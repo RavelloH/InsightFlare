@@ -1,6 +1,7 @@
 "use client";
 import type { ReactNode } from "react";
 import { useState } from "react";
+import { DetailDrawer } from "@insightflare/product-ui/detail-drawer";
 import { Button } from "@insightflare/ui/button";
 import {
   Dialog,
@@ -18,7 +19,6 @@ import {
 } from "@insightflare/ui/select";
 import { useLocation } from "@tanstack/react-router";
 
-import { DetailDrawer } from "@/components/dashboard/site-pages/common/detail-drawer";
 import { EventDetailDrawer } from "@/components/dashboard/site-pages/events/event-detail-drawer";
 import { getMessages } from "@/lib/i18n/messages";
 const FIXTURE_QUERY = "__layerFixture";

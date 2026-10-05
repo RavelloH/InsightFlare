@@ -39,6 +39,7 @@ import {
   TableHeader,
   TableRow,
 } from "@insightflare/ui/table";
+import { TableActionButton } from "@insightflare/ui/table-action-button";
 import {
   RiAddLine,
   RiCheckboxCircleLine,
@@ -55,7 +56,6 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { TableActionButton } from "@/components/dashboard/common/table-action-button";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import {
   type MemberData,
@@ -346,7 +346,7 @@ export function TeamNotificationsClient({
               <Link
                 href={`/${locale}/app/${teamSlug}/notifications/email-preview`}
               >
-                <RiMailSendLine />
+                <RiMailSendLine data-icon="inline-start" />
                 <span>{copy.emailPreview}</span>
               </Link>
             </Button>
@@ -355,7 +355,7 @@ export function TeamNotificationsClient({
               variant="outline"
               onClick={() => setTestDialogOpen(true)}
             >
-              <RiMailSendLine />
+              <RiMailSendLine data-icon="inline-start" />
               <span>{copy.sendTestNotification}</span>
             </Button>
             <Button
@@ -363,7 +363,7 @@ export function TeamNotificationsClient({
               onClick={() => openCreate()}
               disabled={!canCreateRule}
             >
-              <RiAddLine />
+              <RiAddLine data-icon="inline-start" />
               <span>{copy.createRule}</span>
             </Button>
           </>
@@ -576,7 +576,7 @@ export function TeamNotificationsClient({
               onClick={() => setTestDialogOpen(false)}
               disabled={testing}
             >
-              <RiCloseLine className="size-4" />
+              <RiCloseLine data-icon="inline-start" />
               <span>{messages.teamSelect.cancel}</span>
             </Button>
             <Button
@@ -585,7 +585,11 @@ export function TeamNotificationsClient({
               onClick={handleSendTest}
               disabled={testing}
             >
-              {testing ? <Spinner className="size-4" /> : <RiMailSendLine />}
+              {testing ? (
+                <Spinner data-icon="inline-start" />
+              ) : (
+                <RiMailSendLine data-icon="inline-start" />
+              )}
               <span>{copy.sendTestNotification}</span>
             </Button>
           </DialogFooter>
@@ -804,7 +808,7 @@ export function TeamNotificationsClient({
               variant="outline"
               onClick={() => setPreviewDialogOpen(false)}
             >
-              <RiCloseLine className="size-4" />
+              <RiCloseLine data-icon="inline-start" />
               <span>{messages.teamSelect.cancel}</span>
             </Button>
           </ResponsiveDialogFooter>
@@ -851,7 +855,7 @@ export function TeamNotificationsClient({
               onClick={() => setDialogOpen(false)}
               disabled={saving}
             >
-              <RiCloseLine className="size-4" />
+              <RiCloseLine data-icon="inline-start" />
               <span>{messages.teamSelect.cancel}</span>
             </Button>
             <Button
@@ -859,7 +863,7 @@ export function TeamNotificationsClient({
               onClick={() => void saveRule()}
               disabled={saving}
             >
-              {saving ? <Spinner className="size-4" /> : <RiSave3Line />}
+              {saving ? <Spinner /> : <RiSave3Line />}
               <span>{form.id ? copy.saveRule : copy.createRule}</span>
             </Button>
           </ResponsiveDialogFooter>

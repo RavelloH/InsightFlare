@@ -8,6 +8,11 @@ import {
   useMemo,
   useState,
 } from "react";
+import {
+  type AnalyticsTableColumnDefinition,
+  AnalyticsTableColumnSettings,
+  useAnalyticsTableColumns,
+} from "@insightflare/product-ui/tables";
 import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
 import { RiFileList3Line } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
@@ -17,11 +22,6 @@ import {
   AnalyticsTimeTooltipTarget,
 } from "@/components/dashboard/analytics-time-tooltip";
 import { AnalyticsDataTable } from "@/components/dashboard/common/analytics-data-table";
-import {
-  type AnalyticsTableColumnDefinition,
-  AnalyticsTableColumnSettings,
-  useAnalyticsTableColumns,
-} from "@/components/dashboard/common/analytics-table-column-settings";
 import {
   CountryRegionMeta,
   formatRelativeTime,

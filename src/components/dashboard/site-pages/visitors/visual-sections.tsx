@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useDetailDrawerReady } from "@insightflare/product-ui/detail-drawer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Clickable } from "@insightflare/ui/clickable";
 import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
@@ -23,7 +24,6 @@ import {
   VisitorAvatar,
   visitorDisplayName,
 } from "@/components/dashboard/journeys/journey-display";
-import { useDetailDrawerReady } from "@/components/dashboard/site-pages/common/detail-drawer";
 import type { VisitorDetailMapTheme } from "@/components/dashboard/site-pages/visitors/visitor-detail-map-stage";
 import { useTheme } from "@/components/theme-provider";
 import { zonedParts } from "@/lib/analytics/time-zone";

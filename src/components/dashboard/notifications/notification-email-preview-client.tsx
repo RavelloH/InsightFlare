@@ -114,9 +114,9 @@ export function NotificationEmailPreviewClient({
           >
             <span className="inline-flex size-4 shrink-0 items-center justify-center">
               {loading ? (
-                <Spinner className="size-4" />
+                <Spinner data-icon="inline-start" />
               ) : (
-                <RiRefreshLine className="size-4" />
+                <RiRefreshLine data-icon="inline-start" />
               )}
             </span>
             <AutoResizer

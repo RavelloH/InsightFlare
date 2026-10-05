@@ -1,6 +1,6 @@
+import { TableActionButton } from "@insightflare/ui/table-action-button";
 import { RiSettings3Line } from "@remixicon/react";
 
-import { TableActionButton } from "@/components/dashboard/common/table-action-button";
 import { navigateWithTransition } from "@/lib/page-transition";
 import { useRouter } from "@/lib/router";
 

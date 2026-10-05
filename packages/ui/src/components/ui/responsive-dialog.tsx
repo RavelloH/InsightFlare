@@ -228,7 +228,7 @@ export function ResponsiveDialogFooter({
         {showCloseButton ? (
           <DrawerClose asChild>
             <Button variant="outline">
-              <RiCloseLine />
+              <RiCloseLine data-icon="inline-start" />
               <span>Close</span>
             </Button>
           </DrawerClose>

@@ -13,23 +13,20 @@ import { Spinner } from "@insightflare/ui/spinner";
 import { RiSearchLine } from "@remixicon/react";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
-import {
-  addZonedInterval,
-  startOfZonedInterval,
-} from "@/lib/analytics/time-zone";
-import { buildComplementaryOklchPalette } from "@/lib/dashboard/chart-colors";
+import { cn } from "../utils/cn";
+import { buildComplementaryOklchPalette } from "./chart-colors";
+import { intlLocale, numberFormat } from "./chart-format";
 import {
   createChartAxisDateFormatter,
   createChartTooltipDateFormatter,
-} from "@/lib/dashboard/chart-time";
-import { intlLocale, numberFormat } from "@/lib/dashboard/format";
-import type { DashboardInterval } from "@/lib/dashboard/query-state";
+} from "./chart-time";
+import { addZonedInterval, startOfZonedInterval } from "./time-zone";
 import type {
+  ChartLocale as Locale,
+  DashboardInterval,
   EventsTrendData,
   EventTrendSeries,
-} from "@/lib/dashboard-api/client/edge";
-import type { Locale } from "@/lib/i18n/config";
-import { cn } from "@/lib/utils";
+} from "./types";
 export const EVENT_TREND_MAX_SERIES = 18;
 const MAX_INITIAL_CHART_POINTS = 2_000;
 const COMPARISON_DATA_PREFIX = "comparison:";

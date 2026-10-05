@@ -15,11 +15,10 @@ import { JsonTreePanel } from "@insightflare/ui/json-tree";
 import { Skeleton } from "@insightflare/ui/skeleton";
 import { Spinner } from "@insightflare/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
-import type { RiTimeLine } from "@remixicon/react";
+import { TableActionButton } from "@insightflare/ui/table-action-button";
 import { RiCloseCircleLine, RiFileList3Line } from "@remixicon/react";
 
 import { AnalyticsDataTable } from "@/components/dashboard/common/analytics-data-table";
-import { TableActionButton } from "@/components/dashboard/common/table-action-button";
 import {
   durationFormat,
   numberFormat,
@@ -80,66 +79,6 @@ export function StatusBadge({
     <Badge variant={variant} className={cn("capitalize", statusTone(status))}>
       {text}
     </Badge>
-  );
-}
-export function HealthCell({
-  icon: Icon,
-  label,
-  value,
-  detail,
-  loading = false,
-  tone = "default",
-}: {
-  icon: typeof RiTimeLine;
-  label: string;
-  value: string;
-  detail: string;
-  loading?: boolean;
-  tone?: "default" | "good" | "warning" | "danger";
-}) {
-  const contentKey = loading ? "loading" : value;
-
-  return (
-    <div className="min-w-0 bg-card p-4">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="inline-flex shrink-0 items-center justify-center text-muted-foreground">
-          <Icon className="size-[11px]" />
-        </span>
-        <p className="min-w-0 truncate text-[11px] uppercase text-muted-foreground">
-          {label}
-        </p>
-      </div>
-      <AutoResizer initial className="mt-3">
-        <AutoTransition
-          transitionKey={contentKey}
-          initial={false}
-          duration={0.2}
-          type="fade"
-          presenceMode="wait"
-        >
-          {loading ? (
-            <div key="loading" className="flex h-7 items-center">
-              <Spinner className="size-5" />
-            </div>
-          ) : (
-            <p
-              key={value}
-              className={cn(
-                "min-w-0 truncate font-mono text-xl leading-7 font-semibold text-foreground tabular-nums",
-                tone === "good" && "text-primary",
-                tone === "warning" && "text-amber-500",
-                tone === "danger" && "text-destructive",
-              )}
-            >
-              {value}
-            </p>
-          )}
-        </AutoTransition>
-      </AutoResizer>
-      <p className="mt-3 min-w-0 truncate text-[11px] leading-[14px] text-muted-foreground">
-        {detail}
-      </p>
-    </div>
   );
 }
 export function summaryValue(
@@ -723,8 +662,8 @@ export function ScheduledTaskRunLogDrawer({
                               onClick={onLoadMore}
                             >
                               {loadingMore ? (
-                                <span className="inline-flex items-center gap-2">
-                                  <Spinner className="size-4" />
+                                <span className="inline-flex items-center gap-[var(--button-content-gap)]">
+                                  <Spinner data-icon="inline-start" />
                                   {messages.common.loading}
                                 </span>
                               ) : (

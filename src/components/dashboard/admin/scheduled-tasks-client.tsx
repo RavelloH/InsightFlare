@@ -10,6 +10,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
+import { DataTableSwitch } from "@insightflare/ui/data-table-switch";
+import { MetricSummaryGrid } from "@insightflare/ui/metric-summary-grid";
 import { PageHeading } from "@insightflare/ui/page-heading";
 import {
   Select,
@@ -30,7 +32,6 @@ import {
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch";
 import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
 import { numberFormat, shortDateTimeWithSeconds } from "@/lib/dashboard/format";
 import type { ScheduledTasksInitialData } from "@/lib/dashboard/management-data";
@@ -46,7 +47,6 @@ import type {
 import {
   formatDuration,
   formatRate,
-  HealthCell,
   localizedTaskInfo,
   RUN_PAGE_SIZE,
   ScheduledTaskRunLogDrawer,
@@ -293,11 +293,7 @@ export function ScheduledTasksClient({
               onClick={() => void runsQuery.refetch()}
             >
               <span className="inline-flex size-4 shrink-0 items-center justify-center">
-                {replacingRows ? (
-                  <Spinner className="size-4" />
-                ) : (
-                  <RiRefreshLine className="size-4" />
-                )}
+                {replacingRows ? <Spinner /> : <RiRefreshLine />}
               </span>
               <AutoResizer
                 initial
@@ -327,57 +323,56 @@ export function ScheduledTasksClient({
         }
       />
 
-      <Card className="py-0">
-        <CardContent className="p-0">
-          <div className="grid gap-px overflow-hidden bg-border/70 sm:grid-cols-2 xl:grid-cols-4">
-            <HealthCell
-              icon={RiCalendarScheduleLine}
-              label={t.runs24h}
-              loading={replacingRows}
-              value={numberFormat(locale, data?.health.totalRuns24h ?? 0)}
-              detail={`${t.retentionPrefix} ${data?.retentionDays ?? 30} ${t.days}`}
-            />
-            <HealthCell
-              icon={RiCheckboxCircleLine}
-              label={t.successRate24h}
-              loading={replacingRows}
-              value={formatRate(locale, data?.health.successRate24h ?? null)}
-              detail={t.successRateDescription}
-              tone={
-                (data?.health.successRate24h ?? 1) >= 0.95 ? "good" : "warning"
-              }
-            />
-            <HealthCell
-              icon={RiAlarmWarningLine}
-              label={t.problemRuns24h}
-              loading={replacingRows}
-              value={numberFormat(locale, failedOrPartial)}
-              detail={`${t.failed}: ${numberFormat(locale, data?.health.failedRuns24h ?? 0)} / ${t.partial}: ${numberFormat(locale, data?.health.partialRuns24h ?? 0)}`}
-              tone={failedOrPartial > 0 ? "danger" : "good"}
-            />
-            <HealthCell
-              icon={RiTimeLine}
-              label={t.lastRun}
-              loading={replacingRows}
-              value={
-                data?.health.lastRunAt
-                  ? shortDateTimeWithSeconds(
-                      locale,
-                      data.health.lastRunAt,
-                      timeZone,
-                    )
-                  : "--"
-              }
-              detail={
-                data?.health.staleRunningRuns
-                  ? `${t.staleRunning}: ${numberFormat(locale, data.health.staleRunningRuns)}`
-                  : t.noStaleRunning
-              }
-              tone={data?.health.staleRunningRuns ? "warning" : "default"}
-            />
-          </div>
-        </CardContent>
-      </Card>
+      <MetricSummaryGrid
+        items={[
+          {
+            id: "runs-24h",
+            icon: <RiCalendarScheduleLine />,
+            label: t.runs24h,
+            loading: replacingRows,
+            value: numberFormat(locale, data?.health.totalRuns24h ?? 0),
+            detail: `${t.retentionPrefix} ${data?.retentionDays ?? 30} ${t.days}`,
+          },
+          {
+            id: "success-rate-24h",
+            icon: <RiCheckboxCircleLine />,
+            label: t.successRate24h,
+            loading: replacingRows,
+            value: formatRate(locale, data?.health.successRate24h ?? null),
+            detail: t.successRateDescription,
+            tone:
+              (data?.health.successRate24h ?? 1) >= 0.95
+                ? "positive"
+                : "warning",
+          },
+          {
+            id: "problem-runs-24h",
+            icon: <RiAlarmWarningLine />,
+            label: t.problemRuns24h,
+            loading: replacingRows,
+            value: numberFormat(locale, failedOrPartial),
+            detail: `${t.failed}: ${numberFormat(locale, data?.health.failedRuns24h ?? 0)} / ${t.partial}: ${numberFormat(locale, data?.health.partialRuns24h ?? 0)}`,
+            tone: failedOrPartial > 0 ? "critical" : "positive",
+          },
+          {
+            id: "last-run",
+            icon: <RiTimeLine />,
+            label: t.lastRun,
+            loading: replacingRows,
+            value: data?.health.lastRunAt
+              ? shortDateTimeWithSeconds(
+                  locale,
+                  data.health.lastRunAt,
+                  timeZone,
+                )
+              : "--",
+            detail: data?.health.staleRunningRuns
+              ? `${t.staleRunning}: ${numberFormat(locale, data.health.staleRunningRuns)}`
+              : t.noStaleRunning,
+            tone: data?.health.staleRunningRuns ? "warning" : "default",
+          },
+        ]}
+      />
 
       <Card>
         <CardHeader>

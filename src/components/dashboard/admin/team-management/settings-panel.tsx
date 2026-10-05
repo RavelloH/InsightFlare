@@ -112,18 +112,21 @@ export function TeamManagementSettingsPanel() {
                 className="mt-auto self-start"
                 disabled={savingTeam || deletingTeam}
               >
-                <AutoTransition className="inline-flex items-center gap-2">
+                <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                   {savingTeam ? (
                     <span
                       key="saving"
-                      className="inline-flex items-center gap-2"
+                      className="inline-flex items-center gap-[var(--button-content-gap)]"
                     >
-                      <Spinner className="size-4" />
+                      <Spinner data-icon="inline-start" />
                       {copy.settings.saving}
                     </span>
                   ) : (
-                    <span key="save" className="inline-flex items-center gap-2">
-                      <RiSave3Line className="size-4" />
+                    <span
+                      key="save"
+                      className="inline-flex items-center gap-[var(--button-content-gap)]"
+                    >
+                      <RiSave3Line data-icon="inline-start" />
                       {copy.settings.save}
                     </span>
                   )}
@@ -198,21 +201,21 @@ export function TeamManagementSettingsPanel() {
                         transferableMembers.length === 0
                       }
                     >
-                      <AutoTransition className="inline-flex items-center gap-2">
+                      <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                         {transferring ? (
                           <span
                             key="transferring"
-                            className="inline-flex items-center gap-2"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
                           >
-                            <Spinner className="size-4" />
+                            <Spinner data-icon="inline-start" />
                             {copy.settings.transferring}
                           </span>
                         ) : (
                           <span
                             key="transfer"
-                            className="inline-flex items-center gap-2"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
                           >
-                            <RiArrowRightLine className="size-4" />
+                            <RiArrowRightLine data-icon="inline-start" />
                             {copy.settings.transfer}
                           </span>
                         )}
@@ -291,21 +294,21 @@ export function TeamManagementSettingsPanel() {
                     variant="destructive"
                     disabled={savingTeam || deletingTeam}
                   >
-                    <AutoTransition className="inline-flex items-center gap-2">
+                    <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                       {deletingTeam ? (
                         <span
                           key="deleting"
-                          className="inline-flex items-center gap-2"
+                          className="inline-flex items-center gap-[var(--button-content-gap)]"
                         >
-                          <Spinner className="size-4" />
+                          <Spinner data-icon="inline-start" />
                           {copy.settings.deleting}
                         </span>
                       ) : (
                         <span
                           key="delete"
-                          className="inline-flex items-center gap-2"
+                          className="inline-flex items-center gap-[var(--button-content-gap)]"
                         >
-                          <RiDeleteBinLine className="size-4" />
+                          <RiDeleteBinLine data-icon="inline-start" />
                           {copy.settings.delete}
                         </span>
                       )}

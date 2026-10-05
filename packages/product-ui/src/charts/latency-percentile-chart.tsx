@@ -11,9 +11,9 @@ import {
 } from "@insightflare/ui/chart";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 
-import { intlLocale } from "@/lib/dashboard/format";
-import type { Locale } from "@/lib/i18n/config";
-import { cn } from "@/lib/utils";
+import { cn } from "../utils/cn";
+import { intlLocale } from "./chart-format";
+import type { ChartLocale as Locale } from "./types";
 
 export interface LatencyPercentileChartPoint {
   timestampMs: number;

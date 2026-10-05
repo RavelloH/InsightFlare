@@ -4,6 +4,12 @@ import {
   useCallback,
   useMemo,
 } from "react";
+import { TrafficPairBarChart } from "@insightflare/product-ui/charts";
+import {
+  type AnalyticsTableColumnDefinition,
+  AnalyticsTableColumnSettings,
+  type AnalyticsTableColumnSettingsLabels,
+} from "@insightflare/product-ui/tables";
 import { Input } from "@insightflare/ui/input";
 import { Skeleton } from "@insightflare/ui/skeleton";
 import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
@@ -16,13 +22,7 @@ import {
 } from "@remixicon/react";
 
 import { AnalyticsDetailsTooltipTarget } from "@/components/dashboard/analytics-time-tooltip";
-import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
 import { AnalyticsDataTable } from "@/components/dashboard/common/analytics-data-table";
-import {
-  type AnalyticsTableColumnDefinition,
-  AnalyticsTableColumnSettings,
-  type AnalyticsTableColumnSettingsLabels,
-} from "@/components/dashboard/common/analytics-table-column-settings";
 import type { PagesDashboardRow } from "@/lib/dashboard/client/data/types";
 import {
   durationFormat,

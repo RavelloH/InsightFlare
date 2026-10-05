@@ -115,7 +115,6 @@ const commonProps = {
   renderLabel: (row: TabbedTableRow) => row.label,
   loadingLabel: "Loading table…",
   loadingMoreLabel: "Loading more rows…",
-  loadingRowCount: 3,
   hasMore: false,
   onLoadMore: () => {},
   emptyLabel: "No data available.",

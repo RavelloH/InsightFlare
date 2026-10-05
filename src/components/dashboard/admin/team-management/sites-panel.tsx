@@ -1,4 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { SiteTrafficStackChart } from "@insightflare/product-ui/charts";
+import { TrafficPairBarChart } from "@insightflare/product-ui/charts";
 import {
   Card,
   CardContent,
@@ -13,8 +15,6 @@ import {
   RiBarChartBoxLine,
 } from "@remixicon/react";
 
-import { SiteTrafficStackChart } from "@/components/dashboard/charts/site-traffic-stack-chart";
-import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
 import { SiteBrandIcon } from "@/components/dashboard/common/site-brand-icon";
 import {
   durationFormat,

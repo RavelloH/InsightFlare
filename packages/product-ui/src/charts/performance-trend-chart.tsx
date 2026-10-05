@@ -18,11 +18,11 @@ import {
   YAxis,
 } from "recharts";
 
-import { intlLocale } from "@/lib/dashboard/format";
-import type { TimeWindow } from "@/lib/dashboard/query-state";
-import type { PerformanceMetricKey } from "@/lib/dashboard-api/client/edge";
-import type { Locale } from "@/lib/i18n/config";
-import { cn } from "@/lib/utils";
+import { cn } from "../utils/cn";
+import { intlLocale } from "./chart-format";
+import type { ChartTimeWindow as TimeWindow } from "./types";
+import type { PerformanceMetricKey } from "./types";
+import type { ChartLocale as Locale } from "./types";
 export interface PerformanceTrendChartPoint {
   timestampMs: number;
   p50: number | null;

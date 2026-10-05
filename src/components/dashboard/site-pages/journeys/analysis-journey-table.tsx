@@ -6,15 +6,16 @@ import {
   useRef,
   useState,
 } from "react";
+import { DetailDrawer } from "@insightflare/product-ui/detail-drawer";
+import {
+  AnalyticsTableColumnSettings,
+  useAnalyticsTableColumns,
+} from "@insightflare/product-ui/tables";
 import { Input } from "@insightflare/ui/input";
 import { TooltipProvider } from "@insightflare/ui/tooltip";
 import { RiSearchLine } from "@remixicon/react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 
-import {
-  AnalyticsTableColumnSettings,
-  useAnalyticsTableColumns,
-} from "@/components/dashboard/common/analytics-table-column-settings";
 import {
   createSessionTableColumnDefinitions,
   SESSION_TABLE_COLUMNS_STORAGE_KEY,
@@ -22,7 +23,6 @@ import {
   type SessionSortState,
   SessionsTableCard,
 } from "@/components/dashboard/sessions/sessions-table-card";
-import { DetailDrawer } from "@/components/dashboard/site-pages/common/detail-query-modal";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/sessions/session-detail-client-page";
 import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitors/visitor-detail-client-page";
 import {

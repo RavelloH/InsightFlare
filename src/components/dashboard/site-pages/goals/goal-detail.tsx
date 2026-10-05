@@ -1,6 +1,4 @@
-import { type ReactNode, useState } from "react";
-import { AutoResizer } from "@insightflare/ui/auto-resizer";
-import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { useState } from "react";
 import { Button } from "@insightflare/ui/button";
 import {
   Card,
@@ -9,11 +7,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
+import { MetricSummaryGrid } from "@insightflare/ui/metric-summary-grid";
 import { Skeleton } from "@insightflare/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@insightflare/ui/tabs";
 import {
-  RiArrowDownLine,
-  RiArrowUpLine,
   RiDeleteBinLine,
   RiEditLine,
   RiFileList3Line,
@@ -78,14 +75,6 @@ function updatedLabel(
     year: "numeric",
   }).format(date)}`;
 }
-function formatChangeRate(value: number | null): string | null {
-  if (value === null) return null;
-  return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
-}
-function changeRateClass(value: number | null): string {
-  if (value === null) return "text-muted-foreground";
-  return value >= 0 ? "text-emerald-600" : "text-rose-600";
-}
 function conversionRateChange(
   current?: GoalSummary["sessions"],
   comparison?: GoalSummary["sessions"],
@@ -100,112 +89,6 @@ function conversionRateChange(
     return null;
   }
   return ((currentRate - comparisonRate) / comparisonRate) * 100;
-}
-function ChangeRateInline({ value }: { readonly value: number | null }) {
-  if (value === null) return null;
-  const Icon = value >= 0 ? RiArrowUpLine : RiArrowDownLine;
-  return (
-    <span
-      className={`inline-flex shrink-0 items-end gap-0.5 font-mono text-xs leading-none ${changeRateClass(value)}`}
-    >
-      <Icon className="size-3.5" />
-      {formatChangeRate(value)}
-    </span>
-  );
-}
-function GoalMetric({
-  label,
-  value,
-  detail,
-  comparisonLabel,
-  comparisonDetail,
-  comparisonChange = null,
-  comparisonLoading = false,
-  loading = false,
-}: {
-  readonly label: string;
-  readonly value: string;
-  readonly detail?: ReactNode;
-  readonly comparisonLabel?: string;
-  readonly comparisonDetail?: ReactNode;
-  readonly comparisonChange?: number | null;
-  readonly comparisonLoading?: boolean;
-  readonly loading?: boolean;
-}) {
-  const showComparison = Boolean(
-    comparisonLabel &&
-    (comparisonLoading ||
-      (comparisonDetail !== undefined && comparisonDetail !== null)),
-  );
-  const valueTransitionKey = loading
-    ? "loading"
-    : `${value}:${showComparison ? (comparisonChange ?? "") : ""}`;
-  const detailTransitionKey = loading
-    ? "loading"
-    : showComparison
-      ? `comparison:${String(comparisonDetail ?? "")}`
-      : `current:${String(detail ?? "")}`;
-  return (
-    <div className="min-w-0 bg-card p-4">
-      <p className="truncate text-[11px] uppercase text-muted-foreground">
-        {label}
-      </p>
-      <AutoTransition
-        className="mt-3 h-7"
-        initial={false}
-        transitionKey={valueTransitionKey}
-        duration={0.18}
-        type="fade"
-        presenceMode="wait"
-      >
-        {loading ? (
-          <Skeleton key="loading" className="h-7 w-28" />
-        ) : (
-          <div
-            key="value"
-            className="flex min-w-0 items-end gap-1.5 leading-none"
-          >
-            <span className="min-w-0 truncate font-mono text-xl font-semibold leading-none">
-              {value}
-            </span>
-            {showComparison ? (
-              <ChangeRateInline value={comparisonChange} />
-            ) : null}
-          </div>
-        )}
-      </AutoTransition>
-      <AutoResizer className="mt-3 min-w-0" duration={0.2}>
-        <AutoTransition
-          className="min-h-4"
-          initial={false}
-          transitionKey={detailTransitionKey}
-          duration={0.18}
-          type="fade"
-          presenceMode="wait"
-        >
-          {loading || (showComparison && comparisonLoading) ? (
-            <Skeleton key="loading" className="h-3 w-32" />
-          ) : showComparison ? (
-            <p
-              key="comparison"
-              className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground"
-            >
-              <span className="min-w-0 truncate">
-                {comparisonLabel}: {comparisonDetail}
-              </span>
-            </p>
-          ) : (
-            <p
-              key="detail"
-              className="truncate text-[11px] text-muted-foreground"
-            >
-              {detail}
-            </p>
-          )}
-        </AutoTransition>
-      </AutoResizer>
-    </div>
-  );
 }
 function goalMetricValue(
   summary: GoalSummary | undefined,
@@ -222,7 +105,13 @@ function goalMetricRate(
 ): string {
   return percentFormat(locale, summary?.[audience].conversionRate ?? 0);
 }
-function GoalDetailSkeleton({ canManage }: { readonly canManage: boolean }) {
+function GoalDetailSkeleton({
+  canManage,
+  labels,
+}: {
+  readonly canManage: boolean;
+  readonly labels: AppMessages["goals"];
+}) {
   return (
     <div className="min-w-0 space-y-6 p-4 md:p-6">
       <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
@@ -237,19 +126,38 @@ function GoalDetailSkeleton({ canManage }: { readonly canManage: boolean }) {
           </div>
         ) : null}
       </div>
-      <Card className="min-w-0 py-0">
-        <CardContent className="p-0">
-          <div className="grid gap-px overflow-hidden bg-border/70 sm:grid-cols-2 lg:grid-cols-4">
-            {[0, 1, 2, 3].map((item) => (
-              <div key={item} className="min-w-0 bg-card p-4">
-                <Skeleton className="h-3 w-20" />
-                <Skeleton className="mt-3 h-7 w-28" />
-                <Skeleton className="mt-3 h-3 w-32" />
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      <MetricSummaryGrid
+        items={[
+          {
+            id: "visitors",
+            label: labels.visitors,
+            value: "",
+            detail: "",
+            loading: true,
+          },
+          {
+            id: "sessions",
+            label: labels.sessions,
+            value: "",
+            detail: "",
+            loading: true,
+          },
+          {
+            id: "visitor-conversion",
+            label: `${labels.visitors} ${labels.conversion}`,
+            value: "",
+            detail: "",
+            loading: true,
+          },
+          {
+            id: "session-conversion",
+            label: `${labels.sessions} ${labels.conversion}`,
+            value: "",
+            detail: "",
+            loading: true,
+          },
+        ]}
+      />
       <Card className="min-w-0">
         <CardHeader>
           <Skeleton className="h-5 w-36" />
@@ -409,7 +317,7 @@ export function GoalDetail({
 
   if (!goal) {
     if (loading && !loadError) {
-      return <GoalDetailSkeleton canManage={canManage} />;
+      return <GoalDetailSkeleton canManage={canManage} labels={labels} />;
     }
     return (
       <div className="p-6 text-sm text-muted-foreground">
@@ -425,6 +333,72 @@ export function GoalDetail({
     (comparisonSummary.isFetching || !comparisonSummary.data);
   const filterDescriptionMessages = messages ?? getMessages(locale);
   const fullMessages = getMessages(locale);
+  const metricLoading = summary.isFetching || !summary.data;
+  const comparisonDetail = (value: string) =>
+    comparisonGoalSummary && comparisonLabel
+      ? `${comparisonLabel}: ${value}`
+      : undefined;
+  const conversionChange = (audience: "visitors" | "sessions") => {
+    if (!comparisonGoalSummary || !comparisonLabel) return undefined;
+    const value = conversionRateChange(
+      goalSummary?.[audience],
+      comparisonGoalSummary[audience],
+    );
+    if (value === null) return undefined;
+    return {
+      value: `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`,
+      direction: value >= 0 ? ("up" as const) : ("down" as const),
+      tone: value >= 0 ? ("positive" as const) : ("negative" as const),
+    };
+  };
+  const goalMetricItems = [
+    {
+      id: "visitors",
+      label: labels.visitors,
+      value: goalMetricValue(goalSummary, "visitors", locale),
+      detail:
+        comparisonDetail(
+          goalMetricValue(comparisonGoalSummary, "visitors", locale),
+        ) ?? `${labels.converted} / ${labels.total}`,
+      detailLoading: comparisonLoading && Boolean(comparisonLabel),
+      loading: metricLoading,
+    },
+    {
+      id: "sessions",
+      label: labels.sessions,
+      value: goalMetricValue(goalSummary, "sessions", locale),
+      detail:
+        comparisonDetail(
+          goalMetricValue(comparisonGoalSummary, "sessions", locale),
+        ) ?? `${labels.converted} / ${labels.total}`,
+      detailLoading: comparisonLoading && Boolean(comparisonLabel),
+      loading: metricLoading,
+    },
+    {
+      id: "visitor-conversion",
+      label: `${labels.visitors} ${labels.conversion}`,
+      value: goalMetricRate(goalSummary, "visitors", locale),
+      detail:
+        comparisonDetail(
+          goalMetricRate(comparisonGoalSummary, "visitors", locale),
+        ) ?? goalMetricValue(goalSummary, "visitors", locale),
+      change: conversionChange("visitors"),
+      detailLoading: comparisonLoading && Boolean(comparisonLabel),
+      loading: metricLoading,
+    },
+    {
+      id: "session-conversion",
+      label: `${labels.sessions} ${labels.conversion}`,
+      value: goalMetricRate(goalSummary, "sessions", locale),
+      detail:
+        comparisonDetail(
+          goalMetricRate(comparisonGoalSummary, "sessions", locale),
+        ) ?? goalMetricValue(goalSummary, "sessions", locale),
+      change: conversionChange("sessions"),
+      detailLoading: comparisonLoading && Boolean(comparisonLabel),
+      loading: metricLoading,
+    },
+  ];
 
   return (
     <div className="min-w-0 space-y-6 p-4 md:p-6">
@@ -446,7 +420,7 @@ export function GoalDetail({
               disabled={actionPending}
               onClick={onEdit}
             >
-              <RiEditLine />
+              <RiEditLine data-icon="inline-start" />
               {labels.edit}
             </Button>
             <Button
@@ -455,7 +429,7 @@ export function GoalDetail({
               disabled={actionPending}
               onClick={onDelete}
             >
-              <RiDeleteBinLine />
+              <RiDeleteBinLine data-icon="inline-start" />
               {labels.delete}
             </Button>
           </div>
@@ -469,80 +443,7 @@ export function GoalDetail({
           </CardContent>
         </Card>
       ) : (
-        <Card className="min-w-0 py-0">
-          <CardContent className="p-0">
-            <div className="grid gap-px overflow-hidden bg-border/70 sm:grid-cols-2 lg:grid-cols-4">
-              <GoalMetric
-                label={labels.visitors}
-                value={goalMetricValue(goalSummary, "visitors", locale)}
-                detail={`${labels.converted} / ${labels.total}`}
-                comparisonLabel={
-                  comparisonGoalSummary ? comparisonLabel : undefined
-                }
-                comparisonDetail={
-                  comparisonGoalSummary
-                    ? goalMetricValue(comparisonGoalSummary, "visitors", locale)
-                    : undefined
-                }
-                comparisonLoading={comparisonLoading}
-                loading={summary.isFetching || !summary.data}
-              />
-              <GoalMetric
-                label={labels.sessions}
-                value={goalMetricValue(goalSummary, "sessions", locale)}
-                detail={`${labels.converted} / ${labels.total}`}
-                comparisonLabel={
-                  comparisonGoalSummary ? comparisonLabel : undefined
-                }
-                comparisonDetail={
-                  comparisonGoalSummary
-                    ? goalMetricValue(comparisonGoalSummary, "sessions", locale)
-                    : undefined
-                }
-                comparisonLoading={comparisonLoading}
-                loading={summary.isFetching || !summary.data}
-              />
-              <GoalMetric
-                label={`${labels.visitors} ${labels.conversion}`}
-                value={goalMetricRate(goalSummary, "visitors", locale)}
-                detail={goalMetricValue(goalSummary, "visitors", locale)}
-                comparisonLabel={
-                  comparisonGoalSummary ? comparisonLabel : undefined
-                }
-                comparisonDetail={
-                  comparisonGoalSummary
-                    ? goalMetricRate(comparisonGoalSummary, "visitors", locale)
-                    : undefined
-                }
-                comparisonChange={conversionRateChange(
-                  goalSummary?.visitors,
-                  comparisonGoalSummary?.visitors,
-                )}
-                comparisonLoading={comparisonLoading}
-                loading={summary.isFetching || !summary.data}
-              />
-              <GoalMetric
-                label={`${labels.sessions} ${labels.conversion}`}
-                value={goalMetricRate(goalSummary, "sessions", locale)}
-                detail={goalMetricValue(goalSummary, "sessions", locale)}
-                comparisonLabel={
-                  comparisonGoalSummary ? comparisonLabel : undefined
-                }
-                comparisonDetail={
-                  comparisonGoalSummary
-                    ? goalMetricRate(comparisonGoalSummary, "sessions", locale)
-                    : undefined
-                }
-                comparisonChange={conversionRateChange(
-                  goalSummary?.sessions,
-                  comparisonGoalSummary?.sessions,
-                )}
-                comparisonLoading={comparisonLoading}
-                loading={summary.isFetching || !summary.data}
-              />
-            </div>
-          </CardContent>
-        </Card>
+        <MetricSummaryGrid items={goalMetricItems} />
       )}
 
       <Card className="min-w-0 overflow-visible">

@@ -4,14 +4,13 @@ import {
 } from "@insightflare/ui/chart";
 import type { TooltipProps } from "recharts";
 
-import { intlLocale } from "@/lib/dashboard/format";
-import type { DashboardInterval } from "@/lib/dashboard/query-state";
+import { intlLocale } from "./chart-format";
 import {
   downsampleTrafficData,
   fillMissingTrafficData,
   safeChartCount,
-} from "@/lib/dashboard/traffic-chart-data";
-import type { Locale } from "@/lib/i18n/config";
+} from "./traffic-chart-data";
+import type { ChartLocale as Locale, DashboardInterval } from "./types";
 
 export interface TrafficPairDataPoint {
   timestampMs: number;

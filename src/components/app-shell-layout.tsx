@@ -34,7 +34,7 @@ export function AppShellLayout({
           axis="vertical"
           className="h-full min-h-0 flex-1"
           viewportClassName="h-full min-h-0"
-          contentClassName="flex h-full min-h-full flex-col"
+          contentClassName="flex min-h-full flex-col"
           options={PERSISTENT_VERTICAL_SCROLLBAR_OPTIONS}
           data-page-scroll-container=""
         >

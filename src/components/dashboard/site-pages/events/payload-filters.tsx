@@ -63,7 +63,7 @@ export function PayloadFilterButton({
       variant="outline"
       size="sm"
       className={cn(
-        "gap-2 transition-colors",
+        "transition-colors",
         hasActiveFilters &&
           "!border-primary/60 !bg-primary/10 !text-primary hover:!bg-primary/15 hover:!text-primary aria-expanded:!bg-primary/15 dark:!border-primary/60 dark:!bg-primary/20 dark:hover:!bg-primary/25",
       )}
@@ -78,7 +78,7 @@ export function PayloadFilterButton({
       }
       onClick={onClick}
     >
-      <RiFilter3Line className="size-4" />
+      <RiFilter3Line data-icon="inline-start" />
       {labels.payloadFilter}
       <PayloadFilterActiveCountBadge count={count} />
     </Button>

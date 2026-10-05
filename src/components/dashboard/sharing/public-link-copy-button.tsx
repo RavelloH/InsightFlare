@@ -1,7 +1,6 @@
+import { TableActionButton } from "@insightflare/ui/table-action-button";
 import { RiFileCopyLine } from "@remixicon/react";
 import { toast } from "sonner";
-
-import { TableActionButton } from "@/components/dashboard/common/table-action-button";
 
 interface PublicLinkCopyButtonProps {
   value: string;

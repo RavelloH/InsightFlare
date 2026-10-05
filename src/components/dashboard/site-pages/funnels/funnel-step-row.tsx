@@ -80,7 +80,7 @@ export function FunnelStepRow({
         onClick={onFilter}
         className="w-28 shrink-0 justify-center"
       >
-        <RiFilter2Line />
+        <RiFilter2Line data-icon="inline-start" />
         <span>
           {labels.filter}
           {count > 0 ? ` (${count})` : ""}

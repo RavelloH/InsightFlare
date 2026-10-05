@@ -19,6 +19,7 @@ uiGallery:
     data-display: 数据展示
     overlays: 浮层
     product-analytics: 产品 UI / 分析
+    product-management: 产品 UI / 管理
     product-realtime: 产品 UI / 实时
   browseCategories: 按分类浏览
   featuredComponents: 精选组件

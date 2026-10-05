@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
-import { TableCell } from "@insightflare/ui/table";
 
-import { cn } from "@/lib/utils";
+import { cn } from "../../lib/utils";
+import { TableCell } from "./table";
 
-interface ClickableTableCellProps {
+export interface ClickableTableCellProps {
   onClick: () => void;
   children: ReactNode;
   className?: string;

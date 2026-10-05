@@ -400,18 +400,21 @@ export function LoginForm({
           />
         </div>
         <Button type="submit" className="w-full" disabled={buttonDisabled}>
-          <AutoTransition className="inline-flex items-center gap-2">
+          <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
             {showButtonSpinner ? (
               <span
                 key={buttonLabel}
-                className="inline-flex items-center gap-2"
+                className="inline-flex items-center gap-[var(--button-content-gap)]"
               >
-                <Spinner className="size-4" />
+                <Spinner data-icon="inline-start" />
                 {buttonLabel}
               </span>
             ) : (
-              <span key="idle" className="inline-flex items-center gap-2">
-                <RiLoginBoxLine className="size-4" />
+              <span
+                key="idle"
+                className="inline-flex items-center gap-[var(--button-content-gap)]"
+              >
+                <RiLoginBoxLine data-icon="inline-start" />
                 {buttonLabel}
               </span>
             )}
@@ -442,7 +445,7 @@ export function LoginForm({
                 void retrySecurityVerification();
               }}
             >
-              <RiRefreshLine className="size-4" />
+              <RiRefreshLine data-icon="inline-start" />
               {retrySecurityLabel}
             </Button>
           </DialogFooter>

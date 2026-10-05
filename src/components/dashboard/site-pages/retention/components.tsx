@@ -1,5 +1,4 @@
 import { memo } from "react";
-import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   Card,
@@ -8,13 +7,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
+import type { MetricSummaryItem } from "@insightflare/ui/metric-summary-grid";
 import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
 import { Skeleton } from "@insightflare/ui/skeleton";
-import { Spinner } from "@insightflare/ui/spinner";
 import {
-  type RemixiconComponentType,
-  RiArrowDownLine,
-  RiArrowUpLine,
   RiCalendarLine,
   RiGroupLine,
   RiPercentLine,
@@ -37,7 +33,6 @@ import {
   retentionCellAt,
   retentionCellStyle,
   type RetentionCellView,
-  retentionChangeClass,
   type RetentionCohortView,
   retentionComparisonChange,
   type RetentionComparisonViewModel,
@@ -53,118 +48,7 @@ const RETENTION_SIZE_COLUMN =
   "w-[var(--retention-size-width)] min-w-[var(--retention-size-width)] max-w-[var(--retention-size-width)]";
 const RETENTION_PERIOD_COLUMN =
   "w-[var(--retention-period-width)] min-w-[var(--retention-period-width)] max-w-[var(--retention-period-width)]";
-function RetentionChangeRate({ value }: { value: number | null }) {
-  if (value === null) return null;
-  const ChangeIcon = value >= 0 ? RiArrowUpLine : RiArrowDownLine;
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-end gap-0.5 font-mono text-xs leading-none tabular-nums",
-        retentionChangeClass(value),
-      )}
-    >
-      <ChangeIcon className="size-3.5" />
-      {formatRetentionChange(value)}
-    </span>
-  );
-}
-const RetentionMetricCell = memo(function RetentionMetricCell({
-  icon: Icon,
-  label,
-  value,
-  detail,
-  comparisonChange,
-  comparisonLabel,
-  comparisonValue,
-  loading = false,
-}: {
-  icon: RemixiconComponentType;
-  label: string;
-  value: string;
-  detail: string;
-  comparisonChange?: number | null;
-  comparisonLabel?: string;
-  comparisonValue?: string | null;
-  loading?: boolean;
-}) {
-  const contentKey = loading ? "loading" : `${value}:${comparisonChange ?? ""}`;
-  const detailKey = loading
-    ? "loading"
-    : comparisonChange === undefined
-      ? detail
-      : `comparison:${comparisonChange ?? "unavailable"}:${comparisonLabel ?? ""}:${comparisonValue ?? "unavailable"}`;
-
-  return (
-    <div className="min-w-0 bg-card p-4">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="inline-flex shrink-0 items-center justify-center text-muted-foreground">
-          <Icon className="size-[11px]" />
-        </span>
-        <p className="min-w-0 truncate text-[11px] uppercase text-muted-foreground">
-          {label}
-        </p>
-      </div>
-      <AutoResizer initial animateHeight={false} className="mt-3 h-7">
-        <AutoTransition
-          className="h-7"
-          transitionKey={contentKey}
-          initial={false}
-          duration={0.2}
-          type="fade"
-          presenceMode="wait"
-        >
-          {loading ? (
-            <div key="loading" className="flex h-7 items-center">
-              <Spinner className="size-5" />
-            </div>
-          ) : (
-            <div
-              key={contentKey}
-              className="flex h-7 min-w-0 items-end gap-1.5 leading-none"
-            >
-              <span className="min-w-0 truncate font-mono text-xl leading-none font-semibold text-foreground">
-                {value}
-              </span>
-              {comparisonChange !== undefined ? (
-                <RetentionChangeRate value={comparisonChange} />
-              ) : null}
-            </div>
-          )}
-        </AutoTransition>
-      </AutoResizer>
-      <AutoTransition
-        initial={false}
-        transitionKey={detailKey}
-        className="mt-3 h-[14px]"
-        duration={0.2}
-        type="fade"
-        presenceMode="wait"
-      >
-        {loading ? (
-          <Skeleton
-            key="loading"
-            className="h-full w-[min(12rem,72%)] rounded-none"
-          />
-        ) : comparisonChange === undefined ? (
-          <p
-            key={detail}
-            className="h-[14px] min-w-0 truncate text-[11px] leading-[14px] text-muted-foreground"
-          >
-            {detail}
-          </p>
-        ) : (
-          <div
-            key={detailKey}
-            className="h-[14px] min-w-0 truncate font-mono text-[11px] leading-[14px] text-muted-foreground"
-          >
-            {comparisonLabel}: {comparisonValue ?? "--"}
-          </div>
-        )}
-      </AutoTransition>
-    </div>
-  );
-});
-export const RetentionSummaryGrid = memo(function RetentionSummaryGrid({
+export function createRetentionMetricItems({
   locale,
   labels,
   viewModel,
@@ -178,126 +62,96 @@ export const RetentionSummaryGrid = memo(function RetentionSummaryGrid({
   comparisonViewModel?: RetentionViewModel | null;
   comparisonLabel: string;
   loading?: boolean;
-}) {
+}): MetricSummaryItem[] {
   const { summary } = viewModel;
   const comparisonSummary = comparisonViewModel?.summary;
+  const item = (
+    id: string,
+    icon: MetricSummaryItem["icon"],
+    label: string,
+    value: string,
+    detail: string,
+    current: number | null,
+    previous: number | null | undefined,
+  ): MetricSummaryItem => {
+    const comparisonChange =
+      previous === undefined
+        ? undefined
+        : retentionComparisonChange(current, previous);
+    const comparisonValue =
+      previous === undefined || previous === null
+        ? "--"
+        : id === "period-one" || id === "average-return"
+          ? percentFormat(locale, previous)
+          : numberFormat(locale, previous);
+    return {
+      id,
+      icon,
+      label,
+      value,
+      detail:
+        previous === undefined
+          ? detail
+          : `${comparisonLabel}: ${comparisonValue}`,
+      change:
+        comparisonChange === undefined || comparisonChange === null
+          ? undefined
+          : {
+              value: formatRetentionChange(comparisonChange) ?? "",
+              direction: comparisonChange >= 0 ? "up" : "down",
+              tone: comparisonChange >= 0 ? "positive" : "negative",
+            },
+      loading,
+    };
+  };
 
-  return (
-    <Card className="py-0">
-      <CardContent className="p-0">
-        <div className="grid gap-px overflow-hidden bg-border/70 sm:grid-cols-2 xl:grid-cols-4">
-          <RetentionMetricCell
-            icon={RiCalendarLine}
-            label={labels.cohortsMetric}
-            loading={loading}
-            value={numberFormat(locale, summary.cohortCount)}
-            detail={`${numberFormat(locale, viewModel.columns.length)} ${labels.periodsAnalyzed}`}
-            comparisonLabel={comparisonLabel}
-            comparisonValue={
-              comparisonSummary
-                ? numberFormat(locale, comparisonSummary.cohortCount)
-                : undefined
-            }
-            comparisonChange={
-              comparisonSummary
-                ? retentionComparisonChange(
-                    summary.cohortCount,
-                    comparisonSummary.cohortCount,
-                  )
-                : undefined
-            }
-          />
-          <RetentionMetricCell
-            icon={RiGroupLine}
-            label={labels.visitorsMetric}
-            loading={loading}
-            value={numberFormat(locale, summary.totalVisitors)}
-            detail={labels.cohortDetail}
-            comparisonLabel={comparisonLabel}
-            comparisonValue={
-              comparisonSummary
-                ? numberFormat(locale, comparisonSummary.totalVisitors)
-                : undefined
-            }
-            comparisonChange={
-              comparisonSummary
-                ? retentionComparisonChange(
-                    summary.totalVisitors,
-                    comparisonSummary.totalVisitors,
-                  )
-                : undefined
-            }
-          />
-          <RetentionMetricCell
-            icon={RiPercentLine}
-            label={labels.periodOneMetric}
-            loading={loading}
-            value={
-              summary.periodOneRate === null
-                ? "--"
-                : percentFormat(locale, summary.periodOneRate)
-            }
-            detail={
-              summary.periodOneBase > 0
-                ? `${numberFormat(locale, summary.periodOneBase)} ${labels.eligibleVisitors}`
-                : labels.noEligibleCohorts
-            }
-            comparisonLabel={comparisonLabel}
-            comparisonValue={
-              comparisonSummary
-                ? comparisonSummary.periodOneRate === null
-                  ? null
-                  : percentFormat(locale, comparisonSummary.periodOneRate)
-                : undefined
-            }
-            comparisonChange={
-              comparisonSummary
-                ? retentionComparisonChange(
-                    summary.periodOneRate,
-                    comparisonSummary.periodOneRate,
-                  )
-                : undefined
-            }
-          />
-          <RetentionMetricCell
-            icon={RiRepeat2Line}
-            label={labels.averageReturnMetric}
-            loading={loading}
-            value={
-              summary.averageReturnRate === null
-                ? "--"
-                : percentFormat(locale, summary.averageReturnRate)
-            }
-            detail={
-              summary.strongestCohort
-                ? `${labels.strongestCohortMetric}: ${summary.strongestCohort.label} ${percentFormat(
-                    locale,
-                    summary.strongestCohort.rate,
-                  )}`
-                : labels.noEligibleCohorts
-            }
-            comparisonLabel={comparisonLabel}
-            comparisonValue={
-              comparisonSummary
-                ? comparisonSummary.averageReturnRate === null
-                  ? null
-                  : percentFormat(locale, comparisonSummary.averageReturnRate)
-                : undefined
-            }
-            comparisonChange={
-              comparisonSummary
-                ? retentionComparisonChange(
-                    summary.averageReturnRate,
-                    comparisonSummary.averageReturnRate,
-                  )
-                : undefined
-            }
-          />
-        </div>
-      </CardContent>
-    </Card>
-  );
-});
+  return [
+    item(
+      "cohorts",
+      <RiCalendarLine />,
+      labels.cohortsMetric,
+      numberFormat(locale, summary.cohortCount),
+      `${numberFormat(locale, viewModel.columns.length)} ${labels.periodsAnalyzed}`,
+      summary.cohortCount,
+      comparisonSummary?.cohortCount,
+    ),
+    item(
+      "visitors",
+      <RiGroupLine />,
+      labels.visitorsMetric,
+      numberFormat(locale, summary.totalVisitors),
+      labels.cohortDetail,
+      summary.totalVisitors,
+      comparisonSummary?.totalVisitors,
+    ),
+    item(
+      "period-one",
+      <RiPercentLine />,
+      labels.periodOneMetric,
+      summary.periodOneRate === null
+        ? "--"
+        : percentFormat(locale, summary.periodOneRate),
+      summary.periodOneBase > 0
+        ? `${numberFormat(locale, summary.periodOneBase)} ${labels.eligibleVisitors}`
+        : labels.noEligibleCohorts,
+      summary.periodOneRate,
+      comparisonSummary?.periodOneRate,
+    ),
+    item(
+      "average-return",
+      <RiRepeat2Line />,
+      labels.averageReturnMetric,
+      summary.averageReturnRate === null
+        ? "--"
+        : percentFormat(locale, summary.averageReturnRate),
+      summary.strongestCohort
+        ? `${labels.strongestCohortMetric}: ${summary.strongestCohort.label} ${percentFormat(locale, summary.strongestCohort.rate)}`
+        : labels.noEligibleCohorts,
+      summary.averageReturnRate,
+      comparisonSummary?.averageReturnRate,
+    ),
+  ];
+}
 export const RetentionStateCard = memo(function RetentionStateCard({
   title,
   subtitle,

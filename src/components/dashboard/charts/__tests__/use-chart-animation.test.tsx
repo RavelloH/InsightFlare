@@ -1,11 +1,10 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
-
 import {
   useAnimationOnChartSwitch,
   useChartVisibility,
-} from "@/components/dashboard/charts/use-chart-animation";
+} from "@insightflare/product-ui/charts";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;

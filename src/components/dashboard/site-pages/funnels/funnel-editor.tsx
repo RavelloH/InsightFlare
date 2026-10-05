@@ -322,7 +322,7 @@ export function FunnelEditor({
                         setSteps((current) => [...current, step]);
                       }}
                     >
-                      <RiAddLine /> {labels.addStep}
+                      <RiAddLine data-icon="inline-start" /> {labels.addStep}
                     </Button>
                   </div>
                   <AutoResizer initial={false} duration={0.2}>
@@ -364,7 +364,7 @@ export function FunnelEditor({
             <ResponsiveDialogFooter>
               <ResponsiveDialogClose asChild>
                 <Button type="button" variant="outline" disabled={submitting}>
-                  <RiCloseLine /> {labels.cancel}
+                  <RiCloseLine data-icon="inline-start" /> {labels.cancel}
                 </Button>
               </ResponsiveDialogClose>
               <Button type="submit" disabled={!valid || submitting}>

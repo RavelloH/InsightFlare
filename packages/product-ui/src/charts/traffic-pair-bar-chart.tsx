@@ -11,20 +11,13 @@ import {
 import { Spinner } from "@insightflare/ui/spinner";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
-import {
-  useAnimationOnChartSwitch,
-  useChartVisibility,
-} from "@/components/dashboard/charts/use-chart-animation";
+import { cn } from "../utils/cn";
+import { intlLocale } from "./chart-format";
 import {
   type ChartAxisDateFormat,
   createChartAxisDateFormatter,
   createChartTooltipDateFormatter,
-} from "@/lib/dashboard/chart-time";
-import { intlLocale } from "@/lib/dashboard/format";
-import type { DashboardInterval } from "@/lib/dashboard/query-state";
-import type { Locale } from "@/lib/i18n/config";
-import { cn } from "@/lib/utils";
-
+} from "./chart-time";
 import {
   createTrafficPairChartConfig,
   createTrafficPairChartData,
@@ -36,6 +29,11 @@ import {
   type TrafficPairRange,
   TrafficPairTooltip,
 } from "./traffic-pair-chart";
+import type { ChartLocale as Locale, DashboardInterval } from "./types";
+import {
+  useAnimationOnChartSwitch,
+  useChartVisibility,
+} from "./use-chart-animation";
 
 export interface TrafficPairBarChartProps {
   data: ReadonlyArray<TrafficPairDataPoint>;

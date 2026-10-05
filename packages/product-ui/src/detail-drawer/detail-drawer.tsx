@@ -17,8 +17,7 @@ import { LayerPortal } from "@insightflare/ui/layer-portal";
 import { VerticalScrollMask } from "@insightflare/ui/vertical-scroll-mask";
 import type { PartialOptions } from "overlayscrollbars";
 
-import { cn } from "@/lib/utils";
-export const DETAIL_QUERY_PARAM = "detail";
+import { cn } from "../utils/cn";
 const CLOSE_TRANSLATE_Y_VH = 1.12;
 const CLOSE_MIN_DURATION_MS = 360;
 const CLOSE_MAX_DURATION_MS = 640;

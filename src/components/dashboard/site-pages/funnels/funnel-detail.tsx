@@ -9,6 +9,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
+import type { MetricSummaryItem } from "@insightflare/ui/metric-summary-grid";
+import { MetricSummaryGrid } from "@insightflare/ui/metric-summary-grid";
 import { Skeleton } from "@insightflare/ui/skeleton";
 import { Slider } from "@insightflare/ui/slider";
 import { Switch } from "@insightflare/ui/switch";
@@ -59,107 +61,6 @@ function updatedLabel(
     day: "numeric",
     year: "numeric",
   }).format(date)}`;
-}
-function FunnelMetric({
-  locale = "en-US",
-  label,
-  value,
-  detail,
-  comparisonLabel,
-  comparisonDetail,
-  comparisonChange = null,
-  comparisonLoading = false,
-  loading = false,
-}: {
-  readonly locale?: string;
-  readonly label: string;
-  readonly value: string;
-  readonly detail: string;
-  readonly comparisonLabel?: string;
-  readonly comparisonDetail?: string;
-  readonly comparisonChange?: number | null;
-  readonly comparisonLoading?: boolean;
-  readonly loading?: boolean;
-}) {
-  const showComparison = Boolean(
-    comparisonLabel &&
-    (comparisonLoading ||
-      (comparisonDetail !== undefined && comparisonDetail !== null)),
-  );
-  const valueTransitionKey = loading
-    ? "loading"
-    : `${value}:${showComparison ? (comparisonChange ?? "") : ""}`;
-
-  return (
-    <div className="min-w-0 bg-card p-4">
-      <p className="truncate text-[11px] uppercase text-muted-foreground">
-        {label}
-      </p>
-      <AutoTransition
-        initial={false}
-        transitionKey={valueTransitionKey}
-        duration={0.18}
-        type="fade"
-        presenceMode="wait"
-        className="mt-3 h-7"
-      >
-        {loading ? (
-          <Skeleton key="loading" className="h-7 w-20" />
-        ) : (
-          <div
-            key="ready"
-            className="flex min-w-0 items-end gap-1.5 leading-none"
-          >
-            <span className="min-w-0 truncate font-mono text-xl font-semibold leading-none">
-              {value}
-            </span>
-            {showComparison ? (
-              <FunnelChangeRateInline
-                value={comparisonChange}
-                locale={locale}
-              />
-            ) : null}
-          </div>
-        )}
-      </AutoTransition>
-      <AutoResizer className="mt-3 min-w-0" duration={0.2}>
-        <AutoTransition
-          initial={false}
-          transitionKey={
-            loading
-              ? "loading"
-              : showComparison
-                ? `comparison:${comparisonDetail}:${comparisonChange ?? ""}`
-                : `current:${detail}`
-          }
-          duration={0.18}
-          type="fade"
-          presenceMode="wait"
-          className="min-h-4"
-        >
-          {loading || (showComparison && comparisonLoading) ? (
-            <Skeleton key="loading" className="h-3 w-32" />
-          ) : showComparison ? (
-            <p
-              key="comparison"
-              className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground"
-            >
-              <span className="min-w-0 truncate">
-                {comparisonLabel}: {comparisonDetail}
-              </span>
-            </p>
-          ) : (
-            <p
-              key="detail"
-              className="truncate text-[11px] text-muted-foreground"
-            >
-              {detail}
-            </p>
-          )}
-        </AutoTransition>
-      </AutoResizer>
-    </div>
-  );
 }
 function FunnelStepValue({
   locale,
@@ -540,6 +441,94 @@ function FunnelDetailContent({
     comparisonLargestDropOffStep &&
     largestDropOffStep.stepId === comparisonLargestDropOffStep.stepId,
   );
+  const makeChange = (value: number | null | undefined) =>
+    value === null || value === undefined || !comparisonLabel
+      ? undefined
+      : {
+          value: `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`,
+          direction: value >= 0 ? ("up" as const) : ("down" as const),
+          tone: value >= 0 ? ("positive" as const) : ("negative" as const),
+        };
+  const comparisonDetail = (value: string) =>
+    comparisonLabel && comparisonAnalysis
+      ? `${comparisonLabel}: ${value}`
+      : undefined;
+  const metricItems: MetricSummaryItem[] = [
+    {
+      id: "overall-conversion",
+      label: labels.overallConversion,
+      value: percentFormat(locale, overallConversionRate),
+      detail:
+        comparisonDetail(
+          percentFormat(locale, comparisonSummary?.overallConversionRate ?? 0),
+        ) ??
+        `${numberFormat(locale, convertedCount)} / ${numberFormat(locale, startingCount)} ${funnelMetricLabel(labels, metric)}`,
+      change: makeChange(
+        funnelComparisonChange(
+          overallConversionRate,
+          comparisonSummary?.overallConversionRate,
+        ),
+      ),
+      detailLoading: comparisonLoading && Boolean(comparisonLabel),
+      loading,
+    },
+    {
+      id: "starting-count",
+      label: funnelStartingLabel(labels, metric),
+      value: numberFormat(locale, startingCount),
+      detail:
+        comparisonDetail(numberFormat(locale, comparisonStartingCount)) ??
+        (firstStep
+          ? `${numberFormat(locale, secondaryStartingCount)} ${funnelMetricLabel(labels, secondaryMetric)}`
+          : "0"),
+      change: makeChange(
+        funnelComparisonChange(startingCount, comparisonStartingCount),
+      ),
+      detailLoading: comparisonLoading && Boolean(comparisonLabel),
+      loading,
+    },
+    {
+      id: "converted-count",
+      label: funnelConvertedLabel(labels, metric),
+      value: numberFormat(locale, convertedCount),
+      detail:
+        comparisonDetail(numberFormat(locale, comparisonConvertedCount)) ??
+        (lastStep
+          ? `${numberFormat(locale, secondaryConvertedCount)} ${funnelMetricLabel(labels, secondaryMetric)}`
+          : labels.noDropOff),
+      change: makeChange(
+        funnelComparisonChange(convertedCount, comparisonConvertedCount),
+      ),
+      detailLoading: comparisonLoading && Boolean(comparisonLabel),
+      loading,
+    },
+    {
+      id: "largest-drop-off",
+      label: labels.largestDropOff,
+      value: largestDropOffStep
+        ? numberFormat(locale, largestDropOffStep.progression.dropOffCount)
+        : labels.noDropOff,
+      detail:
+        comparisonDetail(
+          comparisonLargestDropOffStep
+            ? `${funnelStepLabel(funnel.steps[comparisonLargestDropOffStep.index]!, descriptionMessages)} ${percentFormat(locale, comparisonLargestDropOffStep.progression.dropOffRate)}`
+            : labels.noDropOff,
+        ) ??
+        (largestDropOffStep
+          ? `${funnelStepLabel(funnel.steps[largestDropOffStep.index]!, descriptionMessages)} ${percentFormat(locale, largestDropOffStep.progression.dropOffRate)}`
+          : labels.noDropOff),
+      change: largestDropOffMatches
+        ? makeChange(
+            funnelComparisonChange(
+              largestDropOffStep?.progression.dropOffCount,
+              comparisonLargestDropOffStep?.progression.dropOffCount,
+            ),
+          )
+        : undefined,
+      detailLoading: comparisonLoading && Boolean(comparisonLabel),
+      loading,
+    },
+  ];
 
   return (
     <div className="min-w-0 space-y-6 p-4 md:p-6">
@@ -588,7 +577,7 @@ function FunnelDetailContent({
               disabled={loading}
               onClick={() => onEdit(funnel)}
             >
-              <RiEditLine />
+              <RiEditLine data-icon="inline-start" />
               {labels.edit}
             </Button>
             <Button
@@ -597,119 +586,14 @@ function FunnelDetailContent({
               disabled={loading}
               onClick={() => onDelete(funnel)}
             >
-              <RiDeleteBinLine />
+              <RiDeleteBinLine data-icon="inline-start" />
               {labels.delete}
             </Button>
           </div>
         ) : null}
       </div>
 
-      <Card className="min-w-0 py-0">
-        <CardContent className="p-0">
-          <div className="grid gap-px overflow-hidden bg-border/70 sm:grid-cols-2 xl:grid-cols-4">
-            <FunnelMetric
-              locale={locale}
-              label={labels.overallConversion}
-              value={percentFormat(locale, overallConversionRate)}
-              detail={`${numberFormat(locale, convertedCount)} / ${numberFormat(locale, startingCount)} ${funnelMetricLabel(labels, metric)}`}
-              comparisonLabel={comparisonLabel}
-              comparisonDetail={
-                comparisonSummary
-                  ? percentFormat(
-                      locale,
-                      comparisonSummary.overallConversionRate,
-                    )
-                  : undefined
-              }
-              comparisonChange={funnelComparisonChange(
-                overallConversionRate,
-                comparisonSummary?.overallConversionRate,
-              )}
-              comparisonLoading={comparisonLoading}
-              loading={loading}
-            />
-            <FunnelMetric
-              locale={locale}
-              label={funnelStartingLabel(labels, metric)}
-              value={numberFormat(locale, startingCount)}
-              detail={
-                firstStep
-                  ? `${numberFormat(locale, secondaryStartingCount)} ${funnelMetricLabel(labels, secondaryMetric)}`
-                  : "0"
-              }
-              comparisonLabel={comparisonLabel}
-              comparisonDetail={
-                comparisonAnalysis
-                  ? numberFormat(locale, comparisonStartingCount)
-                  : undefined
-              }
-              comparisonChange={funnelComparisonChange(
-                startingCount,
-                comparisonStartingCount,
-              )}
-              comparisonLoading={comparisonLoading}
-              loading={loading}
-            />
-            <FunnelMetric
-              locale={locale}
-              label={funnelConvertedLabel(labels, metric)}
-              value={numberFormat(locale, convertedCount)}
-              detail={
-                lastStep
-                  ? `${numberFormat(locale, secondaryConvertedCount)} ${funnelMetricLabel(labels, secondaryMetric)}`
-                  : labels.noDropOff
-              }
-              comparisonLabel={comparisonLabel}
-              comparisonDetail={
-                comparisonAnalysis
-                  ? numberFormat(locale, comparisonConvertedCount)
-                  : undefined
-              }
-              comparisonChange={funnelComparisonChange(
-                convertedCount,
-                comparisonConvertedCount,
-              )}
-              comparisonLoading={comparisonLoading}
-              loading={loading}
-            />
-            <FunnelMetric
-              locale={locale}
-              label={labels.largestDropOff}
-              value={
-                largestDropOffStep
-                  ? numberFormat(
-                      locale,
-                      largestDropOffStep.progression.dropOffCount,
-                    )
-                  : labels.noDropOff
-              }
-              detail={
-                largestDropOffStep
-                  ? `${funnelStepLabel(funnel.steps[largestDropOffStep.index]!, descriptionMessages)} ${percentFormat(locale, largestDropOffStep.progression.dropOffRate)}`
-                  : labels.noDropOff
-              }
-              comparisonLabel={comparisonLabel}
-              comparisonDetail={
-                comparisonAnalysis
-                  ? comparisonLargestDropOffStep
-                    ? `${funnelStepLabel(funnel.steps[comparisonLargestDropOffStep.index]!, descriptionMessages)} ${percentFormat(locale, comparisonLargestDropOffStep.progression.dropOffRate)}`
-                    : labels.noDropOff
-                  : undefined
-              }
-              comparisonChange={
-                largestDropOffMatches
-                  ? funnelComparisonChange(
-                      largestDropOffStep?.progression.dropOffCount,
-                      comparisonLargestDropOffStep?.progression.dropOffCount,
-                    )
-                  : null
-              }
-              comparisonLoading={comparisonLoading}
-              loading={loading}
-            />
-          </div>
-        </CardContent>
-      </Card>
+      <MetricSummaryGrid items={metricItems} />
 
       <Card className="min-w-0">
         <CardHeader>
@@ -850,29 +734,38 @@ function FunnelDetailSkeleton({
         <Skeleton className="h-7 w-56 max-w-full" />
         <Skeleton className="h-4 w-44" />
       </div>
-      <Card className="min-w-0 py-0">
-        <CardContent className="p-0">
-          <div className="grid gap-px overflow-hidden bg-border/70 sm:grid-cols-2 xl:grid-cols-4">
-            {Array.from({ length: 4 }, (_, index) => (
-              <FunnelMetric
-                key={index}
-                label={
-                  index === 0
-                    ? labels.overallConversion
-                    : index === 1
-                      ? funnelStartingLabel(labels, metric)
-                      : index === 2
-                        ? funnelConvertedLabel(labels, metric)
-                        : labels.largestDropOff
-                }
-                value=""
-                detail=""
-                loading
-              />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      <MetricSummaryGrid
+        items={[
+          {
+            id: "overall-conversion",
+            label: labels.overallConversion,
+            value: "",
+            detail: "",
+            loading: true,
+          },
+          {
+            id: "starting-count",
+            label: funnelStartingLabel(labels, metric),
+            value: "",
+            detail: "",
+            loading: true,
+          },
+          {
+            id: "converted-count",
+            label: funnelConvertedLabel(labels, metric),
+            value: "",
+            detail: "",
+            loading: true,
+          },
+          {
+            id: "largest-drop-off",
+            label: labels.largestDropOff,
+            value: "",
+            detail: "",
+            loading: true,
+          },
+        ]}
+      />
       <Card className="min-w-0">
         <CardHeader>
           <CardTitle className="inline-flex items-center gap-2">

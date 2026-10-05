@@ -355,7 +355,7 @@ function BlockingRuleTestDialog({
         <ResponsiveDialogFooter>
           <ResponsiveDialogClose asChild>
             <Button type="button" variant="outline">
-              <RiCloseLine className="size-4" />
+              <RiCloseLine data-icon="inline-start" />
               <span>{dialogCopy.testClose}</span>
             </Button>
           </ResponsiveDialogClose>
@@ -364,7 +364,7 @@ function BlockingRuleTestDialog({
             onClick={handleTest}
             disabled={errors.length > 0}
           >
-            <RiTestTubeLine className="size-4" />
+            <RiTestTubeLine data-icon="inline-start" />
             <span>{dialogCopy.testRun}</span>
           </Button>
         </ResponsiveDialogFooter>
@@ -504,15 +504,15 @@ export function BlockingRuleEditorCard({
             onClick={onSave}
             disabled={disabled || !changed || errors.length > 0}
           >
-            <AutoTransition className="inline-flex items-center gap-2">
+            <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
               {saving ? (
-                <span className="inline-flex items-center gap-2">
-                  <Spinner className="size-4" />
+                <span className="inline-flex items-center gap-[var(--button-content-gap)]">
+                  <Spinner data-icon="inline-start" />
                   {savingLabel}
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-2">
-                  <RiSave3Line className="size-4" />
+                <span className="inline-flex items-center gap-[var(--button-content-gap)]">
+                  <RiSave3Line data-icon="inline-start" />
                   {saveLabel}
                 </span>
               )}
@@ -525,7 +525,7 @@ export function BlockingRuleEditorCard({
                 variant="outline"
                 onClick={() => setSearchOpen(true)}
               >
-                <RiSearchLine className="size-4" />
+                <RiSearchLine data-icon="inline-start" />
                 <span>{dialogCopy.searchButton}</span>
               </Button>
             ) : null}
@@ -534,7 +534,7 @@ export function BlockingRuleEditorCard({
               variant="outline"
               onClick={() => setTestOpen(true)}
             >
-              <RiTestTubeLine className="size-4" />
+              <RiTestTubeLine data-icon="inline-start" />
               <span>{dialogCopy.testButton}</span>
             </Button>
             <Button
@@ -542,7 +542,7 @@ export function BlockingRuleEditorCard({
               variant="outline"
               onClick={() => setHelpOpen(true)}
             >
-              <RiQuestionLine className="size-4" />
+              <RiQuestionLine data-icon="inline-start" />
               <span>{dialogCopy.helpButton}</span>
             </Button>
           </div>

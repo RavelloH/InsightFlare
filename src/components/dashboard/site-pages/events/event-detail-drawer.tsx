@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { DetailDrawer } from "@insightflare/product-ui/detail-drawer";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Button } from "@insightflare/ui/button";
@@ -34,7 +35,6 @@ import {
   OsMeta,
   ReferrerMeta,
 } from "@/components/dashboard/journeys/journey-display";
-import { DetailDrawer } from "@/components/dashboard/site-pages/common/detail-drawer";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/sessions/session-detail-client-page";
 import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitors/visitor-detail-client-page";
 import { numberFormat } from "@/lib/dashboard/format";

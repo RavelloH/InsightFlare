@@ -13,13 +13,9 @@ import {
   RadarChart,
 } from "recharts";
 
-import {
-  durationFormat,
-  numberFormat,
-  percentFormat,
-} from "@/lib/dashboard/format";
-import type { Locale } from "@/lib/i18n/config";
-import { cn } from "@/lib/utils";
+import { cn } from "../utils/cn";
+import { durationFormat, numberFormat, percentFormat } from "./chart-format";
+import type { ChartLocale as Locale } from "./types";
 
 export type PerformanceRadarMetricKey =
   "duration" | "engagement" | "depth" | "loyalty" | "frequency" | "traffic";

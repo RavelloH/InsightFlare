@@ -105,25 +105,25 @@ export function TeamManagementCreateSiteDialog() {
               onClick={() => setCreateSiteDialogOpen(false)}
               disabled={creatingSite}
             >
-              <RiCloseLine className="size-4" />
+              <RiCloseLine data-icon="inline-start" />
               <span>{messages.teamSelect.cancel}</span>
             </Button>
             <Button type="submit" disabled={creatingSite}>
-              <AutoTransition className="inline-flex items-center gap-2">
+              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                 {creatingSite ? (
                   <span
                     key="creating-site"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <Spinner className="size-4" />
+                    <Spinner data-icon="inline-start" />
                     {siteCreateCopy.creating}
                   </span>
                 ) : (
                   <span
                     key="create-site"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <RiAddLine className="size-4" />
+                    <RiAddLine data-icon="inline-start" />
                     {siteCreateCopy.create}
                   </span>
                 )}

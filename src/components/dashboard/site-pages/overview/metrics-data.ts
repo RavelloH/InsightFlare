@@ -1,7 +1,7 @@
 import { useMemo } from "react";
+import { type MetricAreaPoint } from "@insightflare/product-ui/charts";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
-import { type MetricAreaPoint } from "@/components/dashboard/charts/metric-area-chart";
 import { fetchOverview, fetchTrend } from "@/lib/dashboard/client/data/index";
 import { useLiveSearchParams } from "@/lib/dashboard/client/history";
 import {

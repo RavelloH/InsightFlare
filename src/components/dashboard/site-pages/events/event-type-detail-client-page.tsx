@@ -1,19 +1,20 @@
 import { memo, useMemo } from "react";
+import { TrafficPairBarChart } from "@insightflare/product-ui/charts";
+import { useDetailModalClose } from "@insightflare/product-ui/detail-drawer";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
+import { MetricSummaryGrid } from "@insightflare/ui/metric-summary-grid";
 import { RiPulseLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
-import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
 import { JourneyDetailStateSwitch } from "@/components/dashboard/journeys/journey-detail-state";
-import { useDetailModalClose } from "@/components/dashboard/site-pages/common/detail-query-modal";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import { EventFieldsCard } from "@/components/dashboard/site-pages/events/fields-card";
-import { EventMetricGrid } from "@/components/dashboard/site-pages/events/metrics-components";
+import { createEventMetricItems } from "@/components/dashboard/site-pages/events/metrics-components";
 import { EventPageHeader } from "@/components/dashboard/site-pages/events/page-header";
 import { EventRecordsSection } from "@/components/dashboard/site-pages/events/records-section";
 import { parseOverviewCardFilters } from "@/components/dashboard/site-pages/overview/overview-filter-model";
@@ -543,14 +544,16 @@ export const EventTypeDetailClientPage = memo(
             </Card>
           ) : null}
 
-          <EventMetricGrid
-            locale={locale}
-            labels={labels}
-            summary={detail.summary}
-            comparisonSummary={comparisonDetail?.summary}
-            comparisonLabel={comparisonLabel}
-            includeShare
-            loading={loading}
+          <MetricSummaryGrid
+            items={createEventMetricItems({
+              locale,
+              labels,
+              summary: detail.summary,
+              comparisonSummary: comparisonDetail?.summary,
+              comparisonLabel,
+              includeShare: true,
+              loading,
+            })}
           />
 
           <Card className="overflow-visible">

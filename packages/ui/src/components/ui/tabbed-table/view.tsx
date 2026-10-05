@@ -1,8 +1,12 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { RiArrowDownSLine, RiArrowUpSLine } from "@remixicon/react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 
 import { cn } from "../../../lib/utils";
+import {
+  DataTableSkeletonRows as TabbedDataTableSkeletonRows,
+  DataTableSwitch,
+} from "../data-table-switch";
 import type {
   TabbedDataTableColumn,
   TabbedDataTableRowAdapter,
@@ -18,10 +22,6 @@ import {
 } from "../tabbed-table.utils";
 import { TableCell, TableHead, TableRow } from "../table";
 import { AnimatedDataTableRow } from "./animated-data-table-row";
-import {
-  DataTableSwitch,
-  TabbedDataTableSkeletonRows,
-} from "./data-table-switch";
 import { TabbedScrollMaskCard } from "./tabbed-scroll-mask-card";
 import { useLoadMoreSentinel } from "./use-load-more-sentinel";
 
@@ -71,7 +71,6 @@ export interface TabbedDataTableViewProps<
   emptyLabel: string;
   errorLabel?: string;
   loadingMoreLabel?: string;
-  loadingRowCount?: number;
   hasMore?: boolean;
   onLoadMore?: () => void;
   loadingRows?: ReactNode;
@@ -394,7 +393,6 @@ export function TabbedDataTableView<
   emptyLabel,
   errorLabel,
   loadingMoreLabel,
-  loadingRowCount = 3,
   hasMore = false,
   onLoadMore,
   loadingRows,
@@ -471,6 +469,36 @@ export function TabbedDataTableView<
     };
   });
   const activeSort = effectiveSortByTab[activeTab];
+  const displayRows = useMemo(() => {
+    // When no sorting owner is supplied, this view owns sorting. Product
+    // controllers pass onSortChange and keep server-side sorting authoritative.
+    if (onSortChange) return activeRows;
+
+    const sortColumn = activeColumns.find(
+      (column) => column.key === activeSort.key,
+    );
+    if (!sortColumn || sortColumn.sortable === false) return activeRows;
+
+    const direction = activeSort.direction === "asc" ? 1 : -1;
+    return [...activeRows].sort((left, right) => {
+      const leftValue =
+        sortColumn.sortValue?.(left, activeTab) ??
+        sortColumn.getValue(left, activeTab);
+      const rightValue =
+        sortColumn.sortValue?.(right, activeTab) ??
+        sortColumn.getValue(right, activeTab);
+      const difference = (leftValue - rightValue) * direction;
+      if (difference !== 0) return difference;
+      return String(left.key ?? "").localeCompare(String(right.key ?? ""));
+    });
+  }, [
+    activeColumns,
+    activeRows,
+    activeSort.direction,
+    activeSort.key,
+    activeTab,
+    onSortChange,
+  ]);
   const handleTabChange = (next: TTab) => {
     if (!controlled) setInternalTab(next);
     onValueChange?.(next);
@@ -499,7 +527,7 @@ export function TabbedDataTableView<
     ) : (
       <TabbedDataTableRows
         tab={activeTab}
-        rows={activeRows}
+        rows={displayRows}
         columns={activeColumns}
         sort={activeSort}
         source="card"
@@ -559,7 +587,6 @@ export function TabbedDataTableView<
         loadingLabel={loadingLabel}
         emptyLabel={emptyLabel}
         colSpan={1 + activeColumns.length}
-        loadingRowCount={loadingRowCount}
         header={
           <TabbedDataTableHeader
             tabs={tabs}
@@ -582,7 +609,10 @@ export function TabbedDataTableView<
             </>
           ) : null
         }
-        contentKey={contentKey ?? `${activeTab}:${activeRows.length}`}
+        // Keep the table instance mounted while rows are appended. The row
+        // list animates individual additions; changing this key on row count
+        // would crossfade the entire table when a load-more request completes.
+        contentKey={contentKey ?? activeTab}
         animate={animate}
       />
     </TabbedScrollMaskCard>

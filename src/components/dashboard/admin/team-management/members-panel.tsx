@@ -1,3 +1,4 @@
+import { SiteScopeSelector } from "@insightflare/product-ui/site-scope-selector";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,7 +27,6 @@ import { formatI18nTemplate } from "@/lib/i18n/template";
 
 import { useTeamManagementContext } from "./context";
 import {
-  SiteAccessSelectorButtons,
   TeamInviteCreateCard,
   TeamInviteLinksCard,
   TeamMembersTableCard,
@@ -63,8 +63,6 @@ export function TeamManagementMemberDialogs() {
     setSiteAccessDialogMember,
     siteAccessDialogMember,
     sites,
-    toggleEditingSite,
-    toggleInviteSite,
   } = useTeamManagementContext();
 
   const inviteSiteAccessDialog = (
@@ -87,15 +85,13 @@ export function TeamManagementMemberDialogs() {
             <FieldDescription>
               {copy.members.siteAccessDescription}
             </FieldDescription>
-            <SiteAccessSelectorButtons
-              siteIds={inviteSiteIds}
+            <SiteScopeSelector
+              ariaLabel={copy.members.siteAccessLabel}
+              selectedSiteIds={inviteSiteIds}
               sites={sites}
               allSitesLabel={copy.members.siteAccessAll}
-              noSitesLabel={copy.members.noSitesForAccess}
-              onAllSites={() => setInviteSiteIds([])}
-              onToggleSite={(siteId) =>
-                toggleInviteSite(siteId, !inviteSiteIds.includes(siteId))
-              }
+              emptySitesLabel={copy.members.noSitesForAccess}
+              onChange={setInviteSiteIds}
             />
           </Field>
         </ResponsiveDialogBody>
@@ -104,7 +100,7 @@ export function TeamManagementMemberDialogs() {
             type="button"
             onClick={() => setInviteSiteAccessDialogOpen(false)}
           >
-            <RiSave3Line className="size-4" />
+            <RiSave3Line data-icon="inline-start" />
             <span>{copy.members.saveSiteAccess}</span>
           </Button>
         </ResponsiveDialogFooter>
@@ -138,15 +134,13 @@ export function TeamManagementMemberDialogs() {
             <FieldDescription>
               {copy.members.siteAccessDescription}
             </FieldDescription>
-            <SiteAccessSelectorButtons
-              siteIds={editingSiteIds}
+            <SiteScopeSelector
+              ariaLabel={copy.members.siteAccessLabel}
+              selectedSiteIds={editingSiteIds}
               sites={sites}
               allSitesLabel={copy.members.siteAccessAll}
-              noSitesLabel={copy.members.noSitesForAccess}
-              onAllSites={() => setEditingSiteIds([])}
-              onToggleSite={(siteId) =>
-                toggleEditingSite(siteId, !editingSiteIds.includes(siteId))
-              }
+              emptySitesLabel={copy.members.noSitesForAccess}
+              onChange={setEditingSiteIds}
             />
           </Field>
         </ResponsiveDialogBody>
@@ -173,9 +167,9 @@ export function TeamManagementMemberDialogs() {
           >
             {siteAccessDialogMember &&
             savingSiteAccessId === siteAccessDialogMember.userId ? (
-              <Spinner className="size-4" />
+              <Spinner data-icon="inline-start" />
             ) : (
-              <RiSave3Line className="size-4" />
+              <RiSave3Line data-icon="inline-start" />
             )}
             <span>{copy.members.saveSiteAccess}</span>
           </Button>

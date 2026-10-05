@@ -1,4 +1,9 @@
 import { type ComponentType, memo, type ReactNode, useMemo } from "react";
+import {
+  ShareTrendAreaChart,
+  type ShareTrendAreaPoint,
+  type ShareTrendAreaSeries,
+} from "@insightflare/product-ui/charts";
 import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
@@ -11,11 +16,6 @@ import {
 import { RiLineChartLine } from "@remixicon/react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
-import {
-  ShareTrendAreaChart,
-  type ShareTrendAreaPoint,
-  type ShareTrendAreaSeries,
-} from "@/components/dashboard/charts/share-trend-area-chart";
 import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,

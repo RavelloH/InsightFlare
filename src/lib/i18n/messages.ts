@@ -23,6 +23,7 @@ export interface AppMessages {
       "data-display": string;
       overlays: string;
       "product-analytics": string;
+      "product-management": string;
       "product-realtime": string;
     };
     browseCategories: string;
@@ -2849,6 +2850,7 @@ const enMessages = {
       "data-display": "Data display",
       overlays: "Overlays",
       "product-analytics": "Product UI / Analytics",
+      "product-management": "Product UI / Management",
       "product-realtime": "Product UI / Realtime",
     },
     browseCategories: "Browse by category",
@@ -6011,6 +6013,7 @@ const zhMessages = {
       "data-display": "数据展示",
       overlays: "浮层",
       "product-analytics": "产品 UI / 分析",
+      "product-management": "产品 UI / 管理",
       "product-realtime": "产品 UI / 实时",
     },
     browseCategories: "按分类浏览",
@@ -9083,6 +9086,7 @@ const jaMessages = {
       "data-display": "データ表示",
       overlays: "オーバーレイ",
       "product-analytics": "プロダクト UI / 分析",
+      "product-management": "プロダクト UI / 管理",
       "product-realtime": "プロダクト UI / リアルタイム",
     },
     browseCategories: "カテゴリーから探す",

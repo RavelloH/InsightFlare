@@ -1,11 +1,11 @@
 import { memo, useCallback, useMemo, useState } from "react";
+import { useDetailDrawerClose } from "@insightflare/product-ui/detail-drawer";
 import { Card, CardContent } from "@insightflare/ui/card";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { JourneyDetailStateSwitch } from "@/components/dashboard/journeys/journey-detail-state";
 import { JourneyGeoLocationCard } from "@/components/dashboard/journeys/journey-geo-location-card";
 import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
-import { useDetailDrawerClose } from "@/components/dashboard/site-pages/common/detail-drawer";
 import { EventDetailDrawer } from "@/components/dashboard/site-pages/events/event-detail-drawer";
 import { PageDetailDrawer } from "@/components/dashboard/site-pages/pages/page-detail-drawer";
 import {

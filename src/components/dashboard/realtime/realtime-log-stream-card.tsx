@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DetailDrawer } from "@insightflare/product-ui/detail-drawer";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
@@ -12,7 +13,6 @@ import { RiPulseLine } from "@remixicon/react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 
 import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
-import { DetailDrawer } from "@/components/dashboard/site-pages/common/detail-drawer";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/sessions/session-detail-client-page";
 import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitors/visitor-detail-client-page";
 import type { RealtimeEvent } from "@/lib/realtime/types";

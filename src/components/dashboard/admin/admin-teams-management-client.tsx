@@ -8,11 +8,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
+import { DataTableSwitch } from "@insightflare/ui/data-table-switch";
 import { Input } from "@insightflare/ui/input";
 import { Label } from "@insightflare/ui/label";
 import { PageHeading } from "@insightflare/ui/page-heading";
 import { Spinner } from "@insightflare/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
+import { TableActionButton } from "@insightflare/ui/table-action-button";
 import {
   RiAddLine,
   RiArrowRightLine,
@@ -22,8 +24,6 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch";
-import { TableActionButton } from "@/components/dashboard/common/table-action-button";
 import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
 import { shortDateTime } from "@/lib/dashboard/format";
 import type { AdminTeamsInitialData } from "@/lib/dashboard/management-data";
@@ -148,21 +148,21 @@ export function AdminTeamsManagementClient({
             </div>
             <div className="md:col-span-2">
               <Button type="submit" disabled={submitting}>
-                <AutoTransition className="inline-flex items-center gap-2">
+                <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                   {submitting ? (
                     <span
                       key="creating"
-                      className="inline-flex items-center gap-2"
+                      className="inline-flex items-center gap-[var(--button-content-gap)]"
                     >
-                      <Spinner className="size-4" />
+                      <Spinner data-icon="inline-start" />
                       {t.creating}
                     </span>
                   ) : (
                     <span
                       key="create"
-                      className="inline-flex items-center gap-2"
+                      className="inline-flex items-center gap-[var(--button-content-gap)]"
                     >
-                      <RiAddLine className="size-4" />
+                      <RiAddLine data-icon="inline-start" />
                       {t.create}
                     </span>
                   )}

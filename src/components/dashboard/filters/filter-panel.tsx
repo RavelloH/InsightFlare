@@ -581,7 +581,7 @@ export function FilterPanel({
                 variant="outline"
                 onClick={() => openSavedFilterCreate()}
               >
-                <RiSaveLine />
+                <RiSaveLine data-icon="inline-start" />
                 <span>{messages.filterBuilder.saveThisFilter}</span>
               </Button>
             ) : null}
@@ -591,7 +591,7 @@ export function FilterPanel({
                 variant="outline"
                 onClick={() => openSavedFilterCreate(matchedSavedFilter)}
               >
-                <RiFileCopyLine />
+                <RiFileCopyLine data-icon="inline-start" />
                 <span>{messages.filterBuilder.saveAsThisFilter}</span>
               </Button>
             ) : null}
@@ -601,7 +601,7 @@ export function FilterPanel({
                 variant="outline"
                 onClick={() => openSavedFilterManagement(matchedSavedFilter)}
               >
-                <RiEditLine />
+                <RiEditLine data-icon="inline-start" />
                 <span>{messages.filterBuilder.manageThisFilter}</span>
               </Button>
             ) : null}
@@ -613,15 +613,15 @@ export function FilterPanel({
                 onClick={finishSavedFilterEditing}
               >
                 {updateSavedFilterMutation.isPending ? (
-                  <Spinner />
+                  <Spinner data-icon="inline-start" />
                 ) : (
-                  <RiCheckLine />
+                  <RiCheckLine data-icon="inline-start" />
                 )}
                 <span>{messages.filterBuilder.finishEditingFilter}</span>
               </Button>
             ) : null}
             <Button type="button" onClick={apply}>
-              <RiCheckLine />
+              <RiCheckLine data-icon="inline-start" />
               <span>{messages.filterBuilder.apply}</span>
             </Button>
           </>
@@ -730,7 +730,7 @@ export function FilterPanel({
                 setConfirmSavedFilterDeleteOpen(true);
               }}
             >
-              <RiDeleteBinLine />
+              <RiDeleteBinLine data-icon="inline-start" />
               <span>{messages.filterBuilder.deleteSavedFilter}</span>
             </Button>
             <div className="flex flex-wrap justify-end gap-2">
@@ -755,7 +755,7 @@ export function FilterPanel({
                   setSavedFilterOperationError(null);
                 }}
               >
-                <RiEditLine />
+                <RiEditLine data-icon="inline-start" />
                 <span>{messages.filterBuilder.editSavedFilter}</span>
               </Button>
               <Button

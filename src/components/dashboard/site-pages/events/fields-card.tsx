@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useInfiniteTableSentinel } from "@insightflare/product-ui/tables";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Badge } from "@insightflare/ui/badge";
@@ -18,6 +19,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
+import { DataTableSwitch } from "@insightflare/ui/data-table-switch";
 import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
 import {
   ResponsiveDialog,
@@ -50,8 +52,6 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 
 import { AnimatedDataTableRow } from "@/components/dashboard/common/animated-data-table-row";
-import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch";
-import { useInfiniteTableSentinel } from "@/components/dashboard/common/use-infinite-table-sentinel";
 import {
   fetchEventTypeFields,
   fetchEventTypeFieldValues,
@@ -533,7 +533,7 @@ export const EventFieldsCard = memo(function EventFieldsCard({
               >
                 <RiArrowDownSLine
                   className={cn(
-                    "size-3.5 transition-transform duration-200 ease-out",
+                    "transition-transform duration-200 ease-out",
                     isExpanded ? "rotate-0" : "-rotate-90",
                   )}
                 />
@@ -866,11 +866,11 @@ export const EventFieldsCard = memo(function EventFieldsCard({
               variant="outline"
               onClick={clearPayloadFilters}
             >
-              <RiFilterOffLine className="size-4" />
+              <RiFilterOffLine data-icon="inline-start" />
               <span>{labels.payloadFilterClear}</span>
             </Button>
             <Button type="button" onClick={applyPayloadFilterDraft}>
-              <RiCheckLine className="size-4" />
+              <RiCheckLine data-icon="inline-start" />
               <span>{labels.payloadFilterApply}</span>
             </Button>
           </ResponsiveDialogFooter>

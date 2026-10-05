@@ -52,52 +52,49 @@ vi.mock(
     ),
   }),
 );
-vi.mock(
-  "../../../../packages/ui/src/components/ui/tabbed-table/data-table-switch",
-  () => ({
-    DataTableSwitch: ({
-      loading,
-      hasContent,
-      header,
-      loadingLabel,
-      loadingRows,
-      rows,
-      footer,
-    }: {
-      loading: boolean;
-      hasContent: boolean;
-      header: ReactNode;
-      loadingLabel: string;
-      loadingRows?: ReactNode;
-      rows: ReactNode;
-      footer?: ReactNode;
-    }) =>
-      loading ? (
-        <table data-testid="loading">
-          <thead>{header}</thead>
-          <tbody>
-            {loadingRows ?? (
-              <tr>
-                <td>
-                  <span data-testid="loading-indicator">{loadingLabel}</span>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      ) : hasContent ? (
-        <table>
-          <thead>{header}</thead>
-          <tbody>
-            {rows}
-            {footer}
-          </tbody>
-        </table>
-      ) : (
-        <div data-testid="empty">Empty</div>
-      ),
-  }),
-);
+vi.mock("../../../../packages/ui/src/components/ui/data-table-switch", () => ({
+  DataTableSwitch: ({
+    loading,
+    hasContent,
+    header,
+    loadingLabel,
+    loadingRows,
+    rows,
+    footer,
+  }: {
+    loading: boolean;
+    hasContent: boolean;
+    header: ReactNode;
+    loadingLabel: string;
+    loadingRows?: ReactNode;
+    rows: ReactNode;
+    footer?: ReactNode;
+  }) =>
+    loading ? (
+      <table data-testid="loading">
+        <thead>{header}</thead>
+        <tbody>
+          {loadingRows ?? (
+            <tr>
+              <td>
+                <span data-testid="loading-indicator">{loadingLabel}</span>
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    ) : hasContent ? (
+      <table>
+        <thead>{header}</thead>
+        <tbody>
+          {rows}
+          {footer}
+        </tbody>
+      </table>
+    ) : (
+      <div data-testid="empty">Empty</div>
+    ),
+}));
 vi.mock("@insightflare/ui/use-mobile", () => ({ useIsMobile: () => false }));
 vi.mock("@insightflare/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,

@@ -1,4 +1,6 @@
 import { useMemo } from "react";
+import { EVENT_TREND_MAX_SERIES } from "@insightflare/product-ui/charts";
+import { MetricSummaryGrid } from "@insightflare/ui/metric-summary-grid";
 import { Skeleton } from "@insightflare/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 
@@ -9,7 +11,6 @@ import { BrowserShareOverview } from "@/components/dashboard/browsers/browser-sh
 import { BrowserShareTrendCard } from "@/components/dashboard/browsers/browser-share-trend-card";
 import { BrowserVersionBreakdownGrid } from "@/components/dashboard/browsers/browser-version-breakdown-grid";
 import { CanIUseCompatCard } from "@/components/dashboard/browsers/caniuse-compat-card";
-import { EVENT_TREND_MAX_SERIES } from "@/components/dashboard/charts/event-trend-bar-chart";
 import { DeviceCrossBreakdownGrid } from "@/components/dashboard/devices/device-cross-breakdown-grid";
 import { DeviceDimensionTrendCard } from "@/components/dashboard/devices/device-dimension-trend-card";
 import { DeviceScreenBreakdownCard } from "@/components/dashboard/devices/device-screen-breakdown-card";
@@ -22,7 +23,7 @@ import {
   useDashboardQuery,
 } from "@/components/dashboard/shell/dashboard-query-provider";
 import {
-  EventMetricGrid,
+  createEventMetricItems,
   EventTrendStackedBarCard,
 } from "@/components/dashboard/site-pages/events/metrics-components";
 import { EventRecordsSection } from "@/components/dashboard/site-pages/events/records-section";
@@ -549,10 +550,12 @@ function EventsEmbedBlock({
   }
 
   return (
-    <EventMetricGrid
-      locale={locale}
-      labels={labels}
-      summary={summary.summary}
+    <MetricSummaryGrid
+      items={createEventMetricItems({
+        locale,
+        labels,
+        summary: summary.summary,
+      })}
     />
   );
 }

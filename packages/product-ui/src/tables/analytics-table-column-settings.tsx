@@ -24,7 +24,7 @@ import {
 } from "@remixicon/react";
 import { Reorder, useDragControls } from "motion/react";
 
-import { cn } from "@/lib/utils";
+import { cn } from "../utils/cn";
 const STORAGE_VERSION = 1;
 export interface AnalyticsTableColumnDefinition<TId extends string = string> {
   id: TId;

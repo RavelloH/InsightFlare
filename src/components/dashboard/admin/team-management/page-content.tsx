@@ -47,8 +47,8 @@ export function TeamManagementPageContent() {
             <>
               <Button variant="outline" asChild>
                 <Link href={`/${locale}/app/${activeTeam.slug}/manage/sites`}>
-                  <RiGlobalLine />
-                  <span className="inline-flex items-center gap-1.5">
+                  <RiGlobalLine data-icon="inline-start" />
+                  <span className="inline-flex items-center gap-[var(--button-content-gap)]">
                     {copy.stats.sites}:
                     <AutoResizer
                       initial
@@ -65,7 +65,7 @@ export function TeamManagementPageContent() {
                             key="sites-loading"
                             className="inline-flex items-center"
                           >
-                            <Spinner className="size-3.5" />
+                            <Spinner data-icon="inline-end" />
                           </span>
                         ) : (
                           <span key="sites-value">{siteCount}</span>
@@ -77,8 +77,8 @@ export function TeamManagementPageContent() {
               </Button>
               <Button variant="outline" asChild>
                 <Link href={`/${locale}/app/${activeTeam.slug}/members`}>
-                  <RiGroupLine />
-                  <span className="inline-flex items-center gap-1.5">
+                  <RiGroupLine data-icon="inline-start" />
+                  <span className="inline-flex items-center gap-[var(--button-content-gap)]">
                     {copy.stats.members}:
                     <AutoResizer
                       initial
@@ -95,7 +95,7 @@ export function TeamManagementPageContent() {
                             key="members-loading"
                             className="inline-flex items-center"
                           >
-                            <Spinner className="size-3.5" />
+                            <Spinner data-icon="inline-end" />
                           </span>
                         ) : (
                           <span key="members-value">{memberCount}</span>
@@ -116,7 +116,7 @@ export function TeamManagementPageContent() {
                     setCreateSiteDialogOpen(true);
                   }}
                 >
-                  <RiAddLine />
+                  <RiAddLine data-icon="inline-start" />
                   <span>{siteCreateCopy.create}</span>
                 </Button>
               ) : null}

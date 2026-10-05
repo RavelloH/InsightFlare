@@ -1,3 +1,4 @@
+import { type PerformanceTrendChartPoint } from "@insightflare/product-ui/charts";
 import {
   RiArrowDownLine,
   RiArrowUpLine,
@@ -7,7 +8,6 @@ import {
   RiPulseLine,
 } from "@remixicon/react";
 
-import { type PerformanceTrendChartPoint } from "@/components/dashboard/charts/performance-trend-chart";
 import { type CountryFeature } from "@/components/dashboard/site-pages/performance/performance-map-utils";
 import {
   addZonedInterval,

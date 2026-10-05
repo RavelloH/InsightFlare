@@ -1,4 +1,5 @@
 import { memo, useMemo } from "react";
+import { useDetailDrawerReady } from "@insightflare/product-ui/detail-drawer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   Card,
@@ -15,7 +16,6 @@ import {
   visitorDisplayName,
 } from "@/components/dashboard/journeys/journey-display";
 import { type JourneyGeoLocationInput } from "@/components/dashboard/journeys/journey-geo-location-card";
-import { useDetailDrawerReady } from "@/components/dashboard/site-pages/common/detail-drawer";
 import type {
   SessionDetailMapTheme,
   SessionLocationPoint,

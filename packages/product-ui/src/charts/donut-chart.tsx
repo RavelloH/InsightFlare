@@ -6,12 +6,9 @@ import {
 } from "@insightflare/ui/chart";
 import { Cell, Pie, PieChart } from "recharts";
 
-import {
-  numberFormat,
-  percentFormatWithOneDecimal,
-} from "@/lib/dashboard/format";
-import type { Locale } from "@/lib/i18n/config";
-import { cn } from "@/lib/utils";
+import { cn } from "../utils/cn";
+import { numberFormat, percentFormatWithOneDecimal } from "./chart-format";
+import type { ChartLocale as Locale } from "./types";
 
 export interface DonutChartDataPoint {
   key: string;

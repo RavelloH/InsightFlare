@@ -1,4 +1,5 @@
 import { memo, useMemo } from "react";
+import { useDetailDrawerClose } from "@insightflare/product-ui/detail-drawer";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Button } from "@insightflare/ui/button";
@@ -10,7 +11,6 @@ import {
   AsyncDimensionBreakdownCard,
   type AsyncDimensionBreakdownLoader,
 } from "@/components/dashboard/common/async-dimension-breakdown-card";
-import { useDetailDrawerClose } from "@/components/dashboard/site-pages/common/detail-query-modal";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import {
   OverviewMetricsSection,

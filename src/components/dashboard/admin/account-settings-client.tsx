@@ -522,21 +522,21 @@ export function AccountSettingsClient({
 
               <div className="mt-auto flex justify-start">
                 <Button type="submit" disabled={!canSaveProfile}>
-                  <AutoTransition className="inline-flex items-center gap-2">
+                  <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                     {profileSaving ? (
                       <span
                         key="profile-saving"
-                        className="inline-flex items-center gap-2"
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
                       >
-                        <Spinner className="size-4" />
+                        <Spinner data-icon="inline-start" />
                         {copy.profileSaving}
                       </span>
                     ) : (
                       <span
                         key="profile-save"
-                        className="inline-flex items-center gap-2"
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
                       >
-                        <RiSave3Line className="size-4" />
+                        <RiSave3Line data-icon="inline-start" />
                         {copy.profileSave}
                       </span>
                     )}
@@ -609,21 +609,21 @@ export function AccountSettingsClient({
 
               <div className="mt-auto flex justify-start">
                 <Button type="submit" disabled={!canSavePassword}>
-                  <AutoTransition className="inline-flex items-center gap-2">
+                  <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                     {passwordSaving ? (
                       <span
                         key="password-saving"
-                        className="inline-flex items-center gap-2"
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
                       >
-                        <Spinner className="size-4" />
+                        <Spinner data-icon="inline-start" />
                         {copy.passwordSaving}
                       </span>
                     ) : (
                       <span
                         key="password-save"
-                        className="inline-flex items-center gap-2"
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
                       >
-                        <RiSave3Line className="size-4" />
+                        <RiSave3Line data-icon="inline-start" />
                         {copy.passwordSave}
                       </span>
                     )}
@@ -769,21 +769,21 @@ export function AccountSettingsClient({
                         type="submit"
                         disabled={!canSaveNotificationPreferences}
                       >
-                        <AutoTransition className="inline-flex items-center gap-2">
+                        <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                           {notificationPreferencesSaving ? (
                             <span
                               key="notification-preferences-saving"
-                              className="inline-flex items-center gap-2"
+                              className="inline-flex items-center gap-[var(--button-content-gap)]"
                             >
-                              <Spinner className="size-4" />
+                              <Spinner data-icon="inline-start" />
                               {copy.saving}
                             </span>
                           ) : (
                             <span
                               key="notification-preferences-save"
-                              className="inline-flex items-center gap-2"
+                              className="inline-flex items-center gap-[var(--button-content-gap)]"
                             >
-                              <RiSave3Line className="size-4" />
+                              <RiSave3Line data-icon="inline-start" />
                               {copy.save}
                             </span>
                           )}
@@ -851,21 +851,21 @@ export function AccountSettingsClient({
 
               <div className="mt-auto flex justify-start">
                 <Button type="submit" disabled={!canSavePreferredLocale}>
-                  <AutoTransition className="inline-flex items-center gap-2">
+                  <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                     {preferredLocaleSaving ? (
                       <span
                         key="preferred-locale-saving"
-                        className="inline-flex items-center gap-2"
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
                       >
-                        <Spinner className="size-4" />
+                        <Spinner data-icon="inline-start" />
                         {copy.saving}
                       </span>
                     ) : (
                       <span
                         key="preferred-locale-save"
-                        className="inline-flex items-center gap-2"
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
                       >
-                        <RiSave3Line className="size-4" />
+                        <RiSave3Line data-icon="inline-start" />
                         {copy.save}
                       </span>
                     )}
@@ -981,21 +981,21 @@ export function AccountSettingsClient({
 
               <div className="mt-auto flex justify-start">
                 <Button type="submit" disabled={!canSave}>
-                  <AutoTransition className="inline-flex items-center gap-2">
+                  <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                     {saving ? (
                       <span
                         key="saving"
-                        className="inline-flex items-center gap-2"
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
                       >
-                        <Spinner className="size-4" />
+                        <Spinner data-icon="inline-start" />
                         {copy.saving}
                       </span>
                     ) : (
                       <span
                         key="save"
-                        className="inline-flex items-center gap-2"
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
                       >
-                        <RiSave3Line className="size-4" />
+                        <RiSave3Line data-icon="inline-start" />
                         {copy.save}
                       </span>
                     )}

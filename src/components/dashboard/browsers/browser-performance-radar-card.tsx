@@ -1,4 +1,9 @@
 import { memo, useMemo } from "react";
+import {
+  buildPerformanceRadarMaxByMetric,
+  PerformanceRadarChart,
+  type PerformanceRadarMetricKey,
+} from "@insightflare/product-ui/charts";
 import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
 import {
   Card,
@@ -9,11 +14,6 @@ import {
 import { RiPulseLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
-import {
-  buildPerformanceRadarMaxByMetric,
-  PerformanceRadarChart,
-  type PerformanceRadarMetricKey,
-} from "@/components/dashboard/charts/performance-radar-chart";
 import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,

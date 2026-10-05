@@ -7,6 +7,8 @@ import {
   useMemo,
   useState,
 } from "react";
+import type { AnalyticsTableColumnDefinition } from "@insightflare/product-ui/tables";
+import { ClickableTableCell } from "@insightflare/ui/clickable-table-cell";
 import { Skeleton } from "@insightflare/ui/skeleton";
 import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
 import { RiArrowDownSLine, RiArrowUpSLine } from "@remixicon/react";
@@ -16,8 +18,6 @@ import {
   AnalyticsTimeTooltipTarget,
 } from "@/components/dashboard/analytics-time-tooltip";
 import { AnalyticsDataTable } from "@/components/dashboard/common/analytics-data-table";
-import type { AnalyticsTableColumnDefinition } from "@/components/dashboard/common/analytics-table-column-settings";
-import { ClickableTableCell } from "@/components/dashboard/common/clickable-table-cell";
 import {
   BrowserMeta,
   CountryRegionMeta,

@@ -1,10 +1,11 @@
+export { DataTableSwitch } from "../data-table-switch";
+export { DataTableSkeletonRows as TabbedDataTableSkeletonRows } from "../data-table-switch";
 export type * from "../tabbed-table.types";
 export {
   createTabRecord,
   firstSortableColumnKey,
   getColumnsForTab,
 } from "../tabbed-table.utils";
-export { DataTableSwitch } from "./data-table-switch";
 export {
   TabbedScrollMaskCard,
   type TabbedScrollMaskCardTab,

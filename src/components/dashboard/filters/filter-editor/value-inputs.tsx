@@ -153,7 +153,10 @@ export function SearchablePayloadPathInput({
           <span className="min-w-0 truncate text-left">
             {condition.payloadPath || messages.filterBuilder.valueUnset}
           </span>
-          <RiArrowDownSLine className="size-4 shrink-0 text-muted-foreground" />
+          <RiArrowDownSLine
+            data-icon="inline-end"
+            className="shrink-0 text-muted-foreground"
+          />
         </Button>
       </Popover.Trigger>
       <Popover.Portal>
@@ -555,7 +558,7 @@ export function SearchableValueInput({
                     .join(", ") || messages.filterBuilder.valueUnset
                 : displayValueText || messages.filterBuilder.valueUnset}
             </span>
-            <RiArrowDownSLine className="size-4 shrink-0 text-muted-foreground" />
+            <RiArrowDownSLine className="shrink-0 text-muted-foreground" />
           </Button>
         </Popover.Trigger>
         <Popover.Portal>

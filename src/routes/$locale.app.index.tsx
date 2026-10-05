@@ -54,7 +54,10 @@ function AppIndexPage() {
               >
                 <Link href={`/${locale}/app/${team.slug}`}>
                   <span className="truncate">{team.name}</span>
-                  <RiArrowRightSLine className="size-4 text-muted-foreground" />
+                  <RiArrowRightSLine
+                    data-icon="inline-end"
+                    className="text-muted-foreground"
+                  />
                 </Link>
               </Button>
             ))}
@@ -76,7 +79,7 @@ function AppIndexPage() {
         <CardContent className="flex items-center gap-2">
           <Button asChild>
             <Link href={`/${locale}/login`}>
-              <RiLoginBoxLine className="size-4" />
+              <RiLoginBoxLine data-icon="inline-start" />
               <span>{t.login.title}</span>
             </Link>
           </Button>

@@ -4,11 +4,30 @@ import {
   Fragment,
   isValidElement,
   type ReactNode,
+  useState,
 } from "react";
+import {
+  AnalyticsTooltipProvider,
+  AnalyticsTooltipTarget,
+} from "@insightflare/product-ui/analytics-tooltip";
+import {
+  DonutChart,
+  TrafficPairBarChart,
+} from "@insightflare/product-ui/charts";
+import { DetailDrawer } from "@insightflare/product-ui/detail-drawer";
 import { funnelVisualizationContract } from "@insightflare/product-ui/funnel";
 import { goalVisualizationContract } from "@insightflare/product-ui/goals";
 import { realtimeTrafficTrendContract } from "@insightflare/product-ui/realtime";
 import { shareBreakdownContract } from "@insightflare/product-ui/sharing";
+import type { SiteScopeSelectorProps } from "@insightflare/product-ui/site-scope-selector";
+import { SiteScopeSelector } from "@insightflare/product-ui/site-scope-selector";
+import {
+  AnalyticsDataTable,
+  type AnalyticsTableColumnDefinition,
+  AnalyticsTableColumnSettings,
+} from "@insightflare/product-ui/tables";
+import { Button } from "@insightflare/ui/button";
+import { ClickableTableCell } from "@insightflare/ui/clickable-table-cell";
 import type { ComponentContract } from "@insightflare/ui/contracts";
 import {
   alertDialogContract,
@@ -27,6 +46,7 @@ import {
   checkboxContract,
   clickableContract,
   type ComponentCategoryId,
+  defineComponentContract,
   dialogContract,
   drawerContract,
   dropdownMenuContract,
@@ -34,6 +54,7 @@ import {
   inputContract,
   jsonTreeContract,
   labelContract,
+  metricSummaryGridContract,
   overlayScrollbarContract,
   pageHeadingContract,
   popoverContract,
@@ -54,7 +75,16 @@ import {
   tooltipContract,
   verticalScrollMaskContract,
 } from "@insightflare/ui/contracts";
-import { RiAddLine } from "@remixicon/react";
+import { DataTableSwitch } from "@insightflare/ui/data-table-switch";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+} from "@insightflare/ui/table";
+import { TableActionButton } from "@insightflare/ui/table-action-button";
+import { RiAddLine, RiMore2Line } from "@remixicon/react";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 
 export interface UiGalleryContract {
@@ -205,6 +235,131 @@ function propValue(
   };
 }
 
+function SiteScopeSelectorGalleryPreview({
+  selectedSiteIds: initialSelectedSiteIds,
+  ...props
+}: Omit<SiteScopeSelectorProps, "onChange">) {
+  const [selectedSiteIds, setSelectedSiteIds] = useState<string[]>(() => [
+    ...initialSelectedSiteIds,
+  ]);
+
+  return createElement(SiteScopeSelector, {
+    ...props,
+    selectedSiteIds,
+    onChange: setSelectedSiteIds,
+  });
+}
+
+function DetailDrawerGalleryPreview({ ariaLabel }: { ariaLabel: string }) {
+  const [openDepth, setOpenDepth] = useState(0);
+  const [layerCount, setLayerCount] = useState(0);
+
+  const renderLayer = (depth: number): ReactNode => {
+    if (depth >= layerCount) return null;
+
+    const layerNumber = depth + 1;
+    return createElement(DetailDrawer, {
+      ariaLabel: `${ariaLabel} · layer ${layerNumber}`,
+      drawerKey: `ui-gallery-detail-drawer-${layerNumber}`,
+      open: depth < openDepth,
+      onOpenChange: (nextOpen: boolean) => {
+        if (!nextOpen) {
+          setOpenDepth((currentDepth) => Math.min(currentDepth, depth));
+        }
+      },
+      children: createElement(
+        "div",
+        { className: "min-h-[112vh] p-6 sm:p-10" },
+        createElement(
+          "div",
+          { className: "mx-auto max-w-3xl space-y-6" },
+          createElement(
+            "div",
+            { className: "flex flex-wrap items-start justify-between gap-4" },
+            createElement(
+              "div",
+              { className: "space-y-2" },
+              createElement(
+                "p",
+                { className: "font-mono text-xs text-primary" },
+                `LAYER ${layerNumber}`,
+              ),
+              createElement(
+                "h2",
+                { className: "text-xl font-semibold" },
+                `${ariaLabel} · layer ${layerNumber}`,
+              ),
+              createElement(
+                "p",
+                { className: "text-sm text-muted-foreground" },
+                "Open another detail drawer to continue the nested stack.",
+              ),
+            ),
+            createElement(
+              Button,
+              {
+                variant: "outline",
+                onClick: () => setOpenDepth(depth),
+              },
+              "Close this layer",
+            ),
+          ),
+          createElement(
+            "div",
+            { className: "border bg-card p-4 sm:p-5" },
+            createElement(
+              "p",
+              { className: "text-xs text-muted-foreground" },
+              "Current stack depth",
+            ),
+            createElement(
+              "p",
+              { className: "mt-2 font-mono text-2xl tabular-nums" },
+              String(layerNumber),
+            ),
+          ),
+          createElement(
+            Button,
+            {
+              onClick: () => {
+                const nextDepth = depth + 2;
+                setLayerCount((currentCount) =>
+                  Math.max(currentCount, nextDepth),
+                );
+                setOpenDepth(nextDepth);
+              },
+            },
+            createElement(RiAddLine, { className: "size-4" }),
+            `Open nested layer ${layerNumber + 1}`,
+          ),
+          renderLayer(depth + 1),
+        ),
+      ),
+    });
+  };
+
+  return createElement(
+    "div",
+    { className: "grid w-full justify-items-start gap-3" },
+    createElement(
+      Button,
+      {
+        onClick: () => {
+          setLayerCount((currentCount) => Math.max(currentCount, 1));
+          setOpenDepth(1);
+        },
+      },
+      "Open first detail drawer",
+    ),
+    createElement(
+      "p",
+      { className: "text-sm text-muted-foreground" },
+      "Keep opening nested layers to build an unbounded stack. Close the top layer to return to the one below it.",
+    ),
+    renderLayer(0),
+  );
+}
+
 function scrollbarItems(labels: readonly string[], className: string) {
   return createElement(
     "div",
@@ -223,6 +378,160 @@ function scrollbarItems(labels: readonly string[], className: string) {
     ),
   );
 }
+
+const ClickableTableCellGalleryPreview = Object.assign(
+  function ClickableTableCellGalleryPreview({
+    focusable,
+    ariaLabel,
+    onClick,
+    children,
+  }: {
+    focusable: boolean;
+    ariaLabel: string;
+    onClick: () => void;
+    children: ReactNode;
+  }) {
+    const [selectedPage, setSelectedPage] = useState("/pricing");
+    const handleClick = () => {
+      onClick();
+      setSelectedPage((page) =>
+        page === "/pricing" ? "/docs/getting-started" : "/pricing",
+      );
+    };
+
+    return createElement(
+      ClickableTableCell,
+      {
+        focusable,
+        ariaLabel:
+          selectedPage === "/pricing" ? ariaLabel : `Open ${selectedPage}`,
+        onClick: handleClick,
+      },
+      selectedPage === "/pricing" ? children : selectedPage,
+    );
+  },
+  { displayName: "ClickableTableCell" },
+);
+
+const COLUMN_SETTINGS_BASE_COLUMNS = [
+  { id: "page", label: "Page", required: true },
+  { id: "views", label: "Views" },
+  { id: "visitors", label: "Visitors" },
+  { id: "conversions", label: "Conversions", defaultVisible: false },
+] as const satisfies readonly AnalyticsTableColumnDefinition[];
+
+const COLUMN_SETTINGS_LABELS = {
+  action: "Configure columns",
+  title: "Table columns",
+  description: "Choose which columns to show and drag to change their order.",
+  visible: "Visible columns",
+  required: "Required",
+  reset: "Reset",
+  dragHint: "Drag to reorder",
+  close: "Done",
+};
+
+const AnalyticsTableColumnSettingsGalleryPreview = Object.assign(
+  function AnalyticsTableColumnSettingsGalleryPreview({
+    columns,
+    orderedIds: initialOrderedIds,
+    visibleIds: initialVisibleIds,
+    onOrderChange,
+    onVisibilityChange,
+    onReset,
+    labels,
+  }: {
+    columns: readonly AnalyticsTableColumnDefinition[];
+    orderedIds: readonly string[];
+    visibleIds: readonly string[];
+    onOrderChange: (nextOrder: readonly string[]) => void;
+    onVisibilityChange: (nextVisible: readonly string[]) => void;
+    onReset: () => void;
+    labels: typeof COLUMN_SETTINGS_LABELS;
+  }) {
+    const [orderedIds, setOrderedIds] = useState([...initialOrderedIds]);
+    const [visibleIds, setVisibleIds] = useState([...initialVisibleIds]);
+    const visibleColumnIds = orderedIds.filter((id) => visibleIds.includes(id));
+    const columnsById = new Map(
+      columns.map((column) => [column.id, column] as const),
+    );
+    const handleOrderChange = (nextOrder: readonly string[]) => {
+      setOrderedIds([...nextOrder]);
+      onOrderChange(nextOrder);
+    };
+    const handleVisibilityChange = (nextVisible: readonly string[]) => {
+      setVisibleIds([...nextVisible]);
+      onVisibilityChange(nextVisible);
+    };
+    const handleReset = () => {
+      setOrderedIds(columns.map((column) => column.id));
+      setVisibleIds(
+        columns
+          .filter(
+            (column) => column.required || column.defaultVisible !== false,
+          )
+          .map((column) => column.id),
+      );
+      onReset();
+    };
+
+    return createElement(
+      "div",
+      { className: "grid w-full gap-3" },
+      createElement(
+        "div",
+        { className: "flex items-center justify-between gap-3" },
+        createElement("p", { className: "text-sm font-medium" }, "Page report"),
+        createElement(AnalyticsTableColumnSettings, {
+          columns,
+          orderedIds,
+          visibleIds,
+          onOrderChange: handleOrderChange,
+          onVisibilityChange: handleVisibilityChange,
+          onReset: handleReset,
+          labels,
+        }),
+      ),
+      createElement(
+        Table,
+        null,
+        createElement(
+          "thead",
+          null,
+          createElement(
+            TableRow,
+            null,
+            ...visibleColumnIds.map((id) =>
+              createElement(
+                TableHead,
+                { key: id },
+                columnsById.get(id)?.label ?? id,
+              ),
+            ),
+          ),
+        ),
+        createElement(
+          TableBody,
+          null,
+          ...[
+            ["/pricing", "1,284", "842", "126"],
+            ["/docs/getting-started", "946", "731", "84"],
+          ].map((row) =>
+            createElement(
+              TableRow,
+              { key: row[0]! },
+              ...visibleColumnIds.map((id) => {
+                const index = columns.findIndex((column) => column.id === id);
+                return createElement(TableCell, { key: id }, row[index] ?? "—");
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+  },
+  { displayName: "AnalyticsTableColumnSettings" },
+);
 
 const galleryContracts = {
   asyncContent: registerPropCards(asyncContentContract, [
@@ -986,6 +1295,10 @@ const galleryContracts = {
       ),
     ]),
   ]),
+  metricSummaryGrid: registerPropCards(metricSummaryGridContract, [
+    propCard("columns", [propValue(2), propValue(3), propValue(4)]),
+    propCard("loading", [propValue(false), propValue(true)]),
+  ]),
   sidebar: registerPropCards(sidebarContract, [
     propCard("side", [propValue("left"), propValue("right")]),
     propCard("variant", [
@@ -1598,6 +1911,578 @@ const galleryContracts = {
     ],
     { comparisonItems: undefined },
   ),
+  trafficPairBarChart: registerPropCards(
+    defineComponentContract<{
+      locale: string;
+      comparison: boolean;
+    }>({
+      id: "traffic-pair-bar-chart",
+      title: "Traffic pair bar chart",
+      category: "Product UI / Analytics",
+      categoryId: "product-analytics",
+      fixtures: [
+        {
+          id: "default",
+          title: "Traffic pair bar chart",
+          props: { locale: "en-US", comparison: false },
+        },
+      ],
+      render: ({ locale, comparison }) => {
+        const traffic = [
+          { timestampMs: 1_728_000_000_000, views: 128, visitors: 84 },
+          { timestampMs: 1_728_086_400_000, views: 176, visitors: 112 },
+          { timestampMs: 1_728_172_800_000, views: 142, visitors: 96 },
+          { timestampMs: 1_728_259_200_000, views: 214, visitors: 151 },
+          { timestampMs: 1_728_345_600_000, views: 189, visitors: 130 },
+        ];
+
+        return createElement(
+          "div",
+          { className: "w-full" },
+          createElement(TrafficPairBarChart, {
+            data: traffic,
+            ...(comparison
+              ? {
+                  comparisonData: traffic.map((point) => ({
+                    ...point,
+                    views: point.views * 0.8,
+                    visitors: point.visitors * 0.85,
+                  })),
+                }
+              : {}),
+            locale,
+            timeZone: "UTC",
+            interval: "day",
+            viewsLabel: "Views",
+            visitorsLabel: "Visitors",
+            dataIsComplete: true,
+            range: {
+              from: traffic[0]!.timestampMs,
+              to: traffic.at(-1)!.timestampMs,
+            },
+          }),
+        );
+      },
+    }),
+    [
+      propCard("locale", [propValue("en-US"), propValue("zh-CN")]),
+      propCard("comparison", [propValue(false), propValue(true)]),
+    ],
+  ),
+  donutChart: registerPropCards(
+    defineComponentContract<{
+      locale: string;
+      comparison: boolean;
+    }>({
+      id: "donut-chart",
+      title: "Donut chart",
+      category: "Product UI / Analytics",
+      categoryId: "product-analytics",
+      fixtures: [
+        {
+          id: "default",
+          title: "Donut chart",
+          props: { locale: "en-US", comparison: false },
+        },
+      ],
+      render: ({ locale, comparison }) => {
+        const sources = [
+          {
+            key: "search",
+            label: "Search",
+            value: 420,
+            share: 42,
+            color: "var(--color-chart-1)",
+          },
+          {
+            key: "direct",
+            label: "Direct",
+            value: 310,
+            share: 31,
+            color: "var(--color-chart-2)",
+          },
+          {
+            key: "social",
+            label: "Social",
+            value: 270,
+            share: 27,
+            color: "var(--color-chart-3)",
+          },
+        ];
+        const comparisonColors = [
+          "var(--color-chart-secondary-1)",
+          "var(--color-chart-secondary-2)",
+          "var(--color-chart-secondary-3)",
+        ];
+
+        return createElement(
+          "div",
+          { className: "mx-auto w-full max-w-sm" },
+          createElement(DonutChart, {
+            data: sources,
+            ...(comparison
+              ? {
+                  comparisonData: sources.map((point, index) => ({
+                    ...point,
+                    value: Math.round(point.value * 0.82),
+                    color: comparisonColors[index % comparisonColors.length]!,
+                  })),
+                }
+              : {}),
+            locale,
+            valueLabel: "visitors",
+          }),
+        );
+      },
+    }),
+    [
+      propCard("locale", [propValue("en-US"), propValue("zh-CN")]),
+      propCard("comparison", [propValue(false), propValue(true)]),
+    ],
+  ),
+  tableActionButton: registerPropCards(
+    defineComponentContract<{
+      tone: "default" | "destructive";
+      disabled: boolean;
+    }>({
+      id: "table-action-button",
+      title: "Table action button",
+      category: "Data display",
+      categoryId: "data-display",
+      fixtures: [
+        {
+          id: "default",
+          title: "Table action button",
+          props: { tone: "default", disabled: false },
+        },
+      ],
+      render: ({ tone, disabled }) =>
+        createElement(
+          "div",
+          { className: "flex w-full items-center gap-3" },
+          createElement(TableActionButton, {
+            label: tone === "destructive" ? "Delete row" : "More row actions",
+            tone,
+            disabled,
+            children: createElement(RiMore2Line, { "aria-hidden": true }),
+          }),
+          createElement(
+            "span",
+            { className: "text-sm text-muted-foreground" },
+            "Example table row",
+          ),
+        ),
+    }),
+    [
+      propCard("tone", [propValue("default"), propValue("destructive")]),
+      propCard("disabled", [propValue(false), propValue(true)]),
+    ],
+  ),
+  clickableTableCell: registerPropCards(
+    defineComponentContract<{ focusable: boolean }>({
+      id: "clickable-table-cell",
+      title: "Clickable table cell",
+      category: "Data display",
+      categoryId: "data-display",
+      fixtures: [
+        {
+          id: "default",
+          title: "Clickable table cell",
+          props: { focusable: false },
+        },
+      ],
+      render: ({ focusable }) =>
+        createElement(
+          "div",
+          { className: "grid w-full gap-3" },
+          createElement(
+            Table,
+            null,
+            createElement(
+              TableBody,
+              null,
+              createElement(
+                TableRow,
+                null,
+                createElement(ClickableTableCellGalleryPreview, {
+                  focusable,
+                  ariaLabel: "Open /pricing",
+                  onClick: () => {},
+                  children: "/pricing",
+                }),
+                createElement(TableCell, { className: "text-right" }, "1,284"),
+              ),
+            ),
+          ),
+          createElement(
+            "p",
+            { className: "text-xs text-muted-foreground" },
+            "Click the page cell to switch the selected row.",
+          ),
+        ),
+    }),
+    [propCard("focusable", [propValue(false), propValue(true)])],
+  ),
+  dataTableSwitch: registerPropCards(
+    defineComponentContract<{
+      state: "ready" | "loading" | "empty";
+    }>({
+      id: "data-table-switch",
+      title: "Data table switch",
+      category: "Data display",
+      categoryId: "data-display",
+      fixtures: [
+        {
+          id: "default",
+          title: "Ready table",
+          props: { state: "ready" },
+        },
+      ],
+      render: ({ state }) =>
+        createElement(
+          "div",
+          { className: "w-full border bg-card" },
+          createElement(DataTableSwitch, {
+            loading: state === "loading",
+            hasContent: state === "ready",
+            loadingLabel: "Loading pages…",
+            emptyLabel: "No pages found.",
+            colSpan: 2,
+            loadingRowCount: 3,
+            header: createElement(
+              TableRow,
+              null,
+              createElement(TableHead, null, "Page"),
+              createElement(TableHead, { className: "text-right" }, "Views"),
+            ),
+            rows:
+              state === "ready"
+                ? createElement(
+                    Fragment,
+                    null,
+                    createElement(
+                      TableRow,
+                      null,
+                      createElement(TableCell, null, "/pricing"),
+                      createElement(
+                        TableCell,
+                        { className: "text-right tabular-nums" },
+                        "1,284",
+                      ),
+                    ),
+                    createElement(
+                      TableRow,
+                      null,
+                      createElement(TableCell, null, "/docs/getting-started"),
+                      createElement(
+                        TableCell,
+                        { className: "text-right tabular-nums" },
+                        "946",
+                      ),
+                    ),
+                  )
+                : null,
+            contentKey: state,
+          }),
+        ),
+    }),
+    [
+      propCard("state", [
+        propValue("ready"),
+        propValue("loading"),
+        propValue("empty"),
+      ]),
+    ],
+  ),
+  analyticsTableColumnSettings: registerPropCards(
+    defineComponentContract<{ preset: "default" | "all-columns" }>({
+      id: "analytics-table-column-settings",
+      title: "Analytics table column settings",
+      category: "Product UI / Analytics",
+      categoryId: "product-analytics",
+      fixtures: [
+        {
+          id: "default",
+          title: "Analytics table column settings",
+          props: { preset: "default" },
+        },
+      ],
+      render: ({ preset }) => {
+        const columns = COLUMN_SETTINGS_BASE_COLUMNS.map((column) => ({
+          ...column,
+          defaultVisible:
+            preset === "all-columns" || column.defaultVisible !== false,
+        }));
+        const orderedIds = columns.map((column) => column.id);
+        const visibleIds = columns
+          .filter(
+            (column) => column.required || column.defaultVisible !== false,
+          )
+          .map((column) => column.id);
+
+        return createElement(AnalyticsTableColumnSettingsGalleryPreview, {
+          key: preset,
+          columns,
+          orderedIds,
+          visibleIds,
+          onOrderChange: () => {},
+          onVisibilityChange: () => {},
+          onReset: () => {},
+          labels: COLUMN_SETTINGS_LABELS,
+        });
+      },
+    }),
+    [
+      propCard("preset", [
+        propValue("default"),
+        propValue("all-columns", "All columns visible"),
+      ]),
+    ],
+  ),
+  analyticsDataTable: registerPropCards(
+    defineComponentContract<{
+      loading: boolean;
+      rows: readonly { id: string; page: string; views: string }[];
+    }>({
+      id: "analytics-data-table",
+      title: "Analytics data table",
+      category: "Product UI / Analytics",
+      categoryId: "product-analytics",
+      fixtures: [
+        {
+          id: "default",
+          title: "Analytics table",
+          props: {
+            loading: false,
+            rows: [
+              { id: "pricing", page: "/pricing", views: "1,284" },
+              { id: "docs", page: "/docs/getting-started", views: "946" },
+              { id: "blog", page: "/blog/launch", views: "721" },
+            ],
+          },
+        },
+      ],
+      render: ({ loading, rows }) =>
+        createElement(
+          AnalyticsDataTable<{ id: string; page: string; views: string }>,
+          {
+            loading,
+            rows,
+            header: createElement(
+              "tr",
+              null,
+              createElement("th", { className: "px-4 py-3 text-left" }, "Page"),
+              createElement(
+                "th",
+                { className: "px-4 py-3 text-right" },
+                "Views",
+              ),
+            ),
+            columnCount: 2,
+            skeletonRows: 3,
+            getRowKey: (row) => row.id,
+            renderRow: (row) => ({
+              children: createElement(
+                Fragment,
+                null,
+                createElement("td", { className: "px-4 py-3" }, row.page),
+                createElement(
+                  "td",
+                  { className: "px-4 py-3 text-right tabular-nums" },
+                  row.views,
+                ),
+              ),
+            }),
+            renderSkeletonRow: () =>
+              createElement(
+                Fragment,
+                null,
+                createElement(
+                  "td",
+                  { className: "px-4 py-3" },
+                  createElement("div", {
+                    className: "h-4 w-40 animate-pulse bg-muted",
+                  }),
+                ),
+                createElement(
+                  "td",
+                  { className: "px-4 py-3" },
+                  createElement("div", {
+                    className: "ml-auto h-4 w-16 animate-pulse bg-muted",
+                  }),
+                ),
+              ),
+            errorContent: "Unable to load pages.",
+            emptyContent: "No pages found.",
+            minTableWidth: "32rem",
+          },
+        ),
+    }),
+    [propCard("loading", [propValue(false), propValue(true)])],
+  ),
+  detailDrawer: registerPropCards(
+    defineComponentContract<{ ariaLabel: string }>({
+      id: "detail-drawer",
+      title: "Detail drawer",
+      category: "Product UI / Analytics",
+      categoryId: "product-analytics",
+      fixtures: [
+        {
+          id: "default",
+          title: "Interactive detail drawer",
+          props: { ariaLabel: "Session details" },
+        },
+      ],
+      render: ({ ariaLabel }) =>
+        createElement(DetailDrawerGalleryPreview, { ariaLabel }),
+    }),
+    [
+      propCard("ariaLabel", [
+        propValue("Session details"),
+        propValue("Visitor details"),
+      ]),
+    ],
+  ),
+  siteScopeSelector: registerPropCards(
+    defineComponentContract<Omit<SiteScopeSelectorProps, "onChange">>({
+      id: "site-scope-selector",
+      title: "Site scope selector",
+      category: "Product UI / Management",
+      categoryId: "product-management",
+      fixtures: [
+        {
+          id: "default",
+          title: "All sites selected",
+          props: {
+            ariaLabel: "Site scope",
+            allSitesLabel: "All sites",
+            selectedSiteIds: [],
+            sites: [
+              {
+                id: "site-news",
+                name: "News Portal",
+                domain: "news.example.com",
+              },
+              {
+                id: "site-store",
+                name: "E-Commerce Store",
+                domain: "store.example.com",
+              },
+              {
+                id: "site-docs",
+                name: "Developer Docs",
+                domain: "docs.example.com",
+              },
+            ],
+            emptySitesLabel: "No sites available.",
+          },
+        },
+      ],
+      render: (props) =>
+        createElement(SiteScopeSelectorGalleryPreview, {
+          ...props,
+          key: props.selectedSiteIds.join(",") || "all-sites",
+        }),
+    }),
+    [
+      propCard("selectedSiteIds", [
+        propValue("all", "All sites", { selectedSiteIds: [] }, false),
+        propValue("one", "One site", { selectedSiteIds: ["site-news"] }, false),
+        propValue(
+          "multiple",
+          "Multiple sites",
+          { selectedSiteIds: ["site-news", "site-docs"] },
+          false,
+        ),
+      ]),
+    ],
+  ),
+  analyticsTooltip: registerPropCards(
+    defineComponentContract<{
+      retentionMode: "table-column" | "target";
+    }>({
+      id: "analytics-tooltip",
+      title: "Analytics tooltip",
+      category: "Product UI / Analytics",
+      categoryId: "product-analytics",
+      fixtures: [
+        {
+          id: "default",
+          title: "Single moving tooltip",
+          props: { retentionMode: "target" },
+        },
+      ],
+      render: ({ retentionMode }) => {
+        const examples = [
+          { key: "timestamp", target: "14:32:08.221", title: "Timestamp" },
+          { key: "request", target: "GET /pricing", title: "Request" },
+          { key: "visitor", target: "visitor-1042", title: "Visitor" },
+          { key: "duration", target: "184 ms", title: "Duration" },
+        ];
+
+        return createElement(AnalyticsTooltipProvider, {
+          retentionMode,
+          children: createElement(
+            "div",
+            { className: "grid w-full max-w-sm gap-4" },
+            createElement(
+              "p",
+              { className: "text-sm text-muted-foreground" },
+              "Move down the vertical trigger stack. One tooltip follows each row and updates with its content.",
+            ),
+            createElement(
+              "div",
+              { className: "grid gap-2" },
+              ...examples.map(({ key, target, title }) =>
+                createElement(
+                  "div",
+                  {
+                    key,
+                    className:
+                      "flex items-center justify-between gap-4 border bg-card px-4 py-3",
+                  },
+                  createElement(
+                    "span",
+                    { className: "text-xs text-muted-foreground" },
+                    title,
+                  ),
+                  createElement(AnalyticsTooltipTarget, {
+                    contentKey: key,
+                    className:
+                      "shrink-0 cursor-help border-b border-dashed border-muted-foreground/60 py-1 font-mono text-sm",
+                    content: createElement(
+                      "div",
+                      { className: "grid gap-1 whitespace-nowrap" },
+                      createElement(
+                        "span",
+                        {
+                          className:
+                            "text-[10px] uppercase tracking-wide text-background/60",
+                        },
+                        title,
+                      ),
+                      createElement(
+                        "span",
+                        { className: "text-xs" },
+                        `${target} · sample analytics detail`,
+                      ),
+                    ),
+                    children: target,
+                  }),
+                ),
+              ),
+            ),
+          ),
+        });
+      },
+    }),
+    [
+      propCard("retentionMode", [
+        propValue("target"),
+        propValue("table-column"),
+      ]),
+    ],
+  ),
   tabbedTable: registerPropCards(tabbedTableContract, [
     propCard("state", [
       propValue("ready"),
@@ -1614,7 +2499,7 @@ const galleryContracts = {
   ]),
 } as const;
 
-export const uiGalleryRegistry = [
+export const uiGalleryRegistry: readonly UiGalleryEntry[] = [
   {
     slug: "button",
     packageType: "ui",
@@ -1803,10 +2688,41 @@ export const uiGalleryRegistry = [
     contract: galleryContracts.table,
   },
   {
+    slug: "clickable-table-cell",
+    packageType: "ui",
+    apiEntry: "@insightflare/ui/clickable-table-cell",
+    maxValuesPerRow: 2,
+    previewAlignment: "start",
+    contract: galleryContracts.clickableTableCell,
+  },
+  {
+    slug: "data-table-switch",
+    packageType: "ui",
+    apiEntry: "@insightflare/ui/data-table-switch",
+    maxValuesPerRow: 3,
+    previewAlignment: "start",
+    contract: galleryContracts.dataTableSwitch,
+  },
+  {
+    slug: "table-action-button",
+    packageType: "ui",
+    apiEntry: "@insightflare/ui/table-action-button",
+    maxValuesPerRow: 2,
+    previewAlignment: "start",
+    contract: galleryContracts.tableActionButton,
+  },
+  {
     slug: "card",
     packageType: "ui",
     apiEntry: "@insightflare/ui/card",
     contract: galleryContracts.card,
+  },
+  {
+    slug: "metric-summary-grid",
+    packageType: "ui",
+    apiEntry: "@insightflare/ui/metric-summary-grid",
+    maxValuesPerRow: 1,
+    contract: galleryContracts.metricSummaryGrid,
   },
   {
     slug: "sidebar",
@@ -1883,6 +2799,59 @@ export const uiGalleryRegistry = [
     contract: galleryContracts.sharing,
   },
   {
+    slug: "traffic-pair-bar-chart",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/charts",
+    maxValuesPerRow: 2,
+    previewAlignment: "start",
+    contract: galleryContracts.trafficPairBarChart,
+  },
+  {
+    slug: "donut-chart",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/charts",
+    maxValuesPerRow: 2,
+    contract: galleryContracts.donutChart,
+  },
+  {
+    slug: "analytics-data-table",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/tables",
+    maxValuesPerRow: 2,
+    previewAlignment: "start",
+    contract: galleryContracts.analyticsDataTable,
+  },
+  {
+    slug: "analytics-table-column-settings",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/tables",
+    maxValuesPerRow: 2,
+    previewAlignment: "start",
+    contract: galleryContracts.analyticsTableColumnSettings,
+  },
+  {
+    slug: "detail-drawer",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/detail-drawer",
+    maxValuesPerRow: 2,
+    previewAlignment: "start",
+    contract: galleryContracts.detailDrawer,
+  },
+  {
+    slug: "site-scope-selector",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/site-scope-selector",
+    previewAlignment: "start",
+    contract: galleryContracts.siteScopeSelector,
+  },
+  {
+    slug: "analytics-tooltip",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/analytics-tooltip",
+    maxValuesPerRow: 3,
+    contract: galleryContracts.analyticsTooltip,
+  },
+  {
     slug: "tabbed-table",
     packageType: "ui",
     apiEntry: "@insightflare/ui/tabbed-table",
@@ -1890,7 +2859,7 @@ export const uiGalleryRegistry = [
     previewAlignment: "start",
     contract: galleryContracts.tabbedTable,
   },
-] as const satisfies readonly UiGalleryEntry[];
+];
 
 export function findUiGalleryEntry(slug: string | undefined) {
   return uiGalleryRegistry.find((entry) => entry.slug === slug) ?? null;

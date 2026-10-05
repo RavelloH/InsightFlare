@@ -8,8 +8,8 @@ import {
 } from "@insightflare/ui/tooltip";
 import type { HTMLMotionProps } from "motion/react";
 
-import { cn } from "@/lib/utils";
-interface TableActionButtonProps extends Omit<
+import { cn } from "../../lib/utils";
+export interface TableActionButtonProps extends Omit<
   HTMLMotionProps<"div">,
   "children" | "onClick" | "title"
 > {

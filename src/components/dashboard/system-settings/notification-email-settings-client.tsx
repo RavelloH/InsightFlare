@@ -405,18 +405,21 @@ export function NotificationEmailSettingsClient({
                   void handleSendTest();
                 }}
               >
-                <AutoTransition className="inline-flex items-center gap-2">
+                <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                   {testing ? (
                     <span
                       key="testing"
-                      className="inline-flex items-center gap-2"
+                      className="inline-flex items-center gap-[var(--button-content-gap)]"
                     >
-                      <Spinner className="size-4" />
+                      <Spinner data-icon="inline-start" />
                       {copy.testing}
                     </span>
                   ) : (
-                    <span key="test" className="inline-flex items-center gap-2">
-                      <RiSendPlane2Line className="size-4" />
+                    <span
+                      key="test"
+                      className="inline-flex items-center gap-[var(--button-content-gap)]"
+                    >
+                      <RiSendPlane2Line data-icon="inline-start" />
                       {copy.test}
                     </span>
                   )}
@@ -426,18 +429,21 @@ export function NotificationEmailSettingsClient({
 
             <div className="flex flex-wrap gap-2">
               <Button type="submit" disabled={loading || saving || !hasChanges}>
-                <AutoTransition className="inline-flex items-center gap-2">
+                <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                   {saving ? (
                     <span
                       key="saving"
-                      className="inline-flex items-center gap-2"
+                      className="inline-flex items-center gap-[var(--button-content-gap)]"
                     >
-                      <Spinner className="size-4" />
+                      <Spinner data-icon="inline-start" />
                       {copy.saving}
                     </span>
                   ) : (
-                    <span key="save" className="inline-flex items-center gap-2">
-                      <RiSave3Line className="size-4" />
+                    <span
+                      key="save"
+                      className="inline-flex items-center gap-[var(--button-content-gap)]"
+                    >
+                      <RiSave3Line data-icon="inline-start" />
                       {copy.save}
                     </span>
                   )}
@@ -462,21 +468,21 @@ export function NotificationEmailSettingsClient({
                       config.updatedAt === 0
                     }
                   >
-                    <AutoTransition className="inline-flex items-center gap-2">
+                    <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                       {deletingConfig ? (
                         <span
                           key="deleting-config"
-                          className="inline-flex items-center gap-2"
+                          className="inline-flex items-center gap-[var(--button-content-gap)]"
                         >
-                          <Spinner className="size-4" />
+                          <Spinner data-icon="inline-start" />
                           {copy.deleting}
                         </span>
                       ) : (
                         <span
                           key="delete-config"
-                          className="inline-flex items-center gap-2"
+                          className="inline-flex items-center gap-[var(--button-content-gap)]"
                         >
-                          <RiDeleteBinLine className="size-4" />
+                          <RiDeleteBinLine data-icon="inline-start" />
                           {copy.delete}
                         </span>
                       )}

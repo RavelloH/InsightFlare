@@ -1,4 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
+import { DetailDrawer } from "@insightflare/product-ui/detail-drawer";
+import { useInfiniteTableSentinel } from "@insightflare/product-ui/tables";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,15 +24,11 @@ import {
 } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { useInfiniteTableSentinel } from "@/components/dashboard/common/use-infinite-table-sentinel";
 import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,
 } from "@/components/dashboard/comparison/use-dashboard-comparison-query";
-import {
-  DETAIL_QUERY_PARAM,
-  DetailDrawer,
-} from "@/components/dashboard/site-pages/common/detail-query-modal";
+import { DETAIL_QUERY_PARAM } from "@/components/dashboard/site-pages/common/detail-query-param";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import {
   createGoal,
@@ -257,7 +255,7 @@ export function GoalsClientPage({
               setEditorOpen(true);
             }}
           >
-            <RiAddLine /> {labels.create}
+            <RiAddLine data-icon="inline-start" /> {labels.create}
           </Button>
         ) : null}
       </div>
@@ -303,7 +301,7 @@ export function GoalsClientPage({
                     setEditorOpen(true);
                   }}
                 >
-                  <RiAddLine /> {labels.create}
+                  <RiAddLine data-icon="inline-start" /> {labels.create}
                 </Button>
               ) : null}
             </CardContent>

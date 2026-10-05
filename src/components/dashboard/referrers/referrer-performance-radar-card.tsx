@@ -1,14 +1,14 @@
 import { memo, useEffect, useMemo, useState } from "react";
+import {
+  buildPerformanceRadarMaxByMetric,
+  PerformanceRadarChart,
+} from "@insightflare/product-ui/charts";
 import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Card, CardContent, CardTitle } from "@insightflare/ui/card";
 import { RiShareForwardLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
-import {
-  buildPerformanceRadarMaxByMetric,
-  PerformanceRadarChart,
-} from "@/components/dashboard/charts/performance-radar-chart";
 import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,

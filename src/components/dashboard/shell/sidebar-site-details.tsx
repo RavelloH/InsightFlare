@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useState } from "react";
+import { TrafficPairBarChart } from "@insightflare/product-ui/charts";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   SidebarMenu,
@@ -12,7 +13,6 @@ import {
   AnalyticsTimeTooltipProvider,
   AnalyticsTooltipTarget,
 } from "@/components/dashboard/analytics-time-tooltip";
-import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
 import { SiteBrandIcon } from "@/components/dashboard/common/site-brand-icon";
 import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
 import { numberFormat } from "@/lib/dashboard/format";

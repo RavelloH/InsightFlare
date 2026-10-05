@@ -1,4 +1,9 @@
 import { memo, useMemo } from "react";
+import {
+  StackedBreakdownBarChart,
+  type StackedBreakdownBarRow,
+  type StackedBreakdownBarSeries,
+} from "@insightflare/product-ui/charts";
 import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
 import {
   Card,
@@ -9,11 +14,6 @@ import {
 import { RiBarChartBoxLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
-import {
-  StackedBreakdownBarChart,
-  type StackedBreakdownBarRow,
-  type StackedBreakdownBarSeries,
-} from "@/components/dashboard/charts/stacked-breakdown-bar-chart";
 import { resolveDeviceTypeMeta } from "@/components/dashboard/journeys/journey-display";
 import { fetchClientCrossBreakdown } from "@/lib/dashboard/client/data/index";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";

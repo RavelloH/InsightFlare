@@ -246,7 +246,7 @@ export function AnalyticsEngineSettingsClient({
                         target="_blank"
                         rel="noreferrer"
                       >
-                        <RiExternalLinkLine className="size-4" />
+                        <RiExternalLinkLine data-icon="inline-start" />
                         {copy.analyticsEngineOpenCloudflare}
                       </a>
                     </Button>
@@ -303,11 +303,7 @@ export function AnalyticsEngineSettingsClient({
                       !hasChanges
                     }
                   >
-                    {saving ? (
-                      <Spinner className="size-4" />
-                    ) : (
-                      <RiSave3Line className="size-4" />
-                    )}
+                    {saving ? <Spinner /> : <RiSave3Line />}
                     {saving ? copy.saving : copy.save}
                   </Button>
                   <AlertDialog
@@ -329,11 +325,7 @@ export function AnalyticsEngineSettingsClient({
                           config.updatedAt === 0
                         }
                       >
-                        {deleting ? (
-                          <Spinner className="size-4" />
-                        ) : (
-                          <RiDeleteBinLine className="size-4" />
-                        )}
+                        {deleting ? <Spinner /> : <RiDeleteBinLine />}
                         {deleting ? copy.deleting : copy.delete}
                       </Button>
                     </AlertDialogTrigger>

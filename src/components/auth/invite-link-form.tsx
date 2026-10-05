@@ -205,7 +205,7 @@ export function InviteLinkForm({ locale, copy }: InviteLinkFormProps) {
             </div>
             <Button asChild variant="outline" className="w-full">
               <Link href={`/${locale}/login`}>
-                <RiLoginBoxLine className="size-4" />
+                <RiLoginBoxLine data-icon="inline-start" />
                 {copy.signIn}
               </Link>
             </Button>
@@ -266,7 +266,7 @@ export function InviteLinkForm({ locale, copy }: InviteLinkFormProps) {
                 ) : requiresLogin ? (
                   <Button asChild className="w-full">
                     <Link href={loginHref}>
-                      <RiLoginBoxLine className="size-4" />
+                      <RiLoginBoxLine data-icon="inline-start" />
                       {copy.signIn}
                     </Link>
                   </Button>
@@ -330,17 +330,17 @@ export function InviteLinkForm({ locale, copy }: InviteLinkFormProps) {
               <div className="pt-4">
                 <Button type="submit" className="w-full" disabled={submitting}>
                   <AutoTransition
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                     transitionKey={submitting ? "submitting" : "idle"}
                   >
                     {submitting ? (
-                      <span className="inline-flex items-center gap-2">
-                        <Spinner className="size-4" />
+                      <span className="inline-flex items-center gap-[var(--button-content-gap)]">
+                        <Spinner data-icon="inline-start" />
                         {copy.accepting}
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-2">
-                        <RiCheckLine className="size-4" />
+                      <span className="inline-flex items-center gap-[var(--button-content-gap)]">
+                        <RiCheckLine data-icon="inline-start" />
                         {copy.accept}
                       </span>
                     )}

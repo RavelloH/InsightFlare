@@ -90,6 +90,16 @@
       "development": "./src/components/ui/clickable.tsx",
       "import": "./dist/components/ui/clickable.js"
     },
+    "./clickable-table-cell": {
+      "types": "./dist/components/ui/clickable-table-cell.d.ts",
+      "development": "./src/components/ui/clickable-table-cell.tsx",
+      "import": "./dist/components/ui/clickable-table-cell.js"
+    },
+    "./data-table-switch": {
+      "types": "./dist/components/ui/data-table-switch.d.ts",
+      "development": "./src/components/ui/data-table-switch.tsx",
+      "import": "./dist/components/ui/data-table-switch.js"
+    },
     "./dialog": {
       "types": "./dist/components/ui/dialog.d.ts",
       "development": "./src/components/ui/dialog.tsx",
@@ -124,6 +134,11 @@
       "types": "./dist/components/ui/label.d.ts",
       "development": "./src/components/ui/label.tsx",
       "import": "./dist/components/ui/label.js"
+    },
+    "./metric-summary-grid": {
+      "types": "./dist/components/ui/metric-summary-grid.d.ts",
+      "development": "./src/components/ui/metric-summary-grid.tsx",
+      "import": "./dist/components/ui/metric-summary-grid.js"
     },
     "./overlay-scrollbar": {
       "types": "./dist/components/ui/overlay-scrollbar.d.ts",
@@ -199,6 +214,11 @@
       "types": "./dist/components/ui/table.d.ts",
       "development": "./src/components/ui/table.tsx",
       "import": "./dist/components/ui/table.js"
+    },
+    "./table-action-button": {
+      "types": "./dist/components/ui/table-action-button.d.ts",
+      "development": "./src/components/ui/table-action-button.tsx",
+      "import": "./dist/components/ui/table-action-button.js"
     },
     "./tabbed-table": {
       "types": "./dist/components/ui/tabbed-table/index.d.ts",

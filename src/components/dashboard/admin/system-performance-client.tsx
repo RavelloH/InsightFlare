@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  LatencyPercentileChart,
+  type LatencyPercentileChartPoint,
+} from "@insightflare/product-ui/charts";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Badge } from "@insightflare/ui/badge";
@@ -10,6 +14,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
+import { DataTableSwitch } from "@insightflare/ui/data-table-switch";
+import { MetricSummaryGrid } from "@insightflare/ui/metric-summary-grid";
 import { PageHeading } from "@insightflare/ui/page-heading";
 import {
   Select,
@@ -21,7 +27,6 @@ import {
 import { Spinner } from "@insightflare/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
 import {
-  type RemixiconComponentType,
   RiAlarmWarningLine,
   RiBarChartBoxLine,
   RiCpuLine,
@@ -33,11 +38,6 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import {
-  LatencyPercentileChart,
-  type LatencyPercentileChartPoint,
-} from "@/components/dashboard/charts/latency-percentile-chart";
-import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch";
 import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
 import { intlLocale, shortDateTime } from "@/lib/dashboard/format";
 import type { SystemPerformanceInitialData } from "@/lib/dashboard/management-data";
@@ -49,7 +49,6 @@ import type {
   SystemPerformanceData,
   SystemPerformanceWindowMinutes,
 } from "@/lib/system-performance";
-import { cn } from "@/lib/utils";
 
 import { DoDiagnosticPanel } from "./system-performance/diagnostic-panel";
 import {
@@ -84,65 +83,6 @@ async function fetchDoDiagnostic(
   return requestAdminService<DoDiagnosticAggregate>("do-diagnostic", {
     signal,
   });
-}
-function SystemMetricCell({
-  icon: Icon,
-  label,
-  value,
-  detail,
-  loading = false,
-  tone = "default",
-}: {
-  icon: RemixiconComponentType;
-  label: string;
-  value: string;
-  detail: string;
-  loading?: boolean;
-  tone?: "default" | "warning" | "good";
-}) {
-  const contentKey = loading ? "loading" : value;
-
-  return (
-    <div className="min-w-0 bg-card p-4">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="inline-flex shrink-0 items-center justify-center text-muted-foreground">
-          <Icon className="size-[11px]" />
-        </span>
-        <p className="min-w-0 truncate text-[11px] uppercase text-muted-foreground">
-          {label}
-        </p>
-      </div>
-      <AutoResizer initial className="mt-3">
-        <AutoTransition
-          transitionKey={contentKey}
-          initial={false}
-          duration={0.2}
-          type="fade"
-          presenceMode="wait"
-        >
-          {loading ? (
-            <div key="loading" className="flex h-7 items-center">
-              <Spinner className="size-5" />
-            </div>
-          ) : (
-            <p
-              key={value}
-              className={cn(
-                "min-w-0 truncate font-mono text-xl leading-7 font-semibold text-foreground tabular-nums",
-                tone === "warning" && "text-destructive",
-                tone === "good" && "text-primary",
-              )}
-            >
-              {value}
-            </p>
-          )}
-        </AutoTransition>
-      </AutoResizer>
-      <p className="mt-3 min-w-0 truncate text-[11px] leading-[14px] text-muted-foreground">
-        {detail}
-      </p>
-    </div>
-  );
 }
 export function SystemPerformanceClient({
   locale,
@@ -286,11 +226,7 @@ export function SystemPerformanceClient({
               }}
             >
               <span className="inline-flex size-4 shrink-0 items-center justify-center">
-                {loading ? (
-                  <Spinner className="size-4" />
-                ) : (
-                  <RiRefreshLine className="size-4" />
-                )}
+                {loading ? <Spinner /> : <RiRefreshLine />}
               </span>
               <AutoResizer
                 initial
@@ -320,73 +256,65 @@ export function SystemPerformanceClient({
         }
       />
 
-      <Card className="py-0">
-        <CardContent className="p-0">
-          <div className="grid gap-px overflow-hidden bg-border/70 sm:grid-cols-2 xl:grid-cols-4">
-            <SystemMetricCell
-              icon={RiDatabase2Line}
-              label={t.totalEvents}
-              loading={loading}
-              value={
-                summary ? formatMetricNumber(locale, summary.totalEvents) : "--"
-              }
-              detail={
-                summary
-                  ? `${formatMetricRate(locale, summary.eventsPerMinute)} / min`
-                  : "--"
-              }
-            />
-            <SystemMetricCell
-              icon={RiSpeedUpLine}
-              label={t.p95Latency}
-              loading={loading}
-              value={
-                summary ? formatLatency(locale, summary.p95LatencyMs) : "--"
-              }
-              detail={
-                summary
-                  ? `${t.p50Latency}: ${formatLatency(locale, summary.p50LatencyMs)} / ${t.p75Latency}: ${formatLatency(locale, summary.p75LatencyMs)}`
-                  : "--"
-              }
-              tone={
-                summary?.p95LatencyMs !== null &&
-                summary?.p95LatencyMs !== undefined &&
-                summary.p95LatencyMs > (data?.thresholds.delayedMs ?? 0)
+      <MetricSummaryGrid
+        items={[
+          {
+            id: "total-events",
+            icon: <RiDatabase2Line />,
+            label: t.totalEvents,
+            loading,
+            value: summary
+              ? formatMetricNumber(locale, summary.totalEvents)
+              : "--",
+            detail: summary
+              ? `${formatMetricRate(locale, summary.eventsPerMinute)} / min`
+              : "--",
+          },
+          {
+            id: "p95-latency",
+            icon: <RiSpeedUpLine />,
+            label: t.p95Latency,
+            loading,
+            value: summary ? formatLatency(locale, summary.p95LatencyMs) : "--",
+            detail: summary
+              ? `${t.p50Latency}: ${formatLatency(locale, summary.p50LatencyMs)} / ${t.p75Latency}: ${formatLatency(locale, summary.p75LatencyMs)}`
+              : "--",
+            tone:
+              summary?.p95LatencyMs !== null &&
+              summary?.p95LatencyMs !== undefined &&
+              summary.p95LatencyMs > (data?.thresholds.delayedMs ?? 0)
+                ? "critical"
+                : "default",
+          },
+          {
+            id: "data-freshness",
+            icon: <RiTimeLine />,
+            label: t.dataFreshness,
+            loading,
+            value: summary ? formatAge(locale, summary.dataFreshnessMs) : "--",
+            detail: summary?.latestCreatedAt
+              ? shortDateTime(locale, summary.latestCreatedAt, timeZone)
+              : t.noRecentWrite,
+            tone:
+              freshnessTone === "good"
+                ? "positive"
+                : freshnessTone === "warning"
                   ? "warning"
-                  : "default"
-              }
-            />
-            <SystemMetricCell
-              icon={RiTimeLine}
-              label={t.dataFreshness}
-              loading={loading}
-              value={
-                summary ? formatAge(locale, summary.dataFreshnessMs) : "--"
-              }
-              detail={
-                summary?.latestCreatedAt
-                  ? shortDateTime(locale, summary.latestCreatedAt, timeZone)
-                  : t.noRecentWrite
-              }
-              tone={freshnessTone}
-            />
-            <SystemMetricCell
-              icon={RiAlarmWarningLine}
-              label={t.clockAnomalies}
-              loading={loading}
-              value={
-                summary ? formatPercent(locale, summary.anomalyRate) : "--"
-              }
-              detail={
-                summary
-                  ? `${t.delayed}: ${formatMetricNumber(locale, summary.delayedEvents)} / ${t.future}: ${formatMetricNumber(locale, summary.futureSkewedEvents)}`
-                  : "--"
-              }
-              tone={anomalyTone}
-            />
-          </div>
-        </CardContent>
-      </Card>
+                  : "default",
+          },
+          {
+            id: "clock-anomalies",
+            icon: <RiAlarmWarningLine />,
+            label: t.clockAnomalies,
+            loading,
+            value: summary ? formatPercent(locale, summary.anomalyRate) : "--",
+            detail: summary
+              ? `${t.delayed}: ${formatMetricNumber(locale, summary.delayedEvents)} / ${t.future}: ${formatMetricNumber(locale, summary.futureSkewedEvents)}`
+              : "--",
+            tone: anomalyTone === "warning" ? "critical" : "default",
+          },
+        ]}
+      />
 
       <Card>
         <CardHeader>

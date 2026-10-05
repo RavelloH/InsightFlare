@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 
-import { AutoResizer } from "../auto-resizer";
-import { AutoTransition } from "../auto-transition";
-import { Skeleton } from "../skeleton";
-import { Spinner } from "../spinner";
-import { Table, TableBody, TableCell, TableHeader, TableRow } from "../table";
-interface DataTableSwitchProps {
+import { AutoResizer } from "./auto-resizer";
+import { AutoTransition } from "./auto-transition";
+import { Skeleton } from "./skeleton";
+import { Spinner } from "./spinner";
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "./table";
+export interface DataTableSwitchProps {
   loading: boolean;
   hasContent: boolean;
   loadingLabel: string;
@@ -35,10 +35,11 @@ export function DataTableSwitch({
 }: DataTableSwitchProps) {
   const viewKey = String(contentKey ?? "default");
   const generatedLoadingRows = loadingRowCount ? (
-    <TabbedDataTableSkeletonRows
+    <DataTableSkeletonRows
       count={loadingRowCount}
       colSpan={colSpan}
       keyPrefix={`loading-${viewKey}`}
+      statusLabel={loadingLabel}
     />
   ) : null;
   const table = loading ? (
@@ -93,19 +94,19 @@ export function DataTableSwitch({
   );
 }
 
-interface TabbedDataTableSkeletonRowsProps {
+export interface DataTableSkeletonRowsProps {
   count: number;
   colSpan: number;
   keyPrefix: string;
   statusLabel?: string;
 }
 
-export function TabbedDataTableSkeletonRows({
+export function DataTableSkeletonRows({
   count,
   colSpan,
   keyPrefix,
   statusLabel,
-}: TabbedDataTableSkeletonRowsProps) {
+}: DataTableSkeletonRowsProps) {
   return (
     <>
       {Array.from({ length: Math.max(0, count) }, (_, rowIndex) => (

@@ -1,4 +1,5 @@
 import { type SetStateAction, useEffect, useMemo, useState } from "react";
+import { SiteScopeSelector } from "@insightflare/product-ui/site-scope-selector";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -57,10 +58,9 @@ import {
   TableHeader,
   TableRow,
 } from "@insightflare/ui/table";
+import { TableActionButton } from "@insightflare/ui/table-action-button";
 import {
   RiAddLine,
-  RiCheckboxBlankCircleLine,
-  RiCheckLine,
   RiCloseLine,
   RiDeleteBinLine,
   RiFileCopyLine,
@@ -70,7 +70,6 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { TableActionButton } from "@/components/dashboard/common/table-action-button";
 import type { ApiKeysInitialData } from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import type {
@@ -213,14 +212,6 @@ export function ApiKeysClient({
     );
   }
 
-  function toggleSite(siteId: string) {
-    setSiteIds((current) =>
-      current.includes(siteId)
-        ? current.filter((item) => item !== siteId)
-        : [...current, siteId],
-    );
-  }
-
   async function createKey() {
     if (name.trim().length < 2 || scopes.length === 0) {
       toast.error(copy.invalidInput);
@@ -326,7 +317,7 @@ export function ApiKeysClient({
         subtitle={copy.subtitle}
         actions={
           <Button type="button" onClick={() => setCreateOpen(true)}>
-            <RiAddLine />
+            <RiAddLine data-icon="inline-start" />
             <span>{copy.create}</span>
           </Button>
         }
@@ -583,39 +574,13 @@ export function ApiKeysClient({
               <Field>
                 <FieldLabel>{copy.siteScopeTitle}</FieldLabel>
                 <FieldDescription>{copy.siteScopeDescription}</FieldDescription>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant={siteIds.length === 0 ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setSiteIds([])}
-                  >
-                    {siteIds.length === 0 ? (
-                      <RiCheckLine />
-                    ) : (
-                      <RiCheckboxBlankCircleLine />
-                    )}
-                    <span>{copy.allSites}</span>
-                  </Button>
-                  {sites.map((site) => (
-                    <Button
-                      key={site.id}
-                      type="button"
-                      variant={
-                        siteIds.includes(site.id) ? "default" : "outline"
-                      }
-                      size="sm"
-                      onClick={() => toggleSite(site.id)}
-                    >
-                      {siteIds.includes(site.id) ? (
-                        <RiCheckLine />
-                      ) : (
-                        <RiCheckboxBlankCircleLine />
-                      )}
-                      <span>{site.name}</span>
-                    </Button>
-                  ))}
-                </div>
+                <SiteScopeSelector
+                  ariaLabel={copy.siteScopeTitle}
+                  allSitesLabel={copy.allSites}
+                  selectedSiteIds={siteIds}
+                  sites={sites}
+                  onChange={setSiteIds}
+                />
               </Field>
               <Field>
                 <FieldLabel>{copy.expirationLabel}</FieldLabel>
@@ -643,18 +608,21 @@ export function ApiKeysClient({
           </ResponsiveDialogBody>
           <ResponsiveDialogFooter>
             <Button onClick={createKey} disabled={submitting}>
-              <AutoTransition className="inline-flex items-center gap-2">
+              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                 {submitting ? (
                   <span
                     key="creating"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <Spinner className="size-4" />
+                    <Spinner data-icon="inline-start" />
                     {copy.creating}
                   </span>
                 ) : (
-                  <span key="create" className="inline-flex items-center gap-2">
-                    <RiAddLine className="size-4" />
+                  <span
+                    key="create"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
+                  >
+                    <RiAddLine data-icon="inline-start" />
                     {copy.create}
                   </span>
                 )}
@@ -679,7 +647,7 @@ export function ApiKeysClient({
           </div>
           <DialogFooter>
             <Button onClick={copySecret}>
-              <RiFileCopyLine />
+              <RiFileCopyLine data-icon="inline-start" />
               {copy.copySecret}
             </Button>
           </DialogFooter>

@@ -53,15 +53,21 @@ export function LogoutActionButton({
       onClick={() => void handleLogout()}
       disabled={pending}
     >
-      <AutoTransition className="inline-flex items-center gap-2">
+      <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
         {pending ? (
-          <span key="pending" className="inline-flex items-center gap-2">
-            <Spinner className="size-4" />
+          <span
+            key="pending"
+            className="inline-flex items-center gap-[var(--button-content-gap)]"
+          >
+            <Spinner data-icon="inline-start" />
             {pendingLabel}
           </span>
         ) : (
-          <span key="idle" className="inline-flex items-center gap-2">
-            <RiLogoutBoxLine className="size-4" />
+          <span
+            key="idle"
+            className="inline-flex items-center gap-[var(--button-content-gap)]"
+          >
+            <RiLogoutBoxLine data-icon="inline-start" />
             {label}
           </span>
         )}

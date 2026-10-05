@@ -754,12 +754,15 @@ function ConditionEditor({
               <Button
                 type="button"
                 variant="outline"
-                className="h-8 w-full justify-between gap-1.5 border-input bg-transparent py-2 pr-2 pl-2.5 text-xs font-normal whitespace-nowrap dark:bg-input/30"
+                className="h-8 w-full justify-between border-input bg-transparent py-2 pr-2 pl-2.5 text-xs font-normal whitespace-nowrap dark:bg-input/30"
               >
                 <span className="min-w-0 truncate text-left">
                   {selectedFieldLabel}
                 </span>
-                <RiArrowDownSLine className="size-4 shrink-0 text-muted-foreground" />
+                <RiArrowDownSLine
+                  data-icon="inline-end"
+                  className="shrink-0 text-muted-foreground"
+                />
               </Button>
             </Popover.Trigger>
             <Popover.Portal>
@@ -1527,7 +1530,7 @@ function ConditionEditor({
           aria-label={messages.teamManagement.notifications.removeCondition}
           onClick={onRemove}
         >
-          <RiDeleteBinLine className="size-4" />
+          <RiDeleteBinLine />
           <span className="sr-only">
             {messages.teamManagement.notifications.removeCondition}
           </span>
@@ -1635,7 +1638,7 @@ export function GroupEditor({
               aria-label={messages.teamManagement.notifications.removeCondition}
               onClick={() => onRemove(group.id)}
             >
-              <RiDeleteBinLine className="size-4" />
+              <RiDeleteBinLine />
               <span className="sr-only">
                 {messages.teamManagement.notifications.removeCondition}
               </span>
@@ -1707,7 +1710,7 @@ export function GroupEditor({
                 variant="outline"
                 onClick={() => onAddCondition(group.id)}
               >
-                <RiAddLine />
+                <RiAddLine data-icon="inline-start" />
                 <span>
                   {messages.teamManagement.notifications.addCondition}
                 </span>
@@ -1717,7 +1720,7 @@ export function GroupEditor({
                 variant="outline"
                 onClick={() => onAddGroup(group.id)}
               >
-                <RiAddLine />
+                <RiAddLine data-icon="inline-start" />
                 <span>{messages.filterBuilder.addGroup}</span>
               </Button>
             </motion.div>

@@ -17,8 +17,10 @@ vi.mock("@/lib/dashboard/client/data", () => ({
   fetchGoals: vi.fn(),
   updateGoal: vi.fn(),
 }));
-vi.mock("@/components/dashboard/site-pages/common/detail-query-modal", () => ({
+vi.mock("@/components/dashboard/site-pages/common/detail-query-param", () => ({
   DETAIL_QUERY_PARAM: "detail",
+}));
+vi.mock("@insightflare/product-ui/detail-drawer", () => ({
   DetailDrawer: (props: { children: ReactNode }) =>
     createElement("div", { "data-detail-drawer": true }, props.children),
 }));

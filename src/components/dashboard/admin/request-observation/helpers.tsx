@@ -2,9 +2,7 @@ import { memo, type ReactNode, useMemo } from "react";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Skeleton } from "@insightflare/ui/skeleton";
-import { Spinner } from "@insightflare/ui/spinner";
 import { TableCell } from "@insightflare/ui/table";
-import type { RiRobot2Line } from "@remixicon/react";
 
 import {
   type AsyncDimensionBreakdownLabelAppearance,
@@ -220,59 +218,6 @@ export function formatNormalAsn(event: NormalRequestEvent): string {
   if (!event.asn) return event.asOrganization;
   if (!event.asOrganization) return `AS${event.asn}`;
   return `AS${event.asn} ${event.asOrganization}`;
-}
-export function MetricTile({
-  icon: Icon,
-  label,
-  value,
-  detail,
-  loading,
-}: {
-  icon: typeof RiRobot2Line;
-  label: string;
-  value: string;
-  detail: string;
-  loading: boolean;
-}) {
-  const contentKey = loading ? "loading" : value;
-
-  return (
-    <div className="min-w-0 bg-card p-4">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="inline-flex shrink-0 items-center justify-center text-muted-foreground">
-          <Icon className="size-[11px]" />
-        </span>
-        <p className="min-w-0 truncate text-[11px] uppercase text-muted-foreground">
-          {label}
-        </p>
-      </div>
-      <AutoResizer initial className="mt-3">
-        <AutoTransition
-          transitionKey={contentKey}
-          initial={false}
-          duration={0.2}
-          type="fade"
-          presenceMode="wait"
-        >
-          {loading ? (
-            <div key="loading" className="flex h-7 items-center">
-              <Spinner className="size-5" />
-            </div>
-          ) : (
-            <p
-              key={value}
-              className="min-w-0 truncate font-mono text-xl leading-7 font-semibold text-foreground tabular-nums"
-            >
-              {value}
-            </p>
-          )}
-        </AutoTransition>
-      </AutoResizer>
-      <p className="mt-3 min-w-0 truncate text-[11px] leading-[14px] text-muted-foreground">
-        {detail}
-      </p>
-    </div>
-  );
 }
 function faviconLabelForEvent(
   event: BotEvent | null,

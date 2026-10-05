@@ -462,7 +462,7 @@ export function RuleFormFields({
                                 onClick={() => removeCondition(condition.id)}
                                 aria-label={copy.removeCondition}
                               >
-                                <RiDeleteBinLine className="size-4" />
+                                <RiDeleteBinLine />
                                 <span className="xl:sr-only">
                                   {copy.removeCondition}
                                 </span>
@@ -508,7 +508,7 @@ export function RuleFormFields({
                       variant="outline"
                       onClick={addCondition}
                     >
-                      <RiAddLine />
+                      <RiAddLine data-icon="inline-start" />
                       <span>{copy.addCondition}</span>
                     </Button>
                   </div>

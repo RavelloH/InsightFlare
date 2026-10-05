@@ -9,6 +9,7 @@ import {
 } from "react";
 import { Button } from "@insightflare/ui/button";
 import { Clickable } from "@insightflare/ui/clickable";
+import { DataTableSwitch } from "@insightflare/ui/data-table-switch";
 import {
   Dialog,
   DialogContent,
@@ -34,7 +35,6 @@ import {
 } from "@insightflare/ui/select";
 import { Spinner } from "@insightflare/ui/spinner";
 import {
-  DataTableSwitch,
   TabbedDataTableHeader,
   TabbedDataTableRows,
   TabbedDataTableView,
@@ -931,7 +931,7 @@ function TabbedDataTableCardDataControllerImpl<
               }
               aria-busy={exporting}
             >
-              {exporting ? <Spinner className="size-4" /> : <RiDownloadLine />}
+              {exporting ? <Spinner /> : <RiDownloadLine />}
               {exporting ? loadingLabel : exportLabels.download}
             </Button>
           </DialogFooter>
@@ -976,7 +976,6 @@ function TabbedDataTableCardDataControllerImpl<
         onLoadMore={loadMore}
         emptyLabel={emptyLabel}
         errorLabel={errorLabel}
-        loadingRowCount={Math.max(1, limit)}
         headerRight={
           headerRight || exportAction || searchAction ? (
             <div className="inline-flex items-center gap-1">

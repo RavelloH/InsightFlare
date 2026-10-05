@@ -3,6 +3,7 @@ import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Card } from "@insightflare/ui/card";
 import { Clickable } from "@insightflare/ui/clickable";
+import { DataTableSwitch } from "@insightflare/ui/data-table-switch";
 import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
 import { VerticalScrollMask } from "@insightflare/ui/vertical-scroll-mask";
 import {
@@ -13,7 +14,6 @@ import {
   RiInformationLine,
 } from "@remixicon/react";
 
-import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch";
 import {
   ComparisonMetricToggle,
   type ComparisonTableMetric,

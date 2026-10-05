@@ -451,18 +451,21 @@ export function LoginTurnstileSettingsClient({
                 void handleTest();
               }}
             >
-              <AutoTransition className="inline-flex items-center gap-2">
+              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                 {testing ? (
                   <span
                     key="testing"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <Spinner className="size-4" />
+                    <Spinner data-icon="inline-start" />
                     {copy.loginTurnstileTesting}
                   </span>
                 ) : (
-                  <span key="test" className="inline-flex items-center gap-2">
-                    <RiTestTubeLine className="size-4" />
+                  <span
+                    key="test"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
+                  >
+                    <RiTestTubeLine data-icon="inline-start" />
                     {copy.loginTurnstileTest}
                   </span>
                 )}
@@ -477,15 +480,21 @@ export function LoginTurnstileSettingsClient({
               type="submit"
               disabled={loading || saving || !hasChanges || !canSaveEnabled}
             >
-              <AutoTransition className="inline-flex items-center gap-2">
+              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                 {saving ? (
-                  <span key="saving" className="inline-flex items-center gap-2">
-                    <Spinner className="size-4" />
+                  <span
+                    key="saving"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
+                  >
+                    <Spinner data-icon="inline-start" />
                     {copy.saving}
                   </span>
                 ) : (
-                  <span key="save" className="inline-flex items-center gap-2">
-                    <RiSave3Line className="size-4" />
+                  <span
+                    key="save"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
+                  >
+                    <RiSave3Line data-icon="inline-start" />
                     {copy.save}
                   </span>
                 )}
@@ -510,21 +519,21 @@ export function LoginTurnstileSettingsClient({
                     config.updatedAt === 0
                   }
                 >
-                  <AutoTransition className="inline-flex items-center gap-2">
+                  <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                     {deletingConfig ? (
                       <span
                         key="deleting-config"
-                        className="inline-flex items-center gap-2"
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
                       >
-                        <Spinner className="size-4" />
+                        <Spinner data-icon="inline-start" />
                         {copy.deleting}
                       </span>
                     ) : (
                       <span
                         key="delete-config"
-                        className="inline-flex items-center gap-2"
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
                       >
-                        <RiDeleteBinLine className="size-4" />
+                        <RiDeleteBinLine data-icon="inline-start" />
                         {copy.delete}
                       </span>
                     )}

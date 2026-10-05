@@ -8,6 +8,13 @@ import {
   useRef,
   useState,
 } from "react";
+import { DetailDrawer } from "@insightflare/product-ui/detail-drawer";
+import {
+  type AnalyticsTableColumnDefinition,
+  AnalyticsTableColumnSettings,
+  useAnalyticsTableColumns,
+} from "@insightflare/product-ui/tables";
+import { ClickableTableCell } from "@insightflare/ui/clickable-table-cell";
 import { Input } from "@insightflare/ui/input";
 import { PageHeading } from "@insightflare/ui/page-heading";
 import { Skeleton } from "@insightflare/ui/skeleton";
@@ -25,12 +32,6 @@ import {
 } from "@/components/dashboard/analytics-time-tooltip";
 import { AnalyticsDataTable } from "@/components/dashboard/common/analytics-data-table";
 import {
-  type AnalyticsTableColumnDefinition,
-  AnalyticsTableColumnSettings,
-  useAnalyticsTableColumns,
-} from "@/components/dashboard/common/analytics-table-column-settings";
-import { ClickableTableCell } from "@/components/dashboard/common/clickable-table-cell";
-import {
   BrowserMeta,
   CountryRegionMeta,
   DeviceMeta,
@@ -41,10 +42,7 @@ import {
   VisitorAvatar,
   visitorDisplayName,
 } from "@/components/dashboard/journeys/journey-display";
-import {
-  DETAIL_QUERY_PARAM,
-  DetailDrawer,
-} from "@/components/dashboard/site-pages/common/detail-query-modal";
+import { DETAIL_QUERY_PARAM } from "@/components/dashboard/site-pages/common/detail-query-param";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/sessions/session-detail-client-page";
 import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitors/visitor-detail-client-page";

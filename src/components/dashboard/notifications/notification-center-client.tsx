@@ -1,9 +1,16 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  createElement,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Badge } from "@insightflare/ui/badge";
 import { Button } from "@insightflare/ui/button";
 import { Card, CardContent } from "@insightflare/ui/card";
+import { MetricSummaryGrid } from "@insightflare/ui/metric-summary-grid";
 import { PageHeading } from "@insightflare/ui/page-heading";
 import {
   Select,
@@ -119,68 +126,6 @@ function tabIcon(tab: NotificationTab): RemixiconComponentType {
   if (tab === "attention") return RiAlertLine;
   if (tab === "report") return RiFileList3Line;
   return RiInboxLine;
-}
-function NotificationMetricTab({
-  active,
-  description,
-  icon: Icon,
-  label,
-  loading,
-  value,
-  onClick,
-}: {
-  active: boolean;
-  description: string;
-  icon: RemixiconComponentType;
-  label: string;
-  loading: boolean;
-  value: number;
-  onClick: () => void;
-}) {
-  const contentKey = loading ? "loading" : String(value);
-
-  return (
-    <button
-      type="button"
-      className="min-w-0 bg-card p-4 text-left"
-      onClick={onClick}
-      aria-pressed={active}
-    >
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="inline-flex shrink-0 items-center justify-center text-muted-foreground">
-          <Icon className="size-[11px]" />
-        </span>
-        <p className="min-w-0 truncate text-[11px] uppercase text-muted-foreground">
-          {label}
-        </p>
-      </div>
-      <AutoResizer initial className="mt-3">
-        <AutoTransition
-          transitionKey={contentKey}
-          initial={false}
-          duration={0.2}
-          type="fade"
-          presenceMode="wait"
-        >
-          {loading ? (
-            <div key="loading" className="flex h-7 items-center">
-              <Spinner className="size-5" />
-            </div>
-          ) : (
-            <p
-              key={value}
-              className="min-w-0 truncate font-mono text-xl leading-7 font-semibold text-foreground tabular-nums"
-            >
-              {value}
-            </p>
-          )}
-        </AutoTransition>
-      </AutoResizer>
-      <p className="mt-3 min-w-0 truncate text-[11px] leading-[14px] text-muted-foreground">
-        {description}
-      </p>
-    </button>
-  );
 }
 function NotificationSectionHeading({
   actions,
@@ -326,9 +271,9 @@ function NotificationMessageList({
                       onClick={() => onRead(item.id)}
                     >
                       {updatingId === item.id ? (
-                        <Spinner className="size-4" />
+                        <Spinner data-icon="inline-start" />
                       ) : (
-                        <RiCheckLine />
+                        <RiCheckLine data-icon="inline-start" />
                       )}
                       <span>{copy.markRead}</span>
                     </Button>
@@ -552,9 +497,9 @@ export function NotificationCenterClient({
               disabled={markingAll || unreadCount === 0}
             >
               {markingAll ? (
-                <Spinner className="size-4" />
+                <Spinner data-icon="inline-start" />
               ) : (
-                <RiCheckDoubleLine />
+                <RiCheckDoubleLine data-icon="inline-start" />
               )}
               <span>{copy.markAllRead}</span>
             </Button>
@@ -565,11 +510,7 @@ export function NotificationCenterClient({
               onClick={() => void messagesQuery.refetch()}
             >
               <span className="inline-flex size-4 shrink-0 items-center justify-center">
-                {loading ? (
-                  <Spinner className="size-4" />
-                ) : (
-                  <RiRefreshLine className="size-4" />
-                )}
+                {loading ? <Spinner /> : <RiRefreshLine />}
               </span>
               <AutoResizer
                 initial
@@ -599,28 +540,22 @@ export function NotificationCenterClient({
         }
       />
 
-      <Card className="py-0">
-        <CardContent className="p-0">
-          <div className="grid gap-px overflow-hidden bg-border/70 sm:grid-cols-2 xl:grid-cols-4">
-            {NOTIFICATION_TABS.map((tab) => (
-              <NotificationMetricTab
-                key={tab}
-                active={activeTab === tab}
-                description={copy.tabDescriptions[tab]}
-                icon={tabIcon(tab)}
-                label={copy.tabs[tab]}
-                loading={loading}
-                value={
-                  tab === "attention"
-                    ? unreadAttentionCount
-                    : countForTab(messagesList, tab)
-                }
-                onClick={() => setActiveTab(tab)}
-              />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      <MetricSummaryGrid
+        items={NOTIFICATION_TABS.map((tab) => ({
+          id: tab,
+          icon: createElement(tabIcon(tab)),
+          label: copy.tabs[tab],
+          value: String(
+            tab === "attention"
+              ? unreadAttentionCount
+              : countForTab(messagesList, tab),
+          ),
+          detail: copy.tabDescriptions[tab],
+          loading,
+          onClick: () => setActiveTab(tab),
+          pressed: activeTab === tab,
+        }))}
+      />
 
       {ruleIdFilter ? (
         <Card>
@@ -637,7 +572,7 @@ export function NotificationCenterClient({
               size="sm"
               onClick={clearRuleFilter}
             >
-              <RiFilterOffLine className="size-4" />
+              <RiFilterOffLine data-icon="inline-start" />
               <span>{copy.ruleFilterClear}</span>
             </Button>
           </CardContent>

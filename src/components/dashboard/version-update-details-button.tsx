@@ -144,7 +144,7 @@ export function VersionUpdateDetailsButton({
   return (
     <>
       <Button variant="outline" onClick={() => handleOpenChange(true)}>
-        <RiListCheck2 />
+        <RiListCheck2 data-icon="inline-start" />
         {labels.viewDetails}
       </Button>
 
@@ -192,7 +192,7 @@ export function VersionUpdateDetailsButton({
                             target="_blank"
                             rel="noreferrer"
                           >
-                            <RiExternalLinkLine />
+                            <RiExternalLinkLine data-icon="inline-start" />
                             {labels.openCompare}
                           </Link>
                         </Button>
@@ -250,7 +250,7 @@ export function VersionUpdateDetailsButton({
                                       target="_blank"
                                       rel="noreferrer"
                                     >
-                                      <RiExternalLinkLine />
+                                      <RiExternalLinkLine data-icon="inline-start" />
                                       {labels.openCommit}
                                     </Link>
                                   </Button>

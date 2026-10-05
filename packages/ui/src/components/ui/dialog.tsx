@@ -249,7 +249,7 @@ function DialogFooter({
       {showCloseButton && (
         <DialogPrimitive.Close asChild>
           <Button variant="outline">
-            <RiCloseLine />
+            <RiCloseLine data-icon="inline-start" />
             <span>Close</span>
           </Button>
         </DialogPrimitive.Close>

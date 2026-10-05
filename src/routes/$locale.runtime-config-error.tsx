@@ -102,7 +102,7 @@ function Page() {
               <Button variant="outline" asChild>
                 <Link href="https://github.com/RavelloH/InsightFlare">
                   {copy.docsLabel}
-                  <RiExternalLinkLine className="size-3.5" />
+                  <RiExternalLinkLine data-icon="inline-end" />
                 </Link>
               </Button>
               <Button asChild>

@@ -1,4 +1,8 @@
 import { useCallback, useMemo, useState } from "react";
+import {
+  PerformanceTrendChart,
+  type PerformanceTrendChartLabels,
+} from "@insightflare/product-ui/charts";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
@@ -11,10 +15,6 @@ import { PageHeading } from "@insightflare/ui/page-heading";
 import { RiSpeedUpLine } from "@remixicon/react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
-import {
-  PerformanceTrendChart,
-  type PerformanceTrendChartLabels,
-} from "@/components/dashboard/charts/performance-trend-chart";
 import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,

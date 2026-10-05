@@ -1,8 +1,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { useInfiniteTableSentinel } from "@insightflare/product-ui/tables";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-import { useInfiniteTableSentinel } from "@/components/dashboard/common/use-infinite-table-sentinel";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 

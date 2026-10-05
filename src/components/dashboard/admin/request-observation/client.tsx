@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { RequestObservationTrendChart } from "@insightflare/product-ui/charts";
 import { ShareBreakdownView } from "@insightflare/product-ui/sharing";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
@@ -10,6 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
+import { MetricSummaryGrid } from "@insightflare/ui/metric-summary-grid";
 import { Spinner } from "@insightflare/ui/spinner";
 import {
   RiGlobalLine,
@@ -22,7 +24,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, useAnimationControls } from "motion/react";
 import { toast } from "sonner";
 
-import { RequestObservationTrendChart } from "@/components/dashboard/charts/request-observation-trend-chart";
 import {
   AsyncDimensionBreakdownCard,
   type AsyncDimensionBreakdownLoader,
@@ -42,11 +43,7 @@ import {
   fetchRequestObservationDimension,
   fetchRequestObservationPage,
 } from "./data";
-import {
-  asyncDimensionPage,
-  MetricTile,
-  toAsyncAggregatedDimensionRows,
-} from "./helpers";
+import { asyncDimensionPage, toAsyncAggregatedDimensionRows } from "./helpers";
 import { IncludedRequestsTable } from "./included-requests-table";
 import {
   BLOCKED_POINT_COLOR,
@@ -758,9 +755,9 @@ export function RequestObservationClient({
           disabled={loading || refreshing}
         >
           {refreshing ? (
-            <Spinner className="size-4" />
+            <Spinner data-icon="inline-start" />
           ) : (
-            <RiRefreshLine className="size-4" />
+            <RiRefreshLine data-icon="inline-start" />
           )}
           {copy.refresh}
         </Button>
@@ -771,53 +768,42 @@ export function RequestObservationClient({
   const renderOverviewCharts = () => (
     <div className="mx-auto w-full max-w-[1400px] px-4 md:px-6">
       <div className="space-y-6">
-        <Card className="py-0">
-          <CardContent className="p-0">
-            <div className="grid gap-px overflow-hidden bg-border/70 md:grid-cols-2 xl:grid-cols-4">
-              <MetricTile
-                icon={RiRadarLine}
-                label={ui.totalRequests}
-                value={numberFormat(locale, overview?.totalRequests ?? 0)}
-                detail={windowDetail}
-                loading={loading}
-              />
-              <MetricTile
-                icon={RiRobot2Line}
-                label={ui.blockedRequestRatio}
-                value={percentFormat(
-                  locale,
-                  overview?.blockedRequestRatio ?? 0,
-                )}
-                detail={`${labels.requests}: ${numberFormat(
-                  locale,
-                  overview?.blockedRequests ?? 0,
-                )}`}
-                loading={loading}
-              />
-              <MetricTile
-                icon={RiRobot2Line}
-                label={ui.botRequestRatio}
-                value={percentFormat(locale, overview?.botRequestRatio ?? 0)}
-                detail={`${labels.requests}: ${numberFormat(
-                  locale,
-                  overview?.botRequests ?? 0,
-                )}`}
-                loading={loading}
-              />
-              <MetricTile
-                icon={RiGlobalLine}
-                label={labels.avgLatency}
-                value={latencyFormat(locale, copy, overview?.avgLatencyMs)}
-                detail={`${labels.p95Latency}: ${latencyFormat(
-                  locale,
-                  copy,
-                  overview?.p95LatencyMs,
-                )}`}
-                loading={loading}
-              />
-            </div>
-          </CardContent>
-        </Card>
+        <MetricSummaryGrid
+          items={[
+            {
+              id: "total-requests",
+              icon: <RiRadarLine />,
+              label: ui.totalRequests,
+              value: numberFormat(locale, overview?.totalRequests ?? 0),
+              detail: windowDetail,
+              loading,
+            },
+            {
+              id: "blocked-ratio",
+              icon: <RiRobot2Line />,
+              label: ui.blockedRequestRatio,
+              value: percentFormat(locale, overview?.blockedRequestRatio ?? 0),
+              detail: `${labels.requests}: ${numberFormat(locale, overview?.blockedRequests ?? 0)}`,
+              loading,
+            },
+            {
+              id: "bot-ratio",
+              icon: <RiRobot2Line />,
+              label: ui.botRequestRatio,
+              value: percentFormat(locale, overview?.botRequestRatio ?? 0),
+              detail: `${labels.requests}: ${numberFormat(locale, overview?.botRequests ?? 0)}`,
+              loading,
+            },
+            {
+              id: "average-latency",
+              icon: <RiGlobalLine />,
+              label: labels.avgLatency,
+              value: latencyFormat(locale, copy, overview?.avgLatencyMs),
+              detail: `${labels.p95Latency}: ${latencyFormat(locale, copy, overview?.p95LatencyMs)}`,
+              loading,
+            },
+          ]}
+        />
 
         <Card>
           <CardHeader>
@@ -918,61 +904,58 @@ export function RequestObservationClient({
                 <div className="space-y-6">
                   <div className="mx-auto w-full max-w-[1400px] px-4 md:px-6">
                     <div className="space-y-6">
-                      <Card className="py-0">
-                        <CardContent className="p-0">
-                          <div className="grid gap-px overflow-hidden bg-border/70 md:grid-cols-2 xl:grid-cols-4">
-                            <MetricTile
-                              icon={RiRobot2Line}
-                              label={ui.blockedRequests}
-                              value={numberFormat(
-                                locale,
-                                blockedSummary?.total ??
-                                  overview?.blockedRequests ??
-                                  0,
-                              )}
-                              detail={windowDetail}
-                              loading={loading}
-                            />
-                            <MetricTile
-                              icon={RiRadarLine}
-                              label={ui.blockedRequestRatio}
-                              value={percentFormat(
-                                locale,
-                                blockedSummary?.ratio ??
-                                  overview?.blockedRequestRatio ??
-                                  0,
-                              )}
-                              detail={`${labels.requests}: ${numberFormat(
-                                locale,
-                                blockedSummary?.total ??
-                                  overview?.blockedRequests ??
-                                  0,
-                              )}`}
-                              loading={loading}
-                            />
-                            <MetricTile
-                              icon={RiShieldCheckLine}
-                              label={ui.botRequests}
-                              value={numberFormat(
-                                locale,
-                                blockedSummary?.botRequests ?? 0,
-                              )}
-                              detail={copy.category}
-                              loading={loading}
-                            />
-                            <MetricTile
-                              icon={RiGlobalLine}
-                              label={copy.affectedSites}
-                              value={numberFormat(
-                                locale,
-                                blockedSummary?.affectedSites ?? 0,
-                              )}
-                              detail={copy.site}
-                              loading={loading}
-                            />
-                          </div>
-                        </CardContent>
-                      </Card>
+                      <MetricSummaryGrid
+                        items={[
+                          {
+                            id: "blocked-requests",
+                            icon: <RiRobot2Line />,
+                            label: ui.blockedRequests,
+                            value: numberFormat(
+                              locale,
+                              blockedSummary?.total ??
+                                overview?.blockedRequests ??
+                                0,
+                            ),
+                            detail: windowDetail,
+                            loading,
+                          },
+                          {
+                            id: "blocked-ratio",
+                            icon: <RiRadarLine />,
+                            label: ui.blockedRequestRatio,
+                            value: percentFormat(
+                              locale,
+                              blockedSummary?.ratio ??
+                                overview?.blockedRequestRatio ??
+                                0,
+                            ),
+                            detail: `${labels.requests}: ${numberFormat(locale, blockedSummary?.total ?? overview?.blockedRequests ?? 0)}`,
+                            loading,
+                          },
+                          {
+                            id: "bot-requests",
+                            icon: <RiShieldCheckLine />,
+                            label: ui.botRequests,
+                            value: numberFormat(
+                              locale,
+                              blockedSummary?.botRequests ?? 0,
+                            ),
+                            detail: copy.category,
+                            loading,
+                          },
+                          {
+                            id: "affected-sites",
+                            icon: <RiGlobalLine />,
+                            label: copy.affectedSites,
+                            value: numberFormat(
+                              locale,
+                              blockedSummary?.affectedSites ?? 0,
+                            ),
+                            detail: copy.site,
+                            loading,
+                          },
+                        ]}
+                      />
 
                       <Card>
                         <CardHeader>
@@ -1054,68 +1037,66 @@ export function RequestObservationClient({
                 <div className="space-y-6">
                   <div className="mx-auto w-full max-w-[1400px] px-4 md:px-6">
                     <div className="space-y-6">
-                      <Card className="py-0">
-                        <CardContent className="p-0">
-                          <div className="grid gap-px overflow-hidden bg-border/70 md:grid-cols-2 xl:grid-cols-4">
-                            <MetricTile
-                              icon={RiShieldCheckLine}
-                              label={ui.includedRequests}
-                              value={numberFormat(
-                                locale,
-                                includedSummary?.total ??
-                                  overview?.includedRequests ??
-                                  0,
-                              )}
-                              detail={percentFormat(
-                                locale,
-                                overview?.includedRequests &&
-                                  overview.totalRequests > 0
-                                  ? overview.includedRequests /
-                                      overview.totalRequests
-                                  : 0,
-                              )}
-                              loading={loading}
-                            />
-                            <MetricTile
-                              icon={RiRadarLine}
-                              label={labels.pageviews}
-                              value={numberFormat(
-                                locale,
-                                includedSummary?.pageviews ??
-                                  overview?.pageviews ??
-                                  0,
-                              )}
-                              detail={labels.customEvents}
-                              loading={loading}
-                            />
-                            <MetricTile
-                              icon={RiGlobalLine}
-                              label={copy.uniqueCountries}
-                              value={numberFormat(
-                                locale,
-                                includedSummary?.uniqueCountries ?? 0,
-                              )}
-                              detail={copy.country}
-                              loading={loading}
-                            />
-                            <MetricTile
-                              icon={RiRadarLine}
-                              label={labels.avgLatency}
-                              value={latencyFormat(
-                                locale,
-                                copy,
-                                includedSummary?.avgLatencyMs,
-                              )}
-                              detail={`${labels.p95Latency}: ${latencyFormat(
-                                locale,
-                                copy,
-                                includedSummary?.p95LatencyMs,
-                              )}`}
-                              loading={loading}
-                            />
-                          </div>
-                        </CardContent>
-                      </Card>
+                      <MetricSummaryGrid
+                        items={[
+                          {
+                            id: "included-requests",
+                            icon: <RiShieldCheckLine />,
+                            label: ui.includedRequests,
+                            value: numberFormat(
+                              locale,
+                              includedSummary?.total ??
+                                overview?.includedRequests ??
+                                0,
+                            ),
+                            detail: percentFormat(
+                              locale,
+                              overview?.includedRequests &&
+                                overview.totalRequests > 0
+                                ? overview.includedRequests /
+                                    overview.totalRequests
+                                : 0,
+                            ),
+                            loading,
+                          },
+                          {
+                            id: "pageviews",
+                            icon: <RiRadarLine />,
+                            label: labels.pageviews,
+                            value: numberFormat(
+                              locale,
+                              includedSummary?.pageviews ??
+                                overview?.pageviews ??
+                                0,
+                            ),
+                            detail: labels.customEvents,
+                            loading,
+                          },
+                          {
+                            id: "unique-countries",
+                            icon: <RiGlobalLine />,
+                            label: copy.uniqueCountries,
+                            value: numberFormat(
+                              locale,
+                              includedSummary?.uniqueCountries ?? 0,
+                            ),
+                            detail: copy.country,
+                            loading,
+                          },
+                          {
+                            id: "average-latency",
+                            icon: <RiRadarLine />,
+                            label: labels.avgLatency,
+                            value: latencyFormat(
+                              locale,
+                              copy,
+                              includedSummary?.avgLatencyMs,
+                            ),
+                            detail: `${labels.p95Latency}: ${latencyFormat(locale, copy, includedSummary?.p95LatencyMs)}`,
+                            loading,
+                          },
+                        ]}
+                      />
 
                       <Card>
                         <CardHeader>

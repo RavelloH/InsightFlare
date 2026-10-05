@@ -155,7 +155,7 @@ function Page() {
         actions={
           <Button variant="outline" asChild>
             <Link href={REPO_RELEASES_URL} target="_blank" rel="noreferrer">
-              <RiExternalLinkLine />
+              <RiExternalLinkLine data-icon="inline-start" />
               {labels.source}
             </Link>
           </Button>
@@ -313,7 +313,7 @@ function Page() {
                               target="_blank"
                               rel="noreferrer"
                             >
-                              <RiExternalLinkLine />
+                              <RiExternalLinkLine data-icon="inline-start" />
                               {labels.openRelease}
                             </Link>
                           </Button>

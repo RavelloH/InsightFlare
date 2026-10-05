@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { Card, CardContent } from "@insightflare/ui/card";
 
-import { cn } from "@/lib/utils";
+import { cn } from "../utils/cn";
 
 interface AnalyticsTableCardProps {
   children: ReactNode;

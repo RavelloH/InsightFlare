@@ -20,22 +20,21 @@ import {
 import { Spinner } from "@insightflare/ui/spinner";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
-import {
-  addZonedInterval,
-  startOfZonedInterval,
-} from "@/lib/analytics/time-zone";
+import { cn } from "../utils/cn";
+import { intlLocale, numberFormat } from "./chart-format";
+import { formatI18nTemplate } from "./chart-format";
 import {
   type ChartAxisDateFormat,
   createChartAxisDateFormatter,
   createChartTooltipDateFormatter,
-} from "@/lib/dashboard/chart-time";
-import { intlLocale, numberFormat } from "@/lib/dashboard/format";
-import type { DashboardInterval } from "@/lib/dashboard/query-state";
-import { safeChartCount } from "@/lib/dashboard/traffic-chart-data";
-import type { Locale } from "@/lib/i18n/config";
-import type { AppMessages } from "@/lib/i18n/messages";
-import { formatI18nTemplate } from "@/lib/i18n/template";
-import { cn } from "@/lib/utils";
+} from "./chart-time";
+import { addZonedInterval, startOfZonedInterval } from "./time-zone";
+import { safeChartCount } from "./traffic-chart-data";
+import type {
+  ChartLocale as Locale,
+  DashboardInterval,
+  SiteTrafficChartMessages as AppMessages,
+} from "./types";
 export interface SiteTrafficStackChartProps {
   data?: ReadonlyArray<{
     timestampMs: number;

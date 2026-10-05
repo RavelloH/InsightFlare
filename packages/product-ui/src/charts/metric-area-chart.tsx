@@ -6,13 +6,12 @@ import {
 } from "@insightflare/ui/chart";
 import { Area, AreaChart, type TooltipProps } from "recharts";
 
+import { createChartTooltipDateFormatter } from "./chart-time";
+import type { ChartLocale as Locale, DashboardInterval } from "./types";
 import {
   useAnimationOnChartSwitch,
   useChartVisibility,
-} from "@/components/dashboard/charts/use-chart-animation";
-import { createChartTooltipDateFormatter } from "@/lib/dashboard/chart-time";
-import type { DashboardInterval } from "@/lib/dashboard/query-state";
-import type { Locale } from "@/lib/i18n/config";
+} from "./use-chart-animation";
 
 export interface MetricAreaPoint {
   timestampMs: number;

@@ -179,10 +179,8 @@ function FilterTrigger({
             style={style}
           >
             <RiFilter3Line
-              className={cn(
-                "size-4",
-                activeFilterCount === 0 && "text-muted-foreground",
-              )}
+              data-icon="inline-start"
+              className={cn(activeFilterCount === 0 && "text-muted-foreground")}
             />
             <AutoResizer
               initial
@@ -240,7 +238,8 @@ function CompareTrigger({
             onClick={onClick}
           >
             <RiBarChartGroupedLine
-              className={cn("size-4", !active && "text-muted-foreground")}
+              data-icon="inline-start"
+              className={cn(!active && "text-muted-foreground")}
             />
             <span className="hidden sm:inline">
               {messages.dashboardHeader.compareButton}
@@ -353,12 +352,10 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
   const [mobileFilterDrawerOpen, setMobileFilterDrawerOpen] = useState(false);
   const [desktopFilterSheetOpen, setDesktopFilterSheetOpen] = useState(false);
   const [mobileTimeDrawerOpen, setMobileTimeDrawerOpen] = useState(false);
+  const customDialogAfterCloseRef = useRef<"desktop" | "mobile" | null>(null);
   const [periodForwardStack, setPeriodForwardStack] = useState<
     CustomTimeRange[]
   >([]);
-  const openCustomDialogTimeoutRef = useRef<ReturnType<
-    typeof globalThis.setTimeout
-  > | null>(null);
   const [pendingCustomRange, setPendingCustomRange] = useState<
     DateRange | undefined
   >(selectedDateRange);
@@ -468,14 +465,6 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
     pendingNormalized,
     timeZone,
   ]);
-
-  useEffect(() => {
-    return () => {
-      if (openCustomDialogTimeoutRef.current !== null) {
-        globalThis.clearTimeout(openCustomDialogTimeoutRef.current);
-      }
-    };
-  }, []);
 
   useEffect(() => {
     if (scopePreference !== urlScopePreference) {
@@ -588,28 +577,27 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
     [livePathname, scopePreference, searchParams, setUiFilters],
   );
 
-  const queueOpenCustomDialog = () => {
-    if (openCustomDialogTimeoutRef.current !== null) {
-      globalThis.clearTimeout(openCustomDialogTimeoutRef.current);
-    }
-    openCustomDialogTimeoutRef.current = globalThis.setTimeout(() => {
-      openCustomDialogTimeoutRef.current = null;
-      setCustomDialogOpen(true);
-    }, 0);
+  const openCustomDialogAfterClose = (source: "desktop" | "mobile") => {
+    if (customDialogAfterCloseRef.current !== source) return;
+    customDialogAfterCloseRef.current = null;
+    setCustomDialogOpen(true);
   };
 
   const handleRangeValueChange = (
     value: RangePreset,
     source: "desktop" | "mobile" = "desktop",
   ) => {
+    if (value === "custom") {
+      setPendingCustomRange(selectedDateRange);
+      customDialogAfterCloseRef.current = source;
+      if (source === "mobile") {
+        setMobileTimeDrawerOpen(false);
+      }
+      return;
+    }
+
     setPeriodForwardStack([]);
     setRange(value);
-    if (value !== "custom") return;
-    setPendingCustomRange(selectedDateRange);
-    if (source === "mobile") {
-      setMobileTimeDrawerOpen(false);
-    }
-    queueOpenCustomDialog();
   };
 
   const handleIntervalValueChange = (value: DashboardInterval) => {
@@ -737,12 +725,17 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
             onOpenChange={setMobileTimeDrawerOpen}
           >
             <DrawerTrigger asChild>
-              <Button variant="outline" className="gap-2">
-                <RiTimeLine className="size-4" />
+              <Button variant="outline">
+                <RiTimeLine data-icon="inline-start" />
                 {mobileTimeLabel}
               </Button>
             </DrawerTrigger>
-            <DrawerContent className="max-h-[80dvh]">
+            <DrawerContent
+              className="max-h-[80dvh]"
+              onCloseAutoFocus={() => {
+                openCustomDialogAfterClose("mobile");
+              }}
+            >
               <DrawerHeader>
                 <DrawerTitle>{mobileTimeLabel}</DrawerTitle>
                 <DrawerDescription>
@@ -757,22 +750,22 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                     <Button
                       type="button"
                       variant="outline"
-                      className="flex-1 justify-center gap-1"
+                      className="flex-1 justify-center"
                       disabled={!previousPeriodRange}
                       onClick={handleShiftToPreviousPeriod}
                     >
-                      <RiArrowLeftSLine className="size-4" />
+                      <RiArrowLeftSLine data-icon="inline-start" />
                       <span>{previousPeriodLabel}</span>
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
-                      className="flex-1 justify-center gap-1"
+                      className="flex-1 justify-center"
                       disabled={!nextPeriodRange}
                       onClick={handleShiftToNextPeriod}
                     >
                       <span>{nextPeriodLabel}</span>
-                      <RiArrowRightSLine className="size-4" />
+                      <RiArrowRightSLine data-icon="inline-end" />
                     </Button>
                   </ButtonGroup>
                 </div>
@@ -796,7 +789,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                               handleRangeValueChange(item, "mobile");
                             }}
                           >
-                            <RiCalendarLine className="size-3.5" />
+                            <RiCalendarLine data-icon="inline-start" />
                             <span>{rangeLabel(messages, item)}</span>
                           </Button>
                         ))}
@@ -820,13 +813,13 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                           variant={
                             window.interval === item ? "default" : "outline"
                           }
-                          className="w-full justify-center gap-1 overflow-hidden px-1"
+                          className="w-full justify-center overflow-hidden px-1"
                           disabled={!enabled}
                           onClick={() => {
                             handleIntervalValueChange(item);
                           }}
                         >
-                          <RiTimeLine className="size-3.5" />
+                          <RiTimeLine data-icon="inline-start" />
                           <span className="min-w-0 truncate">
                             {intervalLabel(messages, item)}
                           </span>
@@ -857,7 +850,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
               <DrawerFooter>
                 <DrawerClose asChild>
                   <Button>
-                    <RiCloseLine className="size-4" />
+                    <RiCloseLine data-icon="inline-start" />
                     <span>{closeLabel}</span>
                   </Button>
                 </DrawerClose>
@@ -972,7 +965,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                   aria-label={previousPeriodLabel}
                   onClick={handleShiftToPreviousPeriod}
                 >
-                  <RiArrowLeftSLine className="size-4" />
+                  <RiArrowLeftSLine />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
@@ -990,7 +983,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                   aria-label={nextPeriodLabel}
                   onClick={handleShiftToNextPeriod}
                 >
-                  <RiArrowRightSLine className="size-4" />
+                  <RiArrowRightSLine />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">{nextPeriodLabel}</TooltipContent>
@@ -1004,13 +997,29 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                 className="min-w-[156px] justify-between"
               >
                 <span className="inline-flex items-center gap-2">
-                  <RiCalendarLine className="size-4 text-muted-foreground" />
+                  <RiCalendarLine
+                    data-icon="inline-start"
+                    className="text-muted-foreground"
+                  />
                   <span>{rangeLabelText}</span>
                 </span>
-                <RiArrowDownSLine className="size-4 text-muted-foreground" />
+                <RiArrowDownSLine
+                  data-icon="inline-end"
+                  className="text-muted-foreground"
+                />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
+            <DropdownMenuContent
+              align="end"
+              className="w-64"
+              onCloseAutoFocus={() => {
+                openCustomDialogAfterClose("desktop");
+              }}
+            >
+              <DropdownMenuLabel>
+                {messages.dashboardHeader.range}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
               {rangeGroups.map((group, groupIndex) => (
                 <div key={group.key}>
                   {groupIndex > 0 ? <DropdownMenuSeparator /> : null}
@@ -1041,10 +1050,16 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
                 className="min-w-[96px] justify-between"
               >
                 <span className="inline-flex items-center gap-2">
-                  <RiTimeLine className="size-4 text-muted-foreground" />
+                  <RiTimeLine
+                    data-icon="inline-start"
+                    className="text-muted-foreground"
+                  />
                   <span>{intervalLabelText}</span>
                 </span>
-                <RiArrowDownSLine className="size-4 text-muted-foreground" />
+                <RiArrowDownSLine
+                  data-icon="inline-end"
+                  className="text-muted-foreground"
+                />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">
@@ -1124,7 +1139,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
               }}
               disabled={!pendingNormalized}
             >
-              <RiCheckLine className="size-4" />
+              <RiCheckLine data-icon="inline-start" />
               <span>{messages.dashboardHeader.customApply}</span>
             </Button>
           </DialogFooter>

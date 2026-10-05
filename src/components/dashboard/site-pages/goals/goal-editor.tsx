@@ -127,7 +127,8 @@ export function GoalEditor({
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={() => setFilterDialogOpen(true)}
                   >
-                    <RiFilter2Line /> {labels.filter} ({filterCount})
+                    <RiFilter2Line data-icon="inline-start" /> {labels.filter} (
+                    {filterCount})
                   </Button>
                   {!valid && (name.length > 0 || filterDsl.length > 0) ? (
                     <p className="text-xs text-destructive">
@@ -140,7 +141,7 @@ export function GoalEditor({
             <ResponsiveDialogFooter>
               <ResponsiveDialogClose asChild>
                 <Button type="button" variant="outline" disabled={submitting}>
-                  <RiCloseLine /> {labels.cancel}
+                  <RiCloseLine data-icon="inline-start" /> {labels.cancel}
                 </Button>
               </ResponsiveDialogClose>
               <Button type="submit" disabled={!valid || submitting}>

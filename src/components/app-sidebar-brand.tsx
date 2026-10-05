@@ -6,6 +6,7 @@ interface AppSidebarBrandProps {
   appName: string;
   suffix: string;
   target?: string;
+  rel?: string;
 }
 
 export function AppSidebarBrand({
@@ -13,11 +14,13 @@ export function AppSidebarBrand({
   appName,
   suffix,
   target,
+  rel,
 }: AppSidebarBrandProps) {
   return (
     <Link
       href={href}
       target={target}
+      rel={rel}
       className="relative block h-10 overflow-hidden"
     >
       <div className="absolute inset-y-0 left-0 flex items-center whitespace-nowrap transition-[opacity,transform] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] group-data-[collapsible=icon]:-translate-x-2 group-data-[collapsible=icon]:opacity-0 motion-reduce:transition-none">

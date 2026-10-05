@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { MetricSummaryGrid } from "@insightflare/ui/metric-summary-grid";
 import { PageHeading } from "@insightflare/ui/page-heading";
 import { RiPulseLine, RiRepeat2Line } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
@@ -18,9 +19,9 @@ import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
 import {
+  createRetentionMetricItems,
   RetentionMatrix,
   RetentionStateCard,
-  RetentionSummaryGrid,
 } from "./components";
 import {
   buildRetentionComparisonViewModel,
@@ -173,13 +174,15 @@ export function RetentionClientPage({
       />
 
       {resolvedLoading || (!error && !isEmpty) ? (
-        <RetentionSummaryGrid
-          locale={locale}
-          labels={labels}
-          viewModel={viewModel}
-          comparisonViewModel={comparisonViewModel?.comparison ?? null}
-          comparisonLabel={comparisonLabel}
-          loading={resolvedLoading}
+        <MetricSummaryGrid
+          items={createRetentionMetricItems({
+            locale,
+            labels,
+            viewModel,
+            comparisonViewModel: comparisonViewModel?.comparison ?? null,
+            comparisonLabel,
+            loading: resolvedLoading,
+          })}
         />
       ) : null}
 

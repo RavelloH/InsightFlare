@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState } from "react";
+import type { TrafficPairDataPoint } from "@insightflare/product-ui/charts";
 
-import type { TrafficPairDataPoint } from "@/components/dashboard/charts/traffic-pair-chart";
 import { RealtimeRollingTrendChartIsland } from "@/components/dashboard/realtime/realtime-rolling-trend-chart-island";
 import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
 import {

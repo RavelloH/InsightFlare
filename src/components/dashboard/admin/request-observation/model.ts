@@ -1,4 +1,5 @@
-import type { RequestObservationTrendPoint } from "@/components/dashboard/charts/request-observation-trend-chart";
+import type { RequestObservationTrendPoint } from "@insightflare/product-ui/charts";
+
 import { durationFormat, intlLocale } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";

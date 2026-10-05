@@ -215,22 +215,25 @@ export const TeamSelect = memo(function TeamSelect({
               onClick={() => setOpenCreateDialog(false)}
               disabled={submitting}
             >
-              <RiCloseLine className="size-4" />
+              <RiCloseLine data-icon="inline-start" />
               <span>{copy.cancel}</span>
             </Button>
             <Button type="submit" disabled={submitting}>
-              <AutoTransition className="inline-flex items-center gap-2">
+              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                 {submitting ? (
                   <span
                     key="creating"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <Spinner className="size-4" />
+                    <Spinner data-icon="inline-start" />
                     {copy.creating}
                   </span>
                 ) : (
-                  <span key="create" className="inline-flex items-center gap-2">
-                    <RiAddLine className="size-4" />
+                  <span
+                    key="create"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
+                  >
+                    <RiAddLine data-icon="inline-start" />
                     {copy.create}
                   </span>
                 )}
@@ -252,7 +255,7 @@ export const TeamSelect = memo(function TeamSelect({
           className="w-full justify-start"
           onClick={queueOpenCreateDialog}
         >
-          <RiAddLine />
+          <RiAddLine data-icon="inline-start" />
           <span>{copy.createHint}</span>
         </Button>
         {createTeamDialog}

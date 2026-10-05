@@ -7,6 +7,7 @@ export { cardContract } from "../components/ui/card.contract";
 export * from "../components/ui/composites.contract";
 export { inputContract, inputFixtures } from "../components/ui/input.contract";
 export { jsonTreeContract } from "../components/ui/json-tree.contract";
+export { metricSummaryGridContract } from "../components/ui/metric-summary-grid.contract";
 export {
   dialogContract,
   drawerContract,

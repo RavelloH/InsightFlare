@@ -301,7 +301,7 @@ export function ComparisonPanel({
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={() => setCustomFilterDialogOpen(true)}
                 >
-                  <RiFilter2Line className="size-4" />
+                  <RiFilter2Line data-icon="inline-start" />
                   <span className="min-w-0 truncate">
                     {messages.dashboardHeader.compareCustomFilter}
                   </span>
@@ -322,7 +322,7 @@ export function ComparisonPanel({
         </VerticalScrollMask>
         <div className="flex shrink-0 justify-end gap-2 border-t border-border bg-background pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <Button type="button" variant="outline" onClick={onCancel}>
-            <RiCloseLine />
+            <RiCloseLine data-icon="inline-start" />
             <span>{messages.dashboardHeader.compareCancel}</span>
           </Button>
           <Button
@@ -336,7 +336,7 @@ export function ComparisonPanel({
               })
             }
           >
-            <RiCheckLine />
+            <RiCheckLine data-icon="inline-start" />
             <span>{messages.dashboardHeader.compareApply}</span>
           </Button>
         </div>

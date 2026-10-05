@@ -1,11 +1,11 @@
 import { useMemo } from "react";
-import { Button } from "@insightflare/ui/button";
-import { RiCloseLine } from "@remixicon/react";
-
 import {
   DetailDrawer,
   useDetailDrawerClose,
-} from "@/components/dashboard/site-pages/common/detail-drawer";
+} from "@insightflare/product-ui/detail-drawer";
+import { Button } from "@insightflare/ui/button";
+import { RiCloseLine } from "@remixicon/react";
+
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import {
   OverviewMetricsSection,

@@ -73,12 +73,18 @@ export function AuthPageActions({
           <Button
             type="button"
             variant="outline"
-            className="inline-flex gap-2 bg-background"
+            className="inline-flex bg-background"
             aria-label={messages.common.theme}
           >
-            <ThemeIcon className="size-4 text-muted-foreground" />
+            <ThemeIcon
+              data-icon="inline-start"
+              className="text-muted-foreground"
+            />
             <span>{messages.common.theme}</span>
-            <RiArrowDownSLine className="size-4 text-muted-foreground" />
+            <RiArrowDownSLine
+              data-icon="inline-end"
+              className="text-muted-foreground"
+            />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-40">
@@ -107,12 +113,18 @@ export function AuthPageActions({
           <Button
             type="button"
             variant="outline"
-            className="inline-flex gap-2 bg-background"
+            className="inline-flex bg-background"
             aria-label={messages.common.language}
           >
-            <RiGlobalLine className="size-4 text-muted-foreground" />
+            <RiGlobalLine
+              data-icon="inline-start"
+              className="text-muted-foreground"
+            />
             <span>{messages.common.language}</span>
-            <RiArrowDownSLine className="size-4 text-muted-foreground" />
+            <RiArrowDownSLine
+              data-icon="inline-end"
+              className="text-muted-foreground"
+            />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-40">

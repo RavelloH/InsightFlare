@@ -1186,7 +1186,7 @@ export function RealtimeLogEventDetailsDrawer({
                     <AutoTransition
                       as="span"
                       initial={false}
-                      className="inline-flex items-center gap-2"
+                      className="inline-flex items-center gap-[var(--button-content-gap)]"
                       duration={0.16}
                       transitionKey={
                         isIntegratingEvent ? "integrating" : "open"
@@ -1234,7 +1234,7 @@ export function RealtimeLogEventDetailsDrawer({
                     <AutoTransition
                       as="span"
                       initial={false}
-                      className="inline-flex items-center gap-2"
+                      className="inline-flex items-center gap-[var(--button-content-gap)]"
                       duration={0.16}
                       transitionKey={
                         isIntegratingEvent ? "integrating" : "open"

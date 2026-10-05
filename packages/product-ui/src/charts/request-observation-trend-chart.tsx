@@ -17,13 +17,9 @@ import {
 } from "recharts";
 import type { CategoricalChartState } from "recharts/types/chart/types";
 
-import {
-  durationFormat,
-  intlLocale,
-  percentFormat,
-} from "@/lib/dashboard/format";
-import type { Locale } from "@/lib/i18n/config";
-import { cn } from "@/lib/utils";
+import { cn } from "../utils/cn";
+import { durationFormat, intlLocale, percentFormat } from "./chart-format";
+import type { ChartLocale as Locale } from "./types";
 
 export interface RequestObservationTrendPoint {
   timestampMs: number;

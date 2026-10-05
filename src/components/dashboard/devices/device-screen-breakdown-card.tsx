@@ -1,4 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  DonutChart,
+  type DonutChartDataPoint,
+} from "@insightflare/product-ui/charts";
 import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
 import { Button } from "@insightflare/ui/button";
 import {
@@ -21,10 +25,6 @@ import {
 } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
-import {
-  DonutChart,
-  type DonutChartDataPoint,
-} from "@/components/dashboard/charts/donut-chart";
 import {
   TabbedDataTableCard,
   type TabbedDataTableColumn,
@@ -580,7 +580,10 @@ function ScreenPreviewCard({
                   {selectedItem?.displayLabel ??
                     messages.devices.selectedViewportLabel}
                 </span>
-                <RiArrowDownSLine className="size-4 text-muted-foreground" />
+                <RiArrowDownSLine
+                  data-icon="inline-end"
+                  className="text-muted-foreground"
+                />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -599,7 +602,7 @@ function ScreenPreviewCard({
           {previewUrl ? (
             <Button asChild variant="outline" size="sm">
               <a href={previewUrl} target="_blank" rel="noreferrer">
-                <RiExternalLinkLine className="size-4" />
+                <RiExternalLinkLine data-icon="inline-start" />
                 <span>{messages.devices.openSiteLabel}</span>
               </a>
             </Button>

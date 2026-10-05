@@ -2,7 +2,7 @@
   "name": "@insightflare/product-ui",
   "version": "0.7.1",
   "type": "module",
-  "description": "Props-only InsightFlare product visualization components.",
+  "description": "Props-only InsightFlare product UI components.",
   "sideEffects": false,
   "files": [
     "dist",
@@ -37,6 +37,31 @@
       "types": "./dist/tabbed-table/index.d.ts",
       "development": "./src/tabbed-table/index.ts",
       "import": "./dist/tabbed-table/index.js"
+    },
+    "./charts": {
+      "types": "./dist/charts/index.d.ts",
+      "development": "./src/charts/index.ts",
+      "import": "./dist/charts/index.js"
+    },
+    "./analytics-tooltip": {
+      "types": "./dist/analytics-tooltip/index.d.ts",
+      "development": "./src/analytics-tooltip/index.ts",
+      "import": "./dist/analytics-tooltip/index.js"
+    },
+    "./detail-drawer": {
+      "types": "./dist/detail-drawer/index.d.ts",
+      "development": "./src/detail-drawer/index.ts",
+      "import": "./dist/detail-drawer/index.js"
+    },
+    "./tables": {
+      "types": "./dist/tables/index.d.ts",
+      "development": "./src/tables/index.ts",
+      "import": "./dist/tables/index.js"
+    },
+    "./site-scope-selector": {
+      "types": "./dist/site-scope-selector/index.d.ts",
+      "development": "./src/site-scope-selector/index.ts",
+      "import": "./dist/site-scope-selector/index.js"
     }
   },
   "scripts": {

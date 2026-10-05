@@ -7,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
+import { DataTableSwitch } from "@insightflare/ui/data-table-switch";
 import { Input } from "@insightflare/ui/input";
 import { Label } from "@insightflare/ui/label";
 import {
@@ -18,6 +19,7 @@ import {
 } from "@insightflare/ui/select";
 import { Spinner } from "@insightflare/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
+import { TableActionButton } from "@insightflare/ui/table-action-button";
 import {
   Tooltip,
   TooltipContent,
@@ -25,8 +27,6 @@ import {
 } from "@insightflare/ui/tooltip";
 import {
   RiAddLine,
-  RiCheckboxBlankCircleLine,
-  RiCheckLine,
   RiDeleteBinLine,
   RiFileCopyLine,
   RiGlobalLine,
@@ -37,62 +37,11 @@ import {
 } from "@remixicon/react";
 import { toast } from "sonner";
 
-import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch";
-import { TableActionButton } from "@/components/dashboard/common/table-action-button";
 import { shortDateTime } from "@/lib/dashboard/format";
-import type { SiteData } from "@/lib/dashboard-api/client/edge";
 import { formatI18nTemplate } from "@/lib/i18n/template";
 
 import { useTeamManagementContext } from "./context";
 import { epochSecondsToMs, normalizeSiteIds, siteAccessSummary } from "./model";
-export function SiteAccessSelectorButtons({
-  siteIds,
-  sites,
-  allSitesLabel,
-  noSitesLabel,
-  onAllSites,
-  onToggleSite,
-}: {
-  siteIds: string[];
-  sites: Array<Pick<SiteData, "id" | "name" | "domain">>;
-  allSitesLabel: string;
-  noSitesLabel: string;
-  onAllSites: () => void;
-  onToggleSite: (siteId: string) => void;
-}) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      <Button
-        type="button"
-        variant={siteIds.length === 0 ? "default" : "outline"}
-        size="sm"
-        onClick={onAllSites}
-      >
-        {siteIds.length === 0 ? <RiCheckLine /> : <RiCheckboxBlankCircleLine />}
-        <span>{allSitesLabel}</span>
-      </Button>
-      {sites.length > 0 ? (
-        sites.map((site) => {
-          const checked = siteIds.includes(site.id);
-          return (
-            <Button
-              key={site.id}
-              type="button"
-              variant={checked ? "default" : "outline"}
-              size="sm"
-              onClick={() => onToggleSite(site.id)}
-            >
-              {checked ? <RiCheckLine /> : <RiCheckboxBlankCircleLine />}
-              <span>{site.name || site.domain || site.id}</span>
-            </Button>
-          );
-        })
-      ) : (
-        <p className="text-sm text-muted-foreground">{noSitesLabel}</p>
-      )}
-    </div>
-  );
-}
 export function TeamInviteCreateCard() {
   const {
     canManage,
@@ -191,13 +140,16 @@ export function TeamInviteCreateCard() {
                 className="w-full justify-between"
                 onClick={() => setInviteSiteAccessDialogOpen(true)}
               >
-                <span className="inline-flex min-w-0 items-center gap-2">
-                  <RiGlobalLine className="size-4 shrink-0" />
+                <span className="inline-flex min-w-0 items-center gap-[var(--button-content-gap)]">
+                  <RiGlobalLine data-icon="inline-start" className="shrink-0" />
                   <span className="truncate">
                     {siteAccessSummary(inviteSiteIds, sites, copy.members)}
                   </span>
                 </span>
-                <RiSettings3Line className="size-4 shrink-0 text-muted-foreground" />
+                <RiSettings3Line
+                  data-icon="inline-end"
+                  className="shrink-0 text-muted-foreground"
+                />
               </Button>
             </div>
           ) : (
@@ -210,15 +162,21 @@ export function TeamInviteCreateCard() {
             className="mt-auto self-start"
             disabled={creatingInvite || !canManage}
           >
-            <AutoTransition className="inline-flex items-center gap-2">
+            <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
               {creatingInvite ? (
-                <span key="creating" className="inline-flex items-center gap-2">
-                  <Spinner className="size-4" />
+                <span
+                  key="creating"
+                  className="inline-flex items-center gap-[var(--button-content-gap)]"
+                >
+                  <Spinner data-icon="inline-start" />
                   {copy.members.creatingInvite}
                 </span>
               ) : (
-                <span key="create" className="inline-flex items-center gap-2">
-                  <RiAddLine className="size-4" />
+                <span
+                  key="create"
+                  className="inline-flex items-center gap-[var(--button-content-gap)]"
+                >
+                  <RiAddLine data-icon="inline-start" />
                   {copy.members.createInvite}
                 </span>
               )}
@@ -236,7 +194,7 @@ export function TeamInviteCreateCard() {
                 void handleCopyLatestInviteUrl();
               }}
             >
-              <RiFileCopyLine className="size-4" />
+              <RiFileCopyLine data-icon="inline-start" />
               <span>{copy.members.copyInvite}</span>
             </Button>
           </div>
@@ -470,7 +428,7 @@ export function TeamMembersTableCard() {
                       void handleChangeMemberRole(member.userId, next);
                     }}
                   >
-                    <SelectTrigger className="h-8 w-28 text-xs">
+                    <SelectTrigger size="sm" className="w-28">
                       <AutoTransition className="inline-flex items-center gap-1.5">
                         {changingRoleId === member.userId ? (
                           <span
@@ -512,8 +470,11 @@ export function TeamMembersTableCard() {
                       setEditingSiteIds(normalizeSiteIds(member.siteIds));
                     }}
                   >
-                    <span className="inline-flex min-w-0 items-center gap-2">
-                      <RiGlobalLine className="size-3.5 shrink-0" />
+                    <span className="inline-flex min-w-0 items-center gap-[var(--button-content-gap)]">
+                      <RiGlobalLine
+                        data-icon="inline-start"
+                        className="shrink-0"
+                      />
                       <span className="min-w-0 truncate">
                         {siteAccessSummary(
                           normalizeSiteIds(member.siteIds),
@@ -523,9 +484,12 @@ export function TeamMembersTableCard() {
                       </span>
                     </span>
                     {savingSiteAccessId === member.userId ? (
-                      <Spinner className="size-3.5 shrink-0" />
+                      <Spinner data-icon="inline-end" className="shrink-0" />
                     ) : (
-                      <RiSettings3Line className="size-3.5 shrink-0 text-muted-foreground" />
+                      <RiSettings3Line
+                        data-icon="inline-end"
+                        className="shrink-0 text-muted-foreground"
+                      />
                     )}
                   </Button>
                 ) : (
@@ -536,7 +500,7 @@ export function TeamMembersTableCard() {
                     disabled
                     className="justify-start"
                   >
-                    <RiGlobalLine className="size-3.5" />
+                    <RiGlobalLine data-icon="inline-start" />
                     <span className="truncate">
                       {copy.members.siteAccessAll}
                     </span>

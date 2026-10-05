@@ -19,6 +19,7 @@ uiGallery:
     data-display: Data display
     overlays: Overlays
     product-analytics: Product UI / Analytics
+    product-management: Product UI / Management
     product-realtime: Product UI / Realtime
   browseCategories: Browse by category
   featuredComponents: Featured components

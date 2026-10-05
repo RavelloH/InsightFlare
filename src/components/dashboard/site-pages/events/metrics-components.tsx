@@ -1,30 +1,24 @@
-import { memo, type ReactNode, useMemo } from "react";
-import { AutoResizer } from "@insightflare/ui/auto-resizer";
-import { AutoTransition } from "@insightflare/ui/auto-transition";
+import { memo, useMemo } from "react";
+import {
+  createEventTrendChartData,
+  createEventTrendChartSeries,
+  createEventTrendComparisonChartSeries,
+  EventTrendBarChart,
+} from "@insightflare/product-ui/charts";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
-import { Skeleton } from "@insightflare/ui/skeleton";
-import { Spinner } from "@insightflare/ui/spinner";
-import type { RemixiconComponentType } from "@remixicon/react";
+import type { MetricSummaryItem } from "@insightflare/ui/metric-summary-grid";
 import {
-  RiArrowDownLine,
-  RiArrowUpLine,
   RiDatabase2Line,
   RiFileList3Line,
   RiPulseLine,
   RiStackLine,
 } from "@remixicon/react";
 
-import {
-  createEventTrendChartData,
-  createEventTrendChartSeries,
-  createEventTrendComparisonChartSeries,
-  EventTrendBarChart,
-} from "@/components/dashboard/charts/event-trend-bar-chart";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
@@ -32,130 +26,14 @@ import type {
   EventTrendSeries,
 } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";
-import { cn } from "@/lib/utils";
 
 import { type EventMetricSummary, type EventPageCopy } from "./types";
-function EventMetricCell({
-  icon: Icon,
-  label,
-  value,
-  detail,
-  detailKey,
-  comparisonChange,
-  loading = false,
-}: {
-  icon: RemixiconComponentType;
-  label: string;
-  value: string;
-  detail: ReactNode;
-  detailKey?: string;
-  comparisonChange?: number | null;
-  loading?: boolean;
-}) {
-  const contentKey = loading ? "loading" : `${value}:${comparisonChange ?? ""}`;
-
-  return (
-    <div className="min-w-0 bg-card p-4">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="inline-flex shrink-0 items-center justify-center text-muted-foreground">
-          <Icon className="size-[11px]" />
-        </span>
-        <p className="min-w-0 truncate text-[11px] uppercase text-muted-foreground">
-          {label}
-        </p>
-      </div>
-      <AutoResizer initial animateHeight={false} className="mt-3 h-7">
-        <AutoTransition
-          className="h-7"
-          transitionKey={contentKey}
-          initial={false}
-          duration={0.2}
-          type="fade"
-          presenceMode="wait"
-        >
-          {loading ? (
-            <div key="loading" className="flex h-7 items-center">
-              <Spinner className="size-5" />
-            </div>
-          ) : (
-            <div
-              key={value}
-              className="flex h-7 min-w-0 items-end gap-1.5 leading-none"
-            >
-              <span className="min-w-0 truncate font-mono text-xl leading-none font-semibold text-foreground">
-                {value}
-              </span>
-              {comparisonChange !== undefined ? (
-                <EventMetricChangeRate value={comparisonChange} />
-              ) : null}
-            </div>
-          )}
-        </AutoTransition>
-      </AutoResizer>
-      <AutoTransition
-        initial={false}
-        transitionKey={loading ? "loading" : (detailKey ?? "detail")}
-        className="mt-3 h-[14px]"
-        duration={0.2}
-        type="fade"
-        presenceMode="wait"
-      >
-        {loading ? (
-          <Skeleton
-            key="loading"
-            className="h-full w-[min(12rem,72%)] rounded-none"
-          />
-        ) : (
-          <p
-            key={detailKey ?? "detail"}
-            className="h-[14px] min-w-0 truncate text-[11px] leading-[14px] text-muted-foreground"
-          >
-            {detail}
-          </p>
-        )}
-      </AutoTransition>
-    </div>
-  );
-}
 function eventMetricDelta(current: number, comparison: number): number | null {
   if (!Number.isFinite(current) || !Number.isFinite(comparison)) return null;
   if (comparison === 0) return null;
   return ((current - comparison) / comparison) * 100;
 }
-function EventMetricChangeRate({ value }: { value: number | null }) {
-  if (value === null) return null;
-  const ChangeIcon = value >= 0 ? RiArrowUpLine : RiArrowDownLine;
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-end gap-0.5 font-mono text-xs leading-none tabular-nums",
-        value >= 0 ? "text-emerald-600" : "text-rose-600",
-      )}
-    >
-      <ChangeIcon className="size-3.5" />
-      {value >= 0 ? "+" : ""}
-      {value.toFixed(1)}%
-    </span>
-  );
-}
-function EventMetricComparisonDetail({
-  locale,
-  comparisonLabel,
-  comparisonValue,
-  formatValue = (value) => numberFormat(locale, value),
-}: {
-  locale: Locale;
-  comparisonLabel: string;
-  comparisonValue: number;
-  formatValue?: (value: number) => string;
-}) {
-  return (
-    <span className="min-w-0 truncate">
-      {comparisonLabel}: {formatValue(comparisonValue)}
-    </span>
-  );
-}
-export const EventMetricGrid = memo(function EventMetricGrid({
+export function createEventMetricItems({
   locale,
   labels,
   summary,
@@ -171,7 +49,7 @@ export const EventMetricGrid = memo(function EventMetricGrid({
   comparisonLabel?: string;
   includeShare?: boolean;
   loading?: boolean;
-}) {
+}): MetricSummaryItem[] {
   const average = numberFormat(
     locale,
     Number(summary.avgEventsPerSession || 0),
@@ -180,45 +58,6 @@ export const EventMetricGrid = memo(function EventMetricGrid({
     includeShare && summary.shareOfAllEvents !== undefined
       ? percentFormat(locale, summary.shareOfAllEvents)
       : null;
-  const comparisonDetails = comparisonSummary
-    ? {
-        events: (
-          <EventMetricComparisonDetail
-            locale={locale}
-            comparisonLabel={comparisonLabel ?? "Comparison"}
-            comparisonValue={comparisonSummary.events}
-          />
-        ),
-        eventTypes: (
-          <EventMetricComparisonDetail
-            locale={locale}
-            comparisonLabel={comparisonLabel ?? "Comparison"}
-            comparisonValue={comparisonSummary.eventTypes}
-          />
-        ),
-        sessions: (
-          <EventMetricComparisonDetail
-            locale={locale}
-            comparisonLabel={comparisonLabel ?? "Comparison"}
-            comparisonValue={comparisonSummary.sessions}
-          />
-        ),
-        visitors: (
-          <EventMetricComparisonDetail
-            locale={locale}
-            comparisonLabel={comparisonLabel ?? "Comparison"}
-            comparisonValue={comparisonSummary.visitors}
-          />
-        ),
-        average: (
-          <EventMetricComparisonDetail
-            locale={locale}
-            comparisonLabel={comparisonLabel ?? "Comparison"}
-            comparisonValue={comparisonSummary.avgEventsPerSession}
-          />
-        ),
-      }
-    : null;
   const comparisonChanges = comparisonSummary
     ? {
         events: eventMetricDelta(summary.events, comparisonSummary.events),
@@ -237,75 +76,68 @@ export const EventMetricGrid = memo(function EventMetricGrid({
       }
     : null;
 
-  return (
-    <Card className="py-0">
-      <CardContent className="p-0">
-        <div className="grid gap-px overflow-hidden bg-border/70 sm:grid-cols-2 xl:grid-cols-4">
-          <EventMetricCell
-            icon={RiPulseLine}
-            label={labels.totalEvents}
-            loading={loading}
-            value={numberFormat(locale, summary.events)}
-            comparisonChange={comparisonChanges?.events}
-            detail={
-              comparisonDetails?.events ??
-              (share
-                ? `${labels.shareOfAllEvents}: ${share}`
-                : labels.detailSubtitle)
-            }
-            detailKey={
-              comparisonSummary
-                ? `comparison-events:${comparisonSummary.events}:${summary.events}`
-                : "events-detail"
-            }
-          />
-          <EventMetricCell
-            icon={RiStackLine}
-            label={labels.eventTypes}
-            loading={loading}
-            value={numberFormat(locale, summary.eventTypes)}
-            comparisonChange={comparisonChanges?.eventTypes}
-            detail={comparisonDetails?.eventTypes ?? labels.breakdownTitle}
-            detailKey={
-              comparisonSummary
-                ? `comparison-event-types:${comparisonSummary.eventTypes}:${summary.eventTypes}`
-                : "event-types-detail"
-            }
-          />
-          <EventMetricCell
-            icon={RiFileList3Line}
-            label={labels.sessions}
-            loading={loading}
-            value={numberFormat(locale, summary.sessions)}
-            comparisonChange={comparisonChanges?.average}
-            detail={
-              comparisonDetails?.average ??
-              `${labels.avgEventsPerSession}: ${average}`
-            }
-            detailKey={
-              comparisonSummary
-                ? `comparison-average:${comparisonSummary.avgEventsPerSession}:${summary.avgEventsPerSession}`
-                : "sessions-detail"
-            }
-          />
-          <EventMetricCell
-            icon={RiDatabase2Line}
-            label={labels.visitors}
-            loading={loading}
-            value={numberFormat(locale, summary.visitors)}
-            comparisonChange={comparisonChanges?.visitors}
-            detail={comparisonDetails?.visitors ?? labels.recordsTitle}
-            detailKey={
-              comparisonSummary
-                ? `comparison-visitors:${comparisonSummary.visitors}:${summary.visitors}`
-                : "visitors-detail"
-            }
-          />
-        </div>
-      </CardContent>
-    </Card>
-  );
-});
+  const comparisonDetail = (value: number) =>
+    comparisonSummary
+      ? `${comparisonLabel ?? "Comparison"}: ${numberFormat(locale, value)}`
+      : undefined;
+  const change = (value: number | null) =>
+    value === null
+      ? undefined
+      : {
+          value: `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`,
+          direction: value >= 0 ? ("up" as const) : ("down" as const),
+          tone: value >= 0 ? ("positive" as const) : ("negative" as const),
+        };
+
+  return [
+    {
+      id: "events",
+      icon: <RiPulseLine />,
+      label: labels.totalEvents,
+      value: numberFormat(locale, summary.events),
+      detail:
+        comparisonDetail(comparisonSummary?.events ?? 0) ??
+        (share
+          ? `${labels.shareOfAllEvents}: ${share}`
+          : labels.detailSubtitle),
+      change: change(comparisonChanges?.events ?? null),
+      loading,
+    },
+    {
+      id: "event-types",
+      icon: <RiStackLine />,
+      label: labels.eventTypes,
+      value: numberFormat(locale, summary.eventTypes),
+      detail:
+        comparisonDetail(comparisonSummary?.eventTypes ?? 0) ??
+        labels.breakdownTitle,
+      change: change(comparisonChanges?.eventTypes ?? null),
+      loading,
+    },
+    {
+      id: "sessions",
+      icon: <RiFileList3Line />,
+      label: labels.sessions,
+      value: numberFormat(locale, summary.sessions),
+      detail:
+        comparisonDetail(comparisonSummary?.avgEventsPerSession ?? 0) ??
+        `${labels.avgEventsPerSession}: ${average}`,
+      change: change(comparisonChanges?.average ?? null),
+      loading,
+    },
+    {
+      id: "visitors",
+      icon: <RiDatabase2Line />,
+      label: labels.visitors,
+      value: numberFormat(locale, summary.visitors),
+      detail:
+        comparisonDetail(comparisonSummary?.visitors ?? 0) ??
+        labels.recordsTitle,
+      change: change(comparisonChanges?.visitors ?? null),
+      loading,
+    },
+  ];
+}
 export const EventTrendStackedBarCard = memo(function EventTrendStackedBarCard({
   locale,
   labels,

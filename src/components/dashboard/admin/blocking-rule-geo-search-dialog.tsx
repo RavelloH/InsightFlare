@@ -402,7 +402,7 @@ export function BlockingRuleGeoSearchDialog({
                     setQuery("");
                   }}
                 >
-                  <RiArrowLeftLine className="size-3.5" />
+                  <RiArrowLeftLine data-icon="inline-start" />
                   <span>{copy.searchBack}</span>
                 </Button>
               </div>

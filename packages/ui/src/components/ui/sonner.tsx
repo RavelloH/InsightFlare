@@ -40,9 +40,13 @@ const Toaster = ({
       }}
       style={
         {
-          "--normal-bg": "var(--popover)",
-          "--normal-text": "var(--popover-foreground)",
-          "--normal-border": "var(--border)",
+          ...(theme === "system"
+            ? {
+                "--normal-bg": "var(--popover)",
+                "--normal-text": "var(--popover-foreground)",
+                "--normal-border": "var(--border)",
+              }
+            : {}),
           "--border-radius": "0px",
           pointerEvents: "auto",
           ...style,

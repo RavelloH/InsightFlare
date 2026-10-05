@@ -8,6 +8,7 @@ export type ComponentCategoryId =
   | "data-display"
   | "overlays"
   | "product-analytics"
+  | "product-management"
   | "product-realtime";
 
 export type ComponentFixturePresentation =

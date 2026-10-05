@@ -1,4 +1,8 @@
 import { memo, useMemo, useState } from "react";
+import {
+  DonutChart,
+  type DonutChartDataPoint,
+} from "@insightflare/product-ui/charts";
 import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
@@ -17,10 +21,6 @@ import {
 import { RiGlobalLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
-import {
-  DonutChart,
-  type DonutChartDataPoint,
-} from "@/components/dashboard/charts/donut-chart";
 import { fetchBrowserVersionBreakdown } from "@/lib/dashboard/client/data/index";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";

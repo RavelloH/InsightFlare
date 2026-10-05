@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { EVENT_TREND_MAX_SERIES } from "@insightflare/product-ui/charts";
+import { DetailModal } from "@insightflare/product-ui/detail-drawer";
+import { MetricSummaryGrid } from "@insightflare/ui/metric-summary-grid";
 import { useQuery } from "@tanstack/react-query";
 
-import { EVENT_TREND_MAX_SERIES } from "@/components/dashboard/charts/event-trend-bar-chart";
-import {
-  DETAIL_QUERY_PARAM,
-  DetailModal,
-} from "@/components/dashboard/site-pages/common/detail-query-modal";
+import { DETAIL_QUERY_PARAM } from "@/components/dashboard/site-pages/common/detail-query-param";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import { EventTypeDetailClientPage } from "@/components/dashboard/site-pages/events/event-type-detail-client-page";
 import {
-  EventMetricGrid,
+  createEventMetricItems,
   EventTrendStackedBarCard,
 } from "@/components/dashboard/site-pages/events/metrics-components";
 import { EventPageHeader } from "@/components/dashboard/site-pages/events/page-header";
@@ -311,13 +310,15 @@ export function EventsClientPage({
         subtitle={messages.events.subtitle}
       />
 
-      <EventMetricGrid
-        locale={locale}
-        labels={labels}
-        summary={summary.summary}
-        comparisonSummary={data?.comparisonSummary?.summary}
-        comparisonLabel={comparisonLabel}
-        loading={loading}
+      <MetricSummaryGrid
+        items={createEventMetricItems({
+          locale,
+          labels,
+          summary: summary.summary,
+          comparisonSummary: data?.comparisonSummary?.summary,
+          comparisonLabel,
+          loading,
+        })}
       />
 
       <EventTrendStackedBarCard

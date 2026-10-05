@@ -1,4 +1,6 @@
 import { useMemo } from "react";
+import { MetricAreaChart } from "@insightflare/product-ui/charts";
+import { TrafficPairBarChart } from "@insightflare/product-ui/charts";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
@@ -10,8 +12,6 @@ import {
 import { Spinner } from "@insightflare/ui/spinner";
 import { RiLineChartLine } from "@remixicon/react";
 
-import { MetricAreaChart } from "@/components/dashboard/charts/metric-area-chart";
-import { TrafficPairBarChart } from "@/components/dashboard/charts/traffic-pair-bar-chart";
 import {
   durationFormat,
   intlLocale,

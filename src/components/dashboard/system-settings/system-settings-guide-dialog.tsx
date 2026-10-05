@@ -27,7 +27,7 @@ export function SystemSettingsGuideDialog({
     <ResponsiveDialog>
       <ResponsiveDialogTrigger asChild>
         <Button type="button" variant="outline" size="sm" className="ml-auto">
-          <RiBookOpenLine className="size-4" />
+          <RiBookOpenLine data-icon="inline-start" />
           {triggerLabel}
         </Button>
       </ResponsiveDialogTrigger>

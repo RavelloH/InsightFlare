@@ -122,11 +122,7 @@ export function ScheduledTaskRetentionSettingsClient({
           disabled={saving || hasInvalidValue}
           onClick={() => void handleSave()}
         >
-          {saving ? (
-            <Spinner className="size-4" />
-          ) : (
-            <RiSave3Line className="size-4" />
-          )}
+          {saving ? <Spinner /> : <RiSave3Line />}
           {saving ? copy.retentionSaving : copy.retentionSave}
         </Button>
       </CardContent>

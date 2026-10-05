@@ -139,7 +139,7 @@ export function ShareHeader({
               className="inline-flex bg-background xl:hidden"
               aria-label={messages.common.theme}
             >
-              <ThemeIcon className="size-4 text-muted-foreground" />
+              <ThemeIcon className="text-muted-foreground" />
             </Button>
           </DrawerTrigger>
           <DrawerContent>
@@ -151,10 +151,10 @@ export function ShareHeader({
                 <Button
                   type="button"
                   variant={themeValue === "light" ? "default" : "outline"}
-                  className="justify-start gap-2"
+                  className="justify-start"
                   onClick={() => setTheme("light")}
                 >
-                  <RiSunLine className="size-4" />
+                  <RiSunLine data-icon="inline-start" />
                   {messages.actions.switchToLight}
                 </Button>
               </DrawerClose>
@@ -162,10 +162,10 @@ export function ShareHeader({
                 <Button
                   type="button"
                   variant={themeValue === "dark" ? "default" : "outline"}
-                  className="justify-start gap-2"
+                  className="justify-start"
                   onClick={() => setTheme("dark")}
                 >
-                  <RiMoonLine className="size-4" />
+                  <RiMoonLine data-icon="inline-start" />
                   {messages.actions.switchToDark}
                 </Button>
               </DrawerClose>
@@ -173,10 +173,10 @@ export function ShareHeader({
                 <Button
                   type="button"
                   variant={themeValue === "system" ? "default" : "outline"}
-                  className="justify-start gap-2"
+                  className="justify-start"
                   onClick={() => setTheme("system")}
                 >
-                  <RiComputerLine className="size-4" />
+                  <RiComputerLine data-icon="inline-start" />
                   {messages.common.system}
                 </Button>
               </DrawerClose>
@@ -188,13 +188,16 @@ export function ShareHeader({
           <DropdownMenuTrigger asChild>
             <Button
               variant="outline"
-              className="hidden gap-2 bg-background xl:inline-flex"
+              className="hidden bg-background xl:inline-flex"
               aria-label={messages.common.theme}
             >
-              <ThemeIcon className="size-4 text-muted-foreground" />
+              <ThemeIcon
+                data-icon="inline-start"
+                className="text-muted-foreground"
+              />
               <span>{messages.common.theme}</span>
               <RiArrowDownSLine
-                className="size-4 text-muted-foreground"
+                className="text-muted-foreground"
                 data-icon="inline-end"
               />
             </Button>
@@ -238,7 +241,7 @@ export function ShareHeader({
               className="inline-flex bg-background xl:hidden"
               aria-label={messages.common.language}
             >
-              <RiGlobalLine className="size-4 text-muted-foreground" />
+              <RiGlobalLine className="text-muted-foreground" />
             </Button>
           </DrawerTrigger>
           <DrawerContent>
@@ -254,7 +257,7 @@ export function ShareHeader({
                     className="justify-start"
                     onClick={() => switchLocale(item)}
                   >
-                    <RiTranslate2 className="size-4" />
+                    <RiTranslate2 data-icon="inline-start" />
                     <span>{localeLabel(messages, item)}</span>
                   </Button>
                 </DrawerClose>
@@ -267,13 +270,16 @@ export function ShareHeader({
           <DropdownMenuTrigger asChild>
             <Button
               variant="outline"
-              className="hidden gap-2 bg-background xl:inline-flex"
+              className="hidden bg-background xl:inline-flex"
               aria-label={messages.common.language}
             >
-              <RiGlobalLine className="size-4 text-muted-foreground" />
+              <RiGlobalLine
+                data-icon="inline-start"
+                className="text-muted-foreground"
+              />
               <span>{messages.common.language}</span>
               <RiArrowDownSLine
-                className="size-4 text-muted-foreground"
+                className="text-muted-foreground"
                 data-icon="inline-end"
               />
             </Button>

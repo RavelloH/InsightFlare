@@ -1,4 +1,5 @@
-import { type MetricAreaPoint } from "@/components/dashboard/charts/metric-area-chart";
+import { type MetricAreaPoint } from "@insightflare/product-ui/charts";
+
 import { type TrafficChannelId } from "@/lib/analytics/traffic-channel-rules";
 import { type OverviewTabRows } from "@/lib/dashboard/client/data/index";
 import type { TimeWindow } from "@/lib/dashboard/query-state";

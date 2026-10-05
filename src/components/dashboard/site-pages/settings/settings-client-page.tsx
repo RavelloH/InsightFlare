@@ -759,18 +759,21 @@ export function SettingsClientPage({
                   !hasSiteInfoChanges
                 }
               >
-                <AutoTransition className="inline-flex items-center gap-2">
+                <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                   {saving ? (
                     <span
                       key="saving"
-                      className="inline-flex items-center gap-2"
+                      className="inline-flex items-center gap-[var(--button-content-gap)]"
                     >
-                      <Spinner className="size-4" />
+                      <Spinner data-icon="inline-start" />
                       {copy.saving}
                     </span>
                   ) : (
-                    <span key="save" className="inline-flex items-center gap-2">
-                      <RiSave3Line className="size-4" />
+                    <span
+                      key="save"
+                      className="inline-flex items-center gap-[var(--button-content-gap)]"
+                    >
+                      <RiSave3Line data-icon="inline-start" />
                       {copy.save}
                     </span>
                   )}
@@ -879,7 +882,7 @@ export function SettingsClientPage({
                       }}
                       disabled={!publicLink}
                     >
-                      <RiFileCopyLine className="size-4" />
+                      <RiFileCopyLine data-icon="inline-start" />
                       <span>
                         {messages.teamManagement.publicLinks.copyLink}
                       </span>
@@ -909,21 +912,21 @@ export function SettingsClientPage({
                 !hasPublicSharingChanges
               }
             >
-              <AutoTransition className="inline-flex items-center gap-2">
+              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                 {savingPublicSharing ? (
                   <span
                     key="saving-public-sharing"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <Spinner className="size-4" />
+                    <Spinner data-icon="inline-start" />
                     {copy.saving}
                   </span>
                 ) : (
                   <span
                     key="save-public-sharing"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <RiSave3Line className="size-4" />
+                    <RiSave3Line data-icon="inline-start" />
                     {copy.save}
                   </span>
                 )}
@@ -969,7 +972,7 @@ export function SettingsClientPage({
               }}
               disabled={loadingScript || !scriptSnippet}
             >
-              <RiFileCopyLine className="size-4" />
+              <RiFileCopyLine data-icon="inline-start" />
               <span>{copy.copyScript}</span>
             </Button>
           </CardContent>
@@ -1074,21 +1077,21 @@ export function SettingsClientPage({
                 !hasTrackingStrengthChanges
               }
             >
-              <AutoTransition className="inline-flex items-center gap-2">
+              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                 {savingTrackingStrength ? (
                   <span
                     key="saving-strength"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <Spinner className="size-4" />
+                    <Spinner data-icon="inline-start" />
                     {copy.savingTracking}
                   </span>
                 ) : (
                   <span
                     key="save-strength"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <RiSave3Line className="size-4" />
+                    <RiSave3Line data-icon="inline-start" />
                     {copy.saveTracking}
                   </span>
                 )}
@@ -1202,21 +1205,21 @@ export function SettingsClientPage({
                 !hasQueryHashChanges
               }
             >
-              <AutoTransition className="inline-flex items-center gap-2">
+              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                 {savingQueryHash ? (
                   <span
                     key="saving-query-hash"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <Spinner className="size-4" />
+                    <Spinner data-icon="inline-start" />
                     {copy.savingTracking}
                   </span>
                 ) : (
                   <span
                     key="save-query-hash"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <RiSave3Line className="size-4" />
+                    <RiSave3Line data-icon="inline-start" />
                     {copy.saveTracking}
                   </span>
                 )}
@@ -1281,21 +1284,21 @@ export function SettingsClientPage({
                 !hasAutoTrackingChanges
               }
             >
-              <AutoTransition className="inline-flex items-center gap-2">
+              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                 {savingAutoTracking ? (
                   <span
                     key="saving-auto-tracking"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <Spinner className="size-4" />
+                    <Spinner data-icon="inline-start" />
                     {copy.savingTracking}
                   </span>
                 ) : (
                   <span
                     key="save-auto-tracking"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <RiSave3Line className="size-4" />
+                    <RiSave3Line data-icon="inline-start" />
                     {copy.saveTracking}
                   </span>
                 )}
@@ -1365,21 +1368,21 @@ export function SettingsClientPage({
                 !hasPerformanceTrackingChanges
               }
             >
-              <AutoTransition className="inline-flex items-center gap-2">
+              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                 {savingPerformanceTracking ? (
                   <span
                     key="saving-performance"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <Spinner className="size-4" />
+                    <Spinner data-icon="inline-start" />
                     {copy.savingTracking}
                   </span>
                 ) : (
                   <span
                     key="save-performance"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <RiSave3Line className="size-4" />
+                    <RiSave3Line data-icon="inline-start" />
                     {copy.saveTracking}
                   </span>
                 )}
@@ -1489,21 +1492,21 @@ export function SettingsClientPage({
                 !hasBotProtectionChanges
               }
             >
-              <AutoTransition className="inline-flex items-center gap-2">
+              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                 {savingBotProtection ? (
                   <span
                     key="saving-bot-protection"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <Spinner className="size-4" />
+                    <Spinner data-icon="inline-start" />
                     {copy.savingTracking}
                   </span>
                 ) : (
                   <span
                     key="save-bot-protection"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <RiSave3Line className="size-4" />
+                    <RiSave3Line data-icon="inline-start" />
                     {copy.saveTracking}
                   </span>
                 )}
@@ -1573,21 +1576,21 @@ export function SettingsClientPage({
                 !hasHostingProxyBlockingChanges
               }
             >
-              <AutoTransition className="inline-flex items-center gap-2">
+              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                 {savingHostingProxyBlocking ? (
                   <span
                     key="saving-hosting-proxy-blocking"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <Spinner className="size-4" />
+                    <Spinner data-icon="inline-start" />
                     {copy.savingTracking}
                   </span>
                 ) : (
                   <span
                     key="save-hosting-proxy-blocking"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
                   >
-                    <RiSave3Line className="size-4" />
+                    <RiSave3Line data-icon="inline-start" />
                     {copy.saveTracking}
                   </span>
                 )}
@@ -1654,21 +1657,21 @@ export function SettingsClientPage({
                   transferTeamId === activeTeamId
                 }
               >
-                <AutoTransition className="inline-flex items-center gap-2">
+                <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                   {transferring ? (
                     <span
                       key="transferring"
-                      className="inline-flex items-center gap-2"
+                      className="inline-flex items-center gap-[var(--button-content-gap)]"
                     >
-                      <Spinner className="size-4" />
+                      <Spinner data-icon="inline-start" />
                       {copy.transferring}
                     </span>
                   ) : (
                     <span
                       key="transfer"
-                      className="inline-flex items-center gap-2"
+                      className="inline-flex items-center gap-[var(--button-content-gap)]"
                     >
-                      <RiArrowRightLine className="size-4" />
+                      <RiArrowRightLine data-icon="inline-start" />
                       {copy.transfer}
                     </span>
                   )}
@@ -1702,21 +1705,21 @@ export function SettingsClientPage({
                     saving || trackingSaving || transferring || deleting
                   }
                 >
-                  <AutoTransition className="inline-flex items-center gap-2">
+                  <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                     {deleting ? (
                       <span
                         key="deleting"
-                        className="inline-flex items-center gap-2"
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
                       >
-                        <Spinner className="size-4" />
+                        <Spinner data-icon="inline-start" />
                         {copy.deleting}
                       </span>
                     ) : (
                       <span
                         key="delete"
-                        className="inline-flex items-center gap-2"
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
                       >
-                        <RiDeleteBinLine className="size-4" />
+                        <RiDeleteBinLine data-icon="inline-start" />
                         {copy.delete}
                       </span>
                     )}

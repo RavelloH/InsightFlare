@@ -511,20 +511,20 @@ export function FilterEditor({
         </AutoResizer>
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
           <Button type="button" variant="ghost" onClick={clear}>
-            <RiFilterOffLine />
+            <RiFilterOffLine data-icon="inline-start" />
             {messages.filters.clear}
           </Button>
           <div className="flex flex-wrap items-center justify-end gap-2">
             {footerActions ??
               (onCancel ? (
                 <Button type="button" variant="outline" onClick={onCancel}>
-                  <RiCloseLine />
+                  <RiCloseLine data-icon="inline-start" />
                   {cancelLabel}
                 </Button>
               ) : null)}
             {!footerActions ? (
               <Button type="button" onClick={apply}>
-                <RiCheckLine />
+                <RiCheckLine data-icon="inline-start" />
                 {applyLabel}
               </Button>
             ) : null}

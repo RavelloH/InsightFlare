@@ -7,13 +7,13 @@ import {
 } from "@insightflare/ui/chart";
 import { Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis } from "recharts";
 
+import { cn } from "../utils/cn";
 import {
   numberFormat,
   percentFormat,
   percentFormatWithOneDecimal,
-} from "@/lib/dashboard/format";
-import type { Locale } from "@/lib/i18n/config";
-import { cn } from "@/lib/utils";
+} from "./chart-format";
+import type { ChartLocale as Locale } from "./types";
 
 export interface StackedBreakdownBarSeries {
   key: string;

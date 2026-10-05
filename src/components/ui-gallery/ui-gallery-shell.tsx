@@ -27,7 +27,6 @@ import {
   type RemixiconComponentType,
   RiAlarmWarningLine,
   RiArrowDownSLine,
-  RiArrowLeftLine,
   RiBankCardLine,
   RiBarChart2Line,
   RiCalendarLine,
@@ -39,6 +38,7 @@ import {
   RiExpandDiagonalLine,
   RiFileList3Line,
   RiFlowChart,
+  RiGlobalLine,
   RiHashtag,
   RiInputMethodLine,
   RiLayoutColumnLine,
@@ -120,7 +120,17 @@ const uiEntryIcons: Record<string, RemixiconComponentType> = {
   funnel: RiFlowChart,
   "realtime-traffic-trend": RiPulseLine,
   sharing: RiPieChart2Line,
+  "donut-chart": RiPieChart2Line,
+  "traffic-pair-bar-chart": RiBarChart2Line,
+  "analytics-data-table": RiTableLine,
+  "analytics-table-column-settings": RiLayoutColumnLine,
+  "detail-drawer": RiSideBarLine,
+  "site-scope-selector": RiGlobalLine,
+  "analytics-tooltip": RiQuestionLine,
   "tabbed-table": RiTableLine,
+  "clickable-table-cell": RiCursorLine,
+  "data-table-switch": RiTableLine,
+  "table-action-button": RiMore2Line,
 };
 const uiGalleryCategories = listUiGalleryCategories();
 
@@ -174,11 +184,13 @@ export function UiGalleryShell() {
         <Sidebar variant="inset" collapsible="icon">
           <SidebarHeader>
             <AppSidebarBrand
-              href={"/" + locale + "/ui"}
+              href="https://github.com/RavelloH/InsightFlare"
+              target="_blank"
+              rel="noopener noreferrer"
               appName="InsightFlare"
               suffix="UI"
             />
-            <label className="group-data-[collapsible=icon]:hidden relative block px-2 pb-2">
+            <label className="group-data-[collapsible=icon]:hidden relative block w-full pb-2">
               <SidebarInput
                 aria-label={galleryMessages.searchLabel}
                 placeholder={galleryMessages.searchPlaceholder}
@@ -191,14 +203,6 @@ export function UiGalleryShell() {
             <SidebarGroup>
               <SidebarGroupContent>
                 <SidebarMenu className="mb-2">
-                  <SidebarMenuItem>
-                    <SidebarMenuButton asChild>
-                      <Link href={"/" + locale + "/app"}>
-                        <RiArrowLeftLine />
-                        <span>{galleryMessages.backToApp}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
                   <SidebarMenuItem>
                     <SidebarMenuButton asChild isActive={!currentEntry}>
                       <Link href={"/" + locale + "/ui"}>

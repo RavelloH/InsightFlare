@@ -171,7 +171,7 @@ export function ResetPasswordLinkForm({
             </div>
             <Button asChild variant="outline" className="w-full">
               <Link href={`/${locale}/login`}>
-                <RiLoginBoxLine className="size-4" />
+                <RiLoginBoxLine data-icon="inline-start" />
                 {copy.signIn}
               </Link>
             </Button>
@@ -234,17 +234,17 @@ export function ResetPasswordLinkForm({
             </div>
             <Button type="submit" className="w-full" disabled={submitting}>
               <AutoTransition
-                className="inline-flex items-center gap-2"
+                className="inline-flex items-center gap-[var(--button-content-gap)]"
                 transitionKey={submitting ? "submitting" : "idle"}
               >
                 {submitting ? (
-                  <span className="inline-flex items-center gap-2">
-                    <Spinner className="size-4" />
+                  <span className="inline-flex items-center gap-[var(--button-content-gap)]">
+                    <Spinner data-icon="inline-start" />
                     {copy.resetting}
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-2">
-                    <RiSave3Line className="size-4" />
+                  <span className="inline-flex items-center gap-[var(--button-content-gap)]">
+                    <RiSave3Line data-icon="inline-start" />
                     {copy.reset}
                   </span>
                 )}

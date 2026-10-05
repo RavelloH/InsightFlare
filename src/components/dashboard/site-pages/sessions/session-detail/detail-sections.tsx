@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
 } from "react";
+import { useInfiniteTableSentinel } from "@insightflare/product-ui/tables";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
@@ -29,7 +30,6 @@ import {
   type AsyncDimensionBreakdownLoader,
   type AsyncDimensionBreakdownRow,
 } from "@/components/dashboard/common/async-dimension-breakdown-card";
-import { useInfiniteTableSentinel } from "@/components/dashboard/common/use-infinite-table-sentinel";
 import { LazyGeoCityBreadcrumbLabel } from "@/components/dashboard/geo/lazy-geo-location-label";
 import {
   BrowserMeta,

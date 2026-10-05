@@ -1,4 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDetailDrawerClose } from "@insightflare/product-ui/detail-drawer";
+import {
+  AnalyticsTableColumnSettings,
+  useAnalyticsTableColumns,
+} from "@insightflare/product-ui/tables";
+import { useInfiniteTableSentinel } from "@insightflare/product-ui/tables";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
@@ -19,15 +25,10 @@ import {
 import { useQuery } from "@tanstack/react-query";
 
 import {
-  AnalyticsTableColumnSettings,
-  useAnalyticsTableColumns,
-} from "@/components/dashboard/common/analytics-table-column-settings";
-import {
   AsyncDimensionBreakdownCard,
   type AsyncDimensionBreakdownLoader,
   type AsyncDimensionBreakdownRow,
 } from "@/components/dashboard/common/async-dimension-breakdown-card";
-import { useInfiniteTableSentinel } from "@/components/dashboard/common/use-infinite-table-sentinel";
 import {
   BrowserMeta,
   DeviceMeta,
@@ -46,7 +47,6 @@ import {
   SessionsTableCard,
   type SessionsTableLabels,
 } from "@/components/dashboard/sessions/sessions-table-card";
-import { useDetailDrawerClose } from "@/components/dashboard/site-pages/common/detail-drawer";
 import { EventDetailDrawer } from "@/components/dashboard/site-pages/events/event-detail-drawer";
 import { OverviewPagesSection } from "@/components/dashboard/site-pages/overview/pages-section";
 import { type OverviewPagesSectionCardData } from "@/components/dashboard/site-pages/overview/types";

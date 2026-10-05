@@ -10,11 +10,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
+import { DataTableSwitch } from "@insightflare/ui/data-table-switch";
 import { Spinner } from "@insightflare/ui/spinner";
 import { TableCell, TableHead, TableRow } from "@insightflare/ui/table";
 import { RiAlarmWarningLine, RiCpuLine, RiRefreshLine } from "@remixicon/react";
 
-import { DataTableSwitch } from "@/components/dashboard/common/data-table-switch";
 import { shortDateTime } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -102,11 +102,10 @@ export function DoDiagnosticPanel({
                 <Button
                   type="button"
                   variant="outline"
-                  className="gap-2"
                   disabled={loading}
                   onClick={onRun}
                 >
-                  <RiRefreshLine className="size-4" />
+                  <RiRefreshLine data-icon="inline-start" />
                   {t.doDiagnosticRun}
                 </Button>
               </div>
