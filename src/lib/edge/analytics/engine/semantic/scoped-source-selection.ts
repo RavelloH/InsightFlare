@@ -25,6 +25,7 @@ import type { FilterScope } from "@/lib/filter-contract/scope-preference";
 export type SemanticScopedSourceProfile =
   | "prepared-scoped-v1"
   | "prepared-page-reader-window-v1"
+  | "prepared-scoped-reader-window-v1"
   | "direct-event-records-v1"
   | "direct-event-analytics-v1"
   | "direct-page-analytics-v1"
@@ -256,7 +257,8 @@ export function createSemanticScopedSourceSelection(
 
   if (
     input.profile === "prepared-scoped-v1" ||
-    input.profile === "prepared-page-reader-window-v1"
+    input.profile === "prepared-page-reader-window-v1" ||
+    input.profile === "prepared-scoped-reader-window-v1"
   ) {
     if (
       !metadata ||
@@ -270,12 +272,19 @@ export function createSemanticScopedSourceSelection(
     if (input.profile === "prepared-scoped-v1") {
       if (!sameJsonValue(resolvedTime, time))
         return fail("prepared_time_mismatch");
-    } else {
+    } else if (input.profile === "prepared-page-reader-window-v1") {
       if (
         input.eventName !== undefined ||
         input.eventNameInputSemantics !== undefined
       )
         return fail("page_reader_window_event_name_unsupported");
+      preparationTime = resolvedTime;
+    } else {
+      if (
+        input.eventName !== undefined ||
+        input.eventNameInputSemantics !== undefined
+      )
+        return fail("prepared_scoped_reader_window_event_name_unsupported");
       preparationTime = resolvedTime;
     }
     authorizedSiteIds = canonicalSiteIds(metadata.siteIds);
@@ -427,6 +436,7 @@ export function validateSemanticScopedSourceSelection(
     ![
       "prepared-scoped-v1",
       "prepared-page-reader-window-v1",
+      "prepared-scoped-reader-window-v1",
       "direct-event-records-v1",
       "direct-event-analytics-v1",
       "direct-page-analytics-v1",
@@ -473,7 +483,10 @@ export function validateSemanticScopedSourceSelection(
     )
       fail("prepared_advanced_matches_missing");
   }
-  if (selection.profile === "prepared-page-reader-window-v1") {
+  if (
+    selection.profile === "prepared-page-reader-window-v1" ||
+    selection.profile === "prepared-scoped-reader-window-v1"
+  ) {
     if (!selection.preparationTime) fail("prepared_time_snapshot_missing");
     let normalizedPreparationTime: SemanticTemporalDomains;
     try {
@@ -497,7 +510,11 @@ export function validateSemanticScopedSourceSelection(
     )
       fail("prepared_advanced_matches_missing");
     if (selection.eventNameGate !== undefined)
-      fail("page_reader_window_event_name_unsupported");
+      fail(
+        selection.profile === "prepared-page-reader-window-v1"
+          ? "page_reader_window_event_name_unsupported"
+          : "prepared_scoped_reader_window_event_name_unsupported",
+      );
   } else if (
     Object.prototype.hasOwnProperty.call(selection, "preparationTime")
   ) {
@@ -550,7 +567,8 @@ export function validateSemanticScopedSourceSelection(
       fail("invalid_event_name_gate_value");
     if (
       selection.profile === "prepared-scoped-v1" ||
-      selection.profile === "prepared-page-reader-window-v1"
+      selection.profile === "prepared-page-reader-window-v1" ||
+      selection.profile === "prepared-scoped-reader-window-v1"
         ? selection.eventNameGate.semantics !== "prepared-trimmed-label-v1" &&
           selection.eventNameGate.semantics !== "prepared-defined-raw-value-v1"
         : selection.eventNameGate.semantics !==

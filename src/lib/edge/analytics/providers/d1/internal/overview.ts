@@ -3,6 +3,7 @@ import {
   scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
 import { buildLatestSiteActivityPlan } from "@/lib/edge/analytics/engine/latest-site-activity-report-plan";
+import { buildOverviewAggregatePlan } from "@/lib/edge/analytics/engine/overview-aggregate-report-plan";
 import { queryAnalyticsReportOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import {
   hasFilterDocument,
@@ -48,69 +49,20 @@ export async function queryOverviewFromD1(
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<OverviewAggregateRow> {
-  const scopedDataset =
-    scopedDatasetFor(siteId, window, filters) ??
-    scopedDatasetForUnpreparedReader(
-      "overview",
-      siteId,
-      window,
-      filters,
-      "session",
-    );
+  const plan = buildOverviewAggregatePlan({
+    siteId,
+    queryTime: queryWindowToTime(window),
+    filters,
+  });
   recordScopedFilterDiagnostics(diagnostics, scopedFilterMetadata(filters));
-  const filter = scopedDataset
-    ? { clause: "", bindings: [] as Array<string | number> }
-    : buildVisitFilterSql(filters, "visit_source", { window });
-  const visitSource = buildVisitSourceCte().replace(
-    "visit_source AS (",
-    "visit_source AS MATERIALIZED (",
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    "overview-aggregate",
+    undefined,
+    diagnostics,
   );
-  const metricSource = scopedDataset
-    ? scopedDataset.visitRelation
-    : "filtered_visits";
-  const entityCounts = scopedDataset
-    ? `
-  (SELECT count(*) FROM ${scopedDataset.sessionRelation}) AS sessions,
-  (SELECT count(*) FROM ${scopedDataset.visitorRelation}) AS visitors,`
-    : `
-  count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors,`;
-  const sourceSql = scopedDataset
-    ? `${scopedDataset.ctes},`
-    : `${visitSource},
-filtered_visits AS MATERIALIZED (
-  SELECT *
-  FROM visit_source
-  ${filter.clause}
-),`;
-  const sql = `
-WITH
-${sourceSql}
-session_rollup AS (
-  SELECT vs.session_id, count(*) AS visit_count
-  FROM ${metricSource} vs
-  WHERE vs.session_id != ''
-  GROUP BY vs.session_id
-)
-SELECT
-  count(*) AS views,
-${entityCounts}
-  COALESCE((SELECT count(*) FROM session_rollup WHERE visit_count = 1), 0) AS bounces,
-  COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0) AS totalDuration,
-  COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0) AS durationViews
-FROM ${metricSource}
-`;
-  const row =
-    (
-      await queryD1All<Record<string, unknown>>(
-        env,
-        sql,
-        scopedDataset
-          ? scopedDataset.bindings.map((binding) => binding.value)
-          : [...visitSourceBindings(siteId, window), ...filter.bindings],
-        diagnostics,
-      )
-    )[0] ?? {};
+  const row = rows[0] ?? {};
   return {
     views: Number(row.views ?? 0),
     sessions: Number(row.sessions ?? 0),

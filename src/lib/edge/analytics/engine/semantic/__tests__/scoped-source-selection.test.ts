@@ -360,6 +360,97 @@ describe("semantic scoped source selection", () => {
     );
   });
 
+  it("preserves prepared proof for the scoped Page/Event reader window only", () => {
+    const prepared = preparedSelectionInput("event");
+    const readerTime = createQueryTime(100, 200, "UTC", 200);
+    const readerDomains = semanticTemporalDomainsFromQueryTime(readerTime);
+    const readerSelection = createSemanticScopedSourceSelection({
+      profile: "prepared-scoped-reader-window-v1",
+      filters: prepared.filters,
+      subject: SUBJECT,
+      time: readerDomains,
+      expectedPlan: prepared.plan,
+    });
+
+    expect(readerSelection).toMatchObject({
+      profile: "prepared-scoped-reader-window-v1",
+      scope: "event",
+      mode: "observation",
+      time: readerDomains,
+      preparationTime: TIME,
+    });
+    expect(Object.isFrozen(readerSelection.preparationTime)).toBe(true);
+    const context = {
+      subject: SUBJECT,
+      time: readerDomains,
+      scope: resolveAnalyticsScope("event"),
+      originOperation: "event-records" as const,
+    };
+    validateSemanticScopedSourceSelection(readerSelection, context);
+    expect(
+      snapshotSemanticScopedSourceSelection(readerSelection, context)
+        .preparationTime,
+    ).toEqual(TIME);
+
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "prepared-scoped-reader-window-v1",
+        filters: prepared.filters,
+        subject: SUBJECT,
+        time: readerDomains,
+        expectedPlan: prepared.plan,
+        eventName: "purchase",
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:prepared_scoped_reader_window_event_name_unsupported",
+    );
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "prepared-scoped-reader-window-v1",
+        filters: prepared.filters,
+        subject: SUBJECT,
+        time: readerDomains,
+        expectedPlan: prepared.plan,
+        eventNameInputSemantics: "legacy-truthy-raw",
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:prepared_scoped_reader_window_event_name_unsupported",
+    );
+    expect(() =>
+      validateSemanticScopedSourceSelection(
+        { ...readerSelection, preparationTime: undefined },
+        { subject: SUBJECT, time: readerDomains },
+      ),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:prepared_time_snapshot_missing",
+    );
+    expect(() =>
+      validateSemanticScopedSourceSelection(
+        {
+          ...readerSelection,
+          preparationTime: {
+            ...readerSelection.preparationTime!,
+            candidate: {
+              startMs: 200 as never,
+              endExclusiveMs: 100 as never,
+            },
+          },
+        },
+        { subject: SUBJECT, time: readerDomains },
+      ),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:preparation_time_snapshot_invalid",
+    );
+    expect(() =>
+      validateSemanticScopedSourceSelection(
+        { ...readerSelection, profile: "prepared-scoped-v1" },
+        { subject: SUBJECT, time: readerDomains },
+      ),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:unexpected_preparation_time",
+    );
+  });
+
   it("validates and snapshots direct and prepared descriptors", () => {
     const direct = directSelection();
     const context = { subject: SUBJECT, time: TIME };

@@ -1191,6 +1191,7 @@ function validateNode(
           (node.entity === "page" &&
             node.selection.profile !== "prepared-scoped-v1" &&
             node.selection.profile !== "prepared-page-reader-window-v1" &&
+            node.selection.profile !== "prepared-scoped-reader-window-v1" &&
             node.selection.profile !== "direct-page-analytics-v1" &&
             node.selection.profile !== "direct-page-session-compat-v1") ||
           (node.entity === "event" &&
@@ -1205,7 +1206,8 @@ function validateNode(
         if (
           node.entity === "page" &&
           (node.selection.profile === "prepared-scoped-v1" ||
-            node.selection.profile === "prepared-page-reader-window-v1") &&
+            node.selection.profile === "prepared-page-reader-window-v1" ||
+            node.selection.profile === "prepared-scoped-reader-window-v1") &&
           node.selection.eventNameGate !== undefined
         )
           fail(

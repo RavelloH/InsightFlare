@@ -10,6 +10,7 @@ import {
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
+import type { SemanticRelationshipId } from "@/lib/edge/analytics/engine/semantic/relationships";
 import {
   createSemanticScopedSourceSelection,
   type SemanticScopedSourceSelection,
@@ -65,8 +66,9 @@ export function createPageReportSource(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
-  readonly preparedTimePolicy?: "reader-window-v1";
+  readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly sourceSelection?: SemanticScopedSourceSelection;
+  readonly relationships?: readonly SemanticRelationshipId[];
   readonly attributes: readonly string[];
 }) {
   return createPageReportSourceForDomain(
@@ -88,8 +90,9 @@ export function createPageReportSourceForSubject(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
-  readonly preparedTimePolicy?: "reader-window-v1";
+  readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly sourceSelection?: SemanticScopedSourceSelection;
+  readonly relationships?: readonly SemanticRelationshipId[];
   readonly attributes: readonly string[];
 }) {
   const subject = createSemanticSubjectDomain({
@@ -105,8 +108,10 @@ function createPageReportSourceForDomain(
     readonly queryTime: QueryTime;
     readonly filters: FilterDocument;
     readonly scopePlan?: ScopedFilterPlan;
-    readonly preparedTimePolicy?: "reader-window-v1";
+    readonly preparedTimePolicy?:
+      "reader-window-v1" | "scoped-reader-window-v1";
     readonly sourceSelection?: SemanticScopedSourceSelection;
+    readonly relationships?: readonly SemanticRelationshipId[];
     readonly attributes: readonly string[];
   },
   subject: ReturnType<typeof createSemanticSubjectDomain>,
@@ -126,7 +131,9 @@ function createPageReportSourceForDomain(
       profile: input.scopePlan
         ? input.preparedTimePolicy === "reader-window-v1"
           ? "prepared-page-reader-window-v1"
-          : "prepared-scoped-v1"
+          : input.preparedTimePolicy === "scoped-reader-window-v1"
+            ? "prepared-scoped-reader-window-v1"
+            : "prepared-scoped-v1"
         : "direct-page-analytics-v1",
       filters: input.filters,
       subject,
@@ -169,9 +176,10 @@ function createPageReportSourceForDomain(
   const pages = builder.source("page", {
     temporalDomain: "candidate",
     attributes: input.attributes,
+    ...(input.relationships ? { relationships: input.relationships } : {}),
     selection,
   });
-  return { builder, pages };
+  return { builder, pages, selection };
 }
 
 function pageAttribute(

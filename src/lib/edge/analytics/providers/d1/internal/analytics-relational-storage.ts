@@ -615,7 +615,7 @@ export class AnalyticsRelationalStorage {
         );
       this.#requireRelationships(
         relationships,
-        ["page.observation", "page.session"],
+        ["page.observation", "page.session", "page.visitor"],
         path,
       );
       activity = "page";
@@ -633,7 +633,11 @@ export class AnalyticsRelationalStorage {
         throw new Error(
           `${path}.values: An Event source cannot bind Page fields.`,
         );
-      this.#requireRelationships(relationships, ["event.observation"], path);
+      this.#requireRelationships(
+        relationships,
+        ["event.observation", "event.session", "event.visitor"],
+        path,
+      );
       activity = "event";
       if (
         declaredEventReportAttributes.length > 0 &&
@@ -879,6 +883,21 @@ export class AnalyticsRelationalStorage {
               ),
             );
             break;
+          case "page.visitor":
+            if (node.entity !== "page")
+              throw new Error(
+                `${path}.values: page.visitor is only valid on Page.`,
+              );
+            values.set(
+              binding.slot,
+              this.#visitorValue(
+                carrier,
+                "site_pk",
+                "visitor_id",
+                node.temporalDomain,
+              ),
+            );
+            break;
           case "event.observation":
             if (node.entity !== "event")
               throw new Error(
@@ -896,6 +915,36 @@ export class AnalyticsRelationalStorage {
               nullable: false,
               candidateBounded: node.temporalDomain === "candidate",
             });
+            break;
+          case "event.session":
+            if (node.entity !== "event")
+              throw new Error(
+                `${path}.values: event.session is only valid on Event.`,
+              );
+            values.set(
+              binding.slot,
+              this.#sessionValue(
+                carrier,
+                "owner_session_id",
+                "site_pk",
+                node.temporalDomain,
+              ),
+            );
+            break;
+          case "event.visitor":
+            if (node.entity !== "event")
+              throw new Error(
+                `${path}.values: event.visitor is only valid on Event.`,
+              );
+            values.set(
+              binding.slot,
+              this.#visitorValue(
+                carrier,
+                "site_pk",
+                "owner_visitor_id",
+                node.temporalDomain,
+              ),
+            );
             break;
           case "observation.session":
             if (node.entity !== "observation")

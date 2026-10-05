@@ -76,6 +76,14 @@ function relationColumn(
   return value;
 }
 
+function nonemptyIdentity(value: AnyExpression): Predicate {
+  const text = value as SqlExpression<
+    string | null,
+    ExpressionResultType<"text", boolean>
+  >;
+  return and(isNotNull(text), neq(text, param("")));
+}
+
 const rowLocalDerivedStrategies = new Set([
   "derived.trafficChannel",
   "derived.browserEngine",
@@ -1326,6 +1334,24 @@ function remapPageSourceValues(
       remapped.set(binding.slot, { ...value, value: expression });
       continue;
     }
+    if (
+      binding.kind === "related-entity" &&
+      value.kind === "entity" &&
+      ((binding.relationship === "page.session" &&
+        value.entity === "session") ||
+        (binding.relationship === "page.visitor" && value.entity === "visitor"))
+    ) {
+      const idColumn =
+        binding.relationship === "page.session"
+          ? relationColumn(relation, "visit_session_id")
+          : relationColumn(relation, "visit_visitor_id");
+      remapped.set(binding.slot, {
+        ...value,
+        keys: [relationColumn(relation, "site_pk"), idColumn],
+        present: nonemptyIdentity(idColumn),
+      });
+      continue;
+    }
     throw new Error(
       `Scoped Page source cannot remap the ${binding.kind} binding for ${String(binding.slot)}.`,
     );
@@ -1365,6 +1391,27 @@ function remapEventSourceValues(
       remapped.set(binding.slot, {
         ...value,
         ...(expression ? { value: expression } : {}),
+      });
+      continue;
+    }
+    if (
+      binding.kind === "related-entity" &&
+      value.kind === "entity" &&
+      ((binding.relationship === "event.session" &&
+        value.entity === "session") ||
+        (binding.relationship === "event.visitor" &&
+          value.entity === "visitor"))
+    ) {
+      const idColumn = relationColumn(
+        relation,
+        binding.relationship === "event.session"
+          ? "owner_session_id"
+          : "owner_visitor_id",
+      );
+      remapped.set(binding.slot, {
+        ...value,
+        keys: [relationColumn(relation, "site_pk"), idColumn],
+        present: nonemptyIdentity(idColumn),
       });
       continue;
     }
@@ -1440,7 +1487,8 @@ export class AnalyticsLegacyScopedStorage {
       selection.profile !== "direct-page-analytics-v1" &&
       selection.profile !== "direct-page-session-compat-v1" &&
       selection.profile !== "prepared-scoped-v1" &&
-      selection.profile !== "prepared-page-reader-window-v1"
+      selection.profile !== "prepared-page-reader-window-v1" &&
+      selection.profile !== "prepared-scoped-reader-window-v1"
     )
       throw new Error(`${path}.selection: Invalid Page source profile.`);
     if (selection.eventNameGate)
