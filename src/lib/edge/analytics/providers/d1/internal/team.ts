@@ -17,6 +17,7 @@ import {
 } from "@/lib/db";
 import type { TeamDashboardData } from "@/lib/edge/analytics/contract";
 import {
+  attachScopedFilterMetadata,
   EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
   scopedFilterMetadata,
@@ -106,11 +107,21 @@ function createTeamRawDashboardPlan(
   const metadata = effective ? scopedFilterMetadata(filters) : undefined;
   if (effective && !metadata)
     throw new Error("team_dashboard_scoped_dataset_metadata_required");
+  const effectiveFilters =
+    effective && metadata && metadata.siteIds.length === 0
+      ? attachScopedFilterMetadata(filters!, {
+          ...metadata,
+          // Admin and team-owner contexts represent access to every site in
+          // this already authorized team chunk. Give the prepared filter
+          // snapshot the concrete subject IDs used by this query.
+          siteIds,
+        })
+      : filters;
   return buildTeamRawDashboardReportPlan({
     teamId,
     siteIds,
     queryTime: queryWindowToTime(window),
-    filters: effective ? filters! : EMPTY_FILTER_DOCUMENT,
+    filters: effective ? effectiveFilters! : EMPTY_FILTER_DOCUMENT,
     ...(metadata ? { scopePlan: metadata.plan } : {}),
     interval,
     outputs,
@@ -532,10 +543,9 @@ export async function queryTeamDashboardForTeam(
   const allSites = preloadedSites
     ? [...preloadedSites]
     : await listTeamSites(env, teamId, diagnostics);
-  const allowed =
-    allowedSiteIds && allowedSiteIds.length > 0
-      ? new Set(allowedSiteIds)
-      : null;
+  // `undefined` means an owner/admin may read all team sites. An explicit
+  // empty list means the member has access to none of them.
+  const allowed = allowedSiteIds === undefined ? null : new Set(allowedSiteIds);
   const sites = allowed
     ? allSites.filter((site) => allowed.has(site.id))
     : allSites;

@@ -275,8 +275,10 @@ describe("edge team query low branch coverage", () => {
       },
     });
     expect(calls).toHaveLength(7);
-    expect(calls[6].sql).toContain(
-      `started_at >= ${FROM} AND started_at < ${FROM + 24 * 60 * 60 * 1000}`,
-    );
+    const dayEnd = FROM + 24 * 60 * 60 * 1000;
+    expect(calls[6].sql).toContain(String(FROM));
+    expect(calls[6].sql).toContain(String(dayEnd));
+    expect(calls[6].bindings).toContain(FROM);
+    expect(calls[6].bindings).toContain(TO);
   });
 });

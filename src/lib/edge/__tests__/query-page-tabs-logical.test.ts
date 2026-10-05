@@ -862,27 +862,27 @@ describe("Logical Page tabs report", () => {
       expect(budgets).toEqual([
         {
           name: "plain",
-          sqlBytes: 11485,
+          sqlBytes: 5988,
           bindings: 15,
           statements: 1,
           sha256:
-            "12c3071f71b718b1e2d816b9519fca564d03c0c98d268f8e372b3b68d28c5e51",
+            "0158e7b061729252b6aaeef524ab2d8aff20ae86afbae1ad565315a2b051cac1",
         },
         {
           name: "prepared-session-128",
-          sqlBytes: 13254,
+          sqlBytes: 7169,
           bindings: 17,
           statements: 1,
           sha256:
-            "8ddc56d39a332251bdc181a9f74121d7f2c38ed11b3d1eeccf1ca00316608c44",
+            "c9aa6cca9e72ae4317d6df9f1800abab1817321771de495e50dfcb7dffba922d",
         },
         {
           name: "event-payload-40",
-          sqlBytes: 80453,
-          bindings: 69,
+          sqlBytes: 63822,
+          bindings: 60,
           statements: 1,
           sha256:
-            "5e206fbee2b2149a2839be88cdc009658976e05131a18090475cff25fd709861",
+            "ae62e355699b742b7703107235cc71732e8857a821fc8cbd225087cf565753d6",
         },
       ]);
     } finally {

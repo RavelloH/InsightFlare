@@ -380,6 +380,37 @@ function sessionRow(overrides: Record<string, unknown> = {}) {
 }
 function commonQueryMatches(): SqlMatch[] {
   return [
+    {
+      match: (sql) =>
+        sql.includes('AS "rowType"') &&
+        sql.includes('AS "browser"') &&
+        sql.includes('AS "dimension"') &&
+        sql.includes('AS "rowOrder"'),
+      all: [
+        {
+          rowType: "browser",
+          browser: "Chrome",
+          views: 10,
+          visitors: 6,
+          sessions: 5,
+        },
+        {
+          rowType: "dimension",
+          dimension: "Windows",
+          views: 8,
+          visitors: 5,
+          sessions: 4,
+        },
+        {
+          rowType: "pair",
+          browser: "Chrome",
+          dimension: "Windows",
+          views: 8,
+          visitors: 5,
+          sessions: 4,
+        },
+      ],
+    },
     allMatch(
       ['AS "cohortBucket"', 'AS "visitBucket"', 'AS "visitors"'],
       [
@@ -1082,33 +1113,6 @@ function commonQueryMatches(): SqlMatch[] {
       ],
     ),
     allMatch(
-      ["top_browser_rows AS", "tagged_rows AS", "'browser' AS rowType"],
-      [
-        {
-          rowType: "browser",
-          browser: "Chrome",
-          views: 10,
-          visitors: 6,
-          sessions: 5,
-        },
-        {
-          rowType: "dimension",
-          dimension: "Windows",
-          views: 8,
-          visitors: 5,
-          sessions: 4,
-        },
-        {
-          rowType: "pair",
-          browser: "Chrome",
-          dimension: "Windows",
-          views: 8,
-          visitors: 5,
-          sessions: 4,
-        },
-      ],
-    ),
-    allMatch(
       [
         "SELECT",
         "browser,",
@@ -1246,56 +1250,56 @@ function commonQueryMatches(): SqlMatch[] {
       ["GROUP BY pathname, bucket"],
       [{ pathname: "/pricing", bucket: 0, views: 5, visitors: 4 }],
     ),
-    allMatch(
-      [
-        "metric_visits AS MATERIALIZED",
-        "tagged_rows AS",
-        "'summary' AS rowType",
-      ],
-      [
+    {
+      match: (sql, bindings) =>
+        sql.includes('"perf_lcp_ms"') &&
+        bindings.includes("summary") &&
+        bindings.includes("ttfb") &&
+        bindings.includes("country"),
+      all: [
         {
           rowType: "summary",
           metric: "lcp",
-          avgValue: 123.4567,
-          p50: 100,
-          p75: 140,
-          p95: 200,
-          samples: 8,
+          lcpAvgValue: 123.4567,
+          lcpP50: 100,
+          lcpP75: 140,
+          lcpP95: 200,
+          lcpSamples: 8,
         },
         {
           rowType: "trend",
           metric: "ttfb",
           bucket: 0,
-          avgValue: 50,
-          p50: 40,
-          p75: 60,
-          p95: 90,
-          samples: 4,
+          ttfbAvgValue: 50,
+          ttfbP50: 40,
+          ttfbP75: 60,
+          ttfbP95: 90,
+          ttfbSamples: 4,
         },
         {
           rowType: "route",
           pathname: "/pricing",
           metric: "lcp",
           views: 6,
-          avgValue: 100,
-          p50: 90,
-          p75: 120,
-          p95: 180,
-          samples: 5,
+          lcpAvgValue: 100,
+          lcpP50: 90,
+          lcpP75: 120,
+          lcpP95: 180,
+          lcpSamples: 5,
         },
         {
           rowType: "country",
           country: "us",
           metric: "ttfb",
           views: 6,
-          avgValue: 30,
-          p50: 20,
-          p75: 35,
-          p95: 60,
-          samples: 5,
+          ttfbAvgValue: 30,
+          ttfbP50: 20,
+          ttfbP75: 35,
+          ttfbP95: 60,
+          ttfbSamples: 5,
         },
       ],
-    ),
+    },
     allMatch(
       ["thresholds.pathname AS pathname"],
       [
@@ -2548,10 +2552,15 @@ describe("edge query handlers", () => {
             },
           ],
         ),
-        allMatch(
-          ["session_rollup AS", "FROM combined", "GROUP BY siteId"],
-          [
+        {
+          match: (sql, bindings) =>
+            sql.includes('AS "reportType"') &&
+            bindings.includes("overview") &&
+            bindings.includes(from) &&
+            bindings.includes(to),
+          all: [
             {
+              reportType: "overview",
               siteId: "site-1",
               views: 20,
               sessions: 8,
@@ -2561,11 +2570,44 @@ describe("edge query handlers", () => {
               durationViews: 0,
             },
           ],
-        ),
-        allMatch(
-          ["GROUP BY siteId, bucket"],
-          [{ siteId: "site-1", bucket: 0, views: 5, visitors: 3 }],
-        ),
+        },
+        {
+          match: (sql, bindings) =>
+            sql.includes('AS "reportType"') && bindings.includes("trend"),
+          all: [
+            {
+              reportType: "trend",
+              siteId: "site-1",
+              bucket: 0,
+              views: 5,
+              visitors: 3,
+              sessions: 0,
+              bounces: 0,
+              totalDuration: 0,
+              durationViews: 0,
+            },
+          ],
+        },
+        {
+          match: (sql, bindings) =>
+            sql.includes('AS "reportType"') &&
+            bindings.includes("overview") &&
+            bindings.includes(from) &&
+            bindings.includes(from - (to - from)) &&
+            !bindings.includes(to),
+          all: [
+            {
+              reportType: "overview",
+              siteId: "site-1",
+              views: 10,
+              sessions: 5,
+              visitors: 4,
+              bounces: 1,
+              totalDuration: 5_000,
+              durationViews: 0,
+            },
+          ],
+        },
       ],
     });
 
@@ -2637,10 +2679,45 @@ describe("edge query handlers", () => {
             },
           ],
         ),
-        allMatch(
-          ["FROM scope_final_visits", "GROUP BY siteId"],
-          [
+        {
+          match: (sql, bindings) =>
+            sql.includes('AS "reportType"') &&
+            bindings.includes("overview") &&
+            bindings.includes("trend") &&
+            bindings.includes("/docs"),
+          all: [
             {
+              reportType: "overview",
+              siteId: "site-1",
+              views: 4,
+              sessions: 2,
+              visitors: 2,
+              bounces: 1,
+              totalDuration: 100,
+              durationViews: 2,
+            },
+            {
+              reportType: "trend",
+              siteId: "site-1",
+              bucket: 0,
+              views: 4,
+              visitors: 2,
+              sessions: 0,
+              bounces: 0,
+              totalDuration: 0,
+              durationViews: 0,
+            },
+          ],
+        },
+        {
+          match: (sql, bindings) =>
+            sql.includes('AS "reportType"') &&
+            bindings.includes("overview") &&
+            !bindings.includes("trend") &&
+            bindings.includes("/docs"),
+          all: [
+            {
+              reportType: "overview",
               siteId: "site-1",
               views: 4,
               sessions: 2,
@@ -2650,11 +2727,7 @@ describe("edge query handlers", () => {
               durationViews: 2,
             },
           ],
-        ),
-        allMatch(
-          ["FROM scope_final_visits", "GROUP BY siteId, bucket"],
-          [{ siteId: "site-1", bucket: 0, views: 4, visitors: 2 }],
-        ),
+        },
       ],
     });
 
@@ -2662,7 +2735,6 @@ describe("edge query handlers", () => {
       `/api/private/team-dashboard?teamId=team-1&${windowParams}&filter[page.path]=/docs`,
       env,
     );
-
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       ok: true,
@@ -2672,14 +2744,55 @@ describe("edge query handlers", () => {
       },
     });
     const scopedStatements = statements.filter((statement) =>
-      statement.sql.includes("FROM scope_final_visits"),
+      statement.sql.includes('AS "reportType"'),
     );
-    expect(scopedStatements).toHaveLength(3);
+    expect(scopedStatements).toHaveLength(2);
     expect(
       scopedStatements.every((statement) =>
         statement.bindings.includes("/docs"),
       ),
     ).toBe(true);
+  });
+
+  it("returns no team sites for a member with an explicit empty site allowlist", async () => {
+    requireSessionMock.mockResolvedValueOnce(userSession);
+    const { env, statements } = createEnv({
+      matches: [
+        firstMatch(['"teams"', '"team_members"'], {
+          id: "team-1",
+          ownerUserId: null,
+          role: "member",
+          siteIdsJson: "[]",
+        }),
+        allMatch(
+          ['"sites"', '"team_id"', '"created_at"'],
+          [
+            {
+              id: "site-1",
+              teamId: "team-1",
+              name: "Main",
+              domain: "example.com",
+              publicEnabled: 1,
+              publicSlug: "main",
+              createdAt: 10,
+              updatedAt: 20,
+            },
+          ],
+        ),
+      ],
+    });
+
+    const response = await privateQuery(
+      `/api/private/team-dashboard?teamId=team-1&${windowParams}`,
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      data: { sites: [], trend: [] },
+    });
+    expect(statements).toHaveLength(2);
   });
 
   it("handles public query lookup, public privacy envelope, public-only route restrictions, and missing slugs", async () => {

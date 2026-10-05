@@ -490,26 +490,26 @@ describe("authorized multi-site Analytics report lowering", () => {
     ).toEqual([
       {
         tag: "wave25.analytics_report.page-report",
-        sqlBytes: 16870,
+        sqlBytes: 6323,
         bindings: 7,
         physicalPlanHash:
-          "v1:fd33c4612f53d64594685d2abda58b85dff5a42c7e14bc327e439639ead92a61",
+          "v1:431901ecd4b4fefc78ad5d2c72120ed1bf8c137c50de63706a0a23c3a08e6107",
         statements: 1,
       },
       {
         tag: "wave25.analytics_report.event-report",
-        sqlBytes: 14422,
+        sqlBytes: 5949,
         bindings: 7,
         physicalPlanHash:
-          "v1:3b5c3a43b14735e8061f28bdaee8aa099b511f5fa087a4d8923824800063a3ee",
+          "v1:2f8aa6552bb6e150707a87b2ca3a0dd7b7cdc98f46a18b9f8653f76fe79358a6",
         statements: 1,
       },
       {
         tag: "wave25.analytics_report.observation-report",
-        sqlBytes: 7340,
+        sqlBytes: 3823,
         bindings: 9,
         physicalPlanHash:
-          "v1:b28fddea483606f43f18e4169574dd9a22828d12ba9d8069c43a6d686bd44e42",
+          "v1:61de2d201592fda458f79ac2cddb0af383d349df73ca51b51e79e6b82e884423",
         statements: 1,
       },
     ]);
@@ -609,17 +609,17 @@ describe("authorized multi-site Analytics report lowering", () => {
       }).toEqual(
         siteCount === 90
           ? {
-              sqlBytes: 17131,
+              sqlBytes: 6584,
               bindings: 94,
               physicalPlanHash:
-                "v1:7625afc7077971b54736a529474afcbf02db4a12d9040f56d90892cae5f460c5",
+                "v1:2d5fde37b9522d7a0345bc1e2d03900ca908f7cbd6cf51a202dff6f0af9df6c0",
               statements: 1,
             }
           : {
-              sqlBytes: 17134,
+              sqlBytes: 6587,
               bindings: 95,
               physicalPlanHash:
-                "v1:12439806d6bf3f9fe0e7428b4ea15cfedec355f7b42626e01a69982b66620477",
+                "v1:59fb9e8ad2f6bcf185861c87a8a20a1bdf45565095bafe72ddf77ba61310f641",
               statements: 1,
             },
       );
@@ -641,9 +641,9 @@ describe("authorized multi-site Analytics report lowering", () => {
           window: WINDOW,
         }),
         output: "journey-pageview-detail",
-        bytes: 26679,
+        bytes: 11252,
         bindings: 7,
-        hash: "v1:a028fe9fdafc3b3ff41afa3ccf0d528cc2641e90b83b2b467f9803ea932ffb73",
+        hash: "v1:bfde1227b37718ab2d690d4544ecca1d32bfb118d74cd8dee98073c309e966d6",
       },
       {
         plan: buildEventRecordDetailPlan({
@@ -657,9 +657,9 @@ describe("authorized multi-site Analytics report lowering", () => {
           },
         }),
         output: "event-record-detail",
-        bytes: 28830,
+        bytes: 15793,
         bindings: 7,
-        hash: "v1:ed37fb8f348bff056511dfa8780551fe8f35127b3661e3245a82c7073f9fd179",
+        hash: "v1:fb839d3e3dcd4262ecf1e6bd3eeda80c485d19833724b03f7f47851f3c442bfb",
       },
       {
         plan: buildJourneyObservationPlan({
@@ -669,9 +669,9 @@ describe("authorized multi-site Analytics report lowering", () => {
           window: WINDOW,
         }),
         output: "journey-observation-detail-source",
-        bytes: 25305,
+        bytes: 14042,
         bindings: 21,
-        hash: "v1:223759fd29897411834e31eade5b80b8a81eee9caa24216340acdd39f5a55428",
+        hash: "v1:d7039ee2bcba513f1d402ab10537e594f628670ab5d13af94d9ebbbdbdfc85b7",
       },
     ];
 

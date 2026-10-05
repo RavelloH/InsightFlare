@@ -3715,7 +3715,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         { leafCount: 12, kind: "supported" },
       ]);
       expect(boundaryCosts[0]).toMatchObject({
-        sqlBytes: 49_493,
+        sqlBytes: 27_561,
         bindings: 54,
         cteCount: 12,
         explain: {
@@ -3726,7 +3726,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         },
       });
       expect(boundaryCosts[1]).toMatchObject({
-        sqlBytes: 67_267,
+        sqlBytes: 37_679,
         bindings: 74,
         cteCount: 16,
         explain: {
@@ -3742,7 +3742,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         and: {
           statements: 1,
           bindings: 21,
-          sqlBytes: 20_438,
+          sqlBytes: 10_875,
           explain: {
             visitPrimaryKeyLookups: 1,
           },
@@ -3750,7 +3750,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         or: {
           statements: 1,
           bindings: 17,
-          sqlBytes: 16_009,
+          sqlBytes: 8_337,
           explain: {
             visitPrimaryKeyLookups: 1,
           },
@@ -3758,7 +3758,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         not: {
           statements: 1,
           bindings: 16,
-          sqlBytes: 16_629,
+          sqlBytes: 8_620,
           explain: {
             visitPrimaryKeyLookups: 1,
           },
@@ -3766,7 +3766,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         "nested-and-not": {
           statements: 1,
           bindings: 21,
-          sqlBytes: 20_968,
+          sqlBytes: 11_102,
           explain: {
             visitPrimaryKeyLookups: 1,
           },
@@ -3774,7 +3774,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         "or-set-operation": {
           statements: 1,
           bindings: 21,
-          sqlBytes: 20_791,
+          sqlBytes: 10_991,
           explain: {
             visitPrimaryKeyLookups: 1,
           },
@@ -3783,7 +3783,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
       expect(costs["six-leaf-mixed"]).toMatchObject({
         statements: 1,
         bindings: 44,
-        sqlBytes: 41_051,
+        sqlBytes: 22_620,
         cteCount: 10,
         explain: {
           pageRangeIndexSearches: 4,
@@ -4346,7 +4346,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
       expect(observedCosts["event-only"]).toMatchObject({
         statements: 1,
         bindings: 16,
-        sqlLength: 13_804,
+        sqlLength: 7_845,
         explain: {
           eventTimeRangeSearches: 2,
           integerPrimaryKeyLookups: 3,
