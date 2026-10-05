@@ -109,6 +109,12 @@ export interface UiGalleryContract {
     showDeferredPreview?: boolean,
     previewOverrides?: Record<string, unknown>,
   ): ReactNode | null;
+  renderSourceValue(
+    cardId: string,
+    valueId: string,
+    showDeferredPreview?: boolean,
+    sourceOverrides?: Record<string, unknown>,
+  ): ReactNode | null;
 }
 
 export interface UiGalleryEntry {
@@ -172,12 +178,38 @@ function registerPropCards<Props>(
   contract: ComponentContract<Props>,
   propCards: readonly GalleryPropCard[],
   defaultOverrides: Partial<Props> = {},
+  sourceRender?: (props: Props) => ReactNode,
 ): UiGalleryContract {
   const defaultProps = {
     ...contract.fixtures[0]?.props,
     ...defaultOverrides,
   } as Props;
   const componentType = findComponentType(contract.render(defaultProps));
+  const resolveProps = (
+    cardId: string,
+    valueId: string,
+    showDeferredPreview = false,
+    overrides?: Record<string, unknown>,
+  ) => {
+    const card = propCards.find((candidate) => candidate.id === cardId);
+    const value = card?.values.find((candidate) => candidate.id === valueId);
+    if (!card || !value) return null;
+
+    const props = { ...defaultProps } as Record<string, unknown>;
+    if (value.applyValue !== false) {
+      const resolvedValue =
+        value.preview === "on-demand" && !showDeferredPreview
+          ? false
+          : value.value;
+      setGalleryPropValue(props, card.prop, resolvedValue);
+    }
+    Object.assign(props, value.overrides);
+    Object.assign(props, overrides);
+    if (contract.id === "sonner") {
+      props.id = `ui-gallery-${cardId}-${valueId}`;
+    }
+    return props as Props;
+  };
 
   return {
     ...contract,
@@ -189,24 +221,28 @@ function registerPropCards<Props>(
       showDeferredPreview = false,
       previewOverrides,
     ) {
-      const card = propCards.find((candidate) => candidate.id === cardId);
-      const value = card?.values.find((candidate) => candidate.id === valueId);
-      if (!card || !value) return null;
-
-      const props = { ...defaultProps } as Record<string, unknown>;
-      if (value.applyValue !== false) {
-        const resolvedValue =
-          value.preview === "on-demand" && !showDeferredPreview
-            ? false
-            : value.value;
-        setGalleryPropValue(props, card.prop, resolvedValue);
-      }
-      Object.assign(props, value.overrides);
-      Object.assign(props, previewOverrides);
-      if (contract.id === "sonner") {
-        props.id = `ui-gallery-${cardId}-${valueId}`;
-      }
-      return contract.render(props as Props);
+      const props = resolveProps(
+        cardId,
+        valueId,
+        showDeferredPreview,
+        previewOverrides,
+      );
+      return props ? contract.render(props) : null;
+    },
+    renderSourceValue(
+      cardId,
+      valueId,
+      showDeferredPreview = false,
+      sourceOverrides,
+    ) {
+      const props = resolveProps(
+        cardId,
+        valueId,
+        showDeferredPreview,
+        sourceOverrides,
+      );
+      if (!props) return null;
+      return sourceRender ? sourceRender(props) : contract.render(props);
     },
   };
 }
@@ -2342,6 +2378,28 @@ const galleryContracts = {
         propValue("Visitor details"),
       ]),
     ],
+    {},
+    ({ ariaLabel }) =>
+      createElement(DetailDrawer, {
+        ariaLabel,
+        drawerKey: "ui-gallery-detail-drawer-example",
+        open: true,
+        onOpenChange: () => {},
+        children: createElement(
+          "div",
+          { className: "space-y-2 p-6" },
+          createElement(
+            "h2",
+            { className: "text-lg font-semibold" },
+            ariaLabel,
+          ),
+          createElement(
+            "p",
+            { className: "text-sm text-muted-foreground" },
+            `Details for ${ariaLabel.toLowerCase()}.`,
+          ),
+        ),
+      }),
   ),
   siteScopeSelector: registerPropCards(
     defineComponentContract<Omit<SiteScopeSelectorProps, "onChange">>({
@@ -2396,6 +2454,12 @@ const galleryContracts = {
         ),
       ]),
     ],
+    {},
+    (props) =>
+      createElement(SiteScopeSelector, {
+        ...props,
+        onChange: () => {},
+      }),
   ),
   analyticsTooltip: registerPropCards(
     defineComponentContract<{

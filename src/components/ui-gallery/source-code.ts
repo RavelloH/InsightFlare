@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { resolveComponentSourceImport } from "./code-import-map";
 import { type UiGalleryEntry, uiGalleryRegistry } from "./registry";
 
 interface ComponentImport {
@@ -39,21 +40,13 @@ const rechartsComponents = new Set([
   "YAxis",
 ]);
 
-function getComponentName(type: ElementType, fallback: string) {
+function getStableDisplayName(type: ElementType) {
   if (typeof type === "string") return type;
-
   const component = type as {
     displayName?: string;
-    name?: string;
-    render?: { displayName?: string; name?: string };
+    render?: { displayName?: string };
   };
-  return (
-    component.displayName ||
-    component.render?.displayName ||
-    component.name ||
-    component.render?.name ||
-    fallback
-  );
+  return component.displayName || component.render?.displayName || null;
 }
 
 function toPascalCase(value: string) {
@@ -101,23 +94,38 @@ function walkNode(
 function getImportForType(
   type: ElementType,
   entry: UiGalleryEntry,
-  registeredSources: ReadonlyMap<ElementType, string>,
+  registeredComponents: ReadonlyMap<ElementType, ComponentImport>,
 ): ComponentImport {
-  const fallbackName = toPascalCase(entry.contract.title) || "Component";
-  const name = getComponentName(type, fallbackName);
+  const publicImport = resolveComponentSourceImport(type);
+  if (publicImport) return { type, ...publicImport };
+
+  const registeredComponent = registeredComponents.get(type);
+  if (registeredComponent) return registeredComponent;
+
+  const name = getStableDisplayName(type);
+  if (!name) {
+    throw new Error(
+      `Missing a public source import mapping for a component rendered by ${entry.contract.title}.`,
+    );
+  }
+
   return {
     type,
     name,
-    source: registeredSources.get(type) ?? getComponentSource(name, entry),
+    source: getComponentSource(name, entry),
   };
 }
 
 function collectImports(node: ReactNode, entry: UiGalleryEntry) {
-  const registeredSources = new Map<ElementType, string>();
+  const registeredComponents = new Map<ElementType, ComponentImport>();
   for (const registeredEntry of uiGalleryRegistry) {
     const { componentType } = registeredEntry.contract;
-    if (componentType && !registeredSources.has(componentType)) {
-      registeredSources.set(componentType, registeredEntry.apiEntry);
+    if (componentType && !registeredComponents.has(componentType)) {
+      registeredComponents.set(componentType, {
+        type: componentType,
+        name: toPascalCase(registeredEntry.contract.title) || "Component",
+        source: registeredEntry.apiEntry,
+      });
     }
   }
 
@@ -138,7 +146,10 @@ function collectImports(node: ReactNode, entry: UiGalleryEntry) {
       if (element.type === Fragment || typeof element.type === "string") return;
       const type = element.type as ElementType;
       if (!components.has(type)) {
-        components.set(type, getImportForType(type, entry, registeredSources));
+        components.set(
+          type,
+          getImportForType(type, entry, registeredComponents),
+        );
       }
     },
     new WeakSet(),
@@ -301,8 +312,7 @@ function serializeElement(
   const name =
     typeof element.type === "string"
       ? element.type
-      : (identifiers.get(element.type as ElementType) ??
-        getComponentName(element.type as ElementType, "Component"));
+      : (identifiers.get(element.type as ElementType) ?? "Component");
   const attributes = Object.entries(element.props)
     .filter(
       ([key, value]) =>

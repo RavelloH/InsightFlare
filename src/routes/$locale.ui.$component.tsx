@@ -380,7 +380,7 @@ function PropCard({
   const source = activeValue
     ? createUiGallerySource(
         entry,
-        entry.contract.renderPropValue(card.id, activeValue.id, true),
+        entry.contract.renderSourceValue(card.id, activeValue.id, true),
       )
     : "";
 
