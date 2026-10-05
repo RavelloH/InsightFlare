@@ -30,13 +30,19 @@ vi.mock("@/lib/edge/analytics/providers/d1/internal/core", () => ({
   percentChange: vi.fn((current: number, previous: number) =>
     previous > 0 ? ((current - previous) / previous) * 100 : null,
   ),
-  queryD1All: vi.fn(),
   timeBucketCase: vi.fn(() => ({ sql: "CASE ...", bindings: [] })),
   timeBucketTimestamp: vi.fn(
     (_buckets: unknown, bucket: number) => bucket * 86400000,
   ),
   visitSourceBindingsForSites: vi.fn(() => []),
 }));
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/analytics-report-query",
+  () => ({
+    queryAnalyticsReportOutputRowsFromD1: vi.fn(),
+    queryAnalyticsReportOutputSetRowsFromD1: vi.fn(),
+  }),
+);
 vi.mock("@/lib/edge/analytics/interfaces/dashboard/protocol/parsers", () => ({
   parseInterval: vi.fn(() => "day"),
   parseWindow: vi.fn(),
@@ -74,7 +80,10 @@ vi.mock("@/lib/edge/auth/site-access", () => ({
 import { executePrivateTeamDashboard } from "@/lib/edge/analytics/interfaces/dashboard/private";
 import { parseWindow } from "@/lib/edge/analytics/interfaces/dashboard/protocol/parsers";
 import { badRequest } from "@/lib/edge/analytics/interfaces/dashboard/protocol/responses";
-import { queryD1All } from "@/lib/edge/analytics/providers/d1/internal/core";
+import {
+  queryAnalyticsReportOutputRowsFromD1,
+  queryAnalyticsReportOutputSetRowsFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import {
   queryOverviewAndTrendForSitesFromHourlyRollupsPartial,
   queryOverviewForSitesFromHourlyRollupsPartial,
@@ -102,7 +111,16 @@ const resolvePrivateTeamMock = vi.mocked(resolvePrivateTeam);
 const resolvePrivateTeamForSessionMock = vi.mocked(
   resolvePrivateTeamForSession,
 );
-const queryD1AllMock = vi.mocked(queryD1All);
+const queryReportRowsMock = vi.mocked(queryAnalyticsReportOutputRowsFromD1);
+const queryReportOutputSetMock = vi.mocked(
+  queryAnalyticsReportOutputSetRowsFromD1,
+);
+beforeEach(() => {
+  queryReportRowsMock.mockReset();
+  queryReportRowsMock.mockResolvedValue([]);
+  queryReportOutputSetMock.mockReset();
+  queryReportOutputSetMock.mockResolvedValue([]);
+});
 function makeDbMock() {
   return {
     prepare: vi.fn().mockReturnThis(),
@@ -201,12 +219,18 @@ function handleTeamDashboardForTeam(
 describe("queryTeamOverviewFromD1", () => {
   it("returns empty Map for empty siteIds", async () => {
     const env = makeEnv();
-    const result = await queryTeamOverviewFromD1(env, [], makeWindow());
+    const result = await queryTeamOverviewFromD1(
+      env,
+      "team-1",
+      [],
+      makeWindow(),
+    );
     expect(result.size).toBe(0);
+    expect(queryReportRowsMock).not.toHaveBeenCalled();
   });
 
   it("returns overview data per site", async () => {
-    queryD1AllMock.mockResolvedValueOnce([
+    queryReportRowsMock.mockResolvedValueOnce([
       {
         siteId: "s1",
         views: 100,
@@ -218,26 +242,73 @@ describe("queryTeamOverviewFromD1", () => {
       },
     ]);
     const env = makeEnv();
-    const result = await queryTeamOverviewFromD1(env, ["s1"], makeWindow());
+    const result = await queryTeamOverviewFromD1(
+      env,
+      "team-1",
+      ["s1"],
+      makeWindow(),
+    );
     expect(result.get("s1")?.views).toBe(100);
     expect(result.get("s1")?.sessions).toBe(50);
+    const plan = queryReportRowsMock.mock.calls.at(-1)?.[1];
+    expect(plan?.context.subject).toMatchObject({
+      origin: "team",
+      teamId: "team-1",
+      siteIds: ["s1"],
+    });
   });
 });
 describe("queryTeamTrendFromD1", () => {
   it("returns empty array for empty siteIds", async () => {
     const env = makeEnv();
-    const result = await queryTeamTrendFromD1(env, [], makeWindow(), "day");
+    const result = await queryTeamTrendFromD1(
+      env,
+      "team-1",
+      [],
+      makeWindow(),
+      "day",
+    );
     expect(result).toEqual([]);
+    expect(queryReportRowsMock).not.toHaveBeenCalled();
   });
 
-  it("connects the unfiltered source CTE directly to SELECT", async () => {
-    queryD1AllMock.mockResolvedValueOnce([]);
+  it("builds the trend report on the true team subject", async () => {
+    queryReportRowsMock.mockResolvedValueOnce([]);
 
-    await queryTeamTrendFromD1(makeEnv(), ["s1"], makeWindow(), "day");
+    await queryTeamTrendFromD1(
+      makeEnv(),
+      "team-1",
+      ["s1"],
+      makeWindow(),
+      "day",
+    );
 
-    const sql = String(queryD1AllMock.mock.calls.at(-1)?.[1]);
-    expect(sql).toContain("visit_source AS (...)\nSELECT");
-    expect(sql).not.toMatch(/\),\s*SELECT/);
+    const [env, plan, outputId] = queryReportRowsMock.mock.calls.at(-1)!;
+    expect(env).toBeDefined();
+    expect(plan.context.subject).toMatchObject({
+      origin: "team",
+      teamId: "team-1",
+      siteIds: ["s1"],
+    });
+    expect(outputId).toBe("team-raw-trend");
+  });
+
+  it("maps a NULL trend bucket to bucket zero", async () => {
+    queryReportRowsMock.mockResolvedValueOnce([
+      { siteId: "s1", bucket: null, views: 1, visitors: 1 },
+    ]);
+
+    await expect(
+      queryTeamTrendFromD1(makeEnv(), "team-1", ["s1"], makeWindow(), "day"),
+    ).resolves.toEqual([
+      {
+        siteId: "s1",
+        bucket: 0,
+        timestampMs: 0,
+        views: 1,
+        visitors: 1,
+      },
+    ]);
   });
 });
 describe("filtered team dashboard aggregates", () => {
@@ -245,8 +316,10 @@ describe("filtered team dashboard aggregates", () => {
     queryOverviewMock.mockReset();
     queryTrendMock.mockReset();
     queryOverviewAndTrendMock.mockReset();
-    queryD1AllMock.mockReset();
-    queryD1AllMock.mockResolvedValue([]);
+    queryReportRowsMock.mockReset();
+    queryReportRowsMock.mockResolvedValue([]);
+    queryReportOutputSetMock.mockReset();
+    queryReportOutputSetMock.mockResolvedValue([]);
   });
 
   it("uses the scoped dataset for filtered current and previous data", async () => {
@@ -280,12 +353,15 @@ describe("filtered team dashboard aggregates", () => {
     expect(queryOverviewAndTrendMock).not.toHaveBeenCalled();
     expect(queryOverviewMock).not.toHaveBeenCalled();
     expect(queryTrendMock).not.toHaveBeenCalled();
-    expect(queryD1AllMock).toHaveBeenCalledTimes(3);
+    expect(queryReportOutputSetMock).toHaveBeenCalledTimes(1);
+    expect(queryReportRowsMock).toHaveBeenCalledTimes(1);
     expect(
-      queryD1AllMock.mock.calls.every(([, sql]) =>
-        String(sql).includes("FROM scope_final_visits"),
-      ),
-    ).toBe(true);
+      queryReportOutputSetMock.mock.calls[0]?.[1].context.subject,
+    ).toMatchObject({
+      origin: "team",
+      teamId: "team-1",
+      siteIds: ["s1"],
+    });
   });
 
   it.each(["session", "visitor"] as const)(
@@ -315,12 +391,15 @@ describe("filtered team dashboard aggregates", () => {
       );
 
       expect(result.source).toBe("raw");
-      expect(queryD1AllMock).toHaveBeenCalledTimes(3);
+      expect(queryReportOutputSetMock).toHaveBeenCalledTimes(1);
+      expect(queryReportRowsMock).toHaveBeenCalledTimes(1);
       expect(
-        queryD1AllMock.mock.calls.every(([, sql]) =>
-          String(sql).includes("scope_membership_"),
-        ),
-      ).toBe(true);
+        queryReportOutputSetMock.mock.calls[0]?.[1].context.scope,
+      ).toMatchObject({
+        requested: scopePreference,
+        logicalScope: scopePreference,
+        contractScope: scopePreference,
+      });
     },
   );
 });
@@ -360,8 +439,10 @@ describe("handleTeamDashboard", () => {
       overview: new Map(),
       trend: new Map(),
     });
-    queryD1AllMock.mockReset();
-    queryD1AllMock.mockResolvedValue([]);
+    queryReportRowsMock.mockReset();
+    queryReportRowsMock.mockResolvedValue([]);
+    queryReportOutputSetMock.mockReset();
+    queryReportOutputSetMock.mockResolvedValue([]);
   });
 
   it("returns badRequest for invalid window", async () => {
@@ -429,8 +510,10 @@ describe("handleTeamDashboardForTeam", () => {
       overview: new Map(),
       trend: new Map(),
     });
-    queryD1AllMock.mockReset();
-    queryD1AllMock.mockResolvedValue([]);
+    queryReportRowsMock.mockReset();
+    queryReportRowsMock.mockResolvedValue([]);
+    queryReportOutputSetMock.mockReset();
+    queryReportOutputSetMock.mockResolvedValue([]);
   });
 
   it("returns empty data when team has no sites", async () => {
@@ -513,7 +596,7 @@ describe("handleTeamDashboardForTeam", () => {
     const env = { DB: db } as unknown as Env;
     queryOverviewMock.mockResolvedValue(new Map());
     queryTrendMock.mockResolvedValue(null);
-    queryD1AllMock.mockResolvedValue([]);
+    queryReportRowsMock.mockResolvedValue([]);
     const url = makeUrl("/api/private/team-dashboard");
     const window = makeWindow();
 

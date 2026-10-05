@@ -1,5 +1,9 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
-import type { QueryTime, SiteId } from "@/lib/edge/analytics/contract/types";
+import type {
+  QueryTime,
+  SiteId,
+  TeamId,
+} from "@/lib/edge/analytics/contract/types";
 import {
   LogicalPlanBuilder,
   type LogicalRelationHandle,
@@ -65,6 +69,48 @@ export function createPageReportSource(input: {
   readonly sourceSelection?: SemanticScopedSourceSelection;
   readonly attributes: readonly string[];
 }) {
+  return createPageReportSourceForDomain(
+    input,
+    createSemanticSubjectDomain({
+      origin: "site",
+      siteIds: [input.siteId as SiteId],
+    }),
+  );
+}
+
+/** Builds a Page report Source for an explicit, already-authorized team subject. */
+export function createPageReportSourceForSubject(input: {
+  readonly subject: {
+    readonly origin: "team";
+    readonly teamId: string;
+    readonly siteIds: readonly string[];
+  };
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly preparedTimePolicy?: "reader-window-v1";
+  readonly sourceSelection?: SemanticScopedSourceSelection;
+  readonly attributes: readonly string[];
+}) {
+  const subject = createSemanticSubjectDomain({
+    origin: input.subject.origin,
+    teamId: input.subject.teamId as TeamId,
+    siteIds: input.subject.siteIds as readonly SiteId[],
+  });
+  return createPageReportSourceForDomain(input, subject);
+}
+
+function createPageReportSourceForDomain(
+  input: {
+    readonly queryTime: QueryTime;
+    readonly filters: FilterDocument;
+    readonly scopePlan?: ScopedFilterPlan;
+    readonly preparedTimePolicy?: "reader-window-v1";
+    readonly sourceSelection?: SemanticScopedSourceSelection;
+    readonly attributes: readonly string[];
+  },
+  subject: ReturnType<typeof createSemanticSubjectDomain>,
+) {
   const time = semanticTemporalDomainsFromQueryTime(input.queryTime);
   if (input.preparedTimePolicy && !input.scopePlan)
     throw new Error(
@@ -74,10 +120,6 @@ export function createPageReportSource(input: {
     throw new Error(
       "invalid_page_report_source_selection:reader_window_disallows_selection_override",
     );
-  const subject = createSemanticSubjectDomain({
-    origin: "site",
-    siteIds: [input.siteId as SiteId],
-  });
   const selection =
     input.sourceSelection ??
     createSemanticScopedSourceSelection({

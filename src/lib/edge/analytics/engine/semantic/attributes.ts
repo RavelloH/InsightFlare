@@ -370,6 +370,7 @@ export const semanticPageReportAttributeCatalog: readonly SemanticAttributeDefin
   Object.freeze(
     (
       [
+        { name: "rawSiteId", scalar: "string", nullable: false },
         { name: "localId", scalar: "string", nullable: true },
         { name: "sessionId", scalar: "string", nullable: false },
         { name: "visitorId", scalar: "string", nullable: false },

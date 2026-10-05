@@ -167,6 +167,7 @@ const observationReportColumnByAttribute: Readonly<Record<string, string>> = {
 };
 
 const pageReportColumnByAttribute: Readonly<Record<string, string>> = {
+  "page.report.rawSiteId": "site_id",
   "page.report.localId": "visit_id",
   "page.report.sessionId": "session_id",
   "page.report.visitorId": "visitor_id",

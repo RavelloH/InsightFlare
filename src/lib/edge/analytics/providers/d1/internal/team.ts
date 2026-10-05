@@ -2,7 +2,6 @@ import {
   and,
   compileD1Query,
   createD1DatabaseClient,
-  D1_MAX_BOUND_PARAMETERS,
   eq,
   filter,
   gt,
@@ -18,16 +17,26 @@ import {
 } from "@/lib/db";
 import type { TeamDashboardData } from "@/lib/edge/analytics/contract";
 import {
+  EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
   scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
+import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import {
+  buildTeamRawDashboardReportPlan,
+  TEAM_RAW_DASHBOARD_OUTPUT_FIELDS,
+  TEAM_RAW_DASHBOARD_OUTPUTS,
+} from "@/lib/edge/analytics/engine/team-raw-dashboard-report-plan";
 import {
   queryOverviewAndTrendForSitesFromHourlyRollupsPartial,
   queryOverviewForSitesFromHourlyRollupsPartial,
 } from "@/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries";
-import { sitePksFromSiteIdsSql } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
 
+import {
+  queryAnalyticsReportOutputRowsFromD1,
+  queryAnalyticsReportOutputSetRowsFromD1,
+} from "./analytics-report-query";
 import type {
   Interval,
   OverviewAggregateRow,
@@ -36,13 +45,9 @@ import type {
 } from "./core";
 import {
   buildTimeBuckets,
-  buildVisitSourceCteForSites,
   mapOverviewAggregate,
   percentChange,
-  queryD1All,
-  timeBucketCase,
   timeBucketTimestamp,
-  visitSourceBindingsForSites,
 } from "./core";
 import {
   type AnalyticsDataSource,
@@ -50,9 +55,9 @@ import {
   type D1ReadDiagnostics,
   recordD1RowsRead,
 } from "./diagnostics";
-import { compileScopedDatasetSql } from "./scoped-dataset";
-// Visit sources use two bindings for their half-open time window.
-const MAX_SITE_IDS_PER_D1_QUERY = D1_MAX_BOUND_PARAMETERS - 2;
+
+// Preserve the parent raw reader's site chunk and request boundaries.
+const MAX_SITE_IDS_PER_D1_QUERY = 98;
 
 function teamSiteWithDomainId<Row extends { readonly id: string | null }>(
   row: Row,
@@ -77,53 +82,6 @@ function hasEffectiveFilter(
     (filters?.root !== null && filters?.root !== undefined)
   );
 }
-function scopedDatasetsForSites(
-  siteIds: string[],
-  window: QueryWindow,
-  filters: FilterDocument,
-): Array<{
-  readonly siteIds: string[];
-  readonly dataset: ReturnType<typeof compileScopedDatasetSql>;
-}> {
-  const metadata = scopedFilterMetadata(filters);
-  if (!metadata) {
-    throw new Error("team_dashboard_scoped_dataset_metadata_required");
-  }
-  if (siteIds.length === 0) return [];
-
-  const probe = compileScopedDatasetSql({
-    filters,
-    plan: metadata.plan,
-    siteIds: [siteIds[0]!],
-    window,
-  });
-  const fixedBindingCount = probe.bindings.length - 2;
-  const maxSitesPerQuery = Math.floor(
-    (D1_MAX_BOUND_PARAMETERS - fixedBindingCount) / 2,
-  );
-  if (maxSitesPerQuery < 1) {
-    throw new Error("team_dashboard_filter_binding_limit");
-  }
-
-  const datasets: Array<{
-    readonly siteIds: string[];
-    readonly dataset: ReturnType<typeof compileScopedDatasetSql>;
-  }> = [];
-  for (let index = 0; index < siteIds.length; index += maxSitesPerQuery) {
-    const chunk = siteIds.slice(index, index + maxSitesPerQuery);
-    const dataset = compileScopedDatasetSql({
-      filters,
-      plan: metadata.plan,
-      siteIds: chunk,
-      window,
-    });
-    if (dataset.bindings.length > D1_MAX_BOUND_PARAMETERS) {
-      throw new Error("team_dashboard_filter_binding_limit");
-    }
-    datasets.push({ siteIds: chunk, dataset });
-  }
-  return datasets;
-}
 function siteIdChunks(siteIds: string[]): string[][] {
   const chunks: string[][] = [];
   for (
@@ -135,17 +93,71 @@ function siteIdChunks(siteIds: string[]): string[][] {
   }
   return chunks;
 }
-function buildTeamOverviewSourceCte(siteCount: number): string {
-  return `
-visit_source AS MATERIALIZED (
-  SELECT site_id, visitor_id, session_id, duration_ms
-  FROM visits
-  WHERE site_pk IN ${sitePksFromSiteIdsSql(siteCount)}
-    AND started_at >= ? AND started_at < ?
-)`;
+
+function createTeamRawDashboardPlan(
+  teamId: string,
+  siteIds: readonly string[],
+  window: QueryWindow,
+  interval: Interval,
+  filters?: FilterDocument,
+  outputs: "overview" | "trend" | "dashboard" = "dashboard",
+) {
+  const effective = hasEffectiveFilter(filters);
+  const metadata = effective ? scopedFilterMetadata(filters) : undefined;
+  if (effective && !metadata)
+    throw new Error("team_dashboard_scoped_dataset_metadata_required");
+  return buildTeamRawDashboardReportPlan({
+    teamId,
+    siteIds,
+    queryTime: queryWindowToTime(window),
+    filters: effective ? filters! : EMPTY_FILTER_DOCUMENT,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    interval,
+    outputs,
+  });
 }
+
+function mapOverviewRows(
+  rows: readonly Record<string, unknown>[],
+): Map<string, OverviewAggregateRow> {
+  const result = new Map<string, OverviewAggregateRow>();
+  for (const row of rows) {
+    result.set(String(row.siteId ?? ""), {
+      views: Number(row.views ?? 0),
+      sessions: Number(row.sessions ?? 0),
+      visitors: Number(row.visitors ?? 0),
+      bounces: Number(row.bounces ?? 0),
+      totalDuration: Number(row.totalDuration ?? 0),
+      durationViews: Number(row.durationViews ?? 0),
+    } satisfies OverviewAggregateRow);
+  }
+  return result;
+}
+
+function mapTrendRows(
+  rows: readonly Record<string, unknown>[],
+  buckets: ReturnType<typeof buildTimeBuckets>,
+): TeamTrendRow[] {
+  return rows
+    .map((row) => {
+      const bucket = Number(row.bucket ?? 0);
+      return {
+        siteId: String(row.siteId ?? ""),
+        bucket,
+        timestampMs: timeBucketTimestamp(buckets, bucket),
+        views: Number(row.views ?? 0),
+        visitors: Number(row.visitors ?? 0),
+      };
+    })
+    .sort(
+      (left, right) =>
+        left.bucket - right.bucket || left.siteId.localeCompare(right.siteId),
+    );
+}
+
 export async function queryTeamOverviewFromD1(
   env: Env,
+  teamId: string,
   siteIds: string[],
   window: QueryWindow,
   diagnostics?: D1ReadDiagnostics,
@@ -153,83 +165,85 @@ export async function queryTeamOverviewFromD1(
 ): Promise<Map<string, OverviewAggregateRow>> {
   if (siteIds.length === 0) return new Map();
   const result = new Map<string, OverviewAggregateRow>();
-  const datasets = hasEffectiveFilter(filters)
-    ? scopedDatasetsForSites(siteIds, window, filters)
-    : siteIdChunks(siteIds).map((chunk) => ({
-        siteIds: chunk,
-        dataset: null,
-      }));
-  for (const { siteIds: chunk, dataset } of datasets) {
-    const sourceCte = dataset
-      ? `${dataset.ctes},`
-      : `${buildTeamOverviewSourceCte(chunk.length)},`;
-    const metricSource = dataset?.visitRelation ?? "visit_source";
-    const sql = `
-WITH
-${sourceCte}
-session_rollup AS (
-  SELECT site_id AS siteId, session_id, count(*) AS visit_count
-  FROM ${metricSource}
-  WHERE session_id != ''
-  GROUP BY siteId, session_id
-),
-combined AS (
-  SELECT
-    site_id AS siteId,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors,
-    0 AS bounces,
-    COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0) AS totalDuration,
-    COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0) AS durationViews
-  FROM ${metricSource}
-  GROUP BY siteId
-  UNION ALL
-  SELECT
-    siteId,
-    0 AS views,
-    0 AS sessions,
-    0 AS visitors,
-    COALESCE(sum(CASE WHEN visit_count = 1 THEN 1 ELSE 0 END), 0) AS bounces,
-    0 AS totalDuration,
-    0 AS durationViews
-  FROM session_rollup
-  GROUP BY siteId
-)
-SELECT
-  siteId,
-  sum(views) AS views,
-  sum(sessions) AS sessions,
-  sum(visitors) AS visitors,
-  sum(bounces) AS bounces,
-  sum(totalDuration) AS totalDuration,
-  sum(durationViews) AS durationViews
-FROM combined
-GROUP BY siteId
-`;
-    const rows = await queryD1All<Record<string, unknown>>(
+  for (const chunk of siteIdChunks(siteIds)) {
+    const plan = createTeamRawDashboardPlan(
+      teamId,
+      chunk,
+      window,
+      "day",
+      filters,
+      "overview",
+    );
+    const rows = await queryAnalyticsReportOutputRowsFromD1(
       env,
-      sql,
-      dataset
-        ? dataset.bindings.map((binding) => binding.value)
-        : visitSourceBindingsForSites(chunk, window),
+      plan,
+      TEAM_RAW_DASHBOARD_OUTPUTS.overview,
+      undefined,
       diagnostics,
     );
-    for (const row of rows) {
-      result.set(String(row.siteId ?? ""), {
-        views: Number(row.views ?? 0),
-        sessions: Number(row.sessions ?? 0),
-        visitors: Number(row.visitors ?? 0),
-        bounces: Number(row.bounces ?? 0),
-        totalDuration: Number(row.totalDuration ?? 0),
-        durationViews: Number(row.durationViews ?? 0),
-      } satisfies OverviewAggregateRow);
-    }
+    for (const [siteId, value] of mapOverviewRows(rows))
+      result.set(siteId, value);
   }
   return result;
 }
+
+async function queryTeamOverviewAndTrendFromD1(
+  env: Env,
+  teamId: string,
+  siteIds: string[],
+  window: QueryWindow,
+  interval: Interval,
+  diagnostics?: D1ReadDiagnostics,
+  filters?: FilterDocument,
+): Promise<{
+  readonly overview: Map<string, OverviewAggregateRow>;
+  readonly trend: TeamTrendRow[];
+}> {
+  const overview = new Map<string, OverviewAggregateRow>();
+  const trend: TeamTrendRow[] = [];
+  const buckets = buildTimeBuckets(window, interval);
+  for (const chunk of siteIdChunks(siteIds)) {
+    const plan = createTeamRawDashboardPlan(
+      teamId,
+      chunk,
+      window,
+      interval,
+      filters,
+      "dashboard",
+    );
+    const rows = await queryAnalyticsReportOutputSetRowsFromD1(
+      env,
+      plan,
+      {
+        outputIds: Object.values(TEAM_RAW_DASHBOARD_OUTPUTS),
+        fields: TEAM_RAW_DASHBOARD_OUTPUT_FIELDS,
+        orderBy: [
+          { field: "reportType", direction: "asc", nulls: "first" },
+          { field: "bucket", direction: "asc", nulls: "first" },
+          { field: "siteId", direction: "asc", nulls: "first" },
+        ],
+      },
+      diagnostics,
+    );
+    for (const row of rows) {
+      if (row.reportType === "overview") {
+        const mapped = mapOverviewRows([row]);
+        for (const [siteId, value] of mapped) overview.set(siteId, value);
+      } else if (row.reportType === "trend") {
+        trend.push(...mapTrendRows([row], buckets));
+      }
+    }
+  }
+  trend.sort(
+    (left, right) =>
+      left.bucket - right.bucket || left.siteId.localeCompare(right.siteId),
+  );
+  return { overview, trend };
+}
+
 async function queryTeamOverviewAggregate(
   env: Env,
+  teamId: string,
   siteIds: string[],
   window: QueryWindow,
   diagnostics?: D1ReadDiagnostics,
@@ -242,6 +256,7 @@ async function queryTeamOverviewAggregate(
     return {
       value: await queryTeamOverviewFromD1(
         env,
+        teamId,
         siteIds,
         window,
         diagnostics,
@@ -261,6 +276,7 @@ async function queryTeamOverviewAggregate(
   if (rawSiteIds.length === 0) return { value: rollup, source: "rollup" };
   const raw = await queryTeamOverviewFromD1(
     env,
+    teamId,
     rawSiteIds,
     window,
     diagnostics,
@@ -280,6 +296,7 @@ export interface TeamTrendRow {
 }
 export async function queryTeamTrendFromD1(
   env: Env,
+  teamId: string,
   siteIds: string[],
   window: QueryWindow,
   interval: Interval,
@@ -288,51 +305,24 @@ export async function queryTeamTrendFromD1(
 ): Promise<TeamTrendRow[]> {
   if (siteIds.length === 0) return [];
   const buckets = buildTimeBuckets(window, interval);
-  const bucket = timeBucketCase(buckets, "started_at");
   const result: TeamTrendRow[] = [];
-  const datasets = hasEffectiveFilter(filters)
-    ? scopedDatasetsForSites(siteIds, window, filters)
-    : siteIdChunks(siteIds).map((chunk) => ({
-        siteIds: chunk,
-        dataset: null,
-      }));
-  for (const { siteIds: chunk, dataset } of datasets) {
-    const sourceCte = dataset
-      ? dataset.ctes
-      : buildVisitSourceCteForSites(chunk.length);
-    const metricSource = dataset?.visitRelation ?? "visit_source";
-    const sql = `
-WITH
-${sourceCte}
-SELECT
-  site_id AS siteId,
-  ${bucket.sql} AS bucket,
-  count(*) AS views,
-  count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-FROM ${metricSource}
-GROUP BY siteId, bucket
-ORDER BY bucket ASC, siteId ASC
-`;
-    const rows = await queryD1All<Record<string, unknown>>(
+  for (const chunk of siteIdChunks(siteIds)) {
+    const plan = createTeamRawDashboardPlan(
+      teamId,
+      chunk,
+      window,
+      interval,
+      filters,
+      "trend",
+    );
+    const rows = await queryAnalyticsReportOutputRowsFromD1(
       env,
-      sql,
-      [
-        ...(dataset
-          ? dataset.bindings.map((binding) => binding.value)
-          : visitSourceBindingsForSites(chunk, window)),
-        ...bucket.bindings,
-      ],
+      plan,
+      TEAM_RAW_DASHBOARD_OUTPUTS.trend,
+      undefined,
       diagnostics,
     );
-    result.push(
-      ...rows.map((row) => ({
-        siteId: String(row.siteId ?? ""),
-        bucket: Number(row.bucket ?? 0),
-        timestampMs: timeBucketTimestamp(buckets, Number(row.bucket ?? 0)),
-        views: Number(row.views ?? 0),
-        visitors: Number(row.visitors ?? 0),
-      })),
-    );
+    result.push(...mapTrendRows(rows, buckets));
   }
   return result.sort(
     (left, right) =>
@@ -341,6 +331,7 @@ ORDER BY bucket ASC, siteId ASC
 }
 async function queryTeamCurrentAggregates(
   env: Env,
+  teamId: string,
   siteIds: string[],
   window: QueryWindow,
   interval: Interval,
@@ -354,17 +345,15 @@ async function queryTeamCurrentAggregates(
   trend: { value: TeamTrendRow[]; source: AnalyticsDataSource };
 }> {
   if (hasEffectiveFilter(filters)) {
-    const [overview, trend] = await Promise.all([
-      queryTeamOverviewFromD1(env, siteIds, window, diagnostics, filters),
-      queryTeamTrendFromD1(
-        env,
-        siteIds,
-        window,
-        interval,
-        diagnostics,
-        filters,
-      ),
-    ]);
+    const { overview, trend } = await queryTeamOverviewAndTrendFromD1(
+      env,
+      teamId,
+      siteIds,
+      window,
+      interval,
+      diagnostics,
+      filters,
+    );
     return {
       overview: { value: overview, source: "raw" },
       trend: { value: trend, source: "raw" },
@@ -385,6 +374,7 @@ async function queryTeamCurrentAggregates(
   if (overviewRawSiteIds.length > 0) {
     const raw = await queryTeamOverviewFromD1(
       env,
+      teamId,
       overviewRawSiteIds,
       window,
       diagnostics,
@@ -398,6 +388,7 @@ async function queryTeamCurrentAggregates(
     : siteIds;
   const rawTrend = await queryTeamTrendFromD1(
     env,
+    teamId,
     trendRawSiteIds,
     window,
     interval,
@@ -565,6 +556,7 @@ export async function queryTeamDashboardForTeam(
   const [current, previousOverview] = await Promise.all([
     queryTeamCurrentAggregates(
       env,
+      teamId,
       siteIds,
       window,
       interval,
@@ -573,6 +565,7 @@ export async function queryTeamDashboardForTeam(
     ),
     queryTeamOverviewAggregate(
       env,
+      teamId,
       siteIds,
       previousWindow,
       diagnostics,
