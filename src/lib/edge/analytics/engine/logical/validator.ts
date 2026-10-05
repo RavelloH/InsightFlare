@@ -29,6 +29,11 @@ import {
   isAnalyticsEntityKind,
   validateResolvedAnalyticsScope,
 } from "@/lib/edge/analytics/engine/semantic/entities";
+import {
+  EVENT_PAYLOAD_OCCURRENCE_FIELDS,
+  type EventPayloadOccurrenceField,
+  isEventPayloadOccurrenceField,
+} from "@/lib/edge/analytics/engine/semantic/event-payload-occurrences";
 import { semanticMetric } from "@/lib/edge/analytics/engine/semantic/metrics";
 import { semanticPageDimension } from "@/lib/edge/analytics/engine/semantic/page-dimensions";
 import {
@@ -1176,6 +1181,59 @@ function hasDerivedLineage(
   );
 }
 
+function hasEventPayloadSourceProof(
+  relation: RelationId,
+  eventKey: SlotId,
+  eventPk: SlotId,
+  states: ReadonlyMap<RelationId, RelationState>,
+  active: ReadonlySet<RelationId> = new Set(),
+): boolean {
+  if (active.has(relation)) return false;
+  const state = states.get(relation);
+  if (
+    !state ||
+    !state.node.output.includes(eventKey) ||
+    !state.node.output.includes(eventPk)
+  )
+    return false;
+  const nextActive = new Set(active).add(relation);
+  if (state.node.kind === "filter")
+    return hasEventPayloadSourceProof(
+      state.node.input,
+      eventKey,
+      eventPk,
+      states,
+      nextActive,
+    );
+  if (state.node.kind !== "source") return false;
+  const key = state.slotTypes.get(eventKey);
+  const pk = state.slotTypes.get(eventPk);
+  return (
+    state.node.entity === "event" &&
+    state.grain.kind === "entity" &&
+    state.grain.entity === "event" &&
+    state.grain.key === eventKey &&
+    state.node.values.some(
+      (binding) => binding.kind === "self" && binding.slot === eventKey,
+    ) &&
+    state.node.values.some(
+      (binding) =>
+        binding.kind === "attribute" &&
+        binding.slot === eventPk &&
+        binding.attribute === "event.report.internalPk",
+    ) &&
+    key?.type.kind === "entity" &&
+    key.type.entity === "event" &&
+    !key.nullable &&
+    pk?.type.kind === "scalar" &&
+    pk.type.scalar === "number" &&
+    pk.type.unit === undefined &&
+    !pk.nullable &&
+    pk.lineage.kind === "attribute" &&
+    pk.lineage.attribute === "event.report.internalPk"
+  );
+}
+
 function validateNode(
   node: LogicalNode,
   path: string,
@@ -1391,6 +1449,113 @@ function validateNode(
       }
       expectedOutput = input.node.output;
       expectedGrain = input.grain;
+      break;
+    }
+    case "event-payload-occurrences": {
+      const input = assertRelation(node.input, states, `${path}.input`);
+      if (
+        input.grain.kind !== "entity" ||
+        input.grain.entity !== "event" ||
+        input.grain.key !== node.eventKey
+      )
+        fail(
+          "invalid-grain",
+          `${path}.input`,
+          "Payload occurrences require one selected Event Entity relation.",
+        );
+      const eventKey = resolveVisibleSlot(
+        input,
+        node.eventKey,
+        `${path}.eventKey`,
+      );
+      if (
+        eventKey.type.kind !== "entity" ||
+        eventKey.type.entity !== "event" ||
+        eventKey.nullable
+      )
+        fail(
+          "invalid-grain",
+          `${path}.eventKey`,
+          "Payload expansion requires the non-null Event Entity key.",
+        );
+      const eventPk = resolveVisibleSlot(
+        input,
+        node.eventPk,
+        `${path}.eventPk`,
+      );
+      if (
+        eventPk.type.kind !== "scalar" ||
+        eventPk.type.scalar !== "number" ||
+        eventPk.type.unit !== undefined ||
+        eventPk.nullable ||
+        eventPk.lineage.kind !== "attribute" ||
+        eventPk.lineage.attribute !== "event.report.internalPk" ||
+        !hasEventPayloadSourceProof(
+          node.input,
+          node.eventKey,
+          node.eventPk,
+          states,
+        )
+      )
+        fail(
+          "invalid-source",
+          `${path}.eventPk`,
+          "Payload expansion requires the internal Event PK binding from the same transparent Event Source ancestry.",
+        );
+      if (!Array.isArray(node.fields) || node.fields.length === 0)
+        fail(
+          "invalid-topology",
+          `${path}.fields`,
+          "Payload occurrence expansion requires at least one finite output field.",
+        );
+      const fields = new Set<string>();
+      const outputs = new Set<SlotId>();
+      node.fields.forEach((binding, index) => {
+        const fieldPath = `${path}.fields[${index}]`;
+        if (
+          !binding ||
+          typeof binding.field !== "string" ||
+          !isEventPayloadOccurrenceField(binding.field) ||
+          fields.has(binding.field)
+        )
+          fail(
+            "invalid-topology",
+            `${fieldPath}.field`,
+            "Payload occurrence fields must be unique registered names.",
+          );
+        fields.add(binding.field);
+        const field = binding.field as EventPayloadOccurrenceField;
+        if (outputs.has(binding.slot))
+          fail(
+            "invalid-topology",
+            `${fieldPath}.slot`,
+            "Payload occurrence output slots must be unique.",
+          );
+        outputs.add(binding.slot);
+        const slot = types.get(binding.slot);
+        const definition = EVENT_PAYLOAD_OCCURRENCE_FIELDS[field];
+        const lineageInputs =
+          field === "internalEventKey"
+            ? [node.eventPk]
+            : [node.eventKey, node.eventPk];
+        if (
+          !slot ||
+          !sameType(slot.type, definition.type) ||
+          slot.nullable !== definition.nullable ||
+          !hasDerivedLineage(
+            slot,
+            `event-payload-occurrence:${field}`,
+            lineageInputs,
+          )
+        )
+          fail(
+            "invalid-expression",
+            `${fieldPath}.slot`,
+            "Payload occurrence output type, nullability, or source lineage differs from its finite schema.",
+          );
+      });
+      expectedOutput = node.fields.map(({ slot }) => slot);
+      expectedGrain = { kind: "bag" };
       break;
     }
     case "project": {
@@ -2249,6 +2414,8 @@ export function validateLogicalPlan(plan: LogicalPlan): ValidatedLogicalPlan {
       switch (node.kind) {
         case "source":
           return node.values.map((binding) => binding.slot);
+        case "event-payload-occurrences":
+          return node.fields.map((binding) => binding.slot);
         case "relationship-lookup":
           return [node.relatedSlot];
         case "project":

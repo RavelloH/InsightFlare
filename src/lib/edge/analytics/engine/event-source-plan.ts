@@ -31,6 +31,7 @@ export interface EventReportSourceContext {
   readonly builder: LogicalPlanBuilder;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly preparedTimePolicy?: "reader-window";
   readonly subject: SemanticSubjectDomain;
   readonly time: SemanticTemporalDomains;
 }
@@ -41,7 +42,10 @@ export function createEventReportSourceContext(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly preparedTimePolicy?: "reader-window";
 }): EventReportSourceContext {
+  if (input.preparedTimePolicy && !input.scopePlan)
+    throw new Error("event_source_reader_window_requires_prepared_scope");
   const time = semanticTemporalDomainsFromQueryTime(input.queryTime);
   const subject = createSemanticSubjectDomain({
     origin: "site",
@@ -57,6 +61,9 @@ export function createEventReportSourceContext(input: {
     builder,
     filters: input.filters,
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    ...(input.preparedTimePolicy
+      ? { preparedTimePolicy: input.preparedTimePolicy }
+      : {}),
     subject,
     time,
   };
@@ -71,27 +78,55 @@ export function addEventReportSource(
     readonly eventNameInputSemantics?: EventNameInputSemantics;
   },
 ): LogicalRelationHandle {
+  const readerWindow = context.preparedTimePolicy === "reader-window";
+  const eventNameSemantics =
+    input.eventNameInputSemantics ?? "trimmed-nonempty";
+  if (
+    readerWindow &&
+    input.eventName !== undefined &&
+    eventNameSemantics !== "legacy-truthy-raw"
+  )
+    throw new Error(
+      "event_source_reader_window_requires_legacy_truthy_raw_event_name",
+    );
   const selection = createSemanticScopedSourceSelection({
     profile: context.scopePlan
-      ? "prepared-scoped-v1"
+      ? readerWindow
+        ? "prepared-scoped-reader-window-v1"
+        : "prepared-scoped-v1"
       : "direct-event-analytics-v1",
     filters: context.filters,
     subject: context.subject,
     time: context.time,
     ...(context.scopePlan ? { expectedPlan: context.scopePlan } : {}),
-    ...(input.eventName !== undefined
+    ...(!readerWindow && input.eventName !== undefined
       ? {
           eventName: input.eventName,
-          eventNameInputSemantics:
-            input.eventNameInputSemantics ?? "trimmed-nonempty",
+          eventNameInputSemantics: eventNameSemantics,
         }
       : {}),
   });
-  return context.builder.source("event", {
+  const events = context.builder.source("event", {
     temporalDomain: "candidate",
     attributes: input.attributes,
     selection,
   });
+  if (!readerWindow || !input.eventName) return events;
+  const eventName = context.builder.coalesce(
+    context.builder.slot(events, "attribute:event.report.eventName"),
+    context.builder.literal("", { kind: "scalar", scalar: "string" }),
+  );
+  return context.builder.filter(
+    events,
+    context.builder.compare(
+      "eq",
+      context.builder.normalizeString(eventName, "trim-ascii-space"),
+      context.builder.literal(input.eventName, {
+        kind: "scalar",
+        scalar: "string",
+      }),
+    ),
+  );
 }
 
 /** Builds a shared value-only Event Source used by event summaries and trends. */
@@ -100,6 +135,7 @@ export function buildEventReportSource(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly preparedTimePolicy?: "reader-window";
   readonly attributes: readonly string[];
   readonly eventName?: string;
   readonly eventNameInputSemantics?: EventNameInputSemantics;
@@ -112,6 +148,9 @@ export function buildEventReportSource(input: {
     queryTime: input.queryTime,
     filters: input.filters,
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    ...(input.preparedTimePolicy
+      ? { preparedTimePolicy: input.preparedTimePolicy }
+      : {}),
   });
   return {
     builder: context.builder,

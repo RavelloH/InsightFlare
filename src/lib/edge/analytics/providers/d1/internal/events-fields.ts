@@ -3,9 +3,18 @@ import {
   effectiveScopeForPagination,
   filterFingerprint,
   type QueryAudience,
+  scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
+import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import {
+  buildEventFieldsPagePlan,
+  buildEventFieldsPlan,
+  EVENT_FIELDS_OUTPUT,
+  EVENT_FIELDS_PAGE_OUTPUT,
+} from "@/lib/edge/analytics/engine/event-fields-plan";
 import type { Env } from "@/lib/edge/types";
 
+import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
 import type {
   EventFieldRow,
   EventFieldValueRow,
@@ -119,45 +128,21 @@ export async function queryEventFieldsFromD1(
   eventName: string | undefined,
   limit: number,
 ): Promise<EventFieldRow[]> {
-  const source = buildEventFilteredSourceCte(
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildEventFieldsPlan({
     siteId,
-    window,
+    queryTime: queryWindowToTime(window),
     filters,
-    eventName,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(eventName !== undefined ? { eventName } : {}),
+    limit,
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    EVENT_FIELDS_OUTPUT,
   );
-  const sql = `
-${source.cte},
-field_rows AS (
-  SELECT
-    p.path,
-    v.value_type AS valueType,
-    v.event_pk,
-    v.occurred_at,
-    v.string_value AS stringValue,
-    v.number_value AS numberValue,
-    v.boolean_value AS booleanValue
-  FROM custom_event_json_values v
-  INNER JOIN custom_event_json_paths p
-    ON p.id = v.path_id
-  INNER JOIN filtered_events fe
-    ON fe.event_pk = v.event_pk
-)
-SELECT
-  path,
-  valueType,
-  count(DISTINCT event_pk) AS events,
-  count(*) AS occurrences,
-  MIN(occurred_at) AS firstSeenAt,
-  MAX(occurred_at) AS lastSeenAt,
-  MIN(stringValue) AS stringValue,
-  MIN(numberValue) AS numberValue,
-  MIN(booleanValue) AS booleanValue
-FROM field_rows
-GROUP BY path, valueType
-ORDER BY events DESC, occurrences DESC, path ASC
-LIMIT ?
-  `;
-  return queryD1All<EventFieldRow>(env, sql, [...source.bindings, limit]);
+  return rows as unknown as EventFieldRow[];
 }
 
 export async function queryEventFieldsPageFromD1(
@@ -170,74 +155,21 @@ export async function queryEventFieldsPageFromD1(
   cursor?: EventFieldCursor | null,
   audience: QueryAudience = "private-dashboard",
 ): Promise<PageResult<EventFieldRow>> {
-  const source = buildEventFilteredSourceCte(
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildEventFieldsPagePlan({
     siteId,
-    window,
+    queryTime: queryWindowToTime(window),
     filters,
-    eventName,
-  );
-  const cursorClause = cursor
-    ? `
-WHERE events < ?
-   OR (events = ? AND occurrences < ?)
-   OR (events = ? AND occurrences = ? AND path > ?)
-   OR (events = ? AND occurrences = ? AND path = ? AND valueType > ?)`
-    : "";
-  const sql = `
-${source.cte},
-field_rows AS (
-  SELECT
-    p.path,
-    v.value_type AS valueType,
-    v.event_pk,
-    v.occurred_at,
-    v.string_value AS stringValue,
-    v.number_value AS numberValue,
-    v.boolean_value AS booleanValue
-  FROM custom_event_json_values v
-  INNER JOIN custom_event_json_paths p ON p.id = v.path_id
-  INNER JOIN filtered_events fe ON fe.event_pk = v.event_pk
-),
-rollup AS (
-  SELECT
-    path,
-    valueType,
-    count(DISTINCT event_pk) AS events,
-    count(*) AS occurrences,
-    MIN(occurred_at) AS firstSeenAt,
-    MAX(occurred_at) AS lastSeenAt,
-    MIN(stringValue) AS stringValue,
-    MIN(numberValue) AS numberValue,
-    MIN(booleanValue) AS booleanValue
-  FROM field_rows
-  GROUP BY path, valueType
-)
-SELECT path, valueType, events, occurrences, firstSeenAt, lastSeenAt,
-  stringValue, numberValue, booleanValue
-FROM rollup
-${cursorClause}
-ORDER BY events DESC, occurrences DESC, path ASC, valueType ASC
-LIMIT ?
-`;
-  const cursorBindings = cursor
-    ? [
-        cursor.events,
-        cursor.events,
-        cursor.occurrences,
-        cursor.events,
-        cursor.occurrences,
-        cursor.path,
-        cursor.events,
-        cursor.occurrences,
-        cursor.path,
-        cursor.valueType,
-      ]
-    : [];
-  const rows = await queryD1All<EventFieldRow>(env, sql, [
-    ...source.bindings,
-    ...cursorBindings,
-    limit + 1,
-  ]);
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(eventName !== undefined ? { eventName } : {}),
+    limit,
+    ...(cursor ? { cursor } : {}),
+  });
+  const rows = (await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    EVENT_FIELDS_PAGE_OUTPUT,
+  )) as unknown as EventFieldRow[];
   const page = pageResult(rows, limit);
   const binding = await eventFieldBinding(
     "event-fields",

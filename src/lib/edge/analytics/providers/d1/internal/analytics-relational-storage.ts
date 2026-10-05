@@ -436,6 +436,39 @@ export class AnalyticsRelationalStorage {
     this.#time = context.time;
   }
 
+  /** Expands payload rows only from the Event relation already selected upstream. */
+  eventPayloadOccurrences(
+    selectedEvents: AnalyticsDbRelation,
+    eventPk: AnyExpression,
+  ): AnalyticsDbRelation {
+    const eventPkValue = eventPk as SqlExpression<
+      number,
+      ExpressionResultType<"integer", false>
+    >;
+    const eventKeys = project(selectedEvents, { event_pk: eventPkValue });
+    const occurrences = scan(schema.custom_event_json_values);
+    const eventOccurrences = join(
+      eventKeys,
+      occurrences,
+      eq(eventKeys.columns.event_pk, occurrences.columns.event_pk),
+    );
+    const paths = scan(schema.custom_event_json_paths);
+    const occurrencesWithPaths = join(
+      eventOccurrences,
+      paths,
+      eq(eventOccurrences.columns.right_path_id, paths.columns.id),
+    );
+    return project(occurrencesWithPaths, {
+      path: occurrencesWithPaths.columns.right_path,
+      valueType: occurrencesWithPaths.columns.left_right_value_type,
+      occurredAt: occurrencesWithPaths.columns.left_right_occurred_at,
+      stringValue: occurrencesWithPaths.columns.left_right_string_value,
+      numberValue: occurrencesWithPaths.columns.left_right_number_value,
+      booleanValue: occurrencesWithPaths.columns.left_right_boolean_value,
+      internalEventKey: occurrencesWithPaths.columns.left_left_event_pk,
+    });
+  }
+
   lowerSource(
     node: SourceNode,
     path: string,

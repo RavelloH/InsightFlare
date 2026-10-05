@@ -6,6 +6,7 @@ import type {
 } from "@/lib/edge/analytics/engine/logical/ids";
 import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
 import type { AnalyticsEntityKind } from "@/lib/edge/analytics/engine/semantic/entities";
+import type { EventPayloadOccurrenceField } from "@/lib/edge/analytics/engine/semantic/event-payload-occurrences";
 import type { SemanticRelationshipId } from "@/lib/edge/analytics/engine/semantic/relationships";
 import type { SemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import type { TemporalDomainRef } from "@/lib/edge/analytics/engine/semantic/time";
@@ -52,6 +53,18 @@ export interface FilterNode extends LogicalNodeBase {
   readonly kind: "filter";
   readonly input: RelationId;
   readonly predicate: LogicalExpr;
+}
+
+/** Expands the stored occurrence bag for an already selected Event relation. */
+export interface EventPayloadOccurrencesNode extends LogicalNodeBase {
+  readonly kind: "event-payload-occurrences";
+  readonly input: RelationId;
+  readonly eventKey: SlotId;
+  readonly eventPk: SlotId;
+  readonly fields: readonly {
+    readonly field: EventPayloadOccurrenceField;
+    readonly slot: SlotId;
+  }[];
 }
 
 export interface ProjectBinding {
@@ -225,6 +238,7 @@ export type LogicalNode =
   | SourceNode
   | RelationshipLookupNode
   | FilterNode
+  | EventPayloadOccurrencesNode
   | ProjectNode
   | AggregateNode
   | SampleStatisticsNode

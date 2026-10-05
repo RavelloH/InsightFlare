@@ -80,6 +80,109 @@ function planWithForgedFilter(predicate: LogicalExpr): LogicalPlan {
 }
 
 describe("logical relational IR", () => {
+  it("expands selected Event payloads into a guarded occurrence bag", () => {
+    const builder = createBuilder();
+    const events = builder.source("event", {
+      attributes: ["event.report.internalPk"],
+    });
+    const selected = builder.filter(events, booleanLiteral(builder, true));
+    const occurrences = builder.eventPayloadOccurrences(selected);
+    expect(occurrences.grain).toEqual({ kind: "bag" });
+    builder.output("payload-occurrences", occurrences, [
+      { name: "path", slot: "path" },
+      { name: "event", slot: "internalEventKey" },
+    ]);
+    const plan = builder.finish();
+    const node = plan.nodes.find(
+      (candidate) => candidate.kind === "event-payload-occurrences",
+    );
+    expect(node).toMatchObject({
+      kind: "event-payload-occurrences",
+      input: selected.id,
+      grain: { kind: "bag" },
+    });
+    expect(
+      node?.kind === "event-payload-occurrences" ? node.fields : [],
+    ).toHaveLength(7);
+    expect(() => builder.eventPayloadOccurrences(occurrences)).toThrow(
+      "logical_builder_event_payload_occurrences_requires_event_entity",
+    );
+
+    const wrongEntityBuilder = createBuilder();
+    expect(() =>
+      wrongEntityBuilder.eventPayloadOccurrences(
+        wrongEntityBuilder.source("page"),
+      ),
+    ).toThrow(
+      "logical_builder_event_payload_occurrences_requires_event_entity",
+    );
+    const missingPkBuilder = createBuilder();
+    expect(() =>
+      missingPkBuilder.eventPayloadOccurrences(
+        missingPkBuilder.source("event"),
+      ),
+    ).toThrow(
+      "logical_builder_event_payload_occurrences_requires_event_pk_attribute",
+    );
+    const projectedBuilder = createBuilder();
+    const projectedSource = projectedBuilder.source("event", {
+      attributes: ["event.report.internalPk"],
+    });
+    const projectedEvents = projectedBuilder.project(projectedSource, {
+      entity: projectedBuilder.slot(projectedSource, "entity"),
+      "attribute:event.report.internalPk": projectedBuilder.slot(
+        projectedSource,
+        "attribute:event.report.internalPk",
+      ),
+    });
+    expect(() =>
+      projectedBuilder.eventPayloadOccurrences(projectedEvents),
+    ).toThrow(
+      "logical_builder_event_payload_occurrences_requires_event_pk_attribute",
+    );
+    const foreignBuilder = createBuilder();
+    const foreignEvents = createBuilder().source("event", {
+      attributes: ["event.report.internalPk"],
+    });
+    expect(() => foreignBuilder.eventPayloadOccurrences(foreignEvents)).toThrow(
+      "logical_builder_foreign_relation_handle",
+    );
+
+    const eventPk = plan.slots.find(
+      (slot) =>
+        slot.lineage.kind === "attribute" &&
+        slot.lineage.attribute === "event.report.internalPk",
+    );
+    if (!eventPk) throw new Error("wave64_event_pk_slot_missing");
+    const forged = {
+      ...plan,
+      slots: plan.slots.map((slot) =>
+        slot.id === eventPk.id
+          ? {
+              ...slot,
+              lineage: {
+                kind: "derived" as const,
+                operation: "forged-event-pk",
+                inputs: [],
+              },
+            }
+          : slot,
+      ),
+    } satisfies LogicalPlan;
+    expect(() => validateLogicalPlan(forged)).toThrow(LogicalPlanError);
+    if (node?.kind !== "event-payload-occurrences")
+      throw new Error("wave64_event_payload_occurrence_node_missing");
+    const pathSlot = node.fields.find((field) => field.field === "path")?.slot;
+    if (!pathSlot) throw new Error("wave64_event_payload_path_slot_missing");
+    const forgedNullable = {
+      ...plan,
+      slots: plan.slots.map((slot) =>
+        slot.id === pathSlot ? { ...slot, nullable: true } : slot,
+      ),
+    } satisfies LogicalPlan;
+    expect(() => validateLogicalPlan(forgedNullable)).toThrow(LogicalPlanError);
+  });
+
   it("concatenates visible scalar rows with explicit bag grain", () => {
     const builder = createBuilder();
     const number = { kind: "scalar", scalar: "number" } as const;

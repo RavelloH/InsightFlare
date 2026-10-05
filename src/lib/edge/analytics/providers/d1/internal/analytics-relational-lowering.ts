@@ -69,6 +69,7 @@ import type {
   AggregateNode,
   AntiJoinNode,
   DistinctNode,
+  EventPayloadOccurrencesNode,
   JoinNode,
   LogicalNode,
   OrderedMemberNode,
@@ -1504,6 +1505,7 @@ function logicalNodeInputs(node: LogicalNode): readonly RelationId[] {
       return [];
     case "relationship-lookup":
     case "filter":
+    case "event-payload-occurrences":
     case "project":
     case "aggregate":
     case "sample-statistics":
@@ -1808,6 +1810,9 @@ export class AnalyticsLogicalToDbLowerer {
         };
         break;
       }
+      case "event-payload-occurrences":
+        result = this.#lowerEventPayloadOccurrences(node, path);
+        break;
       case "project":
         result = this.#lowerProject(node, path);
         break;
@@ -2052,6 +2057,50 @@ export class AnalyticsLogicalToDbLowerer {
           : undefined,
       candidateActivitySessionRestricted: false,
     };
+  }
+
+  #lowerEventPayloadOccurrences(
+    node: EventPayloadOccurrencesNode,
+    path: string,
+  ): LoweredRelation {
+    if (!this.#hasStorageBackedEventPk(node.input, node.eventKey, node.eventPk))
+      reject(
+        path,
+        "Payload occurrence expansion requires the Event PK from the same registered Event Source ancestry.",
+      );
+    const input = this.#lowerNode(node.input);
+    const eventPk = readValue(
+      input.relation,
+      input.slots,
+      node.eventPk,
+      `${path}.eventPk`,
+    );
+    if (eventPk.kind !== "scalar")
+      reject(`${path}.eventPk`, "Event PK must lower to a scalar value.");
+    const payload = this.#storage.eventPayloadOccurrences(
+      input.relation,
+      eventPk.expression,
+    );
+    const values = node.fields
+      .filter((field) => this.#requiredOutput(node).has(field.slot))
+      .map(({ field, slot }) => {
+        const logical = logicalSlot(
+          this.#logicalSlots,
+          slot,
+          `${path}.${field}`,
+        );
+        return {
+          slot,
+          value: {
+            kind: "scalar" as const,
+            expression: relationColumn(payload, field, `${path}.${field}`),
+            type: logical.type,
+            nullable: logical.nullable,
+            candidateBounded: false,
+          },
+        };
+      });
+    return projectedValues(payload, values, this.#logicalSlots, path);
   }
 
   #lowerProject(node: ProjectNode, path: string): LoweredRelation {
@@ -2703,6 +2752,46 @@ export class AnalyticsLogicalToDbLowerer {
     };
   }
 
+  #hasStorageBackedEventPk(
+    relation: RelationId,
+    eventKey: SlotId,
+    eventPk: SlotId,
+    active = new Set<RelationId>(),
+  ): boolean {
+    if (active.has(relation)) return false;
+    const node = this.#nodes.get(relation);
+    if (
+      !node ||
+      !node.output.includes(eventKey) ||
+      !node.output.includes(eventPk)
+    )
+      return false;
+    const nextActive = new Set(active).add(relation);
+    if (node.kind === "filter")
+      return this.#hasStorageBackedEventPk(
+        node.input,
+        eventKey,
+        eventPk,
+        nextActive,
+      );
+    if (node.kind !== "source") return false;
+    return (
+      node.entity === "event" &&
+      node.grain.kind === "entity" &&
+      node.grain.entity === "event" &&
+      node.grain.key === eventKey &&
+      node.values.some(
+        (binding) => binding.kind === "self" && binding.slot === eventKey,
+      ) &&
+      node.values.some(
+        (binding) =>
+          binding.kind === "attribute" &&
+          binding.slot === eventPk &&
+          binding.attribute === "event.report.internalPk",
+      )
+    );
+  }
+
   #hasStorageBackedObservationIdentity(
     relation: RelationId,
     slot: SlotId,
@@ -2806,6 +2895,7 @@ export class AnalyticsLogicalToDbLowerer {
       case "sample-statistics":
       case "join":
       case "row-concatenation":
+      case "event-payload-occurrences":
         // Aggregates and joins do not supply a storage-backed Observation key.
         return false;
       case "sort":
@@ -3647,6 +3737,9 @@ export class AnalyticsLogicalToDbLowerer {
               ...node.output.filter((slot) => needed.has(slot)),
               ...this.#expressionSlots(node.predicate),
             ]);
+            break;
+          case "event-payload-occurrences":
+            add(node.input, [node.eventPk]);
             break;
           case "project":
             for (const projection of node.projections) {

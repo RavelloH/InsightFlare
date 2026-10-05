@@ -56,6 +56,10 @@ import {
   validateResolvedAnalyticsScope,
 } from "@/lib/edge/analytics/engine/semantic/entities";
 import {
+  EVENT_PAYLOAD_OCCURRENCE_FIELDS,
+  type EventPayloadOccurrenceField,
+} from "@/lib/edge/analytics/engine/semantic/event-payload-occurrences";
+import {
   semanticPageDimension,
   type SemanticPageDimensionId,
 } from "@/lib/edge/analytics/engine/semantic/page-dimensions";
@@ -242,6 +246,110 @@ export class LogicalPlanBuilder {
       grain: { kind: "entity", entity, key: self.id },
     } satisfies LogicalNode;
     return this.#addNode(node, namedSlots, node.grain, [temporalDomain]);
+  }
+
+  eventPayloadOccurrences(
+    events: LogicalRelationHandle,
+  ): LogicalRelationHandle {
+    let state = this.#owned(events);
+    if (
+      events.grain.kind !== "entity" ||
+      events.grain.entity !== "event" ||
+      events.entityKey !== events.grain.key
+    )
+      throw new Error(
+        "logical_builder_event_payload_occurrences_requires_event_entity",
+      );
+    const eventKey = events.grain.key;
+    const eventPk = events.slots["attribute:event.report.internalPk"];
+    const pkSlot =
+      eventPk === undefined ? undefined : this.#slotById.get(eventPk);
+    if (
+      !pkSlot ||
+      !state.node.output.includes(eventKey) ||
+      !state.node.output.includes(eventPk) ||
+      pkSlot.type.kind !== "scalar" ||
+      pkSlot.type.scalar !== "number" ||
+      pkSlot.type.unit !== undefined ||
+      pkSlot.nullable ||
+      pkSlot.lineage.kind !== "attribute" ||
+      pkSlot.lineage.attribute !== "event.report.internalPk"
+    )
+      throw new Error(
+        "logical_builder_event_payload_occurrences_requires_event_pk_attribute",
+      );
+
+    const visited = new Set<RelationId>();
+    while (state.node.kind === "filter") {
+      if (
+        visited.has(state.node.id) ||
+        !state.node.output.includes(eventKey) ||
+        !state.node.output.includes(eventPk)
+      )
+        throw new Error(
+          "logical_builder_event_payload_occurrences_invalid_filter_ancestry",
+        );
+      visited.add(state.node.id);
+      const parent = this.#relationById.get(state.node.input);
+      if (!parent)
+        throw new Error(
+          "logical_builder_event_payload_occurrences_missing_source",
+        );
+      state = parent;
+    }
+    const source = state.node;
+    if (
+      source.kind !== "source" ||
+      source.entity !== "event" ||
+      source.grain.kind !== "entity" ||
+      source.grain.entity !== "event" ||
+      source.grain.key !== eventKey ||
+      !source.output.includes(eventKey) ||
+      !source.output.includes(eventPk) ||
+      !source.values.some(
+        (binding) => binding.kind === "self" && binding.slot === eventKey,
+      ) ||
+      !source.values.some(
+        (binding) =>
+          binding.kind === "attribute" &&
+          binding.slot === eventPk &&
+          binding.attribute === "event.report.internalPk",
+      )
+    )
+      throw new Error(
+        "logical_builder_event_payload_occurrences_requires_same_event_source",
+      );
+
+    const fields: {
+      readonly field: EventPayloadOccurrenceField;
+      readonly slot: SlotId;
+    }[] = [];
+    const namedSlots: Record<string, SlotId> = {};
+    for (const field of Object.keys(
+      EVENT_PAYLOAD_OCCURRENCE_FIELDS,
+    ) as EventPayloadOccurrenceField[]) {
+      const definition = EVENT_PAYLOAD_OCCURRENCE_FIELDS[field];
+      const lineageInputs =
+        field === "internalEventKey" ? [eventPk] : [eventKey, eventPk];
+      const slot = this.#newSlot(definition.type, definition.nullable, {
+        kind: "derived",
+        operation: `event-payload-occurrence:${field}`,
+        inputs: lineageInputs,
+      });
+      fields.push({ field, slot: slot.id });
+      namedSlots[field] = slot.id;
+    }
+    const node = {
+      kind: "event-payload-occurrences",
+      id: this.#newRelationId(),
+      input: events.id,
+      eventKey,
+      eventPk,
+      fields,
+      output: fields.map(({ slot }) => slot),
+      grain: { kind: "bag" },
+    } satisfies LogicalNode;
+    return this.#addNode(node, namedSlots, node.grain, events.temporalDomains);
   }
 
   #snapshotSelection(

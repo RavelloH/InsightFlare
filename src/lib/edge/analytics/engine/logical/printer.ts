@@ -137,6 +137,8 @@ function nodeHeader(node: LogicalNode): string {
       return `${relation(node.id)} RelationshipLookup<${node.relationship}> grain=${grain(node.grain)} input=${relation(node.input)} time=${node.timeSemantics}`;
     case "filter":
       return `${relation(node.id)} Filter grain=${grain(node.grain)} input=${relation(node.input)}`;
+    case "event-payload-occurrences":
+      return `${relation(node.id)} EventPayloadOccurrences grain=${grain(node.grain)} input=${relation(node.input)} eventKey=${slot(node.eventKey)} eventPk=${slot(node.eventPk)}`;
     case "project":
       return `${relation(node.id)} Project grain=${grain(node.grain)} input=${relation(node.input)}`;
     case "aggregate":
@@ -192,6 +194,11 @@ function nodeLines(
       break;
     case "filter":
       lines.push(`  WHERE ${expression(node.predicate)}`);
+      break;
+    case "event-payload-occurrences":
+      node.fields.forEach((binding) =>
+        lines.push(`  ${binding.field} -> ${formatSlot(binding.slot, slots)}`),
+      );
       break;
     case "project":
       node.projections.forEach((projection) =>
