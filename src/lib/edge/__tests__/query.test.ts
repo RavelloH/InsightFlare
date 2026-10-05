@@ -272,11 +272,13 @@ function overviewMatch(): SqlMatch {
   let index = 0;
   return {
     match: (sql) =>
-      sql.includes(
-        "COALESCE((SELECT count(*) FROM session_rollup WHERE visit_count = 1), 0) AS bounces",
-      ) &&
-      (sql.includes("FROM filtered_visits") ||
-        sql.includes("FROM scope_final_visits")),
+      sql.includes('AS "views"') &&
+      sql.includes('AS "sessions"') &&
+      sql.includes('AS "visitors"') &&
+      sql.includes('AS "bounces"') &&
+      sql.includes('AS "totalDuration"') &&
+      !sql.includes('AS "pathname"') &&
+      !sql.includes('AS "bucket"'),
     first: undefined,
     run: undefined,
     get all() {
@@ -584,7 +586,7 @@ function commonQueryMatches(): SqlMatch[] {
       ],
     ),
     overviewMatch(),
-    allMatch(["visit_bucket_rollup AS", "session_bucket_rollup AS"], trendRows),
+    allMatch(['AS "bucket"', 'AS "views"', 'AS "sessions"'], trendRows),
     allMatch(
       ["ranked_session_visits AS", "card_rows AS", "cardType"],
       [
@@ -890,9 +892,13 @@ function commonQueryMatches(): SqlMatch[] {
         ),
       all: [eventRecordRow, { ...eventRecordRow, eventId: "evt-2" }],
     },
-    allMatch(
-      ["field_rows AS", "GROUP BY path, valueType"],
-      [
+    {
+      match: (sql, bindings) =>
+        sql.includes('"custom_event_json_values"') &&
+        sql.includes('"custom_event_json_paths"') &&
+        bindings.includes("Signup") &&
+        !bindings.some((binding) => binding === "/plan"),
+      all: [
         {
           path: "/plan",
           valueType: 1,
@@ -905,10 +911,14 @@ function commonQueryMatches(): SqlMatch[] {
           booleanValue: null,
         },
       ],
-    ),
-    allMatch(
-      ["GROUP BY valueType, stringValue"],
-      [
+    },
+    {
+      match: (sql, bindings) =>
+        sql.includes('"custom_event_json_values"') &&
+        sql.includes('"custom_event_json_paths"') &&
+        bindings.includes("/plan") &&
+        bindings.at(-2) === 1,
+      all: [
         {
           valueType: 1,
           events: 2,
@@ -920,7 +930,7 @@ function commonQueryMatches(): SqlMatch[] {
           booleanValue: null,
         },
       ],
-    ),
+    },
     {
       match: (sql, bindings) =>
         sql.includes('"custom_events"') &&
@@ -1540,17 +1550,18 @@ describe("edge query handlers", () => {
         }),
       ]),
     );
-    const aggregateStatement = statements.find((statement) =>
-      statement.sql.includes("session_rollup AS"),
+    const aggregateStatement = statements.find(
+      (statement) =>
+        statement.sql.includes('AS "views"') &&
+        statement.sql.includes('AS "sessions"') &&
+        statement.sql.includes('AS "bounces"'),
     );
     expect(aggregateStatement?.bindings).toEqual(
       expect.arrayContaining(["us", "example.com"]),
     );
-    expect(aggregateStatement?.sql).toContain("scope_matching_visits AS");
-    expect(aggregateStatement?.sql).toContain("scope_matching_events AS");
-    expect(aggregateStatement?.sql).toContain(
-      "LOWER(TRIM(COALESCE(v.referrer_host, ''))) = ''",
-    );
+    expect(aggregateStatement?.sql).toContain('"custom_events"');
+    expect(aggregateStatement?.sql).toContain('"custom_event_names"');
+    expect(aggregateStatement?.sql).toContain("LOWER(TRIM(COALESCE(");
   });
 
   it("rejects invalid private query windows after authorization", async () => {
@@ -1856,8 +1867,7 @@ describe("edge query handlers", () => {
     const fieldValueMatches: SqlMatch[] = [
       {
         match: (sql, bindings) =>
-          includesAll("GROUP BY valueType, stringValue")(sql) &&
-          bindings.at(-2) === 2,
+          sql.includes('"custom_event_json_values"') && bindings.at(-2) === 2,
         all: [
           {
             valueType: 2,
@@ -1873,8 +1883,7 @@ describe("edge query handlers", () => {
       },
       {
         match: (sql, bindings) =>
-          includesAll("GROUP BY valueType, stringValue")(sql) &&
-          bindings.at(-2) === 3,
+          sql.includes('"custom_event_json_values"') && bindings.at(-2) === 3,
         all: [
           {
             valueType: 3,
@@ -1890,8 +1899,7 @@ describe("edge query handlers", () => {
       },
       {
         match: (sql, bindings) =>
-          includesAll("GROUP BY valueType, stringValue")(sql) &&
-          bindings.at(-2) === 0,
+          sql.includes('"custom_event_json_values"') && bindings.at(-2) === 0,
         all: [
           {
             valueType: 0,

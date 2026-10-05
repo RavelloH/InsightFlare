@@ -518,8 +518,12 @@ function nodeExpressions(node: LogicalQueryNode): readonly SqlExpression[] {
   }
 }
 
-function expressionSources(expression: SqlExpression): QuerySource[] {
-  const result: QuerySource[] = [];
+type ExpressionQuerySourceKind = "scalar-subquery" | "in-subquery";
+
+function visitExpressionQuerySources(
+  expression: SqlExpression,
+  visitSource: (source: QuerySource, kind: ExpressionQuerySourceKind) => void,
+): void {
   const visit = (current: SqlExpression): void => {
     switch (current.kind) {
       case "binary":
@@ -555,7 +559,7 @@ function expressionSources(expression: SqlExpression): QuerySource[] {
         break;
       case "in-subquery":
         visit(current.expression);
-        result.push(current.query);
+        visitSource(current.query, "in-subquery");
         break;
       case "function":
         current.arguments.forEach(visit);
@@ -574,7 +578,7 @@ function expressionSources(expression: SqlExpression): QuerySource[] {
         if (current.else) visit(current.else);
         break;
       case "scalar-subquery":
-        result.push(current.query);
+        visitSource(current.query, "scalar-subquery");
         break;
       case "column":
       case "parameter":
@@ -585,6 +589,11 @@ function expressionSources(expression: SqlExpression): QuerySource[] {
     }
   };
   visit(expression);
+}
+
+function expressionSources(expression: SqlExpression): QuerySource[] {
+  const result: QuerySource[] = [];
+  visitExpressionQuerySources(expression, (source) => result.push(source));
   return result;
 }
 
@@ -1534,7 +1543,11 @@ function terminalOutputSort(
     wrappers.add(source);
     source = source.input.node;
   }
-  return source.kind === "sort" ? source : undefined;
+  return source.kind === "sort" &&
+    source.input.node.kind === "union" &&
+    source.input.node.all
+    ? source
+    : undefined;
 }
 
 function isAggregateRankingInput(root: LogicalQueryNode): boolean {
@@ -1745,6 +1758,112 @@ function isConstantExistenceQuery(query: QuerySource): boolean {
   return expression.kind === "constant" && expression.value === 1;
 }
 
+const closedWindowScopeMemo = new WeakMap<LogicalQueryNode, boolean>();
+
+function expressionColumnScopes(
+  expression: SqlExpression,
+  scopes: RelationScope[],
+): void {
+  switch (expression.kind) {
+    case "binary":
+    case "distinct-from":
+      expressionColumnScopes(expression.left, scopes);
+      expressionColumnScopes(expression.right, scopes);
+      break;
+    case "boolean":
+      expression.expressions.forEach((child) =>
+        expressionColumnScopes(child, scopes),
+      );
+      break;
+    case "not":
+    case "null-check":
+    case "in-list":
+    case "cast-integer":
+    case "cast-real":
+    case "cast-text":
+      expressionColumnScopes(expression.expression, scopes);
+      break;
+    case "text-position":
+      expressionColumnScopes(expression.text, scopes);
+      expressionColumnScopes(expression.needle, scopes);
+      break;
+    case "text-substring":
+      expressionColumnScopes(expression.text, scopes);
+      expressionColumnScopes(expression.start, scopes);
+      if (expression.length) expressionColumnScopes(expression.length, scopes);
+      break;
+    case "text-like":
+      expressionColumnScopes(expression.text, scopes);
+      expressionColumnScopes(expression.pattern, scopes);
+      break;
+    case "in-subquery":
+      expressionColumnScopes(expression.expression, scopes);
+      break;
+    case "function":
+      expression.arguments.forEach((argument) =>
+        expressionColumnScopes(argument, scopes),
+      );
+      break;
+    case "aggregate":
+      if (expression.expression)
+        expressionColumnScopes(expression.expression, scopes);
+      break;
+    case "coalesce":
+      expression.expressions.forEach((child) =>
+        expressionColumnScopes(child, scopes),
+      );
+      break;
+    case "case":
+      expression.branches.forEach((branch) => {
+        expressionColumnScopes(branch.when, scopes);
+        expressionColumnScopes(branch.then, scopes);
+      });
+      if (expression.else) expressionColumnScopes(expression.else, scopes);
+      break;
+    case "column":
+      scopes.push(expression.scope);
+      break;
+    case "scalar-subquery":
+    case "parameter":
+    case "excluded":
+    case "unixepoch":
+    case "constant":
+      break;
+  }
+}
+
+function hasClosedWindowSubtreeScopes(root: LogicalQueryNode): boolean {
+  const cached = closedWindowScopeMemo.get(root);
+  if (cached !== undefined) return cached;
+
+  const scopes = new Set<RelationScope>();
+  const referencedScopes: RelationScope[] = [];
+  const visited = new Set<LogicalQueryNode>();
+  const active = new Set<LogicalQueryNode>();
+  let cyclic = false;
+  const visit = (node: LogicalQueryNode): void => {
+    if (active.has(node)) {
+      cyclic = true;
+      return;
+    }
+    if (visited.has(node)) return;
+    active.add(node);
+    scopes.add(node.scope);
+    nodeExpressions(node).forEach((expression) =>
+      expressionColumnScopes(expression, referencedScopes),
+    );
+    nodeSources(node).forEach((source) => visit(source.node));
+    active.delete(node);
+    visited.add(node);
+  };
+  visit(root);
+
+  const closed =
+    !cyclic && referencedScopes.every((scope) => scopes.has(scope));
+  closedWindowScopeMemo.set(root, closed);
+  return closed;
+}
+
 function candidateFacts(root: LogicalQueryNode): CandidateFacts {
   const facts: CandidateFacts = {
     scopes: new Set(),
@@ -1753,15 +1872,24 @@ function candidateFacts(root: LogicalQueryNode): CandidateFacts {
     forbidden: false,
     rowNumberWindow: false,
   };
-  const visited = new Map<LogicalQueryNode, Set<boolean>>();
-  const visit = (node: LogicalQueryNode, querySourcePath: boolean): void => {
-    let contexts = visited.get(node);
-    if (!contexts) {
-      contexts = new Set();
-      visited.set(node, contexts);
+  const visited = new Map<LogicalQueryNode, Map<boolean, Set<boolean>>>();
+  const visit = (
+    node: LogicalQueryNode,
+    querySourcePath: boolean,
+    constantExistencePath: boolean,
+  ): void => {
+    let querySourceContexts = visited.get(node);
+    if (!querySourceContexts) {
+      querySourceContexts = new Map();
+      visited.set(node, querySourceContexts);
     }
-    if (contexts.has(querySourcePath)) return;
-    contexts.add(querySourcePath);
+    let constantExistenceContexts = querySourceContexts.get(querySourcePath);
+    if (!constantExistenceContexts) {
+      constantExistenceContexts = new Set();
+      querySourceContexts.set(querySourcePath, constantExistenceContexts);
+    }
+    if (constantExistenceContexts.has(constantExistencePath)) return;
+    constantExistenceContexts.add(constantExistencePath);
     facts.scopes.add(node.scope);
     if (
       node.kind === "filter" ||
@@ -1776,13 +1904,15 @@ function candidateFacts(root: LogicalQueryNode): CandidateFacts {
     )
       facts.forbidden = true;
     if (node.kind === "window") {
-      if (
-        !querySourcePath &&
+      const onlyRowNumberWindows =
         node.windows.length > 0 &&
         node.windows.every(
           ({ specification }) => specification.kind === "row-number",
-        )
-      )
+        );
+      const allowedQueryContext =
+        !querySourcePath ||
+        (constantExistencePath && hasClosedWindowSubtreeScopes(node));
+      if (onlyRowNumberWindows && allowedQueryContext)
         facts.rowNumberWindow = true;
       else facts.forbidden = true;
     }
@@ -1794,7 +1924,7 @@ function candidateFacts(root: LogicalQueryNode): CandidateFacts {
           current.kind === "unixepoch" ||
           current.kind === "in-subquery" ||
           (current.kind === "scalar-subquery" &&
-            !isConstantExistenceQuery(current.query))
+            (!isConstantExistenceQuery(current.query) || querySourcePath))
         ) {
           facts.forbidden = true;
         }
@@ -1862,12 +1992,19 @@ function candidateFacts(root: LogicalQueryNode): CandidateFacts {
       };
       inspect(expression);
     }
-    nodeChildren(node).forEach((source) => visit(source.node, querySourcePath));
-    nodeExpressions(node)
-      .flatMap(expressionSources)
-      .forEach((source) => visit(source.node, true));
+    nodeChildren(node).forEach((source) =>
+      visit(source.node, querySourcePath, constantExistencePath),
+    );
+    for (const expression of nodeExpressions(node))
+      visitExpressionQuerySources(expression, (source, sourceKind) => {
+        const entersConstantExistencePath =
+          !querySourcePath &&
+          sourceKind === "scalar-subquery" &&
+          isConstantExistenceQuery(source);
+        visit(source.node, true, entersConstantExistencePath);
+      });
   };
-  visit(root, false);
+  visit(root, false, false);
   return facts;
 }
 

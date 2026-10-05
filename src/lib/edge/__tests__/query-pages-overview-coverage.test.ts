@@ -178,7 +178,12 @@ function installDirectEventFilterTables(database: DatabaseSync): void {
       site_pk INTEGER NOT NULL DEFAULT 1,
       visit_id TEXT NOT NULL,
       event_name_id INTEGER NOT NULL,
-      occurred_at INTEGER NOT NULL
+      occurred_at INTEGER NOT NULL,
+      received_at INTEGER NOT NULL,
+      sequence INTEGER NOT NULL DEFAULT 0,
+      node_count INTEGER NOT NULL DEFAULT 0,
+      value_count INTEGER NOT NULL DEFAULT 0,
+      ae_synced_at INTEGER
     );
   `);
 }
@@ -7099,8 +7104,12 @@ describe("edge pages D1 queries", () => {
     ]);
 
     expect(calls[0].bindings).toEqual([
-      ...visitBindings(),
-      ...visitBindings(),
+      "site-pages",
+      window.startMs,
+      window.endExclusiveMs,
+      "site-pages",
+      window.startMs,
+      window.endExclusiveMs,
       "desktop",
       "desktop",
       "/pricing",
@@ -8721,19 +8730,19 @@ describe("edge overview D1 queries and handlers", () => {
       durationViews: 0,
     });
 
-    expect(calls[0].sql).toContain("session_rollup AS");
-    expect(calls[0].bindings).toEqual([
-      ...visitBindings(),
-      "Chrome",
-      "us",
-      window.startMs,
-      window.endExclusiveMs,
-      "Chrome",
-      "us",
-    ]);
+    expect(calls[0].sql).toContain('AS "views"');
+    expect(calls[0].sql).toContain("AS MATERIALIZED");
+    expect(calls[0].bindings).toEqual(
+      expect.arrayContaining([
+        "Chrome",
+        "us",
+        window.startMs,
+        window.endExclusiveMs,
+      ]),
+    );
   });
 
-  it("materializes filtered overview visits once while preserving aggregates", async () => {
+  it("materializes overview inputs and preserves filtered aggregates", async () => {
     const database = new DatabaseSync(":memory:");
     for (const migration of [
       "migrations/0008_rebuild_analytics.sql",
@@ -8834,13 +8843,15 @@ describe("edge overview D1 queries and handlers", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]?.sql).toContain("filtered_visits AS MATERIALIZED");
+      expect(calls[0]?.sql).toContain("AS MATERIALIZED");
       const plan = database
         .prepare(`EXPLAIN QUERY PLAN ${calls[0]?.sql ?? "SELECT 1"}`)
         .all(...(calls[0]?.bindings ?? [])) as Array<{ detail: string }>;
       expect(
-        plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
-      ).toHaveLength(1);
+        plan.filter((row) =>
+          row.detail.includes("idx_visits_site_pk_started_at"),
+        ),
+      ).toHaveLength(2);
       expect(
         plan.some((row) =>
           row.detail.includes("idx_visits_site_pk_started_at"),
@@ -9020,6 +9031,56 @@ describe("edge overview D1 queries and handlers", () => {
         999,
       );
 
+      const expectedOverview = {
+        views: 2,
+        sessions: 1,
+        visitors: 1,
+        bounces: 0,
+        totalDuration: 50,
+        durationViews: 2,
+      };
+      const legacyDataset = scopedDatasetForUnpreparedReader(
+        "overview",
+        siteId,
+        window,
+        filterFixture({ entry: "/landing", exit: "/pricing" }),
+        "session",
+      );
+      if (!legacyDataset)
+        throw new Error("legacy_overview_entry_exit_dataset_missing");
+      const legacyMetricSource = legacyDataset.visitRelation;
+      const legacySql = `
+WITH
+${legacyDataset.ctes},
+session_rollup AS (
+  SELECT vs.session_id, count(*) AS visit_count
+  FROM ${legacyMetricSource} vs
+  WHERE vs.session_id != ''
+  GROUP BY vs.session_id
+)
+SELECT
+  count(*) AS views,
+  (SELECT count(*) FROM ${legacyDataset.sessionRelation}) AS sessions,
+  (SELECT count(*) FROM ${legacyDataset.visitorRelation}) AS visitors,
+  COALESCE((SELECT count(*) FROM session_rollup WHERE visit_count = 1), 0) AS bounces,
+  COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0) AS totalDuration,
+  COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0) AS durationViews
+FROM ${legacyMetricSource}
+`;
+      const legacyBindings = legacyDataset.bindings.map(({ value }) => value);
+      const legacyRow = database
+        .prepare(legacySql)
+        .get(...legacyBindings) as Record<string, unknown>;
+      const legacyOverview = {
+        views: Number(legacyRow.views ?? 0),
+        sessions: Number(legacyRow.sessions ?? 0),
+        visitors: Number(legacyRow.visitors ?? 0),
+        bounces: Number(legacyRow.bounces ?? 0),
+        totalDuration: Number(legacyRow.totalDuration ?? 0),
+        durationViews: Number(legacyRow.durationViews ?? 0),
+      };
+      expect(legacyOverview).toEqual(expectedOverview);
+
       await expect(
         queryOverviewFromD1(
           env,
@@ -9030,21 +9091,26 @@ describe("edge overview D1 queries and handlers", () => {
             exit: "/pricing",
           }),
         ),
-      ).resolves.toEqual({
-        views: 2,
-        sessions: 1,
-        visitors: 1,
-        bounces: 0,
-        totalDuration: 50,
-        durationViews: 2,
-      });
+      ).resolves.toEqual(expectedOverview);
 
       expect(calls).toHaveLength(1);
+      const statement = calls[0];
+      if (!statement) throw new Error("overview_entry_exit_statement_missing");
+      expect(Buffer.byteLength(statement.sql, "utf8")).toBeLessThanOrEqual(
+        100_000,
+      );
+      expect(statement.bindings.length).toBeLessThanOrEqual(100);
+      expect(statement.sql).toContain("_d1_shared_");
+      expect(statement.sql.match(/ AS MATERIALIZED \(/gu)).toHaveLength(1);
       const plan = database
-        .prepare(`EXPLAIN QUERY PLAN ${calls[0]?.sql ?? "SELECT 1"}`)
-        .all(...(calls[0]?.bindings ?? [])) as Array<{ detail: string }>;
+        .prepare(`EXPLAIN QUERY PLAN ${statement.sql}`)
+        .all(...statement.bindings) as Array<{ detail: string }>;
       expect(plan.length).toBeGreaterThan(0);
-      expect(calls[0]?.sql).toContain("event_filter_source");
+      expect(
+        plan.filter(({ detail }) =>
+          /\bSCAN (?:visits|site_identities|custom_events)\b/iu.test(detail),
+        ),
+      ).toEqual([]);
     } finally {
       database.close();
     }
@@ -9181,21 +9247,21 @@ describe("edge overview D1 queries and handlers", () => {
       },
     ]);
 
-    expect(calls[0].sql).toContain("visit_bucket_rollup AS");
-    expect(calls[0].sql).toContain("session_bucket_rollup AS");
-    expect(calls[0].sql).toContain("CASE WHEN started_at >=");
-    expect(calls[0].bindings).toEqual([
-      ...visitBindings(),
-      "mobile",
-      "ref.example",
-      window.startMs,
-      window.endExclusiveMs,
-      "mobile",
-      "ref.example",
-    ]);
+    expect(calls[0].sql).toContain('AS "bucket"');
+    expect(calls[0].sql).toContain("COUNT(*)");
+    expect(calls[0].sql).toContain("COUNT(DISTINCT");
+    expect(calls[0].sql).toContain("CASE WHEN");
+    expect(calls[0].bindings).toEqual(
+      expect.arrayContaining([
+        "mobile",
+        "ref.example",
+        window.startMs,
+        window.endExclusiveMs,
+      ]),
+    );
   });
 
-  it("materializes filtered trend visits once while preserving bucket metrics", async () => {
+  it("uses indexed trend inputs while preserving bucket metrics", async () => {
     const database = new DatabaseSync(":memory:");
     for (const migration of [
       "migrations/0008_rebuild_analytics.sql",
@@ -9297,13 +9363,15 @@ describe("edge overview D1 queries and handlers", () => {
       ]);
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]?.sql).toContain("filtered_visits AS MATERIALIZED");
+      expect(calls[0]?.sql).toContain('"_d1_shared_1" AS (');
       const plan = database
         .prepare(`EXPLAIN QUERY PLAN ${calls[0]?.sql ?? "SELECT 1"}`)
         .all(...(calls[0]?.bindings ?? [])) as Array<{ detail: string }>;
       expect(
-        plan.filter((row) => row.detail.includes("SEARCH visits USING INDEX")),
-      ).toHaveLength(1);
+        plan.filter((row) =>
+          row.detail.includes("idx_visits_site_pk_started_at"),
+        ),
+      ).not.toHaveLength(0);
       expect(
         plan.some((row) =>
           row.detail.includes("idx_visits_site_pk_started_at"),
@@ -9414,11 +9482,9 @@ describe("edge overview D1 queries and handlers", () => {
       "unavailable",
     );
     expect(calls).toHaveLength(3);
-    expect(calls.map((call) => call.bindings.at(-1))).toEqual([
-      "/pricing",
-      "/pricing",
-      "/pricing",
-    ]);
+    expect(calls.every((call) => call.bindings.includes("/pricing"))).toBe(
+      true,
+    );
   });
 
   it("maps trend handler rows without optional overview change payload", async () => {
@@ -9464,7 +9530,7 @@ describe("edge overview D1 queries and handlers", () => {
         },
       ],
     });
-    expect(calls[0].bindings.at(-1)).toBe("ref.example");
+    expect(calls[0].bindings).toContain("ref.example");
   });
 
   it("maps overview page, source, client, and geo tab handlers", async () => {

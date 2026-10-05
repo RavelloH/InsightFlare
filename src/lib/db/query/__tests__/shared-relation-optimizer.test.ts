@@ -17,6 +17,7 @@ import {
   eq,
   filter,
   gt,
+  inSubquery,
   isNotNull,
   join,
   limit,
@@ -116,6 +117,121 @@ function selectedWideTextProjection(width: number, selective = true): Relation {
   const projections: Record<string, AnyExpression> = {};
   for (const name of fieldNames) projections[name] = selected.columns[name]!;
   return project(selected, projections);
+}
+
+function closedConstantExistenceWindowCandidate(
+  options: {
+    readonly windowInputCorrelation?: "input" | "partition" | "order";
+    readonly windowKind?: "row-number" | "count-rows";
+    readonly barrier?: "sort" | "limit";
+    readonly nestedNonconstantQuery?: boolean;
+    readonly queryKind?: "scalar" | "in";
+  } = {},
+) {
+  const pageSchema = {
+    sitePk: { affinity: "text", nullable: false },
+    sessionId: { affinity: "text", nullable: true },
+    startedAt: { affinity: "text", nullable: false },
+  } as const;
+  const outerPages = valuesRelation(pageSchema, [
+    {
+      sitePk: "1",
+      sessionId: "session-a",
+      startedAt: "11",
+    },
+    {
+      sitePk: "1",
+      sessionId: "session-a",
+      startedAt: "11",
+    },
+    {
+      sitePk: "1",
+      sessionId: "missing-session",
+      startedAt: "13",
+    },
+    {
+      sitePk: "1",
+      sessionId: null,
+      startedAt: "14",
+    },
+  ]);
+  const innerPages = valuesRelation(pageSchema, [
+    {
+      sitePk: "1",
+      sessionId: "session-a",
+      startedAt: "30",
+    },
+    {
+      sitePk: "1",
+      sessionId: "session-a",
+      startedAt: "10",
+    },
+    {
+      sitePk: "2",
+      sessionId: "session-a",
+      startedAt: "1",
+    },
+  ]);
+  const windowInput =
+    options.windowInputCorrelation === "input"
+      ? filter(
+          innerPages,
+          eq(innerPages.columns.sitePk, outerPages.columns.sitePk),
+        )
+      : innerPages;
+  const partitionBy = [innerPages.columns.sitePk, innerPages.columns.sessionId];
+  if (options.windowInputCorrelation === "partition")
+    partitionBy.push(outerPages.columns.sitePk);
+  const ranked = window(windowInput, {
+    rank:
+      options.windowKind === "count-rows"
+        ? windowCountRows({ partitionBy })
+        : rowNumber({
+            partitionBy,
+            orderBy: [
+              {
+                expression:
+                  options.windowInputCorrelation === "order"
+                    ? outerPages.columns.startedAt
+                    : innerPages.columns.startedAt,
+                direction: "ASC",
+              },
+            ],
+          }),
+  });
+  const boundarySource =
+    options.barrier === "sort"
+      ? sort(ranked, [{ expression: ranked.columns.rank, direction: "ASC" }])
+      : options.barrier === "limit"
+        ? limit(ranked, 10)
+        : ranked;
+  const nestedNonconstantSource = project(innerPages, {
+    value: innerPages.columns.sitePk,
+  });
+  const nestedQueryBoundary = options.nestedNonconstantQuery
+    ? filter(boundarySource, eq(scalar(nestedNonconstantSource), param("1")))
+    : boundarySource;
+  const matchingBoundary = filter(
+    nestedQueryBoundary,
+    and(
+      eq(ranked.columns.sitePk, outerPages.columns.sitePk),
+      eq(ranked.columns.sessionId, outerPages.columns.sessionId),
+      eq(ranked.columns.rank, param(1)),
+    ),
+  );
+  const existence = project(matchingBoundary, { found: constant(1) });
+  const selected = filter(
+    outerPages,
+    options.queryKind === "in"
+      ? inSubquery(param(1), existence)
+      : eq(scalar(existence), constant(1)),
+  );
+  const candidate = project(selected, {
+    sitePk: selected.columns.sitePk,
+    sessionId: selected.columns.sessionId,
+    startedAt: selected.columns.startedAt,
+  });
+  return { candidate, existence, innerPages, outerPages, ranked };
 }
 
 function independentWindowUnion(source: Relation, count: number): Relation {
@@ -536,7 +652,7 @@ describe("shared relation physical selection", () => {
       lowerLogicalPlan(mixedOutput).sharedRelations.some(
         ({ node }) => node === base.selectedPages.node,
       ),
-    ).toBe(true);
+    ).toBe(false);
     const mixedPhysical = lowerLogicalPlan(mixedOutput);
     const mixedOptimized = compileD1Query(mixedPhysical);
     const mixedMechanical = compileD1QueryUnoptimizedForTest(mixedOutput);
@@ -566,7 +682,7 @@ describe("shared relation physical selection", () => {
       nestedSortPhysical.sharedRelations.some(
         ({ node }) => node === base.selectedPages.node,
       ),
-    ).toBe(true);
+    ).toBe(false);
     const nestedSortOptimized = compileD1Query(nestedSortPhysical);
     const nestedSortMechanical =
       compileD1QueryUnoptimizedForTest(nestedSortOutput);
@@ -597,7 +713,7 @@ describe("shared relation physical selection", () => {
       nestedLimitPhysical.sharedRelations.some(
         ({ node }) => node === base.selectedPages.node,
       ),
-    ).toBe(true);
+    ).toBe(false);
     const nestedLimitOptimized = compileD1Query(nestedLimitPhysical);
     const nestedLimitMechanical =
       compileD1QueryUnoptimizedForTest(nestedLimitOutput);
@@ -674,7 +790,7 @@ describe("shared relation physical selection", () => {
       lowerLogicalPlan(scalarOutput).sharedRelations.some(
         ({ node }) => node === base.selectedPages.node,
       ),
-    ).toBe(true);
+    ).toBe(false);
 
     const correlatedIdentities = scan(schema.site_identities);
     const correlatedIdentity = filter(
@@ -705,7 +821,7 @@ describe("shared relation physical selection", () => {
       lowerLogicalPlan(correlatedOutput).sharedRelations.some(
         ({ node }) => node === base.selectedPages.node,
       ),
-    ).toBe(true);
+    ).toBe(false);
 
     const volatile = buildAggregateRankingQuery({ volatile: true });
     expect(
@@ -1367,7 +1483,7 @@ describe("shared relation physical selection", () => {
     );
   });
 
-  it("recognizes a terminal sort through only pure local output projections", () => {
+  it("allows a wrapped terminal sort over UNION ALL through pure output projections", () => {
     const database = createMigratedDatabase();
     databases.add(database);
     database
@@ -1375,7 +1491,7 @@ describe("shared relation physical selection", () => {
       .run("wrapped-sort-b", "wrapped-sort-a");
 
     const source = selectedProjection(5);
-    const repeated = repeatedThree(source);
+    const repeated = union(union(source, source, true), source, true);
     const ordered = sort(repeated, [
       { expression: repeated.columns.field1!, direction: "ASC" },
     ]);
@@ -1434,6 +1550,71 @@ describe("shared relation physical selection", () => {
     expect(
       lowerLogicalPlan(projectedLimit).sharedRelations.some(
         ({ node }) => node === source.node,
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps wrapped sorts over noncompound and UNION DISTINCT inputs behind the old barrier", () => {
+    const noncompoundSource = selectedProjection(5);
+    const noncompoundAliases = Array.from({ length: 3 }, () =>
+      project(noncompoundSource, {
+        field0: noncompoundSource.columns.field0!,
+        field1: noncompoundSource.columns.field1!,
+        field2: noncompoundSource.columns.field2!,
+        field3: noncompoundSource.columns.field3!,
+        field4: noncompoundSource.columns.field4!,
+      }),
+    );
+    const noncompoundPair = join(
+      noncompoundAliases[0]!,
+      noncompoundAliases[1]!,
+      eq(
+        noncompoundAliases[0]!.columns.field0!,
+        noncompoundAliases[1]!.columns.field0!,
+      ),
+    );
+    const noncompoundRepeated = join(
+      noncompoundPair,
+      noncompoundAliases[2]!,
+      eq(
+        noncompoundPair.columns.left_field0!,
+        noncompoundAliases[2]!.columns.field0!,
+      ),
+    );
+    const noncompoundSort = sort(noncompoundRepeated, [
+      {
+        expression: noncompoundRepeated.columns.right_field1!,
+        direction: "ASC",
+      },
+    ]);
+    const noncompoundOutput = project(noncompoundSort, {
+      field1: noncompoundSort.columns.right_field1!,
+    });
+    expect(
+      lowerLogicalPlan(noncompoundOutput).sharedRelations.some(
+        ({ node }) => node === noncompoundSource.node,
+      ),
+    ).toBe(false);
+
+    const distinctSource = selectedProjection(5);
+    const distinctRepeated = union(
+      union(distinctSource, distinctSource, false),
+      distinctSource,
+      false,
+    );
+    const distinctSort = sort(distinctRepeated, [
+      { expression: distinctRepeated.columns.field1!, direction: "ASC" },
+    ]);
+    const distinctOutput = project(distinctSort, {
+      field0: distinctSort.columns.field0!,
+      field1: distinctSort.columns.field1!,
+      field2: distinctSort.columns.field2!,
+      field3: distinctSort.columns.field3!,
+      field4: distinctSort.columns.field4!,
+    });
+    expect(
+      lowerLogicalPlan(distinctOutput).sharedRelations.some(
+        ({ node }) => node === distinctSource.node,
       ),
     ).toBe(false);
   });
@@ -1833,6 +2014,125 @@ describe("shared relation physical selection", () => {
     expect(optimizedRows.filter((row) => row.field2 === "c-many")).toHaveLength(
       2,
     );
+  });
+
+  it("shares a repeated selection containing a closed constant-existence row-number window", () => {
+    const database = new DatabaseSync(":memory:");
+    databases.add(database);
+    const { candidate, existence, innerPages, outerPages, ranked } =
+      closedConstantExistenceWindowCandidate();
+    const repeated = union(
+      union(union(candidate, candidate, true), candidate, true),
+      candidate,
+      true,
+    );
+    const ordered = sort(repeated, [
+      { expression: repeated.columns.startedAt, direction: "ASC" },
+    ]);
+    const output = project(ordered, {
+      sitePk: ordered.columns.sitePk,
+      sessionId: ordered.columns.sessionId,
+      startedAt: ordered.columns.startedAt,
+    });
+    const physical = lowerLogicalPlan(output);
+
+    expect(
+      physical.sharedRelations.find(({ node }) => node === candidate.node),
+    ).toMatchObject({ materialization: "materialized" });
+    expect(
+      physical.sharedRelations.some(
+        ({ node }) =>
+          node === existence.node ||
+          node === innerPages.node ||
+          node === outerPages.node ||
+          node === ranked.node,
+      ),
+    ).toBe(false);
+
+    const optimized = compileD1Query(physical);
+    const mechanical = compileD1QueryUnoptimizedForTest(output);
+    expect(optimized.sql.match(/ AS MATERIALIZED \(/gu)).toHaveLength(1);
+    const optimizedRows = database
+      .prepare(optimized.sql)
+      .all(...(optimized.bindings as SQLInputValue[]));
+    const mechanicalRows = database
+      .prepare(mechanical.sql)
+      .all(...(mechanical.bindings as SQLInputValue[]));
+    expect(rowBag(optimizedRows)).toEqual(rowBag(mechanicalRows));
+    expect(optimizedRows).toHaveLength(8);
+    expect(optimizedRows.map((row) => row.startedAt)).toEqual(
+      Array<string>(8).fill("11"),
+    );
+    expect(optimizedRows.every((row) => row.sessionId === "session-a")).toBe(
+      true,
+    );
+    expect(optimizedRows.every((row) => row.sitePk === "1")).toBe(true);
+  });
+
+  it("keeps nonclosed or unsafe constant-existence window shapes unshared", () => {
+    for (const options of [
+      { windowInputCorrelation: "input" },
+      { windowInputCorrelation: "partition" },
+      { windowInputCorrelation: "order" },
+      { windowKind: "count-rows" },
+      { barrier: "sort" },
+      { barrier: "limit" },
+      { nestedNonconstantQuery: true },
+      { queryKind: "in" },
+    ] as const) {
+      const { candidate } = closedConstantExistenceWindowCandidate(options);
+      let physical: ReturnType<typeof lowerLogicalPlan> | undefined;
+      try {
+        physical = lowerLogicalPlan(repeatedThree(candidate));
+      } catch (error) {
+        expect(error).toMatchObject({ code: "invalid_plan" });
+      }
+      expect(
+        physical?.sharedRelations.some(({ node }) => node === candidate.node) ??
+          false,
+      ).toBe(false);
+    }
+  });
+
+  it("lets a forbidden scalar-query path veto a safe reuse in either join order", () => {
+    for (const safeFirst of [true, false]) {
+      const { candidate } = closedConstantExistenceWindowCandidate();
+      const safeReuse = repeatedThree(candidate);
+      const query = project(candidate, {
+        value: candidate.columns.sitePk,
+      });
+      const lookupRows = valuesRelation(
+        { marker: { affinity: "text", nullable: false } },
+        [{ marker: "lookup" }],
+      );
+      const lookup = project(lookupRows, {
+        marker: lookupRows.columns.marker,
+        value: scalar(query),
+      });
+      const assertForbidden = (combined: Relation) => {
+        const physical = lowerLogicalPlan(combined);
+        expect(
+          physical.sharedRelations.some(({ node }) => node === candidate.node),
+        ).toBe(false);
+      };
+      if (safeFirst) {
+        assertForbidden(
+          join(
+            safeReuse,
+            lookup,
+            eq(safeReuse.columns.sitePk, lookup.columns.value),
+          ),
+        );
+      } else {
+        assertForbidden(
+          join(
+            lookup,
+            safeReuse,
+            eq(lookup.columns.value, safeReuse.columns.sitePk),
+          ),
+        );
+      }
+    }
   });
 
   it("keeps unsafe scalar-subquery shapes out of shared relations", () => {
