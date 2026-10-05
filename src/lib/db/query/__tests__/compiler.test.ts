@@ -1092,6 +1092,103 @@ describe("typed D1 query compiler", () => {
     }
   });
 
+  it("expands compiler-owned stars and identity projections with equal SQLite rows", () => {
+    const db = createMigratedDatabase();
+    try {
+      db.prepare("INSERT INTO site_identities (site_id) VALUES (?), (?)").run(
+        "compiler-left",
+        "compiler-right",
+      );
+
+      const buildQuery = (kind: "inner" | "left") => {
+        const sites = scan(schema.site_identities);
+        const selectedSites = filter(
+          sites,
+          gt(sites.columns.site_pk, param(0)),
+        );
+        const leftIdentity = project(selectedSites, {
+          sitePk: selectedSites.columns.site_pk,
+          siteId: selectedSites.columns.site_id,
+        });
+
+        const rightSites = scan(schema.site_identities);
+        const selectedRightSites = filter(
+          rightSites,
+          eq(rightSites.columns.site_id, param("compiler-left")),
+        );
+        const rightIdentity = project(selectedRightSites, {
+          sitePk: selectedRightSites.columns.site_pk,
+          siteId: selectedRightSites.columns.site_id,
+        });
+        const joined = join(
+          leftIdentity,
+          rightIdentity,
+          eq(leftIdentity.columns.sitePk, rightIdentity.columns.sitePk),
+          kind,
+        );
+        const visible = distinct(
+          project(joined, {
+            siteId: joined.columns.left_siteId,
+            maybeSitePk: joined.columns.right_sitePk,
+          }),
+        );
+        const ascending = window(visible, {
+          rank: rowNumber({
+            orderBy: [{ expression: visible.columns.siteId, direction: "ASC" }],
+          }),
+        });
+        const descending = window(visible, {
+          rank: rowNumber({
+            orderBy: [
+              { expression: visible.columns.siteId, direction: "DESC" },
+            ],
+          }),
+        });
+        const bothOrders = union(ascending, descending, false);
+        const ordered = sort(bothOrders, [
+          { expression: bothOrders.columns.rank, direction: "ASC" },
+          { expression: bothOrders.columns.siteId, direction: "ASC" },
+        ]);
+        const limited = limit(ordered, 10);
+        return project(limited, {
+          siteId: limited.columns.siteId,
+          maybeSitePk: limited.columns.maybeSitePk,
+          rank: limited.columns.rank,
+        });
+      };
+
+      const run = (query: { sql: string; bindings?: readonly unknown[] }) =>
+        db
+          .prepare(query.sql)
+          .all(...((query.bindings ?? []) as SQLInputValue[]));
+      for (const kind of ["inner", "left"] as const) {
+        const relation = buildQuery(kind);
+        const optimized = compileD1Query(relation);
+        const repeated = compileD1Query(relation);
+        const mechanical = compileD1QueryUnoptimizedForTest(relation);
+
+        expect(optimized.sql).not.toBe(mechanical.sql);
+        expect(optimized.sql).toContain(".*");
+        expect(optimized.sql).toContain('"site_pk" AS "_c0"');
+        expect(optimized.sql).toContain('AS "_c2"');
+        expect(mechanical.sql).not.toContain(".*");
+        expect(optimized.bindings).toEqual(mechanical.bindings);
+        expect(repeated.sql).toBe(optimized.sql);
+        expect(repeated.bindings).toEqual(optimized.bindings);
+        expect(repeated.physicalPlanShape).toEqual(optimized.physicalPlanShape);
+        expect(run(optimized)).toEqual(run(mechanical));
+        if (kind === "left")
+          expect(run(optimized)).toContainEqual({
+            siteId: "compiler-right",
+            maybeSitePk: null,
+            rank: 1,
+          });
+      }
+    } finally {
+      db.close();
+    }
+  });
+
   it("hoists shared filtered expression plans and keeps subquery or volatile plans inline", () => {
     const db = createMigratedDatabase();
     try {

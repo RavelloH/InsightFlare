@@ -44,6 +44,46 @@ function createD1Env(rowSets: Record<string, unknown>[][] = []) {
 }
 type D1Row = Record<string, unknown>;
 type Binding = string | number | null;
+const PERFORMANCE_METRICS = ["ttfb", "fcp", "lcp", "cls", "inp"] as const;
+function performanceWireRow(
+  rowType: string,
+  metric: string,
+  values: {
+    readonly bucket?: number | null;
+    readonly pathname?: string | null;
+    readonly country?: string | null;
+    readonly views?: number | string | null;
+    readonly samples?: number | string | null;
+    readonly avgValue?: number | string | null;
+    readonly p50?: number | null;
+    readonly p75?: number | null;
+    readonly p95?: number | null;
+  } = {},
+): D1Row {
+  const stats = Object.fromEntries(
+    PERFORMANCE_METRICS.flatMap((key) => [
+      [`${key}Samples`, null],
+      [`${key}AvgValue`, null],
+      [`${key}P50`, null],
+      [`${key}P75`, null],
+      [`${key}P95`, null],
+    ]),
+  );
+  return {
+    rowType,
+    metric,
+    bucket: values.bucket ?? null,
+    pathname: values.pathname ?? null,
+    country: values.country ?? null,
+    views: values.views ?? null,
+    ...stats,
+    [`${metric}Samples`]: values.samples,
+    [`${metric}AvgValue`]: values.avgValue,
+    [`${metric}P50`]: values.p50,
+    [`${metric}P75`]: values.p75,
+    [`${metric}P95`]: values.p95,
+  };
+}
 class SqliteStatement {
   constructor(
     private readonly database: DatabaseSync,
@@ -333,25 +373,26 @@ describe("edge query performance D1 helpers", () => {
   it("queries and groups every metric trend in one D1 statement", async () => {
     const { env, calls } = createD1Env([
       [
-        {
-          metric: "lcp",
+        performanceWireRow("trend", "lcp", {
           bucket: 0,
           samples: 3,
           avgValue: 100.3333,
           p50: 80,
           p75: 120.5555,
           p95: 250.9999,
-        },
-        {
-          metric: "ttfb",
+        }),
+        performanceWireRow("trend", "ttfb", {
           bucket: 1,
           samples: 2,
           avgValue: 50,
           p50: 40,
           p75: 60,
           p95: 70,
-        },
-        { metric: "unknown", bucket: 0, samples: 99 },
+        }),
+        performanceWireRow("trend", "unknown", {
+          bucket: 0,
+          samples: 99,
+        }),
       ],
     ]);
 
@@ -364,16 +405,10 @@ describe("edge query performance D1 helpers", () => {
     );
 
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.sql).toContain("PARTITION BY metric, bucket");
-    expect(calls[0]?.sql).toContain("'ttfb' AS metric");
-    expect(calls[0]?.sql).toContain("'inp' AS metric");
-    expect(calls[0]?.bindings).toEqual([
-      ...visitBindings,
-      "us",
-      window.startMs,
-      window.endExclusiveMs,
-      "us",
-    ]);
+    expect(calls[0]?.sql).toContain("UNION ALL");
+    expect(calls[0]?.sql).toContain('AS "ttfbAvgValue"');
+    expect(calls[0]?.sql).toContain('AS "clsP95"');
+    expect(calls[0]?.bindings).toContain("us");
     expect(result.lcp).toEqual([
       {
         bucket: 0,
@@ -394,46 +429,42 @@ describe("edge query performance D1 helpers", () => {
   it("groups route metrics by normalized pathname and preserves empty metric buckets", async () => {
     const { env, calls } = createD1Env([
       [
-        {
+        performanceWireRow("route", "lcp", {
           pathname: " /pricing ",
-          metric: "lcp",
           views: "9",
           samples: "3",
           avgValue: 100.4444,
           p50: 90,
           p75: 120,
           p95: 150,
-        },
-        {
+        }),
+        performanceWireRow("route", "ttfb", {
           pathname: "/pricing",
-          metric: "ttfb",
           views: 9,
           samples: 2,
           avgValue: 50,
           p50: 40,
           p75: 60,
           p95: 70,
-        },
-        {
+        }),
+        performanceWireRow("route", "fcp", {
           pathname: "",
-          metric: "fcp",
           views: 2,
           samples: 1,
           avgValue: 80,
           p50: 80,
           p75: 80,
           p95: 80,
-        },
-        {
+        }),
+        performanceWireRow("route", "bad", {
           pathname: "/ignored",
-          metric: "bad",
           views: 99,
           samples: 99,
           avgValue: 999,
           p50: 999,
           p75: 999,
           p95: 999,
-        },
+        }),
       ],
     ]);
 
@@ -463,41 +494,32 @@ describe("edge query performance D1 helpers", () => {
         inp: { avg: null, p50: null, p75: null, p95: null, samples: 0 },
       },
     });
-    expect(calls[0]?.sql).toContain("path_views AS");
-    expect(calls[0]?.sql).toContain("LIMIT ?");
-    expect(calls[0]?.bindings).toEqual([
-      ...visitBindings,
-      "Chrome",
-      window.startMs,
-      window.endExclusiveMs,
-      "Chrome",
-      2,
-    ]);
+    expect(calls[0]?.sql).toContain('AS "pathname"');
+    expect(calls[0]?.sql).toContain('AS "views"');
+    expect(calls[0]?.bindings).toContain("Chrome");
   });
 
   it("normalizes sparse route metric rows", async () => {
     const { env } = createD1Env([
       [
-        {
+        performanceWireRow("route", "ttfb", {
           pathname: null,
-          metric: "ttfb",
           views: null,
           samples: null,
           avgValue: null,
           p50: undefined,
           p75: null,
           p95: undefined,
-        },
-        {
+        }),
+        performanceWireRow("route", "bad", {
           pathname: "/ignored",
-          metric: null,
           views: 99,
           samples: 99,
           avgValue: 999,
           p50: 999,
           p75: 999,
           p95: 999,
-        },
+        }),
       ],
     ]);
 
@@ -529,56 +551,51 @@ describe("edge query performance D1 helpers", () => {
   it("groups country metrics by uppercase country and skips invalid rows", async () => {
     const { env, calls } = createD1Env([
       [
-        {
+        performanceWireRow("country", "ttfb", {
           country: " us ",
-          metric: "ttfb",
           views: "6",
           samples: "3",
           avgValue: 30.3333,
           p50: 20,
           p75: 40,
           p95: 50,
-        },
-        {
+        }),
+        performanceWireRow("country", "cls", {
           country: "US",
-          metric: "cls",
           views: 6,
           samples: 1,
           avgValue: 0.1234,
           p50: 0.1,
           p75: 0.12,
           p95: 0.2,
-        },
-        {
+        }),
+        performanceWireRow("country", "fcp", {
           country: "ca",
-          metric: "fcp",
           views: 2,
           samples: 1,
           avgValue: 111.1111,
           p50: 111.1111,
           p75: 111.1111,
           p95: 111.1111,
-        },
-        {
+        }),
+        performanceWireRow("country", "lcp", {
           country: "",
-          metric: "lcp",
           views: 1,
           samples: 1,
           avgValue: 999,
           p50: 999,
           p75: 999,
           p95: 999,
-        },
-        {
+        }),
+        performanceWireRow("country", "bad", {
           country: "MX",
-          metric: "bad",
           views: 1,
           samples: 1,
           avgValue: 999,
           p50: 999,
           p75: 999,
           p95: 999,
-        },
+        }),
       ],
     ]);
 
@@ -615,52 +632,41 @@ describe("edge query performance D1 helpers", () => {
         },
       },
     });
-    expect(calls[0]?.sql).toContain("country_views AS");
-    expect(calls[0]?.sql).toContain("UPPER(TRIM(COALESCE(country, '')))");
-    expect(calls[0]?.bindings).toEqual([
-      ...visitBindings,
-      "na",
-      "Example ISP",
-      window.startMs,
-      window.endExclusiveMs,
-      "na",
-      "Example ISP",
-    ]);
+    expect(calls[0]?.sql).toContain("UPPER(TRIM(COALESCE(");
+    expect(calls[0]?.sql).toContain('AS "country"');
+    expect(calls[0]?.bindings).toContain("na");
   });
 
   it("normalizes sparse country metric rows", async () => {
     const { env } = createD1Env([
       [
-        {
+        performanceWireRow("country", "ttfb", {
           country: null,
-          metric: "ttfb",
           views: 99,
           samples: 99,
           avgValue: 999,
           p50: 999,
           p75: 999,
           p95: 999,
-        },
-        {
+        }),
+        performanceWireRow("country", "bad", {
           country: "US",
-          metric: null,
           views: 99,
           samples: 99,
           avgValue: 999,
           p50: 999,
           p75: 999,
           p95: 999,
-        },
-        {
+        }),
+        performanceWireRow("country", "lcp", {
           country: "ca",
-          metric: "lcp",
           views: null,
           samples: null,
           avgValue: null,
           p50: undefined,
           p75: null,
           p95: undefined,
-        },
+        }),
       ],
     ]);
 
@@ -822,7 +828,7 @@ describe("edge query performance D1 helpers", () => {
           .all(...call.bindings) as Array<{ detail: string }>;
         expect(
           plan.filter((row) =>
-            row.detail.includes("SEARCH visits USING INDEX"),
+            row.detail.includes("idx_visits_site_pk_started_at"),
           ),
         ).toHaveLength(1);
       }
@@ -853,13 +859,10 @@ describe("edge query performance D1 helpers", () => {
         .all(...(d1.calls[4]?.bindings ?? [])) as Array<{ detail: string }>;
       expect(
         dashboardPlan.filter((row) =>
-          row.detail.includes("SEARCH visits USING INDEX"),
+          row.detail.includes("idx_visits_site_pk_started_at"),
         ),
       ).toHaveLength(1);
-      expect(d1.calls[4]?.sql).toContain("performance_visits AS MATERIALIZED");
-      expect(d1.calls[4]?.sql).toContain(
-        "perf_ttfb_ms IS NOT NULL OR perf_fcp_ms IS NOT NULL",
-      );
+      expect(d1.calls[4]?.sql).toContain('"_d1_shared_0" AS MATERIALIZED');
     } finally {
       d1.close();
     }
@@ -885,16 +888,21 @@ describe("edge query performance D1 helpers", () => {
   it("serves the performance dashboard with one shared D1 statement", async () => {
     const { env, prepare } = createD1Env([
       [
-        {
-          rowType: "trend",
-          metric: "lcp",
+        performanceWireRow("summary", "lcp", {
+          samples: 3,
+          avgValue: 150,
+          p50: 100,
+          p75: 200,
+          p95: 200,
+        }),
+        performanceWireRow("trend", "lcp", {
           bucket: 0,
           samples: 2,
           avgValue: 150,
           p50: 100,
           p75: 200,
           p95: 200,
-        },
+        }),
       ],
     ]);
 
@@ -910,6 +918,9 @@ describe("edge query performance D1 helpers", () => {
     expect(prepare).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
+      summaries: {
+        lcp: { avg: 150, p50: 100, p75: 200, p95: 200, samples: 3 },
+      },
       trends: {
         lcp: [{ bucket: 0, avg: 150, p75: 200, samples: 2 }],
       },

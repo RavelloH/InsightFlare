@@ -896,6 +896,41 @@ function incomingNodeCounts(
   return incoming;
 }
 
+/**
+ * Relations in a common outer input path for at least two distinct Window
+ * nodes. Expression-subquery edges are intentionally excluded from this
+ * physical sharing eligibility proof.
+ */
+function multiWindowInputs(
+  root: LogicalQueryNode,
+): ReadonlySet<LogicalQueryNode> {
+  const owners = new Map<LogicalQueryNode, Set<LogicalQueryNode>>();
+  const visited = new Set<LogicalQueryNode>();
+  const visit = (node: LogicalQueryNode): void => {
+    if (visited.has(node)) return;
+    visited.add(node);
+    if (node.kind === "window") {
+      const inputs = new Set<LogicalQueryNode>();
+      const collect = (input: LogicalQueryNode): void => {
+        if (inputs.has(input)) return;
+        inputs.add(input);
+        const set = owners.get(input) ?? new Set<LogicalQueryNode>();
+        set.add(node);
+        owners.set(input, set);
+        nodeChildren(input).forEach((child) => collect(child.node));
+      };
+      collect(node.input.node);
+    }
+    nodeChildren(node).forEach((child) => visit(child.node));
+  };
+  visit(root);
+  return new Set(
+    [...owners]
+      .filter(([, windows]) => windows.size >= 2)
+      .map(([node]) => node),
+  );
+}
+
 function directColumnIndex(
   expression: SqlExpression,
   scope: RelationScope,
@@ -1858,6 +1893,7 @@ function sharedRelationDefinitions(
   };
   visit(root);
   const hoist = hoistEligibility(root);
+  const repeatedWindowInputs = multiWindowInputs(root);
 
   const sharedMaterializations = new Map<
     LogicalQueryNode,
@@ -1889,7 +1925,13 @@ function sharedRelationDefinitions(
       );
       continue;
     }
-    if (node.kind === "project" && incomingCount >= 3)
+    if (
+      node.kind === "project" &&
+      (incomingCount >= 3 ||
+        (incomingCount === 2 &&
+          hoist.windowInput.has(node) &&
+          repeatedWindowInputs.has(node)))
+    )
       sharedMaterializations.set(node, "materialized");
   }
 

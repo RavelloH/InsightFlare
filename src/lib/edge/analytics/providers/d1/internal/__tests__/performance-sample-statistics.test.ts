@@ -28,12 +28,21 @@ import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/p
 import { printLogicalPlan } from "@/lib/edge/analytics/engine/logical/printer";
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
 import {
+  buildPerformanceDashboardPlan,
   buildPerformanceSummariesPlan,
   buildPerformanceTrendPlan,
+  PERFORMANCE_DASHBOARD_OUTPUT_IDS,
+  PERFORMANCE_REPORT_OUTPUT_FIELDS,
 } from "@/lib/edge/analytics/engine/performance-sample-statistics-report-plan";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { createSemanticTemporalDomains } from "@/lib/edge/analytics/engine/semantic/time";
+import {
+  queryAllPerformanceTrendsFromD1 as queryParentAllTrends,
+  queryPerformanceCountriesFromD1 as queryParentCountries,
+  queryPerformanceDashboardFromD1 as queryParentDashboard,
+  queryPerformanceRoutesFromD1 as queryParentRoutes,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/performance-parent-oracle";
 import { queryAnalyticsReportOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import type {
   PerformanceMetricKey,
@@ -51,6 +60,10 @@ import {
   visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
+  queryAllPerformanceTrendsFromD1,
+  queryPerformanceCountriesFromD1,
+  queryPerformanceDashboardFromD1,
+  queryPerformanceRoutesFromD1,
   queryPerformanceSummariesFromD1,
   queryPerformanceTrendFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/performance";
@@ -81,7 +94,8 @@ const PREVIOUS_WINDOW: QueryWindow = {
 interface PageInput {
   readonly id: string;
   readonly startedAt: number;
-  readonly pathname?: string;
+  readonly pathname?: string | null;
+  readonly country?: string | null;
   readonly latitude: number | null;
   readonly ttfb: number | null;
   readonly fcp: number | null;
@@ -200,9 +214,9 @@ function createDatabase(rows: readonly PageInput[] = PAGE_ROWS) {
   const insert = database.prepare(`
     INSERT INTO visits (
       visit_id, site_id, visitor_id, session_id, status, started_at,
-      last_activity_at, pathname, hostname, latitude,
+      last_activity_at, pathname, hostname, country, latitude,
       perf_ttfb_ms, perf_fcp_ms, perf_lcp_ms, perf_cls, perf_inp_ms, site_pk
-    ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'sample.test', ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'sample.test', ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   for (const row of rows) {
     insert.run(
@@ -212,7 +226,8 @@ function createDatabase(rows: readonly PageInput[] = PAGE_ROWS) {
       `session-${row.id}`,
       row.startedAt,
       row.startedAt,
-      row.pathname ?? "/sample",
+      row.pathname === undefined ? "/sample" : row.pathname,
+      row.country ?? "",
       row.latitude,
       row.ttfb,
       row.fcp,
@@ -716,6 +731,24 @@ async function compileObserved(
   };
 }
 
+async function captureParentSql(
+  invoke: (env: Env) => Promise<unknown>,
+): Promise<{
+  readonly sql: string;
+  readonly bindings: readonly (string | number | null)[];
+  readonly statementCount: number;
+}> {
+  const { env, calls } = createCaptureEnv();
+  await invoke(env);
+  const call = calls[0];
+  if (!call) throw new Error("wave60_parent_sql_capture_missing");
+  return {
+    sql: call.sql,
+    bindings: call.bindings,
+    statementCount: calls.length,
+  };
+}
+
 describe("Logical sample statistics and migrated performance readers", () => {
   afterEach(() => {
     activeDatabase?.close();
@@ -959,6 +992,42 @@ describe("Logical sample statistics and migrated performance readers", () => {
     expect(trace.preparedSql).toHaveLength(3);
   });
 
+  it("retains all 20 typed dashboard outputs and their metric units", () => {
+    const plan = buildPerformanceDashboardPlan({
+      siteId: SITE_ID,
+      queryTime: queryWindowToTime(WINDOW),
+      filters: EMPTY_FILTER_DOCUMENT,
+      interval: "hour",
+      routeLimit: 20,
+    });
+    expect(PERFORMANCE_DASHBOARD_OUTPUT_IDS).toHaveLength(20);
+    expect(plan.outputs.map(({ id }) => id)).toEqual(
+      PERFORMANCE_DASHBOARD_OUTPUT_IDS,
+    );
+    const types = new Map(plan.slots.map(({ id, type }) => [id, type]));
+    for (const output of plan.outputs) {
+      expect(output.fields.map(({ name }) => name)).toEqual(
+        PERFORMANCE_REPORT_OUTPUT_FIELDS,
+      );
+      const outputTypes = new Map(
+        output.fields.map(({ name, slot }) => [name, types.get(slot)]),
+      );
+      for (const metric of ["ttfb", "fcp", "lcp", "cls", "inp"] as const) {
+        expect(outputTypes.get(`${metric}Samples`)).toEqual({
+          kind: "scalar",
+          scalar: "number",
+        });
+        const unit = metric === "cls" ? "ratio" : "ms";
+        for (const suffix of ["AvgValue", "P50", "P75", "P95"])
+          expect(outputTypes.get(`${metric}${suffix}`)).toEqual({
+            kind: "scalar",
+            scalar: "number",
+            unit,
+          });
+      }
+    }
+  });
+
   it("returns scalar empty bags for every summary metric", async () => {
     const { env, trace } = createDatabase([]);
     await expect(
@@ -978,11 +1047,363 @@ describe("Logical sample statistics and migrated performance readers", () => {
     expect(trace.preparedSql).toHaveLength(1);
   });
 
+  it("matches the parent DTOs for all four public readers on a rich fixture", async () => {
+    const row = (
+      id: string,
+      minute: number,
+      pathname: string | null,
+      country: string | null,
+      metrics: Pick<PageInput, "ttfb" | "fcp" | "lcp" | "cls" | "inp">,
+    ): PageInput => ({
+      id,
+      startedAt: WINDOW.startMs + minute * 60_000,
+      pathname,
+      country,
+      latitude: null,
+      ...metrics,
+    });
+    const rows: PageInput[] = [
+      row("pricing-a", 1, " /pricing ", " us ", {
+        ttfb: 0,
+        fcp: null,
+        lcp: 10,
+        cls: 0,
+        inp: null,
+      }),
+      row("pricing-b", 2, "/pricing", "US", {
+        ttfb: -5,
+        fcp: 5,
+        lcp: null,
+        cls: 0.4,
+        inp: 20,
+      }),
+      row("pricing-c", 61, "/pricing", "US", {
+        ttfb: 100,
+        fcp: 0,
+        lcp: null,
+        cls: null,
+        inp: 30,
+      }),
+      row("tie-a-1", 5, "/tie-a", "ca", {
+        ttfb: 20,
+        fcp: null,
+        lcp: 50,
+        cls: 0.2,
+        inp: null,
+      }),
+      row("tie-a-2", 65, "/tie-a", "CA", {
+        ttfb: null,
+        fcp: 8,
+        lcp: null,
+        cls: 0.8,
+        inp: 40,
+      }),
+      row("tie-b-1", 6, "/tie-b", "CA", {
+        ttfb: 30,
+        fcp: 9,
+        lcp: null,
+        cls: 0.1,
+        inp: 50,
+      }),
+      row("tie-b-2", 66, "/tie-b", "CA", {
+        ttfb: null,
+        fcp: null,
+        lcp: null,
+        cls: null,
+        inp: null,
+      }),
+      row("unicode-sharp-s", 7, "/unicode-a", "ß", {
+        ttfb: 7,
+        fcp: null,
+        lcp: null,
+        cls: null,
+        inp: null,
+      }),
+      row("unicode-ascii-ss", 8, "/unicode-b", "SS", {
+        ttfb: null,
+        fcp: 11,
+        lcp: null,
+        cls: null,
+        inp: null,
+      }),
+      row("tab-country", 9, "/tab-country", "\t", {
+        ttfb: 90,
+        fcp: 90,
+        lcp: 90,
+        cls: 0.9,
+        inp: 90,
+      }),
+      row("nbsp-country", 10, "/nbsp-country", "\u00a0", {
+        ttfb: 91,
+        fcp: 91,
+        lcp: 91,
+        cls: 0.91,
+        inp: 91,
+      }),
+      row("empty-country", 11, "/empty-country", "", {
+        ttfb: 92,
+        fcp: 92,
+        lcp: 92,
+        cls: 0.92,
+        inp: 92,
+      }),
+      ...Array.from({ length: 5 }, (_unused, index) =>
+        row(`all-null-${index}`, 12 + index, "/all-null", "US", {
+          ttfb: null,
+          fcp: null,
+          lcp: null,
+          cls: null,
+          inp: null,
+        }),
+      ),
+      row("outside-start", -1, "/outside-start", "ZZ", {
+        ttfb: 999,
+        fcp: 999,
+        lcp: 999,
+        cls: 9,
+        inp: 999,
+      }),
+      {
+        ...row("end-exclusive", 120, "/end-exclusive", "ZZ", {
+          ttfb: 999,
+          fcp: 999,
+          lcp: 999,
+          cls: 9,
+          inp: 999,
+        }),
+        startedAt: WINDOW.endExclusiveMs,
+      },
+    ];
+    const { env, database, trace } = createDatabase(rows);
+    const foreignSitePk = Number(
+      (
+        database
+          .prepare(
+            "INSERT INTO site_identities (site_id) VALUES (?) RETURNING site_pk",
+          )
+          .get("performance-other-site") as { readonly site_pk: number }
+      ).site_pk,
+    );
+    database
+      .prepare(
+        `
+        INSERT INTO visits (
+          visit_id, site_id, visitor_id, session_id, status, started_at,
+          last_activity_at, pathname, hostname, country, latitude,
+          perf_ttfb_ms, perf_fcp_ms, perf_lcp_ms, perf_cls, perf_inp_ms, site_pk
+        ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'sample.test', ?, NULL, ?, ?, ?, ?, ?, ?)
+      `,
+      )
+      .run(
+        "foreign-site-row",
+        "performance-other-site",
+        "visitor-foreign",
+        "session-foreign",
+        WINDOW.startMs + 10,
+        WINDOW.startMs + 10,
+        "/foreign-site",
+        "ZZ",
+        888,
+        888,
+        888,
+        8,
+        888,
+        foreignSitePk,
+      );
+
+    const allTrends = await queryAllPerformanceTrendsFromD1(
+      env,
+      SITE_ID,
+      WINDOW,
+      "hour",
+      EMPTY_FILTER_DOCUMENT,
+    );
+    expect(allTrends).toEqual(
+      await queryParentAllTrends(
+        env,
+        SITE_ID,
+        WINDOW,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+      ),
+    );
+    expect(allTrends.lcp.map(({ bucket }) => bucket)).toEqual([0]);
+
+    const routes = await queryPerformanceRoutesFromD1(
+      env,
+      SITE_ID,
+      WINDOW,
+      EMPTY_FILTER_DOCUMENT,
+      20,
+    );
+    expect(routes).toEqual(
+      await queryParentRoutes(env, SITE_ID, WINDOW, EMPTY_FILTER_DOCUMENT, 20),
+    );
+    expect(routes.find(({ pathname }) => pathname === "/pricing")?.views).toBe(
+      3,
+    );
+    expect(routes.some(({ pathname }) => pathname === "/all-null")).toBe(false);
+    expect(routes.some(({ pathname }) => pathname === "/foreign-site")).toBe(
+      false,
+    );
+
+    const countries = await queryPerformanceCountriesFromD1(
+      env,
+      SITE_ID,
+      WINDOW,
+      EMPTY_FILTER_DOCUMENT,
+    );
+    expect(countries).toEqual(
+      await queryParentCountries(env, SITE_ID, WINDOW, EMPTY_FILTER_DOCUMENT),
+    );
+    expect(countries.some(({ country }) => country === "SS")).toBe(true);
+    expect(countries.some(({ country }) => country === "")).toBe(false);
+    expect(countries.some(({ country }) => country === "ZZ")).toBe(false);
+
+    const dashboard = await queryPerformanceDashboardFromD1(
+      env,
+      SITE_ID,
+      WINDOW,
+      "hour",
+      EMPTY_FILTER_DOCUMENT,
+      20,
+    );
+    expect(dashboard).toEqual(
+      await queryParentDashboard(
+        env,
+        SITE_ID,
+        WINDOW,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        20,
+      ),
+    );
+    expect(dashboard.trends).toEqual(allTrends);
+    expect(new Set(dashboard.routes.map(({ pathname }) => pathname))).toEqual(
+      new Set(routes.map(({ pathname }) => pathname)),
+    );
+    expect(dashboard.routes.map(({ pathname }) => pathname)).not.toEqual(
+      routes.map(({ pathname }) => pathname),
+    );
+    expect(new Set(dashboard.countries.map(({ country }) => country))).toEqual(
+      new Set(countries.map(({ country }) => country)),
+    );
+
+    const topNullOnly = await queryPerformanceRoutesFromD1(
+      env,
+      SITE_ID,
+      WINDOW,
+      EMPTY_FILTER_DOCUMENT,
+      1,
+    );
+    expect(topNullOnly).toEqual([]);
+    expect(topNullOnly).toEqual(
+      await queryParentRoutes(env, SITE_ID, WINDOW, EMPTY_FILTER_DOCUMENT, 1),
+    );
+    const limitedDashboard = await queryPerformanceDashboardFromD1(
+      env,
+      SITE_ID,
+      WINDOW,
+      "hour",
+      EMPTY_FILTER_DOCUMENT,
+      1,
+    );
+    expect(limitedDashboard.routes).toEqual([]);
+    expect(limitedDashboard).toEqual(
+      await queryParentDashboard(
+        env,
+        SITE_ID,
+        WINDOW,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        1,
+      ),
+    );
+    for (const limit of [0, -1]) {
+      const limitedRoutes = await queryPerformanceRoutesFromD1(
+        env,
+        SITE_ID,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        limit,
+      );
+      expect(limitedRoutes).toEqual(
+        await queryParentRoutes(
+          env,
+          SITE_ID,
+          WINDOW,
+          EMPTY_FILTER_DOCUMENT,
+          limit,
+        ),
+      );
+      const limitedDashboardRoutes = await queryPerformanceDashboardFromD1(
+        env,
+        SITE_ID,
+        WINDOW,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        limit,
+      );
+      expect(limitedDashboardRoutes).toEqual(
+        await queryParentDashboard(
+          env,
+          SITE_ID,
+          WINDOW,
+          "hour",
+          EMPTY_FILTER_DOCUMENT,
+          limit,
+        ),
+      );
+    }
+    const statementCountBeforeInvalidLimits = trace.preparedSql.length;
+    for (const limit of [0.5, Number.NaN]) {
+      await expect(
+        queryPerformanceRoutesFromD1(
+          env,
+          SITE_ID,
+          WINDOW,
+          EMPTY_FILTER_DOCUMENT,
+          limit,
+        ),
+      ).rejects.toThrow("performance_invalid_route_limit");
+      await expect(
+        queryPerformanceDashboardFromD1(
+          env,
+          SITE_ID,
+          WINDOW,
+          "hour",
+          EMPTY_FILTER_DOCUMENT,
+          limit,
+        ),
+      ).rejects.toThrow("performance_invalid_route_limit");
+    }
+    expect(trace.preparedSql).toHaveLength(statementCountBeforeInvalidLimits);
+
+    const indexedVisitScans = (sql: string, bindings: readonly unknown[]) =>
+      (
+        database
+          .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+          .all(...(bindings as never[])) as Array<{ readonly detail: string }>
+      ).filter(({ detail }) => detail.includes("idx_visits_site_pk_started_at"))
+        .length;
+    expect(trace.preparedSql).toHaveLength(trace.bindings.length);
+    const currentPlans = [0, 2, 4, 6].map((index) =>
+      indexedVisitScans(trace.preparedSql[index]!, trace.bindings[index] ?? []),
+    );
+    const parentPlans = [1, 3, 5, 7].map((index) =>
+      indexedVisitScans(trace.preparedSql[index]!, trace.bindings[index] ?? []),
+    );
+    expect(currentPlans).toEqual([1, 1, 1, 1]);
+    expect(parentPlans).toEqual([1, 1, 1, 1]);
+  });
+
   it("executes direct 40/40 and 39/40 payload filters through both migrated readers", async () => {
     const rows: PageInput[] = [
       {
         id: "payload-full-match",
         startedAt: WINDOW.startMs + 10,
+        pathname: "/payload/full",
+        country: "us",
         latitude: null,
         ttfb: 1,
         fcp: 2,
@@ -993,6 +1414,8 @@ describe("Logical sample statistics and migrated performance readers", () => {
       {
         id: "payload-partial-match",
         startedAt: WINDOW.startMs + 20,
+        pathname: "/payload/partial",
+        country: "CA",
         latitude: 1,
         ttfb: 2,
         fcp: 4,
@@ -1001,7 +1424,7 @@ describe("Logical sample statistics and migrated performance readers", () => {
         inp: 5,
       },
     ];
-    const { env, database, sitePk } = createDatabase(rows);
+    const { env, database, sitePk, trace } = createDatabase(rows);
     insertPayloadMatches(database, sitePk, {
       visitId: rows[0]!.id,
       count: 40,
@@ -1076,6 +1499,72 @@ describe("Logical sample statistics and migrated performance readers", () => {
     expect(trend39).toEqual(
       parentTrendDto(database, SITE_ID, WINDOW, "hour", direct39, "lcp"),
     );
+
+    for (const [filters, expectedRoutes, expectedDashboard] of [
+      [direct40, ["/payload/full"], ["/payload/full"]],
+      [
+        direct39,
+        ["/payload/full", "/payload/partial"],
+        ["/payload/full", "/payload/partial"],
+      ],
+    ] as const) {
+      const allTrends = await queryAllPerformanceTrendsFromD1(
+        env,
+        SITE_ID,
+        WINDOW,
+        "hour",
+        filters,
+      );
+      expect(allTrends).toEqual(
+        await queryParentAllTrends(env, SITE_ID, WINDOW, "hour", filters),
+      );
+      const routes = await queryPerformanceRoutesFromD1(
+        env,
+        SITE_ID,
+        WINDOW,
+        filters,
+        20,
+      );
+      expect(routes.map(({ pathname }) => pathname)).toEqual(expectedRoutes);
+      expect(routes).toEqual(
+        await queryParentRoutes(env, SITE_ID, WINDOW, filters, 20),
+      );
+      const countries = await queryPerformanceCountriesFromD1(
+        env,
+        SITE_ID,
+        WINDOW,
+        filters,
+      );
+      expect(countries).toEqual(
+        await queryParentCountries(env, SITE_ID, WINDOW, filters),
+      );
+      const dashboard = await queryPerformanceDashboardFromD1(
+        env,
+        SITE_ID,
+        WINDOW,
+        "hour",
+        filters,
+        20,
+      );
+      expect(dashboard.routes.map(({ pathname }) => pathname)).toEqual(
+        expectedDashboard,
+      );
+      expect(dashboard).toEqual(
+        await queryParentDashboard(env, SITE_ID, WINDOW, "hour", filters, 20),
+      );
+    }
+
+    const indexedVisitScans = (sql: string, bindings: readonly unknown[]) =>
+      (
+        database
+          .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+          .all(...(bindings as never[])) as Array<{ readonly detail: string }>
+      ).filter(({ detail }) => detail.includes("idx_visits_site_pk_started_at"))
+        .length;
+    const direct40Plans = [6, 7, 10, 11].map((index) =>
+      indexedVisitScans(trace.preparedSql[index]!, trace.bindings[index] ?? []),
+    );
+    expect(direct40Plans).toEqual([1, 1, 1, 1]);
   });
 
   it("uses the actual previous reader window with current prepared Page metadata", async () => {
@@ -1089,6 +1578,7 @@ describe("Logical sample statistics and migrated performance readers", () => {
       lcp: 17,
       cls: 0.25,
       inp: 8,
+      country: "fr",
     };
     const { env, database } = createDatabase([row]);
     const prepared = preparedPageMatches(1);
@@ -1134,6 +1624,144 @@ describe("Logical sample statistics and migrated performance readers", () => {
         "lcp",
       ),
     );
+
+    const routes = await queryPerformanceRoutesFromD1(
+      env,
+      SITE_ID,
+      PREVIOUS_WINDOW,
+      prepared,
+      20,
+    );
+    expect(routes).toEqual(
+      await queryParentRoutes(env, SITE_ID, PREVIOUS_WINDOW, prepared, 20),
+    );
+    const countries = await queryPerformanceCountriesFromD1(
+      env,
+      SITE_ID,
+      PREVIOUS_WINDOW,
+      prepared,
+    );
+    expect(countries).toEqual(
+      await queryParentCountries(env, SITE_ID, PREVIOUS_WINDOW, prepared),
+    );
+    const allTrends = await queryAllPerformanceTrendsFromD1(
+      env,
+      SITE_ID,
+      PREVIOUS_WINDOW,
+      "hour",
+      prepared,
+    );
+    expect(allTrends).toEqual(
+      await queryParentAllTrends(
+        env,
+        SITE_ID,
+        PREVIOUS_WINDOW,
+        "hour",
+        prepared,
+      ),
+    );
+    const dashboard = await queryPerformanceDashboardFromD1(
+      env,
+      SITE_ID,
+      PREVIOUS_WINDOW,
+      "hour",
+      prepared,
+      20,
+    );
+    expect(dashboard).toEqual(
+      await queryParentDashboard(
+        env,
+        SITE_ID,
+        PREVIOUS_WINDOW,
+        "hour",
+        prepared,
+        20,
+      ),
+    );
+
+    const emptyPrepared = preparedPageMatches(0);
+    const emptySummary = await queryPerformanceSummariesFromD1(
+      env,
+      SITE_ID,
+      PREVIOUS_WINDOW,
+      emptyPrepared,
+    );
+    expect(emptySummary).toEqual(
+      parentSummaryDto(database, SITE_ID, PREVIOUS_WINDOW, emptyPrepared),
+    );
+    const emptyTrend = await queryPerformanceTrendFromD1(
+      env,
+      SITE_ID,
+      PREVIOUS_WINDOW,
+      "hour",
+      emptyPrepared,
+      "lcp",
+    );
+    expect(emptyTrend).toEqual(
+      parentTrendDto(
+        database,
+        SITE_ID,
+        PREVIOUS_WINDOW,
+        "hour",
+        emptyPrepared,
+        "lcp",
+      ),
+    );
+    const emptyAllTrends = await queryAllPerformanceTrendsFromD1(
+      env,
+      SITE_ID,
+      PREVIOUS_WINDOW,
+      "hour",
+      emptyPrepared,
+    );
+    expect(emptyAllTrends).toEqual(
+      await queryParentAllTrends(
+        env,
+        SITE_ID,
+        PREVIOUS_WINDOW,
+        "hour",
+        emptyPrepared,
+      ),
+    );
+    expect(
+      await queryPerformanceRoutesFromD1(
+        env,
+        SITE_ID,
+        PREVIOUS_WINDOW,
+        emptyPrepared,
+        20,
+      ),
+    ).toEqual(
+      await queryParentRoutes(env, SITE_ID, PREVIOUS_WINDOW, emptyPrepared, 20),
+    );
+    expect(
+      await queryPerformanceCountriesFromD1(
+        env,
+        SITE_ID,
+        PREVIOUS_WINDOW,
+        emptyPrepared,
+      ),
+    ).toEqual(
+      await queryParentCountries(env, SITE_ID, PREVIOUS_WINDOW, emptyPrepared),
+    );
+    const emptyDashboard = await queryPerformanceDashboardFromD1(
+      env,
+      SITE_ID,
+      PREVIOUS_WINDOW,
+      "hour",
+      emptyPrepared,
+      20,
+    );
+    expect(emptyDashboard).toEqual(
+      await queryParentDashboard(
+        env,
+        SITE_ID,
+        PREVIOUS_WINDOW,
+        "hour",
+        emptyPrepared,
+        20,
+      ),
+    );
   });
 
   it("compiles one-statement public performance plans within the D1 budget", async () => {
@@ -1171,7 +1799,11 @@ describe("Logical sample statistics and migrated performance readers", () => {
         },
       },
     });
-    const profiles = [
+    const profiles: Array<{
+      readonly name: string;
+      readonly invoke: (env: Env) => Promise<unknown>;
+      readonly enforceBudget?: boolean;
+    }> = [
       {
         name: "summary-plain",
         invoke: (env: Env) =>
@@ -1204,6 +1836,50 @@ describe("Logical sample statistics and migrated performance readers", () => {
             "hour",
             EMPTY_FILTER_DOCUMENT,
             "cls",
+          ),
+      },
+      {
+        name: "all-trends-plain",
+        invoke: (env: Env) =>
+          queryAllPerformanceTrendsFromD1(
+            env,
+            SITE_ID,
+            WINDOW,
+            "hour",
+            EMPTY_FILTER_DOCUMENT,
+          ),
+      },
+      {
+        name: "routes-plain",
+        invoke: (env: Env) =>
+          queryPerformanceRoutesFromD1(
+            env,
+            SITE_ID,
+            WINDOW,
+            EMPTY_FILTER_DOCUMENT,
+            20,
+          ),
+      },
+      {
+        name: "countries-plain",
+        invoke: (env: Env) =>
+          queryPerformanceCountriesFromD1(
+            env,
+            SITE_ID,
+            WINDOW,
+            EMPTY_FILTER_DOCUMENT,
+          ),
+      },
+      {
+        name: "dashboard-plain",
+        invoke: (env: Env) =>
+          queryPerformanceDashboardFromD1(
+            env,
+            SITE_ID,
+            WINDOW,
+            "hour",
+            EMPTY_FILTER_DOCUMENT,
+            20,
           ),
       },
       {
@@ -1241,6 +1917,40 @@ describe("Logical sample statistics and migrated performance readers", () => {
           ),
       },
       {
+        name: "routes-direct-40",
+        invoke: (env: Env) =>
+          queryPerformanceRoutesFromD1(env, SITE_ID, WINDOW, direct40, 20),
+      },
+      {
+        name: "routes-direct-39",
+        invoke: (env: Env) =>
+          queryPerformanceRoutesFromD1(env, SITE_ID, WINDOW, direct39, 20),
+      },
+      {
+        name: "dashboard-direct-40",
+        invoke: (env: Env) =>
+          queryPerformanceDashboardFromD1(
+            env,
+            SITE_ID,
+            WINDOW,
+            "hour",
+            direct40,
+            20,
+          ),
+      },
+      {
+        name: "dashboard-direct-39",
+        invoke: (env: Env) =>
+          queryPerformanceDashboardFromD1(
+            env,
+            SITE_ID,
+            WINDOW,
+            "hour",
+            direct39,
+            20,
+          ),
+      },
+      {
         name: "summary-prepared-page-128-previous-window",
         invoke: (env: Env) =>
           queryPerformanceSummariesFromD1(
@@ -1262,28 +1972,130 @@ describe("Logical sample statistics and migrated performance readers", () => {
             "lcp",
           ),
       },
+      {
+        name: "dashboard-prepared-page-128-previous-window",
+        invoke: (env: Env) =>
+          queryPerformanceDashboardFromD1(
+            env,
+            SITE_ID,
+            PREVIOUS_WINDOW,
+            "hour",
+            prepared128,
+            20,
+          ),
+      },
+    ];
+
+    const coverageInputs = [
+      { suffix: "plain", window: WINDOW, filters: EMPTY_FILTER_DOCUMENT },
+      { suffix: "direct-40", window: WINDOW, filters: direct40 },
+      { suffix: "direct-39", window: WINDOW, filters: direct39 },
+      {
+        suffix: "prepared-page-128-previous-window",
+        window: PREVIOUS_WINDOW,
+        filters: prepared128,
+      },
     ] as const;
+    const readers = [
+      {
+        key: "all-trends",
+        current: (env: Env, window: QueryWindow, filters: FilterDocument) =>
+          queryAllPerformanceTrendsFromD1(
+            env,
+            SITE_ID,
+            window,
+            "hour",
+            filters,
+          ),
+        parent: (env: Env, window: QueryWindow, filters: FilterDocument) =>
+          queryParentAllTrends(env, SITE_ID, window, "hour", filters),
+      },
+      {
+        key: "routes",
+        current: (env: Env, window: QueryWindow, filters: FilterDocument) =>
+          queryPerformanceRoutesFromD1(env, SITE_ID, window, filters, 20),
+        parent: (env: Env, window: QueryWindow, filters: FilterDocument) =>
+          queryParentRoutes(env, SITE_ID, window, filters, 20),
+      },
+      {
+        key: "countries",
+        current: (env: Env, window: QueryWindow, filters: FilterDocument) =>
+          queryPerformanceCountriesFromD1(env, SITE_ID, window, filters),
+        parent: (env: Env, window: QueryWindow, filters: FilterDocument) =>
+          queryParentCountries(env, SITE_ID, window, filters),
+      },
+      {
+        key: "dashboard",
+        current: (env: Env, window: QueryWindow, filters: FilterDocument) =>
+          queryPerformanceDashboardFromD1(
+            env,
+            SITE_ID,
+            window,
+            "hour",
+            filters,
+            20,
+          ),
+        parent: (env: Env, window: QueryWindow, filters: FilterDocument) =>
+          queryParentDashboard(env, SITE_ID, window, "hour", filters, 20),
+      },
+    ] as const;
+    const existingProfileNames = new Set(profiles.map(({ name }) => name));
+    for (const input of coverageInputs) {
+      for (const reader of readers) {
+        const currentName = `${reader.key}-${input.suffix}`;
+        if (input.suffix !== "plain" && !existingProfileNames.has(currentName))
+          profiles.push({
+            name: currentName,
+            invoke: (env) => reader.current(env, input.window, input.filters),
+          });
+        profiles.push({
+          name: `parent-${reader.key}-${input.suffix}`,
+          invoke: (env) => reader.parent(env, input.window, input.filters),
+          enforceBudget: false,
+        });
+      }
+    }
 
     const evidence = [];
     for (const profile of profiles) {
-      const compiled = await compileObserved(profile.name, profile.invoke);
+      const compiled =
+        profile.enforceBudget === false
+          ? {
+              ...(await captureParentSql(profile.invoke)),
+              observation: undefined,
+            }
+          : await compileObserved(profile.name, profile.invoke);
       const sqlBytes = new TextEncoder().encode(compiled.sql).byteLength;
       const bindCount = compiled.bindings.length;
       expect(compiled.statementCount, profile.name).toBe(1);
-      expect(sqlBytes, profile.name).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
-      expect(bindCount, profile.name).toBeLessThanOrEqual(
-        D1_MAX_BOUND_PARAMETERS,
-      );
-      expect(compiled.observation.physicalPlanHash, profile.name).toMatch(
-        /^v\d+:/u,
-      );
+      if (profile.enforceBudget !== false) {
+        expect(sqlBytes, profile.name).toBeLessThanOrEqual(
+          D1_MAX_SQL_UTF8_BYTES,
+        );
+        expect(bindCount, profile.name).toBeLessThanOrEqual(
+          D1_MAX_BOUND_PARAMETERS,
+        );
+      }
+      if (profile.enforceBudget !== false)
+        expect(compiled.observation?.physicalPlanHash, profile.name).toMatch(
+          /^v\d+:/u,
+        );
       evidence.push({
         name: profile.name,
         sqlBytes,
         bindCount,
         statements: compiled.statementCount,
-        physicalPlanHash: compiled.observation.physicalPlanHash,
-        tag: compiled.observation.tag,
+        physicalPlanHash:
+          profile.enforceBudget === false
+            ? undefined
+            : compiled.observation?.physicalPlanHash,
+        tag:
+          profile.enforceBudget === false
+            ? undefined
+            : compiled.observation?.tag,
+        meetsBudget:
+          sqlBytes <= D1_MAX_SQL_UTF8_BYTES &&
+          bindCount <= D1_MAX_BOUND_PARAMETERS,
       });
     }
     expect(evidence).toHaveLength(profiles.length);

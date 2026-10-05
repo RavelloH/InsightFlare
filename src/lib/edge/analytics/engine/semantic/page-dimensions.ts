@@ -1,6 +1,10 @@
 import type { SemanticAttributeId } from "./attributes";
 
 export const SEMANTIC_PAGE_DIMENSIONS = {
+  countryCode: {
+    dependencies: ["page.report.country"],
+    nullableFromDependencies: false,
+  },
   trafficChannel: {
     dependencies: [
       "page.report.referrerHost",

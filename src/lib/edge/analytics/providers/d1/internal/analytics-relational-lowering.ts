@@ -1026,6 +1026,12 @@ function lowerExpression(
         get(attribute) as SqlExpression<string | null>;
       let result: AnyExpression;
       switch (expression.dimension) {
+        case "countryCode":
+          result = callFunction(
+            "upper",
+            trimSpaces(coalesce(text("page.report.country"), constant(""))),
+          );
+          break;
         case "trafficChannel":
           result = trafficChannelExpression({
             referrer_host: get("page.report.referrerHost"),
@@ -2958,10 +2964,15 @@ export class AnalyticsLogicalToDbLowerer {
     const partitionBy = groupColumns.map(
       ({ column }) => nonNull.columns[column] as SqlExpression,
     );
-    const ordinalColumn = slotColumn(node.groups.length + 1, "ordinal");
-    const partitionCountColumn = slotColumn(node.groups.length + 2, "count");
+    const ordinalColumn = "__analytics_sample_ordinal";
+    const partitionCountColumn = "__analytics_sample_count";
+    if (
+      Object.hasOwn(selected, ordinalColumn) ||
+      Object.hasOwn(selected, partitionCountColumn)
+    )
+      reject(path, "Sample statistics window aliases conflict with inputs.");
     const ordered = windowRelation(nonNull, {
-      [ordinalColumn]: rowNumber({
+      __analytics_sample_ordinal: rowNumber({
         partitionBy,
         orderBy: [
           {
@@ -2970,8 +2981,8 @@ export class AnalyticsLogicalToDbLowerer {
           },
         ],
       }),
-      [partitionCountColumn]: windowCountRows({ partitionBy }),
-    } as never);
+      __analytics_sample_count: windowCountRows({ partitionBy }),
+    });
     const groupBy: Record<string, AnyExpression> = Object.fromEntries(
       groupColumns.map(({ column }) => [
         column,

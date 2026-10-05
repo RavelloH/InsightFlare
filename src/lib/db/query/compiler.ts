@@ -92,6 +92,7 @@ interface RenderContext {
     }
   >;
   readonly textRowUsage?: Map<ValuesRelationNode, number>;
+  readonly projectionTransportSimplifications: boolean;
   bypassSharedNode?: LogicalQueryNode;
 }
 
@@ -121,12 +122,32 @@ function column(index: number, alias: string, fieldName?: string): SqlFragment {
 }
 
 function outputList(
+  context: RenderContext,
   width: number,
   alias: string,
   outputOffset = 0,
 ): SqlFragment[] {
+  if (
+    context.projectionTransportSimplifications &&
+    width > 0 &&
+    outputOffset === 0
+  )
+    return [concat(identifier(alias), text(".*"))];
   return Array.from({ length: width }, (_, index) =>
     concat(column(index, alias), text(` AS "_c${index + outputOffset}"`)),
+  );
+}
+
+function isIdentityProject(node: LogicalQueryNode): node is ProjectNode {
+  return (
+    node.kind === "project" &&
+    node.projections.length === node.input.fields.length &&
+    node.projections.every(
+      ({ expression }, index) =>
+        expression.kind === "column" &&
+        expression.scope === node.input.scope &&
+        expression.index === index,
+    )
   );
 }
 
@@ -540,7 +561,7 @@ function compileNode(
     const alias = nextAlias(context, "q");
     return concat(
       text("SELECT "),
-      join(outputList(node.fields.length, alias)),
+      join(outputList(context, node.fields.length, alias)),
       text(" FROM "),
       identifier(sharedName),
       text(" AS "),
@@ -653,7 +674,7 @@ function compileNode(
       const scopes = extendScopes(outerScopes, [[node.input.scope, { alias }]]);
       return concat(
         text("SELECT "),
-        join(outputList(node.fields.length, alias)),
+        join(outputList(context, node.fields.length, alias)),
         text(" FROM "),
         parenthesize(source),
         text(" AS "),
@@ -663,6 +684,8 @@ function compileNode(
       );
     }
     case "project": {
+      if (context.projectionTransportSimplifications && isIdentityProject(node))
+        return compileNode(node.input.node, context, outerScopes);
       const directScanProjection = context.directScanProjections.get(node);
       if (directScanProjection) {
         const alias = nextAlias(context, "t");
@@ -808,8 +831,9 @@ function compileNode(
                 );
           })
         : [
-            ...outputList(node.left.fields.length, leftAlias),
+            ...outputList(context, node.left.fields.length, leftAlias),
             ...outputList(
+              context,
               node.right.fields.length,
               rightAlias,
               node.left.fields.length,
@@ -842,7 +866,7 @@ function compileNode(
       ]);
       return concat(
         text("SELECT "),
-        join(outputList(node.fields.length, leftAlias)),
+        join(outputList(context, node.fields.length, leftAlias)),
         text(" FROM "),
         parenthesize(leftSql),
         text(" AS "),
@@ -895,7 +919,7 @@ function compileNode(
       const alias = nextAlias(context, "q");
       return concat(
         text("SELECT DISTINCT "),
-        join(outputList(node.fields.length, alias)),
+        join(outputList(context, node.fields.length, alias)),
         text(" FROM "),
         parenthesize(source),
         text(" AS "),
@@ -945,7 +969,10 @@ function compileNode(
       });
       return concat(
         text("SELECT "),
-        join([...outputList(node.input.fields.length, alias), ...selections]),
+        join([
+          ...outputList(context, node.input.fields.length, alias),
+          ...selections,
+        ]),
         text(" FROM "),
         parenthesize(source),
         text(" AS "),
@@ -958,7 +985,7 @@ function compileNode(
       const scopes = extendScopes(outerScopes, [[node.input.scope, { alias }]]);
       return concat(
         text("SELECT "),
-        join(outputList(node.fields.length, alias)),
+        join(outputList(context, node.fields.length, alias)),
         text(" FROM "),
         parenthesize(source),
         text(" AS "),
@@ -979,7 +1006,7 @@ function compileNode(
       const alias = nextAlias(context, "q");
       return concat(
         text("SELECT "),
-        join(outputList(node.fields.length, alias)),
+        join(outputList(context, node.fields.length, alias)),
         text(" FROM "),
         parenthesize(source),
         text(" AS "),
@@ -1001,14 +1028,14 @@ function compileNode(
       const rightAlias = nextAlias(context, "r");
       return concat(
         text("SELECT "),
-        join(outputList(node.fields.length, leftAlias)),
+        join(outputList(context, node.fields.length, leftAlias)),
         text(" FROM "),
         parenthesize(leftSql),
         text(" AS "),
         identifier(leftAlias),
         text(node.all ? " UNION ALL " : " UNION "),
         text("SELECT "),
-        join(outputList(node.fields.length, rightAlias)),
+        join(outputList(context, node.fields.length, rightAlias)),
         text(" FROM "),
         parenthesize(rightSql),
         text(" AS "),
@@ -1072,7 +1099,7 @@ function compileRecursiveClosure(
     text(" UNION "),
     recursiveStep,
     text(") SELECT "),
-    join(outputList(node.fields.length, outputAlias)),
+    join(outputList(context, node.fields.length, outputAlias)),
     text(" FROM "),
     identifier(cteName),
     text(" AS "),
@@ -1112,6 +1139,7 @@ function renderContext(
   constantFilterJoinProjections: RenderContext["constantFilterJoinProjections"] = new Map(),
   sparseJoinOutputs: RenderContext["sparseJoinOutputs"] = new Map(),
   positiveTupleMemberships: RenderContext["positiveTupleMemberships"] = new Map(),
+  projectionTransportSimplifications = true,
 ): RenderContext {
   return {
     scanAlias: 0,
@@ -1126,6 +1154,7 @@ function renderContext(
     constantFilterJoinProjections,
     sparseJoinOutputs,
     positiveTupleMemberships,
+    projectionTransportSimplifications,
     ...(membershipStrategies ? { membershipStrategies } : {}),
     ...(membershipUsage ? { membershipUsage } : {}),
     ...(textRowStrategies ? { textRowStrategies } : {}),
@@ -1631,6 +1660,7 @@ function renderAndBudget(
         constantFilterJoinProjections,
         sparseJoinOutputs,
         positiveTupleMemberships,
+        includeSharedRelations,
       )
     : renderContext(
         sharedNames,
@@ -1644,6 +1674,7 @@ function renderAndBudget(
         constantFilterJoinProjections,
         sparseJoinOutputs,
         positiveTupleMemberships,
+        includeSharedRelations,
       );
   const definitions = sharedRelations.map((shared) => {
     context.bypassSharedNode = shared.node;

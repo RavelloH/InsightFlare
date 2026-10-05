@@ -1036,21 +1036,21 @@ describe("finite packed positive tuple membership", () => {
     expect(referencePhysical.positiveTupleMembershipCandidates).toEqual([]);
     const baseline = compileD1Query(referencePhysical);
     const optimized = compileD1Query(physical);
-    expect(new TextEncoder().encode(baseline.sql).byteLength).toBe(3_983);
+    expect(new TextEncoder().encode(baseline.sql).byteLength).toBe(2_545);
     expect(baseline.bindings).toHaveLength(2);
     expect(hashSql(baseline.sql)).toBe(
-      "c3e3a559698f3b47fbf9b8aa54cd718bd2832dae83327fa735308caee13c51dc",
+      "cfa63bffd4a845a128231a4432ddc5cd4994d6051405b054311c3597d5886821",
     );
     expect(baseline.physicalPlanShape).toMatchObject({
       version: 2,
       nativeRowRelationCount: 0,
       jsonRowRelationCount: 1,
     });
-    expect(new TextEncoder().encode(optimized.sql).byteLength).toBe(2_572);
+    expect(new TextEncoder().encode(optimized.sql).byteLength).toBe(2_428);
     const optimizedBindings = optimized.bindings ?? [];
     expect(optimizedBindings).toHaveLength(2);
     expect(hashSql(optimized.sql)).toBe(
-      "b27a4c871d2a1478d28addd80bba91907b2e9db80c0db5cbac4df3ef1b9f825d",
+      "b6c2c939194616c6f091e38e4905cb0c73b9e4d51df1ad0d5d41d01aa94c570b",
     );
     const optimizedAgain = compileD1Query(result);
     expect(baseline.sql).not.toContain(" IN (SELECT ");
@@ -1444,13 +1444,13 @@ describe("finite packed positive tuple membership", () => {
     expect(new TextEncoder().encode(compiled.sql).byteLength).toBeLessThan(
       100_000,
     );
-    expect(new TextEncoder().encode(compiled.sql).byteLength).toBe(3_346);
+    expect(new TextEncoder().encode(compiled.sql).byteLength).toBe(2_998);
     expect(hashSql(compiled.sql)).toBe(
-      "5ba8a7f89afe4c3f1b37857e479064780dcba3c34da148800df28986de85fdfd",
+      "1bf0d13fc9f2ef3756eb772b6ec11bb55a2729111378b0f0bf33a74e70e96389",
     );
-    expect(new TextEncoder().encode(fallback.sql).byteLength).toBe(4_677);
+    expect(new TextEncoder().encode(fallback.sql).byteLength).toBe(3_069);
     expect(hashSql(fallback.sql)).toBe(
-      "5503e189b3586b2ec6f06901dc853a2152e01616102d83705493b566283231ac",
+      "d3b601c48e8ea52994e7290712f9fc801192bd75010019bde97d0954f21ce71d",
     );
     expect(
       packedSegments.every(

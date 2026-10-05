@@ -770,6 +770,97 @@ describe("shared relation physical selection", () => {
     ).toMatchObject({ materialization: "materialized", fields: [{}, {}] });
   });
 
+  it("materializes a safe five-field input shared by two distinct windows only", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    database
+      .prepare("INSERT INTO site_identities (site_id) VALUES (?), (?)")
+      .run("wide-window-b", "wide-window-a");
+
+    const wide = selectedProjection(5);
+    const byPk = window(wide, {
+      rank: rowNumber({
+        orderBy: [{ expression: wide.columns.field0, direction: "ASC" }],
+      }),
+    });
+    const bySite = window(wide, {
+      rank: rowNumber({
+        partitionBy: [wide.columns.field1],
+        orderBy: [{ expression: wide.columns.field0, direction: "DESC" }],
+      }),
+    });
+    const twoWindows = union(byPk, bySite, true);
+    const physical = lowerLogicalPlan(twoWindows);
+    expect(
+      physical.sharedRelations.find(({ node }) => node === wide.node),
+    ).toMatchObject({
+      materialization: "materialized",
+      fields: [{}, {}, {}, {}, {}],
+    });
+
+    const optimized = compileD1Query(physical);
+    const repeated = compileD1Query(physical);
+    const mechanical = compileD1QueryUnoptimizedForTest(twoWindows);
+    expect(optimized.sql).toContain("AS MATERIALIZED (");
+    expect(repeated.sql).toBe(optimized.sql);
+    expect(repeated.bindings).toEqual(optimized.bindings);
+    expect(repeated.physicalPlanShape).toEqual(optimized.physicalPlanShape);
+    const run = (query: { sql: string; bindings?: readonly unknown[] }) =>
+      database
+        .prepare(query.sql)
+        .all(...((query.bindings ?? []) as SQLInputValue[]));
+    expect(run(optimized)).toEqual(run(mechanical));
+
+    const noWindowCandidate = selectedProjection(5);
+    expect(
+      lowerLogicalPlan(union(noWindowCandidate, noWindowCandidate, true))
+        .sharedRelations,
+    ).toEqual([]);
+
+    const sameWindowInput = selectedProjection(5);
+    const oneWindow = window(sameWindowInput, {
+      rank: rowNumber({
+        orderBy: [
+          { expression: sameWindowInput.columns.field0, direction: "ASC" },
+        ],
+      }),
+    });
+    expect(
+      lowerLogicalPlan(union(oneWindow, oneWindow, true)).sharedRelations,
+    ).toEqual([]);
+    expect(lowerLogicalPlan(oneWindow).sharedRelations).toEqual([]);
+
+    const expressionCandidate = selectedProjection(5);
+    const expressionByPk = window(expressionCandidate, {
+      rank: rowNumber({
+        orderBy: [
+          { expression: expressionCandidate.columns.field0, direction: "ASC" },
+        ],
+      }),
+    });
+    const expressionBySite = window(expressionCandidate, {
+      rank: rowNumber({
+        partitionBy: [expressionCandidate.columns.field1],
+        orderBy: [
+          { expression: expressionCandidate.columns.field0, direction: "DESC" },
+        ],
+      }),
+    });
+    const scalarReader = project(scan(schema.site_identities), {
+      value: scalar(project(expressionCandidate, { value: constant(1) })),
+    });
+    const expressionUse = join(
+      union(expressionByPk, expressionBySite, true),
+      scalarReader,
+      eq(param(1), param(1)),
+    );
+    expect(
+      lowerLogicalPlan(expressionUse).sharedRelations.some(
+        ({ node }) => node === expressionCandidate.node,
+      ),
+    ).toBe(false);
+  });
+
   it("does not share a window candidate or inputs behind inherited barriers", () => {
     const base = selectedProjection(2);
     const ranked = window(base, {
