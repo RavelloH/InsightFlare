@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,6 +8,7 @@ import {
   add,
   aggregate,
   and,
+  antiJoin,
   caseWhen,
   castReal,
   castText,
@@ -15,6 +17,7 @@ import {
   constant,
   count,
   countDistinct,
+  distinct,
   div,
   eq,
   filter,
@@ -31,6 +34,7 @@ import {
   rowNumber,
   scalar,
   scan,
+  semiJoin,
   sort,
   textLike,
   textPosition,
@@ -42,6 +46,7 @@ import {
   window,
   windowCountRows,
 } from "@/lib/db";
+import { explainQueryPlan } from "@/lib/db/__tests__/query-plan";
 import { compileD1QueryUnoptimizedForTest } from "@/lib/db/query/compiler";
 import type { AnyExpression } from "@/lib/db/query/expression";
 import { lowerLogicalPlan } from "@/lib/db/query/physical-plan";
@@ -123,6 +128,228 @@ function selectedWideTextProjection(width: number, selective = true): Relation {
   const projections: Record<string, AnyExpression> = {};
   for (const name of fieldNames) projections[name] = selected.columns[name]!;
   return project(selected, projections);
+}
+
+interface TerminalBagMembershipOptions {
+  readonly width?: number;
+  readonly selective?: boolean;
+  readonly computedCandidate?: boolean;
+  readonly extraCandidateReference?: boolean;
+  readonly membership?: "semi" | "anti" | "none";
+  readonly candidateBarrier?: "sort" | "limit" | "window";
+  readonly terminalOffset?: number;
+  readonly unionAll?: boolean;
+  readonly hiddenPredicate?: "scalar" | "in" | "volatile";
+  readonly cursor?: { readonly order: string; readonly id: string };
+  readonly limit?: number;
+}
+
+function terminalBagMembershipQuery(
+  options: TerminalBagMembershipOptions = {},
+): { readonly candidate: Relation; readonly output: Relation } {
+  const width = options.width ?? 26;
+  const fieldNames = Array.from(
+    { length: width },
+    (_, index) => `field${index}`,
+  );
+  const schema = {
+    keep: { affinity: "text", nullable: false },
+    field0: { affinity: "text", nullable: true },
+    field1: { affinity: "text", nullable: true },
+    field2: { affinity: "text", nullable: false },
+  } as const satisfies TextRowRelationSchema;
+  const makeRow = (
+    keep: string,
+    key: string | null,
+    order: string | null,
+    id: string,
+  ): TextRowRelationRow<typeof schema> =>
+    ({ keep, field0: key, field1: order, field2: id }) as TextRowRelationRow<
+      typeof schema
+    >;
+  const pageSource = valuesRelation(schema, [
+    makeRow("yes", "same", "1", "page-a"),
+    makeRow("yes", "same", "1", "page-b"),
+    makeRow("yes", null, "2", "page-null-key"),
+    makeRow("yes", "key-b", "3", "page-other"),
+    makeRow("yes", null, null, "page-null-order"),
+    makeRow("no", "hidden", "0", "page-filtered"),
+  ]);
+  const eventSource = valuesRelation(schema, [
+    makeRow("yes", "same", "1", "event-a"),
+    makeRow("yes", "same", "1", "event-b"),
+    makeRow("yes", "missing", "2", "event-missing"),
+    makeRow("yes", null, "4", "event-null-key"),
+    makeRow("yes", "key-b", "3", "event-other"),
+    makeRow("no", "same", "0", "event-filtered"),
+  ]);
+  const candidatePredicate =
+    options.selective === false
+      ? undefined
+      : eq(pageSource.columns.keep, param("yes"));
+  const hiddenPredicate = (() => {
+    switch (options.hiddenPredicate) {
+      case "scalar": {
+        const one = valuesRelation(
+          { result: { affinity: "text", nullable: false } },
+          [{ result: "yes" }],
+        );
+        return eq(scalar(one), constant("yes"));
+      }
+      case "in": {
+        const keys = valuesRelation(
+          { key: { affinity: "text", nullable: true } },
+          [{ key: "same" }],
+        );
+        return inSubquery(pageSource.columns.field0!, keys);
+      }
+      case "volatile":
+        return gt(unixepoch(), param(0));
+      default:
+        return undefined;
+    }
+  })();
+  const pageSelectionPredicate =
+    candidatePredicate && hiddenPredicate
+      ? and(candidatePredicate, hiddenPredicate)
+      : (candidatePredicate ?? hiddenPredicate);
+  let candidateInput = pageSelectionPredicate
+    ? filter(pageSource, pageSelectionPredicate)
+    : pageSource;
+  if (options.candidateBarrier === "sort")
+    candidateInput = sort(candidateInput, [
+      { expression: candidateInput.columns.field1!, direction: "ASC" },
+    ]);
+  else if (options.candidateBarrier === "limit")
+    candidateInput = limit(candidateInput, 100);
+  else if (options.candidateBarrier === "window")
+    candidateInput = window(candidateInput, {
+      rank: rowNumber({
+        partitionBy: [],
+        orderBy: [
+          { expression: candidateInput.columns.field1!, direction: "ASC" },
+        ],
+      }),
+    });
+  const candidateInputColumns = [
+    candidateInput.columns.field0!,
+    candidateInput.columns.field1!,
+    candidateInput.columns.field2!,
+  ];
+  const candidateProjections = {
+    field0: options.computedCandidate
+      ? coalesce(candidateInput.columns.field0!, constant("fallback"))
+      : candidateInput.columns.field0!,
+    field1: candidateInput.columns.field1!,
+    field2: candidateInput.columns.field2!,
+    ...Object.fromEntries(
+      fieldNames
+        .slice(3)
+        .map((name, index) => [name, candidateInputColumns[index % 3]!]),
+    ),
+  };
+  const candidate = project(candidateInput, candidateProjections);
+
+  const eventSelection = filter(
+    eventSource,
+    eq(eventSource.columns.keep, param("yes")),
+  );
+  const eventInputColumns = [
+    eventSelection.columns.field0!,
+    eventSelection.columns.field1!,
+    eventSelection.columns.field2!,
+  ];
+  const eventProjections = {
+    field0: eventSelection.columns.field0!,
+    field1: eventSelection.columns.field1!,
+    field2: eventSelection.columns.field2!,
+    ...Object.fromEntries(
+      fieldNames
+        .slice(3)
+        .map((name, index) => [name, eventInputColumns[index % 3]!]),
+    ),
+  };
+  const eventRows = project(eventSelection, eventProjections);
+  const keyProjection = project(candidate, {
+    matchKey: candidate.columns.field0!,
+  });
+  const uniqueKeys =
+    options.membership === "none"
+      ? keyProjection
+      : options.membership === "anti"
+        ? keyProjection
+        : distinct(keyProjection);
+  const membership =
+    options.membership === "anti"
+      ? antiJoin(
+          eventRows,
+          uniqueKeys,
+          eq(eventRows.columns.field0!, uniqueKeys.columns.matchKey!),
+        )
+      : options.membership === "none"
+        ? eventRows
+        : semiJoin(
+            eventRows,
+            uniqueKeys,
+            eq(eventRows.columns.field0!, uniqueKeys.columns.matchKey!),
+          );
+  const membershipColumns = membership.columns as Readonly<
+    Record<string, AnyExpression>
+  >;
+  const eventOutputProjections = {
+    field0: membership.columns.field0!,
+    field1: membership.columns.field1!,
+    field2: membership.columns.field2!,
+    ...Object.fromEntries(
+      fieldNames.slice(3).map((name) => [name, membershipColumns[name]!]),
+    ),
+  };
+  const eventOutput = project(membership, eventOutputProjections);
+  const candidateColumns = candidate.columns as Readonly<
+    Record<string, AnyExpression>
+  >;
+  const pageOutputProjections = {
+    field0: candidate.columns.field0!,
+    field1: candidate.columns.field1!,
+    field2: candidate.columns.field2!,
+    ...Object.fromEntries(
+      fieldNames.slice(3).map((name) => [name, candidateColumns[name]!]),
+    ),
+  };
+  const pageOutput = project(candidate, pageOutputProjections);
+  const pageBranch = options.extraCandidateReference
+    ? union(pageOutput, project(candidate, { ...pageOutputProjections }), true)
+    : pageOutput;
+  let combined = union(pageBranch, eventOutput, options.unionAll ?? true);
+  if (options.cursor) {
+    combined = filter(
+      combined,
+      or(
+        gt(castText(combined.columns.field1!), param(options.cursor.order)),
+        and(
+          eq(castText(combined.columns.field1!), param(options.cursor.order)),
+          gt(castText(combined.columns.field2!), param(options.cursor.id)),
+        ),
+      ),
+    );
+  }
+  const ordered = sort(combined, [
+    { expression: combined.columns.field1!, direction: "ASC" },
+    { expression: combined.columns.field2!, direction: "ASC" },
+  ]);
+  const limited = limit(ordered, options.limit ?? 100, options.terminalOffset);
+  const limitedColumns = limited.columns as Readonly<
+    Record<string, AnyExpression>
+  >;
+  const outputProjections = {
+    field0: limited.columns.field0!,
+    field1: limited.columns.field1!,
+    field2: limited.columns.field2!,
+    ...Object.fromEntries(
+      fieldNames.slice(3).map((name) => [name, limitedColumns[name]!]),
+    ),
+  };
+  return { candidate, output: project(limited, outputProjections) };
 }
 
 function closedConstantExistenceWindowCandidate(
@@ -1642,6 +1869,140 @@ describe("shared relation physical selection", () => {
       ),
     ).toBe(false);
   });
+
+  it("auto-shares a closed wide bag and positive membership input before terminal pagination", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    const baseline = terminalBagMembershipQuery();
+    const physical = lowerLogicalPlan(baseline.output);
+    const selected = physical.sharedRelations.find(
+      ({ node }) => node === baseline.candidate.node,
+    );
+    expect(selected).toMatchObject({
+      materialization: "auto",
+      fields: Array.from({ length: 26 }, () => expect.any(Object)),
+    });
+    const maximumWidth = terminalBagMembershipQuery({ width: 32 });
+    const maximumWidthDefinition = lowerLogicalPlan(
+      maximumWidth.output,
+    ).sharedRelations.find(({ node }) => node === maximumWidth.candidate.node);
+    expect(maximumWidthDefinition).toMatchObject({
+      materialization: "auto",
+      fields: expect.any(Array),
+    });
+    expect(maximumWidthDefinition?.fields).toHaveLength(32);
+
+    const optimized = compileD1Query(physical);
+    const mechanical = compileD1QueryUnoptimizedForTest(baseline.output);
+    expect(optimized.sql.length).toBeLessThan(mechanical.sql.length);
+    const optimizedRows = database
+      .prepare(optimized.sql)
+      .all(...(optimized.bindings as SQLInputValue[]));
+    const mechanicalRows = database
+      .prepare(mechanical.sql)
+      .all(...(mechanical.bindings as SQLInputValue[]));
+    expect(optimizedRows).toEqual(mechanicalRows);
+    expect(optimizedRows).toHaveLength(8);
+    expect(optimizedRows.some((row) => Object.values(row).includes(null))).toBe(
+      true,
+    );
+    expect(
+      optimizedRows.filter(
+        (row) => row.field0 === "same" && row.field1 === "1",
+      ),
+    ).toHaveLength(4);
+    expect(optimizedRows.map((row) => row.field2)).not.toContain(
+      "event-missing",
+    );
+    expect(optimizedRows.map((row) => row.field2)).not.toContain(
+      "event-null-key",
+    );
+
+    const pivotIndex = optimizedRows.findIndex(
+      (row) => row.field2 === "page-b",
+    );
+    expect(pivotIndex).toBeGreaterThanOrEqual(0);
+    const pivot = optimizedRows[pivotIndex]!;
+    const firstPage = terminalBagMembershipQuery({ limit: pivotIndex + 1 });
+    const firstPageQuery = compileD1Query(lowerLogicalPlan(firstPage.output));
+    const firstPageRows = database
+      .prepare(firstPageQuery.sql)
+      .all(...(firstPageQuery.bindings as SQLInputValue[]));
+    expect(firstPageRows).toEqual(optimizedRows.slice(0, pivotIndex + 1));
+
+    const afterCursor = terminalBagMembershipQuery({
+      cursor: { order: String(pivot.field1), id: String(pivot.field2) },
+    });
+    const afterCursorQuery = compileD1Query(
+      lowerLogicalPlan(afterCursor.output),
+    );
+    const afterCursorRows = database
+      .prepare(afterCursorQuery.sql)
+      .all(...(afterCursorQuery.bindings as SQLInputValue[]));
+    const afterCursorMechanical = compileD1QueryUnoptimizedForTest(
+      afterCursor.output,
+    );
+    expect(afterCursorRows).toEqual(
+      database
+        .prepare(afterCursorMechanical.sql)
+        .all(...(afterCursorMechanical.bindings as SQLInputValue[])),
+    );
+    expect(afterCursorRows).toEqual(optimizedRows.slice(pivotIndex + 1));
+
+    const zeroLimit = terminalBagMembershipQuery({ limit: 0 });
+    const zeroLimitQuery = compileD1Query(lowerLogicalPlan(zeroLimit.output));
+    expect(
+      database
+        .prepare(zeroLimitQuery.sql)
+        .all(...(zeroLimitQuery.bindings as SQLInputValue[])),
+    ).toEqual([]);
+
+    const optimizedPlan = explainQueryPlan(database, optimized);
+    const mechanicalPlan = explainQueryPlan(database, mechanical);
+    expect(optimizedPlan.length).toBeGreaterThan(0);
+    console.info("wave67_generic_shared_membership_prototype", {
+      optimizedSqlBytes: new TextEncoder().encode(optimized.sql).byteLength,
+      optimizedSqlSha256: createHash("sha256")
+        .update(optimized.sql)
+        .digest("hex"),
+      mechanicalSqlBytes: new TextEncoder().encode(mechanical.sql).byteLength,
+      mechanicalSqlSha256: createHash("sha256")
+        .update(mechanical.sql)
+        .digest("hex"),
+      sharedMaterialization: selected?.materialization,
+      sharedColumns: selected?.fields.length,
+      optimizedExplain: optimizedPlan,
+      mechanicalExplain: mechanicalPlan,
+    });
+  });
+
+  it.each([
+    ["33 fields", { width: 33 }],
+    ["nonselective input", { selective: false }],
+    ["computed candidate", { computedCandidate: true }],
+    ["third candidate reference", { extraCandidateReference: true }],
+    ["missing membership", { membership: "none" }],
+    ["anti membership", { membership: "anti" }],
+    ["candidate sort barrier", { candidateBarrier: "sort" }],
+    ["candidate limit barrier", { candidateBarrier: "limit" }],
+    ["candidate window barrier", { candidateBarrier: "window" }],
+    ["offset pagination", { terminalOffset: 1 }],
+    ["UNION DISTINCT", { unionAll: false }],
+    ["hidden scalar query", { hiddenPredicate: "scalar" }],
+    ["hidden IN query", { hiddenPredicate: "in" }],
+    ["volatile candidate", { hiddenPredicate: "volatile" }],
+  ] as const)(
+    "keeps terminal bag sharing disabled for %s",
+    (_name, options) => {
+      const query = terminalBagMembershipQuery(options);
+      const physical = lowerLogicalPlan(query.output);
+      expect(
+        physical.sharedRelations.find(
+          ({ node }) => node === query.candidate.node,
+        ),
+      ).toBeUndefined();
+    },
+  );
 
   it("keeps wrapped sorts over noncompound and UNION DISTINCT inputs behind the old barrier", () => {
     const noncompoundSource = selectedProjection(5);

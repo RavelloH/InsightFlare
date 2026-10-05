@@ -5,6 +5,10 @@ import {
   type FilterDocument,
   type FunnelConfigV2,
 } from "@/lib/edge/analytics/contract";
+import {
+  buildJourneyEventPageReportPlan,
+  JOURNEY_EVENT_PAGE_REPORT_OUTPUT,
+} from "@/lib/edge/analytics/engine/journey-event-page-report-plan";
 import { buildJourneyTargetPresencePlan } from "@/lib/edge/analytics/engine/journey-target-presence-plan";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { currentD1Operation } from "@/lib/edge/observability/logger";
@@ -46,6 +50,7 @@ import {
   visitorListOrderBy,
   whereClauseWithTarget,
 } from "./journey-helpers";
+import { queryJourneyPageReportRowsFromD1 } from "./journey-page-report-query";
 import type { ScopedDatasetSql } from "./scoped-dataset";
 import {
   applyObservationFilterToScopedDataset,
@@ -723,151 +728,19 @@ export async function queryJourneyEventsPageFromD1(
   limit: number,
   cursor?: JourneyEventCursor | null,
 ): Promise<JourneyEventPage> {
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  const filter = scopedDataset
-    ? null
-    : buildVisitFilterSql(filters, "visit_source", { window });
-  const targetColumn = target.type === "visitor" ? "visitor_id" : "session_id";
-  const targetClause = scopedDataset
-    ? `WHERE ${targetColumn} = ?`
-    : whereClauseWithTarget(filter?.clause ?? "", {
-        column: targetColumn,
-        value: target.value,
-      });
-  const eventTargetClause = scopedDataset ? `WHERE es.${targetColumn} = ?` : "";
-  const customEventProjection = scopedDataset
-    ? `
-    es.session_id AS sessionId,
-    es.visitor_id AS visitorId,
-    es.pathname AS pathname,
-    es.hash_fragment AS hash,
-    es.title AS title,
-    es.hostname AS hostname,
-    es.referrer_host AS referrerHost,
-    es.referrer_url AS referrerUrl,
-    es.country AS country,
-    es.region AS region,
-    es.city AS city,
-    es.browser AS browser,
-    es.browser_version AS browserVersion,
-    es.os AS os,
-    es.os_version AS osVersion,
-    es.device_type AS deviceType,
-    es.screen_width AS screenWidth,
-    es.screen_height AS screenHeight,
-    0 AS durationMs,
-    NULL AS perfTtfbMs,
-    NULL AS perfFcpMs,
-    NULL AS perfLcpMs,
-    NULL AS perfCls,
-    NULL AS perfInpMs`
-    : `
-    fv.session_id AS sessionId,
-    fv.visitor_id AS visitorId,
-    COALESCE(NULLIF(es.pathname, ''), fv.pathname) AS pathname,
-    COALESCE(NULLIF(es.hash_fragment, ''), fv.hash_fragment) AS hash,
-    COALESCE(NULLIF(es.title, ''), fv.title) AS title,
-    COALESCE(NULLIF(es.hostname, ''), fv.hostname) AS hostname,
-    COALESCE(NULLIF(es.referrer_host, ''), fv.referrer_host) AS referrerHost,
-    COALESCE(NULLIF(es.referrer_url, ''), fv.referrer_url) AS referrerUrl,
-    COALESCE(NULLIF(es.country, ''), fv.country) AS country,
-    COALESCE(NULLIF(es.region, ''), fv.region) AS region,
-    COALESCE(NULLIF(es.city, ''), fv.city) AS city,
-    COALESCE(NULLIF(es.browser, ''), fv.browser) AS browser,
-    fv.browser_version AS browserVersion,
-    COALESCE(NULLIF(es.os, ''), fv.os) AS os,
-    COALESCE(NULLIF(es.os_version, ''), fv.os_version) AS osVersion,
-    COALESCE(NULLIF(es.device_type, ''), fv.device_type) AS deviceType,
-    COALESCE(es.screen_width, fv.screen_width) AS screenWidth,
-    COALESCE(es.screen_height, fv.screen_height) AS screenHeight,
-    0 AS durationMs,
-    fv.perf_ttfb_ms AS perfTtfbMs,
-    fv.perf_fcp_ms AS perfFcpMs,
-    fv.perf_lcp_ms AS perfLcpMs,
-    fv.perf_cls AS perfCls,
-    fv.perf_inp_ms AS perfInpMs`;
-  const cursorClause = cursor
-    ? "WHERE occurredAt < ? OR (occurredAt = ? AND id < ?)"
-    : "";
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? `${buildVisitSourceCte()},\n${buildCustomEventSourceCte()}`},
-${scopedDataset ? `event_source AS (SELECT * FROM ${scopedDataset.eventRelation}),` : ""}
-filtered_visits AS (
-  SELECT *
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
-  ${targetClause}
-),
-page_events AS (
-  SELECT
-    visit_id AS id,
-    'pageview' AS kind,
-    'pageview' AS eventType,
-    started_at AS occurredAt,
-    visit_id AS visitId,
-    session_id AS sessionId,
-    visitor_id AS visitorId,
-    pathname,
-    hash_fragment AS hash,
-    title,
-    hostname,
-    referrer_host AS referrerHost,
-    referrer_url AS referrerUrl,
-    country,
-    region,
-    city,
-    browser,
-    browser_version AS browserVersion,
-    os,
-    os_version AS osVersion,
-    device_type AS deviceType,
-    screen_width AS screenWidth,
-    screen_height AS screenHeight,
-    COALESCE(duration_ms, 0) AS durationMs,
-    perf_ttfb_ms AS perfTtfbMs,
-    perf_fcp_ms AS perfFcpMs,
-    perf_lcp_ms AS perfLcpMs,
-    perf_cls AS perfCls,
-    perf_inp_ms AS perfInpMs
-  FROM filtered_visits
-),
-custom_event_rows AS (
-  SELECT
-    es.event_id AS id,
-    'custom' AS kind,
-    es.event_name AS eventType,
-    es.occurred_at AS occurredAt,
-    es.visit_id AS visitId,
-    ${customEventProjection}
-  FROM event_source es
-  ${scopedDataset ? "LEFT JOIN" : "INNER JOIN"} filtered_visits fv
-    ON fv.visit_id = es.visit_id
-  ${eventTargetClause}
-)
-SELECT *
-FROM (
-  SELECT * FROM page_events
-  UNION ALL
-  SELECT * FROM custom_event_rows
-)
-AS journey_events
-${cursorClause}
-ORDER BY occurredAt DESC, id DESC
-LIMIT ?
-`;
-  const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...(scopedDataset
-      ? scopedDataset.bindings.map((binding) => binding.value)
-      : [
-          ...visitSourceBindings(siteId, window),
-          ...eventSourceBindings(siteId, window),
-        ]),
-    target.value,
-    ...(filter?.bindings ?? []),
-    ...(scopedDataset ? [target.value] : []),
-    ...(cursor ? [cursor.occurredAt, cursor.occurredAt, cursor.id] : []),
-    limit + 1,
-  ]);
+  const plan = buildJourneyEventPageReportPlan({
+    siteId,
+    window,
+    filters,
+    target,
+    limit,
+    cursor,
+  });
+  const rows = await queryJourneyPageReportRowsFromD1(
+    env,
+    plan,
+    JOURNEY_EVENT_PAGE_REPORT_OUTPUT,
+  );
   const mapped = rows.map(mapJourneyEventRow);
   const page = pageResult(mapped, limit);
   const last = page.last;

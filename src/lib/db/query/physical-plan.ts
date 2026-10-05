@@ -2016,6 +2016,314 @@ function candidateFacts(
   return facts;
 }
 
+interface IncomingConsumer {
+  readonly parent: LogicalQueryNode;
+  readonly kind: "relation" | "expression";
+}
+
+function incomingConsumers(
+  nodes: readonly LogicalQueryNode[],
+): Map<LogicalQueryNode, IncomingConsumer[]> {
+  const incoming = new Map<LogicalQueryNode, IncomingConsumer[]>();
+  const add = (
+    child: LogicalQueryNode,
+    parent: LogicalQueryNode,
+    kind: IncomingConsumer["kind"],
+  ): void => {
+    incoming.set(child, [...(incoming.get(child) ?? []), { parent, kind }]);
+  };
+  for (const parent of nodes) {
+    for (const child of nodeChildren(parent))
+      add(child.node, parent, "relation");
+    for (const expression of nodeExpressions(parent))
+      for (const child of expressionSources(expression))
+        add(child.node, parent, "expression");
+  }
+  return incoming;
+}
+
+function inspectLocalStableExpression(
+  expression: SqlExpression,
+  allowedScopes: ReadonlySet<RelationScope>,
+): {
+  readonly valid: boolean;
+  readonly columns: readonly {
+    readonly scope: RelationScope;
+    readonly index: number;
+  }[];
+} {
+  const columns: { scope: RelationScope; index: number }[] = [];
+  let valid = expressionSources(expression).length === 0;
+  const seen = new WeakSet<object>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (typeof value !== "object" || value === null || seen.has(value)) return;
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    if (
+      record.kind === "unixepoch" ||
+      record.kind === "scalar-subquery" ||
+      record.kind === "in-subquery"
+    ) {
+      valid = false;
+      return;
+    }
+    if (record.kind === "column") {
+      const scope = record.scope as RelationScope;
+      const index = record.index;
+      if (
+        !allowedScopes.has(scope) ||
+        !Number.isInteger(index) ||
+        Number(index) < 0
+      )
+        valid = false;
+      else columns.push({ scope, index: Number(index) });
+      return;
+    }
+    for (const [key, child] of Object.entries(record))
+      if (key !== "scope" && key !== "query") visit(child);
+  };
+  visit(expression);
+  return { valid, columns };
+}
+
+function isPureProjectConsumer(node: LogicalQueryNode): node is ProjectNode {
+  return (
+    isPureLocalColumnProject(node) &&
+    node.projections.every(
+      ({ expression }) => expressionSources(expression).length === 0,
+    )
+  );
+}
+
+function isLocalStableProjectConsumer(
+  node: LogicalQueryNode,
+): node is ProjectNode {
+  return (
+    node.kind === "project" &&
+    node.projections.every(
+      ({ expression }) =>
+        inspectLocalStableExpression(expression, new Set([node.input.scope]))
+          .valid,
+    )
+  );
+}
+
+function terminalBagUnion(
+  root: LogicalQueryNode,
+): Extract<LogicalQueryNode, { readonly kind: "union" }> | undefined {
+  const visited = new Set<LogicalQueryNode>();
+  let current = root;
+  while (isPureProjectConsumer(current)) {
+    if (visited.has(current)) return undefined;
+    visited.add(current);
+    current = current.input.node;
+  }
+  if (current.kind !== "limit" || current.offset !== undefined)
+    return undefined;
+  const sortNode = current.input.node;
+  if (sortNode.kind !== "sort") return undefined;
+  const sortInputScope = new Set([sortNode.input.scope]);
+  if (
+    !sortNode.keys.every(
+      ({ expression }) =>
+        inspectLocalStableExpression(expression, sortInputScope).valid,
+    )
+  )
+    return undefined;
+
+  current = sortNode.input.node;
+  let sawCursorFilter = false;
+  visited.clear();
+  while (true) {
+    if (visited.has(current)) return undefined;
+    visited.add(current);
+    if (isPureProjectConsumer(current)) {
+      current = current.input.node;
+      continue;
+    }
+    if (current.kind === "filter" && !sawCursorFilter) {
+      const filterInputScope = new Set([current.input.scope]);
+      if (
+        !inspectLocalStableExpression(current.predicate, filterInputScope).valid
+      )
+        return undefined;
+      sawCursorFilter = true;
+      current = current.input.node;
+      continue;
+    }
+    return current.kind === "union" && current.all ? current : undefined;
+  }
+}
+
+function relationChildIndex(
+  parent: LogicalQueryNode,
+  child: LogicalQueryNode,
+): 0 | 1 | undefined {
+  if (parent.kind === "union") {
+    if (parent.left.node === child) return 0;
+    if (parent.right.node === child) return 1;
+  }
+  return undefined;
+}
+
+function projectPathToUnionBranch(
+  child: LogicalQueryNode,
+  consumer: LogicalQueryNode,
+  unionNode: Extract<LogicalQueryNode, { readonly kind: "union" }>,
+  incoming: ReadonlyMap<LogicalQueryNode, readonly IncomingConsumer[]>,
+): 0 | 1 | undefined {
+  if (!isLocalStableProjectConsumer(consumer) || consumer.input.node !== child)
+    return undefined;
+  const visited = new Set<LogicalQueryNode>();
+  let current: LogicalQueryNode = consumer;
+  while (!visited.has(current)) {
+    visited.add(current);
+    const incomingEdges: readonly IncomingConsumer[] =
+      incoming.get(current) ?? [];
+    if (incomingEdges.length !== 1 || incomingEdges[0]!.kind !== "relation")
+      return undefined;
+    const parent: LogicalQueryNode = incomingEdges[0]!.parent;
+    if (parent === unionNode) return relationChildIndex(parent, current);
+    if (!isLocalStableProjectConsumer(parent) || parent.input.node !== current)
+      return undefined;
+    current = parent;
+  }
+  return undefined;
+}
+
+function membershipOutputBranch(
+  semiJoin: LogicalQueryNode,
+  unionNode: Extract<LogicalQueryNode, { readonly kind: "union" }>,
+  incoming: ReadonlyMap<LogicalQueryNode, readonly IncomingConsumer[]>,
+): 0 | 1 | undefined {
+  if (semiJoin.kind !== "semi-join") return undefined;
+  const parents = incoming.get(semiJoin) ?? [];
+  if (parents.length !== 1 || parents[0]!.kind !== "relation") return undefined;
+  return projectPathToUnionBranch(
+    semiJoin,
+    parents[0]!.parent,
+    unionNode,
+    incoming,
+  );
+}
+
+function isTerminalBagMembershipCandidate(
+  node: LogicalQueryNode,
+  unionNode: Extract<LogicalQueryNode, { readonly kind: "union" }>,
+  incoming: ReadonlyMap<LogicalQueryNode, readonly IncomingConsumer[]>,
+): node is ProjectNode {
+  if (
+    node.kind !== "project" ||
+    !isPureProjectConsumer(node) ||
+    node.fields.length === 0 ||
+    node.fields.length > MAX_REPEATED_WINDOW_INPUT_PROJECT_FIELDS
+  )
+    return false;
+  const consumers = incoming.get(node) ?? [];
+  if (
+    consumers.length !== 2 ||
+    consumers.some(({ kind }) => kind !== "relation") ||
+    consumers[0]!.parent === consumers[1]!.parent
+  )
+    return false;
+
+  const directBranches = consumers.map(({ parent }) =>
+    projectPathToUnionBranch(node, parent, unionNode, incoming),
+  );
+  for (let directIndex = 0; directIndex < consumers.length; directIndex += 1) {
+    const directBranch = directBranches[directIndex];
+    if (directBranch === undefined) continue;
+    const keyConsumer = consumers[1 - directIndex]!.parent;
+    if (
+      !isPureProjectConsumer(keyConsumer) ||
+      keyConsumer.input.node !== node ||
+      keyConsumer.fields.length === 0 ||
+      keyConsumer.fields.length > 4
+    )
+      continue;
+    const keyParents = incoming.get(keyConsumer) ?? [];
+    if (keyParents.length !== 1 || keyParents[0]!.kind !== "relation") continue;
+    let membershipInput = keyConsumer as LogicalQueryNode;
+    let membershipParents = keyParents;
+    if (membershipParents[0]!.parent.kind === "distinct") {
+      const distinct = membershipParents[0]!.parent;
+      if (distinct.input.node !== membershipInput) continue;
+      membershipInput = distinct;
+      membershipParents = incoming.get(distinct) ?? [];
+      if (
+        membershipParents.length !== 1 ||
+        membershipParents[0]!.kind !== "relation"
+      )
+        continue;
+    }
+    const semiJoin = membershipParents[0]!.parent;
+    if (
+      semiJoin.kind !== "semi-join" ||
+      semiJoin.right.node !== membershipInput ||
+      semiJoin.right.fields.length === 0 ||
+      semiJoin.right.fields.length > 4
+    )
+      continue;
+    const condition = inspectLocalStableExpression(
+      semiJoin.condition,
+      new Set([semiJoin.left.scope, semiJoin.right.scope]),
+    );
+    if (!condition.valid) continue;
+    const rightIndexes = new Set(
+      condition.columns
+        .filter(({ scope }) => scope === semiJoin.right.scope)
+        .map(({ index }) => index),
+    );
+    if (
+      rightIndexes.size !== semiJoin.right.fields.length ||
+      Array.from(
+        { length: semiJoin.right.fields.length },
+        (_unused, index) => index,
+      ).some((index) => !rightIndexes.has(index))
+    )
+      continue;
+    const membershipBranch = membershipOutputBranch(
+      semiJoin,
+      unionNode,
+      incoming,
+    );
+    if (membershipBranch !== undefined && membershipBranch !== directBranch)
+      return true;
+  }
+  return false;
+}
+
+function terminalBagMembershipCandidates(
+  root: LogicalQueryNode,
+  nodes: readonly LogicalQueryNode[],
+  closedWindowScopeMemo: WeakMap<LogicalQueryNode, boolean>,
+): Set<LogicalQueryNode> {
+  const unionNode = terminalBagUnion(root);
+  if (!unionNode) return new Set();
+  const incoming = incomingConsumers(nodes);
+  const candidates = new Set<LogicalQueryNode>();
+  for (const node of nodes) {
+    if (
+      !isTerminalBagMembershipCandidate(node, unionNode, incoming) ||
+      incoming.get(node)?.length !== 2
+    )
+      continue;
+    const facts = candidateFacts(node, closedWindowScopeMemo);
+    if (
+      facts.selective &&
+      !facts.forbidden &&
+      !facts.ordinaryRowNumberWindow &&
+      facts.referencedScopes.every((scope) => facts.scopes.has(scope))
+    )
+      candidates.add(node);
+  }
+  return candidates;
+}
+
 function sameFields(
   left: readonly OutputField[],
   right: readonly OutputField[],
@@ -2058,6 +2366,11 @@ function sharedRelationDefinitions(
   const hoist = hoistEligibility(root);
   const repeatedWindowInputs = multiWindowInputs(root);
   const closedWindowScopeMemo = new WeakMap<LogicalQueryNode, boolean>();
+  const terminalBagCandidates = terminalBagMembershipCandidates(
+    root,
+    postorder,
+    closedWindowScopeMemo,
+  );
 
   const sharedMaterializations = new Map<
     LogicalQueryNode,
@@ -2065,10 +2378,11 @@ function sharedRelationDefinitions(
   >();
   for (const node of postorder) {
     const incomingCount = incoming.get(node) ?? 0;
+    const hasTerminalBagLicense = terminalBagCandidates.has(node);
     if (
       incomingCount < 2 ||
       node.kind === "scan" ||
-      hoist.forbidden.has(node) ||
+      (hoist.forbidden.has(node) && !hasTerminalBagLicense) ||
       node.fields.length === 0 ||
       node.fields.length > MAX_REPEATED_WINDOW_INPUT_PROJECT_FIELDS
     )
@@ -2079,6 +2393,11 @@ function sharedRelationDefinitions(
       !facts.forbidden &&
       facts.referencedScopes.every((scope) => facts.scopes.has(scope));
     if (!isSafe) continue;
+
+    if (hasTerminalBagLicense) {
+      sharedMaterializations.set(node, "auto");
+      continue;
+    }
 
     if (node.fields.length <= MAX_SHARED_RELATION_FIELDS) {
       sharedMaterializations.set(

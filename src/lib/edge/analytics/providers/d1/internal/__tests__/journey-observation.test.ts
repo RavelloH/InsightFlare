@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -15,23 +16,46 @@ import {
   createSqliteD1Database,
   type SqliteD1Trace,
 } from "@/lib/db/__tests__/sqlite-d1";
+import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import {
+  attachScopedFilterMetadata,
+  createQueryTime,
+  prepareScopedQuery,
+  scopedFilterMetadata,
+  siteQueryContext,
+} from "@/lib/edge/analytics/contract";
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
+import {
+  buildJourneyEventPageReportPlan,
+  JOURNEY_EVENT_PAGE_REPORT_OUTPUT,
+} from "@/lib/edge/analytics/engine/journey-event-page-report-plan";
 import { buildJourneyObservationPlan } from "@/lib/edge/analytics/engine/journey-observation-plan";
 import { LogicalPlanBuilder } from "@/lib/edge/analytics/engine/logical/builder";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { AnalyticsRelationalStorage } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-storage";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
+  buildCustomEventSourceCte,
   buildDetailCustomEventSourceCte,
   buildTargetVisitSourceCte,
+  buildVisitFilterSql,
+  buildVisitSourceCte,
   detailCustomEventSourceBindings,
+  eventSourceBindings,
   targetVisitSourceBindings,
+  visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   queryJourneyEventsForDetailFromD1,
   querySessionDetailFromD1,
   queryVisitorDetailFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-detail-queries";
-import { mapJourneyEventRow } from "@/lib/edge/analytics/providers/d1/internal/journey-helpers";
+import {
+  mapJourneyEventRow,
+  whereClauseWithTarget,
+} from "@/lib/edge/analytics/providers/d1/internal/journey-helpers";
+import { queryJourneyEventsPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
+import { scopedDatasetFor } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";
 import {
   createInvocationLogger,
@@ -39,6 +63,12 @@ import {
   runWithInvocationLogger,
 } from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
+import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
+import {
+  type FilterDocument,
+  type FilterExpression,
+  normalizeFilterDocument,
+} from "@/lib/filter-contract/filters";
 
 const SITE_A = "journey-observation-a";
 const SITE_B = "journey-observation-b";
@@ -92,7 +122,16 @@ function insertVisit(
     readonly sessionId: string;
     readonly startedAt: number;
     readonly pathname?: string;
+    readonly hash?: string;
+    readonly title?: string;
     readonly durationMs?: number | null;
+    readonly screenWidth?: number | null;
+    readonly screenHeight?: number | null;
+    readonly perfTtfbMs?: number | null;
+    readonly perfFcpMs?: number | null;
+    readonly perfLcpMs?: number | null;
+    readonly perfCls?: number | null;
+    readonly perfInpMs?: number | null;
     readonly userId?: string | null;
     readonly userName?: string | null;
   },
@@ -119,9 +158,9 @@ function insertVisit(
       input.startedAt,
       input.durationMs ?? null,
       input.pathname ?? `/${input.visitId}`,
-      `#${input.visitId}`,
+      input.hash ?? `#${input.visitId}`,
       "journey.test",
-      `Title ${input.visitId}`,
+      input.title ?? `Title ${input.visitId}`,
       "referrer.test",
       `https://referrer.test/${input.visitId}`,
       "US",
@@ -135,15 +174,15 @@ function insertVisit(
       "Linux",
       "6",
       "desktop",
-      null,
-      null,
+      input.screenWidth ?? null,
+      input.screenHeight ?? null,
       input.userId ?? null,
       input.userName ?? null,
-      null,
-      null,
-      null,
-      null,
-      null,
+      input.perfTtfbMs ?? null,
+      input.perfFcpMs ?? null,
+      input.perfLcpMs ?? null,
+      input.perfCls ?? null,
+      input.perfInpMs ?? null,
     );
 }
 
@@ -332,6 +371,138 @@ function seedPlanNoise(database: DatabaseSync): void {
   database.exec("ANALYZE");
 }
 
+function filtersFor(root: FilterExpression | null): FilterDocument {
+  return normalizeFilterDocument({ version: 1, root }, analyticsFilterRegistry);
+}
+
+function pagePathFilter(pathname: string): FilterDocument {
+  return filtersFor({
+    kind: "condition",
+    target: { kind: "field", field: "page.path" },
+    operator: "eq",
+    value: pathname,
+  } as never);
+}
+
+function eventNameFilter(name: string): FilterDocument {
+  return filtersFor({
+    kind: "condition",
+    target: { kind: "field", field: "event.name" },
+    operator: "eq",
+    value: name,
+  } as never);
+}
+
+function payloadExists40(): FilterDocument {
+  return filtersFor({
+    kind: "and",
+    children: Array.from({ length: 40 }, (_unused, index) => ({
+      kind: "condition" as const,
+      target: {
+        kind: "event-payload" as const,
+        path: `/wave67/payload-${index}`,
+      },
+      operator: "exists" as const,
+    })),
+  } as never);
+}
+
+function preparedFilters(
+  filters: FilterDocument,
+  scopePreference: "event" | "session" | "visitor" = "event",
+): { readonly filters: FilterDocument; readonly scopePlan: ScopedFilterPlan } {
+  const prepared = prepareScopedQuery("event-records", {
+    context: siteQueryContext(SITE_A, "private-dashboard"),
+    time: createQueryTime(
+      WINDOW.startMs,
+      WINDOW.endExclusiveMs,
+      WINDOW.timeZone,
+      WINDOW.nowMs,
+    ),
+    filters,
+    scopePreference,
+  } as never) as {
+    readonly filters?: FilterDocument;
+    readonly scopePlan?: ScopedFilterPlan;
+  };
+  if (!prepared.filters || !prepared.scopePlan)
+    throw new Error("journey_event_page_prepare_failed");
+  return { filters: prepared.filters, scopePlan: prepared.scopePlan };
+}
+
+function withAdvancedMatches(
+  prepared: {
+    readonly filters: FilterDocument;
+    readonly scopePlan: ScopedFilterPlan;
+  },
+  advancedMatches: NonNullable<ScopedFilterPlan["advancedMatches"]>,
+): FilterDocument {
+  const metadata = scopedFilterMetadata(prepared.filters);
+  if (!metadata) throw new Error("journey_event_page_metadata_missing");
+  return attachScopedFilterMetadata(prepared.filters, {
+    ...metadata,
+    plan: { ...prepared.scopePlan, advancedMatches },
+  });
+}
+
+function addPayload(
+  database: DatabaseSync,
+  site: FixtureSite,
+  eventId: string,
+  path: string,
+  occurredAt: number,
+): void {
+  const event = database
+    .prepare(
+      "SELECT event_pk, event_name_id FROM custom_events WHERE event_id = ?",
+    )
+    .get(eventId) as {
+    readonly event_pk: number;
+    readonly event_name_id: number;
+  };
+  database
+    .prepare(
+      `INSERT OR IGNORE INTO custom_event_json_paths
+       (site_id, site_pk, path, last_seen_at) VALUES (?, ?, ?, ?)`,
+    )
+    .run(site.siteId, site.sitePk, path, occurredAt);
+  const pathRow = database
+    .prepare(
+      "SELECT id FROM custom_event_json_paths WHERE site_pk = ? AND path = ?",
+    )
+    .get(site.sitePk, path) as { readonly id: number };
+  const node = database
+    .prepare(
+      `SELECT COALESCE(MAX(node_id), 0) + 1 AS node_id
+       FROM custom_event_json_nodes WHERE event_pk = ?`,
+    )
+    .get(event.event_pk) as { readonly node_id: number };
+  database
+    .prepare(
+      `INSERT INTO custom_event_json_nodes
+       (event_pk, node_id, path_id, value_type, depth)
+       VALUES (?, ?, ?, 1, 1)`,
+    )
+    .run(event.event_pk, node.node_id, pathRow.id);
+  database
+    .prepare(
+      `INSERT INTO custom_event_json_values (
+        event_pk, node_id, site_id, event_name_id, path_id, occurred_at,
+        value_type, string_value, number_value, boolean_value, site_pk
+      ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, NULL, NULL, ?)`,
+    )
+    .run(
+      event.event_pk,
+      node.node_id,
+      site.siteId,
+      event.event_name_id,
+      pathRow.id,
+      occurredAt,
+      `payload:${path}`,
+      site.sitePk,
+    );
+}
+
 function testEnv(database: DatabaseSync, trace?: SqliteD1Trace): Env {
   return {
     DB: createSqliteD1Database(database, trace),
@@ -512,6 +683,291 @@ function legacyDetailSourceRows(
   >[];
 }
 
+/** Frozen test-only copy of the complete pre-Logical Journey Events page SQL. */
+function legacyJourneyEventsPageQuery(input: {
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly filters: Parameters<typeof buildVisitFilterSql>[0];
+  readonly target: {
+    readonly type: "visitor" | "session";
+    readonly value: string;
+  };
+  readonly limit: number;
+  readonly cursor?: { readonly occurredAt: number; readonly id: string } | null;
+}): { readonly sql: string; readonly bindings: readonly SQLInputValue[] } {
+  const scopedDataset = scopedDatasetFor(
+    input.siteId,
+    input.window,
+    input.filters,
+  );
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(input.filters, "visit_source", {
+        window: input.window,
+      });
+  const targetColumn =
+    input.target.type === "visitor" ? "visitor_id" : "session_id";
+  const targetClause = scopedDataset
+    ? `WHERE ${targetColumn} = ?`
+    : whereClauseWithTarget(filter?.clause ?? "", {
+        column: targetColumn,
+        value: input.target.value,
+      });
+  const eventTargetClause = scopedDataset ? `WHERE es.${targetColumn} = ?` : "";
+  const customEventProjection = scopedDataset
+    ? `
+    es.session_id AS sessionId,
+    es.visitor_id AS visitorId,
+    es.pathname AS pathname,
+    es.hash_fragment AS hash,
+    es.title AS title,
+    es.hostname AS hostname,
+    es.referrer_host AS referrerHost,
+    es.referrer_url AS referrerUrl,
+    es.country AS country,
+    es.region AS region,
+    es.city AS city,
+    es.browser AS browser,
+    es.browser_version AS browserVersion,
+    es.os AS os,
+    es.os_version AS osVersion,
+    es.device_type AS deviceType,
+    es.screen_width AS screenWidth,
+    es.screen_height AS screenHeight,
+    0 AS durationMs,
+    NULL AS perfTtfbMs,
+    NULL AS perfFcpMs,
+    NULL AS perfLcpMs,
+    NULL AS perfCls,
+    NULL AS perfInpMs`
+    : `
+    fv.session_id AS sessionId,
+    fv.visitor_id AS visitorId,
+    COALESCE(NULLIF(es.pathname, ''), fv.pathname) AS pathname,
+    COALESCE(NULLIF(es.hash_fragment, ''), fv.hash_fragment) AS hash,
+    COALESCE(NULLIF(es.title, ''), fv.title) AS title,
+    COALESCE(NULLIF(es.hostname, ''), fv.hostname) AS hostname,
+    COALESCE(NULLIF(es.referrer_host, ''), fv.referrer_host) AS referrerHost,
+    COALESCE(NULLIF(es.referrer_url, ''), fv.referrer_url) AS referrerUrl,
+    COALESCE(NULLIF(es.country, ''), fv.country) AS country,
+    COALESCE(NULLIF(es.region, ''), fv.region) AS region,
+    COALESCE(NULLIF(es.city, ''), fv.city) AS city,
+    COALESCE(NULLIF(es.browser, ''), fv.browser) AS browser,
+    fv.browser_version AS browserVersion,
+    COALESCE(NULLIF(es.os, ''), fv.os) AS os,
+    COALESCE(NULLIF(es.os_version, ''), fv.os_version) AS osVersion,
+    COALESCE(NULLIF(es.device_type, ''), fv.device_type) AS deviceType,
+    COALESCE(es.screen_width, fv.screen_width) AS screenWidth,
+    COALESCE(es.screen_height, fv.screen_height) AS screenHeight,
+    0 AS durationMs,
+    fv.perf_ttfb_ms AS perfTtfbMs,
+    fv.perf_fcp_ms AS perfFcpMs,
+    fv.perf_lcp_ms AS perfLcpMs,
+    fv.perf_cls AS perfCls,
+    fv.perf_inp_ms AS perfInpMs`;
+  const cursorClause = input.cursor
+    ? "WHERE occurredAt < ? OR (occurredAt = ? AND id < ?)"
+    : "";
+  const sql = `
+WITH
+${scopedDataset?.ctes ?? `${buildVisitSourceCte()},\n${buildCustomEventSourceCte()}`},
+${scopedDataset ? `event_source AS (SELECT * FROM ${scopedDataset.eventRelation}),` : ""}
+filtered_visits AS (
+  SELECT *
+  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
+  ${targetClause}
+),
+page_events AS (
+  SELECT
+    visit_id AS id,
+    'pageview' AS kind,
+    'pageview' AS eventType,
+    started_at AS occurredAt,
+    visit_id AS visitId,
+    session_id AS sessionId,
+    visitor_id AS visitorId,
+    pathname,
+    hash_fragment AS hash,
+    title,
+    hostname,
+    referrer_host AS referrerHost,
+    referrer_url AS referrerUrl,
+    country,
+    region,
+    city,
+    browser,
+    browser_version AS browserVersion,
+    os,
+    os_version AS osVersion,
+    device_type AS deviceType,
+    screen_width AS screenWidth,
+    screen_height AS screenHeight,
+    COALESCE(duration_ms, 0) AS durationMs,
+    perf_ttfb_ms AS perfTtfbMs,
+    perf_fcp_ms AS perfFcpMs,
+    perf_lcp_ms AS perfLcpMs,
+    perf_cls AS perfCls,
+    perf_inp_ms AS perfInpMs
+  FROM filtered_visits
+),
+custom_event_rows AS (
+  SELECT
+    es.event_id AS id,
+    'custom' AS kind,
+    es.event_name AS eventType,
+    es.occurred_at AS occurredAt,
+    es.visit_id AS visitId,
+    ${customEventProjection}
+  FROM event_source es
+  ${scopedDataset ? "LEFT JOIN" : "INNER JOIN"} filtered_visits fv
+    ON fv.visit_id = es.visit_id
+  ${eventTargetClause}
+)
+SELECT *
+FROM (
+  SELECT * FROM page_events
+  UNION ALL
+  SELECT * FROM custom_event_rows
+)
+AS journey_events
+${cursorClause}
+ORDER BY occurredAt DESC, id DESC
+LIMIT ?
+`;
+  return {
+    sql,
+    bindings: [
+      ...(scopedDataset
+        ? scopedDataset.bindings.map((binding) => binding.value)
+        : [
+            ...visitSourceBindings(input.siteId, input.window),
+            ...eventSourceBindings(input.siteId, input.window),
+          ]),
+      input.target.value,
+      ...(filter?.bindings ?? []),
+      ...(scopedDataset ? [input.target.value] : []),
+      ...(input.cursor
+        ? [input.cursor.occurredAt, input.cursor.occurredAt, input.cursor.id]
+        : []),
+      input.limit + 1,
+    ],
+  };
+}
+
+function legacyJourneyEventsPageRows(
+  database: DatabaseSync,
+  input: Parameters<typeof legacyJourneyEventsPageQuery>[0],
+): Record<string, unknown>[] {
+  const query = legacyJourneyEventsPageQuery(input);
+  return database.prepare(query.sql).all(...query.bindings) as Record<
+    string,
+    unknown
+  >[];
+}
+
+function physicalGraphSummary(root: unknown): {
+  readonly rootChain: readonly {
+    readonly kind: string;
+    readonly fields: number;
+  }[];
+  readonly multiplyReferenced: readonly {
+    readonly kind: string;
+    readonly fields: number;
+    readonly incoming: number;
+    readonly parents: readonly string[];
+  }[];
+} {
+  const nodeIds = new Map<object, string>();
+  const incoming = new Map<object, number>();
+  const parents = new Map<object, string[]>();
+  const expanded = new WeakSet<object>();
+  const nodes = new Map<object, Record<string, unknown>>();
+  let nextId = 0;
+  const nodeFor = (source: unknown): Record<string, unknown> | null => {
+    if (typeof source !== "object" || source === null) return null;
+    const record = source as Record<string, unknown>;
+    const nested = record.node;
+    if (typeof nested === "object" && nested !== null)
+      return nested as Record<string, unknown>;
+    return record;
+  };
+  const idFor = (node: object): string => {
+    const existing = nodeIds.get(node);
+    if (existing) return existing;
+    const id = `g${nextId++}`;
+    nodeIds.set(node, id);
+    return id;
+  };
+  const childSources = (node: Record<string, unknown>): unknown[] => {
+    if (
+      node.kind === "filter" ||
+      node.kind === "project" ||
+      node.kind === "sort" ||
+      node.kind === "limit" ||
+      node.kind === "distinct" ||
+      node.kind === "aggregate" ||
+      node.kind === "window" ||
+      node.kind === "recursive-closure"
+    )
+      return [node.input];
+    if (
+      node.kind === "join" ||
+      node.kind === "semi-join" ||
+      node.kind === "anti-join"
+    )
+      return [node.left, node.right];
+    if (node.kind === "union") return [node.left, node.right];
+    return [];
+  };
+  const visit = (source: unknown, parent?: Record<string, unknown>): void => {
+    const node = nodeFor(source);
+    if (!node) return;
+    nodes.set(node, node);
+    idFor(node);
+    if (parent) {
+      incoming.set(node, (incoming.get(node) ?? 0) + 1);
+      const parentLabel = `${String(parent.kind)}:${idFor(parent)}`;
+      parents.set(node, [...(parents.get(node) ?? []), parentLabel]);
+    }
+    if (expanded.has(node)) return;
+    expanded.add(node);
+    for (const child of childSources(node)) visit(child, node);
+  };
+  visit(root);
+  const rootNode = nodeFor(root);
+  const rootChain: { kind: string; fields: number }[] = [];
+  let current = rootNode;
+  const chainSeen = new WeakSet<object>();
+  while (current && !chainSeen.has(current)) {
+    chainSeen.add(current);
+    rootChain.push({
+      kind: String(current.kind),
+      fields: Array.isArray(current.fields) ? current.fields.length : 0,
+    });
+    const next =
+      current.input === undefined ? undefined : nodeFor(current.input);
+    current = next ?? null;
+  }
+  return {
+    rootChain,
+    multiplyReferenced: [...nodes.entries()]
+      .filter(([node]) => (incoming.get(node) ?? 0) > 1)
+      .map(([node]) => {
+        const record = nodes.get(node)!;
+        return {
+          kind: String(record.kind),
+          fields: Array.isArray(record.fields) ? record.fields.length : 0,
+          incoming: incoming.get(node) ?? 0,
+          parents: parents.get(node) ?? [],
+        };
+      })
+      .sort(
+        (left, right) =>
+          right.fields - left.fields || right.incoming - left.incoming,
+      ),
+  };
+}
+
 function rowBag(rows: readonly Record<string, unknown>[]): string[] {
   return rows
     .map((row) =>
@@ -534,6 +990,619 @@ describe("Journey report Observation D1 lowering", () => {
   });
 
   afterAll(() => db.close());
+
+  it("freezes the full parent Journey Events page assembly before migration", async () => {
+    for (const target of [
+      { type: "visitor", value: TARGET_VISITOR },
+      { type: "session", value: TARGET_SESSION },
+    ] as const) {
+      const input = {
+        siteId: SITE_A,
+        window: WINDOW,
+        filters: EMPTY_FILTER_DOCUMENT,
+        target,
+        limit: 100,
+      };
+      const query = legacyJourneyEventsPageQuery(input);
+      const parentRaw = legacyJourneyEventsPageRows(db, input);
+      const parent = parentRaw.map(mapJourneyEventRow);
+      const actual = await queryJourneyEventsPageFromD1(
+        testEnv(db),
+        input.siteId,
+        input.window,
+        input.filters,
+        target,
+        input.limit,
+      );
+
+      expect(query.sql).toContain("UNION ALL");
+      expect(query.sql).toContain("INNER JOIN filtered_visits fv");
+      expect(query.sql).toContain("ORDER BY occurredAt DESC, id DESC");
+      expect(actual.items).toEqual(parent);
+      expect(actual.pagination).toEqual({
+        limit: input.limit,
+        returned: parent.length,
+        hasMore: false,
+        nextCursor: null,
+      });
+    }
+  });
+
+  it("keeps direct Page eligibility, duplicate bags, and the exact cursor", async () => {
+    db.exec("SAVEPOINT wave67_journey_direct_eligibility");
+    try {
+      insertEvent(db, {
+        eventId: "owner-in-window",
+        site: siteA,
+        visitId: "owner-in-window",
+        eventNameId: siteA.purchaseNameId,
+        occurredAt: 100,
+      });
+      const filters = pagePathFilter("/inside");
+      const target = { type: "visitor", value: TARGET_VISITOR } as const;
+      const firstInput = {
+        siteId: SITE_A,
+        window: WINDOW,
+        filters,
+        target,
+        limit: 2,
+      };
+      const parentFirst = legacyJourneyEventsPageRows(db, firstInput).map(
+        mapJourneyEventRow,
+      );
+      const actualFirst = await queryJourneyEventsPageFromD1(
+        testEnv(db),
+        SITE_A,
+        WINDOW,
+        filters,
+        target,
+        firstInput.limit,
+      );
+      expect(actualFirst.items).toEqual(parentFirst.slice(0, firstInput.limit));
+      expect(actualFirst.pagination).toEqual({
+        limit: firstInput.limit,
+        returned: Math.min(parentFirst.length, firstInput.limit),
+        hasMore: parentFirst.length > firstInput.limit,
+        nextCursor:
+          parentFirst.length > firstInput.limit
+            ? {
+                occurredAt: parentFirst[firstInput.limit - 1]!.occurredAt,
+                id: parentFirst[firstInput.limit - 1]!.id,
+              }
+            : null,
+      });
+      expect(actualFirst.items.map((row) => row.id)).not.toContain(
+        "event-owner-outside-window",
+      );
+      expect(actualFirst.items.map((row) => row.id)).not.toContain(
+        "event-missing-dictionary",
+      );
+
+      if (!actualFirst.pagination.nextCursor) return;
+      const secondInput = {
+        ...firstInput,
+        cursor: actualFirst.pagination.nextCursor,
+      };
+      const parentSecond = legacyJourneyEventsPageRows(db, secondInput).map(
+        mapJourneyEventRow,
+      );
+      const actualSecond = await queryJourneyEventsPageFromD1(
+        testEnv(db),
+        SITE_A,
+        WINDOW,
+        filters,
+        target,
+        firstInput.limit,
+        secondInput.cursor,
+      );
+      expect(actualSecond.items).toEqual(
+        parentSecond.slice(0, firstInput.limit),
+      );
+      expect(actualSecond.items.map((row) => row.id)).not.toContain(
+        "event-owner-outside-window",
+      );
+    } finally {
+      db.exec("ROLLBACK TO wave67_journey_direct_eligibility");
+      db.exec("RELEASE wave67_journey_direct_eligibility");
+    }
+  });
+
+  it("keeps prepared Event ownership independent from filtered Page rows and uses the actual reader window", async () => {
+    db.exec("SAVEPOINT wave67_journey_prepared_ownership");
+    try {
+      insertEvent(db, {
+        eventId: "event-previous-reader-window",
+        site: siteA,
+        visitId: "owner-in-window",
+        eventNameId: siteA.purchaseNameId,
+        occurredAt: 75,
+      });
+      const prepared = preparedFilters(eventNameFilter("purchase"));
+      const target = { type: "visitor", value: TARGET_VISITOR } as const;
+      const currentInput = {
+        siteId: SITE_A,
+        window: WINDOW,
+        filters: prepared.filters,
+        target,
+        limit: 100,
+      };
+      const parentCurrent = legacyJourneyEventsPageRows(db, currentInput).map(
+        mapJourneyEventRow,
+      );
+      const actualCurrent = await queryJourneyEventsPageFromD1(
+        testEnv(db),
+        SITE_A,
+        WINDOW,
+        prepared.filters,
+        target,
+        currentInput.limit,
+      );
+      expect(actualCurrent.items).toEqual(parentCurrent);
+      expect(actualCurrent.items.map((row) => row.id)).toContain(
+        "event-owner-outside-window",
+      );
+
+      const previousWindow: QueryWindow = {
+        ...WINDOW,
+        startMs: 0,
+        endExclusiveMs: 100,
+      };
+      const previousInput = {
+        ...currentInput,
+        window: previousWindow,
+      };
+      const parentPrevious = legacyJourneyEventsPageRows(db, previousInput).map(
+        mapJourneyEventRow,
+      );
+      const actualPrevious = await queryJourneyEventsPageFromD1(
+        testEnv(db),
+        SITE_A,
+        previousWindow,
+        prepared.filters,
+        target,
+        previousInput.limit,
+      );
+      expect(actualPrevious.items).toEqual(parentPrevious);
+      expect(actualPrevious.items.map((row) => row.id)).toContain(
+        "event-previous-reader-window",
+      );
+      expect(actualPrevious.items.map((row) => row.id)).not.toContain(
+        "owner-in-window",
+      );
+
+      const metricVisit = "journey-event-page-perf-owner";
+      const metricEvent = "journey-event-page-perf-event";
+      insertVisit(db, siteA, {
+        visitId: metricVisit,
+        visitorId: "MetricVisitor",
+        sessionId: "MetricSession",
+        startedAt: 130,
+        pathname: "",
+        title: "",
+        durationMs: -9,
+        screenWidth: null,
+        screenHeight: null,
+        perfTtfbMs: 51,
+        perfFcpMs: 102,
+        perfLcpMs: 203,
+        perfCls: 0.125,
+        perfInpMs: 7,
+      });
+      insertEvent(db, {
+        eventId: metricEvent,
+        site: siteA,
+        visitId: metricVisit,
+        eventNameId: siteA.purchaseNameId,
+        occurredAt: 140,
+      });
+      const metricTarget = { type: "visitor", value: "MetricVisitor" } as const;
+      const directMetricRows = await queryJourneyEventsPageFromD1(
+        testEnv(db),
+        SITE_A,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        metricTarget,
+        100,
+      );
+      const directMetricPage = directMetricRows.items.find(
+        (row) => row.id === metricVisit,
+      );
+      const directMetricEvent = directMetricRows.items.find(
+        (row) => row.id === metricEvent,
+      );
+      expect(directMetricPage).toMatchObject({
+        pathname: "",
+        title: "",
+        durationMs: 0,
+        screenWidth: null,
+        performance: { ttfb: 51, fcp: 102, lcp: 203, cls: 0.125, inp: 7 },
+      });
+      expect(directMetricEvent).toMatchObject({
+        pathname: "",
+        title: "",
+        durationMs: 0,
+        screenWidth: null,
+        performance: { ttfb: 51, fcp: 102, lcp: 203, cls: 0.125, inp: 7 },
+      });
+
+      const preparedMetric = preparedFilters(eventNameFilter("purchase"));
+      const preparedMetricRows = await queryJourneyEventsPageFromD1(
+        testEnv(db),
+        SITE_A,
+        WINDOW,
+        preparedMetric.filters,
+        metricTarget,
+        100,
+      );
+      const preparedMetricPage = preparedMetricRows.items.find(
+        (row) => row.id === metricVisit,
+      );
+      const preparedMetricEvent = preparedMetricRows.items.find(
+        (row) => row.id === metricEvent,
+      );
+      expect(preparedMetricPage).toMatchObject({
+        durationMs: 0,
+        performance: { ttfb: 51, fcp: 102, lcp: 203, cls: 0.125, inp: 7 },
+      });
+      expect(preparedMetricEvent).toMatchObject({
+        durationMs: 0,
+        performance: { ttfb: null, fcp: null, lcp: null, cls: null, inp: null },
+      });
+    } finally {
+      db.exec("ROLLBACK TO wave67_journey_prepared_ownership");
+      db.exec("RELEASE wave67_journey_prepared_ownership");
+    }
+  });
+
+  it("matches direct 40/39 payload membership and prepared-128 scopes within D1 budgets", async () => {
+    db.exec("SAVEPOINT wave67_journey_page_budget");
+    try {
+      const visit40 = "journey-page-payload-40";
+      const visit39 = "journey-page-payload-39";
+      insertVisit(db, siteA, {
+        visitId: visit40,
+        visitorId: "PayloadVisitor",
+        sessionId: "PayloadSession",
+        startedAt: 120,
+        pathname: "/payload-full",
+      });
+      insertVisit(db, siteA, {
+        visitId: visit39,
+        visitorId: "PayloadVisitor",
+        sessionId: "PayloadSession",
+        startedAt: 130,
+        pathname: "/payload-partial",
+      });
+      insertEvent(db, {
+        eventId: "journey-page-payload-event-40",
+        site: siteA,
+        visitId: visit40,
+        eventNameId: siteA.purchaseNameId,
+        occurredAt: 140,
+      });
+      insertEvent(db, {
+        eventId: "journey-page-payload-event-39",
+        site: siteA,
+        visitId: visit39,
+        eventNameId: siteA.purchaseNameId,
+        occurredAt: 150,
+      });
+      for (let index = 0; index < 40; index += 1)
+        addPayload(
+          db,
+          siteA,
+          "journey-page-payload-event-40",
+          `/wave67/payload-${index}`,
+          140,
+        );
+      for (let index = 0; index < 39; index += 1)
+        addPayload(
+          db,
+          siteA,
+          "journey-page-payload-event-39",
+          `/wave67/payload-${index}`,
+          150,
+        );
+
+      const direct40 = payloadExists40();
+      const payloadTarget = {
+        type: "visitor",
+        value: "PayloadVisitor",
+      } as const;
+      const directInput = {
+        siteId: SITE_A,
+        window: WINDOW,
+        filters: direct40,
+        target: payloadTarget,
+        limit: 100,
+      };
+      const parentDirectQuery = legacyJourneyEventsPageQuery(directInput);
+      const parentDirect = legacyJourneyEventsPageRows(db, directInput).map(
+        mapJourneyEventRow,
+      );
+      const logicalPlan = buildJourneyEventPageReportPlan(directInput);
+      const reportOutput = logicalPlan.outputs.find(
+        (output) => output.id === JOURNEY_EVENT_PAGE_REPORT_OUTPUT,
+      )!;
+      const lowerer = new AnalyticsLogicalToDbLowerer(logicalPlan, {
+        siteId: SITE_A,
+        time: logicalPlan.context.time,
+      });
+      const loweredOutput = lowerer.lower(reportOutput);
+      const genericRelation = lowerer.projectOutput(
+        loweredOutput,
+        reportOutput.fields.map((field) => ({
+          name: field.name,
+          slot: field.slot,
+        })),
+      );
+      const physicalPlan = lowerLogicalPlan(genericRelation);
+      const logicalNodeCounts = logicalPlan.nodes.reduce<
+        Record<string, number>
+      >((counts, node) => {
+        counts[node.kind] = (counts[node.kind] ?? 0) + 1;
+        return counts;
+      }, {});
+      console.info("wave67_direct40_parent_budget", {
+        sqlBytes: new TextEncoder().encode(parentDirectQuery.sql).byteLength,
+        sqlSha256: createHash("sha256")
+          .update(parentDirectQuery.sql)
+          .digest("hex"),
+        bindings: parentDirectQuery.bindings.length,
+        statements: 1,
+      });
+      console.info(
+        "wave67_direct40_plan_shape",
+        JSON.stringify({
+          logicalNodeCounts,
+          genericRootKind: physicalPlan.root.kind,
+          genericGraph: physicalGraphSummary(physicalPlan.root),
+          sharedRelations: physicalPlan.sharedRelations.map((relation) => ({
+            name: relation.name,
+            columns: relation.node.fields.length,
+          })),
+          outputFields: physicalPlan.fields.length,
+        }),
+      );
+      const defaultTarget = { type: "visitor", value: TARGET_VISITOR } as const;
+      const defaultInput = {
+        siteId: SITE_A,
+        window: WINDOW,
+        filters: EMPTY_FILTER_DOCUMENT,
+        target: defaultTarget,
+        limit: 100,
+      };
+      const defaultParentQuery = legacyJourneyEventsPageQuery(defaultInput);
+      const defaultTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      await queryJourneyEventsPageFromD1(
+        testEnv(db, defaultTrace),
+        SITE_A,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        defaultTarget,
+        defaultInput.limit,
+      );
+      const cursor = {
+        occurredAt: 150,
+        id: "event-foreign-dictionary-site",
+      } as const;
+      const cursorInput = { ...defaultInput, cursor };
+      const cursorParentQuery = legacyJourneyEventsPageQuery(cursorInput);
+      const cursorTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      await queryJourneyEventsPageFromD1(
+        testEnv(db, cursorTrace),
+        SITE_A,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        defaultTarget,
+        defaultInput.limit,
+        cursor,
+      );
+      console.info("wave67_default_cursor_budget", [
+        {
+          profile: "default",
+          parentSqlBytes: new TextEncoder().encode(defaultParentQuery.sql)
+            .byteLength,
+          parentSqlSha256: createHash("sha256")
+            .update(defaultParentQuery.sql)
+            .digest("hex"),
+          parentBindings: defaultParentQuery.bindings.length,
+          logicalSqlBytes: new TextEncoder().encode(
+            defaultTrace.preparedSql[0]!,
+          ).byteLength,
+          logicalSqlSha256: createHash("sha256")
+            .update(defaultTrace.preparedSql[0]!)
+            .digest("hex"),
+          logicalBindings: defaultTrace.bindings[0]!.length,
+          statements: defaultTrace.preparedSql.length,
+        },
+        {
+          profile: "cursor",
+          parentSqlBytes: new TextEncoder().encode(cursorParentQuery.sql)
+            .byteLength,
+          parentSqlSha256: createHash("sha256")
+            .update(cursorParentQuery.sql)
+            .digest("hex"),
+          parentBindings: cursorParentQuery.bindings.length,
+          logicalSqlBytes: new TextEncoder().encode(cursorTrace.preparedSql[0]!)
+            .byteLength,
+          logicalSqlSha256: createHash("sha256")
+            .update(cursorTrace.preparedSql[0]!)
+            .digest("hex"),
+          logicalBindings: cursorTrace.bindings[0]!.length,
+          statements: cursorTrace.preparedSql.length,
+        },
+      ]);
+      const directTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const actualDirect = await queryJourneyEventsPageFromD1(
+        testEnv(db, directTrace),
+        SITE_A,
+        WINDOW,
+        direct40,
+        payloadTarget,
+        directInput.limit,
+      );
+      expect(actualDirect.items).toEqual(parentDirect);
+      expect(actualDirect.items.map((row) => row.id).sort()).toEqual(
+        [visit40, "journey-page-payload-event-40"].sort(),
+      );
+      expect(directTrace.preparedSql).toHaveLength(1);
+      const parentDirectExplain = explainQueryPlan(db, parentDirectQuery);
+      const logicalDirectExplain = explainQueryPlan(db, {
+        sql: directTrace.preparedSql[0]!,
+        bindings: directTrace.bindings[0]!,
+      });
+      console.info("wave67_direct40_sqlite_eqp", {
+        parentIdentityReads: parentDirectExplain.filter((line) =>
+          /(?:site_identities|sqlite_autoindex_site_identities_1)/u.test(line),
+        ).length,
+        logicalIdentityReads: logicalDirectExplain.filter((line) =>
+          /(?:site_identities|sqlite_autoindex_site_identities_1)/u.test(line),
+        ).length,
+        parentVisitIndexReads: parentDirectExplain.filter((line) =>
+          /idx_visits_site_pk_(?:visitor_)?started_at/u.test(line),
+        ).length,
+        logicalVisitIndexReads: logicalDirectExplain.filter((line) =>
+          /idx_visits_site_pk_(?:visitor_)?started_at/u.test(line),
+        ).length,
+        parentEventIndexReads: parentDirectExplain.filter((line) =>
+          /idx_custom_events_site_pk_(?:name|visit)?_?time/u.test(line),
+        ).length,
+        logicalEventIndexReads: logicalDirectExplain.filter((line) =>
+          /idx_custom_events_site_pk_(?:name|visit)?_?time/u.test(line),
+        ).length,
+        parentPayloadPathIndexReads: parentDirectExplain.filter((line) =>
+          /idx_custom_event_json_paths_site_pk_path/u.test(line),
+        ).length,
+        logicalPayloadPathIndexReads: logicalDirectExplain.filter((line) =>
+          /idx_custom_event_json_paths_site_pk_path/u.test(line),
+        ).length,
+        parentPayloadValueIndexReads: parentDirectExplain.filter((line) =>
+          /idx_custom_event_values_site_pk_path_time/u.test(line),
+        ).length,
+        logicalPayloadValueIndexReads: logicalDirectExplain.filter((line) =>
+          /idx_custom_event_values_site_pk_path_time/u.test(line),
+        ).length,
+      });
+
+      const target = { type: "visitor", value: TARGET_VISITOR } as const;
+      const preparedBase = preparedFilters(eventNameFilter("purchase"));
+      const eventIds = [
+        { siteId: SITE_A, id: "event-owner-outside-window" },
+        { siteId: SITE_A, id: "event-owner-outside-window" },
+        { siteId: SITE_A, id: "event-previous-reader-window" },
+        ...Array.from({ length: 125 }, (_unused, index) => ({
+          siteId: SITE_A,
+          id: `journey-event-page-missing-event-${index}`,
+        })),
+      ];
+      const visitIds = [
+        { siteId: SITE_A, id: "owner-in-window" },
+        { siteId: SITE_A, id: "owner-outside-window" },
+        { siteId: SITE_A, id: "owner-in-window" },
+        ...Array.from({ length: 125 }, (_unused, index) => ({
+          siteId: SITE_A,
+          id: `journey-event-page-missing-visit-${index}`,
+        })),
+      ];
+      const prepared128 = withAdvancedMatches(preparedBase, {
+        eventIds,
+        visitIds,
+      });
+      const preparedEmpty = preparedFilters(EMPTY_FILTER_DOCUMENT).filters;
+      const preparedProfiles = [
+        {
+          name: "prepared-empty-current",
+          window: WINDOW,
+          filters: preparedEmpty,
+        },
+        { name: "prepared-128-current", window: WINDOW, filters: prepared128 },
+        {
+          name: "prepared-128-previous",
+          window: { ...WINDOW, startMs: 0, endExclusiveMs: 100 },
+          filters: prepared128,
+        },
+      ] as const;
+      const budgetRows: Array<Record<string, unknown>> = [];
+      for (const profile of preparedProfiles) {
+        const input = {
+          siteId: SITE_A,
+          window: profile.window,
+          filters: profile.filters,
+          target,
+          limit: 100,
+        };
+        const parentQuery = legacyJourneyEventsPageQuery(input);
+        const parent = legacyJourneyEventsPageRows(db, input).map(
+          mapJourneyEventRow,
+        );
+        const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+        const actual = await queryJourneyEventsPageFromD1(
+          testEnv(db, trace),
+          SITE_A,
+          profile.window,
+          profile.filters,
+          target,
+          input.limit,
+        );
+        expect(actual.items).toEqual(parent);
+        expect(trace.preparedSql).toHaveLength(1);
+        const newSqlBytes = new TextEncoder().encode(
+          trace.preparedSql[0]!,
+        ).byteLength;
+        const newBindings = trace.bindings[0]!.length;
+        const parentSqlBytes = new TextEncoder().encode(
+          parentQuery.sql,
+        ).byteLength;
+        const parentBindings = parentQuery.bindings.length;
+        expect(newSqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+        expect(newBindings).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+        budgetRows.push({
+          profile: profile.name,
+          parentSqlBytes,
+          parentSqlSha256: createHash("sha256")
+            .update(parentQuery.sql)
+            .digest("hex"),
+          parentBindings,
+          logicalSqlBytes: newSqlBytes,
+          logicalSqlSha256: createHash("sha256")
+            .update(trace.preparedSql[0]!)
+            .digest("hex"),
+          logicalBindings: newBindings,
+          statements: trace.preparedSql.length,
+        });
+      }
+
+      const directSqlBytes = new TextEncoder().encode(
+        directTrace.preparedSql[0]!,
+      ).byteLength;
+      const directBindings = directTrace.bindings[0]!.length;
+      const parentDirectSqlBytes = new TextEncoder().encode(
+        parentDirectQuery.sql,
+      ).byteLength;
+      const parentDirectBindings = parentDirectQuery.bindings.length;
+      expect(directSqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+      expect(directBindings).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+      budgetRows.unshift({
+        profile: "direct-40-payload",
+        parentSqlBytes: parentDirectSqlBytes,
+        parentSqlSha256: createHash("sha256")
+          .update(parentDirectQuery.sql)
+          .digest("hex"),
+        parentBindings: parentDirectBindings,
+        logicalSqlBytes: directSqlBytes,
+        logicalSqlSha256: createHash("sha256")
+          .update(directTrace.preparedSql[0]!)
+          .digest("hex"),
+        logicalBindings: directBindings,
+        statements: directTrace.preparedSql.length,
+      });
+      console.info("wave67_journey_event_page_budget", budgetRows);
+    } finally {
+      db.exec("ROLLBACK TO wave67_journey_page_budget");
+      db.exec("RELEASE wave67_journey_page_budget");
+    }
+  });
 
   it("rejects malformed Observation plan inputs", () => {
     const valid = {
