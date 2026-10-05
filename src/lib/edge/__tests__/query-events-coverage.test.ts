@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { siteQueryResponse } from "@/lib/edge/analytics/interfaces/dashboard/protocol/responses";
 import type * as AnalyticsReportQuery from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
-import type * as QueryCore from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   addDimensionValue,
   finalizeDimensionBuckets,
@@ -21,12 +21,7 @@ import {
   SHARE_TREND_OTHER_TOKEN,
   sqlIntegerLiteral,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
-import {
-  queryEventAnalyticsContextCardsFromD1,
-  queryEventDimensionRowsFromFilteredEvents,
-  queryEventGeoRowsFromFilteredEvents,
-  queryEventSessionBoundaryRowsFromFilteredEvents,
-} from "@/lib/edge/analytics/providers/d1/internal/events-context";
+import { queryEventAnalyticsContextCardsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-context";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
 import {
   queryEventsSummaryFromD1,
@@ -40,18 +35,8 @@ import {
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";
-const queryD1AllMock = vi.hoisted(() => vi.fn());
 const reportOutputMock = vi.hoisted(() => vi.fn());
 const reportOutputSetMock = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/edge/analytics/providers/d1/internal/core", async () => {
-  const actual = await vi.importActual<typeof QueryCore>(
-    "@/lib/edge/analytics/providers/d1/internal/core",
-  );
-  return {
-    ...actual,
-    queryD1All: queryD1AllMock,
-  };
-});
 vi.mock(
   "@/lib/edge/analytics/providers/d1/internal/analytics-report-query",
   async () => {
@@ -75,7 +60,6 @@ const window: QueryWindow = {
 };
 describe("edge query events summary coverage", () => {
   beforeEach(() => {
-    queryD1AllMock.mockReset();
     reportOutputMock.mockReset();
     reportOutputSetMock.mockReset();
   });
@@ -199,8 +183,8 @@ describe("edge query events summary coverage", () => {
     });
   });
 
-  it("builds all event context cards within D1 compound SELECT limits", async () => {
-    queryD1AllMock.mockResolvedValueOnce([
+  it("builds the full event context typed card output", async () => {
+    reportOutputMock.mockResolvedValueOnce([
       {
         cardType: "path",
         value: "/pricing",
@@ -268,11 +252,23 @@ describe("edge query events summary coverage", () => {
       label: "California",
     });
     expect(cards.client.browser[0]?.value).toBe("Chrome");
-    expect(queryD1AllMock).toHaveBeenCalledOnce();
-    const [, sql] = queryD1AllMock.mock.calls[0];
-    expect(sql).toContain("ranked_cards AS");
-    expect((sql.match(/card_group_\d+ AS \(/g) ?? []).length).toBe(4);
-    expect((sql.match(/SELECT \* FROM card_group_\d+/g) ?? []).length).toBe(4);
+    expect(reportOutputMock).toHaveBeenCalledOnce();
+    const [, rawPlan, outputId] = reportOutputMock.mock.calls[0];
+    const plan = rawPlan as ValidatedLogicalPlan;
+    expect(outputId).toBe("event-context-cards");
+    expect(plan.outputs).toHaveLength(1);
+    expect(plan.outputs[0]?.fields.map(({ name }) => name)).toEqual([
+      "cardType",
+      "value",
+      "label",
+      "views",
+      "sessions",
+      "visitors",
+    ]);
+    expect(plan.nodes.filter((node) => node.kind === "source")).toHaveLength(2);
+    expect(
+      plan.nodes.filter((node) => node.kind === "row-concatenation"),
+    ).toHaveLength(1);
   });
 
   it("maps empty combined summary results without a synthetic row", async () => {
@@ -286,78 +282,66 @@ describe("edge query events summary coverage", () => {
     });
   });
 
-  it("keeps low-level context helpers compatible for targeted callers", async () => {
-    queryD1AllMock
-      .mockResolvedValueOnce([
-        { value: "", views: 1, sessions: 1, visitors: 1 },
-      ])
-      .mockResolvedValueOnce([
-        { value: "Chrome", views: 2, sessions: 1, visitors: 1 },
-      ])
-      .mockResolvedValueOnce([
-        {
-          value: "US::CA::California",
-          label: "California",
-          views: 2,
-          sessions: 1,
-          visitors: 1,
-        },
-      ])
-      .mockResolvedValueOnce([
-        { value: "/", views: 2, sessions: 1, visitors: 1 },
-      ])
-      .mockResolvedValueOnce([
-        { value: "/pricing", views: 2, sessions: 1, visitors: 1 },
-      ]);
-    const baseCte = "WITH filtered_events AS (SELECT * FROM source)";
+  it("deduplicates selected cards and returns unselected arrays empty", async () => {
+    reportOutputMock.mockResolvedValueOnce([
+      {
+        cardType: "path",
+        value: "/pricing",
+        views: 2,
+        sessions: 1,
+        visitors: 1,
+      },
+      {
+        cardType: "sourceDomain",
+        value: null,
+        label: null,
+        views: 1,
+        sessions: 1,
+        visitors: 1,
+      },
+    ]);
+    const cards = await queryEventAnalyticsContextCardsFromD1(
+      env,
+      siteId,
+      window,
+      EMPTY_FILTER_DOCUMENT,
+      5,
+      undefined,
+      ["path", "sourceDomain", "path"],
+    );
 
+    expect(cards.page.path).toEqual([
+      { value: "/pricing", views: 2, sessions: 1, visitors: 1 },
+    ]);
+    expect(cards.source.domain).toEqual([
+      { value: "", views: 1, sessions: 1, visitors: 1 },
+    ]);
+    expect(cards.page.entry).toEqual([]);
+    expect(cards.geo.country).toEqual([]);
+    const [, rawPlan] = reportOutputMock.mock.calls[0];
+    const plan = rawPlan as ValidatedLogicalPlan;
+    const concatenation = plan.nodes.find(
+      (node) => node.kind === "row-concatenation",
+    );
+    expect(concatenation?.inputs).toHaveLength(2);
+  });
+
+  it("validates an empty selection without issuing a D1 statement", async () => {
     await expect(
-      queryEventDimensionRowsFromFilteredEvents(
+      queryEventAnalyticsContextCardsFromD1(
         env,
-        baseCte,
-        [siteId],
-        "browser",
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
         5,
-        { includeEmpty: true },
+        undefined,
+        [],
       ),
-    ).resolves.toHaveLength(1);
-    await expect(
-      queryEventDimensionRowsFromFilteredEvents(
-        env,
-        baseCte,
-        [siteId],
-        "browser",
-        5,
-      ),
-    ).resolves.toMatchObject([{ value: "Chrome" }]);
-    await expect(
-      queryEventGeoRowsFromFilteredEvents(
-        env,
-        baseCte,
-        [siteId],
-        "country",
-        "region",
-        5,
-      ),
-    ).resolves.toMatchObject([{ label: "California" }]);
-    await expect(
-      queryEventSessionBoundaryRowsFromFilteredEvents(
-        env,
-        baseCte,
-        [siteId],
-        "entry",
-        5,
-      ),
-    ).resolves.toMatchObject([{ value: "/" }]);
-    await expect(
-      queryEventSessionBoundaryRowsFromFilteredEvents(
-        env,
-        baseCte,
-        [siteId],
-        "exit",
-        5,
-      ),
-    ).resolves.toMatchObject([{ value: "/pricing" }]);
+    ).resolves.toMatchObject({
+      page: { path: [], entry: [], exit: [] },
+      source: { domain: [], link: [] },
+    });
+    expect(reportOutputMock).not.toHaveBeenCalled();
   });
 
   it("queries custom event type aggregates with visit context filters", async () => {
@@ -502,7 +486,6 @@ describe("edge query events summary coverage", () => {
 });
 describe("edge query events trend coverage", () => {
   beforeEach(() => {
-    queryD1AllMock.mockReset();
     reportOutputMock.mockReset();
     reportOutputSetMock.mockReset();
   });

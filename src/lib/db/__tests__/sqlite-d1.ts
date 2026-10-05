@@ -10,6 +10,9 @@ export interface SqliteD1Trace {
 
 function d1NumberValue(value: unknown): unknown {
   if (typeof value === "bigint") return Number(value);
+  // BLOBs from node:sqlite are Uint8Array instances. Keep their byte view
+  // intact while adapting integer values in row objects.
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return value;
   if (Array.isArray(value)) return value.map(d1NumberValue);
   if (value && typeof value === "object")
     return Object.fromEntries(
@@ -45,17 +48,20 @@ export function createSqliteD1Database(
           return prepared;
         },
         async first<Row>() {
+          const row = statement.get(...sqliteBindings(bindings));
           return (
-            (d1NumberValue(statement.get(...sqliteBindings(bindings))) as
-              Row | undefined) ?? null
+            (trace?.readBigIntsAsNumbers
+              ? (d1NumberValue(row) as Row | undefined)
+              : (row as Row | undefined)) ?? null
           );
         },
         async all<Row>() {
+          const rows = statement.all(...sqliteBindings(bindings));
           return {
             success: true,
-            results: d1NumberValue(
-              statement.all(...sqliteBindings(bindings)),
-            ) as Row[],
+            results: (trace?.readBigIntsAsNumbers
+              ? d1NumberValue(rows)
+              : rows) as Row[],
           } as D1Result<Row>;
         },
         async run() {

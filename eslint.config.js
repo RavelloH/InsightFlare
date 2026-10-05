@@ -17,6 +17,7 @@ export default [
       ".tanstack/**",
       ".wrangler/**",
       "dist/**",
+      "logs/**",
       "node_modules/**",
       "output/**",
       "plan/**",

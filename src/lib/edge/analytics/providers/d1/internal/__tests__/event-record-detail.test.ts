@@ -597,6 +597,9 @@ describe("Event record detail report D1 lowering", () => {
     const owner = compileProbeSql(
       sourceProbePlan(SITE_A, ["event.report.ownerStatus"]),
     );
+    const organization = compileProbeSql(
+      sourceProbePlan(SITE_A, ["event.report.ownerOrganization"]),
+    );
     const previous = compileProbeSql(
       sourceProbePlan(SITE_A, ["event.report.ownerPreviousVisitId"]),
     );
@@ -608,6 +611,7 @@ describe("Event record detail report D1 lowering", () => {
     expect(owner).toContain("LEFT JOIN");
     expect(owner).toContain("visits");
     expect(owner).not.toContain("custom_event_names");
+    expect(organization).toContain("as_organization");
     expect(previous).toContain("ORDER BY");
     expect(previous.match(/DESC/gu)).toHaveLength(2);
   });

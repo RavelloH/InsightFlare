@@ -32,6 +32,7 @@ import {
   buildEventTypeOverviewPlan,
   EVENT_TYPE_OVERVIEW_OUTPUTS,
 } from "@/lib/edge/analytics/engine/event-type-overview-plan";
+import { queryEventAnalyticsContextCardsParentOracleFromD1 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/event-context-parent-oracle";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import {
   buildEventFilteredSourceCte,
@@ -2232,25 +2233,17 @@ describe("event detail D1 SQL", () => {
       expect(cards.geo.country).toMatchObject([{ value: "CN", views: 1 }]);
       expect(cards.page.entry).toMatchObject([{ value: "/entry", views: 1 }]);
       expect(cards.page.exit).toMatchObject([{ value: "/exit", views: 1 }]);
-      const cardQueries = d1.calls.filter(({ sql }) =>
-        sql.includes("\ncard_rows AS"),
+      expect(d1.calls).toHaveLength(5);
+      const cardQuery = d1.calls.at(-1)!;
+      expect(Buffer.byteLength(cardQuery.sql, "utf8")).toBeLessThanOrEqual(
+        100_000,
       );
-      expect(cardQueries).toHaveLength(1);
-      const cardQuery = cardQueries[0];
-      expect((cardQuery.sql.match(/card_group_\d+ AS \(/g) ?? []).length).toBe(
-        4,
-      );
-      expect(
-        (cardQuery.sql.match(/SELECT \* FROM card_group_\d+/g) ?? []).length,
-      ).toBe(4);
+      expect(cardQuery.bindings.length).toBeLessThanOrEqual(100);
       const cardPlan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${cardQuery.sql}`)
         .all(...cardQuery.bindings) as Array<{ detail: string }>;
       const cardPlanDetails = cardPlan.map((row) => row.detail).join("\n");
-      expect(cardPlanDetails).toContain("MATERIALIZE filtered_events");
-      expect(
-        (cardPlanDetails.match(/MATERIALIZE filtered_events/g) ?? []).length,
-      ).toBe(1);
+      expect(cardPlanDetails).toContain("MATERIALIZE _d1_shared_");
       const overviewQuery = d1.calls.find(({ sql }) =>
         sql.includes('"scopedEvents"'),
       );
@@ -2271,8 +2264,133 @@ describe("event detail D1 SQL", () => {
         .prepare(`EXPLAIN QUERY PLAN ${cardQuery.sql}`)
         .all(...cardQuery.bindings) as Array<{ detail: string }>;
       expect(entryExitPlan.map((row) => row.detail).join("\n")).toContain(
-        "idx_visits_site_pk_session_started_at",
+        "idx_visits_site_pk_started_at",
       );
+
+      const parentStart = d1.calls.length;
+      const parentCards =
+        await queryEventAnalyticsContextCardsParentOracleFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          100,
+          eventName,
+        );
+      const parentQuery = d1.calls[parentStart]!;
+      expect(parentCards).toEqual(cards);
+      expect(d1.calls).toHaveLength(parentStart + 1);
+      expect(Buffer.byteLength(parentQuery.sql, "utf8")).toBe(12_463);
+      expect(parentQuery.bindings).toHaveLength(9);
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("matches the parent oracle for plain default-19 Event Context", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+
+    try {
+      const actual = await queryEventAnalyticsContextCardsFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        100,
+      );
+      const actualQuery = d1.calls[0]!;
+      expect(d1.calls).toHaveLength(1);
+      expect(Buffer.byteLength(actualQuery.sql, "utf8")).toBeLessThanOrEqual(
+        100_000,
+      );
+      expect(actualQuery.bindings.length).toBeLessThanOrEqual(100);
+
+      const parent = await queryEventAnalyticsContextCardsParentOracleFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        100,
+      );
+      const parentQuery = d1.calls[1]!;
+      expect(actual).toEqual(parent);
+      expect(d1.calls).toHaveLength(2);
+      expect(Buffer.byteLength(parentQuery.sql, "utf8")).toBeLessThanOrEqual(
+        100_000,
+      );
+      expect(parentQuery.bindings.length).toBeLessThanOrEqual(100);
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("matches the frozen context oracle for legal 40- and 39-payload direct filters", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+    const insertPath = d1.database.prepare(
+      "INSERT INTO custom_event_json_paths (id, site_id, path) VALUES (?, ?, ?)",
+    );
+    const insertPayload = d1.database.prepare(
+      `INSERT INTO custom_event_json_values (
+        event_pk, node_id, site_id, event_name_id, path_id, occurred_at,
+        value_type, string_value, number_value, boolean_value
+      ) VALUES (?, ?, ?, ?, ?, ?, 1, 'budget-value', NULL, NULL)`,
+    );
+    for (let index = 1; index <= 40; index += 1) {
+      const pathId = index + 1;
+      insertPath.run(pathId, siteId, overviewBudgetPayloadPath(index));
+      for (const [eventPk, eventNameId] of [
+        [1, 1],
+        [99, 99],
+      ] as const)
+        insertPayload.run(
+          eventPk,
+          eventPk * 1_000 + pathId,
+          siteId,
+          eventNameId,
+          pathId,
+          eventTime,
+        );
+    }
+
+    try {
+      for (const count of [40, 39]) {
+        const filters = overviewBudgetPayloadFilters(count);
+        const parentStart = d1.calls.length;
+        const expected =
+          await queryEventAnalyticsContextCardsParentOracleFromD1(
+            env,
+            siteId,
+            window,
+            filters,
+            100,
+            eventName,
+          );
+        const parentQuery = d1.calls[parentStart]!;
+        expect(d1.calls).toHaveLength(parentStart + 1);
+        expect(parentQuery.bindings.length).toBeLessThanOrEqual(100);
+        expect(Buffer.byteLength(parentQuery.sql, "utf8")).toBeLessThanOrEqual(
+          100_000,
+        );
+        const actualStart = d1.calls.length;
+        const actual = await queryEventAnalyticsContextCardsFromD1(
+          env,
+          siteId,
+          window,
+          filters,
+          100,
+          eventName,
+        );
+        const actualQuery = d1.calls[actualStart]!;
+
+        expect(actual, `payload-exists-${count}`).toEqual(expected);
+        expect(d1.calls).toHaveLength(actualStart + 1);
+        for (const query of [actualQuery, parentQuery]) {
+          expect(query.bindings.length).toBeLessThanOrEqual(100);
+          expect(Buffer.byteLength(query.sql, "utf8")).toBeLessThanOrEqual(
+            100_000,
+          );
+        }
+      }
     } finally {
       d1.close();
     }
@@ -2582,8 +2700,8 @@ describe("event detail D1 SQL", () => {
       expect(cards.source.domain).toEqual([]);
       const query = d1.calls.at(-1);
       expect(query?.sql).not.toContain("session_visit_edges");
-      expect(query?.sql).toContain("'path' AS cardType");
-      expect(query?.sql).not.toContain("'browser' AS cardType");
+      expect(query?.bindings).toContain("path");
+      expect(query?.bindings).not.toContain("browser");
     } finally {
       d1.close();
     }
@@ -2622,7 +2740,9 @@ describe("event detail D1 SQL", () => {
       expect(cards.page.exit).toMatchObject([
         { value: "/posts/minecraft-meteor-guide" },
       ]);
-      expect(d1.calls.at(-1)?.sql).toContain("INNER JOIN scope_final_visits v");
+      expect(d1.calls.at(-1)?.bindings).toContain(
+        "/posts/minecraft-meteor-guide",
+      );
     } finally {
       d1.close();
     }

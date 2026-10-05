@@ -38,7 +38,11 @@ import {
 import { compileD1QueryUnoptimizedForTest } from "@/lib/db/query/compiler";
 import type { AnyExpression } from "@/lib/db/query/expression";
 import { lowerLogicalPlan } from "@/lib/db/query/physical-plan";
-import type { Relation } from "@/lib/db/query/plan";
+import type {
+  Relation,
+  TextRowRelationRow,
+  TextRowRelationSchema,
+} from "@/lib/db/query/plan";
 import { schema } from "@/lib/db/schema";
 
 const databases = new Set<DatabaseSync>();
@@ -69,6 +73,69 @@ function nullablePageProjection() {
     field3: selected.columns.session_id,
     field4: selected.columns.pathname,
   });
+}
+
+function selectedWideTextProjection(width: number, selective = true): Relation {
+  const fieldNames = Array.from(
+    { length: width },
+    (_, index) => `field${index}`,
+  );
+  const schema = Object.fromEntries([
+    ["keep", { affinity: "text", nullable: false }],
+    ...fieldNames.map((name) => [name, { affinity: "text", nullable: true }]),
+  ]) as TextRowRelationSchema;
+  const row = (
+    keep: string,
+    key: string | null,
+    order: string | null,
+    payload: string,
+  ): TextRowRelationRow<typeof schema> =>
+    Object.fromEntries([
+      ["keep", keep],
+      ...fieldNames.map((name, index) => [
+        name,
+        index === 0
+          ? key
+          : index === 1
+            ? order
+            : index % 3 === 0
+              ? null
+              : `${payload}-${index}`,
+      ]),
+    ]) as TextRowRelationRow<typeof schema>;
+  const rows = valuesRelation(schema, [
+    row("yes", "same", "a", "duplicate"),
+    row("yes", "same", "a", "duplicate"),
+    row("yes", null, "z", "null-key"),
+    row("yes", "other", null, "null-order"),
+    row("no", "filtered", "b", "filtered"),
+  ]);
+  const selected = selective
+    ? filter(rows, eq(rows.columns.keep, param("yes")))
+    : rows;
+  const projections: Record<string, AnyExpression> = {};
+  for (const name of fieldNames) projections[name] = selected.columns[name]!;
+  return project(selected, projections);
+}
+
+function independentWindowUnion(source: Relation, count: number): Relation {
+  const branches = Array.from({ length: count }, (_, index) =>
+    window(source, {
+      rank: rowNumber({
+        partitionBy: [source.columns[`field${index % source.fields.length}`]!],
+        orderBy: [
+          {
+            expression:
+              source.columns[`field${(index + 1) % source.fields.length}`]!,
+            direction: index % 2 === 0 ? "ASC" : "DESC",
+          },
+        ],
+      }),
+    }),
+  );
+  return branches
+    .slice(1)
+    .reduce((combined, branch) => union(combined, branch, true), branches[0]!);
 }
 
 function rowBag(rows: readonly Record<string, unknown>[]) {
@@ -407,6 +474,8 @@ describe("shared relation physical selection", () => {
   });
 
   it("rejects aggregate ranking shapes outside the local wrapper and closed aggregate graph", () => {
+    const database = new DatabaseSync(":memory:");
+    databases.add(database);
     const base = buildAggregateRankingQuery();
     const assertNotShared = (query: Parameters<typeof lowerLogicalPlan>[0]) => {
       expect(
@@ -463,7 +532,27 @@ describe("shared relation physical selection", () => {
       pathname: mixedSorted.columns.left_pathname,
       views: mixedSorted.columns.left_views,
     });
-    assertNotShared(mixedOutput);
+    expect(
+      lowerLogicalPlan(mixedOutput).sharedRelations.some(
+        ({ node }) => node === base.selectedPages.node,
+      ),
+    ).toBe(true);
+    const mixedPhysical = lowerLogicalPlan(mixedOutput);
+    const mixedOptimized = compileD1Query(mixedPhysical);
+    const mixedMechanical = compileD1QueryUnoptimizedForTest(mixedOutput);
+    expect(
+      rowBag(
+        database
+          .prepare(mixedOptimized.sql)
+          .all(...(mixedOptimized.bindings as SQLInputValue[])),
+      ),
+    ).toEqual(
+      rowBag(
+        database
+          .prepare(mixedMechanical.sql)
+          .all(...(mixedMechanical.bindings as SQLInputValue[])),
+      ),
+    );
 
     const nestedSort = sort(base.sorted, [
       { expression: base.sorted.columns.bounceRate, direction: "DESC" },
@@ -472,7 +561,28 @@ describe("shared relation physical selection", () => {
       pathname: nestedSort.columns.pathname,
       views: nestedSort.columns.views,
     });
-    assertNotShared(nestedSortOutput);
+    const nestedSortPhysical = lowerLogicalPlan(nestedSortOutput);
+    expect(
+      nestedSortPhysical.sharedRelations.some(
+        ({ node }) => node === base.selectedPages.node,
+      ),
+    ).toBe(true);
+    const nestedSortOptimized = compileD1Query(nestedSortPhysical);
+    const nestedSortMechanical =
+      compileD1QueryUnoptimizedForTest(nestedSortOutput);
+    expect(
+      rowBag(
+        database
+          .prepare(nestedSortOptimized.sql)
+          .all(...(nestedSortOptimized.bindings as SQLInputValue[])),
+      ),
+    ).toEqual(
+      rowBag(
+        database
+          .prepare(nestedSortMechanical.sql)
+          .all(...(nestedSortMechanical.bindings as SQLInputValue[])),
+      ),
+    );
 
     const nestedLimit = limit(base.sorted, 2);
     const nestedLimitSort = sort(nestedLimit, [
@@ -482,7 +592,28 @@ describe("shared relation physical selection", () => {
       pathname: nestedLimitSort.columns.pathname,
       views: nestedLimitSort.columns.views,
     });
-    assertNotShared(nestedLimitOutput);
+    const nestedLimitPhysical = lowerLogicalPlan(nestedLimitOutput);
+    expect(
+      nestedLimitPhysical.sharedRelations.some(
+        ({ node }) => node === base.selectedPages.node,
+      ),
+    ).toBe(true);
+    const nestedLimitOptimized = compileD1Query(nestedLimitPhysical);
+    const nestedLimitMechanical =
+      compileD1QueryUnoptimizedForTest(nestedLimitOutput);
+    expect(
+      rowBag(
+        database
+          .prepare(nestedLimitOptimized.sql)
+          .all(...(nestedLimitOptimized.bindings as SQLInputValue[])),
+      ),
+    ).toEqual(
+      rowBag(
+        database
+          .prepare(nestedLimitMechanical.sql)
+          .all(...(nestedLimitMechanical.bindings as SQLInputValue[])),
+      ),
+    );
 
     const windowedMetrics = window(base.metrics, {
       rank: rowNumber({
@@ -539,7 +670,11 @@ describe("shared relation physical selection", () => {
       views: scalarSorted.columns.views,
       lookupValue: scalarSorted.columns.lookupValue,
     });
-    assertNotShared(scalarOutput);
+    expect(
+      lowerLogicalPlan(scalarOutput).sharedRelations.some(
+        ({ node }) => node === base.selectedPages.node,
+      ),
+    ).toBe(true);
 
     const correlatedIdentities = scan(schema.site_identities);
     const correlatedIdentity = filter(
@@ -566,7 +701,11 @@ describe("shared relation physical selection", () => {
       views: correlatedSorted.columns.views,
       sitePk: correlatedSorted.columns.sitePk,
     });
-    assertNotShared(correlatedOutput);
+    expect(
+      lowerLogicalPlan(correlatedOutput).sharedRelations.some(
+        ({ node }) => node === base.selectedPages.node,
+      ),
+    ).toBe(true);
 
     const volatile = buildAggregateRankingQuery({ volatile: true });
     expect(
@@ -830,35 +969,68 @@ describe("shared relation physical selection", () => {
     ).toEqual([]);
     expect(lowerLogicalPlan(oneWindow).sharedRelations).toEqual([]);
 
-    const expressionCandidate = selectedProjection(5);
-    const expressionByPk = window(expressionCandidate, {
-      rank: rowNumber({
-        orderBy: [
-          { expression: expressionCandidate.columns.field0, direction: "ASC" },
-        ],
-      }),
-    });
-    const expressionBySite = window(expressionCandidate, {
-      rank: rowNumber({
-        partitionBy: [expressionCandidate.columns.field1],
-        orderBy: [
-          { expression: expressionCandidate.columns.field0, direction: "DESC" },
-        ],
-      }),
-    });
-    const scalarReader = project(scan(schema.site_identities), {
-      value: scalar(project(expressionCandidate, { value: constant(1) })),
-    });
-    const expressionUse = join(
-      union(expressionByPk, expressionBySite, true),
-      scalarReader,
-      eq(param(1), param(1)),
-    );
-    expect(
-      lowerLogicalPlan(expressionUse).sharedRelations.some(
-        ({ node }) => node === expressionCandidate.node,
-      ),
-    ).toBe(false);
+    for (const safeFirst of [true, false]) {
+      const expressionCandidate = selectedProjection(5);
+      const expressionByPk = window(expressionCandidate, {
+        rank: rowNumber({
+          orderBy: [
+            {
+              expression: expressionCandidate.columns.field0,
+              direction: "ASC",
+            },
+          ],
+        }),
+      });
+      const expressionBySite = window(expressionCandidate, {
+        rank: rowNumber({
+          partitionBy: [expressionCandidate.columns.field1],
+          orderBy: [
+            {
+              expression: expressionCandidate.columns.field0,
+              direction: "DESC",
+            },
+          ],
+        }),
+      });
+      const safeWindows = union(expressionByPk, expressionBySite, true);
+      const scalarReader = project(scan(schema.site_identities), {
+        value: scalar(project(expressionCandidate, { value: constant(1) })),
+      });
+      const assertUnsharedUnderWrappedSort = (
+        combined: Relation,
+        sortExpression: AnyExpression,
+      ) => {
+        const ordered = sort(combined, [
+          { expression: sortExpression, direction: "ASC" },
+        ]);
+        const output: Record<string, AnyExpression> = {};
+        for (const [name, expression] of Object.entries(ordered.columns))
+          output[name] = expression;
+        const wrapped = project(ordered, output);
+
+        expect(
+          lowerLogicalPlan(wrapped).sharedRelations.some(
+            ({ node }) => node === expressionCandidate.node,
+          ),
+        ).toBe(false);
+      };
+
+      if (safeFirst) {
+        const combined = join(
+          safeWindows,
+          scalarReader,
+          eq(param(1), param(1)),
+        );
+        assertUnsharedUnderWrappedSort(combined, combined.columns.left_field0);
+      } else {
+        const combined = join(
+          scalarReader,
+          safeWindows,
+          eq(param(1), param(1)),
+        );
+        assertUnsharedUnderWrappedSort(combined, combined.columns.right_field0);
+      }
+    }
   });
 
   it("does not share a window candidate or inputs behind inherited barriers", () => {
@@ -1157,14 +1329,19 @@ describe("shared relation physical selection", () => {
     const ordered = sort(repeated, [
       { expression: repeated.columns.field1, direction: "ASC" },
     ]);
-    const physical = lowerLogicalPlan(ordered);
+    const output = project(ordered, {
+      field0: ordered.columns.field0,
+      field2: ordered.columns.field2,
+      field4: ordered.columns.field4,
+    });
+    const physical = lowerLogicalPlan(output);
     const selected = physical.sharedRelations.find(
       (shared) => shared.node === relation.node,
     );
     expect(selected?.materialization).toBe("materialized");
 
     const optimized = compileD1Query(physical);
-    const mechanical = compileD1QueryUnoptimizedForTest(ordered);
+    const mechanical = compileD1QueryUnoptimizedForTest(output);
     expect(optimized.sql.match(/ AS MATERIALIZED \(/gu)).toHaveLength(1);
     expect(optimized.sql.lastIndexOf("ORDER BY")).toBeGreaterThan(
       optimized.sql.lastIndexOf("UNION ALL"),
@@ -1188,6 +1365,302 @@ describe("shared relation physical selection", () => {
     expect(() => compileD1Query(forged)).toThrowError(
       expect.objectContaining({ code: "invalid_plan" }),
     );
+  });
+
+  it("recognizes a terminal sort through only pure local output projections", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    database
+      .prepare("INSERT INTO site_identities (site_id) VALUES (?), (?)")
+      .run("wrapped-sort-b", "wrapped-sort-a");
+
+    const source = selectedProjection(5);
+    const repeated = repeatedThree(source);
+    const ordered = sort(repeated, [
+      { expression: repeated.columns.field1!, direction: "ASC" },
+    ]);
+    const wrapped = project(ordered, {
+      field0: ordered.columns.field0!,
+      field1: ordered.columns.field1!,
+      field2: ordered.columns.field2!,
+      field3: ordered.columns.field3!,
+      field4: ordered.columns.field4!,
+    });
+    const physical = lowerLogicalPlan(wrapped);
+    expect(
+      physical.sharedRelations.find(({ node }) => node === source.node),
+    ).toMatchObject({
+      materialization: "materialized",
+      fields: [{}, {}, {}, {}, {}],
+    });
+
+    const optimized = compileD1Query(physical);
+    const mechanical = compileD1QueryUnoptimizedForTest(wrapped);
+    const optimizedRows = database
+      .prepare(optimized.sql)
+      .all(...(optimized.bindings as SQLInputValue[]));
+    const mechanicalRows = database
+      .prepare(mechanical.sql)
+      .all(...(mechanical.bindings as SQLInputValue[]));
+    expect(optimized.sql.match(/ AS MATERIALIZED \(/gu)).toHaveLength(1);
+    expect(optimizedRows).toEqual(mechanicalRows);
+    expect(optimizedRows).toHaveLength(6);
+
+    const filteredRoot = filter(ordered, eq(param(1), param(1)));
+    expect(
+      lowerLogicalPlan(filteredRoot).sharedRelations.some(
+        ({ node }) => node === source.node,
+      ),
+    ).toBe(false);
+
+    const expressionRoot = project(ordered, {
+      field0: ordered.columns.field0!,
+      marker: constant("expression"),
+    });
+    expect(
+      lowerLogicalPlan(expressionRoot).sharedRelations.some(
+        ({ node }) => node === source.node,
+      ),
+    ).toBe(false);
+
+    const limited = limit(ordered, 2);
+    const projectedLimit = project(limited, {
+      field0: limited.columns.field0!,
+      field1: limited.columns.field1!,
+      field2: limited.columns.field2!,
+      field3: limited.columns.field3!,
+      field4: limited.columns.field4!,
+    });
+    expect(
+      lowerLogicalPlan(projectedLimit).sharedRelations.some(
+        ({ node }) => node === source.node,
+      ),
+    ).toBe(false);
+  });
+
+  it("materializes only bounded wide selective inputs reused by eight independent windows", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+
+    database
+      .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
+      .run("wide-window-site");
+    const { site_pk: sitePk } = database
+      .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+      .get("wide-window-site") as { site_pk: number };
+    const insertVisit = database.prepare(
+      `INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, status, started_at,
+        last_activity_at, ended_at, duration_ms, duration_source, exit_reason,
+        pathname, hostname, site_pk
+      ) VALUES (?, 'wide-window-site', ?, ?, 'complete', ?, ?, ?, ?, ?, ?, '/', 'example.test', ?)`,
+    );
+    insertVisit.run(
+      "wide-duplicate-a",
+      "wide-duplicate-visitor",
+      "wide-duplicate-session",
+      1,
+      1,
+      10,
+      20,
+      "duration",
+      "same",
+      sitePk,
+    );
+    insertVisit.run(
+      "wide-duplicate-b",
+      "wide-duplicate-visitor",
+      "wide-duplicate-session",
+      2,
+      2,
+      10,
+      20,
+      "duration",
+      "same",
+      sitePk,
+    );
+    insertVisit.run(
+      "wide-null-row",
+      "wide-null-visitor",
+      "wide-null-session",
+      3,
+      3,
+      null,
+      null,
+      null,
+      null,
+      sitePk,
+    );
+    const narrowSource = nullablePageProjection();
+    const wideFields: Record<string, AnyExpression> = {};
+    for (let index = 0; index < 17; index += 1)
+      wideFields[`field${index}`] = Object.values(narrowSource.columns)[
+        index % 5
+      ]!;
+    const source = project(narrowSource, wideFields);
+    const windows = independentWindowUnion(source, 8);
+    const ordered = sort(windows, [
+      { expression: windows.columns.field0!, direction: "ASC" },
+      { expression: windows.columns.rank!, direction: "ASC" },
+    ]);
+    const output: Record<string, AnyExpression> = {};
+    for (const name of Object.keys(ordered.columns))
+      output[name] = ordered.columns[name]!;
+    const wrapped = project(ordered, output);
+    const physical = lowerLogicalPlan(wrapped);
+    expect(
+      physical.sharedRelations.find(({ node }) => node === source.node),
+    ).toMatchObject({
+      materialization: "materialized",
+      fields: Array.from({ length: 17 }, () => ({})),
+    });
+
+    const optimized = compileD1Query(physical);
+    const mechanical = compileD1QueryUnoptimizedForTest(wrapped);
+    const optimizedRows = database
+      .prepare(optimized.sql)
+      .all(...(optimized.bindings as SQLInputValue[]));
+    const mechanicalRows = database
+      .prepare(mechanical.sql)
+      .all(...(mechanical.bindings as SQLInputValue[]));
+    const queryPlan = database
+      .prepare(`EXPLAIN QUERY PLAN ${optimized.sql}`)
+      .all(...(optimized.bindings as SQLInputValue[])) as Array<{
+      detail: string;
+    }>;
+    const details = queryPlan.map(({ detail }) => detail);
+
+    expect(optimized.sql.match(/ AS MATERIALIZED \(/gu)).toHaveLength(1);
+    expect(
+      details.filter((detail) => detail.includes("MATERIALIZE _d1_shared_0")),
+    ).toHaveLength(1);
+    expect(optimizedRows).toEqual(mechanicalRows);
+    expect(optimizedRows).toHaveLength(24);
+    expect(optimizedRows.some((row) => Object.values(row).includes(null))).toBe(
+      true,
+    );
+
+    for (const width of [17, 32]) {
+      const candidate = selectedWideTextProjection(width);
+      const query = independentWindowUnion(candidate, 8);
+      expect(
+        lowerLogicalPlan(query).sharedRelations.some(
+          ({ node }) => node === candidate.node,
+        ),
+      ).toBe(true);
+    }
+
+    for (const [width, count] of [
+      [33, 8],
+      [17, 7],
+    ] as const) {
+      const candidate = selectedWideTextProjection(width);
+      const query = independentWindowUnion(candidate, count);
+      expect(
+        lowerLogicalPlan(query).sharedRelations.some(
+          ({ node }) => node === candidate.node,
+        ),
+      ).toBe(false);
+    }
+
+    const narrowLegacy = selectedProjection(16);
+    expect(
+      lowerLogicalPlan(
+        independentWindowUnion(narrowLegacy, 8),
+      ).sharedRelations.some(({ node }) => node === narrowLegacy.node),
+    ).toBe(true);
+
+    const oneWindowInput = selectedWideTextProjection(17);
+    const oneWindow = window(oneWindowInput, {
+      rank: rowNumber({
+        orderBy: [
+          { expression: oneWindowInput.columns.field0!, direction: "ASC" },
+        ],
+      }),
+    });
+    const repeatedOneWindow = Array.from({ length: 8 }, () => oneWindow)
+      .slice(1)
+      .reduce((combined, branch) => union(combined, branch, true), oneWindow);
+    expect(
+      lowerLogicalPlan(repeatedOneWindow).sharedRelations.some(
+        ({ node }) => node === oneWindowInput.node,
+      ),
+    ).toBe(false);
+
+    const nonselective = selectedWideTextProjection(17, false);
+    expect(
+      lowerLogicalPlan(
+        independentWindowUnion(nonselective, 8),
+      ).sharedRelations.some(({ node }) => node === nonselective.node),
+    ).toBe(false);
+
+    const nonProjectInput = selectedWideTextProjection(17);
+    const nonProject = filter(nonProjectInput, eq(param(1), param(1)));
+    expect(
+      lowerLogicalPlan(
+        independentWindowUnion(nonProject, 8),
+      ).sharedRelations.some(({ node }) => node === nonProject.node),
+    ).toBe(false);
+
+    const rankSource = selectedWideTextProjection(17);
+    const innerRank = window(rankSource, {
+      rank: rowNumber({
+        orderBy: [{ expression: rankSource.columns.field0!, direction: "ASC" }],
+      }),
+    });
+    const rankColumns: Record<string, AnyExpression> = {};
+    for (let index = 0; index < 16; index += 1)
+      rankColumns[`field${index}`] = innerRank.columns[`field${index}`]!;
+    rankColumns.field16 = innerRank.columns.rank!;
+    const rowNumberResult = project(innerRank, rankColumns);
+    expect(
+      lowerLogicalPlan(
+        independentWindowUnion(rowNumberResult, 8),
+      ).sharedRelations.some(({ node }) => node === rowNumberResult.node),
+    ).toBe(false);
+
+    for (const safeFirst of [true, false]) {
+      const barrierSource = selectedWideTextProjection(17);
+      const safeWindows = independentWindowUnion(barrierSource, 8);
+      const windowColumns: Record<string, AnyExpression> = {};
+      for (let index = 0; index < 17; index += 1)
+        windowColumns[`field${index}`] = safeWindows.columns[`field${index}`]!;
+      const safeRows = project(safeWindows, windowColumns);
+      const sortedBranch = sort(barrierSource, [
+        { expression: barrierSource.columns.field0!, direction: "ASC" },
+      ]);
+      const combined = safeFirst
+        ? union(safeRows, sortedBranch, true)
+        : union(sortedBranch, safeRows, true);
+      expect(
+        lowerLogicalPlan(combined).sharedRelations.some(
+          ({ node }) => node === barrierSource.node,
+        ),
+      ).toBe(false);
+    }
+
+    const limitSource = selectedWideTextProjection(17);
+    expect(
+      lowerLogicalPlan(
+        limit(independentWindowUnion(limitSource, 8), 4),
+      ).sharedRelations.some(({ node }) => node === limitSource.node),
+    ).toBe(false);
+
+    for (const safeLeft of [true, false]) {
+      const expressionSource = selectedWideTextProjection(17);
+      const safeWindows = independentWindowUnion(expressionSource, 8);
+      const scalarReader = project(scan(schema.site_identities), {
+        value: scalar(project(expressionSource, { value: constant(1) })),
+      });
+      const combined: Relation = safeLeft
+        ? join(safeWindows, scalarReader, eq(param(1), param(1)))
+        : join(scalarReader, safeWindows, eq(param(1), param(1)));
+      expect(
+        lowerLogicalPlan(combined).sharedRelations.some(
+          ({ node }) => node === expressionSource.node,
+        ),
+      ).toBe(false);
+    }
   });
 
   it("shares independent branch Top-N inputs below a terminal root sort", () => {

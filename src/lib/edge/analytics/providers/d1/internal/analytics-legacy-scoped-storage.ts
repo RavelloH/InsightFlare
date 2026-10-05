@@ -1279,11 +1279,10 @@ function eventAttributeColumn(
     derivation.relationship === "event.ownerPage" &&
     derivation.sourceAttribute
   ) {
-    const sourceName = derivation.sourceAttribute.slice("page.report.".length);
-    const physicalName = sourceName.replace(
-      /[A-Z]/g,
-      (letter) => `_${letter.toLowerCase()}`,
+    const physicalName = analyticsPageReportStorageColumn(
+      derivation.sourceAttribute,
     );
+    if (!physicalName) return undefined;
     const column = relation.columns[`owner_${physicalName}`];
     if (column) return column;
   }

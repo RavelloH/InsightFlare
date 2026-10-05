@@ -20,6 +20,9 @@ import { validateLogicalQueryPlan } from "./validator";
 
 const MAX_SHARED_RELATION_FIELDS = 4;
 const MAX_MATERIALIZED_SHARED_RELATION_FIELDS = 16;
+const MIN_REPEATED_WINDOW_INPUT_PROJECT_FIELDS = 17;
+const MAX_REPEATED_WINDOW_INPUT_PROJECT_FIELDS = 32;
+const MIN_REPEATED_WINDOW_INPUT_PROJECT_REFERENCES = 8;
 
 export const MAX_D1_JSON_MEMBERSHIP_BYTES = 1_000_000;
 
@@ -1520,6 +1523,20 @@ function isPureLocalColumnProject(
   );
 }
 
+function terminalOutputSort(
+  root: LogicalQueryNode,
+): LogicalQueryNode | undefined {
+  if (root.kind === "sort") return root;
+  let source: LogicalQueryNode = root;
+  const wrappers = new Set<LogicalQueryNode>();
+  while (isPureLocalColumnProject(source)) {
+    if (wrappers.has(source)) return undefined;
+    wrappers.add(source);
+    source = source.input.node;
+  }
+  return source.kind === "sort" ? source : undefined;
+}
+
 function isAggregateRankingInput(root: LogicalQueryNode): boolean {
   const memo = new Map<LogicalQueryNode, boolean>();
   const active = new Set<LogicalQueryNode>();
@@ -1618,6 +1635,7 @@ function terminalAggregateRanking(
 function hoistEligibility(root: LogicalQueryNode): HoistEligibility {
   const forbidden = new Set<LogicalQueryNode>();
   const windowInput = new Set<LogicalQueryNode>();
+  const outputSort = terminalOutputSort(root);
   const rankingSorts = new Set<LogicalQueryNode>();
   const rankingLimits = new Set<LogicalQueryNode>();
   const rankingVisited = new Set<LogicalQueryNode>();
@@ -1653,7 +1671,7 @@ function hoistEligibility(root: LogicalQueryNode): HoistEligibility {
     if (underWindow && !inheritedForbidden && node.kind !== "window")
       windowInput.add(node);
 
-    const terminalRootSort = node === root && node.kind === "sort";
+    const terminalRootSort = node === outputSort;
     const terminalAggregateRankingSort = rankingSorts.has(node);
     const terminalAggregateRankingLimit = rankingLimits.has(node);
     const branchTopN =
@@ -1906,7 +1924,7 @@ function sharedRelationDefinitions(
       node.kind === "scan" ||
       hoist.forbidden.has(node) ||
       node.fields.length === 0 ||
-      node.fields.length > MAX_MATERIALIZED_SHARED_RELATION_FIELDS
+      node.fields.length > MAX_REPEATED_WINDOW_INPUT_PROJECT_FIELDS
     )
       continue;
     const facts = candidateFacts(node);
@@ -1926,11 +1944,22 @@ function sharedRelationDefinitions(
       continue;
     }
     if (
+      node.fields.length <= MAX_MATERIALIZED_SHARED_RELATION_FIELDS &&
       node.kind === "project" &&
       (incomingCount >= 3 ||
         (incomingCount === 2 &&
           hoist.windowInput.has(node) &&
           repeatedWindowInputs.has(node)))
+    )
+      sharedMaterializations.set(node, "materialized");
+    else if (
+      node.kind === "project" &&
+      node.fields.length >= MIN_REPEATED_WINDOW_INPUT_PROJECT_FIELDS &&
+      node.fields.length <= MAX_REPEATED_WINDOW_INPUT_PROJECT_FIELDS &&
+      incomingCount >= MIN_REPEATED_WINDOW_INPUT_PROJECT_REFERENCES &&
+      hoist.windowInput.has(node) &&
+      repeatedWindowInputs.has(node) &&
+      !facts.rowNumberWindow
     )
       sharedMaterializations.set(node, "materialized");
   }
