@@ -60,10 +60,14 @@ function ssrMapStubs() {
     import.meta.dirname,
     "./src/lib/ssr-map-stubs.tsx",
   );
+  const maplibreWorkerSetupPath = path
+    .resolve(import.meta.dirname, "./src/lib/dashboard/maplibre-worker")
+    .replaceAll("\\", "/");
   const stubs = new Set([
     "react-map-gl/maplibre",
     "@deck.gl/layers",
     "@deck.gl/mapbox",
+    "@/lib/dashboard/maplibre-worker",
   ]);
 
   return {
@@ -74,7 +78,13 @@ function ssrMapStubs() {
       _importer: string | undefined,
       options: { ssr?: boolean },
     ) {
-      if (options.ssr && stubs.has(source)) {
+      const normalizedSource = source.replaceAll("\\", "/");
+      if (
+        options.ssr &&
+        (stubs.has(source) ||
+          normalizedSource === maplibreWorkerSetupPath ||
+          normalizedSource === `${maplibreWorkerSetupPath}.ts`)
+      ) {
         return stubPath;
       }
       return null;

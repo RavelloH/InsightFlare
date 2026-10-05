@@ -466,7 +466,7 @@ export function GeoClientPage({
 
   return (
     <div
-      className="relative h-full min-h-0 overflow-hidden"
+      className="relative h-full min-h-0 flex-1 overflow-hidden"
       style={MAP_VIEWPORT_RENDER_ISOLATION_STYLE}
     >
       {mapViewport}

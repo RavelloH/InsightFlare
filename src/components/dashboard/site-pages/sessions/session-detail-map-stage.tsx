@@ -1,3 +1,5 @@
+import "@/lib/dashboard/maplibre-worker";
+
 import { memo, useMemo } from "react";
 import Map, { useControl } from "react-map-gl/maplibre";
 import { ScatterplotLayer } from "@deck.gl/layers";

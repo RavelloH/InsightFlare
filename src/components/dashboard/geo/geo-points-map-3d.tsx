@@ -1,3 +1,5 @@
+import "@/lib/dashboard/maplibre-worker";
+
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Map, { type MapRef, useControl } from "react-map-gl/maplibre";
 import { _GlobeView, type MapViewState } from "@deck.gl/core";
