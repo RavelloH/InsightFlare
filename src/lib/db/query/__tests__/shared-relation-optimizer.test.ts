@@ -7,7 +7,9 @@ import {
   add,
   aggregate,
   and,
+  caseWhen,
   castReal,
+  castText,
   coalesce,
   compileD1Query,
   constant,
@@ -30,6 +32,10 @@ import {
   scalar,
   scan,
   sort,
+  textLike,
+  textPosition,
+  textSubstring,
+  trimSpaces,
   union,
   unixepoch,
   valuesRelation,
@@ -232,6 +238,86 @@ function closedConstantExistenceWindowCandidate(
     startedAt: selected.columns.startedAt,
   });
   return { candidate, existence, innerPages, outerPages, ranked };
+}
+
+function closedExpressionWindowCandidate(correlateWindowInput = false) {
+  const outerRows = valuesRelation(
+    {
+      id: { affinity: "text", nullable: false },
+      owner: { affinity: "text", nullable: false },
+      groupKey: { affinity: "text", nullable: false },
+    },
+    [
+      { id: "alpha-a", owner: "alpha", groupKey: "alpha" },
+      { id: "alpha-b", owner: "alpha", groupKey: "alpha" },
+      { id: "beta", owner: "beta", groupKey: "iss" },
+      { id: "null-text", owner: "blank", groupKey: "" },
+      { id: "no-match", owner: "missing", groupKey: "absent" },
+    ],
+  );
+  const innerRows = valuesRelation(
+    {
+      owner: { affinity: "text", nullable: false },
+      text: { affinity: "text", nullable: true },
+    },
+    [
+      { owner: "alpha", text: "alpha-hit-tail" },
+      { owner: "alpha", text: "alpha  hit-tail" },
+      { owner: "alpha", text: "alpha-hit-tail" },
+      { owner: "beta", text: "beta-miss" },
+      { owner: "blank", text: null },
+    ],
+  );
+  const windowInput = correlateWindowInput
+    ? filter(innerRows, eq(innerRows.columns.owner, outerRows.columns.owner))
+    : innerRows;
+  const positioned = project(windowInput, {
+    groupKey: caseWhen(
+      [
+        {
+          when: textLike(windowInput.columns.text, param("%hit%")),
+          then: trimSpaces(
+            coalesce(
+              textSubstring(windowInput.columns.text, constant(1), constant(5)),
+              constant(""),
+            ),
+          ),
+        },
+      ],
+      coalesce(
+        textSubstring(windowInput.columns.text, constant(7)),
+        constant(""),
+      ),
+    ),
+    offset: castText(textPosition(windowInput.columns.text, constant("hit"))),
+  });
+  const grouped = aggregate(positioned, {
+    groupBy: {
+      groupKey: positioned.columns.groupKey,
+      offset: positioned.columns.offset,
+    },
+    aggregates: { occurrences: count(positioned.columns.offset) },
+  });
+  const ranked = window(grouped, {
+    rank: rowNumber({
+      partitionBy: [grouped.columns.groupKey],
+      orderBy: [{ expression: grouped.columns.offset, direction: "ASC" }],
+    }),
+  });
+  const matching = filter(
+    ranked,
+    and(
+      eq(ranked.columns.groupKey, outerRows.columns.groupKey),
+      eq(ranked.columns.rank, param(1)),
+    ),
+  );
+  const existence = project(matching, { found: constant(1) });
+  const selected = filter(outerRows, eq(scalar(existence), constant(1)));
+  const candidate = project(selected, {
+    id: selected.columns.id,
+    groupKey: selected.columns.groupKey,
+  });
+  return { candidate, existence, positioned, grouped, ranked };
 }
 
 function independentWindowUnion(source: Relation, count: number): Relation {
@@ -2086,6 +2172,82 @@ describe("shared relation physical selection", () => {
       true,
     );
     expect(optimizedRows.every((row) => row.sitePk === "1")).toBe(true);
+  });
+
+  it("checks nested text, CASE, and aggregate scopes before sharing closed window existence queries", () => {
+    const database = new DatabaseSync(":memory:");
+    databases.add(database);
+
+    const closed = closedExpressionWindowCandidate();
+    const closedRepeated = repeatedThree(closed.candidate);
+    const closedPhysical = lowerLogicalPlan(closedRepeated);
+    expect(
+      closedPhysical.sharedRelations.find(
+        ({ node }) => node === closed.candidate.node,
+      ),
+    ).toMatchObject({ materialization: "materialized" });
+    expect(
+      closedPhysical.sharedRelations.some(
+        ({ node }) =>
+          node === closed.existence.node ||
+          node === closed.positioned.node ||
+          node === closed.grouped.node ||
+          node === closed.ranked.node,
+      ),
+    ).toBe(false);
+
+    const closedOptimized = compileD1Query(closedPhysical);
+    const closedMechanical = compileD1QueryUnoptimizedForTest(closedRepeated);
+    const closedOptimizedRows = database
+      .prepare(closedOptimized.sql)
+      .all(...(closedOptimized.bindings as SQLInputValue[]));
+    const closedMechanicalRows = database
+      .prepare(closedMechanical.sql)
+      .all(...(closedMechanical.bindings as SQLInputValue[]));
+    expect(closedOptimized.sql.match(/ AS MATERIALIZED \(/gu)).toHaveLength(1);
+    expect(rowBag(closedOptimizedRows)).toEqual(rowBag(closedMechanicalRows));
+    expect(rowBag(closedOptimizedRows)).toEqual(
+      rowBag(
+        [
+          { id: "alpha-a", groupKey: "alpha" },
+          { id: "alpha-b", groupKey: "alpha" },
+          { id: "beta", groupKey: "iss" },
+          { id: "null-text", groupKey: "" },
+        ].flatMap((row) => [row, row, row]),
+      ),
+    );
+
+    const correlated = closedExpressionWindowCandidate(true);
+    const correlatedRepeated = repeatedThree(correlated.candidate);
+    const correlatedPhysical = lowerLogicalPlan(correlatedRepeated);
+    expect(
+      correlatedPhysical.sharedRelations.some(
+        ({ node }) => node === correlated.candidate.node,
+      ),
+    ).toBe(false);
+
+    const correlatedOptimized = compileD1Query(correlatedPhysical);
+    const correlatedMechanical =
+      compileD1QueryUnoptimizedForTest(correlatedRepeated);
+    const correlatedOptimizedRows = database
+      .prepare(correlatedOptimized.sql)
+      .all(...(correlatedOptimized.bindings as SQLInputValue[]));
+    const correlatedMechanicalRows = database
+      .prepare(correlatedMechanical.sql)
+      .all(...(correlatedMechanical.bindings as SQLInputValue[]));
+    expect(rowBag(correlatedOptimizedRows)).toEqual(
+      rowBag(correlatedMechanicalRows),
+    );
+    expect(rowBag(correlatedOptimizedRows)).toEqual(
+      rowBag(
+        [
+          { id: "alpha-a", groupKey: "alpha" },
+          { id: "alpha-b", groupKey: "alpha" },
+          { id: "beta", groupKey: "iss" },
+          { id: "null-text", groupKey: "" },
+        ].flatMap((row) => [row, row, row]),
+      ),
+    );
   });
 
   it("keeps nonclosed or unsafe constant-existence window shapes unshared", () => {

@@ -24,8 +24,15 @@ import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
 import type { QueryWindow } from "@/lib/edge/analytics/contract/types";
 import type { LogicalRelationHandle } from "@/lib/edge/analytics/engine/logical/builder";
 import { LogicalPlanBuilder } from "@/lib/edge/analytics/engine/logical/builder";
-import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
+import type {
+  LogicalPlan,
+  ValidatedLogicalPlan,
+} from "@/lib/edge/analytics/engine/logical/plan";
 import { printLogicalPlan } from "@/lib/edge/analytics/engine/logical/printer";
+import {
+  LogicalPlanError,
+  validateLogicalPlan,
+} from "@/lib/edge/analytics/engine/logical/validator";
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
 import {
   buildPerformanceDashboardPlan,
@@ -407,6 +414,84 @@ function createGroupedStatisticsPlan(): ValidatedLogicalPlan {
     { name: "p50", slot: "p50" },
     { name: "p75", slot: "p75" },
     { name: "p95", slot: "p95" },
+    { name: "p100", slot: "p100" },
+  ]);
+  return builder.finish();
+}
+
+function createNestedStatisticsPlan(): ValidatedLogicalPlan {
+  const { builder, pages } = createPageReportSource({
+    siteId: SITE_ID,
+    queryTime: queryWindowToTime(WINDOW),
+    filters: EMPTY_FILTER_DOCUMENT,
+    attributes: ["page.report.country", "page.report.perfLcpMs"],
+  });
+  const country = pageAttribute(builder, pages, "country");
+  const countryCode = builder.pageDimension("countryCode", {
+    "page.report.country": country,
+  });
+  const normalizedCountry = builder.normalizeString(
+    countryCode,
+    "trim-ascii-space",
+  );
+  const metric = pageAttribute(builder, pages, "perfLcpMs");
+  const zeroMs = builder.literal(0, {
+    kind: "scalar",
+    scalar: "number",
+    unit: "ms",
+  });
+  const oneMs = builder.literal(1, {
+    kind: "scalar",
+    scalar: "number",
+    unit: "ms",
+  });
+  const positiveMetric = builder.compare("gt", metric, zeroMs);
+  const isUs = builder.compare(
+    "eq",
+    normalizedCountry,
+    builder.literal("US", { kind: "scalar", scalar: "string" }),
+  );
+  const group = builder.caseWhen(
+    [
+      {
+        when: builder.and(isUs, positiveMetric),
+        then: builder.coalesce(
+          normalizedCountry,
+          builder.literal("UNKNOWN", {
+            kind: "scalar",
+            scalar: "string",
+          }),
+        ),
+      },
+    ],
+    builder.literal("OTHER", { kind: "scalar", scalar: "string" }),
+  );
+  const adjustedMetric = builder.caseWhen(
+    [
+      {
+        when: positiveMetric,
+        then: builder.arithmetic("subtract", metric, oneMs),
+      },
+    ],
+    metric,
+  );
+  const value = builder.coalesce(adjustedMetric, metric);
+  const statistics = builder.sampleStatistics(
+    pages,
+    { segment: group },
+    value,
+    [
+      { name: "p50", percentile: 50 },
+      { name: "p75", percentile: 75 },
+      { name: "p100", percentile: 100 },
+    ],
+  );
+  builder.output("nested-statistics", statistics, [
+    { name: "segment", slot: "segment" },
+    { name: "samples", slot: "samples" },
+    { name: "avg", slot: "avg" },
+    { name: "p50", slot: "p50" },
+    { name: "p75", slot: "p75" },
     { name: "p100", slot: "p100" },
   ]);
   return builder.finish();
@@ -840,6 +925,104 @@ describe("Logical sample statistics and migrated performance readers", () => {
       p50: 0,
       p100: 4,
     });
+  });
+
+  it("validates nested group and value lineage and computes grouped statistics in SQLite", async () => {
+    const rows = [
+      { ...operatorRow("nested-us-a", null, 10), country: "US" },
+      { ...operatorRow("nested-us-b", null, 10), country: " us " },
+      { ...operatorRow("nested-us-c", null, 2), country: "us" },
+      { ...operatorRow("nested-us-null", null, null), country: "US" },
+      { ...operatorRow("nested-ca-a", null, 4), country: "CA" },
+      { ...operatorRow("nested-ca-b", null, 8), country: "CA" },
+    ] as const;
+    const { env } = createDatabase(rows);
+    const plan = createNestedStatisticsPlan();
+    expect(() => validateLogicalPlan(plan)).not.toThrow();
+
+    const statisticsNode = plan.nodes.find(
+      (candidate) => candidate.kind === "sample-statistics",
+    );
+    if (!statisticsNode || statisticsNode.kind !== "sample-statistics")
+      throw new Error("wave66_nested_statistics_node_missing");
+    const group = statisticsNode.groups.find(
+      (candidate) => candidate.name === "segment",
+    );
+    if (!group) throw new Error("wave66_nested_statistics_group_missing");
+    expect(group.expression.kind).toBe("case");
+    expect(statisticsNode.value.kind).toBe("coalesce");
+
+    const actualRows = await queryAnalyticsReportOutputRowsFromD1(
+      env,
+      plan,
+      "nested-statistics",
+    );
+    const expectedRows = [
+      {
+        segment: "OTHER",
+        ...expectedStatistics([3, 7, null]),
+      },
+      {
+        segment: "US",
+        ...expectedStatistics([9, 9, 1, null]),
+      },
+    ].map(({ segment, samples, avg, p50, p75, p100 }) => ({
+      segment,
+      samples,
+      avg,
+      p50,
+      p75,
+      p100,
+    }));
+    expect(
+      (actualRows as typeof expectedRows).sort((left, right) =>
+        left.segment.localeCompare(right.segment),
+      ),
+    ).toEqual(expectedRows);
+
+    const metricSlot = plan.slots.find(
+      (candidate) =>
+        candidate.lineage.kind === "attribute" &&
+        candidate.lineage.attribute === "page.report.perfLcpMs",
+    );
+    const groupSlot = plan.slots.find(
+      (candidate) => candidate.id === group.slot,
+    );
+    if (!metricSlot || !groupSlot || groupSlot.lineage.kind !== "derived")
+      throw new Error("wave66_nested_statistics_lineage_missing");
+    expect(groupSlot.lineage.inputs).toContain(metricSlot.id);
+
+    const forgedPlan = {
+      ...plan,
+      slots: plan.slots.map((candidate) =>
+        candidate.id === group.slot && candidate.lineage.kind === "derived"
+          ? {
+              ...candidate,
+              lineage: {
+                ...candidate.lineage,
+                inputs: candidate.lineage.inputs.filter(
+                  (input) => input !== metricSlot.id,
+                ),
+              },
+            }
+          : candidate,
+      ),
+    } satisfies LogicalPlan;
+    let validationError: unknown;
+    try {
+      validateLogicalPlan(forgedPlan);
+    } catch (error) {
+      validationError = error;
+    }
+    expect(validationError).toBeInstanceOf(LogicalPlanError);
+    expect((validationError as LogicalPlanError).issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "invalid-expression",
+          message: "Group output lineage does not match its expression.",
+        }),
+      ]),
+    );
   });
 
   it("preserves five metric units and matches the previous reader's summary and trend rows", async () => {
