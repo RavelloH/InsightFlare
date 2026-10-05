@@ -1,7 +1,17 @@
 import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MotionGlobalConfig } from "motion/react";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 vi.mock("@/lib/dashboard/client/data", () => ({
   fetchGoalDefinition: vi.fn(),
   fetchGoalSummary: vi.fn(),
@@ -150,8 +160,19 @@ function renderWithQueryClient(
   return { client, container, root };
 }
 describe("Goal dashboard components", () => {
+  const previousSkipAnimations = MotionGlobalConfig.skipAnimations;
   let intersectionCallback:
     ((entries: IntersectionObserverEntry[]) => void) | undefined;
+
+  beforeAll(() => {
+    // These tests verify Goal data and interactions with final rendered values.
+    // Avoid happy-dom's asynchronous WAAPI cancellation during component teardown.
+    MotionGlobalConfig.skipAnimations = true;
+  });
+
+  afterAll(() => {
+    MotionGlobalConfig.skipAnimations = previousSkipAnimations;
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
