@@ -16,7 +16,15 @@ import {
   type FilterDocument,
   type ScopedFilterPlan,
 } from "@/lib/edge/analytics/contract";
-import { queryGoalSummaryParentOracle } from "@/lib/edge/analytics/providers/d1/internal/__tests__/goal-summary-parent-oracle";
+import {
+  GOAL_FILTER_DSL_VERSION,
+  parseGoalFilter,
+} from "@/lib/edge/analytics/contract/goal-config";
+import {
+  compileGoalSummaryParentOracleStatement,
+  mapGoalSummaryParentOracleRow,
+  queryGoalSummaryParentOracle,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/goal-summary-parent-oracle";
 import { queryGoalTimeseriesParentOracle } from "@/lib/edge/analytics/providers/d1/internal/__tests__/goal-timeseries-parent-oracle";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core-types";
 import { queryGoalSummaryFromD1 } from "@/lib/edge/analytics/providers/d1/internal/goal-summary";
@@ -29,10 +37,18 @@ const SITE_ID = "goal-logical-report-site";
 const OTHER_SITE_ID = "goal-logical-report-other-site";
 const EMPTY_SITE_ID = "goal-logical-report-empty-site";
 const IDENTITY_SITE_ID = "goal-logical-report-identity-site";
+const PAYLOAD_SITE_ID = "goal-logical-report-payload-site";
+const BOUNDARY_SITE_ID = "goal-logical-report-boundary-site";
 const WINDOW: QueryWindow = {
   startMs: 0,
   endExclusiveMs: 180_000,
   nowMs: 180_000,
+  timeZone: "UTC",
+};
+const PREVIOUS_WINDOW: QueryWindow = {
+  startMs: -60_000,
+  endExclusiveMs: 0,
+  nowMs: 0,
   timeZone: "UTC",
 };
 const EMPTY: FilterDocument = { version: 1, root: null };
@@ -41,9 +57,13 @@ let database: DatabaseSync;
 let sitePk: number;
 let otherSitePk: number;
 let identitySitePk: number;
+let payloadSitePk: number;
+let boundarySitePk: number;
 let purchaseNameId: number;
 let upgradeNameId: number;
 let identityPurchaseNameId: number;
+let payloadPurchaseNameId: number;
+let boundaryPurchaseNameId: number;
 
 function registerSite(db: DatabaseSync, id: string): number {
   db.prepare("INSERT INTO site_identities (site_id) VALUES (?)").run(id);
@@ -128,32 +148,60 @@ function addStringPayload(
   pathId: number,
   value: string,
   eventNameId = purchaseNameId,
+  options: {
+    readonly path?: string;
+    readonly siteId?: string;
+    readonly sitePk?: number;
+    readonly nodeId?: number;
+    readonly occurredAt?: number;
+  } = {},
 ): void {
+  const payloadSiteId = options.siteId ?? SITE_ID;
+  const payloadSitePk = options.sitePk ?? sitePk;
+  const nodeId = options.nodeId ?? 1;
   database
     .prepare(
       `INSERT INTO custom_event_json_paths (id, site_id, site_pk, path, last_seen_at)
-       VALUES (?, ?, ?, '/plan', 1) ON CONFLICT(id) DO NOTHING`,
+       VALUES (?, ?, ?, ?, 1) ON CONFLICT(id) DO NOTHING`,
     )
-    .run(pathId, SITE_ID, sitePk);
+    .run(pathId, payloadSiteId, payloadSitePk, options.path ?? "/plan");
   database
     .prepare(
       `INSERT INTO custom_event_json_nodes (
         event_pk, node_id, path_id, value_type, depth
-      ) VALUES (?, 1, ?, 1, 1)`,
+      ) VALUES (?, ?, ?, 1, 1)`,
     )
-    .run(eventPk, pathId);
+    .run(eventPk, nodeId, pathId);
   database
     .prepare(
       `INSERT INTO custom_event_json_values (
         event_pk, node_id, site_id, site_pk, event_name_id, path_id,
         occurred_at, value_type, string_value
-      ) VALUES (?, 1, ?, ?, ?, ?, 1, 1, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)`,
     )
-    .run(eventPk, SITE_ID, sitePk, eventNameId, pathId, value);
+    .run(
+      eventPk,
+      nodeId,
+      payloadSiteId,
+      payloadSitePk,
+      eventNameId,
+      pathId,
+      options.occurredAt ?? 1,
+      value,
+    );
 }
 
 function filter(source: string): FilterDocument {
   return parseFilterDsl(source, analyticsFilterRegistry);
+}
+
+function payloadExistsGoal(count: number): FilterDocument {
+  return filter(
+    Array.from(
+      { length: count },
+      (_unused, index) => `event.payload("/payload/key-${index}") exists`,
+    ).join(" AND "),
+  );
 }
 
 function prepared(
@@ -162,6 +210,7 @@ function prepared(
   scope: "event" | "session" | "visitor" = "event",
   advancedMatches?: NonNullable<ScopedFilterPlan["advancedMatches"]>,
   preparationWindow: QueryWindow = WINDOW,
+  preparationSiteId: string = SITE_ID,
 ): FilterDocument {
   const plan = createScopedFilterPlan(operation, filters, scope)!;
   return attachScopedFilterMetadata(filters, {
@@ -174,7 +223,7 @@ function prepared(
       preparationWindow.timeZone,
       preparationWindow.nowMs,
     ),
-    siteIds: [SITE_ID],
+    siteIds: [preparationSiteId],
   });
 }
 
@@ -223,6 +272,8 @@ beforeAll(() => {
   otherSitePk = registerSite(database, OTHER_SITE_ID);
   registerSite(database, EMPTY_SITE_ID);
   identitySitePk = registerSite(database, IDENTITY_SITE_ID);
+  payloadSitePk = registerSite(database, PAYLOAD_SITE_ID);
+  boundarySitePk = registerSite(database, BOUNDARY_SITE_ID);
   purchaseNameId = addName(database, SITE_ID, sitePk, "purchase");
   upgradeNameId = addName(database, SITE_ID, sitePk, "upgrade");
   identityPurchaseNameId = addName(
@@ -235,6 +286,18 @@ beforeAll(() => {
     database,
     OTHER_SITE_ID,
     otherSitePk,
+    "purchase",
+  );
+  payloadPurchaseNameId = addName(
+    database,
+    PAYLOAD_SITE_ID,
+    payloadSitePk,
+    "purchase",
+  );
+  boundaryPurchaseNameId = addName(
+    database,
+    BOUNDARY_SITE_ID,
+    boundarySitePk,
     "purchase",
   );
 
@@ -371,6 +434,177 @@ beforeAll(() => {
     sitePk: identitySitePk,
   });
 
+  insertPage({
+    id: "goal-previous-window-page",
+    session: "goal-previous-window-session",
+    visitor: "goal-previous-window-visitor",
+    time: -20_000,
+    path: "/previous-window",
+  });
+  insertEvent({
+    pk: 900,
+    id: "goal-previous-window-event",
+    visitId: "goal-previous-window-page",
+    time: -10_000,
+  });
+
+  const payloadConditions = (
+    eventPk: number,
+    time: number,
+    indexes: number[],
+  ) => {
+    for (const index of indexes) {
+      addStringPayload(
+        eventPk,
+        6_000 + index,
+        `value-${index}`,
+        payloadPurchaseNameId,
+        {
+          path: `/payload/key-${index}`,
+          siteId: PAYLOAD_SITE_ID,
+          sitePk: payloadSitePk,
+          nodeId: index + 1,
+          occurredAt: time,
+        },
+      );
+    }
+  };
+  const payloadPages = [
+    { id: "payload-full-page", path: "/payload-full", time: 1_000 },
+    { id: "payload-partial-page", path: "/payload-partial", time: 61_000 },
+    { id: "payload-split-page", path: "/payload-split", time: 121_000 },
+    {
+      id: "payload-unselected-page",
+      path: "/payload-unselected",
+      time: 151_000,
+    },
+  ] as const;
+  for (const [index, page] of payloadPages.entries()) {
+    insertPage({
+      id: page.id,
+      session: `payload-scope-session-${index}`,
+      visitor: `payload-scope-visitor-${index}`,
+      time: page.time,
+      path: page.path,
+      siteId: PAYLOAD_SITE_ID,
+      pk: payloadSitePk,
+    });
+  }
+  insertEvent({
+    pk: 500,
+    id: "payload-full-event",
+    visitId: "payload-full-page",
+    nameId: payloadPurchaseNameId,
+    time: 2_000,
+    siteId: PAYLOAD_SITE_ID,
+    sitePk: payloadSitePk,
+  });
+  payloadConditions(
+    500,
+    2_000,
+    Array.from({ length: 40 }, (_unused, i) => i),
+  );
+  insertEvent({
+    pk: 501,
+    id: "payload-partial-event",
+    visitId: "payload-partial-page",
+    nameId: payloadPurchaseNameId,
+    time: 62_000,
+    siteId: PAYLOAD_SITE_ID,
+    sitePk: payloadSitePk,
+  });
+  payloadConditions(
+    501,
+    62_000,
+    Array.from({ length: 39 }, (_unused, i) => i),
+  );
+  insertEvent({
+    pk: 502,
+    id: "payload-split-event-a",
+    visitId: "payload-split-page",
+    nameId: payloadPurchaseNameId,
+    time: 122_000,
+    siteId: PAYLOAD_SITE_ID,
+    sitePk: payloadSitePk,
+  });
+  insertEvent({
+    pk: 503,
+    id: "payload-split-event-b",
+    visitId: "payload-split-page",
+    nameId: payloadPurchaseNameId,
+    time: 123_000,
+    siteId: PAYLOAD_SITE_ID,
+    sitePk: payloadSitePk,
+  });
+  payloadConditions(
+    502,
+    122_000,
+    Array.from({ length: 20 }, (_unused, i) => i),
+  );
+  payloadConditions(
+    503,
+    123_000,
+    Array.from({ length: 20 }, (_unused, i) => i + 20),
+  );
+  insertEvent({
+    pk: 504,
+    id: "payload-unselected-event",
+    visitId: "payload-unselected-page",
+    nameId: payloadPurchaseNameId,
+    time: 152_000,
+    siteId: PAYLOAD_SITE_ID,
+    sitePk: payloadSitePk,
+  });
+  payloadConditions(
+    504,
+    152_000,
+    Array.from({ length: 40 }, (_unused, i) => i),
+  );
+
+  const boundaryPages = [
+    { id: "boundary-raw-entry", path: "/raw-entry", time: 1_000 },
+    {
+      id: "boundary-selected-entry",
+      path: "/selected-entry",
+      time: 2_000,
+    },
+    {
+      id: "boundary-selected-exit",
+      path: "/selected-exit",
+      time: 3_000,
+    },
+    { id: "boundary-raw-exit", path: "/raw-exit", time: 4_000 },
+  ] as const;
+  for (const page of boundaryPages) {
+    insertPage({
+      id: page.id,
+      session: "boundary-shared-session",
+      visitor: "boundary-shared-visitor",
+      time: page.time,
+      path: page.path,
+      siteId: BOUNDARY_SITE_ID,
+      pk: boundarySitePk,
+    });
+  }
+  insertEvent({
+    pk: 910,
+    id: "boundary-selected-entry-event",
+    visitId: "boundary-selected-entry",
+    nameId: boundaryPurchaseNameId,
+    time: 2_500,
+    siteId: BOUNDARY_SITE_ID,
+    sitePk: boundarySitePk,
+  });
+  insertEvent({
+    pk: 911,
+    id: "boundary-selected-exit-event",
+    visitId: "boundary-selected-exit",
+    nameId: boundaryPurchaseNameId,
+    time: 3_500,
+    siteId: BOUNDARY_SITE_ID,
+    sitePk: boundarySitePk,
+  });
+
   for (let index = 0; index < 40; index += 1) {
     const visitId = `payload-p${index}`;
     const eventPk = 100 + index;
@@ -467,7 +701,7 @@ describe("Goal typed logical reports on migrated SQLite", () => {
         goal: filter('event.name eq "purchase"'),
       },
       {
-        label: "payload-40-observations",
+        label: "payload-single-path-among-40-observations",
         filters: EMPTY,
         goal: filter(
           'event.name eq "purchase" AND event.payload("/plan") eq "pro"',
@@ -550,6 +784,184 @@ describe("Goal typed logical reports on migrated SQLite", () => {
     );
     expect(actual).toEqual(expected);
     expect(actual).toMatchObject({ totalSessions: 2, convertedSessions: 0 });
+  });
+
+  it("checks forty distinct payload paths on the same selected Event", async () => {
+    const selectedPages = filter(
+      'page.path eq "/payload-full" OR page.path eq "/payload-partial" OR page.path eq "/payload-split"',
+    );
+    const globalSummary = prepared(
+      "goal-summary",
+      selectedPages,
+      "event",
+      undefined,
+      WINDOW,
+      PAYLOAD_SITE_ID,
+    );
+    const globalTimeseries = prepared(
+      "goal-timeseries",
+      selectedPages,
+      "event",
+      undefined,
+      WINDOW,
+      PAYLOAD_SITE_ID,
+    );
+    const cases = [
+      { count: 40, goal: payloadExistsGoal(40), converted: [1, 0, 0] },
+      { count: 39, goal: payloadExistsGoal(39), converted: [1, 1, 0] },
+    ] as const;
+
+    for (const testCase of cases) {
+      const summaryTrace = emptyTrace();
+      const parentSummaryTrace = emptyTrace();
+      const summary = await queryGoalSummaryFromD1(
+        envWithTrace(summaryTrace),
+        PAYLOAD_SITE_ID,
+        WINDOW,
+        globalSummary,
+        testCase.goal,
+      );
+      const parentSummary = await queryGoalSummaryParentOracle(
+        envWithTrace(parentSummaryTrace),
+        PAYLOAD_SITE_ID,
+        WINDOW,
+        globalSummary,
+        testCase.goal,
+      );
+      expect(summary).toEqual(parentSummary);
+      expect(summary).toEqual({
+        totalSessions: 3,
+        convertedSessions: testCase.count === 40 ? 1 : 2,
+        totalVisitors: 3,
+        convertedVisitors: testCase.count === 40 ? 1 : 2,
+      });
+      expect(summaryTrace.preparedSql).toHaveLength(1);
+      const summaryEvidence = queryEvidence(summaryTrace);
+      expect(summaryEvidence.sqlBytes).toBeLessThanOrEqual(
+        D1_MAX_SQL_UTF8_BYTES,
+      );
+      expect(summaryEvidence.bindingCount).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+      expect(summaryEvidence.explainSteps).toBeGreaterThan(0);
+
+      const timeseriesTrace = emptyTrace();
+      const parentTimeseriesTrace = emptyTrace();
+      const timeseries = await queryGoalTimeseriesFromD1(
+        envWithTrace(timeseriesTrace),
+        PAYLOAD_SITE_ID,
+        WINDOW,
+        "minute",
+        globalTimeseries,
+        testCase.goal,
+      );
+      const parentTimeseries = await queryGoalTimeseriesParentOracle(
+        envWithTrace(parentTimeseriesTrace),
+        PAYLOAD_SITE_ID,
+        WINDOW,
+        "minute",
+        globalTimeseries,
+        testCase.goal,
+      );
+      expect(timeseries).toEqual(parentTimeseries);
+      expect(timeseries).toEqual(
+        testCase.converted.map((converted, bucket) => ({
+          bucket,
+          totalSessions: 1,
+          convertedSessions: converted,
+          totalVisitors: 1,
+          convertedVisitors: converted,
+        })),
+      );
+      expect(timeseriesTrace.preparedSql).toHaveLength(1);
+      const timeseriesEvidence = queryEvidence(timeseriesTrace);
+      expect(timeseriesEvidence.sqlBytes).toBeLessThanOrEqual(
+        D1_MAX_SQL_UTF8_BYTES,
+      );
+      expect(timeseriesEvidence.bindingCount).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+      expect(timeseriesEvidence.explainSteps).toBeGreaterThan(0);
+      console.info(
+        "Goal true payload-condition evidence",
+        JSON.stringify({
+          conditionCount: testCase.count,
+          summary: {
+            actual: summaryEvidence,
+            parent: queryEvidence(parentSummaryTrace),
+            result: summary,
+          },
+          timeseries: {
+            actual: timeseriesEvidence,
+            parent: queryEvidence(parentTimeseriesTrace),
+            result: timeseries,
+          },
+        }),
+      );
+    }
+  });
+
+  it("uses the selected Page bag for legal Goal Session entry and exit fields", async () => {
+    const selectedPages = prepared(
+      "goal-summary",
+      filter('page.path eq "/selected-entry" OR page.path eq "/selected-exit"'),
+      "event",
+      undefined,
+      WINDOW,
+      BOUNDARY_SITE_ID,
+    );
+    for (const [field, path] of [
+      ["session.entryPath", "/selected-entry"],
+      ["session.exitPath", "/selected-exit"],
+    ] as const) {
+      const dsl = `${field} eq "${path}"`;
+      const goal = parseGoalFilter({
+        filterDslVersion: GOAL_FILTER_DSL_VERSION,
+        filterDsl: dsl,
+      });
+      expect(goal).toEqual(filter(dsl));
+      const selectedActual = await queryGoalSummaryFromD1(
+        { DB: createSqliteD1Database(database) } as unknown as Env,
+        BOUNDARY_SITE_ID,
+        WINDOW,
+        selectedPages,
+        goal,
+      );
+      const selectedParent = await queryGoalSummaryParentOracle(
+        { DB: createSqliteD1Database(database) } as unknown as Env,
+        BOUNDARY_SITE_ID,
+        WINDOW,
+        selectedPages,
+        goal,
+      );
+      expect(selectedActual).toEqual(selectedParent);
+      expect(selectedActual).toEqual({
+        totalSessions: 1,
+        convertedSessions: 1,
+        totalVisitors: 1,
+        convertedVisitors: 1,
+      });
+
+      const rawActual = await queryGoalSummaryFromD1(
+        { DB: createSqliteD1Database(database) } as unknown as Env,
+        BOUNDARY_SITE_ID,
+        WINDOW,
+        EMPTY,
+        goal,
+      );
+      const rawParent = await queryGoalSummaryParentOracle(
+        { DB: createSqliteD1Database(database) } as unknown as Env,
+        BOUNDARY_SITE_ID,
+        WINDOW,
+        EMPTY,
+        goal,
+      );
+      expect(rawActual).toEqual(rawParent);
+      expect(rawActual).toMatchObject({
+        totalSessions: 1,
+        convertedSessions: 0,
+      });
+    }
   });
 
   it("returns four zeros for empty summaries and zero conversions for a nonmatching Goal", async () => {
@@ -648,38 +1060,111 @@ describe("Goal typed logical reports on migrated SQLite", () => {
     });
   });
 
-  it("keeps prepared128 inside the new D1 budget while the parent remains offline-only", async () => {
-    const filters = prepared("goal-summary", EMPTY, "event", {
-      visitIds: Array.from({ length: 128 }, (_unused, index) => ({
-        siteId: SITE_ID,
-        id: `prepared-page-${index}`,
-      })),
-      eventIds: [],
-    });
-    const trace = emptyTrace();
+  it("matches nonempty prepared128 data and the offline parent in the previous window", async () => {
+    const visitIds = [
+      "goal-previous-window-page",
+      "goal-previous-window-page",
+      "goal-p1",
+      "goal-p3",
+      ...Array.from(
+        { length: 60 },
+        (_unused, index) => `prepared-missing-page-${index}`,
+      ),
+    ].map((id) => ({ siteId: SITE_ID, id }));
+    const eventIds = [
+      "goal-previous-window-event",
+      "goal-previous-window-event",
+      ...Array.from(
+        { length: 62 },
+        (_unused, index) => `prepared-missing-event-${index}`,
+      ),
+    ].map((id) => ({ siteId: SITE_ID, id }));
+    expect(visitIds.length + eventIds.length).toBe(128);
+    expect(new Set(visitIds.map(({ id }) => id)).size).toBeLessThan(
+      visitIds.length,
+    );
+    expect(new Set(eventIds.map(({ id }) => id)).size).toBeLessThan(
+      eventIds.length,
+    );
+    const filters = prepared(
+      "goal-summary",
+      EMPTY,
+      "event",
+      { visitIds, eventIds },
+      WINDOW,
+    );
     const goal = filter('event.name eq "purchase"');
-    const actual = await queryGoalSummaryFromD1(
-      envWithTrace(trace),
+
+    const previousTrace = emptyTrace();
+    const previousActual = await queryGoalSummaryFromD1(
+      envWithTrace(previousTrace),
+      SITE_ID,
+      PREVIOUS_WINDOW,
+      filters,
+      goal,
+    );
+    expect(previousActual).toEqual({
+      totalSessions: 1,
+      convertedSessions: 1,
+      totalVisitors: 1,
+      convertedVisitors: 1,
+    });
+    expect(previousTrace.preparedSql).toHaveLength(1);
+    const evidence = queryEvidence(previousTrace);
+    expect(evidence.sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+    expect(evidence.bindingCount).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+
+    const parentStatement = compileGoalSummaryParentOracleStatement(
+      SITE_ID,
+      PREVIOUS_WINDOW,
+      filters,
+      goal,
+    );
+    expect(parentStatement.bindings.length).toBeGreaterThan(
+      D1_MAX_BOUND_PARAMETERS,
+    );
+    const offlineParentRow = database
+      .prepare(parentStatement.sql)
+      .get(...parentStatement.bindings) as Record<string, unknown> | undefined;
+    const offlineParent = mapGoalSummaryParentOracleRow(offlineParentRow ?? {});
+    expect(offlineParent).toEqual(previousActual);
+    expect(offlineParent.convertedSessions).toBeGreaterThan(0);
+
+    const currentTrace = emptyTrace();
+    const currentActual = await queryGoalSummaryFromD1(
+      envWithTrace(currentTrace),
       SITE_ID,
       WINDOW,
       filters,
       goal,
     );
-    expect(actual).toEqual({
-      totalSessions: 0,
+    const currentParentStatement = compileGoalSummaryParentOracleStatement(
+      SITE_ID,
+      WINDOW,
+      filters,
+      goal,
+    );
+    const currentParentRow = database
+      .prepare(currentParentStatement.sql)
+      .get(...currentParentStatement.bindings) as
+      Record<string, unknown> | undefined;
+    expect(currentActual).toEqual(
+      mapGoalSummaryParentOracleRow(currentParentRow ?? {}),
+    );
+    expect(currentActual).toEqual({
+      totalSessions: 2,
       convertedSessions: 0,
-      totalVisitors: 0,
+      totalVisitors: 2,
       convertedVisitors: 0,
     });
-    const evidence = queryEvidence(trace);
-    expect(evidence.sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
-    expect(evidence.bindingCount).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+    expect(currentActual).not.toEqual(previousActual);
+
     const offlineParentTrace = emptyTrace();
     await expect(
       queryGoalSummaryParentOracle(
         envWithTrace(offlineParentTrace),
         SITE_ID,
-        WINDOW,
+        PREVIOUS_WINDOW,
         filters,
         goal,
       ),
@@ -692,10 +1177,12 @@ describe("Goal typed logical reports on migrated SQLite", () => {
     });
     expect(offlineParentTrace.preparedSql).toHaveLength(0);
     console.info(
-      "Goal prepared128 migrated SQLite evidence",
+      "Goal nonempty prepared128 previous-window evidence",
       JSON.stringify({
         actual: evidence,
-        parent: "offline D1 budget rejection",
+        parentBindings: parentStatement.bindings.length,
+        offlineParent,
+        currentWindow: currentActual,
       }),
     );
   });

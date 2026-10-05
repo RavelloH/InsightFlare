@@ -60,6 +60,54 @@ function countValue(value: unknown): number {
   return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
 }
 
+/** Preserve the exact parent SQL and bindings for test-only offline execution. */
+export function compileGoalSummaryParentOracleStatement(
+  siteId: string,
+  window: QueryWindow,
+  globalFilters: FilterDocument,
+  goalFilter: FilterDocument,
+  preparedDataset?: ScopedDatasetSql | null,
+): { readonly sql: string; readonly bindings: Array<string | number | null> } {
+  const dataset = baseGoalDataset(
+    siteId,
+    window,
+    globalFilters,
+    preparedDataset,
+  );
+  const goal = executeObservationFilterOnScopedDataset(
+    dataset,
+    goalFilter,
+    "goal",
+  );
+  return {
+    sql: `WITH
+${dataset.ctes.trim()},
+${goal.ctes.trim()}
+SELECT
+  (SELECT COUNT(*) FROM ${dataset.sessionRelation}) AS totalSessions,
+  (SELECT COUNT(*) FROM ${goal.sessionRelation}) AS convertedSessions,
+  (SELECT COUNT(*) FROM ${dataset.visitorRelation}) AS totalVisitors,
+  (SELECT COUNT(*) FROM ${goal.visitorRelation}) AS convertedVisitors
+`,
+    bindings: [
+      ...dataset.bindings.map((binding) => binding.value),
+      ...goal.bindings.map((binding) => binding.value),
+    ],
+  };
+}
+
+/** Use the parent mapper for guarded and offline-oracle result paths. */
+export function mapGoalSummaryParentOracleRow(
+  row: Record<string, unknown>,
+): GoalSummaryAggregateRow {
+  return {
+    totalSessions: countValue(row.totalSessions),
+    convertedSessions: countValue(row.convertedSessions),
+    totalVisitors: countValue(row.totalVisitors),
+    convertedVisitors: countValue(row.convertedVisitors),
+  };
+}
+
 /**
  * Execute Goal summary as one D1 statement.  The goal filter is already
  * parsed by the Goal codec before it reaches this engine.  Both global and
@@ -74,40 +122,19 @@ export async function queryGoalSummaryParentOracle(
   goalFilter: FilterDocument,
   preparedDataset?: ScopedDatasetSql | null,
 ): Promise<GoalSummaryAggregateRow> {
-  const dataset = baseGoalDataset(
+  const statement = compileGoalSummaryParentOracleStatement(
     siteId,
     window,
     globalFilters,
-    preparedDataset,
-  );
-  const goal = executeObservationFilterOnScopedDataset(
-    dataset,
     goalFilter,
-    "goal",
+    preparedDataset,
   );
   const rows = await queryD1All<Record<string, unknown>>(
     env,
-    `WITH
-${dataset.ctes.trim()},
-${goal.ctes.trim()}
-SELECT
-  (SELECT COUNT(*) FROM ${dataset.sessionRelation}) AS totalSessions,
-  (SELECT COUNT(*) FROM ${goal.sessionRelation}) AS convertedSessions,
-  (SELECT COUNT(*) FROM ${dataset.visitorRelation}) AS totalVisitors,
-  (SELECT COUNT(*) FROM ${goal.visitorRelation}) AS convertedVisitors
-`,
-    [
-      ...dataset.bindings.map((binding) => binding.value),
-      ...goal.bindings.map((binding) => binding.value),
-    ],
+    statement.sql,
+    statement.bindings,
   );
-  const row = rows[0] ?? {};
-  return {
-    totalSessions: countValue(row.totalSessions),
-    convertedSessions: countValue(row.convertedSessions),
-    totalVisitors: countValue(row.totalVisitors),
-    convertedVisitors: countValue(row.convertedVisitors),
-  };
+  return mapGoalSummaryParentOracleRow(rows[0] ?? {});
 }
 
 /** Short alias for callers that use the operation name without the D1 suffix. */

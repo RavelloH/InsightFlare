@@ -177,13 +177,13 @@ function nonBlankRawIdentity(
 function projectObservationIdentities(input: {
   readonly builder: LogicalPlanBuilder;
   readonly relation: LogicalRelationHandle;
+  readonly occurredAt?: LogicalExpressionHandle;
   readonly sessionId: LogicalExpressionHandle;
   readonly visitorId: LogicalExpressionHandle;
   readonly isGoal: boolean;
-  readonly bucket?: LogicalExpressionHandle;
 }): LogicalRelationHandle {
   return input.builder.project(input.relation, {
-    ...(input.bucket ? { bucket: input.bucket } : {}),
+    ...(input.occurredAt ? { occurredAt: input.occurredAt } : {}),
     sessionId: input.sessionId,
     visitorId: input.visitorId,
     isGoal: input.builder.literal(input.isGoal, BOOLEAN),
@@ -199,37 +199,23 @@ function appendObservationIdentities(
     projectObservationIdentities({
       builder,
       relation,
+      ...(input.includeBucket
+        ? { occurredAt: pageAttribute(builder, relation, "startedAt") }
+        : {}),
       sessionId: pageAttribute(builder, relation, "sessionId"),
       visitorId: pageAttribute(builder, relation, "visitorId"),
       isGoal,
-      ...(input.includeBucket
-        ? {
-            bucket: builder.bucketIndex(
-              builder.timeBucket(
-                pageAttribute(builder, relation, "startedAt"),
-                input.interval!,
-              ),
-            ),
-          }
-        : {}),
     });
   const eventRows = (relation: LogicalRelationHandle, isGoal: boolean) =>
     projectObservationIdentities({
       builder,
       relation,
+      ...(input.includeBucket
+        ? { occurredAt: eventAttribute(builder, relation, "occurredAt") }
+        : {}),
       sessionId: eventAttribute(builder, relation, "ownerSessionId"),
       visitorId: eventAttribute(builder, relation, "ownerVisitorId"),
       isGoal,
-      ...(input.includeBucket
-        ? {
-            bucket: builder.bucketIndex(
-              builder.timeBucket(
-                eventAttribute(builder, relation, "occurredAt"),
-                input.interval!,
-              ),
-            ),
-          }
-        : {}),
     });
   const relations = [
     pageRows(sources.pages, false),
@@ -237,12 +223,22 @@ function appendObservationIdentities(
     pageRows(sources.goalPages, true),
     eventRows(sources.goalEvents, true),
   ];
-  return builder.appendRows(
+  const observations = builder.appendRows(
     relations,
     input.includeBucket
-      ? ["bucket", "sessionId", "visitorId", "isGoal"]
+      ? ["occurredAt", "sessionId", "visitorId", "isGoal"]
       : ["sessionId", "visitorId", "isGoal"],
   );
+  if (!input.includeBucket) return observations;
+  const occurredAt = builder.slot(observations, "occurredAt");
+  return builder.project(observations, {
+    bucket: builder.bucketIndex(
+      builder.timeBucket(occurredAt, input.interval!),
+    ),
+    sessionId: builder.slot(observations, "sessionId"),
+    visitorId: builder.slot(observations, "visitorId"),
+    isGoal: builder.slot(observations, "isGoal"),
+  });
 }
 
 function outputSummary(
