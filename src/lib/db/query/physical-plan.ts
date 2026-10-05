@@ -1758,8 +1758,6 @@ function isConstantExistenceQuery(query: QuerySource): boolean {
   return expression.kind === "constant" && expression.value === 1;
 }
 
-const closedWindowScopeMemo = new WeakMap<LogicalQueryNode, boolean>();
-
 function expressionColumnScopes(
   expression: SqlExpression,
   scopes: RelationScope[],
@@ -1832,7 +1830,10 @@ function expressionColumnScopes(
   }
 }
 
-function hasClosedWindowSubtreeScopes(root: LogicalQueryNode): boolean {
+function hasClosedWindowSubtreeScopes(
+  root: LogicalQueryNode,
+  closedWindowScopeMemo: WeakMap<LogicalQueryNode, boolean>,
+): boolean {
   const cached = closedWindowScopeMemo.get(root);
   if (cached !== undefined) return cached;
 
@@ -1864,7 +1865,10 @@ function hasClosedWindowSubtreeScopes(root: LogicalQueryNode): boolean {
   return closed;
 }
 
-function candidateFacts(root: LogicalQueryNode): CandidateFacts {
+function candidateFacts(
+  root: LogicalQueryNode,
+  closedWindowScopeMemo: WeakMap<LogicalQueryNode, boolean>,
+): CandidateFacts {
   const facts: CandidateFacts = {
     scopes: new Set(),
     referencedScopes: [],
@@ -1911,7 +1915,8 @@ function candidateFacts(root: LogicalQueryNode): CandidateFacts {
         );
       const allowedQueryContext =
         !querySourcePath ||
-        (constantExistencePath && hasClosedWindowSubtreeScopes(node));
+        (constantExistencePath &&
+          hasClosedWindowSubtreeScopes(node, closedWindowScopeMemo));
       if (onlyRowNumberWindows && allowedQueryContext)
         facts.rowNumberWindow = true;
       else facts.forbidden = true;
@@ -2049,6 +2054,7 @@ function sharedRelationDefinitions(
   visit(root);
   const hoist = hoistEligibility(root);
   const repeatedWindowInputs = multiWindowInputs(root);
+  const closedWindowScopeMemo = new WeakMap<LogicalQueryNode, boolean>();
 
   const sharedMaterializations = new Map<
     LogicalQueryNode,
@@ -2064,7 +2070,7 @@ function sharedRelationDefinitions(
       node.fields.length > MAX_REPEATED_WINDOW_INPUT_PROJECT_FIELDS
     )
       continue;
-    const facts = candidateFacts(node);
+    const facts = candidateFacts(node, closedWindowScopeMemo);
     const isSafe =
       facts.selective &&
       !facts.forbidden &&
