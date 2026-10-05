@@ -25,7 +25,7 @@ function valueType(type: LogicalValueType): string {
     case "entity":
       return `Entity<${type.entity}>`;
     case "bucket":
-      return "Bucket";
+      return `Bucket<${type.granularity},${type.reportingTimeZone}>`;
     case "duration":
       return "ElapsedDuration";
     case "calendar-period":
@@ -43,6 +43,8 @@ function grain(value: LogicalGrain): string {
       return `Keyed[${value.keys.map(slot).join(",")}]`;
     case "scalar":
       return "Scalar";
+    case "bag":
+      return "Bag";
   }
 }
 
@@ -149,6 +151,8 @@ function nodeHeader(node: LogicalNode): string {
       return `${relation(node.id)} Distinct grain=${grain(node.grain)} excludeNull=${node.excludeNull}`;
     case "set-operation":
       return `${relation(node.id)} ${node.operation[0]!.toUpperCase()}${node.operation.slice(1)} grain=${grain(node.grain)} inputs=[${node.inputs.map(relation).join(", ")}]`;
+    case "row-concatenation":
+      return `${relation(node.id)} AppendRows grain=${grain(node.grain)} inputs=[${node.inputs.map(relation).join(", ")}]`;
     case "semi-join":
       return `${relation(node.id)} SemiJoin grain=${grain(node.grain)}`;
     case "anti-join":
@@ -251,6 +255,13 @@ function nodeLines(
       break;
     case "set-operation":
       node.inputs.forEach((input) => lines.push(`  INPUT ${relation(input)}`));
+      break;
+    case "row-concatenation":
+      node.columns.forEach((column) =>
+        lines.push(
+          `  ${JSON.stringify(column.name)} ${formatSlot(column.output, slots)} <- [${column.inputs.map((id) => formatSlot(id, slots)).join(", ")}]`,
+        ),
+      );
       break;
     case "semi-join":
     case "anti-join":

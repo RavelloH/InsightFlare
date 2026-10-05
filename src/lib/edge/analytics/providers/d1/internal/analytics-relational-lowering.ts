@@ -75,6 +75,7 @@ import type {
   ProjectNode,
   RankedMembersNode,
   RelationshipLookupNode,
+  RowConcatenationNode,
   SampleStatisticsNode,
   SemiJoinNode,
   SetOperationNode,
@@ -1354,7 +1355,11 @@ function lowerExpression(
           ],
           constant(null),
         ),
-        type: { kind: "bucket" },
+        type: {
+          kind: "bucket",
+          granularity: expression.granularity,
+          reportingTimeZone: expression.reportingTimeZone,
+        },
         nullable: true,
         candidateBounded: input.candidateBounded,
       };
@@ -1509,6 +1514,8 @@ function logicalNodeInputs(node: LogicalNode): readonly RelationId[] {
     case "limit":
       return [node.input];
     case "set-operation":
+      return node.inputs;
+    case "row-concatenation":
       return node.inputs;
     case "semi-join":
     case "anti-join":
@@ -1815,6 +1822,9 @@ export class AnalyticsLogicalToDbLowerer {
         break;
       case "set-operation":
         result = this.#lowerSetOperation(node, path);
+        break;
+      case "row-concatenation":
+        result = this.#lowerRowConcatenation(node, path);
         break;
       case "semi-join":
       case "anti-join":
@@ -2289,6 +2299,72 @@ export class AnalyticsLogicalToDbLowerer {
     return accumulated;
   }
 
+  #lowerRowConcatenation(
+    node: RowConcatenationNode,
+    path: string,
+  ): LoweredRelation {
+    const inputs = node.inputs.map((id) => this.#lowerNode(id));
+    const required = this.#requiredOutput(node);
+    const aligned = inputs.map((input, inputIndex) => {
+      const values = node.columns
+        .filter((column) => required.has(column.output))
+        .map((column) => {
+          const sourceSlot = column.inputs[inputIndex];
+          if (sourceSlot === undefined)
+            reject(
+              path,
+              `Input ${inputIndex} has no mapping for ${column.name}.`,
+            );
+          const value = readValue(
+            input.relation,
+            input.slots,
+            sourceSlot,
+            `${path}.inputs[${inputIndex}].${column.name}`,
+          );
+          if (value.kind !== "scalar")
+            reject(
+              `${path}.inputs[${inputIndex}].${column.name}`,
+              "Row concatenation accepts only scalar or bucket values.",
+            );
+          const outputMeta = logicalSlot(
+            this.#logicalSlots,
+            column.output,
+            `${path}.${column.name}`,
+          );
+          return {
+            slot: column.output,
+            value: {
+              ...value,
+              type: outputMeta.type,
+              candidateBounded: false,
+            },
+          };
+        });
+      return projectedValues(
+        input.relation,
+        values,
+        this.#logicalSlots,
+        `${path}.inputs[${inputIndex}]`,
+      );
+    });
+    let relation = aligned[0]!.relation;
+    for (const next of aligned.slice(1))
+      relation = union(relation, next.relation, true);
+    const slots = new Map<SlotId, SlotLayout>();
+    for (const column of node.columns) {
+      if (!required.has(column.output)) continue;
+      const initial = aligned[0]!.slots.get(column.output);
+      if (!initial || initial.kind !== "scalar")
+        reject(path, `Output mapping for ${column.name} is missing.`);
+      slots.set(column.output, { ...initial, candidateBounded: false });
+    }
+    return {
+      relation,
+      slots,
+      candidateActivitySessionRestricted: false,
+    };
+  }
+
   #lowerRelationshipLookup(
     node: RelationshipLookupNode,
     path: string,
@@ -2729,6 +2805,7 @@ export class AnalyticsLogicalToDbLowerer {
       case "aggregate":
       case "sample-statistics":
       case "join":
+      case "row-concatenation":
         // Aggregates and joins do not supply a storage-backed Observation key.
         return false;
       case "sort":
@@ -3620,6 +3697,19 @@ export class AnalyticsLogicalToDbLowerer {
                 ),
               );
             }
+            break;
+          case "row-concatenation":
+            node.inputs.forEach((inputId, inputIndex) =>
+              add(
+                inputId,
+                node.columns.flatMap((column) =>
+                  needed.has(column.output) &&
+                  column.inputs[inputIndex] !== undefined
+                    ? [column.inputs[inputIndex]!]
+                    : [],
+                ),
+              ),
+            );
             break;
           case "semi-join":
           case "anti-join": {

@@ -762,7 +762,14 @@ function infer(
       }
       // Calendar bucketing can return NULL outside the candidate range or
       // after the shared 2000-bucket cap, even when its input is non-null.
-      return { type: { kind: "bucket" }, nullable: true };
+      return {
+        type: {
+          kind: "bucket",
+          granularity: expression.granularity,
+          reportingTimeZone: expression.reportingTimeZone,
+        },
+        nullable: true,
+      };
     }
     case "bucket-index": {
       const input = infer(expression.input, resolveSlot, `${path}.input`);
@@ -806,6 +813,7 @@ function fail(
 function sameGrain(left: LogicalGrain, right: LogicalGrain): boolean {
   if (left.kind !== right.kind) return false;
   if (left.kind === "scalar" && right.kind === "scalar") return true;
+  if (left.kind === "bag" && right.kind === "bag") return true;
   if (left.kind === "entity" && right.kind === "entity") {
     return left.entity === right.entity && left.key === right.key;
   }
@@ -945,6 +953,7 @@ function joinKeysCoverGrain(
   right: RelationState,
   keys: readonly { readonly left: SlotId; readonly right: SlotId }[],
 ): boolean {
+  if (right.grain.kind === "bag") return false;
   const rightKeys = grainKeys(right.grain);
   return rightKeys.every((key) =>
     keys.some((joinKey) => joinKey.right === key),
@@ -1428,7 +1437,7 @@ function validateNode(
           kind: "keyed",
           keys: input.grain.keys.map((key) => mapping.get(key)!),
         };
-      } else expectedGrain = { kind: "scalar" };
+      } else expectedGrain = input.grain;
       break;
     }
     case "aggregate": {
@@ -1646,6 +1655,89 @@ function validateNode(
           : { kind: "keyed", keys };
       break;
     }
+    case "row-concatenation": {
+      if (node.inputs.length < 2)
+        fail(
+          "invalid-topology",
+          `${path}.inputs`,
+          "Row concatenation requires at least two inputs.",
+        );
+      if (node.columns.length === 0)
+        fail(
+          "invalid-topology",
+          `${path}.columns`,
+          "Row concatenation requires at least one output column.",
+        );
+      const inputs = node.inputs.map((id, index) =>
+        assertRelation(id, states, `${path}.inputs[${index}]`),
+      );
+      const names = new Set<string>();
+      const outputs = new Set<SlotId>();
+      node.columns.forEach((column, index) => {
+        const columnPath = `${path}.columns[${index}]`;
+        if (!column.name || names.has(column.name))
+          fail(
+            "invalid-topology",
+            `${columnPath}.name`,
+            "Row concatenation column names must be non-empty and unique.",
+          );
+        names.add(column.name);
+        if (outputs.has(column.output))
+          fail(
+            "invalid-topology",
+            `${columnPath}.output`,
+            "Row concatenation output slots must be unique.",
+          );
+        outputs.add(column.output);
+        if (column.inputs.length !== inputs.length)
+          fail(
+            "invalid-topology",
+            `${columnPath}.inputs`,
+            "Every output column must map one slot from each input.",
+          );
+        const sourceSlots = column.inputs.map((id, inputIndex) =>
+          resolveVisibleSlot(
+            inputs[inputIndex]!,
+            id,
+            `${columnPath}.inputs[${inputIndex}]`,
+          ),
+        );
+        const first = sourceSlots[0]!;
+        if (
+          (first.type.kind !== "scalar" && first.type.kind !== "bucket") ||
+          sourceSlots.some(
+            (slot) =>
+              (slot.type.kind !== "scalar" && slot.type.kind !== "bucket") ||
+              !sameType(slot.type, first.type),
+          )
+        )
+          fail(
+            "invalid-expression",
+            `${columnPath}.inputs`,
+            "Row concatenation supports only exactly matching scalar or bucket values.",
+          );
+        const output = types.get(column.output);
+        const nullable = sourceSlots.some((slot) => slot.nullable);
+        if (
+          !output ||
+          !sameType(output.type, first.type) ||
+          output.nullable !== nullable ||
+          !hasDerivedLineage(
+            output,
+            "append-rows",
+            sourceSlots.map((slot) => slot.id),
+          )
+        )
+          fail(
+            "invalid-expression",
+            `${columnPath}.output`,
+            "Row concatenation output type, nullability, or provenance does not match its inputs.",
+          );
+      });
+      expectedOutput = node.columns.map((column) => column.output);
+      expectedGrain = { kind: "bag" };
+      break;
+    }
     case "set-operation": {
       if (
         !(["union", "intersect", "difference"] as const).includes(
@@ -1672,6 +1764,12 @@ function validateNode(
       const inputs = node.inputs.map((id, index) =>
         assertRelation(id, states, `${path}.inputs[${index}]`),
       );
+      if (inputs.some((input) => input.grain.kind === "bag"))
+        fail(
+          "invalid-grain",
+          `${path}.inputs`,
+          "Entity set operations cannot consume bag-grain relations.",
+        );
       const first = inputs[0]!;
       inputs.slice(1).forEach((input, inputIndex) => {
         if (
@@ -1770,6 +1868,12 @@ function validateNode(
     case "anti-join": {
       const left = assertRelation(node.left, states, `${path}.left`);
       const right = assertRelation(node.right, states, `${path}.right`);
+      if (left.grain.kind === "bag" || right.grain.kind === "bag")
+        fail(
+          "invalid-grain",
+          path,
+          "Membership joins cannot consume bag-grain relations.",
+        );
       validateJoinKeys(left, right, node.keys, `${path}.keys`);
       expectedOutput = left.node.output;
       expectedGrain = left.grain;
@@ -2165,6 +2269,8 @@ export function validateLogicalPlan(plan: LogicalPlan): ValidatedLogicalPlan {
           return node.keys.map((key) => key.output);
         case "set-operation":
           return node.output;
+        case "row-concatenation":
+          return node.columns.map((column) => column.output);
         case "join":
           return node.rightAliases.map((alias) => alias.alias);
         case "filter":

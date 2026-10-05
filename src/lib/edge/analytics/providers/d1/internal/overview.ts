@@ -4,6 +4,7 @@ import {
 } from "@/lib/edge/analytics/contract";
 import { buildLatestSiteActivityPlan } from "@/lib/edge/analytics/engine/latest-site-activity-report-plan";
 import { buildOverviewAggregatePlan } from "@/lib/edge/analytics/engine/overview-aggregate-report-plan";
+import { buildOverviewTrendPlan } from "@/lib/edge/analytics/engine/overview-trend-report-plan";
 import { queryAnalyticsReportOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import {
   hasFilterDocument,
@@ -21,15 +22,7 @@ import type {
   QueryWindow,
   TrendAggregateRow,
 } from "./core";
-import {
-  buildTimeBuckets,
-  buildVisitFilterSql,
-  buildVisitSourceCte,
-  queryD1All,
-  timeBucketCase,
-  timeBucketTimestamp,
-  visitSourceBindings,
-} from "./core";
+import { buildTimeBuckets, timeBucketTimestamp } from "./core";
 import {
   type D1ReadDiagnostics,
   recordScopedFilterDiagnostics,
@@ -38,10 +31,7 @@ import {
   queryOverviewClientDimensionsFromD1,
   queryOverviewGeoDimensionsFromD1,
 } from "./dimensions";
-import {
-  scopedDatasetFor,
-  scopedDatasetForUnpreparedReader,
-} from "./scoped-dataset";
+import { scopedDatasetFor } from "./scoped-dataset";
 export async function queryOverviewFromD1(
   env: Env,
   siteId: string,
@@ -80,165 +70,22 @@ export async function queryTrendFromD1(
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<TrendAggregateRow[]> {
-  const scopedDataset =
-    scopedDatasetFor(siteId, window, filters) ??
-    scopedDatasetForUnpreparedReader(
-      "trend",
-      siteId,
-      window,
-      filters,
-      "session",
-    );
-  recordScopedFilterDiagnostics(diagnostics, scopedFilterMetadata(filters));
-  const filter = scopedDataset
-    ? { clause: "", bindings: [] as Array<string | number> }
-    : buildVisitFilterSql(filters, "visit_source", { window });
-  const visitSource = buildVisitSourceCte().replace(
-    "visit_source AS (",
-    "visit_source AS MATERIALIZED (",
-  );
   const buckets = buildTimeBuckets(window, interval);
-  const visitBucket = timeBucketCase(buckets, "started_at");
-  const scopedVisitorBucket = scopedDataset
-    ? timeBucketCase(buckets, "observed_at")
-    : null;
-  const sessionBucket = timeBucketCase(
-    buckets,
-    scopedDataset ? "session_observed_at" : "session_started_at",
+  const plan = buildOverviewTrendPlan({
+    siteId,
+    queryTime: queryWindowToTime(window),
+    filters,
+    interval,
+  });
+  recordScopedFilterDiagnostics(diagnostics, scopedFilterMetadata(filters));
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    "overview-trend",
+    undefined,
+    diagnostics,
   );
-  const metricSource = scopedDataset
-    ? scopedDataset.visitRelation
-    : "filtered_visits";
-  const scopedEntityObservations = scopedDataset
-    ? `
-scope_entity_observations AS (
-  SELECT visitor_id, session_id, started_at AS observed_at, 1 AS is_visit_observation
-  FROM ${scopedDataset.visitRelation}
-  UNION ALL
-  SELECT visitor_id, session_id, occurred_at AS observed_at, 0 AS is_visit_observation
-  FROM ${scopedDataset.eventRelation}
-),`
-    : "";
-  const visitBucketRollup = scopedDataset
-    ? `
-visit_bucket_rollup AS (
-  SELECT
-    ${visitBucket.sql} AS bucket,
-    count(*) AS views,
-    0 AS visitors,
-    COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0) AS totalDuration,
-    COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0) AS durationViews
-  FROM ${metricSource}
-  GROUP BY bucket
-),`
-    : `
-visit_bucket_rollup AS (
-  SELECT
-    ${visitBucket.sql} AS bucket,
-    count(*) AS views,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors,
-    COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0) AS totalDuration,
-    COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0) AS durationViews
-  FROM ${metricSource}
-  GROUP BY bucket
-),`;
-  const scopedVisitorBucketRollup = scopedDataset
-    ? `
-visitor_bucket_rollup AS (
-  SELECT
-    ${scopedVisitorBucket?.sql} AS bucket,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-  FROM scope_entity_observations
-  GROUP BY bucket
-),`
-    : "";
-  const sessionRollup = scopedDataset
-    ? `
-session_rollup AS (
-  SELECT
-    session_id,
-    MIN(observed_at) AS session_observed_at,
-    COUNT(CASE WHEN is_visit_observation = 1 THEN 1 END) AS visit_count
-  FROM scope_entity_observations
-  WHERE session_id != ''
-  GROUP BY session_id
-),`
-    : `
-session_rollup AS (
-  SELECT
-    vs.session_id,
-    MIN(vs.started_at) AS session_started_at,
-    count(*) AS visit_count
-  FROM ${metricSource} vs
-  WHERE vs.session_id != ''
-  GROUP BY vs.session_id
-),`;
-  const combined = scopedDataset
-    ? `
-combined AS (
-  SELECT bucket, views, visitors, 0 AS sessions, 0 AS bounces, totalDuration, durationViews FROM visit_bucket_rollup
-  UNION ALL
-  SELECT bucket, 0 AS views, visitors, 0 AS sessions, 0 AS bounces, 0 AS totalDuration, 0 AS durationViews FROM visitor_bucket_rollup
-  UNION ALL
-  SELECT bucket, 0 AS views, 0 AS visitors, sessions, bounces, 0 AS totalDuration, 0 AS durationViews FROM session_bucket_rollup
- )`
-    : `
-combined AS (
-  SELECT bucket, views, visitors, 0 AS sessions, 0 AS bounces, totalDuration, durationViews FROM visit_bucket_rollup
-  UNION ALL
-  SELECT bucket, 0 AS views, 0 AS visitors, sessions, bounces, 0 AS totalDuration, 0 AS durationViews FROM session_bucket_rollup
- )`;
-  const sourceSql = scopedDataset
-    ? `${scopedDataset.ctes},
-${scopedEntityObservations}`
-    : `${visitSource},
-filtered_visits AS MATERIALIZED (
-  SELECT *
-  FROM visit_source
-  ${filter.clause}
-),`;
-  const sql = `
-WITH
-${sourceSql}
-${visitBucketRollup}
-${scopedVisitorBucketRollup}
-${sessionRollup}
-session_bucket_rollup AS (
-  SELECT
-    ${sessionBucket.sql} AS bucket,
-    count(*) AS sessions,
-    COALESCE(sum(CASE WHEN visit_count = 1 THEN 1 ELSE 0 END), 0) AS bounces
-  FROM session_rollup
-  GROUP BY bucket
-),
-${combined}
-SELECT
-  bucket,
-  sum(views) AS views,
-  sum(visitors) AS visitors,
-  sum(sessions) AS sessions,
-  sum(bounces) AS bounces,
-  sum(totalDuration) AS totalDuration,
-  sum(durationViews) AS durationViews
-FROM combined
-GROUP BY bucket
-ORDER BY bucket ASC
-`;
-  return (
-    await queryD1All<Record<string, unknown>>(
-      env,
-      sql,
-      [
-        ...(scopedDataset
-          ? scopedDataset.bindings.map((binding) => binding.value)
-          : [...visitSourceBindings(siteId, window), ...filter.bindings]),
-        ...visitBucket.bindings,
-        ...(scopedVisitorBucket?.bindings ?? []),
-        ...sessionBucket.bindings,
-      ],
-      diagnostics,
-    )
-  ).map((row) => ({
+  return rows.map((row) => ({
     bucket: Number(row.bucket ?? 0),
     timestampMs: timeBucketTimestamp(buckets, Number(row.bucket ?? 0)),
     views: Number(row.views ?? 0),

@@ -1,20 +1,11 @@
-import {
-  factEntityKindsForFilter,
-  type QueryTime,
-  scopedFilterMetadata,
-  type SiteId,
-} from "@/lib/edge/analytics/contract";
+import type { QueryTime } from "@/lib/edge/analytics/contract";
 import type {
   LogicalExpressionHandle,
   LogicalPlanBuilder,
   LogicalRelationHandle,
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
-import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
-import type { SemanticRelationshipId } from "@/lib/edge/analytics/engine/semantic/relationships";
-import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
-import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
-import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
+import { createOverviewReportSource } from "@/lib/edge/analytics/engine/overview-report-source";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
@@ -169,58 +160,20 @@ export function buildOverviewAggregatePlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
 }): ValidatedLogicalPlan {
-  const metadata = scopedFilterMetadata(input.filters);
-  const directCompatibilitySelection =
-    !metadata && input.filters.root !== null
-      ? createSemanticScopedSourceSelection({
-          profile: "direct-page-session-compat-v1",
-          filters: input.filters,
-          subject: createSemanticSubjectDomain({
-            origin: "site",
-            siteIds: [input.siteId as SiteId],
-          }),
-          time: semanticTemporalDomainsFromQueryTime(input.queryTime),
-        })
-      : undefined;
-  const scoped = metadata !== undefined || input.filters.root !== null;
-  const includeEvents =
-    metadata !== undefined ||
-    (directCompatibilitySelection !== undefined &&
-      input.filters.root !== null &&
-      factEntityKindsForFilter(input.filters.root).size > 0);
-  const relationships: readonly SemanticRelationshipId[] = scoped
-    ? ["page.session", "page.visitor"]
-    : [];
-  const { builder, pages, selection } = createPageReportSource({
+  const { builder, pages, events, scoped } = createOverviewReportSource({
     ...input,
-    ...(metadata
-      ? {
-          scopePlan: metadata.plan,
-          preparedTimePolicy: "scoped-reader-window-v1" as const,
-        }
-      : {}),
-    ...(directCompatibilitySelection
-      ? { sourceSelection: directCompatibilitySelection }
-      : {}),
-    attributes: [
+    pageAttributes: [
       "page.report.sessionId",
       "page.report.visitorId",
       "page.report.durationMs",
     ],
-    relationships,
+    pageRelationships: ["page.session", "page.visitor"],
+    eventAttributes: [
+      "event.report.ownerSessionId",
+      "event.report.ownerVisitorId",
+    ],
+    eventRelationships: ["event.session", "event.visitor"],
   });
-
-  const events = includeEvents
-    ? builder.source("event", {
-        temporalDomain: "candidate",
-        attributes: [
-          "event.report.ownerSessionId",
-          "event.report.ownerVisitorId",
-        ],
-        relationships: ["event.session", "event.visitor"],
-        selection,
-      })
-    : undefined;
 
   const summary = pageSummary(builder, pages);
   const bounces = bounceCount(builder, pages);

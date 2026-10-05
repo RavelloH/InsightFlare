@@ -124,6 +124,20 @@ export interface SetOperationNode extends LogicalNodeBase {
   readonly inputs: readonly RelationId[];
 }
 
+export interface RowConcatenationColumn {
+  readonly name: string;
+  readonly output: SlotId;
+  /** One visible scalar/bucket slot for each input, in input order. */
+  readonly inputs: readonly SlotId[];
+}
+
+/** Bag-preserving positional row concatenation (SQL UNION ALL semantics). */
+export interface RowConcatenationNode extends LogicalNodeBase {
+  readonly kind: "row-concatenation";
+  readonly inputs: readonly RelationId[];
+  readonly columns: readonly RowConcatenationColumn[];
+}
+
 export function setOperationResultNullable(
   operation: SetOperationNode["operation"],
   inputNullability: readonly boolean[],
@@ -216,6 +230,7 @@ export type LogicalNode =
   | SampleStatisticsNode
   | DistinctNode
   | SetOperationNode
+  | RowConcatenationNode
   | SemiJoinNode
   | AntiJoinNode
   | JoinNode

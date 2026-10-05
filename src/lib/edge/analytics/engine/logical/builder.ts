@@ -22,6 +22,7 @@ import {
   type LogicalAggregateMeasure,
   type LogicalNode,
   type ProjectBinding,
+  type RowConcatenationColumn,
   type SampleStatisticsGroupBinding,
   type SampleStatisticsPercentile,
   setOperationResultNullable,
@@ -948,6 +949,8 @@ export class LogicalPlanBuilder {
     if (operation === "difference" && inputs.length !== 2)
       throw new Error("logical_builder_difference_requires_two_inputs");
     const states = inputs.map((input) => this.#owned(input));
+    if (inputs.some((input) => input.grain.kind === "bag"))
+      throw new Error("logical_builder_set_requires_unique_grain");
     const first = inputs[0]!;
     const firstNode = states[0]!.node;
     if (
@@ -1015,6 +1018,75 @@ export class LogicalPlanBuilder {
     return this.#addNode(
       node,
       slots,
+      grain,
+      this.#mergeTemporalDomains(...inputs),
+    );
+  }
+
+  appendRows(
+    inputs: readonly LogicalRelationHandle[],
+    fieldNames: readonly string[],
+  ): LogicalRelationHandle {
+    if (inputs.length < 2)
+      throw new Error("logical_builder_append_rows_requires_two_inputs");
+    if (
+      fieldNames.length === 0 ||
+      fieldNames.some((name) => !name) ||
+      new Set(fieldNames).size !== fieldNames.length
+    )
+      throw new Error("logical_builder_append_rows_invalid_field_names");
+    inputs.forEach((input) => this.#owned(input));
+    const columns: RowConcatenationColumn[] = fieldNames.map((name) => {
+      const sourceSlots = inputs.map((input) => {
+        const id = input.slots[name];
+        if (id === undefined)
+          throw new Error(`logical_builder_append_rows_unknown_field:${name}`);
+        const state = this.#owned(input);
+        if (!state.node.output.includes(id))
+          throw new Error(
+            `logical_builder_append_rows_invisible_field:${name}`,
+          );
+        const slot = this.#slotById.get(id);
+        if (!slot)
+          throw new Error(`logical_builder_append_rows_unknown_slot:${name}`);
+        if (slot.type.kind !== "scalar" && slot.type.kind !== "bucket")
+          throw new Error("logical_builder_append_rows_requires_scalar_fields");
+        return slot;
+      });
+      const first = sourceSlots[0]!;
+      if (
+        sourceSlots.some(
+          (slot) => !isSameLogicalValueType(slot.type, first.type),
+        )
+      )
+        throw new Error("logical_builder_append_rows_incompatible_types");
+      const output = this.#newSlot(
+        first.type,
+        sourceSlots.some((slot) => slot.nullable),
+        {
+          kind: "derived",
+          operation: "append-rows",
+          inputs: sourceSlots.map((slot) => slot.id),
+        },
+      );
+      return {
+        name,
+        output: output.id,
+        inputs: sourceSlots.map((slot) => slot.id),
+      };
+    });
+    const grain: LogicalGrain = { kind: "bag" };
+    const node = {
+      kind: "row-concatenation",
+      id: this.#newRelationId(),
+      inputs: inputs.map((input) => input.id),
+      columns,
+      output: columns.map((column) => column.output),
+      grain,
+    } satisfies LogicalNode;
+    return this.#addNode(
+      node,
+      Object.fromEntries(columns.map((column) => [column.name, column.output])),
       grain,
       this.#mergeTemporalDomains(...inputs),
     );
@@ -1313,6 +1385,8 @@ export class LogicalPlanBuilder {
   ): LogicalRelationHandle {
     const leftState = this.#owned(left);
     this.#owned(right);
+    if (left.grain.kind === "bag" || right.grain.kind === "bag")
+      throw new Error("logical_builder_membership_join_requires_unique_grain");
     const keys = this.#joinKeys(left, right, namedKeys);
     const node = {
       kind,
@@ -1363,6 +1437,8 @@ export class LogicalPlanBuilder {
     right: LogicalRelationHandle,
     keys: readonly { readonly left: SlotId; readonly right: SlotId }[],
   ): void {
+    if (right.grain.kind === "bag")
+      throw new Error("logical_builder_join_requires_unique_right_grain");
     if (
       right.grain.kind !== "scalar" &&
       !grainKeys(right.grain).every((key) =>
@@ -1487,7 +1563,7 @@ export class LogicalPlanBuilder {
     grain: LogicalGrain,
     mapping: ReadonlyMap<SlotId, SlotId>,
   ): LogicalGrain {
-    if (grain.kind === "scalar") return grain;
+    if (grain.kind === "scalar" || grain.kind === "bag") return grain;
     if (grain.kind === "entity") {
       const key = mapping.get(grain.key);
       if (key === undefined)

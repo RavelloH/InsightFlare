@@ -1,3 +1,7 @@
+import type {
+  CalendarGranularity,
+  ReportingTimeZone,
+} from "@/lib/edge/analytics/contract/types";
 import type { FilterScalarType } from "@/lib/filter-contract/filter-types";
 
 import type { AnalyticsEntityKind } from "./entities";
@@ -24,6 +28,8 @@ export interface SemanticEntityValueType<Entity extends string = string> {
 
 export interface SemanticBucketValueType {
   readonly kind: "bucket";
+  readonly granularity: CalendarGranularity;
+  readonly reportingTimeZone: ReportingTimeZone;
 }
 
 export interface ElapsedDurationValueType {

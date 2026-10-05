@@ -80,6 +80,256 @@ function planWithForgedFilter(predicate: LogicalExpr): LogicalPlan {
 }
 
 describe("logical relational IR", () => {
+  it("concatenates visible scalar rows with explicit bag grain", () => {
+    const builder = createBuilder();
+    const number = { kind: "scalar", scalar: "number" } as const;
+    const firstPage = builder.source("page");
+    const secondPage = builder.source("page");
+    const first = builder.project(firstPage, {
+      value: builder.literal(1, number),
+    });
+    const second = builder.project(secondPage, {
+      value: builder.literal(null, number),
+    });
+    const bag = builder.appendRows([first, second], ["value"]);
+    const filtered = builder.filter(bag, booleanLiteral(builder, true));
+    const sorted = builder.sort(filtered, [
+      { slot: "value", direction: "asc", nulls: "first" },
+    ]);
+    const limited = builder.limit(sorted, 1);
+    builder.output("appended-rows", limited, [
+      { name: "value", slot: "value" },
+    ]);
+
+    expect(limited.grain).toEqual({ kind: "bag" });
+    const plan = builder.finish();
+    const node = plan.nodes.find((item) => item.id === bag.id);
+    expect(node?.kind).toBe("row-concatenation");
+    expect(node?.output).toHaveLength(1);
+    expect(
+      plan.slots.find((item) => item.id === node?.output[0])?.nullable,
+    ).toBe(true);
+    expect(printLogicalPlan(plan)).toContain("AppendRows grain=Bag");
+  });
+
+  it("rejects incompatible row concatenation fields", () => {
+    const builder = createBuilder();
+    const leftSource = builder.source("page");
+    const rightSource = builder.source("event");
+    const left = builder.project(leftSource, {
+      value: builder.literal(1, {
+        kind: "scalar",
+        scalar: "number",
+        unit: "ms",
+      }),
+    });
+    const right = builder.project(rightSource, {
+      value: builder.literal(1, { kind: "scalar", scalar: "number" }),
+    });
+    expect(() => builder.appendRows([left, right], ["value"])).toThrow(
+      "logical_builder_append_rows_incompatible_types",
+    );
+    expect(() => builder.appendRows([left, right], [])).toThrow(
+      "logical_builder_append_rows_invalid_field_names",
+    );
+
+    const page = builder.source("page", {
+      attributes: ["page.report.startedAt"],
+    });
+    const event = builder.source("event", {
+      attributes: ["event.report.occurredAt"],
+    });
+    const day = builder.project(page, {
+      bucket: builder.timeBucket(
+        builder.slot(page, "attribute:page.report.startedAt"),
+        "day",
+      ),
+    });
+    const month = builder.project(event, {
+      bucket: builder.timeBucket(
+        builder.slot(event, "attribute:event.report.occurredAt"),
+        "month",
+      ),
+    });
+    expect(() => builder.appendRows([day, month], ["bucket"])).toThrow(
+      "logical_builder_append_rows_incompatible_types",
+    );
+
+    expect(() =>
+      builder.appendRows(
+        [
+          builder.project(leftSource, {
+            entity: builder.slot(leftSource, "entity"),
+          }),
+          builder.project(rightSource, {
+            entity: builder.slot(rightSource, "entity"),
+          }),
+        ],
+        ["entity"],
+      ),
+    ).toThrow("logical_builder_append_rows_requires_scalar_fields");
+
+    const otherBuilder = createBuilder();
+    expect(() =>
+      builder.appendRows([left, otherBuilder.source("page")], ["value"]),
+    ).toThrow("logical_builder_foreign_relation_handle");
+  });
+
+  it("does not let bags act as entity sets or unique join inputs", () => {
+    const builder = createBuilder();
+    const a = builder.project(builder.source("page"), {
+      value: builder.literal(1, { kind: "scalar", scalar: "number" }),
+    });
+    const b = builder.project(builder.source("page"), {
+      value: builder.literal(2, { kind: "scalar", scalar: "number" }),
+    });
+    const firstBag = builder.appendRows([a, b], ["value"]);
+    const secondBag = builder.appendRows([a, b], ["value"]);
+    expect(() => builder.setOperation("union", [firstBag, secondBag])).toThrow(
+      "logical_builder_set_requires_unique_grain",
+    );
+    expect(() =>
+      builder.join(firstBag, secondBag, [{ left: "value", right: "value" }]),
+    ).toThrow("logical_builder_join_requires_unique_right_grain");
+    expect(() =>
+      builder.semiJoin(firstBag, secondBag, [
+        { left: "value", right: "value" },
+      ]),
+    ).toThrow("logical_builder_membership_join_requires_unique_grain");
+  });
+
+  it("validates forged row concatenation mappings and bag metadata", () => {
+    const builder = createBuilder();
+    const number = { kind: "scalar", scalar: "number" } as const;
+    const first = builder.project(builder.source("page"), {
+      value: builder.literal(1, number),
+    });
+    const second = builder.project(builder.source("event"), {
+      value: builder.literal(null, number),
+    });
+    const bag = builder.appendRows([first, second], ["value"]);
+    builder.output("values", bag, [{ name: "value", slot: "value" }]);
+    const plan = builder.finish();
+    const rowNode = plan.nodes.find(
+      (node) => node.kind === "row-concatenation",
+    );
+    if (!rowNode || rowNode.kind !== "row-concatenation")
+      throw new Error("test_row_concatenation_missing");
+    type RowConcatenation = Extract<
+      LogicalPlan["nodes"][number],
+      { readonly kind: "row-concatenation" }
+    >;
+    const assertIssue = (invalidPlan: LogicalPlan, code: string) => {
+      try {
+        validateLogicalPlan(invalidPlan);
+      } catch (error) {
+        expect(error).toBeInstanceOf(LogicalPlanError);
+        expect((error as LogicalPlanError).issues).toEqual(
+          expect.arrayContaining([expect.objectContaining({ code })]),
+        );
+        return;
+      }
+      throw new Error(`test_expected_logical_issue:${code}`);
+    };
+    const withRowNode = (
+      update: (node: RowConcatenation) => RowConcatenation,
+    ): LogicalPlan => ({
+      ...plan,
+      nodes: plan.nodes.map((node) =>
+        node.id === rowNode.id ? update(node as RowConcatenation) : node,
+      ),
+    });
+    const column = rowNode.columns[0]!;
+
+    assertIssue(
+      withRowNode((node) => ({
+        ...node,
+        columns: node.columns.map((item) =>
+          item.output === column.output
+            ? { ...item, inputs: [slotId(999), item.inputs[1]!] }
+            : item,
+        ),
+      })),
+      "invisible-slot",
+    );
+
+    const sourceNodes = plan.nodes.filter((node) => node.kind === "source");
+    const entityInputs = sourceNodes.map((source) => {
+      const entitySlot = source.output.find((id) =>
+        plan.slots.some(
+          (slot) => slot.id === id && slot.lineage.kind === "entity",
+        ),
+      );
+      if (entitySlot === undefined)
+        throw new Error("test_source_entity_slot_missing");
+      return entitySlot;
+    });
+    assertIssue(
+      withRowNode((node) => ({
+        ...node,
+        inputs: sourceNodes.map((source) => source.id),
+        columns: node.columns.map((item) => ({
+          ...item,
+          inputs: entityInputs,
+        })),
+      })),
+      "invalid-expression",
+    );
+
+    assertIssue(
+      {
+        ...plan,
+        slots: plan.slots.map((slot) =>
+          slot.id === column.output ? { ...slot, nullable: false } : slot,
+        ),
+      },
+      "invalid-expression",
+    );
+
+    assertIssue(
+      {
+        ...plan,
+        slots: plan.slots.map((slot) =>
+          slot.id === column.output
+            ? { ...slot, type: { kind: "scalar", scalar: "string" } }
+            : slot,
+        ),
+      },
+      "invalid-expression",
+    );
+
+    assertIssue(
+      {
+        ...plan,
+        slots: plan.slots.map((slot) =>
+          slot.id === column.output
+            ? {
+                ...slot,
+                lineage: {
+                  kind: "derived",
+                  operation: "forged-row-concat",
+                  inputs: column.inputs,
+                },
+              }
+            : slot,
+        ),
+      },
+      "invalid-expression",
+    );
+
+    assertIssue(
+      {
+        ...plan,
+        nodes: plan.nodes.map((node) =>
+          node.id === rowNode.id
+            ? { ...node, grain: { kind: "scalar" } }
+            : node,
+        ),
+      } as LogicalPlan,
+      "invalid-grain",
+    );
+  });
+
   it("prints bounded ROUND precision and rejects forged precision", () => {
     const builder = createBuilder();
     const pages = builder.source("page", {
@@ -400,7 +650,11 @@ describe("logical relational IR", () => {
     });
     expect(
       isSameLogicalValueType(
-        { kind: "bucket" },
+        {
+          kind: "bucket",
+          granularity: "day",
+          reportingTimeZone: "UTC" as ReportingTimeZone,
+        },
         { kind: "scalar", scalar: "number" },
       ),
     ).toBe(false);

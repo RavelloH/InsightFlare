@@ -8,7 +8,9 @@ export type LogicalGrain =
       readonly key: SlotId;
     }
   | { readonly kind: "keyed"; readonly keys: readonly SlotId[] }
-  | { readonly kind: "scalar" };
+  | { readonly kind: "scalar" }
+  /** A bag has no uniqueness or at-most-one-row guarantee. */
+  | { readonly kind: "bag" };
 
 export function grainKeys(grain: LogicalGrain): readonly SlotId[] {
   if (grain.kind === "entity") return [grain.key];
@@ -20,7 +22,7 @@ export function remapGrain(
   grain: LogicalGrain,
   mapping: ReadonlyMap<SlotId, SlotId>,
 ): LogicalGrain {
-  if (grain.kind === "scalar") return { kind: "scalar" };
+  if (grain.kind === "scalar" || grain.kind === "bag") return grain;
   if (grain.kind === "entity") {
     const key = mapping.get(grain.key);
     if (key === undefined) throw new Error("logical_grain_key_not_mapped");
@@ -40,6 +42,7 @@ export function sameGrainShape(
 ): boolean {
   if (left.kind !== right.kind) return false;
   if (left.kind === "scalar" && right.kind === "scalar") return true;
+  if (left.kind === "bag" && right.kind === "bag") return true;
   if (left.kind === "entity" && right.kind === "entity") {
     return left.entity === right.entity;
   }
