@@ -300,6 +300,7 @@ describe("dashboard domain model helpers", () => {
       from: 101,
       to: 201,
     });
+    expect(shiftTimeWindow(100, 200, "next", 200)).toBeNull();
   });
 
   it("builds retention cohorts, comparisons, loading shapes, and cell styles", () => {

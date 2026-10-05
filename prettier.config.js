@@ -1,6 +1,6 @@
 /** @type {import("prettier").Config} */
 const config = {
-  endOfLine: "lf",
+  endOfLine: "auto",
   semi: true,
   singleQuote: false,
   trailingComma: "all",

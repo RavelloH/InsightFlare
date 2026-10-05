@@ -11,6 +11,7 @@ import type { MetricSummaryItem } from "@insightflare/ui/metric-summary-grid";
 import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
 import { Skeleton } from "@insightflare/ui/skeleton";
 import {
+  type RemixiconComponentType,
   RiCalendarLine,
   RiGroupLine,
   RiPercentLine,

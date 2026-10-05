@@ -191,7 +191,7 @@ const registrySource = ts.createSourceFile(
   true,
   ts.ScriptKind.TSX,
 );
-const productContractImports: Array<{ binding: string; subpath: string }> = [];
+const productImports: Array<{ binding: string; subpath: string }> = [];
 for (const statement of registrySource.statements) {
   if (!ts.isImportDeclaration(statement)) continue;
   if (!ts.isStringLiteral(statement.moduleSpecifier)) continue;
@@ -202,12 +202,15 @@ for (const statement of registrySource.statements) {
   const bindings = statement.importClause.namedBindings;
   if (!ts.isNamedImports(bindings)) continue;
   for (const element of bindings.elements) {
-    productContractImports.push({
+    productImports.push({
       binding: element.name.text,
       subpath: match[1],
     });
   }
 }
+const productContractImports = productImports.filter(({ binding }) =>
+  binding.endsWith("Contract"),
+);
 
 function variableInitializer(name: string): ts.Expression | undefined {
   for (const statement of registrySource.statements) {
@@ -314,19 +317,23 @@ for (const subpath of publicComponentSubpaths) {
 }
 
 const importedProductSubpaths = new Set(
-  productContractImports.map(({ subpath }) => subpath),
+  productImports.map(({ subpath }) => subpath),
 );
 for (const subpath of productComponentSubpaths) {
   const contractImport = productContractImports.find(
     (candidate) => candidate.subpath === subpath,
   );
-  if (!contractImport) {
+  const galleryTargetsSubpath = productGalleryEntries.some(
+    (entry) => entry.subpath === subpath,
+  );
+  if (!galleryTargetsSubpath) {
     issues.push(
-      `Public Product UI subpath is missing a contract import: ${subpath}`,
+      `Public Product UI subpath is missing from the Gallery: ${subpath}`,
     );
     continue;
   }
   if (
+    contractImport &&
     !productGalleryEntries.some(
       (entry) =>
         entry.subpath === subpath &&
@@ -343,9 +350,12 @@ for (const subpath of importedProductSubpaths) {
     issues.push(`Gallery imports a non-public Product UI subpath: ${subpath}`);
   }
 }
-if (productGalleryEntries.length !== productComponentSubpaths.length) {
+if (
+  new Set(productGalleryEntries.map(({ subpath }) => subpath)).size !==
+  productComponentSubpaths.length
+) {
   issues.push(
-    `Expected ${productComponentSubpaths.length} Product UI Gallery entries, found ${productGalleryEntries.length}.`,
+    `Expected ${productComponentSubpaths.length} Product UI Gallery targets, found ${new Set(productGalleryEntries.map(({ subpath }) => subpath)).size}.`,
   );
 }
 

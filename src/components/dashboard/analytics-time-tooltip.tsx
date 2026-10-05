@@ -10,7 +10,7 @@ import { RiSearchLine } from "@remixicon/react";
 import { toast } from "sonner";
 
 import { useReportingTimeZone } from "@/components/time-zone-provider";
-import { shortDateTimeWithSeconds } from "@/lib/dashboard/format";
+import { intlLocale, shortDateTimeWithSeconds } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 
@@ -136,7 +136,7 @@ function formatTimeZoneShortName(
   timeZone: string,
 ): string {
   try {
-    const value = new Intl.DateTimeFormat(INTL_LOCALE[locale], {
+    const value = new Intl.DateTimeFormat(intlLocale(locale), {
       hour: "2-digit",
       minute: "2-digit",
       timeZone,
@@ -239,7 +239,7 @@ function AnalyticsDetailsTooltipContent({
   request,
   appContext,
 }: {
-  request: AnalyticsDetailsTooltipRequest;
+  request: Pick<AnalyticsDetailsTooltipRequest, "items">;
   appContext: AnalyticsTooltipAppContextValue;
 }) {
   return (

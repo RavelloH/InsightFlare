@@ -1,5 +1,9 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import {
+  AutoTransition,
+  type AutoTransitionProps,
+} from "@insightflare/ui/auto-transition";
 import { Button } from "@insightflare/ui/button";
 import {
   Card,
@@ -18,6 +22,7 @@ import { RiArrowDownSLine, RiArrowUpSLine } from "@remixicon/react";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { toast } from "sonner";
 
+import { HighlightedCode } from "@/components/code/highlighted-code";
 import { getUiGalleryCopy } from "@/components/ui-gallery/copy";
 import { formatUiGalleryMessage } from "@/components/ui-gallery/format-copy";
 import {
@@ -38,6 +43,22 @@ const COLLAPSED_CODE_HEIGHT = 240;
 const LIVE_TABLE_TOTAL_ROWS = 36;
 const LIVE_TABLE_INITIAL_ROWS = 14;
 const LIVE_TABLE_PAGE_SIZE = 7;
+const CODE_TAB_TRANSITION_VARIANTS: NonNullable<
+  AutoTransitionProps["customVariants"]
+> = {
+  initial: (direction) => ({
+    opacity: 0,
+    x: Number(direction) * 20,
+  }),
+  animate: {
+    opacity: 1,
+    x: 0,
+  },
+  exit: (direction) => ({
+    opacity: 0,
+    x: -Number(direction) * 20,
+  }),
+};
 type UiGalleryPropCard = UiGalleryContract["propCards"][number];
 type UiGalleryPropValue = UiGalleryPropCard["values"][number];
 
@@ -359,7 +380,11 @@ function PropCard({
   const [autoCycle, setAutoCycle] = useState(0);
   const [codeExpanded, setCodeExpanded] = useState(false);
   const [codeOverflows, setCodeOverflows] = useState(false);
+  const [codeTransitionDirection, setCodeTransitionDirection] = useState<
+    1 | -1
+  >(1);
   const codeRef = useRef<HTMLPreElement>(null);
+  const tabListRef = useRef<HTMLDivElement>(null);
   const activeValue =
     card.values.find((value) => value.id === activeValueId) ?? card.values[0];
   const shouldAutoCycle =
@@ -383,6 +408,52 @@ function PropCard({
         entry.contract.renderSourceValue(card.id, activeValue.id, true),
       )
     : "";
+
+  const handleTabValueChange = useCallback(
+    (nextValueId: string) => {
+      const currentIndex = card.values.findIndex(
+        (value) => value.id === activeValueId,
+      );
+      const nextIndex = card.values.findIndex(
+        (value) => value.id === nextValueId,
+      );
+
+      if (
+        currentIndex !== -1 &&
+        nextIndex !== -1 &&
+        currentIndex !== nextIndex
+      ) {
+        const tabs = Array.from(
+          tabListRef.current?.querySelectorAll<HTMLElement>(
+            "[data-ui-gallery-tab-value]",
+          ) ?? [],
+        );
+        const currentTab = tabs.find(
+          (tab) => tab.dataset.uiGalleryTabValue === activeValueId,
+        );
+        const nextTab = tabs.find(
+          (tab) => tab.dataset.uiGalleryTabValue === nextValueId,
+        );
+        const currentLeft = currentTab?.getBoundingClientRect().left;
+        const nextLeft = nextTab?.getBoundingClientRect().left;
+
+        setCodeTransitionDirection(
+          currentLeft !== undefined &&
+            nextLeft !== undefined &&
+            currentLeft !== nextLeft
+            ? nextLeft > currentLeft
+              ? 1
+              : -1
+            : nextIndex > currentIndex
+              ? 1
+              : -1,
+        );
+      }
+
+      setActiveValueId(nextValueId);
+    },
+    [activeValueId, card.values],
+  );
 
   useEffect(() => {
     const code = codeRef.current;
@@ -455,11 +526,12 @@ function PropCard({
       <div className="border-t bg-card">
         <Tabs
           value={activeValue?.id ?? ""}
-          onValueChange={setActiveValueId}
+          onValueChange={handleTabValueChange}
           className="gap-0"
         >
           <div className="px-3 py-2">
             <TabsList
+              ref={tabListRef}
               variant="line"
               aria-label={`${card.prop} example values`}
               className="h-auto w-full flex-wrap justify-start gap-x-2 gap-y-1 p-0"
@@ -468,6 +540,7 @@ function PropCard({
                 <TabsTrigger
                   key={value.id}
                   value={value.id}
+                  data-ui-gallery-tab-value={value.id}
                   className="h-8 flex-none rounded-none px-2 font-mono text-[11px] after:hidden"
                 >
                   {formatPropValue(value.value)}
@@ -496,7 +569,18 @@ function PropCard({
                       ref={codeRef}
                       className="m-0 whitespace-pre-wrap break-words font-mono text-xs leading-6 text-foreground/85"
                     >
-                      <code>{source}</code>
+                      <AutoTransition
+                        as="span"
+                        className="block min-w-full"
+                        initial={false}
+                        transitionKey={activeValue.id}
+                        custom={codeTransitionDirection}
+                        customVariants={CODE_TAB_TRANSITION_VARIANTS}
+                        duration={0.2}
+                        type="slide"
+                      >
+                        <HighlightedCode source={source} />
+                      </AutoTransition>
                     </pre>
                   </AutoResizer>
                   {codeOverflows && !codeExpanded ? (

@@ -435,26 +435,24 @@ const ClickableTableCellGalleryPreview = Object.assign(
       );
     };
 
-    return createElement(
-      ClickableTableCell,
-      {
-        focusable,
-        ariaLabel:
-          selectedPage === "/pricing" ? ariaLabel : `Open ${selectedPage}`,
-        onClick: handleClick,
-      },
-      selectedPage === "/pricing" ? children : selectedPage,
-    );
+    return createElement(ClickableTableCell, {
+      focusable,
+      ariaLabel:
+        selectedPage === "/pricing" ? ariaLabel : `Open ${selectedPage}`,
+      onClick: handleClick,
+      children: selectedPage === "/pricing" ? children : selectedPage,
+    });
   },
   { displayName: "ClickableTableCell" },
 );
 
-const COLUMN_SETTINGS_BASE_COLUMNS = [
-  { id: "page", label: "Page", required: true },
-  { id: "views", label: "Views" },
-  { id: "visitors", label: "Visitors" },
-  { id: "conversions", label: "Conversions", defaultVisible: false },
-] as const satisfies readonly AnalyticsTableColumnDefinition[];
+const COLUMN_SETTINGS_BASE_COLUMNS: readonly AnalyticsTableColumnDefinition[] =
+  [
+    { id: "page", label: "Page", required: true },
+    { id: "views", label: "Views" },
+    { id: "visitors", label: "Visitors" },
+    { id: "conversions", label: "Conversions", defaultVisible: false },
+  ] as const satisfies readonly AnalyticsTableColumnDefinition[];
 
 const COLUMN_SETTINGS_LABELS = {
   action: "Configure columns",

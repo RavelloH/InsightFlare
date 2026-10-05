@@ -61,6 +61,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import { HighlightedCode } from "@/components/code/highlighted-code";
 import {
   BLOCKING_FIELD_IDS,
   type BlockingFieldId,
@@ -957,9 +958,16 @@ export function SettingsClientPage({
                   className="text-xs leading-relaxed text-foreground"
                   contentClassName="w-max min-w-full"
                 >
-                  <code className="font-mono whitespace-pre">
-                    {scriptSnippet || copy.scriptUnavailable}
-                  </code>
+                  {scriptSnippet ? (
+                    <HighlightedCode
+                      source={scriptSnippet}
+                      className="font-mono whitespace-pre"
+                    />
+                  ) : (
+                    <code className="font-mono whitespace-pre">
+                      {copy.scriptUnavailable}
+                    </code>
+                  )}
                 </OverlayScrollbar>
               )}
             </div>
