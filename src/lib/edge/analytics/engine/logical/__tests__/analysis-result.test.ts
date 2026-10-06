@@ -9,9 +9,11 @@ import type {
 import {
   type LogicalPlan,
   LogicalPlanBuilder,
+  LogicalPlanError,
   validateLogicalPlan,
 } from "@/lib/edge/analytics/engine/logical";
 import { slotId } from "@/lib/edge/analytics/engine/logical/ids";
+import type { AnalysisResultNode } from "@/lib/edge/analytics/engine/logical/nodes";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
 import {
@@ -87,6 +89,38 @@ function importingParent(
   return { builder, imported };
 }
 
+function withAnalysisResultNode(
+  plan: LogicalPlan,
+  update: (node: AnalysisResultNode) => AnalysisResultNode,
+): LogicalPlan {
+  let found = false;
+  const nodes = plan.nodes.map((node) => {
+    if (node.kind !== "analysis-result") return node;
+    found = true;
+    return update(node);
+  });
+  if (!found) throw new Error("missing_analysis_result_node");
+  return { ...plan, nodes };
+}
+
+function expectLogicalIssue(
+  plan: LogicalPlan,
+  expected: {
+    readonly code: string;
+    readonly path: string;
+    readonly message: string;
+  },
+): void {
+  try {
+    validateLogicalPlan(plan);
+  } catch (error) {
+    expect(error).toBeInstanceOf(LogicalPlanError);
+    expect((error as LogicalPlanError).issues).toEqual([expected]);
+    return;
+  }
+  throw new Error("expected_logical_plan_error");
+}
+
 describe("Logical analysis-result imports", () => {
   it("snapshots a keyed child and remaps every key and scalar output", () => {
     const child = keyedChild();
@@ -101,6 +135,73 @@ describe("Logical analysis-result imports", () => {
     expect(Object.isFrozen(node.childPlan)).toBe(true);
     expect(Object.isFrozen(node.childPlan.context.time.candidate)).toBe(true);
     expect(validateLogicalPlan(plan)).toBe(plan);
+  });
+
+  it("renames public fields while preserving keyed grain, types, nullability, and child provenance", () => {
+    const child = keyedChild();
+    const childOutput = child.outputs.find((output) => output.id === "rollup");
+    if (!childOutput) throw new Error("missing child output");
+    const builder = new LogicalPlanBuilder(context());
+    const imported = builder.importAnalysisResult(child, "rollup", [
+      { field: "key", as: "pathname" },
+      { field: "rows", as: "pageViews" },
+    ]);
+    builder.output("renamed", imported, [
+      { name: "path", slot: "pathname" },
+      { name: "views", slot: "pageViews" },
+    ]);
+    const plan = builder.finish();
+    const node = plan.nodes.find((item) => item.kind === "analysis-result");
+    if (node?.kind !== "analysis-result") throw new Error("missing node");
+
+    expect(imported.grain).toEqual({
+      kind: "keyed",
+      keys: [imported.slots.pathname],
+    });
+    expect(node.output).toEqual([
+      imported.slots.pathname,
+      imported.slots.pageViews,
+    ]);
+    expect(node.mappings).toEqual([
+      { field: "key", slot: imported.slots.pathname },
+      { field: "rows", slot: imported.slots.pageViews },
+    ]);
+    expect(
+      node.childPlan.outputs.find((output) => output.id === "rollup"),
+    ).toEqual(childOutput);
+    for (const mapping of node.mappings) {
+      const sourceField = childOutput.fields.find(
+        (field) => field.name === mapping.field,
+      );
+      const sourceSlot = child.slots.find(
+        (slot) => slot.id === sourceField?.slot,
+      );
+      const targetSlot = plan.slots.find((slot) => slot.id === mapping.slot);
+      expect(sourceSlot).toBeDefined();
+      expect(targetSlot).toBeDefined();
+      expect(targetSlot?.type).toEqual(sourceSlot?.type);
+      expect(targetSlot?.nullable).toBe(sourceSlot?.nullable);
+      expect(targetSlot?.lineage).toEqual({
+        kind: "analysis-result",
+        relation: node.id,
+        outputId: "rollup",
+        field: mapping.field,
+        sourceSlot: sourceField?.slot,
+      });
+    }
+    expect(validateLogicalPlan(plan)).toBe(plan);
+
+    expect(() =>
+      new LogicalPlanBuilder(context()).importAnalysisResult(child, "rollup", [
+        { field: "key", as: "shared" },
+        { field: "rows", as: "shared" },
+      ]),
+    ).toThrow("logical_builder_duplicate_analysis_result_name");
+    expect(() =>
+      new LogicalPlanBuilder(context()).importAnalysisResult(child, "rollup", [
+        { field: "key", as: "" },
+      ]),
+    ).toThrow("logical_builder_duplicate_analysis_result_name");
   });
 
   it("keeps a detached snapshot when the caller mutates its child plan", () => {
@@ -380,5 +481,171 @@ describe("Logical analysis-result imports", () => {
       }),
     };
     expect(() => validateLogicalPlan(forged)).toThrow(/one-to-one/u);
+  });
+
+  it("independently rejects forged analysis-result output, field, target, provenance, and key mappings", () => {
+    const base = importingParent(keyedChild()).builder.finish();
+    const baseNodeIndex = base.nodes.findIndex(
+      (node) => node.kind === "analysis-result",
+    );
+    if (baseNodeIndex < 0) throw new Error("missing analysis result");
+    const baseNode = base.nodes[baseNodeIndex];
+    if (baseNode?.kind !== "analysis-result")
+      throw new Error("missing analysis result");
+    const keySlot = baseNode.mappings.find(
+      (mapping) => mapping.field === "key",
+    )?.slot;
+    if (keySlot === undefined) throw new Error("missing key mapping");
+    const path = `nodes[${baseNodeIndex}]`;
+
+    expectLogicalIssue(
+      withAnalysisResultNode(base, (node) => ({ ...node, outputId: "" })),
+      {
+        code: "invalid-topology",
+        path,
+        message: "Analysis result output and field mappings are required.",
+      },
+    );
+    expectLogicalIssue(
+      withAnalysisResultNode(base, (node) => ({ ...node, mappings: [] })),
+      {
+        code: "invalid-topology",
+        path,
+        message: "Analysis result output and field mappings are required.",
+      },
+    );
+    expectLogicalIssue(
+      withAnalysisResultNode(base, (node) => ({
+        ...node,
+        outputId: "undeclared-output",
+      })),
+      {
+        code: "invalid-output",
+        path: `${path}.outputId`,
+        message: "Analysis result must reference a declared child output.",
+      },
+    );
+    expectLogicalIssue(
+      withAnalysisResultNode(base, (node) => ({
+        ...node,
+        mappings: node.mappings.map((mapping, index) =>
+          index === 0 ? { ...mapping, field: "unknown-field" } : mapping,
+        ),
+      })),
+      {
+        code: "invalid-output",
+        path: `${path}.mappings[0].field`,
+        message:
+          "Mapping must name a scalar field of the declared child output.",
+      },
+    );
+
+    const undeclaredSlot = slotId(
+      Math.max(...base.slots.map((slot) => slot.id)) + 1,
+    );
+    expectLogicalIssue(
+      withAnalysisResultNode(base, (node) => ({
+        ...node,
+        mappings: node.mappings.map((mapping, index) =>
+          index === 0 ? { ...mapping, slot: undeclaredSlot } : mapping,
+        ),
+      })),
+      {
+        code: "invisible-slot",
+        path: `${path}.mappings[0].slot`,
+        message: "Mapped parent slot is not declared.",
+      },
+    );
+
+    const forgedProvenance: LogicalPlan = {
+      ...base,
+      slots: base.slots.map((slot) =>
+        slot.id === keySlot && slot.lineage.kind === "analysis-result"
+          ? { ...slot, lineage: { ...slot.lineage, field: "forged-field" } }
+          : slot,
+      ),
+    };
+    expectLogicalIssue(forgedProvenance, {
+      code: "invalid-output",
+      path: `${path}.mappings[0].slot`,
+      message:
+        "Imported slot provenance does not match the declared child output.",
+    });
+
+    expectLogicalIssue(
+      withAnalysisResultNode(base, (node) => ({
+        ...node,
+        mappings: node.mappings.filter((mapping) => mapping.field !== "key"),
+        output: node.output.filter((slot) => slot !== keySlot),
+      })),
+      {
+        code: "invalid-grain",
+        path: `${path}.mappings`,
+        message: "Every child keyed-grain key must be declared and mapped.",
+      },
+    );
+  });
+
+  it("rejects a valid keyed time-bucket child at both public import boundaries", () => {
+    const childBuilder = new LogicalPlanBuilder(context());
+    const pages = childBuilder.source("page", {
+      attributes: ["page.report.startedAt"],
+    });
+    const grouped = childBuilder.aggregate(
+      pages,
+      {
+        day: childBuilder.timeBucket(
+          childBuilder.slot(pages, "attribute:page.report.startedAt"),
+          "day",
+        ),
+      },
+      [{ name: "rows", kind: "count-rows" }],
+    );
+    childBuilder.output("bucketed", grouped, [
+      { name: "day", slot: "day" },
+      { name: "rows", slot: "rows" },
+    ]);
+    const bucketChild = childBuilder.finish();
+    const childOutput = bucketChild.outputs.find(
+      (output) => output.id === "bucketed",
+    );
+    if (!childOutput) throw new Error("missing bucket output");
+    const childKey = childOutput.fields.find((field) => field.name === "day");
+    if (!childKey) throw new Error("missing bucket key");
+    expect(
+      bucketChild.nodes.find((node) => node.id === childOutput.relation),
+    ).toMatchObject({
+      kind: "aggregate",
+      grain: { kind: "keyed", keys: [childKey.slot] },
+    });
+    expect(
+      bucketChild.slots.find((slot) => slot.id === childKey.slot)?.type,
+    ).toMatchObject({
+      kind: "bucket",
+    });
+
+    expect(() =>
+      new LogicalPlanBuilder(context()).importAnalysisResult(
+        bucketChild,
+        "bucketed",
+        [{ field: "day" }, { field: "rows" }],
+      ),
+    ).toThrow("logical_builder_analysis_result_fields_must_be_scalar");
+
+    const base = importingParent(keyedChild()).builder.finish();
+    const index = base.nodes.findIndex(
+      (node) => node.kind === "analysis-result",
+    );
+    if (index < 0) throw new Error("missing analysis result");
+    const forgedBucketChild = withAnalysisResultNode(base, (node) => ({
+      ...node,
+      childPlan: bucketChild,
+      outputId: "bucketed",
+    }));
+    expectLogicalIssue(forgedBucketChild, {
+      code: "invalid-grain",
+      path: `nodes[${index}].childPlan.outputs`,
+      message: "Every imported child output field must be scalar.",
+    });
   });
 });
