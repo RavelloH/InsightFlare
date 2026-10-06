@@ -262,12 +262,21 @@ describe("logical relational IR", () => {
     const right = builder.project(rightSource, {
       value: builder.literal(1, { kind: "scalar", scalar: "number" }),
     });
+    expect(() => builder.appendRows([left], ["value"])).toThrow(
+      "logical_builder_append_rows_requires_two_inputs",
+    );
     expect(() => builder.appendRows([left, right], ["value"])).toThrow(
       "logical_builder_append_rows_incompatible_types",
     );
     expect(() => builder.appendRows([left, right], [])).toThrow(
       "logical_builder_append_rows_invalid_field_names",
     );
+    const differentlyNamed = builder.project(rightSource, {
+      differentName: builder.literal(1, { kind: "scalar", scalar: "number" }),
+    });
+    expect(() =>
+      builder.appendRows([left, differentlyNamed], ["value"]),
+    ).toThrow("logical_builder_append_rows_unknown_field:value");
 
     const page = builder.source("page", {
       attributes: ["page.report.startedAt"],
@@ -600,6 +609,54 @@ describe("logical relational IR", () => {
         expect.objectContaining({ code: "invisible-slot" }),
       ]),
     );
+  });
+
+  it("rejects accessor plans without invoking getters and wraps proxy inspection failures", () => {
+    const builder = createBuilder();
+    const pages = builder.source("page");
+    builder.output("pages", pages, [{ name: "page", slot: "entity" }]);
+    const plan = builder.finish();
+
+    const captureError = (candidate: LogicalPlan): LogicalPlanError => {
+      try {
+        validateLogicalPlan(candidate);
+      } catch (error) {
+        expect(error).toBeInstanceOf(LogicalPlanError);
+        return error as LogicalPlanError;
+      }
+      throw new Error("expected_logical_plan_error");
+    };
+
+    let getterCalls = 0;
+    const accessorPlan = { ...plan };
+    Object.defineProperty(accessorPlan, "context", {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return plan.context;
+      },
+    });
+    expect(captureError(accessorPlan as LogicalPlan).issues).toEqual([
+      {
+        code: "invalid-envelope",
+        path: "plan",
+        message: "Logical plan must contain only data properties.",
+      },
+    ]);
+    expect(getterCalls).toBe(0);
+
+    const unsafeProxy = new Proxy(plan, {
+      ownKeys() {
+        throw new Error("untrusted_own_keys_trap");
+      },
+    });
+    expect(captureError(unsafeProxy).issues).toEqual([
+      {
+        code: "invalid-envelope",
+        path: "plan",
+        message: "Logical plan object graph is not safely inspectable.",
+      },
+    ]);
   });
 
   it("reports malformed inherited page dimension IDs as logical plan errors", () => {

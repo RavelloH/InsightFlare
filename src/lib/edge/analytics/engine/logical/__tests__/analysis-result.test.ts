@@ -13,7 +13,10 @@ import {
   validateLogicalPlan,
 } from "@/lib/edge/analytics/engine/logical";
 import { slotId } from "@/lib/edge/analytics/engine/logical/ids";
-import type { AnalysisResultNode } from "@/lib/edge/analytics/engine/logical/nodes";
+import type {
+  AnalysisResultNode,
+  LogicalNode,
+} from "@/lib/edge/analytics/engine/logical/nodes";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
 import {
@@ -101,6 +104,13 @@ function withAnalysisResultNode(
   });
   if (!found) throw new Error("missing_analysis_result_node");
   return { ...plan, nodes };
+}
+
+function withLogicalNode(
+  plan: LogicalPlan,
+  update: (node: LogicalNode) => LogicalNode,
+): LogicalPlan {
+  return { ...plan, nodes: plan.nodes.map(update) };
 }
 
 function expectLogicalIssue(
@@ -582,6 +592,163 @@ describe("Logical analysis-result imports", () => {
         code: "invalid-grain",
         path: `${path}.mappings`,
         message: "Every child keyed-grain key must be declared and mapped.",
+      },
+    );
+  });
+
+  it("rejects missing, nested, and invalid children at the public import boundary", () => {
+    const base = importingParent(keyedChild()).builder.finish();
+    const nodeIndex = base.nodes.findIndex(
+      (node) => node.kind === "analysis-result",
+    );
+    if (nodeIndex < 0) throw new Error("missing analysis result");
+    const path = `nodes[${nodeIndex}].childPlan`;
+
+    expectLogicalIssue(
+      withAnalysisResultNode(base, (node) => ({
+        ...node,
+        childPlan: undefined as unknown as LogicalPlan,
+      })),
+      {
+        code: "invalid-topology",
+        path,
+        message: "Analysis result child plan is missing.",
+      },
+    );
+
+    const nestedChild = importingParent(keyedChild()).builder.finish();
+    const nestedOutput = nestedChild.outputs.find(
+      (output) => output.id === "imported",
+    );
+    if (!nestedOutput) throw new Error("missing nested child output");
+    expect(
+      nestedChild.nodes.some((node) => node.kind === "analysis-result"),
+    ).toBe(true);
+    expectLogicalIssue(
+      withAnalysisResultNode(base, (node) => ({
+        ...node,
+        childPlan: nestedChild,
+        outputId: nestedOutput.id,
+      })),
+      {
+        code: "invalid-topology",
+        path,
+        message: "Nested analysis-result nodes are not supported.",
+      },
+    );
+
+    const validChild = keyedChild();
+    const invalidChild: LogicalPlan = { ...validChild, nodes: [] };
+    expectLogicalIssue(
+      withAnalysisResultNode(base, (node) => ({
+        ...node,
+        childPlan: invalidChild,
+      })),
+      {
+        code: "invalid-topology",
+        path,
+        message: "outputs[0].relation: Output relation does not exist.",
+      },
+    );
+  });
+
+  it.each([
+    {
+      name: "sort direction",
+      expected: {
+        code: "invalid-topology",
+        path: "nodes[2].keys[0].direction",
+        message: "Sort direction is invalid.",
+      },
+      update: (node: LogicalNode): LogicalNode =>
+        node.kind === "sort"
+          ? {
+              ...node,
+              keys: node.keys.map((key, index) =>
+                index === 0 ? { ...key, direction: "sideways" as never } : key,
+              ),
+            }
+          : node,
+    },
+    {
+      name: "sort null ordering",
+      expected: {
+        code: "invalid-topology",
+        path: "nodes[2].keys[0].nulls",
+        message: "Sort null ordering is invalid.",
+      },
+      update: (node: LogicalNode): LogicalNode =>
+        node.kind === "sort"
+          ? {
+              ...node,
+              keys: node.keys.map((key, index) =>
+                index === 0 ? { ...key, nulls: "unordered" as never } : key,
+              ),
+            }
+          : node,
+    },
+    {
+      name: "negative limit count",
+      expected: {
+        code: "invalid-topology",
+        path: "nodes[3].count",
+        message: "Limit count must be a non-negative integer.",
+      },
+      update: (node: LogicalNode): LogicalNode =>
+        node.kind === "limit" ? { ...node, count: -1 } : node,
+    },
+    {
+      name: "fractional limit count",
+      expected: {
+        code: "invalid-topology",
+        path: "nodes[3].count",
+        message: "Limit count must be a non-negative integer.",
+      },
+      update: (node: LogicalNode): LogicalNode =>
+        node.kind === "limit" ? { ...node, count: 1.5 } : node,
+    },
+  ])("revalidates $name in a child plan", ({ expected, update }) => {
+    const childBuilder = new LogicalPlanBuilder(context());
+    const pages = childBuilder.source("page", { attributes: ["page.path"] });
+    const grouped = childBuilder.aggregate(
+      pages,
+      { key: childBuilder.slot(pages, "attribute:page.path") },
+      [{ name: "rows", kind: "count-rows" }],
+    );
+    const sorted = childBuilder.sort(grouped, [
+      { slot: "key", direction: "asc", nulls: "first" },
+    ]);
+    const limited = childBuilder.limit(sorted, 2);
+    childBuilder.output("rollup", limited, [
+      { name: "key", slot: "key" },
+      { name: "rows", slot: "rows" },
+    ]);
+    const validChild = childBuilder.finish();
+    expect(validChild.nodes.map((node) => node.kind)).toEqual([
+      "source",
+      "aggregate",
+      "sort",
+      "limit",
+    ]);
+    expect(validateLogicalPlan(validChild)).toBe(validChild);
+
+    const invalidChild = withLogicalNode(validChild, update);
+    expectLogicalIssue(invalidChild, expected);
+
+    const parent = importingParent(keyedChild()).builder.finish();
+    const parentNodeIndex = parent.nodes.findIndex(
+      (node) => node.kind === "analysis-result",
+    );
+    if (parentNodeIndex < 0) throw new Error("missing analysis result");
+    expectLogicalIssue(
+      withAnalysisResultNode(parent, (node) => ({
+        ...node,
+        childPlan: invalidChild,
+      })),
+      {
+        code: "invalid-topology",
+        path: `nodes[${parentNodeIndex}].childPlan`,
+        message: `${expected.path}: ${expected.message}`,
       },
     );
   });
