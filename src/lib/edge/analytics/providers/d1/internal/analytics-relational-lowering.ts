@@ -997,6 +997,44 @@ function lowerExpression(
         candidateBounded: input.candidateBounded,
       };
     }
+    case "text-concatenation": {
+      if (expression.values.length < 2)
+        reject(path, "Text concatenation requires at least two operands.");
+      const values = expression.values.map((value, index) =>
+        lowerExpression(
+          value,
+          relation,
+          logicalSlots,
+          visible,
+          `${path}.values[${index}]`,
+          time,
+        ),
+      );
+      const textValues = values.map((value) => {
+        if (
+          value.kind !== "scalar" ||
+          value.type.kind !== "scalar" ||
+          value.type.scalar !== "string"
+        )
+          reject(path, "Text concatenation accepts only scalar strings.");
+        return value.expression as SqlExpression<
+          string | null,
+          ExpressionResultType<"text", boolean>
+        >;
+      });
+      const concatenated = textValues
+        .slice(1)
+        .reduce<
+          SqlExpression<string | null, ExpressionResultType<"text", boolean>>
+        >((previous, next) => concatText(previous, next), textValues[0]!);
+      return {
+        kind: "scalar",
+        expression: concatenated,
+        type: { kind: "scalar", scalar: "string" },
+        nullable: values.some((value) => value.nullable),
+        candidateBounded: values.some((value) => value.candidateBounded),
+      };
+    }
     case "page-dimension": {
       const definition = semanticPageDimension(expression.dimension);
       const names = expression.dependencies.map(
@@ -4016,6 +4054,10 @@ export class AnalyticsLogicalToDbLowerer {
       case "time-bucket":
       case "bucket-index":
         return this.#expressionSlots(expression.input);
+      case "text-concatenation":
+        return expression.values.flatMap((value) =>
+          this.#expressionSlots(value),
+        );
       case "page-dimension":
         return expression.dependencies.flatMap((dependency) =>
           this.#expressionSlots(dependency.expression),

@@ -438,6 +438,107 @@ describe("D1 database runtime", () => {
     expect(JSON.stringify(events)).not.toContain("private-row-");
   });
 
+  it("hashes v3 numbered parameter layouts without including bound values", async () => {
+    const { database, result } = createDatabase();
+    const events: DatabaseQueryObservation[] = [];
+    const runtime = createDatabaseRuntime(database, {
+      observer: recordingObserver(events),
+    });
+    const shape: DatabasePhysicalPlanShape = {
+      version: 3,
+      cteCount: 4,
+      directScanProjectionCount: 1,
+      nativeMembershipCount: 0,
+      jsonMembershipCount: 1,
+      nativeRowRelationCount: 0,
+      jsonRowRelationCount: 1,
+      parameterStrategy: "numbered-reuse",
+      parameterOccurrenceCount: 101,
+      parameterSlotCount: 2,
+    };
+    const sql = "SELECT ?1 AS first_value, ?2 AS second_value";
+
+    await runtime.all({
+      sql,
+      bindings: ["private-first-a", "private-second-a"],
+      physicalPlanShape: shape,
+    });
+    await runtime.all({
+      sql,
+      bindings: ["private-first-b", "private-second-b"],
+      physicalPlanShape: shape,
+    });
+    await waitForObservations(events, 2);
+
+    const expectedHash = `v3:${await sha256Hex(
+      JSON.stringify([
+        "d1-query-shape-v3",
+        sql,
+        shape.cteCount,
+        shape.directScanProjectionCount,
+        shape.nativeMembershipCount,
+        shape.jsonMembershipCount,
+        shape.nativeRowRelationCount,
+        shape.jsonRowRelationCount,
+        shape.parameterStrategy,
+        shape.parameterOccurrenceCount,
+        shape.parameterSlotCount,
+      ]),
+    )}`;
+    expect(events.map((event) => event.physicalPlanHash)).toEqual([
+      expectedHash,
+      expectedHash,
+    ]);
+    expect(JSON.stringify(events)).not.toContain("private-");
+
+    const differentLayout: DatabasePhysicalPlanShape = {
+      ...shape,
+      parameterSlotCount: 3,
+    };
+    await runtime.all({
+      sql: "SELECT ?1 AS first_value, ?2 AS second_value, ?3 AS third_value",
+      bindings: ["a", "b", "c"],
+      physicalPlanShape: differentLayout,
+    });
+    await waitForObservations(events, 3);
+    expect(events[2]?.physicalPlanHash).not.toBe(expectedHash);
+    expect(result.success).toBe(true);
+  });
+
+  it("checks actual bindings even when v3 metadata claims fewer slots", async () => {
+    const { database, prepared } = createDatabase();
+    const runtime = createDatabaseRuntime(database);
+    const shape: DatabasePhysicalPlanShape = {
+      version: 3,
+      cteCount: 1,
+      directScanProjectionCount: 0,
+      nativeMembershipCount: 0,
+      jsonMembershipCount: 0,
+      nativeRowRelationCount: 0,
+      jsonRowRelationCount: 0,
+      parameterStrategy: "numbered-reuse",
+      parameterOccurrenceCount: 101,
+      parameterSlotCount: 1,
+    };
+
+    expect(() =>
+      runtime.all({
+        sql: "SELECT ?",
+        bindings: Array<string>(101).fill("claimed-as-one-slot"),
+        physicalPlanShape: shape,
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        code: "d1_statement_budget_exceeded",
+        item: "bindings",
+        actual: 101,
+        limit: 100,
+      }),
+    );
+    expect(database.prepare).not.toHaveBeenCalled();
+    expect(prepared.all).not.toHaveBeenCalled();
+  });
+
   it("uses valid fallback timing and omits invalid or failed result metrics", async () => {
     const { database, prepared, result: baseResult } = createDatabase();
     const events: DatabaseQueryObservation[] = [];

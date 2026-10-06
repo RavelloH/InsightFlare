@@ -1,10 +1,14 @@
 import { assertObservationFilterCompatible } from "@/lib/edge/analytics/contract/observation-planner";
 import {
   createScopedFilterPlan,
+  factEntityKindsForFilter,
   scopedFilterMetadata,
   type ScopedFilterPlan,
 } from "@/lib/edge/analytics/contract/scoped-filter";
-import type { QueryTime } from "@/lib/edge/analytics/contract/types";
+import type {
+  QueryOperation,
+  QueryTime,
+} from "@/lib/edge/analytics/contract/types";
 import type { LogicalPlanContext } from "@/lib/edge/analytics/engine/logical/plan";
 import {
   createSemanticSubjectDomain,
@@ -30,7 +34,8 @@ export type SemanticScopedSourceProfile =
   | "direct-event-records-v1"
   | "direct-event-analytics-v1"
   | "direct-page-analytics-v1"
-  | "direct-page-session-compat-v1";
+  | "direct-page-session-compat-v1"
+  | "direct-page-entity-only-compat-v1";
 
 export type SemanticScopedIdentityKind =
   "page" | "event" | "session" | "visitor";
@@ -91,6 +96,10 @@ export interface CreateSemanticScopedSourceSelectionInput {
   readonly time: SemanticTemporalDomains;
   /** Required for prepared-scoped-v1 and must be the exact prepared plan. */
   readonly expectedPlan?: ScopedFilterPlan;
+  /** Operation whose scope capability prepared this metadata. */
+  readonly preparedPlanOperation?: QueryOperation;
+  /** Required by direct-page-entity-only-compat-v1. */
+  readonly compatibilityScope?: "session" | "visitor";
   readonly eventName?: string;
   /** Event analytics preserves the legacy truthy raw value; record detail trims. */
   readonly eventNameInputSemantics?:
@@ -215,9 +224,19 @@ function validatePostObservationProfile(
     return;
   }
   if (selection.profile !== "prepared-scoped-reader-window-v1")
-    fail("post_observation_filter_profile_unsupported");
+    if (selection.profile !== "direct-page-entity-only-compat-v1")
+      fail("post_observation_filter_profile_unsupported");
   if (selection.eventNameGate !== undefined)
-    fail("prepared_post_observation_filter_event_name_unsupported");
+    fail(
+      selection.profile === "prepared-scoped-reader-window-v1"
+        ? "prepared_post_observation_filter_event_name_unsupported"
+        : "page_entity_compatibility_event_name_unsupported",
+    );
+  if (
+    selection.profile === "direct-page-entity-only-compat-v1" &&
+    selection.filter.root === null
+  )
+    fail("page_entity_compatibility_requires_filter");
 }
 
 function canonicalSiteIds(siteIds: readonly string[]): readonly string[] {
@@ -379,7 +398,7 @@ export function createSemanticScopedSourceSelection(
         ? metadata.plan.membership.entityKind
         : undefined;
     const independentlyResolved = createScopedFilterPlan(
-      "event-records",
+      input.preparedPlanOperation ?? "event-records",
       filters,
       metadata.requestedScope,
     );
@@ -446,6 +465,44 @@ export function createSemanticScopedSourceSelection(
       compatibilityPlan.membership.entityKind !== "session"
     )
       return fail("session_compatibility_plan_mismatch");
+    scope = compatibilityPlan.scope;
+    mode = compatibilityPlan.mode;
+    entityKind = compatibilityPlan.membership.entityKind;
+    authorizedSiteIds = canonicalSiteIds(subject.siteIds);
+  } else if (input.profile === "direct-page-entity-only-compat-v1") {
+    if (metadata || input.expectedPlan)
+      return fail("compatibility_profile_has_prepared_metadata");
+    if (!filters.root) return fail("page_entity_compatibility_requires_filter");
+    if (filterDocumentUsesAdvancedExpressions(filters))
+      return fail(
+        "page_entity_compatibility_requires_prepared_advanced_matches",
+      );
+    if (
+      input.eventName !== undefined ||
+      input.eventNameInputSemantics !== undefined
+    )
+      return fail("page_entity_compatibility_event_name_unsupported");
+    if (
+      input.compatibilityScope !== "session" &&
+      input.compatibilityScope !== "visitor"
+    )
+      return fail("page_entity_compatibility_scope_required");
+    if (subject.siteIds.length !== 1)
+      return fail("page_entity_compatibility_requires_single_site");
+    const compatibilityPlan = createScopedFilterPlan(
+      "goal-summary",
+      filters,
+      input.compatibilityScope,
+    );
+    if (
+      !compatibilityPlan ||
+      compatibilityPlan.scope !== input.compatibilityScope ||
+      compatibilityPlan.mode !== "entity" ||
+      compatibilityPlan.membership.kind !== "entity" ||
+      compatibilityPlan.membership.entityKind !== input.compatibilityScope ||
+      factEntityKindsForFilter(filters.root).size !== 0
+    )
+      return fail("page_entity_compatibility_plan_mismatch");
     scope = compatibilityPlan.scope;
     mode = compatibilityPlan.mode;
     entityKind = compatibilityPlan.membership.entityKind;
@@ -524,6 +581,7 @@ export function validateSemanticScopedSourceSelection(
       "direct-event-analytics-v1",
       "direct-page-analytics-v1",
       "direct-page-session-compat-v1",
+      "direct-page-entity-only-compat-v1",
     ].includes(selection.profile) ||
     !["event", "session", "visitor"].includes(selection.scope) ||
     !["observation", "entity"].includes(selection.mode)
@@ -636,6 +694,28 @@ export function validateSemanticScopedSourceSelection(
       !sameResolvedSelection(compatibilityPlan, selection)
     )
       fail("invalid_session_compatibility_profile");
+  }
+  if (selection.profile === "direct-page-entity-only-compat-v1") {
+    const compatibilityPlan = createScopedFilterPlan(
+      "goal-summary",
+      selection.filter,
+      selection.scope,
+    );
+    if (
+      !compatibilityPlan ||
+      selection.filter.root === null ||
+      (selection.scope !== "session" && selection.scope !== "visitor") ||
+      selection.mode !== "entity" ||
+      selection.entityKind !== selection.scope ||
+      selection.preparedMatches !== undefined ||
+      selection.eventNameGate !== undefined ||
+      selection.subject.siteIds.length !== 1 ||
+      !sameJsonValue(selection.authorizedSiteIds, selection.subject.siteIds) ||
+      filterDocumentUsesAdvancedExpressions(selection.filter) ||
+      factEntityKindsForFilter(selection.filter.root).size !== 0 ||
+      !sameResolvedSelection(compatibilityPlan, selection)
+    )
+      fail("invalid_page_entity_compatibility_profile");
   }
   if (
     selection.profile === "direct-page-analytics-v1" &&

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { DatabaseCompilerError } from "@/lib/db/query/errors";
 import {
   concat,
+  getParameterPlaceholderOffsets,
   join,
   parameter,
   parenthesize,
@@ -25,6 +26,42 @@ describe("SQL fragments", () => {
       text: 'SELECT "a""b" WHERE id = ? AND enabled IN (?, ?)',
       bindings: ["value", true, false],
     });
+  });
+
+  it("tracks typed placeholder offsets across composition without changing fragments", () => {
+    const fragment = concat(
+      text("SELECT '?' AS literal WHERE left_value = "),
+      parameter("left"),
+      text(" OR right_value = "),
+      parameter("right"),
+    );
+    expect(getParameterPlaceholderOffsets(fragment)).toEqual([
+      fragment.text.indexOf("?", fragment.text.indexOf("literal")),
+      fragment.text.lastIndexOf("?"),
+    ]);
+    expect(fragment).toEqual({
+      text: "SELECT '?' AS literal WHERE left_value = ? OR right_value = ?",
+      bindings: ["left", "right"],
+    });
+
+    const repeatedSeparator = join(
+      [parameter("first"), parameter("second")],
+      concat(text(" OR value = "), parameter("separator")),
+    );
+    expect(getParameterPlaceholderOffsets(repeatedSeparator)).toEqual([
+      0,
+      repeatedSeparator.text.indexOf("?", 1),
+      repeatedSeparator.text.lastIndexOf("?"),
+    ]);
+  });
+
+  it("opts out of exact placeholder tracking for raw fragments with bindings", () => {
+    expect(getParameterPlaceholderOffsets(unsafeRawSql("SELECT ?", [7]))).toBe(
+      undefined,
+    );
+    expect(
+      getParameterPlaceholderOffsets(unsafeRawSql("SELECT '?'", [])),
+    ).toEqual([]);
   });
 
   it("rejects empty and NUL-containing identifiers", () => {

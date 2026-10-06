@@ -468,6 +468,38 @@ function infer(
       }
       return { type: scalar("string"), nullable: input.nullable };
     }
+    case "text-concatenation": {
+      if (expression.values.length < 2) {
+        throw new LogicalPlanError([
+          {
+            code: "invalid-expression",
+            path: `${path}.values`,
+            message: "Text concatenation requires at least two operands.",
+          },
+        ]);
+      }
+      const values = expression.values.map((value, index) =>
+        infer(value, resolveSlot, `${path}.values[${index}]`),
+      );
+      if (
+        values.some(
+          (value) =>
+            value.type.kind !== "scalar" || value.type.scalar !== "string",
+        )
+      ) {
+        throw new LogicalPlanError([
+          {
+            code: "invalid-expression",
+            path: `${path}.values`,
+            message: "Text concatenation accepts only scalar strings.",
+          },
+        ]);
+      }
+      return {
+        type: scalar("string"),
+        nullable: values.some((value) => value.nullable),
+      };
+    }
     case "page-dimension": {
       const definition = semanticPageDimension(expression.dimension);
       const dependencyNames = expression.dependencies.map(
@@ -1175,6 +1207,9 @@ function logicalExpressionSlotReferences(expression: LogicalExpr): SlotId[] {
       case "bucket-index":
         visit(value.input);
         break;
+      case "text-concatenation":
+        value.values.forEach(visit);
+        break;
       case "page-dimension":
         value.dependencies.forEach((dependency) =>
           visit(dependency.expression),
@@ -1288,7 +1323,8 @@ function validateNode(
             node.selection.profile !== "prepared-page-reader-window-v1" &&
             node.selection.profile !== "prepared-scoped-reader-window-v1" &&
             node.selection.profile !== "direct-page-analytics-v1" &&
-            node.selection.profile !== "direct-page-session-compat-v1") ||
+            node.selection.profile !== "direct-page-session-compat-v1" &&
+            node.selection.profile !== "direct-page-entity-only-compat-v1") ||
           (node.entity === "event" &&
             (node.selection.profile === "direct-page-analytics-v1" ||
               node.selection.profile === "prepared-page-reader-window-v1"))
@@ -2061,11 +2097,11 @@ function validateNode(
     case "anti-join": {
       const left = assertRelation(node.left, states, `${path}.left`);
       const right = assertRelation(node.right, states, `${path}.right`);
-      if (left.grain.kind === "bag" || right.grain.kind === "bag")
+      if (right.grain.kind === "bag")
         fail(
           "invalid-grain",
           path,
-          "Membership joins cannot consume bag-grain relations.",
+          "Membership joins cannot use a bag-grain right relation.",
         );
       validateJoinKeys(left, right, node.keys, `${path}.keys`);
       expectedOutput = left.node.output;

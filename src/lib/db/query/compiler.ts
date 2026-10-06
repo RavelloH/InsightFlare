@@ -4,6 +4,7 @@ import {
 } from "@/lib/db/d1-budget";
 import {
   concat,
+  getParameterPlaceholderOffsets,
   join,
   parameter,
   parenthesize,
@@ -29,8 +30,10 @@ import {
   hasSamePhysicalMembershipOptimization,
   lowerLogicalPlan,
   optimizePhysicalMembershipBudget,
+  optimizePhysicalParameterSlots,
   type PassthroughProjectFusion,
   type PhysicalMembershipUsage,
+  type PhysicalParameterSlotLayout,
   type PhysicalQueryPlan,
   type PhysicalTextRowStrategy,
   type PhysicalTextRowUsage,
@@ -1749,12 +1752,76 @@ function compileAndBudget(
       "invalid_plan",
       "Physical membership strategy binding cost does not match its SQL",
     );
+  let finalQuery = query;
+  let finalShape = shape;
+  if (shape !== undefined) {
+    const parameterLayout = optimizePhysicalParameterSlots(query.bindings);
+    if (parameterLayout) {
+      const numberedQuery = renderNumberedParameterSlots(
+        query,
+        parameterLayout,
+      );
+      if (numberedQuery) {
+        finalQuery = numberedQuery;
+        finalShape = withParameterSlotShape(shape, parameterLayout);
+      }
+    }
+  }
   const statement: DatabaseStatement = {
-    sql: query.text,
-    bindings: query.bindings,
-    ...(shape === undefined ? {} : { physicalPlanShape: shape }),
+    sql: finalQuery.text,
+    bindings: finalQuery.bindings,
+    ...(finalShape === undefined ? {} : { physicalPlanShape: finalShape }),
     ...(options.tag === undefined ? {} : { tag: options.tag }),
   };
   assertD1StatementBudget(statement);
   return { ...statement, kind: "query" };
+}
+
+function renderNumberedParameterSlots(
+  query: SqlFragment,
+  layout: PhysicalParameterSlotLayout,
+): SqlFragment | undefined {
+  const offsets = getParameterPlaceholderOffsets(query);
+  if (
+    offsets === undefined ||
+    offsets.length !== query.bindings.length ||
+    offsets.length !== layout.occurrenceSlots.length
+  )
+    return undefined;
+
+  const sql: string[] = [];
+  let copiedThrough = 0;
+  for (let index = 0; index < offsets.length; index += 1) {
+    const offset = offsets[index]!;
+    if (
+      !Number.isInteger(offset) ||
+      offset < copiedThrough ||
+      query.text[offset] !== "?"
+    )
+      return undefined;
+    sql.push(query.text.slice(copiedThrough, offset));
+    sql.push(`?${layout.occurrenceSlots[index]!}`);
+    copiedThrough = offset + 1;
+  }
+  sql.push(query.text.slice(copiedThrough));
+  return { text: sql.join(""), bindings: layout.bindings };
+}
+
+function withParameterSlotShape(
+  shape: DatabasePhysicalPlanShape,
+  layout: PhysicalParameterSlotLayout,
+): DatabasePhysicalPlanShape {
+  return {
+    version: 3,
+    cteCount: shape.cteCount,
+    directScanProjectionCount: shape.directScanProjectionCount,
+    nativeMembershipCount: shape.nativeMembershipCount,
+    jsonMembershipCount: shape.jsonMembershipCount,
+    nativeRowRelationCount:
+      shape.version === 1 ? 0 : shape.nativeRowRelationCount,
+    jsonRowRelationCount: shape.version === 1 ? 0 : shape.jsonRowRelationCount,
+    parameterStrategy: layout.strategy,
+    parameterOccurrenceCount: layout.occurrenceCount,
+    parameterSlotCount: layout.slotCount,
+  };
 }

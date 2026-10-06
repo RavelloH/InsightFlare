@@ -11,6 +11,7 @@ import {
   D1_MAX_SQL_UTF8_BYTES,
   eq,
   inList,
+  lowerLogicalPlan,
   param,
   project,
   scan,
@@ -577,6 +578,90 @@ function evaluateCandidateRestrictedSets(
 }
 
 describe("Analytics native Page/Event primitive → Session D1 lowering", () => {
+  it("preserves duplicate, null, and unmatched rows on bag membership joins", async () => {
+    const db = createMigratedDatabase();
+    try {
+      const { siteA } = setupSites(db);
+      addPage(db, siteA, "membership-bag-page", "s-match", 110, "/match");
+
+      const context = {
+        subject: createSemanticSubjectDomain({
+          origin: "site",
+          siteIds: [SITE_A as never],
+        }),
+        time: createSemanticTemporalDomains({
+          candidate: CANDIDATE_RANGE as never,
+          read: { kind: "bounded", range: READ_RANGE as never },
+          reportingTimeZone: "UTC" as never,
+          capturedAtMs: 200 as never,
+        }),
+        scope: resolveAnalyticsScope("session"),
+      };
+      const builder = new LogicalPlanBuilder(context);
+      const pages = builder.source("page", {
+        temporalDomain: "candidate",
+        attributes: ["page.path"],
+      });
+      const path = builder.slot(pages, "attribute:page.path");
+      const string = { kind: "scalar", scalar: "string" } as const;
+      const matchedA = builder.project(pages, {
+        path: builder.literal("/match", string),
+      });
+      const matchedB = builder.project(pages, {
+        path: builder.literal("/match", string),
+      });
+      const unmatched = builder.project(pages, {
+        path: builder.literal("/missing", string),
+      });
+      const nullValue = builder.project(pages, {
+        path: builder.literal(null, string),
+      });
+      const left = builder.appendRows(
+        [matchedA, matchedB, unmatched, nullValue],
+        ["path"],
+      );
+      const matchingRight = builder.filter(
+        pages,
+        builder.compare("eq", path, builder.literal("/match", string)),
+      );
+      const included = builder.semiJoin(left, matchingRight, [
+        { left: "path", right: "attribute:page.path" },
+      ]);
+      const excluded = builder.antiJoin(left, matchingRight, [
+        { left: "path", right: "attribute:page.path" },
+      ]);
+      builder.output("included", included, [{ name: "path", slot: "path" }]);
+      builder.output("excluded", excluded, [{ name: "path", slot: "path" }]);
+      const plan = builder.finish();
+      const client = createD1DatabaseClient(createSqliteD1Database(db));
+      const run = async (outputId: string) => {
+        const output = plan.outputs.find((item) => item.id === outputId)!;
+        const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+          siteId: SITE_A,
+          time: plan.context.time,
+        });
+        const lowered = lowerer.lower(output);
+        const relation = lowerer.projectOutput(lowered, [
+          { name: "path", slot: output.fields[0]!.slot },
+        ]);
+        return (await client.all(compileD1Query(lowerLogicalPlan(relation))))
+          .results as Array<{ readonly path: string | null }>;
+      };
+
+      expect(await run("included")).toEqual([
+        { path: "/match" },
+        { path: "/match" },
+      ]);
+      const excludedRows = await run("excluded");
+      excludedRows.sort((leftRow, rightRow) =>
+        String(leftRow.path ?? "").localeCompare(String(rightRow.path ?? "")),
+      );
+      expect(excludedRows).toEqual([{ path: null }, { path: "/missing" }]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("compares complete entity identities in filters and rejects nullable identity equality", async () => {
     const db = createMigratedDatabase();
     try {

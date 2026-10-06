@@ -164,7 +164,18 @@ function shapeIsValid(
         Number.isInteger(shape.nativeRowRelationCount) &&
         shape.nativeRowRelationCount >= 0 &&
         Number.isInteger(shape.jsonRowRelationCount) &&
-        shape.jsonRowRelationCount >= 0)) &&
+        shape.jsonRowRelationCount >= 0) ||
+      (shape?.version === 3 &&
+        Number.isInteger(shape.nativeRowRelationCount) &&
+        shape.nativeRowRelationCount >= 0 &&
+        Number.isInteger(shape.jsonRowRelationCount) &&
+        shape.jsonRowRelationCount >= 0 &&
+        shape.parameterStrategy === "numbered-reuse" &&
+        Number.isSafeInteger(shape.parameterOccurrenceCount) &&
+        shape.parameterOccurrenceCount > 100 &&
+        Number.isSafeInteger(shape.parameterSlotCount) &&
+        shape.parameterSlotCount > 0 &&
+        shape.parameterSlotCount < shape.parameterOccurrenceCount)) &&
     Number.isInteger(shape.cteCount) &&
     shape.cteCount >= 0 &&
     Number.isInteger(shape.directScanProjectionCount) &&
@@ -194,8 +205,21 @@ async function physicalPlanHash(
       ]);
       return `v1:${await sha256Hex(payload)}`;
     }
+    if (shape.version === 2) {
+      const payload = JSON.stringify([
+        "d1-query-shape-v2",
+        statement.sql,
+        shape.cteCount,
+        shape.directScanProjectionCount,
+        shape.nativeMembershipCount,
+        shape.jsonMembershipCount,
+        shape.nativeRowRelationCount,
+        shape.jsonRowRelationCount,
+      ]);
+      return `v2:${await sha256Hex(payload)}`;
+    }
     const payload = JSON.stringify([
-      "d1-query-shape-v2",
+      "d1-query-shape-v3",
       statement.sql,
       shape.cteCount,
       shape.directScanProjectionCount,
@@ -203,8 +227,11 @@ async function physicalPlanHash(
       shape.jsonMembershipCount,
       shape.nativeRowRelationCount,
       shape.jsonRowRelationCount,
+      shape.parameterStrategy,
+      shape.parameterOccurrenceCount,
+      shape.parameterSlotCount,
     ]);
-    return `v2:${await sha256Hex(payload)}`;
+    return `v3:${await sha256Hex(payload)}`;
   } catch {
     return null;
   }

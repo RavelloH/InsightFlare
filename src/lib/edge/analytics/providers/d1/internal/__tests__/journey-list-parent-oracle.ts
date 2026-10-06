@@ -1,0 +1,785 @@
+// Test-only Wave69 parent snapshot: preserve the complete legacy list/scoped assembly as an oracle.
+import { compileD1Query, lowerLogicalPlan } from "@/lib/db";
+import {
+  createScopedFilterPlan,
+  EMPTY_FILTER_DOCUMENT,
+  type FilterDocument,
+  type FunnelConfigV2,
+} from "@/lib/edge/analytics/contract";
+import {
+  buildJourneyEventPageReportPlan,
+  JOURNEY_EVENT_PAGE_REPORT_OUTPUT,
+} from "@/lib/edge/analytics/engine/journey-event-page-report-plan";
+import { buildJourneyTargetPresencePlan } from "@/lib/edge/analytics/engine/journey-target-presence-plan";
+import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
+import type {
+  JourneyEventRow,
+  ListSort,
+  QueryWindow,
+  SessionListSortKey,
+  SessionRow,
+  VisitorListSortKey,
+  VisitorRow,
+} from "@/lib/edge/analytics/providers/d1/internal/core";
+import {
+  browserMajorVersionExpr,
+  buildCustomEventSourceCte,
+  buildVisitFilterSql,
+  buildVisitSourceCte,
+  DEFAULT_SESSION_LIST_SORT,
+  DEFAULT_VISITOR_LIST_SORT,
+  eventSourceBindings,
+  queryD1All,
+  queryD1CompiledAll,
+  visitSourceBindings,
+} from "@/lib/edge/analytics/providers/d1/internal/core";
+import { queryJourneyPageReportRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-page-report-query";
+import { currentD1Operation } from "@/lib/edge/observability/logger";
+import type { Env } from "@/lib/edge/types";
+import { pageResult } from "@/lib/pagination";
+
+import {
+  buildSessionAggregationSql,
+  buildVisitorAggregationSql,
+} from "./journey-list-parent-aggregation-oracle";
+import { buildFunnelMembershipSqlPlan } from "./journey-list-parent-funnel-oracle";
+import {
+  buildJourneySearchSql,
+  mapJourneyEventRow,
+  mapSessionRow,
+  mapVisitorRow,
+  sessionListOrderBy,
+  visitorListOrderBy,
+  whereClauseWithTarget,
+} from "./journey-list-parent-helpers-oracle";
+import type { ScopedDatasetSql } from "./journey-list-parent-scoped-oracle";
+import {
+  applyObservationFilterToScopedDataset,
+  compileScopedDatasetSql,
+  scopedDatasetFor,
+  scopedDatasetForUnpreparedReader,
+} from "./journey-list-parent-scoped-oracle";
+export type JourneyListAnalysis =
+  | { readonly type: "goal"; readonly filter: FilterDocument }
+  | {
+      readonly type: "funnel";
+      readonly config: FunnelConfigV2;
+      readonly stepIndex: number;
+      readonly outcome?: "converted" | "dropoff";
+    };
+export interface VisitorListCursor {
+  sortValue: number;
+  lastSeenAt?: number;
+  visitorId: string;
+}
+export interface SessionListCursor {
+  sortValue: number;
+  startedAt?: number;
+  sessionId: string;
+}
+export interface VisitorListPage {
+  rows: VisitorRow[];
+  nextCursor: VisitorListCursor | null;
+}
+export interface SessionListPage {
+  rows: SessionRow[];
+  nextCursor: SessionListCursor | null;
+}
+export interface JourneyEventCursor {
+  readonly occurredAt: number;
+  readonly id: string;
+}
+export interface JourneyEventPage {
+  readonly items: readonly JourneyEventRow[];
+  readonly pagination: {
+    readonly limit: number;
+    readonly returned: number;
+    readonly hasMore: boolean;
+    readonly nextCursor: JourneyEventCursor | null;
+  };
+}
+/**
+ * Direct readers receive normalized filters without scoped-query metadata.
+ * Resolve filter/search membership first, then expand each matching entity to
+ * every visit in the window so aggregation is not limited to the hit row.
+ */
+function entityFilterCtes(
+  entity: "visitor" | "session",
+  filterClause: string,
+  searchCondition?: string,
+): string {
+  const column = entity === "visitor" ? "visitor_id" : "session_id";
+  const entityRelation =
+    entity === "visitor"
+      ? "visitor_filter_entities"
+      : "session_filter_entities";
+  return `${entityRelation} AS (
+  SELECT DISTINCT visit_source.${column}
+  FROM visit_source
+  ${filterClause}
+    AND visit_source.${column} != ''
+    ${searchCondition ? `AND ${searchCondition}` : ""}
+),
+filtered_visits AS (
+  SELECT v.*, 1 AS is_visit_observation
+  FROM visit_source v
+  INNER JOIN ${entityRelation} entity_ids
+    ON entity_ids.${column} = v.${column}
+)`;
+}
+const EVENT_ONLY_VISIT_PROJECTION = `
+    e.visit_id,
+    e.site_id,
+    e.site_pk,
+    e.visitor_id,
+    e.session_id,
+    NULL,
+    e.occurred_at,
+    e.occurred_at,
+    e.occurred_at,
+    e.occurred_at,
+    NULL,
+    NULL,
+    NULL,
+    e.pathname,
+    e.query_string,
+    e.hash_fragment,
+    e.hostname,
+    e.title,
+    e.referrer_url,
+    e.referrer_host,
+    e.utm_source,
+    e.utm_medium,
+    e.utm_campaign,
+    e.utm_term,
+    e.utm_content,
+    NULL,
+    e.country,
+    e.region,
+    e.region_code,
+    e.city,
+    e.continent,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    e.timezone,
+    e.as_organization,
+    NULL,
+    e.browser,
+    e.browser_version,
+    e.os,
+    e.os_version,
+    e.device_type,
+    e.screen_width,
+    e.screen_height,
+    e.language,
+    e.user_id,
+    e.user_name,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    0 AS is_visit_observation`;
+function scopedAggregationFilteredVisitsCte(
+  dataset: ScopedDatasetSql,
+  entity: "visitor" | "session",
+  targetClause: string,
+): string {
+  const column = entity === "visitor" ? "visitor_id" : "session_id";
+  const eventTargetClause = targetClause || "";
+  return `filtered_visits AS (
+  SELECT v.*, 1 AS is_visit_observation
+  FROM ${dataset.visitRelation} v
+  ${targetClause}
+  UNION ALL
+  SELECT ${EVENT_ONLY_VISIT_PROJECTION}
+  FROM ${dataset.eventRelation} e
+  INNER JOIN ${entity === "visitor" ? dataset.visitorRelation : dataset.sessionRelation} entity_ids
+    ON entity_ids.site_pk = e.site_pk
+   AND entity_ids.${column} = e.${column}
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM ${dataset.visitRelation} existing_visit
+    WHERE existing_visit.site_pk = e.site_pk
+      AND existing_visit.${column} = e.${column}
+  )
+  ${eventTargetClause ? eventTargetClause.replace(/^WHERE\s+/i, "AND ") : ""}
+)`;
+}
+function baseAnalysisDataset(
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  entity: "visitor" | "session",
+): ScopedDatasetSql {
+  const prepared = scopedDatasetFor(siteId, window, filters);
+  if (prepared) return prepared;
+
+  if (filters.root !== null) {
+    const compatibility = scopedDatasetForUnpreparedReader(
+      "goal-summary",
+      siteId,
+      window,
+      filters,
+      entity,
+    );
+    if (compatibility) return compatibility;
+  }
+
+  const plan = createScopedFilterPlan(
+    "goal-summary",
+    EMPTY_FILTER_DOCUMENT,
+    "event",
+  );
+  if (!plan) throw new Error("analysis_scope_unavailable");
+  return compileScopedDatasetSql({
+    filters: EMPTY_FILTER_DOCUMENT,
+    plan,
+    siteIds: [siteId],
+    window,
+  });
+}
+function analysisEntityDataset(
+  base: ScopedDatasetSql,
+  membership: {
+    readonly ctes: string;
+    readonly bindings: readonly { readonly value: string | number | null }[];
+    readonly relation: string;
+    readonly column: "session_id" | "visitor_id";
+  },
+): ScopedDatasetSql {
+  const prefix = "journey_analysis";
+  const ids = `${prefix}_entity_ids`;
+  const visits = `${prefix}_visits`;
+  const events = `${prefix}_events`;
+  const sessions = `${prefix}_sessions`;
+  const visitors = `${prefix}_visitors`;
+  const ctes = `
+${base.ctes},
+${membership.ctes},
+${ids} AS (
+  SELECT DISTINCT site_pk, ${membership.column} AS entity_id
+  FROM ${membership.relation}
+  WHERE site_pk IS NOT NULL
+    AND TRIM(COALESCE(${membership.column}, '')) != ''
+),
+${visits} AS (
+  SELECT source.*
+  FROM ${base.visitRelation} source
+  INNER JOIN ${ids} matching
+    ON matching.site_pk = source.site_pk
+   AND matching.entity_id = source.${membership.column}
+),
+${events} AS (
+  SELECT source.*
+  FROM ${base.eventRelation} source
+  INNER JOIN ${ids} matching
+    ON matching.site_pk = source.site_pk
+   AND matching.entity_id = source.${membership.column}
+),
+${sessions} AS (
+  SELECT DISTINCT site_pk, session_id
+  FROM ${visits}
+  WHERE TRIM(COALESCE(session_id, '')) != ''
+  UNION
+  SELECT DISTINCT site_pk, session_id
+  FROM ${events}
+  WHERE TRIM(COALESCE(session_id, '')) != ''
+),
+${visitors} AS (
+  SELECT DISTINCT site_pk, visitor_id
+  FROM ${visits}
+  WHERE TRIM(COALESCE(visitor_id, '')) != ''
+  UNION
+  SELECT DISTINCT site_pk, visitor_id
+  FROM ${events}
+  WHERE TRIM(COALESCE(visitor_id, '')) != ''
+)`;
+  return {
+    ctes,
+    bindings: [...base.bindings, ...membership.bindings],
+    visitRelation: visits,
+    eventRelation: events,
+    sessionRelation: sessions,
+    visitorRelation: visitors,
+    scope: base.scope,
+  };
+}
+function analysisDatasetFor(
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  analysis: JourneyListAnalysis,
+  entity: "visitor" | "session",
+): ScopedDatasetSql {
+  const base = baseAnalysisDataset(siteId, window, filters, entity);
+  if (analysis.type === "goal") {
+    const matched = applyObservationFilterToScopedDataset(
+      base,
+      analysis.filter,
+      "journey_analysis_goal",
+    );
+    return analysisEntityDataset(base, {
+      ctes: matched.ctes,
+      bindings: matched.bindings,
+      relation:
+        entity === "visitor"
+          ? matched.visitorRelation
+          : matched.sessionRelation,
+      column: entity === "visitor" ? "visitor_id" : "session_id",
+    });
+  }
+
+  const funnel = buildFunnelMembershipSqlPlan(
+    analysis.config,
+    base,
+    analysis.stepIndex,
+    {
+      allowHistoricalOverLimit: true,
+      outcome: analysis.outcome,
+    },
+  );
+  return analysisEntityDataset(base, {
+    ctes: funnel.ctes,
+    bindings: funnel.bindings,
+    relation: funnel.relation,
+    column: funnel.identity,
+  });
+}
+/**
+ * Establishes a target's site/window scope before reading its trajectory.
+ * Empty trajectories are valid. Presence is established from the unfiltered
+ * observation universe, so a target with only an in-window custom event (or a
+ * session whose visit began before the window) is still a real target.
+ */
+export async function queryJourneyTargetExistsFromD1(
+  env: Env,
+  siteId: string,
+  target: { readonly type: "visitor" | "session"; readonly value: string },
+  window: QueryWindow,
+): Promise<boolean> {
+  const logicalPlan = buildJourneyTargetPresencePlan({
+    siteId,
+    target,
+    window,
+  });
+  const output = logicalPlan.outputs[0];
+  if (!output || output.fields.length !== 1)
+    throw new Error("journey_target_presence_output_invalid");
+  const lowerer = new AnalyticsLogicalToDbLowerer(logicalPlan, {
+    siteId,
+    time: logicalPlan.context.time,
+  });
+  const lowered = lowerer.lower(output);
+  const relation = lowerer.projectOutput(lowered, [
+    { name: "present", slot: output.fields[0]!.slot },
+  ]);
+  const query = compileD1Query(lowerLogicalPlan(relation), {
+    tag: currentD1Operation() ?? "analytics.query.all",
+  });
+  const rows = await queryD1CompiledAll(env, query);
+  return rows.length > 0;
+}
+function visitorCursorFromRow(
+  row: VisitorRow,
+  sort: ListSort<VisitorListSortKey>,
+): VisitorListCursor {
+  return sort.key === "lastSeenAt"
+    ? { sortValue: row.lastSeenAt, visitorId: row.visitorId }
+    : {
+        sortValue: row[sort.key],
+        lastSeenAt: row.lastSeenAt,
+        visitorId: row.visitorId,
+      };
+}
+function sessionCursorFromRow(
+  row: SessionRow,
+  sort: ListSort<SessionListSortKey>,
+): SessionListCursor {
+  return sort.key === "startedAt"
+    ? { sortValue: row.startedAt, sessionId: row.sessionId }
+    : {
+        sortValue: sort.key === "durationMs" ? row.durationMs : row[sort.key],
+        startedAt: row.startedAt,
+        sessionId: row.sessionId,
+      };
+}
+function visitorCursorFilter(
+  cursor: VisitorListCursor,
+  sort: ListSort<VisitorListSortKey>,
+): { clause: string; bindings: Array<string | number> } {
+  const column: Record<VisitorListSortKey, string> = {
+    firstSeenAt: "vm.firstSeenAt",
+    lastSeenAt: "vm.lastSeenAt",
+    sessions: "vm.sessions",
+    views: "vm.views",
+  };
+  const primary = column[sort.key];
+  const operator = sort.direction === "asc" ? ">" : "<";
+  if (sort.key === "lastSeenAt") {
+    return {
+      clause: `AND (${primary} ${operator} ? OR (${primary} = ? AND vm.visitor_id > ?))`,
+      bindings: [cursor.sortValue, cursor.sortValue, cursor.visitorId],
+    };
+  }
+  return {
+    clause: `AND (
+  ${primary} ${operator} ?
+  OR (${primary} = ? AND (vm.lastSeenAt < ? OR (vm.lastSeenAt = ? AND vm.visitor_id > ?)))
+)`,
+    bindings: [
+      cursor.sortValue,
+      cursor.sortValue,
+      cursor.lastSeenAt!,
+      cursor.lastSeenAt!,
+      cursor.visitorId,
+    ],
+  };
+}
+function sessionCursorFilter(
+  cursor: SessionListCursor,
+  sort: ListSort<SessionListSortKey>,
+): { clause: string; bindings: Array<string | number> } {
+  const column: Record<SessionListSortKey, string> = {
+    startedAt: "sm.startedAt",
+    durationMs: "sm.totalDurationMs",
+    views: "sm.views",
+  };
+  const primary = column[sort.key];
+  const operator = sort.direction === "asc" ? ">" : "<";
+  if (sort.key === "startedAt") {
+    return {
+      clause: `AND (${primary} ${operator} ? OR (${primary} = ? AND sm.session_id > ?))`,
+      bindings: [cursor.sortValue, cursor.sortValue, cursor.sessionId],
+    };
+  }
+  return {
+    clause: `AND (
+  ${primary} ${operator} ?
+  OR (${primary} = ? AND (sm.startedAt < ? OR (sm.startedAt = ? AND sm.session_id > ?)))
+)`,
+    bindings: [
+      cursor.sortValue,
+      cursor.sortValue,
+      cursor.startedAt!,
+      cursor.startedAt!,
+      cursor.sessionId,
+    ],
+  };
+}
+export async function queryVisitorsFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  limit: number,
+  targetVisitorId?: string,
+  sort: ListSort<VisitorListSortKey> = DEFAULT_VISITOR_LIST_SORT,
+  search?: string,
+): Promise<VisitorRow[]> {
+  const rows: VisitorRow[] = [];
+  let cursor: VisitorListCursor | null = null;
+  const pageLimit = Math.max(1, Math.min(200, Math.trunc(limit)));
+  while (rows.length < limit) {
+    const page = await queryVisitorListPageFromD1(
+      env,
+      siteId,
+      window,
+      filters,
+      {
+        limit: pageLimit,
+        sort,
+        search,
+        cursor,
+      },
+    );
+    const candidates = targetVisitorId
+      ? page.rows.filter((row) => row.visitorId === targetVisitorId)
+      : page.rows;
+    rows.push(...candidates.slice(0, limit - rows.length));
+    if (rows.length >= limit || !page.nextCursor) break;
+    cursor = page.nextCursor;
+  }
+  return rows;
+}
+export async function queryVisitorListPageFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  options: {
+    limit: number;
+    sort: ListSort<VisitorListSortKey>;
+    search?: string;
+    cursor?: VisitorListCursor | null;
+    analysis?: JourneyListAnalysis;
+  },
+): Promise<VisitorListPage> {
+  const scopedDataset = options.analysis
+    ? analysisDatasetFor(siteId, window, filters, options.analysis, "visitor")
+    : scopedDatasetFor(siteId, window, filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
+  const searchSql = buildJourneySearchSql(options.search);
+  const hasFilters = !scopedDataset && filters.root !== null;
+  const expandEntities = hasFilters;
+  const searchCte = searchSql
+    ? `,
+visitor_search_entities AS (
+  SELECT DISTINCT visitor_id
+  FROM filtered_visits
+  WHERE visitor_id != '' AND ${searchSql.condition}
+)`
+    : "";
+  const searchWhere = searchSql
+    ? "AND fv.visitor_id IN (SELECT visitor_id FROM visitor_search_entities)"
+    : "";
+  const cursor = options.cursor
+    ? visitorCursorFilter(options.cursor, options.sort)
+    : { clause: "", bindings: [] };
+  const sql = `
+WITH
+${scopedDataset?.ctes ?? `${buildVisitSourceCte()},\n${buildCustomEventSourceCte()}`},
+${scopedDataset ? `event_source AS (SELECT * FROM ${scopedDataset.eventRelation}),` : ""}
+${
+  scopedDataset
+    ? scopedAggregationFilteredVisitsCte(scopedDataset, "visitor", "")
+    : expandEntities
+      ? entityFilterCtes("visitor", filter?.clause ?? "", searchSql?.condition)
+      : `filtered_visits AS (
+  SELECT visit_source.*, 1 AS is_visit_observation
+  FROM visit_source
+  ${filter?.clause ?? ""}
+  )`
+}
+${expandEntities ? "" : searchCte},
+${buildVisitorAggregationSql({
+  searchWhere: expandEntities ? "" : searchWhere,
+  browserVersionExpression: browserMajorVersionExpr(),
+  cursorWhere: cursor.clause,
+  orderBy: visitorListOrderBy(options.sort),
+  limitOffset: "LIMIT ?",
+})}`;
+  const records = await queryD1All<Record<string, unknown>>(env, sql, [
+    ...(scopedDataset
+      ? scopedDataset.bindings.map((binding) => binding.value)
+      : [
+          ...visitSourceBindings(siteId, window),
+          ...eventSourceBindings(siteId, window),
+        ]),
+    ...(filter?.bindings ?? []),
+    ...(searchSql?.bindings ?? []),
+    ...cursor.bindings,
+    options.limit + 1,
+  ]);
+  const hasMore = records.length > options.limit;
+  const pageRecords = hasMore ? records.slice(0, options.limit) : records;
+  const rows = pageRecords.map(mapVisitorRow);
+  const lastRow = rows.at(-1);
+  return {
+    rows,
+    nextCursor:
+      hasMore && lastRow ? visitorCursorFromRow(lastRow, options.sort) : null,
+  };
+}
+export async function querySessionsFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  limit: number,
+  target?: { type: "visitor" | "session"; value: string },
+  sort: ListSort<SessionListSortKey> = DEFAULT_SESSION_LIST_SORT,
+  search?: string,
+): Promise<SessionRow[]> {
+  const rows: SessionRow[] = [];
+  let cursor: SessionListCursor | null = null;
+  const pageLimit = Math.max(1, Math.min(200, Math.trunc(limit)));
+  while (rows.length < limit) {
+    const page = await querySessionListPageFromD1(
+      env,
+      siteId,
+      window,
+      filters,
+      {
+        limit: pageLimit,
+        sort,
+        search,
+        cursor,
+        target,
+      },
+    );
+    rows.push(...page.rows.slice(0, limit - rows.length));
+    if (rows.length >= limit || !page.nextCursor) break;
+    cursor = page.nextCursor;
+  }
+  return rows;
+}
+export async function querySessionListPageFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  options: {
+    limit: number;
+    sort: ListSort<SessionListSortKey>;
+    search?: string;
+    cursor?: SessionListCursor | null;
+    target?: { readonly type: "visitor" | "session"; readonly value: string };
+    analysis?: JourneyListAnalysis;
+  },
+  executeOffline?: (
+    sql: string,
+    bindings: Array<string | number | null>,
+  ) => Promise<Record<string, unknown>[]>,
+): Promise<SessionListPage> {
+  const scopedDataset = options.analysis
+    ? analysisDatasetFor(siteId, window, filters, options.analysis, "session")
+    : scopedDatasetFor(siteId, window, filters);
+  const filter = scopedDataset
+    ? null
+    : buildVisitFilterSql(filters, "visit_source", { window });
+  const searchSql = buildJourneySearchSql(options.search);
+  const hasFilters = !scopedDataset && filters.root !== null;
+  const expandEntities = hasFilters;
+  const searchCte = searchSql
+    ? `,
+session_search_entities AS (
+  SELECT DISTINCT session_id
+  FROM filtered_visits
+  WHERE session_id != '' AND ${searchSql.condition}
+)`
+    : "";
+  const searchWhere = searchSql
+    ? "AND fv.session_id IN (SELECT session_id FROM session_search_entities)"
+    : "";
+  const cursor = options.cursor
+    ? sessionCursorFilter(options.cursor, options.sort)
+    : { clause: "", bindings: [] };
+  const targetColumn =
+    options.target?.type === "visitor"
+      ? "visitor_id"
+      : options.target?.type === "session"
+        ? "session_id"
+        : "";
+  const targetClause = options.target
+    ? scopedDataset
+      ? `WHERE ${targetColumn} = ?`
+      : whereClauseWithTarget(filter?.clause ?? "", {
+          column: targetColumn,
+          value: options.target.value,
+        })
+    : (filter?.clause ?? "");
+  const sql = `
+WITH
+${scopedDataset?.ctes ?? `${buildVisitSourceCte()},\n${buildCustomEventSourceCte()}`},
+${scopedDataset ? `event_source AS (SELECT * FROM ${scopedDataset.eventRelation}),` : ""}
+${
+  scopedDataset
+    ? scopedAggregationFilteredVisitsCte(scopedDataset, "session", targetClause)
+    : expandEntities
+      ? entityFilterCtes("session", targetClause, searchSql?.condition)
+      : `filtered_visits AS (
+  SELECT visit_source.*, 1 AS is_visit_observation
+  FROM visit_source
+  ${targetClause}
+  )`
+}
+${expandEntities ? "" : searchCte},
+${buildSessionAggregationSql({
+  searchWhere: expandEntities ? "" : searchWhere,
+  browserVersionExpression: browserMajorVersionExpr(),
+  cursorWhere: cursor.clause,
+  orderBy: sessionListOrderBy(options.sort),
+  limitOffset: "LIMIT ?",
+})}`;
+  const bindings = [
+    ...(scopedDataset
+      ? scopedDataset.bindings.map((binding) => binding.value)
+      : [
+          ...visitSourceBindings(siteId, window),
+          ...eventSourceBindings(siteId, window),
+        ]),
+    ...(scopedDataset && options.target
+      ? [options.target.value, options.target.value]
+      : options.target
+        ? [options.target.value]
+        : []),
+    ...(filter?.bindings ?? []),
+    ...(searchSql?.bindings ?? []),
+    ...cursor.bindings,
+    options.limit + 1,
+  ];
+  const records = executeOffline
+    ? await executeOffline(sql, bindings)
+    : await queryD1All<Record<string, unknown>>(env, sql, bindings);
+  const hasMore = records.length > options.limit;
+  const pageRecords = hasMore ? records.slice(0, options.limit) : records;
+  const rows = pageRecords.map(mapSessionRow);
+  const lastRow = rows.at(-1);
+  return {
+    rows,
+    nextCursor:
+      hasMore && lastRow ? sessionCursorFromRow(lastRow, options.sort) : null,
+  };
+}
+export async function queryJourneyEventsPageFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  target: { type: "visitor" | "session"; value: string },
+  limit: number,
+  cursor?: JourneyEventCursor | null,
+): Promise<JourneyEventPage> {
+  const plan = buildJourneyEventPageReportPlan({
+    siteId,
+    window,
+    filters,
+    target,
+    limit,
+    cursor,
+  });
+  const rows = await queryJourneyPageReportRowsFromD1(
+    env,
+    plan,
+    JOURNEY_EVENT_PAGE_REPORT_OUTPUT,
+  );
+  const mapped = rows.map(mapJourneyEventRow);
+  const page = pageResult(mapped, limit);
+  const last = page.last;
+  return {
+    items: page.rows,
+    pagination: {
+      limit,
+      returned: page.rows.length,
+      hasMore: page.hasMore,
+      nextCursor:
+        page.hasMore && last
+          ? { occurredAt: last.occurredAt, id: last.id }
+          : null,
+    },
+  };
+}
+export async function queryJourneyEventsFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  target: { type: "visitor" | "session"; value: string },
+  limit: number,
+): Promise<JourneyEventRow[]> {
+  const page = await queryJourneyEventsPageFromD1(
+    env,
+    siteId,
+    window,
+    filters,
+    target,
+    limit,
+  );
+  return [...page.items];
+}

@@ -15,6 +15,7 @@ import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semanti
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
 import {
   AnalyticsLegacyScopedStorage,
+  entityQualificationCacheKey,
   pageEventOwnerPairCacheKey,
 } from "@/lib/edge/analytics/providers/d1/internal/analytics-legacy-scoped-storage";
 import type {
@@ -266,6 +267,147 @@ describe("legacy scoped Event storage guards", () => {
             siteIds: [SITE_ID as never, OTHER_SITE_ID as never],
           }),
         ),
+      ),
+    ).toBeNull();
+  });
+
+  it("keys shared entity qualification by the complete candidate selection", () => {
+    const direct = selection(
+      "direct-page-session-compat-v1",
+      sessionFactFilter(),
+    );
+    const key = entityQualificationCacheKey(direct, "candidate");
+    expect(key).not.toBeNull();
+    expect(entityQualificationCacheKey(direct, "filter")).toBeNull();
+    expect(entityQualificationCacheKey(direct, "read")).toBeNull();
+
+    expect(
+      entityQualificationCacheKey(
+        selection("direct-page-session-compat-v1", sessionFactFilter(), {
+          origin: "site",
+          siteIds: [OTHER_SITE_ID as never],
+        }),
+        "candidate",
+      ),
+    ).not.toBe(key);
+    expect(
+      entityQualificationCacheKey(
+        selection(
+          "direct-page-session-compat-v1",
+          sessionFactFilter(),
+          undefined,
+          semanticTemporalDomainsFromQueryTime(
+            createQueryTime(1, 101, "UTC", 101),
+          ),
+        ),
+        "candidate",
+      ),
+    ).not.toBe(key);
+    expect(
+      entityQualificationCacheKey(
+        selection(
+          "direct-page-session-compat-v1",
+          normalizeFilterDocument(
+            {
+              version: 1,
+              root: {
+                kind: "condition",
+                target: { kind: "field", field: "session.views" },
+                operator: "gte",
+                value: 2,
+              },
+            } as never,
+            analyticsFilterRegistry,
+          ),
+        ),
+        "candidate",
+      ),
+    ).not.toBe(key);
+    expect(
+      entityQualificationCacheKey(
+        { ...direct, entityKind: "visitor" },
+        "candidate",
+      ),
+    ).not.toBe(key);
+    expect(
+      entityQualificationCacheKey(
+        { ...direct, authorizedSiteIds: [SITE_ID, OTHER_SITE_ID] },
+        "candidate",
+      ),
+    ).not.toBe(key);
+    expect(
+      entityQualificationCacheKey(
+        {
+          ...direct,
+          preparedMatches: {
+            identities: [{ siteId: SITE_ID, kind: "session", id: "one" }],
+          },
+        },
+        "candidate",
+      ),
+    ).not.toBe(key);
+    expect(
+      entityQualificationCacheKey(
+        {
+          ...direct,
+          preparedMatches: {
+            identities: [
+              { siteId: SITE_ID, kind: "session", id: "one" },
+              { siteId: SITE_ID, kind: "session", id: "two" },
+            ],
+          },
+        },
+        "candidate",
+      ),
+    ).not.toBe(
+      entityQualificationCacheKey(
+        {
+          ...direct,
+          preparedMatches: {
+            identities: [{ siteId: SITE_ID, kind: "session", id: "one" }],
+          },
+        },
+        "candidate",
+      ),
+    );
+    expect(
+      entityQualificationCacheKey(
+        {
+          ...direct,
+          profile: "prepared-scoped-reader-window-v1",
+          preparationTime: TIME,
+        },
+        "candidate",
+      ),
+    ).not.toBe(key);
+    expect(
+      entityQualificationCacheKey(
+        {
+          ...direct,
+          eventNameGate: {
+            value: "signup",
+            semantics: "prepared-defined-raw-value-v1",
+          },
+        },
+        "candidate",
+      ),
+    ).toBeNull();
+    expect(
+      entityQualificationCacheKey(
+        {
+          ...direct,
+          postObservationFilter: {
+            semantics: "legacy-projected-observation-v1",
+            filter: EMPTY_FILTER_DOCUMENT,
+          },
+        },
+        "candidate",
+      ),
+    ).toBeNull();
+    expect(
+      entityQualificationCacheKey(
+        { ...direct, profile: "direct-page-entity-only-compat-v1" },
+        "candidate",
       ),
     ).toBeNull();
   });

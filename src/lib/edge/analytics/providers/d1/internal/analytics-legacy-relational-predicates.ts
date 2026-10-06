@@ -183,8 +183,22 @@ function payloadValueColumn(
 function payloadRows(source: LegacyEventRow, path: string) {
   const values = schema.custom_event_json_values;
   const paths = schema.custom_event_json_paths;
-  const valueRows = scan(values);
-  const pathRows = scan(paths);
+  const valueScan = scan(values);
+  const valueRows = project(valueScan, {
+    event_pk: valueScan.columns.event_pk,
+    site_pk: valueScan.columns.site_pk,
+    path_id: valueScan.columns.path_id,
+    value_type: valueScan.columns.value_type,
+    string_value: valueScan.columns.string_value,
+    number_value: valueScan.columns.number_value,
+    boolean_value: valueScan.columns.boolean_value,
+  });
+  const pathScan = scan(paths);
+  const pathRows = project(pathScan, {
+    id: pathScan.columns.id,
+    site_pk: pathScan.columns.site_pk,
+    path: pathScan.columns.path,
+  });
   const valuesWithPaths = join(
     valueRows,
     pathRows,

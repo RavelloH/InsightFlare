@@ -97,6 +97,12 @@ export interface LogicalNumberReportTextExpression {
   readonly semantics: "legacy-report-number-v1";
 }
 
+/** Ordered scalar text concatenation; NULL propagates unless callers coalesce it. */
+export interface LogicalTextConcatenationExpression {
+  readonly kind: "text-concatenation";
+  readonly values: readonly LogicalExpr[];
+}
+
 export interface LogicalPageDimensionExpression {
   readonly kind: "page-dimension";
   readonly dimension: SemanticPageDimensionId;
@@ -166,6 +172,7 @@ export type LogicalExpr =
   | LogicalStringMatchExpression
   | LogicalStringNormalizeExpression
   | LogicalNumberReportTextExpression
+  | LogicalTextConcatenationExpression
   | LogicalPageDimensionExpression
   | LogicalArithmeticExpression
   | LogicalAbsoluteExpression

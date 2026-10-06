@@ -100,6 +100,8 @@ function expression(value: LogicalExpr): string {
       return `NORMALIZE_STRING<${value.normalization}>(${expression(value.input)})`;
     case "number-report-text":
       return `NUMBER_REPORT_TEXT<${value.semantics}>(${expression(value.input)})`;
+    case "text-concatenation":
+      return `CONCAT_TEXT(${value.values.map(expression).join(", ")})`;
     case "page-dimension":
       return `PAGE_DIMENSION<${value.dimension}>(${value.dependencies.map((dependency) => `${dependency.attribute}=${expression(dependency.expression)}`).join(", ")})`;
     case "arithmetic":

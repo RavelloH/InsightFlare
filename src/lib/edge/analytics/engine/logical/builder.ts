@@ -566,6 +566,15 @@ export class LogicalPlanBuilder {
     });
   }
 
+  concatText(
+    ...values: readonly LogicalExpressionHandle[]
+  ): LogicalExpressionHandle {
+    return this.#expression({
+      kind: "text-concatenation",
+      values: values.map((value) => value.expression),
+    });
+  }
+
   pageDimension(
     dimension: SemanticPageDimensionId,
     dependencies: Readonly<Record<string, LogicalExpressionHandle>>,
@@ -1504,7 +1513,7 @@ export class LogicalPlanBuilder {
   ): LogicalRelationHandle {
     const leftState = this.#owned(left);
     this.#owned(right);
-    if (left.grain.kind === "bag" || right.grain.kind === "bag")
+    if (right.grain.kind === "bag")
       throw new Error("logical_builder_membership_join_requires_unique_grain");
     const keys = this.#joinKeys(left, right, namedKeys);
     const node = {
@@ -1654,6 +1663,9 @@ export class LogicalPlanBuilder {
         case "time-bucket":
         case "bucket-index":
           visit(value.input);
+          return;
+        case "text-concatenation":
+          value.values.forEach(visit);
           return;
         case "page-dimension":
           value.dependencies.forEach((dependency) =>

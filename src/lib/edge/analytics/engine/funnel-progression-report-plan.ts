@@ -1,7 +1,10 @@
 import {
   assertHistoricalFunnelConfigForAnalysis,
+  attachScopedFilterMetadata,
   createQueryTime,
+  createScopedFilterPlan,
   EMPTY_FILTER_DOCUMENT,
+  factEntityKindsForFilter,
   type FilterDocument,
   type FunnelConfigV2,
   parseFunnelStepFilter,
@@ -64,6 +67,7 @@ export function createFunnelProgressionSourceSelections(input: {
   readonly siteId: string;
   readonly window: QueryWindow;
   readonly filters: FilterDocument;
+  readonly preparedPlanOperation?: "visitors" | "sessions";
 }): FunnelProgressionSourceSelections {
   const metadata = scopedFilterMetadata(input.filters);
   const queryTime = createQueryTime(
@@ -83,6 +87,9 @@ export function createFunnelProgressionSourceSelections(input: {
     subject,
     time,
     ...(metadata ? { expectedPlan: metadata.plan } : {}),
+    ...(input.preparedPlanOperation
+      ? { preparedPlanOperation: input.preparedPlanOperation }
+      : {}),
   } as const;
   const profile = metadata
     ? ("prepared-scoped-reader-window-v1" as const)
@@ -116,6 +123,9 @@ function stepSelection(
     subject: base.subject,
     time: base.time,
     ...(expectedPlan ? { expectedPlan } : {}),
+    ...(base.profile === "direct-page-entity-only-compat-v1"
+      ? { compatibilityScope: base.entityKind! }
+      : {}),
     postObservationFilter: createSemanticPostObservationFilter({
       filter: { ...document, root: predicate.expression },
     }),
@@ -500,9 +510,25 @@ function assertProgressionBuilderContext(
   const expectedEventProfile = sources.expectedPlan
     ? "prepared-scoped-reader-window-v1"
     : "direct-event-analytics-v1";
-  const sourceProfilesMatch =
+  const standardSourceProfilesMatch =
     page.profile === expectedPageProfile &&
     event.profile === expectedEventProfile;
+  const journeyCompatibilityProfilesMatch =
+    !sources.expectedPlan &&
+    sources.filters.root !== null &&
+    factEntityKindsForFilter(sources.filters.root).size === 0 &&
+    page.profile === "direct-page-entity-only-compat-v1" &&
+    event.profile === "direct-page-entity-only-compat-v1" &&
+    page.mode === "entity" &&
+    event.mode === "entity" &&
+    (page.scope === "session" || page.scope === "visitor") &&
+    page.scope === event.scope &&
+    page.entityKind === page.scope &&
+    event.entityKind === event.scope &&
+    JSON.stringify(page.authorizedSiteIds) === JSON.stringify([siteId]) &&
+    JSON.stringify(event.authorizedSiteIds) === JSON.stringify([siteId]);
+  const sourceProfilesMatch =
+    standardSourceProfilesMatch || journeyCompatibilityProfilesMatch;
   const sameBuilderContext =
     JSON.stringify(builder.context.subject) === JSON.stringify(page.subject) &&
     JSON.stringify(builder.context.time) === JSON.stringify(page.time) &&
@@ -676,4 +702,71 @@ export function buildFunnelProgressionReportPlan(input: {
   return {
     plan: builder.finish(),
   };
+}
+
+/**
+ * Build the legacy Goal/Funnel base for Journey list analysis. Unlike the
+ * standalone Funnel report, an unprepared nonempty no-fact filter is part of
+ * the selected base and has the historical empty Event output domain.
+ */
+export function createJourneyFunnelProgressionSourceSelections(input: {
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly filters: FilterDocument;
+  readonly entityScope: "session" | "visitor";
+}): FunnelProgressionSourceSelections {
+  const metadata = scopedFilterMetadata(input.filters);
+  const preparedPlanOperation =
+    input.entityScope === "visitor" ? "visitors" : "sessions";
+  if (metadata || input.filters.root === null)
+    return createFunnelProgressionSourceSelections({
+      ...input,
+      preparedPlanOperation,
+    });
+
+  const queryTime = createQueryTime(
+    input.window.startMs,
+    input.window.endExclusiveMs,
+    input.window.timeZone,
+    input.window.nowMs,
+  );
+  const subject = createSemanticSubjectDomain({
+    origin: "site",
+    siteIds: [input.siteId as SiteId],
+  });
+  const time = semanticTemporalDomainsFromQueryTime(queryTime);
+  if (factEntityKindsForFilter(input.filters.root).size === 0) {
+    const selection = {
+      profile: "direct-page-entity-only-compat-v1" as const,
+      filters: input.filters,
+      subject,
+      time,
+      compatibilityScope: input.entityScope,
+    };
+    return {
+      filters: input.filters,
+      page: createSemanticScopedSourceSelection(selection),
+      event: createSemanticScopedSourceSelection(selection),
+    };
+  }
+
+  const plan = createScopedFilterPlan(
+    "goal-summary",
+    input.filters,
+    input.entityScope,
+  );
+  if (!plan) throw new Error("journey_analysis_scope_unavailable");
+  const scopedFilters = attachScopedFilterMetadata(input.filters, {
+    requestedScope: input.entityScope,
+    resolvedScope: plan.scope,
+    plan,
+    time: queryTime,
+    siteIds: [input.siteId],
+  });
+  return createFunnelProgressionSourceSelections({
+    siteId: input.siteId,
+    window: input.window,
+    filters: scopedFilters,
+    preparedPlanOperation,
+  });
 }

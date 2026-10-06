@@ -1345,7 +1345,7 @@ describe("typed D1 query compiler", () => {
     const projections = Object.fromEntries(
       Array.from({ length: 101 }, (_, index) => [
         `value_${index}`,
-        param("private-value"),
+        param(`private-value-${index}`),
       ]),
     );
 
@@ -1843,17 +1843,16 @@ describe("typed D1 query compiler", () => {
         "x".repeat(999_697),
         ...Array.from({ length: 100 }, () => ""),
       ];
-      expect(() =>
-        compileD1Query(
-          filter(sites, inList(sites.columns.site_id, overBoundaryValues)),
-        ),
-      ).toThrowError(
-        expect.objectContaining({
-          code: "d1_statement_budget_exceeded",
-          item: "bindings",
-          actual: 101,
-        }),
+      const overBoundaryQuery = compileD1Query(
+        filter(sites, inList(sites.columns.site_id, overBoundaryValues)),
       );
+      expect(overBoundaryQuery.bindings).toEqual(["x".repeat(999_697), ""]);
+      expect(overBoundaryQuery.physicalPlanShape).toMatchObject({
+        version: 3,
+        parameterStrategy: "numbered-reuse",
+        parameterOccurrenceCount: 101,
+        parameterSlotCount: 2,
+      });
 
       const rowValues = Array.from({ length: 101 }, (_unused, index) => ({
         site_id: `row-source-${index}`,

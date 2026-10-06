@@ -1241,4 +1241,116 @@ describe("semantic scoped source selection", () => {
       "invalid_semantic_scoped_source_selection:page_selection_event_name_unsupported",
     );
   });
+
+  it("limits Journey no-fact Page compatibility to the requested entity scope", () => {
+    const filter = simpleSessionFilter("US");
+    const stage = createSemanticPostObservationFilter({
+      filter: simpleSessionFilter("CA"),
+    });
+    const session = createSemanticScopedSourceSelection({
+      profile: "direct-page-entity-only-compat-v1",
+      filters: filter,
+      subject: SUBJECT,
+      time: TIME,
+      compatibilityScope: "session",
+      postObservationFilter: stage,
+    });
+    expect(session).toMatchObject({
+      profile: "direct-page-entity-only-compat-v1",
+      scope: "session",
+      mode: "entity",
+      entityKind: "session",
+      postObservationFilter: stage,
+      authorizedSiteIds: [SITE_ID],
+    });
+    const visitor = createSemanticScopedSourceSelection({
+      profile: "direct-page-entity-only-compat-v1",
+      filters: filter,
+      subject: SUBJECT,
+      time: TIME,
+      compatibilityScope: "visitor",
+    });
+    expect(visitor).toMatchObject({
+      scope: "visitor",
+      mode: "entity",
+      entityKind: "visitor",
+    });
+
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-page-entity-only-compat-v1",
+        filters: EMPTY_FILTER_DOCUMENT,
+        subject: SUBJECT,
+        time: TIME,
+        compatibilityScope: "visitor",
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:page_entity_compatibility_requires_filter",
+    );
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-page-entity-only-compat-v1",
+        filters: preparedSelectionInput("visitor", filter).filters,
+        subject: SUBJECT,
+        time: TIME,
+        compatibilityScope: "visitor",
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:compatibility_profile_has_prepared_metadata",
+    );
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-page-entity-only-compat-v1",
+        filters: filter,
+        subject: SUBJECT,
+        time: TIME,
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:page_entity_compatibility_scope_required",
+    );
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-page-entity-only-compat-v1",
+        filters: filter,
+        subject: SUBJECT,
+        time: TIME,
+        compatibilityScope: "visitor",
+        eventName: "signup",
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:page_entity_compatibility_event_name_unsupported",
+    );
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "direct-page-entity-only-compat-v1",
+        filters: simpleSessionFilter("US"),
+        subject: createSemanticSubjectDomain({
+          origin: "team",
+          teamId: "compat-team" as never,
+          siteIds: [SITE_ID as never, "another-site" as never],
+        }),
+        time: TIME,
+        compatibilityScope: "session",
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:page_entity_compatibility_requires_single_site",
+    );
+
+    expect(() =>
+      validateSemanticScopedSourceSelection(
+        { ...session, scope: "visitor" },
+        { subject: SUBJECT, time: TIME },
+      ),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:invalid_page_entity_compatibility_profile",
+    );
+    expect(() =>
+      validateSemanticScopedSourceSelection(
+        { ...session, entityKind: "visitor" },
+        { subject: SUBJECT, time: TIME },
+      ),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:invalid_page_entity_compatibility_profile",
+    );
+  });
 });

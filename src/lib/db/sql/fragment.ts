@@ -5,19 +5,51 @@ export interface SqlFragment {
   readonly bindings: readonly DatabaseBinding[];
 }
 
+const placeholderOffsets = new WeakMap<
+  SqlFragment,
+  readonly number[] | undefined
+>();
+
+/** Exact typed-placeholder offsets, or undefined when a raw fragment obscures them. */
+export function getParameterPlaceholderOffsets(
+  fragment: SqlFragment,
+): readonly number[] | undefined {
+  return placeholderOffsets.get(fragment);
+}
+
+function withPlaceholderOffsets(
+  fragment: SqlFragment,
+  offsets: readonly number[] | undefined,
+): SqlFragment {
+  placeholderOffsets.set(fragment, offsets);
+  return fragment;
+}
+
 export function text(value: string): SqlFragment {
-  return { text: value, bindings: [] };
+  return withPlaceholderOffsets({ text: value, bindings: [] }, []);
 }
 
 export function parameter(value: DatabaseBinding): SqlFragment {
-  return { text: "?", bindings: [value] };
+  return withPlaceholderOffsets({ text: "?", bindings: [value] }, [0]);
 }
 
 export function concat(...parts: readonly SqlFragment[]): SqlFragment {
-  return {
+  const fragment = {
     text: parts.map((part) => part.text).join(""),
     bindings: parts.flatMap((part) => part.bindings),
   };
+  const offsets: number[] = [];
+  let textOffset = 0;
+  let known = true;
+  for (const part of parts) {
+    const partOffsets = getParameterPlaceholderOffsets(part);
+    if (partOffsets === undefined) known = false;
+    else {
+      for (const offset of partOffsets) offsets.push(offset + textOffset);
+    }
+    textOffset += part.text.length;
+  }
+  return withPlaceholderOffsets(fragment, known ? offsets : undefined);
 }
 
 export function join(
@@ -26,15 +58,27 @@ export function join(
 ): SqlFragment {
   const sql: string[] = [];
   const bindings: DatabaseBinding[] = [];
-  parts.forEach((part, index) => {
-    if (index > 0) {
-      sql.push(separator.text);
-      for (const binding of separator.bindings) bindings.push(binding);
+  const offsets: number[] = [];
+  let textOffset = 0;
+  let known = true;
+  const append = (fragment: SqlFragment) => {
+    sql.push(fragment.text);
+    for (const binding of fragment.bindings) bindings.push(binding);
+    const fragmentOffsets = getParameterPlaceholderOffsets(fragment);
+    if (fragmentOffsets === undefined) known = false;
+    else {
+      for (const offset of fragmentOffsets) offsets.push(offset + textOffset);
     }
-    sql.push(part.text);
-    for (const binding of part.bindings) bindings.push(binding);
+    textOffset += fragment.text.length;
+  };
+  parts.forEach((part, index) => {
+    if (index > 0) append(separator);
+    append(part);
   });
-  return { text: sql.join(""), bindings };
+  return withPlaceholderOffsets(
+    { text: sql.join(""), bindings },
+    known ? offsets : undefined,
+  );
 }
 
 export function parenthesize(part: SqlFragment): SqlFragment {
@@ -45,5 +89,8 @@ export function unsafeRawSql(
   sql: string,
   bindings: readonly DatabaseBinding[] = [],
 ): SqlFragment {
-  return { text: sql, bindings: [...bindings] };
+  return withPlaceholderOffsets(
+    { text: sql, bindings: [...bindings] },
+    bindings.length === 0 ? [] : undefined,
+  );
 }

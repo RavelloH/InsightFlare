@@ -1071,6 +1071,449 @@ describe("shared relation physical selection", () => {
     expectEquivalentRows(nestedGlobalRanking);
   });
 
+  it("shares only licensed rank-one aggregate inputs", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    database
+      .prepare("INSERT INTO site_identities (site_id) VALUES (?), (?)")
+      .run("rank-one-site-a", "rank-one-site-b");
+
+    const buildQuery = (
+      candidate: Relation,
+      options: {
+        readonly rankValues?: readonly number[];
+        readonly includeAggregate?: boolean;
+        readonly partitioned?: boolean;
+        readonly rankFieldName?: "rank" | "derivedRankValue";
+        readonly reverseRankPredicate?: boolean;
+        readonly rankInputs?: readonly Relation[];
+        readonly multipleWindowOutputs?: boolean;
+        readonly rawSourceTerminalBranch?: boolean;
+        readonly aggregateInput?: Relation;
+      } = {},
+    ) => {
+      const rankValues = options.rankValues ?? [1, 1];
+      const rankFieldName = options.rankFieldName ?? "rank";
+      const rankBranches = rankValues.map((rankValue, index) => {
+        const rankInput = options.rankInputs?.[index] ?? candidate;
+        const specification = rowNumber({
+          ...(options.partitioned === false
+            ? {}
+            : { partitionBy: [rankInput.columns.field1!] }),
+          orderBy: [
+            {
+              expression: rankInput.columns.field0!,
+              direction: index ? "DESC" : "ASC",
+            },
+          ],
+        });
+        const ranked = options.multipleWindowOutputs
+          ? (window(rankInput, {
+              rank: specification,
+              secondRank: rowNumber({
+                orderBy: [
+                  { expression: rankInput.columns.field0!, direction: "ASC" },
+                ],
+              }),
+            }) as Relation)
+          : rankFieldName === "derivedRankValue"
+            ? (window(rankInput, {
+                derivedRankValue: specification,
+              }) as Relation)
+            : (window(rankInput, { rank: specification }) as Relation);
+        const rankExpression =
+          rankFieldName === "derivedRankValue"
+            ? ranked.columns.derivedRankValue
+            : ranked.columns.rank;
+        const rankConstant = constant(rankValue) as AnyExpression;
+        const rankPredicate = options.reverseRankPredicate
+          ? eq(rankConstant as never, rankExpression as never)
+          : eq(rankExpression as never, rankConstant as never);
+        const selected = filter(
+          ranked as Relation,
+          rankPredicate as never,
+        ) as Relation;
+        return project(selected, { key: selected.columns.field1! });
+      });
+
+      const identityRows = database
+        .prepare("SELECT site_id FROM site_identities ORDER BY site_pk")
+        .all() as Array<{ site_id: string }>;
+      const aggregateInput =
+        options.aggregateInput ??
+        valuesRelation(
+          { key: { affinity: "text", nullable: false } },
+          identityRows.map(({ site_id }) => ({ key: site_id })),
+        );
+      const aggregateBranch = aggregate(aggregateInput, {
+        groupBy: { key: aggregateInput.columns.key },
+        aggregates: { total: count() },
+      });
+
+      let output: Relation;
+      let sortExpression: AnyExpression;
+      if (rankBranches.length === 0) {
+        throw new Error("at least one rank branch is required by this helper");
+      }
+      if (options.includeAggregate === false) {
+        if (rankBranches.length < 2)
+          throw new Error("the aggregate-free case requires two rank branches");
+        const rankJoin = join(
+          rankBranches[0]!,
+          rankBranches[1]!,
+          eq(
+            rankBranches[0]!.columns.key as never,
+            rankBranches[1]!.columns.key as never,
+          ),
+        );
+        output = rankJoin;
+        sortExpression = rankJoin.columns.left_key!;
+      } else {
+        const aggregateJoin = join(
+          aggregateBranch,
+          rankBranches[0]!,
+          eq(
+            aggregateBranch.columns.key as never,
+            rankBranches[0]!.columns.key as never,
+          ),
+        );
+        const secondRank = rankBranches[1];
+        output = secondRank
+          ? join(
+              aggregateJoin,
+              secondRank,
+              eq(
+                aggregateJoin.columns.right_key! as never,
+                secondRank.columns.key as never,
+              ),
+            )
+          : aggregateJoin;
+        sortExpression = secondRank
+          ? output.columns.left_left_total!
+          : output.columns.left_total!;
+      }
+      if (options.rawSourceTerminalBranch) {
+        const rawScan = scan(schema.site_identities);
+        const rawBranch = project(rawScan, { key: rawScan.columns.site_id });
+        const previousSortColumn =
+          options.includeAggregate === false
+            ? "left_key"
+            : rankBranches[1]
+              ? "left_left_total"
+              : "left_total";
+        output = join(output, rawBranch, eq(param(1), param(1)));
+        sortExpression = output.columns[
+          `left_${previousSortColumn}`
+        ] as AnyExpression;
+      }
+      return sort(output, [
+        {
+          expression: sortExpression,
+          direction: "ASC",
+        },
+      ]);
+    };
+
+    const assertEquivalent = (query: Relation) => {
+      const physical = lowerLogicalPlan(query);
+      const optimized = compileD1Query(physical);
+      const mechanical = compileD1QueryUnoptimizedForTest(query);
+      const optimizedRows = database
+        .prepare(optimized.sql)
+        .all(...(optimized.bindings as SQLInputValue[]));
+      const mechanicalRows = database
+        .prepare(mechanical.sql)
+        .all(...(mechanical.bindings as SQLInputValue[]));
+      expect(rowBag(optimizedRows)).toEqual(rowBag(mechanicalRows));
+      return { physical, optimizedRows, optimizedSql: optimized.sql };
+    };
+
+    const copyColumns = (relation: Relation) =>
+      project(
+        relation,
+        Object.fromEntries(
+          Object.entries(relation.columns).map(([name, expression]) => [
+            name,
+            expression,
+          ]),
+        ),
+      );
+
+    const wideProject = selectedProjection(17);
+    const wideQuery = buildQuery(wideProject, {
+      rankInputs: [copyColumns(wideProject), copyColumns(wideProject)],
+    });
+    const wideResult = assertEquivalent(wideQuery);
+    const wideShared = wideResult.physical.sharedRelations.find(
+      ({ node }) => node === wideProject.node,
+    );
+    expect(wideShared).toMatchObject({ materialization: "materialized" });
+    expect(wideResult.optimizedRows.length).toBeGreaterThan(1);
+    expect(wideResult.optimizedSql).toContain(" AS MATERIALIZED (");
+    const forgedWidePlan = {
+      ...wideResult.physical,
+      sharedRelations: wideResult.physical.sharedRelations.map((shared) =>
+        shared.node === wideProject.node
+          ? { ...shared, materialization: "auto" as const }
+          : shared,
+      ),
+    };
+    expect(() => compileD1Query(forgedWidePlan)).toThrowError(
+      expect.objectContaining({ code: "invalid_plan" }),
+    );
+
+    const derivedRankCandidate = selectedProjection(17);
+    const derivedRankQuery = buildQuery(derivedRankCandidate, {
+      rankInputs: [
+        copyColumns(derivedRankCandidate),
+        copyColumns(derivedRankCandidate),
+      ],
+      rankFieldName: "derivedRankValue",
+      reverseRankPredicate: true,
+    });
+    expect(
+      assertEquivalent(derivedRankQuery).physical.sharedRelations.find(
+        ({ node }) => node === derivedRankCandidate.node,
+      ),
+    ).toMatchObject({ materialization: "materialized" });
+
+    const materializedQualification =
+      closedExpressionWindowCandidate().candidate;
+    const wideQualificationProject = project(
+      materializedQualification,
+      Object.fromEntries(
+        Array.from({ length: 17 }, (_unused, index) => [
+          `field${index}`,
+          index % 2 === 0
+            ? materializedQualification.columns.id!
+            : materializedQualification.columns.groupKey!,
+        ]),
+      ),
+    );
+    const qualificationAggregateInput = project(materializedQualification, {
+      key: materializedQualification.columns.groupKey!,
+    });
+    const shieldedQuery = buildQuery(wideQualificationProject, {
+      aggregateInput: qualificationAggregateInput,
+      rankInputs: [
+        copyColumns(wideQualificationProject),
+        copyColumns(wideQualificationProject),
+      ],
+    });
+    const shieldedResult = assertEquivalent(shieldedQuery);
+    expect(shieldedResult.physical.sharedRelations).toContainEqual(
+      expect.objectContaining({
+        node: materializedQualification.node,
+        materialization: "materialized",
+      }),
+    );
+    expect(shieldedResult.physical.sharedRelations).toContainEqual(
+      expect.objectContaining({
+        node: wideQualificationProject.node,
+        materialization: "materialized",
+      }),
+    );
+    expect(shieldedResult.optimizedRows.length).toBeGreaterThan(0);
+
+    const outsideProbe = valuesRelation(
+      { accepted: { affinity: "text", nullable: false } },
+      [{ accepted: "yes" }],
+    );
+    const queryOutsideBoundary = filter(
+      materializedQualification,
+      eq(
+        scalar(
+          project(outsideProbe, { accepted: outsideProbe.columns.accepted! }),
+        ),
+        param("yes"),
+      ),
+    );
+    const outsideWideProject = project(
+      queryOutsideBoundary,
+      Object.fromEntries(
+        Array.from({ length: 17 }, (_unused, index) => [
+          `field${index}`,
+          index % 2 === 0
+            ? queryOutsideBoundary.columns.id!
+            : queryOutsideBoundary.columns.groupKey!,
+        ]),
+      ),
+    );
+    const outsideQuery = buildQuery(outsideWideProject, {
+      aggregateInput: qualificationAggregateInput,
+      rankInputs: [
+        copyColumns(outsideWideProject),
+        copyColumns(outsideWideProject),
+      ],
+    });
+    const outsideResult = assertEquivalent(outsideQuery);
+    expect(outsideResult.physical.sharedRelations).toContainEqual(
+      expect.objectContaining({
+        node: materializedQualification.node,
+        materialization: "materialized",
+      }),
+    );
+    expect(
+      outsideResult.physical.sharedRelations.some(
+        ({ node }) => node === outsideWideProject.node,
+      ),
+    ).toBe(false);
+
+    const rawFacts = selectedWideVisitProjection(10);
+    const factFilter = filter(
+      rawFacts,
+      eq(rawFacts.columns.field2! as never, param("duplicate-2") as never),
+    );
+    const factProjection = copyColumns(factFilter);
+    // The aggregate and the local column project both consume the filter.
+    const aggregateFromFact = aggregate(factFilter, {
+      groupBy: { key: factFilter.columns.field0! },
+      aggregates: { total: count() },
+    });
+    const firstFactBranch = (() => {
+      const ranked = window(factProjection, {
+        rank: rowNumber({
+          partitionBy: [factProjection.columns.field1!],
+          orderBy: [
+            { expression: factProjection.columns.field0!, direction: "ASC" },
+          ],
+        }),
+      });
+      const selected = filter(ranked, eq(ranked.columns.rank!, constant(1)));
+      return project(selected, { key: selected.columns.field0! });
+    })();
+    const secondFactBranch = (() => {
+      const ranked = window(factProjection, {
+        rank: rowNumber({
+          partitionBy: [factProjection.columns.field1!],
+          orderBy: [
+            { expression: factProjection.columns.field2!, direction: "DESC" },
+          ],
+        }),
+      });
+      const selected = filter(ranked, eq(ranked.columns.rank!, constant(1)));
+      return project(selected, { key: selected.columns.field0! });
+    })();
+    const factAggregateJoin = join(
+      aggregateFromFact,
+      firstFactBranch,
+      eq(aggregateFromFact.columns.key, firstFactBranch.columns.key),
+    );
+    const factJoined = join(
+      factAggregateJoin,
+      secondFactBranch,
+      eq(factAggregateJoin.columns.right_key, secondFactBranch.columns.key),
+    );
+    const factOutput = sort(factJoined, [
+      { expression: factJoined.columns.left_left_total, direction: "DESC" },
+    ]);
+    expect(
+      assertEquivalent(factOutput).physical.sharedRelations.find(
+        ({ node }) => node === factFilter.node,
+      ),
+    ).toMatchObject({ materialization: "auto" });
+
+    const internallyRanked = selectedProjection(17);
+    const internalWindow = window(internallyRanked, {
+      innerRank: rowNumber({
+        partitionBy: [internallyRanked.columns.field1!],
+        orderBy: [
+          { expression: internallyRanked.columns.field0!, direction: "ASC" },
+        ],
+      }),
+    });
+    const closedOrdinaryWindowCandidate = project(
+      internalWindow,
+      Object.fromEntries(
+        Array.from({ length: 17 }, (_unused, index) => [
+          `field${index}`,
+          internalWindow.columns[`field${index}`]!,
+        ]),
+      ),
+    );
+    const closedWindowQuery = buildQuery(closedOrdinaryWindowCandidate, {
+      rankInputs: [
+        copyColumns(closedOrdinaryWindowCandidate),
+        copyColumns(closedOrdinaryWindowCandidate),
+      ],
+    });
+    expect(
+      assertEquivalent(closedWindowQuery).physical.sharedRelations.find(
+        ({ node }) => node === closedOrdinaryWindowCandidate.node,
+      ),
+    ).toMatchObject({ materialization: "auto" });
+
+    const tooWide = selectedProjection(33);
+    const wrongRank = selectedProjection(17);
+    const missingAggregate = selectedProjection(17);
+    const unpartitioned = selectedProjection(17);
+    const multipleWindowCandidate = selectedProjection(17);
+    const rawTerminalCandidate = selectedProjection(17);
+    const inputsFor = (candidate: Relation) => [
+      copyColumns(candidate),
+      copyColumns(candidate),
+    ];
+    const rejected = [
+      {
+        candidate: tooWide,
+        query: buildQuery(tooWide, { rankInputs: inputsFor(tooWide) }),
+      },
+      {
+        candidate: wrongRank,
+        query: buildQuery(wrongRank, {
+          rankInputs: inputsFor(wrongRank),
+          rankValues: [2, 1],
+        }),
+      },
+      {
+        candidate: missingAggregate,
+        query: buildQuery(missingAggregate, {
+          rankInputs: inputsFor(missingAggregate),
+          includeAggregate: false,
+        }),
+      },
+      {
+        candidate: unpartitioned,
+        query: buildQuery(unpartitioned, {
+          rankInputs: inputsFor(unpartitioned),
+          partitioned: false,
+        }),
+      },
+      {
+        candidate: multipleWindowCandidate,
+        query: buildQuery(multipleWindowCandidate, {
+          rankInputs: inputsFor(multipleWindowCandidate),
+          multipleWindowOutputs: true,
+        }),
+      },
+      {
+        candidate: rawTerminalCandidate,
+        query: buildQuery(rawTerminalCandidate, {
+          rankInputs: inputsFor(rawTerminalCandidate),
+          rawSourceTerminalBranch: true,
+        }),
+      },
+    ];
+    for (const { candidate, query } of rejected) {
+      expect(
+        lowerLogicalPlan(query).sharedRelations.some(
+          ({ node }) => node === candidate.node,
+        ),
+      ).toBe(false);
+    }
+
+    const oneWindowOwner = selectedProjection(17);
+    const oneOwnerQuery = buildQuery(oneWindowOwner, {
+      rankInputs: [copyColumns(oneWindowOwner)],
+      rankValues: [1],
+    });
+    expect(
+      lowerLogicalPlan(oneOwnerQuery).sharedRelations.some(
+        ({ node }) => node === oneWindowOwner.node,
+      ),
+    ).toBe(false);
+  });
+
   it("rejects aggregate ranking shapes outside the local wrapper and closed aggregate graph", () => {
     const database = new DatabaseSync(":memory:");
     databases.add(database);

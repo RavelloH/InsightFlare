@@ -27,6 +27,7 @@ import {
   appendFunnelProgressionRelations,
   buildFunnelProgressionReportPlan,
   createFunnelProgressionSourceSelections,
+  createJourneyFunnelProgressionSourceSelections,
 } from "@/lib/edge/analytics/engine/funnel-progression-report-plan";
 import { LogicalPlanBuilder } from "@/lib/edge/analytics/engine/logical/builder";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
@@ -53,11 +54,15 @@ const WINDOW: QueryWindow = {
   timeZone: "UTC",
 };
 
-function configFor(stepCount: number, scope: "session" | "visitor") {
+function configFor(
+  stepCount: number,
+  scope: "session" | "visitor",
+  conversionWindowMs = scope === "visitor" ? 86_400_000 : null,
+) {
   return {
     filterDslVersion: 1,
     progressionScope: scope,
-    conversionWindowMs: scope === "visitor" ? 86_400_000 : null,
+    conversionWindowMs,
     steps: Array.from({ length: stepCount }, (_, index) => ({
       id: `step-${index}`,
       filterDsl:
@@ -472,6 +477,219 @@ function preparedPagePathFilters(
 }
 
 describe("Logical Funnel analysis report", () => {
+  it("keeps the Journey no-fact compatibility base Page-only through progression", async () => {
+    const database = createMigratedDatabase();
+    const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+    try {
+      seed(database, 2);
+      const filters = parseFilterDsl(
+        'page.path eq "/step-0"',
+        analyticsFilterRegistry,
+      );
+      expect(scopedFilterMetadata(filters)).toBeUndefined();
+      const sources = createJourneyFunnelProgressionSourceSelections({
+        siteId: SITE_ID,
+        window: WINDOW,
+        filters,
+        entityScope: "visitor",
+      });
+      expect(sources.page.profile).toBe("direct-page-entity-only-compat-v1");
+      const context = {
+        subject: sources.page.subject,
+        time: sources.page.time,
+        scope: resolveAnalyticsScope(sources.page.scope),
+        originOperation: "funnel-analysis" as const,
+      };
+      const builder = new LogicalPlanBuilder(context);
+      const relations = appendFunnelProgressionRelations({
+        builder,
+        sources,
+        config: configFor(2, "visitor", 5_000),
+        throughStepIndex: 1,
+      });
+      const stepRows = relations.reachedSteps.map((relation, stepIndex) =>
+        builder.project(relation, {
+          stepIndex: builder.literal(stepIndex, {
+            kind: "scalar",
+            scalar: "number",
+          }),
+          identity: builder.slot(relation, "identity"),
+        }),
+      );
+      const combined = builder.appendRows(stepRows, ["stepIndex", "identity"]);
+      builder.output("journey-compatibility-reached", combined, [
+        { name: "stepIndex", slot: "stepIndex" },
+        { name: "identity", slot: "identity" },
+      ]);
+      const plan = builder.finish();
+      const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+        siteId: SITE_ID,
+        time: plan.context.time,
+      });
+      const lowered = lowerer.lower(plan.outputs[0]!);
+      const query = compileD1Query(
+        lowerer.projectOutput(lowered, [
+          { name: "stepIndex", slot: plan.outputs[0]!.fields[0]!.slot },
+          { name: "identity", slot: plan.outputs[0]!.fields[1]!.slot },
+        ]),
+      );
+      const actual = await createD1DatabaseClient(
+        createSqliteD1Database(database, trace),
+      ).all(query);
+      expect(actual.results).toEqual([{ stepIndex: 0, identity: "visitor-a" }]);
+      expect(trace.preparedSql).toHaveLength(1);
+      expect(trace.bindings[0]?.length).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+      expect(
+        new TextEncoder().encode(trace.preparedSql[0]!).length,
+      ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+
+      const eventQualifiedTrace: SqliteD1Trace = {
+        preparedSql: [],
+        bindings: [],
+      };
+      const eventQualifiedSources =
+        createJourneyFunnelProgressionSourceSelections({
+          siteId: SITE_ID,
+          window: WINDOW,
+          filters: parseFilterDsl(
+            'event.name eq "action-1"',
+            analyticsFilterRegistry,
+          ),
+          entityScope: "visitor",
+        });
+      const eventQualifiedBuilder = new LogicalPlanBuilder({
+        subject: eventQualifiedSources.page.subject,
+        time: eventQualifiedSources.page.time,
+        scope: resolveAnalyticsScope(eventQualifiedSources.page.scope),
+        originOperation: "funnel-analysis",
+      });
+      const eventQualifiedProgression = appendFunnelProgressionRelations({
+        builder: eventQualifiedBuilder,
+        sources: eventQualifiedSources,
+        config: configFor(2, "visitor", 5_000),
+        throughStepIndex: 1,
+      });
+      const eventQualifiedStepRows = eventQualifiedProgression.reachedSteps.map(
+        (relation, stepIndex) =>
+          eventQualifiedBuilder.project(relation, {
+            stepIndex: eventQualifiedBuilder.literal(stepIndex, {
+              kind: "scalar",
+              scalar: "number",
+            }),
+            identity: eventQualifiedBuilder.slot(relation, "identity"),
+          }),
+      );
+      const eventQualifiedCombined = eventQualifiedBuilder.appendRows(
+        eventQualifiedStepRows,
+        ["stepIndex", "identity"],
+      );
+      eventQualifiedBuilder.output(
+        "journey-event-qualified-compatibility",
+        eventQualifiedCombined,
+        [
+          { name: "stepIndex", slot: "stepIndex" },
+          { name: "identity", slot: "identity" },
+        ],
+      );
+      const eventQualifiedPlan = eventQualifiedBuilder.finish();
+      const eventQualifiedLowerer = new AnalyticsLogicalToDbLowerer(
+        eventQualifiedPlan,
+        { siteId: SITE_ID, time: eventQualifiedPlan.context.time },
+      );
+      const eventQualifiedOutput = eventQualifiedLowerer.lower(
+        eventQualifiedPlan.outputs[0]!,
+      );
+      const eventQualifiedQuery = compileD1Query(
+        eventQualifiedLowerer.projectOutput(eventQualifiedOutput, [
+          {
+            name: "stepIndex",
+            slot: eventQualifiedPlan.outputs[0]!.fields[0]!.slot,
+          },
+          {
+            name: "identity",
+            slot: eventQualifiedPlan.outputs[0]!.fields[1]!.slot,
+          },
+        ]),
+      );
+      const eventQualifiedActual = await createD1DatabaseClient(
+        createSqliteD1Database(database, eventQualifiedTrace),
+      ).all(eventQualifiedQuery);
+      expect(eventQualifiedActual.results).toEqual([
+        { stepIndex: 0, identity: "visitor-a" },
+      ]);
+      expect(eventQualifiedTrace.preparedSql).toHaveLength(1);
+
+      const factTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const factSources = createJourneyFunnelProgressionSourceSelections({
+        siteId: SITE_ID,
+        window: WINDOW,
+        filters: parseFilterDsl("session.views gte 2", analyticsFilterRegistry),
+        entityScope: "visitor",
+      });
+      expect(factSources.page.profile).toBe("prepared-scoped-reader-window-v1");
+      const factBuilder = new LogicalPlanBuilder({
+        subject: factSources.page.subject,
+        time: factSources.page.time,
+        scope: resolveAnalyticsScope(factSources.page.scope),
+        originOperation: "funnel-analysis",
+      });
+      const factProgression = appendFunnelProgressionRelations({
+        builder: factBuilder,
+        sources: factSources,
+        config: configFor(2, "visitor", 5_000),
+        throughStepIndex: 1,
+      });
+      const factStepRows = factProgression.reachedSteps.map(
+        (relation, stepIndex) =>
+          factBuilder.project(relation, {
+            stepIndex: factBuilder.literal(stepIndex, {
+              kind: "scalar",
+              scalar: "number",
+            }),
+            identity: factBuilder.slot(relation, "identity"),
+          }),
+      );
+      const factCombined = factBuilder.appendRows(factStepRows, [
+        "stepIndex",
+        "identity",
+      ]);
+      factBuilder.output("journey-fact-progression", factCombined, [
+        { name: "stepIndex", slot: "stepIndex" },
+        { name: "identity", slot: "identity" },
+      ]);
+      const factPlan = factBuilder.finish();
+      const factLowerer = new AnalyticsLogicalToDbLowerer(factPlan, {
+        siteId: SITE_ID,
+        time: factPlan.context.time,
+      });
+      const factOutput = factLowerer.lower(factPlan.outputs[0]!);
+      const factQuery = compileD1Query(
+        factLowerer.projectOutput(factOutput, [
+          { name: "stepIndex", slot: factPlan.outputs[0]!.fields[0]!.slot },
+          { name: "identity", slot: factPlan.outputs[0]!.fields[1]!.slot },
+        ]),
+      );
+      const factActual = await createD1DatabaseClient(
+        createSqliteD1Database(database, factTrace),
+      ).all(factQuery);
+      expect(factActual.results).toEqual([
+        { stepIndex: 0, identity: "visitor-a" },
+        { stepIndex: 1, identity: "visitor-a" },
+      ]);
+      expect(factTrace.preparedSql).toHaveLength(1);
+      expect(factTrace.bindings[0]?.length).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+      expect(
+        new TextEncoder().encode(factTrace.preparedSql[0]!).length,
+      ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+    } finally {
+      database.close();
+    }
+  });
+
   it.each([
     {
       name: "missing steps",

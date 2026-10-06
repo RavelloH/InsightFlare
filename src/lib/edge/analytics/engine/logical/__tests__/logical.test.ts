@@ -313,11 +313,12 @@ describe("logical relational IR", () => {
 
   it("does not let bags act as entity sets or unique join inputs", () => {
     const builder = createBuilder();
+    const string = { kind: "scalar", scalar: "string" } as const;
     const a = builder.project(builder.source("page"), {
-      value: builder.literal(1, { kind: "scalar", scalar: "number" }),
+      value: builder.literal("/one", string),
     });
     const b = builder.project(builder.source("page"), {
-      value: builder.literal(2, { kind: "scalar", scalar: "number" }),
+      value: builder.literal("/two", string),
     });
     const firstBag = builder.appendRows([a, b], ["value"]);
     const secondBag = builder.appendRows([a, b], ["value"]);
@@ -332,6 +333,42 @@ describe("logical relational IR", () => {
         { left: "value", right: "value" },
       ]),
     ).toThrow("logical_builder_membership_join_requires_unique_grain");
+
+    const rightPages = builder.source("page", { attributes: ["page.path"] });
+    const uniqueRight = builder.aggregate(
+      rightPages,
+      { value: builder.slot(rightPages, "attribute:page.path") },
+      [],
+    );
+    const included = builder.semiJoin(firstBag, uniqueRight, [
+      { left: "value", right: "value" },
+    ]);
+    const excluded = builder.antiJoin(firstBag, uniqueRight, [
+      { left: "value", right: "value" },
+    ]);
+    builder.output("included", included, [{ name: "value", slot: "value" }]);
+    builder.output("excluded", excluded, [{ name: "value", slot: "value" }]);
+    const plan = builder.finish();
+    const forgedRightBag: LogicalPlan = {
+      ...plan,
+      nodes: plan.nodes.map((node) =>
+        node.kind === "semi-join"
+          ? {
+              ...node,
+              right: secondBag.id,
+              keys: [
+                {
+                  left: firstBag.slots["value"]!,
+                  right: secondBag.slots["value"]!,
+                },
+              ],
+            }
+          : node,
+      ),
+    };
+    expect(() => validateLogicalPlan(forgedRightBag)).toThrow(
+      "Membership joins cannot use a bag-grain right relation.",
+    );
   });
 
   it("validates forged row concatenation mappings and bag metadata", () => {

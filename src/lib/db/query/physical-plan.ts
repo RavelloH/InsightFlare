@@ -1,3 +1,6 @@
+import { D1_MAX_BOUND_PARAMETERS } from "@/lib/db/d1-budget";
+import type { DatabaseBinding } from "@/lib/db/types";
+
 import { DatabaseCompilerError } from "./errors";
 import type {
   AnyExpression,
@@ -52,6 +55,57 @@ export interface PhysicalMembershipOptimizationFacts {
   readonly nativeBindingCount: number;
   readonly usage: readonly PhysicalMembershipUsage[];
   readonly rowUsage?: readonly PhysicalTextRowUsage[];
+}
+
+/** Numbered parameter layout selected from final emitted SQL bindings. */
+export interface PhysicalParameterSlotLayout {
+  readonly strategy: "numbered-reuse";
+  readonly occurrenceCount: number;
+  readonly slotCount: number;
+  /** One-based SQLite parameter indexes in original occurrence order. */
+  readonly occurrenceSlots: readonly number[];
+  readonly bindings: readonly DatabaseBinding[];
+}
+
+function reusableBindingKey(value: DatabaseBinding): string | undefined {
+  if (value === null) return "null:";
+  if (typeof value === "string") return `string:${value}`;
+  if (typeof value === "boolean") return `boolean:${value ? "1" : "0"}`;
+  if (typeof value === "number" && Number.isFinite(value))
+    return `number:${Object.is(value, -0) ? "-0" : String(value)}`;
+  return undefined;
+}
+
+/** Reuse only safe primitive values, and only when the original exceeds D1's cap. */
+export function optimizePhysicalParameterSlots(
+  bindings: readonly DatabaseBinding[],
+): PhysicalParameterSlotLayout | undefined {
+  if (bindings.length <= D1_MAX_BOUND_PARAMETERS) return undefined;
+
+  const slotsByKey = new Map<string, number>();
+  const occurrenceSlots: number[] = [];
+  const uniqueBindings: DatabaseBinding[] = [];
+  for (const binding of bindings) {
+    const key = reusableBindingKey(binding);
+    const existing = key === undefined ? undefined : slotsByKey.get(key);
+    if (existing !== undefined) {
+      occurrenceSlots.push(existing);
+      continue;
+    }
+
+    const slot = uniqueBindings.length + 1;
+    uniqueBindings.push(binding);
+    occurrenceSlots.push(slot);
+    if (key !== undefined) slotsByKey.set(key, slot);
+  }
+  if (uniqueBindings.length >= bindings.length) return undefined;
+  return {
+    strategy: "numbered-reuse",
+    occurrenceCount: bindings.length,
+    slotCount: uniqueBindings.length,
+    occurrenceSlots,
+    bindings: uniqueBindings,
+  };
 }
 
 export interface PhysicalTextRowUsage {
@@ -1639,9 +1693,128 @@ function terminalAggregateRanking(
     sort = source.input.node;
   } else return undefined;
 
-  return isAggregateRankingInput(sort.input.node)
+  return isAggregateRankingInput(sort.input.node) ||
+    isTerminalAggregateRankingInput(sort.input.node)
     ? { sort, ...(limit ? { limit } : {}) }
     : undefined;
+}
+
+function isTerminalAggregateRankingInput(root: LogicalQueryNode): boolean {
+  const visited = new Map<LogicalQueryNode, boolean>();
+  const active = new Set<LogicalQueryNode>();
+  let hasAggregate = false;
+  let hasRankOne = false;
+
+  const visit = (node: LogicalQueryNode): boolean => {
+    const previous = visited.get(node);
+    if (previous !== undefined) return previous;
+    if (active.has(node)) return false;
+    active.add(node);
+
+    let accepted = false;
+    if (node.kind === "aggregate") {
+      const expressions = [
+        ...node.groups.map(({ expression }) => expression),
+        ...node.aggregates.map(({ expression }) => expression),
+      ];
+      accepted = expressions.every((expression) =>
+        expressionFitsLocalFields(
+          expression,
+          node.input.scope,
+          node.input.fields.length,
+        ),
+      );
+      if (accepted) hasAggregate = true;
+    } else if (node.kind === "filter" && isRankOneWindowFilter(node)) {
+      accepted = true;
+      hasRankOne = true;
+    } else if (node.kind === "project") {
+      accepted =
+        node.projections.every(({ expression }) =>
+          expressionFitsLocalFields(
+            expression,
+            node.input.scope,
+            node.input.fields.length,
+          ),
+        ) && visit(node.input.node);
+    } else if (node.kind === "filter") {
+      accepted =
+        expressionFitsLocalFields(
+          node.predicate,
+          node.input.scope,
+          node.input.fields.length,
+        ) && visit(node.input.node);
+    } else if (
+      node.kind === "join" &&
+      (node.joinType === "inner" || node.joinType === "left")
+    ) {
+      const condition = inspectLocalStableExpression(
+        node.condition,
+        new Set([node.left.scope, node.right.scope]),
+      );
+      accepted =
+        condition.valid &&
+        condition.columns.every(({ scope, index }) =>
+          scope === node.left.scope
+            ? index < node.left.fields.length
+            : index < node.right.fields.length,
+        ) &&
+        visit(node.left.node) &&
+        visit(node.right.node);
+    }
+
+    active.delete(node);
+    visited.set(node, accepted);
+    return accepted;
+  };
+
+  return visit(root) && hasAggregate && hasRankOne;
+}
+
+function isRankOneWindowFilter(
+  node: LogicalQueryNode & { readonly kind: "filter" },
+): boolean {
+  if (node.input.node.kind !== "window") return false;
+  const windowNode = node.input.node;
+  if (windowNode.windows.length !== 1) return false;
+  const specification = windowNode.windows[0]!.specification;
+  if (
+    specification.kind !== "row-number" ||
+    specification.partitionBy.length === 0 ||
+    specification.orderBy.length === 0 ||
+    !specification.partitionBy.every((expression) => {
+      const index = directColumnIndex(expression, windowNode.input.scope);
+      return (
+        index !== undefined &&
+        index >= 0 &&
+        index < windowNode.input.fields.length
+      );
+    }) ||
+    !specification.orderBy.every(
+      ({ expression, direction }) =>
+        (direction === "ASC" || direction === "DESC") &&
+        expressionFitsLocalFields(
+          expression,
+          windowNode.input.scope,
+          windowNode.input.fields.length,
+        ),
+    )
+  )
+    return false;
+
+  const rankIndex = windowNode.input.fields.length;
+  const predicate = node.predicate;
+  if (predicate.kind !== "binary" || predicate.operator !== "=") return false;
+  const isRankEqualsOne = (candidate: SqlExpression, value: SqlExpression) =>
+    candidate.kind === "column" &&
+    candidate.scope === node.input.scope &&
+    candidate.index === rankIndex &&
+    value.kind === "constant" &&
+    value.value === 1;
+  return (
+    isRankEqualsOne(predicate.left, predicate.right) ||
+    isRankEqualsOne(predicate.right, predicate.left)
+  );
 }
 
 /** Keep selection-sensitive barriers while permitting proven ranking inputs. */
@@ -2090,6 +2263,111 @@ function inspectLocalStableExpression(
   return { valid, columns };
 }
 
+function expressionFitsLocalFields(
+  expression: SqlExpression,
+  scope: RelationScope,
+  fieldCount: number,
+): boolean {
+  const inspected = inspectLocalStableExpression(expression, new Set([scope]));
+  return (
+    inspected.valid &&
+    inspected.columns.every(({ index }) => index < fieldCount)
+  );
+}
+
+function expressionQueryEdgeSubtrees(
+  nodes: readonly LogicalQueryNode[],
+  materializedBoundaries: ReadonlySet<LogicalQueryNode> = new Set(),
+): ReadonlySet<LogicalQueryNode> {
+  const affected = new Set<LogicalQueryNode>();
+  const propagated = new Set<LogicalQueryNode>();
+  for (const node of nodes) {
+    const hasExpressionQuery =
+      nodeExpressions(node).some(
+        (expression) => expressionSources(expression).length > 0,
+      ) || nodeChildren(node).some((child) => propagated.has(child.node));
+    if (!hasExpressionQuery) continue;
+    affected.add(node);
+    if (!materializedBoundaries.has(node)) propagated.add(node);
+  }
+  return affected;
+}
+
+function isStableRelationConsumer(
+  parent: LogicalQueryNode,
+  child: LogicalQueryNode,
+): boolean {
+  if (parent.kind === "project" && parent.input.node === child)
+    return parent.projections.every(({ expression }) =>
+      expressionFitsLocalFields(
+        expression,
+        parent.input.scope,
+        parent.input.fields.length,
+      ),
+    );
+  if (parent.kind === "filter" && parent.input.node === child)
+    return expressionFitsLocalFields(
+      parent.predicate,
+      parent.input.scope,
+      parent.input.fields.length,
+    );
+  if (parent.kind === "aggregate" && parent.input.node === child)
+    return [
+      ...parent.groups.map(({ expression }) => expression),
+      ...parent.aggregates.map(({ expression }) => expression),
+    ].every((expression) =>
+      expressionFitsLocalFields(
+        expression,
+        parent.input.scope,
+        parent.input.fields.length,
+      ),
+    );
+  if (parent.kind === "window" && parent.input.node === child)
+    return (
+      parent.windows.length > 0 &&
+      parent.windows.every(({ specification }) => {
+        if (specification.kind !== "row-number") return false;
+        return (
+          specification.partitionBy.every((expression) =>
+            expressionFitsLocalFields(
+              expression,
+              parent.input.scope,
+              parent.input.fields.length,
+            ),
+          ) &&
+          specification.orderBy.every(
+            ({ expression, direction }) =>
+              (direction === "ASC" || direction === "DESC") &&
+              expressionFitsLocalFields(
+                expression,
+                parent.input.scope,
+                parent.input.fields.length,
+              ),
+          )
+        );
+      })
+    );
+  if (
+    parent.kind === "join" &&
+    (parent.joinType === "inner" || parent.joinType === "left") &&
+    (parent.left.node === child || parent.right.node === child)
+  ) {
+    const condition = inspectLocalStableExpression(
+      parent.condition,
+      new Set([parent.left.scope, parent.right.scope]),
+    );
+    return (
+      condition.valid &&
+      condition.columns.every(({ scope, index }) =>
+        scope === parent.left.scope
+          ? index < parent.left.fields.length
+          : index < parent.right.fields.length,
+      )
+    );
+  }
+  return false;
+}
+
 function isPureProjectConsumer(node: LogicalQueryNode): node is ProjectNode {
   return (
     isPureLocalColumnProject(node) &&
@@ -2379,6 +2657,130 @@ function sharedFilterFanoutCandidates(
   return candidates;
 }
 
+function terminalRankOneSubtreeNodes(
+  nodes: readonly LogicalQueryNode[],
+): Set<LogicalQueryNode> {
+  const candidates = new Set<LogicalQueryNode>();
+  for (const node of nodes) {
+    const ranking = terminalAggregateRanking(node);
+    if (
+      !ranking ||
+      isAggregateRankingInput(ranking.sort.input.node) ||
+      !isTerminalAggregateRankingInput(ranking.sort.input.node)
+    )
+      continue;
+    const visit = (current: LogicalQueryNode): void => {
+      if (candidates.has(current)) return;
+      candidates.add(current);
+      nodeChildren(current).forEach((child) => visit(child.node));
+    };
+    visit(ranking.sort.input.node);
+  }
+  return candidates;
+}
+
+function sharedRankOneProjectCandidates(
+  nodes: readonly LogicalQueryNode[],
+  incomingCounts: ReadonlyMap<LogicalQueryNode, number>,
+  incoming: ReadonlyMap<LogicalQueryNode, readonly IncomingConsumer[]>,
+  hoist: HoistEligibility,
+  repeatedWindowInputs: ReadonlySet<LogicalQueryNode>,
+  rankingInputNodes: ReadonlySet<LogicalQueryNode>,
+  expressionQueryEdgeNodes: ReadonlySet<LogicalQueryNode>,
+  closedWindowScopeMemo: WeakMap<LogicalQueryNode, boolean>,
+): Set<LogicalQueryNode> {
+  const candidates = new Set<LogicalQueryNode>();
+  for (const node of nodes) {
+    if (
+      !isPureProjectConsumer(node) ||
+      node.fields.length < MIN_REPEATED_WINDOW_INPUT_PROJECT_FIELDS ||
+      node.fields.length > MAX_REPEATED_WINDOW_INPUT_PROJECT_FIELDS ||
+      !hoist.windowInput.has(node) ||
+      !repeatedWindowInputs.has(node) ||
+      !rankingInputNodes.has(node) ||
+      expressionQueryEdgeNodes.has(node)
+    )
+      continue;
+    const consumers = incoming.get(node) ?? [];
+    if (
+      consumers.length < 2 ||
+      consumers.length !== (incomingCounts.get(node) ?? 0) ||
+      consumers.some(
+        ({ kind, parent }) =>
+          kind !== "relation" || !isStableRelationConsumer(parent, node),
+      )
+    )
+      continue;
+    const facts = candidateFacts(node, closedWindowScopeMemo);
+    if (
+      facts.selective &&
+      !facts.forbidden &&
+      facts.referencedScopes.every((scope) => facts.scopes.has(scope))
+    )
+      candidates.add(node);
+  }
+  return candidates;
+}
+
+function sharedRankOneFactFilterCandidates(
+  nodes: readonly LogicalQueryNode[],
+  incomingCounts: ReadonlyMap<LogicalQueryNode, number>,
+  incoming: ReadonlyMap<LogicalQueryNode, readonly IncomingConsumer[]>,
+  hoist: HoistEligibility,
+  repeatedWindowInputs: ReadonlySet<LogicalQueryNode>,
+  rankingInputNodes: ReadonlySet<LogicalQueryNode>,
+  expressionQueryEdgeNodes: ReadonlySet<LogicalQueryNode>,
+  closedWindowScopeMemo: WeakMap<LogicalQueryNode, boolean>,
+): Set<LogicalQueryNode> {
+  const candidates = new Set<LogicalQueryNode>();
+  for (const node of nodes) {
+    if (
+      node.kind !== "filter" ||
+      node.fields.length < 5 ||
+      node.fields.length > 16 ||
+      !hoist.windowInput.has(node) ||
+      !repeatedWindowInputs.has(node) ||
+      !rankingInputNodes.has(node) ||
+      expressionQueryEdgeNodes.has(node) ||
+      !expressionFitsLocalFields(
+        node.predicate,
+        node.input.scope,
+        node.input.fields.length,
+      )
+    )
+      continue;
+    const consumers = incoming.get(node) ?? [];
+    if (
+      consumers.length !== 2 ||
+      consumers.length !== (incomingCounts.get(node) ?? 0) ||
+      consumers.some(({ kind }) => kind !== "relation")
+    )
+      continue;
+    const parents = consumers.map(({ parent }) => parent);
+    const aggregateConsumer = parents.find(
+      (parent) => parent.kind === "aggregate" && parent.input.node === node,
+    );
+    const projectConsumer = parents.find(
+      (parent) => isPureProjectConsumer(parent) && parent.input.node === node,
+    );
+    if (
+      !aggregateConsumer ||
+      !projectConsumer ||
+      !isStableRelationConsumer(aggregateConsumer, node)
+    )
+      continue;
+    const facts = candidateFacts(node, closedWindowScopeMemo);
+    if (
+      facts.selective &&
+      !facts.forbidden &&
+      !facts.ordinaryRowNumberWindow &&
+      facts.referencedScopes.every((scope) => facts.scopes.has(scope))
+    )
+      candidates.add(node);
+  }
+  return candidates;
+}
+
 function sameFields(
   left: readonly OutputField[],
   right: readonly OutputField[],
@@ -2394,9 +2796,22 @@ function sameFields(
   );
 }
 
-function sharedRelationDefinitions(
+interface SharedRelationAnalysis {
+  readonly incoming: ReadonlyMap<LogicalQueryNode, number>;
+  readonly postorder: readonly LogicalQueryNode[];
+  readonly hoist: ReturnType<typeof hoistEligibility>;
+  readonly repeatedWindowInputs: ReadonlySet<LogicalQueryNode>;
+  readonly closedWindowScopeMemo: WeakMap<LogicalQueryNode, boolean>;
+  readonly incomingEdges: ReturnType<typeof incomingConsumers>;
+  readonly terminalBagCandidates: ReadonlySet<LogicalQueryNode>;
+  readonly filterFanoutCandidates: ReadonlySet<LogicalQueryNode>;
+  readonly rankingInputNodes: ReadonlySet<LogicalQueryNode>;
+  readonly expressionQueryEdgeNodes: ReadonlySet<LogicalQueryNode>;
+}
+
+function analyzeSharedRelations(
   root: LogicalQueryNode,
-): readonly SharedRelationDefinition[] {
+): SharedRelationAnalysis {
   const incoming = new Map<LogicalQueryNode, number>([[root, 1]]);
   const visited = new Set<LogicalQueryNode>();
   const active = new Set<LogicalQueryNode>();
@@ -2436,7 +2851,34 @@ function sharedRelationDefinitions(
     repeatedWindowInputs,
     closedWindowScopeMemo,
   );
+  return {
+    incoming,
+    postorder,
+    hoist,
+    repeatedWindowInputs,
+    closedWindowScopeMemo,
+    incomingEdges,
+    terminalBagCandidates,
+    filterFanoutCandidates,
+    rankingInputNodes: terminalRankOneSubtreeNodes(postorder),
+    expressionQueryEdgeNodes: expressionQueryEdgeSubtrees(postorder),
+  };
+}
 
+function sharedRelationDefinitionsForCandidates(
+  analysis: SharedRelationAnalysis,
+  rankOneProjectCandidates: ReadonlySet<LogicalQueryNode>,
+  rankOneFactFilterCandidates: ReadonlySet<LogicalQueryNode>,
+): readonly SharedRelationDefinition[] {
+  const {
+    incoming,
+    postorder,
+    hoist,
+    repeatedWindowInputs,
+    closedWindowScopeMemo,
+    terminalBagCandidates,
+    filterFanoutCandidates,
+  } = analysis;
   const sharedMaterializations = new Map<
     LogicalQueryNode,
     SharedRelationDefinition["materialization"]
@@ -2464,6 +2906,17 @@ function sharedRelationDefinitions(
       continue;
     }
     if (filterFanoutCandidates.has(node)) {
+      sharedMaterializations.set(node, "auto");
+      continue;
+    }
+    if (rankOneProjectCandidates.has(node)) {
+      sharedMaterializations.set(
+        node,
+        facts.ordinaryRowNumberWindow ? "auto" : "materialized",
+      );
+      continue;
+    }
+    if (rankOneFactFilterCandidates.has(node)) {
       sharedMaterializations.set(node, "auto");
       continue;
     }
@@ -2547,6 +3000,64 @@ function sharedRelationDefinitions(
         materialization: sharedMaterializations.get(node)!,
       };
     });
+}
+
+function sharedRelationDefinitions(
+  root: LogicalQueryNode,
+): readonly SharedRelationDefinition[] {
+  const analysis = analyzeSharedRelations(root);
+  const noRankOneCandidates = new Set<LogicalQueryNode>();
+  const baseline = sharedRelationDefinitionsForCandidates(
+    analysis,
+    noRankOneCandidates,
+    noRankOneCandidates,
+  );
+  const materializedBoundaries = new Set(
+    baseline
+      .filter(({ node, materialization }) => {
+        if (
+          materialization !== "materialized" ||
+          analysis.hoist.forbidden.has(node)
+        )
+          return false;
+        const facts = candidateFacts(node, analysis.closedWindowScopeMemo);
+        return (
+          facts.selective &&
+          !facts.forbidden &&
+          facts.referencedScopes.every((scope) => facts.scopes.has(scope))
+        );
+      })
+      .map(({ node }) => node),
+  );
+  const shieldedExpressionQueryEdges = expressionQueryEdgeSubtrees(
+    analysis.postorder,
+    materializedBoundaries,
+  );
+  const rankOneProjectCandidates = sharedRankOneProjectCandidates(
+    analysis.postorder,
+    analysis.incoming,
+    analysis.incomingEdges,
+    analysis.hoist,
+    analysis.repeatedWindowInputs,
+    analysis.rankingInputNodes,
+    shieldedExpressionQueryEdges,
+    analysis.closedWindowScopeMemo,
+  );
+  const rankOneFactFilterCandidates = sharedRankOneFactFilterCandidates(
+    analysis.postorder,
+    analysis.incoming,
+    analysis.incomingEdges,
+    analysis.hoist,
+    analysis.repeatedWindowInputs,
+    analysis.rankingInputNodes,
+    analysis.expressionQueryEdgeNodes,
+    analysis.closedWindowScopeMemo,
+  );
+  return sharedRelationDefinitionsForCandidates(
+    analysis,
+    rankOneProjectCandidates,
+    rankOneFactFilterCandidates,
+  );
 }
 
 /** Validate optimizer metadata against a fresh analysis of the logical root. */
