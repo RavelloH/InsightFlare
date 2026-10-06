@@ -555,8 +555,26 @@ describe("legacy scalar SQL primitives", () => {
 
     let many = jsonScalarArray("text", ["x"]);
     for (let index = 0; index < 100; index++)
-      many = union(many, jsonScalarArray("text", ["x"]), true);
+      many = union(many, jsonScalarArray("text", [`x-${index}`]), true);
     expect(() => compileD1Query(many)).toThrow(D1StatementBudgetError);
+
+    let repeatedPrimitive = jsonScalarArray("text", ["duplicate"]);
+    for (let index = 0; index < 100; index++)
+      repeatedPrimitive = union(
+        repeatedPrimitive,
+        jsonScalarArray("text", ["duplicate"]),
+        true,
+      );
+    const duplicatePrimitive = compileD1Query(repeatedPrimitive);
+    expect(duplicatePrimitive.bindings).toEqual(['["duplicate"]']);
+    const db = database();
+    try {
+      expect(all(db, duplicatePrimitive)).toEqual(
+        Array.from({ length: 101 }, () => ({ value: "duplicate" })),
+      );
+    } finally {
+      db.close();
+    }
 
     expect(() =>
       compileD1Query(

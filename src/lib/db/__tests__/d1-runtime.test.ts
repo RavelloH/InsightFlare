@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  compileD1Query,
   createD1DatabaseClient,
   createDatabaseRuntime,
   D1_MAX_SQL_UTF8_BYTES,
@@ -8,7 +9,12 @@ import {
   type DatabasePhysicalPlanShape,
   type DatabaseQueryObservation,
   type DatabaseQueryObserver,
+  lowerLogicalPlan,
+  param,
+  project,
 } from "@/lib/db";
+import { buildJourneyVisitorDetailPlan } from "@/lib/edge/analytics/engine/journey-entity-detail-plan";
+import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { sha256Hex } from "@/lib/sha256";
 
 function createDatabase() {
@@ -76,6 +82,40 @@ async function waitForObservations(
   count: number,
 ): Promise<void> {
   await vi.waitFor(() => expect(events).toHaveLength(count));
+}
+
+function compiledJourneyAnchorQuery(
+  siteId: string,
+  visitorId: string,
+  repeatedParameter: string,
+) {
+  const plan = buildJourneyVisitorDetailPlan({ siteId, visitorId });
+  const output = plan.outputs.find(
+    (candidate) => candidate.id === "journey-visitor-detail",
+  );
+  if (!output) throw new Error("journey_detail_output_missing");
+  const siteIds = plan.context.subject.siteIds;
+  const lowerer = new AnalyticsLogicalToDbLowerer(
+    plan,
+    siteIds.length === 1
+      ? { siteId: siteIds[0]!, time: plan.context.time }
+      : { siteIds, time: plan.context.time },
+  );
+  const lowered = lowerer.lower(output);
+  const relation = lowerer.projectOutput(
+    lowered,
+    output.fields.map((field) => ({ name: field.name, slot: field.slot })),
+  );
+  const repeated = project(relation, {
+    ...Object.fromEntries(
+      Array.from({ length: 100 }, (_unused, index) => [
+        `reused_${index}`,
+        param(repeatedParameter),
+      ]),
+    ),
+    visitorId: relation.columns.visitorId,
+  });
+  return compileD1Query(lowerLogicalPlan(repeated));
 }
 
 describe("D1 database runtime", () => {
@@ -503,6 +543,113 @@ describe("D1 database runtime", () => {
     await waitForObservations(events, 3);
     expect(events[2]?.physicalPlanHash).not.toBe(expectedHash);
     expect(result.success).toBe(true);
+  });
+
+  it("observes a compiled Journey anchor as value-free v4 including numbered reuse", async () => {
+    const events: DatabaseQueryObservation[] = [];
+    const { database, prepared } = createDatabase();
+    const runtime = createDatabaseRuntime(database, {
+      observer: recordingObserver(events),
+    });
+    const first = compiledJourneyAnchorQuery(
+      "private-site-a",
+      "private-visitor-a",
+      "private-repeated-a",
+    );
+    const second = compiledJourneyAnchorQuery(
+      "private-site-b",
+      "private-visitor-b",
+      "private-repeated-b",
+    );
+    const shape = first.physicalPlanShape;
+    expect(shape).toMatchObject({
+      version: 4,
+      rightAnchorJoinOrderCount: 1,
+      uniqueLookupJoinOrderCount: 1,
+      parameterStrategy: "numbered-reuse",
+    });
+    expect(shape?.version).toBe(4);
+    if (shape?.version !== 4) throw new Error("journey_v4_shape_missing");
+    const occurrenceCount = shape.parameterOccurrenceCount;
+    const slotCount = shape.parameterSlotCount;
+    if (occurrenceCount === undefined || slotCount === undefined) {
+      throw new Error("journey_v4_parameter_counts_missing");
+    }
+    expect(occurrenceCount).toBeGreaterThan(100);
+    expect(slotCount).toBeLessThan(occurrenceCount);
+    expect(first.sql).toBe(second.sql);
+    expect(first.bindings).not.toEqual(second.bindings);
+    expect(first.bindings?.length).toBeLessThan(100);
+
+    await runtime.all(first);
+    await runtime.all(second);
+    await waitForObservations(events, 2);
+
+    const expectedHash = `v4:${await sha256Hex(
+      JSON.stringify([
+        "d1-query-shape-v4",
+        first.sql,
+        shape.cteCount,
+        shape.directScanProjectionCount,
+        shape.nativeMembershipCount,
+        shape.jsonMembershipCount,
+        shape.nativeRowRelationCount,
+        shape.jsonRowRelationCount,
+        shape.rightAnchorJoinOrderCount,
+        shape.uniqueLookupJoinOrderCount,
+        shape.parameterStrategy ?? null,
+        shape.parameterOccurrenceCount ?? null,
+        shape.parameterSlotCount ?? null,
+      ]),
+    )}`;
+    expect(events.map((event) => event.physicalPlanHash)).toEqual([
+      expectedHash,
+      expectedHash,
+    ]);
+    expect(events[0]).toMatchObject({
+      operation: "all",
+      status: "success",
+      bindings: first.bindings?.length,
+      physicalPlanHash: expectedHash,
+    });
+    expect(prepared.bind).toHaveBeenNthCalledWith(1, ...(first.bindings ?? []));
+    expect(prepared.bind).toHaveBeenNthCalledWith(
+      2,
+      ...(second.bindings ?? []),
+    );
+    expect(JSON.stringify(events)).not.toContain("private-site-");
+    expect(JSON.stringify(events)).not.toContain("private-visitor-");
+    expect(JSON.stringify(events)).not.toContain("private-repeated-");
+  });
+
+  it("does not hash malformed v4 parameter-slot metadata", async () => {
+    const events: DatabaseQueryObservation[] = [];
+    const { database } = createDatabase();
+    const runtime = createDatabaseRuntime(database, {
+      observer: recordingObserver(events),
+    });
+    const malformedShape: DatabasePhysicalPlanShape = {
+      version: 4,
+      cteCount: 0,
+      directScanProjectionCount: 0,
+      nativeMembershipCount: 0,
+      jsonMembershipCount: 0,
+      nativeRowRelationCount: 0,
+      jsonRowRelationCount: 0,
+      rightAnchorJoinOrderCount: 1,
+      uniqueLookupJoinOrderCount: 0,
+      parameterStrategy: "numbered-reuse",
+      parameterOccurrenceCount: 101,
+      parameterSlotCount: 101,
+    };
+
+    await runtime.all({ sql: "SELECT 1", physicalPlanShape: malformedShape });
+    await waitForObservations(events, 1);
+    expect(events[0]).toMatchObject({
+      operation: "all",
+      status: "success",
+      physicalPlanHash: null,
+    });
   });
 
   it("checks actual bindings even when v3 metadata claims fewer slots", async () => {

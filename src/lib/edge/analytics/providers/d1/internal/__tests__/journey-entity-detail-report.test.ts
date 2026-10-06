@@ -73,7 +73,7 @@ type LegacyReportRow = Record<string, unknown>;
 type JourneyDetailPlan = ReturnType<typeof buildJourneyVisitorDetailPlan>;
 type PhysicalPlanShape = Extract<
   NonNullable<ReturnType<typeof compileD1Query>["physicalPlanShape"]>,
-  { readonly version: 1 }
+  { readonly version: 4 }
 >;
 
 const databases = new Set<DatabaseSync>();
@@ -93,13 +93,7 @@ interface DetailQueryEvidence {
   readonly bindingCount: number;
   readonly sqlSha256: string;
   readonly physicalPlanHash?: string;
-  readonly physicalPlanShape?: {
-    readonly version: 1;
-    readonly cteCount: number;
-    readonly directScanProjectionCount: number;
-    readonly nativeMembershipCount: number;
-    readonly jsonMembershipCount: number;
-  };
+  readonly physicalPlanShape?: PhysicalPlanShape;
   readonly explainDetails: readonly string[];
   readonly rawTableScanDetails: readonly string[];
   readonly intermediateRelationScanCount: number;
@@ -536,12 +530,19 @@ function collectQueryEvidence(
   ).map((row) => row.detail);
   const physicalPlanPayload = physicalPlanShape
     ? JSON.stringify([
-        "d1-query-shape-v1",
+        "d1-query-shape-v4",
         sql,
         physicalPlanShape.cteCount,
         physicalPlanShape.directScanProjectionCount,
         physicalPlanShape.nativeMembershipCount,
         physicalPlanShape.jsonMembershipCount,
+        physicalPlanShape.nativeRowRelationCount,
+        physicalPlanShape.jsonRowRelationCount,
+        physicalPlanShape.rightAnchorJoinOrderCount,
+        physicalPlanShape.uniqueLookupJoinOrderCount,
+        physicalPlanShape.parameterStrategy ?? null,
+        physicalPlanShape.parameterOccurrenceCount ?? null,
+        physicalPlanShape.parameterSlotCount ?? null,
       ])
     : undefined;
   return {
@@ -552,7 +553,7 @@ function collectQueryEvidence(
     ...(physicalPlanShape
       ? {
           physicalPlanShape,
-          physicalPlanHash: `v1:${createHash("sha256").update(physicalPlanPayload!, "utf8").digest("hex")}`,
+          physicalPlanHash: `v4:${createHash("sha256").update(physicalPlanPayload!, "utf8").digest("hex")}`,
         }
       : {}),
     explainDetails,
@@ -603,9 +604,9 @@ function assertDetailQueryEvidence(
   const typedQuery = compileJourneyDetailQuery(plan, outputId);
   expect(typedQuery.sql).toBe(sql);
   expect(typedQuery.bindings).toEqual(bindings);
-  expect(typedQuery.physicalPlanShape?.version).toBe(1);
+  expect(typedQuery.physicalPlanShape?.version).toBe(4);
   const typedShape =
-    typedQuery.physicalPlanShape?.version === 1
+    typedQuery.physicalPlanShape?.version === 4
       ? typedQuery.physicalPlanShape
       : undefined;
   const evidence = collectQueryEvidence(
@@ -623,8 +624,10 @@ function assertDetailQueryEvidence(
   expect(evidence.bindingCount, failureContext).toBeLessThanOrEqual(100);
   expect(evidence.sqlSha256, failureContext).toMatch(/^[a-f0-9]{64}$/u);
   expect(evidence.physicalPlanHash, failureContext).toMatch(
-    /^v1:[a-f0-9]{64}$/u,
+    /^v4:[a-f0-9]{64}$/u,
   );
+  expect(evidence.physicalPlanShape?.rightAnchorJoinOrderCount).toBe(1);
+  expect(evidence.physicalPlanShape?.uniqueLookupJoinOrderCount).toBe(1);
   expect(legacyEvidence.statementCount, failureContext).toBe(1);
   expect(legacyEvidence.sqlSha256, failureContext).toMatch(/^[a-f0-9]{64}$/u);
   expect(legacyEvidence.explainDetails.join("\n"), failureContext).toContain(
@@ -641,10 +644,7 @@ function assertDetailQueryEvidence(
     ).toMatch(/\(site_pk=\?/u);
   }
   expect(explainText, failureContext).toMatch(
-    /SEARCH \w+ USING INDEX idx_custom_events_site_pk_time \(site_pk=\?\)/u,
-  );
-  expect(explainText, failureContext).toMatch(
-    /SEARCH \w+ USING INDEX sqlite_autoindex_visits_1 \(visit_id=\?\)/u,
+    /SEARCH \w+ USING INDEX idx_custom_events_site_pk_visit_time \(site_pk=\? AND visit_id=\?\)/u,
   );
   expect(explainText, failureContext).toMatch(
     /SEARCH \w+ USING INTEGER PRIMARY KEY \(rowid=\?\)/u,
@@ -989,10 +989,7 @@ describe("journey entity detail report differential", () => {
       raw.plan,
       "journey-session-detail",
       "session",
-      [
-        "idx_visits_site_pk_visitor_started_at",
-        "idx_visits_site_pk_session_started_at",
-      ],
+      ["idx_visits_site_pk_visitor_started_at"],
       "idx_visits_site_pk_session_started_at",
       legacyEvidence,
     );
@@ -1035,6 +1032,16 @@ describe("journey entity detail report differential", () => {
           views: 5,
           events: 4,
         });
+        assertDetailQueryEvidence(
+          database,
+          actual.trace,
+          actual.plan,
+          "journey-session-detail",
+          "session target",
+          ["idx_visits_site_pk_session_started_at"],
+          "idx_visits_site_pk_session_started_at",
+          collectLegacySessionEvidence(database, siteA.id, target),
+        );
       }
       if (target.type === "visitor" && target.value === "") {
         expect(expectedTargetRows).toHaveLength(1);

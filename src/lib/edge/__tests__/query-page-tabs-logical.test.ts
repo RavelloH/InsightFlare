@@ -863,26 +863,26 @@ describe("Logical Page tabs report", () => {
         {
           name: "plain",
           sqlBytes: 5988,
-          bindings: 15,
+          bindings: 13,
           statements: 1,
           sha256:
-            "0158e7b061729252b6aaeef524ab2d8aff20ae86afbae1ad565315a2b051cac1",
+            "ca6b46c4c9628a656a1f6f5823bbfe6f966afb8b38b7f979622f76069b68948a",
         },
         {
           name: "prepared-session-128",
           sqlBytes: 7169,
-          bindings: 17,
+          bindings: 15,
           statements: 1,
           sha256:
-            "c9aa6cca9e72ae4317d6df9f1800abab1817321771de495e50dfcb7dffba922d",
+            "592b27c1b9cb78bbfecbebc1658d5bfc20b496ddb36cf4591732b8651142642a",
         },
         {
           name: "event-payload-40",
-          sqlBytes: 63822,
-          bindings: 60,
+          sqlBytes: 47289,
+          bindings: 58,
           statements: 1,
           sha256:
-            "ae62e355699b742b7703107235cc71732e8857a821fc8cbd225087cf565753d6",
+            "b9ff1325b1f267d9eb0ab9d36b6c14cb664cd550ca15154f0f03c0ee7f6236b1",
         },
       ]);
     } finally {

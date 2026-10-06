@@ -93,96 +93,70 @@ function pageField(
   return builder.slot(relation, `attribute:page.report.${name}`);
 }
 
-function observationField(
+function detailOwnerRows(
   builder: LogicalPlanBuilder,
-  relation: LogicalRelationHandle,
-  name: string,
-) {
-  return builder.slot(relation, `attribute:observation.${name}`);
-}
-
-function visitorDetailEvents(
-  builder: LogicalPlanBuilder,
-  visitorId: string,
+  pages: LogicalRelationHandle,
 ): LogicalRelationHandle {
-  const observations = builder.source("observation", {
-    temporalDomain: "read",
-    attributes: [
-      "observation.kind",
-      "observation.visitorId",
-      "observation.eventName",
-    ],
-  });
-  const visitor = observationField(builder, observations, "visitorId");
-  const matching = builder.filter(
-    observations,
-    builder.and(
-      builder.compare(
-        "eq",
-        observationField(builder, observations, "kind"),
-        builder.literal("event", STRING),
-      ),
-      builder.isNull(
-        observationField(builder, observations, "eventName"),
-        true,
-      ),
-      builder.compare("eq", visitor, builder.literal(visitorId, STRING)),
-      builder.compare("neq", visitor, builder.literal("", STRING)),
-    ),
-  );
-  const counts = builder.aggregate(
-    matching,
-    { visitorId: observationField(builder, matching, "visitorId") },
-    [{ name: "eventCount", kind: "count-rows" }],
-  );
-  return builder.project(counts, {
-    eventsVisitorId: builder.slot(counts, "visitorId"),
-    eventCount: builder.slot(counts, "eventCount"),
+  return builder.project(pages, {
+    ownerVisitId: pageField(builder, pages, "localId"),
+    ownerVisitorId: pageField(builder, pages, "visitorId"),
+    ownerSessionId: pageField(builder, pages, "sessionId"),
+    ownerUserId: pageField(builder, pages, "userId"),
+    ownerUserName: pageField(builder, pages, "userName"),
+    ownerStartedAt: pageField(builder, pages, "startedAt"),
   });
 }
 
-function sessionDetailEvents(
+function detailEventsForPages(
   builder: LogicalPlanBuilder,
-  target: JourneyObservationTarget,
+  ownerRows: LogicalRelationHandle,
+  entity: "visitor" | "session",
 ): LogicalRelationHandle {
-  const observations = builder.source("observation", {
-    temporalDomain: "read",
-    attributes: [
-      "observation.kind",
-      "observation.sessionId",
-      "observation.eventName",
-      ...(target.type === "visitor" ? ["observation.visitorId"] : []),
-    ],
+  const entityKey = entity === "visitor" ? "ownerVisitorId" : "ownerSessionId";
+  const ownerInput = builder.project(ownerRows, {
+    ownerVisitId: builder.slot(ownerRows, "ownerVisitId"),
+    ownerEntityId: builder.slot(ownerRows, entityKey),
   });
-  const sessionId = observationField(builder, observations, "sessionId");
-  const targetSlot = observationField(
-    builder,
-    observations,
-    target.type === "visitor" ? "visitorId" : "sessionId",
+  const ownerAggregate = builder.aggregate(
+    ownerInput,
+    { ownerVisitId: builder.slot(ownerInput, "ownerVisitId") },
+    [
+      {
+        name: "ownerEntityId",
+        kind: "max",
+        expression: builder.slot(ownerInput, "ownerEntityId"),
+      },
+    ],
   );
-  const matching = builder.filter(
-    observations,
-    builder.and(
-      builder.compare(
-        "eq",
-        observationField(builder, observations, "kind"),
-        builder.literal("event", STRING),
-      ),
-      builder.isNull(
-        observationField(builder, observations, "eventName"),
-        true,
-      ),
-      builder.compare("eq", targetSlot, builder.literal(target.value, STRING)),
-      builder.compare("neq", sessionId, builder.literal("", STRING)),
+  const owners = builder.project(ownerAggregate, {
+    ownerVisitId: builder.slot(ownerAggregate, "ownerVisitId"),
+    ownerEntityId: builder.slot(ownerAggregate, "ownerEntityId"),
+  });
+  const events = builder.source("event", {
+    temporalDomain: "read",
+    attributes: ["event.report.ownerVisitId", "event.report.eventName"],
+  });
+  const namedEvents = builder.filter(
+    events,
+    builder.isNull(
+      builder.slot(events, "attribute:event.report.eventName"),
+      true,
     ),
   );
+  const ownedEvents = builder.join(namedEvents, owners, [
+    {
+      left: "attribute:event.report.ownerVisitId",
+      right: "ownerVisitId",
+    },
+  ]);
   const counts = builder.aggregate(
-    matching,
-    { sessionId: observationField(builder, matching, "sessionId") },
+    ownedEvents,
+    { ownerEntityId: builder.slot(ownedEvents, "right.ownerEntityId") },
     [{ name: "eventCount", kind: "count-rows" }],
   );
+  const alias = entity === "visitor" ? "eventsVisitorId" : "eventsSessionId";
   return builder.project(counts, {
-    eventsSessionId: builder.slot(counts, "sessionId"),
+    [alias]: builder.slot(counts, "ownerEntityId"),
     eventCount: builder.slot(counts, "eventCount"),
   });
 }
@@ -216,29 +190,47 @@ export function buildJourneyVisitorDetailPlan(input: {
     ),
   );
   const field = (name: string) => pageField(builder, pages, name);
+  const ownerRows = detailOwnerRows(builder, pages);
 
   const metrics = builder.aggregate(pages, { visitorId: field("visitorId") }, [
     { name: "firstSeenAt", kind: "min", expression: field("startedAt") },
     { name: "lastSeenAt", kind: "max", expression: field("startedAt") },
     { name: "views", kind: "count-rows" },
-    {
-      name: "sessionCount",
-      kind: "count-distinct",
-      expression: builder.caseWhen(
-        [
-          {
-            when: builder.compare(
-              "neq",
-              field("sessionId"),
-              builder.literal("", STRING),
-            ),
-            then: field("sessionId"),
-          },
-        ],
-        builder.literal(null, STRING),
-      ),
-    },
   ]);
+  const ownerSessionId = builder.slot(ownerRows, "ownerSessionId");
+  const ownerSessionCounts = builder.aggregate(
+    ownerRows,
+    { visitorId: builder.slot(ownerRows, "ownerVisitorId") },
+    [
+      {
+        name: "sessionCount",
+        kind: "count-distinct",
+        expression: builder.caseWhen(
+          [
+            {
+              when: builder.compare(
+                "neq",
+                ownerSessionId,
+                builder.literal("", STRING),
+              ),
+              then: ownerSessionId,
+            },
+          ],
+          builder.literal(null, STRING),
+        ),
+      },
+    ],
+  );
+  const joinedMetrics = builder.join(metrics, ownerSessionCounts, [
+    { left: "visitorId", right: "visitorId" },
+  ]);
+  const metricsWithSessions = builder.project(joinedMetrics, {
+    visitorId: builder.slot(joinedMetrics, "visitorId"),
+    firstSeenAt: builder.slot(joinedMetrics, "firstSeenAt"),
+    lastSeenAt: builder.slot(joinedMetrics, "lastSeenAt"),
+    views: builder.slot(joinedMetrics, "views"),
+    sessionCount: builder.slot(joinedMetrics, "right.sessionCount"),
+  });
 
   const firstMember = builder.orderedMember(pages, {
     groups: ["attribute:page.report.visitorId"],
@@ -292,7 +284,7 @@ export function buildJourneyVisitorDetailPlan(input: {
     latestScreenHeight: pageField(builder, latestMember, "screenHeight"),
   });
 
-  const userId = field("userId");
+  const userId = builder.slot(ownerRows, "ownerUserId");
   const empty = builder.literal("", STRING);
   const hasIdentity = builder.compare(
     "neq",
@@ -300,16 +292,16 @@ export function buildJourneyVisitorDetailPlan(input: {
     empty,
     "trim-ascii-space",
   );
-  const identityInput = builder.project(pages, {
-    identityVisitorId: field("visitorId"),
+  const identityInput = builder.project(ownerRows, {
+    identityVisitorId: builder.slot(ownerRows, "ownerVisitorId"),
     identityUserId: userId,
-    identityUserName: field("userName"),
+    identityUserName: builder.slot(ownerRows, "ownerUserName"),
     identityPriority: builder.caseWhen(
       [{ when: hasIdentity, then: builder.literal(0, NUMBER) }],
       builder.literal(1, NUMBER),
     ),
-    identityStartedAt: field("startedAt"),
-    identityLocalId: field("localId"),
+    identityStartedAt: builder.slot(ownerRows, "ownerStartedAt"),
+    identityLocalId: builder.slot(ownerRows, "ownerVisitId"),
   });
   const identityMember = builder.orderedMember(identityInput, {
     groups: ["identityVisitorId"],
@@ -325,7 +317,7 @@ export function buildJourneyVisitorDetailPlan(input: {
     identityUserName: builder.slot(identityMember, "identityUserName"),
   });
 
-  let detail = builder.join(metrics, first, [
+  let detail = builder.join(metricsWithSessions, first, [
     { left: "visitorId", right: "firstVisitorId" },
   ]);
   detail = builder.join(detail, latest, [
@@ -336,7 +328,7 @@ export function buildJourneyVisitorDetailPlan(input: {
   ]);
   detail = builder.join(
     detail,
-    visitorDetailEvents(builder, input.visitorId),
+    detailEventsForPages(builder, ownerRows, "visitor"),
     [{ left: "visitorId", right: "eventsVisitorId" }],
     "left",
   );
@@ -425,6 +417,7 @@ export function buildJourneySessionDetailPlan(input: {
     ),
   );
   const field = (name: string) => pageField(builder, pages, name);
+  const ownerRows = detailOwnerRows(builder, pages);
   const sessionKey = field("sessionId");
 
   const active = builder.caseWhen(
@@ -458,23 +451,27 @@ export function buildJourneySessionDetailPlan(input: {
       ),
     },
     { name: "active", kind: "max", expression: active },
-    { name: "views", kind: "count-rows" },
   ]);
-  const metricsWithBounce = builder.project(metrics, {
-    sessionId: builder.slot(metrics, "sessionId"),
-    startedAt: builder.slot(metrics, "startedAt"),
-    endedAt: builder.slot(metrics, "endedAt"),
-    totalDurationMs: builder.slot(metrics, "totalDurationMs"),
-    active: builder.slot(metrics, "active"),
-    views: builder.slot(metrics, "views"),
+  const ownerViewCounts = builder.aggregate(
+    ownerRows,
+    { sessionId: builder.slot(ownerRows, "ownerSessionId") },
+    [{ name: "views", kind: "count-rows" }],
+  );
+  const metricsWithViews = builder.join(metrics, ownerViewCounts, [
+    { left: "sessionId", right: "sessionId" },
+  ]);
+  const views = builder.slot(metricsWithViews, "right.views");
+  const metricsWithBounce = builder.project(metricsWithViews, {
+    sessionId: builder.slot(metricsWithViews, "sessionId"),
+    startedAt: builder.slot(metricsWithViews, "startedAt"),
+    endedAt: builder.slot(metricsWithViews, "endedAt"),
+    totalDurationMs: builder.slot(metricsWithViews, "totalDurationMs"),
+    active: builder.slot(metricsWithViews, "active"),
+    views,
     bounce: builder.caseWhen(
       [
         {
-          when: builder.compare(
-            "eq",
-            builder.slot(metrics, "views"),
-            builder.literal(1, NUMBER),
-          ),
+          when: builder.compare("eq", views, builder.literal(1, NUMBER)),
           then: builder.literal(1, NUMBER),
         },
       ],
@@ -537,7 +534,7 @@ export function buildJourneySessionDetailPlan(input: {
     latestPathname: pageField(builder, latestMember, "pathname"),
   });
 
-  const userId = field("userId");
+  const userId = builder.slot(ownerRows, "ownerUserId");
   const empty = builder.literal("", STRING);
   const hasIdentity = builder.compare(
     "neq",
@@ -545,16 +542,16 @@ export function buildJourneySessionDetailPlan(input: {
     empty,
     "trim-ascii-space",
   );
-  const identityInput = builder.project(pages, {
-    identitySessionId: sessionKey,
+  const identityInput = builder.project(ownerRows, {
+    identitySessionId: builder.slot(ownerRows, "ownerSessionId"),
     identityUserId: userId,
-    identityUserName: field("userName"),
+    identityUserName: builder.slot(ownerRows, "ownerUserName"),
     identityPriority: builder.caseWhen(
       [{ when: hasIdentity, then: builder.literal(0, NUMBER) }],
       builder.literal(1, NUMBER),
     ),
-    identityStartedAt: field("startedAt"),
-    identityLocalId: field("localId"),
+    identityStartedAt: builder.slot(ownerRows, "ownerStartedAt"),
+    identityLocalId: builder.slot(ownerRows, "ownerVisitId"),
   });
   const identityMember = builder.orderedMember(identityInput, {
     groups: ["identitySessionId"],
@@ -621,7 +618,7 @@ export function buildJourneySessionDetailPlan(input: {
   ]);
   detail = builder.join(
     detail,
-    sessionDetailEvents(builder, input.target),
+    detailEventsForPages(builder, ownerRows, "session"),
     [{ left: "sessionId", right: "eventsSessionId" }],
     "left",
   );

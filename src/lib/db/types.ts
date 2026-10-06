@@ -31,6 +31,16 @@ export type DatabasePhysicalPlanShape =
       readonly parameterStrategy: "numbered-reuse";
       readonly parameterOccurrenceCount: number;
       readonly parameterSlotCount: number;
+    })
+  | (DatabasePhysicalPlanShapeFields & {
+      readonly version: 4;
+      readonly nativeRowRelationCount: number;
+      readonly jsonRowRelationCount: number;
+      readonly rightAnchorJoinOrderCount: number;
+      readonly uniqueLookupJoinOrderCount: number;
+      readonly parameterStrategy?: "numbered-reuse";
+      readonly parameterOccurrenceCount?: number;
+      readonly parameterSlotCount?: number;
     });
 
 interface DatabaseObservationFields {

@@ -105,6 +105,10 @@ import {
   queryReferrerSummaryFromD1,
   queryTopReferrersFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/referrers";
+import {
+  currentD1Operation,
+  runWithD1Operation,
+} from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
 import { parseFilterDsl } from "@/lib/filter-contract/filter-dsl";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
@@ -117,6 +121,7 @@ type QueryBinding = string | number | null;
 interface QueryCall {
   sql: string;
   bindings: QueryBinding[];
+  operation?: string;
 }
 const siteId = "site-pages";
 const baseMs = Date.UTC(2026, 0, 2, 1);
@@ -139,7 +144,12 @@ function createD1Env(
   const prepare = vi.fn((sql: string) => ({
     bind: vi.fn((...bindings: QueryBinding[]) => ({
       all: vi.fn(async () => {
-        calls.push({ sql, bindings });
+        const operation = currentD1Operation();
+        calls.push({
+          sql,
+          bindings,
+          ...(operation ? { operation } : {}),
+        });
         return {
           results: pendingResults.shift() ?? [],
           ...(rowsRead === undefined ? {} : { meta: { rows_read: rowsRead } }),
@@ -4193,10 +4203,10 @@ describe("edge pages D1 queries", () => {
           legacy: { sqlBytes: 4798, bindings: 5 },
           logical: {
             sqlBytes: 7745,
-            bindings: 23,
+            bindings: 21,
             statements: 1,
             sha256:
-              "a371f0975c50bb63f2259614217c53cc7857b7dc4100f85ed0af6a6da2354397",
+              "51fca0c3684dc1494cee8f253cf16657513dfe60311feac79af657c0bc730161",
           },
         },
         {
@@ -4204,10 +4214,10 @@ describe("edge pages D1 queries", () => {
           legacy: { sqlBytes: 4819, bindings: 5 },
           logical: {
             sqlBytes: 7934,
-            bindings: 23,
+            bindings: 21,
             statements: 1,
             sha256:
-              "439b0c43f61da4c0c852a00e982c5d36519d6fdaca3883e87b5d28ee1234d505",
+              "2e0134796f361278f048a53aa5b6d2c9ea70b5e4a6a2c530eb622d40f810c08b",
           },
         },
         {
@@ -4215,10 +4225,10 @@ describe("edge pages D1 queries", () => {
           legacy: { sqlBytes: 5082, bindings: 20 },
           logical: {
             sqlBytes: 8306,
-            bindings: 35,
+            bindings: 33,
             statements: 1,
             sha256:
-              "fba30b61f3af7ba7427c50b9e62fc3cfb2451c33c83eb698310e448924159693",
+              "ecb6a3eefa649a551c681de8041f79659c3c37f519f2ee9acc64145a4d447530",
           },
         },
         {
@@ -4226,10 +4236,10 @@ describe("edge pages D1 queries", () => {
           legacy: { sqlBytes: 7446, bindings: 10 },
           logical: {
             sqlBytes: 8820,
-            bindings: 27,
+            bindings: 25,
             statements: 1,
             sha256:
-              "f911ab3c93a99cbaef74585a103a2ef5262b2991aced06cf68ce8b93b1da6a6f",
+              "aad9ddec36e7a72eb1b5e1dae52bac80f5c2f035d45ba3aa4e6c34ee297f8556",
           },
         },
         {
@@ -4237,10 +4247,10 @@ describe("edge pages D1 queries", () => {
           legacy: { sqlBytes: 18372, bindings: 264 },
           logical: {
             sqlBytes: 9162,
-            bindings: 25,
+            bindings: 23,
             statements: 1,
             sha256:
-              "c5a0b0b6fcbd46ac5520b3b9a6eb21e2280819a8594e4dd2d5b7b7218ff25a00",
+              "526f6597aa3026aac5da0b3c0998ccc427a1e30566055febd17ae73762347c77",
           },
         },
         {
@@ -4248,21 +4258,21 @@ describe("edge pages D1 queries", () => {
           legacy: { sqlBytes: 7558, bindings: 8 },
           logical: {
             sqlBytes: 8828,
-            bindings: 24,
+            bindings: 22,
             statements: 1,
             sha256:
-              "4ac13ca919ca3adf77135ff42c92cff68b5b2f5b6b2ccba5c0c1bb305c8459b0",
+              "d1b50faae1bf5f015d03f23145cd39a3e937fdbd237ea3aeb5d883d82014648b",
           },
         },
         {
           name: "event-payload-40",
           legacy: { sqlBytes: 43342, bindings: 89 },
           logical: {
-            sqlBytes: 65937,
-            bindings: 68,
+            sqlBytes: 49404,
+            bindings: 66,
             statements: 1,
             sha256:
-              "33e3f553e4abe29732832d712891078d2353740937251dbeb670cbcfb88b920c",
+              "1eeecd986839a13c44a85b4474fd866ec7cce3792827ae2b0a1f7460d58cf00d",
           },
         },
       ]);
@@ -5762,31 +5772,31 @@ describe("edge pages D1 queries", () => {
         },
         {
           name: "event-payload-40-limited",
-          sqlBytes: 57_713,
+          sqlBytes: 41_177,
           bindings: 52,
           sha256:
-            "79860716191ce534c14b88a841425eea1e4bc8896b1648facb21a7e4d1af7c9f",
+            "4f9667897167b86cdf219479ec0eeb4e823eef85e36c119ba5a25c72ecf2efd0",
         },
         {
           name: "event-payload-40-no-limit",
-          sqlBytes: 57_672,
+          sqlBytes: 41_136,
           bindings: 51,
           sha256:
-            "32dbdef451103d173f3858213849aded6c9c4e74f4059d87c3b24c0bb8023778",
+            "4be11f4102ce31d6157647c5c56a78c788874baf17bb25e3f9ecf9a53c232f18",
         },
         {
           name: "event-payload-40-negative-limit",
-          sqlBytes: 57_672,
+          sqlBytes: 41_136,
           bindings: 51,
           sha256:
-            "32dbdef451103d173f3858213849aded6c9c4e74f4059d87c3b24c0bb8023778",
+            "4be11f4102ce31d6157647c5c56a78c788874baf17bb25e3f9ecf9a53c232f18",
         },
         {
           name: "event-payload-40-ratio-cursor",
-          sqlBytes: 58_187,
+          sqlBytes: 41_651,
           bindings: 61,
           sha256:
-            "9bc10f296d91f23d294163f346d34674348173f537645b05f2a7938f17423c33",
+            "4bc1436a6dea6e68137a08bb8ef235bc9fb7c7ce56480c079374dee6feef7901",
         },
         {
           name: "prepared-session-128",
@@ -5991,11 +6001,11 @@ describe("edge pages D1 queries", () => {
         },
         {
           name: "event-payload-40-details",
-          sqlBytes: 57_933,
+          sqlBytes: 41_397,
           bindings: 49,
           statements: 1,
           sha256:
-            "3d221d93a54bb85cc6a9baefc28314bd287f108f8feee4e1ad96d46185d06add",
+            "adfb133dc92ab879d75723f321e145fd709c33838818eec14f45bfd353a8403f",
         },
         {
           name: "prepared-session-128-details",
@@ -9741,39 +9751,78 @@ FROM ${legacyMetricSource}
       comparisonTabs.map((tab) => [
         {
           key: `${tab}-value`,
-          current_views: 4,
-          current_sessions: 2,
-          current_visitors: 2,
-          reference_views: 3,
-          reference_sessions: 1,
-          reference_visitors: 1,
+          currentViews: 4,
+          currentSessions: 2,
+          currentVisitors: 2,
+          referenceViews: 3,
+          referenceSessions: 1,
+          referenceVisitors: 1,
         },
       ]),
     );
 
     for (const tab of comparisonTabs) {
-      const response = await handleOverviewTabContract(
-        env,
-        siteId,
-        url(`/overview/${tab}`, {
-          from: window.startMs,
-          to: window.endExclusiveMs,
-          compare: "previous",
-          sort: "visitors",
-          sortBy: "change",
-          direction: "asc",
-          search: "value",
-          limit: 1,
-        }),
-        tab,
+      const operation = `wave71.overview.${tab}`;
+      const response = await runWithD1Operation(operation, () =>
+        handleOverviewTabContract(
+          env,
+          siteId,
+          url(`/overview/${tab}`, {
+            from: window.startMs,
+            to: window.endExclusiveMs,
+            compare: "previous",
+            sort: "visitors",
+            sortBy: "change",
+            direction: "asc",
+            search: "value",
+            limit: 1,
+          }),
+          tab,
+        ),
       );
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toMatchObject({ ok: true });
+      await expect(response.json()).resolves.toMatchObject({
+        ok: true,
+        data: {
+          items: [
+            {
+              key: `${tab}-value`,
+              value: `${tab}-value`,
+              label: `${tab}-value`,
+              views: 4,
+              sessions: 2,
+              visitors: 2,
+              reference: { views: 3, sessions: 1, visitors: 1 },
+              change: {
+                views: { absolute: 1, relative: 1 / 3 },
+                sessions: { absolute: 1, relative: 1 },
+                visitors: { absolute: 1, relative: 1 },
+              },
+            },
+          ],
+          pagination: { limit: 1, returned: 1, hasMore: false },
+        },
+      });
     }
 
     expect(calls).toHaveLength(comparisonTabs.length);
-    expect(calls.every((call) => call.sql.includes("reference_rollup"))).toBe(
-      true,
+    const comparisonOutputAliases = [
+      'AS "currentViews"',
+      'AS "currentSessions"',
+      'AS "currentVisitors"',
+      'AS "referenceViews"',
+      'AS "referenceSessions"',
+      'AS "referenceVisitors"',
+    ];
+    expect(
+      calls.every(
+        ({ sql }) =>
+          sql.includes('AS "key"') &&
+          comparisonOutputAliases.every((alias) => sql.includes(alias)),
+      ),
+    ).toBe(true);
+    expect(calls.map(({ operation }) => operation)).toEqual(
+      comparisonTabs.map((tab) => `wave71.overview.${tab}`),
     );
 
     const invalidSort = await handleOverviewTabContract(

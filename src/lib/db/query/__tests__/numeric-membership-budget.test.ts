@@ -243,9 +243,22 @@ describe("numeric membership binding optimizer", () => {
       expect(actual.filter((row) => row.value === "tail")).toHaveLength(100);
       expect(actual[0]?.value).toBe(exactUtf8Limit);
 
+      const repeatedTail = compileD1Query(
+        valuesRelation(
+          schema,
+          Array.from({ length: 101 }, () => ({ value: "tail" })),
+        ),
+      );
+      expect(repeatedTail.bindings).toHaveLength(1);
+      expect(executeAll(db, repeatedTail)).toEqual(
+        Array.from({ length: 101 }, () => ({ value: "tail" })),
+      );
+
       const overLimit = valuesRelation(schema, [
         { value: "x".repeat(999_995) },
-        ...Array.from({ length: 100 }, () => ({ value: "tail" })),
+        ...Array.from({ length: 100 }, (_unused, index) => ({
+          value: `tail-${index}`,
+        })),
       ]);
       expectBindingBudgetError(() => compileD1Query(overLimit), 101);
     } finally {

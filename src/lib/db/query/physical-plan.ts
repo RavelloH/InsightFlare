@@ -169,6 +169,16 @@ export interface ConstantFilterJoinProjection {
   readonly referencedOutputColumns: readonly number[];
 }
 
+/** A canonical inner-Join input order selected from typed relational evidence. */
+export interface PhysicalJoinOrderStrategy {
+  readonly kind: "right-anchor" | "unique-lookup";
+  readonly join: JoinNode;
+  /** Both strategies drive the original right input before the original left. */
+  readonly driver: "right";
+  /** Generated schema proof used only by unique-lookup strategies. */
+  readonly uniqueKey?: string;
+}
+
 export interface PhysicalQueryPlan<
   Row extends object = Record<string, unknown>,
 > {
@@ -185,6 +195,8 @@ export interface PhysicalQueryPlan<
   readonly constantFilterJoinProjections: readonly ConstantFilterJoinProjection[];
   /** Canonical structural candidates; enabled only when the RHS rows are packed. */
   readonly positiveTupleMembershipCandidates: readonly PositiveTupleMembershipCandidate[];
+  /** Explicit, recomputable inner Join order choices. */
+  readonly joinOrderStrategies: readonly PhysicalJoinOrderStrategy[];
   /** Backend physical choice, populated after final-shape cost analysis. */
   readonly membershipOptimization?: PhysicalMembershipOptimization;
   readonly __rowType?: Row;
@@ -1554,6 +1566,516 @@ function samePositiveTupleMembershipCandidates(
           (column, columnIndex) =>
             column === canonical.rightKeyIndexes[columnIndex],
         )
+      );
+    })
+  );
+}
+
+interface UniqueLookupProof {
+  readonly scan: ScanNode;
+  readonly columnIndex: number;
+  readonly uniqueKey: string;
+}
+
+function nonNullLookupValue(value: unknown): boolean {
+  return (
+    value !== null &&
+    (typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean")
+  );
+}
+
+function generatedUniqueKey(
+  scan: ScanNode,
+  columnIndex: number,
+): string | undefined {
+  const column = Object.values(scan.table.columns)[columnIndex];
+  if (!column) return undefined;
+  if (
+    scan.table.primaryKey.length === 1 &&
+    scan.table.primaryKey[0] === column.sqlName
+  )
+    return `primary:${scan.table.name}:${column.sqlName}`;
+  const index = scan.table.indexes.find(
+    (candidate) =>
+      candidate.unique &&
+      !candidate.partial &&
+      candidate.rawExpressionSql === undefined &&
+      candidate.columns.length === 1 &&
+      candidate.columns[0] === column.sqlName,
+  );
+  return index ? `index:${index.name}` : undefined;
+}
+
+function scanColumnForOutput(
+  source: QuerySource,
+  outputIndex: number,
+): { readonly scan: ScanNode; readonly columnIndex: number } | undefined {
+  let current = source;
+  let index = outputIndex;
+  const visited = new Set<LogicalQueryNode>();
+  while (current.node.kind === "project" || current.node.kind === "filter") {
+    if (visited.has(current.node)) return undefined;
+    visited.add(current.node);
+    if (current.node.kind === "project") {
+      const childIndex = directColumnIndex(
+        current.node.projections[index]?.expression,
+        current.node.input.scope,
+      );
+      if (childIndex === undefined) return undefined;
+      index = childIndex;
+    }
+    current = current.node.input;
+  }
+  return current.node.kind === "scan"
+    ? { scan: current.node, columnIndex: index }
+    : undefined;
+}
+
+function singleValueUniqueLookup(
+  source: QuerySource,
+): UniqueLookupProof | undefined {
+  let current = source;
+  let pureProjectCount = 0;
+  const visited = new Set<LogicalQueryNode>();
+  while (current.node.kind === "project") {
+    if (visited.has(current.node) || !isPureLocalColumnProject(current.node))
+      return undefined;
+    visited.add(current.node);
+    pureProjectCount++;
+    current = current.node.input;
+  }
+  if (
+    pureProjectCount === 0 ||
+    current.node.kind !== "filter" ||
+    !safeFinitePredicate(current.node.predicate) ||
+    !expressionUsesOnlyScope(current.node.predicate, current.node.input.scope)
+  )
+    return undefined;
+  const predicate = current.node.predicate;
+  let columnIndex: number | undefined;
+  if (predicate.kind === "binary" && predicate.operator === "=") {
+    const lookup =
+      predicate.left.kind === "column"
+        ? { column: predicate.left, value: predicate.right }
+        : predicate.right.kind === "column"
+          ? { column: predicate.right, value: predicate.left }
+          : undefined;
+    if (
+      lookup &&
+      (lookup.value.kind === "parameter" || lookup.value.kind === "constant") &&
+      nonNullLookupValue(lookup.value.value)
+    )
+      columnIndex = directColumnIndex(lookup.column, current.node.input.scope);
+  } else if (
+    predicate.kind === "in-list" &&
+    predicate.values.length === 1 &&
+    nonNullLookupValue(predicate.values[0])
+  ) {
+    columnIndex = directColumnIndex(
+      predicate.expression,
+      current.node.input.scope,
+    );
+  }
+  if (columnIndex === undefined || current.node.input.node.kind !== "scan")
+    return undefined;
+  const scan = current.node.input.node;
+  const uniqueKey = generatedUniqueKey(scan, columnIndex);
+  return uniqueKey === undefined ? undefined : { scan, columnIndex, uniqueKey };
+}
+
+function rightUniqueJoinKey(
+  join: JoinNode,
+): { readonly uniqueKey: string } | undefined {
+  const pairs = equalityPairs(
+    join.condition,
+    join.left.scope,
+    join.right.scope,
+  );
+  if (!pairs) return undefined;
+  for (const pair of pairs) {
+    const mapped = scanColumnForOutput(join.right, pair.right);
+    if (!mapped) continue;
+    const uniqueKey = generatedUniqueKey(mapped.scan, mapped.columnIndex);
+    if (uniqueKey) return { uniqueKey };
+  }
+  const filtered = singleValueUniqueLookup(join.right);
+  return filtered ? { uniqueKey: filtered.uniqueKey } : undefined;
+}
+
+function isClosedOrdinarySubtree(
+  root: LogicalQueryNode,
+  active = new Set<LogicalQueryNode>(),
+  memo = new Map<LogicalQueryNode, boolean>(),
+): boolean {
+  const cached = memo.get(root);
+  if (cached !== undefined) return cached;
+  if (active.has(root)) return false;
+  active.add(root);
+  let accepted: boolean;
+  switch (root.kind) {
+    case "scan":
+      accepted = true;
+      break;
+    case "project":
+      accepted =
+        isPureLocalColumnProject(root) &&
+        isClosedOrdinarySubtree(root.input.node, active, memo);
+      break;
+    case "filter":
+      accepted =
+        isStableOrdinaryFilter(root.predicate, root.input.scope) &&
+        expressionUsesOnlyScope(root.predicate, root.input.scope) &&
+        isClosedOrdinarySubtree(root.input.node, active, memo);
+      break;
+    case "join":
+      accepted =
+        (root.joinType === "inner" || root.joinType === "left") &&
+        safeEqualityCondition(
+          root.condition,
+          root.left.scope,
+          root.right.scope,
+          root.left.fields,
+          root.right.fields,
+        ) &&
+        rightUniqueJoinKey(root) !== undefined &&
+        isClosedOrdinarySubtree(root.left.node, active, memo) &&
+        isClosedOrdinarySubtree(root.right.node, active, memo);
+      break;
+    default:
+      accepted = false;
+      break;
+  }
+  active.delete(root);
+  memo.set(root, accepted);
+  return accepted;
+}
+
+function isStableOrdinaryFilter(
+  expression: SqlExpression,
+  scope: RelationScope,
+): boolean {
+  if (
+    expression.kind === "null-check" &&
+    expression.expression.kind === "column"
+  )
+    return directColumnIndex(expression.expression, scope) !== undefined;
+  if (expression.kind === "boolean" && expression.operator === "AND")
+    return (
+      expression.expressions.length > 0 &&
+      expression.expressions.every((child) =>
+        isStableOrdinaryFilter(child, scope),
+      )
+    );
+  return safeFinitePredicate(expression);
+}
+
+function containsBoundEquality(
+  root: LogicalQueryNode,
+  visited = new Set<LogicalQueryNode>(),
+): boolean {
+  if (visited.has(root)) return false;
+  visited.add(root);
+  if (
+    root.kind === "filter" &&
+    safeFinitePredicate(root.predicate) &&
+    expressionUsesOnlyScope(root.predicate, root.input.scope)
+  ) {
+    const inspect = (expression: SqlExpression): boolean => {
+      if (expression.kind === "boolean" && expression.operator === "AND")
+        return expression.expressions.some(inspect);
+      if (expression.kind === "binary" && expression.operator === "=") {
+        const value =
+          expression.left.kind === "column"
+            ? expression.right
+            : expression.right.kind === "column"
+              ? expression.left
+              : undefined;
+        return (
+          value !== undefined &&
+          (value.kind === "parameter" || value.kind === "constant") &&
+          nonNullLookupValue(value.value)
+        );
+      }
+      if (
+        expression.kind === "in-list" &&
+        expression.expression.kind === "column" &&
+        expression.values.length === 1 &&
+        expression.values.every(nonNullLookupValue)
+      )
+        return true;
+      return false;
+    };
+    if (inspect(root.predicate)) return true;
+  }
+  if (root.kind === "join" && rightUniqueJoinKey(root) !== undefined)
+    return containsBoundEquality(root.left.node, visited);
+  return nodeChildren(root).some((child) =>
+    containsBoundEquality(child.node, visited),
+  );
+}
+
+function pureProjectPath(
+  source: QuerySource,
+  stopAt: ReadonlySet<LogicalQueryNode> = new Set(),
+):
+  | {
+      readonly node: LogicalQueryNode;
+      readonly outputIndexes: readonly number[];
+      readonly depth: number;
+    }
+  | undefined {
+  let current = source;
+  let outputIndexes = source.fields.map((_field, index) => index);
+  let depth = 0;
+  const visited = new Set<LogicalQueryNode>();
+  while (current.node.kind === "project" && !stopAt.has(current.node)) {
+    if (visited.has(current.node) || !isPureLocalColumnProject(current.node))
+      return undefined;
+    const project = current.node;
+    visited.add(project);
+    const mappedIndexes = outputIndexes.map((index) =>
+      directColumnIndex(
+        project.projections[index]?.expression,
+        project.input.scope,
+      ),
+    );
+    if (mappedIndexes.some((index) => index === undefined)) return undefined;
+    outputIndexes = mappedIndexes as number[];
+    current = project.input;
+    depth++;
+  }
+  return {
+    node: current.node,
+    outputIndexes: outputIndexes as number[],
+    depth,
+  };
+}
+
+function isMaterializedKeyedAggregate(
+  join: JoinNode,
+  shared: ReadonlyMap<LogicalQueryNode, SharedRelationDefinition>,
+  analysis: SharedRelationAnalysis,
+): boolean {
+  const leftClosed = isClosedOrdinarySubtree(join.left.node);
+  if (join.joinType !== "inner" || !leftClosed) return false;
+  const rightPath = pureProjectPath(join.right);
+  if (!rightPath || rightPath.node.kind !== "aggregate") return false;
+  const aggregate = rightPath.node;
+  if (
+    aggregate.groups.length === 0 ||
+    !aggregate.groups.every(
+      ({ expression }) =>
+        expression.kind === "column" &&
+        expression.scope === aggregate.input.scope &&
+        expression.index >= 0 &&
+        expression.index < aggregate.input.fields.length,
+    ) ||
+    !aggregate.aggregates.every(({ expression }) =>
+      expressionFitsLocalFields(
+        expression,
+        aggregate.input.scope,
+        aggregate.input.fields.length,
+      ),
+    )
+  )
+    return false;
+  const materializedNodes = new Set(
+    [...shared.values()]
+      .filter(({ materialization }) => materialization === "materialized")
+      .map(({ node }) => node),
+  );
+  const inputPath = pureProjectPath(aggregate.input, materializedNodes);
+  if (!inputPath || inputPath.depth === 0) return false;
+  const sharedDefinition = shared.get(inputPath.node);
+  if (!sharedDefinition || sharedDefinition.materialization !== "materialized")
+    return false;
+  const facts = candidateFacts(
+    sharedDefinition.node,
+    analysis.closedWindowScopeMemo,
+  );
+  if (
+    !facts.selective ||
+    facts.forbidden ||
+    !facts.referencedScopes.every((scope) => facts.scopes.has(scope)) ||
+    !isSafeSharedLookup(sharedDefinition.node) ||
+    !containsBoundEquality(sharedDefinition.node)
+  )
+    return false;
+  const pairs = equalityPairs(
+    join.condition,
+    join.left.scope,
+    join.right.scope,
+  );
+  if (!pairs || pairs.length !== aggregate.groups.length) return false;
+  const groupIndexes = new Set<number>();
+  const leftIndexes = new Set<number>();
+  for (const pair of pairs) {
+    const aggregateIndex = rightPath.outputIndexes[pair.right];
+    if (
+      aggregateIndex === undefined ||
+      aggregateIndex < 0 ||
+      aggregateIndex >= aggregate.groups.length ||
+      groupIndexes.has(aggregateIndex) ||
+      leftIndexes.has(pair.left)
+    )
+      return false;
+    groupIndexes.add(aggregateIndex);
+    leftIndexes.add(pair.left);
+  }
+  return groupIndexes.size === aggregate.groups.length;
+}
+
+function joinOrderStrategies(
+  root: LogicalQueryNode,
+  sharedDefinitions: readonly SharedRelationDefinition[],
+): readonly PhysicalJoinOrderStrategy[] {
+  const analysis = analyzeSharedRelations(root);
+  const shared = new Map(
+    sharedDefinitions.map((definition) => [definition.node, definition]),
+  );
+  const nodes: LogicalQueryNode[] = [];
+  const visited = new Set<LogicalQueryNode>();
+  const visit = (node: LogicalQueryNode): void => {
+    if (visited.has(node)) return;
+    visited.add(node);
+    for (const child of nodeChildren(node)) visit(child.node);
+    nodes.push(node);
+  };
+  visit(root);
+  const anchors = nodes.filter(
+    (node): node is JoinNode =>
+      node.kind === "join" &&
+      isMaterializedKeyedAggregate(node, shared, analysis),
+  );
+  const strategies: PhysicalJoinOrderStrategy[] = anchors.map((join) => ({
+    kind: "right-anchor",
+    join,
+    driver: "right",
+  }));
+  const lookupJoins = new Set<JoinNode>();
+  for (const anchor of anchors) {
+    const descend = (node: LogicalQueryNode): void => {
+      if (node.kind === "join") {
+        if (node.joinType === "inner") {
+          const lookup = singleValueUniqueLookup(node.right);
+          if (
+            lookup &&
+            rightUniqueJoinKey(node) !== undefined &&
+            isClosedOrdinarySubtree(node.left.node) &&
+            !nodeHasParameters(node.left.node)
+          )
+            lookupJoins.add(node);
+        }
+        descend(node.left.node);
+        if (node.joinType === "inner") descend(node.right.node);
+        return;
+      }
+      for (const child of nodeChildren(node)) descend(child.node);
+    };
+    descend(anchor.left.node);
+  }
+  for (const join of lookupJoins)
+    strategies.push({
+      kind: "unique-lookup",
+      join,
+      driver: "right",
+      uniqueKey: singleValueUniqueLookup(join.right)!.uniqueKey,
+    });
+  return strategies;
+}
+
+function nodeHasParameters(
+  root: LogicalQueryNode,
+  visited = new Set<LogicalQueryNode>(),
+): boolean {
+  if (visited.has(root)) return false;
+  visited.add(root);
+  if (
+    nodeExpressions(root).some((expression) =>
+      expressionTreeHasKind(expression, "parameter"),
+    )
+  )
+    return true;
+  return nodeChildren(root).some((child) =>
+    nodeHasParameters(child.node, visited),
+  );
+}
+
+function expressionTreeHasKind(
+  expression: SqlExpression,
+  kind: SqlExpression["kind"],
+): boolean {
+  if (expression.kind === kind) return true;
+  return expressionTreeChildren(expression).some((child) =>
+    expressionTreeHasKind(child, kind),
+  );
+}
+
+function expressionTreeChildren(
+  expression: SqlExpression,
+): readonly SqlExpression[] {
+  switch (expression.kind) {
+    case "binary":
+    case "distinct-from":
+      return [expression.left, expression.right];
+    case "boolean":
+      return expression.expressions;
+    case "not":
+    case "null-check":
+    case "cast-integer":
+    case "cast-real":
+    case "cast-text":
+      return [expression.expression];
+    case "text-position":
+      return [expression.text, expression.needle];
+    case "text-substring":
+      return [
+        expression.text,
+        expression.start,
+        ...(expression.length ? [expression.length] : []),
+      ];
+    case "text-like":
+      return [expression.text, expression.pattern];
+    case "in-list":
+      return [expression.expression];
+    case "function":
+      return expression.arguments;
+    case "aggregate":
+      return expression.expression ? [expression.expression] : [];
+    case "coalesce":
+      return expression.expressions;
+    case "case":
+      return [
+        ...expression.branches.flatMap(({ when, then }) => [when, then]),
+        ...(expression.else ? [expression.else] : []),
+      ];
+    case "column":
+    case "parameter":
+    case "excluded":
+    case "constant":
+    case "unixepoch":
+    case "scalar-subquery":
+    case "in-subquery":
+      return [];
+  }
+}
+
+function sameJoinOrderStrategies(
+  actual: readonly PhysicalJoinOrderStrategy[],
+  expected: readonly PhysicalJoinOrderStrategy[],
+): boolean {
+  return (
+    actual.length === expected.length &&
+    actual.every((strategy, index) => {
+      const canonical = expected[index];
+      return (
+        !!canonical &&
+        strategy.kind === canonical.kind &&
+        strategy.join === canonical.join &&
+        strategy.driver === canonical.driver &&
+        strategy.uniqueKey === canonical.uniqueKey
       );
     })
   );
@@ -3100,6 +3622,7 @@ export function validatePhysicalQueryPlan<Row extends object>(
       plan.root,
       new Set(expected.map(({ node }) => node)),
     );
+  const expectedJoinOrderStrategies = joinOrderStrategies(plan.root, expected);
   if (
     !Array.isArray(plan.directScanProjections) ||
     !sameDirectScanProjectionChoices(
@@ -3143,6 +3666,17 @@ export function validatePhysicalQueryPlan<Row extends object>(
     throw new DatabaseCompilerError(
       "invalid_plan",
       "Physical tuple membership candidates are inconsistent",
+    );
+  if (
+    !Array.isArray(plan.joinOrderStrategies) ||
+    !sameJoinOrderStrategies(
+      plan.joinOrderStrategies,
+      expectedJoinOrderStrategies,
+    )
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical join order strategies are inconsistent",
     );
   const actualDefinitions = plan.sharedRelations;
   let inconsistent =
@@ -3216,6 +3750,7 @@ export function lowerLogicalQuerySource<Row extends object>(
       source.node,
       sharedNodes,
     ),
+    joinOrderStrategies: joinOrderStrategies(source.node, sharedRelations),
   };
 }
 

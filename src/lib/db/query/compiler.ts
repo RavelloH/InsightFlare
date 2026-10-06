@@ -32,6 +32,7 @@ import {
   optimizePhysicalMembershipBudget,
   optimizePhysicalParameterSlots,
   type PassthroughProjectFusion,
+  type PhysicalJoinOrderStrategy,
   type PhysicalMembershipUsage,
   type PhysicalParameterSlotLayout,
   type PhysicalQueryPlan,
@@ -81,6 +82,10 @@ interface RenderContext {
   readonly positiveTupleMemberships: ReadonlyMap<
     ProjectNode,
     PositiveTupleMembershipCandidate
+  >;
+  readonly joinOrderStrategies: ReadonlyMap<
+    JoinNode,
+    PhysicalJoinOrderStrategy
   >;
   readonly membershipStrategies?: ReadonlyMap<
     AnyInListExpression,
@@ -846,15 +851,29 @@ function compileNode(
         text("SELECT "),
         join(selections),
         text(" FROM "),
-        parenthesize(leftSql),
-        text(" AS "),
-        identifier(leftAlias),
-        text(node.joinType === "left" ? " LEFT JOIN " : " INNER JOIN "),
-        parenthesize(rightSql),
-        text(" AS "),
-        identifier(rightAlias),
-        text(" ON "),
-        compileD1Expression(node.condition, scopes, context),
+        context.joinOrderStrategies.has(node)
+          ? concat(
+              parenthesize(rightSql),
+              text(" AS "),
+              identifier(rightAlias),
+              text(" CROSS JOIN "),
+              parenthesize(leftSql),
+              text(" AS "),
+              identifier(leftAlias),
+              text(" WHERE "),
+              compileD1Expression(node.condition, scopes, context),
+            )
+          : concat(
+              parenthesize(leftSql),
+              text(" AS "),
+              identifier(leftAlias),
+              text(node.joinType === "left" ? " LEFT JOIN " : " INNER JOIN "),
+              parenthesize(rightSql),
+              text(" AS "),
+              identifier(rightAlias),
+              text(" ON "),
+              compileD1Expression(node.condition, scopes, context),
+            ),
       );
     }
     case "semi-join":
@@ -1143,6 +1162,7 @@ function renderContext(
   sparseJoinOutputs: RenderContext["sparseJoinOutputs"] = new Map(),
   positiveTupleMemberships: RenderContext["positiveTupleMemberships"] = new Map(),
   projectionTransportSimplifications = true,
+  joinOrderStrategies: RenderContext["joinOrderStrategies"] = new Map(),
 ): RenderContext {
   return {
     scanAlias: 0,
@@ -1157,6 +1177,7 @@ function renderContext(
     constantFilterJoinProjections,
     sparseJoinOutputs,
     positiveTupleMemberships,
+    joinOrderStrategies,
     projectionTransportSimplifications,
     ...(membershipStrategies ? { membershipStrategies } : {}),
     ...(membershipUsage ? { membershipUsage } : {}),
@@ -1482,6 +1503,12 @@ function optimizeForFinalShape(
       constantFilterJoinProjections,
       sparseJoinOutputs,
       new Map(tupleMemberships.map((item) => [item.project, item] as const)),
+      true,
+      new Map(
+        physical.joinOrderStrategies.map(
+          (strategy) => [strategy.join, strategy] as const,
+        ),
+      ),
     );
     const definitions = sharedRelations.map((shared) => {
       context.bypassSharedNode = shared.node;
@@ -1664,6 +1691,11 @@ function renderAndBudget(
         sparseJoinOutputs,
         positiveTupleMemberships,
         includeSharedRelations,
+        new Map(
+          physical.joinOrderStrategies.map(
+            (strategy) => [strategy.join, strategy] as const,
+          ),
+        ),
       )
     : renderContext(
         sharedNames,
@@ -1678,6 +1710,7 @@ function renderAndBudget(
         sparseJoinOutputs,
         positiveTupleMemberships,
         includeSharedRelations,
+        new Map(),
       );
   const definitions = sharedRelations.map((shared) => {
     context.bypassSharedNode = shared.node;
@@ -1728,6 +1761,21 @@ function physicalPlanShape(
     if (strategy.strategy === "json-rows") jsonRowRelationCount += 1;
     else nativeRowRelationCount += 1;
   }
+  const rightAnchorJoinOrderCount = physical.joinOrderStrategies.filter(
+    ({ kind }) => kind === "right-anchor",
+  ).length;
+  const uniqueLookupJoinOrderCount = physical.joinOrderStrategies.filter(
+    ({ kind }) => kind === "unique-lookup",
+  ).length;
+  if (rightAnchorJoinOrderCount + uniqueLookupJoinOrderCount > 0)
+    return {
+      version: 4,
+      ...common,
+      nativeRowRelationCount,
+      jsonRowRelationCount,
+      rightAnchorJoinOrderCount,
+      uniqueLookupJoinOrderCount,
+    };
   return rowStrategies.length === 0
     ? { version: 1, ...common }
     : {
@@ -1811,6 +1859,13 @@ function withParameterSlotShape(
   shape: DatabasePhysicalPlanShape,
   layout: PhysicalParameterSlotLayout,
 ): DatabasePhysicalPlanShape {
+  if (shape.version === 4)
+    return {
+      ...shape,
+      parameterStrategy: layout.strategy,
+      parameterOccurrenceCount: layout.occurrenceCount,
+      parameterSlotCount: layout.slotCount,
+    };
   return {
     version: 3,
     cteCount: shape.cteCount,

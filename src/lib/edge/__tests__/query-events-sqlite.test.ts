@@ -79,8 +79,16 @@ import { sha256Hex } from "@/lib/sha256";
 import { filterFixture } from "./filter-fixtures";
 import { queryLegacyEventTypeOverviewFromD1 } from "./query-events-overview-legacy-oracle";
 
-type Binding = string | number | null;
+type Binding = string | number | boolean | null;
 type D1Row = Record<string, unknown>;
+
+function sqliteBindings(bindings: readonly Binding[]): SQLInputValue[] {
+  // D1 accepts booleans as integer parameters; node:sqlite requires the
+  // adapter to translate them at this boundary.
+  return bindings.map((binding) =>
+    typeof binding === "boolean" ? (binding ? 1 : 0) : binding,
+  );
+}
 
 interface TrendEvidenceResult {
   readonly series: readonly {
@@ -210,7 +218,7 @@ function sqliteExplainEvidence(
   const details = (
     database
       .prepare(`EXPLAIN QUERY PLAN ${statement.sql}`)
-      .all(...statement.bindings) as Array<{ detail: string }>
+      .all(...sqliteBindings(statement.bindings)) as Array<{ detail: string }>
   ).map(({ detail }) => detail);
   return {
     steps: details.length,
@@ -373,7 +381,7 @@ class SqliteStatement {
     return {
       results: this.database
         .prepare(this.sql)
-        .all(...this.bindings)
+        .all(...sqliteBindings(this.bindings))
         .map((row) => ({ ...row }) as T),
     };
   }
@@ -2248,7 +2256,9 @@ describe("event detail D1 SQL", () => {
       expect(cardQuery.bindings.length).toBeLessThanOrEqual(100);
       const cardPlan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${cardQuery.sql}`)
-        .all(...cardQuery.bindings) as Array<{ detail: string }>;
+        .all(...sqliteBindings(cardQuery.bindings)) as Array<{
+        detail: string;
+      }>;
       const cardPlanDetails = cardPlan.map((row) => row.detail).join("\n");
       expect(cardPlanDetails).toContain("MATERIALIZE _d1_shared_");
       const overviewQuery = d1.calls.find(({ sql }) =>
@@ -2262,14 +2272,18 @@ describe("event detail D1 SQL", () => {
       ).toBeLessThanOrEqual(100_000);
       const plan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${overviewQuery?.sql ?? "SELECT 1"}`)
-        .all(...(overviewQuery?.bindings ?? [])) as Array<{ detail: string }>;
+        .all(...sqliteBindings(overviewQuery?.bindings ?? [])) as Array<{
+        detail: string;
+      }>;
       const planDetails = plan.map((row) => row.detail).join("\n");
       expect(planDetails).toContain("MATERIALIZE _d1_shared_");
       expect(planDetails).toContain("idx_custom_events_site_pk_time");
 
       const entryExitPlan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${cardQuery.sql}`)
-        .all(...cardQuery.bindings) as Array<{ detail: string }>;
+        .all(...sqliteBindings(cardQuery.bindings)) as Array<{
+        detail: string;
+      }>;
       expect(entryExitPlan.map((row) => row.detail).join("\n")).toContain(
         "idx_visits_site_pk_started_at",
       );
@@ -3034,7 +3048,7 @@ describe("event detail D1 SQL", () => {
       expect(cursorQuery?.sql).toContain('FROM "custom_events"');
       const plan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${cursorQuery?.sql ?? "SELECT 1"}`)
-        .all(...(cursorQuery?.bindings ?? []));
+        .all(...sqliteBindings(cursorQuery?.bindings ?? []));
       expect(plan.length).toBeGreaterThan(0);
     } finally {
       d1.close();
@@ -3069,7 +3083,9 @@ describe("event detail D1 SQL", () => {
       const query = d1.calls.at(-1);
       const plan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${query?.sql ?? "SELECT 1"}`)
-        .all(...(query?.bindings ?? [])) as Array<{ detail: string }>;
+        .all(...sqliteBindings(query?.bindings ?? [])) as Array<{
+        detail: string;
+      }>;
       const planDetails = plan.map((row) => row.detail).join("\n");
       expect(planDetails).toContain("idx_custom_events_site_pk_name_time");
       expect(query?.sql).toContain('"query_string"');
@@ -4476,13 +4492,14 @@ describe("event detail D1 SQL", () => {
       expect(
         d1.calls.every(
           ({ sql }) =>
-            sql.includes("scope_raw_events") && sql.includes("e.event_name"),
+            sql.includes('FROM "custom_events"') &&
+            sql.includes("event_name_id"),
         ),
       ).toBe(true);
       expect(
         d1.calls.every(
           ({ sql }) =>
-            sql.includes("scope_raw_events") && sql.includes("e.event_pk"),
+            sql.includes('"custom_event_names"') && sql.includes("event_pk"),
         ),
       ).toBe(true);
       expect(
@@ -4605,7 +4622,7 @@ describe("event detail D1 SQL", () => {
       expect(cursorQuery?.sql).not.toContain("OFFSET");
       const plan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${cursorQuery?.sql ?? "SELECT 1"}`)
-        .all(...(cursorQuery?.bindings ?? []));
+        .all(...sqliteBindings(cursorQuery?.bindings ?? []));
       expect(plan.length).toBeGreaterThan(0);
     } finally {
       d1.close();

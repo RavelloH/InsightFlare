@@ -977,9 +977,12 @@ function commonQueryMatches(): SqlMatch[] {
         sessionRow({ sessionId: "session-2", views: 1, bounce: 1 }),
       ],
     },
-    allMatch(
-      ["fv.visitor_id AS visitorId"],
-      [
+    {
+      match: (sql) =>
+        sql.includes('AS "visitorId"') &&
+        sql.includes('AS "firstSeenAt"') &&
+        sql.includes('AS "lastSeenAt"'),
+      all: [
         {
           visitorId: "visitor-1",
           sessionId: "session-2",
@@ -1003,14 +1006,17 @@ function commonQueryMatches(): SqlMatch[] {
           screenHeight: 900,
         },
       ],
-    ),
-    allMatch(
-      ["fv.session_id AS sessionId"],
-      [
+    },
+    {
+      match: (sql) =>
+        sql.includes('AS "sessionId"') &&
+        sql.includes('AS "startedAt"') &&
+        sql.includes('AS "totalDurationMs"'),
+      all: [
         sessionRow(),
         sessionRow({ sessionId: "session-2", views: 1, bounce: 1 }),
       ],
-    ),
+    },
     allMatch(
       ["cohort_bucket AS cohortBucket"],
       [
@@ -1589,7 +1595,6 @@ describe("edge query handlers", () => {
       privatePath("trend", "interval=bogus"),
       env,
     );
-
     expect(response.status).toBe(200);
     const payload: any = await response.json();
     expect(payload).toMatchObject({

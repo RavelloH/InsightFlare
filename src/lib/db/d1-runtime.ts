@@ -175,7 +175,25 @@ function shapeIsValid(
         shape.parameterOccurrenceCount > 100 &&
         Number.isSafeInteger(shape.parameterSlotCount) &&
         shape.parameterSlotCount > 0 &&
-        shape.parameterSlotCount < shape.parameterOccurrenceCount)) &&
+        shape.parameterSlotCount < shape.parameterOccurrenceCount) ||
+      (shape?.version === 4 &&
+        Number.isInteger(shape.nativeRowRelationCount) &&
+        shape.nativeRowRelationCount >= 0 &&
+        Number.isInteger(shape.jsonRowRelationCount) &&
+        shape.jsonRowRelationCount >= 0 &&
+        Number.isInteger(shape.rightAnchorJoinOrderCount) &&
+        shape.rightAnchorJoinOrderCount >= 0 &&
+        Number.isInteger(shape.uniqueLookupJoinOrderCount) &&
+        shape.uniqueLookupJoinOrderCount >= 0 &&
+        (shape.parameterStrategy === undefined
+          ? shape.parameterOccurrenceCount === undefined &&
+            shape.parameterSlotCount === undefined
+          : shape.parameterStrategy === "numbered-reuse" &&
+            Number.isSafeInteger(shape.parameterOccurrenceCount) &&
+            shape.parameterOccurrenceCount! > 100 &&
+            Number.isSafeInteger(shape.parameterSlotCount) &&
+            shape.parameterSlotCount! > 0 &&
+            shape.parameterSlotCount! < shape.parameterOccurrenceCount!))) &&
     Number.isInteger(shape.cteCount) &&
     shape.cteCount >= 0 &&
     Number.isInteger(shape.directScanProjectionCount) &&
@@ -218,8 +236,24 @@ async function physicalPlanHash(
       ]);
       return `v2:${await sha256Hex(payload)}`;
     }
+    if (shape.version === 3) {
+      const payload = JSON.stringify([
+        "d1-query-shape-v3",
+        statement.sql,
+        shape.cteCount,
+        shape.directScanProjectionCount,
+        shape.nativeMembershipCount,
+        shape.jsonMembershipCount,
+        shape.nativeRowRelationCount,
+        shape.jsonRowRelationCount,
+        shape.parameterStrategy,
+        shape.parameterOccurrenceCount,
+        shape.parameterSlotCount,
+      ]);
+      return `v3:${await sha256Hex(payload)}`;
+    }
     const payload = JSON.stringify([
-      "d1-query-shape-v3",
+      "d1-query-shape-v4",
       statement.sql,
       shape.cteCount,
       shape.directScanProjectionCount,
@@ -227,11 +261,13 @@ async function physicalPlanHash(
       shape.jsonMembershipCount,
       shape.nativeRowRelationCount,
       shape.jsonRowRelationCount,
-      shape.parameterStrategy,
-      shape.parameterOccurrenceCount,
-      shape.parameterSlotCount,
+      shape.rightAnchorJoinOrderCount,
+      shape.uniqueLookupJoinOrderCount,
+      shape.parameterStrategy ?? null,
+      shape.parameterOccurrenceCount ?? null,
+      shape.parameterSlotCount ?? null,
     ]);
-    return `v3:${await sha256Hex(payload)}`;
+    return `v4:${await sha256Hex(payload)}`;
   } catch {
     return null;
   }
