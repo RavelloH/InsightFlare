@@ -134,6 +134,40 @@ function overviewDimensionSelection(
     ? overviewSelections[tab]!
     : analyticsPageDimensionSelection(tab);
 }
+
+function overviewComparisonDimensionSelection(
+  tab: string,
+): PageDimensionSelection | null {
+  const comparisonSelections: Readonly<Record<string, PageDimensionSelection>> =
+    {
+      "page.path": PAGE_DIMENSION_SELECTIONS.pagePathTrimmed,
+      "page.query": PAGE_DIMENSION_SELECTIONS.pageQueryTrimmed,
+      "page.title": PAGE_DIMENSION_SELECTIONS.pageTitleTrimmed,
+      "page.hostname": PAGE_DIMENSION_SELECTIONS.pageHostnameTrimmed,
+      "source.domain": PAGE_DIMENSION_SELECTIONS.referrerDomain,
+      "source.link": PAGE_DIMENSION_SELECTIONS.referrerUrl,
+      "source.channel": PAGE_DIMENSION_SELECTIONS.trafficChannel,
+      "client.browser": PAGE_DIMENSION_SELECTIONS.browser,
+      "client.osVersion": PAGE_DIMENSION_SELECTIONS.osVersion,
+      "client.deviceType": PAGE_DIMENSION_SELECTIONS.deviceType,
+      "client.language": PAGE_DIMENSION_SELECTIONS.language,
+      "client.screenSize": PAGE_DIMENSION_SELECTIONS.screenSize,
+      "utm.source": PAGE_DIMENSION_SELECTIONS.utmSource,
+      "utm.medium": PAGE_DIMENSION_SELECTIONS.utmMedium,
+      "utm.campaign": PAGE_DIMENSION_SELECTIONS.utmCampaign,
+      "utm.term": PAGE_DIMENSION_SELECTIONS.utmTerm,
+      "utm.content": PAGE_DIMENSION_SELECTIONS.utmContent,
+      "geo.country": PAGE_DIMENSION_SELECTIONS.countryTrimmed,
+      "geo.region": PAGE_DIMENSION_SELECTIONS.region,
+      "geo.city": PAGE_DIMENSION_SELECTIONS.city,
+      "geo.continent": PAGE_DIMENSION_SELECTIONS.continentTrimmed,
+      "geo.timezone": PAGE_DIMENSION_SELECTIONS.timezoneTrimmed,
+      "geo.organization": PAGE_DIMENSION_SELECTIONS.organizationTrimmed,
+    };
+  return Object.hasOwn(comparisonSelections, tab)
+    ? comparisonSelections[tab]!
+    : null;
+}
 function isPerformanceQuery(input: QueryInput): input is PerformanceQuery {
   if (!("time" in input) || !("mode" in input)) return false;
   if (input.mode === "summary") return true;
@@ -240,7 +274,8 @@ export async function overviewTabData(
   }
   if (comparison && comparisonCurrent?.time && comparisonReference?.time) {
     const expression = overviewTabExpression(tab);
-    if (expression) {
+    const selection = overviewComparisonDimensionSelection(tab);
+    if (expression && selection) {
       const currentWindow = timeWindow(comparisonCurrent.time);
       const referenceWindow = timeWindow(comparisonReference.time);
       const currentFilters = comparisonCurrent.filters ?? EMPTY_FILTER_DOCUMENT;
@@ -276,6 +311,7 @@ export async function overviewTabData(
           sortBy: comparison.sortBy,
           direction: comparison.direction,
           search,
+          selection,
         },
         cursor,
         audience,

@@ -67,6 +67,7 @@ import type {
 } from "@/lib/edge/analytics/engine/logical/ids";
 import type {
   AggregateNode,
+  AnalysisResultNode,
   AntiJoinNode,
   DistinctNode,
   EventPayloadOccurrencesNode,
@@ -85,6 +86,7 @@ import type {
 } from "@/lib/edge/analytics/engine/logical/nodes";
 import type {
   LogicalOutput,
+  LogicalPlan,
   ValidatedLogicalPlan,
 } from "@/lib/edge/analytics/engine/logical/plan";
 import { assertNever } from "@/lib/edge/analytics/engine/logical/plan";
@@ -93,6 +95,7 @@ import type {
   LogicalValueType,
 } from "@/lib/edge/analytics/engine/logical/slots";
 import { isSameLogicalValueType } from "@/lib/edge/analytics/engine/logical/slots";
+import { validateLogicalPlan } from "@/lib/edge/analytics/engine/logical/validator";
 import {
   inferLogicalExpression,
   LogicalPlanError,
@@ -1629,6 +1632,8 @@ function logicalNodeInputs(node: LogicalNode): readonly RelationId[] {
   switch (node.kind) {
     case "source":
       return [];
+    case "analysis-result":
+      return [];
     case "relationship-lookup":
     case "filter":
     case "event-payload-occurrences":
@@ -1687,6 +1692,11 @@ export class AnalyticsLogicalToDbLowerer {
   readonly #sourceSelectionIds = new WeakMap<object, number>();
   #nextSourceSelectionId = 1;
   readonly #requiredSlots = new Map<RelationId, Set<SlotId>>();
+  readonly #analysisResultOutputs = new WeakMap<
+    LogicalPlan,
+    Map<string, LoweredAnalyticsLogicalOutput>
+  >();
+  readonly #storageContext: AnalyticsRelationalStorageContext;
   readonly #storage: AnalyticsRelationalStorage;
   readonly #scopedStorage: AnalyticsLegacyScopedStorage;
 
@@ -1695,6 +1705,7 @@ export class AnalyticsLogicalToDbLowerer {
     storageContext: AnalyticsRelationalStorageContext,
   ) {
     this.#plan = plan;
+    this.#storageContext = storageContext;
     let subjectSiteIds: readonly string[];
     let storageSiteIds: readonly string[];
     try {
@@ -1895,6 +1906,9 @@ export class AnalyticsLogicalToDbLowerer {
     switch (node.kind) {
       case "source":
         result = this.#lowerSource(node, path);
+        break;
+      case "analysis-result":
+        result = this.#lowerAnalysisResult(node, path);
         break;
       case "relationship-lookup":
         result = this.#lowerRelationshipLookup(node, path);
@@ -2230,6 +2244,77 @@ export class AnalyticsLogicalToDbLowerer {
         };
       });
     return projectedValues(payload, values, this.#logicalSlots, path);
+  }
+
+  #lowerAnalysisResult(
+    node: AnalysisResultNode,
+    path: string,
+  ): LoweredRelation {
+    let byOutput = this.#analysisResultOutputs.get(node.childPlan);
+    let childLowered = byOutput?.get(node.outputId);
+    if (!childLowered) {
+      let childPlan: ValidatedLogicalPlan;
+      try {
+        childPlan = validateLogicalPlan(node.childPlan);
+      } catch (error) {
+        reject(
+          `${path}.childPlan`,
+          error instanceof Error
+            ? error.message
+            : "Child Logical plan is invalid.",
+        );
+      }
+      const childOutput = childPlan.outputs.find(
+        (output) => output.id === node.outputId,
+      );
+      if (!childOutput)
+        reject(`${path}.outputId`, "The child output is not declared.");
+      const childLowerer = new AnalyticsLogicalToDbLowerer(childPlan, {
+        ...this.#storageContext,
+        time: childPlan.context.time,
+      });
+      childLowered = childLowerer.lower(childOutput);
+      if (!byOutput) {
+        byOutput = new Map();
+        this.#analysisResultOutputs.set(node.childPlan, byOutput);
+      }
+      byOutput.set(node.outputId, childLowered);
+    }
+
+    const needed = this.#requiredOutput(node);
+    const values = node.mappings
+      .filter((mapping) => needed.has(mapping.slot))
+      .map((mapping) => {
+        const field = childLowered.output.fields.find(
+          (candidate) => candidate.name === mapping.field,
+        );
+        if (!field)
+          reject(
+            `${path}.mappings`,
+            `Child output field ${mapping.field} is missing.`,
+          );
+        const value = valueForSlot(
+          childLowered.relation,
+          childLowered.slots,
+          field.slot,
+          `${path}.child.${mapping.field}`,
+        );
+        if (value.kind !== "scalar")
+          reject(
+            `${path}.mappings`,
+            "Only scalar child output values can be imported.",
+          );
+        return {
+          slot: mapping.slot,
+          value: { ...value, candidateBounded: false } as LoweredValue,
+        };
+      });
+    return projectedValues(
+      childLowered.relation,
+      values,
+      this.#logicalSlots,
+      path,
+    );
   }
 
   #lowerProject(node: ProjectNode, path: string): LoweredRelation {
@@ -3026,6 +3111,9 @@ export class AnalyticsLogicalToDbLowerer {
       case "row-concatenation":
       case "event-payload-occurrences":
         // Aggregates and joins do not supply a storage-backed Observation key.
+        return false;
+      case "analysis-result":
+        // Imported values are already aggregated and cannot authorize raw reads.
         return false;
       case "sort":
         return this.#hasStorageBackedObservationIdentity(
@@ -3860,6 +3948,8 @@ export class AnalyticsLogicalToDbLowerer {
         };
         switch (node.kind) {
           case "source":
+          case "analysis-result":
+            // Imported children keep their own relation/slot namespace.
             break;
           case "filter":
             add(node.input, [

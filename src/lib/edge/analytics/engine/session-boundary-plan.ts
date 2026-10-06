@@ -94,6 +94,24 @@ export function selectedSessionBoundary(
   );
 }
 
+/** Selects the actual first/last Page row, including that row's visitor id. */
+export function selectedSessionPathComparisonBoundary(
+  builder: LogicalPlanBuilder,
+  pages: LogicalRelationHandle,
+  kind: SessionBoundaryKind,
+): LogicalRelationHandle {
+  const eligible = eligibleSessionPages(builder, pages);
+  return projectBoundary(
+    builder,
+    orderedMember(
+      builder,
+      eligible,
+      kind === "entry" ? "asc" : "desc",
+      kind === "entry" ? "first" : "last",
+    ),
+  );
+}
+
 /** Selects both Page edges while carrying the first Page's visitor onto exit rows. */
 export function selectedSessionBoundaryPair(
   builder: LogicalPlanBuilder,

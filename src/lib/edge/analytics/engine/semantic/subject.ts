@@ -71,3 +71,16 @@ export function isCanonicalSemanticSubjectDomain(
     canonical.every((siteId, index) => siteId === subject.siteIds[index])
   );
 }
+
+export function sameSemanticSubjectDomain(
+  left: SemanticSubjectDomain,
+  right: SemanticSubjectDomain,
+): boolean {
+  return (
+    left.origin === right.origin &&
+    Object.hasOwn(left, "teamId") === Object.hasOwn(right, "teamId") &&
+    left.teamId === right.teamId &&
+    left.siteIds.length === right.siteIds.length &&
+    left.siteIds.every((siteId, index) => siteId === right.siteIds[index])
+  );
+}

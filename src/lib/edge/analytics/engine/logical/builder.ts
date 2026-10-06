@@ -34,6 +34,7 @@ import type {
   LogicalPlanContext,
   ValidatedLogicalPlan,
 } from "@/lib/edge/analytics/engine/logical/plan";
+import { snapshotLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import type {
   LogicalSlot,
   LogicalValueType,
@@ -69,6 +70,7 @@ import {
   type SemanticScopedSourceSelection,
   snapshotSemanticScopedSourceSelection,
 } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
+import { sameSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import {
   createSemanticTemporalDomains,
   temporalDomainExists,
@@ -128,6 +130,7 @@ export class LogicalPlanBuilder {
     object,
     SemanticScopedSourceSelection
   >();
+  readonly #analysisPlanSnapshots = new WeakMap<object, ValidatedLogicalPlan>();
   #nextRelationId = 0;
   #nextSlotId = 0;
 
@@ -1492,6 +1495,152 @@ export class LogicalPlanBuilder {
       };
     });
     this.#outputs.push({ id, relation: relation.id, fields: resolved });
+  }
+
+  /**
+   * Imports visible scalar fields from an independently validated analysis
+   * domain. The child plan is detached and frozen before it becomes a node.
+   */
+  importAnalysisResult(
+    child: ValidatedLogicalPlan,
+    outputId: string,
+    mappings: readonly { readonly field: string; readonly as?: string }[],
+  ): LogicalRelationHandle {
+    if (typeof child !== "object" || child === null)
+      throw new Error("logical_builder_invalid_analysis_result_plan");
+    let snapshot = this.#analysisPlanSnapshots.get(child);
+    if (!snapshot) {
+      const copy = snapshotLogicalPlan(child);
+      snapshot = validateLogicalPlan(copy);
+      this.#analysisPlanSnapshots.set(child, snapshot);
+    } else {
+      snapshot = validateLogicalPlan(snapshot);
+    }
+    if (
+      !sameSemanticSubjectDomain(
+        this.#context.subject,
+        snapshot.context.subject,
+      )
+    )
+      throw new Error("logical_builder_analysis_result_subject_mismatch");
+    if (snapshot.nodes.some((node) => node.kind === "analysis-result"))
+      throw new Error("logical_builder_nested_analysis_result_unsupported");
+
+    const declaredOutput = snapshot.outputs.find(
+      (candidate) => candidate.id === outputId,
+    );
+    if (!declaredOutput)
+      throw new Error(
+        `logical_builder_unknown_analysis_result_output:${outputId}`,
+      );
+    const childRelation = snapshot.nodes.find(
+      (node) => node.id === declaredOutput.relation,
+    );
+    if (!childRelation)
+      throw new Error(
+        "logical_builder_analysis_result_output_relation_missing",
+      );
+    if (
+      childRelation.grain.kind !== "scalar" &&
+      childRelation.grain.kind !== "keyed"
+    )
+      throw new Error(
+        "logical_builder_analysis_result_requires_scalar_or_keyed_grain",
+      );
+
+    const childSlots = new Map(
+      snapshot.slots.map((slot) => [slot.id, slot] as const),
+    );
+    const fieldsByName = new Map(
+      declaredOutput.fields.map((field) => [field.name, field] as const),
+    );
+    if (
+      declaredOutput.fields.some(
+        (field) => childSlots.get(field.slot)?.type.kind !== "scalar",
+      )
+    )
+      throw new Error("logical_builder_analysis_result_fields_must_be_scalar");
+    if (mappings.length === 0)
+      throw new Error("logical_builder_analysis_result_mapping_required");
+
+    const usedFields = new Set<string>();
+    const usedNames = new Set<string>();
+    const usedSourceSlots = new Set<SlotId>();
+    const requested = mappings.map(({ field, as }) => {
+      const declared = fieldsByName.get(field);
+      const name = as ?? field;
+      if (!declared)
+        throw new Error(
+          `logical_builder_unknown_analysis_result_field:${field}`,
+        );
+      if (usedFields.has(field))
+        throw new Error(
+          `logical_builder_duplicate_analysis_result_field:${field}`,
+        );
+      if (!name || usedNames.has(name))
+        throw new Error("logical_builder_duplicate_analysis_result_name");
+      const source = childSlots.get(declared.slot);
+      if (!source || source.type.kind !== "scalar")
+        throw new Error(
+          "logical_builder_analysis_result_fields_must_be_scalar",
+        );
+      if (usedSourceSlots.has(source.id))
+        throw new Error(
+          "logical_builder_duplicate_analysis_result_source_slot",
+        );
+      usedFields.add(field);
+      usedNames.add(name);
+      usedSourceSlots.add(source.id);
+      return { field, name, source };
+    });
+    if (
+      childRelation.grain.kind === "keyed" &&
+      childRelation.grain.keys.some((key) => !usedSourceSlots.has(key))
+    )
+      throw new Error("logical_builder_analysis_result_key_not_mapped");
+
+    const childToParent = new Map<SlotId, SlotId>();
+    const parentSlots: Record<string, SlotId> = {};
+    const relationIdValue = this.#newRelationId();
+    const resolvedMappings = requested.map(({ field, name, source }) => {
+      const imported = this.#newSlot(
+        source.type,
+        source.nullable,
+        Object.freeze({
+          kind: "analysis-result",
+          relation: relationIdValue,
+          outputId,
+          field,
+          sourceSlot: source.id,
+        }),
+      );
+      childToParent.set(source.id, imported.id);
+      parentSlots[name] = imported.id;
+      return Object.freeze({ field, slot: imported.id });
+    });
+
+    let grain: LogicalGrain;
+    if (childRelation.grain.kind === "scalar") {
+      grain = { kind: "scalar" };
+    } else {
+      const keys = childRelation.grain.keys.map((key) => {
+        const mapped = childToParent.get(key);
+        if (mapped === undefined)
+          throw new Error("logical_builder_analysis_result_key_not_mapped");
+        return mapped;
+      });
+      grain = { kind: "keyed", keys };
+    }
+    const node = {
+      kind: "analysis-result",
+      id: relationIdValue,
+      childPlan: snapshot,
+      outputId,
+      mappings: Object.freeze(resolvedMappings),
+      output: Object.freeze(resolvedMappings.map((mapping) => mapping.slot)),
+      grain: Object.freeze(grain),
+    } satisfies LogicalNode;
+    return this.#addNode(node, parentSlots, node.grain, []);
   }
 
   finish(): ValidatedLogicalPlan {

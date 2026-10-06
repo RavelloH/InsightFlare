@@ -43,6 +43,66 @@ export interface LogicalPlan {
   readonly outputs: readonly LogicalOutput[];
 }
 
+/**
+ * Makes a detached, deeply frozen snapshot of an untrusted Logical plan.
+ * Logical plans are data records; accessors, class instances, symbols, and
+ * cyclic object graphs are deliberately rejected at this boundary.
+ */
+export function snapshotLogicalPlan(plan: LogicalPlan): LogicalPlan {
+  const active = new WeakSet<object>();
+  const copies = new WeakMap<object, object>();
+
+  const clone = (value: unknown): unknown => {
+    if (
+      value === null ||
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    )
+      return value;
+    if (typeof value !== "object")
+      throw new Error("logical_plan_unsupported_snapshot_value");
+    if (active.has(value)) throw new Error("logical_plan_cyclic_snapshot");
+    const copied = copies.get(value);
+    if (copied) return copied;
+
+    const isArray = Array.isArray(value);
+    const prototype = Object.getPrototypeOf(value);
+    if (
+      (isArray && prototype !== Array.prototype) ||
+      (!isArray && prototype !== Object.prototype && prototype !== null)
+    )
+      throw new Error("logical_plan_unsupported_snapshot_value");
+
+    active.add(value);
+    const output: object = isArray ? [] : Object.create(prototype);
+    copies.set(value, output);
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key !== "string")
+        throw new Error("logical_plan_unsupported_snapshot_value");
+      if (isArray && key === "length") continue;
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !("value" in descriptor))
+        throw new Error("logical_plan_unsupported_snapshot_value");
+      Object.defineProperty(output, key, {
+        value: clone(descriptor.value),
+        enumerable: descriptor.enumerable,
+        configurable: false,
+        writable: false,
+      });
+    }
+    active.delete(value);
+    return Object.freeze(output);
+  };
+
+  try {
+    return clone(plan) as LogicalPlan;
+  } catch (error) {
+    if (error instanceof Error) throw error;
+    throw new Error("logical_plan_unsupported_snapshot_value");
+  }
+}
+
 declare const validatedLogicalPlan: unique symbol;
 export type ValidatedLogicalPlan = LogicalPlan & {
   readonly [validatedLogicalPlan]: true;

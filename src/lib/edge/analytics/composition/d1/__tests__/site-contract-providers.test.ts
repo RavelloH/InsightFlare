@@ -2,6 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/edge/analytics/providers/d1/internal/channels", () => ({
   queryChannelAggregate: vi.fn(),
 }));
+vi.mock(
+  "@/lib/edge/analytics/providers/d1/internal/comparison-dimensions",
+  () => ({
+    decodeComparisonDimensionCursor: vi.fn(),
+    queryComparisonDimensionPageFromD1: vi.fn(),
+    queryComparisonSessionPathPageFromD1: vi.fn(),
+  }),
+);
 vi.mock("@/lib/edge/analytics/providers/d1/internal/dimensions", () => ({
   decodeDimensionCursor: vi.fn(),
   decodeSessionPathDimensionCursor: vi.fn(),
@@ -57,7 +65,13 @@ import {
   EMPTY_FILTER_DOCUMENT,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
+import { PAGE_DIMENSION_SELECTIONS } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import { queryChannelAggregate } from "@/lib/edge/analytics/providers/d1/internal/channels";
+import {
+  decodeComparisonDimensionCursor,
+  queryComparisonDimensionPageFromD1,
+  queryComparisonSessionPathPageFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/comparison-dimensions";
 import {
   decodeDimensionCursor,
   decodeSessionPathDimensionCursor,
@@ -137,6 +151,15 @@ function providers() {
 describe("D1 site contract provider pagination routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(decodeComparisonDimensionCursor).mockResolvedValue(null);
+    vi.mocked(queryComparisonDimensionPageFromD1).mockResolvedValue({
+      items: [],
+      pagination: pathPage.pagination,
+    } as never);
+    vi.mocked(queryComparisonSessionPathPageFromD1).mockResolvedValue({
+      items: [],
+      pagination: pathPage.pagination,
+    } as never);
     vi.mocked(decodeDimensionCursor).mockResolvedValue(null);
     vi.mocked(decodeSessionPathDimensionCursor).mockResolvedValue(null);
     vi.mocked(decodePagesCursor).mockResolvedValue(null);
@@ -223,6 +246,67 @@ describe("D1 site contract provider pagination routing", () => {
     expect(queryDimensionPageFromD1).toHaveBeenCalled();
     expect(querySessionPathDimensionPageFromD1).toHaveBeenCalled();
     expect(queryReferrersPageFromD1).toHaveBeenCalled();
+  });
+
+  it("maps every admitted Comparison tab to its registered Logical selection", async () => {
+    const provider = providers().resolve("dimension")!;
+    const comparison = {
+      metric: "views",
+      sortBy: "current",
+      direction: "desc",
+    };
+    const referenceTime = createQueryTime(100, 200, "UTC", 250);
+    const tabs = [
+      ["page.path", PAGE_DIMENSION_SELECTIONS.pagePathTrimmed],
+      ["page.query", PAGE_DIMENSION_SELECTIONS.pageQueryTrimmed],
+      ["page.title", PAGE_DIMENSION_SELECTIONS.pageTitleTrimmed],
+      ["page.hostname", PAGE_DIMENSION_SELECTIONS.pageHostnameTrimmed],
+      ["source.domain", PAGE_DIMENSION_SELECTIONS.referrerDomain],
+      ["source.link", PAGE_DIMENSION_SELECTIONS.referrerUrl],
+      ["source.channel", PAGE_DIMENSION_SELECTIONS.trafficChannel],
+      ["client.browser", PAGE_DIMENSION_SELECTIONS.browser],
+      ["client.osVersion", PAGE_DIMENSION_SELECTIONS.osVersion],
+      ["client.deviceType", PAGE_DIMENSION_SELECTIONS.deviceType],
+      ["client.language", PAGE_DIMENSION_SELECTIONS.language],
+      ["client.screenSize", PAGE_DIMENSION_SELECTIONS.screenSize],
+      ["utm.source", PAGE_DIMENSION_SELECTIONS.utmSource],
+      ["utm.medium", PAGE_DIMENSION_SELECTIONS.utmMedium],
+      ["utm.campaign", PAGE_DIMENSION_SELECTIONS.utmCampaign],
+      ["utm.term", PAGE_DIMENSION_SELECTIONS.utmTerm],
+      ["utm.content", PAGE_DIMENSION_SELECTIONS.utmContent],
+      ["geo.country", PAGE_DIMENSION_SELECTIONS.countryTrimmed],
+      ["geo.region", PAGE_DIMENSION_SELECTIONS.region],
+      ["geo.city", PAGE_DIMENSION_SELECTIONS.city],
+      ["geo.continent", PAGE_DIMENSION_SELECTIONS.continentTrimmed],
+      ["geo.timezone", PAGE_DIMENSION_SELECTIONS.timezoneTrimmed],
+      ["geo.organization", PAGE_DIMENSION_SELECTIONS.organizationTrimmed],
+    ] as const;
+
+    for (const [tab] of tabs) {
+      await provider.execute(
+        input({
+          mode: "overview-tab",
+          tab,
+          limit: 1,
+          comparison,
+          current: { time, filters: EMPTY_FILTER_DOCUMENT },
+          reference: { time: referenceTime, filters: EMPTY_FILTER_DOCUMENT },
+        }),
+      );
+    }
+
+    const calls = vi.mocked(queryComparisonDimensionPageFromD1).mock.calls;
+    expect(calls).toHaveLength(tabs.length);
+    for (const [index, [tab, selection]] of tabs.entries()) {
+      expect(calls[index]?.[7]).toEqual(expect.any(String));
+      expect(calls[index]?.[8]).toMatchObject({
+        selection: { id: selection.id },
+      });
+      expect(
+        vi.mocked(decodeComparisonDimensionCursor).mock.calls[index]?.[6],
+      ).toBe(calls[index]?.[7]);
+      expect(tab).toBeTruthy();
+    }
   });
 
   it("dispatches typed performance modes through one canonical provider", async () => {

@@ -419,6 +419,7 @@ export function pageDimensionReportSource(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly selections: readonly PageDimensionSelection[];
   readonly includeVisitors?: boolean;
   readonly additionalAttributes?: readonly string[];
@@ -450,6 +451,7 @@ function pageDimensionSource(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly selection: PageDimensionSelection;
 }) {
   return pageDimensionReportSource({
@@ -596,6 +598,7 @@ export function buildDimensionTopPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly limit: number;
   readonly selection: PageDimensionSelection;
   readonly excludeEmpty?: boolean;
@@ -626,6 +629,7 @@ export function buildDimensionPagePlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly limit: number;
   readonly selection: PageDimensionSelection;
   readonly excludeEmpty?: boolean;

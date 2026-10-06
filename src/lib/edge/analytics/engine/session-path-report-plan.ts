@@ -20,6 +20,7 @@ import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engin
 import {
   aggregateSessionBoundaries,
   selectedSessionBoundary,
+  selectedSessionPathComparisonBoundary,
 } from "@/lib/edge/analytics/engine/session-boundary-plan";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
@@ -40,6 +41,7 @@ function sessionPathSource(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
 }) {
   const metadata = scopedFilterMetadata(input.filters);
   const sourceSelection =
@@ -163,6 +165,7 @@ function baseSessionPathPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly kind: SessionPathKind;
   readonly search?: string;
   readonly sortBy: SessionPathSortKey;
@@ -191,6 +194,7 @@ export function buildSessionPathTopPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly limit: number;
   readonly kind: SessionPathKind;
   readonly search?: string;
@@ -214,11 +218,48 @@ export function buildSessionPathTopPlan(input: {
   return builder.finish();
 }
 
+/** Builds an unsorted, unpaged Session edge rollup for cross-period composition. */
+export function buildSessionPathComparisonRollupPlan(input: {
+  readonly siteId: string;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
+  readonly kind: SessionPathKind;
+}): ValidatedLogicalPlan {
+  const { builder, pages } = sessionPathSource(input);
+  const boundaries = selectedSessionPathComparisonBoundary(
+    builder,
+    pages,
+    input.kind,
+  );
+  let result = aggregateSessionBoundaries(builder, boundaries);
+  result = builder.filter(
+    result,
+    builder.compare(
+      "neq",
+      builder.normalizeString(
+        builder.slot(result, "value"),
+        "trim-ascii-space",
+      ),
+      builder.literal("", STRING),
+    ),
+  );
+  builder.output("session-path-comparison-rollup", result, [
+    { name: "value", slot: "value" },
+    { name: "views", slot: "views" },
+    { name: "sessions", slot: "sessions" },
+    { name: "visitors", slot: "visitors" },
+  ]);
+  return builder.finish();
+}
+
 export function buildSessionPathPagePlan(input: {
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly limit: number;
   readonly kind: SessionPathKind;
   readonly search?: string;

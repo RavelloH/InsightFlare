@@ -62,6 +62,8 @@ function lineage(value: SlotLineage): string {
       return `alias:${slot(value.source)}`;
     case "derived":
       return `derived:${value.operation}(${value.inputs.map(slot).join(",")})`;
+    case "analysis-result":
+      return `analysis-result:${value.outputId}.${value.field}@${relation(value.relation)}(${slot(value.sourceSlot)})`;
   }
 }
 
@@ -169,6 +171,11 @@ function nodeHeader(node: LogicalNode): string {
       return `${relation(node.id)} Sort grain=${grain(node.grain)} input=${relation(node.input)}`;
     case "limit":
       return `${relation(node.id)} Limit(${node.count}) grain=${grain(node.grain)} input=${relation(node.input)}`;
+    case "analysis-result": {
+      const subject = node.childPlan.context.subject;
+      const scope = node.childPlan.context.scope;
+      return `${relation(node.id)} AnalysisResult grain=${grain(node.grain)} childSubject=${subject.origin}[${subject.siteIds.join(",")}]${subject.teamId ? ` team=${subject.teamId}` : ""} childScope=${scope.requested}/${scope.logicalScope ?? "auto"} childOutput=${JSON.stringify(node.outputId)}`;
+    }
   }
 }
 
@@ -306,6 +313,13 @@ function nodeLines(
       );
       break;
     case "limit":
+      break;
+    case "analysis-result":
+      node.mappings.forEach((mapping) =>
+        lines.push(
+          `  IMPORT ${JSON.stringify(mapping.field)} -> ${formatSlot(mapping.slot, slots)}`,
+        ),
+      );
       break;
   }
   lines.push(

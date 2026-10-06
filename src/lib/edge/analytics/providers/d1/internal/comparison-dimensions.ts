@@ -9,15 +9,22 @@ import {
   analyticsFilterRegistry,
   effectiveScopeForPagination,
   filterFingerprint,
+  queryWindowToTime,
+  scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
+import type { PageDimensionSelection } from "@/lib/edge/analytics/engine/dimension-report-plan";
+import {
+  dimensionRollup,
+  pageDimensionReportSource,
+  selectedPageDimension,
+  validatePageDimensionSelection,
+} from "@/lib/edge/analytics/engine/dimension-report-plan";
+import { LogicalPlanBuilder } from "@/lib/edge/analytics/engine/logical";
+import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
+import { buildSessionPathComparisonRollupPlan } from "@/lib/edge/analytics/engine/session-path-report-plan";
 import type { Env } from "@/lib/edge/types";
 
-import {
-  buildVisitFilterSql,
-  buildVisitSourceCte,
-  queryD1All,
-  visitSourceBindings,
-} from "./core";
+import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
 import type { DimensionRow, QueryWindow } from "./core-types";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import {
@@ -27,7 +34,10 @@ import {
   pageResult,
   paginationBindingForWindow,
 } from "./pagination";
-import { scopedDatasetFor } from "./scoped-dataset";
+
+const STRING = { kind: "scalar", scalar: "string" } as const;
+const NUMBER = { kind: "scalar", scalar: "number" } as const;
+const RATIO = { kind: "scalar", scalar: "number", unit: "ratio" } as const;
 
 export interface ComparisonDimensionCursor {
   readonly sortClass: number;
@@ -58,101 +68,392 @@ function decodeComparisonCursor(
     : null;
 }
 
-interface ComparisonDimensionSide {
-  readonly ctes: string;
-  readonly relation: string;
-  readonly filterClause: string;
-  readonly bindings: readonly (string | number | null)[];
-}
-
-function renamedScopedDataset(
-  dataset: ReturnType<typeof scopedDatasetFor>,
-  prefix: string,
-): ComparisonDimensionSide | null {
-  if (!dataset) return null;
-  const rename = (value: string) =>
-    value
-      .replace(/\bscope_[A-Za-z0-9_]*/g, (name) => `${prefix}_${name}`)
-      .replace(/\bvisit_source\b/g, `${prefix}_visit_source`);
-  return {
-    ctes: rename(dataset.ctes),
-    relation: rename(dataset.visitRelation),
-    filterClause: "",
-    bindings: dataset.bindings.map((binding) => binding.value),
-  };
-}
-
-function comparisonSide(
-  siteId: string,
-  window: QueryWindow,
-  filters: FilterDocument,
-  prefix: string,
-): ComparisonDimensionSide {
-  const scoped = renamedScopedDataset(
-    scopedDatasetFor(siteId, window, filters),
-    prefix,
+function comparisonDimensionPlan(input: {
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly filters: FilterDocument;
+  readonly selection: PageDimensionSelection;
+}): ValidatedLogicalPlan {
+  const metadata = scopedFilterMetadata(input.filters);
+  const selection = validatePageDimensionSelection(input.selection);
+  const { builder, pages } = pageDimensionReportSource({
+    siteId: input.siteId,
+    queryTime: queryWindowToTime(input.window),
+    filters: input.filters,
+    ...(metadata
+      ? {
+          scopePlan: metadata.plan,
+          preparedTimePolicy: "reader-window-v1" as const,
+        }
+      : {}),
+    selections: [selection],
+  });
+  const rows = dimensionRollup(
+    builder,
+    pages,
+    selectedPageDimension(builder, pages, selection),
   );
-  if (scoped) return scoped;
-  const relation = `${prefix}_visit_source`;
-  const filter = buildVisitFilterSql(filters, relation, { window });
-  return {
-    ctes: buildVisitSourceCte().replace("visit_source", relation),
-    relation,
-    filterClause: filter.clause,
-    bindings: [...visitSourceBindings(siteId, window), ...filter.bindings],
-  };
+  builder.output("comparison-dimension-rollup", rows, [
+    { name: "value", slot: "value" },
+    { name: "views", slot: "views" },
+    { name: "sessions", slot: "sessions" },
+    { name: "visitors", slot: "visitors" },
+  ]);
+  return builder.finish();
 }
 
-function relativeSql(current: string, reference: string): string {
-  return `CASE WHEN ${reference} = 0 THEN CASE WHEN ${current} = 0 THEN 0.0 ELSE NULL END ELSE (${current} - ${reference}) * 1.0 / ${reference} END`;
+function comparisonSessionPathPlan(input: {
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly filters: FilterDocument;
+  readonly kind: "entry" | "exit";
+}): ValidatedLogicalPlan {
+  const metadata = scopedFilterMetadata(input.filters);
+  return buildSessionPathComparisonRollupPlan({
+    siteId: input.siteId,
+    queryTime: queryWindowToTime(input.window),
+    filters: input.filters,
+    ...(metadata
+      ? {
+          scopePlan: metadata.plan,
+          preparedTimePolicy: "reader-window-v1" as const,
+        }
+      : {}),
+    kind: input.kind,
+  });
 }
 
-function comparisonOrdering(
-  metric: OverviewTableMetric,
-  sortBy: OverviewTableSortBy,
-  direction: SortDirection,
-): { expression: string; cursorPredicate: string } {
-  const metricColumn =
-    metric === "visitors"
-      ? "visitors"
-      : metric === "sessions"
-        ? "sessions"
-        : "views";
-  const source =
-    sortBy === "reference"
-      ? `reference_${metricColumn}`
-      : sortBy === "change"
-        ? "change_relative"
-        : `current_${metricColumn}`;
-  if (sortBy !== "change") {
-    const secondary =
-      sortBy === "reference"
-        ? `current_${metricColumn}`
-        : `reference_${metricColumn}`;
-    const operator = direction === "asc" ? ">" : "<";
+function mapComparisonRows(rows: readonly Record<string, unknown>[]) {
+  return rows.map((row) => {
+    const number = (name: string) => Number(row[name] ?? 0);
+    const currentViews = number("currentViews");
+    const currentSessions = number("currentSessions");
+    const currentVisitors = number("currentVisitors");
+    const referenceViews = number("referenceViews");
+    const referenceSessions = number("referenceSessions");
+    const referenceVisitors = number("referenceVisitors");
+    const delta = (a: number, b: number) => ({
+      absolute: a - b,
+      relative: b === 0 ? (a === 0 ? 0 : null) : (a - b) / b,
+    });
+    const key = String(row.key ?? "");
     return {
-      expression: `${source} ${direction}, ${secondary} ${direction}, key ASC`,
-      cursorPredicate: `(
-        ${source} ${operator} ?
-        OR (${source} = ? AND ${secondary} ${operator} ?)
-        OR (${source} = ? AND ${secondary} = ? AND key > ?)
-      )`,
+      key,
+      value: key,
+      views: currentViews,
+      sessions: currentSessions,
+      visitors: currentVisitors,
+      reference: {
+        views: referenceViews,
+        sessions: referenceSessions,
+        visitors: referenceVisitors,
+      },
+      change: {
+        views: delta(currentViews, referenceViews),
+        sessions: delta(currentSessions, referenceSessions),
+        visitors: delta(currentVisitors, referenceVisitors),
+      },
     };
-  }
+  });
+}
 
-  const classDirection = direction === "asc" ? "asc" : "desc";
-  const classOperator = direction === "asc" ? ">" : "<";
-  const valueOperator = direction === "asc" ? ">" : "<";
-  return {
-    expression: `change_class ${classDirection}, change_relative ${classDirection}, key ASC`,
-    cursorPredicate: `(
-      change_class ${classOperator} ?
-      OR (change_class = ? AND (
-        change_relative ${valueOperator} ?
-        OR (change_relative = ? AND key > ?)
-      ))
-    )`,
-  };
+function metricField(
+  metric: OverviewTableMetric,
+  side: "current" | "reference",
+) {
+  return `${side}${metric[0]!.toUpperCase()}${metric.slice(1)}`;
+}
+
+function comparisonRelative(
+  builder: LogicalPlanBuilder,
+  current: ReturnType<LogicalPlanBuilder["slot"]>,
+  reference: ReturnType<LogicalPlanBuilder["slot"]>,
+) {
+  const zero = builder.literal(0, NUMBER);
+  const noReference = builder.compare("eq", reference, zero);
+  const noCurrent = builder.compare("eq", current, zero);
+  const zeroChange = builder.literal(0, RATIO);
+  const nullChange = builder.literal(null, RATIO);
+  const denominatorNonzero = builder.arithmetic("subtract", current, reference);
+  return builder.caseWhen(
+    [
+      {
+        when: noReference,
+        then: builder.caseWhen(
+          [{ when: noCurrent, then: zeroChange }],
+          nullChange,
+        ),
+      },
+    ],
+    builder.arithmetic("divide", denominatorNonzero, reference),
+  );
+}
+
+function comparisonPagePlan(input: {
+  readonly current: ValidatedLogicalPlan;
+  readonly reference: ValidatedLogicalPlan;
+  readonly metric: OverviewTableMetric;
+  readonly sortBy: OverviewTableSortBy;
+  readonly direction: SortDirection;
+  readonly search?: string;
+  readonly cursor: ComparisonDimensionCursor | null;
+  readonly limit: number;
+  readonly childOutputId: string;
+}): ValidatedLogicalPlan {
+  const builder = new LogicalPlanBuilder(input.current.context);
+  const importSide = (plan: ValidatedLogicalPlan) =>
+    builder.importAnalysisResult(plan, input.childOutputId, [
+      { field: "value", as: "key" },
+      { field: "views" },
+      { field: "sessions" },
+      { field: "visitors" },
+    ]);
+  const current = importSide(input.current);
+  const reference = importSide(input.reference);
+  const currentKey = builder.project(current, {
+    key: builder.slot(current, "key"),
+  });
+  const referenceKey = builder.project(reference, {
+    key: builder.slot(reference, "key"),
+  });
+  const keyRows = builder.appendRows([currentKey, referenceKey], ["key"]);
+  const keys = builder.aggregate(
+    keyRows,
+    { key: builder.slot(keyRows, "key") },
+    [],
+  );
+  const currentJoin = builder.join(
+    keys,
+    current,
+    [{ left: "key", right: "key" }],
+    "left",
+  );
+  const zero = builder.literal(0, NUMBER);
+  const currentMeasures = builder.project(currentJoin, {
+    key: builder.slot(currentJoin, "key"),
+    currentViews: builder.coalesce(
+      builder.slot(currentJoin, "right.views"),
+      zero,
+    ),
+    currentSessions: builder.coalesce(
+      builder.slot(currentJoin, "right.sessions"),
+      zero,
+    ),
+    currentVisitors: builder.coalesce(
+      builder.slot(currentJoin, "right.visitors"),
+      zero,
+    ),
+  });
+  const referenceJoin = builder.join(
+    currentMeasures,
+    reference,
+    [{ left: "key", right: "key" }],
+    "left",
+  );
+  const measures = builder.project(referenceJoin, {
+    key: builder.slot(referenceJoin, "key"),
+    currentViews: builder.slot(referenceJoin, "currentViews"),
+    currentSessions: builder.slot(referenceJoin, "currentSessions"),
+    currentVisitors: builder.slot(referenceJoin, "currentVisitors"),
+    referenceViews: builder.coalesce(
+      builder.slot(referenceJoin, "right.views"),
+      zero,
+    ),
+    referenceSessions: builder.coalesce(
+      builder.slot(referenceJoin, "right.sessions"),
+      zero,
+    ),
+    referenceVisitors: builder.coalesce(
+      builder.slot(referenceJoin, "right.visitors"),
+      zero,
+    ),
+  });
+  const currentMetric = builder.slot(
+    measures,
+    metricField(input.metric, "current"),
+  );
+  const referenceMetric = builder.slot(
+    measures,
+    metricField(input.metric, "reference"),
+  );
+  const noReference = builder.compare("eq", referenceMetric, zero);
+  const positiveCurrent = builder.compare("gt", currentMetric, zero);
+  const changeClass = builder.caseWhen(
+    [
+      {
+        when: builder.and(noReference, positiveCurrent),
+        then: builder.literal(1, NUMBER),
+      },
+    ],
+    builder.literal(0, NUMBER),
+  );
+  let result = builder.project(measures, {
+    key: builder.slot(measures, "key"),
+    currentViews: builder.slot(measures, "currentViews"),
+    currentSessions: builder.slot(measures, "currentSessions"),
+    currentVisitors: builder.slot(measures, "currentVisitors"),
+    referenceViews: builder.slot(measures, "referenceViews"),
+    referenceSessions: builder.slot(measures, "referenceSessions"),
+    referenceVisitors: builder.slot(measures, "referenceVisitors"),
+    changeRelative: comparisonRelative(builder, currentMetric, referenceMetric),
+    changeClass,
+  });
+  result = builder.filter(
+    result,
+    builder.compare(
+      "neq",
+      builder.slot(result, "key"),
+      builder.literal("", STRING),
+    ),
+  );
+  const search = input.search?.trim();
+  if (search) {
+    result = builder.filter(
+      result,
+      builder.stringMatch(
+        "contains",
+        builder.slot(result, "key"),
+        search.toLowerCase(),
+        false,
+        undefined,
+        "legacy-report-search-v1",
+      ),
+    );
+  }
+  if (input.cursor) {
+    const cursor = input.cursor;
+    const key = builder.slot(result, "key");
+    if (input.sortBy === "change") {
+      const classValue = builder.slot(result, "changeClass");
+      const relative = builder.slot(result, "changeRelative");
+      const operator = input.direction === "asc" ? "gt" : "lt";
+      result = builder.filter(
+        result,
+        builder.or(
+          builder.compare(
+            operator,
+            classValue,
+            builder.literal(cursor.sortClass, NUMBER),
+          ),
+          builder.and(
+            builder.compare(
+              "eq",
+              classValue,
+              builder.literal(cursor.sortClass, NUMBER),
+            ),
+            builder.or(
+              builder.compare(
+                operator,
+                relative,
+                builder.literal(cursor.primary, RATIO),
+              ),
+              builder.and(
+                builder.compare(
+                  "eq",
+                  relative,
+                  builder.literal(cursor.primary, RATIO),
+                ),
+                builder.compare("gt", key, builder.literal(cursor.key, STRING)),
+              ),
+            ),
+          ),
+        ),
+      );
+    } else {
+      const primaryField = metricField(
+        input.metric,
+        input.sortBy === "reference" ? "reference" : "current",
+      );
+      const secondaryField = metricField(
+        input.metric,
+        input.sortBy === "reference" ? "current" : "reference",
+      );
+      const primary = builder.slot(result, primaryField);
+      const secondary = builder.slot(result, secondaryField);
+      const operator = input.direction === "asc" ? "gt" : "lt";
+      result = builder.filter(
+        result,
+        builder.or(
+          builder.compare(
+            operator,
+            primary,
+            builder.literal(cursor.primary, NUMBER),
+          ),
+          builder.and(
+            builder.compare(
+              "eq",
+              primary,
+              builder.literal(cursor.primary, NUMBER),
+            ),
+            builder.compare(
+              operator,
+              secondary,
+              builder.literal(cursor.secondary, NUMBER),
+            ),
+          ),
+          builder.and(
+            builder.compare(
+              "eq",
+              primary,
+              builder.literal(cursor.primary, NUMBER),
+            ),
+            builder.compare(
+              "eq",
+              secondary,
+              builder.literal(cursor.secondary, NUMBER),
+            ),
+            builder.compare("gt", key, builder.literal(cursor.key, STRING)),
+          ),
+        ),
+      );
+    }
+  }
+  const order =
+    input.sortBy === "change"
+      ? [
+          {
+            slot: "changeClass",
+            direction: input.direction,
+            nulls: "last" as const,
+          },
+          {
+            slot: "changeRelative",
+            direction: input.direction,
+            nulls:
+              input.direction === "asc"
+                ? ("first" as const)
+                : ("last" as const),
+          },
+          { slot: "key", direction: "asc" as const, nulls: "first" as const },
+        ]
+      : [
+          {
+            slot: metricField(input.metric, input.sortBy),
+            direction: input.direction,
+            nulls: "last" as const,
+          },
+          {
+            slot: metricField(
+              input.metric,
+              input.sortBy === "reference" ? "current" : "reference",
+            ),
+            direction: input.direction,
+            nulls: "last" as const,
+          },
+          { slot: "key", direction: "asc" as const, nulls: "first" as const },
+        ];
+  result = builder.sort(result, order);
+  result = builder.limit(result, input.limit + 1);
+  builder.output("comparison-page", result, [
+    { name: "key", slot: "key" },
+    { name: "currentViews", slot: "currentViews" },
+    { name: "currentSessions", slot: "currentSessions" },
+    { name: "currentVisitors", slot: "currentVisitors" },
+    { name: "referenceViews", slot: "referenceViews" },
+    { name: "referenceSessions", slot: "referenceSessions" },
+    { name: "referenceVisitors", slot: "referenceVisitors" },
+  ]);
+  return builder.finish();
 }
 
 function comparisonCursorBinding(
@@ -240,6 +541,7 @@ export async function queryComparisonDimensionPageFromD1(
     sortBy: OverviewTableSortBy;
     direction: SortDirection;
     search?: string;
+    selection: PageDimensionSelection;
   },
   cursor: ComparisonDimensionCursor | null,
   audience: QueryAudience,
@@ -274,170 +576,37 @@ export async function queryComparisonDimensionPageFromD1(
     readonly nextCursor: string | null;
   };
 }> {
-  const currentSide = comparisonSide(
+  const currentPlan = comparisonDimensionPlan({
     siteId,
-    current,
-    currentFilters,
-    "current",
-  );
-  const referenceSide = comparisonSide(
+    window: current,
+    filters: currentFilters,
+    selection: options.selection,
+  });
+  const referencePlan = comparisonDimensionPlan({
     siteId,
-    reference,
-    referenceFilters,
-    "reference",
-  );
-  const searchClause = options.search?.trim()
-    ? "AND LOWER(key) LIKE ? ESCAPE '\\'"
-    : "";
-  const ordering = comparisonOrdering(
-    options.metric,
-    options.sortBy,
-    options.direction,
-  );
-  const cursorClause = cursor ? `AND ${ordering.cursorPredicate}` : "";
-  const currentViews = "current_views";
-  const referenceViews = "reference_views";
-  const currentVisitors = "current_visitors";
-  const referenceVisitors = "reference_visitors";
-  const currentSessions = "current_sessions";
-  const referenceSessions = "reference_sessions";
-  const metricCurrent =
-    options.metric === "visitors"
-      ? currentVisitors
-      : options.metric === "sessions"
-        ? currentSessions
-        : currentViews;
-  const metricReference =
-    options.metric === "visitors"
-      ? referenceVisitors
-      : options.metric === "sessions"
-        ? referenceSessions
-        : referenceViews;
-  const changeRelative = relativeSql(metricCurrent, metricReference);
-  const changeClass = `CASE WHEN ${metricReference} = 0 AND ${metricCurrent} > 0 THEN 1 ELSE 0 END`;
-  const sql = `
-WITH
-${currentSide.ctes},
-${referenceSide.ctes},
-current_rollup AS (
-  SELECT COALESCE(${selectExpr}, '') AS key,
-    count(*) AS current_views,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS current_sessions,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS current_visitors
-  FROM ${currentSide.relation}
-  ${currentSide.filterClause}
-  GROUP BY key
-),
-reference_rollup AS (
-  SELECT COALESCE(${selectExpr}, '') AS key,
-    count(*) AS reference_views,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS reference_sessions,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS reference_visitors
-  FROM ${referenceSide.relation}
-  ${referenceSide.filterClause}
-  GROUP BY key
-),
-joined AS (
-  SELECT
-    keys.key AS key,
-    COALESCE(c.current_views, 0) AS current_views,
-    COALESCE(c.current_sessions, 0) AS current_sessions,
-    COALESCE(c.current_visitors, 0) AS current_visitors,
-    COALESCE(r.reference_views, 0) AS reference_views,
-    COALESCE(r.reference_sessions, 0) AS reference_sessions,
-    COALESCE(r.reference_visitors, 0) AS reference_visitors
-  FROM (
-    SELECT key FROM current_rollup
-    UNION
-    SELECT key FROM reference_rollup
-  ) keys
-  LEFT JOIN current_rollup c ON c.key = keys.key
-  LEFT JOIN reference_rollup r ON r.key = keys.key
-),
-projected AS (
-  SELECT *,
-    ${changeRelative} AS change_relative,
-    ${changeClass} AS change_class
-  FROM joined
-)
-SELECT * FROM projected
-WHERE key != ''
-${searchClause}
-${cursorClause}
-ORDER BY ${ordering.expression}
-LIMIT ?
-`;
-  const searchBindings = options.search?.trim()
-    ? [
-        `%${options.search
-          .trim()
-          .toLowerCase()
-          .replaceAll("\\", "\\\\")
-          .replaceAll("%", "\\%")
-          .replaceAll("_", "\\_")}%`,
-      ]
-    : [];
-  const cursorBindings = cursor
-    ? options.sortBy === "change"
-      ? [
-          cursor.sortClass,
-          cursor.sortClass,
-          cursor.primary,
-          cursor.primary,
-          cursor.key,
-        ]
-      : [
-          cursor.primary,
-          cursor.primary,
-          cursor.secondary,
-          cursor.primary,
-          cursor.secondary,
-          cursor.key,
-        ]
-    : [];
-  const rows = await queryD1All<Record<string, unknown>>(
+    window: reference,
+    filters: referenceFilters,
+    selection: options.selection,
+  });
+  const plan = comparisonPagePlan({
+    current: currentPlan,
+    reference: referencePlan,
+    metric: options.metric,
+    sortBy: options.sortBy,
+    direction: options.direction,
+    search: options.search,
+    cursor,
+    limit,
+    childOutputId: "comparison-dimension-rollup",
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
-    sql,
-    [
-      ...currentSide.bindings,
-      ...referenceSide.bindings,
-      ...searchBindings,
-      ...cursorBindings,
-      limit + 1,
-    ],
+    plan,
+    "comparison-page",
+    undefined,
     diagnostics,
   );
-  const mapped = rows.map((row) => {
-    const number = (name: string) => Number(row[name] ?? 0);
-    const currentViewsValue = number(currentViews);
-    const currentSessionsValue = number(currentSessions);
-    const currentVisitorsValue = number(currentVisitors);
-    const referenceViewsValue = number(referenceViews);
-    const referenceSessionsValue = number(referenceSessions);
-    const referenceVisitorsValue = number(referenceVisitors);
-    const delta = (a: number, b: number) => ({
-      absolute: a - b,
-      relative: b === 0 ? (a === 0 ? 0 : null) : (a - b) / b,
-    });
-    return {
-      key: String(row.key ?? ""),
-      value: String(row.key ?? ""),
-      views: currentViewsValue,
-      sessions: currentSessionsValue,
-      visitors: currentVisitorsValue,
-      reference: {
-        views: referenceViewsValue,
-        sessions: referenceSessionsValue,
-        visitors: referenceVisitorsValue,
-      },
-      change: {
-        views: delta(currentViewsValue, referenceViewsValue),
-        sessions: delta(currentSessionsValue, referenceSessionsValue),
-        visitors: delta(currentVisitorsValue, referenceVisitorsValue),
-      },
-    };
-  });
-  const page = pageResult(mapped, limit);
+  const page = pageResult(mapComparisonRows(rows), limit);
   const binding = await comparisonCursorBinding(
     siteId,
     current,
@@ -456,12 +625,10 @@ LIMIT ?
       ? await encodePageCursor(env, binding, {
           sortClass:
             options.sortBy === "change"
-              ? Number(
-                  page.last.reference[options.metric] === 0 &&
-                    page.last[options.metric] > 0
-                    ? 1
-                    : 0,
-                )
+              ? page.last.reference[options.metric] === 0 &&
+                page.last[options.metric] > 0
+                ? 1
+                : 0
               : 0,
           primary:
             options.sortBy === "reference"
@@ -510,164 +677,37 @@ export async function queryComparisonSessionPathPageFromD1(
   audience: QueryAudience,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<Awaited<ReturnType<typeof queryComparisonDimensionPageFromD1>>> {
-  const currentSide = comparisonSide(
+  const currentPlan = comparisonSessionPathPlan({
     siteId,
-    current,
-    currentFilters,
-    "current",
-  );
-  const referenceSide = comparisonSide(
+    window: current,
+    filters: currentFilters,
+    kind,
+  });
+  const referencePlan = comparisonSessionPathPlan({
     siteId,
-    reference,
-    referenceFilters,
-    "reference",
-  );
-  const rank = kind === "entry" ? "first_rank" : "latest_rank";
-  const searchClause = options.search?.trim()
-    ? "AND LOWER(key) LIKE ? ESCAPE '\\'"
-    : "";
-  const ordering = comparisonOrdering(
-    options.metric,
-    options.sortBy,
-    options.direction,
-  );
-  const cursorClause = cursor ? `AND ${ordering.cursorPredicate}` : "";
-  const currentColumn =
-    options.metric === "visitors"
-      ? "current_visitors"
-      : options.metric === "sessions"
-        ? "current_sessions"
-        : "current_views";
-  const referenceColumn =
-    options.metric === "visitors"
-      ? "reference_visitors"
-      : options.metric === "sessions"
-        ? "reference_sessions"
-        : "reference_views";
-  const changeRelative = relativeSql(currentColumn, referenceColumn);
-  const changeClass = `CASE WHEN ${referenceColumn} = 0 AND ${currentColumn} > 0 THEN 1 ELSE 0 END`;
-  const sql = `
-WITH
-${currentSide.ctes},
-${referenceSide.ctes},
-current_ranked AS (
-  SELECT session_id, visitor_id, TRIM(COALESCE(pathname, '')) AS pathname,
-    ROW_NUMBER() OVER (
-      PARTITION BY session_id
-      ORDER BY started_at ${kind === "entry" ? "ASC" : "DESC"}, visit_id ${kind === "entry" ? "ASC" : "DESC"}
-    ) AS ${rank}
-  FROM ${currentSide.relation}
-  ${currentSide.filterClause}
-  WHERE session_id != '' AND TRIM(COALESCE(pathname, '')) != ''
-),
-reference_ranked AS (
-  SELECT session_id, visitor_id, TRIM(COALESCE(pathname, '')) AS pathname,
-    ROW_NUMBER() OVER (
-      PARTITION BY session_id
-      ORDER BY started_at ${kind === "entry" ? "ASC" : "DESC"}, visit_id ${kind === "entry" ? "ASC" : "DESC"}
-    ) AS ${rank}
-  FROM ${referenceSide.relation}
-  ${referenceSide.filterClause}
-  WHERE session_id != '' AND TRIM(COALESCE(pathname, '')) != ''
-),
-current_rollup AS (
-  SELECT pathname AS key, count(*) AS current_views, count(*) AS current_sessions,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS current_visitors
-  FROM current_ranked WHERE ${rank} = 1 GROUP BY pathname
-),
-reference_rollup AS (
-  SELECT pathname AS key, count(*) AS reference_views, count(*) AS reference_sessions,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS reference_visitors
-  FROM reference_ranked WHERE ${rank} = 1 GROUP BY pathname
-),
-joined AS (
-  SELECT keys.key,
-    COALESCE(c.current_views, 0) AS current_views,
-    COALESCE(c.current_sessions, 0) AS current_sessions,
-    COALESCE(c.current_visitors, 0) AS current_visitors,
-    COALESCE(r.reference_views, 0) AS reference_views,
-    COALESCE(r.reference_sessions, 0) AS reference_sessions,
-    COALESCE(r.reference_visitors, 0) AS reference_visitors
-  FROM (SELECT key FROM current_rollup UNION SELECT key FROM reference_rollup) keys
-  LEFT JOIN current_rollup c ON c.key = keys.key
-  LEFT JOIN reference_rollup r ON r.key = keys.key
-),
-projected AS (
-  SELECT *, ${changeRelative} AS change_relative, ${changeClass} AS change_class
-  FROM joined
-)
-SELECT * FROM projected
-WHERE key != '' ${searchClause} ${cursorClause}
-ORDER BY ${ordering.expression}
-LIMIT ?
-`;
-  const searchBindings = options.search?.trim()
-    ? [
-        `%${options.search
-          .trim()
-          .toLowerCase()
-          .replaceAll("\\", "\\\\")
-          .replaceAll("%", "\\%")
-          .replaceAll("_", "\\_")}%`,
-      ]
-    : [];
-  const cursorBindings = cursor
-    ? options.sortBy === "change"
-      ? [
-          cursor.sortClass,
-          cursor.sortClass,
-          cursor.primary,
-          cursor.primary,
-          cursor.key,
-        ]
-      : [
-          cursor.primary,
-          cursor.primary,
-          cursor.secondary,
-          cursor.primary,
-          cursor.secondary,
-          cursor.key,
-        ]
-    : [];
-  const rows = await queryD1All<Record<string, unknown>>(
+    window: reference,
+    filters: referenceFilters,
+    kind,
+  });
+  const plan = comparisonPagePlan({
+    current: currentPlan,
+    reference: referencePlan,
+    metric: options.metric,
+    sortBy: options.sortBy,
+    direction: options.direction,
+    search: options.search,
+    cursor,
+    limit,
+    childOutputId: "session-path-comparison-rollup",
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
-    sql,
-    [
-      ...currentSide.bindings,
-      ...referenceSide.bindings,
-      ...searchBindings,
-      ...cursorBindings,
-      limit + 1,
-    ],
+    plan,
+    "comparison-page",
+    undefined,
     diagnostics,
   );
-  const mapped = rows.map((row) => {
-    const number = (name: string) => Number(row[name] ?? 0);
-    const cv = number("current_views");
-    const cs = number("current_sessions");
-    const cvis = number("current_visitors");
-    const rv = number("reference_views");
-    const rs = number("reference_sessions");
-    const rvis = number("reference_visitors");
-    const delta = (a: number, b: number) => ({
-      absolute: a - b,
-      relative: b === 0 ? (a === 0 ? 0 : null) : (a - b) / b,
-    });
-    return {
-      key: String(row.key ?? ""),
-      value: String(row.key ?? ""),
-      views: cv,
-      sessions: cs,
-      visitors: cvis,
-      reference: { views: rv, sessions: rs, visitors: rvis },
-      change: {
-        views: delta(cv, rv),
-        sessions: delta(cs, rs),
-        visitors: delta(cvis, rvis),
-      },
-    };
-  });
-  const page = pageResult(mapped, limit);
+  const page = pageResult(mapComparisonRows(rows), limit);
   const binding = await comparisonCursorBinding(
     siteId,
     current,

@@ -4,6 +4,7 @@ import type {
   RelationId,
   SlotId,
 } from "@/lib/edge/analytics/engine/logical/ids";
+import type { LogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
 import type { AnalyticsEntityKind } from "@/lib/edge/analytics/engine/semantic/entities";
 import type { EventPayloadOccurrenceField } from "@/lib/edge/analytics/engine/semantic/event-payload-occurrences";
@@ -234,6 +235,19 @@ export interface LimitNode extends LogicalNodeBase {
   readonly count: number;
 }
 
+export interface AnalysisResultFieldMapping {
+  readonly field: string;
+  readonly slot: SlotId;
+}
+
+/** Imports an independently validated scalar/keyed analysis result. */
+export interface AnalysisResultNode extends LogicalNodeBase {
+  readonly kind: "analysis-result";
+  readonly childPlan: LogicalPlan;
+  readonly outputId: string;
+  readonly mappings: readonly AnalysisResultFieldMapping[];
+}
+
 export type LogicalNode =
   | SourceNode
   | RelationshipLookupNode
@@ -251,4 +265,5 @@ export type LogicalNode =
   | OrderedMemberNode
   | RankedMembersNode
   | SortNode
-  | LimitNode;
+  | LimitNode
+  | AnalysisResultNode;

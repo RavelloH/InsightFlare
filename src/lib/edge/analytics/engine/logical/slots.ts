@@ -1,4 +1,7 @@
-import type { SlotId } from "@/lib/edge/analytics/engine/logical/ids";
+import type {
+  RelationId,
+  SlotId,
+} from "@/lib/edge/analytics/engine/logical/ids";
 import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
 import type { AnalyticsEntityKind } from "@/lib/edge/analytics/engine/semantic/entities";
 import type { SemanticMetricId } from "@/lib/edge/analytics/engine/semantic/metrics";
@@ -27,6 +30,13 @@ export type SlotLineage =
       readonly kind: "derived";
       readonly operation: string;
       readonly inputs: readonly SlotId[];
+    }
+  | {
+      readonly kind: "analysis-result";
+      readonly relation: RelationId;
+      readonly outputId: string;
+      readonly field: string;
+      readonly sourceSlot: SlotId;
     };
 
 export function entityValueType(entity: AnalyticsEntityKind): LogicalValueType {

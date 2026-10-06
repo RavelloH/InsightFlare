@@ -41,7 +41,10 @@ import {
   semanticRelationship,
 } from "@/lib/edge/analytics/engine/semantic/relationships";
 import { validateSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
-import { isCanonicalSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
+import {
+  isCanonicalSemanticSubjectDomain,
+  sameSemanticSubjectDomain,
+} from "@/lib/edge/analytics/engine/semantic/subject";
 import {
   createSemanticTemporalDomains,
   isCalendarGranularity,
@@ -2386,6 +2389,195 @@ function validateNode(
       expectedGrain = input.grain;
       break;
     }
+    case "analysis-result": {
+      if (!node.childPlan || typeof node.childPlan !== "object")
+        fail(
+          "invalid-topology",
+          `${path}.childPlan`,
+          "Analysis result child plan is missing.",
+        );
+      if (
+        Array.isArray(node.childPlan.nodes) &&
+        node.childPlan.nodes.some((child) => child?.kind === "analysis-result")
+      )
+        fail(
+          "invalid-topology",
+          `${path}.childPlan`,
+          "Nested analysis-result nodes are not supported.",
+        );
+      let childPlan: ValidatedLogicalPlan;
+      try {
+        childPlan = validateLogicalPlan(node.childPlan);
+      } catch (error) {
+        fail(
+          "invalid-topology",
+          `${path}.childPlan`,
+          error instanceof Error
+            ? error.message
+            : "Child Logical plan is invalid.",
+        );
+      }
+      if (
+        !sameSemanticSubjectDomain(
+          plan.context.subject,
+          childPlan.context.subject,
+        )
+      )
+        fail(
+          "invalid-source",
+          `${path}.childPlan.context.subject`,
+          "Analysis result child must use the exact same Semantic subject.",
+        );
+      if (
+        !node.outputId ||
+        !Array.isArray(node.mappings) ||
+        node.mappings.length === 0
+      )
+        fail(
+          "invalid-topology",
+          path,
+          "Analysis result output and field mappings are required.",
+        );
+      const childOutput = childPlan.outputs.find(
+        (output) => output.id === node.outputId,
+      );
+      if (!childOutput)
+        fail(
+          "invalid-output",
+          `${path}.outputId`,
+          "Analysis result must reference a declared child output.",
+        );
+      const childOutputNode = childPlan.nodes.find(
+        (candidate) => candidate.id === childOutput.relation,
+      );
+      if (!childOutputNode)
+        fail(
+          "invalid-output",
+          `${path}.outputId`,
+          "Child output relation is missing.",
+        );
+      if (
+        childOutputNode.grain.kind !== "scalar" &&
+        childOutputNode.grain.kind !== "keyed"
+      )
+        fail(
+          "invalid-grain",
+          `${path}.childPlan`,
+          "Only scalar or keyed analysis results may be imported.",
+        );
+      const childSlots = new Map(
+        childPlan.slots.map((slot) => [slot.id, slot] as const),
+      );
+      const childFields = new Map(
+        childOutput.fields.map((field) => [field.name, field] as const),
+      );
+      if (
+        childOutput.fields.some(
+          (field) => childSlots.get(field.slot)?.type.kind !== "scalar",
+        )
+      )
+        fail(
+          "invalid-grain",
+          `${path}.childPlan.outputs`,
+          "Every imported child output field must be scalar.",
+        );
+      const mappedFields = new Set<string>();
+      const mappedSlots = new Set<SlotId>();
+      const mappedSources = new Map<SlotId, SlotId>();
+      const mappedOutput: SlotId[] = [];
+      node.mappings.forEach((mapping, index) => {
+        const mappingPath = `${path}.mappings[${index}]`;
+        const sourceField = childFields.get(mapping.field);
+        const source = sourceField
+          ? childSlots.get(sourceField.slot)
+          : undefined;
+        const target = types.get(mapping.slot);
+        if (
+          !mapping.field ||
+          !sourceField ||
+          !source ||
+          source.type.kind !== "scalar"
+        )
+          fail(
+            "invalid-output",
+            `${mappingPath}.field`,
+            "Mapping must name a scalar field of the declared child output.",
+          );
+        if (
+          mappedFields.has(mapping.field) ||
+          mappedSlots.has(mapping.slot) ||
+          mappedSources.has(sourceField.slot)
+        )
+          fail(
+            "invalid-output",
+            mappingPath,
+            "Analysis result field and target mappings must be one-to-one.",
+          );
+        if (!target)
+          fail(
+            "invisible-slot",
+            `${mappingPath}.slot`,
+            "Mapped parent slot is not declared.",
+          );
+        if (
+          !sameType(target.type, source.type) ||
+          target.nullable !== source.nullable
+        )
+          fail(
+            "invalid-expression",
+            `${mappingPath}.slot`,
+            "Imported slot type, unit, and nullability must match the child output.",
+          );
+        if (
+          target.lineage.kind !== "analysis-result" ||
+          target.lineage.relation !== node.id ||
+          target.lineage.outputId !== node.outputId ||
+          target.lineage.field !== mapping.field ||
+          target.lineage.sourceSlot !== sourceField.slot
+        )
+          fail(
+            "invalid-output",
+            `${mappingPath}.slot`,
+            "Imported slot provenance does not match the declared child output.",
+          );
+        mappedFields.add(mapping.field);
+        mappedSlots.add(mapping.slot);
+        mappedSources.set(sourceField.slot, mapping.slot);
+        mappedOutput.push(mapping.slot);
+      });
+      if (childOutputNode.grain.kind === "keyed") {
+        if (
+          new Set(childOutputNode.grain.keys).size !==
+          childOutputNode.grain.keys.length
+        )
+          fail(
+            "invalid-grain",
+            `${path}.childPlan`,
+            "Child keyed grain cannot contain duplicate keys.",
+          );
+        for (const key of childOutputNode.grain.keys) {
+          const field = childOutput.fields.find(
+            (candidate) => candidate.slot === key,
+          );
+          if (!field || !mappedSources.has(key))
+            fail(
+              "invalid-grain",
+              `${path}.mappings`,
+              "Every child keyed-grain key must be declared and mapped.",
+            );
+        }
+        expectedGrain = {
+          kind: "keyed",
+          keys: childOutputNode.grain.keys.map((key) =>
+            mappedSources.get(key)!,
+          ),
+        };
+      } else {
+        expectedGrain = { kind: "scalar" };
+      }
+      expectedOutput = mappedOutput;
+      break;
+    }
   }
   if (!sameOutput(node.output, expectedOutput)) {
     fail(
@@ -2411,6 +2603,41 @@ function validateNode(
 }
 
 export function validateLogicalPlan(plan: LogicalPlan): ValidatedLogicalPlan {
+  const active = new WeakSet<object>();
+  const visited = new WeakSet<object>();
+  const assertAcyclic = (value: unknown): void => {
+    if (value === null || typeof value !== "object") return;
+    if (active.has(value))
+      fail(
+        "invalid-envelope",
+        "plan",
+        "Logical plan object graph must be acyclic.",
+      );
+    if (visited.has(value)) return;
+    active.add(value);
+    for (const key of Reflect.ownKeys(value)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !("value" in descriptor))
+        fail(
+          "invalid-envelope",
+          "plan",
+          "Logical plan must contain only data properties.",
+        );
+      assertAcyclic(descriptor.value);
+    }
+    active.delete(value);
+    visited.add(value);
+  };
+  try {
+    assertAcyclic(plan);
+  } catch (error) {
+    if (error instanceof LogicalPlanError) throw error;
+    fail(
+      "invalid-envelope",
+      "plan",
+      "Logical plan object graph is not safely inspectable.",
+    );
+  }
   if (
     !plan ||
     plan.version !== 1 ||
@@ -2511,6 +2738,8 @@ export function validateLogicalPlan(plan: LogicalPlan): ValidatedLogicalPlan {
           return [];
         case "ranked-members":
           return [node.rankSlot];
+        case "analysis-result":
+          return node.mappings.map((mapping) => mapping.slot);
         case "sort":
         case "limit":
           return [];
