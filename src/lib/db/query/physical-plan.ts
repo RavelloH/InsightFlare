@@ -1986,80 +1986,45 @@ function joinOrderStrategies(
   return strategies;
 }
 
+function expressionHasBoundParameters(expression: SqlExpression): boolean {
+  switch (expression.kind) {
+    case "parameter":
+      return true;
+    case "column":
+    case "constant":
+      return false;
+    case "binary":
+      return (
+        expressionHasBoundParameters(expression.left) ||
+        expressionHasBoundParameters(expression.right)
+      );
+    case "boolean":
+      return (
+        expression.operator !== "AND" ||
+        expression.expressions.some(expressionHasBoundParameters)
+      );
+    case "null-check":
+      return expression.expression.kind !== "column";
+    case "in-list":
+      return (
+        expression.values.length > 0 ||
+        expressionHasBoundParameters(expression.expression)
+      );
+    default:
+      return true;
+  }
+}
+
 function nodeHasParameters(
   root: LogicalQueryNode,
   visited = new Set<LogicalQueryNode>(),
 ): boolean {
   if (visited.has(root)) return false;
   visited.add(root);
-  if (
-    nodeExpressions(root).some((expression) =>
-      expressionTreeHasKind(expression, "parameter"),
-    )
-  )
-    return true;
+  if (nodeExpressions(root).some(expressionHasBoundParameters)) return true;
   return nodeChildren(root).some((child) =>
     nodeHasParameters(child.node, visited),
   );
-}
-
-function expressionTreeHasKind(
-  expression: SqlExpression,
-  kind: SqlExpression["kind"],
-): boolean {
-  if (expression.kind === kind) return true;
-  return expressionTreeChildren(expression).some((child) =>
-    expressionTreeHasKind(child, kind),
-  );
-}
-
-function expressionTreeChildren(
-  expression: SqlExpression,
-): readonly SqlExpression[] {
-  switch (expression.kind) {
-    case "binary":
-    case "distinct-from":
-      return [expression.left, expression.right];
-    case "boolean":
-      return expression.expressions;
-    case "not":
-    case "null-check":
-    case "cast-integer":
-    case "cast-real":
-    case "cast-text":
-      return [expression.expression];
-    case "text-position":
-      return [expression.text, expression.needle];
-    case "text-substring":
-      return [
-        expression.text,
-        expression.start,
-        ...(expression.length ? [expression.length] : []),
-      ];
-    case "text-like":
-      return [expression.text, expression.pattern];
-    case "in-list":
-      return [expression.expression];
-    case "function":
-      return expression.arguments;
-    case "aggregate":
-      return expression.expression ? [expression.expression] : [];
-    case "coalesce":
-      return expression.expressions;
-    case "case":
-      return [
-        ...expression.branches.flatMap(({ when, then }) => [when, then]),
-        ...(expression.else ? [expression.else] : []),
-      ];
-    case "column":
-    case "parameter":
-    case "excluded":
-    case "constant":
-    case "unixepoch":
-    case "scalar-subquery":
-    case "in-subquery":
-      return [];
-  }
 }
 
 function sameJoinOrderStrategies(

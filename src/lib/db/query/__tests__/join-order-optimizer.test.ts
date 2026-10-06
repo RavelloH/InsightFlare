@@ -6,16 +6,21 @@ import { describe, expect, it } from "vitest";
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
   aggregate,
+  and,
   castText,
   compileD1Query,
+  constant,
   count,
   distinct,
   eq,
   filter,
+  gte,
   inList,
+  isNotNull,
   join,
   limit,
   lowerLogicalPlan,
+  lte,
   max,
   param,
   project,
@@ -32,13 +37,28 @@ import { compileD1QueryUnoptimizedForTest } from "@/lib/db/query/compiler";
 import type { Relation } from "@/lib/db/query/plan";
 import { schema } from "@/lib/db/schema";
 
-function makeTargetRows(selector: "single" | "multi" | "domain-only") {
+function makeTargetRows(
+  selector: "single" | "single-in" | "single-and" | "multi" | "domain-only",
+) {
   const visits = scan(schema.visits);
   let selectedVisits = visits;
   if (selector === "single")
     selectedVisits = filter(
       visits,
       eq(visits.columns.visitor_id, param("target-visitor")),
+    );
+  else if (selector === "single-in")
+    selectedVisits = filter(
+      visits,
+      inList(visits.columns.visitor_id, ["target-visitor"]),
+    );
+  else if (selector === "single-and")
+    selectedVisits = filter(
+      visits,
+      and(
+        eq(visits.columns.visitor_id, param("target-visitor")),
+        gte(visits.columns.started_at, param(10)),
+      ),
     );
   else if (selector === "multi")
     selectedVisits = filter(
@@ -76,10 +96,19 @@ function makeTargetRows(selector: "single" | "multi" | "domain-only") {
 }
 
 function buildQuery(input: {
-  readonly selector?: "single" | "multi" | "domain-only";
+  readonly selector?:
+    "single" | "single-in" | "single-and" | "multi" | "domain-only";
   readonly nameJoin?: "inner" | "left";
   readonly sideLookup?: "none" | "partial-unique" | "one-to-many";
   readonly nameLookupValue?: "single" | "null" | "multi";
+  readonly factFilter?:
+    | "binary-parameter"
+    | "and-time-range"
+    | "single-in"
+    | "multi-in"
+    | "column-only"
+    | "null-check"
+    | "constant";
   readonly ownerAggregation?: "stable" | "volatile" | "subquery";
   readonly extraGroupKey?: boolean;
   readonly rightBarrier?: "window" | "set" | "sort" | "limit" | "distinct";
@@ -140,6 +169,29 @@ function buildQuery(input: {
 
   const events = scan(schema.custom_events);
   let eventRows: Relation = events;
+  if (input.factFilter === "binary-parameter")
+    eventRows = filter(events, eq(events.columns.node_count, param(0)));
+  else if (input.factFilter === "and-time-range")
+    eventRows = filter(
+      events,
+      and(
+        gte(events.columns.occurred_at, param(10)),
+        lte(events.columns.occurred_at, param(11)),
+      ),
+    );
+  else if (input.factFilter === "single-in")
+    eventRows = filter(events, inList(events.columns.event_name_id, [17]));
+  else if (input.factFilter === "multi-in")
+    eventRows = filter(events, inList(events.columns.event_name_id, [17, 18]));
+  else if (input.factFilter === "column-only")
+    eventRows = filter(
+      events,
+      eq(events.columns.node_count, events.columns.value_count),
+    );
+  else if (input.factFilter === "null-check")
+    eventRows = filter(events, isNotNull(events.columns.value_count));
+  else if (input.factFilter === "constant")
+    eventRows = filter(events, eq(events.columns.node_count, constant(0)));
   let eventVisitId: typeof events.columns.visit_id = events.columns.visit_id;
   if (input.sideLookup === "partial-unique") {
     const members = scan(schema.team_members);
@@ -176,10 +228,15 @@ function buildQuery(input: {
     const selectedName = project(selectedNameFilter, {
       id: selectedNameFilter.columns.id,
     });
+    const nameJoinInput = eventRows;
     eventRows = join(
-      events,
+      nameJoinInput,
       selectedName,
-      eq(events.columns.event_name_id, selectedName.columns.id),
+      eq(
+        nameJoinInput.columns
+          .event_name_id as typeof events.columns.event_name_id,
+        selectedName.columns.id,
+      ),
       input.nameJoin ?? "inner",
     );
     eventVisitId = eventRows.columns["left_visit_id"] as typeof eventVisitId;
@@ -332,6 +389,29 @@ function createMigratedFixtureDatabase() {
   return db;
 }
 
+const EXPECTED_EVENT_BAG = [
+  JSON.stringify({ visitorId: "target-visitor", count: 2 }),
+  JSON.stringify({ visitorId: "target-visitor", count: 2 }),
+  JSON.stringify({ visitorId: "target-visitor", count: 2 }),
+].sort();
+
+function expectMigratedBag(
+  output: Relation,
+  expected = EXPECTED_EVENT_BAG,
+): readonly unknown[] {
+  const db = createMigratedFixtureDatabase();
+  try {
+    const optimized = compileD1Query(lowerLogicalPlan(output));
+    const mechanical = compileD1QueryUnoptimizedForTest(output);
+    const optimizedRows = rows(db, optimized);
+    expect(optimizedRows).toEqual(rows(db, mechanical));
+    expect(optimizedRows).toEqual(expected);
+    return optimized.bindings ?? [];
+  } finally {
+    db.close();
+  }
+}
+
 describe("typed join-order optimizer", () => {
   it("uses independently built shared target facts and a proven unique lookup without changing the result bag", () => {
     const { output, targetRows } = buildQuery({ selector: "single" });
@@ -398,6 +478,63 @@ describe("typed join-order optimizer", () => {
     (_label, options) => {
       const { output } = buildQuery(options);
       expect(lowerLogicalPlan(output).joinOrderStrategies).toEqual([]);
+    },
+  );
+
+  it.each(["single-in", "single-and"] as const)(
+    "keeps a materialized target selected by %s as the anchor",
+    (selector) => {
+      const { output, targetRows } = buildQuery({ selector });
+      const physical = lowerLogicalPlan(output);
+      expect(
+        physical.sharedRelations.find(({ node }) => node === targetRows.node),
+      ).toMatchObject({ materialization: "materialized" });
+      expect(physical.joinOrderStrategies.map(({ kind }) => kind)).toEqual([
+        "right-anchor",
+        "unique-lookup",
+      ]);
+      const bindings = expectMigratedBag(output);
+      expect(bindings).toContain("target-visitor");
+      if (selector === "single-and") expect(bindings).toContain(10);
+    },
+  );
+
+  it.each([
+    "binary-parameter",
+    "and-time-range",
+    "single-in",
+    "multi-in",
+  ] as const)(
+    "retains the anchor but suppresses unique lookup for a fact-side %s filter",
+    (factFilter) => {
+      const { output, targetRows } = buildQuery({ factFilter });
+      const physical = lowerLogicalPlan(output);
+      expect(
+        physical.sharedRelations.find(({ node }) => node === targetRows.node),
+      ).toMatchObject({ materialization: "materialized" });
+      expect(physical.joinOrderStrategies.map(({ kind }) => kind)).toEqual([
+        "right-anchor",
+      ]);
+
+      const bindings = expectMigratedBag(output);
+      if (factFilter === "binary-parameter") expect(bindings).toContain(0);
+      if (factFilter === "and-time-range") {
+        expect(bindings).toContain(10);
+        expect(bindings).toContain(11);
+      }
+      if (factFilter === "single-in") expect(bindings).toContain(17);
+      if (factFilter === "multi-in") expect(bindings).toContain(18);
+    },
+  );
+
+  it.each(["column-only", "null-check", "constant"] as const)(
+    "keeps unique lookup for a binding-free fact-side %s filter",
+    (factFilter) => {
+      const { output } = buildQuery({ factFilter });
+      expect(
+        lowerLogicalPlan(output).joinOrderStrategies.map(({ kind }) => kind),
+      ).toEqual(["right-anchor", "unique-lookup"]);
+      expectMigratedBag(output);
     },
   );
 
