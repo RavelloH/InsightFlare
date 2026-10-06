@@ -11,6 +11,8 @@ export const FUNNEL_CONFIG_VERSION = 2 as const;
 export const FUNNEL_FILTER_DSL_VERSION = 1 as const;
 export const MIN_FUNNEL_STEPS = 2;
 export const MAX_FUNNEL_STEPS = 10;
+/** Historical stored funnels may still contain up to twelve stages. */
+export const MAX_HISTORICAL_FUNNEL_STEPS = 12;
 export const MAX_FUNNEL_STEP_ID_LENGTH = 128;
 export const MAX_FUNNEL_STEP_NAME_LENGTH = 120;
 export type FunnelProgressionScope = "session" | "visitor";
@@ -213,6 +215,31 @@ function assertFinitePositiveWindow(config: FunnelConfigV2): void {
     throw new FunnelConfigValidationError(
       "visitor_funnel_conversion_window_must_be_positive",
     );
+  }
+}
+
+/** Preserve the read contract for already-stored funnels, including legacy limits. */
+export function assertHistoricalFunnelConfigForAnalysis(
+  config: FunnelConfigV2,
+): void {
+  if (
+    !config ||
+    !Array.isArray(config.steps) ||
+    !Number.isSafeInteger(config.steps.length) ||
+    config.steps.length < 1
+  )
+    throw new Error("funnel_steps_required");
+  if (config.steps.length > MAX_HISTORICAL_FUNNEL_STEPS)
+    throw new Error("funnel_historical_step_limit_exceeded");
+  if (config.progressionScope === "visitor") {
+    if (
+      config.conversionWindowMs === null ||
+      !Number.isFinite(config.conversionWindowMs) ||
+      config.conversionWindowMs <= 0
+    )
+      throw new Error("visitor_funnel_conversion_window_must_be_positive");
+  } else if (config.conversionWindowMs !== null) {
+    throw new Error("session_funnel_conversion_window_must_be_null");
   }
 }
 /** Validate a decoded config for a new V2 write. */

@@ -5,8 +5,6 @@ import {
 } from "@/lib/db";
 import type { QueryWindow } from "@/lib/edge/analytics/contract";
 import {
-  createScopedFilterPlan,
-  EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
   type FunnelAnalysis,
   type FunnelConfigV2,
@@ -16,6 +14,10 @@ import {
   decodeFunnelConfig,
   funnelSemanticFingerprint,
 } from "@/lib/edge/analytics/contract/funnel-config";
+import {
+  buildFunnelProgressionReportPlan,
+  FUNNEL_PROGRESSION_REPORT_OUTPUT,
+} from "@/lib/edge/analytics/engine/funnel-progression-report-plan";
 import type { Env } from "@/lib/edge/types";
 
 import {
@@ -25,9 +27,8 @@ import {
   insertAnalysisDefinition,
   updateAnalysisDefinition,
 } from "./analysis-definition-queries";
-import { queryD1All } from "./core";
+import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
 import { encodeD1FunnelConfig } from "./funnel-config-validation";
-import { buildFunnelSqlPlan } from "./funnel-planner";
 import {
   decodePageCursor,
   encodePageCursor,
@@ -35,7 +36,6 @@ import {
   pageResult,
   paginationBinding,
 } from "./pagination";
-import { compileScopedDatasetSql, scopedDatasetFor } from "./scoped-dataset";
 const FUNNEL_ANALYSIS_KIND = "funnel";
 export type {
   FunnelAnalysis,
@@ -149,29 +149,6 @@ export async function queryFunnelDefinition(
   const row = result.results[0];
   return row ? mapFunnelDefinition(row) : null;
 }
-function baseFunnelDataset(
-  siteId: string,
-  window: QueryWindow,
-  filters: FilterDocument,
-) {
-  const existing = scopedDatasetFor(siteId, window, filters);
-  if (existing) return existing;
-
-  // A no-filter private request has no prepared metadata. It still gets the
-  // canonical relation bundle before Step filters are applied.
-  const plan = createScopedFilterPlan(
-    "funnel-analysis",
-    EMPTY_FILTER_DOCUMENT,
-    "event",
-  );
-  if (!plan) throw new Error("funnel_scope_unavailable");
-  return compileScopedDatasetSql({
-    filters: EMPTY_FILTER_DOCUMENT,
-    plan,
-    siteIds: [siteId],
-    window,
-  });
-}
 function numberRow(value: unknown): number {
   const result = Number(value ?? 0);
   return Number.isFinite(result) && result > 0 ? Math.floor(result) : 0;
@@ -241,15 +218,16 @@ export async function queryFunnelAnalysis(
   filters: FilterDocument,
   config: FunnelConfigV2,
 ): Promise<FunnelAnalysis> {
-  const plan = buildFunnelSqlPlan(
+  const logical = buildFunnelProgressionReportPlan({
+    siteId,
+    window,
+    filters,
     config,
-    baseFunnelDataset(siteId, window, filters),
-    { allowHistoricalOverLimit: true },
-  );
-  const rows = await queryD1All<FunnelCountRow>(
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
-    plan.sql,
-    plan.bindings.map((binding) => binding.value),
+    logical.plan,
+    FUNNEL_PROGRESSION_REPORT_OUTPUT,
   );
   return analysisFromRows(config, rows);
 }

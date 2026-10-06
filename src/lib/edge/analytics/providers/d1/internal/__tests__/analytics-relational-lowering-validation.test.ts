@@ -23,14 +23,22 @@ const SITE_ID = "relational-lowering-validation-site";
 const STRING = { kind: "scalar", scalar: "string" } as const;
 const NUMBER_MS = { kind: "scalar", scalar: "number", unit: "ms" } as const;
 
-function createBuilder(): LogicalPlanBuilder {
+function createBuilder(
+  range: { readonly startMs: number; readonly endExclusiveMs: number } = {
+    startMs: 0,
+    endExclusiveMs: 1,
+  },
+): LogicalPlanBuilder {
   return new LogicalPlanBuilder({
     subject: createSemanticSubjectDomain({
       origin: "site",
       siteIds: [SITE_ID as never],
     }),
     time: createSemanticTemporalDomains({
-      candidate: { startMs: 0 as never, endExclusiveMs: 1 as never },
+      candidate: {
+        startMs: range.startMs as never,
+        endExclusiveMs: range.endExclusiveMs as never,
+      },
       read: { kind: "retained-history" },
       reportingTimeZone: "UTC" as never,
       capturedAtMs: 0 as never,
@@ -144,6 +152,36 @@ function createOrderedPlan(): {
   };
 }
 
+function createOrderedExecutionPlan(): ValidatedLogicalPlan {
+  const builder = createBuilder({ startMs: 20_000, endExclusiveMs: 30_000 });
+  const pages = builder.source("page", {
+    temporalDomain: "read",
+    attributes: [
+      "page.report.localId",
+      "page.report.sessionId",
+      "page.report.durationMs",
+    ],
+  });
+  const projected = builder.project(pages, {
+    localId: builder.slot(pages, "attribute:page.report.localId"),
+    sessionId: builder.slot(pages, "attribute:page.report.sessionId"),
+    durationMs: builder.slot(pages, "attribute:page.report.durationMs"),
+  });
+  const member = builder.orderedMember(projected, {
+    groups: ["sessionId"],
+    order: [
+      { slot: "durationMs", direction: "desc", nulls: "last" },
+      { slot: "localId", direction: "asc", nulls: "last" },
+    ],
+  });
+  builder.output("ordered-execution", member, [
+    { name: "localId", slot: "localId" },
+    { name: "sessionId", slot: "sessionId" },
+    { name: "durationMs", slot: "durationMs" },
+  ]);
+  return builder.finish();
+}
+
 function createKeyedJoinPlan(): {
   readonly plan: ValidatedLogicalPlan;
   readonly joinId: RelationId;
@@ -241,6 +279,79 @@ function createPageDimensionPlan(): {
 }
 
 describe("relational lowerer validation guards", () => {
+  it("uses an inline fixed rank ordinal and preserves ordered-member tie and NULL behavior", () => {
+    const plan = createOrderedExecutionPlan();
+    const output = plan.outputs[0]!;
+    const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+      siteId: SITE_ID,
+      time: plan.context.time,
+    });
+    const query = compileD1Query(
+      lowerer.projectOutput(
+        lowerer.lower(output),
+        output.fields.map(({ name, slot }) => ({ name, slot })),
+      ),
+    );
+    expect(query.sql).toMatch(/ = 1\)\)/u);
+    expect(query.bindings).not.toContain(1);
+
+    const database = createMigratedDatabase();
+    try {
+      database
+        .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
+        .run(SITE_ID);
+      const sitePk = Number(
+        (
+          database
+            .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+            .get(SITE_ID) as { readonly site_pk: number }
+        ).site_pk,
+      );
+      const insertVisit = database.prepare(
+        `INSERT INTO visits (
+          visit_id, site_id, site_pk, visitor_id, session_id, status,
+          started_at, last_activity_at, duration_ms, pathname, hostname
+        ) VALUES (?, ?, ?, ?, ?, 'complete', ?, ?, ?, '/', 'example.test')`,
+      );
+      for (const [visitId, sessionId, durationMs, startedAt] of [
+        ["same-b", "same", 5, 21_000],
+        ["same-a", "same", 5, 22_000],
+        ["reverse-low", "reverse", 1, 23_000],
+        ["reverse-high", "reverse", 9, 24_000],
+        ["nullable-valid", "nullable", 2, 25_000],
+        ["nullable-null", "nullable", null, 26_000],
+        ["only-null", "only-null", null, 27_000],
+      ] as const)
+        insertVisit.run(
+          visitId,
+          SITE_ID,
+          sitePk,
+          `visitor-${sessionId}`,
+          sessionId,
+          startedAt,
+          startedAt,
+          durationMs,
+        );
+
+      const rows = database
+        .prepare(query.sql)
+        .all(...((query.bindings ?? []) as SQLInputValue[])) as Array<
+        Record<string, unknown>
+      >;
+      rows.sort((left, right) =>
+        String(left.sessionId).localeCompare(String(right.sessionId)),
+      );
+      expect(rows).toEqual([
+        { localId: "nullable-valid", sessionId: "nullable", durationMs: 2 },
+        { localId: "only-null", sessionId: "only-null", durationMs: null },
+        { localId: "reverse-high", sessionId: "reverse", durationMs: 9 },
+        { localId: "same-a", sessionId: "same", durationMs: 5 },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("rechecks forged ROUND precision at the D1 lowering boundary", () => {
     const builder = createBuilder();
     const pages = builder.source("page", {
@@ -761,6 +872,133 @@ describe("relational lowerer validation guards", () => {
     expect(() => lower(textPredicate)).toThrow(
       "A relational predicate must lower to an integer expression.",
     );
+  });
+
+  it("lowers only datetime plus a finite elapsed-duration literal in epoch milliseconds", () => {
+    const builder = createBuilder();
+    const pages = builder.source("page", {
+      temporalDomain: "read",
+      attributes: [
+        "page.report.localId",
+        "page.report.startedAt",
+        "page.report.endedAt",
+      ],
+    });
+    const startedAt = builder.slot(pages, "attribute:page.report.startedAt");
+    const endedAt = builder.slot(pages, "attribute:page.report.endedAt");
+    const projected = builder.project(pages, {
+      localId: builder.slot(pages, "attribute:page.report.localId"),
+      plusMilliseconds: builder.arithmetic(
+        "add",
+        startedAt,
+        builder.elapsedDuration(1, "ms"),
+      ),
+      plusSeconds: builder.arithmetic(
+        "add",
+        startedAt,
+        builder.elapsedDuration(2, "s"),
+      ),
+      minusSeconds: builder.arithmetic(
+        "add",
+        startedAt,
+        builder.elapsedDuration(-1, "s"),
+      ),
+      plusZero: builder.arithmetic(
+        "add",
+        startedAt,
+        builder.elapsedDuration(0, "ms"),
+      ),
+      nullPropagation: builder.arithmetic(
+        "add",
+        endedAt,
+        builder.elapsedDuration(1, "ms"),
+      ),
+    });
+    builder.output("datetimeArithmetic", projected, [
+      { name: "localId", slot: "localId" },
+      { name: "plusMilliseconds", slot: "plusMilliseconds" },
+      { name: "plusSeconds", slot: "plusSeconds" },
+      { name: "minusSeconds", slot: "minusSeconds" },
+      { name: "plusZero", slot: "plusZero" },
+      { name: "nullPropagation", slot: "nullPropagation" },
+    ]);
+    const plan = builder.finish();
+    const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+      siteId: SITE_ID,
+      time: plan.context.time,
+    });
+    const output = plan.outputs[0]!;
+    const query = compileD1Query(
+      lowerer.projectOutput(
+        lowerer.lower(output),
+        output.fields.map(({ name, slot }) => ({ name, slot })),
+      ),
+    );
+    const database = createMigratedDatabase();
+    try {
+      database
+        .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
+        .run(SITE_ID);
+      const sitePk = Number(
+        (
+          database
+            .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+            .get(SITE_ID) as { readonly site_pk: number }
+        ).site_pk,
+      );
+      database
+        .prepare(
+          `
+          INSERT INTO visits (
+            visit_id, site_id, site_pk, visitor_id, session_id, status,
+            started_at, last_activity_at, pathname, hostname
+          ) VALUES (?, ?, ?, ?, ?, 'complete', ?, ?, '/', 'example.test')
+        `,
+        )
+        .run("datetime-arithmetic", SITE_ID, sitePk, "v1", "s1", 10, 10);
+      const rows = database
+        .prepare(query.sql)
+        .all(...((query.bindings ?? []) as SQLInputValue[])) as Array<
+        Record<string, unknown>
+      >;
+      expect(rows).toEqual([
+        {
+          localId: "datetime-arithmetic",
+          plusMilliseconds: 11,
+          plusSeconds: 2_010,
+          minusSeconds: -990,
+          plusZero: 10,
+          nullPropagation: null,
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("rejects unsupported duration units, non-finite amounts, and foreign slots", () => {
+    const builder = createBuilder();
+    const pages = builder.source("page", {
+      attributes: ["page.report.startedAt"],
+    });
+    const startedAt = builder.slot(pages, "attribute:page.report.startedAt");
+    expect(() => builder.elapsedDuration(Number.NaN, "ms")).toThrow();
+    expect(() =>
+      builder.arithmetic(
+        "add",
+        startedAt,
+        builder.elapsedDuration(1, "mo" as never),
+      ),
+    ).toThrow();
+
+    const otherBuilder = createBuilder();
+    expect(() =>
+      otherBuilder.arithmetic(
+        "add",
+        startedAt,
+        otherBuilder.elapsedDuration(1, "ms"),
+      ),
+    ).toThrow();
   });
 
   it("rejects forged ordered-member group and order slots", () => {

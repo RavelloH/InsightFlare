@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { D1_MAX_BOUND_PARAMETERS, D1_MAX_SQL_UTF8_BYTES } from "@/lib/db";
 import { handleFunnel } from "@/lib/edge/analytics/interfaces/dashboard/protocol/funnels";
+import { instrumentEnv } from "@/lib/edge/observability/bindings";
+import {
+  createInvocationLogger,
+  runWithInvocationLogger,
+} from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
 
 interface PreparedCall {
@@ -153,7 +159,8 @@ describe("funnel v2 query handler", () => {
   });
 
   it("runs one staged SQL statement and returns zero rows for later steps", async () => {
-    const { env, calls } = createEnv((sql) => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { env: rawEnv, calls } = createEnv((sql) => {
       if (sql.includes("analysis_definitions")) {
         return [
           {
@@ -174,10 +181,17 @@ describe("funnel v2 query handler", () => {
         ];
       return [];
     });
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const env = instrumentEnv(rawEnv, logger);
     const { request: req, url } = request(
       "/api/private/funnels?id=funnel-1&from=1&to=1000",
     );
-    const response = await handleFunnel(env, "site-1", url, undefined, req);
+    const response = await runWithInvocationLogger(logger, () =>
+      handleFunnel(env, "site-1", url, undefined, req),
+    );
     const body = (await response.json()) as any;
     expect(response.status).toBe(200);
     expect(body.data.analysis.summary).toMatchObject({
@@ -189,8 +203,28 @@ describe("funnel v2 query handler", () => {
       progression: { count: 0, dropOffCount: 2 },
     });
     const queryCalls = calls.filter(
-      (call) => call.method === "all" && call.sql.includes("reached_0"),
+      (call) =>
+        call.method === "all" && !call.sql.includes("analysis_definitions"),
     );
     expect(queryCalls).toHaveLength(1);
+    const queryCall = queryCalls[0];
+    expect(queryCall?.sql).toMatch(/stepIndex/i);
+    expect(queryCall?.sql).toMatch(/sessions/i);
+    expect(queryCall?.sql).toMatch(/visitors/i);
+    expect(
+      new TextEncoder().encode(queryCall?.sql ?? "").byteLength,
+    ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+    expect(queryCall?.bindings.length).toBeLessThanOrEqual(
+      D1_MAX_BOUND_PARAMETERS,
+    );
+    const logRecord = await logger.emitWhenComplete();
+    expect(logRecord.logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "db.query.v1.all.success",
+          data: expect.objectContaining({ tag: "analytics.query.all" }),
+        }),
+      ]),
+    );
   });
 });

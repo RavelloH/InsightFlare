@@ -46,6 +46,7 @@ import {
   type AnalyticsLegacyScopedDataset,
   buildLegacyScopedDataset,
   LEGACY_DIRECT_EVENT_RECORD_VISIT_COLUMNS,
+  requiredLegacyVisitColumnNames,
 } from "./analytics-legacy-scoped-dataset";
 import type {
   AnalyticsLegacyEventColumnName,
@@ -1292,14 +1293,19 @@ function eventAttributeColumn(
     "event.report.valueCount": "value_count",
     "event.report.userId": "user_id",
   };
-  if (attributeId === "event.report.internalPk")
-    return coalesce(relation.columns.event_pk!, constant(0));
+  if (attributeId === "event.report.internalPk") {
+    const eventPk =
+      relation.columns.event_pk ?? relation.columns.event_event_pk;
+    return eventPk ? coalesce(eventPk, constant(0)) : undefined;
+  }
   if (attributeId === "event.report.ownerPresent")
     return relation.columns.owner_site_pk
       ? isNotNull(relation.columns.owner_site_pk)
       : undefined;
   const direct = directColumns[attributeId];
-  if (direct) return relation.columns[direct];
+  if (direct) {
+    return relation.columns[direct] ?? relation.columns[`event_${direct}`];
+  }
 
   const definition = semanticAttribute(attributeId);
   const derivation = definition?.derivation;
@@ -1612,6 +1618,62 @@ interface PostObservationBundle {
   readonly stageSelection: SemanticScopedSourceSelection;
 }
 
+interface PostObservationBaseDomain {
+  readonly dataset: AnalyticsLegacyScopedDataset;
+  readonly pages: AnalyticsLegacyPageRow;
+  readonly events: AnalyticsLegacyEventRow;
+}
+
+interface PostObservationBaseRequirements {
+  readonly pageVisitColumns: readonly string[];
+  readonly eventOwnerVisitColumns: readonly string[];
+}
+
+function postObservationBaseSelectionKey(
+  selection: SemanticScopedSourceSelection,
+): string {
+  const baseSelection = selectionWithoutPostObservationFilter(selection);
+  // These two direct profiles have identical unfiltered single-site Page and
+  // Event domains. This exception never applies to prepared or filtered data.
+  const profile =
+    baseSelection.filter.root === null &&
+    baseSelection.scope === "event" &&
+    baseSelection.mode === "observation" &&
+    baseSelection.subject.origin === "site" &&
+    baseSelection.subject.siteIds.length === 1 &&
+    baseSelection.authorizedSiteIds.length === 1 &&
+    baseSelection.authorizedSiteIds[0] === baseSelection.subject.siteIds[0] &&
+    !baseSelection.preparedMatches &&
+    !baseSelection.eventNameGate &&
+    (baseSelection.profile === "direct-page-analytics-v1" ||
+      baseSelection.profile === "direct-event-analytics-v1")
+      ? "direct-empty-analytics-base-domain-v1"
+      : baseSelection.profile;
+  return JSON.stringify({ ...baseSelection, profile });
+}
+
+function sourcePageAttributeVisitColumns(source: SourceNode): string[] {
+  return source.values.flatMap((binding) => {
+    if (binding.kind !== "attribute") return [];
+    if (source.entity === "page") {
+      const columnName = analyticsPageReportStorageColumn(binding.attribute);
+      return columnName ? [columnName] : [];
+    }
+    if (source.entity !== "event") return [];
+    const derivation = semanticAttribute(binding.attribute)?.derivation;
+    if (
+      derivation?.kind !== "report-relationship" ||
+      derivation.relationship !== "event.ownerPage" ||
+      !derivation.sourceAttribute
+    )
+      return [];
+    const columnName = analyticsPageReportStorageColumn(
+      derivation.sourceAttribute,
+    );
+    return columnName ? [columnName] : [];
+  });
+}
+
 /**
  * Apply the immutable legacy Filter selection to an Event report Source.
  * The Source's output layout comes from the regular semantic storage path;
@@ -1622,9 +1684,53 @@ export class AnalyticsLegacyScopedStorage {
   readonly #rowLocalEventMatches = new Map<string, IdentityRelation>();
   readonly #pageEventOwnerPairs = new Map<string, IdentityRelation>();
   readonly #postObservationBundles = new Map<string, PostObservationBundle>();
+  readonly #postObservationBaseDomains = new Map<
+    string,
+    PostObservationBaseDomain
+  >();
+  readonly #postObservationBaseRequirements = new Map<
+    string,
+    PostObservationBaseRequirements
+  >();
 
-  constructor(storage: AnalyticsRelationalStorageContext) {
+  constructor(
+    storage: AnalyticsRelationalStorageContext,
+    sources: readonly SourceNode[] = [],
+  ) {
     this.#storage = storage;
+    const accumulated = new Map<
+      string,
+      { readonly page: Set<string>; readonly owners: Set<string> }
+    >();
+    for (const source of sources) {
+      const selection = source.selection;
+      if (!selection?.postObservationFilter) continue;
+      const key = postObservationBaseSelectionKey(selection);
+      let requirements = accumulated.get(key);
+      if (!requirements) {
+        requirements = { page: new Set(), owners: new Set() };
+        accumulated.set(key, requirements);
+      }
+      const sourceColumns = sourcePageAttributeVisitColumns(source);
+      for (const columnName of requiredLegacyVisitColumnNames(
+        selection,
+        sourceColumns,
+      )) {
+        requirements.page.add(columnName);
+      }
+      for (const columnName of requiredLegacyVisitColumnNames(
+        selection,
+        source.entity === "event" ? sourceColumns : [],
+      )) {
+        requirements.owners.add(columnName);
+      }
+    }
+    for (const [key, requirements] of accumulated) {
+      this.#postObservationBaseRequirements.set(key, {
+        pageVisitColumns: [...requirements.page].sort(),
+        eventOwnerVisitColumns: [...requirements.owners].sort(),
+      });
+    }
   }
 
   #matchingPageEventOwnerPairs(
@@ -1697,37 +1803,60 @@ export class AnalyticsLegacyScopedStorage {
       "page.report.durationMs",
       "page.report.pathname",
     ]);
-    const extraPageAttributes = requiredPageAttributes
-      .filter((attribute) => !basePageAttributes.has(attribute))
-      .sort();
-    const key = JSON.stringify([baseSelection, stage, extraPageAttributes]);
+    const localPageVisitColumns = requiredLegacyVisitColumnNames(selection, [
+      ...requiredPageAttributes.flatMap((attribute) => {
+        const columnName = analyticsPageReportStorageColumn(attribute);
+        return columnName && !basePageAttributes.has(attribute)
+          ? [columnName]
+          : [];
+      }),
+    ]);
+    const localEventOwnerVisitColumns =
+      requiredLegacyVisitColumnNames(selection);
+    const premerged = this.#postObservationBaseRequirements.get(
+      postObservationBaseSelectionKey(selection),
+    );
+    const pageVisitColumns =
+      premerged?.pageVisitColumns ?? localPageVisitColumns;
+    const eventOwnerVisitColumns =
+      premerged?.eventOwnerVisitColumns ?? localEventOwnerVisitColumns;
+    const baseKey = JSON.stringify([
+      postObservationBaseSelectionKey(selection),
+      pageVisitColumns,
+      eventOwnerVisitColumns,
+    ]);
+    const key = JSON.stringify([baseKey, stage]);
     const existing = this.#postObservationBundles.get(key);
     if (existing) return existing;
 
-    const rawDataset = buildLegacyScopedDataset({
-      selection,
-      storage: this.#storage,
-      requiredPageAttributes,
-    });
-    const pages = selectedPageRows(
-      rawDataset,
-      baseSelection,
-      this.#matchingPageEventOwnerPairs(rawDataset, baseSelection),
-    );
-    const events = selectedEventRows(
-      rawDataset,
-      this.#matchingEventRows(rawDataset, baseSelection),
-    );
-    const dataset: AnalyticsLegacyScopedDataset = {
-      ...rawDataset,
-      readPages: pages,
-      candidatePages: pages,
-      readEvents: events,
-    };
+    let baseDomain = this.#postObservationBaseDomains.get(baseKey);
+    if (!baseDomain) {
+      const rawDataset = buildLegacyScopedDataset({
+        selection: baseSelection,
+        storage: this.#storage,
+        additionalPageVisitColumns: pageVisitColumns,
+        additionalEventOwnerVisitColumns: eventOwnerVisitColumns,
+      });
+      const pages = selectedPageRows(
+        rawDataset,
+        baseSelection,
+        this.#matchingPageEventOwnerPairs(rawDataset, baseSelection),
+      );
+      const events = selectedEventRows(
+        rawDataset,
+        this.#matchingEventRows(rawDataset, baseSelection),
+      );
+      const dataset: AnalyticsLegacyScopedDataset = {
+        ...rawDataset,
+        readPages: pages,
+        candidatePages: pages,
+        readEvents: events,
+      };
+      baseDomain = { dataset, pages, events };
+      this.#postObservationBaseDomains.set(baseKey, baseDomain);
+    }
     const bundle = {
-      dataset,
-      pages,
-      events,
+      ...baseDomain,
       stageSelection: selectionForPostObservationFilter(selection),
     };
     this.#postObservationBundles.set(key, bundle);

@@ -111,7 +111,7 @@ const legacyDirectEventRecordVisitColumnSet = new Set<string>(
   LEGACY_DIRECT_EVENT_RECORD_VISIT_COLUMNS,
 );
 
-function requiredLegacyVisitColumnNames(
+export function requiredLegacyVisitColumnNames(
   selection: SemanticScopedSourceSelection,
   requiredColumns: readonly string[] = [],
 ): readonly string[] {
@@ -236,16 +236,19 @@ function buildPages(
   sites: AnalyticsDbRelation,
   selection: SemanticScopedSourceSelection,
   requiredAttributes: readonly string[] = [],
+  additionalVisitColumns: readonly string[] = [],
 ): AnalyticsLegacyPageRow {
   const source = scan(schema.visits);
   const visitColumns = selectColumns(
     source,
     requiredLegacyVisitColumnNames(
       selection,
-      requiredAttributes.flatMap((attribute) => {
-        const columnName = analyticsPageReportStorageColumn(attribute);
-        return columnName ? [columnName] : [];
-      }),
+      requiredAttributes
+        .flatMap((attribute) => {
+          const columnName = analyticsPageReportStorageColumn(attribute);
+          return columnName ? [columnName] : [];
+        })
+        .concat(additionalVisitColumns),
     ),
   );
   const visits = project(source, visitColumns);
@@ -327,6 +330,7 @@ function buildEvents(
   sites: AnalyticsDbRelation,
   subjectEventNames: AnalyticsDbRelation,
   selection: SemanticScopedSourceSelection,
+  additionalOwnerVisitColumns: readonly string[] = [],
 ): AnalyticsLegacyEventRow {
   const source = scan(schema.custom_events);
   const eventColumnSource = Object.fromEntries(
@@ -454,7 +458,7 @@ function buildEvents(
   const ownersSource = scan(schema.visits);
   const ownerValues = selectColumns(
     ownersSource,
-    requiredLegacyVisitColumnNames(selection),
+    requiredLegacyVisitColumnNames(selection, additionalOwnerVisitColumns),
   );
   const owners: AnalyticsDbRelation = project(ownersSource, {
     site_pk: ownersSource.columns.site_pk,
@@ -526,6 +530,8 @@ export function buildLegacyScopedDataset(input: {
   readonly selection: SemanticScopedSourceSelection;
   readonly storage: AnalyticsRelationalStorageContext;
   readonly requiredPageAttributes?: readonly string[];
+  readonly additionalPageVisitColumns?: readonly string[];
+  readonly additionalEventOwnerVisitColumns?: readonly string[];
 }): AnalyticsLegacyScopedDataset {
   const siteIds = normalizeAnalyticsRelationalSiteIds(input.storage);
   if (
@@ -541,8 +547,14 @@ export function buildLegacyScopedDataset(input: {
     sites,
     input.selection,
     input.requiredPageAttributes,
+    input.additionalPageVisitColumns,
   );
-  const events = buildEvents(sites, subjectEventNames, input.selection);
+  const events = buildEvents(
+    sites,
+    subjectEventNames,
+    input.selection,
+    input.additionalEventOwnerVisitColumns,
+  );
   return {
     sites,
     subjectEventNames,

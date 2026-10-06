@@ -2,6 +2,7 @@ export * from "./eligible-dataset";
 export * from "./event-context-report-plan";
 export * from "./filter-document-lowering";
 export * from "./filter-lowering";
+export * from "./funnel-progression-report-plan";
 export * from "./grouping";
 export * from "./logical";
 export * from "./metric-planner";

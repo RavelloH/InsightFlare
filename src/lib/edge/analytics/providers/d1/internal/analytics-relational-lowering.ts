@@ -1280,6 +1280,59 @@ function lowerExpression(
           reject(path, "Arithmetic operand type or unit is unsupported.");
         throw error;
       }
+      if (
+        expression.operator === "add" &&
+        expression.right.kind === "elapsed-duration-literal" &&
+        inferred.type.kind === "scalar" &&
+        inferred.type.scalar === "datetime"
+      ) {
+        const durationScale = {
+          ms: 1,
+          s: 1_000,
+          m: 60_000,
+          h: 3_600_000,
+          d: 86_400_000,
+          w: 604_800_000,
+        } as const;
+        const elapsedMs =
+          expression.right.amount * durationScale[expression.right.unit];
+        if (!Number.isFinite(elapsedMs))
+          reject(
+            path,
+            "Elapsed duration is outside finite epoch milliseconds.",
+          );
+        const left = lowerExpression(
+          expression.left,
+          relation,
+          logicalSlots,
+          visible,
+          `${path}.left`,
+          time,
+        );
+        if (
+          left.kind !== "scalar" ||
+          left.type.kind !== "scalar" ||
+          left.type.scalar !== "datetime"
+        )
+          reject(path, "Datetime addition requires a datetime left operand.");
+        const timestamp = scalarValue(left, `${path}.left`);
+        if (
+          !["integer", "real", "numeric", "unknown"].includes(
+            timestamp.resultType.affinity,
+          )
+        )
+          reject(path, "Datetime epoch addition requires a numeric SQL value.");
+        return {
+          kind: "scalar",
+          expression: add(
+            timestamp as SqlExpression<number | null>,
+            param(elapsedMs),
+          ),
+          type: inferred.type,
+          nullable: inferred.nullable,
+          candidateBounded: left.candidateBounded,
+        };
+      }
       const left = lowerExpression(
         expression.left,
         relation,
@@ -1631,7 +1684,10 @@ export class AnalyticsLogicalToDbLowerer {
       plan.slots.map((slot) => [slot.id, slot] as const),
     );
     this.#storage = new AnalyticsRelationalStorage(storageContext);
-    this.#scopedStorage = new AnalyticsLegacyScopedStorage(storageContext);
+    this.#scopedStorage = new AnalyticsLegacyScopedStorage(
+      storageContext,
+      plan.nodes.filter((node): node is SourceNode => node.kind === "source"),
+    );
   }
 
   #sourceSelectionId(selection: object | undefined): number | null {
@@ -3381,7 +3437,7 @@ export class AnalyticsLogicalToDbLowerer {
     });
     const selected = filter(
       ranked,
-      eq(ranked.columns.__analytics_ordered_member_rank, param(1)),
+      eq(ranked.columns.__analytics_ordered_member_rank, constant(1)),
     );
     const inputNode = this.#logicalNode(node.input);
     if (!inputNode)

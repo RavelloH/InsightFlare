@@ -184,6 +184,30 @@ describe("legacy scoped Event storage guards", () => {
           ownerFilter(),
           undefined,
           semanticTemporalDomainsFromQueryTime(
+            createQueryTime(0, 100, "America/New_York", 100),
+          ),
+        ),
+      ),
+    ).not.toBe(key);
+    expect(
+      pageEventOwnerPairCacheKey(
+        selection(
+          "direct-page-analytics-v1",
+          ownerFilter(),
+          undefined,
+          semanticTemporalDomainsFromQueryTime(
+            createQueryTime(0, 100, "UTC", 101),
+          ),
+        ),
+      ),
+    ).not.toBe(key);
+    expect(
+      pageEventOwnerPairCacheKey(
+        selection(
+          "direct-page-analytics-v1",
+          ownerFilter(),
+          undefined,
+          semanticTemporalDomainsFromQueryTime(
             createQueryTime(1, 101, "UTC", 101),
           ),
         ),
@@ -199,7 +223,22 @@ describe("legacy scoped Event storage guards", () => {
     expect(
       pageEventOwnerPairCacheKey({
         ...direct,
-        preparedMatches: { identities: [] },
+        authorizedSiteIds: [SITE_ID, OTHER_SITE_ID],
+      }),
+    ).toBeNull();
+    expect(
+      pageEventOwnerPairCacheKey({
+        ...direct,
+        preparedMatches: {
+          identities: [{ siteId: SITE_ID, kind: "page", id: "prepared" }],
+        },
+      }),
+    ).toBeNull();
+    expect(
+      pageEventOwnerPairCacheKey({
+        ...direct,
+        profile: "prepared-scoped-reader-window-v1",
+        preparationTime: TIME,
       }),
     ).toBeNull();
     expect(

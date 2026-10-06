@@ -538,6 +538,14 @@ function infer(
       const nullable =
         left.nullable || right.nullable || expression.operator === "divide";
       if (
+        expression.operator === "add" &&
+        left.type.kind === "scalar" &&
+        left.type.scalar === "datetime" &&
+        expression.right.kind === "elapsed-duration-literal"
+      ) {
+        return { type: left.type, nullable };
+      }
+      if (
         expression.operator === "subtract" &&
         left.type.kind === "scalar" &&
         right.type.kind === "scalar" &&

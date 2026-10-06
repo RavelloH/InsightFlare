@@ -1,7 +1,9 @@
 import {
+  assertHistoricalFunnelConfigForAnalysis,
   type FunnelConfigV2,
   type FunnelStepV2,
   MAX_FUNNEL_STEPS,
+  MAX_HISTORICAL_FUNNEL_STEPS,
   parseFunnelStepFilter,
 } from "@/lib/edge/analytics/contract";
 
@@ -23,7 +25,7 @@ import {
 export const FUNNEL_SQL_MAX_BINDINGS = FUNNEL_CONFIG_MAX_SQL_BINDINGS;
 /** A bounded statement budget for a ten-step plan and its filter expansion. */
 export const FUNNEL_SQL_MAX_LENGTH = FUNNEL_CONFIG_MAX_SQL_LENGTH;
-export const MAX_HISTORICAL_FUNNEL_STEPS = 12 as const;
+export { MAX_HISTORICAL_FUNNEL_STEPS };
 /** Compatibility budget for the pre-v2 database maximum. It is only used for
  * an already-stored definition; all new writes remain on the ten-step budget. */
 export const FUNNEL_SQL_HISTORICAL_STRUCTURAL_BUDGET: FunnelSqlStructuralBudget =
@@ -328,7 +330,7 @@ function buildFunnelCteParts(
   options: { readonly allowHistoricalOverLimit?: boolean } = {},
 ): FunnelCteParts {
   if (options.allowHistoricalOverLimit) {
-    assertHistoricalConfigShape(config);
+    assertHistoricalFunnelConfigForAnalysis(config);
   } else {
     assertConfigShape(config);
   }
@@ -396,25 +398,6 @@ export function assertFunnelStructuralBudget(stepCount: number): void {
 }
 function assertConfigShape(config: FunnelConfigV2): void {
   assertFunnelStructuralBudget(config.steps.length);
-  if (config.progressionScope === "visitor") {
-    if (
-      config.conversionWindowMs === null ||
-      !Number.isFinite(config.conversionWindowMs) ||
-      config.conversionWindowMs <= 0
-    ) {
-      throw new Error("visitor_funnel_conversion_window_must_be_positive");
-    }
-  } else if (config.conversionWindowMs !== null) {
-    throw new Error("session_funnel_conversion_window_must_be_null");
-  }
-}
-function assertHistoricalConfigShape(config: FunnelConfigV2): void {
-  if (!Number.isSafeInteger(config.steps.length) || config.steps.length < 1) {
-    throw new Error("funnel_steps_required");
-  }
-  if (config.steps.length > MAX_HISTORICAL_FUNNEL_STEPS) {
-    throw new Error("funnel_historical_step_limit_exceeded");
-  }
   if (config.progressionScope === "visitor") {
     if (
       config.conversionWindowMs === null ||

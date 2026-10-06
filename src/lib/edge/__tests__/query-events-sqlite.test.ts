@@ -2,7 +2,14 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
-import { compileD1Query, lowerLogicalPlan, sort, union } from "@/lib/db";
+import {
+  compileD1Query,
+  D1_MAX_BOUND_PARAMETERS,
+  D1_MAX_SQL_UTF8_BYTES,
+  lowerLogicalPlan,
+  sort,
+  union,
+} from "@/lib/db";
 import {
   analyticsFilterRegistry,
   attachScopedFilterMetadata,
@@ -3096,8 +3103,12 @@ describe("event detail D1 SQL", () => {
       expect(analysis.summary.totalProgressions).toBe(1);
       expect(analysis.summary.convertedProgressions).toBe(1);
       expect(d1.calls).toHaveLength(1);
-      expect(d1.calls[0]?.sql).toContain("reached_0 AS");
-      expect(d1.calls[0]?.sql).toContain("reached_1 AS");
+      expect(
+        new TextEncoder().encode(d1.calls[0]?.sql ?? "").byteLength,
+      ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+      expect(d1.calls[0]?.bindings.length).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
     } finally {
       d1.close();
     }
@@ -3169,12 +3180,6 @@ describe("event detail D1 SQL", () => {
         totalProgressions: 1,
         convertedProgressions: 1,
       });
-      expect(
-        d1.calls.some((call) => call.sql.includes("FROM scope_final_visits")),
-      ).toBe(true);
-      expect(
-        d1.calls.some((call) => call.sql.includes("FROM scope_final_events")),
-      ).toBe(true);
       expect(d1.calls).toHaveLength(1);
     } finally {
       d1.close();

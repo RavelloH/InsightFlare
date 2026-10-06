@@ -31,6 +31,7 @@ import {
   or,
   param,
   project,
+  recursiveClosure,
   rowNumber,
   scalar,
   scan,
@@ -48,7 +49,7 @@ import {
 } from "@/lib/db";
 import { explainQueryPlan } from "@/lib/db/__tests__/query-plan";
 import { compileD1QueryUnoptimizedForTest } from "@/lib/db/query/compiler";
-import type { AnyExpression } from "@/lib/db/query/expression";
+import type { AnyExpression, Predicate } from "@/lib/db/query/expression";
 import { lowerLogicalPlan } from "@/lib/db/query/physical-plan";
 import type {
   Relation,
@@ -85,6 +86,15 @@ function nullablePageProjection() {
     field3: selected.columns.session_id,
     field4: selected.columns.pathname,
   });
+}
+
+function selectedWideVisitProjection(width: number): Relation {
+  const selected = nullablePageProjection();
+  const columns = selected.columns as Readonly<Record<string, AnyExpression>>;
+  const projections: Record<string, AnyExpression> = {};
+  for (let index = 0; index < width; index += 1)
+    projections[`field${index}`] = columns[`field${index % 5}`]!;
+  return project(selected, projections);
 }
 
 function selectedWideTextProjection(width: number, selective = true): Relation {
@@ -568,6 +578,162 @@ function independentWindowUnion(source: Relation, count: number): Relation {
   return branches
     .slice(1)
     .reduce((combined, branch) => union(combined, branch, true), branches[0]!);
+}
+
+interface FilterFanoutOptions {
+  readonly width?: number;
+  readonly consumerCount?: number;
+  readonly selective?: boolean;
+  readonly windowCount?: number;
+  readonly computedCandidate?: boolean;
+  readonly candidateWindow?: boolean;
+  readonly unsafePredicate?: "scalar" | "in" | "volatile" | "correlated";
+  readonly extraConsumer?: "project" | "join" | "expression";
+  readonly barrier?: "sort" | "limit";
+  readonly useVisitScan?: boolean;
+}
+
+function wideFilterFanoutQuery(options: FilterFanoutOptions = {}) {
+  const width = options.width ?? 20;
+  const base = options.useVisitScan
+    ? selectedWideVisitProjection(width)
+    : selectedWideTextProjection(width, options.selective ?? true);
+  let candidate = base;
+  if (options.candidateWindow) {
+    const ranked = window(base, {
+      innerRank: rowNumber({
+        orderBy: [{ expression: base.columns.field0!, direction: "ASC" }],
+      }),
+    });
+    const projections: Record<string, AnyExpression> = {};
+    for (let index = 0; index < width - 1; index += 1)
+      projections[`field${index}`] = ranked.columns[`field${index}`]!;
+    projections[`field${width - 1}`] = ranked.columns.innerRank!;
+    candidate = project(ranked, projections);
+  } else if (options.computedCandidate) {
+    const projections: Record<string, AnyExpression> = {};
+    for (let index = 0; index < width; index += 1)
+      projections[`field${index}`] =
+        index === 0
+          ? trimSpaces(base.columns.field0! as never)
+          : base.columns[`field${index}`]!;
+    candidate = project(base, projections);
+  }
+
+  const lookup = valuesRelation(
+    { value: { affinity: "text", nullable: true } },
+    [{ value: "same" }, { value: null }],
+  );
+  const consumerCount = options.consumerCount ?? 3;
+  const consumers = Array.from({ length: consumerCount }, (_, index) => {
+    const field =
+      candidate.columns[
+        options.useVisitScan ? "field4" : `field${index % width}`
+      ]!;
+    let predicate: Predicate = eq(
+      field as never,
+      param(index === 1 ? "a" : "same") as never,
+    );
+    if (options.unsafePredicate === "scalar")
+      predicate = eq(
+        field as never,
+        scalar(project(lookup, { value: lookup.columns.value! })) as never,
+      );
+    else if (options.unsafePredicate === "in")
+      predicate = inSubquery(
+        field as never,
+        project(lookup, { value: lookup.columns.value! }) as never,
+      ) as Predicate;
+    else if (options.unsafePredicate === "volatile")
+      predicate = and(predicate, gt(unixepoch(), param(0)));
+    else if (options.unsafePredicate === "correlated") {
+      const correlated = filter(
+        lookup,
+        eq(lookup.columns.value!, field as never),
+      );
+      predicate = eq(
+        field as never,
+        scalar(
+          project(correlated, { value: correlated.columns.value! }),
+        ) as never,
+      );
+    }
+    return filter(candidate, predicate);
+  });
+  let combined: Relation = consumers[0]!;
+  for (const consumer of consumers.slice(1))
+    combined = union(combined, consumer, true);
+
+  const windowCount = options.windowCount ?? 2;
+  let output: Relation = combined;
+  if (windowCount === 1) {
+    output = window(combined, {
+      rank: rowNumber({
+        orderBy: [{ expression: combined.columns.field1!, direction: "ASC" }],
+      }),
+    });
+  } else if (windowCount > 1) {
+    const windows = Array.from({ length: windowCount }, (_, index) => {
+      let input: Relation = combined;
+      if (options.barrier === "sort" && index === 1)
+        input = sort(input, [
+          { expression: input.columns.field0!, direction: "ASC" },
+        ]);
+      if (options.barrier === "limit" && index === 1) input = limit(input, 5);
+      return window(input, {
+        rank: rowNumber({
+          partitionBy: [input.columns.field0!],
+          orderBy: [
+            {
+              expression: input.columns[`field${index % width}`]!,
+              direction: index % 2 === 0 ? "ASC" : "DESC",
+            },
+          ],
+        }),
+      });
+    });
+    output = windows
+      .slice(1)
+      .reduce((query, branch) => union(query, branch, true), windows[0]!);
+  }
+
+  if (options.extraConsumer === "project") {
+    const extra = project(candidate, {
+      field0: candidate.columns.field0!,
+      field1: candidate.columns.field1!,
+    });
+    output = join(
+      output,
+      extra,
+      eq(output.columns.field0!, extra.columns.field0!),
+    );
+  } else if (options.extraConsumer === "join") {
+    const right = valuesRelation(
+      { key: { affinity: "text", nullable: true } },
+      [{ key: "same" }],
+    );
+    const extra = join(
+      candidate,
+      right,
+      eq(candidate.columns.field0! as never, right.columns.key as never),
+    );
+    output = join(
+      output,
+      extra,
+      eq(output.columns.field0! as never, extra.columns.left_field0! as never),
+    );
+  } else if (options.extraConsumer === "expression") {
+    const extra = project(lookup, {
+      value: scalar(project(candidate, { value: candidate.columns.field0! })),
+    });
+    output = join(
+      output,
+      extra,
+      eq(output.columns.field0!, extra.columns.value),
+    );
+  }
+
+  return { candidate, output };
 }
 
 function rowBag(rows: readonly Record<string, unknown>[]) {
@@ -1974,6 +2140,139 @@ describe("shared relation physical selection", () => {
       optimizedExplain: optimizedPlan,
       mechanicalExplain: mechanicalPlan,
     });
+  });
+
+  it("auto-shares only a wide pure Project with three stable Filter consumers before multiple Windows", () => {
+    const { candidate, output } = wideFilterFanoutQuery({ useVisitScan: true });
+    const physical = lowerLogicalPlan(output);
+    const shared = physical.sharedRelations.find(
+      ({ node }) => node === candidate.node,
+    );
+    expect(shared).toMatchObject({ materialization: "auto" });
+
+    const database = createMigratedDatabase();
+    databases.add(database);
+    database
+      .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
+      .run("wide-filter-fanout-site");
+    const sitePk = Number(
+      (
+        database
+          .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+          .get("wide-filter-fanout-site") as { site_pk: number }
+      ).site_pk,
+    );
+    const insertVisit = database.prepare(
+      `INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, status, started_at,
+        last_activity_at, ended_at, duration_ms, duration_source, pathname,
+        hostname, site_pk
+      ) VALUES (?, 'wide-filter-fanout-site', ?, ?, 'complete', ?, ?, ?, ?, ?, ?, 'example.test', ?)`,
+    );
+    insertVisit.run(
+      "fanout-same-null",
+      "visitor-a",
+      "session-a",
+      1,
+      1,
+      null,
+      null,
+      null,
+      "same",
+      sitePk,
+    );
+    insertVisit.run(
+      "fanout-same-value",
+      "visitor-a",
+      "session-a",
+      2,
+      2,
+      20,
+      30,
+      "duration",
+      "same",
+      sitePk,
+    );
+    insertVisit.run(
+      "fanout-a-null",
+      "visitor-b",
+      "session-b",
+      3,
+      3,
+      null,
+      null,
+      null,
+      "a",
+      sitePk,
+    );
+    const optimized = compileD1Query(physical);
+    const mechanical = compileD1QueryUnoptimizedForTest(output);
+    const optimizedRows = database
+      .prepare(optimized.sql)
+      .all(...(optimized.bindings as SQLInputValue[]));
+    const mechanicalRows = database
+      .prepare(mechanical.sql)
+      .all(...(mechanical.bindings as SQLInputValue[]));
+    expect(rowBag(optimizedRows)).toEqual(rowBag(mechanicalRows));
+    expect(optimizedRows.some((row) => Object.values(row).includes(null))).toBe(
+      true,
+    );
+    expect(new TextEncoder().encode(optimized.sql).byteLength).toBeLessThan(
+      new TextEncoder().encode(mechanical.sql).byteLength,
+    );
+    expect(optimized.bindings!.length).toBeLessThan(
+      mechanical.bindings!.length,
+    );
+
+    const forged = {
+      ...physical,
+      sharedRelations: physical.sharedRelations.filter(
+        ({ node }) => node !== candidate.node,
+      ),
+    };
+    expect(() => compileD1Query(forged)).toThrowError(
+      expect.objectContaining({ code: "invalid_plan" }),
+    );
+
+    const negatives: readonly FilterFanoutOptions[] = [
+      { consumerCount: 2 },
+      { width: 33 },
+      { computedCandidate: true },
+      { selective: false },
+      { windowCount: 0 },
+      { windowCount: 1 },
+      { candidateWindow: true },
+      { unsafePredicate: "scalar" },
+      { unsafePredicate: "in" },
+      { unsafePredicate: "volatile" },
+      { unsafePredicate: "correlated" },
+      { extraConsumer: "project" },
+      { extraConsumer: "join" },
+      { extraConsumer: "expression" },
+      { barrier: "sort" },
+      { barrier: "limit" },
+    ];
+    for (const options of negatives) {
+      const query = wideFilterFanoutQuery(options);
+      expect(
+        lowerLogicalPlan(query.output).sharedRelations.some(
+          ({ node }) => node === query.candidate.node,
+        ),
+      ).toBe(false);
+    }
+
+    const recursive = wideFilterFanoutQuery({ windowCount: 0 });
+    const closure = recursiveClosure(
+      recursive.output,
+      recursive.output,
+      (current, next) => eq(current.field0!, next.field0!),
+    );
+    const recursiveWindows = independentWindowUnion(closure, 2);
+    expect(
+      lowerLogicalPlan(recursiveWindows).sharedRelations.some(
+        ({ node }) => node === recursive.candidate.node,
+      ),
+    ).toBe(false);
   });
 
   it.each([

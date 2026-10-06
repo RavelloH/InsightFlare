@@ -2300,11 +2300,11 @@ function isTerminalBagMembershipCandidate(
 function terminalBagMembershipCandidates(
   root: LogicalQueryNode,
   nodes: readonly LogicalQueryNode[],
+  incoming: ReadonlyMap<LogicalQueryNode, readonly IncomingConsumer[]>,
   closedWindowScopeMemo: WeakMap<LogicalQueryNode, boolean>,
 ): Set<LogicalQueryNode> {
   const unionNode = terminalBagUnion(root);
   if (!unionNode) return new Set();
-  const incoming = incomingConsumers(nodes);
   const candidates = new Set<LogicalQueryNode>();
   for (const node of nodes) {
     if (
@@ -2312,6 +2312,61 @@ function terminalBagMembershipCandidates(
       incoming.get(node)?.length !== 2
     )
       continue;
+    const facts = candidateFacts(node, closedWindowScopeMemo);
+    if (
+      facts.selective &&
+      !facts.forbidden &&
+      !facts.ordinaryRowNumberWindow &&
+      facts.referencedScopes.every((scope) => facts.scopes.has(scope))
+    )
+      candidates.add(node);
+  }
+  return candidates;
+}
+
+/**
+ * Select wide, pure local projections that fan out only to independent stable
+ * Filters before multiple ordinary window inputs. The narrow shape keeps this
+ * license separate from the existing width and reference-count thresholds.
+ */
+function sharedFilterFanoutCandidates(
+  nodes: readonly LogicalQueryNode[],
+  incomingCounts: ReadonlyMap<LogicalQueryNode, number>,
+  incoming: ReadonlyMap<LogicalQueryNode, readonly IncomingConsumer[]>,
+  hoist: HoistEligibility,
+  repeatedWindowInputs: ReadonlySet<LogicalQueryNode>,
+  closedWindowScopeMemo: WeakMap<LogicalQueryNode, boolean>,
+): Set<LogicalQueryNode> {
+  const candidates = new Set<LogicalQueryNode>();
+  for (const node of nodes) {
+    if (
+      !isPureProjectConsumer(node) ||
+      node.fields.length < MIN_REPEATED_WINDOW_INPUT_PROJECT_FIELDS ||
+      node.fields.length > MAX_REPEATED_WINDOW_INPUT_PROJECT_FIELDS ||
+      !hoist.windowInput.has(node) ||
+      !repeatedWindowInputs.has(node)
+    )
+      continue;
+
+    const consumers = incoming.get(node) ?? [];
+    const distinctParents = new Set(consumers.map(({ parent }) => parent));
+    if (
+      consumers.length < 3 ||
+      consumers.length !== (incomingCounts.get(node) ?? 0) ||
+      distinctParents.size !== consumers.length ||
+      consumers.some(
+        ({ kind, parent }) =>
+          kind !== "relation" ||
+          parent.kind !== "filter" ||
+          parent.input.node !== node ||
+          !inspectLocalStableExpression(
+            parent.predicate,
+            new Set([parent.input.scope]),
+          ).valid,
+      )
+    )
+      continue;
+
     const facts = candidateFacts(node, closedWindowScopeMemo);
     if (
       facts.selective &&
@@ -2366,9 +2421,19 @@ function sharedRelationDefinitions(
   const hoist = hoistEligibility(root);
   const repeatedWindowInputs = multiWindowInputs(root);
   const closedWindowScopeMemo = new WeakMap<LogicalQueryNode, boolean>();
+  const incomingEdges = incomingConsumers(postorder);
   const terminalBagCandidates = terminalBagMembershipCandidates(
     root,
     postorder,
+    incomingEdges,
+    closedWindowScopeMemo,
+  );
+  const filterFanoutCandidates = sharedFilterFanoutCandidates(
+    postorder,
+    incoming,
+    incomingEdges,
+    hoist,
+    repeatedWindowInputs,
     closedWindowScopeMemo,
   );
 
@@ -2395,6 +2460,10 @@ function sharedRelationDefinitions(
     if (!isSafe) continue;
 
     if (hasTerminalBagLicense) {
+      sharedMaterializations.set(node, "auto");
+      continue;
+    }
+    if (filterFanoutCandidates.has(node)) {
       sharedMaterializations.set(node, "auto");
       continue;
     }
