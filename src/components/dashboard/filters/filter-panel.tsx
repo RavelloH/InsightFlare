@@ -533,6 +533,7 @@ export function FilterPanel({
         resolvedScope={suggestionScope}
         window={window}
         controlledRoot={root}
+        createEditorNodeId={createId}
         controlledDocument={document}
         controlledExpressionText={expressionText}
         controlledExpressionError={expressionError}

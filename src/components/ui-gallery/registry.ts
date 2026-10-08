@@ -60,6 +60,7 @@ import {
   popoverContract,
   radioGroupContract,
   responsiveDialogContract,
+  searchablePopoverContract,
   selectContract,
   separatorContract,
   sheetContract,
@@ -1151,6 +1152,36 @@ const galleryContracts = {
     propCard("required", [propValue(false), propValue(true)]),
     propCard("name", [propValue("reporting-period"), propValue("interval")]),
   ]),
+  searchablePopover: registerPropCards(
+    searchablePopoverContract,
+    [
+      propCard("searchPlaceholder", [
+        propValue("Search components"),
+        propValue("Find a component"),
+      ]),
+      propCard("resultsMaxHeight", [propValue("18rem"), propValue("14rem")]),
+      propCard("side", [
+        propValue("bottom"),
+        propValue("top"),
+        propValue("right"),
+        propValue("left"),
+      ]),
+      propCard("align", [
+        propValue("start"),
+        propValue("center"),
+        propValue("end"),
+      ]),
+      propCard("defaultOpen", [
+        propValue(false),
+        propValue(true, "true", undefined, true, "on-demand"),
+      ]),
+      propCard("className", [
+        propValue("default", "Default", { className: undefined }, false),
+        propValue("min-w-64", "Wider menu", { className: "min-w-64" }),
+      ]),
+    ],
+    { defaultOpen: false },
+  ),
   dialog: registerPropCards(
     dialogContract,
     [
@@ -2694,6 +2725,12 @@ export const uiGalleryRegistry: readonly UiGalleryEntry[] = [
     packageType: "ui",
     apiEntry: "@insightflare/ui/select",
     contract: galleryContracts.select,
+  },
+  {
+    slug: "searchable-popover",
+    packageType: "ui",
+    apiEntry: "@insightflare/ui/searchable-popover",
+    contract: galleryContracts.searchablePopover,
   },
   {
     slug: "dialog",

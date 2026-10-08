@@ -307,8 +307,6 @@ function SelectContent({
   ...props
 }: SelectContentProps) {
   const ctx = useSelectContext("SelectContent");
-  const scrollHostRef = React.useRef<HTMLDivElement | null>(null);
-  const scrollViewport = () => scrollHostRef.current;
 
   const focusValue = React.useCallback(
     (val: string) => {
@@ -387,17 +385,9 @@ function SelectContent({
   const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
     onWheelProp?.(event);
     if (event.defaultPrevented) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const target = scrollViewport();
-    if (!target) return;
-    target.scrollTop += event.deltaY;
-    target.scrollLeft += event.deltaX;
-  };
 
-  const handleWheelCapture = (event: React.WheelEvent<HTMLDivElement>) => {
-    onWheelCaptureProp?.(event);
-    if (event.defaultPrevented) return;
+    // Let OverlayScrollbars process the wheel event on its viewport first,
+    // then keep the page-level scroll handler from moving the page as well.
     event.stopPropagation();
   };
 
@@ -415,7 +405,7 @@ function SelectContent({
         align={align}
         sideOffset={sideOffset}
         onKeyDown={handleKeyDown}
-        onWheelCapture={handleWheelCapture}
+        onWheelCapture={onWheelCaptureProp}
         onWheel={handleWheel}
         onOpenAutoFocus={handleOpenAutoFocus}
         data-slot="select-content"
@@ -428,12 +418,11 @@ function SelectContent({
         <OverlayScrollbar
           axis="vertical"
           className={cn(
-            "min-w-(--radix-popover-trigger-width) max-h-(--radix-popover-content-available-height)",
+            "if-select-content-scroll-area min-w-(--radix-popover-trigger-width)",
             className,
           )}
-          viewportClassName="max-h-(--radix-popover-content-available-height)"
+          viewportClassName="if-select-content-scroll-area"
           contentClassName="min-w-full"
-          scrollElementRef={scrollHostRef}
         >
           {children}
         </OverlayScrollbar>
