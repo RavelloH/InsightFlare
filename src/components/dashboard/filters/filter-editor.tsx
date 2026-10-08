@@ -73,6 +73,7 @@ export interface FilterEditorProps {
   readonly resolvedScope?: "event" | "session" | "visitor";
   readonly window?: TimeWindow;
   readonly controlledRoot?: EditorGroup;
+  readonly createEditorNodeId?: () => string;
   readonly controlledDocument?: FilterDocument;
   readonly controlledExpressionText?: string;
   readonly controlledExpressionError?: string | null;
@@ -119,6 +120,7 @@ export function FilterEditor({
   resolvedScope,
   window,
   controlledRoot,
+  createEditorNodeId,
   controlledDocument,
   controlledExpressionText,
   controlledExpressionError,
@@ -133,7 +135,8 @@ export function FilterEditor({
 }: FilterEditorProps) {
   const isControlled = controlledRoot !== undefined;
   const nextIdRef = useRef(conditionIdFactory());
-  const createId = useCallback(() => nextIdRef.current(), []);
+  const createLocalId = useCallback(() => nextIdRef.current(), []);
+  const createId = createEditorNodeId ?? createLocalId;
   const expressionRegistry = useMemo(
     () => new Map(allowedFields(audience).map((field) => [field.id, field])),
     [audience, observationOnly],
@@ -389,32 +392,23 @@ export function FilterEditor({
         contentClassName="min-h-0 min-w-0 pb-4"
       >
         {headerContent}
-        {renderedExpressionError ? (
-          <p
-            role="alert"
-            className="m-3 border-l-2 border-destructive px-2 text-xs text-destructive"
-          >
-            {renderedExpressionError}
-          </p>
-        ) : (
-          <GroupEditor
-            audience={audience}
-            document={editorDocument}
-            eventName={eventName}
-            group={renderedRoot}
-            isRoot
-            messages={messages}
-            observationOnly={observationOnly}
-            path={[]}
-            resolvedScope={resolvedScope}
-            onAddCondition={addCondition}
-            onAddGroup={addGroup}
-            onChange={updateNode}
-            onRemove={removeNode}
-            siteId={siteId}
-            window={window}
-          />
-        )}
+        <GroupEditor
+          audience={audience}
+          document={editorDocument}
+          eventName={eventName}
+          group={renderedRoot}
+          isRoot
+          messages={messages}
+          observationOnly={observationOnly}
+          path={[]}
+          resolvedScope={resolvedScope}
+          onAddCondition={addCondition}
+          onAddGroup={addGroup}
+          onChange={updateNode}
+          onRemove={removeNode}
+          siteId={siteId}
+          window={window}
+        />
         {renderedValidationError ? (
           <p className="mt-4 border-l-2 border-destructive px-2 text-xs text-destructive">
             {renderedValidationError}

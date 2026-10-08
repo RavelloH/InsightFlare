@@ -3,8 +3,11 @@ import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Button } from "@insightflare/ui/button";
 import { Input } from "@insightflare/ui/input";
-import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
-import { Popover } from "@insightflare/ui/popover";
+import {
+  SearchablePopover,
+  SearchablePopoverContent,
+  SearchablePopoverTrigger,
+} from "@insightflare/ui/searchable-popover";
 import {
   Select,
   SelectContent,
@@ -18,7 +21,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@insightflare/ui/tooltip";
-import { RiArrowDownSLine, RiSearchLine } from "@remixicon/react";
+import { RiArrowDownSLine } from "@remixicon/react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 
 import {
@@ -143,8 +146,8 @@ export function SearchablePayloadPathInput({
   }, [condition.field, condition.id, eventName, open]);
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
+    <SearchablePopover open={open} onOpenChange={setOpen}>
+      <SearchablePopoverTrigger asChild>
         <Button
           type="button"
           variant="outline"
@@ -158,68 +161,53 @@ export function SearchablePayloadPathInput({
             className="shrink-0 text-muted-foreground"
           />
         </Button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          align="start"
-          sideOffset={4}
-          className="relative w-[var(--radix-popover-trigger-width)] origin-(--radix-popover-content-transform-origin) overflow-hidden rounded-none border border-border bg-popover text-popover-foreground shadow-md outline-none duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:overflow-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
-        >
-          <div className="relative">
-            <RiSearchLine
-              aria-hidden
-              className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              autoFocus
-              className="border-0 pl-9 font-mono text-xs shadow-none focus-visible:ring-0"
-              value={searchToken}
-              placeholder={messages.filterBuilder.jsonPointerPlaceholder}
-              onChange={(event) => {
-                const next = event.target.value;
-                setSearchToken(next);
-                onChange(next);
-              }}
-            />
-          </div>
-          <AutoResizer initial duration={0.18}>
-            <AutoTransition transitionKey={menuState} duration={0.18}>
-              {fieldsQuery.isFetching ? (
-                <div className="flex min-h-10 items-center justify-center border-t border-border text-muted-foreground">
-                  <Spinner aria-label={messages.filterBuilder.valueLoading} />
-                </div>
-              ) : suggestions.length > 0 ? (
-                <OverlayScrollbar
-                  axis="vertical"
-                  syncKey={suggestions.length}
-                  className="max-h-56 border-t border-border pt-1"
-                >
-                  {suggestions.map((field) => (
-                    <button
-                      key={`${field.valueType}:${field.path}`}
-                      type="button"
-                      className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs transition-colors hover:bg-accent"
-                      onClick={() => {
-                        onSelect(field);
-                        setSearchToken("");
-                        setOpen(false);
-                      }}
-                    >
-                      <span className="min-w-0 truncate font-mono">
-                        {field.path}
-                      </span>
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        {payloadFieldTypeLabel(field.valueType, messages)}
-                      </span>
-                    </button>
-                  ))}
-                </OverlayScrollbar>
-              ) : null}
-            </AutoTransition>
-          </AutoResizer>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+      </SearchablePopoverTrigger>
+      <SearchablePopoverContent
+        align="start"
+        sideOffset={4}
+        searchValue={searchToken}
+        searchPlaceholder={messages.filterBuilder.jsonPointerPlaceholder}
+        searchInputProps={{ autoFocus: true, className: "font-mono" }}
+        resultsMaxHeight="14rem"
+        syncKey={suggestions.length}
+        onSearchValueChange={(next) => {
+          setSearchToken(next);
+          onChange(next);
+        }}
+      >
+        <AutoResizer className="min-h-0 flex-1" initial duration={0.18}>
+          <AutoTransition transitionKey={menuState} duration={0.18}>
+            {fieldsQuery.isFetching ? (
+              <div className="flex min-h-10 items-center justify-center text-muted-foreground">
+                <Spinner aria-label={messages.filterBuilder.valueLoading} />
+              </div>
+            ) : suggestions.length > 0 ? (
+              <div className="pt-1">
+                {suggestions.map((field) => (
+                  <button
+                    key={`${field.valueType}:${field.path}`}
+                    type="button"
+                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs transition-colors hover:bg-accent"
+                    onClick={() => {
+                      onSelect(field);
+                      setSearchToken("");
+                      setOpen(false);
+                    }}
+                  >
+                    <span className="min-w-0 truncate font-mono">
+                      {field.path}
+                    </span>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {payloadFieldTypeLabel(field.valueType, messages)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </AutoTransition>
+        </AutoResizer>
+      </SearchablePopoverContent>
+    </SearchablePopover>
   );
 }
 function filterNumberUnitLabel(
@@ -535,8 +523,8 @@ export function SearchableValueInput({
         numberUnit && "sm:grid-cols-[minmax(0,2fr)_minmax(6rem,1fr)]",
       )}
     >
-      <Popover.Root open={open} onOpenChange={setOpen}>
-        <Popover.Trigger asChild>
+      <SearchablePopover open={open} onOpenChange={setOpen}>
+        <SearchablePopoverTrigger asChild>
           <Button
             type="button"
             variant="outline"
@@ -560,14 +548,39 @@ export function SearchableValueInput({
             </span>
             <RiArrowDownSLine className="shrink-0 text-muted-foreground" />
           </Button>
-        </Popover.Trigger>
-        <Popover.Portal>
-          <Popover.Content
-            align="start"
-            sideOffset={4}
-            className="relative w-[var(--radix-popover-trigger-width)] origin-(--radix-popover-content-transform-origin) overflow-hidden rounded-none border border-border bg-popover text-popover-foreground shadow-md outline-none duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:overflow-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
-          >
-            {isList && selectedValues.length > 0 ? (
+        </SearchablePopoverTrigger>
+        <SearchablePopoverContent
+          align="start"
+          sideOffset={4}
+          searchValue={searchToken}
+          searchPlaceholder={
+            isList
+              ? messages.filterBuilder.valueListPlaceholder
+              : messages.filterBuilder.valueSearchPlaceholder
+          }
+          searchInputProps={{
+            autoFocus: true,
+            disabled,
+            type: inputType,
+            inputMode,
+            min: displayMetadata?.min ?? numberMetadata?.min,
+            max: displayMetadata?.max ?? numberMetadata?.max,
+            step: displayMetadata?.step ?? numberMetadata?.step,
+            onKeyDown: (event) => {
+              if (isList && event.key === "Enter") {
+                event.preventDefault();
+                addListValue(searchToken);
+              }
+            },
+          }}
+          resultsMaxHeight="14rem"
+          syncKey={suggestions.length}
+          onSearchValueChange={(next) => {
+            setSearchToken(next);
+            if (!isList) onChange(canonicalTextFromDisplay(next));
+          }}
+          header={
+            isList && selectedValues.length > 0 ? (
               <div className="flex flex-wrap gap-1 border-b border-border px-2 py-1.5">
                 {selectedValues.map((value) => {
                   const displayText =
@@ -608,95 +621,59 @@ export function SearchableValueInput({
                   );
                 })}
               </div>
-            ) : null}
-            <div className="relative">
-              <RiSearchLine
-                aria-hidden
-                className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-              />
-              <Input
-                autoFocus
-                disabled={disabled}
-                className="border-0 pl-9 text-xs shadow-none focus-visible:ring-0"
-                type={inputType}
-                value={searchToken}
-                inputMode={inputMode}
-                min={displayMetadata?.min ?? numberMetadata?.min}
-                max={displayMetadata?.max ?? numberMetadata?.max}
-                step={displayMetadata?.step ?? numberMetadata?.step}
-                placeholder={
-                  isList
-                    ? messages.filterBuilder.valueListPlaceholder
-                    : messages.filterBuilder.valueSearchPlaceholder
-                }
-                onChange={(event) => {
-                  const next = event.target.value;
-                  setSearchToken(next);
-                  if (!isList) onChange(canonicalTextFromDisplay(next));
-                }}
-                onKeyDown={(event) => {
-                  if (isList && event.key === "Enter") {
-                    event.preventDefault();
-                    addListValue(searchToken);
-                  }
-                }}
-              />
-            </div>
-            <AutoResizer initial duration={0.18}>
-              <AutoTransition transitionKey={menuState} duration={0.18}>
-                {suggestionsQuery.isFetching ? (
-                  <div className="flex min-h-10 items-center justify-center border-t border-border text-muted-foreground">
-                    <Spinner aria-label={messages.filterBuilder.valueLoading} />
-                  </div>
-                ) : suggestions.length > 0 ? (
-                  <OverlayScrollbar
-                    axis="vertical"
-                    syncKey={suggestions.length}
-                    className="max-h-56 border-t border-border pt-1"
-                  >
-                    {suggestions.map((item) => {
-                      const value = item.value;
-                      const label = "label" in item ? item.label : value;
-                      return (
-                        <button
-                          key={`${typeof value}:${filterValueKey(value)}`}
-                          type="button"
-                          className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs transition-colors hover:bg-accent"
-                          onClick={() => {
-                            if (isList) {
-                              addListValue(value, true);
-                            } else {
-                              const valueText = filterValueText(value);
-                              const displayText =
-                                numberUnit && displayUnit
-                                  ? convertCanonicalTextToDisplay(
-                                      valueText,
-                                      numberUnit,
-                                      displayUnit,
-                                    )
-                                  : valueText;
-                              onChange(valueText);
-                              setSearchToken(displayText);
-                              setOpen(false);
-                            }
-                          }}
-                        >
-                          <span className="min-w-0 truncate">
-                            {label ?? filterValueText(value)}
-                          </span>
-                          <span className="shrink-0 text-xs text-muted-foreground">
-                            {item.occurrences ?? 0}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </OverlayScrollbar>
-                ) : null}
-              </AutoTransition>
-            </AutoResizer>
-          </Popover.Content>
-        </Popover.Portal>
-      </Popover.Root>
+            ) : null
+          }
+        >
+          <AutoResizer className="min-h-0 flex-1" initial duration={0.18}>
+            <AutoTransition transitionKey={menuState} duration={0.18}>
+              {suggestionsQuery.isFetching ? (
+                <div className="flex min-h-10 items-center justify-center text-muted-foreground">
+                  <Spinner aria-label={messages.filterBuilder.valueLoading} />
+                </div>
+              ) : suggestions.length > 0 ? (
+                <div className="pt-1">
+                  {suggestions.map((item) => {
+                    const value = item.value;
+                    const label = "label" in item ? item.label : value;
+                    return (
+                      <button
+                        key={`${typeof value}:${filterValueKey(value)}`}
+                        type="button"
+                        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs transition-colors hover:bg-accent"
+                        onClick={() => {
+                          if (isList) {
+                            addListValue(value, true);
+                          } else {
+                            const valueText = filterValueText(value);
+                            const displayText =
+                              numberUnit && displayUnit
+                                ? convertCanonicalTextToDisplay(
+                                    valueText,
+                                    numberUnit,
+                                    displayUnit,
+                                  )
+                                : valueText;
+                            onChange(valueText);
+                            setSearchToken(displayText);
+                            setOpen(false);
+                          }
+                        }}
+                      >
+                        <span className="min-w-0 truncate">
+                          {label ?? filterValueText(value)}
+                        </span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {item.occurrences ?? 0}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </AutoTransition>
+          </AutoResizer>
+        </SearchablePopoverContent>
+      </SearchablePopover>
       {numberUnit && displayUnit ? (
         <FilterNumberUnitSelect
           canonicalUnit={numberUnit}

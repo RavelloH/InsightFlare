@@ -170,6 +170,11 @@
       "development": "./src/components/ui/select.tsx",
       "import": "./dist/components/ui/select.js"
     },
+    "./searchable-popover": {
+      "types": "./dist/components/ui/searchable-popover.d.ts",
+      "development": "./src/components/ui/searchable-popover.tsx",
+      "import": "./dist/components/ui/searchable-popover.js"
+    },
     "./separator": {
       "types": "./dist/components/ui/separator.d.ts",
       "development": "./src/components/ui/separator.tsx",

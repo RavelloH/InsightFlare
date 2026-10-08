@@ -44,6 +44,10 @@ html[data-scrollbar-mode="native"]
   min-height: 0;
 }
 
+.if-select-content-scroll-area {
+  max-height: min(var(--radix-popover-content-available-height, 100vh), 20rem);
+}
+
 .os-theme-insightflare {
   --os-size: 8px;
   --os-padding-perpendicular: 1px;

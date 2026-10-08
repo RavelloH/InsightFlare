@@ -4,8 +4,11 @@ import { Button } from "@insightflare/ui/button";
 import { Checkbox } from "@insightflare/ui/checkbox";
 import { Input } from "@insightflare/ui/input";
 import { Label } from "@insightflare/ui/label";
-import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
-import { Popover } from "@insightflare/ui/popover";
+import {
+  SearchablePopover,
+  SearchablePopoverContent,
+  SearchablePopoverTrigger,
+} from "@insightflare/ui/searchable-popover";
 import {
   Select,
   SelectContent,
@@ -18,7 +21,6 @@ import {
   RiArrowDownSLine,
   RiCheckLine,
   RiDeleteBinLine,
-  RiSearchLine,
 } from "@remixicon/react";
 import { AnimatePresence, motion } from "motion/react";
 
@@ -743,14 +745,14 @@ function ConditionEditor({
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-2 sm:col-span-2 sm:grid-cols-2">
         <div className="min-w-0 space-y-2">
-          <Popover.Root
+          <SearchablePopover
             open={fieldPickerOpen}
             onOpenChange={(open) => {
               setFieldPickerOpen(open);
               if (open) setFieldSearch("");
             }}
           >
-            <Popover.Trigger asChild>
+            <SearchablePopoverTrigger asChild>
               <Button
                 type="button"
                 variant="outline"
@@ -764,76 +766,60 @@ function ConditionEditor({
                   className="shrink-0 text-muted-foreground"
                 />
               </Button>
-            </Popover.Trigger>
-            <Popover.Portal>
-              <Popover.Content
-                align="start"
-                sideOffset={4}
-                className="relative w-[var(--radix-popover-trigger-width)] origin-(--radix-popover-content-transform-origin) overflow-hidden rounded-none bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:overflow-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
-              >
-                <div className="relative">
-                  <RiSearchLine
-                    aria-hidden
-                    className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <Input
-                    autoFocus
-                    className="border-0 pl-9 text-xs shadow-none focus-visible:ring-0"
-                    value={fieldSearch}
-                    placeholder={messages.common.search}
-                    onChange={(event) => setFieldSearch(event.target.value)}
-                  />
-                </div>
-                <OverlayScrollbar
-                  axis="vertical"
-                  className="max-h-72 border-t border-border"
-                >
-                  <div>
-                    {filteredFieldGroups.map((group, index) => (
-                      <div key={group.key}>
-                        {index > 0 ? (
-                          <div
-                            role="separator"
-                            className="pointer-events-none -mx-1 h-px bg-border"
-                          />
-                        ) : null}
-                        <div className="px-2 py-2 text-xs text-muted-foreground">
-                          {group.label}
-                        </div>
-                        {group.fields.map((pickerField) => (
-                          <button
-                            key={pickerField.value}
-                            type="button"
-                            aria-pressed={advancedField === pickerField.value}
-                            className="relative flex w-full cursor-default items-center gap-2 rounded-none py-2 pr-8 pl-2 text-left text-xs outline-hidden transition-colors select-none hover:bg-accent hover:text-accent-foreground aria-pressed:bg-accent aria-pressed:text-accent-foreground"
-                            onClick={() => {
-                              setField(pickerField.value);
-                              setFieldSearch("");
-                              setFieldPickerOpen(false);
-                            }}
-                          >
-                            <span className="pointer-events-none absolute right-2 flex size-4 items-center justify-center">
-                              {advancedField === pickerField.value ? (
-                                <RiCheckLine className="pointer-events-none" />
-                              ) : null}
-                            </span>
-                            <span className="min-w-0 truncate">
-                              {pickerField.label}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    ))}
-                    {filteredFieldGroups.length === 0 ? (
-                      <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-                        {messages.common.noData}
-                      </div>
+            </SearchablePopoverTrigger>
+            <SearchablePopoverContent
+              align="start"
+              sideOffset={4}
+              searchValue={fieldSearch}
+              searchPlaceholder={messages.common.search}
+              searchInputProps={{ autoFocus: true }}
+              resultsMaxHeight="18rem"
+              onSearchValueChange={setFieldSearch}
+            >
+              <div>
+                {filteredFieldGroups.map((group, index) => (
+                  <div key={group.key}>
+                    {index > 0 ? (
+                      <div
+                        role="separator"
+                        className="pointer-events-none -mx-1 h-px bg-border"
+                      />
                     ) : null}
+                    <div className="px-2 py-2 text-xs text-muted-foreground">
+                      {group.label}
+                    </div>
+                    {group.fields.map((pickerField) => (
+                      <button
+                        key={pickerField.value}
+                        type="button"
+                        aria-pressed={advancedField === pickerField.value}
+                        className="relative flex w-full cursor-default items-center gap-2 rounded-none py-2 pr-8 pl-2 text-left text-xs outline-hidden transition-colors select-none hover:bg-accent hover:text-accent-foreground aria-pressed:bg-accent aria-pressed:text-accent-foreground"
+                        onClick={() => {
+                          setField(pickerField.value);
+                          setFieldSearch("");
+                          setFieldPickerOpen(false);
+                        }}
+                      >
+                        <span className="pointer-events-none absolute right-2 flex size-4 items-center justify-center">
+                          {advancedField === pickerField.value ? (
+                            <RiCheckLine className="pointer-events-none" />
+                          ) : null}
+                        </span>
+                        <span className="min-w-0 truncate">
+                          {pickerField.label}
+                        </span>
+                      </button>
+                    ))}
                   </div>
-                </OverlayScrollbar>
-              </Popover.Content>
-            </Popover.Portal>
-          </Popover.Root>
+                ))}
+                {filteredFieldGroups.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                    {messages.common.noData}
+                  </div>
+                ) : null}
+              </div>
+            </SearchablePopoverContent>
+          </SearchablePopover>
         </div>
         <div className="min-w-0 space-y-2">
           <Select value={operator} onValueChange={setOperator}>

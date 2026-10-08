@@ -38,6 +38,7 @@ import * as uiPageHeading from "@insightflare/ui/page-heading";
 import * as uiPopover from "@insightflare/ui/popover";
 import * as uiRadioGroup from "@insightflare/ui/radio-group";
 import * as uiResponsiveDialog from "@insightflare/ui/responsive-dialog";
+import * as uiSearchablePopover from "@insightflare/ui/searchable-popover";
 import * as uiSelect from "@insightflare/ui/select";
 import * as uiSeparator from "@insightflare/ui/separator";
 import * as uiSheet from "@insightflare/ui/sheet";
@@ -87,6 +88,10 @@ const sourceModules: readonly {
   { source: "@insightflare/ui/chart", exports: uiChart },
   { source: "@insightflare/ui/json-tree", exports: uiJsonTree },
   { source: "@insightflare/ui/select", exports: uiSelect },
+  {
+    source: "@insightflare/ui/searchable-popover",
+    exports: uiSearchablePopover,
+  },
   { source: "@insightflare/ui/dialog", exports: uiDialog },
   { source: "@insightflare/ui/popover", exports: uiPopover },
   { source: "@insightflare/ui/tooltip", exports: uiTooltip },
