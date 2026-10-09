@@ -6,12 +6,16 @@ import { Input } from "./input";
 import {
   OverlayScrollbar,
   type OverlayScrollbarProps,
+  PERSISTENT_VERTICAL_SCROLLBAR_OPTIONS,
 } from "./overlay-scrollbar";
 import {
   Popover,
   type PopoverContentProps,
   type PopoverTriggerProps,
 } from "./popover";
+
+const SELECTED_RESULT_SELECTOR =
+  '[data-selected-item="true"], [aria-selected="true"], [aria-pressed="true"], [aria-checked="true"], [data-state="checked"]';
 
 function SearchablePopover(props: React.ComponentProps<typeof Popover.Root>) {
   return <Popover.Root {...props} />;
@@ -68,6 +72,7 @@ const SearchablePopoverContent = React.forwardRef<
     searchValue,
     style,
     syncKey,
+    onOpenAutoFocus,
     ...contentProps
   },
   ref,
@@ -76,11 +81,76 @@ const SearchablePopoverContent = React.forwardRef<
     defaultSearchValue ?? "",
   );
   const resolvedSearchValue = searchValue ?? uncontrolledSearchValue;
+  const resultsViewportRef = React.useRef<HTMLDivElement | null>(null);
+  const pendingAutoScrollFrameRef = React.useRef(0);
 
   const resolvedResultsMaxHeight =
     typeof resultsMaxHeight === "number"
       ? `${resultsMaxHeight}px`
       : resultsMaxHeight;
+
+  const scrollSelectedResultIntoView = React.useCallback(() => {
+    const viewport = resultsViewportRef.current;
+    const selectedItem = viewport?.querySelector<HTMLElement>(
+      SELECTED_RESULT_SELECTOR,
+    );
+    if (!viewport || viewport.clientHeight === 0 || !selectedItem) return false;
+
+    selectedItem.scrollIntoView({ block: "nearest", inline: "nearest" });
+
+    const viewportRect = viewport.getBoundingClientRect();
+    const selectedRect = selectedItem.getBoundingClientRect();
+    return (
+      selectedRect.top >= viewportRect.top - 1 &&
+      selectedRect.bottom <= viewportRect.top + viewport.clientHeight + 1
+    );
+  }, []);
+
+  const scheduleScrollSelectedResultIntoView = React.useCallback(() => {
+    window.cancelAnimationFrame(pendingAutoScrollFrameRef.current);
+    let attempts = 0;
+    const tryScrollSelectedResultIntoView = () => {
+      attempts += 1;
+      if (scrollSelectedResultIntoView() || attempts >= 8) return;
+      pendingAutoScrollFrameRef.current = window.requestAnimationFrame(
+        tryScrollSelectedResultIntoView,
+      );
+    };
+
+    pendingAutoScrollFrameRef.current = window.requestAnimationFrame(
+      tryScrollSelectedResultIntoView,
+    );
+  }, [scrollSelectedResultIntoView]);
+
+  const setResultsViewportRef = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      resultsViewportRef.current = node;
+      if (node) {
+        if (!scrollSelectedResultIntoView()) {
+          scheduleScrollSelectedResultIntoView();
+        }
+      } else {
+        window.cancelAnimationFrame(pendingAutoScrollFrameRef.current);
+      }
+    },
+    [scheduleScrollSelectedResultIntoView, scrollSelectedResultIntoView],
+  );
+
+  React.useEffect(
+    () => () => window.cancelAnimationFrame(pendingAutoScrollFrameRef.current),
+    [],
+  );
+
+  const handleOpenAutoFocus = (
+    event: Parameters<
+      NonNullable<SearchablePopoverContentProps["onOpenAutoFocus"]>
+    >[0],
+  ) => {
+    onOpenAutoFocus?.(event);
+    if (!scrollSelectedResultIntoView()) {
+      scheduleScrollSelectedResultIntoView();
+    }
+  };
 
   return (
     <Popover.Portal>
@@ -91,6 +161,7 @@ const SearchablePopoverContent = React.forwardRef<
           className,
         )}
         style={style}
+        onOpenAutoFocus={handleOpenAutoFocus}
         {...contentProps}
       >
         {header}
@@ -123,6 +194,8 @@ const SearchablePopoverContent = React.forwardRef<
         </div>
         <OverlayScrollbar
           axis="vertical"
+          options={PERSISTENT_VERTICAL_SCROLLBAR_OPTIONS}
+          scrollElementRef={setResultsViewportRef}
           syncKey={syncKey}
           className={cn(
             "min-h-0 flex-1 border-t border-border",

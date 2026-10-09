@@ -142,6 +142,10 @@ function TabbedDataTableCardDataControllerImpl<
     defaultValue ?? tabs[0].value,
   );
   const [pendingTab, setPendingTab] = useState<TTab | null>(null);
+  const [pendingSort, setPendingSort] = useState<{
+    tab: TTab;
+    sort: TabbedDataTableSortState<TKey>;
+  } | null>(null);
   const selectedTab = controlled ? value : internalTab;
   const activeTab: TTab =
     selectedTab !== undefined && tabs.some((tab) => tab.value === selectedTab)
@@ -405,9 +409,16 @@ function TabbedDataTableCardDataControllerImpl<
   );
   const activeTabMeta = tabByValue.get(activeTab) ?? tabs[0];
   const activeSearchTabMeta = tabByValue.get(activeSearchTab) ?? activeTabMeta;
+  const pendingSortMatchesActive =
+    pendingSort !== null &&
+    pendingSort.tab === activeTab &&
+    pendingSort.sort.key === activeSort.key &&
+    pendingSort.sort.direction === activeSort.direction;
   const activeLoading = completedRows
     ? false
-    : isPending || (pendingTab === activeTab && isFetching);
+    : isPending ||
+      (pendingTab === activeTab && isFetching) ||
+      (pendingSortMatchesActive && (isPending || isFetching));
   const activeError = dataQuery.isError ?? false;
   const searchLoading =
     activeSearchTab === activeTab ? (completedRows ? false : isPending) : false;
@@ -425,6 +436,29 @@ function TabbedDataTableCardDataControllerImpl<
     isPending,
     isPlaceholderData,
     pendingTab,
+  ]);
+  useEffect(() => {
+    if (!pendingSort) return;
+    if (completedRows || activeError) {
+      setPendingSort(null);
+      return;
+    }
+    if (
+      pendingSortMatchesActive &&
+      !isPending &&
+      !isFetching &&
+      !isPlaceholderData
+    ) {
+      setPendingSort(null);
+    }
+  }, [
+    activeError,
+    completedRows,
+    isFetching,
+    isPending,
+    isPlaceholderData,
+    pendingSort,
+    pendingSortMatchesActive,
   ]);
   const activeSearchColumns = getColumnsForTab(columns, activeSearchTab);
   const searchColSpan = 1 + activeSearchColumns.length;
@@ -471,6 +505,7 @@ function TabbedDataTableCardDataControllerImpl<
   ]);
 
   function setActiveTab(next: TTab) {
+    setPendingSort(null);
     if (next !== activeTab) setPendingTab(next);
     if (!controlled) {
       setInternalTab(next);
@@ -479,6 +514,12 @@ function TabbedDataTableCardDataControllerImpl<
   }
 
   function updateSort(tab: TTab, next: TabbedDataTableSortState<TKey>) {
+    // A complete result is sorted from the local cache. Incomplete datasets
+    // change the query key and let the loader fetch the first page in the new
+    // server order; show the same loading transition used for tab changes.
+    if (tab === activeTab && completedRows === null) {
+      setPendingSort({ tab, sort: next });
+    }
     if (onSortChange) {
       onSortChange(tab, next);
       return;

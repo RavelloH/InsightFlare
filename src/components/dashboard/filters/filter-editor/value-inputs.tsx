@@ -187,6 +187,9 @@ export function SearchablePayloadPathInput({
                   <button
                     key={`${field.valueType}:${field.path}`}
                     type="button"
+                    data-selected-item={
+                      condition.payloadPath === field.path ? "true" : undefined
+                    }
                     className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs transition-colors hover:bg-accent"
                     onClick={() => {
                       onSelect(field);
@@ -639,6 +642,19 @@ export function SearchableValueInput({
                       <button
                         key={`${typeof value}:${filterValueKey(value)}`}
                         type="button"
+                        data-selected-item={
+                          (
+                            isList
+                              ? selectedValues.some(
+                                  (selected) =>
+                                    filterValueKey(selected) ===
+                                    filterValueKey(value),
+                                )
+                              : filterValueText(value) === condition.valueText
+                          )
+                            ? "true"
+                            : undefined
+                        }
                         className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs transition-colors hover:bg-accent"
                         onClick={() => {
                           if (isList) {
