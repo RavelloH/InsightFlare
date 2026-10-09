@@ -25,6 +25,7 @@ function useDashboardTableQuery<TRow extends TabbedDataTableRowBase>(
     string | null
   >({
     queryKey: options.queryKey,
+    staleTime: options.staleTime,
     queryFn: ({ pageParam, signal }) => options.queryFn({ pageParam, signal }),
     initialPageParam: options.initialPageParam,
     getNextPageParam: options.getNextPageParam,

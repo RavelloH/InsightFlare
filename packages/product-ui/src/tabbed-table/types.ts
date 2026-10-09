@@ -54,6 +54,7 @@ export interface TabbedDataTableQueryOptions<
   TRow extends TabbedDataTableRowBase,
 > {
   queryKey: readonly unknown[];
+  staleTime?: number;
   queryFn: (context: {
     pageParam: string | null;
     signal: AbortSignal;
