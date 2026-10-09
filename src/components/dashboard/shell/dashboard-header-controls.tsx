@@ -142,6 +142,7 @@ const USE_REALTIME_MOCK = isRealtimeMockEnabled();
 function FilterTrigger({
   activeFilterCount,
   className,
+  compact = false,
   disabled,
   messages,
   onClick,
@@ -150,6 +151,7 @@ function FilterTrigger({
 }: {
   activeFilterCount: number;
   className: string;
+  compact?: boolean;
   disabled: boolean;
   messages: AppMessages;
   onClick: () => void;
@@ -172,7 +174,12 @@ function FilterTrigger({
           <Button
             type="button"
             variant="outline"
-            className={className}
+            size={compact ? "icon" : "default"}
+            className={cn(
+              className,
+              compact &&
+                "relative gap-0 p-0 sm:h-8 sm:w-auto sm:gap-2 sm:px-2.5 sm:has-data-[icon=inline-start]:pl-2",
+            )}
             disabled={disabled}
             aria-label={filterButtonLabel}
             onClick={onClick}
@@ -186,7 +193,7 @@ function FilterTrigger({
               initial
               animateWidth
               animateHeight={false}
-              className="-ml-2 inline-flex min-w-0 items-center sm:ml-0"
+              className="inline-flex min-w-0 items-center"
             >
               <AutoTransition
                 as="span"
@@ -200,7 +207,14 @@ function FilterTrigger({
                 {filterButtonLabel}
               </AutoTransition>
             </AutoResizer>
-            <FilterActiveCountBadge count={activeFilterCount} />
+            <FilterActiveCountBadge
+              count={activeFilterCount}
+              className={
+                compact
+                  ? "absolute -top-1 -right-2 mr-0 sm:static sm:mr-0"
+                  : undefined
+              }
+            />
           </Button>
         </span>
       </TooltipTrigger>
@@ -215,12 +229,14 @@ function FilterTrigger({
 function CompareTrigger({
   active,
   className,
+  compact = false,
   disabled,
   messages,
   onClick,
 }: {
   active: boolean;
   className: string;
+  compact?: boolean;
   disabled: boolean;
   messages: AppMessages;
   onClick: () => void;
@@ -232,7 +248,12 @@ function CompareTrigger({
           <Button
             type="button"
             variant="outline"
-            className={className}
+            size={compact ? "icon" : "default"}
+            className={cn(
+              className,
+              compact &&
+                "gap-0 p-0 sm:h-8 sm:w-auto sm:gap-2 sm:px-2.5 sm:has-data-[icon=inline-start]:pl-2",
+            )}
             disabled={disabled}
             aria-label={messages.dashboardHeader.compareButton}
             onClick={onClick}
@@ -652,6 +673,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
               <CompareTrigger
                 active={hasActiveComparison}
                 className={comparisonTriggerClassName}
+                compact
                 disabled={comparisonDisabled}
                 messages={messages}
                 onClick={() => setMobileCompareDrawerOpen(true)}
@@ -686,6 +708,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
               <FilterTrigger
                 activeFilterCount={activeFilterCount}
                 className={filterTriggerClassName}
+                compact
                 disabled={filterDisabled}
                 messages={messages}
                 onClick={() => setMobileFilterDrawerOpen(true)}
@@ -884,7 +907,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
               />
               <SheetContent
                 side="right"
-                className="flex h-[100dvh] max-h-[100dvh] min-h-0 w-full flex-col overflow-hidden sm:max-w-md"
+                className="flex h-[100dvh] max-h-[100dvh] min-h-0 w-full flex-col overflow-hidden data-[side=right]:sm:max-w-md"
               >
                 <SheetHeader className="shrink-0">
                   <SheetTitle>
@@ -924,7 +947,7 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
               />
               <SheetContent
                 side="right"
-                className="flex h-full max-h-screen w-full flex-col sm:max-w-md"
+                className="flex h-full max-h-screen w-full flex-col data-[side=right]:sm:max-w-md"
               >
                 <SheetHeader>
                   <SheetTitle>

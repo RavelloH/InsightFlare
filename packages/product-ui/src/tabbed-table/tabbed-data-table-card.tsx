@@ -145,6 +145,7 @@ function TabbedDataTableCardDataControllerImpl<
   const [pendingSort, setPendingSort] = useState<{
     tab: TTab;
     sort: TabbedDataTableSortState<TKey>;
+    fetchStarted: boolean;
   } | null>(null);
   const selectedTab = controlled ? value : internalTab;
   const activeTab: TTab =
@@ -274,6 +275,10 @@ function TabbedDataTableCardDataControllerImpl<
       querySortDirection,
       deferredSearchTerm,
     ],
+    // Sort changes on incomplete datasets are server-side requests. A cached
+    // page for a recently used sort must still be revalidated before the
+    // pending-sort transition is allowed to finish.
+    staleTime: 0,
     queryFn: ({ pageParam, signal }) =>
       loader({
         tab: activeTab,
@@ -414,12 +419,12 @@ function TabbedDataTableCardDataControllerImpl<
     pendingSort.tab === activeTab &&
     pendingSort.sort.key === activeSort.key &&
     pendingSort.sort.direction === activeSort.direction;
+  const activeError = dataQuery.isError ?? false;
   const activeLoading = completedRows
     ? false
     : isPending ||
       (pendingTab === activeTab && isFetching) ||
-      (pendingSortMatchesActive && (isPending || isFetching));
-  const activeError = dataQuery.isError ?? false;
+      (pendingSortMatchesActive && !activeError);
   const searchLoading =
     activeSearchTab === activeTab ? (completedRows ? false : isPending) : false;
   useEffect(() => {
@@ -443,12 +448,14 @@ function TabbedDataTableCardDataControllerImpl<
       setPendingSort(null);
       return;
     }
-    if (
-      pendingSortMatchesActive &&
-      !isPending &&
-      !isFetching &&
-      !isPlaceholderData
-    ) {
+    if (!pendingSortMatchesActive) return;
+    if (isFetching) {
+      if (!pendingSort.fetchStarted) {
+        setPendingSort({ ...pendingSort, fetchStarted: true });
+      }
+      return;
+    }
+    if (pendingSort.fetchStarted && !isPending && !isPlaceholderData) {
       setPendingSort(null);
     }
   }, [
@@ -518,7 +525,7 @@ function TabbedDataTableCardDataControllerImpl<
     // change the query key and let the loader fetch the first page in the new
     // server order; show the same loading transition used for tab changes.
     if (tab === activeTab && completedRows === null) {
-      setPendingSort({ tab, sort: next });
+      setPendingSort({ tab, sort: next, fetchStarted: false });
     }
     if (onSortChange) {
       onSortChange(tab, next);
