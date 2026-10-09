@@ -60,6 +60,7 @@ import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 export interface ComponentSourceImport {
   readonly name: string;
   readonly source: string;
+  readonly memberPath?: readonly string[];
 }
 
 const sourceModules: readonly {
@@ -157,18 +158,50 @@ const sourceModules: readonly {
 
 const importsByType = new Map<ElementType, ComponentSourceImport>();
 
+function isElementType(value: unknown): value is ElementType {
+  if (typeof value === "function") return true;
+  if (typeof value !== "object" || value === null) return false;
+
+  // React forwardRef and memo components are objects, while package namespaces
+  // are plain objects whose members need to be resolved as qualified exports.
+  return "$$typeof" in value;
+}
+
+function registerNamespaceMembers(
+  value: object,
+  source: string,
+  rootName: string,
+  memberPath: readonly string[] = [],
+  seen = new WeakSet<object>(),
+) {
+  if (seen.has(value)) return;
+  seen.add(value);
+
+  for (const [name, member] of Object.entries(value)) {
+    const path = [...memberPath, name];
+    if (isElementType(member)) {
+      if (!importsByType.has(member)) {
+        importsByType.set(member, { name: rootName, source, memberPath: path });
+      }
+    } else if (typeof member === "object" && member !== null) {
+      registerNamespaceMembers(member, source, rootName, path, seen);
+    }
+  }
+}
+
 // Match exports by identity so production minification cannot corrupt JSX names.
+// Register direct exports first, then qualified members such as Popover.Root.
 for (const { source, exports } of sourceModules) {
   for (const [name, value] of Object.entries(exports)) {
-    if (
-      (typeof value !== "function" &&
-        (typeof value !== "object" || value === null)) ||
-      importsByType.has(value as ElementType)
-    ) {
-      continue;
+    if (isElementType(value) && !importsByType.has(value)) {
+      importsByType.set(value, { name, source });
     }
+  }
 
-    importsByType.set(value as ElementType, { name, source });
+  for (const [name, value] of Object.entries(exports)) {
+    if (typeof value === "object" && value !== null && !("$$typeof" in value)) {
+      registerNamespaceMembers(value, source, name);
+    }
   }
 }
 

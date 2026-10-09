@@ -13,6 +13,7 @@ interface ComponentImport {
   readonly type: ElementType;
   readonly name: string;
   readonly source: string;
+  readonly memberPath?: readonly string[];
 }
 
 const rechartsComponents = new Set([
@@ -156,19 +157,28 @@ function collectImports(node: ReactNode, entry: UiGalleryEntry) {
   );
 
   const imports = [...components.values()];
-  const sameNameCount = new Map<string, number>();
+  const bindingKey = (source: string, name: string) => `${source}\0${name}`;
+  const bindings = new Map<string, { name: string; source: string }>();
   for (const item of imports) {
-    sameNameCount.set(item.name, (sameNameCount.get(item.name) ?? 0) + 1);
+    const key = bindingKey(item.source, item.name);
+    if (!bindings.has(key)) {
+      bindings.set(key, { name: item.name, source: item.source });
+    }
   }
 
-  const identifiers = new Map<ElementType, string>();
+  const sameNameCount = new Map<string, number>();
+  for (const binding of bindings.values()) {
+    sameNameCount.set(binding.name, (sameNameCount.get(binding.name) ?? 0) + 1);
+  }
+
+  const bindingIdentifiers = new Map<string, string>();
   const usedIdentifiers = new Set<string>();
-  for (const item of imports) {
-    const moduleSegment = item.source.split("/").at(-1) ?? "Component";
+  for (const [key, binding] of bindings) {
+    const moduleSegment = binding.source.split("/").at(-1) ?? "Component";
     const aliasBase =
-      (sameNameCount.get(item.name) ?? 0) > 1
-        ? `${item.name}${toPascalCase(moduleSegment)}`
-        : item.name;
+      (sameNameCount.get(binding.name) ?? 0) > 1
+        ? `${binding.name}${toPascalCase(moduleSegment)}`
+        : binding.name;
     let identifier = aliasBase;
     let suffix = 2;
     while (usedIdentifiers.has(identifier)) {
@@ -176,18 +186,26 @@ function collectImports(node: ReactNode, entry: UiGalleryEntry) {
       suffix += 1;
     }
     usedIdentifiers.add(identifier);
-    identifiers.set(item.type, identifier);
+    bindingIdentifiers.set(key, identifier);
+  }
+
+  const identifiers = new Map<ElementType, string>();
+  for (const item of imports) {
+    const bindingIdentifier = bindingIdentifiers.get(
+      bindingKey(item.source, item.name),
+    )!;
+    identifiers.set(
+      item.type,
+      [bindingIdentifier, ...(item.memberPath ?? [])].join("."),
+    );
   }
 
   const bySource = new Map<string, Map<string, string>>();
-  for (const item of imports) {
+  for (const [key, binding] of bindings) {
     const sourceImports =
-      bySource.get(item.source) ?? new Map<string, string>();
-    const identifier = identifiers.get(item.type)!;
-    if (![...sourceImports.values()].includes(identifier)) {
-      sourceImports.set(item.name, identifier);
-    }
-    bySource.set(item.source, sourceImports);
+      bySource.get(binding.source) ?? new Map<string, string>();
+    sourceImports.set(binding.name, bindingIdentifiers.get(key)!);
+    bySource.set(binding.source, sourceImports);
   }
 
   const importLines = [...bySource.entries()]
