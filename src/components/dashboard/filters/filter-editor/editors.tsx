@@ -21,6 +21,7 @@ import {
   RiArrowDownSLine,
   RiCheckLine,
   RiDeleteBinLine,
+  RiSubtractLine,
 } from "@remixicon/react";
 import { AnimatePresence, motion } from "motion/react";
 
@@ -59,6 +60,7 @@ import {
 } from "./advanced-editor-model";
 import {
   dateTimeInputValueToLiteral,
+  dateTimeLiteralAtLocalDayStart,
   dateTimeLiteralToInputValue,
 } from "./datetime-input";
 import {
@@ -213,6 +215,29 @@ const ELAPSED_DURATION_UNITS: readonly FilterDurationUnit[] = [
 ];
 
 const TIME_ANCHOR_UNITS = ELAPSED_DURATION_UNITS;
+const TIME_FILTER_VALUE_OFFSET_UNITS: readonly FilterDurationUnit[] = [
+  "ms",
+  "s",
+  "m",
+  "h",
+  "d",
+  "w",
+  "mo",
+  "y",
+];
+const TIME_FILTER_VALUE_UNIT_LABELS: Record<
+  FilterDurationUnit,
+  keyof AppMessages["filterBuilder"]["advancedEditor"]["timeUnits"]
+> = {
+  ms: "milliseconds",
+  s: "seconds",
+  m: "minutes",
+  h: "hours",
+  d: "days",
+  w: "weeks",
+  mo: "months",
+  y: "years",
+};
 
 function isDurationValue(value: unknown): value is FilterDurationTarget {
   return Boolean(
@@ -254,6 +279,284 @@ function timeAnchorAt(
         anchor: "now",
         offset: { kind: "duration", amount: -14, unit: "d" },
       };
+}
+
+function timeFilterValueAt(
+  value: FilterCondition["value"],
+  index: number,
+  timeZone: string | undefined,
+  between: boolean,
+): string | FilterTimeAnchorTarget {
+  const item = Array.isArray(value) ? value[index] : value;
+  if (typeof item === "string" || isTimeAnchorValue(item)) return item;
+  return dateTimeLiteralAtLocalDayStart(
+    timeZone,
+    between && index === 0 ? -1 : 0,
+  );
+}
+
+function TimeOffsetAmountInput({
+  amount,
+  messages,
+  onChange,
+}: {
+  amount: number;
+  messages: AppMessages;
+  onChange: (amount: number) => void;
+}) {
+  const [negative, setNegative] = useState(amount < 0);
+  const magnitude = Math.abs(amount);
+
+  return (
+    <div className="flex min-w-0">
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        className="h-8 w-8 shrink-0 rounded-r-none border-r-0 font-mono text-sm"
+        aria-label={messages.filterBuilder.advancedEditor.toggleOffsetSign}
+        aria-pressed={negative}
+        onClick={() => {
+          const nextNegative = !negative;
+          setNegative(nextNegative);
+          onChange(nextNegative ? -magnitude : magnitude);
+        }}
+      >
+        {negative ? (
+          <RiSubtractLine aria-hidden="true" className="size-4" />
+        ) : (
+          <RiAddLine aria-hidden="true" className="size-4" />
+        )}
+      </Button>
+      <Input
+        type="number"
+        min={0}
+        step="any"
+        className="rounded-l-none"
+        value={magnitude}
+        onChange={(event) => {
+          const nextMagnitude = Number(event.target.value);
+          if (Number.isFinite(nextMagnitude))
+            onChange(negative ? -nextMagnitude : nextMagnitude);
+        }}
+      />
+    </div>
+  );
+}
+
+function CurrentTimeValueEditor({
+  operator,
+  value,
+  timeZone,
+  messages,
+  onChange,
+}: {
+  operator: FilterOperator;
+  value: FilterCondition["value"];
+  timeZone: string | undefined;
+  messages: AppMessages;
+  onChange: (value: FilterCondition["value"]) => void;
+}) {
+  const between = operator === "between";
+  const indices = between ? ([0, 1] as const) : ([0] as const);
+  const readValue = (index: number) =>
+    timeFilterValueAt(value, index, timeZone, between);
+  const updateValue = (
+    index: number,
+    nextValue: string | FilterTimeAnchorTarget,
+  ) => {
+    if (!between) {
+      onChange(nextValue);
+      return;
+    }
+    const nextValues: [
+      string | FilterTimeAnchorTarget,
+      string | FilterTimeAnchorTarget,
+    ] = [readValue(0), readValue(1)];
+    nextValues[index] = nextValue;
+    onChange(nextValues);
+  };
+
+  return (
+    <div
+      className={cn(
+        "sm:col-span-2",
+        between ? "grid gap-3 sm:grid-cols-2" : "space-y-3",
+      )}
+    >
+      {indices.map((index) => {
+        const currentValue = readValue(index);
+        const currentAnchor = isTimeAnchorValue(currentValue)
+          ? currentValue
+          : undefined;
+        const relative = currentAnchor !== undefined;
+        const endpointLabel = between
+          ? index === 0
+            ? messages.filterBuilder.rangeStartPlaceholder
+            : messages.filterBuilder.rangeEndPlaceholder
+          : messages.filterBuilder.valueType;
+
+        return (
+          <div key={index} className="min-w-0 space-y-2">
+            <Select
+              value={relative ? "relative" : "fixed"}
+              onValueChange={(mode) => {
+                if (mode === "relative") {
+                  updateValue(index, { kind: "time-anchor", anchor: "now" });
+                } else if (mode === "fixed") {
+                  updateValue(
+                    index,
+                    dateTimeLiteralAtLocalDayStart(
+                      timeZone,
+                      between && index === 0 ? -1 : 0,
+                    ),
+                  );
+                }
+              }}
+            >
+              <SelectTrigger className="w-full" aria-label={endpointLabel}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="fixed">
+                  {messages.filterBuilder.advancedEditor.fixedTime}
+                </SelectItem>
+                <SelectItem value="relative">
+                  {
+                    messages.filterBuilder.advancedEditor.targetKinds[
+                      "time-anchor"
+                    ]
+                  }
+                </SelectItem>
+              </SelectContent>
+            </Select>
+
+            {currentAnchor ? (
+              <div className="space-y-2">
+                <Select
+                  value={currentAnchor.anchor}
+                  onValueChange={(anchor) => {
+                    if (
+                      anchor === "now" ||
+                      anchor === "range.start" ||
+                      anchor === "range.end"
+                    )
+                      updateValue(index, { ...currentAnchor, anchor });
+                  }}
+                >
+                  <SelectTrigger
+                    className="w-full"
+                    aria-label={
+                      messages.filterBuilder.advancedEditor.targetKinds[
+                        "time-anchor"
+                      ]
+                    }
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="now">@now</SelectItem>
+                    <SelectItem value="range.start">@range.start</SelectItem>
+                    <SelectItem value="range.end">@range.end</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <label className="flex min-h-9 items-center gap-2 text-xs text-muted-foreground">
+                  <Checkbox
+                    checked={currentAnchor.offset !== undefined}
+                    onCheckedChange={(checked) => {
+                      if (checked === true)
+                        updateValue(index, {
+                          ...currentAnchor,
+                          offset: currentAnchor.offset ?? {
+                            kind: "duration",
+                            amount: currentAnchor.anchor === "now" ? -1 : 0,
+                            unit: "d",
+                          },
+                        });
+                      else if (currentAnchor.offset) {
+                        const { offset: _offset, ...withoutOffset } =
+                          currentAnchor;
+                        updateValue(index, withoutOffset);
+                      }
+                    }}
+                  />
+                  {messages.filterBuilder.advancedEditor.applyOffset}
+                </label>
+
+                {currentAnchor.offset ? (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <Label>
+                        {messages.filterBuilder.advancedEditor.durationAmount}
+                      </Label>
+                      <TimeOffsetAmountInput
+                        amount={currentAnchor.offset.amount}
+                        messages={messages}
+                        onChange={(amount) =>
+                          updateValue(index, {
+                            ...currentAnchor,
+                            offset: { ...currentAnchor.offset!, amount },
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>{messages.filterBuilder.durationUnit}</Label>
+                      <Select
+                        value={currentAnchor.offset.unit}
+                        onValueChange={(unit) => {
+                          if (
+                            (
+                              TIME_FILTER_VALUE_OFFSET_UNITS as readonly string[]
+                            ).includes(unit)
+                          )
+                            updateValue(index, {
+                              ...currentAnchor,
+                              offset: {
+                                ...currentAnchor.offset!,
+                                unit: unit as FilterDurationUnit,
+                              },
+                            });
+                        }}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {TIME_FILTER_VALUE_OFFSET_UNITS.map((unit) => (
+                            <SelectItem key={unit} value={unit}>
+                              {
+                                messages.filterBuilder.advancedEditor.timeUnits[
+                                  TIME_FILTER_VALUE_UNIT_LABELS[unit]
+                                ]
+                              }
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <Input
+                type="datetime-local"
+                value={dateTimeLiteralToInputValue(currentValue, timeZone)}
+                aria-label={endpointLabel}
+                onChange={(event) =>
+                  updateValue(
+                    index,
+                    dateTimeInputValueToLiteral(event.target.value, timeZone),
+                  )
+                }
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function editorTextFromFilterValue(
@@ -360,6 +663,7 @@ function ConditionEditor({
     [groupedFields, messages, normalizedFieldSearch],
   );
   const advancedFieldKind = advancedFilterTargetKindFromField(advancedField);
+  const isCurrentTimeTarget = advancedFieldKind === "time";
   const intrinsicLocation = advancedTarget
     ? findContextIntrinsic(advancedTarget)
     : undefined;
@@ -546,6 +850,16 @@ function ConditionEditor({
         ? undefined
         : (nextCondition.value as
             FilterValue | readonly FilterValue[] | undefined);
+      const isNextTimeTarget =
+        advancedTargetKind === "time" ||
+        (registeredTarget?.selection.kind === "target" &&
+          registeredTarget.selection.targetKind === "time");
+      const defaultValue = isNextTimeTarget
+        ? dateTimeLiteralAtLocalDayStart(window?.timeZone)
+        : nextValue;
+      const defaultScalar = Array.isArray(defaultValue)
+        ? defaultValue[0]
+        : defaultValue;
       onChange((current) => ({
         ...current,
         field:
@@ -553,21 +867,25 @@ function ConditionEditor({
             ? field
             : advancedFilterFieldValue("reducer"),
         operator: nextCondition.operator,
-        value: nextValue,
-        listValues: Array.isArray(nextValue) ? nextValue : undefined,
+        value: defaultValue,
+        listValues: Array.isArray(defaultValue) ? defaultValue : undefined,
         valueText:
-          nextValue === undefined ? "" : editorTextFromFilterValue(nextValue),
+          defaultValue === undefined
+            ? ""
+            : isNextTimeTarget
+              ? dateTimeLiteralToInputValue(defaultValue, window?.timeZone)
+              : editorTextFromFilterValue(defaultValue),
         scalarKind:
-          typeof (Array.isArray(nextValue) ? nextValue[0] : nextValue) ===
-          "number"
+          typeof defaultScalar === "number"
             ? "number"
-            : typeof (Array.isArray(nextValue) ? nextValue[0] : nextValue) ===
-                "boolean"
+            : typeof defaultScalar === "boolean"
               ? "boolean"
               : "string",
         valueDirty: false,
         payloadPath: "",
-        advancedExpression: nextCondition,
+        advancedExpression: isNextTimeTarget
+          ? { ...nextCondition, value: defaultValue }
+          : nextCondition,
         advancedText: undefined,
       }));
       return;
@@ -598,6 +916,22 @@ function ConditionEditor({
     if (!operators.includes(operator as FilterOperator)) return;
     if (advancedCondition) {
       const nextOperator = operator as FilterOperator;
+      if (advancedFieldKind === "time") {
+        const now = Date.now();
+        const today = dateTimeLiteralAtLocalDayStart(window?.timeZone, 0, now);
+        const value = VALUELESS_OPERATORS.has(nextOperator)
+          ? undefined
+          : nextOperator === "between"
+            ? [dateTimeLiteralAtLocalDayStart(window?.timeZone, -1, now), today]
+            : advancedCondition.operator === "between" ||
+                Array.isArray(advancedCondition.value) ||
+                advancedCondition.value === undefined ||
+                advancedCondition.value === ""
+              ? today
+              : advancedCondition.value;
+        patchAdvanced({ operator: nextOperator, value });
+        return;
+      }
       if (occurrenceTimeTarget && needsValue) {
         const firstAnchor = timeAnchorAt(advancedCondition.value, 0);
         patchAdvanced({
@@ -685,6 +1019,10 @@ function ConditionEditor({
       valueText: nextValueText,
       valueDirty: true,
     }));
+  };
+
+  const setCurrentTimeValue = (value: FilterCondition["value"]) => {
+    patchAdvanced({ value });
   };
 
   const replaceOccurrenceInput = (input: FilterTargetExpression) => {
@@ -836,6 +1174,16 @@ function ConditionEditor({
           </Select>
         </div>
       </div>
+
+      {needsValue && isCurrentTimeTarget && advancedCondition ? (
+        <CurrentTimeValueEditor
+          operator={operator}
+          value={advancedCondition.value}
+          timeZone={window?.timeZone}
+          messages={messages}
+          onChange={setCurrentTimeValue}
+        />
+      ) : null}
 
       {occurrenceTimeTarget && occurrenceReducer ? (
         <div className="grid gap-2 sm:col-span-2 sm:grid-cols-2">
@@ -1443,6 +1791,7 @@ function ConditionEditor({
       ) : null}
 
       {needsValue &&
+      !isCurrentTimeTarget &&
       !(advancedCondition && valueIsExpression) &&
       !(
         advancedTarget?.kind === "context-intrinsic" &&

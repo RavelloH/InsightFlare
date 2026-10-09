@@ -320,12 +320,24 @@ export interface AppMessages {
       remove: string;
       condition: string;
       literalValue: string;
+      fixedTime: string;
       compareWithExpression: string;
       valuesAsJson: string;
       scalarArrayHelp: string;
       chooseValue: string;
       filterValue: string;
       durationAmount: string;
+      toggleOffsetSign: string;
+      timeUnits: {
+        milliseconds: string;
+        seconds: string;
+        minutes: string;
+        hours: string;
+        days: string;
+        weeks: string;
+        months: string;
+        years: string;
+      };
       jsonPointer: string;
       jsonPointerPlaceholder: string;
       entityMember: string;
@@ -3271,12 +3283,24 @@ const enMessages = {
       remove: "Remove",
       condition: "Condition",
       literalValue: "Literal value",
+      fixedTime: "Fixed time",
       compareWithExpression: "Compare with expression",
       valuesAsJson: "Filter values as JSON",
       scalarArrayHelp: "Enter an array of JSON scalar values.",
       chooseValue: "Choose a value",
       filterValue: "Filter value",
       durationAmount: "Duration amount",
+      toggleOffsetSign: "Toggle offset sign",
+      timeUnits: {
+        milliseconds: "Milliseconds",
+        seconds: "Seconds",
+        minutes: "Minutes",
+        hours: "Hours",
+        days: "Days",
+        weeks: "Weeks",
+        months: "Months",
+        years: "Years",
+      },
       jsonPointer: "Payload JSON pointer",
       jsonPointerPlaceholder: "/property/path",
       entityMember: "Entity member",
@@ -6427,12 +6451,24 @@ const zhMessages = {
       remove: "移除",
       condition: "条件",
       literalValue: "字面值",
+      fixedTime: "固定时间",
       compareWithExpression: "与表达式比较",
       valuesAsJson: "筛选值（JSON）",
       scalarArrayHelp: "输入由 JSON 标量值组成的数组。",
       chooseValue: "选择一个值",
       filterValue: "筛选值",
       durationAmount: "时间长度",
+      toggleOffsetSign: "切换偏移量正负",
+      timeUnits: {
+        milliseconds: "毫秒",
+        seconds: "秒",
+        minutes: "分钟",
+        hours: "小时",
+        days: "天",
+        weeks: "周",
+        months: "月",
+        years: "年",
+      },
       jsonPointer: "事件载荷 JSON 指针",
       jsonPointerPlaceholder: "/属性/路径",
       entityMember: "实体成员",
@@ -9506,12 +9542,24 @@ const jaMessages = {
       remove: "削除",
       condition: "条件",
       literalValue: "リテラル値",
+      fixedTime: "固定時刻",
       compareWithExpression: "式と比較",
       valuesAsJson: "JSON 形式のフィルター値",
       scalarArrayHelp: "JSON スカラー値の配列を入力してください。",
       chooseValue: "値を選択",
       filterValue: "フィルター値",
       durationAmount: "期間",
+      toggleOffsetSign: "オフセットの正負を切り替え",
+      timeUnits: {
+        milliseconds: "ミリ秒",
+        seconds: "秒",
+        minutes: "分",
+        hours: "時間",
+        days: "日",
+        weeks: "週間",
+        months: "か月",
+        years: "年",
+      },
       jsonPointer: "ペイロード JSON ポインター",
       jsonPointerPlaceholder: "/property/path",
       entityMember: "エンティティメンバー",
