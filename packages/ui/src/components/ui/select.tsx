@@ -2,7 +2,10 @@ import * as React from "react";
 import { RiArrowDownSLine, RiCheckLine } from "@remixicon/react";
 
 import { cn } from "../../lib/utils";
-import { OverlayScrollbar } from "./overlay-scrollbar";
+import {
+  OverlayScrollbar,
+  PERSISTENT_VERTICAL_SCROLLBAR_OPTIONS,
+} from "./overlay-scrollbar";
 import { Popover } from "./popover";
 
 type ItemMeta = {
@@ -307,14 +310,49 @@ function SelectContent({
   ...props
 }: SelectContentProps) {
   const ctx = useSelectContext("SelectContent");
+  const viewportRef = React.useRef<HTMLDivElement | null>(null);
+
+  const scrollValueIntoView = React.useCallback(
+    (value: string) => {
+      const selectedItem = document.getElementById(ctx.itemIdFor(value));
+      const viewport = viewportRef.current;
+      if (!selectedItem || !viewport || viewport.clientHeight === 0)
+        return false;
+
+      selectedItem.scrollIntoView({ block: "nearest", inline: "nearest" });
+
+      const adjustedRect = selectedItem.getBoundingClientRect();
+      const viewportRect = viewport.getBoundingClientRect();
+      return (
+        adjustedRect.top >= viewportRect.top - 1 &&
+        adjustedRect.bottom <= viewportRect.top + viewport.clientHeight + 1
+      );
+    },
+    [ctx.itemIdFor],
+  );
+
+  React.useEffect(() => {
+    if (!ctx.open || ctx.value === undefined) return;
+    const selectedValue = ctx.value;
+
+    let frameId = 0;
+    let attempts = 0;
+    const tryScrollSelectedValueIntoView = () => {
+      attempts += 1;
+      if (scrollValueIntoView(selectedValue) || attempts >= 8) return;
+      frameId = window.requestAnimationFrame(tryScrollSelectedValueIntoView);
+    };
+
+    frameId = window.requestAnimationFrame(tryScrollSelectedValueIntoView);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [ctx.open, ctx.value, scrollValueIntoView]);
 
   const focusValue = React.useCallback(
     (val: string) => {
       ctx.setHighlightedValue(val);
-      const el = document.getElementById(ctx.itemIdFor(val));
-      el?.scrollIntoView({ block: "nearest" });
+      scrollValueIntoView(val);
     },
-    [ctx],
+    [ctx.setHighlightedValue, scrollValueIntoView],
   );
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -373,13 +411,12 @@ function SelectContent({
         NonNullable<SelectContentProps["onOpenAutoFocus"]>
       >[0],
     );
+    if (ctx.value !== undefined) {
+      scrollValueIntoView(ctx.value);
+    }
     if (event.defaultPrevented) return;
     event.preventDefault();
     ctx.contentRef.current?.focus({ preventScroll: true });
-    if (ctx.highlightedValue) {
-      const el = document.getElementById(ctx.itemIdFor(ctx.highlightedValue));
-      el?.scrollIntoView({ block: "nearest" });
-    }
   };
 
   const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
@@ -417,6 +454,8 @@ function SelectContent({
       >
         <OverlayScrollbar
           axis="vertical"
+          options={PERSISTENT_VERTICAL_SCROLLBAR_OPTIONS}
+          scrollElementRef={viewportRef}
           className={cn(
             "if-select-content-scroll-area min-w-(--radix-popover-trigger-width)",
             className,
