@@ -1,3 +1,5 @@
+import "@/lib/dashboard/maplibre-worker";
+
 import {
   memo,
   type MutableRefObject,
@@ -698,6 +700,7 @@ export const GeoClientMapStage = memo(function GeoClientMapStage({
     <>
       <Map
         ref={mapRef}
+        style={{ position: "absolute", inset: 0 }}
         initialViewState={viewState}
         mapStyle={mapStyle}
         attributionControl={false}
