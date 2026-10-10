@@ -366,7 +366,7 @@ function tokenize(source: string): readonly Token[] {
       continue;
     }
 
-    const identifier = rest.match(/^[A-Za-z_][A-Za-z0-9._-]*/);
+    const identifier = rest.match(/^[A-Za-z_](?:[A-Za-z0-9._]|-(?!>))*/);
     if (identifier) {
       const value = identifier[0]!;
       const normalized = value.toLowerCase();

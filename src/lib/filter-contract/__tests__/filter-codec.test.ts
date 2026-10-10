@@ -236,6 +236,15 @@ describe("filter URL codec", () => {
     ).toEqual(temporal);
   });
 
+  it("rejects collection-to-scalar comparisons from query parameters", () => {
+    const params = new URLSearchParams();
+    params.set("filter[PAGE -> path]", 'eq:"/docs"');
+
+    expect(() => parseFilterParams(params, analyticsFilterRegistry)).toThrow(
+      expect.objectContaining({ code: "condition_type_mismatch" }),
+    );
+  });
+
   it("canonicalizes legacy space-separated computed values to operator:value", () => {
     const legacy = parseFilterParams(
       "filter[count(EVENT)]=gte+5",

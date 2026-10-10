@@ -148,6 +148,32 @@ describe("filter DSL v1", () => {
     }
   });
 
+  it("parses collection projections without requiring whitespace around the arrow", () => {
+    for (const source of [
+      "PAGE -> path exists",
+      "PAGE->path exists",
+      "PAGE\n->\npath exists",
+    ]) {
+      expect(
+        formatFilterDsl(parseFilterDsl(source, analyticsFilterRegistry)),
+      ).toBe("PAGE -> path exists");
+    }
+  });
+
+  it("rejects scalar comparisons against projected collections", () => {
+    for (const source of [
+      'PAGE -> path eq "/docs"',
+      'PAGE -> path neq "/docs"',
+      'PAGE -> path gt "/docs"',
+      'PAGE -> path gte "/docs"',
+    ]) {
+      expect(
+        () => parseFilterDsl(source, analyticsFilterRegistry),
+        source,
+      ).toThrow(expect.objectContaining({ code: "condition_type_mismatch" }));
+    }
+  });
+
   it("round-trips Core selectors, reducers, projections, and relative time", () => {
     const source =
       'count(EVENT { $.name eq "purchase" AND $.payload("/plan") eq "pro" }) gte 2 AND time gte @now-14d';

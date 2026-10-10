@@ -645,8 +645,6 @@ function checkCompatible(
   right: ValueType,
   path: string,
 ): void {
-  left = valueScalar(left);
-  right = valueScalar(right);
   if (left.kind !== "scalar" || right.kind !== "scalar") {
     if (
       left.kind === right.kind &&
@@ -728,6 +726,16 @@ function validateCondition(
       "opaque_bucket_value",
       `${path}.target`,
       "Time buckets can only be consumed by an aggregate.",
+    );
+  if (
+    left.kind === "collection" &&
+    condition.operator !== "exists" &&
+    condition.operator !== "notExists"
+  )
+    fail(
+      "condition_type_mismatch",
+      path,
+      "Collection values must be consumed by an aggregate or an existence operator.",
     );
   if (
     (condition.operator === "isEmpty" || condition.operator === "notEmpty") &&

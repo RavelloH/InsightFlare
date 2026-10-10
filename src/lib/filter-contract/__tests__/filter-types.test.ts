@@ -183,6 +183,31 @@ describe("Filter v1 expression types", () => {
     ).toThrow(expect.objectContaining({ code: "invalid_member" }));
   });
 
+  it("rejects collection-to-scalar comparisons in JSON filter documents", () => {
+    const document: FilterDocument = {
+      version: 1,
+      root: {
+        kind: "condition",
+        target: {
+          kind: "projection",
+          collection: { kind: "entity-root", entity: "page" },
+          member: "path",
+        },
+        operator: "eq",
+        value: "/docs",
+      },
+    };
+    const parsedJson = JSON.parse(JSON.stringify(document)) as FilterDocument;
+    const normalized = normalizeFilterDocument(
+      parsedJson,
+      analyticsFilterRegistry,
+    );
+
+    expect(() =>
+      validateFilterExpressionTypes(normalized, analyticsFilterRegistry),
+    ).toThrow(expect.objectContaining({ code: "condition_type_mismatch" }));
+  });
+
   it("applies registered operators to members in their entity context", () => {
     expect(() => validate('PAGE { $.durationMs contains "1" } exists')).toThrow(
       expect.objectContaining({ code: "operator_not_allowed" }),
@@ -224,6 +249,7 @@ describe("Filter v1 expression types", () => {
     validate("countDistinct(bucket(PAGE, 1d)) gte 1");
     validate('countDistinct(bucket(PAGE { $.path eq "/docs" }, 1d)) gte 1');
     validate("count(window(EVENT, @range.start, [0d, 7d])) gte 1");
+    validate("countDistinct(window(EVENT, @now, [-7d, 0d]) -> name) gte 3");
     expect(() =>
       validate("count(window(EVENT, first(EVENT), [0mo, 7d])) gte 1"),
     ).toThrow(

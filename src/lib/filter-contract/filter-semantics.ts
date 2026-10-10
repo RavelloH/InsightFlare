@@ -246,22 +246,25 @@ function fieldIdForTarget(target: FilterTargetExpression): string | undefined {
   return undefined;
 }
 
-function entityCollection(target: FilterTargetExpression): string | undefined {
-  if (target.kind === "entity-root") return target.entity;
-  if (target.kind === "selector") return entityCollection(target.collection);
-  if (
-    target.kind === "reducer" &&
-    ["first", "last", "nth"].includes(target.reducer)
-  )
-    return entityCollection(target.input);
+function entityCollection(
+  target: FilterTargetExpression,
+  registry: FilterFieldRegistry,
+): string | undefined {
+  const type = inferFilterTargetType(target, registry);
+  if (type.kind === "entity") return type.entity;
+  if (type.kind === "collection" && type.item.kind === "entity")
+    return type.entity;
   return undefined;
 }
 
-function isSingleEntity(target: FilterTargetExpression): boolean {
+function isSingleEntity(
+  target: FilterTargetExpression,
+  registry: FilterFieldRegistry,
+): boolean {
   return (
     target.kind === "reducer" &&
     ["first", "last", "nth"].includes(target.reducer) &&
-    entityCollection(target.input) !== undefined
+    entityCollection(target, registry) !== undefined
   );
 }
 
@@ -338,7 +341,7 @@ function validateCurrentEntityBindings(
       );
     if (target.kind === "selector") {
       validateTarget(target.collection, currentEntity, `${path}.collection`);
-      const entity = entityCollection(target.collection);
+      const entity = entityCollection(target.collection, registry);
       validateExpression(
         target.predicate,
         entity ?? currentEntity,
@@ -526,10 +529,10 @@ function validateMemberWhitelist(
         if (base.context !== "current") invalid(path, parts.join("."));
         return;
       }
-      const entity = entityCollection(base);
+      const entity = entityCollection(base, registry);
       if (entity) {
         const memberPath = parts.join(".");
-        if (!isSingleEntity(base)) invalid(path, memberPath);
+        if (!isSingleEntity(base, registry)) invalid(path, memberPath);
         // `event.payload` is a registered execution strategy, but its JSON
         // object is deliberately not a public member. Callers must project a
         // concrete path with event.payload(path).
@@ -566,7 +569,7 @@ function validateMemberWhitelist(
         validateExpression(target.predicate, `${path}.predicate`);
         return;
       case "projection": {
-        const source = entityCollection(target.collection);
+        const source = entityCollection(target.collection, registry);
         if (target.member === "payload") {
           if (!target.path || source !== "event") invalid(path, target.member);
         } else {
