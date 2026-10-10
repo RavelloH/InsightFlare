@@ -138,6 +138,8 @@ type RuntimeValue =
 interface RuntimeFrame {
   readonly current?: FilterEvaluationEntity;
   readonly anchor?: FilterEvaluationEntity;
+  /** Prevents `$` from falling back to an outer entity in structural scopes. */
+  readonly isolateCurrentEntity?: boolean;
   readonly sequence?: SequenceMatchValue;
   readonly period?: PeriodValue;
   readonly bucket?: TimeBucketValue;
@@ -547,6 +549,14 @@ function currentEntity(
   return frame.current ?? frame.anchor;
 }
 
+function currentEntityBinding(
+  frame: RuntimeFrame,
+): FilterEvaluationEntity | undefined {
+  return (
+    frame.current ?? (frame.isolateCurrentEntity ? undefined : frame.anchor)
+  );
+}
+
 function isScopeTimeTarget(target: FilterTargetExpression): boolean {
   return (
     target.kind === "member" &&
@@ -788,7 +798,7 @@ function targetValue(
       );
     }
     case "current-payload": {
-      const entity = currentEntity(frame);
+      const entity = currentEntityBinding(frame);
       const value =
         entity?.kind === "event"
           ? payloadPath(entity.payload, target.path)
@@ -801,7 +811,8 @@ function targetValue(
     case "entity-root":
       return rootCollection(target.entity, frame, context);
     case "context-root":
-      if (target.context === "current") return currentEntity(frame) ?? MISSING;
+      if (target.context === "current")
+        return currentEntityBinding(frame) ?? MISSING;
       if (target.context === "sequence") return frame.sequence ?? MISSING;
       if (target.context === "period") return frame.period ?? MISSING;
       return frame.bucket ?? MISSING;
@@ -855,7 +866,7 @@ function targetValue(
     }
     case "member":
       if (isScopeTimeTarget(target))
-        return currentEntity(frame)?.time ?? MISSING;
+        return currentEntityBinding(frame)?.time ?? MISSING;
       return memberValue(
         targetValue(target.object, frame, context),
         target.member,
@@ -874,17 +885,35 @@ function targetValue(
         const childFrame: RuntimeFrame = isRuntimeEntity(entity)
           ? { ...frame, current: entity, anchor, topLevel: false }
           : isSequenceMatch(item)
-            ? { ...frame, current: undefined, sequence: item, topLevel: false }
+            ? {
+                ...frame,
+                current: undefined,
+                isolateCurrentEntity: true,
+                sequence: item,
+                topLevel: false,
+              }
             : isPeriodValue(item)
-              ? { ...frame, current: undefined, period: item, topLevel: false }
+              ? {
+                  ...frame,
+                  current: undefined,
+                  isolateCurrentEntity: true,
+                  period: item,
+                  topLevel: false,
+                }
               : isTimeBucket(item)
                 ? {
                     ...frame,
                     current: undefined,
+                    isolateCurrentEntity: true,
                     bucket: item,
                     topLevel: false,
                   }
-                : { ...frame, current: entity, topLevel: false };
+                : {
+                    ...frame,
+                    current: undefined,
+                    isolateCurrentEntity: true,
+                    topLevel: false,
+                  };
         if (
           evaluateExpression(
             target.predicate,

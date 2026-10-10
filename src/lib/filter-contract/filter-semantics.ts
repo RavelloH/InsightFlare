@@ -342,11 +342,11 @@ function validateCurrentEntityBindings(
     if (target.kind === "selector") {
       validateTarget(target.collection, currentEntity, `${path}.collection`);
       const entity = entityCollection(target.collection, registry);
-      validateExpression(
-        target.predicate,
-        entity ?? currentEntity,
-        `${path}.predicate`,
-      );
+      // A selector predicate is lexically bound by the items produced by its
+      // collection. Structural collections (periods, sequences, buckets) do
+      // not bind an entity, so they must not inherit an enclosing selector's
+      // `$` entity.
+      validateExpression(target.predicate, entity, `${path}.predicate`);
       return;
     }
     switch (target.kind) {
