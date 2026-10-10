@@ -1,5 +1,6 @@
 import type { EventField } from "@/lib/dashboard-api/client/edge";
 import {
+  FILTER_ENTITY_ROOT_REGISTRY,
   FILTER_PICKER_GROUP_ORDER,
   FILTER_PICKER_TARGET_REGISTRY,
   type FilterPickerGroup,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/filter-contract/filter-registry";
 import {
   analyticsFilterRegistry,
+  type FilterEntityRoot,
   type FilterFieldDefinition,
 } from "@/lib/filter-contract/index";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -112,6 +114,7 @@ export function filterPickerGroups(
           value: target.value,
           label,
           searchText: `${label} ${target.id} ${target.value}`,
+          registeredTarget: target,
         };
       }),
       ...(fieldsByGroup.get(key) ?? []).map((field) => {
@@ -137,15 +140,21 @@ export interface FilterPickerEntry {
   readonly label: string;
   readonly searchText: string;
   readonly registeredField?: RegisteredFilterField;
+  readonly registeredTarget?: FilterPickerTargetRegistration;
 }
 export function allowedFields(
   audience: FilterPanelAudience,
   observationOnly = false,
+  entityRoot?: FilterEntityRoot,
 ): readonly RegisteredFilterField[] {
+  const entityFields = entityRoot
+    ? new Set<string>(FILTER_ENTITY_ROOT_REGISTRY[entityRoot].fields)
+    : undefined;
   return [...analyticsFilterRegistry.values()]
     .filter(
       (field) =>
         field.audiences.has(audience) &&
+        (!entityFields || entityFields.has(field.id)) &&
         (!observationOnly ||
           field.observationKinds.has("visit") ||
           field.observationKinds.has("event")),
@@ -156,15 +165,34 @@ export function allowedFields(
         analyticsFilterFieldDisplayOrder.get(right.id)!,
     ) as RegisteredFilterField[];
 }
-export function directEventName(group: EditorGroup): string | undefined {
-  const matches = group.children.filter(
-    (node): node is EditorCondition =>
-      node.kind === "condition" &&
-      !node.negated &&
-      node.field === "event.name" &&
-      node.operator === "eq" &&
-      node.valueText.trim().length > 0,
+
+export function defaultFieldForEntityRoot(
+  entity: FilterEntityRoot,
+  audience: FilterPanelAudience,
+): string {
+  return (
+    allowedFields(audience, false, entity)[0]?.id ??
+    FILTER_ENTITY_ROOT_REGISTRY[entity].fields[0] ??
+    "event.name"
   );
+}
+export function directEventName(group: EditorGroup): string | undefined {
+  const matches: EditorCondition[] = [];
+  const visit = (node: EditorCondition | EditorGroup) => {
+    if (node.kind === "condition") {
+      if (
+        !node.negated &&
+        node.field === "event.name" &&
+        node.operator === "eq" &&
+        node.valueText.trim().length > 0
+      )
+        matches.push(node);
+      if (node.entityPredicate) visit(node.entityPredicate);
+      return;
+    }
+    node.children.forEach(visit);
+  };
+  group.children.forEach(visit);
   return matches.length === 1 ? matches[0]?.valueText.trim() : undefined;
 }
 export function isSelectablePayloadFieldType(

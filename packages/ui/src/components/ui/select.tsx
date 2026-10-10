@@ -316,36 +316,20 @@ function SelectContent({
     (value: string) => {
       const selectedItem = document.getElementById(ctx.itemIdFor(value));
       const viewport = viewportRef.current;
-      if (!selectedItem || !viewport || viewport.clientHeight === 0)
-        return false;
-
-      selectedItem.scrollIntoView({ block: "nearest", inline: "nearest" });
+      if (!selectedItem || !viewport || viewport.clientHeight === 0) return;
 
       const adjustedRect = selectedItem.getBoundingClientRect();
       const viewportRect = viewport.getBoundingClientRect();
-      return (
-        adjustedRect.top >= viewportRect.top - 1 &&
-        adjustedRect.bottom <= viewportRect.top + viewport.clientHeight + 1
-      );
+      const viewportBottom = viewportRect.top + viewport.clientHeight;
+
+      if (adjustedRect.top < viewportRect.top) {
+        viewport.scrollTop += adjustedRect.top - viewportRect.top;
+      } else if (adjustedRect.bottom > viewportBottom) {
+        viewport.scrollTop += adjustedRect.bottom - viewportBottom;
+      }
     },
     [ctx.itemIdFor],
   );
-
-  React.useEffect(() => {
-    if (!ctx.open || ctx.value === undefined) return;
-    const selectedValue = ctx.value;
-
-    let frameId = 0;
-    let attempts = 0;
-    const tryScrollSelectedValueIntoView = () => {
-      attempts += 1;
-      if (scrollValueIntoView(selectedValue) || attempts >= 8) return;
-      frameId = window.requestAnimationFrame(tryScrollSelectedValueIntoView);
-    };
-
-    frameId = window.requestAnimationFrame(tryScrollSelectedValueIntoView);
-    return () => window.cancelAnimationFrame(frameId);
-  }, [ctx.open, ctx.value, scrollValueIntoView]);
 
   const focusValue = React.useCallback(
     (val: string) => {

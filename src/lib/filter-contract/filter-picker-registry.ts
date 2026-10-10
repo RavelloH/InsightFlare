@@ -1,4 +1,7 @@
-import type { FilterFieldGroup } from "./filter-registry";
+import type {
+  AnalyticsFilterFieldId,
+  FilterFieldGroup,
+} from "./filter-registry";
 import type {
   FilterArithmeticTarget,
   FilterEntityRoot,
@@ -49,6 +52,69 @@ export interface FilterPickerTargetRegistration {
 
 export const FILTER_PICKER_TARGET_VALUE_PREFIX = "__advanced__:";
 
+const targetValue = (kind: string, variant?: string) =>
+  `${FILTER_PICKER_TARGET_VALUE_PREFIX}${kind}${variant ? `:${variant}` : ""}`;
+
+/**
+ * Fields and nested collections that can be edited inside each entity-root
+ * predicate. Keep this separate from the analytics field registry: these are
+ * visual-builder capabilities, not additional DSL fields.
+ */
+export interface FilterEntityRootRegistration<Entity extends FilterEntityRoot> {
+  readonly fields: readonly Extract<
+    AnalyticsFilterFieldId,
+    `${Entity}.${string}`
+  >[];
+  readonly collections: readonly Exclude<FilterEntityRoot, Entity>[];
+}
+
+export type FilterEntityRootRegistry = {
+  readonly [Entity in FilterEntityRoot]: FilterEntityRootRegistration<Entity>;
+};
+
+export const FILTER_ENTITY_ROOT_REGISTRY = {
+  page: {
+    fields: [
+      "page.path",
+      "page.title",
+      "page.hostname",
+      "page.durationMs",
+      "page.query",
+      "page.hash",
+    ],
+    collections: ["session", "visitor"],
+  },
+  event: {
+    fields: ["event.name", "event.payload"],
+    collections: ["session", "visitor"],
+  },
+  session: {
+    fields: [
+      "session.entryPath",
+      "session.exitPath",
+      "session.durationMs",
+      "session.views",
+      "session.events",
+      "session.bounce",
+    ],
+    collections: ["page", "event", "visitor"],
+  },
+  visitor: {
+    fields: ["visitor.sessions", "visitor.views", "visitor.events"],
+    collections: ["session", "page", "event"],
+  },
+} as const satisfies FilterEntityRootRegistry;
+
+const entityRootPickerTargets: readonly FilterPickerTargetRegistration[] = (
+  Object.keys(FILTER_ENTITY_ROOT_REGISTRY) as FilterEntityRoot[]
+).map((entity) => ({
+  id: entity,
+  group: entity,
+  labelKey: `${entity}.collection`,
+  value: targetValue("entity-root", entity),
+  selection: { kind: "entity-root" as const, entity },
+}));
+
 export const FILTER_PICKER_GROUP_ORDER = [
   "page",
   "event",
@@ -65,43 +131,13 @@ export const FILTER_PICKER_GROUP_ORDER = [
   "relation",
 ] as const satisfies readonly FilterPickerGroup[];
 
-const targetValue = (kind: string, variant?: string) =>
-  `${FILTER_PICKER_TARGET_VALUE_PREFIX}${kind}${variant ? `:${variant}` : ""}`;
-
 /**
  * Non-column entries offered by the filter field picker. These describe AST
  * targets and constructors; they deliberately do not enter the analytics
  * field registry used by DSL field validation or the D1 column compiler.
  */
 export const FILTER_PICKER_TARGET_REGISTRY = [
-  {
-    id: "page",
-    group: "page",
-    labelKey: "page.collection",
-    value: targetValue("entity-root", "page"),
-    selection: { kind: "entity-root", entity: "page" },
-  },
-  {
-    id: "event",
-    group: "event",
-    labelKey: "event.collection",
-    value: targetValue("entity-root", "event"),
-    selection: { kind: "entity-root", entity: "event" },
-  },
-  {
-    id: "session",
-    group: "session",
-    labelKey: "session.collection",
-    value: targetValue("entity-root", "session"),
-    selection: { kind: "entity-root", entity: "session" },
-  },
-  {
-    id: "visitor",
-    group: "visitor",
-    labelKey: "visitor.collection",
-    value: targetValue("entity-root", "visitor"),
-    selection: { kind: "entity-root", entity: "visitor" },
-  },
+  ...entityRootPickerTargets,
   {
     id: "time",
     group: "time",

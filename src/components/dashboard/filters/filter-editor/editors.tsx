@@ -27,7 +27,10 @@ import { AnimatePresence, motion } from "motion/react";
 
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { parseFilterDsl } from "@/lib/filter-contract/filter-dsl";
-import { filterPickerTargetForValue } from "@/lib/filter-contract/filter-picker-registry";
+import {
+  FILTER_ENTITY_ROOT_REGISTRY,
+  filterPickerTargetForValue,
+} from "@/lib/filter-contract/filter-picker-registry";
 import { filterConditionEntity } from "@/lib/filter-contract/filter-registry";
 import {
   analyticsFilterRegistry,
@@ -36,6 +39,7 @@ import {
   type FilterDocument,
   type FilterDurationTarget,
   type FilterDurationUnit,
+  type FilterEntityRoot,
   type FilterExpression,
   type FilterOperator,
   type FilterScope,
@@ -78,6 +82,7 @@ import {
   advancedFilterFieldValue,
   advancedFilterFieldValueForTarget,
   advancedFilterTargetKindFromField,
+  emptyEditorGroup,
   filterValueText,
   firstOperator,
   VALUELESS_OPERATORS,
@@ -103,6 +108,16 @@ function advancedConditionForEditor(
   } catch {
     return undefined;
   }
+}
+
+function entityRootForTarget(
+  target: FilterTargetExpression | undefined,
+): FilterEntityRoot | undefined {
+  if (!target) return undefined;
+  if (target.kind === "entity-root") return target.entity;
+  if (target.kind === "selector" && target.collection.kind === "entity-root")
+    return target.collection.entity;
+  return undefined;
 }
 
 function isFilterTargetExpression(
@@ -584,32 +599,47 @@ function parseAdvancedLiteral(
 function ConditionEditor({
   audience,
   condition,
+  createId,
   document,
   eventName,
   messages,
   observationOnly = false,
+  entityRoot,
+  onAddCondition,
+  onAddGroup,
   path,
   resolvedScope,
   onChange,
+  onChangeNode,
+  onRemoveNode,
   onRemove,
   siteId,
   window,
 }: {
   audience: FilterPanelAudience;
   condition: EditorCondition;
+  createId: () => string;
   document: FilterDocument;
   eventName: string | undefined;
   messages: AppMessages;
   observationOnly?: boolean;
+  entityRoot?: FilterEntityRoot;
+  onAddCondition: (groupId: string, entityRoot?: FilterEntityRoot) => void;
+  onAddGroup: (groupId: string, entityRoot?: FilterEntityRoot) => void;
   path: readonly number[];
   resolvedScope?: FilterScope;
   onChange: (update: (condition: EditorCondition) => EditorCondition) => void;
+  onChangeNode: (id: string, update: (node: EditorNode) => EditorNode) => void;
+  onRemoveNode: (id: string) => void;
   onRemove: () => void;
   siteId: string | undefined;
   window: TimeWindow | undefined;
 }) {
   const advancedCondition = advancedConditionForEditor(condition);
   const advancedTarget = advancedCondition?.target;
+  const nestedEntityRoot = condition.entityPredicate
+    ? entityRootForTarget(advancedTarget)
+    : undefined;
   const advancedField = advancedCondition
     ? advancedFilterFieldValueForTarget(advancedCondition.target)
     : condition.field;
@@ -620,9 +650,17 @@ function ConditionEditor({
         ? "event.payload"
         : condition.field;
   const definition = analyticsFilterRegistry.get(field);
-  const fields = useMemo(
-    () => allowedFields(audience, observationOnly),
-    [audience, observationOnly],
+  const fields = useMemo(() => {
+    return allowedFields(audience, observationOnly, entityRoot);
+  }, [audience, entityRoot, observationOnly]);
+  const allowedCollections = useMemo(
+    () =>
+      entityRoot
+        ? new Set<FilterEntityRoot>(
+            FILTER_ENTITY_ROOT_REGISTRY[entityRoot].collections,
+          )
+        : undefined,
+    [entityRoot],
   );
   const operators = advancedCondition
     ? filterOperatorsForTarget(advancedCondition.target)
@@ -630,14 +668,29 @@ function ConditionEditor({
   const groupedFields = useMemo(
     () =>
       filterPickerGroups(fields, messages).flatMap((group) => {
-        const selectableFields = observationOnly
-          ? group.fields.filter((option) => option.registeredField)
-          : group.fields;
+        const selectableFields =
+          entityRoot || observationOnly
+            ? group.fields.filter((option) => {
+                if (option.registeredField) return true;
+                if (
+                  observationOnly ||
+                  !entityRoot ||
+                  option.registeredTarget?.selection.kind !== "entity-root"
+                ) {
+                  return false;
+                }
+                return (
+                  allowedCollections?.has(
+                    option.registeredTarget.selection.entity,
+                  ) ?? false
+                );
+              })
+            : group.fields;
         return selectableFields.length > 0
           ? [{ ...group, fields: selectableFields }]
           : [];
       }),
-    [fields, messages, observationOnly],
+    [allowedCollections, entityRoot, fields, messages, observationOnly],
   );
   const [fieldPickerOpen, setFieldPickerOpen] = useState(false);
   const [fieldSearch, setFieldSearch] = useState("");
@@ -846,6 +899,10 @@ function ConditionEditor({
             advancedTargetKind ?? "reducer",
             audience,
           );
+      const selectedEntityRoot =
+        registeredTarget?.selection.kind === "entity-root"
+          ? registeredTarget.selection.entity
+          : undefined;
       const nextValue = isFilterTargetExpression(nextCondition.value)
         ? undefined
         : (nextCondition.value as
@@ -886,6 +943,9 @@ function ConditionEditor({
         advancedExpression: isNextTimeTarget
           ? { ...nextCondition, value: defaultValue }
           : nextCondition,
+        entityPredicate: selectedEntityRoot
+          ? emptyEditorGroup(createId)
+          : undefined,
         advancedText: undefined,
       }));
       return;
@@ -895,6 +955,7 @@ function ConditionEditor({
     onChange((current) => {
       const {
         advancedExpression: _advancedExpression,
+        entityPredicate: _entityPredicate,
         advancedText: _advancedText,
         ...basic
       } = current;
@@ -1844,6 +1905,30 @@ function ConditionEditor({
         </div>
       ) : null}
 
+      {condition.entityPredicate && nestedEntityRoot ? (
+        <div className="sm:col-span-2 min-w-0 border-l-2 border-primary/20 pl-3 pt-1">
+          <GroupEditor
+            audience={audience}
+            createId={createId}
+            document={document}
+            entityRoot={nestedEntityRoot}
+            eventName={eventName}
+            group={condition.entityPredicate}
+            isRoot
+            messages={messages}
+            observationOnly={observationOnly}
+            path={path}
+            resolvedScope={resolvedScope}
+            onAddCondition={onAddCondition}
+            onAddGroup={onAddGroup}
+            onChange={onChangeNode}
+            onRemove={onRemoveNode}
+            siteId={siteId}
+            window={window}
+          />
+        </div>
+      ) : null}
+
       <div className="flex items-center justify-between gap-3 sm:col-span-2">
         <label className="flex min-h-7 items-center gap-2 text-xs text-muted-foreground">
           <Checkbox
@@ -1876,7 +1961,9 @@ function ConditionEditor({
 }
 export function GroupEditor({
   audience,
+  createId,
   document,
+  entityRoot,
   eventName,
   group,
   isRoot,
@@ -1892,7 +1979,9 @@ export function GroupEditor({
   window,
 }: {
   audience: FilterPanelAudience;
+  createId: () => string;
   document: FilterDocument;
+  entityRoot?: FilterEntityRoot;
   eventName: string | undefined;
   group: EditorGroup;
   isRoot: boolean;
@@ -1900,8 +1989,8 @@ export function GroupEditor({
   observationOnly?: boolean;
   path: readonly number[];
   resolvedScope?: FilterScope;
-  onAddCondition: (groupId: string) => void;
-  onAddGroup: (groupId: string) => void;
+  onAddCondition: (groupId: string, entityRoot?: FilterEntityRoot) => void;
+  onAddGroup: (groupId: string, entityRoot?: FilterEntityRoot) => void;
   onChange: (id: string, update: (node: EditorNode) => EditorNode) => void;
   onRemove: (id: string) => void;
   siteId: string | undefined;
@@ -1998,10 +2087,12 @@ export function GroupEditor({
                   <ConditionEditor
                     audience={audience}
                     condition={child}
+                    createId={createId}
                     document={document}
                     eventName={eventName}
                     messages={messages}
                     observationOnly={observationOnly}
+                    entityRoot={entityRoot}
                     path={[...path, index + 1]}
                     resolvedScope={resolvedScope}
                     siteId={siteId}
@@ -2011,12 +2102,18 @@ export function GroupEditor({
                         node.kind === "condition" ? update(node) : node,
                       );
                     }}
+                    onAddCondition={onAddCondition}
+                    onAddGroup={onAddGroup}
+                    onChangeNode={onChange}
+                    onRemoveNode={onRemove}
                     onRemove={() => onRemove(child.id)}
                   />
                 ) : (
                   <GroupEditor
                     audience={audience}
+                    createId={createId}
                     document={document}
+                    entityRoot={entityRoot}
                     eventName={eventName}
                     group={child}
                     isRoot={false}
@@ -2043,7 +2140,7 @@ export function GroupEditor({
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => onAddCondition(group.id)}
+                onClick={() => onAddCondition(group.id, entityRoot)}
               >
                 <RiAddLine data-icon="inline-start" />
                 <span>
@@ -2053,7 +2150,7 @@ export function GroupEditor({
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => onAddGroup(group.id)}
+                onClick={() => onAddGroup(group.id, entityRoot)}
               >
                 <RiAddLine data-icon="inline-start" />
                 <span>{messages.filterBuilder.addGroup}</span>

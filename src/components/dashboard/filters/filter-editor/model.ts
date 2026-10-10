@@ -8,6 +8,7 @@ import {
   FILTER_DOCUMENT_VERSION,
   type FilterCondition,
   type FilterDocument,
+  type FilterEntityRoot,
   type FilterExpression,
   type FilterFieldDefinition,
   type FilterFieldId,
@@ -107,6 +108,8 @@ export interface EditorCondition {
   readonly valueDirty: boolean;
   /** Typed advanced filter condition represented by the outer condition row. */
   readonly advancedExpression?: FilterExpression;
+  /** Editable predicate group shown inside an entity-root selector. */
+  readonly entityPredicate?: EditorGroup;
   /** Legacy fallback retained for drafts created by older editor state. */
   readonly advancedText?: string;
 }
@@ -220,6 +223,13 @@ export function advancedFilterFieldValueForTarget(
       target.predicate.target.kind === "without")
   )
     return advancedFilterFieldValue(target.predicate.target.kind);
+  if (target.kind === "selector" && target.collection.kind === "entity-root")
+    return (
+      filterPickerValueForSelection({
+        kind: "entity-root",
+        entity: target.collection.entity,
+      }) ?? advancedFilterFieldValue("entity-root")
+    );
   if (
     target.kind === "reducer" &&
     target.reducer === "countDistinct" &&
@@ -375,13 +385,16 @@ export function filterValueText(value: FilterValue): string {
 export function filterValueKey(value: FilterValue): string {
   return JSON.stringify(value);
 }
-export function defaultCondition(createId: () => string): EditorCondition {
+export function defaultCondition(
+  createId: () => string,
+  field = "page.path",
+): EditorCondition {
   return {
     id: createId(),
     kind: "condition",
     negated: false,
     notCount: 0,
-    field: "page.path",
+    field,
     payloadPath: "",
     operator: "eq",
     value: undefined,
@@ -391,14 +404,17 @@ export function defaultCondition(createId: () => string): EditorCondition {
     valueDirty: true,
   };
 }
-export function defaultGroup(createId: () => string): EditorGroup {
+export function defaultGroup(
+  createId: () => string,
+  field = "page.path",
+): EditorGroup {
   return {
     id: createId(),
     kind: "group",
     negated: false,
     notCount: 0,
     combinator: "and",
-    children: [defaultCondition(createId)],
+    children: [defaultCondition(createId, field)],
   };
 }
 export function emptyEditorGroup(createId: () => string): EditorGroup {
@@ -430,6 +446,14 @@ function editorNodeFromExpression(
       const value = isAdvancedValue
         ? undefined
         : legacyConditionValue(expression.value);
+      const entityRoot = entityRootForTarget(expression.target);
+      const entityPredicate =
+        expression.target.kind === "selector" &&
+        expression.target.collection.kind === "entity-root"
+          ? editorGroupFromExpression(expression.target.predicate, createId)
+          : entityRoot
+            ? emptyEditorGroup(createId)
+            : undefined;
       return {
         id: createId(),
         kind: "condition",
@@ -444,6 +468,7 @@ function editorNodeFromExpression(
         scalarKind: scalarKindFor(value),
         valueDirty: false,
         advancedExpression: expression,
+        ...(entityPredicate ? { entityPredicate } : {}),
       };
     }
     const value = legacyConditionValue(expression.value);
@@ -478,6 +503,30 @@ function editorNodeFromExpression(
     children: expression.children.map((child) =>
       editorNodeFromExpression(child, createId),
     ),
+  };
+}
+function entityRootForTarget(
+  target: FilterTargetExpression,
+): FilterEntityRoot | undefined {
+  if (target.kind === "entity-root") return target.entity;
+  if (target.kind === "selector" && target.collection.kind === "entity-root")
+    return target.collection.entity;
+  return undefined;
+}
+function editorGroupFromExpression(
+  expression: FilterExpression,
+  createId: () => string,
+): EditorGroup {
+  const node = editorNodeFromExpression(expression, createId);
+  if (node.kind === "group" && !node.negated && node.notCount === 0)
+    return node;
+  return {
+    id: createId(),
+    kind: "group",
+    negated: false,
+    notCount: 0,
+    combinator: "and",
+    children: [node],
   };
 }
 export function editorRootFromDocument(
@@ -516,7 +565,32 @@ function requireValue(condition: EditorCondition): void {
 }
 function conditionFromEditor(node: EditorCondition): FilterCondition {
   if (node.advancedExpression?.kind === "condition") {
-    return node.advancedExpression;
+    const expression = node.advancedExpression;
+    const collection =
+      expression.target.kind === "entity-root"
+        ? expression.target
+        : expression.target.kind === "selector" &&
+            expression.target.collection.kind === "entity-root"
+          ? expression.target.collection
+          : undefined;
+    const entityPredicate = node.entityPredicate;
+    if (
+      !collection ||
+      !entityPredicate ||
+      entityPredicate.children.length === 0
+    )
+      return collection ? { ...expression, target: collection } : expression;
+    return {
+      ...expression,
+      target: {
+        kind: "selector",
+        collection,
+        predicate:
+          entityPredicate.children.length === 1
+            ? expressionFromEditor(entityPredicate.children[0]!)
+            : expressionFromEditor(entityPredicate),
+      },
+    };
   }
   if (node.advancedText !== undefined) {
     const parsed = parseFilterDsl(node.advancedText, analyticsFilterRegistry);
@@ -637,6 +711,31 @@ function editorNodeFingerprint(node: EditorNode): string | null {
     return null;
   }
 }
+function editorStructureMatches(
+  current: EditorNode,
+  incoming: EditorNode,
+): boolean {
+  if (current.kind !== incoming.kind) return false;
+  if (current.kind === "condition" && incoming.kind === "condition") {
+    if (Boolean(current.entityPredicate) !== Boolean(incoming.entityPredicate))
+      return false;
+    return (
+      !current.entityPredicate ||
+      editorStructureMatches(current.entityPredicate, incoming.entityPredicate!)
+    );
+  }
+  if (current.kind === "condition" || incoming.kind === "condition")
+    return false;
+  return (
+    current.combinator === incoming.combinator &&
+    current.negated === incoming.negated &&
+    current.notCount === incoming.notCount &&
+    current.children.length === incoming.children.length &&
+    current.children.every((child, index) =>
+      editorStructureMatches(child, incoming.children[index]!),
+    )
+  );
+}
 function reconcileEditorNode(
   current: EditorNode,
   incoming: EditorNode,
@@ -645,13 +744,25 @@ function reconcileEditorNode(
   const incomingFingerprint = editorNodeFingerprint(incoming);
   if (
     currentFingerprint !== null &&
-    currentFingerprint === incomingFingerprint
+    currentFingerprint === incomingFingerprint &&
+    editorStructureMatches(current, incoming)
   ) {
     return current;
   }
   if (current.kind !== incoming.kind) return incoming;
   if (current.kind === "condition" && incoming.kind === "condition") {
-    return { ...incoming, id: current.id };
+    const entityPredicate =
+      current.entityPredicate && incoming.entityPredicate
+        ? (reconcileEditorNode(
+            current.entityPredicate,
+            incoming.entityPredicate,
+          ) as EditorGroup)
+        : incoming.entityPredicate;
+    return {
+      ...incoming,
+      id: current.id,
+      ...(entityPredicate ? { entityPredicate } : {}),
+    };
   }
   if (current.kind === "condition" || incoming.kind === "condition") {
     return incoming;
@@ -701,7 +812,13 @@ export function updateEditorNode(
   update: (node: EditorNode) => EditorNode,
 ): EditorNode {
   if (node.id === id) return update(node);
-  if (node.kind === "condition") return node;
+  if (node.kind === "condition") {
+    if (!node.entityPredicate) return node;
+    const entityPredicate = updateEditorNode(node.entityPredicate, id, update);
+    return entityPredicate === node.entityPredicate
+      ? node
+      : { ...node, entityPredicate: entityPredicate as EditorGroup };
+  }
   const children = node.children.map((child) =>
     updateEditorNode(child, id, update),
   );
@@ -717,7 +834,17 @@ export function appendEditorNode(
   if (node.id === parentId && node.kind === "group") {
     return { ...node, children: [...node.children, child] };
   }
-  if (node.kind === "condition") return node;
+  if (node.kind === "condition") {
+    if (!node.entityPredicate) return node;
+    const entityPredicate = appendEditorNode(
+      node.entityPredicate,
+      parentId,
+      child,
+    );
+    return entityPredicate === node.entityPredicate
+      ? node
+      : { ...node, entityPredicate: entityPredicate as EditorGroup };
+  }
   const children = node.children.map((item) =>
     appendEditorNode(item, parentId, child),
   );
@@ -730,7 +857,18 @@ export function removeEditorNode(
   id: string,
 ): EditorNode | null {
   if (node.id === id) return null;
-  if (node.kind === "condition") return node;
+  if (node.kind === "condition") {
+    if (!node.entityPredicate) return node;
+    const entityPredicate = removeEditorNode(node.entityPredicate, id);
+    if (entityPredicate === node.entityPredicate) return node;
+    return {
+      ...node,
+      entityPredicate:
+        entityPredicate?.kind === "group"
+          ? entityPredicate
+          : { ...node.entityPredicate, children: [] },
+    };
+  }
   const children = node.children
     .map((child) => removeEditorNode(child, id))
     .filter((child): child is EditorNode => child !== null);
