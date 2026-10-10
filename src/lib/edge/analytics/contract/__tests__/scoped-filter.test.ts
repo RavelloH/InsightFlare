@@ -251,7 +251,7 @@ describe("scoped filter contract", () => {
       context,
       time: queryTime,
       filters: parseFilterDsl(
-        "count(window(event, @range.start, [0s, 10s])) gte 1",
+        "count(window(EVENT, @range.start, [0s, 10s])) gte 1",
         analyticsFilterRegistry,
       ),
       scopePreference: "visitor",
@@ -290,7 +290,7 @@ describe("scoped filter contract", () => {
       context,
       time: queryTime,
       filters: parseFilterDsl(
-        "first(page).path exists",
+        "first(PAGE).path exists",
         analyticsFilterRegistry,
       ),
       scopePreference: "visitor",
@@ -356,7 +356,7 @@ describe("scoped filter contract", () => {
 
   it("plans bounded window history independently for each comparison side", () => {
     const filters = parseFilterDsl(
-      "count(window(event, @range.start, [0s, 10s])) gte 1",
+      "count(window(EVENT, @range.start, [0s, 10s])) gte 1",
       analyticsFilterRegistry,
     );
     const currentTime = {
@@ -393,7 +393,7 @@ describe("scoped filter contract", () => {
 
   it("validates top-level Relation targets against the resolved query Scope", () => {
     const filters = parseFilterDsl(
-      'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
       analyticsFilterRegistry,
     );
     const prepared = prepareScopedQuery("overview", {

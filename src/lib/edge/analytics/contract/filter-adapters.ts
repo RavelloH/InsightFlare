@@ -3,6 +3,7 @@ import {
   parseFilterParams,
 } from "@/lib/filter-contract/filter-codec";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
+import { analyzeFilterDocument } from "@/lib/filter-contract/filter-semantics";
 import {
   assertFilterAudience,
   type FilterDocument,
@@ -46,6 +47,7 @@ function fromUrl(
 function fromJson(audience: QueryAudience, input: unknown): FilterDocument {
   try {
     const document = normalizeFilterDocument(input, analyticsFilterRegistry);
+    analyzeFilterDocument(document, analyticsFilterRegistry);
     assertFilterAudience(document, analyticsFilterRegistry, audience);
     return document;
   } catch (error) {

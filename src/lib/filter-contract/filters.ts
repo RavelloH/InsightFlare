@@ -67,6 +67,12 @@ export interface EventPayloadFilterTarget {
   readonly path: CanonicalJsonPath;
 }
 
+/** A JSON pointer read from the Event currently bound by a selector or $same. */
+export interface CurrentPayloadFilterTarget {
+  readonly kind: "current-payload";
+  readonly path: CanonicalJsonPath;
+}
+
 export type FilterEntityRoot = "event" | "page" | "session" | "visitor";
 export type FilterDurationUnit =
   "ms" | "s" | "m" | "h" | "d" | "w" | "mo" | "y";
@@ -202,13 +208,14 @@ export interface FilterWithoutTarget {
 }
 
 /**
- * Core and Relation targets extend the original v1 field and payload targets.
- * The document and DSL versions stay at 1; legacy targets retain their exact
- * shape so old persisted filters continue to normalize as before.
+ * Advanced v1 targets extend the stable registered-field and event-payload
+ * nodes. The document and DSL versions remain unchanged; advanced target
+ * semantics are validated by the shared analyzer.
  */
 export type FilterTargetExpression =
   | FieldFilterTarget
   | EventPayloadFilterTarget
+  | CurrentPayloadFilterTarget
   | FilterEntityRootTarget
   | FilterContextRootTarget
   | FilterContextIntrinsicTarget
@@ -524,6 +531,12 @@ function canonicalTargetExpression(
       path: canonicalJsonPath(input.path, `${path}.path`),
     };
   }
+  if (input.kind === "current-payload") {
+    return {
+      kind: "current-payload",
+      path: canonicalJsonPath(input.path, `${path}.path`),
+    };
+  }
   const target = (value: unknown, key: string) =>
     canonicalTargetExpression(
       value,
@@ -574,28 +587,6 @@ function canonicalTargetExpression(
     case "member": {
       const object = target(input.object, "object");
       const member = memberName(input.member, "member");
-      // One-way migration for persisted v1 structural members. Canonical ASTs
-      // and all new output use the dedicated intrinsic node below.
-      if (
-        object.kind === "context-root" &&
-        object.context === "sequence" &&
-        member === "span"
-      )
-        return {
-          kind: "context-intrinsic",
-          context: "sequence",
-          intrinsic: "span",
-        };
-      if (
-        object.kind === "context-root" &&
-        object.context === "period" &&
-        member === "items"
-      )
-        return {
-          kind: "context-intrinsic",
-          context: "period",
-          intrinsic: "items",
-        };
       return { kind: "member", object, member };
     }
     case "context-intrinsic":
@@ -669,15 +660,29 @@ function canonicalTargetExpression(
         ),
       };
     }
-    case "projection":
+    case "projection": {
+      const projectionMember = input.member;
+      if (
+        typeof projectionMember !== "string" ||
+        !/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*$/.test(
+          projectionMember,
+        )
+      ) {
+        fail(
+          "invalid_member",
+          `${path}.member`,
+          "Expected a registered projection member path.",
+        );
+      }
       return {
         kind: "projection",
         collection: target(input.collection, "collection"),
-        member: memberName(input.member, "member"),
+        member: projectionMember,
         ...(input.path === undefined
           ? {}
           : { path: canonicalJsonPath(input.path, `${path}.path`) }),
       };
+    }
     case "reducer": {
       if (
         typeof input.reducer !== "string" ||

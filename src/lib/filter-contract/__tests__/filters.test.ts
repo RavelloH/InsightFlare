@@ -456,7 +456,7 @@ describe("typed filter contract", () => {
 
   it("enforces audience permissions through advanced members and entity roots", () => {
     const privatePageContext = parseFilterDsl(
-      'first(page).referrer.url eq "example.com"',
+      'first(PAGE).referrer.url eq "example.com"',
       analyticsFilterRegistry,
     );
     expect(() =>
@@ -468,7 +468,7 @@ describe("typed filter contract", () => {
     ).toThrow(expect.objectContaining({ code: "field_not_allowed" }));
 
     const customEventCount = parseFilterDsl(
-      "count(event) gte 1",
+      "count(EVENT) gte 1",
       analyticsFilterRegistry,
     );
     expect(() =>

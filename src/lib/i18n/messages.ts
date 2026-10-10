@@ -342,6 +342,18 @@ export interface AppMessages {
       removeStep: string;
       addStep: string;
       excludedActivity: string;
+      fixedTime: string;
+      toggleOffsetSign: string;
+      timeUnits: {
+        milliseconds: string;
+        seconds: string;
+        minutes: string;
+        hours: string;
+        days: string;
+        weeks: string;
+        months: string;
+        years: string;
+      };
       coreRelation: string;
       coreRelationExpression: string;
       structuredEditor: string;
@@ -3257,9 +3269,9 @@ const enMessages = {
     expressionHelpOtherFields: "Other",
     expressionHelpContextTitle: "Occurrence time and context intrinsics",
     expressionHelpContextDescription:
-      "A dot reads a registered field. @ names a temporal anchor. $ names a value supplied by the nearest matching Sequence or Period predicate context.",
+      "Lowercase dotted names are registered fields; uppercase PAGE, EVENT, SESSION, and VISITOR are entity collections. Inside an entity selector, $.member refers to its current entity, and -> explicitly projects a collection member. @ names a temporal anchor; Sequence and Period predicates also provide $span, $gap, and $items.",
     expressionHelpContextExamples:
-      'time(last(page)) gte @now-14d\nsequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) {\n  $span lte 14d AND $gap(1, 2) lte 7d AND $same(event.payload("/productId"))\n} exists\nperiods(event, 1w) { count($items) gte 3 } exists',
+      'time(last(PAGE)) gte @now-14d\nsequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) {\n  $span lte 14d AND $gap(1, 2) lte 7d AND $same($.payload("/productId"))\n} exists\nperiods(EVENT, 1w) { count($items) gte 3 } exists',
     advancedEditor: {
       not: "NOT",
       removeNot: "Remove NOT",
@@ -3293,6 +3305,18 @@ const enMessages = {
       removeStep: "Remove step",
       addStep: "Add sequence step",
       excludedActivity: "Excluded activity",
+      fixedTime: "Fixed time",
+      toggleOffsetSign: "Toggle time offset sign",
+      timeUnits: {
+        milliseconds: "milliseconds",
+        seconds: "seconds",
+        minutes: "minutes",
+        hours: "hours",
+        days: "days",
+        weeks: "weeks",
+        months: "months",
+        years: "years",
+      },
       coreRelation: "Advanced filter",
       coreRelationExpression: "Advanced filter expression",
       structuredEditor: "Advanced filter controls",
@@ -6413,9 +6437,9 @@ const zhMessages = {
     expressionHelpOtherFields: "其他",
     expressionHelpContextTitle: "活动时间与上下文内建值",
     expressionHelpContextDescription:
-      "点号用于已注册字段；@ 表示时间锚点；$ 表示最近一层匹配的序列或周期筛选上下文提供的内建值。",
+      "小写点分名称表示已注册字段；大写 PAGE、EVENT、SESSION 和 VISITOR 表示实体集合。在实体筛选器内，$.member 表示当前实体，-> 显式投影集合成员。@ 表示时间锚点；序列和周期筛选器还提供 $span、$gap 和 $items。",
     expressionHelpContextExamples:
-      'time(last(page)) gte @now-14d\nsequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) {\n  $span lte 14d AND $gap(1, 2) lte 7d AND $same(event.payload("/productId"))\n} exists\nperiods(event, 1w) { count($items) gte 3 } exists',
+      'time(last(PAGE)) gte @now-14d\nsequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) {\n  $span lte 14d AND $gap(1, 2) lte 7d AND $same($.payload("/productId"))\n} exists\nperiods(EVENT, 1w) { count($items) gte 3 } exists',
     advancedEditor: {
       not: "非",
       removeNot: "移除“非”",
@@ -6449,6 +6473,18 @@ const zhMessages = {
       removeStep: "移除步骤",
       addStep: "添加序列步骤",
       excludedActivity: "排除的活动",
+      fixedTime: "固定时间",
+      toggleOffsetSign: "切换时间偏移正负",
+      timeUnits: {
+        milliseconds: "毫秒",
+        seconds: "秒",
+        minutes: "分钟",
+        hours: "小时",
+        days: "天",
+        weeks: "周",
+        months: "月",
+        years: "年",
+      },
       coreRelation: "高级筛选",
       coreRelationExpression: "高级筛选表达式",
       structuredEditor: "高级筛选控件",
@@ -9492,9 +9528,9 @@ const jaMessages = {
     expressionHelpOtherFields: "その他",
     expressionHelpContextTitle: "発生時刻とコンテキスト組み込み値",
     expressionHelpContextDescription:
-      "ドットは登録済みフィールドを示します。@ は時間アンカー、$ は最も近い Sequence または Period 条件コンテキストの組み込み値です。",
+      "小文字のドット区切り名は登録済みフィールド、大文字の PAGE、EVENT、SESSION、VISITOR はエンティティ集合です。エンティティセレクター内の $.member は現在のエンティティを参照し、-> は集合メンバーを明示的に射影します。@ は時間アンカーで、Sequence と Period の条件には $span、$gap、$items もあります。",
     expressionHelpContextExamples:
-      'time(last(page)) gte @now-14d\nsequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) {\n  $span lte 14d AND $gap(1, 2) lte 7d AND $same(event.payload("/productId"))\n} exists',
+      'time(last(PAGE)) gte @now-14d\nsequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) {\n  $span lte 14d AND $gap(1, 2) lte 7d AND $same($.payload("/productId"))\n} exists',
     advancedEditor: {
       not: "NOT",
       removeNot: "NOT を削除",
@@ -9528,6 +9564,18 @@ const jaMessages = {
       removeStep: "ステップを削除",
       addStep: "シーケンスステップを追加",
       excludedActivity: "除外するアクティビティ",
+      fixedTime: "固定時刻",
+      toggleOffsetSign: "時間オフセットの符号を切り替え",
+      timeUnits: {
+        milliseconds: "ミリ秒",
+        seconds: "秒",
+        minutes: "分",
+        hours: "時間",
+        days: "日",
+        weeks: "週",
+        months: "か月",
+        years: "年",
+      },
       coreRelation: "高度なフィルター",
       coreRelationExpression: "高度なフィルター式",
       structuredEditor: "高度なフィルター設定",

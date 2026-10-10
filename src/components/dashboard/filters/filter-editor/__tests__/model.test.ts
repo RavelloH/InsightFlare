@@ -22,6 +22,7 @@ import {
 } from "@/components/dashboard/filters/filter-editor/model";
 import {
   analyticsFilterRegistry,
+  formatFilterDsl,
   normalizeFilterDocument,
   parseFilterDsl,
 } from "@/lib/filter-contract";
@@ -341,6 +342,45 @@ describe("filter editor tree model", () => {
       normalizeFilterDocument(document, analyticsFilterRegistry),
     );
     expect(expressionTextFromEditor(root)).toContain("NOT");
+  });
+
+  it("round-trips editable entity-root predicates as scoped selector blocks", () => {
+    const document = parseFilterDsl(
+      'EVENT { $.name eq "purchase" AND $.payload("/amount") gt 10 } exists',
+      analyticsFilterRegistry,
+    );
+    const editorRoot = editorRootFromDocument(document, conditionIdFactory());
+
+    expect(documentFromEditor(editorRoot)).toEqual(
+      normalizeFilterDocument(document, analyticsFilterRegistry),
+    );
+  });
+
+  it("applies edited payload paths inside editable entity-root predicates", () => {
+    const document = parseFilterDsl(
+      'EVENT { $.name eq "purchase" AND $.payload("/amount") gt 10 } exists',
+      analyticsFilterRegistry,
+    );
+    const editorRoot = editorRootFromDocument(document, conditionIdFactory());
+    const selector = editorRoot.children[0];
+
+    if (selector?.kind !== "condition" || !selector.entityPredicate)
+      throw new Error("expected an editable event selector");
+    const payloadCondition = selector.entityPredicate.children.find(
+      (node) => node.kind === "condition" && node.payloadPath === "/amount",
+    );
+    if (!payloadCondition || payloadCondition.kind !== "condition")
+      throw new Error("expected an editable payload condition");
+
+    const updated = updateEditorNode(editorRoot, payloadCondition.id, (node) =>
+      node.kind === "condition" ? { ...node, payloadPath: "/total" } : node,
+    );
+    if (updated.kind !== "group")
+      throw new Error("expected the editor root to remain a group");
+
+    expect(formatFilterDsl(documentFromEditor(updated))).toContain(
+      '$.payload("/total") gt 10',
+    );
   });
 
   it("reads legacy advanced text and omits invalid draft rows from the preview", () => {

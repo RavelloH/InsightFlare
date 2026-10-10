@@ -137,7 +137,7 @@ describe("filter evaluator", () => {
     expect(
       evaluateFilterDocument(
         parseFilterDsl(
-          'page { page.path eq "/orphan" } exists',
+          'PAGE { $.path eq "/orphan" } exists',
           analyticsFilterRegistry,
         ),
         dataset,
@@ -146,7 +146,7 @@ describe("filter evaluator", () => {
     ).toEqual(new Set(["orphan-page"]));
     const eventResult = evaluateFilterDocument(
       parseFilterDsl(
-        'event { event.name eq "orphan" } exists',
+        'EVENT { $.name eq "orphan" } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -160,7 +160,7 @@ describe("filter evaluator", () => {
 
   it("evaluates all conditions in a Selector against the same event", () => {
     const result = evaluate(
-      'count(event { event.name eq "purchase" AND event.payload("/amount") gt 20 }) eq 1',
+      'count(EVENT { $.name eq "purchase" AND $.payload("/amount") gt 20 }) eq 1',
     );
     expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
   });
@@ -190,16 +190,17 @@ describe("filter evaluator", () => {
       );
 
     expect(
-      evaluateSession('session { page.path eq "/pricing" } exists')
-        .matchingScopeEntityIds,
-    ).toEqual(new Set(["s-a"]));
-    expect(
-      evaluateSession('session { event.name eq "purchase" } exists')
+      evaluateSession('SESSION { PAGE { $.path eq "/pricing" } exists } exists')
         .matchingScopeEntityIds,
     ).toEqual(new Set(["s-a"]));
     expect(
       evaluateSession(
-        'session { page.path eq "/pricing" AND event.name eq "purchase" } exists',
+        'SESSION { EVENT { $.name eq "purchase" } exists } exists',
+      ).matchingScopeEntityIds,
+    ).toEqual(new Set(["s-a"]));
+    expect(
+      evaluateSession(
+        'SESSION { PAGE { $.path eq "/pricing" } exists AND EVENT { $.name eq "purchase" } exists } exists',
       ).matchingScopeEntityIds,
     ).toEqual(new Set(["s-a"]));
   });
@@ -233,12 +234,12 @@ describe("filter evaluator", () => {
 
     expect(
       evaluateSession(
-        'session { page.path eq "/pricing" AND page.title eq "Checkout" } exists',
+        'SESSION { PAGE { $.path eq "/pricing" } exists AND PAGE { $.title eq "Checkout" } exists } exists',
       ).matchingScopeEntityIds,
     ).toEqual(new Set(["s-a"]));
     expect(
       evaluateSession(
-        'session { page { page.path eq "/pricing" AND page.title eq "Checkout" } exists } exists',
+        'SESSION { PAGE { $.path eq "/pricing" AND $.title eq "Checkout" } exists } exists',
       ).matchingScopeEntityIds,
     ).toEqual(new Set());
   });
@@ -265,16 +266,19 @@ describe("filter evaluator", () => {
       );
 
     expect(
-      evaluateSession('session { NOT page.path eq "/admin" } exists')
-        .matchingScopeEntityIds,
+      evaluateSession(
+        'SESSION { NOT PAGE { $.path eq "/admin" } exists } exists',
+      ).matchingScopeEntityIds,
     ).toEqual(new Set(["s-a"]));
     expect(
-      evaluateSession('session { NOT page.path eq "/pricing" } exists')
-        .matchingScopeEntityIds,
+      evaluateSession(
+        'SESSION { NOT PAGE { $.path eq "/pricing" } exists } exists',
+      ).matchingScopeEntityIds,
     ).toEqual(new Set());
     expect(
-      evaluateSession('session { page.path neq "/pricing" } exists')
-        .matchingScopeEntityIds,
+      evaluateSession(
+        'SESSION { PAGE { $.path neq "/pricing" } exists } exists',
+      ).matchingScopeEntityIds,
     ).toEqual(new Set(["s-a"]));
   });
 
@@ -318,12 +322,14 @@ describe("filter evaluator", () => {
       );
 
     expect(
-      evaluateVisitor('visitor { event.name eq "purchase" } exists')
-        .matchingScopeEntityIds,
+      evaluateVisitor(
+        'VISITOR { EVENT { $.name eq "purchase" } exists } exists',
+      ).matchingScopeEntityIds,
     ).toEqual(new Set(["u-a"]));
     expect(
-      evaluateVisitor("visitor { session.durationMs gt 5m } exists")
-        .matchingScopeEntityIds,
+      evaluateVisitor(
+        "VISITOR { SESSION { $.durationMs gt 300000 } exists } exists",
+      ).matchingScopeEntityIds,
     ).toEqual(new Set(["u-a"]));
   });
 
@@ -391,19 +397,19 @@ describe("filter evaluator", () => {
 
     expect(
       run(
-        'visitor { session.durationMs gte 1s AND visitor.sessions eq 1 AND page.path eq "/pricing" AND event.name eq "purchase" AND geo.country eq "US" } exists',
+        'VISITOR { $.sessions eq 1 AND SESSION { $.durationMs gte 1000 AND PAGE { $.path eq "/pricing" AND $.geo.country eq "US" } exists AND EVENT { $.name eq "purchase" AND $.geo.country eq "US" } exists } exists } exists',
         "visitor",
       ).matchingScopeEntityIds,
     ).toEqual(new Set(["domain-visitor"]));
     expect(
       run(
-        'session { visitor.views eq 1 AND page { page.path eq "/pricing" AND geo.country eq "US" } exists AND event { event.name eq "purchase" AND geo.country eq "US" } exists } exists',
+        'VISITOR { $.views eq 1 } exists AND SESSION { PAGE { $.path eq "/pricing" AND $.geo.country eq "US" } exists AND EVENT { $.name eq "purchase" AND $.geo.country eq "US" } exists } exists',
         "session",
       ).matchingScopeEntityIds,
     ).toEqual(new Set(["domain-session"]));
     expect(
       run(
-        "visitor { visitor.sessions eq 1 } exists AND time between [@range.start, @range.end]",
+        "VISITOR { $.sessions eq 1 } exists AND time between [@range.start, @range.end]",
         "visitor",
       ).matchingScopeEntityIds,
     ).toEqual(new Set(["domain-visitor"]));
@@ -412,13 +418,11 @@ describe("filter evaluator", () => {
   it("rejects Page and Event sibling fields inside a single-activity selector", () => {
     expect(() =>
       evaluate(
-        'event { event.name eq "purchase" AND page.path eq "/pricing" } exists',
+        'EVENT { $.name eq "purchase" AND page.path eq "/pricing" } exists',
       ),
-    ).toThrow(
-      expect.objectContaining({ code: "invalid_condition_entity_domain" }),
-    );
-    expect(() => evaluate('page { event.name eq "purchase" } exists')).toThrow(
-      expect.objectContaining({ code: "invalid_condition_entity_domain" }),
+    ).toThrow(expect.objectContaining({ code: "invalid_context_member" }));
+    expect(() => evaluate('PAGE { event.name eq "purchase" } exists')).toThrow(
+      expect.objectContaining({ code: "invalid_context_member" }),
     );
   });
 
@@ -449,7 +453,7 @@ describe("filter evaluator", () => {
     };
     const minimum = evaluateFilterDocument(
       parseFilterDsl(
-        'min(event.payload("/amount")) gt 100',
+        'min(EVENT -> payload("/amount")) gt 100',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -457,7 +461,7 @@ describe("filter evaluator", () => {
     );
     const distinct = evaluateFilterDocument(
       parseFilterDsl(
-        'countDistinct(event.payload("/productId")) eq 2',
+        'countDistinct(EVENT -> payload("/productId")) eq 2',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -465,7 +469,7 @@ describe("filter evaluator", () => {
     );
     const numericArithmetic = evaluateFilterDocument(
       parseFilterDsl(
-        'div(sub(sum(event.payload("/amount")), sum(event.payload("/refund"))), count(event)) gt 50',
+        'div(sub(sum(EVENT -> payload("/amount")), sum(EVENT -> payload("/refund"))), count(EVENT)) gt 50',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -473,7 +477,7 @@ describe("filter evaluator", () => {
     );
     const stringMinimum = evaluateFilterDocument(
       parseFilterDsl(
-        'min(event.payload("/value")) gt "alpha"',
+        'min(EVENT -> payload("/value")) gt "alpha"',
         analyticsFilterRegistry,
       ),
       {
@@ -522,46 +526,46 @@ describe("filter evaluator", () => {
         },
       ).matchingScopeEntityIds;
 
-    expect(evaluatePayload('first(event.payload("/value")) eq 100')).toEqual(
+    expect(evaluatePayload('first(EVENT -> payload("/value")) eq 100')).toEqual(
       new Set(["u-a"]),
     );
     expect(
-      evaluatePayload('first(event.payload("/value")) eq "legacy"'),
+      evaluatePayload('first(EVENT -> payload("/value")) eq "legacy"'),
     ).toEqual(new Set(["u-a"]));
     expect(
       evaluatePayload(
-        'nth(event { event.name eq "value" }.payload("/value"), 2) eq 200',
+        'nth(EVENT { $.name eq "value" } -> payload("/value"), 2) eq 200',
       ),
     ).toEqual(new Set(["u-a"]));
     expect(
       evaluatePayload(
-        'first(event { event.name eq "value" }.payload("/value")) eq 100',
+        'first(EVENT { $.name eq "value" } -> payload("/value")) eq 100',
       ),
     ).toEqual(new Set(["u-a"]));
     expect(
       evaluatePayload(
-        'first(event { event.name eq "value" }.payload("/value")) in [100, 200]',
+        'first(EVENT { $.name eq "value" } -> payload("/value")) in [100, 200]',
       ),
     ).toEqual(new Set(["u-a"]));
     expect(
       evaluatePayload(
-        'event { event.name eq "value" }.payload("/value") exists',
+        'EVENT { $.name eq "value" } -> payload("/value") exists',
       ),
     ).toEqual(new Set(["u-a"]));
-    expect(evaluatePayload('min(event.payload("/value")) eq 100')).toEqual(
+    expect(evaluatePayload('min(EVENT -> payload("/value")) eq 100')).toEqual(
       new Set(["u-a"]),
     );
     expect(
-      evaluatePayload('first(event.payload("/value")) in [100, 200]'),
+      evaluatePayload('first(EVENT -> payload("/value")) in [100, 200]'),
     ).toEqual(new Set(["u-a"]));
-    expect(evaluatePayload('last(event.payload("/value")) neq 99')).toEqual(
+    expect(evaluatePayload('last(EVENT -> payload("/value")) neq 99')).toEqual(
       new Set(["u-a"]),
     );
     expect(
-      evaluatePayload('first(event.payload("/value")) notIn ["legacy"]'),
+      evaluatePayload('first(EVENT -> payload("/value")) notIn ["legacy"]'),
     ).toEqual(new Set());
     expect(
-      evaluatePayload('countDistinct(event.payload("/value")) eq 3'),
+      evaluatePayload('countDistinct(EVENT -> payload("/value")) eq 3'),
     ).toEqual(new Set(["u-a"]));
   });
 
@@ -594,9 +598,9 @@ describe("filter evaluator", () => {
     };
 
     for (const expression of [
-      'first(page).referrer.domain eq "google.com"',
-      'last(page).referrer.domain eq "bing.com"',
-      'first(page).path eq "/first"',
+      'first(PAGE).referrer.domain eq "google.com"',
+      'last(PAGE).referrer.domain eq "bing.com"',
+      'first(PAGE).path eq "/first"',
     ]) {
       expect(
         evaluateFilterDocument(
@@ -616,7 +620,7 @@ describe("filter evaluator", () => {
     };
     const result = evaluateFilterDocument(
       parseFilterDsl(
-        "div(count(event), count(event)) eq 0",
+        "div(count(EVENT), count(EVENT)) eq 0",
         analyticsFilterRegistry,
       ),
       dataset,
@@ -657,18 +661,18 @@ describe("filter evaluator", () => {
         },
       );
 
-    expect(run("count(page) eq 1", "event").matchingVisitIds).toEqual(
+    expect(run("count(PAGE) eq 1", "event").matchingVisitIds).toEqual(
       new Set(["orphan-page", "session-page"]),
     );
     expect(
-      run("count(page) eq 1 AND count(visitor) eq 1", "event").matchingVisitIds,
+      run("count(PAGE) eq 1 AND count(VISITOR) eq 1", "event").matchingVisitIds,
     ).toEqual(new Set(["session-page"]));
     expect(
-      run("count(visitor) eq 1 OR count(session) eq 1", "visitor")
+      run("count(VISITOR) eq 1 OR count(SESSION) eq 1", "visitor")
         .matchingScopeEntityIds,
     ).toEqual(new Set(["visitor-a"]));
     expect(
-      run("session { count(visitor) eq 1 } exists", "session")
+      run("SESSION { count(VISITOR) eq 1 } exists", "session")
         .matchingScopeEntityIds,
     ).toEqual(new Set(["session-a"]));
   });
@@ -685,7 +689,7 @@ describe("filter evaluator", () => {
     };
     const result = evaluateFilterDocument(
       parseFilterDsl(
-        'first(event.payload("/value")) eq false',
+        'first(EVENT -> payload("/value")) eq false',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -700,7 +704,7 @@ describe("filter evaluator", () => {
     expect(
       evaluateFilterDocument(
         parseFilterDsl(
-          'min(event.payload("/value")) eq false',
+          'min(EVENT -> payload("/value")) eq false',
           analyticsFilterRegistry,
         ),
         dataset,
@@ -725,7 +729,7 @@ describe("filter evaluator", () => {
     };
     const result = evaluateFilterDocument(
       parseFilterDsl(
-        'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { $span eq 10ms } exists',
+        'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) { $span eq 10ms } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -751,7 +755,7 @@ describe("filter evaluator", () => {
     };
     const result = evaluateFilterDocument(
       parseFilterDsl(
-        'sequence([event { event.name eq "signup" }, event { event.name eq "project_created" }, event { event.name eq "purchase" }]) { $gap(1, 2) eq 10ms AND $gap(2, 3) eq 10ms AND $gap(1, 3) eq 20ms AND $span eq 20ms } exists',
+        'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "project_created" }, EVENT { $.name eq "purchase" }]) { $gap(1, 2) eq 10ms AND $gap(2, 3) eq 10ms AND $gap(1, 3) eq 20ms AND $span eq 20ms } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -792,7 +796,7 @@ describe("filter evaluator", () => {
     };
     const result = evaluateFilterDocument(
       parseFilterDsl(
-        'sequence([event { event.name eq "view" }, event { event.name eq "purchase" }]) { $same(event.payload("/productId")) } exists',
+        'sequence([EVENT { $.name eq "view" }, EVENT { $.name eq "purchase" }]) { $same($.payload("/productId")) } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -830,7 +834,7 @@ describe("filter evaluator", () => {
     };
     const first = evaluateFilterDocument(
       parseFilterDsl(
-        'sub(time(first(event { event.name eq "first_team_event" })), time(first(event { event.name eq "signup" }))) between [0d, 30d]',
+        'sub(time(first(EVENT { $.name eq "first_team_event" })), time(first(EVENT { $.name eq "signup" }))) between [0d, 30d]',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -838,7 +842,7 @@ describe("filter evaluator", () => {
     );
     const nth = evaluateFilterDocument(
       parseFilterDsl(
-        'sub(time(nth(event { event.name eq "insight_saved" }, 3)), time(first(event { event.name eq "signup" }))) between [0d, 30d]',
+        'sub(time(nth(EVENT { $.name eq "insight_saved" }, 3)), time(first(EVENT { $.name eq "signup" }))) between [0d, 30d]',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -859,7 +863,7 @@ describe("filter evaluator", () => {
     };
     const result = evaluateFilterDocument(
       parseFilterDsl(
-        "countDistinct(bucket(event, 1d)) eq 2",
+        "countDistinct(bucket(EVENT, 1d)) eq 2",
         analyticsFilterRegistry,
       ),
       dataset,
@@ -928,9 +932,9 @@ describe("filter evaluator", () => {
       capturedAtMs: 299,
     };
     for (const source of [
-      'time between ["1970-01-01T00:00:00.100Z", "1970-01-01T00:00:00.199Z"] AND count(event { event.name eq "purchase" }) gte 3',
-      'time between ["1970-01-01T00:00:00.100Z", "1970-01-01T00:00:00.199Z"] AND first(event).name eq "signup"',
-      'time between ["1970-01-01T00:00:00.100Z", "1970-01-01T00:00:00.199Z"] AND sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
+      'time between ["1970-01-01T00:00:00.100Z", "1970-01-01T00:00:00.199Z"] AND count(EVENT { $.name eq "purchase" }) gte 3',
+      'time between ["1970-01-01T00:00:00.100Z", "1970-01-01T00:00:00.199Z"] AND first(EVENT).name eq "signup"',
+      'time between ["1970-01-01T00:00:00.100Z", "1970-01-01T00:00:00.199Z"] AND sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
     ]) {
       expect(
         evaluateFilterDocument(
@@ -971,7 +975,7 @@ describe("filter evaluator", () => {
     );
     const advanced = evaluateFilterDocument(
       parseFilterDsl(
-        'page.path startsWith "/Docs" AND count(event) gte 0',
+        'page.path startsWith "/Docs" AND count(EVENT) gte 0',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -1053,7 +1057,7 @@ describe("filter evaluator", () => {
       );
       const advanced = evaluateFilterDocument(
         parseFilterDsl(
-          `${condition} AND count(event) gte 0`,
+          `${condition} AND count(EVENT) gte 0`,
           analyticsFilterRegistry,
         ),
         dataset,
@@ -1076,7 +1080,7 @@ describe("filter evaluator", () => {
     };
     const visitorResult = evaluateFilterDocument(
       parseFilterDsl(
-        'visitor { sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists } exists',
+        'VISITOR { sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -1089,7 +1093,7 @@ describe("filter evaluator", () => {
     );
     const sessionResult = evaluateFilterDocument(
       parseFilterDsl(
-        'session { sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists } exists',
+        'SESSION { sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -1102,7 +1106,7 @@ describe("filter evaluator", () => {
     );
     const nestedSessionResult = evaluateFilterDocument(
       parseFilterDsl(
-        'visitor { session { event { event.name eq "signup" } exists AND event { event.name eq "purchase" } exists } exists } exists',
+        'VISITOR { SESSION { EVENT { $.name eq "signup" } exists AND EVENT { $.name eq "purchase" } exists } exists } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -1130,7 +1134,7 @@ describe("filter evaluator", () => {
       coverageRange: { startMs: 0, endExclusiveMs: 100 },
     };
     const document = parseFilterDsl(
-      'event { event.name eq "signup" AND sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists } exists',
+      'EVENT { $.name eq "signup" AND sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists } exists',
       analyticsFilterRegistry,
     );
     const result = evaluateFilterDocument(document, dataset, {
@@ -1180,30 +1184,34 @@ describe("filter evaluator", () => {
 
     expect(
       evaluateForSessions(
-        'session { page.path eq "/pricing" AND event.name eq "purchase" AND event.payload("/plan") eq "pro" } exists',
+        'SESSION { PAGE { $.path eq "/pricing" } exists AND EVENT { $.name eq "purchase" AND $.payload("/plan") eq "pro" } exists } exists',
       ),
     ).toEqual(new Set(["session-a"]));
     expect(
       evaluateForSessions(
-        'session { page.path eq "/pricing" AND page.title eq "Checkout" } exists',
+        'SESSION { PAGE { $.path eq "/pricing" } exists AND PAGE { $.title eq "Checkout" } exists } exists',
       ),
     ).toEqual(new Set(["session-a"]));
     expect(
       evaluateForSessions(
-        'session { page { page.path eq "/pricing" AND page.title eq "Checkout" } exists } exists',
+        'SESSION { PAGE { $.path eq "/pricing" AND $.title eq "Checkout" } exists } exists',
       ),
     ).toEqual(new Set());
     expect(
-      evaluateForSessions('session { NOT page.path eq "/pricing" } exists'),
+      evaluateForSessions(
+        'SESSION { NOT PAGE { $.path eq "/pricing" } exists } exists',
+      ),
     ).toEqual(new Set(["session-b"]));
     expect(
-      evaluateForSessions('session { page.path neq "/pricing" } exists'),
+      evaluateForSessions(
+        'SESSION { PAGE { $.path neq "/pricing" } exists } exists',
+      ),
     ).toEqual(new Set(["session-a", "session-b"]));
   });
 
   it("rejects root Relations when evaluated in Event Scope", () => {
     const document = parseFilterDsl(
-      'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
       analyticsFilterRegistry,
     );
 
@@ -1223,11 +1231,11 @@ describe("filter evaluator", () => {
 
   it("rejects implicit Page/Event sibling reads inside activity selectors", () => {
     for (const source of [
-      'event { event.name eq "purchase" AND page.path eq "/pricing" } exists',
-      'page { page.path eq "/pricing" AND event.name eq "purchase" } exists',
+      'EVENT { $.name eq "purchase" AND page.path eq "/pricing" } exists',
+      'PAGE { $.path eq "/pricing" AND event.name eq "purchase" } exists',
     ]) {
       expect(() => evaluate(source, "visitor")).toThrow(
-        expect.objectContaining({ code: "invalid_condition_entity_domain" }),
+        expect.objectContaining({ code: "invalid_context_member" }),
       );
     }
   });
@@ -1337,62 +1345,62 @@ describe("filter evaluator", () => {
       time gte @now-90d
       AND geo.country in ["US", "GB", "CA"]
       AND client.deviceType neq "bot"
-      AND event {
-        event.name eq "purchase"
-        AND event.payload("/currency") eq "USD"
-        AND event.payload("/amount") gt 0
+      AND EVENT {
+        $.name eq "purchase"
+        AND $.payload("/currency") eq "USD"
+        AND $.payload("/amount") gt 0
       } exists
-      AND event { event.name eq "fraud_flag" } notExists
-      AND count(event {
-        event.name eq "purchase"
-        AND event.payload("/currency") eq "USD"
-        AND event.payload("/amount") gt 0
+      AND EVENT { $.name eq "fraud_flag" } notExists
+      AND count(EVENT {
+        $.name eq "purchase"
+        AND $.payload("/currency") eq "USD"
+        AND $.payload("/amount") gt 0
       }) gte 5
-      AND countDistinct(event {
-        event.name eq "purchase"
-      }.payload("/productId")) gte 3
-      AND countDistinct(bucket(page, 1d)) gte 20
+      AND countDistinct(EVENT {
+        $.name eq "purchase"
+      } -> payload("/productId")) gte 3
+      AND countDistinct(bucket(PAGE, 1d)) gte 20
       AND sub(
-        sum(event { event.name eq "purchase" }.payload("/amount")),
-        sum(event { event.name eq "refund" }.payload("/amount"))
+        sum(EVENT { $.name eq "purchase" } -> payload("/amount")),
+        sum(EVENT { $.name eq "refund" } -> payload("/amount"))
       ) gt 1000
       AND div(
-        sum(event { event.name eq "refund" }.payload("/amount")),
-        sum(event { event.name eq "purchase" }.payload("/amount"))
+        sum(EVENT { $.name eq "refund" } -> payload("/amount")),
+        sum(EVENT { $.name eq "purchase" } -> payload("/amount"))
       ) lt 0.3
-      AND avg(event {
-        event.name eq "api_request"
-        AND event.payload("/latency") exists
-      }.payload("/latency")) lt 500
-      AND first(page).referrer.domain eq "google.com"
-      AND last(page).path eq "/last"
-      AND first(event { event.name eq "first_team_event" }).name eq "first_team_event"
-      AND nth(event { event.name eq "insight_saved" }, 3).name eq "insight_saved"
-      AND count(session) gte 4
+      AND avg(EVENT {
+        $.name eq "api_request"
+        AND $.payload("/latency") exists
+      } -> payload("/latency")) lt 500
+      AND first(PAGE).referrer.domain eq "google.com"
+      AND last(PAGE).path eq "/last"
+      AND first(EVENT { $.name eq "first_team_event" }).name eq "first_team_event"
+      AND nth(EVENT { $.name eq "insight_saved" }, 3).name eq "insight_saved"
+      AND count(SESSION) gte 4
       AND div(
-        count(session { event { event.name eq "purchase" } exists }),
-        count(session)
+        count(SESSION { EVENT { $.name eq "purchase" } exists }),
+        count(SESSION)
       ) gt 0.5
       AND count(periods(
-        event { event.name eq "shared_insight" },
+        EVENT { $.name eq "shared_insight" },
         1w
       ) { count($items) gte 3 }) gte 3
       AND sequence([
-        event { event.name eq "signup" },
-        event { event.name eq "project_created" },
-        event { event.name eq "invite_sent" },
-        event { event.name eq "purchase" }
+        EVENT { $.name eq "signup" },
+        EVENT { $.name eq "project_created" },
+        EVENT { $.name eq "invite_sent" },
+        EVENT { $.name eq "purchase" }
       ]) { $span lte 14d } exists
       AND without(
         sequence([
-          event { event.name eq "signup" },
-          event { event.name eq "purchase" }
+          EVENT { $.name eq "signup" },
+          EVENT { $.name eq "purchase" }
         ]),
-        event { event.name eq "cancellation" }
+        EVENT { $.name eq "cancellation" }
       ) { $span lte 7d } exists
-      AND count(session {
-        count(event { event.name eq "payment_failed" }) gte 2
-        AND event { event.name eq "purchase" } notExists
+      AND count(SESSION {
+        count(EVENT { $.name eq "payment_failed" }) gte 2
+        AND EVENT { $.name eq "purchase" } notExists
       }) lte 1
     `;
     const result = evaluateFilterDocument(
@@ -1411,14 +1419,12 @@ describe("filter evaluator", () => {
 
   it("distinguishes explicit JSON null from a missing payload path", () => {
     expect(
-      evaluate(
-        'event { event.payload("/explicitNull") isNull } exists',
-        "session",
-      ).matchingScopeEntityIds,
+      evaluate('EVENT { $.payload("/explicitNull") isNull } exists', "session")
+        .matchingScopeEntityIds,
     ).toEqual(new Set(["s-a"]));
     expect(
       evaluate(
-        'event { event.payload("/explicitNull") notExists } exists',
+        'EVENT { $.payload("/explicitNull") notExists } exists',
         "session",
       ).matchingScopeEntityIds,
     ).toEqual(new Set(["s-a", "s-b"]));
@@ -1426,7 +1432,7 @@ describe("filter evaluator", () => {
 
   it("preserves explicit null through projections and first", () => {
     expect(
-      evaluate('first(event.payload("/explicitNull")) isNull', "session")
+      evaluate('first(EVENT -> payload("/explicitNull")) isNull', "session")
         .matchingScopeEntityIds,
     ).toEqual(new Set(["s-a"]));
   });
@@ -1559,7 +1565,7 @@ describe("filter evaluator", () => {
     } as const;
     const sessions = evaluateFilterDocument(
       parseFilterDsl(
-        'session { session.views eq 2 AND session.events eq 2 AND session.durationMs eq 100 AND session.entryPath eq "/entry" AND session.exitPath eq "/exit" AND session.bounce eq false } exists',
+        'SESSION { $.views eq 2 AND $.events eq 2 AND $.durationMs eq 100 AND $.entryPath eq "/entry" AND $.exitPath eq "/exit" AND $.bounce eq false } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -1567,7 +1573,7 @@ describe("filter evaluator", () => {
     );
     const visitors = evaluateFilterDocument(
       parseFilterDsl(
-        "visitor { visitor.sessions eq 2 AND visitor.views eq 3 AND visitor.events eq 2 } exists",
+        "VISITOR { $.sessions eq 2 AND $.views eq 3 AND $.events eq 2 } exists",
         analyticsFilterRegistry,
       ),
       dataset,
@@ -1575,7 +1581,7 @@ describe("filter evaluator", () => {
     );
     const bounces = evaluateFilterDocument(
       parseFilterDsl(
-        "session { session.bounce eq true } exists",
+        "SESSION { $.bounce eq true } exists",
         analyticsFilterRegistry,
       ),
       dataset,
@@ -1619,7 +1625,7 @@ describe("filter evaluator", () => {
     expect(
       evaluateFilterDocument(
         parseFilterDsl(
-          "visitor { visitor.sessions eq 4 AND session { session.durationMs eq 9000 } exists } exists",
+          "VISITOR { $.sessions eq 4 AND SESSION { $.durationMs eq 9000 } exists } exists",
           analyticsFilterRegistry,
         ),
         dataset,
@@ -1629,7 +1635,7 @@ describe("filter evaluator", () => {
     expect(
       evaluateFilterDocument(
         parseFilterDsl(
-          "session { visitor.sessions eq 4 } exists",
+          "VISITOR { $.sessions eq 4 } exists AND SESSION { $.durationMs eq 9000 } exists",
           analyticsFilterRegistry,
         ),
         dataset,
@@ -1802,7 +1808,7 @@ describe("filter evaluator", () => {
     } as const;
     const sequence = evaluateFilterDocument(
       parseFilterDsl(
-        'visitor { sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { $span gte 20ms } exists } exists',
+        'VISITOR { sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) { $span gte 20ms } exists } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -1810,7 +1816,7 @@ describe("filter evaluator", () => {
     );
     const bucket = evaluateFilterDocument(
       parseFilterDsl(
-        "countDistinct(bucket(page, 1d)) eq 1",
+        "countDistinct(bucket(PAGE, 1d)) eq 1",
         analyticsFilterRegistry,
       ),
       dataset,
@@ -1818,7 +1824,7 @@ describe("filter evaluator", () => {
     );
     const session = evaluateFilterDocument(
       parseFilterDsl(
-        "session { session.durationMs eq 999 } exists",
+        "SESSION { $.durationMs eq 999 } exists",
         analyticsFilterRegistry,
       ),
       dataset,
@@ -1826,7 +1832,7 @@ describe("filter evaluator", () => {
     );
     const visitor = evaluateFilterDocument(
       parseFilterDsl(
-        "visitor { visitor.sessions eq 7 } exists",
+        "VISITOR { $.sessions eq 7 } exists",
         analyticsFilterRegistry,
       ),
       dataset,
@@ -1834,7 +1840,7 @@ describe("filter evaluator", () => {
     );
     const nestedMember = evaluateFilterDocument(
       parseFilterDsl(
-        "count(page.client.browser) eq 2",
+        "count(PAGE -> client.browser) eq 2",
         analyticsFilterRegistry,
       ),
       dataset,
@@ -1850,7 +1856,7 @@ describe("filter evaluator", () => {
 
   it("uses evaluation-range fields inside selectors and candidate fields for legacy predicates", () => {
     const document = parseFilterDsl(
-      'count(page { page.path eq "/historical" }) gte 1',
+      'count(PAGE { $.path eq "/historical" }) gte 1',
       analyticsFilterRegistry,
     );
     const dataset: FilterEvaluationDataset = {
@@ -2102,7 +2108,7 @@ describe("filter evaluator", () => {
     };
     const result = evaluateFilterDocument(
       parseFilterDsl(
-        'first(page).path eq "/early" AND last(page).path eq "/late" AND nth(event, 3).name eq "third"',
+        'first(PAGE).path eq "/early" AND last(PAGE).path eq "/late" AND nth(EVENT, 3).name eq "third"',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -2128,7 +2134,7 @@ describe("filter evaluator", () => {
     };
     const result = evaluateFilterDocument(
       parseFilterDsl(
-        'first(page).path eq "/a" AND last(page).path eq "/z"',
+        'first(PAGE).path eq "/a" AND last(PAGE).path eq "/z"',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -2145,7 +2151,7 @@ describe("filter evaluator", () => {
 
   it("orders page and event activity together for adjacent sequences", () => {
     const result = evaluate(
-      'visitor { session { adjacent(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }])) exists } exists } exists',
+      'VISITOR { SESSION { adjacent(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }])) exists } exists } exists',
     );
     // The Page at t=25 interrupts the signup-to-purchase activity sequence.
     expect(result.matchingScopeEntityIds).toEqual(new Set(["u-b"]));
@@ -2165,7 +2171,7 @@ describe("filter evaluator", () => {
     };
     const pageThenEvent = evaluateFilterDocument(
       parseFilterDsl(
-        'visitor { session { adjacent(sequence([page { page.path eq "/same" }, event { event.name eq "purchase" }])) exists } exists } exists',
+        'VISITOR { SESSION { adjacent(sequence([PAGE { $.path eq "/same" }, EVENT { $.name eq "purchase" }])) exists } exists } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -2173,7 +2179,7 @@ describe("filter evaluator", () => {
     );
     const eventThenPage = evaluateFilterDocument(
       parseFilterDsl(
-        'visitor { session { sequence([event { event.name eq "purchase" }, page { page.path eq "/same" }]) exists } exists } exists',
+        'VISITOR { SESSION { sequence([EVENT { $.name eq "purchase" }, PAGE { $.path eq "/same" }]) exists } exists } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -2193,7 +2199,7 @@ describe("filter evaluator", () => {
     };
     const result = evaluateFilterDocument(
       parseFilterDsl(
-        'count(event) eq 0 AND sum(event.payload("/amount")) eq 0 AND avg(event.payload("/amount")) isNull AND min(event.payload("/amount")) isNull AND max(event.payload("/amount")) isNull AND first(event) notExists AND last(page) exists AND nth(event, 2) notExists AND countDistinct(event.payload("/amount")) eq 0 AND div(count(event), count(event)) isNull',
+        'count(EVENT) eq 0 AND sum(EVENT -> payload("/amount")) eq 0 AND avg(EVENT -> payload("/amount")) isNull AND min(EVENT -> payload("/amount")) isNull AND max(EVENT -> payload("/amount")) isNull AND first(EVENT) notExists AND last(PAGE) exists AND nth(EVENT, 2) notExists AND countDistinct(EVENT -> payload("/amount")) eq 0 AND div(count(EVENT), count(EVENT)) isNull',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -2210,35 +2216,35 @@ describe("filter evaluator", () => {
   it("evaluates reducers over non-empty projected event values", () => {
     const cases = [
       [
-        'sum(event { event.name eq "purchase" }.payload("/amount")) eq 55',
+        'sum(EVENT { $.name eq "purchase" } -> payload("/amount")) eq 55',
         ["s-a"],
       ],
       [
-        'avg(event { event.name eq "purchase" }.payload("/amount")) eq 27.5',
+        'avg(EVENT { $.name eq "purchase" } -> payload("/amount")) eq 27.5',
         ["s-a"],
       ],
       [
-        'min(event { event.name eq "purchase" }.payload("/amount")) eq 5',
+        'min(EVENT { $.name eq "purchase" } -> payload("/amount")) eq 5',
         ["s-a"],
       ],
       [
-        'max(event { event.name eq "purchase" }.payload("/amount")) eq 50',
+        'max(EVENT { $.name eq "purchase" } -> payload("/amount")) eq 50',
         ["s-a"],
       ],
       [
-        'first(event { event.name eq "purchase" }.payload("/amount")) eq 5',
+        'first(EVENT { $.name eq "purchase" } -> payload("/amount")) eq 5',
         ["s-a"],
       ],
       [
-        'last(event { event.name eq "purchase" }.payload("/amount")) eq 50',
+        'last(EVENT { $.name eq "purchase" } -> payload("/amount")) eq 50',
         ["s-a"],
       ],
       [
-        'nth(event { event.name eq "purchase" }.payload("/amount"), 2) eq 50',
+        'nth(EVENT { $.name eq "purchase" } -> payload("/amount"), 2) eq 50',
         ["s-a"],
       ],
       [
-        'countDistinct(event { event.name eq "purchase" }.payload("/amount")) eq 2',
+        'countDistinct(EVENT { $.name eq "purchase" } -> payload("/amount")) eq 2',
         ["s-a"],
       ],
     ] as const;
@@ -2252,7 +2258,7 @@ describe("filter evaluator", () => {
 
   it("evaluates arithmetic over reducer results", () => {
     const result = evaluate(
-      "add(count(event), count(event)) eq 8 AND mul(count(event), count(event)) eq 16 AND div(count(event), count(event)) eq 1",
+      "add(count(EVENT), count(EVENT)) eq 8 AND mul(count(EVENT), count(EVENT)) eq 16 AND div(count(EVENT), count(EVENT)) eq 1",
     );
     expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a"]));
   });
@@ -2294,7 +2300,7 @@ describe("filter evaluator", () => {
       coverageRange: { startMs: 0, endExclusiveMs: 100 },
     };
     const result = evaluateFilterDocument(
-      parseFilterDsl("count(event) eq 0", analyticsFilterRegistry),
+      parseFilterDsl("count(EVENT) eq 0", analyticsFilterRegistry),
       dataset,
       {
         scope: "visitor",
@@ -2323,7 +2329,7 @@ describe("filter evaluator", () => {
       };
       const result = evaluateFilterDocument(
         parseFilterDsl(
-          `countDistinct(bucket(page, 1d)) eq ${expected}`,
+          `countDistinct(bucket(PAGE, 1d)) eq ${expected}`,
           analyticsFilterRegistry,
         ),
         dataset,
@@ -2368,14 +2374,14 @@ describe("filter evaluator", () => {
       capturedAtMs: february + 1,
     };
     const assertions = [
-      ["countDistinct(bucket(page, 1h)) eq 2", new Set(["u-a"])],
-      ["count(periods(page, 1mo)) eq 2", new Set(["u-a"])],
+      ["countDistinct(bucket(PAGE, 1h)) eq 2", new Set(["u-a"])],
+      ["count(periods(PAGE, 1mo)) eq 2", new Set(["u-a"])],
       [
-        "count(periods(page, 1mo) { count($items) gte 1 }) eq 2",
+        "count(periods(PAGE, 1mo) { count($items) gte 1 }) eq 2",
         new Set(["u-a"]),
       ],
-      ["count(periods(page, 1y)) eq 1", new Set(["u-a"])],
-      ["countDistinct(bucket(page, 1y)) eq 1", new Set(["u-a"])],
+      ["count(periods(PAGE, 1y)) eq 1", new Set(["u-a"])],
+      ["countDistinct(bucket(PAGE, 1y)) eq 1", new Set(["u-a"])],
     ] as const;
 
     for (const [source, expected] of assertions) {
@@ -2401,7 +2407,7 @@ describe("filter evaluator", () => {
       coverageRange: { startMs: sunday - 1, endExclusiveMs: saturday + 1 },
     };
     const result = evaluateFilterDocument(
-      parseFilterDsl("count(periods(page, 1w)) eq 2", analyticsFilterRegistry),
+      parseFilterDsl("count(periods(PAGE, 1w)) eq 2", analyticsFilterRegistry),
       dataset,
       {
         scope: "visitor",
@@ -2425,7 +2431,7 @@ describe("filter evaluator", () => {
     };
     const result = evaluateFilterDocument(
       parseFilterDsl(
-        'session { count(window(event { event.name eq "purchase" }, first(page), [-10ms, 10ms])) eq 2 } exists',
+        'SESSION { count(window(EVENT { $.name eq "purchase" }, first(PAGE), [-10ms, 10ms])) eq 2 } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -2440,7 +2446,7 @@ describe("filter evaluator", () => {
 
     const literalAnchor = evaluateFilterDocument(
       parseFilterDsl(
-        'count(window(event { event.name eq "purchase" }, @range.start, [0ms, 100ms])) eq 3',
+        'count(window(EVENT { $.name eq "purchase" }, @range.start, [0ms, 100ms])) eq 3',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -2457,13 +2463,13 @@ describe("filter evaluator", () => {
 
     expect(
       evaluate(
-        'count(window(event, first(event { event.name eq "missing" }), [0ms, 10ms])) eq 0',
+        'count(window(EVENT, first(EVENT { $.name eq "missing" }), [0ms, 10ms])) eq 0',
         "visitor",
       ).matchingScopeEntityIds,
     ).toEqual(new Set(["u-a", "u-b"]));
     expect(
       evaluate(
-        'sub(avg(event.payload("/missing")), count(event)) isNull',
+        'sub(avg(EVENT -> payload("/missing")), count(EVENT)) isNull',
         "visitor",
       ).matchingScopeEntityIds,
     ).toEqual(new Set(["u-a", "u-b"]));
@@ -2471,7 +2477,7 @@ describe("filter evaluator", () => {
 
   it("checks without only between sequence endpoints", () => {
     const result = evaluate(
-      'visitor { session { without(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]), event { event.name eq "cancellation" }) exists } exists } exists',
+      'VISITOR { SESSION { without(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]), EVENT { $.name eq "cancellation" }) exists } exists } exists',
     );
     expect(result.matchingScopeEntityIds).toEqual(new Set(["u-a", "u-b"]));
   });
@@ -2490,7 +2496,7 @@ describe("filter evaluator", () => {
     };
     const result = evaluateFilterDocument(
       parseFilterDsl(
-        'visitor { session { without(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]), event { event.name eq "cancellation" }) exists } exists } exists',
+        'VISITOR { SESSION { without(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]), EVENT { $.name eq "cancellation" }) exists } exists } exists',
         analyticsFilterRegistry,
       ),
       dataset,
@@ -2508,7 +2514,7 @@ describe("filter evaluator", () => {
     expect(() =>
       evaluateFilterDocument(
         parseFilterDsl(
-          'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
+          'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
           analyticsFilterRegistry,
         ),
         fixture,
@@ -2526,7 +2532,7 @@ describe("filter evaluator", () => {
   it("rejects a read range outside the declared source coverage", () => {
     expect(() =>
       evaluateFilterDocument(
-        parseFilterDsl("count(event) gte 1", analyticsFilterRegistry),
+        parseFilterDsl("count(EVENT) gte 1", analyticsFilterRegistry),
         fixture,
         {
           scope: "visitor",
@@ -2567,7 +2573,7 @@ describe("filter evaluator", () => {
   it("counts read and candidate activities against the activity work limit", () => {
     expect(() =>
       evaluateFilterDocument(
-        parseFilterDsl("count(event) gte 1", analyticsFilterRegistry),
+        parseFilterDsl("count(EVENT) gte 1", analyticsFilterRegistry),
         fixture,
         {
           scope: "visitor",
@@ -2584,7 +2590,7 @@ describe("filter evaluator", () => {
 
   it("rejects invalid ranges and activity volumes before evaluating", () => {
     const document = parseFilterDsl(
-      "count(event) gte 1",
+      "count(EVENT) gte 1",
       analyticsFilterRegistry,
     );
     expect(() =>
@@ -2610,7 +2616,7 @@ describe("filter evaluator", () => {
     expect(() =>
       evaluateFilterDocument(
         parseFilterDsl(
-          'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
+          'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
           analyticsFilterRegistry,
         ),
         fixture,

@@ -83,6 +83,11 @@ type SelectorReferenceKind =
   | "sequence"
   | "value";
 
+// A selector reference names both a predicate scope and (when used directly
+// as a condition) the collection's existential result. This reserved path
+// segment keeps logic attached to that result distinct from predicate members.
+const SELECTOR_RESULT_PART = "$result";
+
 export interface FilterCodecOptions {
   readonly limits?: Partial<typeof DEFAULT_FILTER_LIMITS>;
   readonly strictFilterKeys?: boolean;
@@ -265,10 +270,14 @@ function parseComplexCondition(
   registry: FilterFieldRegistry,
   key: string,
   resolveSelector?: (reference: string) => FilterTargetExpression,
+  currentEntity?: string,
 ): FilterCondition {
   const parse = (source: string) => {
     const prepared = prepareSelectorReferences(source, resolveSelector);
-    const document = parseFilterDsl(prepared.source, registry, {
+    const wrapped = currentEntity
+      ? `${currentEntity.toUpperCase()} { ${prepared.source} } exists`
+      : prepared.source;
+    const document = parseFilterDsl(wrapped, registry, {
       validateSemantics: false,
     });
     if (!document.root || document.root.kind !== "condition") {
@@ -278,14 +287,24 @@ function parseComplexCondition(
         "Expected one condition for the complex filter target.",
       );
     }
-    return {
-      ...document.root,
-      target: replaceSelectorMarkers(
-        document.root.target,
-        prepared.markers,
-        resolveSelector,
-      ),
-    };
+    const parsedTarget = replaceSelectorMarkers(
+      document.root.target,
+      prepared.markers,
+      resolveSelector,
+    );
+    const condition = currentEntity
+      ? parsedTarget.kind === "selector" &&
+        parsedTarget.predicate.kind === "condition"
+        ? parsedTarget.predicate
+        : null
+      : { ...document.root, target: parsedTarget };
+    if (!condition)
+      fail(
+        "invalid_complex_filter",
+        key,
+        "Expected one condition for the complex filter target.",
+      );
+    return condition;
   };
   const valuelessAlias = OPERATOR_ALIASES[raw];
   if (valuelessAlias && VALUELESS.has(valuelessAlias))
@@ -346,6 +365,18 @@ function selectorReferenceParts(reference: string): {
   };
 }
 
+function selectorEntity(target: FilterTargetExpression): string | undefined {
+  if (target.kind === "entity-root") return target.entity;
+  if (target.kind === "selector") return selectorEntity(target.collection);
+  if (target.kind === "window") return selectorEntity(target.collection);
+  if (
+    target.kind === "reducer" &&
+    ["first", "last", "nth"].includes(target.reducer)
+  )
+    return selectorEntity(target.input);
+  return undefined;
+}
+
 function replaceSelectorReferencesOutsideStrings(
   source: string,
   getMarker: (reference: string) => string,
@@ -404,7 +435,7 @@ function prepareSelectorReferences(
       while (source.includes(marker)) marker += "_";
       markers.set(marker, reference);
       index += 1;
-      return `event { event.name eq ${JSON.stringify(marker)} }`;
+      return `EVENT { $.name eq ${JSON.stringify(marker)} }`;
     },
   );
   return { source: rewritten, markers };
@@ -418,8 +449,10 @@ function replaceSelectorMarkers(
   if (target.kind === "selector" && target.predicate.kind === "condition") {
     const condition = target.predicate;
     const marker =
-      condition.target.kind === "field" &&
-      condition.target.field === "event.name" &&
+      condition.target.kind === "member" &&
+      condition.target.object.kind === "context-root" &&
+      condition.target.object.context === "current" &&
+      condition.target.member === "name" &&
       condition.operator === "eq" &&
       typeof condition.value === "string"
         ? condition.value
@@ -739,10 +772,11 @@ export function parseFilterParams(
     entries.push({ key, value, parsed });
     addReference(parsed.field);
     for (const part of parsed.parts) addReference(part);
-    for (const match of parsed.field.matchAll(
-      /\b(event|page|session|visitor|period|bucket|sequence|value):(\d+)\b/giu,
-    ))
-      addReference(`${match[1]!.toLowerCase()}:${Number(match[2])}`);
+    for (const expression of [parsed.field, ...parsed.parts])
+      replaceSelectorReferencesOutsideStrings(expression, (reference) => {
+        addReference(reference);
+        return reference;
+      });
     if (selectorReferenceParts(parsed.field) && parsed.parts[0] === "source")
       replaceSelectorReferencesOutsideStrings(value, (reference) => {
         addReference(reference);
@@ -752,9 +786,13 @@ export function parseFilterParams(
 
   const selectorScopes = new Map<string, Scope>();
   const selectorTargets = new Map<string, FilterTargetExpression>();
+  const selectorReferencesByTarget = new WeakMap<
+    FilterTargetExpression,
+    string
+  >();
   for (const [reference, entity] of references) {
     selectorScopes.set(reference, scope());
-    selectorTargets.set(reference, {
+    const target: FilterTargetExpression = {
       kind: "selector",
       collection: {
         kind: "entity-root",
@@ -768,7 +806,9 @@ export function parseFilterParams(
         target: { kind: "context-root", context: "current" },
         operator: "exists",
       },
-    });
+    };
+    selectorTargets.set(reference, target);
+    selectorReferencesByTarget.set(target, reference);
   }
   const resolveSelector = (reference: string): FilterTargetExpression => {
     const parsed = selectorReferenceParts(reference);
@@ -789,11 +829,23 @@ export function parseFilterParams(
     payloadPath: string | undefined,
     raw: string,
     key: string,
+    currentEntity?: string,
   ): FilterCondition => {
-    if (registry.has(target) || target === "event.payload")
+    if (!currentEntity && (registry.has(target) || target === "event.payload"))
       return parseCondition(target, payloadPath, raw, registry, limits);
+    const actualTarget =
+      target === "$.payload" && payloadPath
+        ? `$.payload(${JSON.stringify(payloadPath)})`
+        : target;
     try {
-      return parseComplexCondition(target, raw, registry, key, resolveSelector);
+      return parseComplexCondition(
+        actualTarget,
+        raw,
+        registry,
+        key,
+        resolveSelector,
+        currentEntity,
+      );
     } catch (error) {
       if (error instanceof FilterCodecError) throw error;
       fail(
@@ -820,10 +872,22 @@ export function parseFilterParams(
       );
     if (raw.length > limits.maxValueLength)
       fail("value_too_long", key, "Filter value is too long.");
-    const condition = parseScopedCondition(target, payloadPath, raw, key);
+    const selector = selectorTargets.get(reference);
+    const currentEntity =
+      selector?.kind === "selector"
+        ? selectorEntity(selector.collection)
+        : undefined;
+    const condition = parseScopedCondition(
+      target,
+      payloadPath,
+      raw,
+      key,
+      currentEntity,
+    );
     insert(selectorScope, parseLogic(logic, limits.maxDepth), condition);
   };
 
+  const selectorSourceDeclarations = new Map<string, string>();
   for (const { key, value, parsed } of entries) {
     const reference = selectorReferenceParts(parsed.field);
     if (!reference || parsed.parts[0] !== "source") continue;
@@ -833,6 +897,15 @@ export function parseFilterParams(
         key,
         "A selector source declaration has an invalid path.",
       );
+    const previousSource = selectorSourceDeclarations.get(parsed.field);
+    if (previousSource !== undefined && previousSource !== value)
+      fail(
+        "conflicting_selector_source",
+        key,
+        "A selector reference cannot declare conflicting sources.",
+      );
+    if (previousSource === value) continue;
+    selectorSourceDeclarations.set(parsed.field, value);
     const sourceCondition = parseComplexCondition(
       value,
       "exists",
@@ -858,15 +931,35 @@ export function parseFilterParams(
     if (!parent || parsed.parts.length === 0) continue;
     const first = parsed.parts[0]!;
     if (first === "source") continue;
+    if (first === SELECTOR_RESULT_PART) continue;
     const child = selectorReferenceParts(first);
     if (child) {
       if (parsed.parts.length === 1) {
         insertInSelector(parsed.field, first, undefined, "", value, key);
         continue;
       }
+      if (parsed.parts[1] === SELECTOR_RESULT_PART) {
+        const logicParts = parsed.parts.slice(2);
+        if (logicParts.length > 1)
+          fail(
+            "invalid_filter_key",
+            key,
+            "A selector result may have one logic path.",
+          );
+        insertInSelector(
+          parsed.field,
+          first,
+          undefined,
+          logicParts[0] ?? "",
+          value,
+          key,
+        );
+        continue;
+      }
       const target = parsed.parts[1]!;
       const payloadPath =
-        target === "event.payload" && parsed.parts[2]?.startsWith("/")
+        (target === "event.payload" || target === "$.payload") &&
+        parsed.parts[2]?.startsWith("/")
           ? parsed.parts[2]
           : undefined;
       const logicIndex = payloadPath ? 3 : 2;
@@ -889,7 +982,8 @@ export function parseFilterParams(
     }
     const target = first;
     const payloadPath =
-      target === "event.payload" && parsed.parts[1]?.startsWith("/")
+      (target === "event.payload" || target === "$.payload") &&
+      parsed.parts[1]?.startsWith("/")
         ? parsed.parts[1]
         : undefined;
     const logicIndex = payloadPath ? 2 : 1;
@@ -920,11 +1014,131 @@ export function parseFilterParams(
     (selector as { predicate: FilterExpression }).predicate = predicate;
   }
 
+  // Selector references form a directed graph through source declarations
+  // and nested predicates. Reject cycles before semantic analysis traverses
+  // the object graph, so URL inputs cannot create recursive ASTs.
+  const dependencies = new Map<string, Set<string>>();
+  const collectTargetDependencies = (
+    target: FilterTargetExpression,
+    result: Set<string>,
+    seen: Set<FilterTargetExpression>,
+  ): void => {
+    if (seen.has(target)) return;
+    seen.add(target);
+    if (target.kind === "selector") {
+      const reference = selectorReferencesByTarget.get(target);
+      if (reference) result.add(reference);
+      return;
+    }
+    switch (target.kind) {
+      case "context-intrinsic":
+        if (target.intrinsic === "same")
+          collectTargetDependencies(target.input, result, seen);
+        break;
+      case "occurrence-time":
+        collectTargetDependencies(target.input, result, seen);
+        break;
+      case "member":
+        collectTargetDependencies(target.object, result, seen);
+        break;
+      case "projection":
+        collectTargetDependencies(target.collection, result, seen);
+        break;
+      case "reducer":
+        collectTargetDependencies(target.input, result, seen);
+        break;
+      case "arithmetic":
+        collectTargetDependencies(target.left, result, seen);
+        collectTargetDependencies(target.right, result, seen);
+        break;
+      case "bucket":
+        collectTargetDependencies(target.input, result, seen);
+        break;
+      case "window":
+        collectTargetDependencies(target.collection, result, seen);
+        collectTargetDependencies(target.anchor, result, seen);
+        break;
+      case "periods":
+        collectTargetDependencies(target.collection, result, seen);
+        break;
+      case "sequence":
+        target.steps.forEach((step) =>
+          collectTargetDependencies(step, result, seen),
+        );
+        break;
+      case "adjacent":
+        collectTargetDependencies(target.sequence, result, seen);
+        break;
+      case "without":
+        collectTargetDependencies(target.sequence, result, seen);
+        collectTargetDependencies(target.excluded, result, seen);
+        break;
+    }
+  };
+  const collectExpressionDependencies = (
+    expression: FilterExpression,
+    result: Set<string>,
+    seen: Set<FilterTargetExpression>,
+  ): void => {
+    if (expression.kind === "condition") {
+      collectTargetDependencies(expression.target, result, seen);
+      if (
+        expression.value &&
+        typeof expression.value === "object" &&
+        !Array.isArray(expression.value) &&
+        "kind" in expression.value
+      )
+        collectTargetDependencies(
+          expression.value as FilterTargetExpression,
+          result,
+          seen,
+        );
+      return;
+    }
+    if (expression.kind === "not") {
+      collectExpressionDependencies(expression.child, result, seen);
+      return;
+    }
+    expression.children.forEach((child) =>
+      collectExpressionDependencies(child, result, seen),
+    );
+  };
+  for (const [reference, selector] of selectorTargets) {
+    if (selector.kind !== "selector") continue;
+    const result = new Set<string>();
+    const seen = new Set<FilterTargetExpression>();
+    collectTargetDependencies(selector.collection, result, seen);
+    collectExpressionDependencies(selector.predicate, result, seen);
+    dependencies.set(reference, result);
+  }
+  const visitSelector = (
+    reference: string,
+    active: Set<string>,
+    visited: Set<string>,
+  ): void => {
+    if (active.has(reference))
+      fail(
+        "cyclic_selector_reference",
+        reference,
+        "Selector references cannot form a cycle.",
+      );
+    if (visited.has(reference)) return;
+    active.add(reference);
+    for (const dependency of dependencies.get(reference) ?? [])
+      visitSelector(dependency, active, visited);
+    active.delete(reference);
+    visited.add(reference);
+  };
+  const visitedSelectors = new Set<string>();
+  for (const reference of selectorTargets.keys())
+    visitSelector(reference, new Set(), visitedSelectors);
+
   const root = scope();
   let conditions = 0;
   for (const { key, value, parsed } of entries) {
     const topSelector = selectorReferenceParts(parsed.field);
-    if (topSelector && parsed.parts.length > 0) continue;
+    const selectorResult = parsed.parts[0] === SELECTOR_RESULT_PART;
+    if (topSelector && parsed.parts.length > 0 && !selectorResult) continue;
     if (
       parsed.field === "event.payload" &&
       !parsed.payloadPath &&
@@ -938,8 +1152,9 @@ export function parseFilterParams(
     }
     if (value.length > limits.maxValueLength)
       fail("value_too_long", key, "Filter value is too long.");
-    const logic = parsed.parts.length === 1 ? parsed.parts[0]! : "";
-    if (parsed.parts.length > 1)
+    const logicParts = selectorResult ? parsed.parts.slice(1) : parsed.parts;
+    const logic = logicParts[0] ?? "";
+    if (logicParts.length > 1)
       fail("invalid_filter_key", key, "A filter key may have one logic path.");
     const condition = parseScopedCondition(
       parsed.field,
@@ -1131,8 +1346,10 @@ function formatFilterUrlTarget(
       return target.field;
     case "event-payload":
       return `event.payload(${JSON.stringify(target.path)})`;
+    case "current-payload":
+      return `$.payload(${JSON.stringify(target.path)})`;
     case "entity-root":
-      return target.entity;
+      return target.entity.toUpperCase();
     case "context-root":
       return target.context === "current" ? "" : target.context;
     case "context-intrinsic":
@@ -1144,6 +1361,17 @@ function formatFilterUrlTarget(
     case "occurrence-time":
       return `time(${formatFilterUrlTarget(target.input, references)})`;
     case "member": {
+      if (
+        target.object.kind === "context-root" &&
+        target.object.context === "current" &&
+        target.member === "time"
+      )
+        return "time";
+      if (
+        target.object.kind === "context-root" &&
+        target.object.context === "current"
+      )
+        return `$.${target.member}`;
       const object = formatFilterUrlTarget(target.object, references);
       return object ? `${object}.${target.member}` : target.member;
     }
@@ -1158,7 +1386,7 @@ function formatFilterUrlTarget(
       return reference;
     }
     case "projection":
-      return `${formatFilterUrlTarget(target.collection, references)}.${target.member}${target.path === undefined ? "" : `(${JSON.stringify(target.path)})`}`;
+      return `${formatFilterUrlTarget(target.collection, references)} -> ${target.member}${target.path === undefined ? "" : `(${JSON.stringify(target.path)})`}`;
     case "reducer":
       return target.reducer === "nth"
         ? `nth(${formatFilterUrlTarget(target.input, references)},${target.index})`
@@ -1331,10 +1559,16 @@ function serializeExpression(
         serializeDeclarations(child.value as FilterTargetExpression);
       if (!isLegacyFilterTarget(child.target)) {
         const urlTarget = formatFilterUrlTarget(child.target, references);
+        const targetParts =
+          child.target.kind === "selector"
+            ? [urlTarget, SELECTOR_RESULT_PART]
+            : child.target.kind === "current-payload"
+              ? ["$.payload", child.target.path]
+              : [urlTarget];
         pairs.push([
           appendKey([
             ...selectorPath,
-            urlTarget,
+            ...targetParts,
             ...(logicPath.length ? [logicPath.join(".")] : []),
           ]),
           formatAdvancedConditionValue(child, references),

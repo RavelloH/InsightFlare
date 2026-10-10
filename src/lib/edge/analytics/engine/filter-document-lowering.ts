@@ -19,11 +19,13 @@ import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 import {
   type AnalyzedFilterDocument,
   analyzeFilterDocument,
+  resolveEntityMember,
 } from "@/lib/filter-contract/filter-semantics";
 import {
   type FilterCondition,
   type FilterExpression,
   type FilterOperator,
+  type FilterTargetExpression,
 } from "@/lib/filter-contract/filters";
 
 import {
@@ -136,6 +138,43 @@ const SCOPES: readonly LogicalFilterScope[] = [
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function currentMemberPath(target: FilterTargetExpression): string | undefined {
+  const members: string[] = [];
+  let current = target;
+  while (current.kind === "member") {
+    members.unshift(current.member);
+    current = current.object;
+  }
+  return current.kind === "context-root" && current.context === "current"
+    ? members.join(".")
+    : undefined;
+}
+
+function fieldConditionForActivity(
+  condition: FilterCondition,
+  entity: ObservationKind,
+): FilterCondition {
+  const memberPath = currentMemberPath(condition.target);
+  if (memberPath) {
+    const resolved = resolveEntityMember(
+      entity,
+      memberPath,
+      analyticsFilterRegistry,
+    );
+    if (resolved)
+      return {
+        ...condition,
+        target: { kind: "field", field: resolved.fieldId },
+      };
+  }
+  if (condition.target.kind === "current-payload" && entity === "event")
+    return {
+      ...condition,
+      target: { kind: "event-payload", path: condition.target.path },
+    };
+  return condition;
 }
 
 function targetName(condition: FilterCondition): string {
@@ -367,6 +406,7 @@ function prepareActivityPredicate(
     };
   }
   if (temporalDomain !== selectorTemporalDomain) {
+    const loweredCondition = fieldConditionForActivity(condition, collection);
     return {
       kind: "unsupported",
       result: unsupported(
@@ -374,7 +414,9 @@ function prepareActivityPredicate(
         path,
         `Activity selector at ${selectorPath} uses '${selectorTemporalDomain}', but this predicate uses '${temporalDomain}'.`,
         condition,
-        condition.target.kind === "field" ? condition.target.field : undefined,
+        loweredCondition.target.kind === "field"
+          ? loweredCondition.target.field
+          : undefined,
       ),
     };
   }
@@ -392,7 +434,9 @@ function prepareActivityPredicate(
 
   let preparedCondition: ReturnType<typeof preparePrimitiveFieldCondition>;
   try {
-    preparedCondition = preparePrimitiveFieldCondition(condition);
+    preparedCondition = preparePrimitiveFieldCondition(
+      fieldConditionForActivity(condition, collection),
+    );
   } catch (error) {
     return {
       kind: "unsupported",

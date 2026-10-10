@@ -400,11 +400,11 @@ filterBuilder:
   expressionHelpFieldOperators: 演算子
   expressionHelpOtherFields: その他
   expressionHelpContextTitle: 発生時刻とコンテキスト組み込み値
-  expressionHelpContextDescription: ドットは登録済みフィールドを示します。@ は時間アンカー、$ は最も近い Sequence または Period 条件コンテキストの組み込み値です。
+  expressionHelpContextDescription: 小文字のドット区切り名は登録済みフィールド、大文字の PAGE、EVENT、SESSION、VISITOR はエンティティ集合です。エンティティセレクター内の $.member は現在のエンティティを参照し、-> は集合メンバーを明示的に射影します。@ は時間アンカーで、Sequence と Period の条件には $span、$gap、$items もあります。
   expressionHelpContextExamples: |-
-    time(last(page)) gte @now-14d
-    sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) {
-      $span lte 14d AND $gap(1, 2) lte 7d AND $same(event.payload("/productId"))
+    time(last(PAGE)) gte @now-14d
+    sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) {
+      $span lte 14d AND $gap(1, 2) lte 7d AND $same($.payload("/productId"))
     } exists
   advancedEditor:
     not: NOT
@@ -439,6 +439,17 @@ filterBuilder:
     removeStep: ステップを削除
     addStep: シーケンスステップを追加
     excludedActivity: 除外するアクティビティ
+    fixedTime: 固定時刻
+    toggleOffsetSign: 時間オフセットの符号を切り替え
+    timeUnits:
+      milliseconds: ミリ秒
+      seconds: 秒
+      minutes: 分
+      hours: 時間
+      days: 日
+      weeks: 週
+      months: か月
+      years: 年
     coreRelation: 高度なフィルター
     coreRelationExpression: 高度なフィルター式
     structuredEditor: 高度なフィルター設定

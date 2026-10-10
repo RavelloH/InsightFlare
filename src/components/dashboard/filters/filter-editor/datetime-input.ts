@@ -50,3 +50,16 @@ export function dateTimeInputValueToLiteral(
   });
   return new Date(timestamp).toISOString();
 }
+
+export function dateTimeLiteralAtLocalDayStart(
+  timeZone: string | undefined,
+  dayOffset = 0,
+  now = Date.now(),
+): string {
+  const parts = zonedParts(now, resolvedTimeZone(timeZone));
+  const date = new Date(
+    Date.UTC(parts.year, parts.month - 1, parts.day + dayOffset),
+  );
+  const localMidnight = `${pad(date.getUTCFullYear(), 4)}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}T00:00`;
+  return dateTimeInputValueToLiteral(localMidnight, timeZone);
+}

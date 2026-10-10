@@ -88,6 +88,21 @@ describe("target API v1 route registry", () => {
         },
       }),
     ).not.toThrow();
+    expect(() =>
+      assertSavedFilterDocument({
+        version: 1,
+        root: {
+          kind: "condition",
+          target: {
+            kind: "member",
+            object: { kind: "entity-root", entity: "page" },
+            member: "path",
+          },
+          operator: "eq",
+          value: "/docs",
+        },
+      } as never),
+    ).toThrow(expect.objectContaining({ code: "invalid_member" }));
   });
   it("keeps each planned route bound to one known analytics operation", () => {
     expect(apiV1AnalyticsRouteRegistry).toHaveLength(2);

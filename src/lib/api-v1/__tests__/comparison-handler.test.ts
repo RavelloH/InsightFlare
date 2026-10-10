@@ -331,7 +331,7 @@ describe("API v1 comparison v2 handler", () => {
           filter: {
             type: "dsl",
             expression:
-              "time gte @range.start-1d AND time lt @range.start AND count(event) gte 1",
+              "time gte @range.start-1d AND time lt @range.start AND count(EVENT) gte 1",
           },
         },
         reference: {
@@ -339,7 +339,7 @@ describe("API v1 comparison v2 handler", () => {
           filter: {
             type: "dsl",
             expression:
-              "time gte @range.start-2d AND time lt @range.start AND count(page) gte 1",
+              "time gte @range.start-2d AND time lt @range.start AND count(PAGE) gte 1",
           },
         },
       }),

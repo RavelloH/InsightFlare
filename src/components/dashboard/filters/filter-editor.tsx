@@ -27,6 +27,7 @@ import {
   filterConditionCount,
   type FilterDocument,
   filterDocumentUsesAdvancedExpressions,
+  type FilterEntityRoot,
   FilterValidationError,
   parseFilterDsl,
 } from "@/lib/filter-contract/index";
@@ -34,7 +35,11 @@ import type { AppMessages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 
 import { GroupEditor } from "./filter-editor/editors";
-import { allowedFields, directEventName } from "./filter-editor/field-catalog";
+import {
+  allowedFields,
+  defaultFieldForEntityRoot,
+  directEventName,
+} from "./filter-editor/field-catalog";
 import { FilterExpressionHelpDialog } from "./filter-editor/help-dialog";
 import type {
   EditorGroup,
@@ -274,33 +279,43 @@ export function FilterEditor({
   );
 
   const addCondition = useCallback(
-    (parentId: string) => {
+    (parentId: string, entityRoot?: FilterEntityRoot) => {
       const nextRoot = appendEditorNode(
         renderedRoot,
         parentId,
-        defaultCondition(createId),
+        defaultCondition(
+          createId,
+          entityRoot
+            ? defaultFieldForEntityRoot(entityRoot, audience)
+            : undefined,
+        ),
       ) as EditorGroup;
       if (isControlled) onControlledRootChange?.(nextRoot);
       else setRoot(nextRoot);
       setExpressionError(null);
       setValidationError(null);
     },
-    [createId, isControlled, onControlledRootChange, renderedRoot],
+    [audience, createId, isControlled, onControlledRootChange, renderedRoot],
   );
 
   const addGroup = useCallback(
-    (parentId: string) => {
+    (parentId: string, entityRoot?: FilterEntityRoot) => {
       const nextRoot = appendEditorNode(
         renderedRoot,
         parentId,
-        defaultGroup(createId),
+        defaultGroup(
+          createId,
+          entityRoot
+            ? defaultFieldForEntityRoot(entityRoot, audience)
+            : undefined,
+        ),
       ) as EditorGroup;
       if (isControlled) onControlledRootChange?.(nextRoot);
       else setRoot(nextRoot);
       setExpressionError(null);
       setValidationError(null);
     },
-    [createId, isControlled, onControlledRootChange, renderedRoot],
+    [audience, createId, isControlled, onControlledRootChange, renderedRoot],
   );
 
   const removeNode = useCallback(
@@ -394,6 +409,7 @@ export function FilterEditor({
         {headerContent}
         <GroupEditor
           audience={audience}
+          createId={createId}
           document={editorDocument}
           eventName={eventName}
           group={renderedRoot}

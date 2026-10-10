@@ -82,7 +82,6 @@ const SearchablePopoverContent = React.forwardRef<
   );
   const resolvedSearchValue = searchValue ?? uncontrolledSearchValue;
   const resultsViewportRef = React.useRef<HTMLDivElement | null>(null);
-  const pendingAutoScrollFrameRef = React.useRef(0);
 
   const resolvedResultsMaxHeight =
     typeof resultsMaxHeight === "number"
@@ -94,50 +93,23 @@ const SearchablePopoverContent = React.forwardRef<
     const selectedItem = viewport?.querySelector<HTMLElement>(
       SELECTED_RESULT_SELECTOR,
     );
-    if (!viewport || viewport.clientHeight === 0 || !selectedItem) return false;
-
-    selectedItem.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (!viewport || viewport.clientHeight === 0 || !selectedItem) return;
 
     const viewportRect = viewport.getBoundingClientRect();
     const selectedRect = selectedItem.getBoundingClientRect();
-    return (
-      selectedRect.top >= viewportRect.top - 1 &&
-      selectedRect.bottom <= viewportRect.top + viewport.clientHeight + 1
-    );
+    const viewportBottom = viewportRect.top + viewport.clientHeight;
+
+    if (selectedRect.top < viewportRect.top) {
+      viewport.scrollTop += selectedRect.top - viewportRect.top;
+    } else if (selectedRect.bottom > viewportBottom) {
+      viewport.scrollTop += selectedRect.bottom - viewportBottom;
+    }
   }, []);
-
-  const scheduleScrollSelectedResultIntoView = React.useCallback(() => {
-    window.cancelAnimationFrame(pendingAutoScrollFrameRef.current);
-    let attempts = 0;
-    const tryScrollSelectedResultIntoView = () => {
-      attempts += 1;
-      if (scrollSelectedResultIntoView() || attempts >= 8) return;
-      pendingAutoScrollFrameRef.current = window.requestAnimationFrame(
-        tryScrollSelectedResultIntoView,
-      );
-    };
-
-    pendingAutoScrollFrameRef.current = window.requestAnimationFrame(
-      tryScrollSelectedResultIntoView,
-    );
-  }, [scrollSelectedResultIntoView]);
 
   const setResultsViewportRef = React.useCallback(
     (node: HTMLDivElement | null) => {
       resultsViewportRef.current = node;
-      if (node) {
-        if (!scrollSelectedResultIntoView()) {
-          scheduleScrollSelectedResultIntoView();
-        }
-      } else {
-        window.cancelAnimationFrame(pendingAutoScrollFrameRef.current);
-      }
     },
-    [scheduleScrollSelectedResultIntoView, scrollSelectedResultIntoView],
-  );
-
-  React.useEffect(
-    () => () => window.cancelAnimationFrame(pendingAutoScrollFrameRef.current),
     [],
   );
 
@@ -147,9 +119,7 @@ const SearchablePopoverContent = React.forwardRef<
     >[0],
   ) => {
     onOpenAutoFocus?.(event);
-    if (!scrollSelectedResultIntoView()) {
-      scheduleScrollSelectedResultIntoView();
-    }
+    scrollSelectedResultIntoView();
   };
 
   return (

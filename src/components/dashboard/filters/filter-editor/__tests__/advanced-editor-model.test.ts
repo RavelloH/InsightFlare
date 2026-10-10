@@ -108,16 +108,16 @@ function wrappersAround(
 describe("advanced filter editor model", () => {
   it("round-trips every advanced target and relation through the visual tree", () => {
     const sources = [
-      'count(event { event.name eq "purchase" AND event.payload("/plan") eq "pro" }) gte 2 AND last(page).path exists',
-      'sub(sum(event { event.name eq "purchase" }.payload("/amount")), sum(event { event.name eq "refund" }.payload("/amount"))) gt 0',
-      "countDistinct(bucket(page, 1d)) gte 2",
-      "count(periods(page, 1w) { count($items) gte 3 }) gte 2",
-      'time(nth(event { event.name eq "signup" }, 3)) gte @now-30d',
-      'sequence([event { event.name eq "view" }, event { event.name eq "purchase" }]) { $gap(1, 2) lte 7d AND $same(event.payload("/productId")) } exists',
-      'window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }), [0d, 7d]) notExists',
-      'time gte @range.start AND time lt @range.end AND sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
-      'adjacent(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }])) exists',
-      'without(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]), event { event.name eq "cancellation" }) { $span lte 7d } exists',
+      'count(EVENT { $.name eq "purchase" AND $.payload("/plan") eq "pro" }) gte 2 AND last(PAGE).path exists',
+      'sub(sum(EVENT { $.name eq "purchase" } -> payload("/amount")), sum(EVENT { $.name eq "refund" } -> payload("/amount"))) gt 0',
+      "countDistinct(bucket(PAGE, 1d)) gte 2",
+      "count(periods(PAGE, 1w) { count($items) gte 3 }) gte 2",
+      'time(nth(EVENT { $.name eq "signup" }, 3)) gte @now-30d',
+      'sequence([EVENT { $.name eq "view" }, EVENT { $.name eq "purchase" }]) { $gap(1, 2) lte 7d AND $same($.payload("/productId")) } exists',
+      'window(EVENT { $.name eq "refund" }, first(EVENT { $.name eq "purchase" }), [0d, 7d]) notExists',
+      'time gte @range.start AND time lt @range.end AND sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
+      'adjacent(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }])) exists',
+      'without(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]), EVENT { $.name eq "cancellation" }) { $span lte 7d } exists',
       'NOT (page.path eq "/a" OR page.path eq "/b")',
     ];
 
@@ -179,6 +179,10 @@ describe("advanced filter editor model", () => {
       "event-payload",
       "private-dashboard",
     );
+    const currentPayload = createDefaultFilterTarget(
+      "current-payload",
+      "private-dashboard",
+    );
     const currentTime = createDefaultFilterTarget("time", "private-dashboard");
     const duration = createDefaultFilterTarget("duration", "private-dashboard");
     const anchor = createDefaultFilterTarget(
@@ -199,6 +203,11 @@ describe("advanced filter editor model", () => {
 
     expect(filterValueKindForTarget(field)).toBe("string");
     expect(filterValueKindForTarget(payload)).toBe("json-scalar");
+    expect(currentPayload).toMatchObject({
+      kind: "current-payload",
+      path: "/value",
+    });
+    expect(filterValueKindForTarget(currentPayload)).toBe("json-scalar");
     expect(filterValueKindForTarget(currentTime)).toBe("datetime");
     expect(filterValueKindForTarget(duration)).toBe("number");
     expect(filterValueKindForTarget(anchor)).toBe("datetime");
@@ -230,7 +239,7 @@ describe("advanced filter editor model", () => {
     ).toBe("number");
 
     const nestedMember = parseFilterDsl(
-      'first(page).geo.country eq "US"',
+      'first(PAGE).geo.country eq "US"',
       analyticsFilterRegistry,
     ).root;
     if (nestedMember?.kind !== "condition")

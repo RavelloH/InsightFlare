@@ -5,6 +5,7 @@ export * from "./filter-dsl";
 export * from "./filter-evaluator";
 export * from "./filter-facts";
 export * from "./filter-history";
+export * from "./filter-members";
 export * from "./filter-registry";
 export * from "./filter-semantics";
 export * from "./filter-types";

@@ -5,6 +5,7 @@ import {
 } from "@/lib/analytics/time-zone";
 
 import { buildCanonicalFilterScopeFacts } from "./filter-facts";
+import { resolveEntityMember } from "./filter-members";
 import {
   analyticsFilterDefinition,
   analyticsFilterRegistry,
@@ -786,6 +787,17 @@ function targetValue(
         context.analysis.expectedTargetTypes.get(target),
       );
     }
+    case "current-payload": {
+      const entity = currentEntity(frame);
+      const value =
+        entity?.kind === "event"
+          ? payloadPath(entity.payload, target.path)
+          : MISSING;
+      return narrowPayloadValue(
+        value,
+        context.analysis.expectedTargetTypes.get(target),
+      );
+    }
     case "entity-root":
       return rootCollection(target.entity, frame, context);
     case "context-root":
@@ -829,7 +841,7 @@ function targetValue(
         )
       )
         return false;
-      const fieldId = fieldIdFor(target.input);
+      const fieldId = fieldIdFor(target.input, sequence.steps[0]?.kind);
       return values
         .slice(1)
         .every((value) => equalValue(values[0], value, fieldId));
@@ -897,7 +909,12 @@ function targetValue(
             : entity.payload === undefined
               ? MISSING
               : entity.payload;
-        return fieldValue(entity, `${entity.kind}.${target.member}`);
+        const resolved = resolveEntityMember(
+          entity.kind,
+          target.member,
+          analyticsFilterRegistry,
+        );
+        return resolved ? fieldValue(entity, resolved.fieldId) : MISSING;
       });
       const expected = context.analysis.expectedTargetTypes.get(target);
       return values.filter(
@@ -1600,7 +1617,7 @@ function conditionMatchesOnEntity(
       ? []
       : [condition.value];
   const legacyNullTarget = legacy && condition.target.kind === "field";
-  const fieldId = fieldIdFor(condition.target);
+  const fieldId = fieldIdFor(condition.target, entity?.kind);
   const presence = filterPresenceMatches(
     op,
     {
@@ -1669,11 +1686,32 @@ function conditionMatchesOnEntity(
           : false;
 }
 
-function fieldIdFor(target: FilterTargetExpression): string | undefined {
+function fieldIdFor(
+  target: FilterTargetExpression,
+  currentEntity?: string,
+): string | undefined {
   if (target.kind === "field") return target.field;
   if (target.kind === "event-payload") return "event.payload";
+  if (target.kind === "current-payload") return "event.payload";
   if (target.kind === "projection" && target.member === "payload")
     return "event.payload";
+
+  const currentMembers: string[] = [];
+  let currentTarget: FilterTargetExpression = target;
+  while (currentTarget.kind === "member") {
+    currentMembers.unshift(currentTarget.member);
+    currentTarget = currentTarget.object;
+  }
+  if (
+    currentEntity &&
+    currentTarget.kind === "context-root" &&
+    currentTarget.context === "current"
+  )
+    return resolveEntityMember(
+      currentEntity,
+      currentMembers.join("."),
+      analyticsFilterRegistry,
+    )?.fieldId;
 
   const members: string[] = [];
   let current: FilterTargetExpression = target;

@@ -21,12 +21,16 @@ import {
   RiArrowDownSLine,
   RiCheckLine,
   RiDeleteBinLine,
+  RiSubtractLine,
 } from "@remixicon/react";
 import { AnimatePresence, motion } from "motion/react";
 
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { parseFilterDsl } from "@/lib/filter-contract/filter-dsl";
-import { filterPickerTargetForValue } from "@/lib/filter-contract/filter-picker-registry";
+import {
+  FILTER_ENTITY_ROOT_REGISTRY,
+  filterPickerTargetForValue,
+} from "@/lib/filter-contract/filter-picker-registry";
 import { filterConditionEntity } from "@/lib/filter-contract/filter-registry";
 import {
   analyticsFilterRegistry,
@@ -35,6 +39,7 @@ import {
   type FilterDocument,
   type FilterDurationTarget,
   type FilterDurationUnit,
+  type FilterEntityRoot,
   type FilterExpression,
   type FilterOperator,
   type FilterScope,
@@ -42,6 +47,7 @@ import {
   type FilterTimeAnchorTarget,
   type FilterValue,
   type FilterValueKind,
+  resolveEntityMember,
 } from "@/lib/filter-contract/index";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
@@ -59,6 +65,7 @@ import {
 } from "./advanced-editor-model";
 import {
   dateTimeInputValueToLiteral,
+  dateTimeLiteralAtLocalDayStart,
   dateTimeLiteralToInputValue,
 } from "./datetime-input";
 import {
@@ -76,6 +83,7 @@ import {
   advancedFilterFieldValue,
   advancedFilterFieldValueForTarget,
   advancedFilterTargetKindFromField,
+  emptyEditorGroup,
   filterValueText,
   firstOperator,
   VALUELESS_OPERATORS,
@@ -101,6 +109,16 @@ function advancedConditionForEditor(
   } catch {
     return undefined;
   }
+}
+
+function entityRootForTarget(
+  target: FilterTargetExpression | undefined,
+): FilterEntityRoot | undefined {
+  if (!target) return undefined;
+  if (target.kind === "entity-root") return target.entity;
+  if (target.kind === "selector" && target.collection.kind === "entity-root")
+    return target.collection.entity;
+  return undefined;
 }
 
 function isFilterTargetExpression(
@@ -145,6 +163,33 @@ function sequenceStepEntity(
   target: FilterTargetExpression,
 ): "event" | "page" | undefined {
   return occurrenceEntity(target);
+}
+
+function currentMemberPath(target: FilterTargetExpression): string | undefined {
+  const parts: string[] = [];
+  let current = target;
+  while (current.kind === "member") {
+    parts.unshift(current.member);
+    current = current.object;
+  }
+  return current.kind === "context-root" && current.context === "current"
+    ? parts.join(".")
+    : undefined;
+}
+
+function memberPathForField(field: string): string {
+  return /^(event|page|session|visitor)\./u.test(field)
+    ? field.slice(field.indexOf(".") + 1)
+    : field;
+}
+
+function currentMemberTarget(path: string): FilterTargetExpression {
+  return path
+    .split(".")
+    .reduce<FilterTargetExpression>(
+      (object, member) => ({ kind: "member", object, member }),
+      { kind: "context-root", context: "current" },
+    );
 }
 
 function conditionForIntrinsic(
@@ -213,6 +258,29 @@ const ELAPSED_DURATION_UNITS: readonly FilterDurationUnit[] = [
 ];
 
 const TIME_ANCHOR_UNITS = ELAPSED_DURATION_UNITS;
+const TIME_FILTER_VALUE_OFFSET_UNITS: readonly FilterDurationUnit[] = [
+  "ms",
+  "s",
+  "m",
+  "h",
+  "d",
+  "w",
+  "mo",
+  "y",
+];
+const TIME_FILTER_VALUE_UNIT_LABELS: Record<
+  FilterDurationUnit,
+  keyof AppMessages["filterBuilder"]["advancedEditor"]["timeUnits"]
+> = {
+  ms: "milliseconds",
+  s: "seconds",
+  m: "minutes",
+  h: "hours",
+  d: "days",
+  w: "weeks",
+  mo: "months",
+  y: "years",
+};
 
 function isDurationValue(value: unknown): value is FilterDurationTarget {
   return Boolean(
@@ -256,6 +324,284 @@ function timeAnchorAt(
       };
 }
 
+function timeFilterValueAt(
+  value: FilterCondition["value"],
+  index: number,
+  timeZone: string | undefined,
+  between: boolean,
+): string | FilterTimeAnchorTarget {
+  const item = Array.isArray(value) ? value[index] : value;
+  if (typeof item === "string" || isTimeAnchorValue(item)) return item;
+  return dateTimeLiteralAtLocalDayStart(
+    timeZone,
+    between && index === 0 ? -1 : 0,
+  );
+}
+
+function TimeOffsetAmountInput({
+  amount,
+  messages,
+  onChange,
+}: {
+  amount: number;
+  messages: AppMessages;
+  onChange: (amount: number) => void;
+}) {
+  const [negative, setNegative] = useState(amount < 0);
+  const magnitude = Math.abs(amount);
+
+  return (
+    <div className="flex min-w-0">
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        className="h-8 w-8 shrink-0 rounded-r-none border-r-0 font-mono text-sm"
+        aria-label={messages.filterBuilder.advancedEditor.toggleOffsetSign}
+        aria-pressed={negative}
+        onClick={() => {
+          const nextNegative = !negative;
+          setNegative(nextNegative);
+          onChange(nextNegative ? -magnitude : magnitude);
+        }}
+      >
+        {negative ? (
+          <RiSubtractLine aria-hidden="true" className="size-4" />
+        ) : (
+          <RiAddLine aria-hidden="true" className="size-4" />
+        )}
+      </Button>
+      <Input
+        type="number"
+        min={0}
+        step="any"
+        className="rounded-l-none"
+        value={magnitude}
+        onChange={(event) => {
+          const nextMagnitude = Number(event.target.value);
+          if (Number.isFinite(nextMagnitude))
+            onChange(negative ? -nextMagnitude : nextMagnitude);
+        }}
+      />
+    </div>
+  );
+}
+
+function CurrentTimeValueEditor({
+  operator,
+  value,
+  timeZone,
+  messages,
+  onChange,
+}: {
+  operator: FilterOperator;
+  value: FilterCondition["value"];
+  timeZone: string | undefined;
+  messages: AppMessages;
+  onChange: (value: FilterCondition["value"]) => void;
+}) {
+  const between = operator === "between";
+  const indices = between ? ([0, 1] as const) : ([0] as const);
+  const readValue = (index: number) =>
+    timeFilterValueAt(value, index, timeZone, between);
+  const updateValue = (
+    index: number,
+    nextValue: string | FilterTimeAnchorTarget,
+  ) => {
+    if (!between) {
+      onChange(nextValue);
+      return;
+    }
+    const nextValues: [
+      string | FilterTimeAnchorTarget,
+      string | FilterTimeAnchorTarget,
+    ] = [readValue(0), readValue(1)];
+    nextValues[index] = nextValue;
+    onChange(nextValues);
+  };
+
+  return (
+    <div
+      className={cn(
+        "sm:col-span-2",
+        between ? "grid gap-3 sm:grid-cols-2" : "space-y-3",
+      )}
+    >
+      {indices.map((index) => {
+        const currentValue = readValue(index);
+        const currentAnchor = isTimeAnchorValue(currentValue)
+          ? currentValue
+          : undefined;
+        const relative = currentAnchor !== undefined;
+        const endpointLabel = between
+          ? index === 0
+            ? messages.filterBuilder.rangeStartPlaceholder
+            : messages.filterBuilder.rangeEndPlaceholder
+          : messages.filterBuilder.valueType;
+
+        return (
+          <div key={index} className="min-w-0 space-y-2">
+            <Select
+              value={relative ? "relative" : "fixed"}
+              onValueChange={(mode) => {
+                if (mode === "relative") {
+                  updateValue(index, { kind: "time-anchor", anchor: "now" });
+                } else if (mode === "fixed") {
+                  updateValue(
+                    index,
+                    dateTimeLiteralAtLocalDayStart(
+                      timeZone,
+                      between && index === 0 ? -1 : 0,
+                    ),
+                  );
+                }
+              }}
+            >
+              <SelectTrigger className="w-full" aria-label={endpointLabel}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="fixed">
+                  {messages.filterBuilder.advancedEditor.fixedTime}
+                </SelectItem>
+                <SelectItem value="relative">
+                  {
+                    messages.filterBuilder.advancedEditor.targetKinds[
+                      "time-anchor"
+                    ]
+                  }
+                </SelectItem>
+              </SelectContent>
+            </Select>
+
+            {currentAnchor ? (
+              <div className="space-y-2">
+                <Select
+                  value={currentAnchor.anchor}
+                  onValueChange={(anchor) => {
+                    if (
+                      anchor === "now" ||
+                      anchor === "range.start" ||
+                      anchor === "range.end"
+                    )
+                      updateValue(index, { ...currentAnchor, anchor });
+                  }}
+                >
+                  <SelectTrigger
+                    className="w-full"
+                    aria-label={
+                      messages.filterBuilder.advancedEditor.targetKinds[
+                        "time-anchor"
+                      ]
+                    }
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="now">@now</SelectItem>
+                    <SelectItem value="range.start">@range.start</SelectItem>
+                    <SelectItem value="range.end">@range.end</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <label className="flex min-h-9 items-center gap-2 text-xs text-muted-foreground">
+                  <Checkbox
+                    checked={currentAnchor.offset !== undefined}
+                    onCheckedChange={(checked) => {
+                      if (checked === true)
+                        updateValue(index, {
+                          ...currentAnchor,
+                          offset: currentAnchor.offset ?? {
+                            kind: "duration",
+                            amount: currentAnchor.anchor === "now" ? -1 : 0,
+                            unit: "d",
+                          },
+                        });
+                      else if (currentAnchor.offset) {
+                        const { offset: _offset, ...withoutOffset } =
+                          currentAnchor;
+                        updateValue(index, withoutOffset);
+                      }
+                    }}
+                  />
+                  {messages.filterBuilder.advancedEditor.applyOffset}
+                </label>
+
+                {currentAnchor.offset ? (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <Label>
+                        {messages.filterBuilder.advancedEditor.durationAmount}
+                      </Label>
+                      <TimeOffsetAmountInput
+                        amount={currentAnchor.offset.amount}
+                        messages={messages}
+                        onChange={(amount) =>
+                          updateValue(index, {
+                            ...currentAnchor,
+                            offset: { ...currentAnchor.offset!, amount },
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>{messages.filterBuilder.durationUnit}</Label>
+                      <Select
+                        value={currentAnchor.offset.unit}
+                        onValueChange={(unit) => {
+                          if (
+                            (
+                              TIME_FILTER_VALUE_OFFSET_UNITS as readonly string[]
+                            ).includes(unit)
+                          )
+                            updateValue(index, {
+                              ...currentAnchor,
+                              offset: {
+                                ...currentAnchor.offset!,
+                                unit: unit as FilterDurationUnit,
+                              },
+                            });
+                        }}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {TIME_FILTER_VALUE_OFFSET_UNITS.map((unit) => (
+                            <SelectItem key={unit} value={unit}>
+                              {
+                                messages.filterBuilder.advancedEditor.timeUnits[
+                                  TIME_FILTER_VALUE_UNIT_LABELS[unit]
+                                ]
+                              }
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <Input
+                type="datetime-local"
+                value={dateTimeLiteralToInputValue(currentValue, timeZone)}
+                aria-label={endpointLabel}
+                onChange={(event) =>
+                  updateValue(
+                    index,
+                    dateTimeInputValueToLiteral(event.target.value, timeZone),
+                  )
+                }
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function editorTextFromFilterValue(
   value: FilterValue | readonly FilterValue[],
 ): string {
@@ -281,60 +627,114 @@ function parseAdvancedLiteral(
 function ConditionEditor({
   audience,
   condition,
+  createId,
   document,
   eventName,
   messages,
   observationOnly = false,
+  entityRoot,
+  onAddCondition,
+  onAddGroup,
   path,
   resolvedScope,
   onChange,
+  onChangeNode,
+  onRemoveNode,
   onRemove,
   siteId,
   window,
 }: {
   audience: FilterPanelAudience;
   condition: EditorCondition;
+  createId: () => string;
   document: FilterDocument;
   eventName: string | undefined;
   messages: AppMessages;
   observationOnly?: boolean;
+  entityRoot?: FilterEntityRoot;
+  onAddCondition: (groupId: string, entityRoot?: FilterEntityRoot) => void;
+  onAddGroup: (groupId: string, entityRoot?: FilterEntityRoot) => void;
   path: readonly number[];
   resolvedScope?: FilterScope;
   onChange: (update: (condition: EditorCondition) => EditorCondition) => void;
+  onChangeNode: (id: string, update: (node: EditorNode) => EditorNode) => void;
+  onRemoveNode: (id: string) => void;
   onRemove: () => void;
   siteId: string | undefined;
   window: TimeWindow | undefined;
 }) {
   const advancedCondition = advancedConditionForEditor(condition);
   const advancedTarget = advancedCondition?.target;
+  const nestedEntityRoot = condition.entityPredicate
+    ? entityRootForTarget(advancedTarget)
+    : undefined;
+  const boundMemberPath =
+    entityRoot && advancedCondition
+      ? currentMemberPath(advancedCondition.target)
+      : undefined;
+  const boundMember = boundMemberPath
+    ? resolveEntityMember(entityRoot!, boundMemberPath, analyticsFilterRegistry)
+    : undefined;
   const advancedField = advancedCondition
-    ? advancedFilterFieldValueForTarget(advancedCondition.target)
+    ? (boundMember?.fieldId ??
+      advancedFilterFieldValueForTarget(advancedCondition.target))
     : condition.field;
   const field =
-    advancedCondition?.target.kind === "field"
+    boundMember?.fieldId ??
+    (advancedCondition?.target.kind === "field"
       ? advancedCondition.target.field
-      : advancedCondition?.target.kind === "event-payload"
+      : advancedCondition?.target.kind === "event-payload" ||
+          advancedCondition?.target.kind === "current-payload"
         ? "event.payload"
-        : condition.field;
+        : condition.field);
   const definition = analyticsFilterRegistry.get(field);
-  const fields = useMemo(
-    () => allowedFields(audience, observationOnly),
-    [audience, observationOnly],
+  const fields = useMemo(() => {
+    return allowedFields(audience, observationOnly, entityRoot);
+  }, [audience, entityRoot, observationOnly]);
+  const allowedCollections = useMemo(
+    () =>
+      entityRoot
+        ? new Set<FilterEntityRoot>(
+            FILTER_ENTITY_ROOT_REGISTRY[entityRoot].collections,
+          )
+        : undefined,
+    [entityRoot],
   );
   const operators = advancedCondition
-    ? filterOperatorsForTarget(advancedCondition.target)
+    ? [
+        ...(boundMember?.definition.operators ??
+          (advancedCondition.target.kind === "current-payload"
+            ? definition?.operators
+            : undefined) ??
+          filterOperatorsForTarget(advancedCondition.target)),
+      ]
     : [...(definition?.operators ?? [])];
   const groupedFields = useMemo(
     () =>
       filterPickerGroups(fields, messages).flatMap((group) => {
-        const selectableFields = observationOnly
-          ? group.fields.filter((option) => option.registeredField)
-          : group.fields;
+        const selectableFields =
+          entityRoot || observationOnly
+            ? group.fields.filter((option) => {
+                if (option.registeredField) return true;
+                if (
+                  observationOnly ||
+                  !entityRoot ||
+                  option.registeredTarget?.selection.kind !== "entity-root"
+                ) {
+                  return false;
+                }
+                return (
+                  allowedCollections?.has(
+                    option.registeredTarget.selection.entity,
+                  ) ?? false
+                );
+              })
+            : group.fields;
         return selectableFields.length > 0
           ? [{ ...group, fields: selectableFields }]
           : [];
       }),
-    [fields, messages, observationOnly],
+    [allowedCollections, entityRoot, fields, messages, observationOnly],
   );
   const [fieldPickerOpen, setFieldPickerOpen] = useState(false);
   const [fieldSearch, setFieldSearch] = useState("");
@@ -360,6 +760,7 @@ function ConditionEditor({
     [groupedFields, messages, normalizedFieldSearch],
   );
   const advancedFieldKind = advancedFilterTargetKindFromField(advancedField);
+  const isCurrentTimeTarget = advancedFieldKind === "time";
   const intrinsicLocation = advancedTarget
     ? findContextIntrinsic(advancedTarget)
     : undefined;
@@ -425,7 +826,10 @@ function ConditionEditor({
         ? "boolean"
         : condition.scalarKind;
   const editorValueKind: FilterValueKind = advancedTarget
-    ? filterValueKindForTarget(advancedTarget)
+    ? (boundMember?.definition.valueKind ??
+      (advancedTarget.kind === "current-payload"
+        ? (definition?.valueKind ?? "json-scalar")
+        : filterValueKindForTarget(advancedTarget)))
     : isPayload
       ? scalarKind
       : (definition?.valueKind ?? "string");
@@ -455,12 +859,12 @@ function ConditionEditor({
   const valueIsBoolean =
     needsValue &&
     ((advancedTarget
-      ? filterValueKindForTarget(advancedTarget) === "boolean"
+      ? editorValueKind === "boolean"
       : definition?.valueKind === "boolean") ||
       (isPayload && scalarKind === "boolean"));
   const valueIsNumber =
     (advancedTarget
-      ? filterValueKindForTarget(advancedTarget) === "number"
+      ? editorValueKind === "number"
       : definition?.valueKind === "number") ||
     (isPayload && scalarKind === "number");
   const valueIsRange = operator === "between";
@@ -532,6 +936,36 @@ function ConditionEditor({
   const setField = (field: string) => {
     const registeredTarget = filterPickerTargetForValue(field);
     const advancedTargetKind = advancedFilterTargetKindFromField(field);
+    if (entityRoot && !registeredTarget && !advancedTargetKind) {
+      const fieldDefinition = analyticsFilterRegistry.get(field);
+      const memberPath = memberPathForField(field);
+      const resolvedMember = resolveEntityMember(
+        entityRoot,
+        memberPath,
+        analyticsFilterRegistry,
+      );
+      if (!fieldDefinition || !resolvedMember) return;
+      const operator = firstOperator(fieldDefinition);
+      const target: FilterTargetExpression =
+        field === "event.payload" && entityRoot === "event"
+          ? { kind: "current-payload", path: "" as never }
+          : currentMemberTarget(memberPath);
+      onChange((current) => ({
+        ...current,
+        field,
+        operator,
+        value: undefined,
+        listValues: undefined,
+        valueText: "",
+        scalarKind: "string",
+        valueDirty: false,
+        payloadPath: "",
+        advancedExpression: { kind: "condition", target, operator },
+        entityPredicate: undefined,
+        advancedText: undefined,
+      }));
+      return;
+    }
     if (registeredTarget || advancedTargetKind || field === "__advanced__") {
       const nextCondition = registeredTarget
         ? createFilterPickerTargetCondition(
@@ -542,10 +976,24 @@ function ConditionEditor({
             advancedTargetKind ?? "reducer",
             audience,
           );
+      const selectedEntityRoot =
+        registeredTarget?.selection.kind === "entity-root"
+          ? registeredTarget.selection.entity
+          : undefined;
       const nextValue = isFilterTargetExpression(nextCondition.value)
         ? undefined
         : (nextCondition.value as
             FilterValue | readonly FilterValue[] | undefined);
+      const isNextTimeTarget =
+        advancedTargetKind === "time" ||
+        (registeredTarget?.selection.kind === "target" &&
+          registeredTarget.selection.targetKind === "time");
+      const defaultValue = isNextTimeTarget
+        ? dateTimeLiteralAtLocalDayStart(window?.timeZone)
+        : nextValue;
+      const defaultScalar = Array.isArray(defaultValue)
+        ? defaultValue[0]
+        : defaultValue;
       onChange((current) => ({
         ...current,
         field:
@@ -553,21 +1001,28 @@ function ConditionEditor({
             ? field
             : advancedFilterFieldValue("reducer"),
         operator: nextCondition.operator,
-        value: nextValue,
-        listValues: Array.isArray(nextValue) ? nextValue : undefined,
+        value: defaultValue,
+        listValues: Array.isArray(defaultValue) ? defaultValue : undefined,
         valueText:
-          nextValue === undefined ? "" : editorTextFromFilterValue(nextValue),
+          defaultValue === undefined
+            ? ""
+            : isNextTimeTarget
+              ? dateTimeLiteralToInputValue(defaultValue, window?.timeZone)
+              : editorTextFromFilterValue(defaultValue),
         scalarKind:
-          typeof (Array.isArray(nextValue) ? nextValue[0] : nextValue) ===
-          "number"
+          typeof defaultScalar === "number"
             ? "number"
-            : typeof (Array.isArray(nextValue) ? nextValue[0] : nextValue) ===
-                "boolean"
+            : typeof defaultScalar === "boolean"
               ? "boolean"
               : "string",
         valueDirty: false,
         payloadPath: "",
-        advancedExpression: nextCondition,
+        advancedExpression: isNextTimeTarget
+          ? { ...nextCondition, value: defaultValue }
+          : nextCondition,
+        entityPredicate: selectedEntityRoot
+          ? emptyEditorGroup(createId)
+          : undefined,
         advancedText: undefined,
       }));
       return;
@@ -577,6 +1032,7 @@ function ConditionEditor({
     onChange((current) => {
       const {
         advancedExpression: _advancedExpression,
+        entityPredicate: _entityPredicate,
         advancedText: _advancedText,
         ...basic
       } = current;
@@ -598,6 +1054,22 @@ function ConditionEditor({
     if (!operators.includes(operator as FilterOperator)) return;
     if (advancedCondition) {
       const nextOperator = operator as FilterOperator;
+      if (advancedFieldKind === "time") {
+        const now = Date.now();
+        const today = dateTimeLiteralAtLocalDayStart(window?.timeZone, 0, now);
+        const value = VALUELESS_OPERATORS.has(nextOperator)
+          ? undefined
+          : nextOperator === "between"
+            ? [dateTimeLiteralAtLocalDayStart(window?.timeZone, -1, now), today]
+            : advancedCondition.operator === "between" ||
+                Array.isArray(advancedCondition.value) ||
+                advancedCondition.value === undefined ||
+                advancedCondition.value === ""
+              ? today
+              : advancedCondition.value;
+        patchAdvanced({ operator: nextOperator, value });
+        return;
+      }
       if (occurrenceTimeTarget && needsValue) {
         const firstAnchor = timeAnchorAt(advancedCondition.value, 0);
         patchAdvanced({
@@ -685,6 +1157,10 @@ function ConditionEditor({
       valueText: nextValueText,
       valueDirty: true,
     }));
+  };
+
+  const setCurrentTimeValue = (value: FilterCondition["value"]) => {
+    patchAdvanced({ value });
   };
 
   const replaceOccurrenceInput = (input: FilterTargetExpression) => {
@@ -836,6 +1312,16 @@ function ConditionEditor({
           </Select>
         </div>
       </div>
+
+      {needsValue && isCurrentTimeTarget && advancedCondition ? (
+        <CurrentTimeValueEditor
+          operator={operator}
+          value={advancedCondition.value}
+          timeZone={window?.timeZone}
+          messages={messages}
+          onChange={setCurrentTimeValue}
+        />
+      ) : null}
 
       {occurrenceTimeTarget && occurrenceReducer ? (
         <div className="grid gap-2 sm:col-span-2 sm:grid-cols-2">
@@ -1106,10 +1592,15 @@ function ConditionEditor({
             </Label>
             <Select
               value={
-                intrinsicTarget.input.kind === "event-payload"
+                intrinsicTarget.input.kind === "event-payload" ||
+                intrinsicTarget.input.kind === "current-payload"
                   ? "event.payload"
-                  : intrinsicTarget.input.kind === "field"
-                    ? intrinsicTarget.input.field
+                  : currentMemberPath(intrinsicTarget.input)
+                    ? (sameFieldOptions.find(
+                        (field) =>
+                          memberPathForField(field.id) ===
+                          currentMemberPath(intrinsicTarget.input),
+                      )?.id ?? "")
                     : ""
               }
               onValueChange={(value) => {
@@ -1118,9 +1609,9 @@ function ConditionEditor({
                   replaceAdvancedTarget(intrinsicTarget, {
                     ...intrinsicTarget,
                     input: {
-                      kind: "event-payload",
+                      kind: "current-payload",
                       path:
-                        intrinsicTarget.input.kind === "event-payload"
+                        intrinsicTarget.input.kind === "current-payload"
                           ? intrinsicTarget.input.path
                           : ("/productId" as never),
                     },
@@ -1130,7 +1621,7 @@ function ConditionEditor({
                 if (sameFieldOptions.some((field) => field.id === value))
                   replaceAdvancedTarget(intrinsicTarget, {
                     ...intrinsicTarget,
-                    input: { kind: "field", field: value as never },
+                    input: currentMemberTarget(memberPathForField(value)),
                   });
               }}
             >
@@ -1151,7 +1642,8 @@ function ConditionEditor({
               </SelectContent>
             </Select>
           </div>
-          {intrinsicTarget.input.kind === "event-payload" ? (
+          {intrinsicTarget.input.kind === "event-payload" ||
+          intrinsicTarget.input.kind === "current-payload" ? (
             <div className="space-y-1">
               <Label>{messages.filterBuilder.advancedEditor.jsonPointer}</Label>
               <Input
@@ -1161,7 +1653,11 @@ function ConditionEditor({
                 }
                 onChange={(event) => {
                   const input = intrinsicTarget.input;
-                  if (input.kind !== "event-payload") return;
+                  if (
+                    input.kind !== "event-payload" &&
+                    input.kind !== "current-payload"
+                  )
+                    return;
                   replaceAdvancedTarget(intrinsicTarget, {
                     ...intrinsicTarget,
                     input: { ...input, path: event.target.value as never },
@@ -1355,7 +1851,8 @@ function ConditionEditor({
               onChange((current) => ({
                 ...current,
                 payloadPath,
-                ...(advancedCondition?.target.kind === "event-payload"
+                ...(advancedCondition?.target.kind === "event-payload" ||
+                advancedCondition?.target.kind === "current-payload"
                   ? {
                       advancedExpression: {
                         ...advancedCondition,
@@ -1383,7 +1880,8 @@ function ConditionEditor({
                       valueDirty: true,
                     }
                   : {}),
-                ...(advancedCondition?.target.kind === "event-payload"
+                ...(advancedCondition?.target.kind === "event-payload" ||
+                advancedCondition?.target.kind === "current-payload"
                   ? {
                       advancedExpression: {
                         ...advancedCondition,
@@ -1443,6 +1941,7 @@ function ConditionEditor({
       ) : null}
 
       {needsValue &&
+      !isCurrentTimeTarget &&
       !(advancedCondition && valueIsExpression) &&
       !(
         advancedTarget?.kind === "context-intrinsic" &&
@@ -1495,6 +1994,30 @@ function ConditionEditor({
         </div>
       ) : null}
 
+      {condition.entityPredicate && nestedEntityRoot ? (
+        <div className="sm:col-span-2 min-w-0 border-l-2 border-primary/20 pl-3 pt-1">
+          <GroupEditor
+            audience={audience}
+            createId={createId}
+            document={document}
+            entityRoot={nestedEntityRoot}
+            eventName={eventName}
+            group={condition.entityPredicate}
+            isRoot
+            messages={messages}
+            observationOnly={observationOnly}
+            path={path}
+            resolvedScope={resolvedScope}
+            onAddCondition={onAddCondition}
+            onAddGroup={onAddGroup}
+            onChange={onChangeNode}
+            onRemove={onRemoveNode}
+            siteId={siteId}
+            window={window}
+          />
+        </div>
+      ) : null}
+
       <div className="flex items-center justify-between gap-3 sm:col-span-2">
         <label className="flex min-h-7 items-center gap-2 text-xs text-muted-foreground">
           <Checkbox
@@ -1527,7 +2050,9 @@ function ConditionEditor({
 }
 export function GroupEditor({
   audience,
+  createId,
   document,
+  entityRoot,
   eventName,
   group,
   isRoot,
@@ -1543,7 +2068,9 @@ export function GroupEditor({
   window,
 }: {
   audience: FilterPanelAudience;
+  createId: () => string;
   document: FilterDocument;
+  entityRoot?: FilterEntityRoot;
   eventName: string | undefined;
   group: EditorGroup;
   isRoot: boolean;
@@ -1551,8 +2078,8 @@ export function GroupEditor({
   observationOnly?: boolean;
   path: readonly number[];
   resolvedScope?: FilterScope;
-  onAddCondition: (groupId: string) => void;
-  onAddGroup: (groupId: string) => void;
+  onAddCondition: (groupId: string, entityRoot?: FilterEntityRoot) => void;
+  onAddGroup: (groupId: string, entityRoot?: FilterEntityRoot) => void;
   onChange: (id: string, update: (node: EditorNode) => EditorNode) => void;
   onRemove: (id: string) => void;
   siteId: string | undefined;
@@ -1649,10 +2176,12 @@ export function GroupEditor({
                   <ConditionEditor
                     audience={audience}
                     condition={child}
+                    createId={createId}
                     document={document}
                     eventName={eventName}
                     messages={messages}
                     observationOnly={observationOnly}
+                    entityRoot={entityRoot}
                     path={[...path, index + 1]}
                     resolvedScope={resolvedScope}
                     siteId={siteId}
@@ -1662,12 +2191,18 @@ export function GroupEditor({
                         node.kind === "condition" ? update(node) : node,
                       );
                     }}
+                    onAddCondition={onAddCondition}
+                    onAddGroup={onAddGroup}
+                    onChangeNode={onChange}
+                    onRemoveNode={onRemove}
                     onRemove={() => onRemove(child.id)}
                   />
                 ) : (
                   <GroupEditor
                     audience={audience}
+                    createId={createId}
                     document={document}
+                    entityRoot={entityRoot}
                     eventName={eventName}
                     group={child}
                     isRoot={false}
@@ -1694,7 +2229,7 @@ export function GroupEditor({
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => onAddCondition(group.id)}
+                onClick={() => onAddCondition(group.id, entityRoot)}
               >
                 <RiAddLine data-icon="inline-start" />
                 <span>
@@ -1704,7 +2239,7 @@ export function GroupEditor({
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => onAddGroup(group.id)}
+                onClick={() => onAddGroup(group.id, entityRoot)}
               >
                 <RiAddLine data-icon="inline-start" />
                 <span>{messages.filterBuilder.addGroup}</span>

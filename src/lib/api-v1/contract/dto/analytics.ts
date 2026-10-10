@@ -78,6 +78,12 @@ const publicFilterTargetSchema: z.ZodType<PublicFilterTarget> = z.lazy(
         .strict(),
       z
         .object({
+          kind: z.literal("current-payload"),
+          path: z.string().min(1).max(240),
+        })
+        .strict(),
+      z
+        .object({
           kind: z.literal("entity-root"),
           entity: z.enum(["event", "page", "session", "visitor"]),
         })
