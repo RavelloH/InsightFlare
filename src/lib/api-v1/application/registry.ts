@@ -7,6 +7,7 @@ import {
   type FilterDocument,
   normalizeFilterDocument,
 } from "@/lib/edge/analytics/contract";
+import { analyzeFilterDocument } from "@/lib/filter-contract/filter-semantics";
 export type ApiV1ApplicationErrorCode =
   "not_found" | "internal_error" | "invalid_cursor";
 export interface ApiV1ApplicationSuccess<Result, Meta = undefined> {
@@ -165,6 +166,7 @@ export function assertSavedFilterDocument(document: FilterDocument): void {
       document,
       analyticsFilterRegistry,
     );
+    analyzeFilterDocument(normalized, analyticsFilterRegistry);
     assertFilterAudience(normalized, analyticsFilterRegistry, "api-v1");
   }
 }

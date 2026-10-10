@@ -220,7 +220,7 @@ function requiredSources(
 ): ReadonlySet<ObservationSource> {
   const sources = new Set<ObservationSource>();
   const visitTarget = (target: FilterTargetExpression): void => {
-    if (target.kind === "event-payload") {
+    if (target.kind === "event-payload" || target.kind === "current-payload") {
       sources.add("payload");
       return;
     }

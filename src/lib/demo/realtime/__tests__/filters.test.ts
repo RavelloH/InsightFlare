@@ -207,7 +207,7 @@ describe("mock/filters", () => {
         siteId: "demo-site-001",
         from: 1_000,
         to: 2_000,
-        __filterDsl: 'count(event { event.name eq "signup" }) gte 1',
+        __filterDsl: 'count(EVENT { $.name eq "signup" }) gte 1',
         __filterRangeExplicit: "true",
         filterFromMs: 1_000,
         filterToMs: 2_000,

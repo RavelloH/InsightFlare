@@ -55,6 +55,7 @@ export const FILTER_TARGET_EDITOR_KINDS = [
   "time",
   "field",
   "event-payload",
+  "current-payload",
   "entity-root",
   "context-root",
   "context-intrinsic",
@@ -238,6 +239,7 @@ export function advancedFilterFieldValueForTarget(
     return advancedFilterFieldValue("bucket");
   if (target.kind === "field") return target.field;
   if (target.kind === "event-payload") return "event.payload";
+  if (target.kind === "current-payload") return "event.payload";
   if (target.kind === "entity-root")
     return (
       filterPickerValueForSelection({
@@ -460,7 +462,11 @@ function editorNodeFromExpression(
         negated: notCount % 2 === 1,
         notCount,
         field: advancedFilterFieldValueForTarget(expression.target),
-        payloadPath: "",
+        payloadPath:
+          expression.target.kind === "event-payload" ||
+          expression.target.kind === "current-payload"
+            ? expression.target.path
+            : "",
         operator: expression.operator,
         value,
         listValues: Array.isArray(value) ? value : undefined,
@@ -566,6 +572,15 @@ function requireValue(condition: EditorCondition): void {
 function conditionFromEditor(node: EditorCondition): FilterCondition {
   if (node.advancedExpression?.kind === "condition") {
     const expression = node.advancedExpression;
+    if (
+      (expression.target.kind === "event-payload" ||
+        expression.target.kind === "current-payload") &&
+      node.payloadPath !== expression.target.path
+    )
+      return {
+        ...expression,
+        target: { ...expression.target, path: node.payloadPath as never },
+      };
     const collection =
       expression.target.kind === "entity-root"
         ? expression.target

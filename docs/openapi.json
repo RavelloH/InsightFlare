@@ -404,6 +404,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -1369,6 +1388,25 @@
                           "kind": {
                             "type": "string",
                             "const": "event-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "current-payload"
                           },
                           "path": {
                             "type": "string",
@@ -3723,6 +3761,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -5079,6 +5136,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -6268,6 +6344,25 @@
                           "kind": {
                             "type": "string",
                             "const": "event-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "current-payload"
                           },
                           "path": {
                             "type": "string",
@@ -7538,6 +7633,25 @@
                           "kind": {
                             "type": "string",
                             "const": "event-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "current-payload"
                           },
                           "path": {
                             "type": "string",
@@ -9306,6 +9420,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -10343,6 +10476,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -11354,6 +11506,25 @@
                           "kind": {
                             "type": "string",
                             "const": "event-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "current-payload"
                           },
                           "path": {
                             "type": "string",
@@ -12611,6 +12782,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -13606,6 +13796,25 @@
                           "kind": {
                             "type": "string",
                             "const": "event-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "current-payload"
                           },
                           "path": {
                             "type": "string",
@@ -14648,6 +14857,25 @@
                           "kind": {
                             "type": "string",
                             "const": "event-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "current-payload"
                           },
                           "path": {
                             "type": "string",
@@ -15840,6 +16068,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -16959,6 +17206,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -18033,6 +18299,25 @@
                           "kind": {
                             "type": "string",
                             "const": "event-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "current-payload"
                           },
                           "path": {
                             "type": "string",
@@ -19174,6 +19459,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -20251,6 +20555,25 @@
                           "kind": {
                             "type": "string",
                             "const": "event-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "current-payload"
                           },
                           "path": {
                             "type": "string",
@@ -21363,6 +21686,25 @@
                           "kind": {
                             "type": "string",
                             "const": "event-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "current-payload"
                           },
                           "path": {
                             "type": "string",
@@ -22679,6 +23021,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -23754,6 +24115,25 @@
                           "kind": {
                             "type": "string",
                             "const": "event-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "current-payload"
                           },
                           "path": {
                             "type": "string",
@@ -24917,6 +25297,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -26008,6 +26407,25 @@
                           "kind": {
                             "type": "string",
                             "const": "event-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "current-payload"
                           },
                           "path": {
                             "type": "string",
@@ -27184,6 +27602,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -28304,6 +28741,25 @@
                           "kind": {
                             "type": "string",
                             "const": "event-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "current-payload"
                           },
                           "path": {
                             "type": "string",
@@ -29585,6 +30041,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -30753,6 +31228,25 @@
                           "kind": {
                             "type": "string",
                             "const": "event-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "current-payload"
                           },
                           "path": {
                             "type": "string",
@@ -32517,6 +33011,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -33604,6 +34117,25 @@
                           "kind": {
                             "type": "string",
                             "const": "event-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "current-payload"
                           },
                           "path": {
                             "type": "string",
@@ -35546,6 +36078,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -36710,6 +37261,25 @@
                           "kind": {
                             "type": "string",
                             "const": "event-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "current-payload"
                           },
                           "path": {
                             "type": "string",
@@ -39836,6 +40406,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -41065,6 +41654,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -42124,6 +42732,25 @@
                           "kind": {
                             "type": "string",
                             "const": "event-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "current-payload"
                           },
                           "path": {
                             "type": "string",
@@ -43211,6 +43838,25 @@
                         "properties": {
                           "kind": {
                             "type": "string",
+                            "const": "current-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
                             "const": "entity-root"
                           },
                           "entity": {
@@ -44266,6 +44912,25 @@
                           "kind": {
                             "type": "string",
                             "const": "event-payload"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "current-payload"
                           },
                           "path": {
                             "type": "string",

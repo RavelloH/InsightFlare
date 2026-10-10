@@ -31,7 +31,7 @@ export const FILTER_DSL_OPERATOR_IDS = FILTER_OPERATOR_IDS;
 export const FILTER_DSL_SYNTAX = {
   condition: "<target-expression> <operator> <condition-value>",
   targetExpression:
-    "A registered field, entity root, selector, projection, reducer, arithmetic or temporal expression. Members are limited to Registry-backed paths. Use time(event-or-page-occurrence) for occurrence time, and `$span`, `$gap(...)`, `$same(...)`, or `$items` for structural context.",
+    "Registered fields remain lowercase (for example page.path). Entity collections use the uppercase roots PAGE, EVENT, SESSION, or VISITOR. Inside a selector, use $.member for the current entity; use -> member for a collection projection and .member only after a single-entity reducer.",
   boolean:
     "Combine expressions with <expression> AND <expression> or <expression> OR <expression>; prefix an expression with NOT to negate it.",
   grouping:
@@ -39,15 +39,16 @@ export const FILTER_DSL_SYNTAX = {
   value:
     "A JSON scalar; temporal `between` ranges may use elapsed duration endpoints or @now/@range anchors with elapsed offsets.",
   list: "Use [<value>, ...] for in and notIn values.",
-  selector: "Select a collection with <collection> { <filter-expression> }.",
+  selector:
+    'Filter an entity collection with PAGE { $.path eq "/docs" }. Use uppercase PAGE, EVENT, SESSION, or VISITOR roots and $.member references inside the selector.',
   reducer:
-    "Use count, first, last, nth, sum, avg, min, max, or countDistinct with a collection.",
+    "Use count, first, last, nth, sum, avg, min, max, or countDistinct with an explicitly typed collection; use -> member for a scalar projection.",
   temporal:
     "Use bucket(Page-or-Event-collection, <positive-calendar-period>), periods(collection, <positive-calendar-period>), or window(collection, event-or-page-anchor-or-@now-or-@range-anchor, [<start-offset>, <end-offset>]). Calendar periods must be positive safe integers such as 1h, 1d, 2w, 3mo or 1y.",
   relation:
     "Use sequence([...]), adjacent(sequence), and without(sequence, collection) with visitor or session query Scope, or inside an explicit session/visitor selector.",
   payloadTarget:
-    'Use event.payload("<json-pointer>") for event payload fields.',
+    'Use event.payload("<json-pointer>") as a registered field, $.payload("<json-pointer>") inside an Event selector, or EVENT -> payload("<json-pointer>") for a collection projection.',
   caseSensitivity:
     "Field identifiers are case-sensitive; operators and boolean keywords are case-insensitive.",
 } as const;
@@ -58,9 +59,11 @@ export const FILTER_DSL_EXAMPLES = [
   'geo.country in ["US", "GB"]',
   'NOT client.deviceType eq "mobile"',
   'page.path startsWith "/docs" AND referrer.domain eq "google.com"',
-  "time(last(page)) gte @now-14d",
-  'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { $span lte 14d AND $gap(1, 2) lte 7d AND $same(event.payload("/productId")) } exists',
-  "periods(event, 1w) { count($items) gte 3 } exists",
+  "time(last(PAGE)) gte @now-14d",
+  "count(EVENT) gte 3 AND countDistinct(PAGE -> path) gte 5",
+  'sum(EVENT { $.name eq "purchase" } -> payload("/amount")) gt 1000',
+  'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) { $span lte 14d AND $gap(1, 2) lte 7d AND $same($.payload("/productId")) } exists',
+  "periods(EVENT, 1w) { count($items) gte 3 } exists",
 ] as const;
 
 const VALUELESS_OPERATORS = new Set<FilterOperator>([
@@ -164,6 +167,7 @@ type Token =
         | "list-close"
         | "comma"
         | "dot"
+        | "projection"
         | "brace-open"
         | "brace-close"
         | "dollar"
@@ -249,6 +253,11 @@ function tokenize(source: string): readonly Token[] {
 
     const start = index;
     const character = source[index]!;
+    if (rest.startsWith("->")) {
+      tokens.push({ kind: "projection", start, end: start + 2 });
+      index += 2;
+      continue;
+    }
     const timeAnchor = rest.match(
       /^@(now|range\.start|range\.end)(?:([+-])(\d+(?:\.\d+)?)(ms|mo|s|m|h|d|w|y))?/i,
     );
@@ -394,6 +403,7 @@ function tokenize(source: string): readonly Token[] {
       | "list-close"
       | "comma"
       | "dot"
+      | "projection"
       | "brace-open"
       | "brace-close"
       | "dollar"
@@ -685,46 +695,64 @@ class Parser {
         this.locations.set(target, { span: { start, end } });
         continue;
       }
+      if (this.consume("projection")) {
+        const memberToken = this.expectIdentifier();
+        const memberPath = memberToken.value;
+        if (memberPath === "payload" && this.consume("open")) {
+          if (this.current.kind !== "string") {
+            throw tokenError(
+              this.source,
+              "expected_payload_path",
+              this.current,
+              "Expected a JSON pointer string for the payload projection.",
+              'a JSON string such as `"/metadata/value"`',
+            );
+          }
+          const pathToken = this.current;
+          this.index += 1;
+          const close = this.consume("close");
+          if (!close) {
+            throw tokenError(
+              this.source,
+              "missing_payload_parenthesis",
+              this.current,
+              "Missing closing parenthesis for the payload projection.",
+              "`)`",
+            );
+          }
+          target = {
+            kind: "projection",
+            collection: target,
+            member: "payload",
+            path: pathToken.value as CanonicalJsonPath,
+          };
+          path = spanFromToken(pathToken);
+          end = close.end;
+        } else {
+          target = {
+            kind: "projection",
+            collection: target,
+            member: memberPath,
+          };
+          end = memberToken.end;
+        }
+        this.locations.set(target, {
+          span: { start, end },
+          ...(path ? { path } : {}),
+        });
+        continue;
+      }
       if (!this.consume("dot")) break;
       const member = this.expectIdentifier();
       end = member.end;
       if (member.value === "payload" && this.consume("open")) {
-        if (this.current.kind !== "string") {
-          throw tokenError(
-            this.source,
-            "expected_payload_path",
-            this.current,
-            "Expected a JSON pointer string for the event payload target.",
-            'a JSON string such as `"/metadata/value"`',
-          );
-        }
-        const pathToken = this.current;
-        this.index += 1;
-        const close = this.consume("close");
-        if (!close) {
-          throw sourceError(
-            this.source,
-            "missing_payload_parenthesis",
-            this.current.start,
-            "Missing closing parenthesis for the payload projection.",
-            this.current.end - this.current.start,
-            "`)`",
-          );
-        }
-        target =
-          target.kind === "entity-root" && target.entity === "event"
-            ? {
-                kind: "event-payload",
-                path: pathToken.value as CanonicalJsonPath,
-              }
-            : {
-                kind: "projection",
-                collection: target,
-                member: "payload",
-                path: pathToken.value as CanonicalJsonPath,
-              };
-        path = spanFromToken(pathToken);
-        end = close.end;
+        throw tokenError(
+          this.source,
+          "explicit_projection_required",
+          member,
+          "Use `-> payload(...)` to project a collection, or `$.payload(...)` inside an Event selector.",
+          "`-> payload(...)` or `$.payload(...)`",
+        );
       } else {
         const parts = member.value.split(".");
         for (const part of parts) {
@@ -743,7 +771,7 @@ class Parser {
   }
 
   private primaryTarget(): FilterTargetExpression {
-    if (this.current.kind === "dollar") return this.contextIntrinsicTarget();
+    if (this.current.kind === "dollar") return this.contextTarget();
     if (this.current.kind === "time-anchor") {
       const target = this.current.value;
       this.index += 1;
@@ -773,7 +801,7 @@ class Parser {
     this.index += 1;
     const name = token.value;
     const normalized = name.toLowerCase();
-    if (normalized === "event.payload" && this.consume("open")) {
+    if (name === "event.payload" && this.consume("open")) {
       const payloadToken = this.tokens[this.index]!;
       if (payloadToken.kind !== "string") {
         throw tokenError(
@@ -811,7 +839,7 @@ class Parser {
     if (this.tokens[this.index]!.kind === "open") {
       return this.functionTarget(token);
     }
-    if (["event", "page", "session", "visitor"].includes(normalized)) {
+    if (["EVENT", "PAGE", "SESSION", "VISITOR"].includes(name)) {
       return {
         kind: "entity-root",
         entity: normalized as "event" | "page" | "session" | "visitor",
@@ -840,25 +868,64 @@ class Parser {
     if (this.registry.has(name)) {
       return { kind: "field", field: name as FilterFieldId };
     }
-    const entityMember = /^(event|page|session|visitor)\.(.+)$/i.exec(name);
-    if (entityMember) {
-      return entityMember[2]!
-        .split(".")
-        .reduce<FilterTargetExpression>(
-          (object, member) => ({ kind: "member", object, member }),
-          {
-            kind: "entity-root",
-            entity: entityMember[1]!.toLowerCase() as
-              "event" | "page" | "session" | "visitor",
-          },
-        );
-    }
     return { kind: "field", field: name as FilterFieldId };
   }
 
-  private contextIntrinsicTarget(): FilterTargetExpression {
+  private contextTarget(): FilterTargetExpression {
     const start = this.current.start;
     this.index += 1;
+    if (this.consume("dot")) {
+      const memberToken = this.expectIdentifier();
+      if (memberToken.value === "time")
+        throw tokenError(
+          this.source,
+          "invalid_member",
+          memberToken,
+          "Use the dedicated `time` expression; `$.time` is not a current entity member.",
+        );
+      if (memberToken.value === "payload" && this.consume("open")) {
+        if (this.current.kind !== "string")
+          throw tokenError(
+            this.source,
+            "expected_payload_path",
+            this.current,
+            "Expected a JSON pointer string for the current Event payload.",
+            'a JSON string such as `"/metadata/value"`',
+          );
+        const pathToken = this.current;
+        this.index += 1;
+        const close = this.consume("close");
+        if (!close)
+          throw tokenError(
+            this.source,
+            "missing_payload_parenthesis",
+            this.current,
+            "Missing closing parenthesis for the current Event payload.",
+            "`)`",
+          );
+        const target: FilterTargetExpression = {
+          kind: "current-payload",
+          path: pathToken.value as CanonicalJsonPath,
+        };
+        this.locations.set(target, {
+          span: { start, end: close.end },
+          target: { start, end: close.end },
+          path: spanFromToken(pathToken),
+        });
+        return target;
+      }
+      const target = memberToken.value
+        .split(".")
+        .reduce<FilterTargetExpression>(
+          (object, member) => ({ kind: "member", object, member }),
+          { kind: "context-root", context: "current" },
+        );
+      this.locations.set(target, {
+        span: { start, end: memberToken.end },
+        target: { start, end: memberToken.end },
+      });
+      return target;
+    }
     const nameToken = this.current;
     if (nameToken.kind !== "identifier")
       throw tokenError(
@@ -1073,9 +1140,7 @@ class Parser {
       return { kind: "window", collection, anchor, startOffset, endOffset };
     }
     if (name === "bucket" || name === "periods") {
-      const collection = this.collectionArgument(
-        this.targetExpression().target,
-      );
+      const collection = this.targetExpression().target;
       if (!this.consume("comma")) {
         throw tokenError(
           this.source,
@@ -1170,7 +1235,7 @@ class Parser {
             ? "countDistinct"
             : (name as
                 "count" | "first" | "last" | "sum" | "avg" | "min" | "max"),
-        input: this.collectionArgument(first),
+        input: first,
       };
     }
     if (["add", "sub", "mul", "div"].includes(name)) {
@@ -1213,37 +1278,6 @@ class Parser {
       "unknown_function",
       token,
       `Unknown filter expression function ${JSON.stringify(token.value)}.`,
-    );
-  }
-
-  /** In a reducer argument, a legacy entity field names that field's ordered
-   * collection across matching entities (for example page.path or
-   * event.payload("/amount")). Bare v1 conditions keep their existing scalar
-   * target and evaluation behavior. */
-  private collectionArgument(
-    target: FilterTargetExpression,
-  ): FilterTargetExpression {
-    if (target.kind === "event-payload") {
-      return {
-        kind: "projection",
-        collection: { kind: "entity-root", entity: "event" },
-        member: "payload",
-        path: target.path,
-      };
-    }
-    if (target.kind !== "field") return target;
-    const [entity, ...members] = target.field.split(".");
-    if (
-      !members.length ||
-      !["event", "page", "session", "visitor"].includes(entity!)
-    )
-      return target;
-    return members.reduce<FilterTargetExpression>(
-      (object, member) => ({ kind: "member", object, member }),
-      {
-        kind: "entity-root",
-        entity: entity as "event" | "page" | "session" | "visitor",
-      },
     );
   }
 
@@ -1535,12 +1569,11 @@ export function parseFilterDsl(
     locations,
     registry,
   ).parse();
-  const migratedRoot = migrateLegacyContextMembers(root);
   try {
     const normalized = normalizeFilterDocument(
       {
         version: FILTER_DSL_VERSION,
-        root: migratedRoot,
+        root,
       },
       registry,
     );
@@ -1552,102 +1585,7 @@ export function parseFilterDsl(
     }
     throw error;
   }
-  return { version: FILTER_DSL_VERSION, root: migratedRoot };
-}
-
-/** One-way migration for persisted structural members accepted by old DSLs. */
-function migrateLegacyContextMembers(
-  expression: FilterExpression,
-): FilterExpression {
-  const migrateTarget = (
-    target: FilterTargetExpression,
-  ): FilterTargetExpression => {
-    switch (target.kind) {
-      case "member": {
-        const object = migrateTarget(target.object);
-        if (
-          object.kind === "context-root" &&
-          object.context === "sequence" &&
-          target.member === "span"
-        )
-          return {
-            kind: "context-intrinsic",
-            context: "sequence",
-            intrinsic: "span",
-          };
-        if (
-          object.kind === "context-root" &&
-          object.context === "period" &&
-          target.member === "items"
-        )
-          return {
-            kind: "context-intrinsic",
-            context: "period",
-            intrinsic: "items",
-          };
-        return { ...target, object };
-      }
-      case "context-intrinsic":
-        return target.intrinsic === "same"
-          ? { ...target, input: migrateTarget(target.input) }
-          : target;
-      case "occurrence-time":
-        return { ...target, input: migrateTarget(target.input) };
-      case "selector":
-        return {
-          ...target,
-          collection: migrateTarget(target.collection),
-          predicate: migrateLegacyContextMembers(target.predicate),
-        };
-      case "projection":
-        return { ...target, collection: migrateTarget(target.collection) };
-      case "reducer":
-        return { ...target, input: migrateTarget(target.input) };
-      case "arithmetic":
-        return {
-          ...target,
-          left: migrateTarget(target.left),
-          right: migrateTarget(target.right),
-        };
-      case "bucket":
-        return { ...target, input: migrateTarget(target.input) };
-      case "window":
-        return {
-          ...target,
-          collection: migrateTarget(target.collection),
-          anchor: migrateTarget(target.anchor),
-        };
-      case "periods":
-        return { ...target, collection: migrateTarget(target.collection) };
-      case "sequence":
-        return { ...target, steps: target.steps.map(migrateTarget) };
-      case "adjacent":
-        return { ...target, sequence: migrateTarget(target.sequence) };
-      case "without":
-        return {
-          ...target,
-          sequence: migrateTarget(target.sequence),
-          excluded: migrateTarget(target.excluded),
-        };
-      default:
-        return target;
-    }
-  };
-
-  if (expression.kind === "condition")
-    return {
-      ...expression,
-      target: migrateTarget(expression.target),
-    };
-  if (expression.kind === "not")
-    return {
-      ...expression,
-      child: migrateLegacyContextMembers(expression.child),
-    };
-  return {
-    ...expression,
-    children: expression.children.map(migrateLegacyContextMembers),
-  };
+  return { version: FILTER_DSL_VERSION, root };
 }
 
 const PRECEDENCE: Readonly<Record<FilterExpression["kind"], number>> = {
@@ -1664,16 +1602,44 @@ function formatDuration(duration: {
   return `${duration.amount}${duration.unit}`;
 }
 
-export function formatFilterTargetExpression(
+type FormatEntity = "event" | "page" | "session" | "visitor";
+
+function entityForFormat(
   target: FilterTargetExpression,
+): FormatEntity | undefined {
+  if (target.kind === "entity-root") return target.entity;
+  if (target.kind === "selector") return entityForFormat(target.collection);
+  if (target.kind === "window") return entityForFormat(target.collection);
+  if (
+    target.kind === "reducer" &&
+    ["first", "last", "nth"].includes(target.reducer)
+  )
+    return entityForFormat(target.input);
+  return undefined;
+}
+
+function formatTargetExpression(
+  target: FilterTargetExpression,
+  currentEntity?: FormatEntity,
 ): string {
   switch (target.kind) {
     case "field":
+      if (currentEntity && target.field.startsWith(`${currentEntity}.`))
+        return `$.${target.field.slice(currentEntity.length + 1)}`;
+      if (
+        currentEntity &&
+        /^(?:geo|client|referrer|utm|user|performance)\./u.test(target.field)
+      )
+        return `$.${target.field}`;
       return target.field;
     case "event-payload":
+      if (currentEntity === "event")
+        return `$.payload(${JSON.stringify(target.path)})`;
       return `event.payload(${JSON.stringify(target.path)})`;
+    case "current-payload":
+      return `$.payload(${JSON.stringify(target.path)})`;
     case "entity-root":
-      return target.entity;
+      return target.entity.toUpperCase();
     case "context-root":
       return target.context === "current" ? "" : target.context;
     case "context-intrinsic":
@@ -1681,10 +1647,16 @@ export function formatFilterTargetExpression(
       if (target.intrinsic === "items") return "$items";
       if (target.intrinsic === "gap")
         return `$gap(${target.from}, ${target.to})`;
-      return `$same(${formatFilterTargetExpression(target.input)})`;
+      return `$same(${formatTargetExpression(target.input, currentEntity)})`;
     case "occurrence-time":
-      return `time(${formatFilterTargetExpression(target.input)})`;
+      return `time(${formatTargetExpression(target.input, currentEntity)})`;
     case "member": {
+      if (
+        target.object.kind === "context-root" &&
+        target.object.context === "current" &&
+        target.member === "time"
+      )
+        return "time";
       if (
         target.object.kind === "context-root" &&
         target.object.context === "sequence" &&
@@ -1697,19 +1669,26 @@ export function formatFilterTargetExpression(
         target.member === "items"
       )
         return "$items";
-      const object = formatFilterTargetExpression(target.object);
+      if (
+        target.object.kind === "context-root" &&
+        target.object.context === "current"
+      )
+        return `$.${target.member}`;
+      const object = formatTargetExpression(target.object, currentEntity);
       return object ? `${object}.${target.member}` : target.member;
     }
-    case "selector":
-      return `${formatFilterTargetExpression(target.collection)} { ${formatExpression(target.predicate)} }`;
+    case "selector": {
+      const entity = entityForFormat(target.collection);
+      return `${formatTargetExpression(target.collection, currentEntity)} { ${formatExpression(target.predicate, 0, undefined, entity)} }`;
+    }
     case "projection":
-      return `${formatFilterTargetExpression(target.collection)}.${target.member}${target.path === undefined ? "" : `(${JSON.stringify(target.path)})`}`;
+      return `${formatTargetExpression(target.collection, currentEntity)} -> ${target.member}${target.path === undefined ? "" : `(${JSON.stringify(target.path)})`}`;
     case "reducer":
       return target.reducer === "nth"
-        ? `nth(${formatFilterTargetExpression(target.input)}, ${target.index})`
-        : `${target.reducer}(${formatFilterTargetExpression(target.input)})`;
+        ? `nth(${formatTargetExpression(target.input, currentEntity)}, ${target.index})`
+        : `${target.reducer}(${formatTargetExpression(target.input, currentEntity)})`;
     case "arithmetic":
-      return `${target.operator}(${formatFilterTargetExpression(target.left)}, ${formatFilterTargetExpression(target.right)})`;
+      return `${target.operator}(${formatTargetExpression(target.left, currentEntity)}, ${formatTargetExpression(target.right, currentEntity)})`;
     case "duration":
       return formatDuration(target);
     case "time-anchor": {
@@ -1718,42 +1697,60 @@ export function formatFilterTargetExpression(
       return `@${target.anchor}${signed}`;
     }
     case "bucket":
-      return `bucket(${formatFilterTargetExpression(target.input)}, ${formatDuration(target.interval)})`;
+      return `bucket(${formatTargetExpression(target.input, currentEntity)}, ${formatDuration(target.interval)})`;
     case "window":
-      return `window(${formatFilterTargetExpression(target.collection)}, ${formatFilterTargetExpression(target.anchor)}, [${formatDuration(target.startOffset)}, ${formatDuration(target.endOffset)}])`;
+      return `window(${formatTargetExpression(target.collection, currentEntity)}, ${formatTargetExpression(target.anchor, currentEntity)}, [${formatDuration(target.startOffset)}, ${formatDuration(target.endOffset)}])`;
     case "periods":
-      return `periods(${formatFilterTargetExpression(target.collection)}, ${formatDuration(target.interval)})`;
+      return `periods(${formatTargetExpression(target.collection, currentEntity)}, ${formatDuration(target.interval)})`;
     case "sequence":
-      return `sequence([${target.steps.map(formatFilterTargetExpression).join(", ")}])`;
+      return `sequence([${target.steps.map((step) => formatTargetExpression(step, currentEntity)).join(", ")}])`;
     case "adjacent":
-      return `adjacent(${formatFilterTargetExpression(target.sequence)})`;
+      return `adjacent(${formatTargetExpression(target.sequence, currentEntity)})`;
     case "without":
-      return `without(${formatFilterTargetExpression(target.sequence)}, ${formatFilterTargetExpression(target.excluded)})`;
+      return `without(${formatTargetExpression(target.sequence, currentEntity)}, ${formatTargetExpression(target.excluded, currentEntity)})`;
   }
 }
 
-function formatConditionValue(value: FilterCondition["value"]): string {
+export function formatFilterTargetExpression(
+  target: FilterTargetExpression,
+): string {
+  return formatTargetExpression(target);
+}
+
+function formatConditionValue(
+  value: FilterCondition["value"],
+  currentEntity?: FormatEntity,
+): string {
   if (
     value &&
     typeof value === "object" &&
     !Array.isArray(value) &&
     "kind" in value
   ) {
-    return formatFilterTargetExpression(value as FilterTargetExpression);
+    return formatTargetExpression(
+      value as FilterTargetExpression,
+      currentEntity,
+    );
   }
   if (Array.isArray(value))
     return `[${value
       .map((item) =>
         item && typeof item === "object" && "kind" in item
-          ? formatFilterTargetExpression(item as FilterTargetExpression)
+          ? formatTargetExpression(
+              item as FilterTargetExpression,
+              currentEntity,
+            )
           : JSON.stringify(item),
       )
       .join(", ")}]`;
   return JSON.stringify(value);
 }
 
-function formatCondition(condition: FilterCondition): string {
-  const target = formatFilterTargetExpression(condition.target);
+function formatCondition(
+  condition: FilterCondition,
+  currentEntity?: FormatEntity,
+): string {
+  const target = formatTargetExpression(condition.target, currentEntity);
   if (
     condition.target.kind === "context-intrinsic" &&
     condition.target.intrinsic === "same"
@@ -1762,25 +1759,31 @@ function formatCondition(condition: FilterCondition): string {
   if (VALUELESS_OPERATORS.has(condition.operator)) {
     return `${target} ${condition.operator}`;
   }
-  return `${target} ${condition.operator} ${formatConditionValue(condition.value)}`;
+  return `${target} ${condition.operator} ${formatConditionValue(condition.value, currentEntity)}`;
 }
 
 function formatExpression(
   expression: FilterExpression,
   parentPrecedence = 0,
   parentGroupKind?: "and" | "or",
+  currentEntity?: FormatEntity,
 ): string {
   const precedence = PRECEDENCE[expression.kind];
   const source =
     expression.kind === "condition"
-      ? formatCondition(expression)
+      ? formatCondition(expression, currentEntity)
       : expression.kind === "not"
-        ? `NOT ${formatExpression(expression.child, precedence)}`
+        ? `NOT ${formatExpression(expression.child, precedence, undefined, currentEntity)}`
         : expression.children.length === 1
-          ? `${expression.kind.toUpperCase()}(${formatExpression(expression.children[0]!)})`
+          ? `${expression.kind.toUpperCase()}(${formatExpression(expression.children[0]!, 0, undefined, currentEntity)})`
           : expression.children
               .map((child) =>
-                formatExpression(child, precedence, expression.kind),
+                formatExpression(
+                  child,
+                  precedence,
+                  expression.kind,
+                  currentEntity,
+                ),
               )
               .join(` ${expression.kind.toUpperCase()} `);
   return precedence < parentPrecedence || expression.kind === parentGroupKind

@@ -283,7 +283,7 @@ describe("filter descriptions", () => {
       analyticsFilterRegistry,
       messages,
     );
-    expect(dynamic).toContain("sub(count(event), 1h)");
+    expect(dynamic).toContain("sub(count(EVENT), 1h)");
     expect(dynamic).toContain("1 or 2");
   });
 });

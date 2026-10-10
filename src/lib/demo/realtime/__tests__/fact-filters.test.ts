@@ -52,7 +52,7 @@ describe("mock/fact-filters", () => {
     historyDataset.from = 0;
     historyDataset.to = 100;
     const filterDocument = parseFilterDsl(
-      'first(page).path eq "/history"',
+      'first(PAGE).path eq "/history"',
       analyticsFilterRegistry,
     );
 
@@ -73,7 +73,7 @@ describe("mock/fact-filters", () => {
     const siteId = "demo-site-001";
     const candidate = buildDemoFactDataset(siteId, from, to);
     const filterDocument = parseFilterDsl(
-      "first(page).path exists",
+      "first(PAGE).path exists",
       analyticsFilterRegistry,
     );
 
@@ -96,7 +96,7 @@ describe("mock/fact-filters", () => {
   it("executes Core expressions over the demo fact dataset", () => {
     const result = applyDemoFilters(emptyDemoFactDataset(0, 1), {
       filterDocument: parseFilterDsl(
-        "count(event) gte 1",
+        "count(EVENT) gte 1",
         analyticsFilterRegistry,
       ),
       scope: "event",
@@ -107,7 +107,7 @@ describe("mock/fact-filters", () => {
   it("handles an empty Query range and an empty FilterDocument", () => {
     const emptyQueryRange = applyDemoFilters(emptyDemoFactDataset(10, 10), {
       filterDocument: parseFilterDsl(
-        "count(event) gte 1",
+        "count(EVENT) gte 1",
         analyticsFilterRegistry,
       ),
       scope: "visitor",

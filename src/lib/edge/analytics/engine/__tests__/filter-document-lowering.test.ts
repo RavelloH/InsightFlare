@@ -963,8 +963,8 @@ describe("FilterDocument Boolean lowering", () => {
   });
 
   it.each([
-    ["selector", "page { page.path exists } exists"],
-    ["reducer", "count(event) eq 2"],
+    ["selector", "PAGE { $.path exists } exists"],
+    ["reducer", "count(EVENT) eq 2"],
     ["event payload", 'event.payload("/amount") eq 4'],
   ])(
     "reports unsupported %s targets without partial plans",
@@ -1335,13 +1335,13 @@ describe("FilterDocument Boolean lowering", () => {
     const fixture = selectorFixture();
     const cases = [
       {
-        collection: "page",
-        field: 'page.path eq "/hit"',
+        collection: "PAGE",
+        field: '$.path eq "/hit"',
         attribute: "page.path",
       },
       {
-        collection: "event",
-        field: 'event.name eq "purchase"',
+        collection: "EVENT",
+        field: '$.name eq "purchase"',
         attribute: "event.name",
       },
     ] as const;
@@ -1368,7 +1368,7 @@ describe("FilterDocument Boolean lowering", () => {
           const selectorSources = lowered.plan!.nodes.filter(
             (node) =>
               node.kind === "source" &&
-              node.entity === item.collection &&
+              node.entity === item.collection.toLowerCase() &&
               node.temporalDomain === "read",
           );
           expect(selectorSources).toHaveLength(1);
@@ -1644,7 +1644,7 @@ describe("FilterDocument Boolean lowering", () => {
 
     const ordinaryPageAnd = 'page.path eq "/x" AND page.title eq "Checkout"';
     const samePageAnd =
-      'page { page.path eq "/x" AND page.title eq "Checkout" } exists';
+      'PAGE { $.path eq "/x" AND $.title eq "Checkout" } exists';
     const ordinaryPage = lowerForSessions(ordinaryPageAnd);
     const selectedPage = lowerForSessions(samePageAnd);
     expect(ordinaryPage.entities).toEqual(new Set(["s-a", "s-b"]));
@@ -1670,7 +1670,7 @@ describe("FilterDocument Boolean lowering", () => {
     const ordinaryEventAnd =
       'event.name eq "signup" AND event.name eq "purchase"';
     const sameEventAnd =
-      'event { event.name eq "signup" AND event.name eq "purchase" } exists';
+      'EVENT { $.name eq "signup" AND $.name eq "purchase" } exists';
     const ordinaryEvent = lowerForSessions(ordinaryEventAnd);
     const selectedEvent = lowerForSessions(sameEventAnd);
     expect(ordinaryEvent.entities).toEqual(new Set(["s-a", "s-b"]));
@@ -1680,7 +1680,7 @@ describe("FilterDocument Boolean lowering", () => {
     );
 
     const matchingEventAnd =
-      'event { event.name contains "pur" AND event.name eq "purchase" } exists';
+      'EVENT { $.name contains "pur" AND $.name eq "purchase" } exists';
     const matchingEvent = lowerForSessions(matchingEventAnd);
     expect(matchingEvent.entities).toEqual(new Set(["s-a", "s-b"]));
     expect(matchingEvent.entities).toEqual(
@@ -1805,19 +1805,19 @@ describe("FilterDocument Boolean lowering", () => {
     };
     const cases = [
       {
-        source: 'page { NOT page.path eq "/home" } exists',
+        source: 'PAGE { NOT $.path eq "/home" } exists',
         expected: new Set(["s-null", "s-missing", "s-other", "s-mixed"]),
       },
       {
-        source: 'page { page.path neq "/home" } exists',
+        source: 'PAGE { $.path neq "/home" } exists',
         expected: new Set(["s-other", "s-mixed"]),
       },
       {
-        source: 'page { page.path notIn ["/home"] } exists',
+        source: 'PAGE { $.path notIn ["/home"] } exists',
         expected: new Set(["s-other", "s-mixed"]),
       },
       {
-        source: 'page { page.path eq "/home" } notExists',
+        source: 'PAGE { $.path eq "/home" } notExists',
         expected: new Set(["s-null", "s-missing", "s-other"]),
       },
     ];
@@ -1844,11 +1844,10 @@ describe("FilterDocument Boolean lowering", () => {
   });
 
   it("combines selectors with outer AND/OR/NOT using candidate set algebra", () => {
-    const pageSelector = analyzeDsl('page { page.path eq "/hit" } exists')
+    const pageSelector = analyzeDsl('PAGE { $.path eq "/hit" } exists').document
+      .root;
+    const eventSelector = analyzeDsl('EVENT { $.name eq "purchase" } exists')
       .document.root;
-    const eventSelector = analyzeDsl(
-      'event { event.name eq "purchase" } exists',
-    ).document.root;
     if (
       !pageSelector ||
       pageSelector.kind !== "condition" ||
@@ -1918,7 +1917,7 @@ describe("FilterDocument Boolean lowering", () => {
   });
 
   it("rejects selector time-domain conflicts and unsupported nested targets atomically", () => {
-    const analysis = analyzeDsl('page { page.path eq "/hit" } exists');
+    const analysis = analyzeDsl('PAGE { $.path eq "/hit" } exists');
     const conflictingBuilder = createBuilder();
     expect(
       lowerFilterDocumentToScope(conflictingBuilder, analysis, {
@@ -1963,17 +1962,17 @@ describe("FilterDocument Boolean lowering", () => {
 
     const unsupportedDocuments = [
       {
-        source: 'event { event.payload("/amount") eq 4 } exists',
+        source: 'EVENT { $.payload("/amount") eq 4 } exists',
         code: "unsupported-target",
         path: "root.target.predicate",
       },
       {
-        source: 'event { event { event.name eq "purchase" } exists } exists',
+        source: 'EVENT { EVENT { $.name eq "purchase" } exists } exists',
         code: "unsupported-target",
         path: "root.target.predicate",
       },
       {
-        source: 'event { geo.country eq "US" } exists',
+        source: 'EVENT { $.geo.country eq "US" } exists',
         code: "unsupported-native-entity",
         path: "root.target.predicate",
       },
@@ -1993,7 +1992,7 @@ describe("FilterDocument Boolean lowering", () => {
       expect(builder.finish().nodes).toHaveLength(0);
     }
 
-    const nestedReducer = "event { count(event) eq 2 } exists";
+    const nestedReducer = "EVENT { count(EVENT) eq 2 } exists";
     const reducerBuilder = createBuilder();
     expect(
       lowerFilterDocumentToScope(reducerBuilder, analyzeDsl(nestedReducer), {
@@ -2009,7 +2008,7 @@ describe("FilterDocument Boolean lowering", () => {
   });
 
   it("rejects selector predicate resolver failures and mismatched domains atomically", () => {
-    const analysis = analyzeDsl('page { page.path eq "/hit" } exists');
+    const analysis = analyzeDsl('PAGE { $.path eq "/hit" } exists');
     const resolverFailureBuilder = createBuilder();
     expect(
       lowerFilterDocumentToScope(resolverFailureBuilder, analysis, {
@@ -2047,7 +2046,7 @@ describe("FilterDocument Boolean lowering", () => {
   });
 
   it("reports invalid selector predicate sidecar identity without partial plans", () => {
-    const analysis = analyzeDsl('page { page.path eq "/hit" } exists');
+    const analysis = analyzeDsl('PAGE { $.path eq "/hit" } exists');
     const root = analysis.document.root;
     if (root?.kind !== "condition" || root.target.kind !== "selector") {
       throw new Error("expected selector condition");
@@ -2088,7 +2087,7 @@ describe("FilterDocument Boolean lowering", () => {
     expect(
       lowerFilterDocumentToScope(
         builder,
-        analyzeDsl("session { session.views gte 1 } exists"),
+        analyzeDsl("SESSION { $.views gte 1 } exists"),
         {
           targetScope: "visitor",
           resolveTemporalDomain: explicitDomain("read"),
@@ -2103,11 +2102,15 @@ describe("FilterDocument Boolean lowering", () => {
   });
 
   it.each([
-    ['event { page.path eq "/hit" } exists', "unsupported-native-entity"],
-    ['page { session.entryPath eq "/hit" } exists', "unsupported-evaluation"],
+    [
+      'EVENT { $.geo.country eq "US" } exists',
+      "unsupported-native-entity",
+      "root.target.predicate",
+    ],
+    ["SESSION { $.durationMs gt 1000 } exists", "unsupported-selector", "root"],
   ])(
     "rejects selector field capabilities before lowering (%s)",
-    (source, code) => {
+    (source, code, path) => {
       const builder = createBuilder();
       expect(
         lowerFilterDocumentToScope(builder, analyzeDsl(source), {
@@ -2117,15 +2120,25 @@ describe("FilterDocument Boolean lowering", () => {
       ).toMatchObject({
         kind: "unsupported",
         code,
-        path: "root.target.predicate",
+        path,
       });
       expect(builder.finish().nodes).toHaveLength(0);
     },
   );
 
   it("deduplicates selector attributes across repeated leaves and one-child groups", () => {
-    const repeated = fieldCondition("page.path", "eq", "/hit");
-    const repeatedField = fieldCondition("page.path", "neq", "/other");
+    const currentPath = {
+      kind: "context-root" as const,
+      context: "current" as const,
+    };
+    const repeated = {
+      ...fieldCondition("page.path", "eq", "/hit"),
+      target: { kind: "member" as const, object: currentPath, member: "path" },
+    };
+    const repeatedField = {
+      ...fieldCondition("page.path", "neq", "/other"),
+      target: { kind: "member" as const, object: currentPath, member: "path" },
+    };
     const selector: FilterCondition = {
       kind: "condition",
       target: {
@@ -2167,7 +2180,7 @@ describe("FilterDocument Boolean lowering", () => {
 
   it("prints a deterministic same-occurrence selector golden", () => {
     const analysis = analyzeDsl(
-      'page { page.path eq "/hit" AND page.title eq "Checkout" } exists',
+      'PAGE { $.path eq "/hit" AND $.title eq "Checkout" } exists',
     );
     const lowered = materialize(createBuilder(), analysis, {
       targetScope: "session",

@@ -14,6 +14,7 @@ import {
   analyticsFilterRegistry,
   type FilterEntityRoot,
   type FilterFieldDefinition,
+  resolveEntityMember,
 } from "@/lib/filter-contract/index";
 import type { AppMessages } from "@/lib/i18n/messages";
 
@@ -147,14 +148,20 @@ export function allowedFields(
   observationOnly = false,
   entityRoot?: FilterEntityRoot,
 ): readonly RegisteredFilterField[] {
-  const entityFields = entityRoot
-    ? new Set<string>(FILTER_ENTITY_ROOT_REGISTRY[entityRoot].fields)
-    : undefined;
   return [...analyticsFilterRegistry.values()]
     .filter(
       (field) =>
         field.audiences.has(audience) &&
-        (!entityFields || entityFields.has(field.id)) &&
+        (!entityRoot ||
+          Boolean(
+            resolveEntityMember(
+              entityRoot,
+              field.id.startsWith(`${entityRoot}.`)
+                ? field.id.slice(entityRoot.length + 1)
+                : field.id,
+              analyticsFilterRegistry,
+            ),
+          )) &&
         (!observationOnly ||
           field.observationKinds.has("visit") ||
           field.observationKinds.has("event")),

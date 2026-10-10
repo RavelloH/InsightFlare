@@ -193,7 +193,7 @@ describe("TypedQueryApplicationService", () => {
       query: {
         context: siteQueryContext("site-1", "private-dashboard"),
         time,
-        filters: parseFilterDsl("count(event) gte 1", analyticsFilterRegistry),
+        filters: parseFilterDsl("count(EVENT) gte 1", analyticsFilterRegistry),
       } as OverviewQuery,
       providerRegistry: new AnalyticsProviderRegistry().register("overview", {
         execute: run,
@@ -583,7 +583,7 @@ describe("TypedQueryApplicationService", () => {
   it("walks Relation steps when estimating the complexity budget", async () => {
     const overviewReader = reader();
     const relationFilters = parseFilterDsl(
-      'visitor { sequence([event { event.name eq "signup" }, page { page.path eq "/pricing" }]) exists } exists',
+      'VISITOR { sequence([EVENT { $.name eq "signup" }, PAGE { $.path eq "/pricing" }]) exists } exists',
       analyticsFilterRegistry,
     );
     const result = await new TypedQueryApplicationService().execute(

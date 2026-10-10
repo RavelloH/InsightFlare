@@ -105,7 +105,7 @@ const SHARED_ACTIVITIES = [
   },
 ] as const satisfies readonly SharedActivity[];
 const SHARED_FILTER_DSL =
-  'page.path eq "/candidate" AND session { count(page { page.path eq "/history" }) gte 1 AND sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists AND event { event.name eq "purchase" AND event.payload("/order/amount") gt 0 } exists } exists';
+  'page.path eq "/candidate" AND SESSION { count(PAGE { $.path eq "/history" }) gte 1 AND sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists AND EVENT { $.name eq "purchase" AND $.payload("/order/amount") gt 0 } exists } exists';
 const RAW_COLUMNS = [
   "started_at",
   "status",
@@ -698,7 +698,7 @@ describe("D1 advanced filter execution", () => {
     const { env, database } = sqliteEnv();
     try {
       const document = parseFilterDsl(
-        "count(page) gte 1",
+        "count(PAGE) gte 1",
         analyticsFilterRegistry,
       );
       const makeSide = (from: number, to: number) => {
@@ -744,7 +744,7 @@ describe("D1 advanced filter execution", () => {
       ).toEqual({ entityIds: [{ siteId: SITE_ID, id: "session-a" }] });
 
       const unscoped = parseFilterDsl(
-        "count(page) gte 1",
+        "count(PAGE) gte 1",
         analyticsFilterRegistry,
       );
       await expect(
@@ -777,7 +777,7 @@ describe("D1 advanced filter execution", () => {
     const sameMillisecond = await evaluateSharedFixture({
       activities: SHARED_ACTIVITIES,
       filterDsl:
-        'session { adjacent(sequence([page { page.path eq "/same-millisecond" }, event { event.name eq "purchase" }])) exists } exists',
+        'SESSION { adjacent(sequence([PAGE { $.path eq "/same-millisecond" }, EVENT { $.name eq "purchase" }])) exists } exists',
       scope: "session",
       candidateRange: sharedRange,
       reportingTimeZone: "UTC",
@@ -789,7 +789,7 @@ describe("D1 advanced filter execution", () => {
     const reverseSameMillisecond = await evaluateSharedFixture({
       activities: SHARED_ACTIVITIES,
       filterDsl:
-        'session { sequence([event { event.name eq "purchase" }, page { page.path eq "/same-millisecond" }]) exists } exists',
+        'SESSION { sequence([EVENT { $.name eq "purchase" }, PAGE { $.path eq "/same-millisecond" }]) exists } exists',
       scope: "session",
       candidateRange: sharedRange,
       reportingTimeZone: "UTC",
@@ -801,7 +801,7 @@ describe("D1 advanced filter execution", () => {
     const withoutBetweenEndpoints = await evaluateSharedFixture({
       activities: SHARED_ACTIVITIES,
       filterDsl:
-        'session { sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists AND without(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]), event { event.name eq "cancellation" }) notExists } exists',
+        'SESSION { sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists AND without(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]), EVENT { $.name eq "cancellation" }) notExists } exists',
       scope: "session",
       candidateRange: sharedRange,
       reportingTimeZone: "UTC",
@@ -843,7 +843,7 @@ describe("D1 advanced filter execution", () => {
     const lifted = await evaluateSharedFixture({
       activities: descendantActivities,
       filterDsl:
-        'session { page.path eq "/pricing" AND event.name eq "purchase" } exists',
+        'SESSION { PAGE { $.path eq "/pricing" } exists AND EVENT { $.name eq "purchase" } exists } exists',
       scope: "session",
       candidateRange: sharedRange,
       reportingTimeZone: "UTC",
@@ -855,7 +855,7 @@ describe("D1 advanced filter execution", () => {
     const independentlyLifted = await evaluateSharedFixture({
       activities: descendantActivities,
       filterDsl:
-        'session { page.path eq "/pricing" AND page.title eq "Home" } exists',
+        'SESSION { PAGE { $.path eq "/pricing" } exists AND PAGE { $.title eq "Home" } exists } exists',
       scope: "session",
       candidateRange: sharedRange,
       reportingTimeZone: "UTC",
@@ -867,7 +867,7 @@ describe("D1 advanced filter execution", () => {
     const samePageOnly = await evaluateSharedFixture({
       activities: descendantActivities,
       filterDsl:
-        'session { page { page.path eq "/pricing" AND page.title eq "Home" } exists } exists',
+        'SESSION { PAGE { $.path eq "/pricing" AND $.title eq "Home" } exists } exists',
       scope: "session",
       candidateRange: sharedRange,
       reportingTimeZone: "UTC",
@@ -1035,7 +1035,7 @@ describe("D1 advanced filter execution", () => {
         ],
       ] as const;
       for (const [legacyFilter, expected] of parityCases) {
-        const mixedFilter = `${legacyFilter} AND count(event) gte 0`;
+        const mixedFilter = `${legacyFilter} AND count(EVENT) gte 0`;
         const baseline = legacyIds(legacyFilter);
         const result = await evaluateSharedFixture({
           activities,
@@ -1086,7 +1086,7 @@ describe("D1 advanced filter execution", () => {
         },
       ],
       filterDsl:
-        'visitor { visitor.sessions eq 2 AND visitor.views eq 4 AND visitor.events eq 1 AND session { session.durationMs eq 15 AND session.views eq 3 AND session.events eq 1 AND session.bounce eq false AND session.entryPath eq "/entry" AND session.exitPath eq "/exit" } exists } exists',
+        'VISITOR { $.sessions eq 2 AND $.views eq 4 AND $.events eq 1 AND SESSION { $.durationMs eq 15 AND $.views eq 3 AND $.events eq 1 AND $.bounce eq false AND $.entryPath eq "/entry" AND $.exitPath eq "/exit" } exists } exists',
       scope: "visitor",
       candidateRange: { startMs: 0, endExclusiveMs: 2_000 },
       reportingTimeZone: "UTC",
@@ -1163,7 +1163,7 @@ describe("D1 advanced filter execution", () => {
     const automaticHistory = await evaluateSharedFixture({
       activities,
       filterDsl:
-        'count(event { event.name eq "purchase" }) gte 3 AND min(event { event.name eq "purchase" }.payload("/amount")) gt 15 AND countDistinct(event { event.name eq "purchase" }.payload("/productId")) eq 2 AND sub(count(event { event.name eq "purchase" }), count(page)) lt 0 AND div(sub(count(event { event.name eq "purchase" }), count(page)), count(page)) lt 0',
+        'count(EVENT { $.name eq "purchase" }) gte 3 AND min(EVENT { $.name eq "purchase" } -> payload("/amount")) gt 15 AND countDistinct(EVENT { $.name eq "purchase" } -> payload("/productId")) eq 2 AND sub(count(EVENT { $.name eq "purchase" }), count(PAGE)) lt 0 AND div(sub(count(EVENT { $.name eq "purchase" }), count(PAGE)), count(PAGE)) lt 0',
       scope: "visitor",
       candidateRange: { startMs: 0, endExclusiveMs: 17_000 },
       reportingTimeZone: "UTC",
@@ -1174,7 +1174,7 @@ describe("D1 advanced filter execution", () => {
 
     const narrowedNumber = await evaluateSharedFixture({
       activities,
-      filterDsl: 'first(event.payload("/amount")) eq 20',
+      filterDsl: 'first(EVENT -> payload("/amount")) eq 20',
       scope: "visitor",
       candidateRange: { startMs: 15_000, endExclusiveMs: 17_000 },
       reportingTimeZone: "UTC",
@@ -1185,7 +1185,7 @@ describe("D1 advanced filter execution", () => {
 
     const narrowedString = await evaluateSharedFixture({
       activities,
-      filterDsl: 'first(event.payload("/amount")) eq "0"',
+      filterDsl: 'first(EVENT -> payload("/amount")) eq "0"',
       scope: "visitor",
       candidateRange: { startMs: 15_000, endExclusiveMs: 17_000 },
       reportingTimeZone: "UTC",
@@ -1196,7 +1196,7 @@ describe("D1 advanced filter execution", () => {
 
     const narrowedSet = await evaluateSharedFixture({
       activities,
-      filterDsl: 'first(event.payload("/amount")) in [20, 30]',
+      filterDsl: 'first(EVENT -> payload("/amount")) in [20, 30]',
       scope: "visitor",
       candidateRange: { startMs: 15_000, endExclusiveMs: 17_000 },
       reportingTimeZone: "UTC",
@@ -1208,7 +1208,7 @@ describe("D1 advanced filter execution", () => {
     const wrappedHistory = await evaluateSharedFixture({
       activities,
       filterDsl:
-        'first(periods(event { event.name eq "purchase" }, 1d) { count($items) gte 1 }) exists',
+        'first(periods(EVENT { $.name eq "purchase" }, 1d) { count($items) gte 1 }) exists',
       scope: "visitor",
       candidateRange: { startMs: 0, endExclusiveMs: 17_000 },
       reportingTimeZone: "UTC",
@@ -1220,7 +1220,7 @@ describe("D1 advanced filter execution", () => {
     const entityAnchoredWindow = await evaluateSharedFixture({
       activities,
       filterDsl:
-        'count(window(event { event.name eq "purchase" }, first(event { event.name eq "signup" }), [0ms, 20ms])) gte 1',
+        'count(window(EVENT { $.name eq "purchase" }, first(EVENT { $.name eq "signup" }), [0ms, 20ms])) gte 1',
       scope: "visitor",
       candidateRange: { startMs: 0, endExclusiveMs: 17_000 },
       reportingTimeZone: "UTC",
@@ -1230,7 +1230,7 @@ describe("D1 advanced filter execution", () => {
     expect(entityAnchoredWindow.mock).toEqual(entityAnchoredWindow.d1);
 
     const visitorSequence =
-      'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists';
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists';
     const visitorRelation = await evaluateSharedFixture({
       activities,
       filterDsl: visitorSequence,
@@ -1310,7 +1310,7 @@ describe("D1 advanced filter execution", () => {
     const contextualParity = await evaluateSharedFixture({
       activities: contextualActivities,
       filterDsl:
-        'sequence([event { event.name eq "view" }, event { event.name eq "purchase" }]) { $span lte 20ms AND $gap(1, 2) eq 10ms AND $same(event.payload("/productId")) } exists',
+        'sequence([EVENT { $.name eq "view" }, EVENT { $.name eq "purchase" }]) { $span lte 20ms AND $gap(1, 2) eq 10ms AND $same($.payload("/productId")) } exists',
       scope: "visitor",
       candidateRange: { startMs: 0, endExclusiveMs: 2_000 },
       reportingTimeZone: "UTC",
@@ -1322,7 +1322,7 @@ describe("D1 advanced filter execution", () => {
     const occurrenceTimeParity = await evaluateSharedFixture({
       activities: contextualActivities,
       filterDsl:
-        'sub(time(first(event { event.name eq "purchase" })), time(first(event { event.name eq "view" }))) eq 10ms',
+        'sub(time(first(EVENT { $.name eq "purchase" })), time(first(EVENT { $.name eq "view" }))) eq 10ms',
       scope: "visitor",
       candidateRange: { startMs: 0, endExclusiveMs: 2_000 },
       reportingTimeZone: "UTC",
@@ -1390,9 +1390,9 @@ describe("D1 advanced filter execution", () => {
     ];
     const filters = [
       'event.name eq "purchase"',
-      'count(event { event.name eq "purchase" }) eq 1',
-      'first(event).name eq "signup"',
-      'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
+      'count(EVENT { $.name eq "purchase" }) eq 1',
+      'first(EVENT).name eq "signup"',
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
     ];
     for (const expression of filters) {
       const result = await evaluateSharedFixture({
@@ -1459,7 +1459,7 @@ describe("D1 advanced filter execution", () => {
   it("short-circuits future-only Filter ranges in D1 and Mock", async () => {
     const result = await evaluateSharedFixture({
       activities: SHARED_ACTIVITIES,
-      filterDsl: "time gte @now+1ms AND count(event) gte 1",
+      filterDsl: "time gte @now+1ms AND count(EVENT) gte 1",
       scope: "visitor",
       candidateRange: { startMs: 10_000, endExclusiveMs: 20_000 },
       reportingTimeZone: "UTC",
@@ -1507,7 +1507,7 @@ describe("D1 advanced filter execution", () => {
     const result = await evaluateSharedFixture({
       activities,
       filterDsl:
-        'time between ["1970-01-01T00:00:01.000Z", "1970-01-01T00:00:03.000Z"] AND count(window(event, first(event { event.name eq "purchase" }), [0d, 7d])) gte 2',
+        'time between ["1970-01-01T00:00:01.000Z", "1970-01-01T00:00:03.000Z"] AND count(window(EVENT, first(EVENT { $.name eq "purchase" }), [0d, 7d])) gte 2',
       scope: "visitor",
       candidateRange: { startMs: 9_000_000, endExclusiveMs: 10_000_000 },
       filterRange: { startMs: 1_000, endExclusiveMs: 3_001 },
@@ -1693,8 +1693,8 @@ describe("D1 advanced filter execution", () => {
         pathname: "/dst",
       };
       const expressions = [
-        "countDistinct(bucket(page, 1d)) eq 1",
-        "count(periods(page, 1d)) eq 1",
+        "countDistinct(bucket(PAGE, 1d)) eq 1",
+        "count(periods(PAGE, 1d)) eq 1",
       ];
       for (const filterDsl of expressions) {
         const result = await evaluateSharedFixture({
@@ -1731,7 +1731,7 @@ describe("D1 advanced filter execution", () => {
     ];
     const mondayWeeks = await evaluateSharedFixture({
       activities: weekActivities,
-      filterDsl: "count(periods(page, 1w)) eq 2",
+      filterDsl: "count(periods(PAGE, 1w)) eq 2",
       scope: "session",
       candidateRange: weekRange,
       reportingTimeZone: "America/Los_Angeles",
@@ -1751,7 +1751,7 @@ describe("D1 advanced filter execution", () => {
         },
       ],
       filterDsl:
-        'count(event) eq 0 AND sum(event.payload("/amount")) eq 0 AND avg(event.payload("/amount")) isNull AND min(event.payload("/amount")) isNull AND max(event.payload("/amount")) isNull AND first(event) notExists AND last(page) exists AND nth(event, 2) notExists AND countDistinct(event.payload("/amount")) eq 0 AND div(count(event), count(event)) isNull',
+        'count(EVENT) eq 0 AND sum(EVENT -> payload("/amount")) eq 0 AND avg(EVENT -> payload("/amount")) isNull AND min(EVENT -> payload("/amount")) isNull AND max(EVENT -> payload("/amount")) isNull AND first(EVENT) notExists AND last(PAGE) exists AND nth(EVENT, 2) notExists AND countDistinct(EVENT -> payload("/amount")) eq 0 AND div(count(EVENT), count(EVENT)) isNull',
       scope: "session",
       candidateRange: { startMs: 0, endExclusiveMs: 100 },
       reportingTimeZone: "UTC",
@@ -1765,7 +1765,7 @@ describe("D1 advanced filter execution", () => {
     const { env, database, queries } = sqliteEnv();
     try {
       const document = parseFilterDsl(
-        "count(page) gte 1",
+        "count(PAGE) gte 1",
         analyticsFilterRegistry,
       );
       const time = {

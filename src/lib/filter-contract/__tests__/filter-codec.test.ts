@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   analyticsFilterRegistry,
+  evaluateFilterDocument,
   type FilterDocument,
   type FilterFieldDefinition,
   type FilterFieldRegistry,
+  formatFilterDsl,
   normalizeFilterDocument,
   parseFilterDsl,
   parseFilterParams,
@@ -12,6 +14,157 @@ import {
 } from "@/lib/filter-contract";
 
 describe("filter URL codec", () => {
+  it("keeps DSL, JSON documents, and query params semantically equivalent", () => {
+    const source =
+      'PAGE { $.path startsWith "/shop" } exists AND sum(EVENT { $.name eq "purchase" } -> payload("/amount")) gt 20';
+    const fromDsl = normalizeFilterDocument(
+      parseFilterDsl(source, analyticsFilterRegistry),
+      analyticsFilterRegistry,
+    );
+    const fromJson = normalizeFilterDocument(
+      JSON.parse(JSON.stringify(fromDsl)) as FilterDocument,
+      analyticsFilterRegistry,
+    );
+    const params = serializeFilterParams(fromDsl, analyticsFilterRegistry);
+    const fromParams = normalizeFilterDocument(
+      parseFilterParams(params, analyticsFilterRegistry),
+      analyticsFilterRegistry,
+    );
+    const canonicalDsl = formatFilterDsl(fromParams);
+    const reparsedDsl = normalizeFilterDocument(
+      parseFilterDsl(canonicalDsl, analyticsFilterRegistry),
+      analyticsFilterRegistry,
+    );
+
+    expect(fromJson).toEqual(fromDsl);
+    expect(fromParams).toEqual(fromDsl);
+    expect(reparsedDsl).toEqual(fromDsl);
+    expect(serializeFilterParams(fromParams, analyticsFilterRegistry)).toEqual(
+      params,
+    );
+    expect(formatFilterDsl(reparsedDsl)).toBe(canonicalDsl);
+
+    const dataset = {
+      pages: [
+        {
+          kind: "page" as const,
+          id: "page-shop",
+          visitId: "visit-shop",
+          sessionId: "session-shop",
+          visitorId: "visitor-shop",
+          time: 10,
+          fields: { "page.path": "/shop" },
+        },
+        {
+          kind: "page" as const,
+          id: "page-docs",
+          visitId: "visit-docs",
+          sessionId: "session-docs",
+          visitorId: "visitor-docs",
+          time: 10,
+          fields: { "page.path": "/docs" },
+        },
+      ],
+      events: [
+        {
+          kind: "event" as const,
+          id: "purchase-shop",
+          visitId: "visit-shop",
+          sessionId: "session-shop",
+          visitorId: "visitor-shop",
+          time: 20,
+          fields: { "event.name": "purchase" },
+          payload: { amount: 50 },
+        },
+        {
+          kind: "event" as const,
+          id: "purchase-docs",
+          visitId: "visit-docs",
+          sessionId: "session-docs",
+          visitorId: "visitor-docs",
+          time: 20,
+          fields: { "event.name": "purchase" },
+          payload: { amount: 10 },
+        },
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const options = {
+      scope: "visitor" as const,
+      candidateRange: { startMs: 0, endExclusiveMs: 100 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 100,
+    };
+    const dslResult = evaluateFilterDocument(fromDsl, dataset, options);
+
+    expect(dslResult.matchingScopeEntityIds).toEqual(new Set(["visitor-shop"]));
+    expect(evaluateFilterDocument(fromJson, dataset, options)).toEqual(
+      dslResult,
+    );
+    expect(evaluateFilterDocument(fromParams, dataset, options)).toEqual(
+      dslResult,
+    );
+
+    for (const expression of [
+      "",
+      'count(PAGE { $.path startsWith "/shop" }) eq 1',
+      'sum(EVENT { $.name eq "purchase" } -> payload("/amount")) gt 20',
+      "sequence([PAGE, EVENT]) { $same($.client.browser) } exists",
+      "count(window(EVENT, first(EVENT), [0d, 1d])) gte 1",
+      "countDistinct(bucket(PAGE, 1d)) gte 1",
+      "periods(EVENT, 1w) { count($items) gte 1 } exists",
+      'NOT (EVENT { $.payload("/amount") eq 0 } exists) AND PAGE { $.path eq "/shop" } exists',
+      "time between [@range.start, @range.end]",
+    ]) {
+      const dslDocument = parseFilterDsl(expression, analyticsFilterRegistry);
+      const jsonDocument = normalizeFilterDocument(
+        JSON.parse(JSON.stringify(dslDocument)) as FilterDocument,
+        analyticsFilterRegistry,
+      );
+      const params = serializeFilterParams(
+        dslDocument,
+        analyticsFilterRegistry,
+      );
+      let queryDocument: FilterDocument;
+      try {
+        queryDocument = parseFilterParams(params, analyticsFilterRegistry);
+      } catch (error) {
+        throw new Error(`Failed to parse query params for '${expression}'.`, {
+          cause: error,
+        });
+      }
+      const expected = evaluateFilterDocument(dslDocument, dataset, options);
+
+      expect(
+        evaluateFilterDocument(jsonDocument, dataset, options),
+        expression,
+      ).toEqual(expected);
+      expect(
+        evaluateFilterDocument(queryDocument, dataset, options),
+        expression,
+      ).toEqual(expected);
+    }
+  });
+
+  it("round-trips selector members and projections with the normalized syntax", () => {
+    const document = normalizeFilterDocument(
+      parseFilterDsl(
+        'count(EVENT { $.name eq "purchase" AND $.payload("/amount") gt 0 }) gte 2 AND sum(EVENT { $.name eq "purchase" } -> payload("/amount")) gt 1000',
+        analyticsFilterRegistry,
+      ),
+      analyticsFilterRegistry,
+    );
+    const params = serializeFilterParams(document, analyticsFilterRegistry);
+    expect([...params.keys()]).toContain("filter[event:0][$.name]");
+    expect([...params.keys()]).toContain("filter[event:0][$.payload][/amount]");
+    expect([...params.keys()].some((key) => key.includes("-> payload"))).toBe(
+      true,
+    );
+    expect(parseFilterParams(params, analyticsFilterRegistry)).toEqual(
+      document,
+    );
+  });
+
   it("parses canonical dot-namespaced filters with typed values", () => {
     const document = parseFilterParams(
       "from=1&filter[geo.country]=US&filter[event.payload][/score]=gte:json:7&filter[event.payload][/paid]=json:false",
@@ -59,19 +212,19 @@ describe("filter URL codec", () => {
 
   it("round trips computed targets through stable filter URL keys", () => {
     const document = parseFilterParams(
-      "filter[count(event)]=gte:5&filter[first(page).path]=eq:%2Fpricing",
+      "filter[count(EVENT)]=gte:5&filter[first(PAGE).path]=eq:%2Fpricing",
       analyticsFilterRegistry,
     );
     const serialized = serializeFilterParams(document, analyticsFilterRegistry);
     expect(serialized.toString()).toBe(
-      "filter%5Bcount%28event%29%5D=gte%3A5&filter%5Bfirst%28page%29.path%5D=eq%3A%22%2Fpricing%22",
+      "filter%5Bcount%28EVENT%29%5D=gte%3A5&filter%5Bfirst%28PAGE%29.path%5D=eq%3A%22%2Fpricing%22",
     );
     expect(parseFilterParams(serialized, analyticsFilterRegistry)).toEqual(
       document,
     );
 
     const temporal = parseFilterParams(
-      "filter[countDistinct(page.path)]=gte:10&filter[time]=gte:@now-30d",
+      "filter[countDistinct(PAGE -> path)]=gte:10&filter[time]=gte:@now-30d",
       analyticsFilterRegistry,
     );
     const temporalSerialized = serializeFilterParams(
@@ -85,13 +238,13 @@ describe("filter URL codec", () => {
 
   it("canonicalizes legacy space-separated computed values to operator:value", () => {
     const legacy = parseFilterParams(
-      "filter[count(event)]=gte+5",
+      "filter[count(EVENT)]=gte+5",
       analyticsFilterRegistry,
     );
     const canonical = serializeFilterParams(legacy, analyticsFilterRegistry);
 
-    expect(canonical.get("filter[count(event)]")).toBe("gte:5");
-    expect(canonical.toString()).toBe("filter%5Bcount%28event%29%5D=gte%3A5");
+    expect(canonical.get("filter[count(EVENT)]")).toBe("gte:5");
+    expect(canonical.toString()).toBe("filter%5Bcount%28EVENT%29%5D=gte%3A5");
     expect(parseFilterParams(canonical, analyticsFilterRegistry)).toEqual(
       legacy,
     );
@@ -99,15 +252,15 @@ describe("filter URL codec", () => {
 
   it("serializes computed operators and temporal values with the URL value grammar", () => {
     const cases = [
-      ["count(event) gte 5", "filter[count(event)]", "gte:5"],
+      ["count(EVENT) gte 5", "filter[count(EVENT)]", "gte:5"],
       [
-        'first(page).path eq "/pricing"',
-        "filter[first(page).path]",
+        'first(PAGE).path eq "/pricing"',
+        "filter[first(PAGE).path]",
         'eq:"/pricing"',
       ],
       [
-        "first(page).durationMs lte 7d",
-        "filter[first(page).durationMs]",
+        "first(PAGE).durationMs lte 7d",
+        "filter[first(PAGE).durationMs]",
         "lte:7d",
       ],
       [
@@ -115,12 +268,12 @@ describe("filter URL codec", () => {
         "filter[time]",
         "between:@now-30d,@now",
       ],
-      ["first(page).path exists", "filter[first(page).path]", "ex"],
-      ["first(page).path notExists", "filter[first(page).path]", "nex"],
-      ["first(page).path isNull", "filter[first(page).path]", "null"],
-      ["first(page).path notNull", "filter[first(page).path]", "nnull"],
-      ["first(page).path isEmpty", "filter[first(page).path]", "empty"],
-      ["first(page).path notEmpty", "filter[first(page).path]", "nempty"],
+      ["first(PAGE).path exists", "filter[first(PAGE).path]", "ex"],
+      ["first(PAGE).path notExists", "filter[first(PAGE).path]", "nex"],
+      ["first(PAGE).path isNull", "filter[first(PAGE).path]", "null"],
+      ["first(PAGE).path notNull", "filter[first(PAGE).path]", "nnull"],
+      ["first(PAGE).path isEmpty", "filter[first(PAGE).path]", "empty"],
+      ["first(PAGE).path notEmpty", "filter[first(PAGE).path]", "nempty"],
     ] as const;
 
     for (const [source, key, expected] of cases) {
@@ -134,7 +287,7 @@ describe("filter URL codec", () => {
     }
 
     const escaped = parseFilterDsl(
-      String.raw`first(page).path in ["a,b", "json:true", "quote\"and\\slash"]`,
+      String.raw`first(PAGE).path in ["a,b", "json:true", "quote\"and\\slash"]`,
       analyticsFilterRegistry,
     );
     const escapedParams = serializeFilterParams(
@@ -155,7 +308,7 @@ describe("filter URL codec", () => {
   it("serializes selector predicates through stable references", () => {
     const document = normalizeFilterDocument(
       parseFilterDsl(
-        'count(event { event.name eq "purchase" AND event.payload("/amount") gt 0 }) gte 2',
+        'count(EVENT { $.name eq "purchase" AND $.payload("/amount") gt 0 }) gte 2',
         analyticsFilterRegistry,
       ),
       analyticsFilterRegistry,
@@ -163,8 +316,8 @@ describe("filter URL codec", () => {
     const params = serializeFilterParams(document, analyticsFilterRegistry);
     expect([...params.keys()]).toEqual([
       "filter[count(event:0)]",
-      "filter[event:0][event.name]",
-      "filter[event:0][event.payload][/amount]",
+      "filter[event:0][$.name]",
+      "filter[event:0][$.payload][/amount]",
     ]);
     expect(params.get("filter[count(event:0)]")).toBe("gte:2");
     expect(params.toString()).not.toMatch(/event\s*\{/u);
@@ -175,8 +328,8 @@ describe("filter URL codec", () => {
 
   it("round-trips nested and computed-collection selectors independent of parameter order", () => {
     const sources = [
-      'session { event { event.name eq "purchase" } exists } exists',
-      'time gte @now-12w AND count(periods(event { event.name eq "shared_insight" }, 1w) { count($items) gte 3 }) gte 3',
+      'SESSION { EVENT { $.name eq "purchase" } exists } exists',
+      'time gte @now-12w AND count(periods(EVENT { $.name eq "shared_insight" }, 1w) { count($items) gte 3 }) gte 3',
     ];
     for (const source of sources) {
       const document = normalizeFilterDocument(
@@ -200,15 +353,147 @@ describe("filter URL codec", () => {
     }
   });
 
+  it("validates selector source declarations before rebuilding URL predicates", () => {
+    const valid = new URLSearchParams();
+    valid.set("filter[count(event:0)]", "gte:1");
+    valid.append("filter[event:0][source]", 'EVENT { $.name eq "purchase" }');
+    valid.append("filter[event:0][source]", 'EVENT { $.name eq "purchase" }');
+    valid.set("filter[event:0][$.name]", 'eq:"purchase"');
+    expect(
+      parseFilterParams(valid, analyticsFilterRegistry).root,
+    ).toMatchObject({
+      kind: "condition",
+      target: { kind: "reducer", reducer: "count" },
+    });
+
+    const conflicting = new URLSearchParams(valid);
+    conflicting.append(
+      "filter[event:0][source]",
+      'EVENT { $.name eq "refund" }',
+    );
+    expect(() =>
+      parseFilterParams(conflicting, analyticsFilterRegistry),
+    ).toThrow(expect.objectContaining({ code: "conflicting_selector_source" }));
+
+    expect(() =>
+      parseFilterParams(
+        "filter[event:0][source][extra]=EVENT%20exists",
+        analyticsFilterRegistry,
+      ),
+    ).toThrow(expect.objectContaining({ code: "invalid_filter_key" }));
+    expect(() =>
+      parseFilterParams(
+        "filter[count(event:0)]=gte:1",
+        analyticsFilterRegistry,
+      ),
+    ).toThrow(expect.objectContaining({ code: "unbound_selector_reference" }));
+  });
+
+  it("preserves selector references and user strings inside source declarations", () => {
+    const params = new URLSearchParams();
+    params.set("filter[count(event:0)]", "gte:1");
+    params.set(
+      "filter[event:0][source]",
+      'EVENT { $.name eq "__insightflare_filter_url_ref_0__" AND count(event:1) gt 0 AND NOT (count(event:2) gt 0) }',
+    );
+    params.set("filter[event:0][$.name]", 'eq:"outer"');
+    params.set("filter[event:1][$.name]", 'eq:"nested-one"');
+    params.set("filter[event:2][$.name]", 'eq:"nested-two"');
+
+    const document = parseFilterParams(params, analyticsFilterRegistry);
+    const serialized = serializeFilterParams(document, analyticsFilterRegistry);
+    expect(parseFilterParams(serialized, analyticsFilterRegistry)).toEqual(
+      document,
+    );
+    expect(serialized.toString()).toContain(
+      encodeURIComponent("__insightflare_filter_url_ref_0__"),
+    );
+  });
+
+  it("quotes plain text list operands in computed URL conditions", () => {
+    const document = parseFilterParams(
+      "filter[first(PAGE).path]=in:/docs,/blog",
+      analyticsFilterRegistry,
+    );
+
+    expect(document.root).toMatchObject({
+      kind: "condition",
+      target: { kind: "member" },
+      operator: "in",
+      value: ["/docs", "/blog"],
+    });
+    expect(
+      parseFilterParams(
+        serializeFilterParams(document, analyticsFilterRegistry),
+        analyticsFilterRegistry,
+      ),
+    ).toEqual(document);
+  });
+
+  it("rejects cyclic selector references before semantic traversal", () => {
+    const params = new URLSearchParams();
+    params.set("filter[count(event:0)]", "gte:1");
+    params.set("filter[count(event:1)]", "gte:1");
+    params.set("filter[event:0][count(event:1)]", "gt:0");
+    params.set("filter[event:1][count(event:0)]", "gt:0");
+
+    expect(() => parseFilterParams(params, analyticsFilterRegistry)).toThrow(
+      expect.objectContaining({ code: "cyclic_selector_reference" }),
+    );
+  });
+
+  it("discovers selector references embedded in computed target key paths", () => {
+    const params = new URLSearchParams();
+    params.set("filter[count(event:0)]", "gte:1");
+    const computedTargets = [
+      ["time(first(event:1))", "gte:@now-7d"],
+      ["first(event:2).name", 'eq:"nested"'],
+      ['countDistinct(event:3 -> payload("/sku"))', "gte:1"],
+      ["sub(count(event:4),count(event:5))", "gt:0"],
+      ["countDistinct(bucket(event:6,1d))", "gt:1"],
+      ["count(window(event:7,first(event:8),[0d,7d]))", "gte:1"],
+      ["count(periods(event:9,1d))", "gte:1"],
+      ["adjacent(sequence([event:10,event:11]))", "ex"],
+      ["without(sequence([event:12,event:13]),event:14)", "ex"],
+      ["count(event:15)", "gt:0"],
+      ["sequence([event:16,event:17])", "ex"],
+    ] as const;
+    for (const [target, value] of computedTargets) {
+      const logic = target === "count(event:15)" ? "[not]" : "";
+      params.set(`filter[event:0][${target}]${logic}`, value);
+    }
+    for (let index = 0; index <= 17; index += 1) {
+      params.set(`filter[event:${index}][$.name]`, `eq:"event-${index}"`);
+    }
+
+    const document = parseFilterParams(params, analyticsFilterRegistry);
+    expect(document.root).toMatchObject({
+      kind: "condition",
+      target: {
+        kind: "reducer",
+        reducer: "count",
+        input: {
+          kind: "selector",
+          collection: { kind: "entity-root", entity: "event" },
+        },
+      },
+    });
+    const serialized = serializeFilterParams(document, analyticsFilterRegistry);
+    expect(parseFilterParams(serialized, analyticsFilterRegistry)).toEqual(
+      document,
+    );
+  });
+
   it("round-trips all Core and Relation target forms through selector references", () => {
     const sources = [
-      'nth(event { event.name eq "purchase" }.payload("/amount"), 3) gt 0',
-      'sub(first(event { event.name eq "purchase" }), first(event { event.name eq "refund" })) gt 0',
-      'window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }), [0d, 7d]) notExists',
-      'adjacent(sequence([page { page.path eq "/pricing" }, event { event.name eq "purchase" }])) exists',
-      'without(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]), event { event.name eq "cancellation" }) { $span lte 7d } exists',
-      'NOT (count(event { event.name eq "purchase" }) gte 2 OR page.path eq "/private")',
-      "time between [@now-30d, @now] AND countDistinct(bucket(page, 1d)) gte 20",
+      'nth(EVENT { $.name eq "purchase" } -> payload("/amount"), 3) gt 0',
+      'sub(first(EVENT { $.name eq "purchase" }), first(EVENT { $.name eq "refund" })) gt 0',
+      'window(EVENT { $.name eq "refund" }, first(EVENT { $.name eq "purchase" }), [0d, 7d]) notExists',
+      'adjacent(sequence([PAGE { $.path eq "/pricing" }, EVENT { $.name eq "purchase" }])) exists',
+      'without(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]), EVENT { $.name eq "cancellation" }) { $span lte 7d } exists',
+      'EVENT { $.name eq "purchase" AND NOT (EVENT { $.payload("/amount") gt 100 } exists) } exists',
+      'NOT (count(EVENT { $.name eq "purchase" }) gte 2 OR page.path eq "/private")',
+      "time between [@now-30d, @now] AND countDistinct(bucket(PAGE, 1d)) gte 20",
     ];
 
     for (const source of sources) {
@@ -230,11 +515,27 @@ describe("filter URL codec", () => {
     }
   });
 
+  it("parses selector result paths without an explicit logic suffix", () => {
+    const params = new URLSearchParams();
+    params.set("filter[event:0][$result]", "ex");
+    params.set("filter[event:0][$.name]", 'eq:"signup"');
+    params.set("filter[event:0][event:1][$result]", "ex");
+    params.set("filter[event:1][$.name]", 'eq:"purchase"');
+
+    const document = parseFilterParams(params, analyticsFilterRegistry);
+    expect(
+      parseFilterParams(
+        serializeFilterParams(document, analyticsFilterRegistry),
+        analyticsFilterRegistry,
+      ),
+    ).toEqual(document);
+  });
+
   it("serializes occurrence time and context intrinsics canonically", () => {
     const sources = [
-      'sequence([event { event.name eq "view" }, event { event.name eq "purchase" }]) { $gap(1, 2) lte 7d AND $same(event.payload("/productId")) } exists',
-      'periods(event { event.name eq "shared_insight" }, 1w) { count($items) gte 3 } exists',
-      'time(first(event { event.name eq "signup" })) gte @now-30d',
+      'sequence([EVENT { $.name eq "view" }, EVENT { $.name eq "purchase" }]) { $gap(1, 2) lte 7d AND $same($.payload("/productId")) } exists',
+      'periods(EVENT { $.name eq "shared_insight" }, 1w) { count($items) gte 3 } exists',
+      'time(first(EVENT { $.name eq "signup" })) gte @now-30d',
     ];
 
     for (const source of sources) {
@@ -258,10 +559,10 @@ describe("filter URL codec", () => {
     }
   });
 
-  it("migrates legacy structural URL targets to context intrinsics", () => {
+  it("rejects legacy structural URL targets instead of reinterpreting them", () => {
     const document = normalizeFilterDocument(
       parseFilterDsl(
-        'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { $span lte 7d } exists AND count(periods(event, 1w) { count($items) gte 3 }) gte 2',
+        'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) { $span lte 7d } exists AND count(periods(EVENT, 1w) { count($items) gte 3 }) gte 2',
         analyticsFilterRegistry,
       ),
       analyticsFilterRegistry,
@@ -281,11 +582,12 @@ describe("filter URL codec", () => {
       legacy.set(key!.replace(`[${current}]`, `[${previous}]`), value!);
     }
 
-    const migrated = parseFilterParams(legacy, analyticsFilterRegistry);
-    expect(migrated).toEqual(document);
-    expect(
-      serializeFilterParams(migrated, analyticsFilterRegistry).toString(),
-    ).toBe(canonical.toString());
+    expect(() => parseFilterParams(legacy, analyticsFilterRegistry)).toThrow(
+      expect.objectContaining({ code: "invalid_member" }),
+    );
+    expect(parseFilterParams(canonical, analyticsFilterRegistry)).toEqual(
+      document,
+    );
   });
 
   it("preserves escaped set operands and reconstructs nested OR and NOT", () => {
@@ -611,6 +913,42 @@ describe("filter URL codec", () => {
     expect(() =>
       parseFilterParams("filter[page.path]x=/docs", analyticsFilterRegistry),
     ).toThrow(/Malformed filter key/);
+    expect(() =>
+      parseFilterParams(
+        "filter[page.path][or.0][not]=/docs",
+        analyticsFilterRegistry,
+      ),
+    ).toThrow(expect.objectContaining({ code: "invalid_filter_key" }));
+    expect(() =>
+      parseFilterParams(
+        'filter[event:0][$.name][or.0][not]=eq:"purchase"',
+        analyticsFilterRegistry,
+      ),
+    ).toThrow(expect.objectContaining({ code: "invalid_filter_key" }));
+    expect(() =>
+      parseFilterParams(
+        'filter[event:0][$result][not][or.0]=ex&filter[event:0][$.name]=eq:"purchase"',
+        analyticsFilterRegistry,
+      ),
+    ).toThrow(expect.objectContaining({ code: "invalid_filter_key" }));
+    expect(() =>
+      parseFilterParams(
+        "filter[event:0][event:1][$result][not][or.0]=ex",
+        analyticsFilterRegistry,
+      ),
+    ).toThrow(expect.objectContaining({ code: "invalid_filter_key" }));
+  });
+
+  it("applies semantic validation to URL-encoded entity selectors", () => {
+    for (const input of [
+      'filter[PAGE { page.path eq "/docs" }]=ex',
+      'filter[PAGE { event.name eq "purchase" }]=ex',
+      'filter[PAGE { $.payload("/price") gt 0 }]=ex',
+    ]) {
+      expect(() => parseFilterParams(input, analyticsFilterRegistry)).toThrow(
+        expect.objectContaining({ code: "invalid_context_member" }),
+      );
+    }
   });
 
   it("handles strict keys, typed parse failures, and invalid payload JSON", () => {

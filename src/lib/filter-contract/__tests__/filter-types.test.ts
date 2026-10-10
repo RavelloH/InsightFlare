@@ -25,7 +25,7 @@ function validate(source: string): void {
 describe("Filter v1 expression types", () => {
   it("keeps dynamic JSON scalar distinct from an unknown value and narrows contextually", () => {
     const source = parseFilterDsl(
-      'min(event.payload("/value")) gt 15',
+      'min(EVENT -> payload("/value")) gt 15',
       analyticsFilterRegistry,
     );
     const root = source.root;
@@ -41,11 +41,11 @@ describe("Filter v1 expression types", () => {
 
   it("propagates eq, neq, and homogeneous set types into positional payload reducers", () => {
     for (const [source, expected] of [
-      ['first(event.payload("/value")) eq 100', "number"],
-      ['first(event.payload("/value")) neq "100"', "string"],
-      ['first(event.payload("/value")) in [true, false]', "boolean"],
+      ['first(EVENT -> payload("/value")) eq 100', "number"],
+      ['first(EVENT -> payload("/value")) neq "100"', "string"],
+      ['first(EVENT -> payload("/value")) in [true, false]', "boolean"],
       [
-        'nth(event { event.name eq "value" }.payload("/value"), 2) notIn [1, 2]',
+        'nth(EVENT { $.name eq "value" } -> payload("/value"), 2) notIn [1, 2]',
         "number",
       ],
     ] as const) {
@@ -64,11 +64,11 @@ describe("Filter v1 expression types", () => {
   it("narrows payload projections after an entity selector", () => {
     for (const [source, expected] of [
       [
-        'first(event { event.name eq "value" }.payload("/value")) eq 100',
+        'first(EVENT { $.name eq "value" } -> payload("/value")) eq 100',
         "number",
       ],
       [
-        'first(event { event.name eq "value" }.payload("/value")) in ["a", "b"]',
+        'first(EVENT { $.name eq "value" } -> payload("/value")) in ["a", "b"]',
         "string",
       ],
     ] as const) {
@@ -113,54 +113,136 @@ describe("Filter v1 expression types", () => {
 
   it("rejects heterogeneous advanced sets and null equality", () => {
     expect(() =>
-      validate('first(event.payload("/value")) in [1, "1"]'),
+      validate('first(EVENT -> payload("/value")) in [1, "1"]'),
     ).toThrow(expect.objectContaining({ code: "heterogeneous_set_values" }));
-    expect(() => validate('first(event.payload("/value")) eq null')).toThrow(
+    expect(() => validate('first(EVENT -> payload("/value")) eq null')).toThrow(
       expect.objectContaining({ code: "null_requires_unary_operator" }),
     );
   });
 
   it("accepts registered entity members and the scope-level time field", () => {
-    validate('first(event).name eq "purchase"');
+    validate('first(EVENT).name eq "purchase"');
     validate('time gte "2026-09-01T00:00:00Z"');
-    validate("first(page).path exists");
-    validate("first(session).durationMs gt 5m");
-    validate("first(visitor).sessions gte 3");
-    validate('first(page).geo.country eq "US"');
-    validate("countDistinct(page.path) gte 10");
-    validate('sum(event.payload("/amount")) gt 1000');
+    validate("first(PAGE).path exists");
+    validate("first(SESSION).durationMs gt 5m");
+    validate("first(VISITOR).sessions gte 3");
+    validate('first(PAGE).geo.country eq "US"');
+    validate("countDistinct(PAGE -> path) gte 10");
+    validate('sum(EVENT -> payload("/amount")) gt 1000');
+  });
+
+  it("keeps current members lexical and requires explicit collection projections", () => {
+    expect(() => validate('PAGE { page.path eq "/docs" } exists')).toThrow(
+      expect.objectContaining({ code: "invalid_context_member" }),
+    );
+    expect(() => validate('PAGE { $.unknown eq "x" } exists')).toThrow(
+      expect.objectContaining({ code: "invalid_context_member" }),
+    );
+    expect(() => validate('PAGE.path eq "/docs"')).toThrow(
+      expect.objectContaining({ code: "unknown_field" }),
+    );
+    expect(() => validate("PAGE -> unknown exists")).toThrow(
+      expect.objectContaining({ code: "invalid_member" }),
+    );
+    validate("count(PAGE -> geo.country) gte 1");
+
+    for (const [target, code] of [
+      [
+        {
+          kind: "member",
+          object: { kind: "entity-root", entity: "page" },
+          member: "path",
+        },
+        "invalid_member",
+      ],
+      [{ kind: "context-root", context: "current" }, "invalid_context_member"],
+    ]) {
+      const legacyDocument = {
+        version: 1,
+        root: { kind: "condition", target, operator: "exists" },
+      } as unknown as FilterDocument;
+      expect(() =>
+        analyzeFilterDocument(legacyDocument, analyticsFilterRegistry),
+      ).toThrow(expect.objectContaining({ code }));
+    }
+
+    const malformedProjection = {
+      version: 1,
+      root: {
+        kind: "condition",
+        target: {
+          kind: "projection",
+          collection: { kind: "entity-root", entity: "page" },
+          member: "path/with/slash",
+        },
+        operator: "exists",
+      },
+    } as unknown as FilterDocument;
+    expect(() =>
+      normalizeFilterDocument(malformedProjection, analyticsFilterRegistry),
+    ).toThrow(expect.objectContaining({ code: "invalid_member" }));
+  });
+
+  it("applies registered operators to members in their entity context", () => {
+    expect(() => validate('PAGE { $.durationMs contains "1" } exists')).toThrow(
+      expect.objectContaining({ code: "operator_not_allowed" }),
+    );
+
+    const registry = new Map(analyticsFilterRegistry);
+    const payload = registry.get("event.payload");
+    if (!payload) throw new Error("missing_event_payload_field");
+    registry.set("event.payload", {
+      ...payload,
+      operators: new Set(["eq"]),
+    });
+    expect(() =>
+      parseFilterDsl(
+        'EVENT { $.payload("/amount") contains "x" } exists',
+        registry,
+      ),
+    ).toThrow(expect.objectContaining({ code: "operator_not_allowed" }));
+  });
+
+  it("limits current Event payload reads to an Event binding", () => {
+    validate('EVENT { $.payload("/amount") gt 0 } exists');
+    expect(() => validate('PAGE { $.payload("/amount") gt 0 } exists')).toThrow(
+      expect.objectContaining({ code: "invalid_context_member" }),
+    );
+    expect(() => validate('$.payload("/amount") gt 0')).toThrow(
+      expect.objectContaining({ code: "invalid_context_member" }),
+    );
   });
 
   it("checks reducer input types and selector collection shape", () => {
-    expect(() => validate("sum(page.path) gt 1")).toThrow(
+    expect(() => validate("sum(PAGE -> path) gt 1")).toThrow(
       expect.objectContaining({ code: "reducer_type_mismatch" }),
     );
   });
 
   it("keeps elapsed windows separate from calendar period buckets", () => {
-    validate("count(bucket(page, 1mo)) gte 1");
-    validate("countDistinct(bucket(page, 1d)) gte 1");
-    validate('countDistinct(bucket(page { page.path eq "/docs" }, 1d)) gte 1');
-    validate("count(window(event, @range.start, [0d, 7d])) gte 1");
+    validate("count(bucket(PAGE, 1mo)) gte 1");
+    validate("countDistinct(bucket(PAGE, 1d)) gte 1");
+    validate('countDistinct(bucket(PAGE { $.path eq "/docs" }, 1d)) gte 1');
+    validate("count(window(EVENT, @range.start, [0d, 7d])) gte 1");
     expect(() =>
-      validate("count(window(event, first(event), [0mo, 7d])) gte 1"),
+      validate("count(window(EVENT, first(EVENT), [0mo, 7d])) gte 1"),
     ).toThrow(
       expect.objectContaining({ code: "calendar_offset_not_supported" }),
     );
     expect(() =>
       validate(
-        'count(window(event, first(event.payload("/timestamp")), [0d, 7d])) gte 1',
+        'count(window(EVENT, first(EVENT -> payload("/timestamp")), [0d, 7d])) gte 1',
       ),
     ).toThrow(expect.objectContaining({ code: "window_anchor_type_mismatch" }));
   });
 
   it("keeps bucket values opaque outside count aggregates", () => {
     for (const source of [
-      "sum(bucket(page, 1d)) gt 1",
-      "avg(bucket(event, 1d)) gt 1",
-      "min(bucket(page, 1d)) exists",
-      "max(bucket(event, 1d)) exists",
-      "bucket(page, 1d) exists",
+      "sum(bucket(PAGE, 1d)) gt 1",
+      "avg(bucket(EVENT, 1d)) gt 1",
+      "min(bucket(PAGE, 1d)) exists",
+      "max(bucket(EVENT, 1d)) exists",
+      "bucket(PAGE, 1d) exists",
     ])
       expect(() => validate(source), source).toThrow(
         expect.objectContaining({ code: "opaque_bucket_value" }),
@@ -169,10 +251,10 @@ describe("Filter v1 expression types", () => {
 
   it("resolves relation anchors from query Scope or explicit selectors", () => {
     const source =
-      'session { sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { $span lte 7d } exists } exists';
+      'SESSION { sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) { $span lte 7d } exists } exists';
     expect(() => validate(source)).not.toThrow();
     const topLevel = parseFilterDsl(
-      'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
       analyticsFilterRegistry,
     );
     expect(() =>
@@ -193,7 +275,7 @@ describe("Filter v1 expression types", () => {
       }),
     );
     const explicit = parseFilterDsl(
-      'session { sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists } exists',
+      'SESSION { sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists } exists',
       analyticsFilterRegistry,
     );
     expect(() =>
@@ -207,13 +289,13 @@ describe("Filter v1 expression types", () => {
 
   it("allows numeric arithmetic but does not expose entity timestamps", () => {
     validate(
-      'sub(sum(event.payload("/purchase")), sum(event.payload("/refund"))) gt 1000',
+      'sub(sum(EVENT -> payload("/purchase")), sum(EVENT -> payload("/refund"))) gt 1000',
     );
     validate(
-      'div(sub(sum(event.payload("/purchase")), sum(event.payload("/refund"))), count(event)) gt 100',
+      'div(sub(sum(EVENT -> payload("/purchase")), sum(EVENT -> payload("/refund"))), count(EVENT)) gt 100',
     );
     const numeric = parseFilterDsl(
-      'sub(sum(event.payload("/purchase")), sum(event.payload("/refund"))) gt 1000',
+      'sub(sum(EVENT -> payload("/purchase")), sum(EVENT -> payload("/refund"))) gt 1000',
       analyticsFilterRegistry,
     );
     const numericTarget =
@@ -225,14 +307,14 @@ describe("Filter v1 expression types", () => {
           numericTarget,
         ),
     ).toMatchObject({ kind: "scalar", scalar: "number" });
-    expect(() => validate("first(event).time exists")).toThrow(
+    expect(() => validate("first(EVENT).time exists")).toThrow(
       expect.objectContaining({ code: "invalid_member" }),
     );
   });
 
   it("allows only DateTime minus DateTime as a duration operation", () => {
     const document = parseFilterDsl(
-      "sub(time(first(event)), time(first(page))) between [0d, 30d]",
+      "sub(time(first(EVENT)), time(first(PAGE))) between [0d, 30d]",
       analyticsFilterRegistry,
     );
     const root = document.root;
@@ -244,9 +326,9 @@ describe("Filter v1 expression types", () => {
     ).toMatchObject({ kind: "scalar", scalar: "duration" });
 
     for (const source of [
-      "sub(time(first(event)), count(event)) gt 1",
-      "sub(count(event), time(first(event))) gt 1",
-      "add(time(first(event)), time(first(page))) gt 1",
+      "sub(time(first(EVENT)), count(EVENT)) gt 1",
+      "sub(count(EVENT), time(first(EVENT))) gt 1",
+      "add(time(first(EVENT)), time(first(PAGE))) gt 1",
     ])
       expect(() => validate(source), source).toThrow(
         expect.objectContaining({ code: "arithmetic_type_mismatch" }),
@@ -255,8 +337,8 @@ describe("Filter v1 expression types", () => {
 
   it("keeps $same in the canonical eq true condition form", () => {
     for (const source of [
-      'sequence([event, event]) { $same(event.payload("/id")) neq true } exists',
-      'sequence([event, event]) { $same(event.payload("/id")) eq false } exists',
+      'sequence([EVENT, EVENT]) { $same($.payload("/id")) neq true } exists',
+      'sequence([EVENT, EVENT]) { $same($.payload("/id")) eq false } exists',
     ])
       expect(
         () => parseFilterDsl(source, analyticsFilterRegistry),
@@ -268,6 +350,30 @@ describe("Filter v1 expression types", () => {
       );
   });
 
+  it("checks $same member availability across every bound entity step", () => {
+    validate("sequence([PAGE, EVENT]) { $same($.geo.country) } exists");
+    expect(() =>
+      validate("sequence([PAGE, EVENT]) { $same($.path) } exists"),
+    ).toThrow(expect.objectContaining({ code: "same_value_entity_mismatch" }));
+    expect(() =>
+      validate('EVENT { event.payload("/id") eq "x" } exists'),
+    ).toThrow(expect.objectContaining({ code: "invalid_context_member" }));
+  });
+
+  it("requires $same to use a scalar value bound to each sequence occurrence", () => {
+    expect(() =>
+      validate("sequence([EVENT, EVENT]) { $same(EVENT) } exists"),
+    ).toThrow(expect.objectContaining({ code: "same_value_type_mismatch" }));
+    expect(() =>
+      validate("sequence([EVENT, EVENT]) { $same(page.path) } exists"),
+    ).toThrow(
+      expect.objectContaining({ code: "same_target_not_per_occurrence" }),
+    );
+    expect(() =>
+      validate('sequence([EVENT, PAGE]) { $same($.payload("/id")) } exists'),
+    ).toThrow(expect.objectContaining({ code: "same_value_entity_mismatch" }));
+  });
+
   it("accepts temporal ranges without allowing temporal set values", () => {
     validate("time between [@now-30d, @now]");
     expect(() => validate("time in [@now, 7d]")).toThrow();
@@ -275,23 +381,19 @@ describe("Filter v1 expression types", () => {
 
   it("rejects unregistered and removed structural members", () => {
     for (const source of [
-      "event.time exists",
-      "page.time exists",
-      "first(event).time exists",
-      "sequence([event, page]).start exists",
-      "sequence([event, page]).end exists",
-      "sequence([event, page]).steps exists",
-      "periods(event, 1w).start exists",
-      "periods(event, 1w).end exists",
-      "bucket(page, 1d).start exists",
-      "bucket(page, 1d).end exists",
-      "session.pages exists",
-      "visitor.pages exists",
-      "periods(event, 1w) { $items.time exists } exists",
-      "first(event).payload exists",
-      'page { page.path eq "/pricing" }.payload("/price") eq 1',
-      'first(event).payload("/price") eq 1',
-      "event.unknownField eq 1",
+      "first(EVENT).time exists",
+      "first(PAGE).time exists",
+      "first(EVENT).time exists",
+      "sequence([EVENT, PAGE]).start exists",
+      "sequence([EVENT, PAGE]).end exists",
+      "sequence([EVENT, PAGE]).steps exists",
+      "periods(EVENT, 1w).start exists",
+      "periods(EVENT, 1w).end exists",
+      "bucket(PAGE, 1d).start exists",
+      "bucket(PAGE, 1d).end exists",
+      "periods(EVENT, 1w) { $items.time exists } exists",
+      "first(EVENT).payload exists",
+      'PAGE { $.path eq "/pricing" } -> payload("/price") eq 1',
     ]) {
       expect(() => validate(source), source).toThrow(
         expect.objectContaining({ code: "invalid_member" }),
@@ -304,6 +406,19 @@ describe("Filter v1 expression types", () => {
       'visitor.payload("/price") eq 1',
     ])
       expect(() => validate(source), source).toThrow();
+
+    for (const source of [
+      "session.pages exists",
+      "visitor.pages exists",
+      "event.unknownField eq 1",
+    ])
+      expect(() => validate(source), source).toThrow(
+        expect.objectContaining({ code: "unknown_field" }),
+      );
+
+    expect(() => validate('first(EVENT).payload("/price") eq 1')).toThrow(
+      expect.objectContaining({ code: "explicit_projection_required" }),
+    );
 
     const rawUnknownField = {
       version: 1,
@@ -347,11 +462,11 @@ describe("Filter v1 expression types", () => {
 
   it("requires positive safe-integer bucket and period intervals", () => {
     for (const source of [
-      "count(bucket(page, 0d)) gte 1",
-      "count(bucket(page, -1d)) gte 1",
-      "count(bucket(page, 0.5d)) gte 1",
-      "count(periods(event, 0w)) gte 1",
-      "count(periods(event, 1.5w)) gte 1",
+      "count(bucket(PAGE, 0d)) gte 1",
+      "count(bucket(PAGE, -1d)) gte 1",
+      "count(bucket(PAGE, 0.5d)) gte 1",
+      "count(periods(EVENT, 0w)) gte 1",
+      "count(periods(EVENT, 1.5w)) gte 1",
     ])
       expect(() => validate(source), source).toThrow();
   });
@@ -371,13 +486,13 @@ describe("Filter v1 expression types", () => {
       expect.objectContaining({ code: "invalid_time_scope" }),
     );
     expect(() =>
-      checkScope("event { time gte @now-30d } exists", "visitor"),
+      checkScope("EVENT { time gte @now-30d } exists", "visitor"),
     ).toThrow(expect.objectContaining({ code: "invalid_time_scope" }));
     expect(() =>
-      checkScope("page { time gte @now-30d } exists", "session"),
+      checkScope("PAGE { time gte @now-30d } exists", "session"),
     ).toThrow(expect.objectContaining({ code: "invalid_time_scope" }));
     expect(() =>
-      checkScope("session { time gte @now-30d } exists", "visitor"),
+      checkScope("SESSION { time gte @now-30d } exists", "visitor"),
     ).toThrow(expect.objectContaining({ code: "invalid_time_scope" }));
     expect(() => checkScope("NOT time gte @now-30d", "session")).toThrow(
       expect.objectContaining({ code: "invalid_time_scope" }),

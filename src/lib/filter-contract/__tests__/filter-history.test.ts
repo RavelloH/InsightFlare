@@ -163,10 +163,10 @@ describe("Filter time domain and history planning", () => {
       explicit: false,
       empty: false,
     });
-    expect(history("count(event) gte 1")).toEqual({
+    expect(history("count(EVENT) gte 1")).toEqual({
       kind: "candidate-only",
     });
-    expect(history("first(event) exists")).toEqual({
+    expect(history("first(EVENT) exists")).toEqual({
       kind: "full-history",
     });
     expect(history("")).toEqual({ kind: "candidate-only" });
@@ -177,22 +177,22 @@ describe("Filter time domain and history planning", () => {
     const endExclusiveMs = capturedAtMs - 30 * 86_400_000 + 1;
     expect(
       history(
-        'time between [@now-60d, @now-30d] AND first(event).name eq "signup"',
+        'time between [@now-60d, @now-30d] AND first(EVENT).name eq "signup"',
       ),
     ).toEqual({ kind: "bounded", startMs, endExclusiveMs });
     expect(
       history(
-        "time between [@now-60d, @now-30d] AND first(periods(event, 1d)) exists",
+        "time between [@now-60d, @now-30d] AND first(periods(EVENT, 1d)) exists",
       ),
     ).toEqual({ kind: "bounded", startMs, endExclusiveMs });
     expect(
       history(
-        'time between [@now-60d, @now-30d] AND count(event { event.name eq "purchase" }) gte 3',
+        'time between [@now-60d, @now-30d] AND count(EVENT { $.name eq "purchase" }) gte 3',
       ),
     ).toEqual({ kind: "bounded", startMs, endExclusiveMs });
     expect(
       history(
-        'time between [@now-60d, @now-30d] AND session { first(event).name eq "signup" } exists',
+        'time between [@now-60d, @now-30d] AND SESSION { first(EVENT).name eq "signup" } exists',
       ),
     ).toEqual({ kind: "bounded", startMs, endExclusiveMs });
   });
@@ -202,7 +202,7 @@ describe("Filter time domain and history planning", () => {
     const filterEnd = capturedAtMs - 30 * 86_400_000 + 1;
     expect(
       history(
-        "time between [@now-60d, @now-30d] AND count(window(event, first(event), [0d, 7d])) gte 1",
+        "time between [@now-60d, @now-30d] AND count(window(EVENT, first(EVENT), [0d, 7d])) gte 1",
       ),
     ).toEqual({
       kind: "bounded",
@@ -212,7 +212,7 @@ describe("Filter time domain and history planning", () => {
   });
 
   it("requires complete retained history for an unbounded lower Filter bound", () => {
-    expect(history("time lt @now-30d AND first(event) exists")).toEqual({
+    expect(history("time lt @now-30d AND first(EVENT) exists")).toEqual({
       kind: "full-history",
     });
   });
@@ -226,24 +226,24 @@ describe("Filter time domain and history planning", () => {
   });
 
   it("keeps ordinary reducers candidate-bound and positional reducers history-aware", () => {
-    expect(history("countDistinct(bucket(page, 1d)) gte 1")).toEqual({
+    expect(history("countDistinct(bucket(PAGE, 1d)) gte 1")).toEqual({
       kind: "candidate-only",
     });
-    expect(history("count(periods(event, 1w)) gte 1")).toEqual({
+    expect(history("count(periods(EVENT, 1w)) gte 1")).toEqual({
       kind: "candidate-only",
     });
-    expect(history("last(page) exists")).toEqual({ kind: "full-history" });
+    expect(history("last(PAGE) exists")).toEqual({ kind: "full-history" });
     expect(
-      history("count(window(event, first(event), [0d, 7d])) gte 1"),
+      history("count(window(EVENT, first(EVENT), [0d, 7d])) gte 1"),
     ).toEqual({
       kind: "full-history",
     });
     expect(
       history(
-        'nth(event { event.name eq "purchase" }.payload("/amount"), 3) eq 3',
+        'nth(EVENT { $.name eq "purchase" } -> payload("/amount"), 3) eq 3',
       ),
     ).toEqual({ kind: "full-history" });
-    expect(history("first(periods(event, 1w)) exists")).toEqual({
+    expect(history("first(periods(EVENT, 1w)) exists")).toEqual({
       kind: "full-history",
     });
   });
@@ -251,44 +251,44 @@ describe("Filter time domain and history planning", () => {
   it("carries bounded windows and relation steps through history analysis", () => {
     expect(
       history(
-        "count(window(event, @range.start, [0ms, 10ms])) gte 1 AND count(event) gte 1",
+        "count(window(EVENT, @range.start, [0ms, 10ms])) gte 1 AND count(EVENT) gte 1",
       ),
     ).toEqual({ kind: "bounded", startMs: 80_000, endExclusiveMs: 80_011 });
     const boundedSequence =
-      "sequence([window(event, @range.start, [0d, 1d]), window(event, @range.end, [-1d, 0d])])";
-    expect(history(`without(${boundedSequence}, event) exists`)).toMatchObject({
+      "sequence([window(EVENT, @range.start, [0d, 1d]), window(EVENT, @range.end, [-1d, 0d])])";
+    expect(history(`without(${boundedSequence}, EVENT) exists`)).toMatchObject({
       kind: "bounded",
       startMs: 90_000 - 86_400_000,
     });
-    expect(history(`without(sequence([event, page]), event) exists`)).toEqual({
+    expect(history(`without(sequence([EVENT, PAGE]), EVENT) exists`)).toEqual({
       kind: "full-history",
     });
-    expect(history("adjacent(sequence([event, page])) exists")).toEqual({
+    expect(history("adjacent(sequence([EVENT, PAGE])) exists")).toEqual({
       kind: "full-history",
     });
     expect(
       history(
-        `without(${boundedSequence}, window(event, @range.start, [0d, 1d])) exists`,
+        `without(${boundedSequence}, window(EVENT, @range.start, [0d, 1d])) exists`,
       ),
     ).toMatchObject({ kind: "bounded" });
     expect(
       history(
-        `without(${boundedSequence}, window(event, first(event), [0d, 7d])) exists`,
+        `without(${boundedSequence}, window(EVENT, first(EVENT), [0d, 7d])) exists`,
       ),
     ).toEqual({ kind: "full-history" });
     expect(
       history(
-        "count(window(event, @range.start, [0d, 9007199254740991ms])) gte 1",
+        "count(window(EVENT, @range.start, [0d, 9007199254740991ms])) gte 1",
       ),
     ).toEqual({ kind: "full-history" });
     expect(
-      history("count(window(event, @range.start, [0d, -7d])) gte 1"),
+      history("count(window(EVENT, @range.start, [0d, -7d])) gte 1"),
     ).toEqual({
       kind: "candidate-only",
     });
     expect(
       history(
-        "time between [@now-30d, @now-10d] AND add(count(event), count(page)) gte 1",
+        "time between [@now-30d, @now-10d] AND add(count(EVENT), count(PAGE)) gte 1",
       ),
     ).toMatchObject({ kind: "bounded" });
   });
@@ -393,7 +393,7 @@ describe("Filter time domain and history planning", () => {
     ).toEqual({ explicit: true, empty: false, range: {} });
     expect(
       analyzeFilterHistory(
-        analyzed("count(event) gte 1").analysis,
+        analyzed("count(EVENT) gte 1").analysis,
         queryRange,
         capturedAtMs,
         "visitor",
@@ -403,7 +403,7 @@ describe("Filter time domain and history planning", () => {
   });
 
   it("falls back to full-history for unsafe ranges and unsupported Window offsets", () => {
-    const document = analyzed("count(event) gte 1");
+    const document = analyzed("count(EVENT) gte 1");
     expect(
       analyzeFilterHistory(
         document.analysis,

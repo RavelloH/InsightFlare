@@ -41,16 +41,21 @@ export function createDefaultFilterTarget(
     ?.audiences.has(audience)
     ? "event"
     : "page";
-  const relationField = relationEntity === "event" ? "event.name" : "page.path";
+  const relationMember = relationEntity === "event" ? "name" : "path";
+  const relationMemberTarget: FilterTargetExpression = {
+    kind: "member",
+    object: { kind: "context-root", context: "current" },
+    member: relationMember,
+  };
   const firstActivityCondition: FilterExpression = {
     kind: "condition",
-    target: { kind: "field", field: relationField as never },
+    target: relationMemberTarget,
     operator: relationEntity === "event" ? "eq" : "exists",
     ...(relationEntity === "event" ? { value: "signup" } : {}),
   };
   const eventNameCondition: FilterExpression = {
     kind: "condition",
-    target: { kind: "field", field: relationField as never },
+    target: relationMemberTarget,
     operator: relationEntity === "event" ? "eq" : "exists",
     ...(relationEntity === "event" ? { value: "signup" } : {}),
   };
@@ -68,7 +73,7 @@ export function createDefaultFilterTarget(
         collection: { kind: "entity-root", entity: relationEntity },
         predicate: {
           kind: "condition",
-          target: { kind: "field", field: relationField as never },
+          target: relationMemberTarget,
           operator: relationEntity === "event" ? "eq" : "exists",
           ...(relationEntity === "event" ? { value: "purchase" } : {}),
         },
@@ -90,6 +95,8 @@ export function createDefaultFilterTarget(
     case "field":
       return { kind, field: firstField as never };
     case "event-payload":
+      return { kind, path: "/value" as never };
+    case "current-payload":
       return { kind, path: "/value" as never };
     case "entity-root":
       return { kind, entity: relationEntity };
@@ -120,7 +127,7 @@ export function createDefaultFilterTarget(
         kind: "context-intrinsic",
         context: "sequence",
         intrinsic: "same",
-        input: { kind: "event-payload", path: "/productId" as never },
+        input: { kind: "current-payload", path: "/productId" as never },
       };
     case "period-items":
       return {
@@ -140,7 +147,11 @@ export function createDefaultFilterTarget(
     case "member":
       return {
         kind,
-        object: { kind: "entity-root", entity: "page" },
+        object: {
+          kind: "reducer",
+          reducer: "first",
+          input: { kind: "entity-root", entity: "page" },
+        },
         member: "path",
       };
     case "selector":
@@ -547,7 +558,8 @@ export function filterValueKindForTarget(
     return (
       analyticsFilterRegistry.get(target.field)?.valueKind ?? "json-scalar"
     );
-  if (target.kind === "event-payload") return "json-scalar";
+  if (target.kind === "event-payload" || target.kind === "current-payload")
+    return "json-scalar";
   if (target.kind === "occurrence-time") return "datetime";
   if (target.kind === "context-intrinsic") {
     if (target.intrinsic === "same") return "boolean";

@@ -47,6 +47,7 @@ import {
   type FilterTimeAnchorTarget,
   type FilterValue,
   type FilterValueKind,
+  resolveEntityMember,
 } from "@/lib/filter-contract/index";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
@@ -162,6 +163,33 @@ function sequenceStepEntity(
   target: FilterTargetExpression,
 ): "event" | "page" | undefined {
   return occurrenceEntity(target);
+}
+
+function currentMemberPath(target: FilterTargetExpression): string | undefined {
+  const parts: string[] = [];
+  let current = target;
+  while (current.kind === "member") {
+    parts.unshift(current.member);
+    current = current.object;
+  }
+  return current.kind === "context-root" && current.context === "current"
+    ? parts.join(".")
+    : undefined;
+}
+
+function memberPathForField(field: string): string {
+  return /^(event|page|session|visitor)\./u.test(field)
+    ? field.slice(field.indexOf(".") + 1)
+    : field;
+}
+
+function currentMemberTarget(path: string): FilterTargetExpression {
+  return path
+    .split(".")
+    .reduce<FilterTargetExpression>(
+      (object, member) => ({ kind: "member", object, member }),
+      { kind: "context-root", context: "current" },
+    );
 }
 
 function conditionForIntrinsic(
@@ -640,15 +668,25 @@ function ConditionEditor({
   const nestedEntityRoot = condition.entityPredicate
     ? entityRootForTarget(advancedTarget)
     : undefined;
+  const boundMemberPath =
+    entityRoot && advancedCondition
+      ? currentMemberPath(advancedCondition.target)
+      : undefined;
+  const boundMember = boundMemberPath
+    ? resolveEntityMember(entityRoot!, boundMemberPath, analyticsFilterRegistry)
+    : undefined;
   const advancedField = advancedCondition
-    ? advancedFilterFieldValueForTarget(advancedCondition.target)
+    ? (boundMember?.fieldId ??
+      advancedFilterFieldValueForTarget(advancedCondition.target))
     : condition.field;
   const field =
-    advancedCondition?.target.kind === "field"
+    boundMember?.fieldId ??
+    (advancedCondition?.target.kind === "field"
       ? advancedCondition.target.field
-      : advancedCondition?.target.kind === "event-payload"
+      : advancedCondition?.target.kind === "event-payload" ||
+          advancedCondition?.target.kind === "current-payload"
         ? "event.payload"
-        : condition.field;
+        : condition.field);
   const definition = analyticsFilterRegistry.get(field);
   const fields = useMemo(() => {
     return allowedFields(audience, observationOnly, entityRoot);
@@ -663,7 +701,13 @@ function ConditionEditor({
     [entityRoot],
   );
   const operators = advancedCondition
-    ? filterOperatorsForTarget(advancedCondition.target)
+    ? [
+        ...(boundMember?.definition.operators ??
+          (advancedCondition.target.kind === "current-payload"
+            ? definition?.operators
+            : undefined) ??
+          filterOperatorsForTarget(advancedCondition.target)),
+      ]
     : [...(definition?.operators ?? [])];
   const groupedFields = useMemo(
     () =>
@@ -782,7 +826,10 @@ function ConditionEditor({
         ? "boolean"
         : condition.scalarKind;
   const editorValueKind: FilterValueKind = advancedTarget
-    ? filterValueKindForTarget(advancedTarget)
+    ? (boundMember?.definition.valueKind ??
+      (advancedTarget.kind === "current-payload"
+        ? (definition?.valueKind ?? "json-scalar")
+        : filterValueKindForTarget(advancedTarget)))
     : isPayload
       ? scalarKind
       : (definition?.valueKind ?? "string");
@@ -812,12 +859,12 @@ function ConditionEditor({
   const valueIsBoolean =
     needsValue &&
     ((advancedTarget
-      ? filterValueKindForTarget(advancedTarget) === "boolean"
+      ? editorValueKind === "boolean"
       : definition?.valueKind === "boolean") ||
       (isPayload && scalarKind === "boolean"));
   const valueIsNumber =
     (advancedTarget
-      ? filterValueKindForTarget(advancedTarget) === "number"
+      ? editorValueKind === "number"
       : definition?.valueKind === "number") ||
     (isPayload && scalarKind === "number");
   const valueIsRange = operator === "between";
@@ -889,6 +936,36 @@ function ConditionEditor({
   const setField = (field: string) => {
     const registeredTarget = filterPickerTargetForValue(field);
     const advancedTargetKind = advancedFilterTargetKindFromField(field);
+    if (entityRoot && !registeredTarget && !advancedTargetKind) {
+      const fieldDefinition = analyticsFilterRegistry.get(field);
+      const memberPath = memberPathForField(field);
+      const resolvedMember = resolveEntityMember(
+        entityRoot,
+        memberPath,
+        analyticsFilterRegistry,
+      );
+      if (!fieldDefinition || !resolvedMember) return;
+      const operator = firstOperator(fieldDefinition);
+      const target: FilterTargetExpression =
+        field === "event.payload" && entityRoot === "event"
+          ? { kind: "current-payload", path: "" as never }
+          : currentMemberTarget(memberPath);
+      onChange((current) => ({
+        ...current,
+        field,
+        operator,
+        value: undefined,
+        listValues: undefined,
+        valueText: "",
+        scalarKind: "string",
+        valueDirty: false,
+        payloadPath: "",
+        advancedExpression: { kind: "condition", target, operator },
+        entityPredicate: undefined,
+        advancedText: undefined,
+      }));
+      return;
+    }
     if (registeredTarget || advancedTargetKind || field === "__advanced__") {
       const nextCondition = registeredTarget
         ? createFilterPickerTargetCondition(
@@ -1515,10 +1592,15 @@ function ConditionEditor({
             </Label>
             <Select
               value={
-                intrinsicTarget.input.kind === "event-payload"
+                intrinsicTarget.input.kind === "event-payload" ||
+                intrinsicTarget.input.kind === "current-payload"
                   ? "event.payload"
-                  : intrinsicTarget.input.kind === "field"
-                    ? intrinsicTarget.input.field
+                  : currentMemberPath(intrinsicTarget.input)
+                    ? (sameFieldOptions.find(
+                        (field) =>
+                          memberPathForField(field.id) ===
+                          currentMemberPath(intrinsicTarget.input),
+                      )?.id ?? "")
                     : ""
               }
               onValueChange={(value) => {
@@ -1527,9 +1609,9 @@ function ConditionEditor({
                   replaceAdvancedTarget(intrinsicTarget, {
                     ...intrinsicTarget,
                     input: {
-                      kind: "event-payload",
+                      kind: "current-payload",
                       path:
-                        intrinsicTarget.input.kind === "event-payload"
+                        intrinsicTarget.input.kind === "current-payload"
                           ? intrinsicTarget.input.path
                           : ("/productId" as never),
                     },
@@ -1539,7 +1621,7 @@ function ConditionEditor({
                 if (sameFieldOptions.some((field) => field.id === value))
                   replaceAdvancedTarget(intrinsicTarget, {
                     ...intrinsicTarget,
-                    input: { kind: "field", field: value as never },
+                    input: currentMemberTarget(memberPathForField(value)),
                   });
               }}
             >
@@ -1560,7 +1642,8 @@ function ConditionEditor({
               </SelectContent>
             </Select>
           </div>
-          {intrinsicTarget.input.kind === "event-payload" ? (
+          {intrinsicTarget.input.kind === "event-payload" ||
+          intrinsicTarget.input.kind === "current-payload" ? (
             <div className="space-y-1">
               <Label>{messages.filterBuilder.advancedEditor.jsonPointer}</Label>
               <Input
@@ -1570,7 +1653,11 @@ function ConditionEditor({
                 }
                 onChange={(event) => {
                   const input = intrinsicTarget.input;
-                  if (input.kind !== "event-payload") return;
+                  if (
+                    input.kind !== "event-payload" &&
+                    input.kind !== "current-payload"
+                  )
+                    return;
                   replaceAdvancedTarget(intrinsicTarget, {
                     ...intrinsicTarget,
                     input: { ...input, path: event.target.value as never },
@@ -1764,7 +1851,8 @@ function ConditionEditor({
               onChange((current) => ({
                 ...current,
                 payloadPath,
-                ...(advancedCondition?.target.kind === "event-payload"
+                ...(advancedCondition?.target.kind === "event-payload" ||
+                advancedCondition?.target.kind === "current-payload"
                   ? {
                       advancedExpression: {
                         ...advancedCondition,
@@ -1792,7 +1880,8 @@ function ConditionEditor({
                       valueDirty: true,
                     }
                   : {}),
-                ...(advancedCondition?.target.kind === "event-payload"
+                ...(advancedCondition?.target.kind === "event-payload" ||
+                advancedCondition?.target.kind === "current-payload"
                   ? {
                       advancedExpression: {
                         ...advancedCondition,

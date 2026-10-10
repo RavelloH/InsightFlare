@@ -43,6 +43,20 @@ describe("filter DSL v1", () => {
     }
   });
 
+  it("reports precise errors for malformed current-member and context syntax", () => {
+    for (const [source, code] of [
+      ["$.time exists", "invalid_member"],
+      ["$.payload(1) exists", "expected_payload_path"],
+      ['$.payload("/id" exists', "missing_payload_parenthesis"],
+      ["$gap(foo, 2) exists", "invalid_sequence_gap"],
+      ["$gap(1 2) exists", "invalid_sequence_gap"],
+      ['$same($.name eq "x"', "invalid_context_intrinsic_arguments"],
+      ["time(EVENT", "invalid_occurrence_time_arguments"],
+    ] as const) {
+      expect(parseError(source), source).toMatchObject({ code });
+    }
+  });
+
   it("exposes version 1 and round-trips the dashboard expression syntax", () => {
     const source =
       'page.path eq "/pricing" AND (referrer.domain eq "google.com" OR NOT client.deviceType in ["Mobile", "Tablet"])';
@@ -58,16 +72,92 @@ describe("filter DSL v1", () => {
     ).toEqual(document);
   });
 
+  it("keeps fields, entity collections, current members, and projections distinct", () => {
+    const registeredField = parseFilterDsl(
+      'page.path eq "/docs"',
+      analyticsFilterRegistry,
+    );
+    expect(registeredField.root).toMatchObject({
+      kind: "condition",
+      target: { kind: "field", field: "page.path" },
+    });
+
+    expect(
+      parseFilterDsl("PAGE exists", analyticsFilterRegistry).root,
+    ).toMatchObject({
+      kind: "condition",
+      target: { kind: "entity-root", entity: "page" },
+    });
+    expect(
+      parseFilterDsl("count(EVENT) gte 3", analyticsFilterRegistry).root,
+    ).toMatchObject({
+      kind: "condition",
+      target: {
+        kind: "reducer",
+        input: { kind: "entity-root", entity: "event" },
+      },
+    });
+
+    const selected = parseFilterDsl(
+      'PAGE { $.path startsWith "/docs" } exists',
+      analyticsFilterRegistry,
+    );
+    expect(selected.root).toMatchObject({
+      kind: "condition",
+      target: {
+        kind: "selector",
+        collection: { kind: "entity-root", entity: "page" },
+        predicate: {
+          kind: "condition",
+          target: {
+            kind: "member",
+            object: { kind: "context-root", context: "current" },
+            member: "path",
+          },
+        },
+      },
+    });
+
+    expect(
+      formatFilterDsl(
+        parseFilterDsl(
+          'sum(EVENT { $.name eq "purchase" } -> payload("/amount")) gt 1000',
+          analyticsFilterRegistry,
+        ),
+      ),
+    ).toBe('sum(EVENT { $.name eq "purchase" } -> payload("/amount")) gt 1000');
+    expect(
+      formatFilterDsl(
+        parseFilterDsl('first(PAGE).path eq "/docs"', analyticsFilterRegistry),
+      ),
+    ).toBe('first(PAGE).path eq "/docs"');
+
+    for (const source of [
+      "page exists",
+      "Page exists",
+      'PAGE.path eq "/docs"',
+      'PAGE { page.path eq "/docs" } exists',
+      'PAGE { event.name eq "purchase" } exists',
+      'sum(event.payload("/amount")) gt 1000',
+      'EVENT { $.name eq "purchase" }.payload("/amount") exists',
+    ]) {
+      expect(
+        () => parseFilterDsl(source, analyticsFilterRegistry),
+        source,
+      ).toThrow();
+    }
+  });
+
   it("round-trips Core selectors, reducers, projections, and relative time", () => {
     const source =
-      'count(event { event.name eq "purchase" AND event.payload("/plan") eq "pro" }) gte 2 AND time gte @now-14d';
+      'count(EVENT { $.name eq "purchase" AND $.payload("/plan") eq "pro" }) gte 2 AND time gte @now-14d';
     const document = parseFilterDsl(source, analyticsFilterRegistry);
     analyzeFilterDocument(document, analyticsFilterRegistry);
     const formatted = formatFilterDsl(document);
 
     expect(document.version).toBe(1);
     expect(formatted).toContain(
-      'count(event { event.name eq "purchase" AND event.payload("/plan") eq "pro" }) gte 2',
+      'count(EVENT { $.name eq "purchase" AND $.payload("/plan") eq "pro" }) gte 2',
     );
     expect(formatted).toContain("time gte @now-14d");
     expect(parseFilterDsl(formatted, analyticsFilterRegistry)).toEqual(
@@ -78,7 +168,7 @@ describe("filter DSL v1", () => {
   it("round-trips duration and request-clock between ranges", () => {
     for (const source of [
       "time between [@now-30d, @now]",
-      "countDistinct(bucket(page, 1d)) gte 10",
+      "countDistinct(bucket(PAGE, 1d)) gte 10",
     ]) {
       const document = parseFilterDsl(source, analyticsFilterRegistry);
       analyzeFilterDocument(document, analyticsFilterRegistry);
@@ -94,14 +184,14 @@ describe("filter DSL v1", () => {
 
   it("round-trips windows, periods, and ordered Relation steps", () => {
     const source =
-      'window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }), [0d, 7d]) notExists AND sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { $span lte 30d } exists AND periods(event, 1w) { count($items) gte 3 } exists';
+      'window(EVENT { $.name eq "refund" }, first(EVENT { $.name eq "purchase" }), [0d, 7d]) notExists AND sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) { $span lte 30d } exists AND periods(EVENT, 1w) { count($items) gte 3 } exists';
     const document = parseFilterDsl(source, analyticsFilterRegistry);
     analyzeFilterDocument(document, analyticsFilterRegistry);
     const formatted = formatFilterDsl(document);
 
     expect(formatted).toContain("[0d, 7d]");
     expect(formatted).toContain(
-      'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }])',
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }])',
     );
     expect(formatted).toContain("$span lte 30d");
     expect(formatted).toContain("count($items) gte 3");
@@ -112,12 +202,12 @@ describe("filter DSL v1", () => {
 
   it("round-trips contextual intrinsics and occurrence timestamps", () => {
     const sources = [
-      "time(first(event)) gte @now-14d",
-      "time(last(page)) between [@now-30d, @now]",
-      'time(nth(event { event.name eq "insight_saved" }, 3)) gte @now-30d',
-      'sequence([event { event.name eq "signup" }, event { event.name eq "project_created" }, event { event.name eq "purchase" }]) { $span lte 14d AND $gap(1, 2) lte 1d AND $gap(2, 3) lte 7d AND $same(event.payload("/productId")) } exists',
-      "periods(event, 1w) { count($items) gte 3 } exists",
-      'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) { $span lte 30d AND count(periods(event, 1w) { count($items) gte 3 }) gte 1 } exists',
+      "time(first(EVENT)) gte @now-14d",
+      "time(last(PAGE)) between [@now-30d, @now]",
+      'time(nth(EVENT { $.name eq "insight_saved" }, 3)) gte @now-30d',
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "project_created" }, EVENT { $.name eq "purchase" }]) { $span lte 14d AND $gap(1, 2) lte 1d AND $gap(2, 3) lte 7d AND $same($.payload("/productId")) } exists',
+      "periods(EVENT, 1w) { count($items) gte 3 } exists",
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) { $span lte 30d AND count(periods(EVENT, 1w) { count($items) gte 3 }) gte 1 } exists',
     ];
     for (const source of sources) {
       const document = parseFilterDsl(source, analyticsFilterRegistry);
@@ -135,18 +225,18 @@ describe("filter DSL v1", () => {
       ["$x eq 1", "unknown_context_intrinsic"],
       ["$span lte 7d", "context_intrinsic_outside_sequence"],
       ["count($items) gte 1", "context_intrinsic_outside_period"],
-      ['$same(event.payload("/id"))', "context_intrinsic_outside_sequence"],
-      ["time(event) exists", "occurrence_time_type_mismatch"],
-      ["time(page) exists", "occurrence_time_type_mismatch"],
-      ["time(session) exists", "occurrence_time_type_mismatch"],
-      ["time(visitor) exists", "occurrence_time_type_mismatch"],
-      ["time(first(session)) exists", "occurrence_time_type_mismatch"],
-      ["time(first(visitor)) exists", "occurrence_time_type_mismatch"],
-      ["event { time gte @now-7d } exists", "invalid_time_scope"],
+      ['$same($.payload("/id"))', "context_intrinsic_outside_sequence"],
+      ["time(EVENT) exists", "occurrence_time_type_mismatch"],
+      ["time(PAGE) exists", "occurrence_time_type_mismatch"],
+      ["time(SESSION) exists", "occurrence_time_type_mismatch"],
+      ["time(VISITOR) exists", "occurrence_time_type_mismatch"],
+      ["time(first(SESSION)) exists", "occurrence_time_type_mismatch"],
+      ["time(first(VISITOR)) exists", "occurrence_time_type_mismatch"],
+      ["EVENT { time gte @now-7d } exists", "invalid_time_scope"],
       ["NOT time gte @now-7d", "invalid_time_scope"],
       ["time gte @now-7d OR event.name exists", "invalid_time_scope"],
       [
-        'sequence([event, page]) { $same(event.payload("/id")) } exists',
+        'sequence([EVENT, PAGE]) { $same($.payload("/id")) } exists',
         "same_value_entity_mismatch",
       ],
     ];
@@ -157,12 +247,12 @@ describe("filter DSL v1", () => {
       ).toThrow(expect.objectContaining({ code }));
 
     for (const source of [
-      "sequence([event, event, event]) { $gap(0, 1) lte 1d } exists",
-      "sequence([event, event, event]) { $gap(2, 2) lte 1d } exists",
-      "sequence([event, event, event]) { $gap(3, 1) lte 1d } exists",
-      "sequence([event, event, event]) { $gap(1, 4) lte 1d } exists",
-      "sequence([event, event, event]) { $gap(1, 1.5) lte 1d } exists",
-      "sequence([event, event, event]) { $gap(1, count(event)) lte 1d } exists",
+      "sequence([EVENT, EVENT, EVENT]) { $gap(0, 1) lte 1d } exists",
+      "sequence([EVENT, EVENT, EVENT]) { $gap(2, 2) lte 1d } exists",
+      "sequence([EVENT, EVENT, EVENT]) { $gap(3, 1) lte 1d } exists",
+      "sequence([EVENT, EVENT, EVENT]) { $gap(1, 4) lte 1d } exists",
+      "sequence([EVENT, EVENT, EVENT]) { $gap(1, 1.5) lte 1d } exists",
+      "sequence([EVENT, EVENT, EVENT]) { $gap(1, count(EVENT)) lte 1d } exists",
     ])
       expect(
         () => parseFilterDsl(source, analyticsFilterRegistry),
@@ -558,30 +648,27 @@ describe("filter DSL v1", () => {
 
   it("reports malformed function arguments at their syntax boundary", () => {
     const cases: readonly [string, string][] = [
-      ["sequence(event)", "expected_sequence_steps"],
+      ["sequence(EVENT)", "expected_sequence_steps"],
+      ['sequence([EVENT { $.name eq "signup" }] exists', "invalid_sequence"],
+      ["window(PAGE, @now [0d, 1d]) exists", "expected_duration_range"],
+      ["window(PAGE, @now, 1d) exists", "expected_duration_range"],
+      ["window(PAGE, @now, [0d 1d]) exists", "expected_argument_separator"],
+      ["window(PAGE, @now, [0d, 1d] exists", "invalid_window"],
+      ['window(PAGE, @now, ["0d", 1d]) exists', "expected_duration"],
+      ["bucket(PAGE 1d) exists", "expected_argument_separator"],
+      ['bucket(PAGE, "1d") exists', "expected_duration"],
+      ["bucket(PAGE, 1d exists", "missing_closing_parenthesis"],
+      ["first(PAGE, EVENT) exists", "unexpected_argument"],
+      ["add(PAGE) exists", "missing_argument"],
       [
-        'sequence([event { event.name eq "signup" }] exists',
-        "invalid_sequence",
-      ],
-      ["window(page, @now [0d, 1d]) exists", "expected_duration_range"],
-      ["window(page, @now, 1d) exists", "expected_duration_range"],
-      ["window(page, @now, [0d 1d]) exists", "expected_argument_separator"],
-      ["window(page, @now, [0d, 1d] exists", "invalid_window"],
-      ['window(page, @now, ["0d", 1d]) exists', "expected_duration"],
-      ["bucket(page 1d) exists", "expected_argument_separator"],
-      ['bucket(page, "1d") exists', "expected_duration"],
-      ["bucket(page, 1d exists", "missing_closing_parenthesis"],
-      ["first(page, event) exists", "unexpected_argument"],
-      ["add(page) exists", "missing_argument"],
-      [
-        'adjacent(sequence([event { event.name eq "signup" }, page]), page) exists',
+        'adjacent(sequence([EVENT { $.name eq "signup" }, PAGE]), PAGE) exists',
         "unexpected_argument",
       ],
       [
-        'without(sequence([event { event.name eq "signup" }, page])) exists',
+        'without(sequence([EVENT { $.name eq "signup" }, PAGE])) exists',
         "missing_argument",
       ],
-      ["unknownFunction(page) exists", "unknown_function"],
+      ["unknownFunction(PAGE) exists", "unknown_function"],
     ];
 
     for (const [source, code] of cases) {
@@ -592,21 +679,18 @@ describe("filter DSL v1", () => {
   it("covers selector, projected payload, nth, and temporal syntax boundaries", () => {
     const cases: readonly [string, string][] = [
       ['"not a target" eq "value"', "expected_identifier"],
-      ['event { event.name eq "purchase"', "missing_selector_brace"],
+      ['EVENT { $.name eq "purchase"', "missing_selector_brace"],
+      ["EVENT { $.name exists } -> payload(1) exists", "expected_payload_path"],
       [
-        "event { event.name exists }.payload(1) exists",
-        "expected_payload_path",
-      ],
-      [
-        'event { event.name eq "purchase" }.payload("/kind" eq "sale"',
+        'EVENT { $.name eq "purchase" } -> payload("/kind" eq "sale"',
         "missing_payload_parenthesis",
       ],
-      ["nth(event, 0) exists", "invalid_index"],
-      ["nth(event, 1 exists", "missing_closing_parenthesis"],
-      ["count(event exists", "missing_closing_parenthesis"],
-      ["window(page @now [0d, 1d]) exists", "expected_argument_separator"],
-      ["window(page, @now 1d) exists", "expected_duration_range"],
-      ["periods(page, 1d exists", "missing_closing_parenthesis"],
+      ["nth(EVENT, 0) exists", "invalid_index"],
+      ["nth(EVENT, 1 exists", "missing_closing_parenthesis"],
+      ["count(EVENT exists", "missing_closing_parenthesis"],
+      ["window(PAGE @now [0d, 1d]) exists", "expected_argument_separator"],
+      ["window(PAGE, @now 1d) exists", "expected_duration_range"],
+      ["periods(PAGE, 1d exists", "missing_closing_parenthesis"],
     ];
 
     for (const [source, code] of cases) {
@@ -614,11 +698,11 @@ describe("filter DSL v1", () => {
     }
 
     const projectedPayload = parseFilterDsl(
-      'event { event.name eq "purchase" }.payload("/kind") exists',
+      'EVENT { $.name eq "purchase" } -> payload("/kind") exists',
       analyticsFilterRegistry,
     );
     expect(formatFilterDsl(projectedPayload)).toContain(
-      '.payload("/kind") exists',
+      '-> payload("/kind") exists',
     );
 
     const timeField = parseFilterDsl(
@@ -639,7 +723,7 @@ describe("filter DSL v1", () => {
         },
         'event.payload("/plan")',
       ],
-      [{ kind: "entity-root", entity: "visitor" }, "visitor"],
+      [{ kind: "entity-root", entity: "visitor" }, "VISITOR"],
       [{ kind: "context-root", context: "current" }, ""],
       [{ kind: "context-root", context: "sequence" }, "sequence"],
       [
@@ -660,7 +744,35 @@ describe("filter DSL v1", () => {
             operator: "exists",
           },
         },
-        "page { page.path exists }",
+        "PAGE { $.path exists }",
+      ],
+      [
+        {
+          kind: "selector",
+          collection: { kind: "entity-root", entity: "page" },
+          predicate: {
+            kind: "condition",
+            target: { kind: "field", field: "geo.country" as FilterFieldId },
+            operator: "eq",
+            value: "US",
+          },
+        },
+        'PAGE { $.geo.country eq "US" }',
+      ],
+      [
+        {
+          kind: "selector",
+          collection: { kind: "entity-root", entity: "event" },
+          predicate: {
+            kind: "condition",
+            target: {
+              kind: "event-payload",
+              path: "/amount" as CanonicalJsonPath,
+            },
+            operator: "exists",
+          },
+        },
+        'EVENT { $.payload("/amount") exists }',
       ],
       [
         {
@@ -668,7 +780,7 @@ describe("filter DSL v1", () => {
           collection: { kind: "entity-root", entity: "page" },
           member: "path",
         },
-        "page.path",
+        "PAGE -> path",
       ],
       [
         {
@@ -676,7 +788,7 @@ describe("filter DSL v1", () => {
           reducer: "count",
           input: { kind: "entity-root", entity: "event" },
         },
-        "count(event)",
+        "count(EVENT)",
       ],
       [
         {
@@ -685,7 +797,7 @@ describe("filter DSL v1", () => {
           input: { kind: "entity-root", entity: "event" },
           index: 2,
         },
-        "nth(event, 2)",
+        "nth(EVENT, 2)",
       ],
       [
         {
@@ -702,7 +814,69 @@ describe("filter DSL v1", () => {
             input: { kind: "entity-root", entity: "page" },
           },
         },
-        "add(count(event), count(page))",
+        "add(count(EVENT), count(PAGE))",
+      ],
+      [
+        {
+          kind: "member",
+          object: { kind: "context-root", context: "current" },
+          member: "geo.country",
+        },
+        "$.geo.country",
+      ],
+      [
+        {
+          kind: "current-payload",
+          path: "/productId" as CanonicalJsonPath,
+        },
+        '$.payload("/productId")',
+      ],
+      [
+        { kind: "context-intrinsic", context: "sequence", intrinsic: "span" },
+        "$span",
+      ],
+      [
+        { kind: "context-intrinsic", context: "period", intrinsic: "items" },
+        "$items",
+      ],
+      [
+        {
+          kind: "member",
+          object: { kind: "context-root", context: "sequence" },
+          member: "span",
+        },
+        "$span",
+      ],
+      [
+        {
+          kind: "member",
+          object: { kind: "context-root", context: "period" },
+          member: "items",
+        },
+        "$items",
+      ],
+      [
+        {
+          kind: "context-intrinsic",
+          context: "sequence",
+          intrinsic: "gap",
+          from: 1,
+          to: 3,
+        },
+        "$gap(1, 3)",
+      ],
+      [
+        {
+          kind: "context-intrinsic",
+          context: "sequence",
+          intrinsic: "same",
+          input: {
+            kind: "member",
+            object: { kind: "context-root", context: "current" },
+            member: "name",
+          },
+        },
+        "$same($.name)",
       ],
       [duration, "2d"],
       [{ kind: "time-anchor", anchor: "now" }, "@now"],
@@ -724,7 +898,7 @@ describe("filter DSL v1", () => {
           input: { kind: "entity-root", entity: "page" },
           interval: duration,
         },
-        "bucket(page, 2d)",
+        "bucket(PAGE, 2d)",
       ],
       [
         {
@@ -734,7 +908,7 @@ describe("filter DSL v1", () => {
           startOffset: duration,
           endOffset: { kind: "duration", amount: 5, unit: "d" },
         },
-        "window(event, @now, [2d, 5d])",
+        "window(EVENT, @now, [2d, 5d])",
       ],
       [
         {
@@ -742,11 +916,11 @@ describe("filter DSL v1", () => {
           collection: { kind: "entity-root", entity: "page" },
           interval: duration,
         },
-        "periods(page, 2d)",
+        "periods(PAGE, 2d)",
       ],
       [
         { kind: "sequence", steps: [{ kind: "entity-root", entity: "event" }] },
-        "sequence([event])",
+        "sequence([EVENT])",
       ],
       [
         { kind: "adjacent", sequence: { kind: "sequence", steps: [] } },
@@ -758,7 +932,7 @@ describe("filter DSL v1", () => {
           sequence: { kind: "sequence", steps: [] },
           excluded: { kind: "entity-root", entity: "page" },
         },
-        "without(sequence([]), page)",
+        "without(sequence([]), PAGE)",
       ],
     ];
 

@@ -1,9 +1,11 @@
+import { resolveEntityMember } from "./filter-members";
 import { filterConditionEntity } from "./filter-registry";
 import type { FilterRelationScope } from "./filter-types";
 import {
   type FilterScalarType,
   type FilterSemanticValueType,
   inferFilterTargetType,
+  validateBoundFilterConditionTypes,
   validateFilterExpressionTypes,
 } from "./filter-types";
 import type {
@@ -15,6 +17,9 @@ import type {
   FilterTargetExpression,
 } from "./filters";
 import { FilterValidationError, isLegacyFilterTarget } from "./filters";
+
+export type { ResolvedEntityMember } from "./filter-members";
+export { resolveEntityMember } from "./filter-members";
 
 export interface FilterConditionSemantics {
   readonly valueType: FilterSemanticValueType;
@@ -219,6 +224,7 @@ type NativeEntity = "page" | "event" | "session" | "visitor" | "activity";
 function fieldIdForTarget(target: FilterTargetExpression): string | undefined {
   if (target.kind === "field") return target.field;
   if (target.kind === "event-payload") return "event.payload";
+  if (target.kind === "current-payload") return "event.payload";
   if (target.kind === "projection" && target.member === "payload")
     return "event.payload";
   if (target.kind !== "member") return undefined;
@@ -240,15 +246,6 @@ function fieldIdForTarget(target: FilterTargetExpression): string | undefined {
   return undefined;
 }
 
-const ENTITY_NAMESPACES = new Set([
-  "geo",
-  "client",
-  "referrer",
-  "utm",
-  "user",
-  "performance",
-]);
-
 function entityCollection(target: FilterTargetExpression): string | undefined {
   if (target.kind === "entity-root") return target.entity;
   if (target.kind === "selector") return entityCollection(target.collection);
@@ -260,11 +257,232 @@ function entityCollection(target: FilterTargetExpression): string | undefined {
   return undefined;
 }
 
-function eventPayloadCollection(target: FilterTargetExpression): boolean {
-  if (target.kind === "entity-root") return target.entity === "event";
+function isSingleEntity(target: FilterTargetExpression): boolean {
   return (
-    target.kind === "selector" && eventPayloadCollection(target.collection)
+    target.kind === "reducer" &&
+    ["first", "last", "nth"].includes(target.reducer) &&
+    entityCollection(target.input) !== undefined
   );
+}
+
+function currentMemberPath(target: FilterTargetExpression): string[] | null {
+  const members: string[] = [];
+  let base = target;
+  while (base.kind === "member") {
+    members.unshift(base.member);
+    base = base.object;
+  }
+  return base.kind === "context-root" && base.context === "current"
+    ? members
+    : null;
+}
+
+function fieldForCurrentEntity(
+  entity: string,
+  memberPath: string,
+  registry: FilterFieldRegistry,
+): string | undefined {
+  return resolveEntityMember(entity, memberPath, registry)?.fieldId;
+}
+
+function validateCurrentEntityBindings(
+  document: FilterDocument,
+  registry: FilterFieldRegistry,
+): void {
+  const invalid = (path: string, message: string): never => {
+    throw new FilterValidationError("invalid_context_member", path, message);
+  };
+  const validateTarget = (
+    target: FilterTargetExpression,
+    currentEntity: string | undefined,
+    path: string,
+  ): void => {
+    if (currentEntity && target.kind === "field")
+      invalid(
+        path,
+        `Entity selector predicates must use current-member references such as $.${target.field.split(".").slice(1).join(".") || target.field}.`,
+      );
+    if (currentEntity && target.kind === "event-payload")
+      invalid(path, "Use $.payload(...) inside an Event selector.");
+    if (target.kind === "current-payload") {
+      if (currentEntity !== "event")
+        invalid(path, "$.payload(...) is only valid in an Event context.");
+      return;
+    }
+    if (target.kind === "member") {
+      const currentPath = currentMemberPath(target);
+      if (currentPath) {
+        const boundEntity = currentEntity;
+        // `time` is a dedicated temporal expression represented with the
+        // current context root for execution. It keeps its historical scope
+        // rules and is intentionally not exposed as `$.time` by the DSL.
+        if (currentPath.length === 1 && currentPath[0] === "time") return;
+        if (!boundEntity)
+          return invalid(
+            path,
+            "Current entity members require an active entity selector.",
+          );
+        const memberPath = currentPath.join(".");
+        if (!fieldForCurrentEntity(boundEntity, memberPath, registry))
+          invalid(
+            path,
+            `Member '${memberPath}' is not registered for ${currentEntity}.`,
+          );
+        return;
+      }
+    }
+    if (target.kind === "context-root" && target.context === "current")
+      invalid(
+        path,
+        "The current entity root is only valid as a member reference.",
+      );
+    if (target.kind === "selector") {
+      validateTarget(target.collection, currentEntity, `${path}.collection`);
+      const entity = entityCollection(target.collection);
+      validateExpression(
+        target.predicate,
+        entity ?? currentEntity,
+        `${path}.predicate`,
+      );
+      return;
+    }
+    switch (target.kind) {
+      case "member":
+        validateTarget(target.object, currentEntity, `${path}.object`);
+        break;
+      case "context-intrinsic":
+        // $same has a per-step binding and is validated against every step in
+        // validateContextIntrinsicScopes below.
+        break;
+      case "occurrence-time":
+        validateTarget(target.input, currentEntity, `${path}.input`);
+        break;
+      case "projection":
+        validateTarget(target.collection, currentEntity, `${path}.collection`);
+        break;
+      case "reducer":
+        validateTarget(target.input, currentEntity, `${path}.input`);
+        break;
+      case "arithmetic":
+        validateTarget(target.left, currentEntity, `${path}.left`);
+        validateTarget(target.right, currentEntity, `${path}.right`);
+        break;
+      case "bucket":
+        validateTarget(target.input, currentEntity, `${path}.input`);
+        break;
+      case "window":
+        validateTarget(target.collection, currentEntity, `${path}.collection`);
+        validateTarget(target.anchor, currentEntity, `${path}.anchor`);
+        break;
+      case "periods":
+        validateTarget(target.collection, currentEntity, `${path}.collection`);
+        break;
+      case "sequence":
+        target.steps.forEach((step, index) =>
+          validateTarget(step, currentEntity, `${path}.steps[${index}]`),
+        );
+        break;
+      case "adjacent":
+        validateTarget(target.sequence, currentEntity, `${path}.sequence`);
+        break;
+      case "without":
+        validateTarget(target.sequence, currentEntity, `${path}.sequence`);
+        validateTarget(target.excluded, currentEntity, `${path}.excluded`);
+        break;
+      case "field":
+      case "event-payload":
+      case "entity-root":
+      case "context-root":
+      case "duration":
+      case "time-anchor":
+        break;
+    }
+  };
+  const validateExpression = (
+    expression: FilterExpression,
+    currentEntity: string | undefined,
+    path: string,
+  ): void => {
+    if (expression.kind === "condition") {
+      validateTarget(expression.target, currentEntity, `${path}.target`);
+      const memberPath = currentMemberPath(expression.target);
+      const scopedEntity = currentEntity;
+      if (
+        scopedEntity &&
+        memberPath &&
+        !(memberPath.length === 1 && memberPath[0] === "time")
+      ) {
+        const memberName = memberPath.join(".");
+        const resolved = resolveEntityMember(
+          scopedEntity,
+          memberName,
+          registry,
+        );
+        if (resolved && !resolved.definition.operators.has(expression.operator))
+          throw new FilterValidationError(
+            "operator_not_allowed",
+            `${path}.operator`,
+            `Operator is not allowed for ${scopedEntity} member '${memberName}'.`,
+          );
+        if (resolved) {
+          validateBoundFilterConditionTypes(
+            {
+              ...expression,
+              // The public expression remains a lexical member reference.
+              // Use the resolved registry field only for the temporary type
+              // check; an Entity.member AST would be interpreted as an
+              // illegal implicit collection projection by the type checker.
+              target: { kind: "field", field: resolved.fieldId },
+            },
+            registry,
+            path,
+          );
+        }
+      } else if (
+        scopedEntity === "event" &&
+        expression.target.kind === "current-payload"
+      ) {
+        const payload = resolveEntityMember("event", "payload", registry);
+        if (payload && !payload.definition.operators.has(expression.operator))
+          throw new FilterValidationError(
+            "operator_not_allowed",
+            `${path}.operator`,
+            "Operator is not allowed for an Event payload member.",
+          );
+        validateBoundFilterConditionTypes(
+          {
+            ...expression,
+            target: {
+              kind: "event-payload",
+              path: expression.target.path,
+            },
+          },
+          registry,
+          path,
+        );
+      }
+      if (
+        expression.value &&
+        typeof expression.value === "object" &&
+        !Array.isArray(expression.value) &&
+        "kind" in expression.value
+      )
+        validateTarget(
+          expression.value as FilterTargetExpression,
+          currentEntity,
+          `${path}.value`,
+        );
+      return;
+    }
+    if (expression.kind === "not") {
+      validateExpression(expression.child, currentEntity, `${path}.child`);
+      return;
+    }
+    expression.children.forEach((child, index) =>
+      validateExpression(child, currentEntity, `${path}.children[${index}]`),
+    );
+  };
+  if (document.root) validateExpression(document.root, undefined, "root");
 }
 
 function isScopeTimeTarget(target: FilterTargetExpression): boolean {
@@ -305,25 +523,20 @@ function validateMemberWhitelist(
         base = base.object;
       }
       if (base.kind === "context-root") {
-        const allowed =
-          parts.length === 1 &&
-          base.context === "current" &&
-          parts[0] === "time";
-        if (!allowed) invalid(path, parts.join("."));
+        if (base.context !== "current") invalid(path, parts.join("."));
         return;
       }
       const entity = entityCollection(base);
       if (entity) {
         const memberPath = parts.join(".");
+        if (!isSingleEntity(base)) invalid(path, memberPath);
         // `event.payload` is a registered execution strategy, but its JSON
         // object is deliberately not a public member. Callers must project a
         // concrete path with event.payload(path).
         if (entity === "event" && memberPath === "payload")
           invalid(path, memberPath);
-        const exact = registry.has(`${entity}.${memberPath}`);
-        const namespaced =
-          ENTITY_NAMESPACES.has(parts[0] ?? "") && registry.has(memberPath);
-        if (!exact && !namespaced) invalid(path, memberPath);
+        if (!resolveEntityMember(entity, memberPath, registry))
+          invalid(path, memberPath);
       } else {
         invalid(path, parts.join("."));
       }
@@ -332,6 +545,7 @@ function validateMemberWhitelist(
     }
     switch (target.kind) {
       case "event-payload":
+      case "current-payload":
       case "entity-root":
       case "context-root":
       case "duration":
@@ -353,13 +567,14 @@ function validateMemberWhitelist(
         return;
       case "projection": {
         const source = entityCollection(target.collection);
-        if (
-          target.member !== "payload" ||
-          !target.path ||
-          source !== "event" ||
-          !eventPayloadCollection(target.collection)
-        )
-          invalid(path, target.member);
+        if (target.member === "payload") {
+          if (!target.path || source !== "event") invalid(path, target.member);
+        } else {
+          if (target.path !== undefined) invalid(path, target.member);
+          if (typeof source !== "string") invalid(path, target.member);
+          if (!resolveEntityMember(source as string, target.member, registry))
+            invalid(path, target.member);
+        }
         validateTarget(target.collection, `${path}.collection`);
         return;
       }
@@ -579,37 +794,41 @@ function validateContextIntrinsicScopes(
       failContext(
         "same_value_type_mismatch",
         path,
-        "$same requires a registered scalar field or event.payload(path).",
+        "$same requires a scalar current-entity member.",
       );
 
-    const applicableEntity =
-      input.kind === "event-payload"
-        ? "event"
-        : input.kind === "field"
-          ? filterConditionEntity(registry.get(input.field))
-          : undefined;
-    if (!applicableEntity)
+    const inputMemberPath =
+      input.kind === "member" ? currentMemberPath(input) : null;
+    const currentPayload = input.kind === "current-payload";
+    if (!inputMemberPath && !currentPayload)
       failContext(
         "same_target_not_per_occurrence",
         path,
-        "$same input must be a registered field or event.payload(path) evaluated on each occurrence.",
+        '$same accepts only a current-entity member such as $.name or an Event payload path such as $.payload("/id").',
       );
 
     for (const [index, step] of sequence.steps.entries()) {
       const stepType = inferFilterTargetType(step, registry);
       if (stepType.kind !== "collection") continue;
       const stepEntity = stepType.entity;
-      if (
-        (applicableEntity === "activity" &&
-          (stepEntity === "event" || stepEntity === "page")) ||
-        applicableEntity === stepEntity
-      )
+      if (currentPayload) {
+        if (stepEntity === "event") continue;
+        failContext(
+          "same_value_entity_mismatch",
+          `${path}.steps[${index}]`,
+          "$same($.payload(...)) requires every sequence step to be an Event.",
+        );
+      }
+      if (inputMemberPath) {
+        const memberPath = inputMemberPath.join(".");
+        if (!fieldForCurrentEntity(stepEntity, memberPath, registry))
+          failContext(
+            "same_value_entity_mismatch",
+            `${path}.steps[${index}]`,
+            `$same member '${memberPath}' is not available on every sequence step.`,
+          );
         continue;
-      failContext(
-        "same_value_entity_mismatch",
-        `${path}.steps[${index}]`,
-        "$same input must be available on every sequence step occurrence.",
-      );
+      }
     }
   };
 
@@ -1045,6 +1264,7 @@ export function analyzeFilterDocument(
   registry: FilterFieldRegistry,
 ): AnalyzedFilterDocument {
   validateMemberWhitelist(document, registry);
+  validateCurrentEntityBindings(document, registry);
   validateScopeTimePlacement(document);
   validateFilterExpressionTypes(document, registry);
   validateContextIntrinsicScopes(document, registry);

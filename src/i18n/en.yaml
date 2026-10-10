@@ -402,13 +402,13 @@ filterBuilder:
   expressionHelpFieldOperators: Operators
   expressionHelpOtherFields: Other
   expressionHelpContextTitle: Occurrence time and context intrinsics
-  expressionHelpContextDescription: A dot reads a registered field. @ names a temporal anchor. $ names a value supplied by the nearest matching Sequence or Period predicate context.
+  expressionHelpContextDescription: Lowercase dotted names are registered fields; uppercase PAGE, EVENT, SESSION, and VISITOR are entity collections. Inside an entity selector, $.member refers to its current entity, and -> explicitly projects a collection member. @ names a temporal anchor; Sequence and Period predicates also provide $span, $gap, and $items.
   expressionHelpContextExamples: |-
-    time(last(page)) gte @now-14d
-    sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) {
-      $span lte 14d AND $gap(1, 2) lte 7d AND $same(event.payload("/productId"))
+    time(last(PAGE)) gte @now-14d
+    sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) {
+      $span lte 14d AND $gap(1, 2) lte 7d AND $same($.payload("/productId"))
     } exists
-    periods(event, 1w) { count($items) gte 3 } exists
+    periods(EVENT, 1w) { count($items) gte 3 } exists
   advancedEditor:
     not: NOT
     removeNot: Remove NOT
@@ -442,6 +442,17 @@ filterBuilder:
     removeStep: Remove step
     addStep: Add sequence step
     excludedActivity: Excluded activity
+    fixedTime: Fixed time
+    toggleOffsetSign: Toggle time offset sign
+    timeUnits:
+      milliseconds: milliseconds
+      seconds: seconds
+      minutes: minutes
+      hours: hours
+      days: days
+      weeks: weeks
+      months: months
+      years: years
     coreRelation: Advanced filter
     coreRelationExpression: Advanced filter expression
     structuredEditor: Advanced filter controls

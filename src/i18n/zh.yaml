@@ -398,13 +398,13 @@ filterBuilder:
   expressionHelpFieldOperators: 操作符
   expressionHelpOtherFields: 其他
   expressionHelpContextTitle: 活动时间与上下文内建值
-  expressionHelpContextDescription: 点号用于已注册字段；@ 表示时间锚点；$ 表示最近一层匹配的序列或周期筛选上下文提供的内建值。
+  expressionHelpContextDescription: 小写点分名称表示已注册字段；大写 PAGE、EVENT、SESSION 和 VISITOR 表示实体集合。在实体筛选器内，$.member 表示当前实体，-> 显式投影集合成员。@ 表示时间锚点；序列和周期筛选器还提供 $span、$gap 和 $items。
   expressionHelpContextExamples: |-
-    time(last(page)) gte @now-14d
-    sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) {
-      $span lte 14d AND $gap(1, 2) lte 7d AND $same(event.payload("/productId"))
+    time(last(PAGE)) gte @now-14d
+    sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) {
+      $span lte 14d AND $gap(1, 2) lte 7d AND $same($.payload("/productId"))
     } exists
-    periods(event, 1w) { count($items) gte 3 } exists
+    periods(EVENT, 1w) { count($items) gte 3 } exists
   advancedEditor:
     not: 非
     removeNot: 移除“非”
@@ -438,6 +438,17 @@ filterBuilder:
     removeStep: 移除步骤
     addStep: 添加序列步骤
     excludedActivity: 排除的活动
+    fixedTime: 固定时间
+    toggleOffsetSign: 切换时间偏移正负
+    timeUnits:
+      milliseconds: 毫秒
+      seconds: 秒
+      minutes: 分钟
+      hours: 小时
+      days: 天
+      weeks: 周
+      months: 月
+      years: 年
     coreRelation: 高级筛选
     coreRelationExpression: 高级筛选表达式
     structuredEditor: 高级筛选控件

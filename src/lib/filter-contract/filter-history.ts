@@ -284,6 +284,7 @@ function analyzeTarget(
     }
     case "field":
     case "event-payload":
+    case "current-payload":
     case "context-root":
     case "duration":
       return { requirement: CANDIDATE_ONLY, boundedCollection: false };

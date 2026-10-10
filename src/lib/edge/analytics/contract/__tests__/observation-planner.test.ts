@@ -68,8 +68,8 @@ describe("observation filter planner", () => {
 
   it("rejects Core and Relation nodes from Goal and Funnel observation predicates", () => {
     for (const source of [
-      "count(event) gte 1",
-      'sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]) exists',
+      "count(EVENT) gte 1",
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
     ]) {
       expect(() =>
         assertObservationFilterCompatible(

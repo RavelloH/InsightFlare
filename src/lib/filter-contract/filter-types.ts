@@ -1,3 +1,4 @@
+import { isEntityMemberNamespace, resolveEntityMember } from "./filter-members";
 import type { AnalyzedFilterDocument } from "./filter-semantics";
 import type { FilterFieldDefinition, FilterFieldRegistry } from "./filters";
 import {
@@ -81,6 +82,7 @@ function registryFieldId(
   if (target.kind === "field")
     return registry.has(target.field) ? target.field : undefined;
   if (target.kind === "event-payload") return "event.payload";
+  if (target.kind === "current-payload") return "event.payload";
   if (target.kind === "projection" && target.member === "payload")
     return "event.payload";
   if (target.kind !== "member") return undefined;
@@ -130,21 +132,64 @@ function entityMemberType(
   registry: FilterFieldRegistry,
 ): ValueType {
   if (
-    ["geo", "client", "referrer", "utm", "user", "performance"].includes(
-      member,
-    ) &&
+    isEntityMemberNamespace(member) &&
     [...registry.keys()].some((id) => id.startsWith(`${member}.`))
   )
     return { kind: "namespace", namespace: member };
-  const fieldId = `${entity}.${member}`;
-  const definition = registry.get(fieldId);
-  if (definition)
-    return scalar(fieldScalars[definition.valueKind] ?? "unknown");
+  const resolved = resolveEntityMember(entity, member, registry);
+  if (resolved)
+    return scalar(fieldScalars[resolved.definition.valueKind] ?? "unknown");
   fail(
     "invalid_member",
     `${entity}.${member}`,
     `Unknown ${entity} member: ${member}.`,
   );
+}
+
+function entityMemberPathType(
+  entity: string,
+  path: string,
+  registry: FilterFieldRegistry,
+): ValueType {
+  const resolved = resolveEntityMember(entity, path, registry);
+  if (resolved)
+    return scalar(fieldScalars[resolved.definition.valueKind] ?? "unknown");
+  fail(
+    "invalid_member",
+    `${entity}.${path}`,
+    `Unknown ${entity} member path: ${path}.`,
+  );
+}
+
+function currentMemberType(
+  member: string,
+  registry: FilterFieldRegistry,
+): ValueType {
+  if (
+    isEntityMemberNamespace(member) &&
+    [...registry.keys()].some((id) => id.startsWith(`${member}.`))
+  )
+    return { kind: "namespace", namespace: member };
+
+  const definitions = ["page", "event", "session", "visitor"]
+    .map((entity) => registry.get(`${entity}.${member}`))
+    .filter((definition): definition is FilterFieldDefinition =>
+      Boolean(definition),
+    );
+  const namespaced = registry.get(member);
+  if (namespaced) definitions.push(namespaced);
+  if (definitions.length === 0)
+    fail(
+      "invalid_member",
+      `$.${member}`,
+      `Unknown current entity member: ${member}.`,
+    );
+  const types = new Set(
+    definitions.map(
+      (definition) => fieldScalars[definition.valueKind] ?? "unknown",
+    ),
+  );
+  return scalar(types.size === 1 ? [...types][0]! : "unknown");
 }
 
 function namespaceMemberType(
@@ -201,6 +246,8 @@ function inferTarget(
       );
     case "event-payload":
       return scalar("json-scalar");
+    case "current-payload":
+      return scalar("json-scalar");
     case "entity-root":
       return collection(target.entity);
     case "context-root":
@@ -242,22 +289,16 @@ function inferTarget(
         const context = target.object.context;
         if (context === "current" && target.member === "time")
           return scalar("datetime");
+        if (context === "current")
+          return currentMemberType(target.member, registry);
       }
       const object = inferTarget(target.object, registry, `${path}.object`);
-      if (object.kind === "collection") {
-        const item =
-          object.item.kind === "entity"
-            ? entityMemberType(object.entity, target.member, registry)
-            : fail(
-                "invalid_member",
-                `${path}.member`,
-                `Unknown ${object.entity} member: ${target.member}.`,
-              );
-        if (item.kind === "namespace")
-          return { ...item, collectionEntity: object.entity };
-        if (item.kind === "collection") return item;
-        return { kind: "collection", entity: object.entity, item };
-      }
+      if (object.kind === "collection")
+        fail(
+          "collection_member_requires_projection",
+          path,
+          "Collection members require an explicit projection target.",
+        );
       if (object.kind === "entity")
         return entityMemberType(object.entity, target.member, registry);
       if (object.kind === "namespace") {
@@ -320,7 +361,7 @@ function inferTarget(
       const projected =
         target.member === "payload" && source.entity === "event" && target.path
           ? scalar("json-scalar")
-          : entityMemberType(source.entity, target.member, registry);
+          : entityMemberPathType(source.entity, target.member, registry);
       return { kind: "collection", entity: source.entity, item: projected };
     }
     case "reducer": {
@@ -637,6 +678,7 @@ function validateCondition(
   condition: FilterCondition,
   registry: FilterFieldRegistry,
   path: string,
+  validateLegacyValue = false,
 ): void {
   if (
     (condition.operator === "eq" || condition.operator === "neq") &&
@@ -673,7 +715,12 @@ function validateCondition(
   );
   // The legacy registry normalizer remains authoritative for the original
   // field/payload contract, preserving its exact type and canonicalization.
-  if (isLegacyFilterTarget(condition.target) && !computedValue) return;
+  if (
+    isLegacyFilterTarget(condition.target) &&
+    !computedValue &&
+    !validateLegacyValue
+  )
+    return;
   const left = inferTarget(condition.target, registry, `${path}.target`);
   const leftType = valueScalar(left);
   if (leftType.kind === "bucket")
@@ -835,6 +882,15 @@ function validateCondition(
     });
     checkCompatible(endpointTypes[0]!, endpointTypes[1]!, `${path}.value`);
   }
+}
+
+/** Type-check a condition after binding its current member to a registry field. */
+export function validateBoundFilterConditionTypes(
+  condition: FilterCondition,
+  registry: FilterFieldRegistry,
+  path = "condition",
+): void {
+  validateCondition(condition, registry, path, true);
 }
 
 function validateBooleanExpression(

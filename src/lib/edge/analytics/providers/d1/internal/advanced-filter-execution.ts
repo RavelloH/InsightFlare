@@ -208,7 +208,8 @@ function payloadPaths(expression: FilterDocument["root"]): {
   const paths = new Set<string>();
   let wholePayload = false;
   const target = (value: FilterTargetExpression): void => {
-    if (value.kind === "event-payload") paths.add(value.path);
+    if (value.kind === "event-payload" || value.kind === "current-payload")
+      paths.add(value.path);
     else if (value.kind === "member") {
       target(value.object);
       if (value.member === "payload") wholePayload = true;
