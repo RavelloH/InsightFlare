@@ -201,6 +201,7 @@ function publicUser(row: UserRow) {
     preferredLocale:
       row.preferred_locale === "en" ||
       row.preferred_locale === "zh" ||
+      row.preferred_locale === "zh-tw" ||
       row.preferred_locale === "ja"
         ? row.preferred_locale
         : "",
@@ -1810,6 +1811,8 @@ describe("private admin edge handler", () => {
       for (const [inputLocale, savedLocale, expectedLocale] of [
         ["en", "en", "en"],
         ["zh", "zh", "zh"],
+        ["zh-tw", "zh-tw", "zh-tw"],
+        ["ja", "ja", "ja"],
         ["", "", ""],
       ] as const) {
         const actor = userRow({

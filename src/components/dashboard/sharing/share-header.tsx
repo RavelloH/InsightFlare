@@ -53,10 +53,12 @@ interface ShareHeaderProps {
   siteName: string;
 }
 function localeSwitchPath(pathname: string, locale: Locale): string {
-  const withoutLocale = pathname.replace(/^\/(en|zh|ja)(?=\/|$)/, "") || "/";
+  const withoutLocale =
+    pathname.replace(/^\/(?:en|zh-tw|zh|ja)(?=\/|$)/, "") || "/";
   return `/${locale}${withoutLocale}`;
 }
 function localeLabel(messages: AppMessages, locale: Locale): string {
+  if (locale === "zh-tw") return messages.actions.switchToTraditionalChinese;
   if (locale === "zh") return messages.actions.switchToChinese;
   if (locale === "ja") return messages.actions.switchToJapanese;
   return messages.actions.switchToEnglish;

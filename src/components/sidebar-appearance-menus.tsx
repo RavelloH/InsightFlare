@@ -27,6 +27,7 @@ interface SidebarAppearanceMenusProps {
   locale: Locale;
   switchToEn: string;
   switchToZh: string;
+  switchToZhTw: string;
   switchToJa: string;
   messages: AppMessages;
   children?: ReactNode;
@@ -48,6 +49,7 @@ export function SidebarAppearanceMenus({
   locale,
   switchToEn,
   switchToZh,
+  switchToZhTw,
   switchToJa,
   messages,
   children,
@@ -69,6 +71,11 @@ export function SidebarAppearanceMenus({
   }> = [
     { locale: "en", href: switchToEn, label: messages.actions.switchToEnglish },
     { locale: "zh", href: switchToZh, label: messages.actions.switchToChinese },
+    {
+      locale: "zh-tw",
+      href: switchToZhTw,
+      label: messages.actions.switchToTraditionalChinese,
+    },
     {
       locale: "ja",
       href: switchToJa,

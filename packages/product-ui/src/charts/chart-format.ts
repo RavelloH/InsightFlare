@@ -2,6 +2,7 @@ const LOCALE_ALIASES: Readonly<Record<string, string>> = {
   en: "en-US",
   ja: "ja-JP",
   zh: "zh-CN",
+  "zh-tw": "zh-TW",
 };
 
 const numberFormatters = new Map<string, Intl.NumberFormat>();
@@ -62,7 +63,11 @@ export function durationFormat(locale: string, ms: number): string {
       ? {
           second: "秒",
           minute: "分",
-          hour: locale.startsWith("ja") ? "時間" : "小时",
+          hour: locale.startsWith("ja")
+            ? "時間"
+            : locale === "zh-tw"
+              ? "小時"
+              : "小时",
           join: "",
         }
       : { second: "s", minute: "m", hour: "h", join: " " };

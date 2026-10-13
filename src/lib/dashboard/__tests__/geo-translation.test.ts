@@ -31,6 +31,7 @@ describe("Geographic Translation Utilities", () => {
   describe("resolveGeoTranslationApiLocale & buildGeoTranslationApiUrl", () => {
     it("should resolve API locale correctly", () => {
       expect(resolveGeoTranslationApiLocale("zh")).toBe("zh-CN");
+      expect(resolveGeoTranslationApiLocale("zh-tw")).toBe("zh-TW");
       expect(resolveGeoTranslationApiLocale("en")).toBeNull();
       expect(resolveGeoTranslationApiLocale("ja")).toBe("ja");
     });
@@ -157,6 +158,38 @@ describe("Geographic Translation Utilities", () => {
       expect(pickLocaleGeoLabel("zh", record)).toBe("广东省");
       expect(pickLocaleGeoLabel("en", record)).toBe("Guangdong Default");
       expect(pickLocaleGeoLabel("zh", null)).toBe("");
+    });
+
+    it("should prefer Traditional Chinese localized and native labels", () => {
+      expect(
+        pickLocaleGeoLabel("zh-tw", {
+          name: "臺灣",
+          name_default: "Taiwan",
+          native: "臺灣",
+        }),
+      ).toBe("臺灣");
+      expect(
+        pickLocaleGeoLabel("zh-tw", {
+          name: "",
+          name_default: "Taiwan",
+          native: "台灣",
+        }),
+      ).toBe("台灣");
+      expect(
+        pickLocaleGeoLabel("zh-tw", {
+          name: "Taiwan",
+          name_default: "Taiwan (default)",
+          native: "臺灣",
+        }),
+      ).toBe("臺灣");
+      // The existing Simplified Chinese record selection remains unchanged.
+      expect(
+        pickLocaleGeoLabel("zh", {
+          name: "Taiwan",
+          name_default: "Taiwan",
+          native: "臺灣",
+        }),
+      ).toBe("Taiwan");
     });
 
     it("should fall back through available label fields", () => {
@@ -292,6 +325,30 @@ describe("Geographic Translation Utilities", () => {
 
       expect(bundle?.stateName).toBe("東京都");
       expect(resolveLocalizedCityName(bundle, "Shinjuku")).toBe("新宿区");
+    });
+
+    it("should use Traditional Chinese labels for zh-TW API bundles", () => {
+      const bundle = parseGeoStateTranslationBundle(
+        {
+          state: {
+            name: "臺灣省",
+            name_default: "Taiwan Province",
+            native: "臺灣省",
+            code: "TW",
+          },
+          cities: [
+            {
+              name: "臺北市",
+              name_default: "Taipei",
+              native: "臺北市",
+            },
+          ],
+        },
+        "zh-TW",
+      );
+
+      expect(bundle?.stateName).toBe("臺灣省");
+      expect(resolveLocalizedCityName(bundle, "Taipei")).toBe("臺北市");
     });
 
     it("should parse bundles with missing state and city fallback labels", () => {

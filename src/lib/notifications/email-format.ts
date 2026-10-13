@@ -3,6 +3,7 @@ import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config";
 const NUMBER_LOCALES = {
   en: "en-US",
   zh: "zh-CN",
+  "zh-tw": "zh-TW",
   ja: "ja-JP",
 } satisfies Record<Locale, string>;
 
@@ -42,7 +43,10 @@ export function formatNotificationDateTime(
     {
       timeZone: normalizedTimeZone(timeZone),
       year: "numeric",
-      month: locale === "zh" || locale === "ja" ? "numeric" : "short",
+      month:
+        locale === "zh" || locale === "zh-tw" || locale === "ja"
+          ? "numeric"
+          : "short",
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
@@ -51,5 +55,8 @@ export function formatNotificationDateTime(
   );
   return formatter
     .format(date)
-    .replace(",", locale === "zh" || locale === "ja" ? "" : ",");
+    .replace(
+      ",",
+      locale === "zh" || locale === "zh-tw" || locale === "ja" ? "" : ",",
+    );
 }

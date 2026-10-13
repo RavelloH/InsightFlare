@@ -15,6 +15,7 @@ const WIKIMEDIA_USER_AGENT = "InsightFlare/0.1 (+https://insight.ravelloh.com)";
 const CACHE_HEADERS = { "cache-control": CACHE_CONTROL_HEADER };
 const WIKIPEDIA_ACCEPT_LANGUAGE: Partial<Record<Locale, string>> = {
   zh: "zh-CN,zh;q=0.9,en;q=0.8",
+  "zh-tw": "zh-TW,zh;q=0.9,en;q=0.8",
   ja: "ja-JP,ja;q=0.9,en;q=0.8",
 };
 interface WikidataTerm {
@@ -63,11 +64,13 @@ function normalizeWikiLanguage(rawLanguage: string | null | undefined): string {
 }
 function resolveWikipediaAcceptLanguage(request: Request): string | null {
   const url = new URL(request.url);
-  const explicitLanguage = String(url.searchParams.get("lang") ?? "").trim();
-  if (/^zh[-_](cn|hans)$/i.test(explicitLanguage)) {
+  const explicitLanguage = String(url.searchParams.get("lang") ?? "")
+    .trim()
+    .replace(/_/g, "-");
+  if (/^zh-(?:cn|hans)(?:-|$)/i.test(explicitLanguage)) {
     return "zh-CN,zh;q=0.9,en;q=0.8";
   }
-  if (/^zh[-_](tw|hk|hant)$/i.test(explicitLanguage)) {
+  if (/^zh-(?:tw|hk|mo|hant)(?:-|$)/i.test(explicitLanguage)) {
     return "zh-TW,zh;q=0.9,en;q=0.8";
   }
 
@@ -97,7 +100,31 @@ function resolveRequestedWikiLanguage(request: Request): string {
     return normalizeWikiLanguage(explicitLanguage);
   }
   const locale = resolveLocale(url.searchParams.get("locale"));
-  return locale === "zh" || locale === "ja" ? locale : DEFAULT_WIKI_LANGUAGE;
+  return locale === "zh" || locale === "zh-tw" || locale === "ja"
+    ? locale === "zh-tw"
+      ? "zh"
+      : locale
+    : DEFAULT_WIKI_LANGUAGE;
+}
+function resolvePreferredWikiLanguages(
+  request: Request,
+  requestedLanguage: string,
+): string[] {
+  const url = new URL(request.url);
+  const explicitLanguage = String(url.searchParams.get("lang") ?? "").trim();
+  const locale = resolveLocale(url.searchParams.get("locale"));
+  const prefersTraditionalChinese =
+    /^zh[-_](?:tw|hk|mo|hant)(?:$|[-_])/i.test(explicitLanguage) ||
+    (!explicitLanguage && locale === "zh-tw");
+
+  if (prefersTraditionalChinese) return ["zh-hant", "zh"];
+
+  const prefersSimplifiedChinese =
+    /^zh[-_](?:cn|hans)(?:$|[-_])/i.test(explicitLanguage) ||
+    (!explicitLanguage && locale === "zh");
+  if (prefersSimplifiedChinese) return ["zh", "zh-hans"];
+
+  return [requestedLanguage];
 }
 function pickPreferredValue(
   values: Record<string, WikidataTerm> | undefined,
@@ -220,7 +247,10 @@ export async function handleWikiSummaryRequest(
   const requestedLanguage = resolveRequestedWikiLanguage(request);
   const acceptLanguage = resolveWikipediaAcceptLanguage(request);
   const preferredLanguages = Array.from(
-    new Set([requestedLanguage, DEFAULT_WIKI_LANGUAGE]),
+    new Set([
+      ...resolvePreferredWikiLanguages(request, requestedLanguage),
+      DEFAULT_WIKI_LANGUAGE,
+    ]),
   );
 
   try {

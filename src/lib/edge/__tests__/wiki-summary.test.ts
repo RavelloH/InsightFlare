@@ -362,6 +362,88 @@ describe("wiki summary route", () => {
     });
   });
 
+  it("uses Traditional Chinese Wikidata labels and Wikipedia variants for zh-tw locale", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            entities: {
+              Q88: {
+                labels: {
+                  "zh-hant": { value: "繁體標籤" },
+                  zh: { value: "中文標籤" },
+                  en: { value: "English Label" },
+                },
+                descriptions: {
+                  "zh-hant": { value: "繁體描述" },
+                  zh: { value: "中文描述" },
+                },
+                sitelinks: {
+                  zhwiki: {
+                    title: "條目",
+                    url: "https://zh.wikipedia.org/wiki/%E6%A2%9D%E7%9B%AE",
+                  },
+                  enwiki: {
+                    title: "Article",
+                    url: "https://en.wikipedia.org/wiki/Article",
+                  },
+                },
+              },
+            },
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            title: "條目",
+            extract: "繁體摘要",
+            content_urls: {
+              desktop: {
+                page: "https://zh.wikipedia.org/wiki/%E6%A2%9D%E7%9B%AE",
+              },
+            },
+          }),
+        ),
+      );
+
+    const response = await handleWikiSummaryRequest(
+      new Request(
+        "https://app.test/api/public/resources/wiki-summary?wikidataId=Q88&locale=zh-tw",
+        {
+          headers: { origin: "https://app.test" },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "https://zh.wikipedia.org/api/rest_v1/page/summary/%E6%A2%9D%E7%9B%AE",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "accept-language": "zh-TW,zh;q=0.9,en;q=0.8",
+        }),
+      }),
+    );
+    expect(await response.json()).toMatchObject({
+      requestedLanguage: "zh",
+      resolvedLanguage: "zh",
+      fallback: false,
+      wikidata: {
+        label: "繁體標籤",
+        description: "繁體描述",
+      },
+      wikipedia: {
+        language: "zh",
+        title: "條目",
+        extract: "繁體摘要",
+        pageUrl:
+          "https://zh.wikipedia.org/wiki/%E6%A2%9D%E7%9B%AE?variant=zh-tw",
+      },
+    });
+  });
+
   it("resolves Wikidata labels, Wikipedia summary, and Chinese URL variants", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(
@@ -410,7 +492,7 @@ describe("wiki summary route", () => {
 
     const response = await handleWikiSummaryRequest(
       new Request(
-        "https://app.test/api/public/resources/wiki-summary?wikidataId=q42&lang=zh-TW",
+        "https://app.test/api/public/resources/wiki-summary?wikidataId=q42&lang=zh-Hant-TW",
         {
           headers: { origin: "https://app.test" },
         },

@@ -254,6 +254,7 @@ export function DashboardShell({
   const localeSuffix = normalizeLocalePath(livePathname);
   const switchToEn = `/en${localeSuffix}`;
   const switchToZh = `/zh${localeSuffix}`;
+  const switchToZhTw = `/zh-tw${localeSuffix}`;
   const switchToJa = `/ja${localeSuffix}`;
   const accountHref = `/${locale}/app/account`;
   const notificationsHref = `/${locale}/app/inbox`;
@@ -713,6 +714,7 @@ export function DashboardShell({
                 user={user}
                 switchToEn={switchToEn}
                 switchToZh={switchToZh}
+                switchToZhTw={switchToZhTw}
                 switchToJa={switchToJa}
                 accountHref={accountHref}
                 notificationsHref={notificationsHref}

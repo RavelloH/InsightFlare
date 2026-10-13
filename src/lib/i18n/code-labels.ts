@@ -13,9 +13,9 @@ const COUNTRY_LABEL_OVERRIDES: Partial<Record<Locale, Record<string, string>>> =
 
 export const COUNTRY_PRIMARY_LANGUAGE_CODE: Record<string, string> = {
   CN: "zh",
-  HK: "zh",
-  MO: "zh",
-  TW: "zh",
+  HK: "zh-tw",
+  MO: "zh-tw",
+  TW: "zh-tw",
   US: "en",
   GB: "en",
   AU: "en",
@@ -41,6 +41,7 @@ const LANGUAGE_LABELS: Record<Locale, Record<string, string>> = {
   en: {
     en: "English",
     zh: "Chinese",
+    "zh-tw": "Traditional Chinese",
     ja: "Japanese",
     ko: "Korean",
     fr: "French",
@@ -61,6 +62,7 @@ const LANGUAGE_LABELS: Record<Locale, Record<string, string>> = {
   zh: {
     en: "英语",
     zh: "中文",
+    "zh-tw": "繁体中文",
     ja: "日语",
     ko: "韩语",
     fr: "法语",
@@ -78,9 +80,31 @@ const LANGUAGE_LABELS: Record<Locale, Record<string, string>> = {
     ms: "马来语",
     hi: "印地语",
   },
+  "zh-tw": {
+    en: "英語",
+    zh: "簡體中文",
+    "zh-tw": "繁體中文",
+    ja: "日語",
+    ko: "韓語",
+    fr: "法語",
+    de: "德語",
+    es: "西班牙語",
+    pt: "葡萄牙語",
+    ru: "俄語",
+    ar: "阿拉伯語",
+    it: "義大利語",
+    nl: "荷蘭語",
+    tr: "土耳其語",
+    vi: "越南語",
+    th: "泰語",
+    id: "印尼語",
+    ms: "馬來語",
+    hi: "印地語",
+  },
   ja: {
     en: "英語",
     zh: "中国語",
+    "zh-tw": "繁体字中国語",
     ja: "日本語",
     ko: "韓国語",
     fr: "フランス語",
@@ -103,11 +127,19 @@ const LANGUAGE_LABELS: Record<Locale, Record<string, string>> = {
 const countryNameFormatters = new Map<Locale, Intl.DisplayNames>();
 const languageNameFormatters = new Map<Locale, Intl.DisplayNames>();
 
+function intlTagForLocale(locale: Locale): string {
+  if (locale === "zh") return "zh-CN";
+  if (locale === "zh-tw") return "zh-TW";
+  return locale;
+}
+
 function getCountryFormatter(locale: Locale): Intl.DisplayNames | null {
   const cached = countryNameFormatters.get(locale);
   if (cached) return cached;
   try {
-    const formatter = new Intl.DisplayNames([locale], { type: "region" });
+    const formatter = new Intl.DisplayNames([intlTagForLocale(locale)], {
+      type: "region",
+    });
     countryNameFormatters.set(locale, formatter);
     return formatter;
   } catch {
@@ -119,7 +151,9 @@ function getLanguageFormatter(locale: Locale): Intl.DisplayNames | null {
   const cached = languageNameFormatters.get(locale);
   if (cached) return cached;
   try {
-    const formatter = new Intl.DisplayNames([locale], { type: "language" });
+    const formatter = new Intl.DisplayNames([intlTagForLocale(locale)], {
+      type: "language",
+    });
     languageNameFormatters.set(locale, formatter);
     return formatter;
   } catch {
@@ -138,7 +172,16 @@ function normalizeCountryCode(raw: string): string | null {
 function normalizeLanguageCode(raw: string): string | null {
   const normalized = raw.trim().replace(/_/g, "-");
   if (!normalized) return null;
-  const primary = normalized.split("-")[0]?.toLowerCase() ?? "";
+  const lower = normalized.toLowerCase();
+  if (
+    lower === "zh-tw" ||
+    lower === "zh-hk" ||
+    lower === "zh-mo" ||
+    lower.startsWith("zh-hant")
+  ) {
+    return "zh-tw";
+  }
+  const primary = lower.split("-")[0] ?? "";
   if (!primary) return null;
   return /^[a-z]{2,3}$/.test(primary) ? primary : null;
 }

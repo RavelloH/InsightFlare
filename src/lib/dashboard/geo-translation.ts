@@ -8,6 +8,7 @@ const GEO_TRANSLATION_API_LOCALE_BY_APP_LOCALE: Record<Locale, string | null> =
   {
     en: null,
     zh: GEO_TRANSLATION_DATA_LOCALE,
+    "zh-tw": "zh-TW",
     ja: "ja",
   };
 
@@ -193,6 +194,19 @@ function pickReadableZhGeoLabel(record: LocaleGeoLabelRecord): string {
   return name || nativeName || asTrimmedString(record.name_default);
 }
 
+function pickReadableTraditionalGeoLabel(record: LocaleGeoLabelRecord): string {
+  const name = asTrimmedString(record.name);
+  const nativeName = asTrimmedString(record.native);
+  if (
+    nativeName &&
+    containsHan(nativeName) &&
+    (!containsHan(name) || shouldPreferNativeGeoLabel(name, nativeName))
+  ) {
+    return nativeName;
+  }
+  return name || nativeName || asTrimmedString(record.name_default);
+}
+
 function pickApiLocaleGeoLabel(
   record: LocaleGeoLabelRecord | null | undefined,
   apiLocale: string,
@@ -200,6 +214,9 @@ function pickApiLocaleGeoLabel(
   if (!record) return "";
   if (apiLocale === GEO_TRANSLATION_DATA_LOCALE) {
     return pickReadableZhGeoLabel(record);
+  }
+  if (apiLocale === "zh-TW") {
+    return pickReadableTraditionalGeoLabel(record);
   }
 
   return (
@@ -342,6 +359,9 @@ export function pickLocaleGeoLabel(
   if (!record) return "";
   if (locale === "zh") {
     return pickReadableZhGeoLabel(record);
+  }
+  if (locale === "zh-tw") {
+    return pickReadableTraditionalGeoLabel(record);
   }
 
   return (

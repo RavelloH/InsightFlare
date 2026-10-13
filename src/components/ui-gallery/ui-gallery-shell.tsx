@@ -140,6 +140,7 @@ export function UiGalleryShell() {
   const localePath = pathname.replace(/^\/[^/]+/, "");
   const switchToEn = "/en" + localePath;
   const switchToZh = "/zh" + localePath;
+  const switchToZhTw = "/zh-tw" + localePath;
   const switchToJa = "/ja" + localePath;
   const messages = getMessages(locale);
   const [query, setQuery] = useState("");
@@ -266,6 +267,7 @@ export function UiGalleryShell() {
               locale={locale}
               switchToEn={switchToEn}
               switchToZh={switchToZh}
+              switchToZhTw={switchToZhTw}
               switchToJa={switchToJa}
               messages={messages}
             />

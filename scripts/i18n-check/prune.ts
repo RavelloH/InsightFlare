@@ -50,8 +50,12 @@ function toTsInterface(
   return "string";
 }
 
+function localeVar(locale: string): string {
+  return locale.replace(/-([a-z])/g, (_, c) => c.toUpperCase()) + "Messages";
+}
+
 function formatMessagesConst(locale: string, value: unknown): string {
-  return `const ${locale}Messages = ${JSON.stringify(value, null, 2)} as AppMessages;`;
+  return `const ${localeVar(locale)} = ${JSON.stringify(value, null, 2)} as AppMessages;`;
 }
 
 function buildMessagesOutput(
@@ -75,7 +79,7 @@ ${interfaceBody.join("\n")}
 ${LOCALES.map((locale) => formatMessagesConst(locale, parsedYamlByLocale[locale])).join("\n\n")}
 
 const DICTIONARIES: Record<Locale, AppMessages> = {
-${LOCALES.map((locale) => `  ${locale}: ${locale}Messages,`).join("\n")}
+${LOCALES.map((locale) => `  ${tsKey(locale)}: ${localeVar(locale)},`).join("\n")}
 };
 
 export function getMessages(locale: Locale): AppMessages {

@@ -4,6 +4,7 @@ import {
 } from "@/lib/dashboard-api/contract/admin-service";
 import { handleDemoNotificationEmailPreview } from "@/lib/demo/notifications/email-preview";
 import { handleDemoRequest } from "@/lib/demo/runtime";
+import { resolveLocale } from "@/lib/i18n/config";
 interface DemoAdminServiceRequest {
   readonly route: AdminServiceRoute;
   readonly request: Request;
@@ -74,7 +75,9 @@ async function demoNotificationEmailPreviewResponse(
     type === "health"
       ? type
       : "report";
-  const locale = input.url.searchParams.get("locale") === "zh" ? "zh" : "en";
+  const locale = resolveLocale(
+    input.url.searchParams.get("locale")?.trim().toLowerCase(),
+  );
   const format =
     input.url.searchParams.get("format") === "text" ? "text" : "json";
 

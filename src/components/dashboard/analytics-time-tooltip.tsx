@@ -68,6 +68,12 @@ const RELATIVE_TIME_UNITS: Record<
     minute: ["分钟", "分钟"],
     second: ["秒", "秒"],
   },
+  "zh-tw": {
+    day: ["天", "天"],
+    hour: ["小時", "小時"],
+    minute: ["分鐘", "分鐘"],
+    second: ["秒", "秒"],
+  },
   ja: {
     day: ["日", "日"],
     hour: ["時間", "時間"],

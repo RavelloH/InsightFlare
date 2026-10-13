@@ -1,10 +1,11 @@
+import { type Locale } from "@/lib/i18n/config";
 import { renderNotificationEmail } from "@/lib/notifications/edge/email-renderer";
 import { resolveNotificationLocale } from "@/lib/notifications/locale";
 import { notificationEmailPreviewMessage } from "@/lib/notifications/preview-data";
 
 export async function handleDemoNotificationEmailPreview(input: {
   type: "test" | "report" | "milestone" | "threshold" | "change" | "health";
-  locale: "en" | "zh";
+  locale: Locale;
   format: "html" | "text" | "json";
 }): Promise<
   | string
