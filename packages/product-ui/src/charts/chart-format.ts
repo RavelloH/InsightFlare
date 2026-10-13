@@ -63,7 +63,11 @@ export function durationFormat(locale: string, ms: number): string {
       ? {
           second: "秒",
           minute: "分",
-          hour: locale.startsWith("ja") ? "時間" : "小时",
+          hour: locale.startsWith("ja")
+            ? "時間"
+            : locale === "zh-tw"
+              ? "小時"
+              : "小时",
           join: "",
         }
       : { second: "s", minute: "m", hour: "h", join: " " };

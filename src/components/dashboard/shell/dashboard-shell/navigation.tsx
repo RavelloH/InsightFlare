@@ -132,7 +132,8 @@ export function getTeamRoleLabel(
 export function normalizeLocalePath(pathname: string): string {
   const cleaned = pathname || "";
   if (cleaned.length === 0) return "/app";
-  const withoutLocale = cleaned.replace(/^\/(en|zh|ja)(?=\/|$)/, "") || "/app";
+  const withoutLocale =
+    cleaned.replace(/^\/(en|zh-tw|zh|ja)(?=\/|$)/, "") || "/app";
   if (withoutLocale === "/") return "/app";
   return withoutLocale.endsWith("/")
     ? withoutLocale.slice(0, -1)

@@ -93,7 +93,7 @@ describe("admin service route contract", () => {
 
   it("serves notification email previews through the demo service adapter", async () => {
     const request = new Request(
-      "https://app.test/api/private/admin/notification-email-preview?type=report&locale=zh&format=json",
+      "https://app.test/api/private/admin/notification-email-preview?type=report&locale=ZH-TW&format=json",
     );
     const response = await executeDemoAdminService({
       route: "notification-email-preview",
@@ -110,7 +110,7 @@ describe("admin service route contract", () => {
     expect(payload.ok).toBe(true);
     expect(payload.data?.subject).toEqual(expect.any(String));
     expect(payload.data?.html).toEqual(expect.any(String));
-    expect(payload.data?.text).toEqual(expect.any(String));
+    expect(payload.data?.text).toEqual(expect.stringContaining("核心指標"));
   });
 
   it("selects the server demo adapter for admin service requests", async () => {

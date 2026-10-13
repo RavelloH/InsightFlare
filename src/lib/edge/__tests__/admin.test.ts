@@ -1811,6 +1811,8 @@ describe("private admin edge handler", () => {
       for (const [inputLocale, savedLocale, expectedLocale] of [
         ["en", "en", "en"],
         ["zh", "zh", "zh"],
+        ["zh-tw", "zh-tw", "zh-tw"],
+        ["ja", "ja", "ja"],
         ["", "", ""],
       ] as const) {
         const actor = userRow({

@@ -10,7 +10,7 @@ import {
   getDemoTeams,
   getDemoUser,
 } from "@/lib/demo/admin/users";
-import type { Locale } from "@/lib/i18n/config";
+import { type Locale, resolveLocale } from "@/lib/i18n/config";
 import {
   buildNotificationContent,
   notificationSiteName,
@@ -40,7 +40,9 @@ function findDemoNotificationRule(ruleId: string): NotificationRuleData {
   return generateDemoNotificationRules(teams[0]?.id || "")[0]!;
 }
 export function demoLocale(value: unknown): Locale {
-  return value === "zh" ? "zh" : "en";
+  return resolveLocale(
+    typeof value === "string" ? value.trim().toLowerCase() : null,
+  );
 }
 function demoSiteDomain(siteId: string | null | undefined): string {
   if (!siteId) return "demo.insightflare.net";

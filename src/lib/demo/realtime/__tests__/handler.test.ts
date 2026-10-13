@@ -228,6 +228,21 @@ describe("mock — handleDemoRequest", () => {
         message: { type: "report", data: { reportType: expect.any(String) } },
       });
 
+      const traditionalChinesePreview = ok(
+        handleDemoRequest({
+          path: "/api/private/admin/notification-rules/preview",
+          method: "POST",
+          body: {
+            ruleId: "demo-notification-rule-daily",
+            locale: "zh-tw",
+          },
+        }),
+      ).data as {
+        message?: { data?: Record<string, unknown>; title?: string };
+      };
+      expect(traditionalChinesePreview.message?.data?.locale).toBe("zh-tw");
+      expect(traditionalChinesePreview.message?.title).toContain("造訪報告");
+
       expect(
         ok(
           handleDemoRequest({
@@ -2187,6 +2202,15 @@ describe("mock — handleDemoRequest", () => {
           format: "html",
         }),
       ).resolves.toContain("<");
+      await expect(
+        handleDemoNotificationEmailPreview({
+          type: "report",
+          locale: "zh-tw",
+          format: "json",
+        }),
+      ).resolves.toMatchObject({
+        text: expect.stringContaining("核心指標"),
+      });
       await expect(
         handleDemoNotificationEmailPreview({
           type: "threshold",
