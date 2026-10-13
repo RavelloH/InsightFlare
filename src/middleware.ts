@@ -88,7 +88,17 @@ function requestLocale(request: Request): string {
     const preferred = acceptLanguage
       .split(",")
       .map((part) => part.trim().split(";")[0].trim().toLowerCase())
-      .map((tag) => (isValidLocale(tag) ? tag : tag.slice(0, 2)))
+      .map((tag) => {
+        if (
+          tag === "zh-tw" ||
+          tag === "zh-hk" ||
+          tag === "zh-mo" ||
+          tag.startsWith("zh-hant")
+        ) {
+          return "zh-tw";
+        }
+        return isValidLocale(tag) ? tag : tag.slice(0, 2);
+      })
       .find(isValidLocale);
     if (preferred) return preferred;
   }

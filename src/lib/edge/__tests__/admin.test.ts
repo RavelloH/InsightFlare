@@ -201,6 +201,7 @@ function publicUser(row: UserRow) {
     preferredLocale:
       row.preferred_locale === "en" ||
       row.preferred_locale === "zh" ||
+      row.preferred_locale === "zh-tw" ||
       row.preferred_locale === "ja"
         ? row.preferred_locale
         : "",

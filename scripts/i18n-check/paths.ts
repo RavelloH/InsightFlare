@@ -4,7 +4,7 @@ import process from "node:process";
 export const ROOT_DIR = process.cwd();
 export const SRC_DIR = path.join(ROOT_DIR, "src");
 export const SCRIPTS_DIR = path.join(ROOT_DIR, "scripts");
-export const LOCALES = ["en", "zh", "ja"] as const;
+export const LOCALES = ["en", "zh", "zh-tw", "ja"] as const;
 export type LocaleCode = (typeof LOCALES)[number];
 export const LOCALE_PATHS = Object.fromEntries(
   LOCALES.map((locale) => [

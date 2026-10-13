@@ -48,6 +48,7 @@ const PREVIEW_TYPES: PreviewType[] = [
 ];
 const PREVIEW_FORMATS: PreviewFormat[] = ["html", "text", "json"];
 function localeLabel(messages: AppMessages, locale: Locale): string {
+  if (locale === "zh-tw") return messages.actions.switchToTraditionalChinese;
   if (locale === "zh") return messages.actions.switchToChinese;
   if (locale === "ja") return messages.actions.switchToJapanese;
   return messages.actions.switchToEnglish;

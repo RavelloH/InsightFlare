@@ -47,7 +47,7 @@ function formatLastSeen(
 }
 
 function usesFullwidthPunctuation(locale: Locale): boolean {
-  return locale === "zh" || locale === "ja";
+  return locale === "zh" || locale === "zh-tw" || locale === "ja";
 }
 
 function renderReportText(input: RenderNotificationEmailTextInput): string {

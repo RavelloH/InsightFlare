@@ -879,7 +879,7 @@ export async function updateMyProfile(input: {
   currentPassword?: string;
   password?: string;
   timeZone?: string;
-  preferredLocale?: "" | "en" | "zh";
+  preferredLocale?: "" | Locale;
 }): Promise<AccountUserData> {
   const res = await fetchEdgeJson<{ ok: boolean; data: AccountUserData }>({
     method: "POST",

@@ -1675,7 +1675,8 @@ accountSettings:
   preferredLanguageLabel: メール言語
   preferredLanguageDefault: デフォルト
   preferredLanguageEnglish: 英語
-  preferredLanguageChinese: 中国語
+  preferredLanguageChinese: 簡体字中国語
+  preferredLanguageTraditionalChinese: 繁体字中国語
   preferredLanguageJapanese: 日本語
   preferredLanguageSaved: 通知言語を保存しました。
   preferredLanguageSaveFailed: 通知言語を保存できません。
@@ -1946,7 +1947,8 @@ errorPage:
 actions:
   logout: ログアウト
   switchToEnglish: English
-  switchToChinese: 中文
+  switchToChinese: 簡体字中国語
+  switchToTraditionalChinese: 繁体字中国語
   switchToJapanese: 日本語
   switchToLight: ライト
   switchToDark: ダーク

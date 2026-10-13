@@ -2,6 +2,7 @@ const LOCALE_ALIASES: Readonly<Record<string, string>> = {
   en: "en-US",
   ja: "ja-JP",
   zh: "zh-CN",
+  "zh-tw": "zh-TW",
 };
 
 const numberFormatters = new Map<string, Intl.NumberFormat>();

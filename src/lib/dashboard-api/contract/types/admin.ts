@@ -1,4 +1,5 @@
 import type { TeamRole } from "@/lib/dashboard/permissions";
+import type { Locale } from "@/lib/i18n/config";
 
 export interface TeamData {
   id: string;
@@ -49,7 +50,7 @@ export interface AccountUserData {
   name: string;
   systemRole: "admin" | "user";
   timeZone?: string;
-  preferredLocale: "" | "en" | "zh";
+  preferredLocale: "" | Locale;
   createdAt: number;
   updatedAt: number;
   teamCount?: number;

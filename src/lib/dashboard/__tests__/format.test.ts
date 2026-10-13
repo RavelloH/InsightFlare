@@ -16,6 +16,7 @@ describe("Dashboard Format Utilities", () => {
     it("should return the correct BCP 47 locale mapping", () => {
       expect(intlLocale("en")).toBe("en-US");
       expect(intlLocale("zh")).toBe("zh-CN");
+      expect(intlLocale("zh-tw")).toBe("zh-TW");
     });
   });
 
@@ -136,6 +137,7 @@ describe("Dashboard Format Utilities", () => {
       expect(durationFormat("en", 3600000)).toBe("1h"); // Exact hours
       expect(durationFormat("en", 3720000)).toBe("1h 2m"); // Hours and minutes
       expect(durationFormat("zh", 3720000)).toBe("1小时2分"); // Chinese hour/minute suffix
+      expect(durationFormat("zh-tw", 3720000)).toBe("1小時2分"); // Traditional Chinese hour/minute suffix
       expect(durationFormat("en", 3600000 * 24 + 60000 * 30)).toBe("24h 30m");
     });
   });

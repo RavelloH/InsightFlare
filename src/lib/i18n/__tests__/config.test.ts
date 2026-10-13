@@ -12,7 +12,7 @@ import { getMessages } from "@/lib/i18n/messages";
 
 describe("i18n locale config", () => {
   it("exports supported locale constants", () => {
-    expect(SUPPORTED_LOCALES).toEqual(["en", "zh", "ja"]);
+    expect(SUPPORTED_LOCALES).toEqual(["en", "zh", "zh-tw", "ja"]);
     expect(DEFAULT_LOCALE).toBe("en");
     expect(LOCALE_COOKIE).toBe("if_locale");
   });
@@ -20,11 +20,13 @@ describe("i18n locale config", () => {
   it("validates and resolves locale values", () => {
     expect(isValidLocale("en")).toBe(true);
     expect(isValidLocale("zh")).toBe(true);
+    expect(isValidLocale("zh-tw")).toBe(true);
     expect(isValidLocale("ja")).toBe(true);
     expect(isValidLocale("fr")).toBe(false);
     expect(isValidLocale(null)).toBe(false);
 
     expect(resolveLocale("zh")).toBe("zh");
+    expect(resolveLocale("zh-tw")).toBe("zh-tw");
     expect(resolveLocale("ja")).toBe("ja");
     expect(resolveLocale("fr")).toBe("en");
     expect(resolveLocale(undefined)).toBe("en");
@@ -33,6 +35,7 @@ describe("i18n locale config", () => {
   it("maps app locales to HTML language tags", () => {
     expect(localeToHtmlLang("en")).toBe("en");
     expect(localeToHtmlLang("zh")).toBe("zh-CN");
+    expect(localeToHtmlLang("zh-tw")).toBe("zh-TW");
     expect(localeToHtmlLang("ja")).toBe("ja");
   });
 

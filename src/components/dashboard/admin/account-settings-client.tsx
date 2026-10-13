@@ -54,7 +54,7 @@ import {
   normalizeNotificationPreferencesData,
   type NotificationPreferencesData,
 } from "@/lib/dashboard-api/client/edge";
-import type { Locale } from "@/lib/i18n/config";
+import { isValidLocale, type Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { useRouter } from "@/lib/router";
 interface AccountSettingsClientProps {
@@ -64,7 +64,7 @@ interface AccountSettingsClientProps {
   initialData?: AccountNotificationPreferencesInitialData | null;
 }
 type TimeZoneMode = "browser" | "custom";
-type PreferredLocale = "" | "en" | "zh" | "ja";
+type PreferredLocale = "" | Locale;
 function sameNotificationPreferences(
   left: NotificationPreferencesData | null,
   right: NotificationPreferencesData | null,
@@ -395,11 +395,7 @@ export function AccountSettingsClient({
   ) {
     event.preventDefault();
     if (preferredLocaleSaving) return;
-    if (
-      preferredLocale !== "" &&
-      preferredLocale !== "en" &&
-      preferredLocale !== "zh"
-    ) {
+    if (preferredLocale !== "" && !isValidLocale(preferredLocale)) {
       toast.error(copy.preferredLanguageSaveFailed);
       return;
     }
@@ -821,7 +817,7 @@ export function AccountSettingsClient({
                   disabled={preferredLocaleSaving}
                   onValueChange={(value) => {
                     if (value === "default") setPreferredLocale("");
-                    if (value === "en" || value === "zh" || value === "ja") {
+                    if (isValidLocale(value)) {
                       setPreferredLocale(value);
                     }
                   }}
@@ -841,6 +837,9 @@ export function AccountSettingsClient({
                     </SelectItem>
                     <SelectItem value="zh">
                       {copy.preferredLanguageChinese}
+                    </SelectItem>
+                    <SelectItem value="zh-tw">
+                      {copy.preferredLanguageTraditionalChinese}
                     </SelectItem>
                     <SelectItem value="ja">
                       {copy.preferredLanguageJapanese}

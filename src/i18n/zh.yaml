@@ -1666,7 +1666,8 @@ accountSettings:
   preferredLanguageLabel: 邮件语言
   preferredLanguageDefault: 默认
   preferredLanguageEnglish: 英语
-  preferredLanguageChinese: 中文
+  preferredLanguageChinese: 简体中文
+  preferredLanguageTraditionalChinese: 繁体中文
   preferredLanguageJapanese: 日语
   preferredLanguageSaved: 通知语言已保存。
   preferredLanguageSaveFailed: 保存通知语言失败。
@@ -1935,7 +1936,8 @@ errorPage:
 actions:
   logout: 退出登录
   switchToEnglish: English
-  switchToChinese: 中文
+  switchToChinese: 简体中文
+  switchToTraditionalChinese: 繁體中文
   switchToJapanese: 日本語
   switchToLight: 浅色
   switchToDark: 深色

@@ -31,6 +31,7 @@ interface SidebarFooterMenusProps {
   locale: Locale;
   switchToEn: string;
   switchToZh: string;
+  switchToZhTw: string;
   switchToJa: string;
   accountHref: string;
   notificationsHref: string;
@@ -55,6 +56,7 @@ export const SidebarFooterMenus = memo(function SidebarFooterMenus({
   locale,
   switchToEn,
   switchToZh,
+  switchToZhTw,
   switchToJa,
   accountHref,
   notificationsHref,
@@ -96,6 +98,7 @@ export const SidebarFooterMenus = memo(function SidebarFooterMenus({
       locale={locale}
       switchToEn={switchToEn}
       switchToZh={switchToZh}
+      switchToZhTw={switchToZhTw}
       switchToJa={switchToJa}
       messages={messages}
     >

@@ -1733,7 +1733,8 @@ accountSettings:
   preferredLanguageLabel: Email language
   preferredLanguageDefault: Default
   preferredLanguageEnglish: English
-  preferredLanguageChinese: Chinese
+  preferredLanguageChinese: Simplified Chinese
+  preferredLanguageTraditionalChinese: Traditional Chinese
   preferredLanguageJapanese: Japanese
   preferredLanguageSaved: Notification language saved.
   preferredLanguageSaveFailed: Failed to save notification language.
@@ -2020,7 +2021,8 @@ errorPage:
 actions:
   logout: Logout
   switchToEnglish: English
-  switchToChinese: 中文
+  switchToChinese: Simplified Chinese
+  switchToTraditionalChinese: Traditional Chinese
   switchToJapanese: 日本語
   switchToLight: Light
   switchToDark: Dark
