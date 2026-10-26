@@ -55,6 +55,7 @@ export default defineConfig({
       "**/.cache/**",
       "**/.tmp/**",
       "**/e2e/**",
+      "**/plan/**",
     ],
     coverage: {
       thresholds: {
