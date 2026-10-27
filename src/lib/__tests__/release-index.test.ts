@@ -87,6 +87,17 @@ describe("release-index", () => {
       );
     });
 
+    it("requests the Traditional Chinese changelog path", async () => {
+      fetchSpy.mockResolvedValueOnce(new Response("繁體中文", { status: 200 }));
+
+      await expect(fetchReleaseChangelog(release, "zh-tw")).resolves.toBe(
+        "繁體中文",
+      );
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "https://raw.githubusercontent.com/RavelloH/InsightFlare/main/.github/releases/i18n/zh-tw/v1.2.3.md",
+      );
+    });
+
     it("falls back to English when a non-English changelog is missing", async () => {
       fetchSpy
         .mockResolvedValueOnce(new Response("Not Found", { status: 404 }))
