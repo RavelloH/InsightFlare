@@ -78,9 +78,9 @@
     "@remixicon/react": "^4.9.0",
     "clsx": "^2.1.1",
     "motion": "^12.43.0",
-    "overlayscrollbars": "^2.16.0",
+    "overlayscrollbars": "^2.17.0",
     "recharts": "^2.15.4",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
     "esbuild": "^0.28.1",
