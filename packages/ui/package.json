@@ -295,7 +295,7 @@
     "vaul": "^1.1.2"
   },
   "devDependencies": {
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "shadcn": "^4.22.1",
     "typescript": "^5.9.3"
   }
