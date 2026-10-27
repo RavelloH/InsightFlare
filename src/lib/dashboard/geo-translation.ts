@@ -22,6 +22,7 @@ export interface LocaleGeoLabelRecord {
   name?: unknown;
   name_default?: unknown;
   native?: unknown;
+  name_zh_tw?: unknown;
 }
 
 export interface GeoTranslationTimezone {
@@ -153,7 +154,9 @@ export function buildGeoTranslationApiUrl(
   apiLocale: string,
   ...segments: string[]
 ): string {
-  const path = [apiLocale, ...segments]
+  const dataLocale =
+    apiLocale === "zh-TW" ? GEO_TRANSLATION_DATA_LOCALE : apiLocale;
+  const path = [dataLocale, ...segments]
     .map((segment) => encodeURIComponent(segment.trim()))
     .filter((segment) => segment.length > 0)
     .join("/");
@@ -195,6 +198,8 @@ function pickReadableZhGeoLabel(record: LocaleGeoLabelRecord): string {
 }
 
 function pickReadableTraditionalGeoLabel(record: LocaleGeoLabelRecord): string {
+  const translated = asTrimmedString(record.name_zh_tw);
+  if (translated) return translated;
   const name = asTrimmedString(record.name);
   const nativeName = asTrimmedString(record.native);
   if (
@@ -205,6 +210,26 @@ function pickReadableTraditionalGeoLabel(record: LocaleGeoLabelRecord): string {
     return nativeName;
   }
   return name || nativeName || asTrimmedString(record.name_default);
+}
+
+// Preserve original fields for matching; lazily create a Traditional Chinese
+// display name when the zh-TW view consumes the available zh-CN dataset.
+async function populateTraditionalGeoLabels(
+  payload: GeoCountryTranslationPayload | GeoStateTranslationPayload | null,
+): Promise<void> {
+  if (!payload) return;
+  const { toTraditionalGeoName } = await import("./geo-traditional");
+  const statePayload = payload as GeoStateTranslationPayload;
+  const records: Array<LocaleGeoLabelRecord | undefined> = [
+    payload.country,
+    statePayload.state,
+    ...(statePayload.cities ?? []),
+  ];
+  for (const record of records) {
+    if (!record) continue;
+    const original = pickReadableTraditionalGeoLabel(record);
+    if (original) record.name_zh_tw = toTraditionalGeoName(original);
+  }
 }
 
 function pickApiLocaleGeoLabel(
@@ -486,7 +511,9 @@ export async function fetchGeoCountryTranslationPayload(
     .then(async (response) => {
       if (!response.ok) return null;
       const payload = (await response.json()) as unknown;
-      return parseGeoCountryTranslationPayload(payload);
+      const parsed = parseGeoCountryTranslationPayload(payload);
+      if (apiLocale === "zh-TW") await populateTraditionalGeoLabels(parsed);
+      return parsed;
     })
     .catch(() => null);
 
@@ -523,7 +550,9 @@ export async function fetchGeoStateTranslationPayload(
     .then(async (response) => {
       if (!response.ok) return null;
       const payload = (await response.json()) as unknown;
-      return parseGeoStateTranslationPayload(payload);
+      const parsed = parseGeoStateTranslationPayload(payload);
+      if (apiLocale === "zh-TW") await populateTraditionalGeoLabels(parsed);
+      return parsed;
     })
     .catch(() => null);
 

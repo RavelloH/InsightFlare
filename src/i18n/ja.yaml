@@ -2590,6 +2590,36 @@ adminTeams:
     created: 作成日時
     action: 操作
 requestObservation:
+  uiLabels:
+    pageSubtitle: "Analytics Engine でリクエストの分類、処置、集計経路を確認します。"
+    blocked: "ブロック済みリクエスト"
+    included: "集計対象リクエスト"
+    disposition: "処置"
+    normalRequests: "通常リクエスト"
+    suspectedBotRequests: "ボット疑い"
+    botRequests: "ボットリクエスト"
+    customBlockedRequests: "カスタムブロック"
+    includedRequests: "集計対象リクエスト数"
+    blockedRequests: "ブロック済みリクエスト数"
+    totalRequests: "総リクエスト数"
+    botRequestRatio: "ボットリクエスト比率"
+    blockedRequestRatio: "ブロック率"
+    normalRequestRatio: "通常リクエスト比率"
+    normalTrafficShare: "通常リクエスト"
+    suspectedBotTraffic: "ボット疑い"
+    botTraffic: "ボットリクエスト"
+    customBlockedTraffic: "カスタムブロック"
+    requests: "リクエスト数"
+    blockedSubtitle: "実際にブロックされたリクエストを表示します。"
+    includedSubtitle: "統計に含まれるリクエストを表示します。"
+    blockedTrendDescription: "時間帯ごとのブロック数とブロック率。"
+    includedTrendDescription: "時間帯ごとの集計対象リクエスト数。"
+    recentBlockedTitle: "最近のブロック済みリクエスト"
+    recentBlockedDescription: "統合された Request Analytics Engine データセットの記録です。"
+    recentIncludedTitle: "最近の集計対象リクエスト"
+    recentIncludedDescription: "統合された Request Analytics Engine データセットの記録です。"
+    detailTitle: "リクエスト詳細"
+    detailSubtitle: "分類、処置、ネットワーク、クライアントの情報を確認します。"
   title: リクエスト監視
   tabs:
     overview: 概要

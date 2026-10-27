@@ -20,6 +20,7 @@ import {
 import { useTheme } from "@/components/theme-provider";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { nativeLocaleName } from "@/lib/i18n/native-locale-names";
 import Link from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -69,17 +70,17 @@ export function SidebarAppearanceMenus({
     href: string;
     label: string;
   }> = [
-    { locale: "en", href: switchToEn, label: messages.actions.switchToEnglish },
-    { locale: "zh", href: switchToZh, label: messages.actions.switchToChinese },
+    { locale: "en", href: switchToEn, label: nativeLocaleName("en") },
+    { locale: "zh", href: switchToZh, label: nativeLocaleName("zh") },
     {
       locale: "zh-tw",
       href: switchToZhTw,
-      label: messages.actions.switchToTraditionalChinese,
+      label: nativeLocaleName("zh-tw"),
     },
     {
       locale: "ja",
       href: switchToJa,
-      label: messages.actions.switchToJapanese,
+      label: nativeLocaleName("ja"),
     },
   ];
   const widthClass = hasAccountControl ? "w-1/3" : "w-1/2";

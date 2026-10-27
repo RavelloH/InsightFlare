@@ -30,6 +30,7 @@ import {
   SUPPORTED_LOCALES,
 } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { nativeLocaleName } from "@/lib/i18n/native-locale-names";
 type PreviewType =
   "test" | "report" | "milestone" | "threshold" | "change" | "health";
 type PreviewFormat = "html" | "text" | "json";
@@ -47,12 +48,6 @@ const PREVIEW_TYPES: PreviewType[] = [
   "health",
 ];
 const PREVIEW_FORMATS: PreviewFormat[] = ["html", "text", "json"];
-function localeLabel(messages: AppMessages, locale: Locale): string {
-  if (locale === "zh-tw") return messages.actions.switchToTraditionalChinese;
-  if (locale === "zh") return messages.actions.switchToChinese;
-  if (locale === "ja") return messages.actions.switchToJapanese;
-  return messages.actions.switchToEnglish;
-}
 export function NotificationEmailPreviewClient({
   locale,
   messages,
@@ -192,7 +187,7 @@ export function NotificationEmailPreviewClient({
               <SelectContent>
                 {SUPPORTED_LOCALES.map((item) => (
                   <SelectItem key={item} value={item}>
-                    {localeLabel(messages, item)}
+                    {nativeLocaleName(item)}
                   </SelectItem>
                 ))}
               </SelectContent>

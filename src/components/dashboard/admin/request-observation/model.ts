@@ -2,7 +2,7 @@ import type { RequestObservationTrendPoint } from "@insightflare/product-ui/char
 
 import { durationFormat, intlLocale } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
-import type { AppMessages } from "@/lib/i18n/messages";
+import { type AppMessages, getMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
 
 export interface RequestObservationClientProps {
@@ -638,118 +638,7 @@ export function requestObservationUiLabels(
   locale: Locale,
   copy: AppMessages["requestObservation"],
 ): RequestObservationUiLabels {
-  const fallback =
-    locale === "zh"
-      ? {
-          pageSubtitle:
-            "基于 Analytics Engine 观察请求分类、实际处置与统计链路。",
-          blocked: "拦截请求",
-          included: "统计请求",
-          disposition: "处置",
-          normalRequests: "正常请求",
-          suspectedBotRequests: "疑似机器人",
-          botRequests: "机器人请求",
-          customBlockedRequests: "自定义拦截",
-          includedRequests: "统计请求数",
-          blockedRequests: "拦截请求数",
-          totalRequests: "总请求数",
-          botRequestRatio: "机器人请求比例",
-          blockedRequestRatio: "拦截请求比例",
-          normalRequestRatio: "正常请求比例",
-          normalTrafficShare: "正常请求",
-          suspectedBotTraffic: "疑似机器人",
-          botTraffic: "机器人请求",
-          customBlockedTraffic: "自定义拦截",
-          requests: "请求数",
-          blockedSubtitle: "聚焦实际被拦截的请求；分类仍表示请求的检测结果。",
-          includedSubtitle:
-            "聚焦进入统计链路的请求，包括正常请求和未被拦截的机器人信号。",
-          blockedTrendDescription: "按时间显示实际拦截请求数与拦截比例。",
-          includedTrendDescription: "按时间显示进入统计链路的请求数。",
-          recentBlockedTitle: "最近拦截请求",
-          recentBlockedDescription:
-            "这些记录来自统一的 Request Analytics Engine 数据集。",
-          recentIncludedTitle: "最近统计请求",
-          recentIncludedDescription:
-            "这些记录来自统一的 Request Analytics Engine 数据集。",
-          detailTitle: "请求详情",
-          detailSubtitle: "查看请求的分类、处置结果、网络和客户端上下文。",
-        }
-      : locale === "ja"
-        ? {
-            pageSubtitle:
-              "Analytics Engine でリクエストの分類、処置、集計経路を確認します。",
-            blocked: "ブロック済みリクエスト",
-            included: "集計対象リクエスト",
-            disposition: "処置",
-            normalRequests: "通常リクエスト",
-            suspectedBotRequests: "ボット疑い",
-            botRequests: "ボットリクエスト",
-            customBlockedRequests: "カスタムブロック",
-            includedRequests: "集計対象リクエスト数",
-            blockedRequests: "ブロック済みリクエスト数",
-            totalRequests: "総リクエスト数",
-            botRequestRatio: "ボットリクエスト比率",
-            blockedRequestRatio: "ブロック率",
-            normalRequestRatio: "通常リクエスト比率",
-            normalTrafficShare: "通常リクエスト",
-            suspectedBotTraffic: "ボット疑い",
-            botTraffic: "ボットリクエスト",
-            customBlockedTraffic: "カスタムブロック",
-            requests: "リクエスト数",
-            blockedSubtitle: "実際にブロックされたリクエストを表示します。",
-            includedSubtitle: "統計に含まれるリクエストを表示します。",
-            blockedTrendDescription: "時間帯ごとのブロック数とブロック率。",
-            includedTrendDescription: "時間帯ごとの集計対象リクエスト数。",
-            recentBlockedTitle: "最近のブロック済みリクエスト",
-            recentBlockedDescription:
-              "統合された Request Analytics Engine データセットの記録です。",
-            recentIncludedTitle: "最近の集計対象リクエスト",
-            recentIncludedDescription:
-              "統合された Request Analytics Engine データセットの記録です。",
-            detailTitle: "リクエスト詳細",
-            detailSubtitle:
-              "分類、処置、ネットワーク、クライアントの情報を確認します。",
-          }
-        : {
-            pageSubtitle:
-              "Monitor request categories, dispositions, and the statistics pipeline from Analytics Engine.",
-            blocked: "Blocked requests",
-            included: "Included requests",
-            disposition: "Disposition",
-            normalRequests: "Normal requests",
-            suspectedBotRequests: "Suspected bots",
-            botRequests: "Bot requests",
-            customBlockedRequests: "Custom blocks",
-            includedRequests: "Included requests",
-            blockedRequests: "Blocked requests",
-            totalRequests: "Total requests",
-            botRequestRatio: "Bot request ratio",
-            blockedRequestRatio: "Blocked request ratio",
-            normalRequestRatio: "Normal request ratio",
-            normalTrafficShare: "Normal requests",
-            suspectedBotTraffic: "Suspected bots",
-            botTraffic: "Bot requests",
-            customBlockedTraffic: "Custom blocks",
-            requests: "Requests",
-            blockedSubtitle:
-              "Requests that were actually blocked; category remains the detection result.",
-            includedSubtitle:
-              "Requests included in statistics, including requests with signals that were not blocked.",
-            blockedTrendDescription:
-              "Actual blocked requests and blocked ratio by interval.",
-            includedTrendDescription:
-              "Requests included in statistics by interval.",
-            recentBlockedTitle: "Recent blocked requests",
-            recentBlockedDescription:
-              "Records read from the unified Request Analytics Engine dataset.",
-            recentIncludedTitle: "Recent included requests",
-            recentIncludedDescription:
-              "Records read from the unified Request Analytics Engine dataset.",
-            detailTitle: "Request details",
-            detailSubtitle:
-              "Inspect the request category, disposition, network, and client context.",
-          };
+  const fallback = getMessages(locale).requestObservation.uiLabels;
   const read = (paths: string[][], value: string) => {
     for (const path of paths) {
       const candidate = nestedMessage(copy, path, "");

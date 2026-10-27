@@ -21,19 +21,13 @@ import {
 import { useTheme } from "@/components/theme-provider";
 import { type Locale, SUPPORTED_LOCALES } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { nativeLocaleName } from "@/lib/i18n/native-locale-names";
 import Link from "@/lib/router";
 
 interface AuthPageActionsProps {
   locale: Locale;
   messages: AppMessages;
   buildHref: (locale: Locale) => string;
-}
-
-function localeLabel(messages: AppMessages, locale: Locale): string {
-  if (locale === "zh-tw") return messages.actions.switchToTraditionalChinese;
-  if (locale === "zh") return messages.actions.switchToChinese;
-  if (locale === "ja") return messages.actions.switchToJapanese;
-  return messages.actions.switchToEnglish;
 }
 
 function pickThemeIcon(theme: string) {
@@ -137,7 +131,7 @@ export function AuthPageActions({
                 <span className="inline-flex w-4 justify-center">
                   {locale === item ? <RiCheckLine className="size-4" /> : null}
                 </span>
-                <span>{localeLabel(messages, item)}</span>
+                <span>{nativeLocaleName(item)}</span>
               </Link>
             </DropdownMenuItem>
           ))}

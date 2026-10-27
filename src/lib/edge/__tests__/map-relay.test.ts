@@ -130,4 +130,23 @@ describe("map relay handler", () => {
     expect(response.status).toBe(502);
     expect(await response.text()).toBe("Map relay unavailable");
   });
+  it("forwards versioned CARTO v2 tiles through the InsightFlare resource proxy", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]), {
+        headers: { "content-type": "application/vnd.mapbox-vector-tile" },
+      }),
+    );
+
+    const response = await handleMapRelayRequest(
+      request(
+        "/api/public/resources/map/v1/tiles/carto.streets/v2/20261001-03/3/6/3.mvt",
+      ),
+      env,
+    );
+    expect(response.status).toBe(200);
+    const [url] = vi.mocked(fetch).mock.calls[0] as [URL, RequestInit];
+    expect(url.pathname).toBe(
+      "/v1/tiles/carto.streets/v2/20261001-03/3/6/3.mvt",
+    );
+  });
 });

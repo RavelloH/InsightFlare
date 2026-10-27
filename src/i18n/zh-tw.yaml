@@ -2581,6 +2581,36 @@ adminTeams:
     created: 建立時間
     action: 操作
 requestObservation:
+  uiLabels:
+    pageSubtitle: "基於 Analytics Engine 觀察請求分類、實際處置與統計鏈路。"
+    blocked: "攔截請求"
+    included: "統計請求"
+    disposition: "處置"
+    normalRequests: "正常請求"
+    suspectedBotRequests: "疑似機器人"
+    botRequests: "機器人請求"
+    customBlockedRequests: "自定義攔截"
+    includedRequests: "統計請求數"
+    blockedRequests: "攔截請求數"
+    totalRequests: "總請求數"
+    botRequestRatio: "機器人請求比例"
+    blockedRequestRatio: "攔截請求比例"
+    normalRequestRatio: "正常請求比例"
+    normalTrafficShare: "正常請求"
+    suspectedBotTraffic: "疑似機器人"
+    botTraffic: "機器人請求"
+    customBlockedTraffic: "自定義攔截"
+    requests: "請求數"
+    blockedSubtitle: "聚焦實際被攔截的請求；分類仍表示請求的檢測結果。"
+    includedSubtitle: "聚焦進入統計鏈路的請求，包括正常請求和未被攔截的機器人信號。"
+    blockedTrendDescription: "按時間顯示實際攔截請求數與攔截比例。"
+    includedTrendDescription: "按時間顯示進入統計鏈路的請求數。"
+    recentBlockedTitle: "最近攔截請求"
+    recentBlockedDescription: "這些記錄來自統一的 Request Analytics Engine 數據集。"
+    recentIncludedTitle: "最近統計請求"
+    recentIncludedDescription: "這些記錄來自統一的 Request Analytics Engine 數據集。"
+    detailTitle: "請求詳情"
+    detailSubtitle: "查看請求的分類、處置結果、網絡和客戶端上下文。"
   title: 請求觀測
   tabs:
     overview: 總覽

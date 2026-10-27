@@ -43,6 +43,7 @@ import {
   SUPPORTED_LOCALES,
 } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { nativeLocaleName } from "@/lib/i18n/native-locale-names";
 import Image from "@/lib/image";
 import Link from "@/lib/router";
 import { usePathname, useRouter } from "@/lib/router";
@@ -56,12 +57,6 @@ function localeSwitchPath(pathname: string, locale: Locale): string {
   const withoutLocale =
     pathname.replace(/^\/(?:en|zh-tw|zh|ja)(?=\/|$)/, "") || "/";
   return `/${locale}${withoutLocale}`;
-}
-function localeLabel(messages: AppMessages, locale: Locale): string {
-  if (locale === "zh-tw") return messages.actions.switchToTraditionalChinese;
-  if (locale === "zh") return messages.actions.switchToChinese;
-  if (locale === "ja") return messages.actions.switchToJapanese;
-  return messages.actions.switchToEnglish;
 }
 function pickThemeIcon(theme: string) {
   if (theme === "dark") return RiMoonLine;
@@ -260,7 +255,7 @@ export function ShareHeader({
                     onClick={() => switchLocale(item)}
                   >
                     <RiTranslate2 data-icon="inline-start" />
-                    <span>{localeLabel(messages, item)}</span>
+                    <span>{nativeLocaleName(item)}</span>
                   </Button>
                 </DrawerClose>
               ))}
@@ -297,7 +292,7 @@ export function ShareHeader({
             >
               {SUPPORTED_LOCALES.map((item) => (
                 <DropdownMenuRadioItem key={item} value={item}>
-                  {localeLabel(messages, item)}
+                  {nativeLocaleName(item)}
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>

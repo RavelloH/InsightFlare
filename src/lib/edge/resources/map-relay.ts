@@ -14,7 +14,7 @@ const MAP_RELAY_LOCALE_HEADER = "x-insightflare-locale";
 const INSTANCE_SCOPED_RELAY_PATH =
   /^\/v1\/(?:styles\/(?:light|dark)\/style\.json|sources\/carto\.streets\/v1\/tiles\.json)$/;
 const ALLOWED_MAP_PATH =
-  /^\/v1\/(?:styles\/(?:light|dark)\/style\.json|sources\/carto\.streets\/v1\/tiles\.json|tiles\/carto\.streets\/v1\/\d+\/\d+\/\d+\.mvt|fonts\/[^/]+\/[^/]+\.pbf|sprites\/(?:light|dark)\/sprite(?:@2x)?\.(?:json|png))$/;
+  /^\/v1\/(?:styles\/(?:light|dark)\/style\.json|sources\/carto\.streets\/v1\/tiles\.json|tiles\/carto\.streets\/(?:v1\/\d+|v2\/\d{8}-\d{2}\/\d+)\/\d+\/\d+\.mvt|fonts\/[^/]+\/[^/]+\.pbf|sprites\/(?:light|dark)\/sprite(?:@2x)?\.(?:json|png))$/;
 const FORWARDED_RESPONSE_HEADERS = [
   "cache-control",
   "cloudflare-cdn-cache-control",

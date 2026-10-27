@@ -2682,6 +2682,36 @@ adminTeams:
     created: Created
     action: Action
 requestObservation:
+  uiLabels:
+    pageSubtitle: "Monitor request categories, dispositions, and the statistics pipeline from Analytics Engine."
+    blocked: "Blocked requests"
+    included: "Included requests"
+    disposition: "Disposition"
+    normalRequests: "Normal requests"
+    suspectedBotRequests: "Suspected bots"
+    botRequests: "Bot requests"
+    customBlockedRequests: "Custom blocks"
+    includedRequests: "Included requests"
+    blockedRequests: "Blocked requests"
+    totalRequests: "Total requests"
+    botRequestRatio: "Bot request ratio"
+    blockedRequestRatio: "Blocked request ratio"
+    normalRequestRatio: "Normal request ratio"
+    normalTrafficShare: "Normal requests"
+    suspectedBotTraffic: "Suspected bots"
+    botTraffic: "Bot requests"
+    customBlockedTraffic: "Custom blocks"
+    requests: "Requests"
+    blockedSubtitle: "Requests that were actually blocked; category remains the detection result."
+    includedSubtitle: "Requests included in statistics, including requests with signals that were not blocked."
+    blockedTrendDescription: "Actual blocked requests and blocked ratio by interval."
+    includedTrendDescription: "Requests included in statistics by interval."
+    recentBlockedTitle: "Recent blocked requests"
+    recentBlockedDescription: "Records read from the unified Request Analytics Engine dataset."
+    recentIncludedTitle: "Recent included requests"
+    recentIncludedDescription: "Records read from the unified Request Analytics Engine dataset."
+    detailTitle: "Request details"
+    detailSubtitle: "Inspect the request category, disposition, network, and client context."
   title: Request Observability
   tabs:
     overview: Overview

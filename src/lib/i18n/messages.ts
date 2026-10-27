@@ -2533,6 +2533,37 @@ export interface AppMessages {
     };
   };
   requestObservation: {
+    uiLabels: {
+      pageSubtitle: string;
+      blocked: string;
+      included: string;
+      disposition: string;
+      normalRequests: string;
+      suspectedBotRequests: string;
+      botRequests: string;
+      customBlockedRequests: string;
+      includedRequests: string;
+      blockedRequests: string;
+      totalRequests: string;
+      botRequestRatio: string;
+      blockedRequestRatio: string;
+      normalRequestRatio: string;
+      normalTrafficShare: string;
+      suspectedBotTraffic: string;
+      botTraffic: string;
+      customBlockedTraffic: string;
+      requests: string;
+      blockedSubtitle: string;
+      includedSubtitle: string;
+      blockedTrendDescription: string;
+      includedTrendDescription: string;
+      recentBlockedTitle: string;
+      recentBlockedDescription: string;
+      recentIncludedTitle: string;
+      recentIncludedDescription: string;
+      detailTitle: string;
+      detailSubtitle: string;
+    };
     title: string;
     tabs: {
       overview: string;
@@ -5661,6 +5692,44 @@ const enMessages = {
     },
   },
   requestObservation: {
+    uiLabels: {
+      pageSubtitle:
+        "Monitor request categories, dispositions, and the statistics pipeline from Analytics Engine.",
+      blocked: "Blocked requests",
+      included: "Included requests",
+      disposition: "Disposition",
+      normalRequests: "Normal requests",
+      suspectedBotRequests: "Suspected bots",
+      botRequests: "Bot requests",
+      customBlockedRequests: "Custom blocks",
+      includedRequests: "Included requests",
+      blockedRequests: "Blocked requests",
+      totalRequests: "Total requests",
+      botRequestRatio: "Bot request ratio",
+      blockedRequestRatio: "Blocked request ratio",
+      normalRequestRatio: "Normal request ratio",
+      normalTrafficShare: "Normal requests",
+      suspectedBotTraffic: "Suspected bots",
+      botTraffic: "Bot requests",
+      customBlockedTraffic: "Custom blocks",
+      requests: "Requests",
+      blockedSubtitle:
+        "Requests that were actually blocked; category remains the detection result.",
+      includedSubtitle:
+        "Requests included in statistics, including requests with signals that were not blocked.",
+      blockedTrendDescription:
+        "Actual blocked requests and blocked ratio by interval.",
+      includedTrendDescription: "Requests included in statistics by interval.",
+      recentBlockedTitle: "Recent blocked requests",
+      recentBlockedDescription:
+        "Records read from the unified Request Analytics Engine dataset.",
+      recentIncludedTitle: "Recent included requests",
+      recentIncludedDescription:
+        "Records read from the unified Request Analytics Engine dataset.",
+      detailTitle: "Request details",
+      detailSubtitle:
+        "Inspect the request category, disposition, network, and client context.",
+    },
     title: "Request Observability",
     tabs: {
       overview: "Overview",
@@ -8756,6 +8825,40 @@ const zhMessages = {
     },
   },
   requestObservation: {
+    uiLabels: {
+      pageSubtitle: "基于 Analytics Engine 观察请求分类、实际处置与统计链路。",
+      blocked: "拦截请求",
+      included: "统计请求",
+      disposition: "处置",
+      normalRequests: "正常请求",
+      suspectedBotRequests: "疑似机器人",
+      botRequests: "机器人请求",
+      customBlockedRequests: "自定义拦截",
+      includedRequests: "统计请求数",
+      blockedRequests: "拦截请求数",
+      totalRequests: "总请求数",
+      botRequestRatio: "机器人请求比例",
+      blockedRequestRatio: "拦截请求比例",
+      normalRequestRatio: "正常请求比例",
+      normalTrafficShare: "正常请求",
+      suspectedBotTraffic: "疑似机器人",
+      botTraffic: "机器人请求",
+      customBlockedTraffic: "自定义拦截",
+      requests: "请求数",
+      blockedSubtitle: "聚焦实际被拦截的请求；分类仍表示请求的检测结果。",
+      includedSubtitle:
+        "聚焦进入统计链路的请求，包括正常请求和未被拦截的机器人信号。",
+      blockedTrendDescription: "按时间显示实际拦截请求数与拦截比例。",
+      includedTrendDescription: "按时间显示进入统计链路的请求数。",
+      recentBlockedTitle: "最近拦截请求",
+      recentBlockedDescription:
+        "这些记录来自统一的 Request Analytics Engine 数据集。",
+      recentIncludedTitle: "最近统计请求",
+      recentIncludedDescription:
+        "这些记录来自统一的 Request Analytics Engine 数据集。",
+      detailTitle: "请求详情",
+      detailSubtitle: "查看请求的分类、处置结果、网络和客户端上下文。",
+    },
     title: "请求观测",
     tabs: {
       overview: "总览",
@@ -11843,6 +11946,40 @@ const zhTwMessages = {
     },
   },
   requestObservation: {
+    uiLabels: {
+      pageSubtitle: "基於 Analytics Engine 觀察請求分類、實際處置與統計鏈路。",
+      blocked: "攔截請求",
+      included: "統計請求",
+      disposition: "處置",
+      normalRequests: "正常請求",
+      suspectedBotRequests: "疑似機器人",
+      botRequests: "機器人請求",
+      customBlockedRequests: "自定義攔截",
+      includedRequests: "統計請求數",
+      blockedRequests: "攔截請求數",
+      totalRequests: "總請求數",
+      botRequestRatio: "機器人請求比例",
+      blockedRequestRatio: "攔截請求比例",
+      normalRequestRatio: "正常請求比例",
+      normalTrafficShare: "正常請求",
+      suspectedBotTraffic: "疑似機器人",
+      botTraffic: "機器人請求",
+      customBlockedTraffic: "自定義攔截",
+      requests: "請求數",
+      blockedSubtitle: "聚焦實際被攔截的請求；分類仍表示請求的檢測結果。",
+      includedSubtitle:
+        "聚焦進入統計鏈路的請求，包括正常請求和未被攔截的機器人信號。",
+      blockedTrendDescription: "按時間顯示實際攔截請求數與攔截比例。",
+      includedTrendDescription: "按時間顯示進入統計鏈路的請求數。",
+      recentBlockedTitle: "最近攔截請求",
+      recentBlockedDescription:
+        "這些記錄來自統一的 Request Analytics Engine 數據集。",
+      recentIncludedTitle: "最近統計請求",
+      recentIncludedDescription:
+        "這些記錄來自統一的 Request Analytics Engine 數據集。",
+      detailTitle: "請求詳情",
+      detailSubtitle: "查看請求的分類、處置結果、網絡和客戶端上下文。",
+    },
     title: "請求觀測",
     tabs: {
       overview: "總覽",
@@ -15015,6 +15152,41 @@ const jaMessages = {
     },
   },
   requestObservation: {
+    uiLabels: {
+      pageSubtitle:
+        "Analytics Engine でリクエストの分類、処置、集計経路を確認します。",
+      blocked: "ブロック済みリクエスト",
+      included: "集計対象リクエスト",
+      disposition: "処置",
+      normalRequests: "通常リクエスト",
+      suspectedBotRequests: "ボット疑い",
+      botRequests: "ボットリクエスト",
+      customBlockedRequests: "カスタムブロック",
+      includedRequests: "集計対象リクエスト数",
+      blockedRequests: "ブロック済みリクエスト数",
+      totalRequests: "総リクエスト数",
+      botRequestRatio: "ボットリクエスト比率",
+      blockedRequestRatio: "ブロック率",
+      normalRequestRatio: "通常リクエスト比率",
+      normalTrafficShare: "通常リクエスト",
+      suspectedBotTraffic: "ボット疑い",
+      botTraffic: "ボットリクエスト",
+      customBlockedTraffic: "カスタムブロック",
+      requests: "リクエスト数",
+      blockedSubtitle: "実際にブロックされたリクエストを表示します。",
+      includedSubtitle: "統計に含まれるリクエストを表示します。",
+      blockedTrendDescription: "時間帯ごとのブロック数とブロック率。",
+      includedTrendDescription: "時間帯ごとの集計対象リクエスト数。",
+      recentBlockedTitle: "最近のブロック済みリクエスト",
+      recentBlockedDescription:
+        "統合された Request Analytics Engine データセットの記録です。",
+      recentIncludedTitle: "最近の集計対象リクエスト",
+      recentIncludedDescription:
+        "統合された Request Analytics Engine データセットの記録です。",
+      detailTitle: "リクエスト詳細",
+      detailSubtitle:
+        "分類、処置、ネットワーク、クライアントの情報を確認します。",
+    },
     title: "リクエスト監視",
     tabs: {
       overview: "概要",

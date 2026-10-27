@@ -2579,6 +2579,36 @@ adminTeams:
     created: 创建时间
     action: 操作
 requestObservation:
+  uiLabels:
+    pageSubtitle: "基于 Analytics Engine 观察请求分类、实际处置与统计链路。"
+    blocked: "拦截请求"
+    included: "统计请求"
+    disposition: "处置"
+    normalRequests: "正常请求"
+    suspectedBotRequests: "疑似机器人"
+    botRequests: "机器人请求"
+    customBlockedRequests: "自定义拦截"
+    includedRequests: "统计请求数"
+    blockedRequests: "拦截请求数"
+    totalRequests: "总请求数"
+    botRequestRatio: "机器人请求比例"
+    blockedRequestRatio: "拦截请求比例"
+    normalRequestRatio: "正常请求比例"
+    normalTrafficShare: "正常请求"
+    suspectedBotTraffic: "疑似机器人"
+    botTraffic: "机器人请求"
+    customBlockedTraffic: "自定义拦截"
+    requests: "请求数"
+    blockedSubtitle: "聚焦实际被拦截的请求；分类仍表示请求的检测结果。"
+    includedSubtitle: "聚焦进入统计链路的请求，包括正常请求和未被拦截的机器人信号。"
+    blockedTrendDescription: "按时间显示实际拦截请求数与拦截比例。"
+    includedTrendDescription: "按时间显示进入统计链路的请求数。"
+    recentBlockedTitle: "最近拦截请求"
+    recentBlockedDescription: "这些记录来自统一的 Request Analytics Engine 数据集。"
+    recentIncludedTitle: "最近统计请求"
+    recentIncludedDescription: "这些记录来自统一的 Request Analytics Engine 数据集。"
+    detailTitle: "请求详情"
+    detailSubtitle: "查看请求的分类、处置结果、网络和客户端上下文。"
   title: 请求观测
   tabs:
     overview: 总览

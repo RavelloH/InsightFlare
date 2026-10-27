@@ -56,6 +56,7 @@ import {
 } from "@/lib/dashboard-api/client/edge";
 import { isValidLocale, type Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { nativeLocaleName } from "@/lib/i18n/native-locale-names";
 import { useRouter } from "@/lib/router";
 interface AccountSettingsClientProps {
   locale: Locale;
@@ -832,18 +833,12 @@ export function AccountSettingsClient({
                     <SelectItem value="default">
                       {copy.preferredLanguageDefault}
                     </SelectItem>
-                    <SelectItem value="en">
-                      {copy.preferredLanguageEnglish}
-                    </SelectItem>
-                    <SelectItem value="zh">
-                      {copy.preferredLanguageChinese}
-                    </SelectItem>
+                    <SelectItem value="en">{nativeLocaleName("en")}</SelectItem>
+                    <SelectItem value="zh">{nativeLocaleName("zh")}</SelectItem>
                     <SelectItem value="zh-tw">
-                      {copy.preferredLanguageTraditionalChinese}
+                      {nativeLocaleName("zh-tw")}
                     </SelectItem>
-                    <SelectItem value="ja">
-                      {copy.preferredLanguageJapanese}
-                    </SelectItem>
+                    <SelectItem value="ja">{nativeLocaleName("ja")}</SelectItem>
                   </SelectContent>
                 </Select>
               </Field>
