@@ -80,7 +80,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -606,7 +606,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_e91b6829da95"
+                $ref: "#/components/schemas/SharedSchema_e96c5e7fcaed"
               example:
                 data:
                   views: 0
@@ -790,7 +790,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -1301,7 +1301,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_e91b6829da95"
+                $ref: "#/components/schemas/SharedSchema_e96c5e7fcaed"
               example:
                 data:
                   views: 0
@@ -1666,17 +1666,17 @@ paths:
                       status:
                         type: string
                       createdAt:
-                        anyOf:
-                          - type: string
-                          - type: "null"
+                        type:
+                          - string
+                          - "null"
                       expiresAt:
-                        anyOf:
-                          - type: string
-                          - type: "null"
+                        type:
+                          - string
+                          - "null"
                       lastUsedAt:
-                        anyOf:
-                          - type: string
-                          - type: "null"
+                        type:
+                          - string
+                          - "null"
                       team:
                         type: object
                         properties:
@@ -2124,9 +2124,9 @@ paths:
                       name:
                         type: string
                       createdAt:
-                        anyOf:
-                          - type: string
-                          - type: "null"
+                        type:
+                          - string
+                          - "null"
                       links:
                         type: object
                         propertyNames:
@@ -2339,7 +2339,7 @@ paths:
                   type: object
                   properties:
                     timeRange:
-                      $ref: "#/components/schemas/SharedSchema_6a5473782474"
+                      $ref: "#/components/schemas/SharedSchema_dff1c4c0e56f"
                     filter:
                       anyOf:
                         - oneOf:
@@ -2390,7 +2390,7 @@ paths:
                   type: object
                   properties:
                     timeRange:
-                      $ref: "#/components/schemas/SharedSchema_3d657b118fdd"
+                      $ref: "#/components/schemas/SharedSchema_14483f6e819b"
                     filter:
                       anyOf:
                         - oneOf:
@@ -2927,7 +2927,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_07a741266f50"
+                $ref: "#/components/schemas/SharedSchema_52b7febe81ff"
               example:
                 data:
                   current:
@@ -3298,7 +3298,7 @@ paths:
                   type: object
                   properties:
                     timeRange:
-                      $ref: "#/components/schemas/SharedSchema_6a5473782474"
+                      $ref: "#/components/schemas/SharedSchema_dff1c4c0e56f"
                     filter:
                       anyOf:
                         - oneOf:
@@ -3349,7 +3349,7 @@ paths:
                   type: object
                   properties:
                     timeRange:
-                      $ref: "#/components/schemas/SharedSchema_3d657b118fdd"
+                      $ref: "#/components/schemas/SharedSchema_14483f6e819b"
                     filter:
                       anyOf:
                         - oneOf:
@@ -3905,7 +3905,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_54fee11931ae"
+                $ref: "#/components/schemas/SharedSchema_048cc0f17594"
               example:
                 data:
                   dimension: example
@@ -4203,7 +4203,7 @@ paths:
                   type: object
                   properties:
                     timeRange:
-                      $ref: "#/components/schemas/SharedSchema_6a5473782474"
+                      $ref: "#/components/schemas/SharedSchema_dff1c4c0e56f"
                     filter:
                       anyOf:
                         - oneOf:
@@ -4240,7 +4240,7 @@ paths:
                   type: object
                   properties:
                     timeRange:
-                      $ref: "#/components/schemas/SharedSchema_3d657b118fdd"
+                      $ref: "#/components/schemas/SharedSchema_14483f6e819b"
                     filter:
                       anyOf:
                         - oneOf:
@@ -4759,7 +4759,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_07a741266f50"
+                $ref: "#/components/schemas/SharedSchema_52b7febe81ff"
               example:
                 data:
                   current:
@@ -5099,7 +5099,7 @@ paths:
                   type: object
                   properties:
                     timeRange:
-                      $ref: "#/components/schemas/SharedSchema_6a5473782474"
+                      $ref: "#/components/schemas/SharedSchema_dff1c4c0e56f"
                     filter:
                       anyOf:
                         - oneOf:
@@ -5137,7 +5137,7 @@ paths:
                   type: object
                   properties:
                     timeRange:
-                      $ref: "#/components/schemas/SharedSchema_3d657b118fdd"
+                      $ref: "#/components/schemas/SharedSchema_14483f6e819b"
                     filter:
                       anyOf:
                         - oneOf:
@@ -5678,7 +5678,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_54fee11931ae"
+                $ref: "#/components/schemas/SharedSchema_048cc0f17594"
               example:
                 data:
                   dimension: example
@@ -5939,7 +5939,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_d59ad36d57ae"
+                $ref: "#/components/schemas/SharedSchema_7f02f8c5c613"
               example:
                 data:
                   metrics:
@@ -6149,7 +6149,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_d59ad36d57ae"
+                $ref: "#/components/schemas/SharedSchema_7f02f8c5c613"
               example:
                 data:
                   metrics:
@@ -6361,7 +6361,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -6883,7 +6883,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_55f78202eaec"
+                $ref: "#/components/schemas/SharedSchema_7f190d7b5798"
               example:
                 data:
                   interval: minute
@@ -7107,7 +7107,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -7611,7 +7611,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_55f78202eaec"
+                $ref: "#/components/schemas/SharedSchema_7f190d7b5798"
               example:
                 data:
                   interval: minute
@@ -7811,7 +7811,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -8355,9 +8355,9 @@ paths:
                             publicEnabled:
                               type: boolean
                             publicSlug:
-                              anyOf:
-                                - type: string
-                                - type: "null"
+                              type:
+                                - string
+                                - "null"
                             createdAt:
                               type: integer
                               minimum: -9007199254740991
@@ -8403,7 +8403,7 @@ paths:
                                   timestamp:
                                     type: string
                                     format: date-time
-                                    pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                                    pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
                                   views:
                                     type: number
                                   sessions:
@@ -8432,7 +8432,7 @@ paths:
                               anyOf:
                                 - type: string
                                   format: date-time
-                                  pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                                  pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
                                 - type: "null"
                           required:
                             - siteId
@@ -8446,13 +8446,13 @@ paths:
                             - lastEventAt
                           additionalProperties: false
                       pagination:
-                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
+                        $ref: "#/components/schemas/SharedSchema_b728ca7d54b3"
                     required:
                       - items
                       - pagination
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -8693,7 +8693,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -9228,7 +9228,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_750b86d20008"
+                $ref: "#/components/schemas/SharedSchema_0edfbffa7345"
               example:
                 data:
                   dimension: example
@@ -9438,7 +9438,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -9960,7 +9960,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_750b86d20008"
+                $ref: "#/components/schemas/SharedSchema_0edfbffa7345"
               example:
                 data:
                   dimension: example
@@ -10165,7 +10165,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -10779,7 +10779,7 @@ paths:
                       - totalVisitors
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -11024,7 +11024,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -11569,13 +11569,13 @@ paths:
                             - sessions
                           additionalProperties: false
                       pagination:
-                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
+                        $ref: "#/components/schemas/SharedSchema_b728ca7d54b3"
                     required:
                       - items
                       - pagination
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -11793,7 +11793,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -12360,13 +12360,13 @@ paths:
                             - visitors
                           additionalProperties: false
                       pagination:
-                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
+                        $ref: "#/components/schemas/SharedSchema_b728ca7d54b3"
                     required:
                       - items
                       - pagination
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -12583,7 +12583,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -13139,7 +13139,7 @@ paths:
                       - items
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -13351,7 +13351,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -13935,14 +13935,14 @@ paths:
                             - occurrences
                           additionalProperties: false
                       pagination:
-                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
+                        $ref: "#/components/schemas/SharedSchema_b728ca7d54b3"
                     required:
                       - field
                       - items
                       - pagination
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -14159,7 +14159,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -14718,7 +14718,7 @@ paths:
                             start:
                               type: string
                               format: date-time
-                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
                             size:
                               type: number
                             periods:
@@ -14749,7 +14749,7 @@ paths:
                       - cohorts
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -14964,7 +14964,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -15525,9 +15525,9 @@ paths:
                               - session
                               - visitor
                           conversionWindowMs:
-                            anyOf:
-                              - type: number
-                              - type: "null"
+                            type:
+                              - number
+                              - "null"
                           steps:
                             type: array
                             items:
@@ -15665,7 +15665,7 @@ paths:
                       - analysis
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -15904,7 +15904,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -16461,7 +16461,7 @@ paths:
                       - summary
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -16686,7 +16686,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -17303,7 +17303,7 @@ paths:
                       - timeseries
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -17530,7 +17530,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -18067,15 +18067,15 @@ paths:
                         type: object
                         properties:
                           ttfb:
-                            $ref: "#/components/schemas/SharedSchema_4b8e303469e7"
+                            $ref: "#/components/schemas/SharedSchema_9c241e1507b9"
                           fcp:
-                            $ref: "#/components/schemas/SharedSchema_4b8e303469e7"
+                            $ref: "#/components/schemas/SharedSchema_9c241e1507b9"
                           lcp:
-                            $ref: "#/components/schemas/SharedSchema_4b8e303469e7"
+                            $ref: "#/components/schemas/SharedSchema_9c241e1507b9"
                           cls:
-                            $ref: "#/components/schemas/SharedSchema_4b8e303469e7"
+                            $ref: "#/components/schemas/SharedSchema_9c241e1507b9"
                           inp:
-                            $ref: "#/components/schemas/SharedSchema_4b8e303469e7"
+                            $ref: "#/components/schemas/SharedSchema_9c241e1507b9"
                         required:
                           - ttfb
                           - fcp
@@ -18087,7 +18087,7 @@ paths:
                       - metrics
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -18325,7 +18325,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -18880,15 +18880,15 @@ paths:
                         type: object
                         properties:
                           ttfb:
-                            $ref: "#/components/schemas/SharedSchema_e4b84a29b1ed"
+                            $ref: "#/components/schemas/SharedSchema_5d7d24dadff4"
                           fcp:
-                            $ref: "#/components/schemas/SharedSchema_e4b84a29b1ed"
+                            $ref: "#/components/schemas/SharedSchema_5d7d24dadff4"
                           lcp:
-                            $ref: "#/components/schemas/SharedSchema_e4b84a29b1ed"
+                            $ref: "#/components/schemas/SharedSchema_5d7d24dadff4"
                           cls:
-                            $ref: "#/components/schemas/SharedSchema_e4b84a29b1ed"
+                            $ref: "#/components/schemas/SharedSchema_5d7d24dadff4"
                           inp:
-                            $ref: "#/components/schemas/SharedSchema_e4b84a29b1ed"
+                            $ref: "#/components/schemas/SharedSchema_5d7d24dadff4"
                         required:
                           - ttfb
                           - fcp
@@ -18901,7 +18901,7 @@ paths:
                       - series
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -19154,7 +19154,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -19728,21 +19728,21 @@ paths:
                             views:
                               type: number
                             avg:
-                              anyOf:
-                                - type: number
-                                - type: "null"
+                              type:
+                                - number
+                                - "null"
                             p50:
-                              anyOf:
-                                - type: number
-                                - type: "null"
+                              type:
+                                - number
+                                - "null"
                             p75:
-                              anyOf:
-                                - type: number
-                                - type: "null"
+                              type:
+                                - number
+                                - "null"
                             p95:
-                              anyOf:
-                                - type: number
-                                - type: "null"
+                              type:
+                                - number
+                                - "null"
                             samples:
                               type: integer
                               minimum: 0
@@ -19763,7 +19763,7 @@ paths:
                       - items
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -19981,7 +19981,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -20636,7 +20636,7 @@ paths:
                       - cards
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -20874,7 +20874,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -21471,7 +21471,7 @@ paths:
                             timestamp:
                               type: string
                               format: date-time
-                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
                             totalEvents:
                               type: number
                             eventsBySeries:
@@ -21492,7 +21492,7 @@ paths:
                       - points
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -21714,7 +21714,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -22362,13 +22362,13 @@ paths:
                             - valueCount
                           additionalProperties: false
                       pagination:
-                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
+                        $ref: "#/components/schemas/SharedSchema_b728ca7d54b3"
                     required:
                       - items
                       - pagination
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -22604,7 +22604,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 eventId:
                   type: string
                   minLength: 1
@@ -22712,7 +22712,7 @@ paths:
                           - valueCount
                         additionalProperties: false
                       context:
-                        $ref: "#/components/schemas/SharedSchema_e305d8baeea4"
+                        $ref: "#/components/schemas/SharedSchema_1215d510a2a6"
                       eventData:
                         type: object
                         propertyNames:
@@ -22724,7 +22724,7 @@ paths:
                       - eventData
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -23006,7 +23006,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -23571,13 +23571,13 @@ paths:
                             - visitors
                           additionalProperties: false
                       pagination:
-                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
+                        $ref: "#/components/schemas/SharedSchema_b728ca7d54b3"
                     required:
                       - items
                       - pagination
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -23795,7 +23795,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -24385,7 +24385,7 @@ paths:
                                 timestamp:
                                   type: string
                                   format: date-time
-                                  pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                                  pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
                                 events:
                                   type: number
                                 visitors:
@@ -24799,7 +24799,7 @@ paths:
                       - cards
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -25147,7 +25147,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -25734,11 +25734,11 @@ paths:
                             lastSeenAt:
                               type: number
                             exampleValue:
-                              anyOf:
-                                - type: string
-                                - type: number
-                                - type: boolean
-                                - type: "null"
+                              type:
+                                - string
+                                - number
+                                - boolean
+                                - "null"
                           required:
                             - path
                             - valueType
@@ -25749,14 +25749,14 @@ paths:
                             - exampleValue
                           additionalProperties: false
                       pagination:
-                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
+                        $ref: "#/components/schemas/SharedSchema_b728ca7d54b3"
                     required:
                       - eventName
                       - items
                       - pagination
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -25977,7 +25977,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -26577,11 +26577,11 @@ paths:
                           type: object
                           properties:
                             value:
-                              anyOf:
-                                - type: string
-                                - type: number
-                                - type: boolean
-                                - type: "null"
+                              type:
+                                - string
+                                - number
+                                - boolean
+                                - "null"
                             events:
                               type: number
                             occurrences:
@@ -26598,7 +26598,7 @@ paths:
                             - lastSeenAt
                           additionalProperties: false
                       pagination:
-                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
+                        $ref: "#/components/schemas/SharedSchema_b728ca7d54b3"
                     required:
                       - eventName
                       - fieldPath
@@ -26607,7 +26607,7 @@ paths:
                       - pagination
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -26828,7 +26828,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 visitorId:
                   type: string
                   minLength: 1
@@ -26905,13 +26905,13 @@ paths:
                           deviceType:
                             type: string
                           screenWidth:
-                            anyOf:
-                              - type: number
-                              - type: "null"
+                            type:
+                              - number
+                              - "null"
                           screenHeight:
-                            anyOf:
-                              - type: number
-                              - type: "null"
+                            type:
+                              - number
+                              - "null"
                         required:
                           - visitorId
                           - sessionId
@@ -27017,7 +27017,7 @@ paths:
                             - count
                           additionalProperties: false
                       performance:
-                        $ref: "#/components/schemas/SharedSchema_b357abdc82b2"
+                        $ref: "#/components/schemas/SharedSchema_1d36a7b0b76b"
                     required:
                       - visitor
                       - metrics
@@ -27027,7 +27027,7 @@ paths:
                       - performance
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -27305,7 +27305,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 sessionId:
                   type: string
                   minLength: 1
@@ -27380,13 +27380,13 @@ paths:
                           city:
                             type: string
                           latitude:
-                            anyOf:
-                              - type: number
-                              - type: "null"
+                            type:
+                              - number
+                              - "null"
                           longitude:
-                            anyOf:
-                              - type: number
-                              - type: "null"
+                            type:
+                              - number
+                              - "null"
                           browser:
                             type: string
                           browserVersion:
@@ -27398,15 +27398,15 @@ paths:
                           deviceType:
                             type: string
                           screenWidth:
-                            anyOf:
-                              - type: number
-                              - type: "null"
+                            type:
+                              - number
+                              - "null"
                           screenHeight:
-                            anyOf:
-                              - type: number
-                              - type: "null"
+                            type:
+                              - number
+                              - "null"
                           performance:
-                            $ref: "#/components/schemas/SharedSchema_62693ee2b03d"
+                            $ref: "#/components/schemas/SharedSchema_cefcb93e669c"
                         required:
                           - sessionId
                           - visitorId
@@ -27496,7 +27496,7 @@ paths:
                             - count
                           additionalProperties: false
                       performance:
-                        $ref: "#/components/schemas/SharedSchema_b357abdc82b2"
+                        $ref: "#/components/schemas/SharedSchema_1d36a7b0b76b"
                     required:
                       - session
                       - locationPoints
@@ -27505,7 +27505,7 @@ paths:
                       - performance
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -27788,7 +27788,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 eventId:
                   type: string
                   minLength: 1
@@ -27907,13 +27907,13 @@ paths:
                           - eventKind
                         additionalProperties: false
                       context:
-                        $ref: "#/components/schemas/SharedSchema_e305d8baeea4"
+                        $ref: "#/components/schemas/SharedSchema_1215d510a2a6"
                     required:
                       - event
                       - context
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -28194,7 +28194,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -28806,13 +28806,13 @@ paths:
                             deviceType:
                               type: string
                             screenWidth:
-                              anyOf:
-                                - type: number
-                                - type: "null"
+                              type:
+                                - number
+                                - "null"
                             screenHeight:
-                              anyOf:
-                                - type: number
-                                - type: "null"
+                              type:
+                                - number
+                                - "null"
                           required:
                             - visitorId
                             - sessionId
@@ -28838,13 +28838,13 @@ paths:
                             - screenHeight
                           additionalProperties: false
                       pagination:
-                        $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
+                        $ref: "#/components/schemas/SharedSchema_b728ca7d54b3"
                     required:
                       - items
                       - pagination
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -29079,7 +29079,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -29639,7 +29639,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_6fe692740c99"
+                $ref: "#/components/schemas/SharedSchema_dc6868a8b566"
               example:
                 data:
                   items:
@@ -29882,7 +29882,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -30421,7 +30421,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_fea62b48b995"
+                $ref: "#/components/schemas/SharedSchema_8ea2e30519e4"
               example:
                 data:
                   items:
@@ -30660,7 +30660,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -31198,7 +31198,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_6fe692740c99"
+                $ref: "#/components/schemas/SharedSchema_dc6868a8b566"
               example:
                 data:
                   items:
@@ -31441,7 +31441,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
                 filter:
                   anyOf:
                     - oneOf:
@@ -31979,7 +31979,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_fea62b48b995"
+                $ref: "#/components/schemas/SharedSchema_8ea2e30519e4"
               example:
                 data:
                   items:
@@ -32215,7 +32215,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/SharedSchema_dca97c1d565b"
+              $ref: "#/components/schemas/SharedSchema_597729a67ecd"
             example:
               timeRange:
                 kind: absolute
@@ -32246,9 +32246,9 @@ paths:
                         maximum: 9007199254740991
                         description: Number of distinct visitors active in the last 5 minutes
                       events:
-                        $ref: "#/components/schemas/SharedSchema_6171fcdc8c09"
+                        $ref: "#/components/schemas/SharedSchema_631e3d430ff1"
                       visits:
-                        $ref: "#/components/schemas/SharedSchema_0431f41f7140"
+                        $ref: "#/components/schemas/SharedSchema_d3ce74a1b66a"
                     required:
                       - activeNow
                       - events
@@ -32256,7 +32256,7 @@ paths:
                     additionalProperties: false
                     description: Real-time activity snapshot for a site
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -32575,7 +32575,7 @@ paths:
               type: object
               properties:
                 timeRange:
-                  $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+                  $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
               required:
                 - timeRange
               additionalProperties: false
@@ -32611,7 +32611,7 @@ paths:
                       - activeNow
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -32811,7 +32811,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/SharedSchema_dca97c1d565b"
+              $ref: "#/components/schemas/SharedSchema_597729a67ecd"
             example:
               timeRange:
                 kind: absolute
@@ -32837,12 +32837,12 @@ paths:
                     type: object
                     properties:
                       items:
-                        $ref: "#/components/schemas/SharedSchema_6171fcdc8c09"
+                        $ref: "#/components/schemas/SharedSchema_631e3d430ff1"
                     required:
                       - items
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -33106,7 +33106,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/SharedSchema_dca97c1d565b"
+              $ref: "#/components/schemas/SharedSchema_597729a67ecd"
             example:
               timeRange:
                 kind: absolute
@@ -33132,12 +33132,12 @@ paths:
                     type: object
                     properties:
                       items:
-                        $ref: "#/components/schemas/SharedSchema_0431f41f7140"
+                        $ref: "#/components/schemas/SharedSchema_d3ce74a1b66a"
                     required:
                       - items
                     additionalProperties: false
                   meta:
-                    $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+                    $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
                 required:
                   - data
                   - meta
@@ -33431,20 +33431,20 @@ paths:
                             createdAt:
                               type: string
                               format: date-time
-                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
                             updatedAt:
                               type: string
                               format: date-time
-                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
                             sharing:
                               type: object
                               properties:
                                 publicEnabled:
                                   type: boolean
                                 publicSlug:
-                                  anyOf:
-                                    - type: string
-                                    - type: "null"
+                                  type:
+                                    - string
+                                    - "null"
                               required:
                                 - publicEnabled
                                 - publicSlug
@@ -33635,7 +33635,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_94662e716bac"
+                $ref: "#/components/schemas/SharedSchema_ebfeec7e5342"
               example:
                 data:
                   id: example
@@ -33837,7 +33837,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_94662e716bac"
+                $ref: "#/components/schemas/SharedSchema_ebfeec7e5342"
               example:
                 data:
                   id: example
@@ -33988,7 +33988,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_94662e716bac"
+                $ref: "#/components/schemas/SharedSchema_ebfeec7e5342"
               example:
                 data:
                   id: example
@@ -35018,7 +35018,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_393f0cd942c5"
+                $ref: "#/components/schemas/SharedSchema_cc3a49dbf267"
               example:
                 data:
                   publicEnabled: false
@@ -35134,9 +35134,9 @@ paths:
                 publicEnabled:
                   type: boolean
                 publicSlug:
-                  anyOf:
-                    - type: string
-                    - type: "null"
+                  type:
+                    - string
+                    - "null"
               additionalProperties: false
             example:
               publicEnabled: false
@@ -35153,7 +35153,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_393f0cd942c5"
+                $ref: "#/components/schemas/SharedSchema_cc3a49dbf267"
               example:
                 data:
                   publicEnabled: false
@@ -35568,9 +35568,9 @@ paths:
                                 - session
                                 - visitor
                             conversionWindowMs:
-                              anyOf:
-                                - type: number
-                                - type: "null"
+                              type:
+                                - number
+                                - "null"
                             steps:
                               minItems: 1
                               type: array
@@ -35597,11 +35597,11 @@ paths:
                             createdAt:
                               type: string
                               format: date-time
-                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
                             updatedAt:
                               type: string
                               format: date-time
-                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
                             links:
                               type: object
                               propertyNames:
@@ -35842,7 +35842,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_cae7d6e6fe38"
+                $ref: "#/components/schemas/SharedSchema_6f7e912194e9"
               example:
                 data:
                   id: example
@@ -36057,7 +36057,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_cae7d6e6fe38"
+                $ref: "#/components/schemas/SharedSchema_6f7e912194e9"
               example:
                 data:
                   id: example
@@ -36234,7 +36234,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_cae7d6e6fe38"
+                $ref: "#/components/schemas/SharedSchema_6f7e912194e9"
               example:
                 data:
                   id: example
@@ -36605,11 +36605,11 @@ paths:
                             createdAt:
                               type: string
                               format: date-time
-                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
                             updatedAt:
                               type: string
                               format: date-time
-                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
                             links:
                               type: object
                               propertyNames:
@@ -36823,7 +36823,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_2feca814b2e1"
+                $ref: "#/components/schemas/SharedSchema_d4bb2c27d0da"
               example:
                 data:
                   id: example
@@ -37033,7 +37033,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_2feca814b2e1"
+                $ref: "#/components/schemas/SharedSchema_d4bb2c27d0da"
               example:
                 data:
                   id: example
@@ -37190,7 +37190,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SharedSchema_2feca814b2e1"
+                $ref: "#/components/schemas/SharedSchema_d4bb2c27d0da"
               example:
                 data:
                   id: example
@@ -37571,11 +37571,11 @@ paths:
                             createdAt:
                               type: string
                               format: date-time
-                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
                             updatedAt:
                               type: string
                               format: date-time
-                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
                           required:
                             - id
                             - name
@@ -37617,7 +37617,7 @@ paths:
                     $defs:
                       __schema0:
                         oneOf:
-                          - $ref: "#/components/schemas/SharedSchema_f112ee8d110e"
+                          - $ref: "#/components/schemas/SharedSchema_8a36b145fea3"
                           - type: object
                             properties:
                               kind:
@@ -37892,7 +37892,7 @@ paths:
                     $defs:
                       __schema0:
                         oneOf:
-                          - $ref: "#/components/schemas/SharedSchema_f112ee8d110e"
+                          - $ref: "#/components/schemas/SharedSchema_8a36b145fea3"
                           - type: object
                             properties:
                               kind:
@@ -38607,7 +38607,7 @@ components:
       required:
         - limit
       additionalProperties: false
-    SharedSchema_72e5450ef6c5:
+    SharedSchema_bf1fd30f60b9:
       type: object
       properties:
         requestId:
@@ -38616,7 +38616,7 @@ components:
         generatedAt:
           $ref: "#/components/schemas/IsoDateTime2"
         timeRange:
-          $ref: "#/components/schemas/SharedSchema_d3f2117ce861"
+          $ref: "#/components/schemas/SharedSchema_2c242698d845"
         source:
           type: string
           enum:
@@ -38657,11 +38657,11 @@ components:
         - source
         - accuracy
       additionalProperties: false
-    SharedSchema_7c93c0603113:
+    SharedSchema_447af2856fc4:
       type: object
       properties:
         range:
-          $ref: "#/components/schemas/SharedSchema_d3f2117ce861"
+          $ref: "#/components/schemas/SharedSchema_2c242698d845"
         source:
           type: string
           enum:
@@ -38680,7 +38680,7 @@ components:
         - source
         - accuracy
       additionalProperties: false
-    SharedSchema_e077ec14aed1:
+    SharedSchema_486d114d8680:
       type: object
       properties:
         interval:
@@ -38695,7 +38695,7 @@ components:
           type: string
           const: period_index
         points:
-          $ref: "#/components/schemas/SharedSchema_57d51a32ba51"
+          $ref: "#/components/schemas/SharedSchema_5344e95d20ef"
       required:
         - interval
         - alignment
@@ -38864,25 +38864,25 @@ components:
         - bounceRate
         - approximateVisitors
       additionalProperties: false
-    SharedSchema_b95ac4b74b85:
+    SharedSchema_0f0f3f612aa5:
       type: object
       properties:
         avg:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         p75:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         min:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         max:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         samples:
           type: integer
           minimum: 0
@@ -38894,25 +38894,25 @@ components:
         - max
         - samples
       additionalProperties: false
-    SharedSchema_4b8e303469e7:
+    SharedSchema_9c241e1507b9:
       type: object
       properties:
         avg:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         p50:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         p75:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         p95:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         samples:
           type: integer
           minimum: 0
@@ -38924,20 +38924,20 @@ components:
         - p95
         - samples
       additionalProperties: false
-    SharedSchema_ed1ff003b8f3:
+    SharedSchema_17abecffb3be:
       type: object
       properties:
         views:
           type: object
           properties:
             absolute:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
             relative:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
           required:
             - absolute
             - relative
@@ -38946,13 +38946,13 @@ components:
           type: object
           properties:
             absolute:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
             relative:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
           required:
             - absolute
             - relative
@@ -38961,13 +38961,13 @@ components:
           type: object
           properties:
             absolute:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
             relative:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
           required:
             - absolute
             - relative
@@ -38976,13 +38976,13 @@ components:
           type: object
           properties:
             absolute:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
             relative:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
           required:
             - absolute
             - relative
@@ -38991,13 +38991,13 @@ components:
           type: object
           properties:
             absolute:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
             relative:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
           required:
             - absolute
             - relative
@@ -39006,13 +39006,13 @@ components:
           type: object
           properties:
             absolute:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
             relative:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
           required:
             - absolute
             - relative
@@ -39021,13 +39021,13 @@ components:
           type: object
           properties:
             absolute:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
             relative:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
           required:
             - absolute
             - relative
@@ -39036,13 +39036,13 @@ components:
           type: object
           properties:
             absolute:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
             relative:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
           required:
             - absolute
             - relative
@@ -39051,13 +39051,13 @@ components:
           type: object
           properties:
             absolute:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
             relative:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
           required:
             - absolute
             - relative
@@ -39066,61 +39066,61 @@ components:
           type: object
           properties:
             absolute:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
             relative:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
           required:
             - absolute
             - relative
           additionalProperties: false
       additionalProperties: false
-    SharedSchema_7eb6510bc958:
+    SharedSchema_d1228e88ac5e:
       type: object
       properties:
         views:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         sessions:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         visitors:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         bounces:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         totalDurationMs:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         durationViews:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         bounceRate:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         avgDurationMs:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         viewsPerSession:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         events:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
       additionalProperties: false
     SharedSchema_5a3fd95ddc11:
       type: object
@@ -39175,7 +39175,7 @@ components:
         - payloadTarget
         - caseSensitivity
       additionalProperties: false
-    SharedSchema_e305d8baeea4:
+    SharedSchema_1215d510a2a6:
       type: object
       properties:
         visitId:
@@ -39223,13 +39223,13 @@ components:
         continent:
           type: string
         latitude:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         longitude:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         postalCode:
           type: string
         metroCode:
@@ -39255,13 +39255,13 @@ components:
         language:
           type: string
         screenWidth:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         screenHeight:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         status:
           type: string
         startedAt:
@@ -39269,29 +39269,29 @@ components:
         previousVisitId:
           type: string
         previousVisitStartedAt:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         lastActivityAt:
           type: number
         endedAt:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         finalizedAt:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         durationMs:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         durationSource:
           type: string
         exitReason:
           type: string
         performance:
-          $ref: "#/components/schemas/SharedSchema_62693ee2b03d"
+          $ref: "#/components/schemas/SharedSchema_cefcb93e669c"
       required:
         - visitId
         - sessionId
@@ -39308,35 +39308,35 @@ components:
         - osVersion
         - deviceType
       additionalProperties: false
-    SharedSchema_433a20b0a14d:
+    SharedSchema_deb58a0d1552:
       type: object
       properties:
         current:
-          $ref: "#/components/schemas/SharedSchema_e70b1ea12c3f"
+          $ref: "#/components/schemas/SharedSchema_f0c80da1916b"
         reference:
-          $ref: "#/components/schemas/SharedSchema_e70b1ea12c3f"
+          $ref: "#/components/schemas/SharedSchema_f0c80da1916b"
         change:
-          $ref: "#/components/schemas/SharedSchema_ed1ff003b8f3"
+          $ref: "#/components/schemas/SharedSchema_17abecffb3be"
         trend:
-          $ref: "#/components/schemas/SharedSchema_e077ec14aed1"
+          $ref: "#/components/schemas/SharedSchema_486d114d8680"
       required:
         - current
         - reference
         - change
       additionalProperties: false
-    SharedSchema_b357abdc82b2:
+    SharedSchema_1d36a7b0b76b:
       type: object
       properties:
         ttfb:
-          $ref: "#/components/schemas/SharedSchema_b95ac4b74b85"
+          $ref: "#/components/schemas/SharedSchema_0f0f3f612aa5"
         fcp:
-          $ref: "#/components/schemas/SharedSchema_b95ac4b74b85"
+          $ref: "#/components/schemas/SharedSchema_0f0f3f612aa5"
         lcp:
-          $ref: "#/components/schemas/SharedSchema_b95ac4b74b85"
+          $ref: "#/components/schemas/SharedSchema_0f0f3f612aa5"
         cls:
-          $ref: "#/components/schemas/SharedSchema_b95ac4b74b85"
+          $ref: "#/components/schemas/SharedSchema_0f0f3f612aa5"
         inp:
-          $ref: "#/components/schemas/SharedSchema_b95ac4b74b85"
+          $ref: "#/components/schemas/SharedSchema_0f0f3f612aa5"
       required:
         - ttfb
         - fcp
@@ -39344,29 +39344,29 @@ components:
         - cls
         - inp
       additionalProperties: false
-    SharedSchema_62693ee2b03d:
+    SharedSchema_cefcb93e669c:
       type: object
       properties:
         ttfb:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         fcp:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         lcp:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         cls:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         inp:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
       required:
         - ttfb
         - fcp
@@ -39423,7 +39423,7 @@ components:
         - converted
         - conversionRate
       additionalProperties: false
-    SharedSchema_394574a77114:
+    SharedSchema_a19e4d3080c7:
       type: object
       properties:
         id:
@@ -39447,9 +39447,9 @@ components:
             - session
             - visitor
         conversionWindowMs:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         steps:
           $ref: "#/components/schemas/SharedSchema_977dfdcaca10"
         semanticFingerprint:
@@ -39478,14 +39478,14 @@ components:
         - updatedAt
         - links
       additionalProperties: false
-    SharedSchema_70e5ad1c6250:
+    SharedSchema_d1284b1f19ea:
       type: object
       properties:
         dimension:
           type: string
           minLength: 1
         items:
-          $ref: "#/components/schemas/SharedSchema_6f899dbf848f"
+          $ref: "#/components/schemas/SharedSchema_7f1c937660ef"
         coverage:
           type: object
           properties:
@@ -39503,7 +39503,7 @@ components:
         - items
         - coverage
       additionalProperties: false
-    SharedSchema_fbbfb89aa861:
+    SharedSchema_e6e13462fbc1:
       type: object
       properties:
         id:
@@ -39528,9 +39528,9 @@ components:
             publicEnabled:
               type: boolean
             publicSlug:
-              anyOf:
-                - type: string
-                - type: "null"
+              type:
+                - string
+                - "null"
           required:
             - publicEnabled
             - publicSlug
@@ -39550,7 +39550,7 @@ components:
         - sharing
         - links
       additionalProperties: false
-    SharedSchema_517ad4ea46a2:
+    SharedSchema_5c9911378fc4:
       type: object
       properties:
         id:
@@ -39636,7 +39636,7 @@ components:
         - createdAt
         - updatedAt
       additionalProperties: false
-    SharedSchema_eb25089bb08d:
+    SharedSchema_ddd8ee908039:
       type: object
       properties:
         requestId:
@@ -39645,9 +39645,9 @@ components:
         generatedAt:
           $ref: "#/components/schemas/IsoDateTime2"
         current:
-          $ref: "#/components/schemas/SharedSchema_7c93c0603113"
+          $ref: "#/components/schemas/SharedSchema_447af2856fc4"
         reference:
-          $ref: "#/components/schemas/SharedSchema_7c93c0603113"
+          $ref: "#/components/schemas/SharedSchema_447af2856fc4"
       required:
         - requestId
         - generatedAt
@@ -39690,62 +39690,33 @@ components:
         - data
         - meta
       additionalProperties: false
-    SharedSchema_e91b6829da95:
+    SharedSchema_e96c5e7fcaed:
       type: object
       properties:
         data:
           $ref: "#/components/schemas/SharedSchema_db553f7c5217"
         meta:
-          $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+          $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
       required:
         - data
         - meta
       additionalProperties: false
-    SharedSchema_07a741266f50:
+    SharedSchema_52b7febe81ff:
       type: object
       properties:
         data:
-          $ref: "#/components/schemas/SharedSchema_433a20b0a14d"
+          $ref: "#/components/schemas/SharedSchema_deb58a0d1552"
         meta:
-          $ref: "#/components/schemas/SharedSchema_eb25089bb08d"
+          $ref: "#/components/schemas/SharedSchema_ddd8ee908039"
       required:
         - data
         - meta
       additionalProperties: false
-    SharedSchema_cae7d6e6fe38:
+    SharedSchema_6f7e912194e9:
       type: object
       properties:
         data:
-          $ref: "#/components/schemas/SharedSchema_394574a77114"
-        meta:
-          type: object
-          properties:
-            requestId:
-              type: string
-              minLength: 1
-          required:
-            - requestId
-          additionalProperties: false
-      required:
-        - data
-        - meta
-      additionalProperties: false
-    SharedSchema_54fee11931ae:
-      type: object
-      properties:
-        data:
-          $ref: "#/components/schemas/SharedSchema_70e5ad1c6250"
-        meta:
-          $ref: "#/components/schemas/SharedSchema_eb25089bb08d"
-      required:
-        - data
-        - meta
-      additionalProperties: false
-    SharedSchema_94662e716bac:
-      type: object
-      properties:
-        data:
-          $ref: "#/components/schemas/SharedSchema_fbbfb89aa861"
+          $ref: "#/components/schemas/SharedSchema_a19e4d3080c7"
         meta:
           type: object
           properties:
@@ -39759,11 +39730,22 @@ components:
         - data
         - meta
       additionalProperties: false
-    SharedSchema_2feca814b2e1:
+    SharedSchema_048cc0f17594:
       type: object
       properties:
         data:
-          $ref: "#/components/schemas/SharedSchema_517ad4ea46a2"
+          $ref: "#/components/schemas/SharedSchema_d1284b1f19ea"
+        meta:
+          $ref: "#/components/schemas/SharedSchema_ddd8ee908039"
+      required:
+        - data
+        - meta
+      additionalProperties: false
+    SharedSchema_ebfeec7e5342:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/SharedSchema_e6e13462fbc1"
         meta:
           type: object
           properties:
@@ -39777,22 +39759,40 @@ components:
         - data
         - meta
       additionalProperties: false
-    SharedSchema_750b86d20008:
+    SharedSchema_d4bb2c27d0da:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/SharedSchema_5c9911378fc4"
+        meta:
+          type: object
+          properties:
+            requestId:
+              type: string
+              minLength: 1
+          required:
+            - requestId
+          additionalProperties: false
+      required:
+        - data
+        - meta
+      additionalProperties: false
+    SharedSchema_0edfbffa7345:
       type: object
       properties:
         data:
           $ref: "#/components/schemas/SharedSchema_d16c24f3e380"
         meta:
-          $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+          $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
       required:
         - data
         - meta
       additionalProperties: false
-    SharedSchema_d59ad36d57ae:
+    SharedSchema_7f02f8c5c613:
       type: object
       properties:
         data:
-          $ref: "#/components/schemas/SharedSchema_62922fdea1b3"
+          $ref: "#/components/schemas/SharedSchema_ba429187166a"
         meta:
           type: object
           properties:
@@ -39806,40 +39806,40 @@ components:
         - data
         - meta
       additionalProperties: false
-    SharedSchema_55f78202eaec:
+    SharedSchema_7f190d7b5798:
       type: object
       properties:
         data:
-          $ref: "#/components/schemas/SharedSchema_26d71b5e0b9d"
+          $ref: "#/components/schemas/SharedSchema_1fdc8cf5943f"
         meta:
-          $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+          $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
       required:
         - data
         - meta
       additionalProperties: false
-    SharedSchema_6fe692740c99:
+    SharedSchema_dc6868a8b566:
       type: object
       properties:
         data:
-          $ref: "#/components/schemas/SharedSchema_e48a9d9eb379"
+          $ref: "#/components/schemas/SharedSchema_63e33c3236b5"
         meta:
-          $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+          $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
       required:
         - data
         - meta
       additionalProperties: false
-    SharedSchema_fea62b48b995:
+    SharedSchema_8ea2e30519e4:
       type: object
       properties:
         data:
-          $ref: "#/components/schemas/SharedSchema_dec1b9541133"
+          $ref: "#/components/schemas/SharedSchema_75ddd9b6db21"
         meta:
-          $ref: "#/components/schemas/SharedSchema_72e5450ef6c5"
+          $ref: "#/components/schemas/SharedSchema_bf1fd30f60b9"
       required:
         - data
         - meta
       additionalProperties: false
-    SharedSchema_393f0cd942c5:
+    SharedSchema_cc3a49dbf267:
       type: object
       properties:
         data:
@@ -39848,9 +39848,9 @@ components:
             publicEnabled:
               type: boolean
             publicSlug:
-              anyOf:
-                - type: string
-                - type: "null"
+              type:
+                - string
+                - "null"
           required:
             - publicEnabled
             - publicSlug
@@ -39880,7 +39880,7 @@ components:
         - dimension
         - items
       additionalProperties: false
-    SharedSchema_62922fdea1b3:
+    SharedSchema_ba429187166a:
       type: object
       properties:
         metrics:
@@ -39923,7 +39923,7 @@ components:
               - this_month
               - last_month
         timeRange:
-          $ref: "#/components/schemas/SharedSchema_89e97a8a9e14"
+          $ref: "#/components/schemas/SharedSchema_649bbd3fbf0f"
         operations:
           $ref: "#/components/schemas/SharedSchema_f026b27b36a1"
         links:
@@ -39986,11 +39986,11 @@ components:
         - json
         - dsl
       additionalProperties: false
-    SharedSchema_89e97a8a9e14:
+    SharedSchema_649bbd3fbf0f:
       type: object
       properties:
         earliestAvailableAt:
-          $ref: "#/components/schemas/SharedSchema_bd7c8573879c"
+          $ref: "#/components/schemas/SharedSchema_6ccb1029a1ab"
         latestAvailableAt:
           $ref: "#/components/schemas/IsoDateTime2"
       required:
@@ -40047,7 +40047,7 @@ components:
         - syntax
         - examples
       additionalProperties: false
-    SharedSchema_e7fd8bad0092:
+    SharedSchema_2875af60ca12:
       type: object
       properties:
         kind:
@@ -40066,7 +40066,7 @@ components:
         - from
         - to
       additionalProperties: false
-    SharedSchema_495d7827ea19:
+    SharedSchema_a9fbaf1fd640:
       type: object
       properties:
         kind:
@@ -40081,7 +40081,7 @@ components:
         - from
         - to
       additionalProperties: false
-    SharedSchema_d3f2117ce861:
+    SharedSchema_2c242698d845:
       type: object
       properties:
         from:
@@ -40096,7 +40096,7 @@ components:
         - to
         - timeZone
       additionalProperties: false
-    SharedSchema_84bd4e13bfb1:
+    SharedSchema_b728ca7d54b3:
       type: object
       properties:
         limit:
@@ -40110,9 +40110,9 @@ components:
         hasMore:
           type: boolean
         nextCursor:
-          anyOf:
-            - type: string
-            - type: "null"
+          type:
+            - string
+            - "null"
       required:
         - limit
         - returned
@@ -40175,7 +40175,7 @@ components:
         - interval
         - metrics
       additionalProperties: false
-    SharedSchema_26d71b5e0b9d:
+    SharedSchema_1fdc8cf5943f:
       type: object
       properties:
         interval:
@@ -40187,34 +40187,34 @@ components:
             - week
             - month
         points:
-          $ref: "#/components/schemas/SharedSchema_f3462e5edde5"
+          $ref: "#/components/schemas/SharedSchema_6e441f4a3ea5"
       required:
         - interval
         - points
       additionalProperties: false
-    SharedSchema_e48a9d9eb379:
+    SharedSchema_63e33c3236b5:
       type: object
       properties:
         items:
-          $ref: "#/components/schemas/SharedSchema_051198d1a062"
+          $ref: "#/components/schemas/SharedSchema_ead4440cfbdb"
         pagination:
-          $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
+          $ref: "#/components/schemas/SharedSchema_b728ca7d54b3"
       required:
         - items
         - pagination
       additionalProperties: false
-    SharedSchema_dec1b9541133:
+    SharedSchema_75ddd9b6db21:
       type: object
       properties:
         items:
-          $ref: "#/components/schemas/SharedSchema_3a8f76151019"
+          $ref: "#/components/schemas/SharedSchema_b6fa17abb798"
         pagination:
-          $ref: "#/components/schemas/SharedSchema_84bd4e13bfb1"
+          $ref: "#/components/schemas/SharedSchema_b728ca7d54b3"
       required:
         - items
         - pagination
       additionalProperties: false
-    SharedSchema_f112ee8d110e:
+    SharedSchema_8a36b145fea3:
       type: object
       properties:
         kind:
@@ -40232,11 +40232,11 @@ components:
             - type: "null"
             - type: array
               items:
-                anyOf:
-                  - type: string
-                  - type: number
-                  - type: boolean
-                  - type: "null"
+                type:
+                  - string
+                  - number
+                  - boolean
+                  - "null"
       required:
         - kind
         - target
@@ -40288,11 +40288,11 @@ components:
         - kind
         - preset
       additionalProperties: false
-    SharedSchema_dca97c1d565b:
+    SharedSchema_597729a67ecd:
       type: object
       properties:
         timeRange:
-          $ref: "#/components/schemas/SharedSchema_618bff0e2a5c"
+          $ref: "#/components/schemas/SharedSchema_5ab7411fa926"
         limit:
           default: 100
           type: integer
@@ -40302,11 +40302,11 @@ components:
         - timeRange
         - limit
       additionalProperties: false
-    SharedSchema_e70b1ea12c3f:
+    SharedSchema_f0c80da1916b:
       type: object
       properties:
         metrics:
-          $ref: "#/components/schemas/SharedSchema_7eb6510bc958"
+          $ref: "#/components/schemas/SharedSchema_d1228e88ac5e"
       required:
         - metrics
       additionalProperties: false
@@ -40338,13 +40338,13 @@ components:
     SharedSchema_9b90c1fae119:
       anyOf:
         - $ref: "#/components/schemas/SharedSchema_a07487506f63"
-    SharedSchema_bd7c8573879c:
+    SharedSchema_6ccb1029a1ab:
       anyOf:
         - $ref: "#/components/schemas/IsoDateTime2"
         - type: "null"
-    SharedSchema_3d657b118fdd:
+    SharedSchema_14483f6e819b:
       anyOf:
-        - $ref: "#/components/schemas/SharedSchema_6a5473782474"
+        - $ref: "#/components/schemas/SharedSchema_dff1c4c0e56f"
         - type: object
           properties:
             kind:
@@ -40373,12 +40373,12 @@ components:
       type: string
       maxLength: 64
       format: date-time
-      pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+      pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
     IsoDateTime2:
       type: string
       format: date-time
-      pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
-    SharedSchema_0431f41f7140:
+      pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+    SharedSchema_d3ce74a1b66a:
       type: array
       items:
         type: object
@@ -40426,9 +40426,9 @@ components:
           userName:
             type: string
           isEU:
-            anyOf:
-              - type: boolean
-              - type: "null"
+            type:
+              - boolean
+              - "null"
           country:
             type: string
           region:
@@ -40467,13 +40467,13 @@ components:
           metroCode:
             type: string
           screenWidth:
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           screenHeight:
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           status:
             type: string
           hiddenAt:
@@ -40495,9 +40495,9 @@ components:
                 maximum: 9007199254740991
               - type: "null"
           durationMs:
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           durationSource:
             type: string
           exitReason:
@@ -40508,14 +40508,14 @@ components:
               - type: "null"
           latitude:
             default: null
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           longitude:
             default: null
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
         required:
           - visitId
           - visitorId
@@ -40544,7 +40544,7 @@ components:
           - longitude
         additionalProperties: false
         description: Active real-time visit from a visitor
-    SharedSchema_6171fcdc8c09:
+    SharedSchema_631e3d430ff1:
       type: array
       items:
         type: object
@@ -40611,9 +40611,9 @@ components:
           userName:
             type: string
           isEU:
-            anyOf:
-              - type: boolean
-              - type: "null"
+            type:
+              - boolean
+              - "null"
           pathname:
             default: /
             type: string
@@ -40691,13 +40691,13 @@ components:
             default: ""
             type: string
           screenWidth:
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           screenHeight:
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           status:
             type: string
           hiddenAt:
@@ -40719,9 +40719,9 @@ components:
                 maximum: 9007199254740991
               - type: "null"
           durationMs:
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           durationSource:
             type: string
           exitReason:
@@ -40742,14 +40742,14 @@ components:
             type: string
           latitude:
             default: null
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           longitude:
             default: null
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           eventName:
             description: Present only for custom_event type
             type: string
@@ -40782,7 +40782,7 @@ components:
           - longitude
         additionalProperties: false
         description: Individual real-time event from a visitor
-    SharedSchema_051198d1a062:
+    SharedSchema_ead4440cfbdb:
       type: array
       items:
         type: object
@@ -40826,13 +40826,13 @@ components:
           city:
             type: string
           latitude:
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           longitude:
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           browser:
             type: string
           browserVersion:
@@ -40844,36 +40844,36 @@ components:
           deviceType:
             type: string
           screenWidth:
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           screenHeight:
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           performance:
             type: object
             properties:
               ttfb:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               fcp:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               lcp:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               cls:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               inp:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
             required:
               - ttfb
               - fcp
@@ -40912,27 +40912,27 @@ components:
           - screenHeight
           - performance
         additionalProperties: false
-    SharedSchema_e4b84a29b1ed:
+    SharedSchema_5d7d24dadff4:
       type: array
       items:
         type: object
         properties:
           avg:
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           p50:
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           p75:
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           p95:
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           samples:
             type: integer
             minimum: 0
@@ -40940,7 +40940,7 @@ components:
           timestamp:
             type: string
             format: date-time
-            pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+            pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
         required:
           - avg
           - p50
@@ -40949,7 +40949,7 @@ components:
           - samples
           - timestamp
         additionalProperties: false
-    SharedSchema_f3462e5edde5:
+    SharedSchema_6e441f4a3ea5:
       type: array
       items:
         type: object
@@ -40957,7 +40957,7 @@ components:
           timestamp:
             type: string
             format: date-time
-            pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+            pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
           views:
             type: number
           sessions:
@@ -40982,7 +40982,7 @@ components:
           - avgDurationMs
           - bounceRate
         additionalProperties: false
-    SharedSchema_3a8f76151019:
+    SharedSchema_b6fa17abb798:
       type: array
       items:
         type: object
@@ -41035,38 +41035,38 @@ components:
           deviceType:
             type: string
           screenWidth:
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           screenHeight:
-            anyOf:
-              - type: number
-              - type: "null"
+            type:
+              - number
+              - "null"
           durationMs:
             type: number
           performance:
             type: object
             properties:
               ttfb:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               fcp:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               lcp:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               cls:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               inp:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
             required:
               - ttfb
               - fcp
@@ -41101,7 +41101,7 @@ components:
           - durationMs
           - performance
         additionalProperties: false
-    SharedSchema_6f899dbf848f:
+    SharedSchema_7f1c937660ef:
       type: array
       items:
         type: object
@@ -41114,89 +41114,89 @@ components:
             type: object
             properties:
               views:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               sessions:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               visitors:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               bounces:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               totalDurationMs:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               durationViews:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               bounceRate:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               avgDurationMs:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               viewsPerSession:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               events:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
             additionalProperties: false
           reference:
             type: object
             properties:
               views:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               sessions:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               visitors:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               bounces:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               totalDurationMs:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               durationViews:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               bounceRate:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               avgDurationMs:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               viewsPerSession:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
               events:
-                anyOf:
-                  - type: number
-                  - type: "null"
+                type:
+                  - number
+                  - "null"
             additionalProperties: false
           change:
             type: object
@@ -41205,13 +41205,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41220,13 +41220,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41235,13 +41235,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41250,13 +41250,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41265,13 +41265,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41280,13 +41280,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41295,13 +41295,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41310,13 +41310,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41325,13 +41325,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41340,13 +41340,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41359,7 +41359,7 @@ components:
           - reference
           - change
         additionalProperties: false
-    SharedSchema_57d51a32ba51:
+    SharedSchema_5344e95d20ef:
       type: array
       items:
         type: object
@@ -41374,54 +41374,54 @@ components:
               from:
                 type: string
                 format: date-time
-                pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
               to:
                 type: string
                 format: date-time
-                pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
               metrics:
                 type: object
                 properties:
                   views:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   sessions:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   visitors:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   bounces:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   totalDurationMs:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   durationViews:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   bounceRate:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   avgDurationMs:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   viewsPerSession:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   events:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 additionalProperties: false
             required:
               - from
@@ -41434,54 +41434,54 @@ components:
               from:
                 type: string
                 format: date-time
-                pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
               to:
                 type: string
                 format: date-time
-                pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
               metrics:
                 type: object
                 properties:
                   views:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   sessions:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   visitors:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   bounces:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   totalDurationMs:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   durationViews:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   bounceRate:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   avgDurationMs:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   viewsPerSession:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   events:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 additionalProperties: false
             required:
               - from
@@ -41495,13 +41495,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41510,13 +41510,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41525,13 +41525,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41540,13 +41540,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41555,13 +41555,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41570,13 +41570,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41585,13 +41585,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41600,13 +41600,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41615,13 +41615,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41630,13 +41630,13 @@ components:
                 type: object
                 properties:
                   absolute:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                   relative:
-                    anyOf:
-                      - type: number
-                      - type: "null"
+                    type:
+                      - number
+                      - "null"
                 required:
                   - absolute
                   - relative
@@ -41908,13 +41908,13 @@ components:
             - kind
             - path
           additionalProperties: false
-    SharedSchema_618bff0e2a5c:
+    SharedSchema_5ab7411fa926:
       oneOf:
-        - $ref: "#/components/schemas/SharedSchema_e7fd8bad0092"
+        - $ref: "#/components/schemas/SharedSchema_2875af60ca12"
         - $ref: "#/components/schemas/SharedSchema_1131aca62623"
-    SharedSchema_6a5473782474:
+    SharedSchema_dff1c4c0e56f:
       oneOf:
-        - $ref: "#/components/schemas/SharedSchema_495d7827ea19"
+        - $ref: "#/components/schemas/SharedSchema_a9fbaf1fd640"
         - $ref: "#/components/schemas/SharedSchema_97d01ddc6bbd"
   securitySchemes:
     BearerAuth:
