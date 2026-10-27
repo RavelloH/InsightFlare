@@ -1,7 +1,7 @@
 # InsightFlare
 
 <!-- auto-readme-i18n-switcher start -->
-| [English](/.github/readme/README.en.md) | 日本語 | [简体中文](/.github/readme/README.zh.md) | [繁體中文](/.github/readme/README.zh-tw.md) |
+| [English](/.github/readme/README.en.md) | 日本語 | [中文（台灣）](/.github/readme/README.zh-tw.md) | [中文](/.github/readme/README.zh.md) |
 <!-- auto-readme-i18n-switcher end -->
 
 > Cloudflare 上で完全に動作する、強力でプライバシーに配慮したオープンソースの Web アナリティクスツールです。

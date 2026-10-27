@@ -1,7 +1,7 @@
 # InsightFlare
 
 <!-- auto-readme-i18n-switcher start -->
-| [English](/.github/readme/README.en.md) | [日本語](/.github/readme/README.ja.md) | [简体中文](/.github/readme/README.zh.md) | 繁體中文 |
+| [English](/.github/readme/README.en.md) | [日本語](/.github/readme/README.ja.md) | 中文（台灣） | [中文](/.github/readme/README.zh.md) |
 <!-- auto-readme-i18n-switcher end -->
 
 > 功能強大、注重隱私的開源網站流量分析工具，完全執行於 Cloudflare 上。
