@@ -232,8 +232,10 @@ try {
             "package.json",
             "src/styles.css",
             "styles/tokens.css",
-            "dist/index.js",
-            "dist/index.d.ts",
+            "dist/components/ui/button.js",
+            "dist/components/ui/button.d.ts",
+            "dist/components/ui/card.js",
+            "dist/components/ui/card.d.ts",
           ]
         : [
             "package.json",

@@ -279,6 +279,9 @@ importers:
       tailwind-merge:
         specifier: ^3.7.0
         version: 3.7.0
+      tailwindcss:
+        specifier: ^4.0.0
+        version: 4.3.3
     devDependencies:
       esbuild:
         specifier: ^0.28.2
