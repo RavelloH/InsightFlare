@@ -3,9 +3,11 @@ import {
   effectiveScopeForPagination,
   filterFingerprint,
   type QueryAudience,
+  type QueryTime,
   scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import {
   buildEventSummaryCardsPlan,
   EVENT_SUMMARY_CARD_OUTPUTS,
@@ -13,9 +15,24 @@ import {
 import {
   buildEventTypeSummaryPlan,
   EVENT_TYPE_SUMMARY_OUTPUTS,
+  type EventNameDimensionListRequest,
 } from "@/lib/edge/analytics/engine/event-type-summary-plan";
 import type { Env } from "@/lib/edge/types";
 
+import type {
+  DeferredEventNameDimensionQualification,
+  DeferredEventSummaryQualification,
+  DeferredEventTypesQualification,
+} from "./advanced-filter-execution";
+import {
+  prepareDeferredEventQualificationFallback,
+  prepareDeferredEventSummaryFallback,
+} from "./advanced-filter-execution";
+import {
+  executeEventNameDimensionQualificationProgram,
+  executeEventSummaryQualificationProgram,
+  executeEventTypesQualificationProgram,
+} from "./analytics-qualification-program";
 import {
   queryAnalyticsReportOutputRowsFromD1,
   queryAnalyticsReportOutputSetRowsFromD1,
@@ -27,6 +44,7 @@ import type {
   FilterDocument,
   QueryWindow,
 } from "./core";
+import type { D1ReadDiagnostics } from "./diagnostics";
 import {
   decodePageCursor,
   encodePageCursor,
@@ -122,6 +140,94 @@ export async function queryEventTypeAggregate(
   );
 }
 
+function sameEventNameDimensionRequestTime(
+  left: QueryTime,
+  right: QueryTime,
+): boolean {
+  const leftRead = left.readRange ?? left.range;
+  const rightRead = right.readRange ?? right.range;
+  return (
+    left.range.startMs === right.range.startMs &&
+    left.range.endExclusiveMs === right.range.endExclusiveMs &&
+    leftRead.startMs === rightRead.startMs &&
+    leftRead.endExclusiveMs === rightRead.endExclusiveMs &&
+    JSON.stringify(left.filterRange) === JSON.stringify(right.filterRange) &&
+    left.filterRangeEmpty === right.filterRangeEmpty &&
+    left.fullHistory === right.fullHistory &&
+    left.reportingTimeZone === right.reportingTimeZone &&
+    left.capturedAtMs === right.capturedAtMs
+  );
+}
+
+export async function queryEventNameDimensionFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  queryTime: QueryTime,
+  filters: FilterDocument,
+  request: EventNameDimensionListRequest,
+  options?: {
+    readonly deferredQualification?: DeferredEventNameDimensionQualification;
+    readonly diagnostics?: D1ReadDiagnostics;
+    readonly scopePlan?: ScopedFilterPlan;
+  },
+): Promise<DimensionRow[]> {
+  let reportFilters = filters;
+  let rows: Record<string, unknown>[] | undefined;
+  const deferred = options?.deferredQualification;
+  if (deferred) {
+    const prepared = deferred.eventNameDimensionRequest;
+    const scopePlanMatches =
+      options?.scopePlan === undefined
+        ? deferred.requestScopePlan === undefined
+        : deferred.requestScopePlan !== undefined &&
+          JSON.stringify(deferred.requestScopePlan) ===
+            JSON.stringify(options.scopePlan);
+    if (
+      deferred.operation !== "event-name-dimension" ||
+      deferred.siteId !== siteId ||
+      deferred.filters !== filters ||
+      !deferred.requestTime ||
+      !sameEventNameDimensionRequestTime(deferred.requestTime, queryTime) ||
+      !scopePlanMatches ||
+      prepared.mode !== request.mode ||
+      prepared.dimension !== request.dimension ||
+      prepared.limit !== request.limit ||
+      prepared.search !== request.search ||
+      prepared.audience !== request.audience
+    )
+      throw new Error("event_name_dimension_qualification_request_mismatch");
+    const result = await executeEventNameDimensionQualificationProgram({
+      env,
+      deferred,
+      ...(options?.diagnostics ? { diagnostics: options.diagnostics } : {}),
+    });
+    if (result.kind === "executed") {
+      rows = [...result.rows];
+    } else {
+      if (options?.diagnostics)
+        options.diagnostics.advancedCountSqlFallbackReason =
+          result.fallbackReason;
+      reportFilters = await prepareDeferredEventQualificationFallback(deferred);
+    }
+  }
+  if (!rows)
+    return queryEventTypeAggregate(
+      env,
+      siteId,
+      window,
+      reportFilters,
+      request.limit,
+      request.search,
+    );
+  return rows.map((row) => ({
+    value: String(row.value ?? ""),
+    views: Number(row.views ?? 0),
+    sessions: Number(row.sessions ?? 0),
+    visitors: Number(row.visitors ?? 0),
+  }));
+}
+
 export async function queryEventTypePageFromD1(
   env: Env,
   siteId: string,
@@ -131,25 +237,102 @@ export async function queryEventTypePageFromD1(
   search?: string,
   cursor?: EventTypeAggregateCursor | null,
   audience: QueryAudience = "private-dashboard",
+  options?: {
+    readonly deferredQualification?: DeferredEventTypesQualification;
+    readonly diagnostics?: D1ReadDiagnostics;
+  },
 ): Promise<PageResult<DimensionRow>> {
-  const metadata = scopedFilterMetadata(filters);
-  const plan = buildEventTypeSummaryPlan({
-    siteId,
-    queryTime: metadata?.time ?? queryWindowToTime(window),
-    filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
-    query: {
-      kind: "page",
+  let reportFilters = filters;
+  let rows: Record<string, unknown>[] | undefined;
+  const deferred = options?.deferredQualification;
+  if (deferred) {
+    if (
+      deferred.operation !== "event-types" ||
+      deferred.siteId !== siteId ||
+      deferred.filters !== filters
+    )
+      throw new Error("event_types_qualification_request_mismatch");
+    const query = {
+      kind: "page" as const,
       limit,
       ...(search !== undefined ? { search } : {}),
       ...(cursor ? { cursor } : {}),
-    },
-  });
-  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    };
+    const result = await executeEventTypesQualificationProgram({
+      env,
+      deferred,
+      query,
+      ...(options?.diagnostics ? { diagnostics: options.diagnostics } : {}),
+    });
+    if (result.kind === "executed") {
+      rows = [...result.rows];
+    } else {
+      if (options?.diagnostics)
+        options.diagnostics.advancedCountSqlFallbackReason =
+          result.fallbackReason;
+      reportFilters = await prepareDeferredEventQualificationFallback(deferred);
+    }
+  }
+  if (!rows) {
+    const metadata = scopedFilterMetadata(reportFilters);
+    const plan = buildEventTypeSummaryPlan({
+      siteId,
+      queryTime: metadata?.time ?? queryWindowToTime(window),
+      filters: reportFilters,
+      ...(metadata ? { scopePlan: metadata.plan } : {}),
+      query: {
+        kind: "page",
+        limit,
+        ...(search !== undefined ? { search } : {}),
+        ...(cursor ? { cursor } : {}),
+      },
+    });
+    rows = await queryAnalyticsReportOutputRowsFromD1(
+      env,
+      plan,
+      EVENT_TYPE_SUMMARY_OUTPUTS.page,
+      undefined,
+      options?.diagnostics,
+    );
+  }
+  return eventTypePageResultFromRows({
     env,
-    plan,
-    EVENT_TYPE_SUMMARY_OUTPUTS.page,
-  );
+    siteId,
+    window,
+    filters,
+    rows,
+    limit,
+    search,
+    audience,
+  });
+}
+
+/** Keeps the existing Event cursor family and page/token mapping in one place. */
+export async function eventTypePageResultFromRows(input: {
+  readonly env: Env;
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly filters: FilterDocument;
+  readonly rows: readonly {
+    readonly value?: unknown;
+    readonly views?: unknown;
+    readonly sessions?: unknown;
+    readonly visitors?: unknown;
+  }[];
+  readonly limit: number;
+  readonly search?: string;
+  readonly audience?: QueryAudience;
+}): Promise<PageResult<DimensionRow>> {
+  const {
+    env,
+    siteId,
+    window,
+    filters,
+    rows,
+    limit,
+    search,
+    audience = "private-dashboard",
+  } = input;
   const mapped = rows.map((row) => ({
     value: String(row.value ?? ""),
     views: Number(row.views ?? 0),
@@ -235,42 +418,74 @@ export async function queryEventsSummaryFromD1(
   siteId: string,
   window: QueryWindow,
   filters: FilterDocument,
+  options?: {
+    readonly deferredQualification?: DeferredEventSummaryQualification;
+    readonly diagnostics?: D1ReadDiagnostics;
+  },
 ): Promise<{
   summary: EventSummaryRow;
   cards: EventSummaryCards;
 }> {
-  const metadata = scopedFilterMetadata(filters);
+  let reportFilters = filters;
+  const deferred = options?.deferredQualification;
+  if (deferred) {
+    if (deferred.siteId !== siteId || deferred.filters !== filters)
+      throw new Error("event_summary_qualification_request_mismatch");
+    const result = await executeEventSummaryQualificationProgram({
+      env,
+      deferred,
+      diagnostics: options?.diagnostics,
+    });
+    if (result.kind === "executed") return eventSummaryFromRows(result.rows);
+    if (options?.diagnostics)
+      options.diagnostics.advancedCountSqlFallbackReason =
+        result.fallbackReason;
+    reportFilters = await prepareDeferredEventSummaryFallback(deferred);
+  }
+  const metadata = scopedFilterMetadata(reportFilters);
   const plan = buildEventSummaryCardsPlan({
     siteId,
     queryTime: metadata?.time ?? queryWindowToTime(window),
-    filters,
+    filters: reportFilters,
     ...(metadata ? { scopePlan: metadata.plan } : {}),
   });
   const rows =
-    (await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
-      outputIds: [
-        EVENT_SUMMARY_CARD_OUTPUTS.summary,
-        EVENT_SUMMARY_CARD_OUTPUTS.event,
-        EVENT_SUMMARY_CARD_OUTPUTS.path,
-        EVENT_SUMMARY_CARD_OUTPUTS.title,
-        EVENT_SUMMARY_CARD_OUTPUTS.hostname,
-      ],
-      fields: [
-        "cardType",
-        "value",
-        "views",
-        "eventTypes",
-        "sessions",
-        "visitors",
-      ],
-      orderBy: [
-        { field: "cardType", direction: "asc", nulls: "first" },
-        { field: "views", direction: "desc", nulls: "last" },
-        { field: "sessions", direction: "desc", nulls: "last" },
-        { field: "visitors", direction: "desc", nulls: "last" },
-        { field: "value", direction: "asc", nulls: "first" },
-      ],
-    })) ?? [];
+    (await queryAnalyticsReportOutputSetRowsFromD1(
+      env,
+      plan,
+      {
+        outputIds: [
+          EVENT_SUMMARY_CARD_OUTPUTS.summary,
+          EVENT_SUMMARY_CARD_OUTPUTS.event,
+          EVENT_SUMMARY_CARD_OUTPUTS.path,
+          EVENT_SUMMARY_CARD_OUTPUTS.title,
+          EVENT_SUMMARY_CARD_OUTPUTS.hostname,
+        ],
+        fields: [
+          "cardType",
+          "value",
+          "views",
+          "eventTypes",
+          "sessions",
+          "visitors",
+        ],
+        orderBy: [
+          { field: "cardType", direction: "asc", nulls: "first" },
+          { field: "views", direction: "desc", nulls: "last" },
+          { field: "sessions", direction: "desc", nulls: "last" },
+          { field: "visitors", direction: "desc", nulls: "last" },
+          { field: "value", direction: "asc", nulls: "first" },
+        ],
+      },
+      options?.diagnostics,
+    )) ?? [];
+  return eventSummaryFromRows(rows);
+}
+
+function eventSummaryFromRows(rows: readonly Record<string, unknown>[]): {
+  summary: EventSummaryRow;
+  cards: EventSummaryCards;
+} {
   const summaryRow = rows.find((row) => row.cardType === "__summary__");
   const summary: EventSummaryRow = summaryRow
     ? {

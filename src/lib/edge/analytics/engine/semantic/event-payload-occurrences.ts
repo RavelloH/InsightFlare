@@ -31,8 +31,8 @@ export const EVENT_PAYLOAD_OCCURRENCE_FIELDS = {
     type: { kind: "scalar", scalar: "number" },
     nullable: true,
   },
-  internalEventKey: {
-    type: { kind: "scalar", scalar: "number" },
+  eventIdentity: {
+    type: { kind: "entity", entity: "event" },
     nullable: false,
   },
 } as const satisfies Readonly<

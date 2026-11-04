@@ -32,7 +32,6 @@ import {
   queryBrowserRadarFromD1,
   queryReferrerRadarFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/technology/radar";
-import { technologyVisitSource } from "@/lib/edge/analytics/providers/d1/internal/technology/scoped-source";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";
 import {
   createInvocationLogger,
@@ -42,6 +41,8 @@ import {
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 import { normalizeFilterDocument } from "@/lib/filter-contract/filters";
+
+import { technologyVisitSource } from "./legacy-technology-scoped-source";
 
 const SITE = "technology-radar-budget-site";
 const WINDOW: QueryWindow = {

@@ -1028,7 +1028,7 @@ describe("Wave29 native Page text fields through migrated SQLite", () => {
         /SEARCH \w+ USING INDEX idx_visits_site_pk_started_at \(site_pk=\? AND started_at>\? AND started_at<\?\)/u,
       );
       expect(queryHashes).toHaveLength(3);
-      expect(queryHashes[0]).toMatch(/^v1:/u);
+      expect(queryHashes[0]).toMatch(/^v8:/u);
       expect(queryHashes[0]).toBe(queryHashes[2]);
       expect(queryHashes[0]).not.toBe(queryHashes[1]);
     } finally {

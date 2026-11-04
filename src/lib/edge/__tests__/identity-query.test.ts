@@ -13,7 +13,7 @@ describe("typed site identity query builders", () => {
     const compiled = compileD1Query(relation);
 
     expect(relation.fields).toEqual([
-      { name: "site_pk", affinity: "integer", nullable: true },
+      { name: "site_pk", affinity: "integer", nullable: false },
     ]);
     expect(compiled.sql).toContain('"site_identities"');
     expect(compiled.sql).toContain('"_c1" = ?');

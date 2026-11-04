@@ -263,7 +263,7 @@ describe("analytics architecture", () => {
       source("src/lib/edge/analytics/composition/query-application-service.ts"),
     ).toContain("TypedQueryApplicationService");
     expect(
-      source("src/lib/edge/analytics/providers/d1/internal/scoped-dataset.ts"),
+      source("src/lib/edge/analytics/contract/observation-planner.ts"),
     ).toContain("planObservationFilter");
 
     const coreFilters = source(

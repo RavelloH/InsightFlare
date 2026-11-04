@@ -107,17 +107,22 @@ describe("logical relational IR", () => {
     ).toThrow("unitless numeric scalar");
   });
 
-  it("expands selected Event payloads into a guarded occurrence bag", () => {
+  it("expands Event payloads without a Logical PK and counts business identity", () => {
     const builder = createBuilder();
-    const events = builder.source("event", {
-      attributes: ["event.report.internalPk"],
-    });
-    const selected = builder.filter(events, booleanLiteral(builder, true));
+    const events = builder.source("event");
+    const firstFilter = builder.filter(events, booleanLiteral(builder, true));
+    const selected = builder.filter(firstFilter, booleanLiteral(builder, true));
     const occurrences = builder.eventPayloadOccurrences(selected);
     expect(occurrences.grain).toEqual({ kind: "bag" });
-    builder.output("payload-occurrences", occurrences, [
-      { name: "path", slot: "path" },
-      { name: "event", slot: "internalEventKey" },
+    const eventCount = builder.aggregate(occurrences, {}, [
+      {
+        name: "events",
+        kind: "count-distinct",
+        expression: builder.slot(occurrences, "eventIdentity"),
+      },
+    ]);
+    builder.output("payload-event-count", eventCount, [
+      { name: "events", slot: "events" },
     ]);
     const plan = builder.finish();
     const node = plan.nodes.find(
@@ -133,10 +138,38 @@ describe("logical relational IR", () => {
     ).toHaveLength(7);
     if (node?.kind !== "event-payload-occurrences")
       throw new Error("wave64_event_payload_occurrence_node_missing");
+    expect("eventPk" in node).toBe(false);
+    const identityField = node.fields.find(
+      ({ field }) => field === "eventIdentity",
+    );
+    const identitySlot = plan.slots.find(
+      ({ id }) => id === identityField?.slot,
+    );
+    expect(identitySlot).toMatchObject({
+      type: { kind: "entity", entity: "event" },
+      nullable: false,
+      lineage: {
+        kind: "derived",
+        operation: "event-payload-occurrence:eventIdentity",
+        inputs: [node.eventKey],
+      },
+    });
+    const eventSource = plan.nodes.find(
+      (candidate) => candidate.kind === "source" && candidate.id === events.id,
+    );
+    expect(
+      eventSource?.kind === "source" &&
+        eventSource.values.some(
+          (binding) =>
+            binding.kind === "attribute" &&
+            binding.attribute === "event.report.internalPk",
+        ),
+    ).toBe(false);
     const explanation = printLogicalPlan(plan);
     expect(explanation).toContain(
-      `EventPayloadOccurrences grain=Bag input=r${selected.id} eventKey=s${node.eventKey} eventPk=s${node.eventPk}`,
+      `EventPayloadOccurrences grain=Bag input=r${selected.id} eventKey=s${node.eventKey}`,
     );
+    expect(explanation).not.toContain("eventPk=");
     for (const { field, slot } of node.fields)
       expect(explanation).toContain(`  ${field} -> s${slot}:`);
     expect(() => builder.eventPayloadOccurrences(occurrences)).toThrow(
@@ -151,69 +184,299 @@ describe("logical relational IR", () => {
     ).toThrow(
       "logical_builder_event_payload_occurrences_requires_event_entity",
     );
-    const missingPkBuilder = createBuilder();
-    expect(() =>
-      missingPkBuilder.eventPayloadOccurrences(
-        missingPkBuilder.source("event"),
-      ),
-    ).toThrow(
-      "logical_builder_event_payload_occurrences_requires_event_pk_attribute",
-    );
     const projectedBuilder = createBuilder();
-    const projectedSource = projectedBuilder.source("event", {
-      attributes: ["event.report.internalPk"],
-    });
+    const projectedSource = projectedBuilder.source("event");
     const projectedEvents = projectedBuilder.project(projectedSource, {
       entity: projectedBuilder.slot(projectedSource, "entity"),
-      "attribute:event.report.internalPk": projectedBuilder.slot(
-        projectedSource,
-        "attribute:event.report.internalPk",
-      ),
     });
     expect(() =>
       projectedBuilder.eventPayloadOccurrences(projectedEvents),
     ).toThrow(
-      "logical_builder_event_payload_occurrences_requires_event_pk_attribute",
+      "logical_builder_event_payload_occurrences_requires_same_event_source",
     );
     const foreignBuilder = createBuilder();
-    const foreignEvents = createBuilder().source("event", {
-      attributes: ["event.report.internalPk"],
-    });
+    const foreignEvents = createBuilder().source("event");
     expect(() => foreignBuilder.eventPayloadOccurrences(foreignEvents)).toThrow(
       "logical_builder_foreign_relation_handle",
     );
+  });
 
-    const eventPk = plan.slots.find(
-      (slot) =>
-        slot.lineage.kind === "attribute" &&
-        slot.lineage.attribute === "event.report.internalPk",
+  it("preserves Event payload identity through only the left side of a semi-join", () => {
+    const builder = createBuilder();
+    const events = builder.source("event", {
+      attributes: ["event.report.ownerSessionId"],
+    });
+    const matchingEvents = builder.source("event", {
+      attributes: ["event.report.ownerSessionId"],
+    });
+    const selected = builder.semiJoin(events, matchingEvents, [
+      {
+        left: "attribute:event.report.ownerSessionId",
+        right: "attribute:event.report.ownerSessionId",
+      },
+    ]);
+    const occurrences = builder.eventPayloadOccurrences(selected);
+    builder.output("semi-joined-event-payload", occurrences, [
+      { name: "eventIdentity", slot: "eventIdentity" },
+    ]);
+    const plan = builder.finish();
+    const payloadNode = plan.nodes.find(
+      (node) => node.kind === "event-payload-occurrences",
     );
-    if (!eventPk) throw new Error("wave64_event_pk_slot_missing");
-    const forged = {
+    expect(payloadNode).toMatchObject({ input: selected.id });
+    expect(validateLogicalPlan(plan)).toBeDefined();
+
+    const forgedAntiJoin = {
       ...plan,
-      slots: plan.slots.map((slot) =>
-        slot.id === eventPk.id
+      nodes: plan.nodes.map((node) =>
+        node.id === selected.id
+          ? { ...node, kind: "anti-join" as const }
+          : node,
+      ),
+    } as unknown as LogicalPlan;
+    expect(() => validateLogicalPlan(forgedAntiJoin)).toThrow(
+      "Payload expansion requires the business Event identity from the same transparent Event Source ancestry.",
+    );
+
+    const antiBuilder = createBuilder();
+    const antiLeft = antiBuilder.source("event", {
+      attributes: ["event.report.ownerSessionId"],
+    });
+    const antiRight = antiBuilder.source("event", {
+      attributes: ["event.report.ownerSessionId"],
+    });
+    const antiJoined = antiBuilder.antiJoin(antiLeft, antiRight, [
+      {
+        left: "attribute:event.report.ownerSessionId",
+        right: "attribute:event.report.ownerSessionId",
+      },
+    ]);
+    expect(() => antiBuilder.eventPayloadOccurrences(antiJoined)).toThrow(
+      "logical_builder_event_payload_occurrences_requires_same_event_source",
+    );
+  });
+
+  it("snapshots finite business Properties paths without Engine storage layout", () => {
+    const builder = createBuilder();
+    const events = builder.source("event", {
+      attributes: ["event.report.ownerPresent"],
+    });
+    const requested = ["/slash~1key", "/emoji 🚀", "/tilde~0key"];
+    const properties = builder.eventPayloadProperties(events, requested);
+    requested[0] = "/changed";
+    expect(properties.grain).toEqual(events.grain);
+    expect(properties.slots["payloadProperty:0:present"]).toBeDefined();
+    builder.output("payload-properties", properties, [
+      { name: "event", slot: "entity" },
+      { name: "present", slot: "payloadProperty:0:present" },
+      { name: "kind", slot: "payloadProperty:0:valueType" },
+      { name: "structure", slot: "payloadProperty:0:structureCompatible" },
+      { name: "value-compatible", slot: "payloadProperty:0:valueCompatible" },
+    ]);
+    const plan = builder.finish();
+    const propertyNode = plan.nodes.find(
+      (node) => node.kind === "event-payload-properties",
+    );
+    if (propertyNode?.kind !== "event-payload-properties")
+      throw new Error("wave93f_payload_properties_missing");
+    if (events.grain.kind !== "entity")
+      throw new Error("wave93f_payload_properties_event_grain_missing");
+    expect(propertyNode.paths.map(({ path }) => path)).toEqual([
+      "/emoji 🚀",
+      "/slash~1key",
+      "/tilde~0key",
+    ]);
+    expect(Object.isFrozen(propertyNode.paths)).toBe(true);
+    expect(propertyNode).toMatchObject({
+      kind: "event-payload-properties",
+      input: events.id,
+      eventKey: events.grain.key,
+      grain: events.grain,
+    });
+    expect(propertyNode.properties).toHaveLength(3);
+    expect(propertyNode.properties[0]?.fields).toHaveLength(7);
+    expect("eventPk" in propertyNode).toBe(false);
+    expect("selectedNodes" in propertyNode).toBe(false);
+    expect("resourceBudget" in propertyNode).toBe(false);
+    const propertyLineage = plan.slots.find(
+      ({ id }) => id === propertyNode.properties[0]?.fields[0]?.slot,
+    );
+    expect(propertyLineage?.lineage).toMatchObject({
+      kind: "derived",
+      operation: "event-payload-property:0:present",
+      inputs: [propertyNode.eventKey],
+    });
+    const source = plan.nodes.find(
+      (node) => node.kind === "source" && node.id === events.id,
+    );
+    expect(
+      source?.kind === "source" &&
+        source.values.some(
+          (binding) =>
+            binding.kind === "attribute" &&
+            binding.attribute === "event.report.internalPk",
+        ),
+    ).toBe(false);
+    const explanation = printLogicalPlan(plan);
+    expect(explanation).toContain("EventPayloadProperties");
+    expect(explanation).not.toContain("eventPk=");
+    expect(explanation).not.toContain("EventPayloadNodes");
+    expect(explanation).not.toContain("EventPayloadNodeBudget");
+
+    const forgedPath = {
+      ...plan,
+      nodes: plan.nodes.map((node) =>
+        node.kind === "event-payload-properties"
+          ? { ...node, paths: [{ path: "/forged", key: "different" }] }
+          : node,
+      ),
+    } satisfies LogicalPlan;
+    expect(() => validateLogicalPlan(forgedPath)).toThrow(LogicalPlanError);
+    const foreignInputBuilder = createBuilder();
+    const firstEvents = foreignInputBuilder.source("event");
+    const secondEvents = foreignInputBuilder.source("event");
+    const firstProperties = foreignInputBuilder.eventPayloadProperties(
+      firstEvents,
+      ["/x"],
+    );
+    foreignInputBuilder.output("first-properties", firstProperties, [
+      { name: "present", slot: "payloadProperty:0:present" },
+    ]);
+    const foreignInputPlan = foreignInputBuilder.finish();
+    const forgedPropertyInput = {
+      ...foreignInputPlan,
+      nodes: foreignInputPlan.nodes.map((node) =>
+        node.kind === "event-payload-properties"
+          ? { ...node, input: secondEvents.id }
+          : node,
+      ),
+    } satisfies LogicalPlan;
+    expect(() => validateLogicalPlan(forgedPropertyInput)).toThrow(
+      LogicalPlanError,
+    );
+    const forgedPropertyPaths = {
+      ...plan,
+      nodes: plan.nodes.map((node) =>
+        node.kind === "event-payload-properties"
           ? {
-              ...slot,
-              lineage: {
-                kind: "derived" as const,
-                operation: "forged-event-pk",
-                inputs: [],
-              },
+              ...node,
+              properties: [
+                { ...node.properties[0]!, path: "/wrong" },
+                ...node.properties.slice(1),
+              ],
             }
-          : slot,
+          : node,
       ),
     } satisfies LogicalPlan;
-    expect(() => validateLogicalPlan(forged)).toThrow(LogicalPlanError);
-    const pathSlot = node.fields.find((field) => field.field === "path")?.slot;
-    if (!pathSlot) throw new Error("wave64_event_payload_path_slot_missing");
-    const forgedNullable = {
+    expect(() => validateLogicalPlan(forgedPropertyPaths)).toThrow(
+      LogicalPlanError,
+    );
+    const forgedPropertyField = {
       ...plan,
-      slots: plan.slots.map((slot) =>
-        slot.id === pathSlot ? { ...slot, nullable: true } : slot,
+      nodes: plan.nodes.map((node) =>
+        node.kind === "event-payload-properties"
+          ? {
+              ...node,
+              properties: node.properties.map((property) => ({
+                ...property,
+                fields: property.fields.map((field, index) =>
+                  index === property.fields.length - 1
+                    ? { ...field, field: "toString" }
+                    : field,
+                ),
+              })),
+            }
+          : node,
       ),
-    } satisfies LogicalPlan;
-    expect(() => validateLogicalPlan(forgedNullable)).toThrow(LogicalPlanError);
+    } as unknown as LogicalPlan;
+    expect(() => validateLogicalPlan(forgedPropertyField)).toThrow(
+      LogicalPlanError,
+    );
+  });
+
+  it("allows Event Properties after a transparent membership semi-join", () => {
+    const builder = createBuilder();
+    const events = builder.source("event", {
+      attributes: ["event.report.ownerSessionId"],
+    });
+    const matchingEvents = builder.source("event", {
+      attributes: ["event.report.ownerSessionId"],
+    });
+    const selected = builder.semiJoin(events, matchingEvents, [
+      {
+        left: "attribute:event.report.ownerSessionId",
+        right: "attribute:event.report.ownerSessionId",
+      },
+    ]);
+    const properties = builder.eventPayloadProperties(selected, ["/tier"]);
+    builder.output("semi-joined-event-properties", properties, [
+      { name: "event", slot: "entity" },
+      { name: "present", slot: "payloadProperty:0:present" },
+    ]);
+    expect(builder.finish()).toBeDefined();
+  });
+
+  it("keeps payload resource admission outside the Engine Properties contract", () => {
+    const builder = createBuilder();
+    const events = builder.source("event");
+    const properties = builder.eventPayloadProperties(events, ["/payload"]);
+    builder.output("payload-properties", properties, [
+      { name: "event", slot: "entity" },
+      { name: "present", slot: "payloadProperty:0:present" },
+    ]);
+    const plan = builder.finish();
+    expect(
+      plan.nodes.some((node) => node.kind === "event-payload-properties"),
+    ).toBe(true);
+    expect(
+      plan.nodes.some((node) => node.kind.includes("event-payload-node")),
+    ).toBe(false);
+    expect(
+      plan.slots.every(
+        (slot) =>
+          slot.lineage.kind !== "derived" ||
+          !slot.lineage.operation.includes("event-payload-node-budget"),
+      ),
+    ).toBe(true);
+    expect(printLogicalPlan(plan)).not.toContain("EventPayloadNodeBudget");
+  });
+
+  it("rejects unsupported payload paths and unqualified Event sources", () => {
+    const builder = createBuilder();
+    const events = builder.source("event");
+    for (const paths of [
+      [],
+      ["/"],
+      ["/nested/path"],
+      ["/*"],
+      ["/__proto__"],
+      ["/constructor"],
+      ["/bad~2escape"],
+      ["/duplicate", "/duplicate"],
+    ])
+      expect(() => builder.eventPayloadProperties(events, paths)).toThrow();
+    const missingOwnerBuilder = createBuilder();
+    const missingOwner = missingOwnerBuilder.source("event");
+    expect(
+      missingOwnerBuilder.eventPayloadProperties(missingOwner, ["/x"]).grain,
+    ).toEqual(missingOwner.grain);
+    expect(() => builder.eventPayloadProperties(events, ["/x"])).not.toThrow();
+    expect(() =>
+      builder.eventPayloadProperties(builder.source("page"), ["/x"]),
+    ).toThrow("logical_builder_event_payload_properties_requires_event_entity");
+    const projectedEvents = builder.project(events, {
+      entity: builder.slot(events, "entity"),
+    });
+    expect(() =>
+      builder.eventPayloadProperties(projectedEvents, ["/x"]),
+    ).toThrow(
+      "logical_builder_event_payload_properties_requires_same_event_source",
+    );
+    const foreignBuilder = createBuilder();
+    const foreignEvents = foreignBuilder.source("event");
+    expect(() => builder.eventPayloadProperties(foreignEvents, ["/x"])).toThrow(
+      "logical_builder_foreign_relation_handle",
+    );
   });
 
   it("concatenates visible scalar rows with explicit bag grain", () => {
@@ -320,64 +583,171 @@ describe("logical relational IR", () => {
     ).toThrow("logical_builder_foreign_relation_handle");
   });
 
-  it("does not let bags act as entity sets or unique join inputs", () => {
+  it("keeps ordinary join and set uniqueness while allowing membership over bags", () => {
     const builder = createBuilder();
     const string = { kind: "scalar", scalar: "string" } as const;
-    const a = builder.project(builder.source("page"), {
+    const number = { kind: "scalar", scalar: "number" } as const;
+    const pages = builder.source("page");
+    const readPages = builder.source("page", { temporalDomain: "read" });
+    const a = builder.project(pages, {
       value: builder.literal("/one", string),
     });
-    const b = builder.project(builder.source("page"), {
+    const b = builder.project(pages, {
       value: builder.literal("/two", string),
     });
-    const firstBag = builder.appendRows([a, b], ["value"]);
-    const secondBag = builder.appendRows([a, b], ["value"]);
+    const rightOne = builder.project(readPages, {
+      value: builder.literal("/one", string),
+    });
+    const rightTwo = builder.project(readPages, {
+      value: builder.literal("/two", string),
+    });
+    const numericRightRow = builder.project(readPages, {
+      value: builder.literal(1, number),
+    });
+    const firstBag = builder.appendRows([a, a, b], ["value"]);
+    const secondBag = builder.appendRows(
+      [rightOne, rightOne, rightTwo],
+      ["value"],
+    );
+    const numericRight = builder.appendRows(
+      [numericRightRow, numericRightRow],
+      ["value"],
+    );
     expect(() => builder.setOperation("union", [firstBag, secondBag])).toThrow(
       "logical_builder_set_requires_unique_grain",
     );
     expect(() =>
       builder.join(firstBag, secondBag, [{ left: "value", right: "value" }]),
     ).toThrow("logical_builder_join_requires_unique_right_grain");
+    expect(() => builder.semiJoin(firstBag, secondBag, [])).toThrow(
+      "logical_builder_join_requires_keys",
+    );
+    expect(() =>
+      builder.semiJoin(firstBag, numericRight, [
+        { left: "value", right: "value" },
+      ]),
+    ).toThrow("logical_builder_join_key_type_mismatch");
     expect(() =>
       builder.semiJoin(firstBag, secondBag, [
         { left: "value", right: "value" },
+        { left: "value", right: "value" },
       ]),
-    ).toThrow("logical_builder_membership_join_requires_unique_grain");
+    ).toThrow("logical_builder_duplicate_join_key");
+    const foreignBuilder = createBuilder();
+    const foreignPages = foreignBuilder.source("page");
+    expect(() =>
+      builder.semiJoin(firstBag, foreignPages, [
+        { left: "value", right: "entity" },
+      ]),
+    ).toThrow("logical_builder_foreign_relation_handle");
 
-    const rightPages = builder.source("page", { attributes: ["page.path"] });
-    const uniqueRight = builder.aggregate(
-      rightPages,
-      { value: builder.slot(rightPages, "attribute:page.path") },
-      [],
-    );
-    const included = builder.semiJoin(firstBag, uniqueRight, [
+    const included = builder.semiJoin(firstBag, secondBag, [
       { left: "value", right: "value" },
     ]);
-    const excluded = builder.antiJoin(firstBag, uniqueRight, [
+    const excluded = builder.antiJoin(firstBag, secondBag, [
       { left: "value", right: "value" },
     ]);
     builder.output("included", included, [{ name: "value", slot: "value" }]);
     builder.output("excluded", excluded, [{ name: "value", slot: "value" }]);
     const plan = builder.finish();
-    const forgedRightBag: LogicalPlan = {
+    const semiJoin = plan.nodes.find((node) => node.kind === "semi-join");
+    const antiJoin = plan.nodes.find((node) => node.kind === "anti-join");
+    if (semiJoin?.kind !== "semi-join" || antiJoin?.kind !== "anti-join")
+      throw new Error("test_membership_join_nodes_missing");
+    const leftNode = plan.nodes.find((node) => node.id === firstBag.id);
+    if (!leftNode) throw new Error("test_membership_left_node_missing");
+    expect(semiJoin.output).toEqual(leftNode.output);
+    expect(semiJoin.grain).toEqual(leftNode.grain);
+    expect(antiJoin.output).toEqual(leftNode.output);
+    expect(antiJoin.grain).toEqual(leftNode.grain);
+    expect(included.temporalDomains).toEqual(["candidate", "read"]);
+    expect(excluded.temporalDomains).toEqual(["candidate", "read"]);
+    expect(
+      validateLogicalPlan(JSON.parse(JSON.stringify(plan)) as LogicalPlan),
+    ).toEqual(plan);
+
+    const wrongKey: LogicalPlan = {
       ...plan,
       nodes: plan.nodes.map((node) =>
-        node.kind === "semi-join"
+        node.id === semiJoin.id && node.kind === "semi-join"
           ? {
               ...node,
-              right: secondBag.id,
               keys: [
                 {
                   left: firstBag.slots["value"]!,
-                  right: secondBag.slots["value"]!,
+                  right: rightOne.slots["value"]!,
                 },
               ],
             }
           : node,
       ),
     };
-    expect(() => validateLogicalPlan(forgedRightBag)).toThrow(
-      "Membership joins cannot use a bag-grain right relation.",
-    );
+    expect(() => validateLogicalPlan(wrongKey)).toThrow(LogicalPlanError);
+
+    const missingKeys: LogicalPlan = {
+      ...plan,
+      nodes: plan.nodes.map((node) =>
+        node.id === semiJoin.id && node.kind === "semi-join"
+          ? { ...node, keys: [] }
+          : node,
+      ),
+    };
+    expect(() => validateLogicalPlan(missingKeys)).toThrow(LogicalPlanError);
+
+    const wrongType: LogicalPlan = {
+      ...plan,
+      nodes: plan.nodes.map((node) =>
+        node.id === semiJoin.id && node.kind === "semi-join"
+          ? {
+              ...node,
+              right: numericRight.id,
+              keys: [
+                {
+                  left: firstBag.slots["value"]!,
+                  right: numericRight.slots["value"]!,
+                },
+              ],
+            }
+          : node,
+      ),
+    };
+    expect(() => validateLogicalPlan(wrongType)).toThrow(LogicalPlanError);
+
+    const wrongOutput: LogicalPlan = {
+      ...plan,
+      nodes: plan.nodes.map((node) =>
+        node.id === semiJoin.id && node.kind === "semi-join"
+          ? {
+              ...node,
+              output: plan.nodes.find((item) => item.id === secondBag.id)!
+                .output,
+            }
+          : node,
+      ),
+    };
+    expect(() => validateLogicalPlan(wrongOutput)).toThrow(LogicalPlanError);
+
+    const wrongGrain: LogicalPlan = {
+      ...plan,
+      nodes: plan.nodes.map((node) =>
+        node.id === semiJoin.id && node.kind === "semi-join"
+          ? { ...node, grain: a.grain }
+          : node,
+      ),
+    };
+    expect(() => validateLogicalPlan(wrongGrain)).toThrow(LogicalPlanError);
+
+    const wrongScope: LogicalPlan = {
+      ...plan,
+      context: {
+        ...plan.context,
+        scope: {
+          ...plan.context.scope,
+          logicalScope: "visitor",
+        },
+      },
+    };
+    expect(() => validateLogicalPlan(wrongScope)).toThrow(LogicalPlanError);
   });
 
   it("validates forged row concatenation mappings and bag metadata", () => {
@@ -553,6 +923,83 @@ describe("logical relational IR", () => {
       unit: "ratio",
     });
     expect(value.nullable).toBe(true);
+  });
+
+  it("erases only numeric units while preserving values, nullability, and slot lineage", () => {
+    const builder = createBuilder();
+    const pages = builder.source("page", {
+      attributes: ["page.report.durationMs"],
+    });
+    const duration = builder.slot(pages, "attribute:page.report.durationMs");
+    const magnitude = builder.numericValue(duration);
+    const negative = builder.numericValue(
+      builder.literal(-2, { kind: "scalar", scalar: "number", unit: "px" }),
+    );
+    const nullValue = builder.numericValue(
+      builder.literal(null, {
+        kind: "scalar",
+        scalar: "number",
+        unit: "ratio",
+      }),
+    );
+    const projected = builder.project(pages, {
+      magnitude,
+      negative,
+      nullValue,
+    });
+    builder.output("numeric-values", projected, [
+      { name: "magnitude", slot: "magnitude" },
+      { name: "negative", slot: "negative" },
+      { name: "nullValue", slot: "nullValue" },
+    ]);
+
+    const plan = builder.finish();
+    expect(duration.type).toMatchObject({
+      kind: "scalar",
+      scalar: "number",
+      unit: "ms",
+    });
+    expect(magnitude.type).toEqual({ kind: "scalar", scalar: "number" });
+    expect(magnitude.nullable).toBe(duration.nullable);
+    expect(negative.type).toEqual({ kind: "scalar", scalar: "number" });
+    expect(negative.nullable).toBe(false);
+    expect(nullValue.nullable).toBe(true);
+    expect(negative.expression).toEqual({
+      kind: "numeric-value",
+      input: {
+        kind: "literal",
+        value: -2,
+        valueType: { kind: "scalar", scalar: "number", unit: "px" },
+      },
+    });
+    expect(
+      plan.slots.find((slot) => slot.id === projected.slots.magnitude)?.lineage,
+    ).toEqual({
+      kind: "derived",
+      operation: "numeric-value",
+      inputs: [pages.slots["attribute:page.report.durationMs"]],
+    });
+    expect(printLogicalPlan(plan)).toContain("NUMERIC_VALUE(");
+    expect(
+      validateLogicalPlan(JSON.parse(JSON.stringify(plan)) as LogicalPlan),
+    ).toEqual(plan);
+
+    expect(() => builder.numericValue(builder.slot(pages, "entity"))).toThrow(
+      "Numeric-value requires a numeric scalar expression.",
+    );
+    expect(() =>
+      builder.numericValue(builder.elapsedDuration(1, "ms")),
+    ).toThrow("Numeric-value requires a numeric scalar expression.");
+
+    const hiddenSource = builder.source("page", {
+      attributes: ["page.report.durationMs"],
+    });
+    const hiddenValue = builder.numericValue(
+      builder.slot(hiddenSource, "attribute:page.report.durationMs"),
+    );
+    expect(() => builder.project(pages, { hiddenValue })).toThrow(
+      "logical_builder_invisible_slot",
+    );
   });
 
   it("accepts finite epoch-millisecond datetime literals", () => {
@@ -1578,6 +2025,13 @@ describe("logical relational IR", () => {
         left: literal(2, number),
         right: literal(1, milliseconds),
       },
+      { kind: "numeric-value", input: slot(path) },
+      {
+        kind: "numeric-value",
+        input: { kind: "elapsed-duration-literal", amount: 1, unit: "ms" },
+      },
+      { kind: "numeric-value", input: slot(pages.slots.entity!) },
+      { kind: "numeric-value", input: slot(slotId(999)) },
       { kind: "round", input: slot(path) },
       { kind: "coalesce", values: [] },
       {

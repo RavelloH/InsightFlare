@@ -19,6 +19,7 @@ import {
   slotId,
 } from "@/lib/edge/analytics/engine/logical/ids";
 import {
+  type EventPayloadPropertiesNode,
   type LogicalAggregateMeasure,
   type LogicalNode,
   type ProjectBinding,
@@ -56,6 +57,11 @@ import {
   type AnalyticsEntityKind,
   validateResolvedAnalyticsScope,
 } from "@/lib/edge/analytics/engine/semantic/entities";
+import {
+  EVENT_PAYLOAD_PROPERTY_FIELDS,
+  type EventPayloadPropertyField,
+  snapshotEventPayloadTopLevelPaths,
+} from "@/lib/edge/analytics/engine/semantic/event-payload-logical";
 import {
   EVENT_PAYLOAD_OCCURRENCE_FIELDS,
   type EventPayloadOccurrenceField,
@@ -254,74 +260,10 @@ export class LogicalPlanBuilder {
   eventPayloadOccurrences(
     events: LogicalRelationHandle,
   ): LogicalRelationHandle {
-    let state = this.#owned(events);
-    if (
-      events.grain.kind !== "entity" ||
-      events.grain.entity !== "event" ||
-      events.entityKey !== events.grain.key
-    )
-      throw new Error(
-        "logical_builder_event_payload_occurrences_requires_event_entity",
-      );
-    const eventKey = events.grain.key;
-    const eventPk = events.slots["attribute:event.report.internalPk"];
-    const pkSlot =
-      eventPk === undefined ? undefined : this.#slotById.get(eventPk);
-    if (
-      !pkSlot ||
-      !state.node.output.includes(eventKey) ||
-      !state.node.output.includes(eventPk) ||
-      pkSlot.type.kind !== "scalar" ||
-      pkSlot.type.scalar !== "number" ||
-      pkSlot.type.unit !== undefined ||
-      pkSlot.nullable ||
-      pkSlot.lineage.kind !== "attribute" ||
-      pkSlot.lineage.attribute !== "event.report.internalPk"
-    )
-      throw new Error(
-        "logical_builder_event_payload_occurrences_requires_event_pk_attribute",
-      );
-
-    const visited = new Set<RelationId>();
-    while (state.node.kind === "filter") {
-      if (
-        visited.has(state.node.id) ||
-        !state.node.output.includes(eventKey) ||
-        !state.node.output.includes(eventPk)
-      )
-        throw new Error(
-          "logical_builder_event_payload_occurrences_invalid_filter_ancestry",
-        );
-      visited.add(state.node.id);
-      const parent = this.#relationById.get(state.node.input);
-      if (!parent)
-        throw new Error(
-          "logical_builder_event_payload_occurrences_missing_source",
-        );
-      state = parent;
-    }
-    const source = state.node;
-    if (
-      source.kind !== "source" ||
-      source.entity !== "event" ||
-      source.grain.kind !== "entity" ||
-      source.grain.entity !== "event" ||
-      source.grain.key !== eventKey ||
-      !source.output.includes(eventKey) ||
-      !source.output.includes(eventPk) ||
-      !source.values.some(
-        (binding) => binding.kind === "self" && binding.slot === eventKey,
-      ) ||
-      !source.values.some(
-        (binding) =>
-          binding.kind === "attribute" &&
-          binding.slot === eventPk &&
-          binding.attribute === "event.report.internalPk",
-      )
-    )
-      throw new Error(
-        "logical_builder_event_payload_occurrences_requires_same_event_source",
-      );
+    const { eventKey } = this.#requirePayloadEventSource(
+      events,
+      "event_payload_occurrences",
+    );
 
     const fields: {
       readonly field: EventPayloadOccurrenceField;
@@ -332,12 +274,10 @@ export class LogicalPlanBuilder {
       EVENT_PAYLOAD_OCCURRENCE_FIELDS,
     ) as EventPayloadOccurrenceField[]) {
       const definition = EVENT_PAYLOAD_OCCURRENCE_FIELDS[field];
-      const lineageInputs =
-        field === "internalEventKey" ? [eventPk] : [eventKey, eventPk];
       const slot = this.#newSlot(definition.type, definition.nullable, {
         kind: "derived",
         operation: `event-payload-occurrence:${field}`,
-        inputs: lineageInputs,
+        inputs: [eventKey],
       });
       fields.push({ field, slot: slot.id });
       namedSlots[field] = slot.id;
@@ -347,12 +287,120 @@ export class LogicalPlanBuilder {
       id: this.#newRelationId(),
       input: events.id,
       eventKey,
-      eventPk,
       fields,
       output: fields.map(({ slot }) => slot),
       grain: { kind: "bag" },
     } satisfies LogicalNode;
     return this.#addNode(node, namedSlots, node.grain, events.temporalDomains);
+  }
+
+  eventPayloadProperties(
+    events: LogicalRelationHandle,
+    requestedPaths: readonly string[],
+  ): LogicalRelationHandle {
+    const state = this.#requirePayloadEventSource(events);
+    const paths = snapshotEventPayloadTopLevelPaths(requestedPaths);
+    const properties = paths.map(({ path, key }, propertyIndex) => {
+      const fields: {
+        readonly field: EventPayloadPropertyField;
+        readonly slot: SlotId;
+      }[] = [];
+      for (const field of Object.keys(
+        EVENT_PAYLOAD_PROPERTY_FIELDS,
+      ) as EventPayloadPropertyField[]) {
+        const definition = EVENT_PAYLOAD_PROPERTY_FIELDS[field];
+        const slot = this.#newSlot(definition.type, definition.nullable, {
+          kind: "derived",
+          operation: `event-payload-property:${propertyIndex}:${field}`,
+          inputs: [state.eventKey],
+        });
+        fields.push({ field, slot: slot.id });
+      }
+      return { path, key, fields };
+    });
+    const namedSlots: Record<string, SlotId> = { ...events.slots };
+    for (const [propertyIndex, property] of properties.entries()) {
+      for (const { field, slot } of property.fields)
+        namedSlots[`payloadProperty:${propertyIndex}:${field}`] = slot;
+    }
+    const node = {
+      kind: "event-payload-properties",
+      id: this.#newRelationId(),
+      input: events.id,
+      eventKey: state.eventKey,
+      paths,
+      properties,
+      output: [
+        ...state.output,
+        ...properties.flatMap(({ fields }) => fields.map(({ slot }) => slot)),
+      ],
+      grain: events.grain,
+    } satisfies EventPayloadPropertiesNode;
+    return this.#addNode(node, namedSlots, node.grain, events.temporalDomains);
+  }
+
+  #requirePayloadEventSource(
+    events: LogicalRelationHandle,
+    purpose:
+      | "event_payload_occurrences"
+      | "event_payload_properties" = "event_payload_properties",
+  ): { readonly eventKey: SlotId; readonly output: readonly SlotId[] } {
+    const state = this.#owned(events);
+    const message = (suffix: string) => `logical_builder_${purpose}_${suffix}`;
+    if (
+      events.grain.kind !== "entity" ||
+      events.grain.entity !== "event" ||
+      events.entityKey !== events.grain.key
+    )
+      throw new Error(message("requires_event_entity"));
+    const eventKey = events.grain.key;
+    const validIdentity = (candidate: InternalRelationState) => {
+      const handle = candidate.handle;
+      const slot = this.#slotById.get(eventKey);
+      return (
+        handle.grain.kind === "entity" &&
+        handle.grain.entity === "event" &&
+        handle.grain.key === eventKey &&
+        handle.entityKey === eventKey &&
+        candidate.node.output.includes(eventKey) &&
+        slot?.type.kind === "entity" &&
+        slot.type.entity === "event" &&
+        !slot.nullable
+      );
+    };
+    if (!validIdentity(state))
+      throw new Error(message("requires_same_event_source"));
+
+    let cursor = state;
+    const visited = new Set<RelationId>();
+    while (cursor.node.kind === "filter" || cursor.node.kind === "semi-join") {
+      if (visited.has(cursor.node.id))
+        throw new Error(message("invalid_event_source_ancestry"));
+      visited.add(cursor.node.id);
+      const parentId =
+        cursor.node.kind === "filter" ? cursor.node.input : cursor.node.left;
+      const parent = this.#relationById.get(parentId);
+      if (!parent) throw new Error(message("missing_event_source"));
+      if (
+        cursor.node.kind === "semi-join" &&
+        (!cursor.node.output.includes(eventKey) ||
+          cursor.node.left !== parent.handle.id)
+      )
+        throw new Error(message("invalid_event_source_ancestry"));
+      if (!validIdentity(parent))
+        throw new Error(message("requires_same_event_source"));
+      cursor = parent;
+    }
+    if (
+      cursor.node.kind !== "source" ||
+      cursor.node.entity !== "event" ||
+      !validIdentity(cursor) ||
+      !cursor.node.values.some(
+        ({ kind, slot }) => kind === "self" && slot === eventKey,
+      )
+    )
+      throw new Error(message("requires_same_event_source"));
+    return { eventKey, output: state.node.output };
   }
 
   #snapshotSelection(
@@ -442,6 +490,21 @@ export class LogicalPlanBuilder {
     const slot = this.#slotById.get(id);
     if (!slot) throw new Error(`logical_builder_missing_slot:${id}`);
     return this.#expression({ kind: "slot", slot: id });
+  }
+
+  assertValueType(
+    input: LogicalExpressionHandle,
+    expected: LogicalValueType,
+  ): LogicalExpressionHandle {
+    const inferred = this.#expression(input.expression);
+    if (
+      !isSameLogicalValueType(input.type, inferred.type) ||
+      input.nullable !== inferred.nullable
+    )
+      throw new Error("logical_builder_expression_handle_metadata_mismatch");
+    if (!isSameLogicalValueType(inferred.type, expected))
+      throw new Error("logical_builder_expression_value_type_mismatch");
+    return inferred;
   }
 
   literal(
@@ -549,7 +612,7 @@ export class LogicalPlanBuilder {
 
   normalizeString(
     input: LogicalExpressionHandle,
-    normalization: "trim-ascii-space",
+    normalization: "trim" | "trim-ascii-space",
   ): LogicalExpressionHandle {
     return this.#expression({
       kind: "string-normalize",
@@ -617,6 +680,10 @@ export class LogicalPlanBuilder {
       right: right.expression,
       ...(operator === "divide" ? { zeroDenominator: "null" as const } : {}),
     });
+  }
+
+  numericValue(input: LogicalExpressionHandle): LogicalExpressionHandle {
+    return this.#expression({ kind: "numeric-value", input: input.expression });
   }
 
   round(
@@ -1662,8 +1729,6 @@ export class LogicalPlanBuilder {
   ): LogicalRelationHandle {
     const leftState = this.#owned(left);
     this.#owned(right);
-    if (right.grain.kind === "bag")
-      throw new Error("logical_builder_membership_join_requires_unique_grain");
     const keys = this.#joinKeys(left, right, namedKeys);
     const node = {
       kind,
@@ -1807,6 +1872,7 @@ export class LogicalPlanBuilder {
         case "string-match":
         case "string-normalize":
         case "number-report-text":
+        case "numeric-value":
         case "absolute":
         case "round":
         case "time-bucket":

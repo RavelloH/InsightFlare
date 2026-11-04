@@ -272,15 +272,15 @@ export function preparePrimitiveFieldCondition(
   };
 }
 
-/** Build a prepared primitive predicate against an existing shared source. */
-export function primitivePredicateForSource(
+/** Build a prepared primitive predicate against an already inferred value. */
+export function primitivePredicateForValue(
   builder: LogicalPlanBuilder,
-  source: LogicalRelationHandle,
+  valueHandle: LogicalExpressionHandle,
   condition: FilterCondition,
   field: RegisteredFilterField,
   attribute: SemanticAttributeDefinition,
 ): LogicalExpressionHandle {
-  const input = builder.slot(source, `attribute:${field.id}`);
+  const input = builder.assertValueType(valueHandle, attribute.valueType);
   const normalization = stringNormalizationFor(field);
 
   if (SUPPORTED_FIELD_PRESENCE.has(condition.operator)) {
@@ -385,6 +385,23 @@ export function primitivePredicateForSource(
       literalValue(field, condition.value as FilterValue, condition.operator),
     ),
     normalization,
+  );
+}
+
+/** Build a prepared primitive predicate against an existing shared source. */
+export function primitivePredicateForSource(
+  builder: LogicalPlanBuilder,
+  source: LogicalRelationHandle,
+  condition: FilterCondition,
+  field: RegisteredFilterField,
+  attribute: SemanticAttributeDefinition,
+): LogicalExpressionHandle {
+  return primitivePredicateForValue(
+    builder,
+    builder.slot(source, `attribute:${field.id}`),
+    condition,
+    field,
+    attribute,
   );
 }
 

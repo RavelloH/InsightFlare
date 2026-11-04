@@ -43,6 +43,11 @@ export interface EventFieldCursorValue {
   readonly valueType: number;
 }
 
+export interface EventFieldsPageOptions {
+  readonly limit: number;
+  readonly cursor?: EventFieldCursorValue | null;
+}
+
 function expression(
   builder: LogicalPlanBuilder,
   relation: LogicalRelationHandle,
@@ -69,7 +74,7 @@ function aggregateFields(
       {
         name: "events",
         kind: "count-distinct",
-        expression: expression(builder, occurrences, "internalEventKey"),
+        expression: expression(builder, occurrences, "eventIdentity"),
       },
       { name: "occurrences", kind: "count-rows" },
       {
@@ -178,15 +183,22 @@ export function buildEventFieldsPlan(
 }
 
 export function buildEventFieldsPagePlan(
-  input: EventFieldsPlanInput & {
-    readonly limit: number;
-    readonly cursor?: EventFieldCursorValue | null;
-  },
+  input: EventFieldsPlanInput & EventFieldsPageOptions,
 ): ValidatedLogicalPlan {
   const { builder, occurrences } = source(input);
+  appendEventFieldsPage(builder, occurrences, input);
+  return builder.finish();
+}
+
+/** Appends the existing page output shape to an already-qualified builder. */
+export function appendEventFieldsPage(
+  builder: LogicalPlanBuilder,
+  occurrences: LogicalRelationHandle,
+  options: EventFieldsPageOptions,
+): LogicalRelationHandle {
   const grouped = aggregateFields(builder, occurrences);
-  const after = input.cursor
-    ? builder.filter(grouped, afterCursor(builder, grouped, input.cursor))
+  const after = options.cursor
+    ? builder.filter(grouped, afterCursor(builder, grouped, options.cursor))
     : grouped;
   const sorted = builder.sort(after, [
     { slot: "events", direction: "desc", nulls: "last" },
@@ -194,7 +206,7 @@ export function buildEventFieldsPagePlan(
     { slot: "path", direction: "asc", nulls: "first" },
     { slot: "valueType", direction: "asc", nulls: "first" },
   ]);
-  const limited = builder.limit(sorted, input.limit + 1);
+  const limited = builder.limit(sorted, options.limit + 1);
   addOutput(builder, limited, EVENT_FIELDS_PAGE_OUTPUT);
-  return builder.finish();
+  return limited;
 }

@@ -22,28 +22,12 @@ export function parseRetentionGranularity(value: string | null): Interval {
 
 export type { RetentionResult } from "@/lib/edge/analytics/contract";
 
-export async function queryRetentionFromD1(
-  env: Env,
-  siteId: string,
+export function retentionResultFromRows(
   window: QueryWindow,
-  filters: FilterDocument,
   granularity: Interval,
-): Promise<RetentionResult> {
+  rows: readonly Record<string, unknown>[],
+): RetentionResult {
   const buckets = buildTimeBuckets(window, granularity);
-  const metadata = scopedFilterMetadata(filters);
-  const plan = buildJourneyRetentionPlan({
-    siteId,
-    queryTime: queryWindowToTime(window),
-    filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
-    granularity,
-  });
-  const rows = await queryAnalyticsReportOutputRowsFromD1(
-    env,
-    plan,
-    "journey-retention",
-  );
-
   const cohortMap = new Map<
     number,
     { size: number; periods: Map<number, number> }
@@ -76,4 +60,28 @@ export async function queryRetentionFromD1(
           })),
       })),
   };
+}
+
+export async function queryRetentionFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  granularity: Interval,
+): Promise<RetentionResult> {
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildJourneyRetentionPlan({
+    siteId,
+    queryTime: queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    granularity,
+  });
+  const rows = await queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    "journey-retention",
+  );
+
+  return retentionResultFromRows(window, granularity, rows);
 }

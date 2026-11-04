@@ -1,4 +1,5 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
+import type { QueryAudience } from "@/lib/edge/analytics/contract/types";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
 import type {
   LogicalExpressionHandle,
@@ -12,11 +13,109 @@ import type { FilterDocument } from "@/lib/filter-contract/filters";
 const STRING = { kind: "scalar", scalar: "string" } as const;
 const NUMBER = { kind: "scalar", scalar: "number" } as const;
 export type ReferrerPageSortKey = "views" | "visitors";
+export type ReferrerOverviewTab = "source.domain" | "source.link";
+export const REFERRERS_PAGE_REPORT_OUTPUT = "referrers-page";
+
+export interface NormalizedReferrerOverviewTableRequest {
+  readonly mode: "overview-tab";
+  readonly tab: ReferrerOverviewTab;
+  readonly includeFullUrl: boolean;
+  readonly limit: number;
+  readonly cursorText: string | null;
+  readonly sortBy: ReferrerPageSortKey;
+  readonly sortDirection: "asc" | "desc";
+  readonly search?: string;
+}
+
+export interface DeferredReferrerOverviewTableRequest extends NormalizedReferrerOverviewTableRequest {
+  readonly audience: QueryAudience;
+}
+
+/** Normalizes only the two single-period overview tabs owned by Referrers. */
+export function normalizeReferrerOverviewTableRequest(input: {
+  readonly mode?: unknown;
+  readonly tab?: unknown;
+  readonly limit?: unknown;
+  readonly cursor?: unknown;
+  readonly sort?: unknown;
+  readonly direction?: unknown;
+  readonly search?: unknown;
+}): NormalizedReferrerOverviewTableRequest | null {
+  if (
+    input.mode !== "overview-tab" ||
+    (input.tab !== "source.domain" && input.tab !== "source.link")
+  )
+    return null;
+  const limit =
+    typeof input.limit === "number" && Number.isFinite(input.limit)
+      ? input.limit
+      : 100;
+  if (!Number.isSafeInteger(limit) || limit < 1) return null;
+  const rawCursor = typeof input.cursor === "string" ? input.cursor : "";
+  const rawSearch = typeof input.search === "string" ? input.search : "";
+  return {
+    mode: "overview-tab",
+    tab: input.tab,
+    includeFullUrl: input.tab === "source.link",
+    limit,
+    cursorText: rawCursor || null,
+    sortBy: input.sort === "visitors" ? "visitors" : "views",
+    sortDirection: input.direction === "asc" ? "asc" : "desc",
+    ...(rawSearch ? { search: rawSearch } : {}),
+  };
+}
 
 export interface ReferrerAggregateCursor {
   readonly primary: number;
   readonly secondary: number;
   readonly referrer: string;
+}
+
+export function appendReferrersPageReport(
+  builder: LogicalPlanBuilder,
+  pages: LogicalRelationHandle,
+  input: {
+    readonly limit: number;
+    readonly includeFullUrl: boolean;
+    readonly search?: string;
+    readonly sortBy: ReferrerPageSortKey;
+    readonly sortDirection: "asc" | "desc";
+    readonly cursor?: ReferrerAggregateCursor | null;
+  },
+): void {
+  let rolled = referrerRollup(
+    builder,
+    pages,
+    selectedReferrer(builder, pages, input.includeFullUrl),
+  );
+  rolled = applySearch(builder, rolled, input.search);
+  if (input.cursor)
+    rolled = builder.filter(
+      rolled,
+      cursorPredicate(
+        builder,
+        rolled,
+        input.cursor,
+        input.sortBy,
+        input.sortDirection,
+      ),
+    );
+  const sorted = sortedReferrers(
+    builder,
+    rolled,
+    input.sortBy,
+    input.sortDirection,
+  );
+  builder.output(
+    REFERRERS_PAGE_REPORT_OUTPUT,
+    builder.limit(sorted, input.limit + 1),
+    [
+      { name: "referrer", slot: "referrer" },
+      { name: "views", slot: "views" },
+      { name: "sessions", slot: "sessions" },
+      { name: "visitors", slot: "visitors" },
+    ],
+  );
 }
 
 function pageAttribute(
@@ -207,35 +306,7 @@ export function buildReferrersPagePlan(input: {
       "page.report.visitorId",
     ],
   });
-  let rolled = referrerRollup(
-    builder,
-    pages,
-    selectedReferrer(builder, pages, input.includeFullUrl),
-  );
-  rolled = applySearch(builder, rolled, input.search);
-  if (input.cursor)
-    rolled = builder.filter(
-      rolled,
-      cursorPredicate(
-        builder,
-        rolled,
-        input.cursor,
-        input.sortBy,
-        input.sortDirection,
-      ),
-    );
-  const sorted = sortedReferrers(
-    builder,
-    rolled,
-    input.sortBy,
-    input.sortDirection,
-  );
-  builder.output("referrers-page", builder.limit(sorted, input.limit + 1), [
-    { name: "referrer", slot: "referrer" },
-    { name: "views", slot: "views" },
-    { name: "sessions", slot: "sessions" },
-    { name: "visitors", slot: "visitors" },
-  ]);
+  appendReferrersPageReport(builder, pages, input);
   return builder.finish();
 }
 
@@ -278,6 +349,16 @@ export function buildReferrerSummaryPlan(input: {
     ...input,
     attributes: ["page.report.referrerHost", "page.report.referrerUrl"],
   });
+  appendReferrerSummaryReport(builder, pages, { topN: input.topN });
+  return builder.finish();
+}
+
+/** Appends the real Referrers summary outputs to an existing Page source. */
+export function appendReferrerSummaryReport(
+  builder: LogicalPlanBuilder,
+  pages: LogicalRelationHandle,
+  options: { readonly topN: number },
+): void {
   const rawHost = selectedReferrer(builder, pages, false);
   const rawUrl = selectedReferrer(builder, pages, true);
   const normalizedHost = builder.normalizeString(rawHost, "trim-ascii-space");
@@ -340,8 +421,8 @@ export function buildReferrerSummaryPlan(input: {
     { slot: "views", direction: "desc", nulls: "last" },
     { slot: "referrer", direction: "asc", nulls: "first" },
   ]);
-  const rowLimit = Number.isFinite(input.topN)
-    ? Math.max(0, Math.floor(input.topN + 1))
+  const rowLimit = Number.isFinite(options.topN)
+    ? Math.max(0, Math.floor(options.topN + 1))
     : 0;
   const limitedTop = builder.limit(sortedTop, rowLimit);
   const top = builder.project(limitedTop, {
@@ -364,5 +445,4 @@ export function buildReferrerSummaryPlan(input: {
     { name: "uniqueLinks", slot: "uniqueLinks" },
     { name: "views", slot: "views" },
   ]);
-  return builder.finish();
 }

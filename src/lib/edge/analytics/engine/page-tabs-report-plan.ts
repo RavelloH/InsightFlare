@@ -184,6 +184,17 @@ export function buildPageTabRows(
   };
 }
 
+/** Appends the five legacy Page tab outputs for an already selected Page bag. */
+export function appendPageTabOutputs(
+  builder: LogicalPlanBuilder,
+  rows: ReturnType<typeof buildPageTabRows>,
+): void {
+  for (const card of PAGE_TAB_CARDS)
+    output(builder, card.outputId, rows[card.cardType]);
+  output(builder, "page-tabs-entry", rows.entry);
+  output(builder, "page-tabs-exit", rows.exit);
+}
+
 /** Builds the five Page cards while keeping observation and session Page bags distinct. */
 export function buildPageTabsPlan(input: {
   readonly siteId: string;
@@ -194,10 +205,7 @@ export function buildPageTabsPlan(input: {
 }): ValidatedLogicalPlan {
   const { builder, pages, boundaryPages } = createPageTabsReportSources(input);
   const rows = buildPageTabRows(builder, pages, boundaryPages, input.limit);
-  for (const card of PAGE_TAB_CARDS)
-    output(builder, card.outputId, rows[card.cardType]);
-  output(builder, "page-tabs-entry", rows.entry);
-  output(builder, "page-tabs-exit", rows.exit);
+  appendPageTabOutputs(builder, rows);
   return builder.finish();
 }
 

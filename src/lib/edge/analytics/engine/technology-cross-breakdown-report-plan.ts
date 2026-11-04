@@ -17,15 +17,33 @@ import type { FilterDocument } from "@/lib/filter-contract/filters";
 const STRING = { kind: "scalar", scalar: "string" } as const;
 const NUMBER = { kind: "scalar", scalar: "number" } as const;
 
+export const TECHNOLOGY_CROSS_CLIENT_UNKNOWN_TOKEN = "__client_cross_unknown__";
+export const TECHNOLOGY_CROSS_CLIENT_OTHER_PRIMARY_TOKEN =
+  "__client_cross_other_primary__";
+export const TECHNOLOGY_CROSS_CLIENT_OTHER_SECONDARY_TOKEN =
+  "__client_cross_other_secondary__";
+export const TECHNOLOGY_CROSS_BROWSER_UNKNOWN_TOKEN =
+  "__browser_cross_unknown__";
+export const TECHNOLOGY_CROSS_BROWSER_OTHER_PRIMARY_TOKEN =
+  "__browser_cross_other_browser__";
+export const TECHNOLOGY_CROSS_BROWSER_OTHER_SECONDARY_TOKEN =
+  "__browser_cross_other_dimension__";
+
 export const TECHNOLOGY_CROSS_BREAKDOWN_OUTPUTS = {
   primary: "technology-cross-primary",
   secondary: "technology-cross-secondary",
   pairs: "technology-cross-pairs",
 } as const;
 
+export interface TechnologyCrossBreakdownOutputIds {
+  readonly primary: string;
+  readonly secondary: string;
+  readonly pairs: string;
+}
+
 export type TechnologyCrossBreakdownFamily = "browser" | "client";
 
-interface TechnologyCrossBreakdownTokens {
+export interface TechnologyCrossBreakdownTokens {
   readonly unknown: string;
   readonly otherPrimary: string;
   readonly otherSecondary: string;
@@ -42,7 +60,16 @@ export interface TechnologyCrossBreakdownPlanInput {
   readonly primaryLimit: number;
   readonly secondaryLimit: number;
   readonly tokens: TechnologyCrossBreakdownTokens;
+  readonly outputIds?: TechnologyCrossBreakdownOutputIds;
 }
+
+export type TechnologyCrossBreakdownReportInput = Omit<
+  TechnologyCrossBreakdownPlanInput,
+  "siteId" | "queryTime" | "filters" | "scopePlan"
+> & {
+  readonly builder: LogicalPlanBuilder;
+  readonly pages: LogicalRelationHandle;
+};
 
 function pageAttribute(
   builder: LogicalPlanBuilder,
@@ -172,6 +199,33 @@ export function buildTechnologyCrossBreakdownPlan(
       : {}),
     selections: [primarySelection, secondarySelection],
   });
+  appendTechnologyCrossBreakdownReport({
+    builder,
+    pages,
+    family: input.family,
+    primarySelection,
+    secondarySelection,
+    primaryLimit,
+    secondaryLimit,
+    tokens: input.tokens,
+    ...(input.outputIds ? { outputIds: input.outputIds } : {}),
+  });
+  return builder.finish();
+}
+
+/** Appends the established ranked Cross report to an existing Page relation. */
+export function appendTechnologyCrossBreakdownReport(
+  input: TechnologyCrossBreakdownReportInput,
+): void {
+  const primaryLimit = legacyLimit(input.primaryLimit, 12);
+  const secondaryLimit = legacyLimit(input.secondaryLimit, 8);
+  const primarySelection = validatePageDimensionSelection(
+    input.primarySelection,
+  );
+  const secondarySelection = validatePageDimensionSelection(
+    input.secondarySelection,
+  );
+  const { builder, pages } = input;
   const empty = builder.literal("", STRING);
   const primary = builder.coalesce(
     selectedPageDimension(builder, pages, primarySelection),
@@ -288,6 +342,7 @@ export function buildTechnologyCrossBreakdownPlan(
   );
 
   const schema = outputFields(input.family);
+  const outputIds = input.outputIds ?? TECHNOLOGY_CROSS_BREAKDOWN_OUTPUTS;
   const fields = [
     "rowType",
     schema.primary,
@@ -324,23 +379,7 @@ export function buildTechnologyCrossBreakdownPlan(
     sessions: builder.slot(pairRows, "sessions"),
     rowOrder: builder.literal(0, NUMBER),
   });
-  output(
-    builder,
-    TECHNOLOGY_CROSS_BREAKDOWN_OUTPUTS.primary,
-    primaryRows,
-    fields,
-  );
-  output(
-    builder,
-    TECHNOLOGY_CROSS_BREAKDOWN_OUTPUTS.secondary,
-    secondaryRows,
-    fields,
-  );
-  output(
-    builder,
-    TECHNOLOGY_CROSS_BREAKDOWN_OUTPUTS.pairs,
-    pairOutputRows,
-    fields,
-  );
-  return builder.finish();
+  output(builder, outputIds.primary, primaryRows, fields);
+  output(builder, outputIds.secondary, secondaryRows, fields);
+  output(builder, outputIds.pairs, pairOutputRows, fields);
 }

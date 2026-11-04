@@ -387,7 +387,7 @@ describe("Journey target presence through typed Analytics lowering", () => {
       status: "success",
       sqlBytes: new TextEncoder().encode(trace.preparedSql[0]!).byteLength,
       bindings: 11,
-      physicalPlanHash: expect.stringMatching(/^v1:/u),
+      physicalPlanHash: expect.stringMatching(/^v8:/u),
     });
     expect(trace.preparedSql[0]).toContain("UNION ALL");
     expect(trace.preparedSql[0]).not.toContain("custom_event_names");

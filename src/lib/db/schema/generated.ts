@@ -5,6 +5,7 @@ export const schema = {
   account_action_tokens: {
     kind: "table",
     name: "account_action_tokens",
+    defaultCollation: "BINARY",
     columns: {
       id: {
         kind: "column",
@@ -182,36 +183,42 @@ export const schema = {
         name: "idx_account_action_tokens_email",
         unique: false,
         columns: ["email", "type", "created_at"],
+        collations: ["BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_account_action_tokens_expires",
         unique: false,
         columns: ["expires_at"],
+        collations: ["BINARY"],
         partial: false,
       },
       {
         name: "idx_account_action_tokens_team",
         unique: false,
         columns: ["team_id", "type", "created_at"],
+        collations: ["BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_account_action_tokens_user",
         unique: false,
         columns: ["user_id", "type", "created_at"],
+        collations: ["BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_account_action_tokens_1",
         unique: true,
         columns: ["id"],
+        collations: ["BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_account_action_tokens_2",
         unique: true,
         columns: ["token_hash"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],
@@ -249,6 +256,7 @@ export const schema = {
   analysis_definitions: {
     kind: "table",
     name: "analysis_definitions",
+    defaultCollation: "BINARY",
     columns: {
       id: {
         kind: "column",
@@ -387,18 +395,21 @@ export const schema = {
         name: "idx_analysis_definitions_site_archived",
         unique: false,
         columns: ["site_id", "archived_at"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_analysis_definitions_site_kind",
         unique: false,
         columns: ["site_id", "kind"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_analysis_definitions_1",
         unique: true,
         columns: ["id"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],
@@ -407,6 +418,7 @@ export const schema = {
   api_keys: {
     kind: "table",
     name: "api_keys",
+    defaultCollation: "BINARY",
     columns: {
       id: {
         kind: "column",
@@ -610,24 +622,28 @@ export const schema = {
         name: "idx_api_keys_active",
         unique: false,
         columns: ["team_id", "revoked_at", "expires_at"],
+        collations: ["BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_api_keys_1",
         unique: true,
         columns: ["id"],
+        collations: ["BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_api_keys_2",
         unique: true,
         columns: ["key_prefix"],
+        collations: ["BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_api_keys_3",
         unique: true,
         columns: ["key_hash"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],
@@ -665,6 +681,7 @@ export const schema = {
   archive_objects: {
     kind: "table",
     name: "archive_objects",
+    defaultCollation: "BINARY",
     columns: {
       archive_key: {
         kind: "column",
@@ -816,12 +833,14 @@ export const schema = {
         name: "idx_archive_objects_site_pk_hour",
         unique: false,
         columns: ["site_pk", "start_hour", "end_hour"],
+        collations: ["BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_archive_objects_1",
         unique: true,
         columns: ["archive_key"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],
@@ -838,6 +857,7 @@ export const schema = {
   configs: {
     kind: "table",
     name: "configs",
+    defaultCollation: "BINARY",
     columns: {
       config_key: {
         kind: "column",
@@ -898,6 +918,7 @@ export const schema = {
         name: "sqlite_autoindex_configs_1",
         unique: true,
         columns: ["config_key"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],
@@ -906,6 +927,7 @@ export const schema = {
   custom_event_json_keys: {
     kind: "table",
     name: "custom_event_json_keys",
+    defaultCollation: "BINARY",
     columns: {
       id: {
         kind: "column",
@@ -914,7 +936,8 @@ export const schema = {
         propertyName: "id",
         declaredType: "INTEGER",
         affinity: "integer",
-        nullable: true,
+        nullable: false,
+        rowidAlias: true,
         primaryKeyPosition: 1,
         defaultSql: null,
         hidden: 0,
@@ -992,6 +1015,7 @@ export const schema = {
         name: "idx_custom_event_json_keys_site_pk_key",
         unique: true,
         columns: ["site_pk", "key"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
     ],
@@ -1008,6 +1032,7 @@ export const schema = {
   custom_event_json_nodes: {
     kind: "table",
     name: "custom_event_json_nodes",
+    defaultCollation: "BINARY",
     columns: {
       event_pk: {
         kind: "column",
@@ -1133,12 +1158,14 @@ export const schema = {
         name: "idx_custom_event_nodes_event_parent",
         unique: false,
         columns: ["event_pk", "parent_node_id", "member_order", "array_index"],
+        collations: ["BINARY", "BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_custom_event_json_nodes_1",
         unique: true,
         columns: ["event_pk", "node_id"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
     ],
@@ -1169,6 +1196,7 @@ export const schema = {
   custom_event_json_paths: {
     kind: "table",
     name: "custom_event_json_paths",
+    defaultCollation: "BINARY",
     columns: {
       id: {
         kind: "column",
@@ -1177,7 +1205,8 @@ export const schema = {
         propertyName: "id",
         declaredType: "INTEGER",
         affinity: "integer",
-        nullable: true,
+        nullable: false,
+        rowidAlias: true,
         primaryKeyPosition: 1,
         defaultSql: null,
         hidden: 0,
@@ -1255,6 +1284,7 @@ export const schema = {
         name: "idx_custom_event_json_paths_site_pk_path",
         unique: true,
         columns: ["site_pk", "path"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
     ],
@@ -1271,6 +1301,7 @@ export const schema = {
   custom_event_json_values: {
     kind: "table",
     name: "custom_event_json_values",
+    defaultCollation: "BINARY",
     columns: {
       event_pk: {
         kind: "column",
@@ -1454,6 +1485,7 @@ export const schema = {
           "occurred_at",
           "event_pk",
         ],
+        collations: ["BINARY", "BINARY", "BINARY", "BINARY", "BINARY"],
         partial: true,
       },
       {
@@ -1466,12 +1498,14 @@ export const schema = {
           "occurred_at",
           "event_pk",
         ],
+        collations: ["BINARY", "BINARY", "BINARY", "BINARY", "BINARY"],
         partial: true,
       },
       {
         name: "idx_custom_event_values_site_pk_path_time",
         unique: false,
         columns: ["site_pk", "path_id", "occurred_at", "event_pk"],
+        collations: ["BINARY", "BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
@@ -1484,12 +1518,14 @@ export const schema = {
           "occurred_at",
           "event_pk",
         ],
+        collations: ["BINARY", "BINARY", "BINARY", "BINARY", "BINARY"],
         partial: true,
       },
       {
         name: "sqlite_autoindex_custom_event_json_values_1",
         unique: true,
         columns: ["event_pk", "node_id"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
     ],
@@ -1534,6 +1570,7 @@ export const schema = {
   custom_event_names: {
     kind: "table",
     name: "custom_event_names",
+    defaultCollation: "BINARY",
     columns: {
       id: {
         kind: "column",
@@ -1542,7 +1579,8 @@ export const schema = {
         propertyName: "id",
         declaredType: "INTEGER",
         affinity: "integer",
-        nullable: true,
+        nullable: false,
+        rowidAlias: true,
         primaryKeyPosition: 1,
         defaultSql: null,
         hidden: 0,
@@ -1620,6 +1658,7 @@ export const schema = {
         name: "idx_custom_event_names_site_pk_name",
         unique: true,
         columns: ["site_pk", "name"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
     ],
@@ -1636,6 +1675,7 @@ export const schema = {
   custom_events: {
     kind: "table",
     name: "custom_events",
+    defaultCollation: "BINARY",
     columns: {
       event_pk: {
         kind: "column",
@@ -1644,7 +1684,8 @@ export const schema = {
         propertyName: "event_pk",
         declaredType: "INTEGER",
         affinity: "integer",
-        nullable: true,
+        nullable: false,
+        rowidAlias: true,
         primaryKeyPosition: 1,
         defaultSql: null,
         hidden: 0,
@@ -1826,30 +1867,35 @@ export const schema = {
         name: "idx_custom_events_created_at_site_pk_performance",
         unique: false,
         columns: ["created_at", "site_pk", "occurred_at", "event_pk"],
+        collations: ["BINARY", "BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_custom_events_site_pk_name_time",
         unique: false,
         columns: ["site_pk", "event_name_id", "occurred_at", "event_pk"],
+        collations: ["BINARY", "BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_custom_events_site_pk_time",
         unique: false,
         columns: ["site_pk", "occurred_at", "event_pk"],
+        collations: ["BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_custom_events_site_pk_visit_time",
         unique: false,
         columns: ["site_pk", "visit_id", "occurred_at", "event_pk"],
+        collations: ["BINARY", "BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_custom_events_1",
         unique: true,
         columns: ["event_id"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],
@@ -1880,6 +1926,7 @@ export const schema = {
   notification_messages: {
     kind: "table",
     name: "notification_messages",
+    defaultCollation: "BINARY",
     columns: {
       id: {
         kind: "column",
@@ -2252,54 +2299,63 @@ export const schema = {
         name: "idx_notification_messages_batch",
         unique: false,
         columns: ["batch_id"],
+        collations: ["BINARY"],
         partial: false,
       },
       {
         name: "idx_notification_messages_expires_at",
         unique: false,
         columns: ["expires_at"],
+        collations: ["BINARY"],
         partial: false,
       },
       {
         name: "idx_notification_messages_rule_created",
         unique: false,
         columns: ["rule_id", "created_at"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_notification_messages_run",
         unique: false,
         columns: ["run_id"],
+        collations: ["BINARY"],
         partial: false,
       },
       {
         name: "idx_notification_messages_site_created",
         unique: false,
         columns: ["site_id", "created_at"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_notification_messages_team_created",
         unique: false,
         columns: ["team_id", "created_at"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_notification_messages_user_attention",
         unique: false,
         columns: ["user_id", "requires_attention", "read_at", "created_at"],
+        collations: ["BINARY", "BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_notification_messages_user_created",
         unique: false,
         columns: ["user_id", "created_at"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_notification_messages_1",
         unique: true,
         columns: ["id"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],
@@ -2337,6 +2393,7 @@ export const schema = {
   notification_rules: {
     kind: "table",
     name: "notification_rules",
+    defaultCollation: "BINARY",
     columns: {
       id: {
         kind: "column",
@@ -2579,30 +2636,35 @@ export const schema = {
         name: "idx_notification_rules_next_run",
         unique: false,
         columns: ["enabled", "next_run_at"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_notification_rules_site",
         unique: false,
         columns: ["site_id", "enabled", "updated_at"],
+        collations: ["BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_notification_rules_team",
         unique: false,
         columns: ["team_id", "enabled", "updated_at"],
+        collations: ["BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_notification_rules_type",
         unique: false,
         columns: ["type", "enabled"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_notification_rules_1",
         unique: true,
         columns: ["id"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],
@@ -2633,6 +2695,7 @@ export const schema = {
   saved_filters: {
     kind: "table",
     name: "saved_filters",
+    defaultCollation: "BINARY",
     columns: {
       id: {
         kind: "column",
@@ -2784,18 +2847,21 @@ export const schema = {
         name: "idx_saved_filters_site_owner_updated",
         unique: false,
         columns: ["site_id", "owner_user_id", "updated_at", "id"],
+        collations: ["BINARY", "BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_saved_filters_site_visibility_updated",
         unique: false,
         columns: ["site_id", "visibility", "updated_at", "id"],
+        collations: ["BINARY", "BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_saved_filters_1",
         unique: true,
         columns: ["id"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],
@@ -2819,6 +2885,7 @@ export const schema = {
   scheduled_task_run_logs: {
     kind: "table",
     name: "scheduled_task_run_logs",
+    defaultCollation: "BINARY",
     columns: {
       id: {
         kind: "column",
@@ -2970,18 +3037,21 @@ export const schema = {
         name: "idx_scheduled_task_run_logs_expires_at",
         unique: false,
         columns: ["expires_at"],
+        collations: ["BINARY"],
         partial: false,
       },
       {
         name: "idx_scheduled_task_run_logs_run_sequence",
         unique: false,
         columns: ["run_id", "sequence"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_scheduled_task_run_logs_1",
         unique: true,
         columns: ["id"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],
@@ -2990,6 +3060,7 @@ export const schema = {
   scheduled_task_runs: {
     kind: "table",
     name: "scheduled_task_runs",
+    defaultCollation: "BINARY",
     columns: {
       id: {
         kind: "column",
@@ -3245,24 +3316,28 @@ export const schema = {
         name: "idx_scheduled_task_runs_expires_at",
         unique: false,
         columns: ["expires_at"],
+        collations: ["BINARY"],
         partial: false,
       },
       {
         name: "idx_scheduled_task_runs_status_started",
         unique: false,
         columns: ["status", "started_at_ms"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_scheduled_task_runs_task_started",
         unique: false,
         columns: ["task_key", "started_at_ms"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_scheduled_task_runs_1",
         unique: true,
         columns: ["id"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],
@@ -3271,6 +3346,7 @@ export const schema = {
   scheduled_task_schedule_state: {
     kind: "table",
     name: "scheduled_task_schedule_state",
+    defaultCollation: "BINARY",
     columns: {
       task_key: {
         kind: "column",
@@ -3383,12 +3459,14 @@ export const schema = {
         name: "idx_scheduled_task_schedule_due",
         unique: false,
         columns: ["enabled", "next_run_at"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_scheduled_task_schedule_state_1",
         unique: true,
         columns: ["task_key"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],
@@ -3397,6 +3475,7 @@ export const schema = {
   site_identities: {
     kind: "table",
     name: "site_identities",
+    defaultCollation: "BINARY",
     columns: {
       site_pk: {
         kind: "column",
@@ -3405,7 +3484,8 @@ export const schema = {
         propertyName: "site_pk",
         declaredType: "INTEGER",
         affinity: "integer",
-        nullable: true,
+        nullable: false,
+        rowidAlias: true,
         primaryKeyPosition: 1,
         defaultSql: null,
         hidden: 0,
@@ -3431,6 +3511,7 @@ export const schema = {
         name: "sqlite_autoindex_site_identities_1",
         unique: true,
         columns: ["site_id"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],
@@ -3439,6 +3520,7 @@ export const schema = {
   sites: {
     kind: "table",
     name: "sites",
+    defaultCollation: "BINARY",
     columns: {
       id: {
         kind: "column",
@@ -3551,24 +3633,28 @@ export const schema = {
         name: "idx_sites_domain",
         unique: false,
         columns: ["domain"],
+        collations: ["BINARY"],
         partial: false,
       },
       {
         name: "idx_sites_team",
         unique: false,
         columns: ["team_id"],
+        collations: ["BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_sites_1",
         unique: true,
         columns: ["id"],
+        collations: ["BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_sites_2",
         unique: true,
         columns: ["public_slug"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],
@@ -3585,6 +3671,7 @@ export const schema = {
   team_members: {
     kind: "table",
     name: "team_members",
+    defaultCollation: "BINARY",
     columns: {
       team_id: {
         kind: "column",
@@ -3658,18 +3745,21 @@ export const schema = {
         name: "idx_team_members_user",
         unique: false,
         columns: ["user_id"],
+        collations: ["BINARY"],
         partial: false,
       },
       {
         name: "idx_team_single_owner",
         unique: true,
         columns: ["team_id"],
+        collations: ["BINARY"],
         partial: true,
       },
       {
         name: "sqlite_autoindex_team_members_1",
         unique: true,
         columns: ["team_id", "user_id"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
     ],
@@ -3693,6 +3783,7 @@ export const schema = {
   teams: {
     kind: "table",
     name: "teams",
+    defaultCollation: "BINARY",
     columns: {
       id: {
         kind: "column",
@@ -3779,12 +3870,14 @@ export const schema = {
         name: "sqlite_autoindex_teams_1",
         unique: true,
         columns: ["id"],
+        collations: ["BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_teams_2",
         unique: true,
         columns: ["slug"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],
@@ -3801,6 +3894,7 @@ export const schema = {
   users: {
     kind: "table",
     name: "users",
+    defaultCollation: "BINARY",
     columns: {
       id: {
         kind: "column",
@@ -3952,24 +4046,28 @@ export const schema = {
         name: "idx_users_system_role",
         unique: false,
         columns: ["system_role"],
+        collations: ["BINARY"],
         partial: false,
       },
       {
         name: "idx_users_username",
         unique: true,
         columns: ["username"],
+        collations: ["BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_users_1",
         unique: true,
         columns: ["id"],
+        collations: ["BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_users_2",
         unique: true,
         columns: ["email"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],
@@ -3978,6 +4076,7 @@ export const schema = {
   visit_hourly_aggregation_state: {
     kind: "table",
     name: "visit_hourly_aggregation_state",
+    defaultCollation: "BINARY",
     columns: {
       site_id: {
         kind: "column",
@@ -4065,6 +4164,7 @@ export const schema = {
         declaredType: "INTEGER",
         affinity: "integer",
         nullable: false,
+        rowidAlias: true,
         primaryKeyPosition: 1,
         defaultSql: null,
         hidden: 0,
@@ -4086,6 +4186,7 @@ export const schema = {
   visit_hourly_rollups: {
     kind: "table",
     name: "visit_hourly_rollups",
+    defaultCollation: "BINARY",
     columns: {
       site_id: {
         kind: "column",
@@ -4406,6 +4507,7 @@ export const schema = {
         name: "sqlite_autoindex_visit_hourly_rollups_1",
         unique: true,
         columns: ["site_pk", "hour_bucket"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
     ],
@@ -4422,6 +4524,7 @@ export const schema = {
   visits: {
     kind: "table",
     name: "visits",
+    defaultCollation: "BINARY",
     columns: {
       visit_id: {
         kind: "column",
@@ -5158,54 +5261,63 @@ export const schema = {
         name: "idx_visits_created_at_site_pk_performance",
         unique: false,
         columns: ["created_at", "site_pk", "started_at", "visit_id"],
+        collations: ["BINARY", "BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_visits_open_last_activity",
         unique: false,
         columns: ["last_activity_at"],
+        collations: ["BINARY"],
         partial: true,
       },
       {
         name: "idx_visits_open_site_pk_started_at",
         unique: false,
         columns: ["site_pk", "started_at"],
+        collations: ["BINARY", "BINARY"],
         partial: true,
       },
       {
         name: "idx_visits_site_pk_last_activity",
         unique: false,
         columns: ["site_pk", "last_activity_at"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_visits_site_pk_session_started_at",
         unique: false,
         columns: ["site_pk", "session_id", "started_at"],
+        collations: ["BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_visits_site_pk_started_at",
         unique: false,
         columns: ["site_pk", "started_at"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_visits_site_pk_visitor_last_activity",
         unique: false,
         columns: ["site_pk", "visitor_id", "last_activity_at"],
+        collations: ["BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "idx_visits_site_pk_visitor_started_at",
         unique: false,
         columns: ["site_pk", "visitor_id", "started_at"],
+        collations: ["BINARY", "BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_visits_1",
         unique: true,
         columns: ["visit_id"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],
@@ -5222,6 +5334,7 @@ export const schema = {
   widgets: {
     kind: "table",
     name: "widgets",
+    defaultCollation: "BINARY",
     columns: {
       id: {
         kind: "column",
@@ -5321,12 +5434,14 @@ export const schema = {
         name: "idx_widgets_site_type",
         unique: false,
         columns: ["site_id", "type"],
+        collations: ["BINARY", "BINARY"],
         partial: false,
       },
       {
         name: "sqlite_autoindex_widgets_1",
         unique: true,
         columns: ["id"],
+        collations: ["BINARY"],
         partial: false,
       },
     ],

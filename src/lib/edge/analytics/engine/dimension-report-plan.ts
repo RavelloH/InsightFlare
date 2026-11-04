@@ -7,11 +7,15 @@ import {
   type LogicalRelationHandle,
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
-import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
+import {
+  addPageReportSourceToBuilder,
+  createPageReportSource,
+} from "@/lib/edge/analytics/engine/page-report-plan";
 import {
   semanticPageDimension,
   type SemanticPageDimensionId,
 } from "@/lib/edge/analytics/engine/semantic/page-dimensions";
+import type { SemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
@@ -276,6 +280,182 @@ export type PageDimensionSelection =
 
 export type PageDimensionSelectionId = PageDimensionSelection["id"];
 
+export const OVERVIEW_PAGE_TABLES = {
+  "page.path": {
+    family: "page",
+    selection: PAGE_DIMENSION_SELECTIONS.pagePath,
+    excludeEmpty: true,
+  },
+  "page.query": {
+    family: "page",
+    selection: PAGE_DIMENSION_SELECTIONS.pageQuery,
+    excludeEmpty: true,
+  },
+  "page.title": {
+    family: "page",
+    selection: PAGE_DIMENSION_SELECTIONS.pageTitle,
+    excludeEmpty: true,
+  },
+  "page.hostname": {
+    family: "page",
+    selection: PAGE_DIMENSION_SELECTIONS.pageHostname,
+    excludeEmpty: true,
+  },
+  "client.browser": {
+    family: "client",
+    selection: PAGE_DIMENSION_SELECTIONS.browser,
+    excludeEmpty: true,
+  },
+  "client.osVersion": {
+    family: "client",
+    selection: PAGE_DIMENSION_SELECTIONS.osVersion,
+    excludeEmpty: true,
+  },
+  "client.deviceType": {
+    family: "client",
+    selection: PAGE_DIMENSION_SELECTIONS.deviceType,
+    excludeEmpty: true,
+  },
+  "client.language": {
+    family: "client",
+    selection: PAGE_DIMENSION_SELECTIONS.language,
+    excludeEmpty: true,
+  },
+  "client.screenSize": {
+    family: "client",
+    selection: PAGE_DIMENSION_SELECTIONS.screenSize,
+    excludeEmpty: true,
+  },
+  "utm.source": {
+    family: "utm",
+    selection: PAGE_DIMENSION_SELECTIONS.utmSource,
+    excludeEmpty: false,
+  },
+  "utm.medium": {
+    family: "utm",
+    selection: PAGE_DIMENSION_SELECTIONS.utmMedium,
+    excludeEmpty: false,
+  },
+  "utm.campaign": {
+    family: "utm",
+    selection: PAGE_DIMENSION_SELECTIONS.utmCampaign,
+    excludeEmpty: false,
+  },
+  "utm.term": {
+    family: "utm",
+    selection: PAGE_DIMENSION_SELECTIONS.utmTerm,
+    excludeEmpty: false,
+  },
+  "utm.content": {
+    family: "utm",
+    selection: PAGE_DIMENSION_SELECTIONS.utmContent,
+    excludeEmpty: false,
+  },
+  "geo.country": {
+    family: "geo",
+    selection: PAGE_DIMENSION_SELECTIONS.country,
+    excludeEmpty: true,
+  },
+  "geo.region": {
+    family: "geo",
+    selection: PAGE_DIMENSION_SELECTIONS.region,
+    excludeEmpty: true,
+  },
+  "geo.city": {
+    family: "geo",
+    selection: PAGE_DIMENSION_SELECTIONS.city,
+    excludeEmpty: true,
+  },
+  "geo.continent": {
+    family: "geo",
+    selection: PAGE_DIMENSION_SELECTIONS.continent,
+    excludeEmpty: true,
+  },
+  "geo.timezone": {
+    family: "geo",
+    selection: PAGE_DIMENSION_SELECTIONS.timezone,
+    excludeEmpty: true,
+  },
+  "geo.organization": {
+    family: "geo",
+    selection: PAGE_DIMENSION_SELECTIONS.organization,
+    excludeEmpty: true,
+  },
+  "source.channel": {
+    family: "channel",
+    selection: PAGE_DIMENSION_SELECTIONS.trafficChannel,
+    excludeEmpty: true,
+  },
+} as const;
+
+export type OverviewPageTableTab = keyof typeof OVERVIEW_PAGE_TABLES;
+export type OverviewPageTableDescriptor = {
+  readonly tab: OverviewPageTableTab;
+  readonly family: (typeof OVERVIEW_PAGE_TABLES)[OverviewPageTableTab]["family"];
+  readonly selection: PageDimensionSelection;
+  readonly excludeEmpty: boolean;
+};
+
+export interface NormalizedOverviewPageTableRequest extends OverviewPageTableDescriptor {
+  readonly mode: "overview-tab";
+  readonly limit: number;
+  readonly cursorText: string | null;
+  readonly sortBy: DimensionSortKey;
+  readonly sortDirection: "asc" | "desc";
+  readonly search?: string;
+}
+
+export function overviewPageTableDescriptor(
+  tab: string,
+): OverviewPageTableDescriptor | null {
+  if (!Object.hasOwn(OVERVIEW_PAGE_TABLES, tab)) return null;
+  const descriptor = OVERVIEW_PAGE_TABLES[tab as OverviewPageTableTab];
+  return { tab: tab as OverviewPageTableTab, ...descriptor };
+}
+
+/** Normalizes the existing single-period overview table controls. */
+export function normalizeOverviewPageTableRequest(input: {
+  readonly operation?: "dimension" | "channels";
+  readonly mode?: unknown;
+  readonly tab?: unknown;
+  readonly limit?: unknown;
+  readonly cursor?: unknown;
+  readonly sort?: unknown;
+  readonly direction?: unknown;
+  readonly search?: unknown;
+}): NormalizedOverviewPageTableRequest | null {
+  if (input.mode !== "overview-tab" || typeof input.tab !== "string")
+    return null;
+  const descriptor = overviewPageTableDescriptor(input.tab);
+  if (!descriptor) return null;
+  if (
+    (descriptor.family === "channel" && input.operation !== "channels") ||
+    (input.operation === "channels" && descriptor.family !== "channel")
+  )
+    return null;
+  const sort =
+    input.sort === "sessions" || input.sort === "visitors"
+      ? input.sort
+      : "views";
+  return {
+    mode: "overview-tab",
+    ...descriptor,
+    limit:
+      typeof input.limit === "number" && Number.isFinite(input.limit)
+        ? input.limit
+        : 100,
+    cursorText:
+      typeof input.cursor === "string" && input.cursor.length > 0
+        ? input.cursor
+        : null,
+    sortBy: sort,
+    sortDirection: input.direction === "asc" ? "asc" : "desc",
+    ...(typeof input.search === "string" && input.search.length > 0
+      ? { search: input.search }
+      : {}),
+  };
+}
+
 const pageDimensionSelectionById = new Map<string, PageDimensionSelection>(
   Object.values(PAGE_DIMENSION_SELECTIONS).map((selection) => [
     selection.id,
@@ -366,6 +546,55 @@ export function analyticsPageDimensionSelection(
   return null;
 }
 
+export function dimensionPageSelection(
+  value: string,
+): PageDimensionSelection | null {
+  if (value === "traffic.channel")
+    return PAGE_DIMENSION_SELECTIONS.trafficChannel;
+  return analyticsPageDimensionSelection(value);
+}
+
+export interface NormalizedDimensionPageRequest extends DimensionPageReportOptions {
+  readonly dimension: string;
+  readonly cursorText: string | null;
+}
+
+/** Applies the public dimension paging defaults in one shared place. */
+export function normalizeDimensionPageRequest(input: {
+  readonly dimension: string;
+  readonly page?: unknown;
+  readonly limit?: unknown;
+  readonly sort?: unknown;
+  readonly search?: unknown;
+}): NormalizedDimensionPageRequest | null {
+  const selection = dimensionPageSelection(input.dimension);
+  if (!selection) return null;
+  const page =
+    input.page && typeof input.page === "object"
+      ? (input.page as { limit?: unknown; cursor?: unknown })
+      : {};
+  const sort =
+    input.sort && typeof input.sort === "object"
+      ? (input.sort as { key?: unknown; direction?: unknown })
+      : null;
+  return {
+    dimension: input.dimension,
+    selection,
+    limit:
+      typeof page.limit === "number" && Number.isFinite(page.limit)
+        ? page.limit
+        : typeof input.limit === "number" && Number.isFinite(input.limit)
+          ? input.limit
+          : 20,
+    cursorText: typeof page.cursor === "string" ? page.cursor : null,
+    sortBy:
+      sort?.key === "sessions" || sort?.key === "visitors" ? sort.key : "views",
+    sortDirection: sort?.direction === "asc" ? "asc" : "desc",
+    ...(typeof input.search === "string" ? { search: input.search } : {}),
+    excludeEmpty: false,
+  };
+}
+
 function pageReportAttribute(
   builder: LogicalPlanBuilder,
   pages: LogicalRelationHandle,
@@ -424,6 +653,34 @@ export function pageDimensionReportSource(input: {
   readonly includeVisitors?: boolean;
   readonly additionalAttributes?: readonly string[];
 }) {
+  const attributes = pageDimensionReportAttributes(input);
+  return createPageReportSource({
+    ...input,
+    attributes,
+  });
+}
+
+/** Adds the same Page dimension Source to a caller-owned Logical builder. */
+export function appendPageDimensionReportSource(
+  builder: LogicalPlanBuilder,
+  input: {
+    readonly selections: readonly PageDimensionSelection[];
+    readonly sourceSelection: SemanticScopedSourceSelection;
+    readonly includeVisitors?: boolean;
+    readonly additionalAttributes?: readonly string[];
+  },
+) {
+  return addPageReportSourceToBuilder(builder, {
+    attributes: pageDimensionReportAttributes(input),
+    selection: input.sourceSelection,
+  });
+}
+
+function pageDimensionReportAttributes(input: {
+  readonly selections: readonly PageDimensionSelection[];
+  readonly includeVisitors?: boolean;
+  readonly additionalAttributes?: readonly string[];
+}): readonly string[] {
   const attributes = new Set<string>(["page.report.sessionId"]);
   if (input.includeVisitors !== false) attributes.add("page.report.visitorId");
   for (const attribute of input.additionalAttributes ?? [])
@@ -440,10 +697,7 @@ export function pageDimensionReportSource(input: {
       : (definition?.dependencies ?? []))
       attributes.add(attribute);
   }
-  return createPageReportSource({
-    ...input,
-    attributes: [...attributes],
-  });
+  return [...attributes];
 }
 
 function pageDimensionSource(input: {
@@ -533,7 +787,7 @@ function filterDimension(
 
 export type DimensionSortKey = "views" | "sessions" | "visitors";
 
-function sortColumns(sortBy: DimensionSortKey): {
+export function dimensionSortColumns(sortBy: DimensionSortKey): {
   primary: DimensionSortKey;
   secondary: DimensionSortKey;
 } {
@@ -554,7 +808,7 @@ function cursorPredicate(
   direction: "asc" | "desc",
 ): LogicalExpressionHandle {
   const { primary: primaryName, secondary: secondaryName } =
-    sortColumns(sortBy);
+    dimensionSortColumns(sortBy);
   const primary = builder.slot(input, primaryName);
   const secondary = builder.slot(input, secondaryName);
   const value = builder.slot(input, "value");
@@ -585,11 +839,92 @@ function sortedDimensions(
   sortBy: DimensionSortKey,
   direction: "asc" | "desc",
 ): LogicalRelationHandle {
-  const columns = sortColumns(sortBy);
+  const columns = dimensionSortColumns(sortBy);
   return builder.sort(input, [
     { slot: columns.primary, direction, nulls: "last" },
     { slot: columns.secondary, direction, nulls: "last" },
     { slot: "value", direction: "asc", nulls: "first" },
+  ]);
+}
+
+export interface DimensionPageReportOptions {
+  readonly limit: number;
+  readonly selection: PageDimensionSelection;
+  readonly excludeEmpty?: boolean;
+  readonly search?: string;
+  readonly sortBy: DimensionSortKey;
+  readonly sortDirection: "asc" | "desc";
+  readonly cursor?: {
+    readonly primary: number;
+    readonly secondary: number;
+    readonly value: string;
+  } | null;
+}
+
+export const DIMENSION_PAGE_REPORT_OUTPUT = "dimension-page";
+
+/** Appends the stored/derived dimension Top-N report to an existing builder. */
+export function appendDimensionTopReport(
+  builder: LogicalPlanBuilder,
+  pages: LogicalRelationHandle,
+  options: DimensionPageReportOptions,
+): void {
+  let result = dimensionRollup(
+    builder,
+    pages,
+    selectedPageDimension(builder, pages, options.selection),
+  );
+  result = filterDimension(builder, result, options);
+  result = sortedDimensions(
+    builder,
+    result,
+    options.sortBy,
+    options.sortDirection,
+  );
+  if (options.limit > 0) result = builder.limit(result, options.limit);
+  builder.output("dimension-top", result, [
+    { name: "value", slot: "value" },
+    { name: "views", slot: "views" },
+    { name: "sessions", slot: "sessions" },
+    { name: "visitors", slot: "visitors" },
+  ]);
+}
+
+/** Appends the keyset-paginated dimension report to an existing builder. */
+export function appendDimensionPageReport(
+  builder: LogicalPlanBuilder,
+  pages: LogicalRelationHandle,
+  options: DimensionPageReportOptions,
+): void {
+  let result = dimensionRollup(
+    builder,
+    pages,
+    selectedPageDimension(builder, pages, options.selection),
+  );
+  result = filterDimension(builder, result, options);
+  if (options.cursor)
+    result = builder.filter(
+      result,
+      cursorPredicate(
+        builder,
+        result,
+        options.cursor,
+        options.sortBy,
+        options.sortDirection,
+      ),
+    );
+  result = sortedDimensions(
+    builder,
+    result,
+    options.sortBy,
+    options.sortDirection,
+  );
+  result = builder.limit(result, options.limit + 1);
+  builder.output(DIMENSION_PAGE_REPORT_OUTPUT, result, [
+    { name: "value", slot: "value" },
+    { name: "views", slot: "views" },
+    { name: "sessions", slot: "sessions" },
+    { name: "visitors", slot: "visitors" },
   ]);
 }
 
@@ -607,20 +942,7 @@ export function buildDimensionTopPlan(input: {
   readonly sortDirection: "asc" | "desc";
 }): ValidatedLogicalPlan {
   const { builder, pages } = pageDimensionSource(input);
-  let result = dimensionRollup(
-    builder,
-    pages,
-    selectedPageDimension(builder, pages, input.selection),
-  );
-  result = filterDimension(builder, result, input);
-  result = sortedDimensions(builder, result, input.sortBy, input.sortDirection);
-  if (input.limit > 0) result = builder.limit(result, input.limit);
-  builder.output("dimension-top", result, [
-    { name: "value", slot: "value" },
-    { name: "views", slot: "views" },
-    { name: "sessions", slot: "sessions" },
-    { name: "visitors", slot: "visitors" },
-  ]);
+  appendDimensionTopReport(builder, pages, input);
   return builder.finish();
 }
 
@@ -643,30 +965,6 @@ export function buildDimensionPagePlan(input: {
   } | null;
 }): ValidatedLogicalPlan {
   const { builder, pages } = pageDimensionSource(input);
-  let result = dimensionRollup(
-    builder,
-    pages,
-    selectedPageDimension(builder, pages, input.selection),
-  );
-  result = filterDimension(builder, result, input);
-  if (input.cursor)
-    result = builder.filter(
-      result,
-      cursorPredicate(
-        builder,
-        result,
-        input.cursor,
-        input.sortBy,
-        input.sortDirection,
-      ),
-    );
-  result = sortedDimensions(builder, result, input.sortBy, input.sortDirection);
-  result = builder.limit(result, input.limit + 1);
-  builder.output("dimension-page", result, [
-    { name: "value", slot: "value" },
-    { name: "views", slot: "views" },
-    { name: "sessions", slot: "sessions" },
-    { name: "visitors", slot: "visitors" },
-  ]);
+  appendDimensionPageReport(builder, pages, input);
   return builder.finish();
 }

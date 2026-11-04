@@ -1,5 +1,6 @@
 import type { QueryTime } from "@/lib/edge/analytics/contract";
 import type { D1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
+import type { compilePagesDashboardQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/pages-dashboard-qualification-compiler";
 import {
   currentInvocationLogger,
   runWithD1Operation,
@@ -9,6 +10,7 @@ export interface D1SiteRuntimeBindings {
   readonly env: Env;
   readonly siteId: string;
   readonly diagnostics?: D1ReadDiagnostics;
+  readonly pagesDashboardQualificationCompile?: typeof compilePagesDashboardQualificationProgram;
 }
 export function stringField<Input extends object, Field extends keyof Input>(
   input: Input,

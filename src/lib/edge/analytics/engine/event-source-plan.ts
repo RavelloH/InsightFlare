@@ -36,6 +36,30 @@ export interface EventReportSourceContext {
   readonly time: SemanticTemporalDomains;
 }
 
+/** Uses an existing semantic builder so qualification and report Sources share
+ * the same authorized subject, temporal domains, scope, and relation IDs. */
+export function createEventReportSourceContextForBuilder(
+  builder: LogicalPlanBuilder,
+  filters: FilterDocument,
+  options: {
+    readonly scopePlan?: ScopedFilterPlan;
+    readonly preparedTimePolicy?: "reader-window";
+  } = {},
+): EventReportSourceContext {
+  if (options.preparedTimePolicy && !options.scopePlan)
+    throw new Error("event_source_reader_window_requires_prepared_scope");
+  return {
+    builder,
+    filters,
+    ...(options.scopePlan ? { scopePlan: options.scopePlan } : {}),
+    ...(options.preparedTimePolicy
+      ? { preparedTimePolicy: options.preparedTimePolicy }
+      : {}),
+    subject: builder.context.subject,
+    time: builder.context.time,
+  };
+}
+
 /** Creates one builder/context for Event report Sources with separate gates. */
 export function createEventReportSourceContext(input: {
   readonly siteId: string;

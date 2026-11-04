@@ -1,16 +1,16 @@
+import { queryLegacyD1All } from "@/lib/edge/__tests__/legacy-d1-oracle";
 import {
   createScopedFilterPlan,
   EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
 } from "@/lib/edge/analytics/contract";
-import { queryD1All } from "@/lib/edge/analytics/providers/d1/internal/core-sources";
-import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core-types";
 import {
   compileScopedDatasetSql,
   executeObservationFilterOnScopedDataset,
   scopedDatasetFor,
   type ScopedDatasetSql,
-} from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core-types";
 import type { Env } from "@/lib/edge/types";
 
 /** The one-row aggregate returned by the summary statement. */
@@ -129,7 +129,7 @@ export async function queryGoalSummaryParentOracle(
     goalFilter,
     preparedDataset,
   );
-  const rows = await queryD1All<Record<string, unknown>>(
+  const rows = await queryLegacyD1All<Record<string, unknown>>(
     env,
     statement.sql,
     statement.bindings,

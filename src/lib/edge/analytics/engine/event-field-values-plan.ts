@@ -30,6 +30,9 @@ const PAGE_OUTPUT = [
   { name: "valueNumber", slot: "valueNumber" },
   { name: "valueBoolean", slot: "valueBoolean" },
 ] as const;
+export const EVENT_FIELD_VALUES_PAGE_FIELDS = PAGE_OUTPUT.map(
+  ({ name }) => name,
+);
 
 const SQLITE_NULL_NUMBER = -9223372036854775808;
 
@@ -41,11 +44,20 @@ export interface EventFieldValueCursorValue {
   readonly booleanValue: number;
 }
 
-interface EventFieldValuesPlanInput {
-  readonly source: EventPayloadReportSource;
+interface EventFieldValuesInput {
   readonly fieldPath: string;
   readonly valueTypeCode: EventPayloadValueTypeCode;
   readonly search?: string;
+}
+
+interface EventFieldValuesPlanInput extends EventFieldValuesInput {
+  readonly source: EventPayloadReportSource;
+  readonly limit: number;
+}
+
+export interface EventFieldValuesPageOptions extends EventFieldValuesInput {
+  readonly limit: number;
+  readonly cursor?: EventFieldValueCursorValue | null;
 }
 
 function expression(
@@ -96,7 +108,9 @@ function searchedValue(
 }
 
 function aggregateValues(
-  input: EventFieldValuesPlanInput,
+  input: EventFieldValuesInput & {
+    readonly source: EventPayloadReportSource;
+  },
 ): LogicalRelationHandle {
   const { builder, occurrences } = input.source;
   const pathAndType = builder.and(
@@ -145,7 +159,7 @@ function aggregateValues(
       {
         name: "events",
         kind: "count-distinct",
-        expression: expression(builder, filtered, "internalEventKey"),
+        expression: expression(builder, filtered, "eventIdentity"),
       },
       { name: "occurrences", kind: "count-rows" },
       {
@@ -239,13 +253,25 @@ function afterCursor(
 }
 
 export function buildEventFieldValuesPagePlan(
-  input: EventFieldValuesPlanInput & {
-    readonly limit: number;
-    readonly cursor?: EventFieldValueCursorValue | null;
-  },
+  input: EventFieldValuesPlanInput,
 ): ValidatedLogicalPlan {
   const { builder } = input.source;
-  const grouped = aggregateValues(input);
+  appendEventFieldValuesPage(builder, input.source.occurrences, input);
+  return builder.finish();
+}
+
+/** Appends the existing values page output to an already-qualified builder. */
+export function appendEventFieldValuesPage(
+  builder: LogicalPlanBuilder,
+  occurrences: LogicalRelationHandle,
+  input: EventFieldValuesPageOptions,
+): LogicalRelationHandle {
+  const grouped = aggregateValues({
+    source: { builder, occurrences },
+    fieldPath: input.fieldPath,
+    valueTypeCode: input.valueTypeCode,
+    ...(input.search !== undefined ? { search: input.search } : {}),
+  });
   const valueString = builder.coalesce(
     expression(builder, grouped, "stringValue"),
     builder.literal("", STRING),
@@ -283,5 +309,5 @@ export function buildEventFieldValuesPagePlan(
   ]);
   const limited = builder.limit(sorted, input.limit + 1);
   builder.output(EVENT_FIELD_VALUES_PAGE_OUTPUT, limited, PAGE_OUTPUT);
-  return builder.finish();
+  return limited;
 }

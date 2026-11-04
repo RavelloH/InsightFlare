@@ -21,7 +21,7 @@ function withPlaceholderOffsets(
   fragment: SqlFragment,
   offsets: readonly number[] | undefined,
 ): SqlFragment {
-  placeholderOffsets.set(fragment, offsets);
+  if (offsets !== undefined) placeholderOffsets.set(fragment, offsets);
   return fragment;
 }
 
@@ -34,22 +34,23 @@ export function parameter(value: DatabaseBinding): SqlFragment {
 }
 
 export function concat(...parts: readonly SqlFragment[]): SqlFragment {
-  const fragment = {
-    text: parts.map((part) => part.text).join(""),
-    bindings: parts.flatMap((part) => part.bindings),
-  };
-  const offsets: number[] = [];
+  let sql = "";
+  const bindings: DatabaseBinding[] = [];
+  let offsets: number[] | undefined = [];
   let textOffset = 0;
-  let known = true;
   for (const part of parts) {
-    const partOffsets = getParameterPlaceholderOffsets(part);
-    if (partOffsets === undefined) known = false;
-    else {
-      for (const offset of partOffsets) offsets.push(offset + textOffset);
+    sql += part.text;
+    part.bindings.forEach((binding) => bindings.push(binding));
+    if (offsets !== undefined) {
+      const partOffsets = getParameterPlaceholderOffsets(part);
+      if (partOffsets === undefined) offsets = undefined;
+      else {
+        for (const offset of partOffsets) offsets.push(offset + textOffset);
+        textOffset += part.text.length;
+      }
     }
-    textOffset += part.text.length;
   }
-  return withPlaceholderOffsets(fragment, known ? offsets : undefined);
+  return withPlaceholderOffsets({ text: sql, bindings }, offsets);
 }
 
 export function join(
@@ -82,7 +83,14 @@ export function join(
 }
 
 export function parenthesize(part: SqlFragment): SqlFragment {
-  return concat(text("("), part, text(")"));
+  const bindings: DatabaseBinding[] = [];
+  part.bindings.forEach((binding) => bindings.push(binding));
+  const partOffsets = getParameterPlaceholderOffsets(part);
+  const offsets =
+    partOffsets === undefined
+      ? undefined
+      : partOffsets.map((offset) => offset + 1);
+  return withPlaceholderOffsets({ text: `(${part.text})`, bindings }, offsets);
 }
 
 export function unsafeRawSql(

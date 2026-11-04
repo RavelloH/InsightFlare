@@ -13,7 +13,7 @@ import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
 const NUMBER = { kind: "scalar", scalar: "number" } as const;
-const OVERVIEW_ATTRIBUTES = {
+export const EVENT_TYPE_OVERVIEW_ATTRIBUTES = {
   page: "event.report.ownerPathname",
   country: "event.report.ownerCountry",
   device: "event.report.ownerDeviceType",
@@ -54,36 +54,15 @@ function addOverviewOutput(
   builder.output(outputId, relation, EVENT_TYPE_OVERVIEW_FIELDS);
 }
 
-/** Builds one Event type overview plan, including its independent denominator. */
-export function buildEventTypeOverviewPlan(input: {
-  readonly siteId: string;
-  readonly queryTime: QueryTime;
-  readonly filters: FilterDocument;
-  readonly scopePlan?: ScopedFilterPlan;
-  readonly eventName: string;
-  readonly includeBreakdowns?: boolean;
-  readonly denominatorSource: "event-report" | "raw-event-domain";
-}): ValidatedLogicalPlan {
-  const includeBreakdowns = input.includeBreakdowns !== false;
-  const context = createEventReportSourceContext({
-    siteId: input.siteId,
-    queryTime: input.queryTime,
-    filters: input.filters,
-    ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
-  });
-  const builder = context.builder;
-  const summaryEvents = addEventReportSource(context, {
-    attributes: includeBreakdowns
-      ? [...EVENT_REPORT_BASE_ATTRIBUTES, ...Object.values(OVERVIEW_ATTRIBUTES)]
-      : EVENT_REPORT_BASE_ATTRIBUTES,
-    eventName: input.eventName,
-    eventNameInputSemantics: "defined-raw-value",
-  });
-  const breakdownEvents = includeBreakdowns ? summaryEvents : undefined;
-  const denominatorEvents =
-    input.denominatorSource === "raw-event-domain"
-      ? builder.source("event", { temporalDomain: "candidate" })
-      : addEventReportSource(context, { attributes: [] });
+/** Appends the overview summary and optional breakdown outputs to a builder. */
+export function appendEventTypeOverviewOutputs(input: {
+  readonly builder: LogicalPlanBuilder;
+  readonly summaryEvents: LogicalRelationHandle;
+  readonly denominatorEvents: LogicalRelationHandle;
+  readonly includeBreakdowns: boolean;
+}): void {
+  const { builder, summaryEvents, denominatorEvents } = input;
+  const breakdownEvents = input.includeBreakdowns ? summaryEvents : undefined;
   const denominator = builder.aggregate(denominatorEvents, {}, [
     { name: "scopedEvents", kind: "count-rows" },
   ]);
@@ -129,7 +108,7 @@ export function buildEventTypeOverviewPlan(input: {
   });
   addOverviewOutput(builder, summaryRow, EVENT_TYPE_OVERVIEW_OUTPUTS.summary);
 
-  if (includeBreakdowns && breakdownEvents) {
+  if (input.includeBreakdowns && breakdownEvents) {
     const dimensions = [
       {
         cardType: "page",
@@ -208,6 +187,45 @@ export function buildEventTypeOverviewPlan(input: {
       addOverviewOutput(builder, limited, dimension.outputId);
     }
   }
+}
 
+/** Builds one Event type overview plan, including its independent denominator. */
+export function buildEventTypeOverviewPlan(input: {
+  readonly siteId: string;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly eventName: string;
+  readonly includeBreakdowns?: boolean;
+  readonly denominatorSource: "event-report" | "raw-event-domain";
+}): ValidatedLogicalPlan {
+  const includeBreakdowns = input.includeBreakdowns !== false;
+  const context = createEventReportSourceContext({
+    siteId: input.siteId,
+    queryTime: input.queryTime,
+    filters: input.filters,
+    ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+  });
+  const builder = context.builder;
+  const summaryEvents = addEventReportSource(context, {
+    attributes: includeBreakdowns
+      ? [
+          ...EVENT_REPORT_BASE_ATTRIBUTES,
+          ...Object.values(EVENT_TYPE_OVERVIEW_ATTRIBUTES),
+        ]
+      : EVENT_REPORT_BASE_ATTRIBUTES,
+    eventName: input.eventName,
+    eventNameInputSemantics: "defined-raw-value",
+  });
+  const denominatorEvents =
+    input.denominatorSource === "raw-event-domain"
+      ? builder.source("event", { temporalDomain: "candidate" })
+      : addEventReportSource(context, { attributes: [] });
+  appendEventTypeOverviewOutputs({
+    builder,
+    summaryEvents,
+    denominatorEvents,
+    includeBreakdowns,
+  });
   return builder.finish();
 }

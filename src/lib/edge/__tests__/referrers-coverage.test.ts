@@ -4,6 +4,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
+import { queryLegacyD1All } from "@/lib/edge/__tests__/legacy-d1-oracle";
 import {
   attachScopedFilterMetadata,
   createQueryTime,
@@ -13,14 +14,13 @@ import {
   scopedFilterMetadata,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
-import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { scopedDatasetFor } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import { buildVisitFilterSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-filters";
 import {
-  buildVisitFilterSql,
   buildVisitSourceCte,
-  queryD1All,
-  scopedDatasetFor,
   visitSourceBindings,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   createD1ReadDiagnostics,
   type D1ReadDiagnostics,
@@ -343,7 +343,7 @@ async function legacyTopReferrersOracle(
     filters,
   );
   const keyExpr = includeFullUrl ? "referrer_url" : "referrer_host";
-  const rows = await queryD1All<Row>(
+  const rows = await queryLegacyD1All<Row>(
     env,
     `
 WITH
@@ -399,7 +399,7 @@ async function legacyReferrersPageOracle(
    OR (${primary} = ? AND ${secondary} ${operator} ?)
    OR (${primary} = ? AND ${secondary} = ? AND referrer > ?)`
     : "";
-  const rows = await queryD1All<Row>(
+  const rows = await queryLegacyD1All<Row>(
     env,
     `
 WITH
@@ -460,7 +460,7 @@ async function legacyReferrerSummaryOracle(
     targetWindow,
     filters,
   );
-  const rows = await queryD1All<Row>(
+  const rows = await queryLegacyD1All<Row>(
     env,
     `
 WITH

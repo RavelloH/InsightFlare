@@ -74,6 +74,38 @@ function pageOutputRows(
   });
 }
 
+/** Appends the legacy Page page and five tab outputs for shared Page bags. */
+export function appendPagesWithTabsOutputs(
+  builder: LogicalPlanBuilder,
+  input: {
+    readonly pages: LogicalRelationHandle;
+    readonly boundaryPages: LogicalRelationHandle;
+    readonly limit: number;
+    readonly includeDetails: boolean;
+    readonly cursor?: PageAggregateCursor | null;
+  },
+): void {
+  output(
+    builder,
+    PAGES_WITH_TABS_PAGE_OUTPUT_ID,
+    pageOutputRows(builder, input.pages, input),
+  );
+  const cards = buildPageTabRows(
+    builder,
+    input.pages,
+    input.boundaryPages,
+    input.limit,
+  );
+  for (const card of PAGE_TAB_CARDS)
+    output(
+      builder,
+      card.outputId,
+      tabOutputRows(builder, cards[card.cardType]),
+    );
+  output(builder, "page-tabs-entry", tabOutputRows(builder, cards.entry));
+  output(builder, "page-tabs-exit", tabOutputRows(builder, cards.exit));
+}
+
 function tabOutputRows(
   builder: LogicalPlanBuilder,
   rows: LogicalRelationHandle,
@@ -115,20 +147,12 @@ export function buildPagesWithTabsPlan(input: {
         : []),
     ],
   });
-
-  output(
-    builder,
-    PAGES_WITH_TABS_PAGE_OUTPUT_ID,
-    pageOutputRows(builder, pages, input),
-  );
-  const cards = buildPageTabRows(builder, pages, boundaryPages, input.limit);
-  for (const card of PAGE_TAB_CARDS)
-    output(
-      builder,
-      card.outputId,
-      tabOutputRows(builder, cards[card.cardType]),
-    );
-  output(builder, "page-tabs-entry", tabOutputRows(builder, cards.entry));
-  output(builder, "page-tabs-exit", tabOutputRows(builder, cards.exit));
+  appendPagesWithTabsOutputs(builder, {
+    pages,
+    boundaryPages,
+    limit: input.limit,
+    includeDetails: input.includeDetails,
+    ...(input.cursor ? { cursor: input.cursor } : {}),
+  });
   return builder.finish();
 }

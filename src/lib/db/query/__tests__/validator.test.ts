@@ -6,6 +6,7 @@ import {
   castInteger,
   compileD1Query,
   concatText,
+  constant,
   count,
   div,
   eq,
@@ -20,12 +21,19 @@ import {
   sort,
   textContains,
   textStartsWith,
+  trimCharacters,
   trimSpaces,
   union,
 } from "@/lib/db";
 import { DatabaseCompilerError } from "@/lib/db/query/errors";
 import type { SqlExpression } from "@/lib/db/query/expression";
-import type { LogicalQueryNode, QuerySource } from "@/lib/db/query/plan";
+import type {
+  FilterNode,
+  LogicalQueryNode,
+  OutputField,
+  ProjectNode,
+  QuerySource,
+} from "@/lib/db/query/plan";
 import {
   validateLogicalQueryPlan,
   validateMutationExpression,
@@ -39,6 +47,59 @@ function expectInvalid(callback: () => unknown): void {
 }
 
 describe("logical query plan validation", () => {
+  it("rejects a shared-child mutation triggered by an ancestor getter", () => {
+    const rows = scan(schema.site_identities);
+    const foreign = scan(schema.site_identities);
+    const selected = filter(rows, eq(rows.columns.site_id, param("site-a")));
+    const first = project(selected, { value: constant(1) });
+    const second = project(selected, { value: constant(1) });
+    const secondNode = second.node as ProjectNode;
+    const selectedNode = selected.node as unknown as {
+      predicate: FilterNode["predicate"];
+    };
+    const originalInput = secondNode.input;
+    let getterCalls = 0;
+
+    Object.defineProperty(secondNode, "input", {
+      configurable: true,
+      get() {
+        getterCalls++;
+        selectedNode.predicate = eq(foreign.columns.site_id, param("site-a"));
+        return originalInput;
+      },
+    });
+
+    expect(() =>
+      validateLogicalQueryPlan(union(first, second, true)),
+    ).toThrowError(/outside the visible relation scope/);
+    expect(getterCalls).toBeGreaterThan(0);
+  });
+
+  it("rejects nested metadata mutation from a descriptor-transparent proxy", () => {
+    const rows = scan(schema.site_identities);
+    const foreign = scan(schema.site_identities);
+    const selected = filter(rows, eq(rows.columns.site_id, param("site-a")));
+    const first = project(selected, { value: constant(1) });
+    const second = project(selected, { value: constant(1) });
+    const selectedNode = selected.node as unknown as {
+      predicate: FilterNode["predicate"];
+    };
+    let nameReads = 0;
+    const originalField = selected.fields[0]!;
+    (selected.fields as OutputField[])[0] = new Proxy(originalField, {
+      get(target, key, receiver) {
+        if (key === "name" && ++nameReads === 10)
+          selectedNode.predicate = eq(foreign.columns.site_id, param("site-a"));
+        return Reflect.get(target, key, receiver);
+      },
+    });
+
+    expect(() =>
+      validateLogicalQueryPlan(union(first, second, true)),
+    ).toThrowError(/outside the visible relation scope/);
+    expect(nameReads).toBeGreaterThanOrEqual(10);
+  });
+
   it("validates closed string-match functions and their metadata", () => {
     const identities = scan(schema.site_identities);
     const valid = textContains(identities.columns.site_id, "needle");
@@ -112,6 +173,38 @@ describe("logical query plan validation", () => {
       resultType: { affinity: "text", nullable: true },
     } as unknown as SqlExpression;
     expectInvalid(() => validateMutationExpression(invalidResult, []));
+  });
+
+  it("validates explicit-character TRIM arity, TEXT inputs, and NULL metadata", () => {
+    const valid = trimCharacters(param(" value "), param(" "));
+    expect(() => validateMutationExpression(valid, [])).not.toThrow();
+    expect(() =>
+      validateMutationExpression(trimCharacters(param(null), param(" ")), []),
+    ).not.toThrow();
+    expect(() =>
+      validateMutationExpression(
+        trimCharacters(param("value"), param(null)),
+        [],
+      ),
+    ).not.toThrow();
+
+    const wrongAffinity = {
+      ...valid,
+      arguments: [param("value"), param(1)],
+    } as unknown as SqlExpression;
+    expectInvalid(() => validateMutationExpression(wrongAffinity, []));
+
+    const wrongNullability = {
+      ...trimCharacters(param(null), param(" ")),
+      resultType: { affinity: "text", nullable: false },
+    } as unknown as SqlExpression;
+    expectInvalid(() => validateMutationExpression(wrongNullability, []));
+
+    const wrongArity = {
+      ...valid,
+      arguments: [param("value")],
+    } as unknown as SqlExpression;
+    expectInvalid(() => validateMutationExpression(wrongArity, []));
   });
 
   it("validates integer casts and rejects invalid input/result metadata", () => {
@@ -236,7 +329,7 @@ describe("logical query plan validation", () => {
 
     const wrongNullability = {
       ...valid,
-      resultType: { affinity: "integer", nullable: false },
+      resultType: { affinity: "integer", nullable: !valid.resultType.nullable },
     } as SqlExpression;
     expectInvalid(() =>
       validatePredicate(wrongNullability as never, [sites.scope]),
@@ -307,6 +400,24 @@ describe("logical query plan validation", () => {
       resultType: { affinity: "text", nullable: false },
     } as unknown as SqlExpression;
     expectInvalid(() => validateMutationExpression(invalidLowerInput, []));
+
+    const invalidStorageClassArity = {
+      kind: "function",
+      name: "storage-class",
+      arguments: [],
+      resultType: { affinity: "text", nullable: false },
+    } as unknown as SqlExpression;
+    expectInvalid(() =>
+      validateMutationExpression(invalidStorageClassArity, []),
+    );
+
+    const nullableStorageClass = {
+      kind: "function",
+      name: "storage-class",
+      arguments: [param(null)],
+      resultType: { affinity: "text", nullable: true },
+    } as unknown as SqlExpression;
+    expectInvalid(() => validateMutationExpression(nullableStorageClass, []));
 
     const invalidSumInput = {
       kind: "aggregate",

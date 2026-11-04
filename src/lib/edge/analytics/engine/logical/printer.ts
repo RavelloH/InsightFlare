@@ -108,6 +108,8 @@ function expression(value: LogicalExpr): string {
       return `PAGE_DIMENSION<${value.dimension}>(${value.dependencies.map((dependency) => `${dependency.attribute}=${expression(dependency.expression)}`).join(", ")})`;
     case "arithmetic":
       return `(${expression(value.left)} ${value.operator}${value.operator === "divide" ? " NULL_ON_ZERO" : ""} ${expression(value.right)})`;
+    case "numeric-value":
+      return `NUMERIC_VALUE(${expression(value.input)})`;
     case "round":
       return `ROUND(${expression(value.input)}${value.decimalPlaces === undefined ? "" : `, ${value.decimalPlaces}`})`;
     case "absolute":
@@ -144,7 +146,9 @@ function nodeHeader(node: LogicalNode): string {
     case "filter":
       return `${relation(node.id)} Filter grain=${grain(node.grain)} input=${relation(node.input)}`;
     case "event-payload-occurrences":
-      return `${relation(node.id)} EventPayloadOccurrences grain=${grain(node.grain)} input=${relation(node.input)} eventKey=${slot(node.eventKey)} eventPk=${slot(node.eventPk)}`;
+      return `${relation(node.id)} EventPayloadOccurrences grain=${grain(node.grain)} input=${relation(node.input)} eventKey=${slot(node.eventKey)}`;
+    case "event-payload-properties":
+      return `${relation(node.id)} EventPayloadProperties grain=${grain(node.grain)} input=${relation(node.input)} eventKey=${slot(node.eventKey)} paths=${node.paths.map(({ path }) => JSON.stringify(path)).join(",")} properties=${node.properties.length}`;
     case "project":
       return `${relation(node.id)} Project grain=${grain(node.grain)} input=${relation(node.input)}`;
     case "aggregate":
@@ -210,6 +214,16 @@ function nodeLines(
       node.fields.forEach((binding) =>
         lines.push(`  ${binding.field} -> ${formatSlot(binding.slot, slots)}`),
       );
+      break;
+    case "event-payload-properties":
+      node.properties.forEach((property, index) => {
+        lines.push(
+          `  PROPERTY ${index} ${JSON.stringify(property.path)} key=${JSON.stringify(property.key)}`,
+        );
+        property.fields.forEach(({ field, slot: id }) =>
+          lines.push(`    ${field} -> ${formatSlot(id, slots)}`),
+        );
+      });
       break;
     case "project":
       node.projections.forEach((projection) =>

@@ -352,17 +352,17 @@ describe("legacy scalar SQL primitives", () => {
   it("decodes copied homogeneous JSON scalar snapshots with bag semantics", () => {
     const db = database();
     try {
-      const mutable = ["é", "same", "same", "\0", "\ud800"];
+      const mutable = ["é", "same", "same", "", "\0", "\ud800"];
       const textValues = jsonScalarArray("text", mutable);
       mutable[0] = "changed";
       const compiledText = compileD1Query(textValues);
       expect(compiledText.sql).toContain("json_each(?)");
       expect(compiledText.sql).not.toContain("CAST(");
       expect(compiledText.bindings).toEqual([
-        '["é","same","same","\\u0000","\\ud800"]',
+        '["é","same","same","","\\u0000","\\ud800"]',
       ]);
       const oracleText = all(db, {
-        sql: `SELECT value AS value FROM json_each('["é","same","same","\\u0000","\\ud800"]')`,
+        sql: `SELECT value AS value FROM json_each('["é","same","same","","\\u0000","\\ud800"]')`,
       });
       expect(all(db, compiledText)).toEqual(oracleText);
       expect(all(db, compiledText).map((row) => row.value)).toContain("é");

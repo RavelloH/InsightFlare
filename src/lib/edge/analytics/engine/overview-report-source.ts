@@ -4,10 +4,23 @@ import {
   scopedFilterMetadata,
   type SiteId,
 } from "@/lib/edge/analytics/contract";
+import {
+  attachScopedFilterMetadata,
+  createScopedFilterPlan,
+  type ScopedFilterPlan,
+} from "@/lib/edge/analytics/contract/scoped-filter";
+import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import {
+  appendAdvancedCountQualification,
+  createAdvancedCountQualificationBuilder,
+} from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { EventQualificationReportSource } from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import type {
   LogicalPlanBuilder,
   LogicalRelationHandle,
 } from "@/lib/edge/analytics/engine/logical/builder";
+import { splitPageDimensionNativeFilters } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
+import { addPageReportSourceToBuilder } from "@/lib/edge/analytics/engine/page-report-plan";
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
 import type { SemanticRelationshipId } from "@/lib/edge/analytics/engine/semantic/relationships";
 import {
@@ -17,6 +30,40 @@ import {
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
+
+const STRING = { kind: "scalar", scalar: "string" } as const;
+
+function appendOverviewEventSource(
+  builder: LogicalPlanBuilder,
+  input: {
+    readonly selection: SemanticScopedSourceSelection;
+    readonly attributes: readonly string[];
+    readonly relationships?: readonly SemanticRelationshipId[];
+  },
+): LogicalRelationHandle {
+  return builder.source("event", {
+    temporalDomain: "candidate",
+    attributes: input.attributes,
+    ...(input.relationships ? { relationships: input.relationships } : {}),
+    selection: input.selection,
+  });
+}
+
+function sameQueryTime(left: QueryTime, right: QueryTime): boolean {
+  const leftRead = left.readRange ?? left.range;
+  const rightRead = right.readRange ?? right.range;
+  return (
+    left.range.startMs === right.range.startMs &&
+    left.range.endExclusiveMs === right.range.endExclusiveMs &&
+    leftRead.startMs === rightRead.startMs &&
+    leftRead.endExclusiveMs === rightRead.endExclusiveMs &&
+    JSON.stringify(left.filterRange) === JSON.stringify(right.filterRange) &&
+    left.filterRangeEmpty === right.filterRangeEmpty &&
+    left.fullHistory === right.fullHistory &&
+    left.reportingTimeZone === right.reportingTimeZone &&
+    left.capturedAtMs === right.capturedAtMs
+  );
+}
 
 /** Shared source-selection contract for the Overview aggregate and Trend reports. */
 export function createOverviewReportSource(input: {
@@ -72,8 +119,7 @@ export function createOverviewReportSource(input: {
       : {}),
   });
   const events = includeEvents
-    ? source.builder.source("event", {
-        temporalDomain: "candidate",
+    ? appendOverviewEventSource(source.builder, {
         attributes: input.eventAttributes,
         ...(input.eventRelationships
           ? { relationships: input.eventRelationships }
@@ -82,4 +128,124 @@ export function createOverviewReportSource(input: {
       })
     : undefined;
   return { ...source, ...(events ? { events } : {}), scoped };
+}
+
+/** Appends the shared Page/Event Sources and Count owner semijoins. */
+export function appendQualifiedOverviewReportSource(input: {
+  readonly semanticOperation: "overview" | "trend";
+  readonly siteId: string;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly scopePlan: ScopedFilterPlan;
+  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly pageAttributes: readonly string[];
+  readonly pageRelationships?: readonly SemanticRelationshipId[];
+  readonly eventAttributes: readonly string[];
+  readonly eventRelationships?: readonly SemanticRelationshipId[];
+}): {
+  readonly builder: ReturnType<typeof createAdvancedCountQualificationBuilder>;
+  readonly qualification: ReturnType<typeof appendAdvancedCountQualification>;
+  readonly pages: LogicalRelationHandle;
+  readonly events: LogicalRelationHandle;
+  readonly reportSourceRelations: readonly EventQualificationReportSource[];
+} {
+  const metadata = scopedFilterMetadata(input.filters);
+  const queryReadRange = input.queryTime.readRange ?? input.queryTime.range;
+  if (
+    !metadata ||
+    metadata.siteIds.length !== 1 ||
+    metadata.siteIds[0] !== input.siteId ||
+    metadata.resolvedScope !== input.scopePlan.scope ||
+    metadata.plan !== input.scopePlan ||
+    input.count.subject.siteIds.length !== 1 ||
+    input.count.subject.siteIds[0] !== input.siteId ||
+    input.count.scope !== input.scopePlan.scope ||
+    !sameQueryTime(input.queryTime, metadata.time) ||
+    input.queryTime.range.startMs !== input.count.candidateRange.startMs ||
+    input.queryTime.range.endExclusiveMs !==
+      input.count.candidateRange.endExclusiveMs ||
+    queryReadRange.startMs !== input.count.readRange.startMs ||
+    queryReadRange.endExclusiveMs !== input.count.readRange.endExclusiveMs ||
+    input.queryTime.filterRange !== undefined ||
+    input.queryTime.filterRangeEmpty === true ||
+    input.queryTime.fullHistory === true ||
+    input.queryTime.reportingTimeZone !== input.count.reportingTimeZone ||
+    input.queryTime.capturedAtMs !== input.count.capturedAtMs
+  )
+    throw new Error("overview_trend_qualification_request_context_mismatch");
+
+  const split = splitPageDimensionNativeFilters(input.filters);
+  if (split.kind === "unsupported")
+    throw new Error(
+      "overview_trend_qualification_native_filter_split_unsupported",
+    );
+  const nativeScopePlan = createScopedFilterPlan(
+    input.semanticOperation,
+    split.filters,
+    input.scopePlan.scope,
+  );
+  if (!nativeScopePlan || nativeScopePlan.scope !== input.scopePlan.scope)
+    throw new Error("overview_trend_qualification_native_scope_plan_missing");
+  const nativeFilters = attachScopedFilterMetadata(split.filters, {
+    requestedScope: input.scopePlan.scope,
+    resolvedScope: nativeScopePlan.scope,
+    plan: nativeScopePlan,
+    time: metadata.time,
+    siteIds: metadata.siteIds,
+  });
+
+  const builder = createAdvancedCountQualificationBuilder(input.count);
+  const qualification = appendAdvancedCountQualification(builder, input.count);
+  const selection = createSemanticScopedSourceSelection({
+    profile: "prepared-scoped-reader-window-v1",
+    filters: nativeFilters,
+    subject: builder.context.subject,
+    time: builder.context.time,
+    expectedPlan: nativeScopePlan,
+    preparedPlanOperation: input.semanticOperation,
+  });
+  const pageSource = addPageReportSourceToBuilder(builder, {
+    attributes: input.pageAttributes,
+    ...(input.pageRelationships
+      ? { relationships: input.pageRelationships }
+      : {}),
+    selection,
+  });
+  const eventSource = appendOverviewEventSource(builder, {
+    attributes: input.eventAttributes,
+    ...(input.eventRelationships
+      ? { relationships: input.eventRelationships }
+      : {}),
+    selection,
+  });
+  const matchesForSite = builder.filter(
+    qualification.matches,
+    builder.compare(
+      "eq",
+      builder.slot(qualification.matches, "siteId"),
+      builder.literal(input.siteId, STRING),
+    ),
+  );
+  const ownerAttribute =
+    input.count.scope === "session" ? "sessionId" : "visitorId";
+  const qualifiedPages = builder.semiJoin(pageSource.pages, matchesForSite, [
+    { left: `attribute:page.report.${ownerAttribute}`, right: "entityId" },
+  ]);
+  const qualifiedEvents = builder.semiJoin(eventSource, matchesForSite, [
+    {
+      left: `attribute:event.report.owner${ownerAttribute[0]!.toUpperCase()}${ownerAttribute.slice(1)}`,
+      right: "entityId",
+    },
+  ]);
+
+  return {
+    builder,
+    qualification,
+    pages: qualifiedPages,
+    events: qualifiedEvents,
+    reportSourceRelations: [
+      { relationId: pageSource.pages.id, entity: "page" },
+      { relationId: eventSource.id, entity: "event" },
+    ],
+  };
 }

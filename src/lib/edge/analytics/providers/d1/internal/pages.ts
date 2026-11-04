@@ -26,13 +26,25 @@ import {
   buildTopPagesPlan,
   type PageAggregateCursor,
 } from "@/lib/edge/analytics/engine/page-report-plan";
+import { PAGE_TAB_OUTPUT_IDS } from "@/lib/edge/analytics/engine/page-tabs-report-plan";
 import {
   buildPagesWithTabsPlan,
   PAGES_WITH_TABS_OUTPUT_FIELDS,
   PAGES_WITH_TABS_OUTPUT_IDS,
 } from "@/lib/edge/analytics/engine/pages-with-tabs-report-plan";
 import type { Env } from "@/lib/edge/types";
+import { InvalidCursorError } from "@/lib/pagination";
 
+import type {
+  DeferredPagesAggregatePageQualification,
+  DeferredPagesTabsQualification,
+} from "./advanced-filter-execution";
+import {
+  type EventSummaryQualificationCompilationEvidence,
+  executePagesAggregateQualificationProgram,
+  executePagesTabsQualificationProgram,
+  type PagesTabsQualificationReportQuery,
+} from "./analytics-qualification-program";
 import {
   queryAnalyticsReportOutputRowsFromD1,
   queryAnalyticsReportOutputSetRowsFromD1,
@@ -190,18 +202,42 @@ export async function queryPagesPageFromD1(
     views: Number(row.views ?? 0),
     sessions: Number(row.sessions ?? 0),
   }));
-  const page = pageResult(mapped, limit);
+  return {
+    ...(await pageResultWithCursor({
+      env,
+      siteId,
+      window,
+      filters,
+      limit,
+      includeDetails,
+      audience,
+      rows: mapped,
+    })),
+  };
+}
+
+async function pageResultWithCursor(input: {
+  readonly env: Env;
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly filters: FilterDocument;
+  readonly limit: number;
+  readonly includeDetails: boolean;
+  readonly audience: QueryAudience;
+  readonly rows: readonly PageRow[];
+}): Promise<PageResult<PageRow>> {
+  const page = pageResult(input.rows, input.limit);
   const binding = await pageCursorBinding(
     "pages",
-    siteId,
-    window,
-    filters,
-    [includeDetails],
-    audience,
+    input.siteId,
+    input.window,
+    input.filters,
+    [input.includeDetails],
+    input.audience,
   );
   const nextCursor =
     page.hasMore && page.last
-      ? await encodePageCursor(env, binding, {
+      ? await encodePageCursor(input.env, binding, {
           views: page.last.views,
           sessions: page.last.sessions,
           pathname: page.last.pathname,
@@ -212,12 +248,104 @@ export async function queryPagesPageFromD1(
   return {
     items: page.rows,
     pagination: {
-      limit,
+      limit: input.limit,
       returned: page.rows.length,
       hasMore: page.hasMore,
       nextCursor,
     },
   };
+}
+
+export async function queryQualifiedPagesAggregatePageFromD1(input: {
+  readonly env: Env;
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly filters: FilterDocument;
+  readonly limit: number;
+  readonly includeDetails: boolean;
+  readonly cursorText: string | null;
+  readonly audience: QueryAudience;
+  readonly deferred: DeferredPagesAggregatePageQualification;
+  readonly scopePlan?: Parameters<typeof buildPagesPagePlan>[0]["scopePlan"];
+  readonly diagnostics?: D1ReadDiagnostics;
+  readonly variant: string | undefined;
+  readonly includeTabs: boolean | undefined;
+}): Promise<
+  | {
+      readonly kind: "executed";
+      readonly page: PageResult<PageRow>;
+      readonly evidence: EventSummaryQualificationCompilationEvidence;
+    }
+  | Exclude<
+      Awaited<ReturnType<typeof executePagesAggregateQualificationProgram>>,
+      { readonly kind: "executed" }
+    >
+> {
+  let cursor: PageAggregateCursor | null = null;
+  let invalidCursor = false;
+  if (input.cursorText) {
+    try {
+      cursor = await decodePagesCursor(
+        input.env,
+        input.siteId,
+        input.window,
+        input.filters,
+        input.includeDetails,
+        input.cursorText,
+        input.audience,
+      );
+    } catch (error) {
+      if (!(error instanceof InvalidCursorError)) throw error;
+      invalidCursor = true;
+    }
+    if (!cursor) invalidCursor = true;
+  }
+  const metadata = scopedFilterMetadata(input.filters);
+  const queryTime = metadata?.time ?? queryWindowToTime(input.window);
+  const execution = await executePagesAggregateQualificationProgram({
+    env: input.env,
+    deferred: input.deferred,
+    query: {
+      env: input.env,
+      siteId: input.siteId,
+      queryTime,
+      filters: input.filters,
+      ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+      limit: input.limit,
+      includeDetails: input.includeDetails,
+      cursor: invalidCursor ? null : cursor,
+      cursorToken: input.cursorText,
+      audience: input.audience,
+      variant: input.variant,
+      includeTabs: input.includeTabs,
+    },
+    ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
+  });
+  if (execution.kind !== "executed") return execution;
+  if (invalidCursor) throw new InvalidCursorError("pages");
+  const rows = execution.rows
+    .filter(
+      (row) =>
+        row.rowKind === "report" && row.outputId === "pages-aggregate-page",
+    )
+    .map((row) => ({
+      pathname: String(row.pathname ?? ""),
+      query: String(row.queryValue ?? ""),
+      hash: String(row.hashValue ?? ""),
+      views: Number(row.views ?? 0),
+      sessions: Number(row.sessions ?? 0),
+    }));
+  const page = await pageResultWithCursor({
+    env: input.env,
+    siteId: input.siteId,
+    window: input.window,
+    filters: input.filters,
+    limit: input.limit,
+    includeDetails: input.includeDetails,
+    audience: input.audience,
+    rows,
+  });
+  return { kind: "executed", page, evidence: execution.evidence };
 }
 export async function decodePagesCursor(
   env: Env,
@@ -255,12 +383,38 @@ export async function queryPageTabsAggregate(
 }
 export interface PagesWithTabsResult {
   readonly pages: PageResult<PageRow>;
-  readonly tabs: {
-    path: DimensionRow[];
-    title: DimensionRow[];
-    hostname: DimensionRow[];
-    entry: DimensionRow[];
-    exit: DimensionRow[];
+  readonly tabs: PageTabsResult;
+}
+
+export interface PageTabsResult {
+  readonly path: DimensionRow[];
+  readonly title: DimensionRow[];
+  readonly hostname: DimensionRow[];
+  readonly entry: DimensionRow[];
+  readonly exit: DimensionRow[];
+}
+
+function pageTabsFromRows(
+  rows: readonly Record<string, unknown>[],
+): PageTabsResult {
+  const byCard = new Map<string, DimensionRow[]>();
+  for (const row of rows) {
+    const card = String(row.cardType ?? "");
+    const values = byCard.get(card) ?? [];
+    values.push({
+      value: String(row.value ?? ""),
+      views: Number(row.views ?? 0),
+      sessions: Number(row.sessions ?? 0),
+      visitors: Number(row.visitors ?? 0),
+    });
+    byCard.set(card, values);
+  }
+  return {
+    path: byCard.get("path") ?? [],
+    title: byCard.get("title") ?? [],
+    hostname: byCard.get("hostname") ?? [],
+    entry: byCard.get("entry") ?? [],
+    exit: byCard.get("exit") ?? [],
   };
 }
 /**
@@ -310,56 +464,144 @@ export async function queryPagesWithTabsFromD1(
       views: Number(row.views ?? 0),
       sessions: Number(row.sessions ?? 0),
     }));
-  const page = pageResult(pageRows, limit);
-  const binding = await pageCursorBinding(
-    "pages",
+  const page = await pageResultWithCursor({
+    env,
     siteId,
     window,
     filters,
-    [includeDetails],
+    limit,
+    includeDetails,
     audience,
-  );
-  const nextCursor =
-    page.hasMore && page.last
-      ? await encodePageCursor(env, binding, {
-          views: page.last.views,
-          sessions: page.last.sessions,
-          pathname: page.last.pathname,
-          query: page.last.query,
-          hash: page.last.hash,
-        })
-      : null;
-  const byCard = new Map<string, DimensionRow[]>();
-  for (const row of rows.filter((item) => item.rowType === "tab")) {
-    const card = String(row.cardType ?? "");
-    const values = byCard.get(card) ?? [];
-    values.push({
-      value: String(row.value ?? ""),
-      views: Number(row.views ?? 0),
-      sessions: Number(row.sessions ?? 0),
-      visitors: Number(row.visitors ?? 0),
-    });
-    byCard.set(card, values);
-  }
+    rows: pageRows,
+  });
   return {
-    pages: {
-      items: page.rows,
-      pagination: {
-        limit,
-        returned: page.rows.length,
-        hasMore: page.hasMore,
-        nextCursor,
-      },
-    },
-    tabs: {
-      path: byCard.get("path") ?? [],
-      title: byCard.get("title") ?? [],
-      hostname: byCard.get("hostname") ?? [],
-      entry: byCard.get("entry") ?? [],
-      exit: byCard.get("exit") ?? [],
-    },
+    pages: page,
+    tabs: pageTabsFromRows(rows.filter((row) => row.rowType === "tab")),
   };
 }
+
+export type PagesTabsQualificationReadResult =
+  | {
+      readonly kind: "executed";
+      readonly configuration: "tabs-only";
+      readonly tabs: PageTabsResult;
+      readonly evidence: EventSummaryQualificationCompilationEvidence;
+    }
+  | {
+      readonly kind: "executed";
+      readonly configuration: "pages-with-tabs";
+      readonly result: PagesWithTabsResult;
+      readonly evidence: EventSummaryQualificationCompilationEvidence;
+    }
+  | Exclude<
+      Awaited<ReturnType<typeof executePagesTabsQualificationProgram>>,
+      { readonly kind: "executed" }
+    >;
+
+/** Executes all Page tabs and the optional paginated Page report in one lowering. */
+export async function queryQualifiedPagesTabsFromD1(input: {
+  readonly env: Env;
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly filters: FilterDocument;
+  readonly limit: number;
+  readonly includeDetails: boolean;
+  readonly cursorText: string | null;
+  readonly audience: QueryAudience;
+  readonly deferred: DeferredPagesTabsQualification;
+  readonly scopePlan?: Parameters<typeof buildPagesPagePlan>[0]["scopePlan"];
+  readonly diagnostics?: D1ReadDiagnostics;
+  readonly variant: string | undefined;
+  readonly includeTabs: boolean | undefined;
+}): Promise<PagesTabsQualificationReadResult> {
+  const configuration = input.deferred.pagesTabsRequest.configuration;
+  let cursor: PageAggregateCursor | null = null;
+  let invalidCursor = false;
+  if (configuration === "pages-with-tabs" && input.cursorText) {
+    try {
+      cursor = await decodePagesCursor(
+        input.env,
+        input.siteId,
+        input.window,
+        input.filters,
+        input.includeDetails,
+        input.cursorText,
+        input.audience,
+      );
+    } catch (error) {
+      if (!(error instanceof InvalidCursorError)) throw error;
+      invalidCursor = true;
+    }
+    if (!cursor) invalidCursor = true;
+  }
+  const metadata = scopedFilterMetadata(input.filters);
+  const query: PagesTabsQualificationReportQuery = {
+    env: input.env,
+    siteId: input.siteId,
+    queryTime: metadata?.time ?? queryWindowToTime(input.window),
+    filters: input.filters,
+    ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    configuration,
+    limit: input.limit,
+    includeDetails: input.includeDetails,
+    cursor: invalidCursor ? null : cursor,
+    cursorToken: input.cursorText,
+    audience: input.audience,
+    variant: input.variant,
+    includeTabs: input.includeTabs,
+  };
+  const execution = await executePagesTabsQualificationProgram({
+    env: input.env,
+    deferred: input.deferred,
+    query,
+    ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
+  });
+  if (execution.kind !== "executed") return execution;
+  if (invalidCursor) throw new InvalidCursorError("pages");
+  if (configuration === "tabs-only") {
+    const tabRows = execution.rows.filter(
+      (row) =>
+        row.rowKind === "report" &&
+        typeof row.outputId === "string" &&
+        PAGE_TAB_OUTPUT_IDS.includes(row.outputId),
+    );
+    return {
+      kind: "executed",
+      configuration,
+      tabs: pageTabsFromRows(tabRows),
+      evidence: execution.evidence,
+    };
+  }
+  const pageRows = execution.rows
+    .filter((row) => row.rowKind === "report" && row.rowType === "page")
+    .map((row) => ({
+      pathname: String(row.pathname ?? ""),
+      query: String(row.queryValue ?? ""),
+      hash: String(row.hashValue ?? ""),
+      views: Number(row.views ?? 0),
+      sessions: Number(row.sessions ?? 0),
+    }));
+  const page = await pageResultWithCursor({
+    env: input.env,
+    siteId: input.siteId,
+    window: input.window,
+    filters: input.filters,
+    limit: input.limit,
+    includeDetails: input.includeDetails,
+    audience: input.audience,
+    rows: pageRows,
+  });
+  const tabRows = execution.rows.filter(
+    (row) => row.rowKind === "report" && row.rowType === "tab",
+  );
+  return {
+    kind: "executed",
+    configuration,
+    result: { pages: page, tabs: pageTabsFromRows(tabRows) },
+    evidence: execution.evidence,
+  };
+}
+
 export async function queryPageCardMetricsFromD1(
   env: Env,
   siteId: string,

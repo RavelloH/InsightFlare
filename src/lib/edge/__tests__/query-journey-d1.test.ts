@@ -34,15 +34,15 @@ import {
   handleVisitorsContract as handleVisitors,
 } from "@/lib/edge/analytics/interfaces/dashboard/protocol/journeys";
 import {
+  buildSessionAggregationSql,
+  buildVisitorAggregationSql,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-aggregation-oracle";
+import {
   querySessionListPageFromD1 as querySessionListPageFromParentOracle,
   queryVisitorListPageFromD1 as queryVisitorListPageFromParentOracle,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-oracle";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
-import {
-  buildSessionAggregationSql,
-  buildVisitorAggregationSql,
-} from "@/lib/edge/analytics/providers/d1/internal/journey-aggregation-sql";
 import {
   querySessionListPageFromD1,
   querySessionsFromD1,
@@ -2574,7 +2574,7 @@ describe("edge journey detail D1 queries", () => {
           const compiled = compileJourneyReport(productionPlan);
           expect(compiled.sql).toBe(currentCall.sql);
           currentPhysicalPlanHash = d1PhysicalPlanHash(compiled);
-          expect(currentPhysicalPlanHash).toMatch(/^v[123]:/u);
+          expect(currentPhysicalPlanHash).toMatch(/^v13:/u);
         }
         const currentEvidence = sqliteQueryEvidence(
           sqlite,
@@ -2806,7 +2806,7 @@ describe("edge journey detail D1 queries", () => {
         expect(current.bindingCount).toBeLessThanOrEqual(
           D1_MAX_BOUND_PARAMETERS,
         );
-        expect(current.physicalPlanHash).toMatch(/^v[123]:/u);
+        expect(current.physicalPlanHash).toMatch(/^v13:/u);
         costEvidence.push(evidence);
       }
 

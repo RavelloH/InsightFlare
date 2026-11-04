@@ -944,7 +944,7 @@ describe("edge query technology D1 mapping", () => {
 
       expect(d1.calls).toHaveLength(2);
       for (const call of d1.calls) {
-        expect(call.sql).toContain('"_d1_shared_0" AS');
+        expect(call.sql).toContain("_d1_shared_0 AS");
         const plan = d1.database
           .prepare(`EXPLAIN QUERY PLAN ${call.sql}`)
           .all(...call.bindings) as Array<{ detail: string }>;

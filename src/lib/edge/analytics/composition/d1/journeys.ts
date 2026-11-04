@@ -1,7 +1,16 @@
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { typedQueryProviderFor } from "@/lib/edge/analytics/application/provider-registry";
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import {
+  EMPTY_FILTER_DOCUMENT,
+  type QueryInput,
+} from "@/lib/edge/analytics/contract";
 import type { LegacyJourneyQuery } from "@/lib/edge/analytics/contract/canonical-operation-map";
+import {
+  deferredEventQualificationFromQuery,
+  prepareDeferredEventQualificationFallback,
+} from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import { executeJourneyEventPageQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/journey-event-page-qualification-program";
+import { deferredJourneyEventPageQualificationFromQuery } from "@/lib/edge/analytics/providers/d1/internal/journey-event-page-qualification-request";
 import {
   queryJourneyEventDetailFromD1,
   querySessionDetailFromD1,
@@ -9,12 +18,18 @@ import {
   stripSessionDetailCollections,
   stripVisitorDetailCollections,
 } from "@/lib/edge/analytics/providers/d1/internal/journeys";
+import { executeSessionListQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/session-list-qualification-program";
+import { deferredSessionListQualificationFromQuery } from "@/lib/edge/analytics/providers/d1/internal/session-list-qualification-request";
+import { executeVisitorListQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/visitor-list-qualification-program";
+import { deferredVisitorListQualificationFromQuery } from "@/lib/edge/analytics/providers/d1/internal/visitor-list-qualification-request";
 import {
   readSiteSessionEvents,
   readSiteSessions,
+  readSiteSessionsWithResolvedAnalysis,
   readSiteVisitorEvents,
   readSiteVisitors,
   readSiteVisitorSessions,
+  readSiteVisitorsWithResolvedAnalysis,
 } from "@/lib/edge/analytics/providers/d1/operations/site-journeys";
 
 import { type D1SiteRuntimeBindings, stringField, timeWindow } from "./shared";
@@ -67,14 +82,65 @@ export function registerJourneyProviders(
       "visitors",
       typedQueryProviderFor("visitors", async (input) => {
         const request = input;
+        const deferred = deferredVisitorListQualificationFromQuery(
+          request as unknown as QueryInput & Record<string, unknown>,
+        );
+        const window = timeWindow(request.time);
+        const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
+        const sort = listSortFromRequest(request, "visitors");
+        const search = stringField(request, "search") || undefined;
+        const pageRequest = pageFromRequest(request, 80);
+        if (deferred) {
+          const qualified = await executeVisitorListQualificationProgram({
+            env: options.env,
+            query: request as unknown as Record<string, unknown>,
+            deferred,
+            ...(options.diagnostics
+              ? { diagnostics: options.diagnostics }
+              : {}),
+          });
+          if (qualified.kind === "executed") return { value: qualified.result };
+          if (options.diagnostics)
+            options.diagnostics.advancedCountSqlFallbackReason =
+              qualified.fallbackReason;
+          const fallbackFilters =
+            await prepareDeferredEventQualificationFallback(
+              deferred.qualification,
+            );
+          if (qualified.postFallbackError)
+            throw qualified.postFallbackError.error;
+          const fallbackInput = {
+            env: options.env,
+            siteId: options.siteId,
+            window,
+            filters: fallbackFilters,
+            sort,
+            search,
+            page: pageRequest,
+            audience: request.context.policy.audience,
+            analysisContext: request.analysisContext,
+          };
+          const page = qualified.resolvedAnalysis
+            ? await readSiteVisitorsWithResolvedAnalysis(
+                fallbackInput,
+                qualified.resolvedAnalysis,
+              )
+            : await readSiteVisitors(fallbackInput);
+          return {
+            value: {
+              items: page.items,
+              pagination: page.pagination,
+            },
+          };
+        }
         const page = await readSiteVisitors({
           env: options.env,
           siteId: options.siteId,
-          window: timeWindow(request.time),
-          filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
-          sort: listSortFromRequest(request, "visitors"),
-          search: stringField(request, "search") || undefined,
-          page: pageFromRequest(request, 80),
+          window,
+          filters,
+          sort,
+          search,
+          page: pageRequest,
           audience: request.context.policy.audience,
           analysisContext: request.analysisContext,
         });
@@ -90,14 +156,65 @@ export function registerJourneyProviders(
       "sessions",
       typedQueryProviderFor("sessions", async (input) => {
         const request = input;
+        const deferred = deferredSessionListQualificationFromQuery(
+          request as unknown as QueryInput & Record<string, unknown>,
+        );
+        const window = timeWindow(request.time);
+        const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
+        const sort = listSortFromRequest(request, "sessions");
+        const search = stringField(request, "search") || undefined;
+        const pageRequest = pageFromRequest(request, 80);
+        if (deferred) {
+          const qualified = await executeSessionListQualificationProgram({
+            env: options.env,
+            query: request as unknown as Record<string, unknown>,
+            deferred,
+            ...(options.diagnostics
+              ? { diagnostics: options.diagnostics }
+              : {}),
+          });
+          if (qualified.kind === "executed") return { value: qualified.result };
+          if (options.diagnostics)
+            options.diagnostics.advancedCountSqlFallbackReason =
+              qualified.fallbackReason;
+          const fallbackFilters =
+            await prepareDeferredEventQualificationFallback(
+              deferred.qualification,
+            );
+          if (qualified.postFallbackError)
+            throw qualified.postFallbackError.error;
+          const fallbackInput = {
+            env: options.env,
+            siteId: options.siteId,
+            window,
+            filters: fallbackFilters,
+            sort,
+            search,
+            page: pageRequest,
+            audience: request.context.policy.audience,
+            analysisContext: request.analysisContext,
+          };
+          const page = qualified.resolvedAnalysis
+            ? await readSiteSessionsWithResolvedAnalysis(
+                fallbackInput,
+                qualified.resolvedAnalysis,
+              )
+            : await readSiteSessions(fallbackInput);
+          return {
+            value: {
+              items: page.items,
+              pagination: page.pagination,
+            },
+          };
+        }
         const page = await readSiteSessions({
           env: options.env,
           siteId: options.siteId,
-          window: timeWindow(request.time),
-          filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
-          sort: listSortFromRequest(request, "sessions"),
-          search: stringField(request, "search") || undefined,
-          page: pageFromRequest(request, 80),
+          window,
+          filters,
+          sort,
+          search,
+          page: pageRequest,
           audience: request.context.policy.audience,
           analysisContext: request.analysisContext,
         });
@@ -113,6 +230,10 @@ export function registerJourneyProviders(
       "visitor-events",
       typedQueryProviderFor("visitor-events", async (input) => {
         const request = input;
+        const deferred = deferredJourneyEventPageQualificationFromQuery(
+          request as unknown as QueryInput & Record<string, unknown>,
+          "visitor-events",
+        );
         const page =
           request.page && typeof request.page === "object"
             ? (request.page as {
@@ -120,6 +241,41 @@ export function registerJourneyProviders(
                 readonly cursor?: unknown;
               })
             : {};
+        if (deferred) {
+          const qualified = await executeJourneyEventPageQualificationProgram({
+            env: options.env,
+            query: request as unknown as Record<string, unknown>,
+            deferred,
+            ...(options.diagnostics
+              ? { diagnostics: options.diagnostics }
+              : {}),
+          });
+          if (qualified.kind === "executed") return { value: qualified.result };
+          if (options.diagnostics)
+            options.diagnostics.advancedCountSqlFallbackReason =
+              qualified.fallbackReason;
+          const genericQualification = deferredEventQualificationFromQuery(
+            request,
+            "visitor-events",
+          );
+          if (genericQualification !== deferred.qualification)
+            throw new Error("journey_event_page_qualification_request_invalid");
+          const fallbackFilters =
+            await prepareDeferredEventQualificationFallback(
+              deferred.qualification,
+            );
+          return {
+            value: await readSiteVisitorEvents({
+              env: options.env,
+              siteId: options.siteId,
+              visitorId: deferred.configuration.target,
+              window: timeWindow(request.time),
+              filters: fallbackFilters,
+              audience: deferred.configuration.audience,
+              page: deferred.configuration.page,
+            }),
+          };
+        }
         return {
           value: await readSiteVisitorEvents({
             env: options.env,
@@ -143,6 +299,9 @@ export function registerJourneyProviders(
       "visitor-sessions",
       typedQueryProviderFor("visitor-sessions", async (input) => {
         const request = input;
+        const deferred = deferredSessionListQualificationFromQuery(
+          request as unknown as QueryInput & Record<string, unknown>,
+        );
         const page =
           request.page && typeof request.page === "object"
             ? (request.page as {
@@ -150,13 +309,33 @@ export function registerJourneyProviders(
                 readonly cursor?: unknown;
               })
             : {};
+        let filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
+        if (deferred) {
+          if (deferred.operation !== "visitor-sessions")
+            throw new Error("session_list_qualification_request_invalid");
+          const qualified = await executeSessionListQualificationProgram({
+            env: options.env,
+            query: request as unknown as Record<string, unknown>,
+            deferred,
+            ...(options.diagnostics
+              ? { diagnostics: options.diagnostics }
+              : {}),
+          });
+          if (qualified.kind === "executed") return { value: qualified.result };
+          if (options.diagnostics)
+            options.diagnostics.advancedCountSqlFallbackReason =
+              qualified.fallbackReason;
+          filters = await prepareDeferredEventQualificationFallback(
+            deferred.qualification,
+          );
+        }
         return {
           value: await readSiteVisitorSessions({
             env: options.env,
             siteId: options.siteId,
             visitorId: stringField(request, "visitorId"),
             window: timeWindow(request.time),
-            filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
+            filters,
             audience: request.context.policy.audience,
             page: {
               limit:
@@ -173,6 +352,10 @@ export function registerJourneyProviders(
       "session-events",
       typedQueryProviderFor("session-events", async (input) => {
         const request = input;
+        const deferred = deferredJourneyEventPageQualificationFromQuery(
+          request as unknown as QueryInput & Record<string, unknown>,
+          "session-events",
+        );
         const page =
           request.page && typeof request.page === "object"
             ? (request.page as {
@@ -180,6 +363,41 @@ export function registerJourneyProviders(
                 readonly cursor?: unknown;
               })
             : {};
+        if (deferred) {
+          const qualified = await executeJourneyEventPageQualificationProgram({
+            env: options.env,
+            query: request as unknown as Record<string, unknown>,
+            deferred,
+            ...(options.diagnostics
+              ? { diagnostics: options.diagnostics }
+              : {}),
+          });
+          if (qualified.kind === "executed") return { value: qualified.result };
+          if (options.diagnostics)
+            options.diagnostics.advancedCountSqlFallbackReason =
+              qualified.fallbackReason;
+          const genericQualification = deferredEventQualificationFromQuery(
+            request,
+            "session-events",
+          );
+          if (genericQualification !== deferred.qualification)
+            throw new Error("journey_event_page_qualification_request_invalid");
+          const fallbackFilters =
+            await prepareDeferredEventQualificationFallback(
+              deferred.qualification,
+            );
+          return {
+            value: await readSiteSessionEvents({
+              env: options.env,
+              siteId: options.siteId,
+              sessionId: deferred.configuration.target,
+              window: timeWindow(request.time),
+              filters: fallbackFilters,
+              audience: deferred.configuration.audience,
+              page: deferred.configuration.page,
+            }),
+          };
+        }
         return {
           value: await readSiteSessionEvents({
             env: options.env,

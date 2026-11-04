@@ -1,5 +1,12 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
+import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import {
+  addEventQualificationControlOutput,
+  buildEventQualifiedSource,
+  EVENT_QUALIFICATION_CONTROL_OUTPUT,
+  type EventQualificationPlan,
+} from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import {
   buildEventReportSource,
   EVENT_REPORT_BASE_ATTRIBUTES,
@@ -20,6 +27,11 @@ export const EVENT_SUMMARY_CARD_OUTPUTS = {
   title: "event-summary-cards-title",
   hostname: "event-summary-cards-hostname",
 } as const;
+
+export const EVENT_SUMMARY_QUALIFICATION_CONTROL_OUTPUT =
+  EVENT_QUALIFICATION_CONTROL_OUTPUT;
+
+export type EventSummaryQualificationPlan = EventQualificationPlan;
 
 const CARD_FIELDS = [
   { name: "cardType", slot: "cardType" },
@@ -66,6 +78,45 @@ export function buildEventSummaryCardsPlan(input: {
     ],
   });
 
+  addEventSummaryCardOutputs(builder, events);
+  return builder.finish();
+}
+
+/** Builds summary/cards and Count qualification under one subject/time builder. */
+export function buildEventSummaryCardsQualificationPlan(input: {
+  readonly siteId: string;
+  readonly count: AdvancedCountFilterMatchPlanInput;
+}): EventSummaryQualificationPlan {
+  const qualified = buildEventQualifiedSource({
+    siteId: input.siteId,
+    count: input.count,
+    purpose: "summary-cards",
+  });
+  addEventSummaryCardOutputs(qualified.builder, qualified.events);
+  addEventQualificationControlOutput(
+    qualified.builder,
+    qualified.qualification.controls,
+  );
+  return {
+    plan: qualified.builder.finish(),
+    primaryReportSourceRelationId: qualified.eventSourceRelationId,
+    eventSourceRelationId: qualified.eventSourceRelationId,
+    reportSourceRelations: qualified.reportSourceRelations,
+    matchesRelationId: qualified.qualification.matches.id,
+    controlsRelationId: qualified.qualification.controls.id,
+    groupedSummaryRelationId: qualified.qualification.groupedSummary.id,
+    controlOutputId: EVENT_SUMMARY_QUALIFICATION_CONTROL_OUTPUT,
+    reportOutputIds: Object.freeze(Object.values(EVENT_SUMMARY_CARD_OUTPUTS)),
+    numericCompatibilityFields:
+      qualified.qualification.numericCompatibilityFields,
+    scope: qualified.qualification.scope,
+  };
+}
+
+function addEventSummaryCardOutputs(
+  builder: LogicalPlanBuilder,
+  events: LogicalRelationHandle,
+): void {
   const summary = builder.aggregate(events, {}, [
     { name: "views", kind: "count-rows" },
     {
@@ -168,6 +219,4 @@ export function buildEventSummaryCardsPlan(input: {
     const limited = builder.limit(sorted, 100);
     addCardOutput(builder, limited, dimension.outputId);
   }
-
-  return builder.finish();
 }

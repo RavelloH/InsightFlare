@@ -7,6 +7,10 @@ import type {
 import type { LogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
 import type { AnalyticsEntityKind } from "@/lib/edge/analytics/engine/semantic/entities";
+import type {
+  EventPayloadPropertyField,
+  EventPayloadTopLevelPath,
+} from "@/lib/edge/analytics/engine/semantic/event-payload-logical";
 import type { EventPayloadOccurrenceField } from "@/lib/edge/analytics/engine/semantic/event-payload-occurrences";
 import type { SemanticRelationshipId } from "@/lib/edge/analytics/engine/semantic/relationships";
 import type { SemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
@@ -61,10 +65,25 @@ export interface EventPayloadOccurrencesNode extends LogicalNodeBase {
   readonly kind: "event-payload-occurrences";
   readonly input: RelationId;
   readonly eventKey: SlotId;
-  readonly eventPk: SlotId;
   readonly fields: readonly {
     readonly field: EventPayloadOccurrenceField;
     readonly slot: SlotId;
+  }[];
+}
+
+/** Reads one finite top-level property set while preserving the selected Events. */
+export interface EventPayloadPropertiesNode extends LogicalNodeBase {
+  readonly kind: "event-payload-properties";
+  readonly input: RelationId;
+  readonly eventKey: SlotId;
+  readonly paths: readonly EventPayloadTopLevelPath[];
+  readonly properties: readonly {
+    readonly path: string;
+    readonly key: string;
+    readonly fields: readonly {
+      readonly field: EventPayloadPropertyField;
+      readonly slot: SlotId;
+    }[];
   }[];
 }
 
@@ -253,6 +272,7 @@ export type LogicalNode =
   | RelationshipLookupNode
   | FilterNode
   | EventPayloadOccurrencesNode
+  | EventPayloadPropertiesNode
   | ProjectNode
   | AggregateNode
   | SampleStatisticsNode

@@ -31,7 +31,6 @@ import {
   queryOverviewClientDimensionsFromD1,
   queryOverviewGeoDimensionsFromD1,
 } from "./dimensions";
-import { scopedDatasetFor } from "./scoped-dataset";
 export async function queryOverviewFromD1(
   env: Env,
   siteId: string,
@@ -133,8 +132,8 @@ export async function queryOverviewAggregate(
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<PreferredSourceResult<OverviewAggregateRow>> {
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  if (!hasFilterDocument(filters) && !scopedDataset) {
+  const scopedMetadata = scopedFilterMetadata(filters);
+  if (!hasFilterDocument(filters) && !scopedMetadata) {
     const rollup = await queryOverviewForSitesFromHourlyRollups(
       env,
       [siteId],
@@ -166,8 +165,8 @@ export async function queryTrendAggregate(
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<PreferredSourceResult<TrendAggregateRow[]>> {
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  if (!hasFilterDocument(filters) && !scopedDataset) {
+  const scopedMetadata = scopedFilterMetadata(filters);
+  if (!hasFilterDocument(filters) && !scopedMetadata) {
     const rollup = await queryTrendForSitesFromHourlyRollups(
       env,
       [siteId],

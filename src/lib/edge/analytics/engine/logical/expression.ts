@@ -88,7 +88,7 @@ export interface LogicalStringMatchExpression {
 export interface LogicalStringNormalizeExpression {
   readonly kind: "string-normalize";
   readonly input: LogicalExpr;
-  readonly normalization: "trim-ascii-space";
+  readonly normalization: "trim" | "trim-ascii-space";
 }
 
 export interface LogicalNumberReportTextExpression {
@@ -119,6 +119,15 @@ export interface LogicalArithmeticExpression {
   readonly right: LogicalExpr;
   /** Division makes undefined ratios null instead of inventing a numeric value. */
   readonly zeroDenominator?: "null";
+}
+
+/**
+ * Coerce a number to IEEE-754 binary64 (SQLite REAL), erase its unit without
+ * unit scaling, and preserve negative values and NULLs.
+ */
+export interface LogicalNumericValueExpression {
+  readonly kind: "numeric-value";
+  readonly input: LogicalExpr;
 }
 
 export interface LogicalRoundExpression {
@@ -175,6 +184,7 @@ export type LogicalExpr =
   | LogicalTextConcatenationExpression
   | LogicalPageDimensionExpression
   | LogicalArithmeticExpression
+  | LogicalNumericValueExpression
   | LogicalAbsoluteExpression
   | LogicalRoundExpression
   | LogicalCoalesceExpression

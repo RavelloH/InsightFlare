@@ -1,17 +1,19 @@
+import { queryLegacyD1All } from "@/lib/edge/__tests__/legacy-d1-oracle";
+import { scopedDatasetFor } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import {
+  buildEventFilterSql,
+  usesSessionBoundaryFilter,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-filters";
+import {
+  buildEventAnalyticsSourceCte,
+  buildEventFilteredSourceCte,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import type {
   DimensionRow,
   EventSummaryRow,
   FilterDocument,
   QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
-import {
-  buildEventAnalyticsSourceCte,
-  buildEventFilteredSourceCte,
-  buildEventFilterSql,
-  queryD1All,
-  usesSessionBoundaryFilter,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
-import { scopedDatasetFor } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
 
@@ -194,7 +196,7 @@ ORDER BY cardType ASC, cardRank ASC
 `;
   const overviewRows = execute
     ? await execute(sql, bindings)
-    : await queryD1All<OverviewCardRow>(env, sql, bindings);
+    : await queryLegacyD1All<OverviewCardRow>(env, sql, bindings);
   const summaryRow = overviewRows.find((row) => row.cardType === "summary");
   const readDimension = (
     cardType: OverviewCardRow["cardType"],

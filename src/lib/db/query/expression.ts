@@ -191,11 +191,14 @@ export type SqlFunctionName =
   | "upper"
   | "trim"
   | "trim-spaces"
+  | "trim-characters"
   | "concat-text"
   | "text-contains"
   | "text-starts-with"
   | "text-ends-with"
   | "length"
+  | "byte-length"
+  | "storage-class"
   | "abs"
   | "round";
 
@@ -1110,11 +1113,15 @@ export function callFunction<
   NullableValue<E, string>,
   ExpressionResultType<"text", NullableOf<E>>
 >;
+export function callFunction<E extends SqlExpression>(
+  name: "storage-class",
+  expression: E,
+): FunctionExpression<string, ExpressionResultType<"text", false>>;
 export function callFunction<
   E extends SqlExpression<string | ArrayBuffer | ArrayBufferView | null>,
   Result extends ExpressionResultType,
 >(
-  name: "length",
+  name: "length" | "byte-length",
   expression: SqlExpression<ExpressionValue<E>, Result> & E,
 ): FunctionExpression<
   NullableValue<E, number>,
@@ -1172,7 +1179,9 @@ export function callFunction(
     case "upper":
     case "trim":
     case "trim-spaces":
+    case "trim-characters":
     case "concat-text":
+    case "storage-class":
       affinity = "text";
       break;
     case "text-contains":
@@ -1181,6 +1190,7 @@ export function callFunction(
       affinity = "integer";
       break;
     case "length":
+    case "byte-length":
       affinity = "integer";
       break;
     case "abs":
@@ -1195,7 +1205,8 @@ export function callFunction(
       decimalPlaces === undefined ? [expression] : [expression, decimalPlaces],
     resultType: {
       affinity,
-      nullable: expression.resultType.nullable,
+      nullable:
+        name === "storage-class" ? false : expression.resultType.nullable,
     },
   };
 }
@@ -1214,6 +1225,35 @@ export function trimSpaces<E extends SqlExpression<string | null>>(
       affinity: "text",
       nullable: expression.resultType.nullable,
     },
+  };
+}
+
+/** SQLite TRIM with an explicit character set; NULL propagates from either operand. */
+export function trimCharacters<
+  Text extends AnyExpression,
+  Characters extends AnyExpression,
+>(
+  text: Text &
+    RequireAffinity<Text, TextSourceAffinity> &
+    RequireValue<Text, string>,
+  characters: Characters &
+    RequireAffinity<Characters, TextSourceAffinity> &
+    RequireValue<Characters, string>,
+): FunctionExpression<
+  NullableInputValue<readonly [Text, Characters], string>,
+  ExpressionResultType<"text", InputsNullable<readonly [Text, Characters]>>
+> {
+  return {
+    kind: "function",
+    name: "trim-characters",
+    arguments: [text, characters],
+    resultType: {
+      affinity: "text",
+      nullable: text.resultType.nullable || characters.resultType.nullable,
+    } as ExpressionResultType<
+      "text",
+      InputsNullable<readonly [Text, Characters]>
+    >,
   };
 }
 

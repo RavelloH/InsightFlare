@@ -512,6 +512,16 @@ function validateExpression(
       return;
     }
     case "function":
+      if (expression.name === "storage-class") {
+        if (expression.arguments.length !== 1)
+          invalid("storage-class() requires exactly one argument");
+        const argument = expression.arguments[0];
+        if (!argument || typeof argument !== "object")
+          invalid("storage-class() contains an invalid operand");
+        validateExpression(argument, scopes, activeSources, allowExcluded);
+        validateResultType(expression, "text", false);
+        return;
+      }
       if (expression.name === "concat-text") {
         if (expression.arguments.length < 2)
           invalid("concatText() requires at least two arguments");
@@ -537,6 +547,35 @@ function validateExpression(
           expression,
           "text",
           expression.arguments.some((argument) => argument.resultType.nullable),
+        );
+        return;
+      }
+      if (expression.name === "trim-characters") {
+        if (
+          !Array.isArray(expression.arguments) ||
+          expression.arguments.length !== 2
+        )
+          invalid("trimCharacters() requires exactly two arguments");
+        const text = expression.arguments[0];
+        const characters = expression.arguments[1];
+        if (
+          !text ||
+          typeof text !== "object" ||
+          !characters ||
+          typeof characters !== "object"
+        )
+          invalid("trimCharacters() contains an invalid operand");
+        validateExpression(text, scopes, activeSources, allowExcluded);
+        validateExpression(characters, scopes, activeSources, allowExcluded);
+        if (
+          !["text", "unknown"].includes(text.resultType.affinity) ||
+          !["text", "unknown"].includes(characters.resultType.affinity)
+        )
+          invalid("trimCharacters() requires TEXT input and character set");
+        validateResultType(
+          expression,
+          "text",
+          text.resultType.nullable || characters.resultType.nullable,
         );
         return;
       }
@@ -587,6 +626,7 @@ function validateExpression(
           "trim",
           "trim-spaces",
           "length",
+          "byte-length",
           "abs",
           "round",
         ].includes(expression.name)
@@ -634,7 +674,8 @@ function validateExpression(
             expression.name === "trim-spaces") &&
             affinity !== "text" &&
             affinity !== "unknown") ||
-          (expression.name === "length" &&
+          ((expression.name === "length" ||
+            expression.name === "byte-length") &&
             affinity !== "text" &&
             affinity !== "blob" &&
             affinity !== "unknown") ||
@@ -650,7 +691,7 @@ function validateExpression(
           expression.name === "trim" ||
           expression.name === "trim-spaces"
             ? "text"
-            : expression.name === "length"
+            : expression.name === "length" || expression.name === "byte-length"
               ? "integer"
               : "numeric";
         validateResultType(

@@ -13,6 +13,7 @@ export function generateSchemaTypes(schema: readonly SchemaObject[]): string {
         declaredType: column.declaredType,
         affinity: column.affinity,
         nullable: column.nullable,
+        ...(column.rowidAlias ? { rowidAlias: true as const } : {}),
         primaryKeyPosition: column.primaryKeyPosition,
         defaultSql: column.defaultSql,
         hidden: column.hidden,
@@ -22,6 +23,7 @@ export function generateSchemaTypes(schema: readonly SchemaObject[]): string {
     tables[object.name] = {
       kind: object.kind,
       name: object.name,
+      defaultCollation: object.defaultCollation,
       columns,
       primaryKey: object.primaryKey,
       indexes: object.indexes,

@@ -26,6 +26,12 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import { scopedDatasetFor } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import { buildVisitFilterSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-filters";
+import {
+  buildVisitSourceCte,
+  visitSourceBindings,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import type {
   FilterDocument,
   Interval,
@@ -33,12 +39,8 @@ import type {
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   buildTimeBuckets,
-  buildVisitFilterSql,
-  buildVisitSourceCte,
-  scopedDatasetFor,
   timeBucketCase,
   timeBucketTimestamp,
-  visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { queryRetentionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-retention";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";

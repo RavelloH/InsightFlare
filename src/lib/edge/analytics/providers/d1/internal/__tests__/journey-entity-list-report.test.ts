@@ -100,91 +100,91 @@ describe("Journey entity list Logical report plans", () => {
     }
   });
 
-  it("keeps the worst 12-step visitor and session query plans within D1 budgets", () => {
-    const siteId = "journey-list-site";
-    const sourceFilter = parseFilterDsl(
-      "session.views gte 2",
-      analyticsFilterRegistry,
-    );
-    const scoped = createScopedFilterPlan(
-      "goal-summary",
-      sourceFilter,
-      "session",
-    );
-    expect(scoped).not.toBeNull();
-    if (!scoped) throw new Error("Expected prepared Session filter plan.");
-    const filters = attachScopedFilterMetadata(sourceFilter, {
-      requestedScope: "session",
-      resolvedScope: scoped.scope,
-      plan: scoped,
-      time: createQueryTime(
-        window.startMs,
-        window.endExclusiveMs,
-        window.timeZone,
-        window.nowMs,
-      ),
-      siteIds: [siteId],
-    });
-    const analysis = {
-      type: "funnel" as const,
-      stepIndex: 11,
-      outcome: "converted" as const,
-      config: {
-        filterDslVersion: 1 as const,
-        progressionScope: "visitor" as const,
-        conversionWindowMs: 86_400_000,
-        steps: Array.from({ length: 12 }, (_unused, index) => ({
-          id: `history-${index}`,
-          filterDsl: `page.path contains "/history-${index}"`,
-        })),
-      },
-    };
-    const visitor = compileOutput(
-      buildJourneyVisitorListReportPlan({
-        siteId,
-        window,
-        filters,
-        limit: 20,
-        sort: DEFAULT_VISITOR_LIST_SORT,
-        search: "  browser os version /history  ",
-        analysis,
-      }),
-      JOURNEY_VISITOR_LIST_REPORT_OUTPUT,
-    );
-    const session = compileOutput(
-      buildJourneySessionListReportPlan({
-        siteId,
-        window,
-        filters,
-        limit: 20,
-        sort: { key: "durationMs", direction: "asc" },
-        cursor: {
-          sortValue: 100,
-          startedAt: window.startMs + 1,
-          sessionId: "s-fixture",
+  it.each(["visitor", "session"] as const)(
+    "keeps the worst 12-step %s query plan within D1 budgets",
+    (scope) => {
+      const siteId = "journey-list-site";
+      const sourceFilter = parseFilterDsl(
+        "session.views gte 2",
+        analyticsFilterRegistry,
+      );
+      const scoped = createScopedFilterPlan(
+        "goal-summary",
+        sourceFilter,
+        "session",
+      );
+      expect(scoped).not.toBeNull();
+      if (!scoped) throw new Error("Expected prepared Session filter plan.");
+      const filters = attachScopedFilterMetadata(sourceFilter, {
+        requestedScope: "session",
+        resolvedScope: scoped.scope,
+        plan: scoped,
+        time: createQueryTime(
+          window.startMs,
+          window.endExclusiveMs,
+          window.timeZone,
+          window.nowMs,
+        ),
+        siteIds: [siteId],
+      });
+      const analysis = {
+        type: "funnel" as const,
+        stepIndex: 11,
+        outcome: "converted" as const,
+        config: {
+          filterDslVersion: 1 as const,
+          progressionScope: "visitor" as const,
+          conversionWindowMs: 86_400_000,
+          steps: Array.from({ length: 12 }, (_unused, index) => ({
+            id: `history-${index}`,
+            filterDsl: `page.path contains "/history-${index}"`,
+          })),
         },
-        sessionTarget: { type: "visitor", value: "fixture-visitor" },
-        search: "  browser os version /history  ",
-        analysis,
-      }),
-      JOURNEY_SESSION_LIST_REPORT_OUTPUT,
-    );
+      };
+      const query =
+        scope === "visitor"
+          ? compileOutput(
+              buildJourneyVisitorListReportPlan({
+                siteId,
+                window,
+                filters,
+                limit: 20,
+                sort: DEFAULT_VISITOR_LIST_SORT,
+                search: "  browser os version /history  ",
+                analysis,
+              }),
+              JOURNEY_VISITOR_LIST_REPORT_OUTPUT,
+            )
+          : compileOutput(
+              buildJourneySessionListReportPlan({
+                siteId,
+                window,
+                filters,
+                limit: 20,
+                sort: { key: "durationMs", direction: "asc" },
+                cursor: {
+                  sortValue: 100,
+                  startedAt: window.startMs + 1,
+                  sessionId: "s-fixture",
+                },
+                sessionTarget: { type: "visitor", value: "fixture-visitor" },
+                search: "  browser os version /history  ",
+                analysis,
+              }),
+              JOURNEY_SESSION_LIST_REPORT_OUTPUT,
+            );
 
-    for (const [name, query] of [
-      ["visitor", visitor],
-      ["session", session],
-    ] as const) {
       expect(
         new TextEncoder().encode(query.sql).byteLength,
-        `${name} SQL bytes`,
+        `${scope} SQL bytes`,
       ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
       expect(
         query.bindings?.length ?? 0,
-        `${name} bindings`,
+        `${scope} bindings`,
       ).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
       expect(query.physicalPlanShape).toBeDefined();
-    }
-  });
+    },
+  );
 
   it("matches the parent Session DTO for two Event-only observations with owner coordinates", async () => {
     const database = createMigratedDatabase();
@@ -567,82 +567,83 @@ describe("Journey entity list Logical report plans", () => {
     }
   });
 
-  it("preflights a prepared fact base, full Funnel history, and full-field search", () => {
-    const filter = parseFilterDsl(
-      "session.views gte 2",
-      analyticsFilterRegistry,
-    );
-    const plan = createScopedFilterPlan("goal-summary", filter, "session");
-    if (!plan) throw new Error("wave70_preflight_scope_missing");
-    const queryTime = createQueryTime(
-      window.startMs,
-      window.endExclusiveMs,
-      window.timeZone,
-      window.nowMs,
-    );
-    const prepared = attachScopedFilterMetadata(filter, {
-      requestedScope: "session",
-      resolvedScope: plan.scope,
-      plan,
-      time: queryTime,
-      siteIds: ["journey-list-site"],
-    });
-    const config = {
-      filterDslVersion: 1 as const,
-      progressionScope: "visitor" as const,
-      conversionWindowMs: 86_400_000,
-      steps: Array.from({ length: 12 }, (_, index) => ({
-        id: `history-${index}`,
-        filterDsl: `page.path contains "/history-${index}"`,
-      })),
-    };
-    const analysis = {
-      type: "funnel" as const,
-      config,
-      stepIndex: 11,
-      outcome: "converted" as const,
-    };
-    const search = "  browser os version /history  ";
-    const visitorPlan = buildJourneyVisitorListReportPlan({
-      siteId: "journey-list-site",
-      window,
-      filters: prepared,
-      limit: 20,
-      sort: DEFAULT_VISITOR_LIST_SORT,
-      search,
-      analysis,
-    });
-    const sessionPlan = buildJourneySessionListReportPlan({
-      siteId: "journey-list-site",
-      window,
-      filters: prepared,
-      limit: 20,
-      sort: { key: "durationMs", direction: "asc" },
-      cursor: {
-        sortValue: 100,
-        startedAt: 1_700_000_000_001,
-        sessionId: "s-fixture",
-      },
-      sessionTarget: { type: "visitor", value: "fixture-visitor" },
-      search,
-      analysis,
-    });
-    const visitorQuery = compileOutput(
-      visitorPlan,
-      JOURNEY_VISITOR_LIST_REPORT_OUTPUT,
-    );
-    const sessionQuery = compileOutput(
-      sessionPlan,
-      JOURNEY_SESSION_LIST_REPORT_OUTPUT,
-    );
-    const preflight = [visitorQuery, sessionQuery].map((query) => ({
-      bytes: new TextEncoder().encode(query.sql).length,
-      binds: query.bindings?.length ?? 0,
-      ctes: query.physicalPlanShape?.cteCount,
-    }));
-    for (const [index, query] of [visitorQuery, sessionQuery].entries()) {
+  it.each(["visitor", "session"] as const)(
+    "preflights a prepared fact base, full Funnel history, and full-field search for %s scope",
+    (scope) => {
+      const filter = parseFilterDsl(
+        "session.views gte 2",
+        analyticsFilterRegistry,
+      );
+      const plan = createScopedFilterPlan("goal-summary", filter, "session");
+      if (!plan) throw new Error("wave70_preflight_scope_missing");
+      const queryTime = createQueryTime(
+        window.startMs,
+        window.endExclusiveMs,
+        window.timeZone,
+        window.nowMs,
+      );
+      const prepared = attachScopedFilterMetadata(filter, {
+        requestedScope: "session",
+        resolvedScope: plan.scope,
+        plan,
+        time: queryTime,
+        siteIds: ["journey-list-site"],
+      });
+      const config = {
+        filterDslVersion: 1 as const,
+        progressionScope: "visitor" as const,
+        conversionWindowMs: 86_400_000,
+        steps: Array.from({ length: 12 }, (_, index) => ({
+          id: `history-${index}`,
+          filterDsl: `page.path contains "/history-${index}"`,
+        })),
+      };
+      const analysis = {
+        type: "funnel" as const,
+        config,
+        stepIndex: 11,
+        outcome: "converted" as const,
+      };
+      const search = "  browser os version /history  ";
+      const query =
+        scope === "visitor"
+          ? compileOutput(
+              buildJourneyVisitorListReportPlan({
+                siteId: "journey-list-site",
+                window,
+                filters: prepared,
+                limit: 20,
+                sort: DEFAULT_VISITOR_LIST_SORT,
+                search,
+                analysis,
+              }),
+              JOURNEY_VISITOR_LIST_REPORT_OUTPUT,
+            )
+          : compileOutput(
+              buildJourneySessionListReportPlan({
+                siteId: "journey-list-site",
+                window,
+                filters: prepared,
+                limit: 20,
+                sort: { key: "durationMs", direction: "asc" },
+                cursor: {
+                  sortValue: 100,
+                  startedAt: 1_700_000_000_001,
+                  sessionId: "s-fixture",
+                },
+                sessionTarget: { type: "visitor", value: "fixture-visitor" },
+                search,
+                analysis,
+              }),
+              JOURNEY_SESSION_LIST_REPORT_OUTPUT,
+            );
+      const preflight = [query].map((compiledQuery) => ({
+        bytes: new TextEncoder().encode(compiledQuery.sql).length,
+        binds: compiledQuery.bindings?.length ?? 0,
+        ctes: compiledQuery.physicalPlanShape?.cteCount,
+      }));
       expect(query.bindings?.length ?? 0).toBeLessThanOrEqual(100);
-      expect(preflight[index]!.bytes).toBeLessThanOrEqual(100_000);
-    }
-  });
+      expect(preflight[0]!.bytes).toBeLessThanOrEqual(100_000);
+    },
+  );
 });

@@ -1,6 +1,9 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { LogicalPlanBuilder } from "@/lib/edge/analytics/engine/logical/builder";
+import type {
+  LogicalPlanBuilder,
+  LogicalRelationHandle,
+} from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
@@ -34,10 +37,29 @@ export const PAGE_CARD_METRICS_OUTPUT_FIELDS = [
   "totalDuration",
   "durationViews",
 ] as const;
+export const PAGE_CARD_METRICS_ROLLUP_OUTPUT_ID = "page-card-metrics-rollup";
+export const PAGE_CARD_METRICS_ROLLUP_OUTPUT_FIELDS = [
+  "pathname",
+  "views",
+  "sessions",
+  "visitors",
+  "bounces",
+  "totalDuration",
+  "durationViews",
+] as const;
+
+export interface PageCardMetricsSourceInput {
+  readonly siteId: string;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly preparedTimePolicy?: "reader-window-v1";
+  readonly pathnames?: readonly string[];
+}
 
 function pageAttribute(
   builder: LogicalPlanBuilder,
-  pages: ReturnType<typeof createPageReportSource>["pages"],
+  pages: LogicalRelationHandle,
   name: "pathname" | "sessionId" | "visitorId" | "durationMs",
 ) {
   return builder.slot(pages, `attribute:page.report.${name}`);
@@ -127,21 +149,8 @@ function cursorOrder(
   );
 }
 
-/** Builds the selected-Page grain rollups and the legacy page-card metrics. */
-export function buildPageCardMetricsPlan(input: {
-  readonly siteId: string;
-  readonly queryTime: QueryTime;
-  readonly filters: FilterDocument;
-  readonly scopePlan?: ScopedFilterPlan;
-  readonly preparedTimePolicy?: "reader-window-v1";
-  readonly pathnames?: readonly string[];
-  readonly limit?: number;
-  readonly cursor?: PageCardMetricsCursor | null;
-  readonly search?: string;
-  readonly sort?: PageCardMetricSort;
-  readonly direction?: "asc" | "desc";
-}): ValidatedLogicalPlan {
-  const { builder, pages } = createPageReportSource({
+function createPageCardMetricsSource(input: PageCardMetricsSourceInput) {
+  return createPageReportSource({
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
@@ -156,6 +165,15 @@ export function buildPageCardMetricsPlan(input: {
       "page.report.durationMs",
     ],
   });
+}
+
+/** Appends Page-card rollups to a caller-owned builder and Page relation. */
+export function appendPageCardMetricsRollup(input: {
+  readonly builder: LogicalPlanBuilder;
+  readonly pages: LogicalRelationHandle;
+  readonly pathnames?: readonly string[];
+}) {
+  const { builder, pages } = input;
   const pathname = pageAttribute(builder, pages, "pathname");
   const sessionId = pageAttribute(builder, pages, "sessionId");
   const visitorId = pageAttribute(builder, pages, "visitorId");
@@ -260,6 +278,21 @@ export function buildPageCardMetricsPlan(input: {
     avgDurationMs: safeDivision(builder, totalDuration, sessions, MILLISECONDS),
   });
 
+  return metrics;
+}
+
+/** Appends the legacy metric search, cursor, sort, and limit stages. */
+export function appendPageCardMetricsPage(
+  builder: LogicalPlanBuilder,
+  metrics: LogicalRelationHandle,
+  input: {
+    readonly limit?: number;
+    readonly cursor?: PageCardMetricsCursor | null;
+    readonly search?: string;
+    readonly sort?: PageCardMetricSort;
+    readonly direction?: "asc" | "desc";
+  },
+): LogicalRelationHandle {
   let rows = metrics;
   if (input.search) {
     rows = builder.filter(
@@ -297,10 +330,69 @@ export function buildPageCardMetricsPlan(input: {
       throw new Error("logical_builder_invalid_limit");
     if (input.limit >= 0) rows = builder.limit(rows, input.limit);
   }
+  return rows;
+}
+
+/** Declares the legacy unsorted rollup output on a caller-owned builder. */
+export function appendPageCardMetricsRollupOutput(
+  builder: LogicalPlanBuilder,
+  metrics: LogicalRelationHandle,
+  outputId = PAGE_CARD_METRICS_ROLLUP_OUTPUT_ID,
+): void {
   builder.output(
-    PAGE_CARD_METRICS_OUTPUT_ID,
+    outputId,
+    metrics,
+    PAGE_CARD_METRICS_ROLLUP_OUTPUT_FIELDS.map((name) => ({
+      name,
+      slot: name,
+    })),
+  );
+}
+
+/** Declares the legacy sorted Page-card output on a caller-owned builder. */
+export function appendPageCardMetricsPageOutput(
+  builder: LogicalPlanBuilder,
+  rows: LogicalRelationHandle,
+  outputId = PAGE_CARD_METRICS_OUTPUT_ID,
+): void {
+  builder.output(
+    outputId,
     rows,
     PAGE_CARD_METRICS_OUTPUT_FIELDS.map((name) => ({ name, slot: name })),
   );
+}
+
+/** Builds complete, unsorted Page-card aggregates for a caller-owned parent. */
+export function buildPageCardMetricsRollupPlan(
+  input: PageCardMetricsSourceInput,
+): ValidatedLogicalPlan {
+  const { builder, pages } = createPageCardMetricsSource(input);
+  const metrics = appendPageCardMetricsRollup({
+    builder,
+    pages,
+    pathnames: input.pathnames,
+  });
+  appendPageCardMetricsRollupOutput(builder, metrics);
+  return builder.finish();
+}
+
+/** Builds the selected-Page grain rollups and the legacy page-card metrics. */
+export function buildPageCardMetricsPlan(
+  input: PageCardMetricsSourceInput & {
+    readonly limit?: number;
+    readonly cursor?: PageCardMetricsCursor | null;
+    readonly search?: string;
+    readonly sort?: PageCardMetricSort;
+    readonly direction?: "asc" | "desc";
+  },
+): ValidatedLogicalPlan {
+  const { builder, pages } = createPageCardMetricsSource(input);
+  const metrics = appendPageCardMetricsRollup({
+    builder,
+    pages,
+    pathnames: input.pathnames,
+  });
+  const rows = appendPageCardMetricsPage(builder, metrics, input);
+  appendPageCardMetricsPageOutput(builder, rows);
   return builder.finish();
 }

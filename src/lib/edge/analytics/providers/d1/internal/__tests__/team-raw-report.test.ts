@@ -31,6 +31,11 @@ import {
   TEAM_RAW_DASHBOARD_OUTPUT_FIELDS,
   TEAM_RAW_DASHBOARD_OUTPUTS,
 } from "@/lib/edge/analytics/engine/team-raw-dashboard-report-plan";
+import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import {
+  buildVisitSourceCteForSites,
+  visitSourceBindingsForSites,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { analyticsPageReportStorageColumn } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-storage";
 import { queryAnalyticsReportOutputSetRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
@@ -41,15 +46,12 @@ import type {
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   buildTimeBuckets,
-  buildVisitSourceCteForSites,
   mapOverviewAggregate,
   percentChange,
   timeBucketCase,
   timeBucketTimestamp,
-  visitSourceBindingsForSites,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
-import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import {
   queryTeamDashboardForTeam,
   queryTeamOverviewFromD1,

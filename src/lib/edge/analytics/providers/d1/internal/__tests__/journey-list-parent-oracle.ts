@@ -1,5 +1,6 @@
 // Test-only Wave69 parent snapshot: preserve the complete legacy list/scoped assembly as an oracle.
 import { compileD1Query, lowerLogicalPlan } from "@/lib/db";
+import { queryLegacyD1All } from "@/lib/edge/__tests__/legacy-d1-oracle";
 import {
   createScopedFilterPlan,
   EMPTY_FILTER_DOCUMENT,
@@ -11,6 +12,13 @@ import {
   JOURNEY_EVENT_PAGE_REPORT_OUTPUT,
 } from "@/lib/edge/analytics/engine/journey-event-page-report-plan";
 import { buildJourneyTargetPresencePlan } from "@/lib/edge/analytics/engine/journey-target-presence-plan";
+import { buildVisitFilterSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-filters";
+import {
+  buildCustomEventSourceCte,
+  buildVisitSourceCte,
+  eventSourceBindings,
+  visitSourceBindings,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import type {
   JourneyEventRow,
@@ -23,15 +31,9 @@ import type {
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   browserMajorVersionExpr,
-  buildCustomEventSourceCte,
-  buildVisitFilterSql,
-  buildVisitSourceCte,
   DEFAULT_SESSION_LIST_SORT,
   DEFAULT_VISITOR_LIST_SORT,
-  eventSourceBindings,
-  queryD1All,
   queryD1CompiledAll,
-  visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { queryJourneyPageReportRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-page-report-query";
 import { currentD1Operation } from "@/lib/edge/observability/logger";
@@ -564,7 +566,7 @@ ${buildVisitorAggregationSql({
   orderBy: visitorListOrderBy(options.sort),
   limitOffset: "LIMIT ?",
 })}`;
-  const records = await queryD1All<Record<string, unknown>>(env, sql, [
+  const records = await queryLegacyD1All<Record<string, unknown>>(env, sql, [
     ...(scopedDataset
       ? scopedDataset.bindings.map((binding) => binding.value)
       : [
@@ -716,7 +718,7 @@ ${buildSessionAggregationSql({
   ];
   const records = executeOffline
     ? await executeOffline(sql, bindings)
-    : await queryD1All<Record<string, unknown>>(env, sql, bindings);
+    : await queryLegacyD1All<Record<string, unknown>>(env, sql, bindings);
   const hasMore = records.length > options.limit;
   const pageRecords = hasMore ? records.slice(0, options.limit) : records;
   const rows = pageRecords.map(mapSessionRow);

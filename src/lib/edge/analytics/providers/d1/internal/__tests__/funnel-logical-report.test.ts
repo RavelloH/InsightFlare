@@ -33,14 +33,14 @@ import { LogicalPlanBuilder } from "@/lib/edge/analytics/engine/logical/builder"
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
-import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
-import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core-types";
 import {
   buildFunnelMembershipSqlPlan,
   buildFunnelSqlPlan,
-} from "@/lib/edge/analytics/providers/d1/internal/funnel-planner";
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-funnel-oracle";
+import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
+import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core-types";
 import { queryFunnelAnalysis } from "@/lib/edge/analytics/providers/d1/internal/funnels";
-import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import type { Env } from "@/lib/edge/types";
 import { parseFilterDsl } from "@/lib/filter-contract/filter-dsl";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
@@ -1630,8 +1630,8 @@ describe("Logical Funnel analysis report", () => {
     },
   );
 
-  it.each(
-    (["event", "session", "visitor"] as const).flatMap((globalScope) =>
+  const preparedScopeCases = (["event", "session", "visitor"] as const).flatMap(
+    (globalScope) =>
       (["session", "visitor"] as const).flatMap((progressionScope) =>
         [3, 10, 12].map((count) => ({
           globalScope,
@@ -1639,44 +1639,64 @@ describe("Logical Funnel analysis report", () => {
           count,
         })),
       ),
-    ),
-  )(
-    "matches prepared $globalScope scope for $progressionScope progression with $count steps",
-    async ({ globalScope, progressionScope, count }) => {
-      const database = createMigratedDatabase();
-      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
-      try {
-        seed(database, count);
-        const config = configFor(count, progressionScope);
-        const filters = preparedPagePathFilters(globalScope);
-        const expected = oldAnalysis(
-          config,
-          oldRows(database, config, filters, globalScope),
-        );
-        const actual = await queryFunnelAnalysis(
-          { DB: createSqliteD1Database(database, trace) } as unknown as Env,
-          SITE_ID,
-          WINDOW,
-          filters,
-          config,
-        );
+  );
+  const runPreparedScopeCase = async ({
+    globalScope,
+    progressionScope,
+    count,
+  }: (typeof preparedScopeCases)[number]) => {
+    const database = createMigratedDatabase();
+    const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+    try {
+      seed(database, count);
+      const config = configFor(count, progressionScope);
+      const filters = preparedPagePathFilters(globalScope);
+      const expected = oldAnalysis(
+        config,
+        oldRows(database, config, filters, globalScope),
+      );
+      const actual = await queryFunnelAnalysis(
+        { DB: createSqliteD1Database(database, trace) } as unknown as Env,
+        SITE_ID,
+        WINDOW,
+        filters,
+        config,
+      );
 
-        expect(actual).toEqual(expected);
-        expect(actual.steps).toHaveLength(count);
-        expect(actual.steps.every((step) => step.progression.count > 0)).toBe(
-          true,
-        );
-        expect(trace.preparedSql).toHaveLength(1);
-        expect(
-          new TextEncoder().encode(trace.preparedSql[0] ?? "").byteLength,
-        ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
-        expect(trace.bindings[0]?.length).toBeLessThanOrEqual(
-          D1_MAX_BOUND_PARAMETERS,
-        );
-      } finally {
-        database.close();
-      }
-    },
+      expect(actual).toEqual(expected);
+      expect(actual.steps).toHaveLength(count);
+      expect(actual.steps.every((step) => step.progression.count > 0)).toBe(
+        true,
+      );
+      expect(trace.preparedSql).toHaveLength(1);
+      expect(
+        new TextEncoder().encode(trace.preparedSql[0] ?? "").byteLength,
+      ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+      expect(trace.bindings[0]?.length).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+    } finally {
+      database.close();
+    }
+  };
+  const ordinaryPreparedScopeCases = preparedScopeCases.filter(
+    ({ globalScope, count }) => globalScope !== "event" || count !== 12,
+  );
+  const measuredLargePreparedScopeCases = preparedScopeCases.filter(
+    ({ globalScope, count }) => globalScope === "event" && count === 12,
+  );
+
+  it.each(ordinaryPreparedScopeCases)(
+    "matches prepared $globalScope scope for $progressionScope progression with $count steps",
+    async (testCase) => runPreparedScopeCase(testCase),
+  );
+
+  // These rows include both the frozen oracle and fresh query; under V8 they
+  // take about 5.3–5.5s, so only these two cases use a 10s test budget.
+  it.each(measuredLargePreparedScopeCases)(
+    "matches prepared $globalScope scope for $progressionScope progression with $count steps",
+    async (testCase) => runPreparedScopeCase(testCase),
+    10_000,
   );
 
   it.each(["session", "visitor"] as const)(

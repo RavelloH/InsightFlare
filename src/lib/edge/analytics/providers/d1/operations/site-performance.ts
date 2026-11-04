@@ -2,10 +2,15 @@ import "@tanstack/react-start/server-only";
 
 import type { Interval } from "@/lib/edge/analytics/contract";
 import { type FilterDocument } from "@/lib/edge/analytics/contract";
-import { SitePerformanceBreakdownDimensionSchema } from "@/lib/edge/analytics/contract/performance-dimensions";
+import {
+  type SitePerformanceBreakdownDimension,
+  SitePerformanceBreakdownDimensionSchema,
+} from "@/lib/edge/analytics/contract/performance-dimensions";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type {
+  PerformanceCountryRow,
   PerformanceMetricKey,
+  PerformanceRouteRow,
   PerformanceSummaryRow,
   PerformanceTrendPointRow,
 } from "@/lib/edge/analytics/providers/d1/internal/core-types";
@@ -42,6 +47,39 @@ export interface ReadSitePerformanceBreakdownInput extends ReadSitePerformanceIn
   readonly metric: PerformanceMetricKey;
   readonly limit: number;
 }
+
+export function serializePerformanceBreakdown(
+  dimension: SitePerformanceBreakdownDimension,
+  metric: PerformanceMetricKey,
+  rows: readonly (PerformanceRouteRow | PerformanceCountryRow)[],
+): {
+  readonly dimension: SitePerformanceBreakdownDimension;
+  readonly metric: PerformanceMetricKey;
+  readonly items: readonly {
+    readonly key: string;
+    readonly label: string;
+    readonly views: number;
+    readonly avg: number | null;
+    readonly p50: number | null;
+    readonly p75: number | null;
+    readonly p95: number | null;
+    readonly samples: number;
+  }[];
+} {
+  return {
+    dimension,
+    metric,
+    items: rows.map((row) => {
+      const key = "pathname" in row ? row.pathname : row.country;
+      return {
+        key,
+        label: key,
+        views: row.views,
+        ...row.metrics[metric],
+      };
+    }),
+  };
+}
 export async function readSitePerformanceSummary(
   input: ReadSitePerformanceInput,
 ): Promise<{ readonly metrics: PerformanceMetrics }> {
@@ -64,6 +102,24 @@ function serializePoint(point: PerformanceTrendPointRow) {
     samples: point.samples,
   };
 }
+export function serializePerformanceTimeseries(
+  interval: Interval,
+  trends: Record<PerformanceMetricKey, PerformanceTrendPointRow[]>,
+): {
+  readonly interval: Interval;
+  readonly series: PerformanceSeries;
+} {
+  return {
+    interval,
+    series: {
+      ttfb: trends.ttfb.map(serializePoint),
+      fcp: trends.fcp.map(serializePoint),
+      lcp: trends.lcp.map(serializePoint),
+      cls: trends.cls.map(serializePoint),
+      inp: trends.inp.map(serializePoint),
+    },
+  };
+}
 export async function readSitePerformanceTimeseries(
   input: ReadSitePerformanceTimeseriesInput,
 ): Promise<{
@@ -77,16 +133,7 @@ export async function readSitePerformanceTimeseries(
     input.interval,
     input.filters,
   );
-  return {
-    interval: input.interval,
-    series: {
-      ttfb: result.ttfb.map(serializePoint),
-      fcp: result.fcp.map(serializePoint),
-      lcp: result.lcp.map(serializePoint),
-      cls: result.cls.map(serializePoint),
-      inp: result.inp.map(serializePoint),
-    },
-  };
+  return serializePerformanceTimeseries(input.interval, result);
 }
 export async function readSitePerformanceBreakdown(
   input: ReadSitePerformanceBreakdownInput,
@@ -123,14 +170,5 @@ export async function readSitePerformanceBreakdown(
           input.window,
           input.filters,
         );
-  return {
-    dimension: dimension.data,
-    metric: input.metric,
-    items: result.map((row) => ({
-      key: "pathname" in row ? row.pathname : row.country,
-      label: "pathname" in row ? row.pathname : row.country,
-      views: row.views,
-      ...row.metrics[input.metric],
-    })),
-  };
+  return serializePerformanceBreakdown(dimension.data, input.metric, result);
 }

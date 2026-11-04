@@ -387,6 +387,7 @@ describe("D1 site contract provider pagination routing", () => {
       expect.anything(),
       EMPTY_FILTER_DOCUMENT,
       2,
+      undefined,
     );
     expect(queryReferrersPageFromD1).toHaveBeenCalled();
     expect(queryPagesDashboard).toHaveBeenCalled();

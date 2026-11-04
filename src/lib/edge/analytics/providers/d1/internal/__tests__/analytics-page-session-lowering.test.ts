@@ -602,36 +602,76 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         temporalDomain: "candidate",
         attributes: ["page.path"],
       });
-      const path = builder.slot(pages, "attribute:page.path");
       const string = { kind: "scalar", scalar: "string" } as const;
+      const boolean = { kind: "scalar", scalar: "boolean" } as const;
       const matchedA = builder.project(pages, {
         path: builder.literal("/match", string),
+        kind: builder.literal("page", string),
       });
       const matchedB = builder.project(pages, {
         path: builder.literal("/match", string),
+        kind: builder.literal("page", string),
       });
       const unmatched = builder.project(pages, {
         path: builder.literal("/missing", string),
+        kind: builder.literal("page", string),
       });
       const nullValue = builder.project(pages, {
         path: builder.literal(null, string),
+        kind: builder.literal("page", string),
       });
       const left = builder.appendRows(
         [matchedA, matchedB, unmatched, nullValue],
-        ["path"],
+        ["path", "kind"],
+      );
+      const acceptedA = builder.project(pages, {
+        path: builder.literal("/match", string),
+        kind: builder.literal("page", string),
+        accepted: builder.literal(true, boolean),
+      });
+      const acceptedB = builder.project(pages, {
+        path: builder.literal("/match", string),
+        kind: builder.literal("page", string),
+        accepted: builder.literal(true, boolean),
+      });
+      const rejectedDuplicate = builder.project(pages, {
+        path: builder.literal("/match", string),
+        kind: builder.literal("page", string),
+        accepted: builder.literal(false, boolean),
+      });
+      const acceptedNullKey = builder.project(pages, {
+        path: builder.literal(null, string),
+        kind: builder.literal("page", string),
+        accepted: builder.literal(true, boolean),
+      });
+      const rightBag = builder.appendRows(
+        [acceptedA, acceptedB, rejectedDuplicate, acceptedNullKey],
+        ["path", "kind", "accepted"],
       );
       const matchingRight = builder.filter(
-        pages,
-        builder.compare("eq", path, builder.literal("/match", string)),
+        rightBag,
+        builder.compare(
+          "eq",
+          builder.slot(rightBag, "accepted"),
+          builder.literal(true, boolean),
+        ),
       );
       const included = builder.semiJoin(left, matchingRight, [
-        { left: "path", right: "attribute:page.path" },
+        { left: "path", right: "path" },
+        { left: "kind", right: "kind" },
       ]);
       const excluded = builder.antiJoin(left, matchingRight, [
-        { left: "path", right: "attribute:page.path" },
+        { left: "path", right: "path" },
+        { left: "kind", right: "kind" },
       ]);
-      builder.output("included", included, [{ name: "path", slot: "path" }]);
-      builder.output("excluded", excluded, [{ name: "path", slot: "path" }]);
+      builder.output("included", included, [
+        { name: "path", slot: "path" },
+        { name: "kind", slot: "kind" },
+      ]);
+      builder.output("excluded", excluded, [
+        { name: "path", slot: "path" },
+        { name: "kind", slot: "kind" },
+      ]);
       const plan = builder.finish();
       const client = createD1DatabaseClient(createSqliteD1Database(db));
       const run = async (outputId: string) => {
@@ -643,20 +683,30 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         const lowered = lowerer.lower(output);
         const relation = lowerer.projectOutput(lowered, [
           { name: "path", slot: output.fields[0]!.slot },
+          { name: "kind", slot: output.fields[1]!.slot },
         ]);
         return (await client.all(compileD1Query(lowerLogicalPlan(relation))))
-          .results as Array<{ readonly path: string | null }>;
+          .results as Array<{
+          readonly path: string | null;
+          readonly kind: string;
+        }>;
       };
 
       expect(await run("included")).toEqual([
-        { path: "/match" },
-        { path: "/match" },
+        { path: "/match", kind: "page" },
+        { path: "/match", kind: "page" },
       ]);
       const excludedRows = await run("excluded");
-      excludedRows.sort((leftRow, rightRow) =>
-        String(leftRow.path ?? "").localeCompare(String(rightRow.path ?? "")),
-      );
-      expect(excludedRows).toEqual([{ path: null }, { path: "/missing" }]);
+      excludedRows.sort((leftRow, rightRow) => {
+        const pathOrder = String(leftRow.path ?? "").localeCompare(
+          String(rightRow.path ?? ""),
+        );
+        return pathOrder || leftRow.kind.localeCompare(rightRow.kind);
+      });
+      expect(excludedRows).toEqual([
+        { path: null, kind: "page" },
+        { path: "/missing", kind: "page" },
+      ]);
     } finally {
       db.close();
     }
@@ -3800,7 +3850,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         { leafCount: 12, kind: "supported" },
       ]);
       expect(boundaryCosts[0]).toMatchObject({
-        sqlBytes: 27_561,
+        sqlBytes: 22_540,
         bindings: 54,
         cteCount: 12,
         explain: {
@@ -3811,7 +3861,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         },
       });
       expect(boundaryCosts[1]).toMatchObject({
-        sqlBytes: 37_679,
+        sqlBytes: 30_867,
         bindings: 74,
         cteCount: 16,
         explain: {
@@ -3827,7 +3877,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         and: {
           statements: 1,
           bindings: 21,
-          sqlBytes: 10_875,
+          sqlBytes: 8_846,
           explain: {
             visitPrimaryKeyLookups: 1,
           },
@@ -3835,7 +3885,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         or: {
           statements: 1,
           bindings: 17,
-          sqlBytes: 8_337,
+          sqlBytes: 6_784,
           explain: {
             visitPrimaryKeyLookups: 1,
           },
@@ -3843,7 +3893,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         not: {
           statements: 1,
           bindings: 16,
-          sqlBytes: 8_620,
+          sqlBytes: 7_022,
           explain: {
             visitPrimaryKeyLookups: 1,
           },
@@ -3851,7 +3901,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         "nested-and-not": {
           statements: 1,
           bindings: 21,
-          sqlBytes: 11_102,
+          sqlBytes: 9_041,
           explain: {
             visitPrimaryKeyLookups: 1,
           },
@@ -3859,7 +3909,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
         "or-set-operation": {
           statements: 1,
           bindings: 21,
-          sqlBytes: 10_991,
+          sqlBytes: 8_948,
           explain: {
             visitPrimaryKeyLookups: 1,
           },
@@ -3868,7 +3918,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
       expect(costs["six-leaf-mixed"]).toMatchObject({
         statements: 1,
         bindings: 44,
-        sqlBytes: 22_620,
+        sqlBytes: 18_477,
         cteCount: 10,
         explain: {
           pageRangeIndexSearches: 4,
@@ -4431,7 +4481,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
       expect(observedCosts["event-only"]).toMatchObject({
         statements: 1,
         bindings: 16,
-        sqlLength: 7_845,
+        sqlLength: 6_358,
         explain: {
           eventTimeRangeSearches: 2,
           integerPrimaryKeyLookups: 3,
@@ -5071,7 +5121,7 @@ describe("Analytics native Page/Event primitive → Session D1 lowering", () => 
           rowsRead: null,
           rowsWritten: null,
           dbDurationMs: null,
-          physicalPlanHash: expect.stringMatching(/^v1:/u),
+          physicalPlanHash: expect.stringMatching(/^v8:/u),
         });
       }
       expect(record.performance.d1Statements).toBe(trace.preparedSql.length);

@@ -42,6 +42,7 @@ import {
   not,
   onConflictDoNothing,
   onConflictDoUpdate,
+  or,
   param,
   project,
   rowNumber,
@@ -50,6 +51,7 @@ import {
   semiJoin,
   sort,
   sum,
+  trimCharacters,
   trimSpaces,
   union,
   unixepoch,
@@ -58,13 +60,100 @@ import {
   window,
   windowCountRows,
 } from "@/lib/db";
+import * as d1Budget from "@/lib/db/d1-budget";
 import {
   compileD1Expression,
+  compileD1QuerySemiMembershipFallbackForTest,
+  compileD1QuerySemiMembershipForceSafeForTest,
   compileD1QueryUnoptimizedForTest,
 } from "@/lib/db/query/compiler";
-import type { Relation } from "@/lib/db/query/plan";
+import { validatePhysicalQueryPlan } from "@/lib/db/query/physical-plan";
+import type { InsertRow, Relation } from "@/lib/db/query/plan";
 import { schema } from "@/lib/db/schema";
+import type { SchemaRow } from "@/lib/db/schema/types";
 import type { DatabaseRuntime } from "@/lib/db/types";
+
+type NonAliasIntegerPrimaryKeyTable = {
+  readonly kind: "table";
+  readonly name: "inline_desc_non_alias";
+  readonly columns: {
+    readonly id: {
+      readonly kind: "column";
+      readonly table: "inline_desc_non_alias";
+      readonly sqlName: "id";
+      readonly propertyName: "id";
+      readonly declaredType: "INTEGER";
+      readonly affinity: "integer";
+      readonly nullable: false;
+      readonly primaryKeyPosition: 1;
+      readonly defaultSql: null;
+      readonly hidden: 0;
+      readonly generated: false;
+    };
+    readonly value: {
+      readonly kind: "column";
+      readonly table: "inline_desc_non_alias";
+      readonly sqlName: "value";
+      readonly propertyName: "value";
+      readonly declaredType: "TEXT";
+      readonly affinity: "text";
+      readonly nullable: false;
+      readonly primaryKeyPosition: 0;
+      readonly defaultSql: null;
+      readonly hidden: 0;
+      readonly generated: false;
+    };
+  };
+  readonly primaryKey: readonly ["id"];
+  readonly indexes: readonly [
+    {
+      readonly name: "sqlite_autoindex_inline_desc_non_alias_1";
+      readonly unique: true;
+      readonly columns: readonly ["id"];
+      readonly partial: false;
+    },
+  ];
+  readonly foreignKeys: readonly [];
+};
+
+function assertInsertRowTypes(): void {
+  const omittedGeneratedRowid: InsertRow<typeof schema.site_identities> = {
+    site_id: "site-a",
+  };
+  const explicitNullGeneratedRowid: InsertRow<typeof schema.site_identities> = {
+    site_id: "site-b",
+    site_pk: null,
+  };
+  const explicitNullExpressionGeneratedRowid: InsertRow<
+    typeof schema.site_identities
+  > = {
+    site_id: "site-expression-null",
+    site_pk: param(null),
+  };
+  const nonNullableReadRow: SchemaRow<typeof schema.site_identities> = {
+    site_id: "site-c",
+    site_pk: 1,
+  };
+  const nullableReadRow: SchemaRow<typeof schema.site_identities> = {
+    site_id: "site-d",
+    // @ts-expect-error Read rows keep actual rowid aliases non-nullable.
+    site_pk: null,
+  };
+  // @ts-expect-error Non-alias INTEGER primary keys remain required.
+  const missingNonAliasKey: InsertRow<NonAliasIntegerPrimaryKeyTable> = {
+    value: "required",
+  };
+  void [
+    omittedGeneratedRowid,
+    explicitNullGeneratedRowid,
+    explicitNullExpressionGeneratedRowid,
+    nonNullableReadRow,
+    nullableReadRow,
+    missingNonAliasKey,
+  ];
+}
+
+void assertInsertRowTypes;
 
 function executeAll(
   db: DatabaseSync,
@@ -85,6 +174,239 @@ function executeRun(
 }
 
 describe("typed D1 query compiler", () => {
+  it("shortens only generated aliases and preserves user identifiers and row labels", () => {
+    const identities = scan(schema.site_identities);
+    const selected = filter(
+      identities,
+      eq(identities.columns.site_id, param("identifier-test")),
+    );
+    const output = project(selected, {
+      "space name": selected.columns.site_id,
+      select: selected.columns.site_pk,
+    });
+    const query = compileD1Query(output);
+
+    expect(query.sql).toContain('FROM "site_identities" AS t0');
+    expect(query.sql).toContain('t0."site_id" AS _c1');
+    expect(query.sql).toContain('q0."_c1" = ?');
+    expect(query.sql).toContain('AS "space name"');
+    expect(query.sql).toContain('AS "select"');
+    expect(query.bindings).toEqual(["identifier-test"]);
+
+    const userScope = identities.columns.site_id.scope;
+    expect(
+      compileD1Expression(
+        identities.columns.site_id,
+        new Map([[userScope, { alias: "q0" }]]),
+      ).text,
+    ).toBe('"q0"._c1');
+  });
+
+  it("does not compact generated aliases after a binding-budget failure", () => {
+    const identities = scan(schema.site_identities);
+    const query = project(identities, {
+      siteId: identities.columns.site_id,
+    });
+    const budgetError = new D1StatementBudgetError(
+      "bindings",
+      101,
+      100,
+      "query.binding-budget-retry",
+    );
+    const statements: Array<{ readonly sql: string }> = [];
+    const budgetSpy = vi
+      .spyOn(d1Budget, "assertD1StatementBudget")
+      .mockImplementation((statement) => {
+        statements.push({ sql: statement.sql });
+        throw budgetError;
+      });
+    try {
+      expect(() =>
+        compileD1Query(query, { tag: "query.binding-budget-retry" }),
+      ).toThrow(budgetError);
+      expect(statements).toHaveLength(1);
+      expect(statements[0]?.sql).toContain(" AS _c");
+    } finally {
+      budgetSpy.mockRestore();
+    }
+  });
+
+  it("returns the compact SQL-byte budget failure without retrying again", () => {
+    const identities = scan(schema.site_identities);
+    const query = project(identities, {
+      siteId: identities.columns.site_id,
+    });
+    const budgetError = new D1StatementBudgetError(
+      "sql_bytes",
+      100_001,
+      100_000,
+      "query.sql-byte-retry",
+    );
+    const statements: Array<{ readonly sql: string }> = [];
+    const budgetSpy = vi
+      .spyOn(d1Budget, "assertD1StatementBudget")
+      .mockImplementation((statement) => {
+        statements.push({ sql: statement.sql });
+        throw budgetError;
+      });
+    try {
+      expect(() =>
+        compileD1Query(query, { tag: "query.sql-byte-retry" }),
+      ).toThrow(budgetError);
+      expect(statements).toHaveLength(2);
+      expect(statements[0]?.sql).toContain(" AS _c");
+      expect(statements[1]?.sql).not.toMatch(/\bAS _c\d+\b/u);
+    } finally {
+      budgetSpy.mockRestore();
+    }
+  });
+
+  it("compacts generated aliases while preserving a representative SQLite query", () => {
+    const db = createMigratedDatabase();
+    try {
+      executeRun(
+        db,
+        compileD1Mutation(
+          insert(schema.site_identities, [
+            { site_id: "κ? AS one" },
+            { site_id: "λ? AS two" },
+          ]),
+        ),
+      );
+
+      const sites = scan(schema.site_identities);
+      const selected = filter(
+        sites,
+        inList(sites.columns.site_id, ["κ? AS one", "λ? AS two"]),
+      );
+      const sharedOnce = union(selected, selected, true);
+      const sharedTwice = union(sharedOnce, sharedOnce, true);
+      const ranked = window(sharedTwice, {
+        rank: rowNumber({
+          orderBy: [
+            { expression: sharedTwice.columns.site_id, direction: "ASC" },
+          ],
+        }),
+      });
+      const scalarSites = scan(schema.site_identities);
+      const scalarSource = filter(
+        scalarSites,
+        eq(scalarSites.columns.site_id, ranked.columns.site_id),
+      );
+      const projected = project(ranked, {
+        siteId: ranked.columns.site_id,
+        formatted: concatText(
+          param("κ? AS"),
+          ranked.columns.site_id,
+          param("κ? AS"),
+        ),
+        sitePk: castInteger(ranked.columns.site_pk),
+        branch: caseWhen(
+          [
+            {
+              when: eq(ranked.columns.site_id, param("κ? AS one")),
+              then: param("match 雪? AS"),
+            },
+          ],
+          param("fallback ? AS"),
+        ),
+        rank: ranked.columns.rank,
+        scalarPk: scalar(
+          project(scalarSource, { site_pk: scalarSource.columns.site_pk }),
+        ),
+        nullable: param(null),
+      });
+      const physical = lowerLogicalPlan(projected);
+      expect(physical.sharedRelations.length).toBeGreaterThan(0);
+
+      const normal = compileD1Query(physical, {
+        tag: "query.generated-alias-compact-contract",
+      });
+      const normalBindings = normal.bindings ?? [];
+      expect(normal.sql).toContain("WITH _d1_shared_0 AS MATERIALIZED (");
+      expect(normal.sql).toContain("CAST(");
+      expect(normal.sql).toContain(" AS INTEGER)");
+      expect(normal.sql).toContain("ROW_NUMBER() OVER");
+      expect(normal.sql).toContain('AS "formatted"');
+      expect(
+        normalBindings.filter((binding) => binding === "κ? AS"),
+      ).toHaveLength(2);
+
+      const budgetError = new D1StatementBudgetError(
+        "sql_bytes",
+        100_001,
+        100_000,
+        "query.generated-alias-compact-contract",
+      );
+      const attempts: Array<{
+        readonly sql: string;
+        readonly bindings?: readonly unknown[];
+      }> = [];
+      const originalAssert = d1Budget.assertD1StatementBudget;
+      const budgetSpy = vi
+        .spyOn(d1Budget, "assertD1StatementBudget")
+        .mockImplementation((statement) => {
+          attempts.push({ sql: statement.sql, bindings: statement.bindings });
+          if (attempts.length === 1) throw budgetError;
+          originalAssert(statement);
+        });
+      let compact: ReturnType<typeof compileD1Query>;
+      try {
+        compact = compileD1Query(physical, {
+          tag: "query.generated-alias-compact-contract",
+        });
+      } finally {
+        budgetSpy.mockRestore();
+      }
+
+      expect(attempts).toHaveLength(2);
+      expect(attempts[0]?.sql).toBe(normal.sql);
+      expect(attempts[0]?.bindings).toEqual(normalBindings);
+      expect(attempts[1]?.sql).toBe(compact.sql);
+      expect(attempts[1]?.bindings).toEqual(compact.bindings);
+      expect(compact.sql).not.toMatch(/\bAS _c\d+\b/u);
+      expect(compact.sql).toContain("WITH _d1_shared_0 AS MATERIALIZED (");
+      expect(compact.sql).toContain("CAST(");
+      expect(compact.sql).toContain(" AS INTEGER)");
+      expect(compact.sql).toContain("ROW_NUMBER() OVER");
+      expect(compact.sql).toContain('AS "formatted"');
+      expect(compact.physicalPlanShape).toEqual(normal.physicalPlanShape);
+      expect(compact.bindings).toEqual(normalBindings);
+
+      const sortedRows = (query: ReturnType<typeof compileD1Query>) =>
+        (executeAll(db, query) as Record<string, unknown>[]).sort(
+          (left, right) =>
+            JSON.stringify(left).localeCompare(JSON.stringify(right)),
+        );
+      const normalRows = sortedRows(normal);
+      const compactRows = sortedRows(compact);
+      expect(compactRows).toEqual(normalRows);
+      expect(normalRows).toHaveLength(8);
+      expect(normalRows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            siteId: "κ? AS one",
+            formatted: "κ? ASκ? AS oneκ? AS",
+            sitePk: 1,
+            branch: "match 雪? AS",
+            scalarPk: 1,
+            nullable: null,
+          }),
+          expect.objectContaining({
+            siteId: "λ? AS two",
+            formatted: "κ? ASλ? AS twoκ? AS",
+            sitePk: 2,
+            branch: "fallback ? AS",
+            scalarPk: 2,
+            nullable: null,
+          }),
+        ]),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("compiles only static bounded ROUND precision and matches SQLite values", () => {
     const db = createMigratedDatabase();
     try {
@@ -264,6 +586,120 @@ describe("typed D1 query compiler", () => {
     }
   });
 
+  it("returns SQLite storage classes as non-null text for NULL, TEXT, and BLOB", () => {
+    const db = createMigratedDatabase();
+    try {
+      db.prepare("INSERT INTO site_identities (site_id) VALUES (?)").run(
+        "storage-class-test",
+      );
+      const identities = scan(schema.site_identities);
+      const query = compileD1Query(
+        project(identities, {
+          nullType: callFunction("storage-class", param(null)),
+          textType: callFunction("storage-class", param("value")),
+          blobType: callFunction(
+            "storage-class",
+            param(new Uint8Array([0x2f, 0x78])),
+          ),
+        }),
+      );
+
+      expect(query.sql.match(/typeof\(/gu)).toHaveLength(3);
+      expect(executeAll(db, query)).toEqual([
+        { nullType: "null", textType: "text", blobType: "blob" },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("counts UTF-8 bytes without decoding text", () => {
+    const db = createMigratedDatabase();
+    try {
+      db.prepare("INSERT INTO site_identities (site_id) VALUES (?)").run(
+        "byte-length-test",
+      );
+      const identities = scan(schema.site_identities);
+      const query = compileD1Query(
+        project(identities, {
+          asciiBytes: callFunction("byte-length", param("US")),
+          unicodeBytes: callFunction("byte-length", param("é")),
+          embeddedNulBytes: callFunction("byte-length", param("a\0b")),
+          blobBytes: callFunction(
+            "byte-length",
+            param(new Uint8Array([0x41, 0x80, 0x00])),
+          ),
+          nullBytes: callFunction("byte-length", param(null)),
+        }),
+      );
+
+      expect(query.sql).toContain("LENGTH(CAST(");
+      expect(query.sql).toContain(" AS BLOB))");
+      expect(executeAll(db, query)).toEqual([
+        {
+          asciiBytes: 2,
+          unicodeBytes: 2,
+          embeddedNulBytes: 3,
+          blobBytes: 3,
+          nullBytes: null,
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("revalidates storage-class scope and wire metadata when compiling a query", () => {
+    const identities = scan(schema.site_identities);
+    const users = scan(schema.users);
+    const externalOperand = project(identities, {
+      storageClass: callFunction("storage-class", users.columns.id),
+    });
+    expect(() => compileD1Query(externalOperand)).toThrowError(
+      expect.objectContaining({ code: "invalid_plan" }),
+    );
+
+    const valid = project(identities, {
+      storageClass: callFunction("storage-class", param("value")),
+    });
+    const wireQuery = JSON.parse(JSON.stringify(valid)) as Relation;
+    if (wireQuery.node.kind !== "project")
+      throw new Error("storage-class-test-project-missing");
+    const corrupted = {
+      ...wireQuery,
+      node: {
+        ...wireQuery.node,
+        projections: wireQuery.node.projections.map((projection) => ({
+          ...projection,
+          expression: {
+            ...projection.expression,
+            resultType: { affinity: "text", nullable: true },
+          },
+        })),
+      },
+    } as Relation;
+    expect(() => compileD1Query(corrupted)).toThrowError(
+      expect.objectContaining({ code: "invalid_plan" }),
+    );
+
+    const invalidOperand = {
+      ...wireQuery,
+      node: {
+        ...wireQuery.node,
+        projections: wireQuery.node.projections.map((projection) => ({
+          ...projection,
+          expression: {
+            ...projection.expression,
+            arguments: [null],
+          },
+        })),
+      },
+    } as unknown as Relation;
+    expect(() => compileD1Query(invalidOperand)).toThrowError(
+      expect.objectContaining({ code: "invalid_plan" }),
+    );
+  });
+
   it("implements ECMAScript trim semantics for text expressions", () => {
     const db = createMigratedDatabase();
     try {
@@ -325,6 +761,70 @@ describe("typed D1 query compiler", () => {
           expect(query.sql).toContain("char(9, 10, 11, 12, 13, 32, 160");
         expect(executeAll(db, query)).toEqual([{ spaces: sqlite, ecma }]);
       }
+
+      const asciiOnly = compileD1Query(
+        project(sites, { spaces: trimSpaces(param("  value  ")) }),
+      );
+      expect(asciiOnly.sql).toContain("TRIM(?)");
+      expect(asciiOnly.bindings).toEqual(["  value  "]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("trims an explicit typed character set with SQLite NULL semantics", () => {
+    const db = createMigratedDatabase();
+    try {
+      db.prepare("INSERT INTO site_identities (site_id) VALUES (?)").run(
+        "trim-characters-test",
+      );
+      const sites = scan(schema.site_identities);
+      const ecmaTrimCharacters =
+        "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
+      const trimCharactersCases = [
+        ...Array.from(
+          ecmaTrimCharacters,
+          (character) => `${character}x${character}`,
+        ),
+        "\u0085x\u0085",
+        "\u180ex\u180e",
+        "\u200bx\u200b",
+        "😀 \"' \u00a0x\u00a0 \"' 😀",
+        "\0 \u00a0x\u00a0 \0",
+        " \n  internal\t whitespace \r ",
+        "",
+        " \u00a0\ufeff\u2028 ",
+        "\ud800x\udc00",
+      ];
+
+      for (const input of trimCharactersCases) {
+        const sqliteInput = db.prepare("SELECT ? AS value").get(input) as {
+          readonly value: string;
+        };
+        const expected = sqliteInput.value.trim();
+        const query = compileD1Query(
+          project(sites, {
+            trimmed: trimCharacters(param(input), constant(ecmaTrimCharacters)),
+          }),
+        );
+        expect(query.sql).toContain("TRIM(");
+        expect(query.sql).not.toContain("TRIM(?)");
+        expect(query.bindings).toEqual([input]);
+        expect(executeAll(db, query)).toEqual([{ trimmed: expected }]);
+      }
+
+      const nullInput = compileD1Query(
+        project(sites, {
+          trimmed: trimCharacters(param(null), constant(" ")),
+        }),
+      );
+      const nullCharacters = compileD1Query(
+        project(sites, {
+          trimmed: trimCharacters(param("value"), param(null)),
+        }),
+      );
+      expect(executeAll(db, nullInput)).toEqual([{ trimmed: null }]);
+      expect(executeAll(db, nullCharacters)).toEqual([{ trimmed: null }]);
     } finally {
       db.close();
     }
@@ -400,7 +900,7 @@ describe("typed D1 query compiler", () => {
       });
       const all = compileD1Query(ranked);
       expect(all.sql).toContain("ROW_NUMBER() OVER (PARTITION BY");
-      expect(all.sql).toContain('ORDER BY "q');
+      expect(all.sql).toContain("ORDER BY q");
       expect(all.sql).not.toMatch(/OVER \([^)]*id.*(?:ASC|DESC)/iu);
       expect(executeAll(db, all)).toHaveLength(8);
 
@@ -643,7 +1143,7 @@ describe("typed D1 query compiler", () => {
     const lookup = limit(filter(users, eq(users.columns.id, param("u-1"))), 1);
     const query = compileD1Query(lookup, { tag: "users.lookup" });
     expect(query.sql).toContain('FROM "users"');
-    expect(query.sql).toContain('WHERE ("q0"."_c0" = ?)');
+    expect(query.sql).toContain("WHERE (q0._c0 = ?)");
     expect(query.bindings).toEqual(["u-1", 1]);
     expect(query.tag).toBe("users.lookup");
     expect(compileD1Query(lookup)).toEqual(compileD1Query(lookup));
@@ -681,15 +1181,15 @@ describe("typed D1 query compiler", () => {
       eq(events.columns.event_name_id, names.columns.id),
     );
     expect(compileD1Query(joined).sql).toContain("INNER JOIN");
-    expect(
-      compileD1Query(
-        semiJoin(
-          events,
-          names,
-          eq(events.columns.event_name_id, names.columns.id),
-        ),
-      ).sql,
-    ).toContain("EXISTS");
+    const positiveMembership = compileD1Query(
+      semiJoin(
+        events,
+        names,
+        eq(events.columns.event_name_id, names.columns.id),
+      ),
+    );
+    expect(positiveMembership.sql).toContain("EXISTS");
+    expect(positiveMembership.physicalPlanShape?.version).not.toBe(10);
     expect(
       compileD1Query(
         antiJoin(
@@ -750,7 +1250,7 @@ describe("typed D1 query compiler", () => {
       expect(physical.sharedRelations[0]?.dependencies).toEqual([]);
 
       const query = compileD1Query(repeatedUnion);
-      expect(query.sql).toContain('WITH "_d1_shared_0" AS (');
+      expect(query.sql).toContain("WITH _d1_shared_0 AS (");
       expect(query.bindings).toEqual(["site-a"]);
       expect(compileD1Query(physical)).toEqual(query);
       expect(executeAll(db, query)).toEqual([
@@ -886,7 +1386,7 @@ describe("typed D1 query compiler", () => {
         eq(param(1), param(1)),
       );
       const membershipQuery = compileD1Query(membershipCounts);
-      expect(membershipQuery.sql).toContain('"_d1_shared_0"');
+      expect(membershipQuery.sql).toContain("_d1_shared_0");
       expect(membershipQuery.bindings).toEqual(["site-a", 1, 1]);
       expect(executeAll(db, membershipQuery)).toEqual([
         { left_rows: 1, right_rows: 1 },
@@ -905,12 +1405,597 @@ describe("typed D1 query compiler", () => {
         emptyCount,
         eq(param(1), param(1)),
       );
-      expect(compileD1Query(repeatedEmptyCount).sql).toContain("WITH ");
-      expect(executeAll(db, compileD1Query(repeatedEmptyCount))).toEqual([
+      const repeatedEmptyPhysical = lowerLogicalPlan(repeatedEmptyCount);
+      expect(
+        repeatedEmptyPhysical.sharedRelations.some(
+          ({ node }) => node === emptyCount.node,
+        ),
+      ).toBe(false);
+      const repeatedEmptyQuery = compileD1Query(repeatedEmptyPhysical);
+      expect(executeAll(db, repeatedEmptyQuery)).toEqual([
         { left_rows: 0, right_rows: 0 },
       ]);
     } finally {
       db.close();
+    }
+  });
+
+  it("preserves bags through Generic semi and anti joins with filtered composite membership", () => {
+    const db = createMigratedDatabase();
+    try {
+      const left = valuesRelation(
+        {
+          marker: { affinity: "text", nullable: false },
+          key_a: { affinity: "text", nullable: true },
+          key_b: { affinity: "text", nullable: true },
+          region: { affinity: "text", nullable: false },
+        },
+        [
+          { marker: "match-1", key_a: "site-a", key_b: "x", region: "west" },
+          { marker: "match-2", key_a: "site-a", key_b: "x", region: "west" },
+          {
+            marker: "residual-miss",
+            key_a: "site-a",
+            key_b: "x",
+            region: "east",
+          },
+          { marker: "null-first-key", key_a: null, key_b: "x", region: "west" },
+          {
+            marker: "null-second-key",
+            key_a: "site-b",
+            key_b: null,
+            region: "west",
+          },
+          {
+            marker: "right-filtered",
+            key_a: "site-z",
+            key_b: "x",
+            region: "west",
+          },
+          { marker: "unmatched", key_a: "missing", key_b: "x", region: "west" },
+        ],
+      );
+      const right = valuesRelation(
+        {
+          key_a: { affinity: "text", nullable: true },
+          key_b: { affinity: "text", nullable: true },
+          region: { affinity: "text", nullable: false },
+          accepted: { affinity: "text", nullable: false },
+        },
+        [
+          { key_a: "site-a", key_b: "x", region: "west", accepted: "yes" },
+          { key_a: "site-a", key_b: "x", region: "west", accepted: "yes" },
+          { key_a: "site-a", key_b: "x", region: "west", accepted: "no" },
+          { key_a: null, key_b: "x", region: "west", accepted: "yes" },
+          { key_a: "site-b", key_b: null, region: "west", accepted: "yes" },
+          { key_a: "site-z", key_b: "x", region: "west", accepted: "no" },
+        ],
+      );
+      const filteredRight = filter(
+        right,
+        eq(right.columns.accepted, param("yes")),
+      );
+      const condition = and(
+        eq(left.columns.key_a, filteredRight.columns.key_a),
+        eq(left.columns.key_b, filteredRight.columns.key_b),
+        eq(left.columns.region, filteredRight.columns.region),
+      );
+      const included = semiJoin(left, filteredRight, condition);
+      const excluded = antiJoin(left, filteredRight, condition);
+      const includedDefaultQuery = compileD1Query(included);
+      const includedQuery =
+        compileD1QuerySemiMembershipForceSafeForTest(included);
+      const includedFallbackQuery =
+        compileD1QuerySemiMembershipFallbackForTest(included);
+      const excludedQuery = compileD1Query(excluded);
+      expect(includedDefaultQuery.sql).toContain("EXISTS");
+      expect(includedDefaultQuery.sql).not.toContain(" IN (SELECT ");
+      expect(includedQuery.sql).toContain(" IN (SELECT ");
+      expect(includedQuery.sql).not.toContain("EXISTS");
+      expect(includedFallbackQuery.sql).toContain("EXISTS");
+      expect(includedQuery.physicalPlanShape?.version).toBe(10);
+      expect(includedFallbackQuery.physicalPlanShape?.version).not.toBe(10);
+      expect(excludedQuery.sql).toContain("NOT EXISTS");
+      expect(includedQuery.sql).not.toContain("DISTINCT");
+      expect(excludedQuery.sql).not.toContain("DISTINCT");
+
+      const markers = (query: ReturnType<typeof compileD1Query>) =>
+        executeAll(db, query)
+          .map((row) => String(row.marker))
+          .sort();
+      expect(markers(includedQuery)).toEqual(["match-1", "match-2"]);
+      expect(markers(includedFallbackQuery)).toEqual(markers(includedQuery));
+      expect(markers(excludedQuery)).toEqual([
+        "null-first-key",
+        "null-second-key",
+        "residual-miss",
+        "right-filtered",
+        "unmatched",
+      ]);
+
+      const scalarLeft = valuesRelation(
+        {
+          marker: { affinity: "text", nullable: false },
+          key: { affinity: "text", nullable: true },
+        },
+        [
+          { marker: "scalar-first", key: "same" },
+          { marker: "scalar-second", key: "same" },
+          { marker: "scalar-null", key: null },
+          { marker: "scalar-miss", key: "other" },
+        ],
+      );
+      const scalarRight = valuesRelation(
+        { key: { affinity: "text", nullable: true } },
+        [{ key: "same" }, { key: "same" }, { key: null }],
+      );
+      const scalarSemi = semiJoin(
+        scalarLeft,
+        scalarRight,
+        eq(scalarLeft.columns.key, scalarRight.columns.key),
+      );
+      const scalarDefaultQuery = compileD1Query(scalarSemi);
+      const scalarQuery =
+        compileD1QuerySemiMembershipForceSafeForTest(scalarSemi);
+      const scalarFallbackQuery =
+        compileD1QuerySemiMembershipFallbackForTest(scalarSemi);
+      expect(scalarDefaultQuery.sql).toContain("EXISTS");
+      expect(scalarDefaultQuery.sql).not.toContain(" IN (SELECT ");
+      expect(scalarQuery.sql).toContain(" IN (SELECT ");
+      expect(scalarQuery.physicalPlanShape?.version).toBe(10);
+      expect(
+        executeAll(db, scalarQuery)
+          .map((row) => row.marker)
+          .sort(),
+      ).toEqual(["scalar-first", "scalar-second"]);
+      expect(executeAll(db, scalarFallbackQuery)).toEqual(
+        executeAll(db, scalarQuery),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("vetoes non-total and non-conjunctive SemiJoin membership and rejects forged choices", () => {
+    const sites = scan(schema.site_identities);
+    const transformedRight = project(sites, {
+      site_pk: callFunction("abs", sites.columns.site_pk),
+    });
+    const nonTotal = semiJoin(
+      sites,
+      transformedRight,
+      eq(sites.columns.site_pk, transformedRight.columns.site_pk),
+    );
+    const nonTotalPhysical = lowerLogicalPlan(nonTotal);
+    expect(nonTotalPhysical.semiMembershipChoices).toEqual([]);
+    expect(compileD1Query(nonTotal).sql).toContain("EXISTS");
+
+    const right = scan(schema.site_identities);
+    const extraPredicate = semiJoin(
+      sites,
+      right,
+      and(
+        eq(sites.columns.site_pk, right.columns.site_pk),
+        eq(param(1), param(1)),
+      ),
+    );
+    expect(lowerLogicalPlan(extraPredicate).semiMembershipChoices).toEqual([]);
+    expect(compileD1Query(extraPredicate).sql).toContain("EXISTS");
+
+    const disjunction = semiJoin(
+      sites,
+      right,
+      or(
+        eq(sites.columns.site_pk, right.columns.site_pk),
+        eq(sites.columns.site_id, right.columns.site_id),
+      ),
+    );
+    expect(lowerLogicalPlan(disjunction).semiMembershipChoices).toEqual([]);
+    expect(compileD1Query(disjunction).sql).toContain("EXISTS");
+
+    const eligible = semiJoin(
+      sites,
+      right,
+      eq(sites.columns.site_pk, right.columns.site_pk),
+    );
+    const physical = lowerLogicalPlan(eligible);
+    expect(physical.semiMembershipChoices).toHaveLength(1);
+    expect(() => validatePhysicalQueryPlan(physical)).not.toThrow();
+    const choice = physical.semiMembershipChoices[0]!;
+    expect(() =>
+      validatePhysicalQueryPlan({
+        ...physical,
+        semiMembershipChoices: [
+          { ...choice, leftKeyIndexes: [choice.leftKeyIndexes[0]! + 1] },
+        ],
+      }),
+    ).toThrow(/semi membership choices/u);
+    const sparse = new Array(1);
+    expect(() =>
+      validatePhysicalQueryPlan({
+        ...physical,
+        semiMembershipChoices: sparse,
+      }),
+    ).toThrow(/semi membership choices/u);
+    expect(() => validatePhysicalQueryPlan(physical)).not.toThrow();
+  });
+
+  it("keeps SemiJoin as EXISTS when a key collation is unknown", () => {
+    const table = schema.site_identities;
+    const originalCollation = table.defaultCollation;
+    Object.assign(table, { defaultCollation: "unknown" });
+    try {
+      const left = scan(table);
+      const right = scan(table);
+      const relation = semiJoin(
+        left,
+        right,
+        eq(left.columns.site_id, right.columns.site_id),
+      );
+
+      expect(lowerLogicalPlan(relation).semiMembershipChoices).toEqual([]);
+      expect(compileD1Query(relation).sql).toContain("EXISTS");
+    } finally {
+      Object.assign(table, { defaultCollation: originalCollation });
+    }
+  });
+
+  it("keeps ordinary INTEGER storage outside the exact membership domain", () => {
+    const db = createMigratedDatabase();
+    try {
+      db.exec("PRAGMA foreign_keys = OFF");
+      db.exec(`
+        INSERT INTO site_identities (site_pk, site_id) VALUES
+          (-9223372036854775808, 'int64-min'),
+          (-9223372036854774784, 'int64-neighbor'),
+          (42, 'ordinary-integer')
+      `);
+      db.exec(`
+        INSERT INTO custom_event_json_values (
+          event_pk, node_id, site_id, event_name_id, path_id, occurred_at,
+          value_type, number_value, site_pk
+        ) VALUES
+          (-9223372036854775808, 1, 'int64-min', 1, 1, 0, 'number',
+            -9223372036854775808.0, -9223372036854775808.0),
+          (-9223372036854774784, 1, 'int64-neighbor', 1, 1, 0, 'number',
+            -9223372036854774784.0, -9223372036854774784.0),
+          (42, 1, 'ordinary-integer', 1, 1, 0, 'number', 42, 42),
+          (43, 1, 'ordinary-real', 1, 1, 0, 'number', 42.5, 42.5)
+      `);
+      expect(
+        db
+          .prepare(
+            "SELECT typeof(site_pk) AS integerType FROM site_identities WHERE site_id = 'int64-min'",
+          )
+          .get(),
+      ).toEqual({ integerType: "integer" });
+      const storedTypesStatement = db.prepare(
+        "SELECT event_pk, typeof(site_pk) AS sitePkType FROM custom_event_json_values ORDER BY event_pk",
+      );
+      storedTypesStatement.setReadBigInts(true);
+      const storedTypes = storedTypesStatement.all();
+      expect(storedTypes.map(({ sitePkType }) => sitePkType)).toEqual([
+        "real",
+        "integer",
+        "integer",
+        "real",
+      ]);
+
+      const sites = scan(schema.site_identities);
+      const values = scan(schema.custom_event_json_values);
+      const integerMinimum = semiJoin(
+        sites,
+        values,
+        eq(sites.columns.site_pk, values.columns.site_pk),
+      );
+      const textToInteger = semiJoin(
+        sites,
+        values,
+        // This intentionally bypasses the expression helper's static check
+        // so the runtime validator's incompatible-affinity refusal is tested.
+        eq(sites.columns.site_id, values.columns.site_pk as never),
+      );
+      const candidate = compileD1Query(integerMinimum);
+      const baseline =
+        compileD1QuerySemiMembershipFallbackForTest(integerMinimum);
+      const executeIntegerRows = (query: ReturnType<typeof compileD1Query>) => {
+        const statement = db.prepare(query.sql);
+        statement.setReadBigInts(true);
+        return statement.all(...((query.bindings ?? []) as SQLInputValue[]));
+      };
+      expect(candidate.sql).toContain("EXISTS");
+      expect(candidate.physicalPlanShape?.version).not.toBe(10);
+      expect(executeIntegerRows(candidate)).toEqual(
+        executeIntegerRows(baseline),
+      );
+      expect(
+        executeIntegerRows(candidate)
+          .map(({ site_id }) => site_id)
+          .sort(),
+      ).toEqual(["int64-min", "int64-neighbor", "ordinary-integer"]);
+
+      const reverse = semiJoin(
+        values,
+        sites,
+        eq(values.columns.site_pk, sites.columns.site_pk),
+      );
+      const reverseCandidate = compileD1Query(reverse);
+      const reverseBaseline =
+        compileD1QuerySemiMembershipFallbackForTest(reverse);
+      expect(reverseCandidate.sql).toContain("EXISTS");
+      expect(executeIntegerRows(reverseCandidate)).toEqual(
+        executeIntegerRows(reverseBaseline),
+      );
+      expect(
+        executeIntegerRows(reverseCandidate).map(({ event_pk }) => event_pk),
+      ).toEqual([-9_223_372_036_854_774_784n, 42n]);
+
+      const tuple = semiJoin(
+        sites,
+        values,
+        and(
+          eq(sites.columns.site_pk, values.columns.site_pk),
+          eq(sites.columns.site_pk, values.columns.event_pk),
+        ),
+      );
+      const tupleCandidate = compileD1Query(tuple);
+      const tupleBaseline = compileD1QuerySemiMembershipFallbackForTest(tuple);
+      expect(tupleCandidate.sql).toContain("EXISTS");
+      expect(executeIntegerRows(tupleCandidate)).toEqual(
+        executeIntegerRows(tupleBaseline),
+      );
+      expect(
+        executeIntegerRows(tupleCandidate)
+          .map(({ site_id }) => site_id)
+          .sort(),
+      ).toEqual(["int64-min", "int64-neighbor", "ordinary-integer"]);
+
+      expect(() => compileD1Query(textToInteger)).toThrow(
+        /incompatible SQL affinities/u,
+      );
+      const integerToReal = semiJoin(
+        sites,
+        values,
+        eq(sites.columns.site_pk, values.columns.number_value),
+      );
+      expect(lowerLogicalPlan(integerToReal).semiMembershipChoices).toEqual([]);
+      const realCandidate = compileD1Query(integerToReal);
+      const realBaseline =
+        compileD1QuerySemiMembershipFallbackForTest(integerToReal);
+      expect(realCandidate.sql).toContain("EXISTS");
+      expect(realCandidate.physicalPlanShape?.version).not.toBe(10);
+      expect(executeIntegerRows(realCandidate)).toEqual(
+        executeIntegerRows(realBaseline),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("optimizes proven rowid domains and rejects an inline DESC primary key", () => {
+    const db = createMigratedDatabase();
+    try {
+      db.prepare("INSERT INTO site_identities (site_id) VALUES (?)").run(
+        "rowid-a",
+      );
+      db.prepare("INSERT INTO site_identities (site_id) VALUES (?)").run(
+        "rowid-b",
+      );
+      const duplicateSites = valuesRelation(
+        { siteId: { affinity: "text", nullable: false } },
+        [{ siteId: "rowid-a" }, { siteId: "rowid-a" }, { siteId: "rowid-b" }],
+      );
+      const siteRows = scan(schema.site_identities);
+      const duplicatedLeft = join(
+        duplicateSites,
+        siteRows,
+        eq(duplicateSites.columns.siteId, siteRows.columns.site_id),
+      );
+      const rightSiteRows = scan(schema.site_identities);
+      const selectedRight = filter(
+        rightSiteRows,
+        eq(rightSiteRows.columns.site_id, param("rowid-a")),
+      );
+      const valid = semiJoin(
+        duplicatedLeft,
+        selectedRight,
+        eq(duplicatedLeft.columns.right_site_pk, selectedRight.columns.site_pk),
+      );
+      const validDefault = compileD1Query(valid);
+      const validCandidate =
+        compileD1QuerySemiMembershipForceSafeForTest(valid);
+      const validBaseline = compileD1QuerySemiMembershipFallbackForTest(valid);
+      expect(validDefault.sql).toContain("EXISTS");
+      expect(validDefault.sql).not.toContain(" IN (SELECT ");
+      expect(validCandidate.sql).toContain(" IN (SELECT ");
+      expect(validCandidate.physicalPlanShape?.version).toBe(10);
+      expect(executeAll(db, validCandidate)).toEqual(
+        executeAll(db, validBaseline),
+      );
+      expect(executeAll(db, validCandidate)).toHaveLength(2);
+
+      const descTable = {
+        kind: "table",
+        name: "inline_desc_non_alias",
+        defaultCollation: "BINARY",
+        columns: {
+          id: {
+            kind: "column",
+            table: "inline_desc_non_alias",
+            sqlName: "id",
+            propertyName: "id",
+            declaredType: "INTEGER",
+            affinity: "integer",
+            nullable: false,
+            primaryKeyPosition: 1,
+            defaultSql: null,
+            hidden: 0,
+            generated: false,
+          },
+          value: {
+            kind: "column",
+            table: "inline_desc_non_alias",
+            sqlName: "value",
+            propertyName: "value",
+            declaredType: "TEXT",
+            affinity: "text",
+            nullable: false,
+            primaryKeyPosition: 0,
+            defaultSql: null,
+            hidden: 0,
+            generated: false,
+          },
+        },
+        primaryKey: ["id"],
+        indexes: [
+          {
+            name: "sqlite_autoindex_inline_desc_non_alias_1",
+            unique: true,
+            columns: ["id"],
+            partial: false,
+          },
+        ],
+        foreignKeys: [],
+      } as const satisfies NonAliasIntegerPrimaryKeyTable & {
+        readonly defaultCollation: "BINARY";
+      };
+      const schemaCatalog = schema as unknown as Record<string, unknown>;
+      schemaCatalog[descTable.name] = descTable;
+      try {
+        const descLeft = scan(
+          descTable as unknown as typeof schema.site_identities,
+        );
+        const descRight = scan(
+          descTable as unknown as typeof schema.site_identities,
+        );
+        const descLeftKey = Object.values(descLeft.columns)[0]!;
+        const descRightKey = Object.values(descRight.columns)[0]!;
+        const descSemi = semiJoin(
+          descLeft,
+          descRight,
+          eq(descLeftKey, descRightKey),
+        );
+        expect(lowerLogicalPlan(descSemi).semiMembershipChoices).toEqual([]);
+        expect(compileD1Query(descSemi).sql).toContain("EXISTS");
+      } finally {
+        Reflect.deleteProperty(schemaCatalog, descTable.name);
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves positive SemiJoin filtering with an empty RHS", () => {
+    const db = createMigratedDatabase();
+    try {
+      const left = valuesRelation(
+        {
+          marker: { affinity: "text", nullable: false },
+          key: { affinity: "text", nullable: true },
+        },
+        [
+          { marker: "left-a", key: "a" },
+          { marker: "left-null", key: null },
+        ],
+      );
+      const right = valuesRelation(
+        { key: { affinity: "text", nullable: true } },
+        [],
+      );
+      const relation = semiJoin(
+        left,
+        right,
+        eq(left.columns.key, right.columns.key),
+      );
+      const defaultQuery = compileD1Query(relation);
+      const candidate = compileD1QuerySemiMembershipForceSafeForTest(relation);
+      const baseline = compileD1QuerySemiMembershipFallbackForTest(relation);
+
+      expect(defaultQuery.sql).toContain("EXISTS");
+      expect(defaultQuery.sql).not.toContain(" IN (SELECT ");
+      expect(candidate.sql).toContain(" IN (SELECT ");
+      expect(candidate.physicalPlanShape?.version).toBe(10);
+      expect(executeAll(db, candidate)).toEqual([]);
+      expect(executeAll(db, baseline)).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("proves values-relation keys through a Generic Join for nullable self-membership", () => {
+    const database = createMigratedDatabase();
+    try {
+      const left = valuesRelation(
+        {
+          marker: { affinity: "text", nullable: false },
+          bucket: { affinity: "text", nullable: false },
+        },
+        [
+          { marker: "left-first", bucket: "all" },
+          { marker: "left-second", bucket: "all" },
+        ],
+      );
+      const right = valuesRelation(
+        {
+          keyA: { affinity: "text", nullable: true },
+          keyB: { affinity: "text", nullable: true },
+          tag: { affinity: "text", nullable: false },
+          bucket: { affinity: "text", nullable: false },
+        },
+        [
+          { keyA: "a", keyB: "x", tag: "duplicate-one", bucket: "all" },
+          { keyA: "a", keyB: "x", tag: "duplicate-two", bucket: "all" },
+          { keyA: null, keyB: "x", tag: "null-key", bucket: "all" },
+          { keyA: "b", keyB: "y", tag: "other-key", bucket: "all" },
+        ],
+      );
+      const source = join(
+        left,
+        right,
+        eq(left.columns.bucket, right.columns.bucket),
+      );
+      const keys = distinct(
+        project(source, {
+          keyA: source.columns.right_keyA,
+          keyB: source.columns.right_keyB,
+        }),
+      );
+      const selfJoin = join(
+        source,
+        keys,
+        and(
+          eq(source.columns.right_keyA, keys.columns.keyA),
+          eq(source.columns.right_keyB, keys.columns.keyB),
+        ),
+      );
+      const result = project(selfJoin, {
+        marker: selfJoin.columns.left_left_marker,
+        tag: selfJoin.columns.left_right_tag,
+      });
+      const physical = lowerLogicalPlan(result);
+      expect(physical.selfMembershipChoices).toHaveLength(1);
+
+      const optimized = compileD1Query(physical);
+      const unoptimized = compileD1QueryUnoptimizedForTest(result);
+      const bag = (query: ReturnType<typeof compileD1Query>) =>
+        executeAll(database, query)
+          .map((row) => JSON.stringify(row))
+          .sort();
+      expect(bag(optimized)).toEqual(bag(unoptimized));
+      expect(bag(optimized)).toEqual(
+        [
+          { marker: "left-first", tag: "duplicate-one" },
+          { marker: "left-first", tag: "duplicate-two" },
+          { marker: "left-first", tag: "other-key" },
+          { marker: "left-second", tag: "duplicate-one" },
+          { marker: "left-second", tag: "duplicate-two" },
+          { marker: "left-second", tag: "other-key" },
+        ]
+          .map((row) => JSON.stringify(row))
+          .sort(),
+      );
+    } finally {
+      database.close();
     }
   });
 
@@ -1169,8 +2254,8 @@ describe("typed D1 query compiler", () => {
 
         expect(optimized.sql).not.toBe(mechanical.sql);
         expect(optimized.sql).toContain(".*");
-        expect(optimized.sql).toContain('"site_pk" AS "_c0"');
-        expect(optimized.sql).toContain('AS "_c2"');
+        expect(optimized.sql).toContain('"site_pk" AS _c0');
+        expect(optimized.sql).toContain("AS _c2");
         expect(mechanical.sql).not.toContain(".*");
         expect(optimized.bindings).toEqual(mechanical.bindings);
         expect(repeated.sql).toBe(optimized.sql);
@@ -1248,7 +2333,7 @@ describe("typed D1 query compiler", () => {
       ).toThrowError(expect.objectContaining({ code: "invalid_plan" }));
       const optimized = compileD1Query(physical);
       const mechanical = compileD1QueryUnoptimizedForTest(repeated);
-      expect(optimized.sql).toContain('"_d1_shared_0"');
+      expect(optimized.sql).toContain("_d1_shared_0");
       expect(optimized.bindings).not.toEqual(mechanical.bindings);
       expect(executeAll(db, optimized)).toEqual([
         {
@@ -2044,7 +3129,7 @@ describe("typed D1 query compiler", () => {
           ),
         }),
       );
-      expect(correlatedMembership.sql).toContain('"q0"."_c1"');
+      expect(correlatedMembership.sql).toContain("q0._c1");
       expect(executeAll(db, correlatedMembership)).toEqual([
         { site_id: "site-a", contains_matching_id: 1 },
         { site_id: "site-b", contains_matching_id: 1 },

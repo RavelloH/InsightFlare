@@ -1,15 +1,106 @@
-import { D1_MAX_BOUND_PARAMETERS } from "@/lib/db/d1-budget";
-import type { DatabaseBinding } from "@/lib/db/types";
+import type {
+  SchemaColumnReference,
+  SchemaObjectReference,
+} from "@/lib/db/schema/types";
 
+import {
+  assertCurrentPhysicalCompileOrderPolicy,
+  derivePhysicalCompileOrderPolicy,
+} from "./physical/compile-order";
+import {
+  analyzeConditionalLookupChoices,
+  sameConditionalLookupChoices,
+} from "./physical/conditional-lookup";
+import type {
+  ConstantFilterJoinProjection,
+  DirectScanProjectionChoice,
+  PassthroughProjectFusion,
+  PhysicalJoinOrderStrategy,
+  PhysicalQueryPlan,
+  PositiveTupleMembershipCandidate,
+  SharedRelationDefinition,
+} from "./physical/contracts";
+import {
+  lexicographicComparisonChoices,
+  sameLexicographicComparisonChoices,
+} from "./physical/lexicographic-comparison";
+import {
+  auditMaterializedBoundaryFixedPoint,
+  type CandidateFacts,
+  materializationConsumerEdges,
+  type MaterializedBoundaryContext,
+  materializedBoundaryContext,
+  type StrictStageReaderContext,
+} from "./physical/materialization-context";
+import {
+  emitMaterializationDiagnostic,
+  type MaterializationDiagnosticSink,
+} from "./physical/materialization-diagnostics";
+import {
+  autoMaterializationPromotionCandidates,
+  type MaterializationPromotionCandidate,
+} from "./physical/materialization-selection";
+import {
+  analyzeNativeNullOrdering,
+  sameNativeNullOrderingChoices,
+} from "./physical/native-null-ordering";
+import {
+  rowPipelineChoices,
+  sameRowPipelineChoices,
+} from "./physical/row-pipeline";
+import {
+  partitionSelfMembershipCandidates,
+  type PhysicalSelfMembershipChoice,
+} from "./physical/self-membership";
+import { createSelfMembershipDerivationContext } from "./physical/self-membership-context";
+import {
+  analyzeSemiMembershipCandidates,
+  sameSemiMembershipChoices,
+  semiMembershipChoices,
+} from "./physical/semi-membership";
+import {
+  sameSemiMembershipCostSelections,
+  semiMembershipCostSelections,
+} from "./physical/semi-membership-cost";
+import {
+  createPhysicalSharedRelationInterfaceView,
+  type PhysicalSharedRelationBoundaryEvidence,
+  type PhysicalSharedRelationInterfaceView,
+  type PhysicalSharedRelationLicenseKind,
+  samePhysicalSharedRelationDefinitionIdentity,
+  snapshotPhysicalSharedRelationLayout,
+} from "./physical/shared-relation-interfaces";
+import {
+  analyzeSingletonRankChoices,
+  sameSingletonRankChoices,
+} from "./physical/singleton-rank";
+import { reviewStrictRankStages } from "./physical/strict-rank-stage-review";
+import {
+  type BoundedAdmissionEvidence,
+  boundedAdmissionReuseCandidates,
+} from "./bounded-admission-reuse";
+import {
+  boundedFactLocalReuseCandidates,
+  type BoundedFactLocalReuseEvidence,
+} from "./bounded-fact-local-reuse";
+import { boundedGroupSummaryReuseCandidates } from "./bounded-group-summary-reuse";
+import { boundedSummaryDerivedReuseCandidates } from "./bounded-summary-derived-reuse";
+import { completeKeyedLookupReuseCandidates } from "./complete-keyed-lookup-reuse";
 import { DatabaseCompilerError } from "./errors";
+import type { AnyExpression, RelationScope, SqlExpression } from "./expression";
+import {
+  createProvenPartitionedRowNumberWindowAnalysisContext,
+  isMaterializationSafeExpression,
+  isMaterializationSafeNode,
+  isMaterializationSafePartitionedRowNumberWindow,
+  isMaterializationSafeProvenPartitionedRowNumberWindow,
+} from "./materialization-safety";
+import {
+  correlatedConstantExistenceOuterScopes,
+  isConstantExistenceQuery,
+  sharedOrdinaryFilterFanoutCandidates,
+} from "./ordinary-filter-fanout";
 import type {
-  AnyExpression,
-  AnyInListExpression,
-  RelationScope,
-  SqlExpression,
-} from "./expression";
-import type {
-  FilterNode,
   JoinNode,
   LogicalQueryNode,
   OutputField,
@@ -19,533 +110,57 @@ import type {
   ScanNode,
   ValuesRelationNode,
 } from "./plan";
+import { sharedMembershipInputReuseCandidates } from "./shared-membership-input-reuse";
+import {
+  isScalarCountRows,
+  sharedScalarCountReuseCandidates,
+} from "./shared-scalar-count-reuse";
 import { validateLogicalQueryPlan } from "./validator";
+export type {
+  ConstantFilterJoinProjection,
+  DirectScanProjectionChoice,
+  PassthroughProjectFusion,
+  PhysicalJoinOrderStrategy,
+  PhysicalLexicographicComparisonChoice,
+  PhysicalMembershipOptimization,
+  PhysicalMembershipOptimizationFacts,
+  PhysicalMembershipStrategy,
+  PhysicalMembershipUsage,
+  PhysicalParameterSlotLayout,
+  PhysicalQueryPlan,
+  PhysicalRowPipelineChoice,
+  PhysicalSemiMembershipChoice,
+  PhysicalSemiMembershipCostSelection,
+  PhysicalTextRowJsonSegment,
+  PhysicalTextRowStrategy,
+  PhysicalTextRowUsage,
+  PositiveTupleMembershipCandidate,
+  SharedRelationDefinition,
+} from "./physical/contracts";
+export {
+  hasSamePhysicalMembershipOptimization,
+  MAX_D1_JSON_MEMBERSHIP_BYTES,
+  optimizePhysicalMembershipBudget,
+} from "./physical/membership";
+export { optimizePhysicalParameterSlots } from "./physical/parameter-layout";
+export type {
+  PhysicalSharedRelationBoundaryEvidence,
+  PhysicalSharedRelationDefinitionIdentity,
+  PhysicalSharedRelationInterface,
+  PhysicalSharedRelationInterfaceAnalysisCounts,
+  PhysicalSharedRelationInterfaceVetoReason,
+  PhysicalSharedRelationInterfaceView,
+  PhysicalSharedRelationLicenseKind,
+  PhysicalSharedRelationUnlicensedDefinition,
+} from "./physical/shared-relation-interfaces";
 
 const MAX_SHARED_RELATION_FIELDS = 4;
 const MAX_MATERIALIZED_SHARED_RELATION_FIELDS = 16;
 const MIN_REPEATED_WINDOW_INPUT_PROJECT_FIELDS = 17;
 const MAX_REPEATED_WINDOW_INPUT_PROJECT_FIELDS = 32;
 const MIN_REPEATED_WINDOW_INPUT_PROJECT_REFERENCES = 8;
-
-export const MAX_D1_JSON_MEMBERSHIP_BYTES = 1_000_000;
-
-export interface PhysicalMembershipUsage {
-  readonly expression: AnyInListExpression;
-  readonly occurrences: number;
-}
-
-export interface PhysicalMembershipStrategy {
-  readonly expression: AnyInListExpression;
-  readonly occurrences: number;
-  readonly strategy: "native" | "json-text";
-  readonly jsonText?: string;
-  readonly jsonUtf8Bytes?: number;
-  readonly nativeBindingsSaved: number;
-}
-
-export interface PhysicalMembershipOptimization {
-  readonly nativeBindingCount: number;
-  readonly selectedBindingCount: number;
-  readonly strategies: readonly PhysicalMembershipStrategy[];
-  readonly rowStrategies?: readonly PhysicalTextRowStrategy[];
-  readonly tupleMemberships?: readonly PositiveTupleMembershipCandidate[];
-}
-
-export interface PhysicalMembershipOptimizationFacts {
-  readonly nativeBindingCount: number;
-  readonly usage: readonly PhysicalMembershipUsage[];
-  readonly rowUsage?: readonly PhysicalTextRowUsage[];
-}
-
-/** Numbered parameter layout selected from final emitted SQL bindings. */
-export interface PhysicalParameterSlotLayout {
-  readonly strategy: "numbered-reuse";
-  readonly occurrenceCount: number;
-  readonly slotCount: number;
-  /** One-based SQLite parameter indexes in original occurrence order. */
-  readonly occurrenceSlots: readonly number[];
-  readonly bindings: readonly DatabaseBinding[];
-}
-
-function reusableBindingKey(value: DatabaseBinding): string | undefined {
-  if (value === null) return "null:";
-  if (typeof value === "string") return `string:${value}`;
-  if (typeof value === "boolean") return `boolean:${value ? "1" : "0"}`;
-  if (typeof value === "number" && Number.isFinite(value))
-    return `number:${Object.is(value, -0) ? "-0" : String(value)}`;
-  return undefined;
-}
-
-/** Reuse only safe primitive values, and only when the original exceeds D1's cap. */
-export function optimizePhysicalParameterSlots(
-  bindings: readonly DatabaseBinding[],
-): PhysicalParameterSlotLayout | undefined {
-  if (bindings.length <= D1_MAX_BOUND_PARAMETERS) return undefined;
-
-  const slotsByKey = new Map<string, number>();
-  const occurrenceSlots: number[] = [];
-  const uniqueBindings: DatabaseBinding[] = [];
-  for (const binding of bindings) {
-    const key = reusableBindingKey(binding);
-    const existing = key === undefined ? undefined : slotsByKey.get(key);
-    if (existing !== undefined) {
-      occurrenceSlots.push(existing);
-      continue;
-    }
-
-    const slot = uniqueBindings.length + 1;
-    uniqueBindings.push(binding);
-    occurrenceSlots.push(slot);
-    if (key !== undefined) slotsByKey.set(key, slot);
-  }
-  if (uniqueBindings.length >= bindings.length) return undefined;
-  return {
-    strategy: "numbered-reuse",
-    occurrenceCount: bindings.length,
-    slotCount: uniqueBindings.length,
-    occurrenceSlots,
-    bindings: uniqueBindings,
-  };
-}
-
-export interface PhysicalTextRowUsage {
-  readonly node: ValuesRelationNode;
-  readonly occurrences: number;
-}
-
-export interface PhysicalTextRowJsonSegment {
-  readonly jsonText: string;
-  readonly jsonUtf8Bytes: number;
-}
-
-export interface PhysicalTextRowStrategy {
-  readonly node: ValuesRelationNode;
-  readonly occurrences: number;
-  readonly strategy: "native" | "json-rows";
-  readonly jsonSegments?: readonly PhysicalTextRowJsonSegment[];
-  readonly nativeBindingsSaved: number;
-}
-
-/** A left-only Project over an exactly-keyed, finite positive Join. */
-export interface PositiveTupleMembershipCandidate {
-  readonly project: ProjectNode;
-  readonly join: JoinNode;
-  readonly valuesRelation: ValuesRelationNode;
-  /** Left Join input indexes, in the corresponding RHS output-key order. */
-  readonly leftKeyIndexes: readonly number[];
-  /** Complete RHS output-key indexes, in tuple comparison order. */
-  readonly rightKeyIndexes: readonly number[];
-}
-
-export interface SharedRelationDefinition {
-  readonly name: string;
-  readonly node: LogicalQueryNode;
-  readonly scope: RelationScope;
-  readonly fields: readonly OutputField[];
-  /** Names of shared CTEs referenced by this CTE, in definition order. */
-  readonly dependencies: readonly string[];
-  /** CTE evaluation policy selected from the canonical logical query shape. */
-  readonly materialization: "auto" | "materialized";
-}
-
-export interface DirectScanProjectionChoice {
-  readonly project: ProjectNode;
-  readonly scan: ScanNode;
-  /** Actual schema SQL column names in the Project output order. */
-  readonly sqlColumnNames: readonly string[];
-}
-
-/** A parent Project may skip a pure column-only Project whose scope it does not read. */
-export interface PassthroughProjectFusion {
-  readonly project: ProjectNode;
-  readonly input: QuerySource;
-}
-
-/** Join outputs needed by a filter whose only visible projection is constant. */
-export interface ConstantFilterJoinProjection {
-  readonly project: ProjectNode;
-  readonly filter: FilterNode;
-  readonly join: JoinNode;
-  readonly referencedOutputColumns: readonly number[];
-}
-
-/** A canonical inner-Join input order selected from typed relational evidence. */
-export interface PhysicalJoinOrderStrategy {
-  readonly kind: "right-anchor" | "unique-lookup";
-  readonly join: JoinNode;
-  /** Both strategies drive the original right input before the original left. */
-  readonly driver: "right";
-  /** Generated schema proof used only by unique-lookup strategies. */
-  readonly uniqueKey?: string;
-}
-
-export interface PhysicalQueryPlan<
-  Row extends object = Record<string, unknown>,
-> {
-  readonly kind: "physical-query";
-  readonly root: LogicalQueryNode;
-  readonly scope: QuerySource["scope"];
-  readonly fields: QuerySource["fields"];
-  readonly sharedRelations: readonly SharedRelationDefinition[];
-  /** Safe Project(Scan) column selections chosen by the physical planner. */
-  readonly directScanProjections: readonly DirectScanProjectionChoice[];
-  /** Safe parent Projects that can bypass an unused pure passthrough Project. */
-  readonly passthroughProjectFusions: readonly PassthroughProjectFusion[];
-  /** Safe sparse Join outputs for constant Project(Filter(Join)) shapes. */
-  readonly constantFilterJoinProjections: readonly ConstantFilterJoinProjection[];
-  /** Canonical structural candidates; enabled only when the RHS rows are packed. */
-  readonly positiveTupleMembershipCandidates: readonly PositiveTupleMembershipCandidate[];
-  /** Explicit, recomputable inner Join order choices. */
-  readonly joinOrderStrategies: readonly PhysicalJoinOrderStrategy[];
-  /** Backend physical choice, populated after final-shape cost analysis. */
-  readonly membershipOptimization?: PhysicalMembershipOptimization;
-  readonly __rowType?: Row;
-}
-
-function hasWellFormedUtf16(value: string): boolean {
-  for (let index = 0; index < value.length; index++) {
-    const codeUnit = value.charCodeAt(index);
-    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
-      const next = value.charCodeAt(index + 1);
-      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
-      index++;
-    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function everyDenseMembershipValue(
-  values: readonly unknown[],
-  predicate: (value: unknown) => boolean,
-): boolean {
-  for (let index = 0; index < values.length; index++) {
-    if (
-      !Object.prototype.hasOwnProperty.call(values, index) ||
-      !predicate(values[index])
-    )
-      return false;
-  }
-  return true;
-}
-
-function encodedJsonMembershipValues(
-  expression: AnyInListExpression,
-): { jsonText: string; jsonUtf8Bytes: number } | undefined {
-  const affinity = expression.expression.resultType.affinity;
-  const isTextList =
-    affinity === "text" &&
-    everyDenseMembershipValue(
-      expression.values,
-      (value) => typeof value === "string" && hasWellFormedUtf16(value),
-    );
-  const isSafeIntegerList =
-    (affinity === "integer" || affinity === "real" || affinity === "numeric") &&
-    everyDenseMembershipValue(
-      expression.values,
-      (value) => typeof value === "number" && Number.isSafeInteger(value),
-    );
-  if (expression.values.length < 2 || (!isTextList && !isSafeIntegerList))
-    return undefined;
-  const jsonText = JSON.stringify(expression.values);
-  const jsonUtf8Bytes = new TextEncoder().encode(jsonText).byteLength;
-  return jsonUtf8Bytes <= MAX_D1_JSON_MEMBERSHIP_BYTES
-    ? { jsonText, jsonUtf8Bytes }
-    : undefined;
-}
-
-function encodedJsonTextRows(
-  node: ValuesRelationNode,
-): readonly PhysicalTextRowJsonSegment[] | undefined {
-  if (node.rows.length === 0) return undefined;
-  const segments: PhysicalTextRowJsonSegment[] = [];
-  let tuples: string[] = [];
-  let tupleBytes = 0;
-  for (const row of node.rows) {
-    const tuple = JSON.stringify(row);
-    const bytes = new TextEncoder().encode(tuple).byteLength;
-    if (bytes + 2 > MAX_D1_JSON_MEMBERSHIP_BYTES) return undefined;
-    const nextBytes = tupleBytes + bytes + (tuples.length === 0 ? 0 : 1) + 2;
-    if (tuples.length > 0 && nextBytes > MAX_D1_JSON_MEMBERSHIP_BYTES) {
-      const jsonText = `[${tuples.join(",")}]`;
-      segments.push({
-        jsonText,
-        jsonUtf8Bytes: new TextEncoder().encode(jsonText).byteLength,
-      });
-      tuples = [];
-      tupleBytes = 0;
-    }
-    tuples.push(tuple);
-    tupleBytes += bytes + (tuples.length === 1 ? 0 : 1);
-  }
-  if (tuples.length > 0) {
-    const jsonText = `[${tuples.join(",")}]`;
-    segments.push({
-      jsonText,
-      jsonUtf8Bytes: new TextEncoder().encode(jsonText).byteLength,
-    });
-  }
-  return segments.every(
-    (segment) => segment.jsonUtf8Bytes <= MAX_D1_JSON_MEMBERSHIP_BYTES,
-  )
-    ? segments
-    : undefined;
-}
-
-/** Select the generic D1 physical representation from measured final-shape costs. */
-export function optimizePhysicalMembershipBudget<Row extends object>(
-  plan: PhysicalQueryPlan<Row>,
-  facts: PhysicalMembershipOptimizationFacts,
-  bindingLimit: number,
-): PhysicalQueryPlan<Row> {
-  if (
-    !Number.isInteger(facts.nativeBindingCount) ||
-    facts.nativeBindingCount < 0 ||
-    !Number.isInteger(bindingLimit) ||
-    bindingLimit < 0
-  )
-    throw new DatabaseCompilerError(
-      "invalid_plan",
-      "Invalid physical membership budget facts",
-    );
-
-  const usage = facts.usage.map((item) => {
-    if (!item || !item.expression || item.expression.kind !== "in-list")
-      throw new DatabaseCompilerError(
-        "invalid_plan",
-        "Invalid physical membership expression facts",
-      );
-    if (!Number.isInteger(item.occurrences) || item.occurrences < 1)
-      throw new DatabaseCompilerError(
-        "invalid_plan",
-        "Invalid physical membership occurrence count",
-      );
-    return item;
-  });
-  const rowUsage = (facts.rowUsage ?? []).map((item) => {
-    if (!item || !item.node || item.node.kind !== "values-relation")
-      throw new DatabaseCompilerError(
-        "invalid_plan",
-        "Invalid physical text row relation facts",
-      );
-    if (!Number.isInteger(item.occurrences) || item.occurrences < 1)
-      throw new DatabaseCompilerError(
-        "invalid_plan",
-        "Invalid physical text row relation occurrence count",
-      );
-    return item;
-  });
-
-  const savingsByExpression = new Map<AnyInListExpression, number>();
-  const encodingByExpression = new Map<
-    AnyInListExpression,
-    { readonly jsonText: string; readonly jsonUtf8Bytes: number } | undefined
-  >();
-  const savingsByRowNode = new Map<ValuesRelationNode, number>();
-  const encodingByRowNode = new Map<
-    ValuesRelationNode,
-    readonly PhysicalTextRowJsonSegment[] | undefined
-  >();
-  let remaining = facts.nativeBindingCount;
-  if (remaining > bindingLimit) {
-    const rowCandidates = rowUsage.map((item, order) => {
-      const encoding = encodedJsonTextRows(item.node);
-      encodingByRowNode.set(item.node, encoding);
-      return {
-        ...item,
-        order: usage.length + order,
-        kind: "text-row" as const,
-        saving: encoding
-          ? item.occurrences *
-            (item.node.rows.length * item.node.columns.length - encoding.length)
-          : 0,
-      };
-    });
-    const candidates = [
-      ...usage.map((item, order) => ({
-        ...item,
-        order,
-        kind: "membership" as const,
-        saving: item.occurrences * (item.expression.values.length - 1),
-      })),
-      ...rowCandidates,
-    ]
-      .filter((item) => item.saving > 0)
-      .sort(
-        (left, right) => right.saving - left.saving || left.order - right.order,
-      );
-    for (const candidate of candidates) {
-      if (remaining <= bindingLimit) break;
-      if (candidate.kind === "membership") {
-        let encoding = encodingByExpression.get(candidate.expression);
-        if (!encoding && !encodingByExpression.has(candidate.expression)) {
-          encoding = encodedJsonMembershipValues(candidate.expression);
-          encodingByExpression.set(candidate.expression, encoding);
-        }
-        if (!encoding) continue;
-        savingsByExpression.set(candidate.expression, candidate.saving);
-        remaining -= candidate.saving;
-      } else {
-        const encoding = encodingByRowNode.get(candidate.node);
-        if (!encoding) continue;
-        savingsByRowNode.set(candidate.node, candidate.saving);
-        remaining -= candidate.saving;
-      }
-    }
-  }
-
-  const strategies: PhysicalMembershipStrategy[] = usage.map((item) => {
-    const nativeBindingsSaved = savingsByExpression.get(item.expression) ?? 0;
-    if (nativeBindingsSaved === 0)
-      return {
-        expression: item.expression,
-        occurrences: item.occurrences,
-        strategy: "native",
-        nativeBindingsSaved: 0,
-      };
-    const encoding = encodingByExpression.get(item.expression);
-    if (!encoding)
-      throw new DatabaseCompilerError(
-        "invalid_plan",
-        "Selected physical membership has no safe JSON encoding",
-      );
-    return {
-      expression: item.expression,
-      occurrences: item.occurrences,
-      strategy: "json-text",
-      jsonText: encoding.jsonText,
-      jsonUtf8Bytes: encoding.jsonUtf8Bytes,
-      nativeBindingsSaved,
-    };
-  });
-  const rowStrategies: PhysicalTextRowStrategy[] = rowUsage.map((item) => {
-    const nativeBindingsSaved = savingsByRowNode.get(item.node) ?? 0;
-    if (nativeBindingsSaved === 0)
-      return {
-        node: item.node,
-        occurrences: item.occurrences,
-        strategy: "native",
-        nativeBindingsSaved: 0,
-      };
-    const jsonSegments = encodingByRowNode.get(item.node);
-    if (!jsonSegments)
-      throw new DatabaseCompilerError(
-        "invalid_plan",
-        "Selected physical text row relation has no safe JSON encoding",
-      );
-    return {
-      node: item.node,
-      occurrences: item.occurrences,
-      strategy: "json-rows",
-      jsonSegments,
-      nativeBindingsSaved,
-    };
-  });
-  const packedRows = new Set(
-    rowStrategies
-      .filter((strategy) => strategy.strategy === "json-rows")
-      .map((strategy) => strategy.node),
-  );
-  const tupleMemberships = (
-    plan.positiveTupleMembershipCandidates ?? []
-  ).filter((candidate) => packedRows.has(candidate.valuesRelation));
-
-  return {
-    ...plan,
-    membershipOptimization: {
-      nativeBindingCount: facts.nativeBindingCount,
-      selectedBindingCount: remaining,
-      strategies,
-      rowStrategies,
-      tupleMemberships,
-    },
-  };
-}
-
-export function hasSamePhysicalMembershipOptimization(
-  actual: PhysicalMembershipOptimization | undefined,
-  expected: PhysicalMembershipOptimization,
-): boolean {
-  const actualRowStrategies = actual?.rowStrategies ?? [];
-  const expectedRowStrategies = expected.rowStrategies ?? [];
-  const actualTupleMemberships = actual?.tupleMemberships ?? [];
-  const expectedTupleMemberships = expected.tupleMemberships ?? [];
-  if (
-    !actual ||
-    actual.nativeBindingCount !== expected.nativeBindingCount ||
-    actual.selectedBindingCount !== expected.selectedBindingCount ||
-    !Array.isArray(actual.strategies) ||
-    actual.strategies.length !== expected.strategies.length ||
-    !Array.isArray(actualRowStrategies) ||
-    actualRowStrategies.length !== expectedRowStrategies.length ||
-    !Array.isArray(actualTupleMemberships) ||
-    actualTupleMemberships.length !== expectedTupleMemberships.length
-  )
-    return false;
-  return (
-    actual.strategies.every((item, index) => {
-      const canonical = expected.strategies[index];
-      return (
-        !!item &&
-        typeof item === "object" &&
-        !!canonical &&
-        item.expression === canonical.expression &&
-        item.occurrences === canonical.occurrences &&
-        item.strategy === canonical.strategy &&
-        item.jsonText === canonical.jsonText &&
-        item.jsonUtf8Bytes === canonical.jsonUtf8Bytes &&
-        item.nativeBindingsSaved === canonical.nativeBindingsSaved
-      );
-    }) &&
-    actualRowStrategies.every((item, index) => {
-      const canonical = expectedRowStrategies[index];
-      return (
-        !!item &&
-        typeof item === "object" &&
-        !!canonical &&
-        item.node === canonical.node &&
-        item.occurrences === canonical.occurrences &&
-        item.strategy === canonical.strategy &&
-        item.nativeBindingsSaved === canonical.nativeBindingsSaved &&
-        Array.isArray(item.jsonSegments) ===
-          Array.isArray(canonical.jsonSegments) &&
-        (item.jsonSegments ?? []).length ===
-          (canonical.jsonSegments ?? []).length &&
-        (item.jsonSegments ?? []).every(
-          (segment: PhysicalTextRowJsonSegment, segmentIndex: number) => {
-            const expectedSegment = canonical.jsonSegments?.[segmentIndex];
-            return (
-              !!expectedSegment &&
-              segment.jsonText === expectedSegment.jsonText &&
-              segment.jsonUtf8Bytes === expectedSegment.jsonUtf8Bytes
-            );
-          },
-        )
-      );
-    }) &&
-    actualTupleMemberships.every((item, index) => {
-      const canonical = expectedTupleMemberships[index];
-      return (
-        !!item &&
-        !!canonical &&
-        item.project === canonical.project &&
-        item.join === canonical.join &&
-        item.valuesRelation === canonical.valuesRelation &&
-        item.leftKeyIndexes.length === canonical.leftKeyIndexes.length &&
-        item.leftKeyIndexes.every(
-          (column: number, columnIndex: number) =>
-            column === canonical.leftKeyIndexes[columnIndex],
-        ) &&
-        item.rightKeyIndexes.length === canonical.rightKeyIndexes.length &&
-        item.rightKeyIndexes.every(
-          (column: number, columnIndex: number) =>
-            column === canonical.rightKeyIndexes[columnIndex],
-        )
-      );
-    })
-  );
-}
+const MIN_MATERIALIZED_BOUNDARY_PROJECT_FIELDS = MAX_SHARED_RELATION_FIELDS + 1;
+const MIN_MATERIALIZED_BOUNDARY_PROJECT_REFERENCES = 2;
 
 function nodeExpressions(node: LogicalQueryNode): readonly SqlExpression[] {
   switch (node.kind) {
@@ -893,6 +508,22 @@ function samePassthroughProjectFusions(
       );
     })
   );
+}
+
+function canonicalProjectRendererBoundaries(
+  directScan: readonly DirectScanProjectionChoice[],
+  passthrough: readonly PassthroughProjectFusion[],
+  constantFilterJoin: readonly ConstantFilterJoinProjection[],
+  positiveTupleMembership: readonly PositiveTupleMembershipCandidate[],
+  selfMembership: readonly PhysicalSelfMembershipChoice[],
+): ReadonlySet<LogicalQueryNode> {
+  return new Set([
+    ...directScan.map(({ project }) => project),
+    ...passthrough.map(({ project }) => project),
+    ...constantFilterJoin.map(({ project }) => project),
+    ...positiveTupleMembership.map(({ project }) => project),
+    ...selfMembership.map(({ project }) => project),
+  ]);
 }
 
 function expressionColumnIndexes(
@@ -1254,6 +885,8 @@ function hasKnownBinaryColumnSource(
     case "filter":
     case "distinct":
       return hasKnownBinaryColumnSource(node.input, index, visited);
+    case "window":
+      return hasKnownBinaryColumnSource(node.input, index, visited);
     case "project": {
       const inputIndex = directColumnIndex(
         node.projections[index]!.expression,
@@ -1273,6 +906,9 @@ function hasKnownBinaryColumnSource(
         visited,
       );
     }
+    case "semi-join":
+    case "anti-join":
+      return hasKnownBinaryColumnSource(node.left, index, visited);
     default:
       return false;
   }
@@ -1280,64 +916,127 @@ function hasKnownBinaryColumnSource(
 
 function hasSafeFiniteValuesAncestor(
   root: QuerySource,
-  incoming: ReadonlyMap<LogicalQueryNode, number>,
-  sharedNodes: ReadonlySet<LogicalQueryNode>,
 ): ValuesRelationNode | undefined {
   const visited = new Set<LogicalQueryNode>();
+  const active = new Set<LogicalQueryNode>();
   const values = new Set<ValuesRelationNode>();
   const visit = (node: LogicalQueryNode): boolean => {
-    const incomingCount = incoming.get(node) ?? 0;
-    // A repeated CTE reference and a repeated non-CTE DAG node are both
-    // boundaries only after proving the complete subtree is a safe lookup.
-    if (sharedNodes.has(node) || incomingCount > 1)
-      return incomingCount > 1 && isSafeSharedLookup(node);
-    if (visited.has(node) || incomingCount !== 1) return false;
-    visited.add(node);
-    switch (node.kind) {
-      case "values-relation":
-        values.add(node);
-        return true;
-      case "scan":
-        return true;
-      case "filter":
-        return (
-          safeFinitePredicate(node.predicate) &&
-          expressionUsesOnlyScope(node.predicate, node.input.scope) &&
-          visit(node.input.node)
-        );
-      case "project":
-        return (
-          node.projections.every(
-            ({ expression }) =>
-              expression.kind === "column" &&
-              expression.scope === node.input.scope,
-          ) && visit(node.input.node)
-        );
-      case "join":
-        return (
-          node.joinType === "inner" &&
-          safeEqualityCondition(
-            node.condition,
-            node.left.scope,
-            node.right.scope,
-            node.left.fields,
-            node.right.fields,
-          ) &&
-          visit(node.left.node) &&
-          visit(node.right.node)
-        );
-      default:
-        return false;
-    }
+    if (active.has(node)) return false;
+    if (visited.has(node)) return true;
+    active.add(node);
+    const safe = (() => {
+      switch (node.kind) {
+        case "values-relation":
+          values.add(node);
+          return true;
+        case "scan":
+          return true;
+        case "filter":
+          return (
+            safeFinitePredicate(node.predicate) &&
+            expressionUsesOnlyScope(node.predicate, node.input.scope) &&
+            visit(node.input.node)
+          );
+        case "project":
+          return (
+            node.projections.every(
+              ({ expression }) =>
+                expression.kind === "column" &&
+                expression.scope === node.input.scope,
+            ) && visit(node.input.node)
+          );
+        case "join":
+          return (
+            node.joinType === "inner" &&
+            safeEqualityCondition(
+              node.condition,
+              node.left.scope,
+              node.right.scope,
+              node.left.fields,
+              node.right.fields,
+            ) &&
+            visit(node.left.node) &&
+            visit(node.right.node)
+          );
+        default:
+          return false;
+      }
+    })();
+    active.delete(node);
+    if (safe) visited.add(node);
+    // Repeated nodes are fully walked before being memoized. A shared CTE is
+    // therefore accepted only when its entire lookup body stays in this safe
+    // finite Values algebra; it is never treated as an opaque name/boundary.
+    return safe;
   };
   return visit(root.node) && values.size === 1
     ? values.values().next().value
     : undefined;
 }
 
+function isStableTupleMembershipSource(
+  root: QuerySource,
+  licensedMaterializedBoundaries: ReadonlySet<LogicalQueryNode>,
+): boolean {
+  const visited = new Set<LogicalQueryNode>();
+  const active = new Set<LogicalQueryNode>();
+  const visit = (node: LogicalQueryNode): boolean => {
+    if (node !== root.node && licensedMaterializedBoundaries.has(node))
+      return true;
+    if (active.has(node)) return false;
+    if (visited.has(node)) return true;
+    active.add(node);
+    const safe = (() => {
+      switch (node.kind) {
+        case "scan":
+        case "values-relation":
+          return true;
+        case "filter":
+          return (
+            safeFinitePredicate(node.predicate) &&
+            expressionUsesOnlyScope(node.predicate, node.input.scope) &&
+            visit(node.input.node)
+          );
+        case "project":
+          return (
+            node.projections.every(
+              ({ expression }) =>
+                expression.kind === "column" &&
+                expression.scope === node.input.scope,
+            ) && visit(node.input.node)
+          );
+        case "distinct":
+          return visit(node.input.node);
+        case "join":
+          return (
+            (node.joinType === "inner" || node.joinType === "left") &&
+            safeEqualityCondition(
+              node.condition,
+              node.left.scope,
+              node.right.scope,
+              node.left.fields,
+              node.right.fields,
+            ) &&
+            visit(node.left.node) &&
+            visit(node.right.node)
+          );
+        default:
+          return false;
+      }
+    })();
+    active.delete(node);
+    if (safe) visited.add(node);
+    // Walk through shared DAG/CTE nodes and prove their complete stable body.
+    // Compilation still references their original shared definition.
+    return safe;
+  };
+  return visit(root.node);
+}
+
 function positiveTupleMembershipCandidates(
   root: LogicalQueryNode,
   sharedNodes: ReadonlySet<LogicalQueryNode>,
+  licensedMaterializedBoundaries: ReadonlySet<LogicalQueryNode> = new Set(),
 ): readonly PositiveTupleMembershipCandidate[] {
   const incoming = incomingNodeCounts(root);
   const postorder: LogicalQueryNode[] = [];
@@ -1380,11 +1079,7 @@ function positiveTupleMembershipCandidates(
     if (
       keyCount === 0 ||
       distinct.fields.length !== distinct.input.fields.length ||
-      keyProjection.projections.length !== keyCount ||
-      sharedNodes.has(distinct) ||
-      sharedNodes.has(keyProjection) ||
-      incoming.get(distinct) !== 1 ||
-      incoming.get(keyProjection) !== 1
+      keyProjection.projections.length !== keyCount
     )
       continue;
 
@@ -1444,16 +1139,24 @@ function positiveTupleMembershipCandidates(
     }
     if (!validKeys) continue;
 
-    const valuesRelation = hasSafeFiniteValuesAncestor(
-      distinct.input,
-      incoming,
-      sharedNodes,
-    );
-    if (!valuesRelation) continue;
+    const valuesRelation = hasSafeFiniteValuesAncestor(distinct.input);
+    const membershipSource = valuesRelation
+      ? "finite-values"
+      : "dynamic-distinct";
+    if (
+      !valuesRelation &&
+      !isStableTupleMembershipSource(
+        distinct.input,
+        licensedMaterializedBoundaries,
+      )
+    ) {
+      continue;
+    }
     candidates.push({
       project: node,
       join,
-      valuesRelation,
+      membershipSource,
+      ...(valuesRelation ? { valuesRelation } : {}),
       leftKeyIndexes,
       rightKeyIndexes,
     });
@@ -1555,6 +1258,7 @@ function samePositiveTupleMembershipCandidates(
         !!canonical &&
         candidate.project === canonical.project &&
         candidate.join === canonical.join &&
+        candidate.membershipSource === canonical.membershipSource &&
         candidate.valuesRelation === canonical.valuesRelation &&
         candidate.leftKeyIndexes.length === canonical.leftKeyIndexes.length &&
         candidate.leftKeyIndexes.every(
@@ -1566,6 +1270,113 @@ function samePositiveTupleMembershipCandidates(
           (column, columnIndex) =>
             column === canonical.rightKeyIndexes[columnIndex],
         )
+      );
+    })
+  );
+}
+
+function sameSelfMembershipChoices(
+  actual: readonly PhysicalSelfMembershipChoice[],
+  expected: readonly PhysicalSelfMembershipChoice[],
+): boolean {
+  const sameIndexes = (
+    left: readonly number[],
+    right: readonly number[],
+  ): boolean =>
+    left.length === right.length &&
+    left.every((value, index) => value === right[index]);
+  const sameWitness = (
+    left: PhysicalSelfMembershipChoice["witness"],
+    right: PhysicalSelfMembershipChoice["witness"],
+  ): boolean => {
+    if (!left || !right) return left === right;
+    return (
+      left.source.node === right.source.node &&
+      left.source.scope === right.source.scope &&
+      sameFields(left.source.fields, right.source.fields) &&
+      left.definition.node === right.definition.node &&
+      left.definition.name === right.definition.name &&
+      left.definition.scope === right.definition.scope &&
+      left.definition.materialization === right.definition.materialization &&
+      sameFields(left.definition.fields, right.definition.fields) &&
+      left.definitionIndex === right.definitionIndex &&
+      left.producer === right.producer &&
+      left.producerIndex === right.producerIndex &&
+      sameIndexes(left.sourceKeyIndexes, right.sourceKeyIndexes) &&
+      sameIndexes(
+        left.rightProjectInputIndexes,
+        right.rightProjectInputIndexes,
+      ) &&
+      left.path.length === right.path.length &&
+      left.path.every((step, index) => {
+        const canonical = right.path[index];
+        if (
+          !canonical ||
+          step.kind !== canonical.kind ||
+          step.node !== canonical.node
+        )
+          return false;
+        if (step.kind === "inner-join" && canonical.kind === "inner-join")
+          return (
+            step.side === canonical.side &&
+            sameIndexes(step.outputIndexes, canonical.outputIndexes) &&
+            sameIndexes(step.inputIndexes, canonical.inputIndexes)
+          );
+        return (
+          step.kind !== "inner-join" &&
+          canonical.kind !== "inner-join" &&
+          sameIndexes(step.outputIndexes, canonical.outputIndexes) &&
+          sameIndexes(step.inputIndexes, canonical.inputIndexes)
+        );
+      }) &&
+      left.boundary.definition.node === right.boundary.definition.node &&
+      left.boundary.definition.name === right.boundary.definition.name &&
+      left.boundary.license.kind === right.boundary.license.kind &&
+      left.boundary.boundary.kind === right.boundary.boundary.kind &&
+      left.boundary.closure.kind === right.boundary.closure.kind &&
+      left.boundary.closure.scopeCount === right.boundary.closure.scopeCount &&
+      left.boundary.closure.referencedScopeCount ===
+        right.boundary.closure.referencedScopeCount &&
+      left.boundary.closure.referencedColumnCount ===
+        right.boundary.closure.referencedColumnCount &&
+      left.boundary.totality.kind === right.boundary.totality.kind &&
+      left.boundary.totality.stoppedAt.length ===
+        right.boundary.totality.stoppedAt.length &&
+      left.boundary.totality.stoppedAt.every(
+        (node, index) => node === right.boundary.totality.stoppedAt[index],
+      )
+    );
+  };
+  return (
+    actual.length === expected.length &&
+    actual.every((choice, index) => {
+      const canonical = expected[index];
+      return (
+        !!canonical &&
+        choice.project === canonical.project &&
+        choice.join === canonical.join &&
+        choice.membershipSource === canonical.membershipSource &&
+        choice.tupleCandidate.project === canonical.tupleCandidate.project &&
+        choice.tupleCandidate.join === canonical.tupleCandidate.join &&
+        choice.tupleCandidate.membershipSource ===
+          canonical.tupleCandidate.membershipSource &&
+        choice.tupleCandidate.valuesRelation ===
+          canonical.tupleCandidate.valuesRelation &&
+        choice.leftKeyIndexes.length === canonical.leftKeyIndexes.length &&
+        sameIndexes(choice.leftKeyIndexes, canonical.leftKeyIndexes) &&
+        sameIndexes(choice.rightKeyIndexes, canonical.rightKeyIndexes) &&
+        sameIndexes(
+          choice.tupleCandidate.leftKeyIndexes,
+          canonical.tupleCandidate.leftKeyIndexes,
+        ) &&
+        sameIndexes(
+          choice.tupleCandidate.rightKeyIndexes,
+          canonical.tupleCandidate.rightKeyIndexes,
+        ) &&
+        choice.nullableKeyIndexes.length ===
+          canonical.nullableKeyIndexes.length &&
+        sameIndexes(choice.nullableKeyIndexes, canonical.nullableKeyIndexes) &&
+        sameWitness(choice.witness, canonical.witness)
       );
     })
   );
@@ -1927,9 +1738,339 @@ function isMaterializedKeyedAggregate(
   return groupIndexes.size === aggregate.groups.length;
 }
 
+interface ResolvedSchemaColumn {
+  readonly table: SchemaObjectReference;
+  readonly column: SchemaColumnReference;
+}
+
+function foldSqlIdentifierAscii(value: string): string {
+  return Array.from(value, (character) => {
+    const code = character.charCodeAt(0);
+    return code >= 0x41 && code <= 0x5a
+      ? String.fromCharCode(code + 0x20)
+      : character;
+  }).join("");
+}
+
+function sameSqlIdentifier(left: string, right: string): boolean {
+  return foldSqlIdentifierAscii(left) === foldSqlIdentifierAscii(right);
+}
+
+function directSchemaColumn(
+  scan: ScanNode,
+  index: number,
+  outputField: OutputField,
+): ResolvedSchemaColumn | undefined {
+  const table = scan.table;
+  const column = Object.values(table.columns)[index];
+  if (
+    table.kind !== "table" ||
+    table.defaultCollation !== "BINARY" ||
+    !column ||
+    column.kind !== "column" ||
+    column.hidden !== 0 ||
+    column.generated ||
+    outputField.affinity === "unknown" ||
+    outputField.affinity !== column.affinity ||
+    !sameSqlIdentifier(column.table, table.name)
+  )
+    return undefined;
+  return { table, column };
+}
+
+/**
+ * Trace one passed-through output to an ordinary table column. Each selected
+ * Project output must be a direct column reference; unrelated computed
+ * outputs do not affect the proof. Set, recursive, and unknown sources have
+ * no lineage proof.
+ */
+function resolvePassedThroughColumn(
+  node: LogicalQueryNode,
+  index: number,
+  active = new Set<LogicalQueryNode>(),
+): ResolvedSchemaColumn | undefined {
+  if (
+    !Number.isInteger(index) ||
+    index < 0 ||
+    index >= node.fields.length ||
+    active.has(node)
+  )
+    return undefined;
+  active.add(node);
+  let resolved: ResolvedSchemaColumn | undefined;
+  const field = node.fields[index]!;
+  if (node.kind === "scan") {
+    resolved = directSchemaColumn(node, index, field);
+  } else if (node.kind === "filter") {
+    const inputField = node.input.fields[index];
+    if (inputField?.affinity === field.affinity)
+      resolved = resolvePassedThroughColumn(node.input.node, index, active);
+  } else if (node.kind === "project") {
+    const projection = node.projections[index];
+    if (
+      projection?.expression.kind === "column" &&
+      projection.expression.scope === node.input.scope &&
+      Number.isInteger(projection.expression.index) &&
+      projection.expression.index >= 0 &&
+      projection.expression.index < node.input.fields.length &&
+      projection.expression.resultType.affinity === field.affinity &&
+      node.input.fields[projection.expression.index]?.affinity ===
+        field.affinity
+    )
+      resolved = resolvePassedThroughColumn(
+        node.input.node,
+        projection.expression.index,
+        active,
+      );
+  } else if (node.kind === "join") {
+    if (index < node.left.fields.length) {
+      if (node.left.fields[index]?.affinity === field.affinity)
+        resolved = resolvePassedThroughColumn(node.left.node, index, active);
+    } else {
+      const rightIndex = index - node.left.fields.length;
+      if (node.right.fields[rightIndex]?.affinity === field.affinity)
+        resolved = resolvePassedThroughColumn(
+          node.right.node,
+          rightIndex,
+          active,
+        );
+    }
+  }
+  active.delete(node);
+  return resolved;
+}
+
+interface DirectRightScan {
+  readonly scan: ScanNode;
+  /** Right input output index to the underlying scan output index. */
+  readonly scanIndexes: readonly number[];
+}
+
+function directRightScan(node: LogicalQueryNode): DirectRightScan | undefined {
+  if (node.kind === "scan")
+    return {
+      scan: node,
+      scanIndexes: node.fields.map((_field, index) => index),
+    };
+  if (node.kind !== "project" || node.input.node.kind !== "scan")
+    return undefined;
+  const scan = node.input.node;
+  const scanIndexes: number[] = [];
+  for (let index = 0; index < node.projections.length; index++) {
+    const expression = node.projections[index]!.expression;
+    if (
+      expression.kind !== "column" ||
+      expression.scope !== node.input.scope ||
+      !Number.isInteger(expression.index) ||
+      expression.index < 0 ||
+      expression.index >= scan.fields.length ||
+      expression.resultType.affinity !== node.fields[index]?.affinity ||
+      scan.fields[expression.index]?.affinity !== node.fields[index]?.affinity
+    )
+      return undefined;
+    scanIndexes.push(expression.index);
+  }
+  return scanIndexes.length === node.fields.length
+    ? { scan, scanIndexes }
+    : undefined;
+}
+
+function factLocalEqualityPairs(
+  expression: SqlExpression,
+  leftScope: RelationScope,
+  rightScope: RelationScope,
+): { readonly left: number; readonly right: number }[] | undefined {
+  if (
+    expression.kind === "boolean" &&
+    expression.operator === "AND" &&
+    expression.expressions.length > 0
+  ) {
+    const pairs: { readonly left: number; readonly right: number }[] = [];
+    for (const child of expression.expressions) {
+      const nested = factLocalEqualityPairs(child, leftScope, rightScope);
+      if (!nested) return undefined;
+      pairs.push(...nested);
+    }
+    return pairs;
+  }
+  if (expression.kind !== "binary" || expression.operator !== "=")
+    return undefined;
+  const direct = (
+    left: SqlExpression,
+    right: SqlExpression,
+  ): { readonly left: number; readonly right: number } | undefined => {
+    const leftIndex = directColumnIndex(left, leftScope);
+    const rightIndex = directColumnIndex(right, rightScope);
+    return leftIndex === undefined || rightIndex === undefined
+      ? undefined
+      : { left: leftIndex, right: rightIndex };
+  };
+  const directPair = direct(expression.left, expression.right);
+  return directPair ? [directPair] : undefined;
+}
+
+function factLocalIndexedStrategy(
+  join: JoinNode,
+  owner: Extract<LogicalQueryNode, { readonly kind: "aggregate" }>,
+  shared: ReadonlyMap<LogicalQueryNode, SharedRelationDefinition>,
+):
+  | Extract<PhysicalJoinOrderStrategy, { readonly kind: "fact-local-indexed" }>
+  | undefined {
+  if (join.joinType !== "inner") return undefined;
+  const reuse = shared.get(join.left.node);
+  if (
+    !reuse ||
+    reuse.materialization !== "materialized" ||
+    shared.get(owner)?.materialization !== "materialized"
+  )
+    return undefined;
+
+  const right = directRightScan(join.right.node);
+  if (
+    !right ||
+    right.scan.table.kind !== "table" ||
+    right.scan.table.defaultCollation !== "BINARY"
+  )
+    return undefined;
+  const pairs = factLocalEqualityPairs(
+    join.condition,
+    join.left.scope,
+    join.right.scope,
+  );
+  if (!pairs || pairs.length < 2) return undefined;
+
+  const leftIndexes = new Set<number>();
+  const rightIndexes = new Set<number>();
+  const pairsByScanIndex = new Map<
+    number,
+    { readonly left: number; readonly right: number }
+  >();
+  for (const pair of pairs) {
+    if (
+      pair.left < 0 ||
+      pair.left >= join.left.fields.length ||
+      pair.right < 0 ||
+      pair.right >= right.scanIndexes.length ||
+      leftIndexes.has(pair.left) ||
+      rightIndexes.has(pair.right)
+    )
+      return undefined;
+    leftIndexes.add(pair.left);
+    rightIndexes.add(pair.right);
+    const scanIndex = right.scanIndexes[pair.right]!;
+    if (pairsByScanIndex.has(scanIndex)) return undefined;
+    const leftField = join.left.fields[pair.left]!;
+    const rightField = join.right.fields[pair.right]!;
+    const leftColumn = resolvePassedThroughColumn(join.left.node, pair.left);
+    const rightColumn = directSchemaColumn(
+      right.scan,
+      scanIndex,
+      right.scan.fields[scanIndex]!,
+    );
+    if (
+      leftField.affinity === "unknown" ||
+      leftField.affinity !== rightField.affinity ||
+      !leftColumn ||
+      !rightColumn ||
+      leftColumn.column.affinity !== leftField.affinity ||
+      rightColumn.column.affinity !== rightField.affinity
+    )
+      return undefined;
+    pairsByScanIndex.set(scanIndex, pair);
+  }
+
+  const schemaColumns = Object.values(right.scan.table.columns);
+  const indexes = [...right.scan.table.indexes]
+    .filter(
+      (index) =>
+        index.partial === false &&
+        index.rawExpressionSql === undefined &&
+        index.columns.length >= 2 &&
+        index.columns.every(
+          (name): name is string => typeof name === "string",
+        ) &&
+        index.collations !== undefined &&
+        index.collations.length === index.columns.length &&
+        new Set(index.columns.map(foldSqlIdentifierAscii)).size ===
+          index.columns.length,
+    )
+    .map((index) => {
+      const keyColumns: {
+        name: string;
+        leftIndex: number;
+        rightIndex: number;
+      }[] = [];
+      for (let keyIndex = 0; keyIndex < index.columns.length; keyIndex++) {
+        const name = index.columns[keyIndex]!;
+        const schemaIndex = schemaColumns.findIndex((column) =>
+          sameSqlIdentifier(column.sqlName, name),
+        );
+        const pair = pairsByScanIndex.get(schemaIndex);
+        const column = schemaColumns[schemaIndex];
+        if (
+          schemaIndex < 0 ||
+          !pair ||
+          !column ||
+          column.generated ||
+          column.hidden !== 0 ||
+          index.collations?.[keyIndex] !== "BINARY"
+        )
+          break;
+        keyColumns.push({
+          name,
+          leftIndex: pair.left,
+          rightIndex: pair.right,
+        });
+      }
+      return { index, keyColumns };
+    })
+    .filter(({ keyColumns }) => keyColumns.length >= 2)
+    .sort(
+      (left, rightCandidate) =>
+        rightCandidate.keyColumns.length - left.keyColumns.length ||
+        (left.index.name < rightCandidate.index.name
+          ? -1
+          : left.index.name > rightCandidate.index.name
+            ? 1
+            : 0),
+    );
+  const selected = indexes[0];
+  return selected
+    ? {
+        kind: "fact-local-indexed",
+        join,
+        driver: "left",
+        owner,
+        tableName: right.scan.table.name,
+        indexName: selected.index.name,
+        keyColumns: selected.keyColumns,
+      }
+    : undefined;
+}
+
+function nodeContains(
+  root: LogicalQueryNode,
+  target: LogicalQueryNode,
+): boolean {
+  const visited = new Set<LogicalQueryNode>();
+  const pending = [root];
+  while (pending.length > 0) {
+    const node = pending.pop()!;
+    if (node === target) return true;
+    if (visited.has(node)) continue;
+    visited.add(node);
+    pending.push(...nodeChildren(node).map(({ node: child }) => child));
+  }
+  return false;
+}
+
 function joinOrderStrategies(
   root: LogicalQueryNode,
   sharedDefinitions: readonly SharedRelationDefinition[],
+  boundedFactLocal: ReadonlyMap<
+    LogicalQueryNode,
+    BoundedFactLocalReuseEvidence
+  >,
 ): readonly PhysicalJoinOrderStrategy[] {
   const analysis = analyzeSharedRelations(root);
   const shared = new Map(
@@ -1983,6 +2124,24 @@ function joinOrderStrategies(
       driver: "right",
       uniqueKey: singleValueUniqueLookup(join.right)!.uniqueKey,
     });
+
+  for (const [candidate, evidence] of boundedFactLocal) {
+    if (
+      evidence.candidateKind !== "carrier" ||
+      !nodeContains(evidence.owner, candidate)
+    )
+      continue;
+    for (const join of nodes) {
+      if (
+        join.kind !== "join" ||
+        join.left.node !== candidate ||
+        strategies.some((strategy) => strategy.join === join)
+      )
+        continue;
+      const indexed = factLocalIndexedStrategy(join, evidence.owner, shared);
+      if (indexed) strategies.push(indexed);
+    }
+  }
   return strategies;
 }
 
@@ -2040,7 +2199,21 @@ function sameJoinOrderStrategies(
         strategy.kind === canonical.kind &&
         strategy.join === canonical.join &&
         strategy.driver === canonical.driver &&
-        strategy.uniqueKey === canonical.uniqueKey
+        (strategy.kind === "fact-local-indexed" &&
+        canonical.kind === "fact-local-indexed"
+          ? strategy.owner === canonical.owner &&
+            strategy.tableName === canonical.tableName &&
+            strategy.indexName === canonical.indexName &&
+            strategy.keyColumns.length === canonical.keyColumns.length &&
+            strategy.keyColumns.every(
+              (key, keyIndex) =>
+                key.name === canonical.keyColumns[keyIndex]?.name &&
+                key.leftIndex === canonical.keyColumns[keyIndex]?.leftIndex &&
+                key.rightIndex === canonical.keyColumns[keyIndex]?.rightIndex,
+            )
+          : strategy.kind !== "fact-local-indexed" &&
+            canonical.kind !== "fact-local-indexed" &&
+            strategy.uniqueKey === canonical.uniqueKey)
       );
     })
   );
@@ -2403,20 +2576,147 @@ function hoistEligibility(root: LogicalQueryNode): HoistEligibility {
   return { forbidden, windowInput };
 }
 
-interface CandidateFacts {
-  readonly scopes: Set<RelationScope>;
-  readonly referencedScopes: RelationScope[];
-  selective: boolean;
-  forbidden: boolean;
-  rowNumberWindow: boolean;
-  ordinaryRowNumberWindow: boolean;
+type MaterializedBoundaryInterface = PhysicalSharedRelationBoundaryEvidence;
+
+interface ConstantExistenceCorrelationContext {
+  readonly outerScopes: ReadonlyMap<RelationScope, number>;
 }
 
-function isConstantExistenceQuery(query: QuerySource): boolean {
-  if (query.node.kind !== "project" || query.node.projections.length !== 1)
-    return false;
-  const expression = query.node.projections[0]!.expression;
-  return expression.kind === "constant" && expression.value === 1;
+function exactNodeInputScopes(
+  node: LogicalQueryNode,
+  inheritedScopes: ReadonlyMap<RelationScope, number>,
+): ReadonlyMap<RelationScope, number> | undefined {
+  const fieldsByScope = new Map(inheritedScopes);
+  for (const source of nodeChildren(node)) {
+    const previous = fieldsByScope.get(source.scope);
+    if (previous !== undefined && previous !== source.fields.length)
+      return undefined;
+    fieldsByScope.set(source.scope, source.fields.length);
+  }
+  return fieldsByScope;
+}
+
+function totalNodeWithVisibleScopes(
+  node: LogicalQueryNode,
+  inheritedScopes: ReadonlyMap<RelationScope, number>,
+): boolean {
+  if (
+    isMaterializationSafeNode(node) ||
+    isMaterializationSafePartitionedRowNumberWindow(node)
+  )
+    return true;
+  const fieldsByScope = exactNodeInputScopes(node, inheritedScopes);
+  if (!fieldsByScope) return false;
+  if (node.kind === "filter")
+    return isMaterializationSafeExpression(node.predicate, fieldsByScope);
+  if (node.kind === "project")
+    return node.projections.every(({ expression }) =>
+      isMaterializationSafeExpression(expression, fieldsByScope),
+    );
+  return false;
+}
+
+function totalConstantExistenceBody(
+  root: LogicalQueryNode,
+  outerScopes: ReadonlyMap<RelationScope, number>,
+  materializedBoundaries?: ReadonlyMap<
+    LogicalQueryNode,
+    MaterializedBoundaryInterface
+  >,
+): boolean {
+  const active = new Set<LogicalQueryNode>();
+  const visited = new Set<LogicalQueryNode>();
+  const visit = (node: LogicalQueryNode): boolean => {
+    if (active.has(node)) return false;
+    const boundary = materializedBoundaries?.get(node);
+    if (boundary) {
+      const { definition } = boundary;
+      return (
+        definition.materialization === "materialized" &&
+        definition.node === node &&
+        definition.scope === node.scope &&
+        sameFields(definition.fields, node.fields) &&
+        boundary.license.kind.length > 0
+      );
+    }
+    if (visited.has(node)) return true;
+    if (
+      node.kind !== "scan" &&
+      node.kind !== "values-relation" &&
+      node.kind !== "project" &&
+      node.kind !== "filter" &&
+      node.kind !== "aggregate" &&
+      node.kind !== "window"
+    )
+      return false;
+    if (
+      node.kind === "window" &&
+      (node.windows.length === 0 ||
+        node.windows.some(
+          ({ specification }) => specification.kind !== "row-number",
+        ))
+    )
+      return false;
+    if (!totalNodeWithVisibleScopes(node, outerScopes)) return false;
+    active.add(node);
+    for (const source of nodeChildren(node)) {
+      if (!visit(source.node)) return false;
+    }
+    active.delete(node);
+    visited.add(node);
+    return true;
+  };
+  return visit(root);
+}
+
+/**
+ * Authorize only the existing `filter(input, scalar(SELECT 1) = 1)` shape.
+ * The filter input is the sole external scope exposed to the query body.
+ */
+function constantExistenceCorrelationContext(
+  node: LogicalQueryNode,
+  materializedBoundaries?: ReadonlyMap<
+    LogicalQueryNode,
+    MaterializedBoundaryInterface
+  >,
+): ConstantExistenceCorrelationContext | undefined {
+  if (node.kind !== "filter") return undefined;
+  if (
+    node.predicate.kind === "null-check" &&
+    node.predicate.expression.kind === "scalar-subquery"
+  ) {
+    const outerScopes = correlatedConstantExistenceOuterScopes(
+      node,
+      nodeChildren,
+      inspectLocalStableExpression,
+    );
+    return outerScopes ? { outerScopes } : undefined;
+  }
+  if (
+    node.predicate.kind !== "binary" ||
+    node.predicate.operator !== "=" ||
+    node.predicate.left.kind !== "scalar-subquery" ||
+    node.predicate.right.kind !== "constant" ||
+    node.predicate.right.value !== 1
+  )
+    return undefined;
+  const query = node.predicate.left.query;
+  if (
+    !isConstantExistenceQuery(query) ||
+    query.scope !== query.node.scope ||
+    !sameFields(query.fields, query.node.fields)
+  )
+    return undefined;
+  const outerScopes = new Map<RelationScope, number>([
+    [node.input.scope, node.input.fields.length],
+  ]);
+  return totalConstantExistenceBody(
+    query.node,
+    outerScopes,
+    materializedBoundaries,
+  )
+    ? { outerScopes }
+    : undefined;
 }
 
 function expressionColumnScopes(
@@ -2529,46 +2829,111 @@ function hasClosedWindowSubtreeScopes(
 function candidateFacts(
   root: LogicalQueryNode,
   closedWindowScopeMemo: WeakMap<LogicalQueryNode, boolean>,
+  materializedBoundaries?: ReadonlyMap<
+    LogicalQueryNode,
+    MaterializedBoundaryInterface
+  >,
+  requireTotalExpressions = false,
+  allowRankOnePartitionedRowNumberProof = false,
+  isSafeProvenPartitionedRowNumberWindow = isMaterializationSafeProvenPartitionedRowNumberWindow,
 ): CandidateFacts {
   const facts: CandidateFacts = {
     scopes: new Set(),
     referencedScopes: [],
+    referencedColumns: [],
+    materializedBoundariesUsed: new Set(),
     selective: false,
     forbidden: false,
+    unsafe: false,
+    materializedBoundary: false,
+    limitBarrier: false,
+    sortBarrier: false,
     rowNumberWindow: false,
     ordinaryRowNumberWindow: false,
   };
-  const visited = new Map<LogicalQueryNode, Map<boolean, Set<boolean>>>();
+  const visited = new Map<
+    LogicalQueryNode,
+    Map<
+      boolean,
+      Map<ConstantExistenceCorrelationContext | undefined, Set<boolean>>
+    >
+  >();
   const visit = (
     node: LogicalQueryNode,
     querySourcePath: boolean,
     constantExistencePath: boolean,
+    correlationContext?: ConstantExistenceCorrelationContext,
   ): void => {
     let querySourceContexts = visited.get(node);
     if (!querySourceContexts) {
       querySourceContexts = new Map();
       visited.set(node, querySourceContexts);
     }
-    let constantExistenceContexts = querySourceContexts.get(querySourcePath);
+    let correlationContexts = querySourceContexts.get(querySourcePath);
+    if (!correlationContexts) {
+      correlationContexts = new Map();
+      querySourceContexts.set(querySourcePath, correlationContexts);
+    }
+    let constantExistenceContexts = correlationContexts.get(correlationContext);
     if (!constantExistenceContexts) {
       constantExistenceContexts = new Set();
-      querySourceContexts.set(querySourcePath, constantExistenceContexts);
+      correlationContexts.set(correlationContext, constantExistenceContexts);
     }
     if (constantExistenceContexts.has(constantExistencePath)) return;
     constantExistenceContexts.add(constantExistencePath);
     facts.scopes.add(node.scope);
+    if (node !== root) {
+      const boundary = materializedBoundaries?.get(node);
+      if (boundary) {
+        const definition = boundary.definition;
+        if (
+          definition.node !== node ||
+          definition.scope !== node.scope ||
+          !sameFields(definition.fields, node.fields)
+        ) {
+          facts.forbidden = true;
+          facts.unsafe = true;
+        }
+        facts.selective ||= boundary.selective;
+        facts.materializedBoundary = true;
+        facts.materializedBoundariesUsed.add(node);
+        return;
+      }
+    }
+    const localConstantExistenceContext =
+      !querySourcePath && !constantExistencePath
+        ? constantExistenceCorrelationContext(node, materializedBoundaries)
+        : undefined;
+    const isTotal =
+      isMaterializationSafeNode(node) ||
+      (requireTotalExpressions &&
+        allowRankOnePartitionedRowNumberProof &&
+        isSafeProvenPartitionedRowNumberWindow(node)) ||
+      (querySourcePath &&
+        constantExistencePath &&
+        correlationContext !== undefined &&
+        totalNodeWithVisibleScopes(node, correlationContext.outerScopes)) ||
+      localConstantExistenceContext !== undefined;
+    if (requireTotalExpressions && !isTotal) {
+      facts.unsafe = true;
+      return;
+    }
     if (
       node.kind === "filter" ||
       node.kind === "semi-join" ||
       node.kind === "anti-join"
     )
       facts.selective = true;
-    if (
-      node.kind === "sort" ||
-      node.kind === "limit" ||
-      node.kind === "recursive-closure"
-    )
+    if (node.kind === "sort") {
       facts.forbidden = true;
+      facts.sortBarrier = true;
+    }
+    if (node.kind === "limit") {
+      facts.forbidden = true;
+      facts.limitBarrier = true;
+    }
+    if (node.kind === "recursive-closure") facts.forbidden = true;
+    if (node.kind === "recursive-closure") facts.unsafe = true;
     if (node.kind === "window") {
       const onlyRowNumberWindows =
         node.windows.length > 0 &&
@@ -2582,12 +2947,20 @@ function candidateFacts(
       if (onlyRowNumberWindows && allowedQueryContext) {
         facts.rowNumberWindow = true;
         if (!querySourcePath) facts.ordinaryRowNumberWindow = true;
-      } else facts.forbidden = true;
+      } else {
+        facts.forbidden = true;
+        facts.unsafe = true;
+      }
     }
     for (const expression of nodeExpressions(node)) {
       const inspect = (current: SqlExpression): void => {
-        if (current.kind === "column")
+        if (current.kind === "column") {
           facts.referencedScopes.push(current.scope);
+          facts.referencedColumns.push({
+            scope: current.scope,
+            index: current.index,
+          });
+        }
         if (
           current.kind === "unixepoch" ||
           current.kind === "in-subquery" ||
@@ -2595,6 +2968,7 @@ function candidateFacts(
             (!isConstantExistenceQuery(current.query) || querySourcePath))
         ) {
           facts.forbidden = true;
+          facts.unsafe = true;
         }
         switch (current.kind) {
           case "binary":
@@ -2661,7 +3035,12 @@ function candidateFacts(
       inspect(expression);
     }
     nodeChildren(node).forEach((source) =>
-      visit(source.node, querySourcePath, constantExistencePath),
+      visit(
+        source.node,
+        querySourcePath,
+        constantExistencePath,
+        correlationContext,
+      ),
     );
     for (const expression of nodeExpressions(node))
       visitExpressionQuerySources(expression, (source, sourceKind) => {
@@ -2669,11 +3048,67 @@ function candidateFacts(
           !querySourcePath &&
           sourceKind === "scalar-subquery" &&
           isConstantExistenceQuery(source);
-        visit(source.node, true, entersConstantExistencePath);
+        visit(
+          source.node,
+          true,
+          entersConstantExistencePath,
+          entersConstantExistencePath
+            ? localConstantExistenceContext
+            : correlationContext,
+        );
       });
   };
   visit(root, false, false);
   return facts;
+}
+
+function candidateFactsAreClosed(
+  facts: CandidateFacts,
+  materializedBoundaries?: ReadonlyMap<
+    LogicalQueryNode,
+    MaterializedBoundaryInterface
+  >,
+): boolean {
+  if (!facts.referencedScopes.every((scope) => facts.scopes.has(scope)))
+    return false;
+  if (!materializedBoundaries) return true;
+  const exportedFieldCounts = new Map<RelationScope, number>(
+    [...materializedBoundaries.values()].map(({ definition }) => [
+      definition.scope,
+      definition.fields.length,
+    ]),
+  );
+  return facts.referencedColumns.every(({ scope, index }) => {
+    const exportedFieldCount = exportedFieldCounts.get(scope);
+    return (
+      exportedFieldCount === undefined ||
+      (Number.isInteger(index) && index >= 0 && index < exportedFieldCount)
+    );
+  });
+}
+
+function wideRankOneBoundaryUsesExistingLicense(
+  node: LogicalQueryNode,
+  facts: CandidateFacts,
+  materializedBoundaries: ReadonlyMap<
+    LogicalQueryNode,
+    MaterializedBoundaryInterface
+  >,
+): boolean {
+  const usedBoundaries = [...materializedBoundaries.values()].filter(
+    ({ definition }) =>
+      definition.node !== node && facts.scopes.has(definition.scope),
+  );
+  // Keep established wide rank-one licenses; new opaque licenses stay narrow.
+  return (
+    usedBoundaries.length > 0 &&
+    usedBoundaries.every(
+      ({ license }) =>
+        license.kind === "rank-one-project" ||
+        license.kind === "bounded-summary-derived" ||
+        license.kind === "strict-generic-facts",
+    )
+  );
 }
 
 interface IncomingConsumer {
@@ -2710,9 +3145,10 @@ function inspectLocalStableExpression(
   readonly columns: readonly {
     readonly scope: RelationScope;
     readonly index: number;
+    readonly name: string;
   }[];
 } {
-  const columns: { scope: RelationScope; index: number }[] = [];
+  const columns: { scope: RelationScope; index: number; name: string }[] = [];
   let valid = expressionSources(expression).length === 0;
   const seen = new WeakSet<object>();
   const visit = (value: unknown): void => {
@@ -2737,10 +3173,16 @@ function inspectLocalStableExpression(
       if (
         !allowedScopes.has(scope) ||
         !Number.isInteger(index) ||
-        Number(index) < 0
+        Number(index) < 0 ||
+        typeof record.name !== "string"
       )
         valid = false;
-      else columns.push({ scope, index: Number(index) });
+      else
+        columns.push({
+          scope,
+          index: Number(index),
+          name: record.name,
+        });
       return;
     }
     for (const [key, child] of Object.entries(record))
@@ -2761,7 +3203,6 @@ function expressionFitsLocalFields(
     inspected.columns.every(({ index }) => index < fieldCount)
   );
 }
-
 function expressionQueryEdgeSubtrees(
   nodes: readonly LogicalQueryNode[],
   materializedBoundaries: ReadonlySet<LogicalQueryNode> = new Set(),
@@ -2855,6 +3296,46 @@ function isStableRelationConsumer(
   return false;
 }
 
+function isStableMaterializedBoundaryConsumer(
+  parent: LogicalQueryNode,
+  child: LogicalQueryNode,
+): boolean {
+  if (parent.kind === "window" && parent.input.node === child) {
+    const fieldsByScope = new Map([
+      [parent.input.scope, parent.input.fields.length],
+    ]);
+    return (
+      parent.windows.length > 0 &&
+      parent.windows.every(
+        ({ specification }) =>
+          specification.kind === "row-number" &&
+          specification.partitionBy.every((expression) =>
+            isMaterializationSafeExpression(expression, fieldsByScope),
+          ) &&
+          specification.orderBy.every(
+            ({ expression, direction }) =>
+              (direction === "ASC" || direction === "DESC") &&
+              isMaterializationSafeExpression(expression, fieldsByScope),
+          ),
+      )
+    );
+  }
+  if (
+    parent.kind === "join" &&
+    (parent.left.node === child || parent.right.node === child)
+  )
+    return (
+      (parent.joinType === "inner" || parent.joinType === "left") &&
+      isMaterializationSafeNode(parent)
+    );
+  return (
+    (parent.kind === "project" ||
+      parent.kind === "filter" ||
+      parent.kind === "aggregate") &&
+    parent.input.node === child &&
+    isMaterializationSafeNode(parent)
+  );
+}
 function isPureProjectConsumer(node: LogicalQueryNode): node is ProjectNode {
   return (
     isPureLocalColumnProject(node) &&
@@ -3175,6 +3656,11 @@ function sharedRankOneProjectCandidates(
   rankingInputNodes: ReadonlySet<LogicalQueryNode>,
   expressionQueryEdgeNodes: ReadonlySet<LogicalQueryNode>,
   closedWindowScopeMemo: WeakMap<LogicalQueryNode, boolean>,
+  materializedBoundaries: ReadonlyMap<
+    LogicalQueryNode,
+    MaterializedBoundaryInterface
+  >,
+  isSafeProvenPartitionedRowNumberWindow: (node: LogicalQueryNode) => boolean,
 ): Set<LogicalQueryNode> {
   const candidates = new Set<LogicalQueryNode>();
   for (const node of nodes) {
@@ -3198,11 +3684,38 @@ function sharedRankOneProjectCandidates(
       )
     )
       continue;
-    const facts = candidateFacts(node, closedWindowScopeMemo);
+    const initialFacts = candidateFacts(
+      node,
+      closedWindowScopeMemo,
+      materializedBoundaries,
+    );
+    const consumesMaterializedBoundary = initialFacts.materializedBoundary;
+    if (
+      consumesMaterializedBoundary &&
+      node.fields.length > MAX_MATERIALIZED_SHARED_RELATION_FIELDS &&
+      !wideRankOneBoundaryUsesExistingLicense(
+        node,
+        initialFacts,
+        materializedBoundaries,
+      )
+    )
+      continue;
+    const facts = consumesMaterializedBoundary
+      ? candidateFacts(
+          node,
+          closedWindowScopeMemo,
+          materializedBoundaries,
+          true,
+          true,
+          isSafeProvenPartitionedRowNumberWindow,
+        )
+      : initialFacts;
     if (
       facts.selective &&
       !facts.forbidden &&
-      facts.referencedScopes.every((scope) => facts.scopes.has(scope))
+      (!consumesMaterializedBoundary ||
+        (facts.materializedBoundary && !facts.unsafe)) &&
+      candidateFactsAreClosed(facts, materializedBoundaries)
     )
       candidates.add(node);
   }
@@ -3292,8 +3805,21 @@ interface SharedRelationAnalysis {
   readonly incomingEdges: ReturnType<typeof incomingConsumers>;
   readonly terminalBagCandidates: ReadonlySet<LogicalQueryNode>;
   readonly filterFanoutCandidates: ReadonlySet<LogicalQueryNode>;
+  readonly ordinaryFilterFanoutCandidates: ReadonlySet<LogicalQueryNode>;
   readonly rankingInputNodes: ReadonlySet<LogicalQueryNode>;
   readonly expressionQueryEdgeNodes: ReadonlySet<LogicalQueryNode>;
+  readonly boundedGroupSummaryCandidates: ReadonlySet<LogicalQueryNode>;
+  readonly boundedSummaryDerivedCandidates: ReadonlySet<LogicalQueryNode>;
+  readonly sharedMembershipInputCandidates: ReadonlySet<LogicalQueryNode>;
+  readonly sharedScalarCountCandidates: ReadonlySet<LogicalQueryNode>;
+  readonly boundedAdmissionCandidates: ReadonlyMap<
+    LogicalQueryNode,
+    BoundedAdmissionEvidence
+  >;
+  readonly boundedAdmissionCounterCandidates: ReadonlyMap<
+    LogicalQueryNode,
+    BoundedAdmissionEvidence
+  >;
 }
 
 function analyzeSharedRelations(
@@ -3324,6 +3850,22 @@ function analyzeSharedRelations(
   const repeatedWindowInputs = multiWindowInputs(root);
   const closedWindowScopeMemo = new WeakMap<LogicalQueryNode, boolean>();
   const incomingEdges = incomingConsumers(postorder);
+  const boundedAdmissionCandidates = boundedAdmissionReuseCandidates({
+    nodes: postorder,
+    incomingCounts: incoming,
+    incoming: incomingEdges,
+    maximumFields: MAX_MATERIALIZED_SHARED_RELATION_FIELDS,
+    inspectLocalStableExpression,
+  });
+  const boundedAdmissionCounterCandidates = new Map<
+    LogicalQueryNode,
+    BoundedAdmissionEvidence
+  >(
+    [...boundedAdmissionCandidates.values()].map((evidence) => [
+      evidence.counter,
+      evidence,
+    ]),
+  );
   const terminalBagCandidates = terminalBagMembershipCandidates(
     root,
     postorder,
@@ -3338,6 +3880,57 @@ function analyzeSharedRelations(
     repeatedWindowInputs,
     closedWindowScopeMemo,
   );
+  const expressionQueryEdgeNodes = expressionQueryEdgeSubtrees(postorder);
+  const boundedGroupSummaryCandidates = boundedGroupSummaryReuseCandidates({
+    nodes: postorder,
+    incomingCounts: incoming,
+    incoming: incomingEdges,
+    forbiddenAncestors: hoist.forbidden,
+    expressionQueryEdges: expressionQueryEdgeNodes,
+    maximumFields: MAX_MATERIALIZED_SHARED_RELATION_FIELDS,
+  });
+  const boundedSummaryDerivedCandidates = boundedSummaryDerivedReuseCandidates({
+    nodes: postorder,
+    incomingCounts: incoming,
+    incoming: incomingEdges,
+    forbiddenAncestors: hoist.forbidden,
+    expressionQueryEdges: expressionQueryEdgeNodes,
+    boundedGroupSummaryCandidates,
+    maximumFields: MAX_MATERIALIZED_SHARED_RELATION_FIELDS,
+    minimumReferences: 2,
+  });
+  const sharedMembershipInputs = sharedMembershipInputReuseCandidates({
+    nodes: postorder,
+    incomingCounts: incoming,
+    incoming: incomingEdges,
+    forbiddenAncestors: hoist.forbidden,
+    expressionQueryEdges: expressionQueryEdgeNodes,
+    boundedGroupSummaryCandidates,
+    minimumFields: MIN_REPEATED_WINDOW_INPUT_PROJECT_FIELDS,
+    maximumFields: MAX_REPEATED_WINDOW_INPUT_PROJECT_FIELDS,
+    minimumReferences: MIN_REPEATED_WINDOW_INPUT_PROJECT_REFERENCES,
+  });
+  const sharedScalarCounts = sharedScalarCountReuseCandidates({
+    nodes: postorder,
+    incomingCounts: incoming,
+    incoming: incomingEdges,
+    expressionQueryEdges: expressionQueryEdgeNodes,
+    boundedGroupSummaryCandidates,
+    minimumReferences: 2,
+  });
+  const ordinaryFilterFanoutCandidates = sharedOrdinaryFilterFanoutCandidates({
+    nodes: postorder,
+    incomingCounts: incoming,
+    incoming: incomingEdges,
+    forbidden: hoist.forbidden,
+    expressionQueryEdgeNodes,
+    minimumFields: MIN_REPEATED_WINDOW_INPUT_PROJECT_FIELDS,
+    maximumFields: MAX_REPEATED_WINDOW_INPUT_PROJECT_FIELDS,
+    minimumReferences: MIN_REPEATED_WINDOW_INPUT_PROJECT_REFERENCES,
+    nodeChildren,
+    inspect: inspectLocalStableExpression,
+    isPureProjectConsumer,
+  });
   return {
     incoming,
     postorder,
@@ -3347,15 +3940,130 @@ function analyzeSharedRelations(
     incomingEdges,
     terminalBagCandidates,
     filterFanoutCandidates,
+    ordinaryFilterFanoutCandidates,
     rankingInputNodes: terminalRankOneSubtreeNodes(postorder),
-    expressionQueryEdgeNodes: expressionQueryEdgeSubtrees(postorder),
+    expressionQueryEdgeNodes,
+    boundedGroupSummaryCandidates,
+    boundedSummaryDerivedCandidates,
+    sharedMembershipInputCandidates: sharedMembershipInputs,
+    sharedScalarCountCandidates: sharedScalarCounts,
+    boundedAdmissionCandidates,
+    boundedAdmissionCounterCandidates,
   };
+}
+
+function isStableMaterializedBoundaryProject(
+  node: LogicalQueryNode,
+): node is ProjectNode {
+  return (
+    node.kind === "project" &&
+    node.projections.length > 0 &&
+    isMaterializationSafeNode(node)
+  );
+}
+function sharedMaterializedBoundaryProjectCandidates(
+  analysis: SharedRelationAnalysis,
+  materializedBoundaries: ReadonlyMap<
+    LogicalQueryNode,
+    MaterializedBoundaryInterface
+  >,
+): Set<LogicalQueryNode> {
+  const candidates = new Set<LogicalQueryNode>();
+  for (const node of analysis.postorder) {
+    if (
+      !isStableMaterializedBoundaryProject(node) ||
+      materializedBoundaries.has(node) ||
+      node.fields.length < MIN_MATERIALIZED_BOUNDARY_PROJECT_FIELDS ||
+      node.fields.length > MAX_MATERIALIZED_SHARED_RELATION_FIELDS ||
+      (analysis.incoming.get(node) ?? 0) <
+        MIN_MATERIALIZED_BOUNDARY_PROJECT_REFERENCES ||
+      !analysis.hoist.windowInput.has(node) ||
+      !analysis.repeatedWindowInputs.has(node) ||
+      analysis.rankingInputNodes.has(node)
+    )
+      continue;
+    const consumers = analysis.incomingEdges.get(node) ?? [];
+    if (new Set(consumers.map(({ parent }) => parent)).size < 2) continue;
+    if (
+      consumers.length !== (analysis.incoming.get(node) ?? 0) ||
+      consumers.some(
+        ({ kind, parent }) =>
+          kind !== "relation" ||
+          !isStableMaterializedBoundaryConsumer(parent, node),
+      )
+    )
+      continue;
+    const facts = candidateFacts(
+      node,
+      analysis.closedWindowScopeMemo,
+      materializedBoundaries,
+      true,
+    );
+    if (
+      facts.selective &&
+      facts.materializedBoundary &&
+      !facts.forbidden &&
+      !facts.unsafe &&
+      !facts.ordinaryRowNumberWindow &&
+      candidateFactsAreClosed(facts, materializedBoundaries)
+    )
+      candidates.add(node);
+  }
+  return candidates;
+}
+
+function selectedMaterializedBoundaryLicenseSource(
+  node: LogicalQueryNode,
+  analysis: SharedRelationAnalysis,
+  completeKeyedLookupCandidates: ReadonlySet<LogicalQueryNode>,
+  rankOneProjectCandidates: ReadonlySet<LogicalQueryNode>,
+  rankOneFactFilterCandidates: ReadonlySet<LogicalQueryNode>,
+  facts: CandidateFacts,
+): PhysicalSharedRelationLicenseKind | undefined {
+  if (analysis.boundedGroupSummaryCandidates.has(node))
+    return "bounded-group-summary";
+  if (analysis.boundedSummaryDerivedCandidates.has(node))
+    return "bounded-summary-derived";
+  if (analysis.sharedMembershipInputCandidates.has(node))
+    return "shared-membership-input";
+  if (analysis.sharedScalarCountCandidates.has(node))
+    return "shared-scalar-count";
+  if (analysis.boundedAdmissionCandidates.has(node)) return "bounded-admission";
+  if (analysis.boundedAdmissionCounterCandidates.has(node))
+    return "bounded-admission-counter";
+  if (completeKeyedLookupCandidates.has(node)) return "complete-keyed-lookup";
+  if (rankOneProjectCandidates.has(node)) return "rank-one-project";
+  if (rankOneFactFilterCandidates.has(node)) return "rank-one-fact-filter";
+  if (facts.selective && !facts.forbidden) return "strict-generic-facts";
+  return undefined;
 }
 
 function sharedRelationDefinitionsForCandidates(
   analysis: SharedRelationAnalysis,
   rankOneProjectCandidates: ReadonlySet<LogicalQueryNode>,
   rankOneFactFilterCandidates: ReadonlySet<LogicalQueryNode>,
+  isSafeProvenPartitionedRowNumberWindow: (node: LogicalQueryNode) => boolean,
+  boundedGroupSummaryCandidates: ReadonlySet<LogicalQueryNode> = new Set(),
+  boundedAdmissionCandidates: ReadonlyMap<
+    LogicalQueryNode,
+    BoundedAdmissionEvidence
+  > = new Map(),
+  boundedAdmissionCounterCandidates: ReadonlyMap<
+    LogicalQueryNode,
+    BoundedAdmissionEvidence
+  > = new Map(),
+  completeKeyedLookupCandidates: ReadonlySet<LogicalQueryNode> = new Set(),
+  boundedFactLocalReuseCandidates: ReadonlyMap<
+    LogicalQueryNode,
+    BoundedFactLocalReuseEvidence
+  > = new Map(),
+  boundedSummaryDerivedCandidates: ReadonlySet<LogicalQueryNode> = analysis.boundedSummaryDerivedCandidates,
+  materializedBoundaries?: ReadonlyMap<
+    LogicalQueryNode,
+    MaterializedBoundaryInterface
+  >,
+  boundaryAwareWindowProjectCandidates: ReadonlySet<LogicalQueryNode> = new Set(),
+  legacyStrictRankOneProjectCandidates: ReadonlySet<LogicalQueryNode> = rankOneProjectCandidates,
 ): readonly SharedRelationDefinition[] {
   const {
     incoming,
@@ -3365,6 +4073,9 @@ function sharedRelationDefinitionsForCandidates(
     closedWindowScopeMemo,
     terminalBagCandidates,
     filterFanoutCandidates,
+    ordinaryFilterFanoutCandidates,
+    sharedMembershipInputCandidates,
+    sharedScalarCountCandidates: scalarCountCandidates,
   } = analysis;
   const sharedMaterializations = new Map<
     LogicalQueryNode,
@@ -3376,16 +4087,93 @@ function sharedRelationDefinitionsForCandidates(
     if (
       incomingCount < 2 ||
       node.kind === "scan" ||
-      (hoist.forbidden.has(node) && !hasTerminalBagLicense) ||
+      (hoist.forbidden.has(node) &&
+        !hasTerminalBagLicense &&
+        !boundedGroupSummaryCandidates.has(node) &&
+        !boundedSummaryDerivedCandidates.has(node) &&
+        !sharedMembershipInputCandidates.has(node) &&
+        !scalarCountCandidates.has(node) &&
+        !boundedAdmissionCandidates.has(node) &&
+        !boundedAdmissionCounterCandidates.has(node) &&
+        !completeKeyedLookupCandidates.has(node) &&
+        !boundedFactLocalReuseCandidates.has(node)) ||
       node.fields.length === 0 ||
       node.fields.length > MAX_REPEATED_WINDOW_INPUT_PROJECT_FIELDS
     )
       continue;
-    const facts = candidateFacts(node, closedWindowScopeMemo);
+    if (boundedGroupSummaryCandidates.has(node)) {
+      sharedMaterializations.set(node, "materialized");
+      continue;
+    }
+    if (boundedSummaryDerivedCandidates.has(node)) {
+      sharedMaterializations.set(node, "materialized");
+      continue;
+    }
+    if (sharedMembershipInputCandidates.has(node)) {
+      sharedMaterializations.set(node, "materialized");
+      continue;
+    }
+    if (scalarCountCandidates.has(node)) {
+      sharedMaterializations.set(node, "materialized");
+      continue;
+    }
+    if (boundedAdmissionCandidates.has(node)) {
+      sharedMaterializations.set(node, "materialized");
+      continue;
+    }
+    if (boundedAdmissionCounterCandidates.has(node)) {
+      sharedMaterializations.set(node, "materialized");
+      continue;
+    }
+    if (completeKeyedLookupCandidates.has(node)) {
+      sharedMaterializations.set(node, "materialized");
+      continue;
+    }
+    if (boundedFactLocalReuseCandidates.has(node)) {
+      sharedMaterializations.set(node, "materialized");
+      continue;
+    }
+    if (node.fields.length === 1 && isScalarCountRows(node)) continue;
+    const hasLegacyStrictRankOnePermit =
+      legacyStrictRankOneProjectCandidates.has(node);
+    const boundaryContext =
+      !hasLegacyStrictRankOnePermit &&
+      (rankOneProjectCandidates.has(node) ||
+        boundaryAwareWindowProjectCandidates.has(node))
+        ? materializedBoundaries
+        : undefined;
+    const initialFacts = candidateFacts(
+      node,
+      closedWindowScopeMemo,
+      boundaryContext,
+    );
+    const consumesMaterializedBoundary = initialFacts.materializedBoundary;
+    if (
+      consumesMaterializedBoundary &&
+      node.fields.length > MAX_MATERIALIZED_SHARED_RELATION_FIELDS &&
+      !wideRankOneBoundaryUsesExistingLicense(
+        node,
+        initialFacts,
+        boundaryContext ?? new Map(),
+      )
+    )
+      continue;
+    const facts = consumesMaterializedBoundary
+      ? candidateFacts(
+          node,
+          closedWindowScopeMemo,
+          boundaryContext,
+          true,
+          rankOneProjectCandidates.has(node) && !hasLegacyStrictRankOnePermit,
+          isSafeProvenPartitionedRowNumberWindow,
+        )
+      : initialFacts;
     const isSafe =
       facts.selective &&
       !facts.forbidden &&
-      facts.referencedScopes.every((scope) => facts.scopes.has(scope));
+      (!consumesMaterializedBoundary ||
+        (facts.materializedBoundary && !facts.unsafe)) &&
+      candidateFactsAreClosed(facts, boundaryContext);
     if (!isSafe) continue;
 
     if (hasTerminalBagLicense) {
@@ -3393,6 +4181,10 @@ function sharedRelationDefinitionsForCandidates(
       continue;
     }
     if (filterFanoutCandidates.has(node)) {
+      sharedMaterializations.set(node, "auto");
+      continue;
+    }
+    if (ordinaryFilterFanoutCandidates.has(node)) {
       sharedMaterializations.set(node, "auto");
       continue;
     }
@@ -3489,38 +4281,146 @@ function sharedRelationDefinitionsForCandidates(
     });
 }
 
+interface CanonicalSharedRelationAnalysis {
+  readonly definitions: readonly SharedRelationDefinition[];
+  readonly boundedFactLocal: ReadonlyMap<
+    LogicalQueryNode,
+    BoundedFactLocalReuseEvidence
+  >;
+  readonly materializedBoundaryPasses: number;
+  readonly materializedDefinitionsChecked: number;
+  readonly currentMaterializedBoundaryContext:
+    MaterializedBoundaryContext | undefined;
+}
+
 function sharedRelationDefinitions(
   root: LogicalQueryNode,
-): readonly SharedRelationDefinition[] {
+  includeCurrentMaterializedBoundaryContext = false,
+  onMaterializationDiagnostics?: MaterializationDiagnosticSink,
+): CanonicalSharedRelationAnalysis {
+  // This cache contains only pure facts about this immutable logical graph and
+  // is discarded when lowering/validation returns. Validation calls this
+  // function again with a fresh context and recomputes every proof.
+  const provenWindowAnalysis =
+    createProvenPartitionedRowNumberWindowAnalysisContext();
   const analysis = analyzeSharedRelations(root);
-  const noRankOneCandidates = new Set<LogicalQueryNode>();
+  const admissionCounters = new Map<LogicalQueryNode, LogicalQueryNode>(
+    [...analysis.boundedAdmissionCandidates.values()].map(
+      ({ counter, bounded }) => [counter, bounded],
+    ),
+  );
+  const completeKeyedLookup = completeKeyedLookupReuseCandidates(
+    root,
+    analysis.boundedAdmissionCandidates,
+    admissionCounters,
+  );
+  const baselineRankOneProjectCandidates = sharedRankOneProjectCandidates(
+    analysis.postorder,
+    analysis.incoming,
+    analysis.incomingEdges,
+    analysis.hoist,
+    analysis.repeatedWindowInputs,
+    analysis.rankingInputNodes,
+    analysis.expressionQueryEdgeNodes,
+    analysis.closedWindowScopeMemo,
+    new Map(),
+    provenWindowAnalysis.isSafe,
+  );
+  const baselineRankOneFactFilterCandidates = sharedRankOneFactFilterCandidates(
+    analysis.postorder,
+    analysis.incoming,
+    analysis.incomingEdges,
+    analysis.hoist,
+    analysis.repeatedWindowInputs,
+    analysis.rankingInputNodes,
+    analysis.expressionQueryEdgeNodes,
+    analysis.closedWindowScopeMemo,
+  );
   const baseline = sharedRelationDefinitionsForCandidates(
     analysis,
-    noRankOneCandidates,
-    noRankOneCandidates,
+    baselineRankOneProjectCandidates,
+    baselineRankOneFactFilterCandidates,
+    provenWindowAnalysis.isSafe,
+    analysis.boundedGroupSummaryCandidates,
+    analysis.boundedAdmissionCandidates,
+    analysis.boundedAdmissionCounterCandidates,
+    completeKeyedLookup,
+    new Map(),
+    analysis.boundedSummaryDerivedCandidates,
   );
-  const materializedBoundaries = new Set(
-    baseline
-      .filter(({ node, materialization }) => {
-        if (
-          materialization !== "materialized" ||
-          analysis.hoist.forbidden.has(node)
-        )
-          return false;
-        const facts = candidateFacts(node, analysis.closedWindowScopeMemo);
-        return (
-          facts.selective &&
-          !facts.forbidden &&
-          facts.referencedScopes.every((scope) => facts.scopes.has(scope))
-        );
-      })
-      .map(({ node }) => node),
+  const consumerEdges = materializationConsumerEdges(
+    analysis.postorder,
+    nodeChildren,
+    nodeExpressions,
+    expressionSources,
   );
+  const createBoundaryContext = (
+    definitions: readonly SharedRelationDefinition[],
+    projectCandidates: ReadonlySet<LogicalQueryNode>,
+    factFilterCandidates: ReadonlySet<LogicalQueryNode>,
+    promotionCandidates?: ReadonlyMap<
+      LogicalQueryNode,
+      MaterializationPromotionCandidate
+    >,
+    originalDefinitions?: readonly SharedRelationDefinition[],
+    strictStageReaderContext?: StrictStageReaderContext,
+    initialInterfaces?: ReadonlyMap<
+      LogicalQueryNode,
+      PhysicalSharedRelationBoundaryEvidence
+    >,
+  ) =>
+    materializedBoundaryContext({
+      root,
+      postorder: analysis.postorder,
+      closedWindowScopeMemo: analysis.closedWindowScopeMemo,
+      baseline: definitions,
+      ...(initialInterfaces ? { initialInterfaces } : {}),
+      completeKeyedLookupCandidates: completeKeyedLookup,
+      rankOneProjectCandidates: projectCandidates,
+      rankOneFactFilterCandidates: factFilterCandidates,
+      ...(promotionCandidates ? { promotionCandidates } : {}),
+      ...(strictStageReaderContext ? { strictStageReaderContext } : {}),
+      ...(originalDefinitions ? { originalDefinitions } : {}),
+      edges: consumerEdges,
+      sourcesOf: nodeSources,
+      sameFields,
+      candidateFacts: (node, memo, boundaries, requireTotal, allowRankProof) =>
+        candidateFacts(
+          node,
+          memo,
+          boundaries,
+          requireTotal,
+          allowRankProof,
+          provenWindowAnalysis.isSafe,
+        ),
+      candidateFactsAreClosed,
+      licenseSourceFor: (node, facts) =>
+        selectedMaterializedBoundaryLicenseSource(
+          node,
+          analysis,
+          completeKeyedLookup,
+          projectCandidates,
+          factFilterCandidates,
+          facts,
+        ),
+      isSafeReader: (node) =>
+        isMaterializationSafeNode(node) || provenWindowAnalysis.isSafe(node),
+    });
+  const boundaryContext = createBoundaryContext(
+    baseline,
+    baselineRankOneProjectCandidates,
+    baselineRankOneFactFilterCandidates,
+  );
+  const boundaryAwareWindowProjectCandidates =
+    sharedMaterializedBoundaryProjectCandidates(
+      analysis,
+      boundaryContext.interfaces,
+    );
   const shieldedExpressionQueryEdges = expressionQueryEdgeSubtrees(
     analysis.postorder,
-    materializedBoundaries,
+    new Set(boundaryContext.interfaces.keys()),
   );
-  const rankOneProjectCandidates = sharedRankOneProjectCandidates(
+  const boundaryAwareRankOneProjectCandidates = sharedRankOneProjectCandidates(
     analysis.postorder,
     analysis.incoming,
     analysis.incomingEdges,
@@ -3529,7 +4429,13 @@ function sharedRelationDefinitions(
     analysis.rankingInputNodes,
     shieldedExpressionQueryEdges,
     analysis.closedWindowScopeMemo,
+    boundaryContext.interfaces,
+    provenWindowAnalysis.isSafe,
   );
+  const rankOneProjectCandidates = new Set([
+    ...baselineRankOneProjectCandidates,
+    ...boundaryAwareRankOneProjectCandidates,
+  ]);
   const rankOneFactFilterCandidates = sharedRankOneFactFilterCandidates(
     analysis.postorder,
     analysis.incoming,
@@ -3540,17 +4446,207 @@ function sharedRelationDefinitions(
     analysis.expressionQueryEdgeNodes,
     analysis.closedWindowScopeMemo,
   );
-  return sharedRelationDefinitionsForCandidates(
+  const existingSharedOwners = new Set<LogicalQueryNode>([
+    ...baseline.map(({ node }) => node),
+    ...analysis.boundedGroupSummaryCandidates,
+    ...analysis.boundedSummaryDerivedCandidates,
+    ...analysis.sharedMembershipInputCandidates,
+    ...analysis.sharedScalarCountCandidates,
+    ...rankOneProjectCandidates,
+    ...rankOneFactFilterCandidates,
+  ]);
+  const boundedFactLocal = boundedFactLocalReuseCandidates({
+    root,
+    nodes: analysis.postorder,
+    incomingCounts: analysis.incoming,
+    incoming: analysis.incomingEdges,
+    completeFacts: completeKeyedLookup,
+    boundedAdmissions: analysis.boundedAdmissionCandidates,
+    sharedBoundaries: existingSharedOwners,
+    maximumFields: MAX_MATERIALIZED_SHARED_RELATION_FIELDS,
+  });
+  const baseDefinitions = sharedRelationDefinitionsForCandidates(
     analysis,
     rankOneProjectCandidates,
     rankOneFactFilterCandidates,
+    provenWindowAnalysis.isSafe,
+    analysis.boundedGroupSummaryCandidates,
+    analysis.boundedAdmissionCandidates,
+    analysis.boundedAdmissionCounterCandidates,
+    completeKeyedLookup,
+    boundedFactLocal,
+    analysis.boundedSummaryDerivedCandidates,
+    boundaryContext.interfaces,
+    boundaryAwareWindowProjectCandidates,
+    baselineRankOneProjectCandidates,
   );
+  const independentAutoPromotionCandidates =
+    autoMaterializationPromotionCandidates(baseDefinitions, analysis.postorder);
+  const independentAutoBoundaryContext = createBoundaryContext(
+    baseDefinitions,
+    rankOneProjectCandidates,
+    rankOneFactFilterCandidates,
+    independentAutoPromotionCandidates,
+    baseDefinitions,
+  );
+  const stageBaseDefinitions = baseDefinitions.map(
+    (definition) =>
+      independentAutoBoundaryContext.promotedDefinitions.get(definition.node) ??
+      definition,
+  );
+  const stageReview = reviewStrictRankStages({
+    root,
+    postorder: analysis.postorder,
+    closedWindowScopeMemo: analysis.closedWindowScopeMemo,
+    stageBaseDefinitions,
+    edges: consumerEdges,
+    sourcesOf: nodeSources,
+    independentAutoBoundaryContext,
+    candidateFacts: (node, memo, boundaries, requireTotal, allowRankProof) =>
+      candidateFacts(
+        node,
+        memo,
+        boundaries,
+        requireTotal,
+        allowRankProof,
+        provenWindowAnalysis.isSafe,
+      ),
+    candidateFactsAreClosed,
+    sameFields,
+    isSafeReader: (node) =>
+      isMaterializationSafeNode(node) || provenWindowAnalysis.isSafe(node),
+  });
+  const {
+    stageProof,
+    selectedStageNodes,
+    provisionalDefinitions,
+    strictStageReaderContext,
+  } = stageReview;
+  const promotionCandidates = new Map(
+    autoMaterializationPromotionCandidates(
+      stageBaseDefinitions,
+      analysis.postorder,
+    ),
+  );
+  for (const node of selectedStageNodes)
+    promotionCandidates.set(node, {
+      kind: "strict-serial-rank-stage",
+      choiceIndex: analysis.postorder.indexOf(node),
+    });
+  const provisionalBoundaryContext = createBoundaryContext(
+    provisionalDefinitions,
+    rankOneProjectCandidates,
+    rankOneFactFilterCandidates,
+    promotionCandidates,
+    stageBaseDefinitions,
+    strictStageReaderContext,
+    independentAutoBoundaryContext.interfaces,
+  );
+  const finalReaderAudit = auditMaterializedBoundaryFixedPoint({
+    initialBoundaryContext: provisionalBoundaryContext,
+    initialReaderContext: {
+      definitions: provisionalBoundaryContext.definitions,
+      interfaces: provisionalBoundaryContext.interfaces,
+      licensedBoundaryNodes: new Set(
+        provisionalBoundaryContext.interfaces.keys(),
+      ),
+    },
+    postorder: analysis.postorder,
+    maximumRounds: promotionCandidates.size + 1,
+    rebuild: (readerContext) => {
+      // Stage licenses stay visible to candidate reader proofs, but each
+      // selected stage must be re-proved against the current boundary set.
+      const initialInterfaces = new Map(
+        [...readerContext.interfaces].filter(
+          ([node]) =>
+            promotionCandidates.get(node)?.kind !== "strict-serial-rank-stage",
+        ),
+      );
+      return createBoundaryContext(
+        provisionalDefinitions,
+        rankOneProjectCandidates,
+        rankOneFactFilterCandidates,
+        promotionCandidates,
+        stageBaseDefinitions,
+        readerContext,
+        initialInterfaces,
+      );
+    },
+  });
+  let finalBoundaryContext = finalReaderAudit.finalBoundaryContext;
+  const finalReaderAuditRounds = finalReaderAudit.rounds;
+  const finalReaderAuditStable = finalReaderAudit.stable;
+  const acceptedStageCount = [
+    ...finalBoundaryContext.promotedDefinitions.keys(),
+  ].filter(
+    (node) =>
+      promotionCandidates.get(node)?.kind === "strict-serial-rank-stage",
+  ).length;
+  const fallbackTriggered =
+    !finalReaderAuditStable || acceptedStageCount !== selectedStageNodes.length;
+  let fallbackBoundaryContext: MaterializedBoundaryContext | undefined;
+  if (fallbackTriggered) {
+    const fallbackCandidates = autoMaterializationPromotionCandidates(
+      stageBaseDefinitions,
+      analysis.postorder,
+    );
+    fallbackBoundaryContext = createBoundaryContext(
+      stageBaseDefinitions,
+      rankOneProjectCandidates,
+      rankOneFactFilterCandidates,
+      fallbackCandidates,
+      stageBaseDefinitions,
+      undefined,
+      independentAutoBoundaryContext.interfaces,
+    );
+    finalBoundaryContext = fallbackBoundaryContext;
+  }
+  emitMaterializationDiagnostic({
+    sink: onMaterializationDiagnostics,
+    logicalPostorderNodeCount: analysis.postorder.length,
+    postorder: analysis.postorder,
+    initialDefinitions: baseline,
+    baseDefinitions,
+    stageBaseDefinitions,
+    initialBoundary: boundaryContext,
+    independentAutoBoundary: independentAutoBoundaryContext,
+    stageProof,
+    selectedStageNodes,
+    provisionalBoundary: provisionalBoundaryContext,
+    acceptedStageCount,
+    finalReaderAuditStable,
+    finalReaderAuditRounds,
+    fallbackTriggered,
+    ...(fallbackBoundaryContext
+      ? { fallbackBoundary: fallbackBoundaryContext }
+      : {}),
+    finalBoundary: finalBoundaryContext,
+  });
+  const definitions = finalBoundaryContext.definitions;
+  const currentMaterializedBoundaryContext =
+    includeCurrentMaterializedBoundaryContext
+      ? finalBoundaryContext
+      : undefined;
+  return {
+    definitions,
+    boundedFactLocal,
+    // Public counters describe the canonical baseline and returned layouts.
+    // Provisional stage/auto reader probes are internal review iterations.
+    materializedBoundaryPasses: 2,
+    materializedDefinitionsChecked:
+      boundaryContext.materializedDefinitionsChecked +
+      finalBoundaryContext.materializedDefinitionsChecked,
+    currentMaterializedBoundaryContext,
+  };
 }
 
 /** Validate optimizer metadata against a fresh analysis of the logical root. */
 export function validatePhysicalQueryPlan<Row extends object>(
   plan: PhysicalQueryPlan<Row>,
-): void {
+  options?: {
+    readonly onMaterializationDiagnostics?: MaterializationDiagnosticSink;
+  },
+): PhysicalSharedRelationInterfaceView {
   if (
     !plan ||
     typeof plan !== "object" ||
@@ -3571,7 +4667,12 @@ export function validatePhysicalQueryPlan<Row extends object>(
       "invalid_plan",
       "Physical query root metadata does not match its logical node",
     );
-  const expected = sharedRelationDefinitions(plan.root);
+  const sharedAnalysis = sharedRelationDefinitions(
+    plan.root,
+    true,
+    options?.onMaterializationDiagnostics,
+  );
+  const expected = sharedAnalysis.definitions;
   const expectedDirectScanProjections = directScanProjectionChoices(plan.root);
   const expectedPassthroughProjectFusions = passthroughProjectFusions(
     plan.root,
@@ -3582,12 +4683,86 @@ export function validatePhysicalQueryPlan<Row extends object>(
     new Set(expected.map(({ node }) => node)),
     expectedPassthroughProjectFusions,
   );
-  const expectedPositiveTupleMembershipCandidates =
-    positiveTupleMembershipCandidates(
-      plan.root,
-      new Set(expected.map(({ node }) => node)),
+  const currentBoundaryContext =
+    sharedAnalysis.currentMaterializedBoundaryContext;
+  if (!currentBoundaryContext)
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical self-membership interfaces were not freshly analyzed",
     );
-  const expectedJoinOrderStrategies = joinOrderStrategies(plan.root, expected);
+  assertCurrentPhysicalCompileOrderPolicy(
+    plan,
+    expected,
+    currentBoundaryContext.interfaces,
+  );
+  const membershipCandidates = positiveTupleMembershipCandidates(
+    plan.root,
+    new Set(expected.map(({ node }) => node)),
+    new Set(currentBoundaryContext.interfaces.keys()),
+  );
+  const selfMembershipContext = createSelfMembershipDerivationContext({
+    root: plan.root,
+    definitions: expected,
+    boundaries: currentBoundaryContext.interfaces,
+    sourcesOf: nodeSources,
+    sameFields,
+    isSafeNode: isMaterializationSafeNode,
+  });
+  const {
+    selfMembershipChoices: expectedSelfMembershipChoices,
+    positiveTupleMembershipCandidates:
+      expectedPositiveTupleMembershipCandidates,
+  } = partitionSelfMembershipCandidates(
+    membershipCandidates,
+    selfMembershipContext,
+  );
+  const expectedRowPipelineChoices = rowPipelineChoices(
+    plan.root,
+    new Set(expected.map(({ node }) => node)),
+    canonicalProjectRendererBoundaries(
+      expectedDirectScanProjections,
+      expectedPassthroughProjectFusions,
+      expectedConstantFilterJoinProjections,
+      expectedPositiveTupleMembershipCandidates,
+      expectedSelfMembershipChoices,
+    ),
+  );
+  const singletonBoundaryContext = currentBoundaryContext;
+  if (!singletonBoundaryContext)
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical singleton-rank interfaces were not freshly analyzed",
+    );
+  const expectedSingletonRankChoices = analyzeSingletonRankChoices({
+    root: plan.root,
+    definitions: expected,
+    interfaces: singletonBoundaryContext.interfaces,
+    rowPipelines: expectedRowPipelineChoices,
+  });
+  const expectedNativeNullOrderingChoices = analyzeNativeNullOrdering(
+    plan.root,
+  );
+  const expectedJoinOrderStrategies = joinOrderStrategies(
+    plan.root,
+    expected,
+    sharedAnalysis.boundedFactLocal,
+  );
+  const expectedConditionalLookupChoices = analyzeConditionalLookupChoices(
+    plan.root,
+  );
+  const expectedLexicographicComparisonChoices = lexicographicComparisonChoices(
+    plan.root,
+  );
+  const semiBoundaryContext = sharedAnalysis.currentMaterializedBoundaryContext;
+  if (!semiBoundaryContext)
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical semi membership interfaces were not freshly analyzed",
+    );
+  const expectedSemiMembershipChoices = semiMembershipChoices(
+    plan.root,
+    semiBoundaryContext.interfaces,
+  );
   if (
     !Array.isArray(plan.directScanProjections) ||
     !sameDirectScanProjectionChoices(
@@ -3609,6 +4784,36 @@ export function validatePhysicalQueryPlan<Row extends object>(
     throw new DatabaseCompilerError(
       "invalid_plan",
       "Physical passthrough projection fusions are inconsistent",
+    );
+  if (
+    !Array.isArray(plan.rowPipelineChoices) ||
+    !sameRowPipelineChoices(plan.rowPipelineChoices, expectedRowPipelineChoices)
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical row-pipeline choices are inconsistent",
+    );
+  if (
+    !Array.isArray(plan.singletonRankChoices) ||
+    !sameSingletonRankChoices(
+      plan.singletonRankChoices,
+      expectedSingletonRankChoices,
+    )
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical singleton-rank choices are inconsistent",
+    );
+  if (
+    !Array.isArray(plan.nativeNullOrderingChoices) ||
+    !sameNativeNullOrderingChoices(
+      plan.nativeNullOrderingChoices,
+      expectedNativeNullOrderingChoices,
+    )
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical native null-ordering choices are inconsistent",
     );
   if (
     !Array.isArray(plan.constantFilterJoinProjections) ||
@@ -3633,6 +4838,41 @@ export function validatePhysicalQueryPlan<Row extends object>(
       "Physical tuple membership candidates are inconsistent",
     );
   if (
+    !Array.isArray(plan.selfMembershipChoices) ||
+    !sameSelfMembershipChoices(
+      plan.selfMembershipChoices,
+      expectedSelfMembershipChoices,
+    )
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical self-membership choices are inconsistent",
+    );
+  if (
+    !sameSemiMembershipChoices(
+      plan.semiMembershipChoices,
+      expectedSemiMembershipChoices,
+    )
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical semi membership choices are inconsistent",
+    );
+  const expectedSemiMembershipCostSelections = semiMembershipCostSelections(
+    expectedSemiMembershipChoices,
+  );
+  if (
+    !sameSemiMembershipCostSelections(
+      plan.semiMembershipCostSelections,
+      expectedSemiMembershipCostSelections,
+      sameSemiMembershipChoices,
+    )
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical semi membership cost selections are inconsistent",
+    );
+  if (
     !Array.isArray(plan.joinOrderStrategies) ||
     !sameJoinOrderStrategies(
       plan.joinOrderStrategies,
@@ -3643,40 +4883,82 @@ export function validatePhysicalQueryPlan<Row extends object>(
       "invalid_plan",
       "Physical join order strategies are inconsistent",
     );
-  const actualDefinitions = plan.sharedRelations;
-  let inconsistent =
-    !Array.isArray(actualDefinitions) ||
-    actualDefinitions.length !== expected.length;
-  if (!inconsistent) {
-    for (let index = 0; index < expected.length; index++) {
-      const actual = actualDefinitions[index]!;
-      const canonical = expected[index]!;
-      if (
-        !actual ||
-        typeof actual !== "object" ||
-        !Array.isArray(actual.fields) ||
-        !Array.isArray(actual.dependencies) ||
-        actual.name !== canonical.name ||
-        actual.node !== canonical.node ||
-        actual.scope !== canonical.scope ||
-        actual.materialization !== canonical.materialization ||
-        !sameFields(actual.fields, canonical.fields) ||
-        actual.dependencies.length !== canonical.dependencies.length ||
-        actual.dependencies.some(
-          (dependency: string, dependencyIndex: number) =>
-            dependency !== canonical.dependencies[dependencyIndex],
-        )
-      ) {
-        inconsistent = true;
-        break;
-      }
-    }
+  if (
+    !Array.isArray(plan.conditionalLookupChoices) ||
+    !sameConditionalLookupChoices(
+      plan.conditionalLookupChoices,
+      expectedConditionalLookupChoices,
+    )
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical conditional lookup choices are inconsistent",
+    );
+  if (
+    !Array.isArray(plan.lexicographicComparisonChoices) ||
+    !sameLexicographicComparisonChoices(
+      plan.lexicographicComparisonChoices,
+      expectedLexicographicComparisonChoices,
+    )
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical lexicographic comparison choices are inconsistent",
+    );
+  let rawActualDefinitions: unknown;
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(plan, "sharedRelations");
+    if (descriptor && "value" in descriptor)
+      rawActualDefinitions = descriptor.value;
+  } catch {
+    rawActualDefinitions = undefined;
   }
-  if (inconsistent)
+  const actualLayout = snapshotPhysicalSharedRelationLayout(
+    plan.root,
+    rawActualDefinitions,
+  );
+  const expectedLayout = snapshotPhysicalSharedRelationLayout(
+    plan.root,
+    expected,
+  );
+  if (
+    !actualLayout ||
+    !expectedLayout ||
+    !Array.isArray(rawActualDefinitions) ||
+    actualLayout.length !== expectedLayout.length
+  )
     throw new DatabaseCompilerError(
       "invalid_plan",
       "Physical query shared relation metadata is inconsistent",
     );
+  for (let index = 0; index < expectedLayout.length; index++) {
+    if (
+      !samePhysicalSharedRelationDefinitionIdentity(
+        actualLayout[index]!,
+        expectedLayout[index]!,
+      )
+    )
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        "Physical query shared relation metadata is inconsistent",
+      );
+  }
+  const sharedRelationBoundaryContext =
+    sharedAnalysis.currentMaterializedBoundaryContext;
+  if (!sharedRelationBoundaryContext)
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical shared relation interfaces were not freshly analyzed",
+    );
+  return createPhysicalSharedRelationInterfaceView({
+    root: plan.root,
+    definitions: rawActualDefinitions as readonly SharedRelationDefinition[],
+    boundaries: sharedRelationBoundaryContext.interfaces,
+    vetoes: sharedRelationBoundaryContext.vetoes,
+    materializedBoundaryPasses: sharedAnalysis.materializedBoundaryPasses,
+    materializedDefinitionsChecked:
+      sharedAnalysis.materializedDefinitionsChecked,
+  });
 }
 
 export function lowerLogicalQuerySource<Row extends object>(
@@ -3695,28 +4977,113 @@ export function lowerLogicalQuerySource<Row extends object>(
       "invalid_plan",
       "Query source metadata does not match its logical node",
     );
-  const sharedRelations = sharedRelationDefinitions(source.node);
+  const sharedAnalysis = sharedRelationDefinitions(source.node, true);
+  const sharedRelations = sharedAnalysis.definitions;
+  const currentBoundaryContext =
+    sharedAnalysis.currentMaterializedBoundaryContext;
+  if (!currentBoundaryContext)
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical self-membership interfaces were not freshly analyzed",
+    );
   const sharedNodes = new Set(sharedRelations.map(({ node }) => node));
+  const directScanProjections = directScanProjectionChoices(source.node);
   const projectFusions = passthroughProjectFusions(source.node, sharedNodes);
+  const constantProjections = constantFilterJoinProjections(
+    source.node,
+    sharedNodes,
+    projectFusions,
+  );
+  const membershipCandidates = positiveTupleMembershipCandidates(
+    source.node,
+    sharedNodes,
+    new Set(currentBoundaryContext.interfaces.keys()),
+  );
+  const selfMembershipContext = createSelfMembershipDerivationContext({
+    root: source.node,
+    definitions: sharedRelations,
+    boundaries: currentBoundaryContext.interfaces,
+    sourcesOf: nodeSources,
+    sameFields,
+    isSafeNode: isMaterializationSafeNode,
+  });
+  const {
+    selfMembershipChoices,
+    positiveTupleMembershipCandidates: tupleCandidates,
+  } = partitionSelfMembershipCandidates(
+    membershipCandidates,
+    selfMembershipContext,
+  );
+  const semiChoices = semiMembershipChoices(
+    source.node,
+    currentBoundaryContext.interfaces,
+  );
+  const semiCostSelections = semiMembershipCostSelections(semiChoices);
+  const rowPipelines = rowPipelineChoices(
+    source.node,
+    sharedNodes,
+    canonicalProjectRendererBoundaries(
+      directScanProjections,
+      projectFusions,
+      constantProjections,
+      tupleCandidates,
+      selfMembershipChoices,
+    ),
+  );
+  const singletonRankChoices = analyzeSingletonRankChoices({
+    root: source.node,
+    definitions: sharedRelations,
+    interfaces: currentBoundaryContext.interfaces,
+    rowPipelines,
+  });
+  const nativeNullOrderingChoices = analyzeNativeNullOrdering(source.node);
+  const joinOrder = joinOrderStrategies(
+    source.node,
+    sharedRelations,
+    sharedAnalysis.boundedFactLocal,
+  );
+  const conditionalLookupChoices = analyzeConditionalLookupChoices(source.node);
+  const lexicographicChoices = lexicographicComparisonChoices(source.node);
+  const compileOrderPolicy = derivePhysicalCompileOrderPolicy(
+    source.node,
+    sharedRelations,
+    currentBoundaryContext.interfaces,
+  );
   return {
     kind: "physical-query",
     root: source.node,
     scope: source.scope,
     fields: source.fields,
     sharedRelations,
-    directScanProjections: directScanProjectionChoices(source.node),
+    directScanProjections,
     passthroughProjectFusions: projectFusions,
-    constantFilterJoinProjections: constantFilterJoinProjections(
-      source.node,
-      sharedNodes,
-      projectFusions,
-    ),
-    positiveTupleMembershipCandidates: positiveTupleMembershipCandidates(
-      source.node,
-      sharedNodes,
-    ),
-    joinOrderStrategies: joinOrderStrategies(source.node, sharedRelations),
+    rowPipelineChoices: rowPipelines,
+    singletonRankChoices,
+    nativeNullOrderingChoices,
+    constantFilterJoinProjections: constantProjections,
+    positiveTupleMembershipCandidates: tupleCandidates,
+    selfMembershipChoices,
+    semiMembershipChoices: semiChoices,
+    semiMembershipCostSelections: semiCostSelections,
+    joinOrderStrategies: joinOrder,
+    conditionalLookupChoices,
+    lexicographicComparisonChoices: lexicographicChoices,
+    ...(compileOrderPolicy ? { compileOrderPolicy } : {}),
   };
+}
+
+/** @internal Recompute the current production SemiJoin eligibility proof. */
+export function analyzeSemiMembershipEligibilityForDiagnostics(
+  root: LogicalQueryNode,
+) {
+  const sharedAnalysis = sharedRelationDefinitions(root, true);
+  const boundaries = sharedAnalysis.currentMaterializedBoundaryContext;
+  if (!boundaries)
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Physical semi membership interfaces were not freshly analyzed",
+    );
+  return analyzeSemiMembershipCandidates(root, boundaries.interfaces);
 }
 
 /** Number of distinct recursive closure nodes rendered as local CTEs. */

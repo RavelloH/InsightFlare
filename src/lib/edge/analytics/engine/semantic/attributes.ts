@@ -5,6 +5,7 @@ import {
   type FilterObservationKind,
 } from "@/lib/filter-contract/filter-registry";
 
+import { ADVANCED_COUNT_SELECTOR_FIELDS } from "./count-selector-fields";
 import type { AnalyticsEntityKind, ObservationKind } from "./entities";
 import type {
   LogicalValueType,
@@ -226,6 +227,7 @@ const semanticObservationBaseAttributeCatalog: readonly SemanticAttributeDefinit
     { name: "eventName", scalar: "string", nullable: true },
     { name: "sameSiteEventName", scalar: "string", nullable: true },
     { name: "rawSiteId", scalar: "string", nullable: false },
+    { name: "siteIdentityConsistent", scalar: "boolean", nullable: false },
     { name: "visitId", scalar: "string", nullable: true },
     { name: "userId", scalar: "string", nullable: true },
     { name: "userName", scalar: "string", nullable: true },
@@ -568,11 +570,32 @@ const semanticObservationContextPageAttributes =
     });
   });
 
+const semanticObservationStorageClassAttributes =
+  ADVANCED_COUNT_SELECTOR_FIELDS.flatMap((field) => {
+    const classAttributes =
+      field.kind === "string"
+        ? [field.stringClassAttribute]
+        : [field.safeRangeAttribute, field.exactAggregateAttribute];
+    return classAttributes.map((classAttribute) => {
+      const prefix = "observation.";
+      if (!classAttribute.startsWith(prefix))
+        throw new Error(
+          `invalid_count_selector_class_attribute:${classAttribute}`,
+        );
+      return observationAttribute({
+        name: classAttribute.slice(prefix.length),
+        scalar: "boolean",
+        nullable: false,
+      });
+    });
+  });
+
 /** Internal activity context: Page fields on Page rows and their owner Page on Event rows. */
 export const semanticObservationAttributeCatalog: readonly SemanticAttributeDefinition[] =
   Object.freeze([
     ...semanticObservationBaseAttributeCatalog,
     ...semanticObservationContextPageAttributes,
+    ...semanticObservationStorageClassAttributes,
   ]);
 
 interface EventReportAttributeInput {
@@ -889,6 +912,10 @@ export function assertSemanticObservationAttributeContracts(
   attributes: readonly SemanticAttributeDefinition[],
   registeredSemanticAttributeIds: Set<string>,
 ): void {
+  const nonNullBooleanAttributes = new Set([
+    "observation.siteIdentityConsistent",
+    ...semanticObservationStorageClassAttributes.map(({ id }) => id),
+  ]);
   for (const attribute of attributes) {
     if (registeredSemanticAttributeIds.has(attribute.id))
       throw new Error(`duplicate_semantic_attribute:${attribute.id}`);
@@ -899,7 +926,12 @@ export function assertSemanticObservationAttributeContracts(
       !attribute.observationKinds.includes("page") ||
       !attribute.observationKinds.includes("event") ||
       attribute.valueType.kind !== "scalar" ||
-      !["string", "number", "datetime"].includes(attribute.valueType.scalar) ||
+      !(
+        ["string", "number", "datetime"].includes(attribute.valueType.scalar) ||
+        (nonNullBooleanAttributes.has(attribute.id) &&
+          attribute.valueType.scalar === "boolean" &&
+          !attribute.nullable)
+      ) ||
       attribute.evaluation !== "observation" ||
       attribute.presence !== "non-null" ||
       attribute.empty !==

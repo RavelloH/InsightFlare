@@ -8,6 +8,7 @@ import {
   buildJourneyGeoPointsPlan,
   buildJourneyGeoSummaryPlan,
   type JourneyGeoSummaryLevel,
+  journeyGeoSummaryLevelFromFilter,
 } from "@/lib/edge/analytics/engine/journey-geo-report-plan";
 import { buildJourneySessionLocationPlan } from "@/lib/edge/analytics/engine/journey-page-report-plan";
 import type { Env } from "@/lib/edge/types";
@@ -64,34 +65,7 @@ export async function queryGeoPointsFromD1(
     )
   ).map(mapGeoPointRow);
 
-  const conditions =
-    filters.root?.kind === "and"
-      ? filters.root.children
-      : [filters.root].filter(Boolean);
-  const valueFor = (field: string) => {
-    const condition = conditions.find(
-      (item) =>
-        item?.kind === "condition" &&
-        item.target.kind === "field" &&
-        item.target.field === field &&
-        item.operator === "eq" &&
-        typeof item.value === "string",
-    );
-    return condition?.kind === "condition" &&
-      typeof condition.value === "string"
-      ? condition.value
-      : undefined;
-  };
-  const parsedGeo = {
-    country: valueFor("geo.country"),
-    regionCode: valueFor("geo.region"),
-    city: valueFor("geo.city"),
-  };
-  const summaryLevel: JourneyGeoSummaryLevel = !parsedGeo.country
-    ? "country"
-    : !parsedGeo.regionCode
-      ? "region"
-      : "city";
+  const summaryLevel = journeyGeoSummaryLevelFromFilter(filters);
   const summaryRows = await queryJourneyPageReportRowsFromD1(
     env,
     buildJourneyGeoSummaryPlan({ ...planInput, level: summaryLevel }),
@@ -99,6 +73,17 @@ export async function queryGeoPointsFromD1(
     diagnostics,
   );
 
+  return {
+    points,
+    ...mapJourneyGeoSummaryRowsToDto(summaryLevel, summaryRows),
+  };
+}
+
+/** Maps the selected summary row family into the existing Geo DTO shape. */
+export function mapJourneyGeoSummaryRowsToDto(
+  summaryLevel: JourneyGeoSummaryLevel,
+  summaryRows: readonly Record<string, unknown>[],
+): Pick<GeoPointAggregate, "countryCounts" | "regionCounts" | "cityCounts"> {
   const countryCounts: GeoCountryCountRow[] = [];
   const regionCounts: GeoDimensionCountRow[] = [];
   const cityCounts: GeoDimensionCountRow[] = [];
@@ -168,6 +153,5 @@ export async function queryGeoPointsFromD1(
         .filter((row): row is GeoDimensionCountRow => Boolean(row)),
     );
   }
-
-  return { points, countryCounts, regionCounts, cityCounts };
+  return { countryCounts, regionCounts, cityCounts };
 }

@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -10,6 +12,7 @@ import {
   createSqliteD1Database,
   type SqliteD1Trace,
 } from "@/lib/db/__tests__/sqlite-d1";
+import { createD1SiteProviderRegistry } from "@/lib/edge/analytics/composition/d1/create-site-runtime";
 import {
   attachScopedFilterMetadata,
   prepareScopedQuery,
@@ -21,10 +24,24 @@ import {
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
+import { buildEventFilteredSourceCte } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import {
-  buildEventFilteredSourceCte,
-  type QueryWindow,
+  d1AdvancedFilterMiddleware,
+  deferredEventSummaryQualificationFromQuery,
+  deferredEventTypesQualificationFromQuery,
+  prepareDeferredEventQualificationFallback,
+  prepareDeferredEventSummaryFallback,
+} from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import {
+  compileEventSummaryQualificationProgram,
+  compileEventTypesQualificationProgram,
+} from "@/lib/edge/analytics/providers/d1/internal/analytics-qualification-program";
+import {
+  mapEventSummaryCards,
+  mapTabs,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { type QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import {
   decodeEventTypeCursor,
   type EventTypeAggregateCursor,
@@ -40,13 +57,14 @@ import {
   runWithInvocationLogger,
 } from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
-import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
+import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 import {
   type FilterDocument,
   type FilterExpression,
   type FilterFieldId,
   normalizeFilterDocument,
 } from "@/lib/filter-contract/filters";
+import { InvalidCursorError } from "@/lib/pagination";
 
 const SITE_ID = "wave38-event-types";
 const SITE_B = "wave38-event-types-sibling";
@@ -127,6 +145,137 @@ function testEnv(database: DatabaseSync, trace: SqliteD1Trace): Env {
     DB: createSqliteD1Database(database, trace),
     MAIN_SECRET: "wave38-event-type-cursor-test-secret",
   } as unknown as Env;
+}
+
+function eventSummaryDto(
+  data: Awaited<ReturnType<typeof queryEventsSummaryFromD1>>,
+) {
+  const events = Number(data.summary.events ?? 0);
+  const sessions = Number(data.summary.sessions ?? 0);
+  return {
+    summary: {
+      events,
+      eventTypes: Number(data.summary.eventTypes ?? 0),
+      sessions,
+      visitors: Number(data.summary.visitors ?? 0),
+      avgEventsPerSession: sessions > 0 ? events / sessions : 0,
+    },
+    cards: mapEventSummaryCards(data.cards),
+  };
+}
+
+function prepareEventSummaryQuery(
+  dsl: string,
+  scope: "session" | "visitor" = "session",
+): QueryInput & {
+  readonly filters?: FilterDocument;
+  readonly time?: QueryTime;
+} {
+  const filters = parseFilterDsl(dsl, analyticsFilterRegistry);
+  const prepared = prepareScopedQuery("event-summary", {
+    context: siteQueryContext(SITE_ID, "private-dashboard"),
+    time: QUERY_TIME,
+    filters,
+    scopePreference: scope,
+  } as QueryInput & { readonly time: QueryTime }) as QueryInput & {
+    readonly filters?: FilterDocument;
+    readonly time?: QueryTime;
+  };
+  if (!prepared.filters || !prepared.time)
+    throw new Error("wave94b_event_summary_query_preparation_failed");
+  return prepared;
+}
+
+interface PreparedEventTypesQuery extends QueryInput {
+  readonly filters?: FilterDocument;
+  readonly time?: QueryTime;
+  readonly limit: number;
+  readonly search?: string;
+  readonly cursor?: string;
+}
+
+function prepareEventTypesQuery(
+  dsl: string,
+  scope: "session" | "visitor",
+  options: {
+    readonly limit: number;
+    readonly search?: string;
+    readonly cursor?: string;
+  },
+): PreparedEventTypesQuery {
+  const filters = parseFilterDsl(dsl, analyticsFilterRegistry);
+  const prepared = prepareScopedQuery("event-types", {
+    context: siteQueryContext(SITE_ID, "private-dashboard"),
+    time: QUERY_TIME,
+    filters,
+    scopePreference: scope,
+  } as QueryInput & { readonly time: QueryTime }) as QueryInput & {
+    readonly filters?: FilterDocument;
+    readonly time?: QueryTime;
+  };
+  if (!prepared.filters || !prepared.time)
+    throw new Error("wave94c_event_types_query_preparation_failed");
+  return {
+    ...prepared,
+    limit: options.limit,
+    ...(options.search !== undefined ? { search: options.search } : {}),
+    ...(options.cursor !== undefined ? { cursor: options.cursor } : {}),
+  } as PreparedEventTypesQuery;
+}
+
+async function executeLegacyEventTypesRequest(input: {
+  readonly env: Env;
+  readonly prepared: PreparedEventTypesQuery;
+}): Promise<Awaited<ReturnType<typeof queryEventTypePageFromD1>>> {
+  const forwarded = await d1AdvancedFilterMiddleware(input.env)(
+    "event-types",
+    input.prepared,
+    async (value) => value,
+  );
+  const deferred = deferredEventTypesQualificationFromQuery(forwarded);
+  if (!deferred)
+    throw new Error("wave94c_full_legacy_event_types_request_not_prepared");
+  const cursor = await decodeEventTypeCursor(
+    input.env,
+    SITE_ID,
+    WINDOW,
+    input.prepared.filters!,
+    input.prepared.search,
+    input.prepared.cursor,
+    input.prepared.context.policy.audience,
+  );
+  if (input.prepared.cursor && !cursor)
+    throw new InvalidCursorError("event-types");
+  const filters = await prepareDeferredEventQualificationFallback(deferred);
+  return queryEventTypePageFromD1(
+    input.env,
+    SITE_ID,
+    WINDOW,
+    filters,
+    input.prepared.limit,
+    input.prepared.search,
+    cursor,
+    input.prepared.context.policy.audience,
+  );
+}
+
+/** Execute the complete legacy Count+report request with this exact DSL. */
+async function executeLegacyEventSummaryRequest(input: {
+  readonly env: Env;
+  readonly prepared: QueryInput & {
+    readonly filters?: FilterDocument;
+    readonly time?: QueryTime;
+  };
+}): Promise<Awaited<ReturnType<typeof queryEventsSummaryFromD1>>> {
+  const forwarded = await d1AdvancedFilterMiddleware(input.env)(
+    "event-summary",
+    input.prepared,
+    async (value) => value,
+  );
+  const deferred = deferredEventSummaryQualificationFromQuery(forwarded);
+  if (!deferred) throw new Error("wave94b_full_legacy_request_not_prepared");
+  const filters = await prepareDeferredEventSummaryFallback(deferred);
+  return queryEventsSummaryFromD1(input.env, SITE_ID, WINDOW, filters);
 }
 
 function recordExecutionEvidence(
@@ -329,6 +478,12 @@ function createFixture(): DatabaseSync {
     DROP TABLE custom_event_names_not_null;
   `);
   const sitePk = addSite(database);
+  database
+    .prepare(
+      `INSERT INTO sites (id, team_id, name, domain, created_at)
+       VALUES (?, ?, ?, ?, 0)`,
+    )
+    .run(SITE_ID, TEAM_ID, "Event summary qualification", "qualification.test");
   database
     .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
     .run(SITE_B);
@@ -779,7 +934,7 @@ async function queryAndMeasureEventSummaryCards(
   expect(observation).toMatchObject({
     sqlBytes,
     bindings: bindingCount,
-    physicalPlanHash: expect.stringMatching(/^v[12]:[a-f0-9]{64}$/u),
+    physicalPlanHash: expect.stringMatching(/^v12:[a-f0-9]{64}$/u),
   });
   expect(sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
   expect(bindingCount).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
@@ -884,6 +1039,1289 @@ afterAll(() => {
 });
 
 describe("Wave38 Event type and summary Logical migration regressions", () => {
+  it("runs the real event-summary middleware with gated Count qualification in one report statement", async () => {
+    const trace = newTrace();
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const operation = "wave94b.event-summary-qualification";
+    const env = instrumentEnv(testEnv(database, trace), logger);
+    const filter = parseFilterDsl(
+      'count(page { page.path eq "/scoped" }) eq 1',
+      analyticsFilterRegistry,
+    );
+    const prepared = prepareScopedQuery("event-summary", {
+      context: siteQueryContext(SITE_ID, "private-dashboard"),
+      time: QUERY_TIME,
+      filters: filter,
+      scopePreference: "session",
+    } as QueryInput & { readonly time: QueryTime }) as QueryInput & {
+      readonly filters?: FilterDocument;
+      readonly time?: QueryTime;
+    };
+    if (!prepared.filters || !prepared.time)
+      throw new Error("wave94b_event_summary_query_preparation_failed");
+
+    let compilation:
+      ReturnType<typeof compileEventSummaryQualificationProgram> | undefined;
+    const registry = createD1SiteProviderRegistry({ env, siteId: SITE_ID });
+    registry.useMiddleware(async (_operation, input, next) => {
+      const deferred = deferredEventSummaryQualificationFromQuery(input);
+      if (deferred)
+        compilation = compileEventSummaryQualificationProgram(deferred);
+      return next(input);
+    });
+    const provider = registry.resolve("event-summary");
+    if (!provider) throw new Error("wave94b_event_summary_provider_missing");
+    const actual = await runWithInvocationLogger(logger, () =>
+      runWithD1Operation(operation, () => provider.execute(prepared as never)),
+    );
+    const emitted = await logger.emitWhenComplete();
+    expect(compilation?.kind).toBe("compiled");
+    if (compilation?.kind !== "compiled")
+      throw new Error("wave94b_event_summary_fusion_unavailable");
+    const compiledEvidence = compilation.evidence;
+    expect(trace.preparedSql).toHaveLength(2);
+    expect(trace.bindings).toHaveLength(2);
+    expect(trace.preparedSql[1]).toBe(compiledEvidence.sql);
+    expect(trace.bindings[1]).toEqual(compiledEvidence.bindings);
+    expect(trace.preparedSql[1]).not.toContain("json_each");
+    expect(trace.bindings.flat()).not.toContain("session-alpha");
+
+    const fusedObservation = emitted.logs.find((item) => {
+      if (item.message !== "db.query.v1.all.success") return false;
+      const data = item.data as
+        { readonly tag?: string; readonly sqlBytes?: number } | undefined;
+      return (
+        data?.tag === operation && data.sqlBytes === compiledEvidence.sqlBytes
+      );
+    })?.data as
+      | {
+          readonly tag?: string;
+          readonly sqlBytes?: number;
+          readonly bindings?: number;
+          readonly physicalPlanHash?: string;
+        }
+      | undefined;
+    expect(fusedObservation).toMatchObject({
+      tag: operation,
+      sqlBytes: compiledEvidence.sqlBytes,
+      bindings: compiledEvidence.bindingCount,
+      physicalPlanHash: expect.stringMatching(/^v\d+:[a-f0-9]{64}$/u),
+    });
+
+    const baselineTrace = newTrace();
+    const baselineEnv = testEnv(database, baselineTrace);
+    const legacy = await executeLegacyEventSummaryRequest({
+      env: baselineEnv,
+      prepared,
+    });
+    expect(baselineTrace.preparedSql.length).toBeGreaterThan(2);
+    const actualValue = actual.value;
+    expect(actualValue).toEqual(eventSummaryDto(legacy));
+    expect(legacy.summary.events).toBeGreaterThan(1);
+
+    const evidenceDirectory = process.env.WAVE94B_REPAIR_FULL_BASELINE_DIR;
+    if (evidenceDirectory) {
+      const absoluteEvidencePath = resolve(evidenceDirectory, "session.json");
+      mkdirSync(dirname(absoluteEvidencePath), { recursive: true });
+      const tracedStatements = (value: SqliteD1Trace) =>
+        value.preparedSql.map((sql, index) => ({
+          sql,
+          bindings: value.bindings[index],
+          sqlUtf8Bytes: new TextEncoder().encode(sql).byteLength,
+          sha256: createHash("sha256").update(sql).digest("hex"),
+        }));
+      writeFileSync(
+        absoluteEvidencePath,
+        JSON.stringify(
+          {
+            kind: "wave94b-full-request-sqlite-baseline",
+            scope: "session",
+            dsl: 'count(page { page.path eq "/scoped" }) eq 1',
+            legacyBaseline: {
+              route:
+                "coverage + normal Count evaluator + report; fusion execution bypassed",
+              statementCount: baselineTrace.preparedSql.length,
+              statements: tracedStatements(baselineTrace),
+              dto: eventSummaryDto(legacy),
+            },
+            fusedRequest: {
+              route: "coverage + one compiled qualification/report statement",
+              statementCount: trace.preparedSql.length,
+              statements: tracedStatements(trace),
+              dto: actualValue,
+              compilation: compiledEvidence,
+              physicalPlanHash: fusedObservation?.physicalPlanHash,
+            },
+            dtoEqual: true,
+          },
+          null,
+          2,
+        ),
+        "utf8",
+      );
+    }
+  });
+
+  it("uses the same fused route with Visitor qualification scope", async () => {
+    const trace = newTrace();
+    const env = testEnv(database, trace);
+    const filter = parseFilterDsl(
+      'count(page { page.path eq "/scoped" }) eq 1',
+      analyticsFilterRegistry,
+    );
+    const prepared = prepareScopedQuery("event-summary", {
+      context: siteQueryContext(SITE_ID, "private-dashboard"),
+      time: QUERY_TIME,
+      filters: filter,
+      scopePreference: "visitor",
+    } as QueryInput & { readonly time: QueryTime }) as QueryInput & {
+      readonly filters?: FilterDocument;
+      readonly time?: QueryTime;
+    };
+    if (!prepared.filters || !prepared.time)
+      throw new Error("wave94b_visitor_event_summary_query_preparation_failed");
+    const registry = createD1SiteProviderRegistry({ env, siteId: SITE_ID });
+    const provider = registry.resolve("event-summary");
+    if (!provider)
+      throw new Error("wave94b_visitor_event_summary_provider_missing");
+    const actual = await provider.execute(prepared as never);
+    expect(trace.preparedSql).toHaveLength(2);
+    expect(trace.bindings).toHaveLength(2);
+    const baselineTrace = newTrace();
+    const legacy = await executeLegacyEventSummaryRequest({
+      env: testEnv(database, baselineTrace),
+      prepared,
+    });
+    expect(baselineTrace.preparedSql.length).toBeGreaterThan(2);
+    expect(actual.value).toEqual(eventSummaryDto(legacy));
+
+    const evidenceDirectory = process.env.WAVE94B_REPAIR_FULL_BASELINE_DIR;
+    if (evidenceDirectory) {
+      const absoluteEvidencePath = resolve(evidenceDirectory, "visitor.json");
+      mkdirSync(dirname(absoluteEvidencePath), { recursive: true });
+      const tracedStatements = (value: SqliteD1Trace) =>
+        value.preparedSql.map((sql, index) => ({
+          sql,
+          bindings: value.bindings[index],
+          sqlUtf8Bytes: new TextEncoder().encode(sql).byteLength,
+          sha256: createHash("sha256").update(sql).digest("hex"),
+        }));
+      writeFileSync(
+        absoluteEvidencePath,
+        JSON.stringify(
+          {
+            kind: "wave94b-full-request-sqlite-baseline",
+            scope: "visitor",
+            dsl: 'count(page { page.path eq "/scoped" }) eq 1',
+            legacyBaseline: {
+              route:
+                "coverage + normal Count evaluator + report; fusion execution bypassed",
+              statementCount: baselineTrace.preparedSql.length,
+              statements: tracedStatements(baselineTrace),
+              dto: eventSummaryDto(legacy),
+            },
+            fusedRequest: {
+              route: "coverage + one compiled qualification/report statement",
+              statementCount: trace.preparedSql.length,
+              statements: tracedStatements(trace),
+              dto: actual.value,
+            },
+            dtoEqual: true,
+          },
+          null,
+          2,
+        ),
+        "utf8",
+      );
+    }
+  });
+
+  it.each(["session", "visitor"] as const)(
+    "qualifies Event type keyset pages in one report statement for %s scope",
+    async (scope) => {
+      const qualifiedDatabase = createFixture();
+      const siteIdentity = qualifiedDatabase
+        .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+        .get(SITE_ID) as { readonly site_pk: number };
+      addEvent(qualifiedDatabase, Number(siteIdentity.site_pk), {
+        id: "event-qualified-beta",
+        visitId: "visit-alpha-1",
+        nameId: 2,
+      });
+      addEvent(qualifiedDatabase, Number(siteIdentity.site_pk), {
+        id: "event-qualified-needle",
+        visitId: "visit-alpha-1",
+        nameId: 3,
+      });
+
+      const dsl = 'count(page { page.path eq "/scoped" }) eq 1';
+      const search = "a";
+      const runActual = async (prepared: PreparedEventTypesQuery) => {
+        const trace = newTrace();
+        const env = testEnv(qualifiedDatabase, trace);
+        const registry = createD1SiteProviderRegistry({ env, siteId: SITE_ID });
+        let deferred:
+          | ReturnType<typeof deferredEventTypesQualificationFromQuery>
+          | undefined;
+        registry.useMiddleware(async (operation, input, next) => {
+          if (operation === "event-types")
+            deferred = deferredEventTypesQualificationFromQuery(input);
+          return next(input);
+        });
+        const provider = registry.resolve("event-types");
+        if (!provider) throw new Error("wave94c_event_types_provider_missing");
+        const actual = await provider.execute(prepared as never);
+        if (!deferred)
+          throw new Error("wave94c_event_types_qualification_missing");
+        return { actual, deferred, env, trace };
+      };
+      const statementEvidence = (trace: SqliteD1Trace) =>
+        trace.preparedSql.map((sql, index) => ({
+          sql,
+          bindings: trace.bindings[index],
+          sqlUtf8Bytes: new TextEncoder().encode(sql).byteLength,
+          sha256: createHash("sha256").update(sql).digest("hex"),
+        }));
+      const compilePage = async (input: {
+        readonly deferred: NonNullable<
+          ReturnType<typeof deferredEventTypesQualificationFromQuery>
+        >;
+        readonly env: Env;
+        readonly prepared: PreparedEventTypesQuery;
+      }) => {
+        const cursor = await decodeEventTypeCursor(
+          input.env,
+          SITE_ID,
+          WINDOW,
+          input.prepared.filters!,
+          input.prepared.search,
+          input.prepared.cursor,
+          input.prepared.context.policy.audience,
+        );
+        const compilation = compileEventTypesQualificationProgram({
+          deferred: input.deferred,
+          query: {
+            kind: "page",
+            limit: input.prepared.limit,
+            ...(input.prepared.search !== undefined
+              ? { search: input.prepared.search }
+              : {}),
+            ...(cursor ? { cursor } : {}),
+          },
+        });
+        if (compilation.kind !== "compiled")
+          throw new Error("wave94c_event_types_compilation_unavailable");
+        return compilation.evidence;
+      };
+
+      const firstPrepared = prepareEventTypesQuery(dsl, scope, {
+        limit: 1,
+        search,
+      });
+      const firstActual = await runActual(firstPrepared);
+      const firstDto = firstActual.actual.value as {
+        readonly items: readonly {
+          readonly label: string;
+          readonly views: number;
+          readonly sessions: number;
+          readonly visitors: number;
+        }[];
+        readonly pagination: {
+          readonly limit: number;
+          readonly returned: number;
+          readonly hasMore: boolean;
+          readonly nextCursor: string | null;
+        };
+      };
+      const firstCompilation = await compilePage({
+        deferred: firstActual.deferred,
+        env: firstActual.env,
+        prepared: firstPrepared,
+      });
+      expect(firstActual.trace.preparedSql).toHaveLength(2);
+      expect(firstActual.trace.preparedSql[1]).toBe(firstCompilation.sql);
+      expect(firstActual.trace.bindings[1]).toEqual(firstCompilation.bindings);
+      expect(firstCompilation.groupedSummaryMaterialization).toBe(
+        "materialized",
+      );
+      expect(firstCompilation.groupWidth).toBeLessThanOrEqual(16);
+      expect(firstCompilation.sqlBytes).toBe(
+        new TextEncoder().encode(firstCompilation.sql).byteLength,
+      );
+      expect(firstCompilation.bindingCount).toBe(
+        firstCompilation.bindings.length,
+      );
+      expect(firstActual.trace.bindings.flat()).not.toContain("session-alpha");
+      expect(firstActual.trace.bindings.flat()).not.toContain(
+        "visitor-alpha-1",
+      );
+      expect(firstDto.items).toHaveLength(1);
+      expect(firstDto.pagination).toMatchObject({
+        limit: 1,
+        returned: 1,
+        hasMore: true,
+      });
+      expect(firstDto.pagination.nextCursor).toEqual(expect.any(String));
+
+      const firstBaselineTrace = newTrace();
+      const firstBaseline = await executeLegacyEventTypesRequest({
+        env: testEnv(qualifiedDatabase, firstBaselineTrace),
+        prepared: firstPrepared,
+      });
+      const firstBaselineDto = {
+        items: mapTabs(firstBaseline.items),
+        pagination: firstBaseline.pagination,
+      };
+      expect(firstBaselineTrace.preparedSql.length).toBeGreaterThan(2);
+      expect(firstDto).toEqual(firstBaselineDto);
+
+      const cursor = firstDto.pagination.nextCursor!;
+      const continuationPrepared = prepareEventTypesQuery(dsl, scope, {
+        limit: 1,
+        search,
+        cursor,
+      });
+      const continuationActual = await runActual(continuationPrepared);
+      const continuationCompilation = await compilePage({
+        deferred: continuationActual.deferred,
+        env: continuationActual.env,
+        prepared: continuationPrepared,
+      });
+      const continuationDto = continuationActual.actual.value as {
+        readonly items: readonly {
+          readonly label: string;
+          readonly views: number;
+          readonly sessions: number;
+          readonly visitors: number;
+        }[];
+        readonly pagination: {
+          readonly limit: number;
+          readonly returned: number;
+          readonly hasMore: boolean;
+          readonly nextCursor: string | null;
+        };
+      };
+      expect(continuationActual.trace.preparedSql).toHaveLength(2);
+      expect(continuationActual.trace.preparedSql[1]).toBe(
+        continuationCompilation.sql,
+      );
+      expect(continuationActual.trace.bindings[1]).toEqual(
+        continuationCompilation.bindings,
+      );
+      expect(continuationActual.trace.bindings.flat()).not.toContain(
+        "session-alpha",
+      );
+      const continuationBaselineTrace = newTrace();
+      const continuationBaseline = await executeLegacyEventTypesRequest({
+        env: testEnv(qualifiedDatabase, continuationBaselineTrace),
+        prepared: continuationPrepared,
+      });
+      const continuationBaselineDto = {
+        items: mapTabs(continuationBaseline.items),
+        pagination: continuationBaseline.pagination,
+      };
+      expect(continuationBaselineTrace.preparedSql.length).toBeGreaterThan(2);
+      expect(continuationDto).toEqual(continuationBaselineDto);
+
+      const evidenceDirectory = process.env.WAVE94C_EVENT_TYPES_EVIDENCE_DIR;
+      if (evidenceDirectory) {
+        const absoluteEvidencePath = resolve(
+          evidenceDirectory,
+          `${scope}.json`,
+        );
+        mkdirSync(dirname(absoluteEvidencePath), { recursive: true });
+        writeFileSync(
+          absoluteEvidencePath,
+          JSON.stringify(
+            {
+              kind: "wave94c-event-types-full-request-sqlite-evidence",
+              scope,
+              dsl,
+              search,
+              limit: 1,
+              firstPage: {
+                baseline: {
+                  route:
+                    "coverage + normal Count evaluator + legacy Event type page",
+                  statementCount: firstBaselineTrace.preparedSql.length,
+                  statements: statementEvidence(firstBaselineTrace),
+                  dto: firstBaselineDto,
+                },
+                qualified: {
+                  route:
+                    "coverage + one qualified Event type keyset-page statement",
+                  statementCount: firstActual.trace.preparedSql.length,
+                  statements: statementEvidence(firstActual.trace),
+                  dto: firstDto,
+                  compilation: firstCompilation,
+                },
+                dtoEqual: true,
+              },
+              continuationPage: {
+                baseline: {
+                  route:
+                    "coverage + normal Count evaluator + legacy Event type page",
+                  statementCount: continuationBaselineTrace.preparedSql.length,
+                  statements: statementEvidence(continuationBaselineTrace),
+                  dto: continuationBaselineDto,
+                },
+                qualified: {
+                  route:
+                    "coverage + one qualified Event type keyset-page statement",
+                  statementCount: continuationActual.trace.preparedSql.length,
+                  statements: statementEvidence(continuationActual.trace),
+                  dto: continuationDto,
+                  compilation: continuationCompilation,
+                },
+                dtoEqual: true,
+              },
+            },
+            null,
+            2,
+          ),
+          "utf8",
+        );
+      }
+    },
+  );
+
+  it("rejects Event type cursors when the Count filter or owner scope changes", async () => {
+    const qualifiedDatabase = createFixture();
+    const siteIdentity = qualifiedDatabase
+      .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+      .get(SITE_ID) as { readonly site_pk: number };
+    addEvent(qualifiedDatabase, Number(siteIdentity.site_pk), {
+      id: "event-cursor-beta",
+      visitId: "visit-alpha-1",
+      nameId: 2,
+    });
+    const original = prepareEventTypesQuery(
+      'count(page { page.path eq "/scoped" }) eq 1',
+      "session",
+      { limit: 1 },
+    );
+    const firstTrace = newTrace();
+    const firstRegistry = createD1SiteProviderRegistry({
+      env: testEnv(qualifiedDatabase, firstTrace),
+      siteId: SITE_ID,
+    });
+    const firstProvider = firstRegistry.resolve("event-types");
+    if (!firstProvider) throw new Error("wave94c_cursor_provider_missing");
+    const first = await firstProvider.execute(original as never);
+    const nextCursor = (
+      first.value as {
+        readonly pagination: { readonly nextCursor: string | null };
+      }
+    ).pagination.nextCursor;
+    if (!nextCursor) throw new Error("wave94c_cursor_not_created");
+
+    const invalidRequests = [
+      prepareEventTypesQuery(
+        'count(page { page.path eq "/ordinary" }) eq 1',
+        "session",
+        { limit: 1, cursor: nextCursor },
+      ),
+      prepareEventTypesQuery(
+        'count(page { page.path eq "/scoped" }) eq 1',
+        "visitor",
+        { limit: 1, cursor: nextCursor },
+      ),
+    ];
+    for (const prepared of invalidRequests) {
+      const trace = newTrace();
+      const provider = createD1SiteProviderRegistry({
+        env: testEnv(qualifiedDatabase, trace),
+        siteId: SITE_ID,
+      }).resolve("event-types");
+      if (!provider) throw new Error("wave94c_cursor_provider_missing");
+      await expect(provider.execute(prepared as never)).rejects.toBeInstanceOf(
+        InvalidCursorError,
+      );
+      expect(trace.preparedSql).toHaveLength(2);
+      expect(trace.preparedSql.join(" ")).not.toContain("event-type-page");
+    }
+  });
+
+  it("preserves activity-cap priority before an invalid Event type cursor", async () => {
+    const capDatabase = createFixture();
+    databases.add(capDatabase);
+    capDatabase
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "visit-alpha-1");
+    capDatabase
+      .prepare(
+        `WITH RECURSIVE generated(n) AS (
+           SELECT 1
+           UNION ALL SELECT n + 1 FROM generated WHERE n < 20001
+         )
+         INSERT INTO visits (
+           visit_id, site_id, site_pk, visitor_id, session_id, status,
+           started_at, last_activity_at, pathname, hostname, duration_ms
+         )
+         SELECT 'wave94d-cap-page-' || n, ?, 1, ?, ?, 'closed', 125,
+           125, '/cap-page', 'cap.test', 1
+         FROM generated`,
+      )
+      .run(SITE_ID, "wave94d-cap-visitor", "wave94d-cap-session");
+    const prepared = prepareEventTypesQuery(
+      "count(page { page.durationMs gt 5 }) eq 1",
+      "session",
+      { limit: 20, cursor: "invalid-event-types-cursor" },
+    );
+
+    const oldTrace = newTrace();
+    const oldEnv = testEnv(capDatabase, oldTrace);
+    const forwarded = await d1AdvancedFilterMiddleware(oldEnv)(
+      "event-types",
+      prepared,
+      async (value) => value,
+    );
+    const deferred = deferredEventTypesQualificationFromQuery(forwarded);
+    if (!deferred)
+      throw new Error("wave94d_pre_fix_deferred_qualification_missing");
+    let legacyFailure: unknown;
+    try {
+      await prepareDeferredEventQualificationFallback(deferred);
+      const cursor = await decodeEventTypeCursor(
+        oldEnv,
+        SITE_ID,
+        WINDOW,
+        prepared.filters!,
+        prepared.search,
+        prepared.cursor,
+      );
+      if (!cursor) throw new InvalidCursorError("event-types");
+    } catch (error) {
+      legacyFailure = error;
+    }
+
+    const currentTrace = newTrace();
+    const currentProvider = createD1SiteProviderRegistry({
+      env: testEnv(capDatabase, currentTrace),
+      siteId: SITE_ID,
+    }).resolve("event-types");
+    if (!currentProvider)
+      throw new Error("wave94d_pre_fix_event_types_provider_missing");
+    let currentFailure: unknown;
+    try {
+      await currentProvider.execute(prepared as never);
+    } catch (error) {
+      currentFailure = error;
+    }
+    const legacyDomainError = (
+      legacyFailure as
+        | {
+            readonly domainError?: {
+              readonly kind?: string;
+              readonly issues?: readonly {
+                readonly path: string;
+                readonly code: string;
+              }[];
+            };
+          }
+        | undefined
+    )?.domainError;
+    expect(legacyDomainError?.issues).toContainEqual({
+      path: "filters",
+      code: "filter_activity_limit_exceeded",
+    });
+    const currentDomainError = (
+      currentFailure as
+        | {
+            readonly domainError?: {
+              readonly kind?: string;
+              readonly issues?: readonly {
+                readonly path: string;
+                readonly code: string;
+              }[];
+            };
+          }
+        | undefined
+    )?.domainError;
+    expect(currentDomainError?.issues).toContainEqual({
+      path: "filters",
+      code: "filter_activity_limit_exceeded",
+    });
+    expect(currentTrace.preparedSql).toHaveLength(oldTrace.preparedSql.length);
+    expect(currentTrace.preparedSql.join(" ")).not.toContain("event-type-page");
+
+    const evidencePath =
+      process.env.WAVE94D_EVENT_CURSOR_CAP_FINAL_EVIDENCE_PATH;
+    if (evidencePath) {
+      const absoluteEvidencePath = resolve(evidencePath);
+      mkdirSync(dirname(absoluteEvidencePath), { recursive: true });
+      const statements = (trace: SqliteD1Trace) =>
+        trace.preparedSql.map((sql, index) => ({
+          sql,
+          bindings: trace.bindings[index],
+          sqlUtf8Bytes: new TextEncoder().encode(sql).byteLength,
+          sha256: createHash("sha256").update(sql).digest("hex"),
+        }));
+      writeFileSync(
+        absoluteEvidencePath,
+        JSON.stringify(
+          {
+            kind: "wave94d-invalid-cursor-cap-priority-post-fix",
+            dsl: "count(page { page.durationMs gt 5 }) eq 1",
+            scope: "session",
+            cursor: prepared.cursor,
+            overCapFixtureActivityCount: 20001,
+            legacyOrder: {
+              route:
+                "coverage + Count preparation/cap validation + invalid cursor decode",
+              statementCount: oldTrace.preparedSql.length,
+              statements: statements(oldTrace),
+              failure: {
+                kind: legacyDomainError?.kind,
+                issues: legacyDomainError?.issues,
+              },
+            },
+            deferredPostFix: {
+              route:
+                "coverage + Count preparation/cap validation before invalid cursor decode",
+              statementCount: currentTrace.preparedSql.length,
+              statements: statements(currentTrace),
+              failure: {
+                kind: currentDomainError?.kind,
+                issues: currentDomainError?.issues,
+              },
+              reportStatementExecuted: false,
+            },
+          },
+          null,
+          2,
+        ),
+        "utf8",
+      );
+    }
+  });
+
+  it.each(["session", "visitor"] as const)(
+    "returns an empty qualified Event type page without report leakage for %s scope",
+    async (scope) => {
+      const emptyDatabase = createFixture();
+      databases.add(emptyDatabase);
+      const prepared = prepareEventTypesQuery(
+        'count(page { page.path eq "/not-present" }) eq 1',
+        scope,
+        { limit: 20 },
+      );
+      const trace = newTrace();
+      const registry = createD1SiteProviderRegistry({
+        env: testEnv(emptyDatabase, trace),
+        siteId: SITE_ID,
+      });
+      let deferred: boolean | undefined;
+      registry.useMiddleware(async (operation, input, next) => {
+        if (operation === "event-types")
+          deferred =
+            deferredEventTypesQualificationFromQuery(input) !== undefined;
+        return next(input);
+      });
+      const provider = registry.resolve("event-types");
+      if (!provider)
+        throw new Error("wave94c_empty_event_types_provider_missing");
+      const actual = await provider.execute(prepared as never);
+      const baselineTrace = newTrace();
+      const baseline = await executeLegacyEventTypesRequest({
+        env: testEnv(emptyDatabase, baselineTrace),
+        prepared,
+      });
+      expect(deferred).toBe(true);
+      expect(actual.value).toEqual({
+        items: mapTabs(baseline.items),
+        pagination: baseline.pagination,
+      });
+      expect(actual.value).toMatchObject({
+        items: [],
+        pagination: { returned: 0, hasMore: false, nextCursor: null },
+      });
+      expect(trace.preparedSql).toHaveLength(2);
+      expect(baselineTrace.preparedSql.length).toBeGreaterThan(2);
+    },
+  );
+
+  it("keeps unsupported payload Count on the static Event type path", async () => {
+    const prepared = prepareEventTypesQuery(
+      'count(event { event.name eq "alpha" AND event.payload("/missing") eq "x" }) eq 1',
+      "session",
+      { limit: 20 },
+    );
+    const trace = newTrace();
+    const registry = createD1SiteProviderRegistry({
+      env: testEnv(database, trace),
+      siteId: SITE_ID,
+    });
+    let deferred: boolean | undefined;
+    registry.useMiddleware(async (operation, input, next) => {
+      if (operation === "event-types")
+        deferred =
+          deferredEventTypesQualificationFromQuery(input) !== undefined;
+      return next(input);
+    });
+    const provider = registry.resolve("event-types");
+    if (!provider)
+      throw new Error("wave94c_payload_event_types_provider_missing");
+    await provider.execute(prepared as never);
+    expect(deferred).toBe(false);
+    expect(trace.preparedSql.length).toBeGreaterThan(2);
+  });
+
+  it.each(["session", "visitor"] as const)(
+    "preserves numeric compatibility fallback for qualified Event type pages in %s scope",
+    async (scope) => {
+      const repairDatabase = createFixture();
+      databases.add(repairDatabase);
+      repairDatabase
+        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+        .run("invalid-duration", "visit-alpha-1");
+      const dsl = "count(page { page.durationMs gt 5 }) eq 1";
+      const prepared = prepareEventTypesQuery(dsl, scope, { limit: 20 });
+      const baselineTrace = newTrace();
+      const baseline = await executeLegacyEventTypesRequest({
+        env: testEnv(repairDatabase, baselineTrace),
+        prepared,
+      });
+      const trace = newTrace();
+      const diagnostics = createD1ReadDiagnostics();
+      const provider = createD1SiteProviderRegistry({
+        env: testEnv(repairDatabase, trace),
+        siteId: SITE_ID,
+        diagnostics,
+      }).resolve("event-types");
+      if (!provider)
+        throw new Error("wave94c_numeric_fallback_provider_missing");
+      const actual = await provider.execute(prepared as never);
+      expect(actual.value).toEqual({
+        items: mapTabs(baseline.items),
+        pagination: baseline.pagination,
+      });
+      expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
+        kind: "numeric-data-domain",
+        fieldIds: ["page.durationMs"],
+      });
+      expect(trace.preparedSql.length).toBeGreaterThan(2);
+
+      const evidenceDirectory = process.env.WAVE94C_EVENT_TYPES_EVIDENCE_DIR;
+      if (evidenceDirectory) {
+        const absoluteEvidencePath = resolve(
+          evidenceDirectory,
+          "numeric-fallback",
+          `${scope}.json`,
+        );
+        mkdirSync(dirname(absoluteEvidencePath), { recursive: true });
+        const statements = (statementTrace: SqliteD1Trace) =>
+          statementTrace.preparedSql.map((sql, index) => ({
+            sql,
+            bindings: statementTrace.bindings[index],
+            sqlUtf8Bytes: new TextEncoder().encode(sql).byteLength,
+            sha256: createHash("sha256").update(sql).digest("hex"),
+          }));
+        writeFileSync(
+          absoluteEvidencePath,
+          JSON.stringify(
+            {
+              kind: "wave94c-event-types-numeric-fallback-evidence",
+              scope,
+              dsl,
+              limit: prepared.limit,
+              numericFixture: {
+                visitId: "visit-alpha-1",
+                fieldId: "page.durationMs",
+                storageType: "text",
+              },
+              baseline: {
+                route:
+                  "coverage + normal Count evaluator + legacy Event type page",
+                statementCount: baselineTrace.preparedSql.length,
+                statements: statements(baselineTrace),
+                dto: {
+                  items: mapTabs(baseline.items),
+                  pagination: baseline.pagination,
+                },
+              },
+              qualifiedFallback: {
+                route:
+                  "coverage + guarded qualification controls + normal Count evaluator + legacy Event type page",
+                statementCount: trace.preparedSql.length,
+                statements: statements(trace),
+                fallbackReason: diagnostics.advancedCountSqlFallbackReason,
+                dto: actual.value,
+              },
+              dtoEqual: true,
+            },
+            null,
+            2,
+          ),
+          "utf8",
+        );
+      }
+    },
+  );
+
+  it.each(["session", "visitor"] as const)(
+    "falls back to the complete legacy request for numeric compatibility in %s scope",
+    async (scope) => {
+      const repairDatabase = createFixture();
+      repairDatabase
+        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+        .run("invalid-duration", "visit-alpha-1");
+      const numericStorageType = repairDatabase
+        .prepare(
+          "SELECT typeof(duration_ms) AS storageType FROM visits WHERE visit_id = ?",
+        )
+        .get("visit-alpha-1") as { readonly storageType: string } | undefined;
+      expect(numericStorageType?.storageType).toBe("text");
+
+      const filter = parseFilterDsl(
+        "count(page { page.durationMs gt 5 }) eq 1",
+        analyticsFilterRegistry,
+      );
+      const prepared = prepareScopedQuery("event-summary", {
+        context: siteQueryContext(SITE_ID, "private-dashboard"),
+        time: QUERY_TIME,
+        filters: filter,
+        scopePreference: scope,
+      } as QueryInput & { readonly time: QueryTime }) as QueryInput & {
+        readonly filters?: FilterDocument;
+        readonly time?: QueryTime;
+      };
+      if (!prepared.filters || !prepared.time)
+        throw new Error("wave94b_numeric_fallback_query_preparation_failed");
+
+      const baselineTrace = newTrace();
+      const baselineEnv = testEnv(repairDatabase, baselineTrace);
+      const baselineMiddleware = d1AdvancedFilterMiddleware(baselineEnv);
+      const baselineInput = await baselineMiddleware(
+        "event-summary",
+        prepared,
+        async (input) => input,
+      );
+      const baselineDeferred =
+        deferredEventSummaryQualificationFromQuery(baselineInput);
+      if (!baselineDeferred)
+        throw new Error("wave94b_numeric_fallback_baseline_not_prepared");
+      const baselineFilters =
+        await prepareDeferredEventSummaryFallback(baselineDeferred);
+      const baseline = await queryEventsSummaryFromD1(
+        baselineEnv,
+        SITE_ID,
+        WINDOW,
+        baselineFilters,
+      );
+      const baselineDto = {
+        summary: {
+          events: baseline.summary.events,
+          eventTypes: baseline.summary.eventTypes,
+          sessions: baseline.summary.sessions,
+          visitors: baseline.summary.visitors,
+          avgEventsPerSession:
+            baseline.summary.sessions > 0
+              ? baseline.summary.events / baseline.summary.sessions
+              : 0,
+        },
+        cards: mapEventSummaryCards(baseline.cards),
+      };
+
+      const fusedTrace = newTrace();
+      const fusedEnv = testEnv(repairDatabase, fusedTrace);
+      const fusedDiagnostics = createD1ReadDiagnostics();
+      const registry = createD1SiteProviderRegistry({
+        env: fusedEnv,
+        siteId: SITE_ID,
+        diagnostics: fusedDiagnostics,
+      });
+      const provider = registry.resolve("event-summary");
+      if (!provider)
+        throw new Error("wave94b_numeric_fallback_provider_missing");
+      const actual = await provider.execute(prepared as never);
+      const actualDto = actual.value as typeof baselineDto;
+      expect(actualDto).toEqual(baselineDto);
+      expect(fusedDiagnostics.advancedCountSqlFallbackReason).toEqual({
+        kind: "numeric-data-domain",
+        fieldIds: ["page.durationMs"],
+      });
+      expect(fusedTrace.preparedSql.length).toBeGreaterThan(
+        baselineTrace.preparedSql.length,
+      );
+
+      const evidenceDirectory = process.env.WAVE94B_REPAIR_NUMERIC_EVIDENCE_DIR;
+      if (evidenceDirectory) {
+        const absoluteEvidencePath = resolve(
+          evidenceDirectory,
+          `${scope}.json`,
+        );
+        mkdirSync(dirname(absoluteEvidencePath), { recursive: true });
+        const statements = (trace: SqliteD1Trace) =>
+          trace.preparedSql.map((sql, index) => ({
+            sql,
+            bindings: trace.bindings[index],
+            sqlUtf8Bytes: new TextEncoder().encode(sql).byteLength,
+            sha256: createHash("sha256").update(sql).digest("hex"),
+          }));
+        writeFileSync(
+          absoluteEvidencePath,
+          JSON.stringify(
+            {
+              kind: "wave94b-numeric-compatibility-fallback-repair",
+              dsl: "count(page { page.durationMs gt 5 }) eq 1",
+              scope,
+              numericFixture: {
+                visitId: "visit-alpha-1",
+                fieldId: "page.durationMs",
+                storageType: numericStorageType?.storageType,
+              },
+              baseline: {
+                route:
+                  "d1AdvancedFilterMiddleware -> prepareDeferredEventSummaryFallback -> queryEventsSummaryFromD1",
+                statementCount: baselineTrace.preparedSql.length,
+                statements: statements(baselineTrace),
+                dto: baselineDto,
+              },
+              fusedRoute: {
+                statementCount: fusedTrace.preparedSql.length,
+                statements: statements(fusedTrace),
+                fallbackReason: fusedDiagnostics.advancedCountSqlFallbackReason,
+                dto: actualDto,
+              },
+            },
+            null,
+            2,
+          ),
+          "utf8",
+        );
+      }
+      expect(baselineTrace.preparedSql.length).toBeGreaterThan(2);
+      expect(baseline.summary.events).toBe(0);
+      expect(fusedTrace.preparedSql.length).toBeGreaterThan(2);
+    },
+  );
+
+  it("keeps the activity cap ahead of numeric fallback and gates every report arm", async () => {
+    const capDatabase = createFixture();
+    capDatabase
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "visit-alpha-1");
+    capDatabase
+      .prepare(
+        `WITH RECURSIVE generated(n) AS (
+           SELECT 1
+           UNION ALL SELECT n + 1 FROM generated WHERE n < 20001
+         )
+         INSERT INTO visits (
+           visit_id, site_id, site_pk, visitor_id, session_id, status,
+           started_at, last_activity_at, pathname, hostname, duration_ms
+         )
+         SELECT 'wave94b-cap-page-' || n, ?, 1, ?, ?, 'closed', 125,
+           125, '/cap-page', 'cap.test', 1
+         FROM generated`,
+      )
+      .run(SITE_ID, "wave94b-cap-visitor", "wave94b-cap-session");
+
+    const filter = parseFilterDsl(
+      "count(page { page.durationMs gt 5 }) eq 1",
+      analyticsFilterRegistry,
+    );
+    const prepared = prepareScopedQuery("event-summary", {
+      context: siteQueryContext(SITE_ID, "private-dashboard"),
+      time: QUERY_TIME,
+      filters: filter,
+      scopePreference: "session",
+    } as QueryInput & { readonly time: QueryTime }) as QueryInput & {
+      readonly filters?: FilterDocument;
+      readonly time?: QueryTime;
+    };
+    if (!prepared.filters || !prepared.time)
+      throw new Error("wave94b_cap_query_preparation_failed");
+
+    const trace = newTrace();
+    const env = testEnv(capDatabase, trace);
+    const registry = createD1SiteProviderRegistry({ env, siteId: SITE_ID });
+    let compilation:
+      ReturnType<typeof compileEventSummaryQualificationProgram> | undefined;
+    registry.useMiddleware(async (_operation, input, next) => {
+      const deferred = deferredEventSummaryQualificationFromQuery(input);
+      if (deferred)
+        compilation = compileEventSummaryQualificationProgram(deferred);
+      return next(input);
+    });
+    const provider = registry.resolve("event-summary");
+    if (!provider) throw new Error("wave94b_cap_provider_missing");
+    let failure: unknown;
+    try {
+      await provider.execute(prepared as never);
+    } catch (error) {
+      failure = error;
+    }
+    expect(compilation?.kind).toBe("compiled");
+    if (compilation?.kind !== "compiled")
+      throw new Error("wave94b_cap_fused_compile_unavailable");
+    const rows = capDatabase
+      .prepare(compilation.evidence.sql)
+      .all(...(compilation.evidence.bindings as SQLInputValue[])) as Record<
+      string,
+      unknown
+    >[];
+    const controls = rows.filter((row) => row.rowKind === "control");
+    const reportRows = rows.filter((row) => row.rowKind === "report");
+    expect(controls).toHaveLength(1);
+    expect(Number(controls[0]?.rawCount)).toBeGreaterThan(20_000);
+    expect(
+      Number(controls[0]?.invalidContextPageDurationMsCount),
+    ).toBeGreaterThan(0);
+    expect(reportRows).toHaveLength(0);
+    const domainError = (
+      failure as
+        | {
+            readonly domainError?: {
+              readonly kind?: string;
+              readonly issues?: readonly {
+                readonly path: string;
+                readonly code: string;
+              }[];
+            };
+          }
+        | undefined
+    )?.domainError;
+    expect(domainError?.kind).toBe("invalid-input");
+    expect(domainError?.issues).toContainEqual({
+      path: "filters",
+      code: "filter_activity_limit_exceeded",
+    });
+
+    const evidencePath = process.env.WAVE94B_REPAIR_CAP_EVIDENCE_PATH;
+    if (evidencePath) {
+      const absoluteEvidencePath = resolve(evidencePath);
+      mkdirSync(dirname(absoluteEvidencePath), { recursive: true });
+      writeFileSync(
+        absoluteEvidencePath,
+        JSON.stringify(
+          {
+            kind: "wave94b-cap-and-numeric-priority-contract",
+            scope: "session",
+            rawCount: Number(controls[0]?.rawCount),
+            numericCompatibilityCount: Number(
+              controls[0]?.invalidContextPageDurationMsCount,
+            ),
+            reportRowCount: reportRows.length,
+            thrownDomainError: domainError,
+            fusedSql: compilation.evidence.sql,
+            fusedBindings: compilation.evidence.bindings,
+            fusedSqlUtf8Bytes: compilation.evidence.sqlBytes,
+          },
+          null,
+          2,
+        ),
+        "utf8",
+      );
+    }
+  });
+
+  it.each([
+    ["zero qualified pages", false],
+    ["zero activities", true],
+  ] as const)(
+    "keeps the empty summary contract for %s",
+    async (label, empty) => {
+      const emptyDatabase = createFixture();
+      if (empty) {
+        emptyDatabase.exec(
+          "UPDATE visits SET started_at = 1; UPDATE custom_events SET occurred_at = 1",
+        );
+      }
+      const dsl = empty
+        ? 'count(page { page.path eq "/scoped" }) eq 1'
+        : 'count(page { page.path eq "/not-present" }) eq 1';
+      const prepared = prepareEventSummaryQuery(dsl);
+      const trace = newTrace();
+      const provider = createD1SiteProviderRegistry({
+        env: testEnv(emptyDatabase, trace),
+        siteId: SITE_ID,
+      }).resolve("event-summary");
+      if (!provider)
+        throw new Error(`wave94b_empty_summary_provider_missing:${label}`);
+      const actual = await provider.execute(prepared as never);
+      const baselineTrace = newTrace();
+      const baseline = await executeLegacyEventSummaryRequest({
+        env: testEnv(emptyDatabase, baselineTrace),
+        prepared,
+      });
+      const expected = eventSummaryDto(baseline);
+      expect(actual.value).toEqual(expected);
+      expect(actual.value).toMatchObject({
+        summary: {
+          events: 0,
+          eventTypes: 0,
+          sessions: 0,
+          visitors: 0,
+          avgEventsPerSession: 0,
+        },
+        cards: {
+          event: { name: [] },
+          page: { hostname: [], path: [], title: [] },
+        },
+      });
+      expect(trace.preparedSql).toHaveLength(2);
+    },
+  );
+
+  it("preserves an ordinary Event Count qualification after Page Count coverage", async () => {
+    const prepared = prepareEventSummaryQuery(
+      'count(event { event.name eq "alpha" }) eq 2',
+    );
+    const trace = newTrace();
+    const provider = createD1SiteProviderRegistry({
+      env: testEnv(database, trace),
+      siteId: SITE_ID,
+    }).resolve("event-summary");
+    if (!provider) throw new Error("wave94b_event_count_provider_missing");
+    const actual = await provider.execute(prepared as never);
+    const baselineTrace = newTrace();
+    const baseline = await executeLegacyEventSummaryRequest({
+      env: testEnv(database, baselineTrace),
+      prepared,
+    });
+    expect(baselineTrace.preparedSql.length).toBeGreaterThan(2);
+    expect(actual.value).toEqual(eventSummaryDto(baseline));
+    expect(
+      (actual.value as { readonly summary: { readonly events: number } })
+        .summary.events,
+    ).toBe(2);
+    expect(trace.preparedSql).toHaveLength(2);
+  });
+
+  it("keeps payload Count on the static legacy path", async () => {
+    const prepared = prepareEventSummaryQuery(
+      'count(event { event.name eq "alpha" AND event.payload("/missing") eq "x" }) eq 1',
+    );
+    const trace = newTrace();
+    const registry = createD1SiteProviderRegistry({
+      env: testEnv(database, trace),
+      siteId: SITE_ID,
+    });
+    let deferred: boolean | undefined;
+    registry.useMiddleware(async (_operation, input, next) => {
+      deferred =
+        deferredEventSummaryQualificationFromQuery(input) !== undefined;
+      return next(input);
+    });
+    const provider = registry.resolve("event-summary");
+    if (!provider)
+      throw new Error("wave94b_payload_static_path_provider_missing");
+    const actual = await provider.execute(prepared as never);
+    expect(deferred).toBe(false);
+    expect(actual.value).toMatchObject({
+      summary: { events: 0 },
+      cards: {
+        event: { name: [] },
+        page: { hostname: [], path: [], title: [] },
+      },
+    });
+    expect(trace.preparedSql.length).toBeGreaterThan(2);
+  });
+
+  it("falls back before executing the combined report when compilation exceeds D1 budget", async () => {
+    const terms = Array.from(
+      { length: D1_MAX_BOUND_PARAMETERS + 1 },
+      (_, index) => `page.path contains ${JSON.stringify(`/budget-${index}`)}`,
+    ).join(" OR ");
+    const prepared = prepareEventSummaryQuery(`count(page { ${terms} }) eq 1`);
+    const trace = newTrace();
+    const diagnostics = createD1ReadDiagnostics();
+    const registry = createD1SiteProviderRegistry({
+      env: testEnv(database, trace),
+      siteId: SITE_ID,
+      diagnostics,
+    });
+    let compilation:
+      ReturnType<typeof compileEventSummaryQualificationProgram> | undefined;
+    registry.useMiddleware(async (_operation, input, next) => {
+      const deferred = deferredEventSummaryQualificationFromQuery(input);
+      if (deferred)
+        compilation = compileEventSummaryQualificationProgram(deferred);
+      return next(input);
+    });
+    const provider = registry.resolve("event-summary");
+    if (!provider) throw new Error("wave94b_budget_fallback_provider_missing");
+    const actual = await provider.execute(prepared as never);
+    expect(compilation?.kind).toBe("unavailable");
+    if (compilation?.kind !== "unavailable")
+      throw new Error("wave94b_budget_fallback_did_not_refuse");
+    expect(compilation.fallbackReason.kind).toBe("compile-budget");
+    expect(diagnostics.advancedCountSqlFallbackReason?.kind).toBe(
+      "compile-budget",
+    );
+    expect(actual.value).toMatchObject({ summary: { events: 0 } });
+    expect(trace.preparedSql.length).toBeGreaterThan(2);
+
+    const evidencePath = process.env.WAVE94B_REPAIR_BUDGET_EVIDENCE_PATH;
+    if (evidencePath) {
+      const absoluteEvidencePath = resolve(evidencePath);
+      mkdirSync(dirname(absoluteEvidencePath), { recursive: true });
+      writeFileSync(
+        absoluteEvidencePath,
+        JSON.stringify(
+          {
+            kind: "wave94b-compile-budget-preexecution-fallback",
+            scope: "session",
+            compilerFallbackReason: compilation.fallbackReason,
+            diagnosticsFallbackReason:
+              diagnostics.advancedCountSqlFallbackReason,
+            statementCount: trace.preparedSql.length,
+            statements: trace.preparedSql.map((sql, index) => ({
+              sql,
+              bindings: trace.bindings[index],
+              sqlUtf8Bytes: new TextEncoder().encode(sql).byteLength,
+              sha256: createHash("sha256").update(sql).digest("hex"),
+            })),
+            dto: actual.value,
+          },
+          null,
+          2,
+        ),
+        "utf8",
+      );
+    }
+  });
+
+  it("does not swallow cancellation of the qualified event-summary request", async () => {
+    const prepared = prepareEventSummaryQuery(
+      'count(page { page.path eq "/scoped" }) eq 1',
+    );
+    const trace = newTrace();
+    const provider = createD1SiteProviderRegistry({
+      env: testEnv(database, trace),
+      siteId: SITE_ID,
+    }).resolve("event-summary");
+    if (!provider)
+      throw new Error("wave94b_cancelled_request_provider_missing");
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      provider.execute(prepared as never, { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("does not swallow a real SQLite failure from the qualified report", async () => {
+    const brokenDatabase = createFixture();
+    brokenDatabase.exec("DROP TABLE custom_events");
+    const prepared = prepareEventSummaryQuery(
+      'count(page { page.path eq "/scoped" }) eq 1',
+    );
+    const trace = newTrace();
+    const provider = createD1SiteProviderRegistry({
+      env: testEnv(brokenDatabase, trace),
+      siteId: SITE_ID,
+    }).resolve("event-summary");
+    if (!provider) throw new Error("wave94b_database_error_provider_missing");
+    await expect(provider.execute(prepared as never)).rejects.toThrow(
+      /no such table: custom_events/u,
+    );
+  });
+
   it("matches frozen list and summary semantics for NULL, empty, whitespace, and empty IDs", async () => {
     const listTrace = newTrace();
     const list = await queryEventTypeAggregate(

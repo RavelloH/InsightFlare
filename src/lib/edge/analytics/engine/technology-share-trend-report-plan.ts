@@ -1,6 +1,11 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { CalendarGranularity } from "@/lib/edge/analytics/contract/types";
+import type {
+  CalendarGranularity,
+  ClientDimensionKey,
+  Interval,
+  UtmDimensionKey,
+} from "@/lib/edge/analytics/contract/types";
 import {
   PAGE_DIMENSION_SELECTIONS,
   type PageDimensionSelection,
@@ -13,6 +18,7 @@ import type {
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
+import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
 import { semanticPageDimension } from "@/lib/edge/analytics/engine/semantic/page-dimensions";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
@@ -39,6 +45,116 @@ export const TECHNOLOGY_SHARE_TREND_DIMENSIONS = {
 
 export type TechnologyShareTrendDimension =
   keyof typeof TECHNOLOGY_SHARE_TREND_DIMENSIONS;
+
+export const CLIENT_DIMENSIONS: Readonly<
+  Record<ClientDimensionKey, TechnologyShareTrendDimension>
+> = {
+  browser: "browser",
+  operatingSystem: "operatingSystem",
+  osVersion: "osVersion",
+  deviceType: "deviceType",
+  language: "language",
+  screenSize: "screenSize",
+};
+
+export const UTM_DIMENSIONS: Readonly<
+  Record<UtmDimensionKey, TechnologyShareTrendDimension>
+> = {
+  source: "utmSource",
+  medium: "utmMedium",
+  campaign: "utmCampaign",
+  term: "utmTerm",
+  content: "utmContent",
+};
+
+export type TechnologyShareTrendQualificationConfiguration =
+  | {
+      readonly kind: "single";
+      readonly dimension: TechnologyShareTrendDimension;
+      readonly interval: Interval;
+      readonly limit: number;
+    }
+  | {
+      readonly kind: "dual";
+      readonly interval: Interval;
+      readonly limit: number;
+    };
+
+const SHARE_TREND_INTERVALS = [
+  "minute",
+  "hour",
+  "day",
+  "week",
+  "month",
+] as const satisfies readonly Interval[];
+
+const CLIENT_DIMENSION_KEYS = Object.keys(
+  CLIENT_DIMENSIONS,
+) as ClientDimensionKey[];
+const UTM_DIMENSION_KEYS = Object.keys(UTM_DIMENSIONS) as UtmDimensionKey[];
+
+/** Normalizes only the exact finite production variants handled by share-trend. */
+export function technologyShareTrendQualificationConfiguration(input: {
+  readonly variant: unknown;
+  readonly dimension: unknown;
+  readonly interval: unknown;
+  readonly limit: unknown;
+}): TechnologyShareTrendQualificationConfiguration | undefined {
+  if (
+    typeof input.interval !== "string" ||
+    !SHARE_TREND_INTERVALS.includes(input.interval as Interval)
+  )
+    return undefined;
+  const normalizedLimit = Math.min(
+    Math.max(1, (input.limit ?? 5) as number),
+    12,
+  );
+  if (
+    !Number.isSafeInteger(normalizedLimit) ||
+    normalizedLimit < 1 ||
+    normalizedLimit > 12
+  )
+    return undefined;
+  if (input.variant === "referrer-channel") {
+    if (input.dimension !== undefined) return undefined;
+    return {
+      kind: "dual",
+      interval: input.interval as Interval,
+      limit: normalizedLimit,
+    };
+  }
+  let dimension: TechnologyShareTrendDimension | undefined;
+  if (input.variant === "browser") {
+    if (input.dimension !== undefined) return undefined;
+    dimension = "browser";
+  } else if (input.variant === "browser-engine") {
+    if (input.dimension !== undefined) return undefined;
+    dimension = "browserEngine";
+  } else if (input.variant === "client") {
+    if (
+      typeof input.dimension !== "string" ||
+      !CLIENT_DIMENSION_KEYS.includes(input.dimension as ClientDimensionKey)
+    )
+      return undefined;
+    dimension = CLIENT_DIMENSIONS[input.dimension as ClientDimensionKey];
+  } else if (input.variant === "utm") {
+    if (
+      typeof input.dimension !== "string" ||
+      !UTM_DIMENSION_KEYS.includes(input.dimension as UtmDimensionKey)
+    )
+      return undefined;
+    dimension = UTM_DIMENSIONS[input.dimension as UtmDimensionKey];
+  } else if (input.variant === undefined || input.variant === "referrer") {
+    if (input.dimension !== undefined) return undefined;
+    dimension = "referrerDomain";
+  } else return undefined;
+  return {
+    kind: "single",
+    dimension,
+    interval: input.interval as Interval,
+    limit: normalizedLimit,
+  };
+}
 
 type TrendKind = "single" | "source" | "channel";
 type TrendRowType = "top" | "series" | "bucket";
@@ -70,7 +186,7 @@ interface TechnologyShareTrendPlanInput {
   readonly limit: number;
 }
 
-interface SelectedTrendDimension {
+export interface SelectedTrendDimension {
   readonly kind: TrendKind;
   readonly dimension: TechnologyShareTrendDimension;
 }
@@ -111,8 +227,8 @@ function distinctNonempty(
 
 function requiredAttributes(
   dimensions: readonly SelectedTrendDimension[],
-): string[] {
-  const attributes = new Set<string>([
+): SemanticAttributeId[] {
+  const attributes = new Set<SemanticAttributeId>([
     "page.report.startedAt",
     "page.report.localId",
     "page.report.visitorId",
@@ -312,22 +428,14 @@ function dimensionOutputs(
   });
 }
 
-function buildPlan(
-  input: TechnologyShareTrendPlanInput,
-  dimensions: readonly SelectedTrendDimension[],
-): ValidatedLogicalPlan {
-  const { builder, pages } = createPageReportSource({
-    siteId: input.siteId,
-    queryTime: input.queryTime,
-    filters: input.filters,
-    ...(input.scopePlan
-      ? {
-          scopePlan: input.scopePlan,
-          preparedTimePolicy: "reader-window-v1" as const,
-        }
-      : {}),
-    attributes: requiredAttributes(dimensions),
-  });
+export function appendTechnologyShareTrendReport(input: {
+  readonly builder: LogicalPlanBuilder;
+  readonly pages: LogicalRelationHandle;
+  readonly dimensions: readonly SelectedTrendDimension[];
+  readonly interval: CalendarGranularity;
+  readonly limit: number;
+}): void {
+  const { builder, pages, dimensions } = input;
   const visitorId = pageAttribute(builder, pages, "visitorId");
   const eligiblePages = builder.filter(
     pages,
@@ -445,7 +553,31 @@ function buildPlan(
       selected.kind,
       input.limit,
     );
+}
 
+function buildPlan(
+  input: TechnologyShareTrendPlanInput,
+  dimensions: readonly SelectedTrendDimension[],
+): ValidatedLogicalPlan {
+  const { builder, pages } = createPageReportSource({
+    siteId: input.siteId,
+    queryTime: input.queryTime,
+    filters: input.filters,
+    ...(input.scopePlan
+      ? {
+          scopePlan: input.scopePlan,
+          preparedTimePolicy: "reader-window-v1" as const,
+        }
+      : {}),
+    attributes: requiredAttributes(dimensions),
+  });
+  appendTechnologyShareTrendReport({
+    builder,
+    pages,
+    dimensions,
+    interval: input.interval,
+    limit: input.limit,
+  });
   return builder.finish();
 }
 

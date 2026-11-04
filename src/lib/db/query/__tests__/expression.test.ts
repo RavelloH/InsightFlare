@@ -36,6 +36,7 @@ import {
   sort,
   sub,
   sum,
+  trimCharacters,
   trimSpaces,
   union,
   unixepoch,
@@ -150,6 +151,18 @@ describe("typed SQL expressions", () => {
       nullable: true,
     });
     expect(trimSpaces(param(null)).resultType).toEqual({
+      affinity: "text",
+      nullable: true,
+    });
+    expect(trimCharacters(param(" value "), constant(" ")).resultType).toEqual({
+      affinity: "text",
+      nullable: false,
+    });
+    expect(trimCharacters(param(" value "), param(null)).resultType).toEqual({
+      affinity: "text",
+      nullable: true,
+    });
+    expect(trimCharacters(param(null), param(" ")).resultType).toEqual({
       affinity: "text",
       nullable: true,
     });

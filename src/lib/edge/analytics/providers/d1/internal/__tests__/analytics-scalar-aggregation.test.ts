@@ -904,7 +904,7 @@ function expectMeasuredOutput(
     sqlBytes: new TextEncoder().encode(measured.trace.preparedSql[0]!)
       .byteLength,
     bindings: measured.trace.bindings[0]!.length,
-    physicalPlanHash: expect.stringMatching(/^v1:/u),
+    physicalPlanHash: expect.stringMatching(/^v8:/u),
   });
   expect(measured.observation.sqlBytes as number).toBeLessThanOrEqual(
     D1_MAX_SQL_UTF8_BYTES,
@@ -1181,7 +1181,7 @@ describe("shared scalar aggregate lowering", () => {
       sqlBytes: new TextEncoder().encode(summary.trace.preparedSql[0]!)
         .byteLength,
       bindings: summary.trace.bindings[0]!.length,
-      physicalPlanHash: expect.stringMatching(/^v1:/u),
+      physicalPlanHash: expect.stringMatching(/^v8:/u),
     });
     expect(summary.trace.preparedSql).toHaveLength(1);
     expect(summary.trace.bindings).toHaveLength(1);
@@ -1531,7 +1531,7 @@ describe("shared scalar aggregate lowering", () => {
       sqlBytes: new TextEncoder().encode(grouped.trace.preparedSql[0]!)
         .byteLength,
       bindings: grouped.trace.bindings[0]!.length,
-      physicalPlanHash: expect.stringMatching(/^v1:/u),
+      physicalPlanHash: expect.stringMatching(/^v8:/u),
     });
     expect(grouped.trace.bindings[0]!.length).toBeLessThanOrEqual(
       D1_MAX_BOUND_PARAMETERS,
@@ -1684,7 +1684,9 @@ describe("shared scalar aggregate lowering", () => {
       expect(error).toBeInstanceOf(AnalyticsRelationalLoweringError);
       if (!(error instanceof AnalyticsRelationalLoweringError)) return;
       expect(error.message).toMatch(
-        /Scalar aggregation requires a scalar Logical value\./u,
+        kind === "group"
+          ? /Scalar aggregation requires a scalar Logical value\./u
+          : /COUNT\(DISTINCT\) supports Entity values only with a proven non-null Event identity\./u,
       );
       expect(error.node).toContain(
         kind === "group" ? ".groups[0].expression" : ".measures[0].input",

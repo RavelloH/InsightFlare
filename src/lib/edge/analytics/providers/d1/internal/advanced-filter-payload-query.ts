@@ -11,7 +11,6 @@ import {
   lt,
   param,
   project,
-  recursiveClosure,
   scan,
   sort,
 } from "@/lib/db";
@@ -23,6 +22,7 @@ import { currentD1Operation } from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
 
 import { queryD1CompiledAll } from "./core-sources";
+import { selectEventPayloadNodeRows } from "./event-payload-node-selection";
 
 export interface AdvancedFilterPayloadNode extends Record<string, unknown> {
   readonly event_id: string;
@@ -77,67 +77,11 @@ function scopedEvents(input: AdvancedFilterPayloadRangeQuery) {
 }
 
 function selectedNodes(input: AdvancedFilterPayloadRangeQuery) {
-  const nodes = scan(schema.custom_event_json_nodes);
-  if (input.wholePayload || input.paths.length === 0)
-    return project(nodes, {
-      event_pk: nodes.columns.event_pk,
-      node_id: nodes.columns.node_id,
-      parent_node_id: nodes.columns.parent_node_id,
-      key_id: nodes.columns.key_id,
-      path_id: nodes.columns.path_id,
-      value_type: nodes.columns.value_type,
-      array_index: nodes.columns.array_index,
-    });
-
-  const paths = scan(schema.custom_event_json_paths);
-  const nodePaths = join(
-    nodes,
-    paths,
-    eq(nodes.columns.path_id, paths.columns.id),
+  return selectEventPayloadNodeRows(
+    scopedEvents(input),
+    input.paths,
+    input.wholePayload,
   );
-  const seedEventRows = scopedEvents(input);
-  const seedEvents = join(
-    nodePaths,
-    seedEventRows,
-    eq(nodePaths.columns.left_event_pk, seedEventRows.columns.event_pk),
-  );
-  const seedCandidates = filter(
-    seedEvents,
-    inList(seedEvents.columns.left_right_path, input.paths),
-  );
-  const seed = project(seedCandidates, {
-    event_pk: seedCandidates.columns.left_left_event_pk,
-    node_id: seedCandidates.columns.left_left_node_id,
-    parent_node_id: seedCandidates.columns.left_left_parent_node_id,
-  });
-  const candidates = project(nodes, {
-    event_pk: nodes.columns.event_pk,
-    node_id: nodes.columns.node_id,
-    parent_node_id: nodes.columns.parent_node_id,
-  });
-  const selected = recursiveClosure(seed, candidates, (current, candidate) =>
-    and(
-      eq(current.event_pk, candidate.event_pk),
-      eq(current.parent_node_id, candidate.node_id),
-    ),
-  );
-  const closureNodes = join(
-    selected,
-    nodes,
-    and(
-      eq(selected.columns.event_pk, nodes.columns.event_pk),
-      eq(selected.columns.node_id, nodes.columns.node_id),
-    ),
-  );
-  return project(closureNodes, {
-    event_pk: closureNodes.columns.right_event_pk,
-    node_id: closureNodes.columns.right_node_id,
-    parent_node_id: closureNodes.columns.right_parent_node_id,
-    key_id: closureNodes.columns.right_key_id,
-    path_id: closureNodes.columns.right_path_id,
-    value_type: closureNodes.columns.right_value_type,
-    array_index: closureNodes.columns.right_array_index,
-  });
 }
 
 /** Reads one authorized site subset and half-open range of payload nodes. */

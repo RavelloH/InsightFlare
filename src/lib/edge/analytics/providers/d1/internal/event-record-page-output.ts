@@ -1,3 +1,4 @@
+import { EVENT_RECORD_PAGE_OUTPUT_ID } from "@/lib/edge/analytics/engine/event-record-page-plan";
 import type { SlotId } from "@/lib/edge/analytics/engine/logical/ids";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import type { SemanticScalarValueType } from "@/lib/edge/analytics/engine/semantic/value-types";
@@ -14,7 +15,7 @@ const STRING_VALUE = { kind: "scalar", scalar: "string" } as const;
 const NUMBER_VALUE = { kind: "scalar", scalar: "number" } as const;
 const DATETIME_VALUE = { kind: "scalar", scalar: "datetime" } as const;
 
-const EVENT_RECORD_PAGE_OUTPUT_TYPES: Readonly<
+export const EVENT_RECORD_PAGE_OUTPUT_TYPES: Readonly<
   Record<keyof EventRecordPageCursorRow, SemanticScalarValueType>
 > = {
   eventPk: NUMBER_VALUE,
@@ -42,7 +43,7 @@ const EVENT_RECORD_PAGE_OUTPUT_TYPES: Readonly<
   valueCount: NUMBER_VALUE,
 };
 
-export const EVENT_RECORD_PAGE_OUTPUT_ID = "event-record-page";
+export { EVENT_RECORD_PAGE_OUTPUT_ID };
 
 declare const eventRecordPageOutputBrand: unique symbol;
 

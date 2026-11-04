@@ -33,6 +33,7 @@ import {
   or,
   param,
   project,
+  recursiveClosure,
   scalar,
   scan,
   semiJoin,
@@ -48,10 +49,12 @@ import {
   compileD1QueryUnoptimizedForTest,
 } from "@/lib/db/query/compiler";
 import type { AnyExpression } from "@/lib/db/query/expression";
+import { hasKnownBinaryTableColumn } from "@/lib/db/query/physical/self-membership";
 import { lowerLogicalPlan } from "@/lib/db/query/physical-plan";
 import { optimizePhysicalMembershipBudget } from "@/lib/db/query/physical-plan";
 import type { Relation } from "@/lib/db/query/plan";
 import { schema } from "@/lib/db/schema";
+import type { SchemaObjectReference } from "@/lib/db/schema/types";
 
 const databases = new Set<DatabaseSync>();
 
@@ -295,7 +298,7 @@ function sharedTupleMembershipPlan<
 }
 
 function firstSharedCteDefinition(sql: string): string {
-  const prefix = 'WITH "_d1_shared_0" AS (';
+  const prefix = "WITH _d1_shared_0 AS (";
   const start = sql.indexOf(prefix);
   if (start < 0) throw new Error("Expected the first shared CTE");
   const opening = start + prefix.length - 1;
@@ -382,6 +385,22 @@ function seedTupleFixture(database: DatabaseSync) {
       .get("tuple-blob-session")?.session_type,
   ).toBe("blob");
 }
+
+describe("generated Event primary-key nullability", () => {
+  it("keeps a rowid alias non-null and null-extends it on the right of a LEFT JOIN", () => {
+    const events = scan(schema.custom_events);
+    const owners = scan(schema.custom_events);
+    const leftJoined = join(
+      events,
+      owners,
+      eq(events.columns.event_pk, owners.columns.event_pk),
+      "left",
+    );
+
+    expect(events.columns.event_pk.resultType.nullable).toBe(false);
+    expect(leftJoined.columns.right_event_pk.resultType.nullable).toBe(true);
+  });
+});
 
 describe("safe passthrough projection fusion", () => {
   it("removes an unused pure projection from 48 correlated scalar-exists leaves", () => {
@@ -636,8 +655,8 @@ describe("safe passthrough projection fusion", () => {
     const optimized = compileD1Query(physical);
     const baseline = compileD1QueryUnoptimizedForTest(found);
     expect(optimized.sql).toContain("LEFT JOIN");
-    expect(optimized.sql).toContain('NULL AS "_c0"');
-    expect(optimized.sql).toContain('NULL AS "_c2"');
+    expect(optimized.sql).toContain("NULL AS _c0");
+    expect(optimized.sql).toContain("NULL AS _c2");
     const optimizedRows = database
       .prepare(optimized.sql)
       .all(...(optimized.bindings as SQLInputValue[]));
@@ -1036,21 +1055,21 @@ describe("finite packed positive tuple membership", () => {
     expect(referencePhysical.positiveTupleMembershipCandidates).toEqual([]);
     const baseline = compileD1Query(referencePhysical);
     const optimized = compileD1Query(physical);
-    expect(new TextEncoder().encode(baseline.sql).byteLength).toBe(2_545);
+    expect(new TextEncoder().encode(baseline.sql).byteLength).toBe(2_189);
     expect(baseline.bindings).toHaveLength(2);
     expect(hashSql(baseline.sql)).toBe(
-      "cfa63bffd4a845a128231a4432ddc5cd4994d6051405b054311c3597d5886821",
+      "5629a1beaad3a76e1fa210061591ccd70ad04c54d4504b1c2351cac7683486dc",
     );
     expect(baseline.physicalPlanShape).toMatchObject({
       version: 2,
       nativeRowRelationCount: 0,
       jsonRowRelationCount: 1,
     });
-    expect(new TextEncoder().encode(optimized.sql).byteLength).toBe(2_428);
+    expect(new TextEncoder().encode(optimized.sql).byteLength).toBe(2_092);
     const optimizedBindings = optimized.bindings ?? [];
     expect(optimizedBindings).toHaveLength(2);
     expect(hashSql(optimized.sql)).toBe(
-      "b6c2c939194616c6f091e38e4905cb0c73b9e4d51df1ad0d5d41d01aa94c570b",
+      "e37510e2bf96dcd425d6110e0cd5bbbef799362746e6af2ad036820aec105543",
     );
     const optimizedAgain = compileD1Query(result);
     expect(baseline.sql).not.toContain(" IN (SELECT ");
@@ -1101,6 +1120,418 @@ describe("finite packed positive tuple membership", () => {
     expect(alternate.bindings).not.toEqual(optimized.bindings);
     expect(firstAgain.sql).toBe(optimized.sql);
     expect(firstAgain.bindings).toEqual(optimized.bindings);
+  });
+
+  it("rewrites both consumers of a shared finite DISTINCT keyset without copying its CTE", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    seedTupleFixture(database);
+    database
+      .prepare(
+        "INSERT INTO visits (visit_id, site_id, visitor_id, session_id, status, started_at, last_activity_at, pathname, hostname, site_pk) VALUES (?, ?, ?, ?, ?, 1, 1, '/', 'tuple.test', (SELECT site_pk FROM site_identities WHERE site_id = ?))",
+      )
+      .run(
+        "tuple-b-shared-session",
+        "tuple-site-b",
+        "tuple-visitor",
+        "tuple-session-a",
+        "active",
+        "tuple-site-b",
+      );
+    database
+      .prepare(
+        "INSERT INTO visits (visit_id, site_id, visitor_id, session_id, status, started_at, last_activity_at, pathname, hostname, site_pk) VALUES (?, ?, ?, ?, ?, 1, 1, '/', 'tuple.test', (SELECT site_pk FROM site_identities WHERE site_id = ?))",
+      )
+      .run(
+        "tuple-kind-only",
+        "tuple-site-a",
+        "tuple-visitor",
+        "tuple-kind-only-session",
+        "active",
+        "tuple-site-a",
+      );
+
+    const rows = [
+      {
+        siteId: "tuple-site-a",
+        sessionId: "tuple-session-a",
+        kind: "session",
+      },
+      {
+        siteId: "tuple-site-a",
+        sessionId: "tuple-session-a",
+        kind: "session",
+      },
+      {
+        siteId: "tuple-site-a",
+        sessionId: "tuple-session-a",
+        kind: "session",
+      },
+      {
+        siteId: "tuple-site-a",
+        sessionId: null,
+        kind: "session",
+      },
+      {
+        siteId: "tuple-site-a",
+        sessionId: "tuple-kind-only-session",
+        kind: "page",
+      },
+    ];
+    for (let index = 0; index < 36; index += 1)
+      rows.push({
+        siteId: index % 2 === 0 ? "tuple-site-a" : "tuple-site-b",
+        sessionId: `shared-filler-${String(index).padStart(3, "0")}`,
+        kind: "session",
+      });
+    const finiteRows = valuesRelation(
+      {
+        siteId: { affinity: "text", nullable: false },
+        sessionId: { affinity: "text", nullable: true },
+        kind: { affinity: "text", nullable: false },
+      } as const,
+      rows,
+    );
+    const sessions = filter(
+      finiteRows,
+      eq(finiteRows.columns.kind, param("session")),
+    );
+    const identities = scan(schema.site_identities);
+    const authorizedPairs = join(
+      sessions,
+      identities,
+      eq(sessions.columns.siteId, identities.columns.site_id),
+    );
+    const keys = distinct(
+      project(authorizedPairs, {
+        sessionId: authorizedPairs.columns.left_sessionId,
+        sitePk: authorizedPairs.columns.right_site_pk,
+      }),
+    );
+
+    const firstVisits = scan(schema.visits);
+    const firstJoin = join(
+      firstVisits,
+      keys,
+      and(
+        eq(firstVisits.columns.site_pk, keys.columns.sitePk),
+        eq(firstVisits.columns.session_id, keys.columns.sessionId),
+      ),
+    );
+    const first = project(firstJoin, {
+      siteId: firstJoin.columns.left_site_id,
+      sessionId: firstJoin.columns.left_session_id,
+    });
+    const secondVisits = scan(schema.visits);
+    const secondJoin = join(
+      secondVisits,
+      keys,
+      and(
+        eq(secondVisits.columns.site_pk, keys.columns.sitePk),
+        eq(secondVisits.columns.session_id, keys.columns.sessionId),
+      ),
+    );
+    const second = project(secondJoin, {
+      siteId: secondJoin.columns.left_site_id,
+      sessionId: secondJoin.columns.left_session_id,
+    });
+    const result = union(first, second, true);
+    const physical = lowerLogicalPlan(result);
+
+    expect(physical.sharedRelations).toContainEqual(
+      expect.objectContaining({ node: keys.node }),
+    );
+    expect(physical.positiveTupleMembershipCandidates).toHaveLength(2);
+    expect(
+      physical.positiveTupleMembershipCandidates.map(
+        (candidate) => candidate.membershipSource,
+      ),
+    ).toEqual(["finite-values", "finite-values"]);
+    expect(
+      physical.positiveTupleMembershipCandidates.every(
+        (candidate) => candidate.valuesRelation === finiteRows.node,
+      ),
+    ).toBe(true);
+
+    const optimized = compileD1Query(physical);
+    const fallback = compileD1QueryTupleMembershipFallbackForTest(physical);
+    expect(optimized.sql.match(/_d1_shared_0 AS \(/gu)).toHaveLength(1);
+    expect(optimized.sql.match(/FROM _d1_shared_0/gu)).toHaveLength(2);
+    expect(optimized.sql.match(/ IN \(SELECT /gu)).toHaveLength(2);
+    expect(fallback.sql).not.toContain(" IN (SELECT ");
+    expect(runBag(database, optimized)).toEqual(runBag(database, fallback));
+    expect(runBag(database, optimized)).toEqual([
+      { siteId: "tuple-site-a", sessionId: "tuple-session-a" },
+      { siteId: "tuple-site-a", sessionId: "tuple-session-a" },
+      { siteId: "tuple-site-a", sessionId: "tuple-session-a" },
+      { siteId: "tuple-site-a", sessionId: "tuple-session-a" },
+    ]);
+  });
+
+  it("rewrites a dynamic composite keyset while retaining its LEFT owner lookup", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    seedTupleFixture(database);
+
+    const siteKeys = new Map(
+      database
+        .prepare("SELECT site_id, site_pk FROM site_identities")
+        .all()
+        .map((row) => [String(row.site_id), Number(row.site_pk)] as const),
+    );
+    for (const siteId of ["tuple-site-a", "tuple-site-b"] as const) {
+      database
+        .prepare(
+          "INSERT INTO custom_event_names (site_id, name, last_seen_at, site_pk) VALUES (?, 'dynamic-membership', 1, ?)",
+        )
+        .run(siteId, siteKeys.get(siteId)!);
+    }
+    const insertEvent = database.prepare(
+      "INSERT INTO custom_events (event_id, site_id, visit_id, event_name_id, occurred_at, received_at, node_count, value_count, site_pk) SELECT ?, identities.site_id, ?, names.id, 1, 1, 0, 0, identities.site_pk FROM site_identities AS identities JOIN custom_event_names AS names ON names.site_pk = identities.site_pk AND names.name = 'dynamic-membership' WHERE identities.site_id = ?",
+    );
+    insertEvent.run("dynamic-key-hit", "tuple-a-first", "tuple-site-a");
+    insertEvent.run("dynamic-key-left-only", "tuple-a-second", "tuple-site-a");
+    insertEvent.run("dynamic-key-b-only", "tuple-b-first", "tuple-site-b");
+
+    const sourceEvents = scan(schema.custom_events);
+    const owners = scan(schema.visits);
+    const eventOwners = join(
+      sourceEvents,
+      owners,
+      and(
+        eq(sourceEvents.columns.site_pk, owners.columns.site_pk),
+        eq(sourceEvents.columns.visit_id, owners.columns.visit_id),
+      ),
+      "left",
+    );
+    const dynamicKeys = distinct(
+      project(eventOwners, {
+        siteId: eventOwners.columns.left_site_id,
+        eventId: eventOwners.columns.left_event_id,
+      }),
+    );
+    const candidateRows = valuesRelation(
+      {
+        siteId: { affinity: "text", nullable: false },
+        eventId: { affinity: "text", nullable: true },
+      } as const,
+      [
+        { siteId: "tuple-site-a", eventId: "dynamic-key-hit" },
+        { siteId: "tuple-site-a", eventId: "dynamic-key-hit" },
+        { siteId: "tuple-site-b", eventId: "dynamic-key-hit" },
+        { siteId: "tuple-site-a", eventId: null },
+        {
+          siteId: "tuple-site-a",
+          eventId: "dynamic-key-left-only",
+        },
+      ] as const,
+    );
+    const firstMatches = join(
+      candidateRows,
+      dynamicKeys,
+      and(
+        eq(candidateRows.columns.siteId, dynamicKeys.columns.siteId),
+        eq(candidateRows.columns.eventId, dynamicKeys.columns.eventId),
+      ),
+    );
+    const firstResult = project(firstMatches, {
+      siteId: firstMatches.columns.left_siteId,
+      eventId: firstMatches.columns.left_eventId,
+    });
+    const secondMatches = join(
+      candidateRows,
+      dynamicKeys,
+      and(
+        eq(candidateRows.columns.siteId, dynamicKeys.columns.siteId),
+        eq(candidateRows.columns.eventId, dynamicKeys.columns.eventId),
+      ),
+    );
+    const secondResult = project(secondMatches, {
+      siteId: secondMatches.columns.left_siteId,
+      eventId: secondMatches.columns.left_eventId,
+    });
+    const result = union(firstResult, secondResult, true);
+    const physical = lowerLogicalPlan(result);
+
+    expect(
+      physical.positiveTupleMembershipCandidates.map(
+        (candidate) => candidate.membershipSource,
+      ),
+    ).toEqual(["dynamic-distinct", "dynamic-distinct"]);
+    expect(
+      physical.positiveTupleMembershipCandidates.every(
+        (candidate) => candidate.valuesRelation === undefined,
+      ),
+    ).toBe(true);
+    const optimized = compileD1Query(physical);
+    const fallback = compileD1QueryTupleMembershipFallbackForTest(physical);
+    expect(optimized.sql.match(/ IN \(SELECT /gu)).toHaveLength(2);
+    expect(optimized.sql).toContain("LEFT JOIN");
+    expect(fallback.sql).not.toContain(" IN (SELECT ");
+    expect(fallback.sql).toContain("LEFT JOIN");
+    expect(runBag(database, optimized)).toEqual(runBag(database, fallback));
+    expect(runBag(database, optimized)).toEqual([
+      {
+        siteId: "tuple-site-a",
+        eventId: "dynamic-key-hit",
+      },
+      {
+        siteId: "tuple-site-a",
+        eventId: "dynamic-key-hit",
+      },
+      {
+        siteId: "tuple-site-a",
+        eventId: "dynamic-key-hit",
+      },
+      {
+        siteId: "tuple-site-a",
+        eventId: "dynamic-key-hit",
+      },
+      {
+        siteId: "tuple-site-a",
+        eventId: "dynamic-key-left-only",
+      },
+      {
+        siteId: "tuple-site-a",
+        eventId: "dynamic-key-left-only",
+      },
+    ]);
+
+    const explain = database
+      .prepare(`EXPLAIN QUERY PLAN ${optimized.sql}`)
+      .all(...((optimized.bindings ?? []) as SQLInputValue[]));
+    expect(
+      explain.some((row) => String(row.detail).includes("LIST SUBQUERY")),
+    ).toBe(true);
+  });
+
+  it("rejects dynamic keysets with a row boundary or recursive source", () => {
+    const sourceEvents = scan(schema.custom_events);
+    const owners = scan(schema.visits);
+    const eventOwners = join(
+      sourceEvents,
+      owners,
+      and(
+        eq(sourceEvents.columns.site_pk, owners.columns.site_pk),
+        eq(sourceEvents.columns.visit_id, owners.columns.visit_id),
+      ),
+      "left",
+    );
+    const outerRows = valuesRelation(
+      {
+        siteId: { affinity: "text", nullable: false },
+        eventId: { affinity: "text", nullable: false },
+      } as const,
+      [{ siteId: "candidate-site", eventId: "candidate" }] as const,
+    );
+    const candidateFor = (keys: typeof eventOwners) => {
+      const dynamicKeys = distinct(
+        project(keys, {
+          siteId: keys.columns.left_site_id,
+          eventId: keys.columns.left_event_id,
+        }),
+      );
+      const matches = join(
+        outerRows,
+        dynamicKeys,
+        and(
+          eq(outerRows.columns.siteId, dynamicKeys.columns.siteId),
+          eq(outerRows.columns.eventId, dynamicKeys.columns.eventId),
+        ),
+      );
+      return project(matches, {
+        eventId: matches.columns.left_eventId,
+      });
+    };
+
+    const limitedKeys = limit(eventOwners, 1);
+    expect(
+      lowerLogicalPlan(candidateFor(limitedKeys))
+        .positiveTupleMembershipCandidates,
+    ).toEqual([]);
+
+    const unsafeLeftLookup = join(
+      sourceEvents,
+      owners,
+      and(
+        eq(sourceEvents.columns.site_pk, owners.columns.site_pk),
+        eq(sourceEvents.columns.visit_id, owners.columns.visit_id),
+        neq(sourceEvents.columns.event_id, owners.columns.visit_id),
+      ),
+      "left",
+    );
+    expect(
+      lowerLogicalPlan(candidateFor(unsafeLeftLookup))
+        .positiveTupleMembershipCandidates,
+    ).toEqual([]);
+
+    const recursiveKeys = recursiveClosure(
+      project(eventOwners, {
+        siteId: eventOwners.columns.left_site_id,
+        eventId: eventOwners.columns.left_event_id,
+      }),
+      project(eventOwners, {
+        siteId: eventOwners.columns.left_site_id,
+        eventId: eventOwners.columns.left_event_id,
+      }),
+      (current, candidate) =>
+        and(
+          eq(current.siteId, candidate.siteId),
+          eq(current.eventId, candidate.eventId),
+        ),
+    );
+    const recursiveDynamicKeys = distinct(
+      project(recursiveKeys, {
+        siteId: recursiveKeys.columns.siteId,
+        eventId: recursiveKeys.columns.eventId,
+      }),
+    );
+    const recursiveMatches = join(
+      outerRows,
+      recursiveDynamicKeys,
+      and(
+        eq(outerRows.columns.siteId, recursiveDynamicKeys.columns.siteId),
+        eq(outerRows.columns.eventId, recursiveDynamicKeys.columns.eventId),
+      ),
+    );
+    expect(
+      lowerLogicalPlan(
+        project(recursiveMatches, {
+          eventId: recursiveMatches.columns.left_eventId,
+        }),
+      ).positiveTupleMembershipCandidates,
+    ).toEqual([]);
+
+    const correlatedOwner = scan(schema.site_identities);
+    const correlatedRows = filter(
+      eventOwners,
+      eq(eventOwners.columns.left_site_pk, correlatedOwner.columns.site_pk),
+    );
+    const correlatedKeys = distinct(
+      project(correlatedRows, {
+        siteId: correlatedRows.columns.left_site_id,
+        eventId: correlatedRows.columns.left_event_id,
+      }),
+    );
+    const correlatedMatches = join(
+      outerRows,
+      correlatedKeys,
+      and(
+        eq(outerRows.columns.siteId, correlatedKeys.columns.siteId),
+        eq(outerRows.columns.eventId, correlatedKeys.columns.eventId),
+      ),
+    );
+    const correlatedRoot = project(correlatedOwner, {
+      siteId: correlatedOwner.columns.site_id,
+      eventId: scalar(
+        project(correlatedMatches, {
+          eventId: correlatedMatches.columns.left_eventId,
+        }),
+      ),
+    });
+    expect(
+      lowerLogicalPlan(correlatedRoot).positiveTupleMembershipCandidates,
+    ).toEqual([]);
   });
 
   it("keeps a finite lookup as an ordinary Join when its filter is outside the proven safe algebra", () => {
@@ -1425,7 +1856,7 @@ describe("finite packed positive tuple membership", () => {
     expect(cte).toContain("INNER JOIN");
     expect(cte).toContain(" IN (?, ?)");
     expect(cte).not.toContain(" IN (SELECT ");
-    expect(compiled.sql).toContain('FROM "_d1_shared_0"');
+    expect(compiled.sql).toContain("FROM _d1_shared_0");
     expect(compiled.sql).toContain(" IN (SELECT ");
     expect(compiled.physicalPlanShape).toMatchObject({
       version: 2,
@@ -1444,13 +1875,13 @@ describe("finite packed positive tuple membership", () => {
     expect(new TextEncoder().encode(compiled.sql).byteLength).toBeLessThan(
       100_000,
     );
-    expect(new TextEncoder().encode(compiled.sql).byteLength).toBe(2_998);
+    expect(new TextEncoder().encode(compiled.sql).byteLength).toBe(2_572);
     expect(hashSql(compiled.sql)).toBe(
-      "1bf0d13fc9f2ef3756eb772b6ec11bb55a2729111378b0f0bf33a74e70e96389",
+      "dbe65a65e8e0070ec11ddeb9fa427bb1b81a71d5dbe9bdacc579357a42145946",
     );
-    expect(new TextEncoder().encode(fallback.sql).byteLength).toBe(3_069);
+    expect(new TextEncoder().encode(fallback.sql).byteLength).toBe(2_627);
     expect(hashSql(fallback.sql)).toBe(
-      "d3b601c48e8ea52994e7290712f9fc801192bd75010019bde97d0954f21ce71d",
+      "8a0c5d95d4a36d2b6f306bf8af93903a4d426aa7d61b6522e9c10ef13f3b2ad5",
     );
     expect(
       packedSegments.every(
@@ -1550,7 +1981,7 @@ describe("finite packed positive tuple membership", () => {
     expect(fallback.sql).toContain("INNER JOIN");
     expect(fallback.sql).not.toContain(" IN (SELECT ");
     expect(optimized.physicalPlanShape).toMatchObject({
-      version: 2,
+      version: 8,
       nativeRowRelationCount: 0,
       jsonRowRelationCount: 1,
     });
@@ -1649,7 +2080,10 @@ describe("finite packed positive tuple membership", () => {
   });
 
   it("rejects incomplete, computed, shared, correlated, and unknown-source keys", () => {
-    const base = compositeMembershipPlan(8);
+    const database = createMigratedDatabase();
+    databases.add(database);
+    seedTupleFixture(database);
+    const base = compositeMembershipPlan(40);
     const physical = lowerLogicalPlan(base.result);
     expect(physical.positiveTupleMembershipCandidates).toHaveLength(1);
 
@@ -1887,9 +2321,18 @@ describe("finite packed positive tuple membership", () => {
       sessionId: base.result.columns.sessionId,
       rhsCount: scalar(project(base.identityKeys, { value: constant(1) })),
     });
+    const sharedPhysical = lowerLogicalPlan(sharedRoot);
+    expect(sharedPhysical.positiveTupleMembershipCandidates).toHaveLength(1);
     expect(
-      lowerLogicalPlan(sharedRoot).positiveTupleMembershipCandidates,
-    ).toEqual([]);
+      sharedPhysical.positiveTupleMembershipCandidates[0]?.membershipSource,
+    ).toBe("finite-values");
+    const sharedOptimized = compileD1Query(sharedPhysical);
+    const sharedBaseline =
+      compileD1QueryTupleMembershipFallbackForTest(sharedPhysical);
+    expect(sharedOptimized.sql).toContain(" IN (SELECT ");
+    expect(runBag(database, sharedOptimized)).toEqual(
+      runBag(database, sharedBaseline),
+    );
 
     const forged = {
       ...physical,
@@ -1917,6 +2360,318 @@ describe("finite packed positive tuple membership", () => {
       ],
     };
     expect(() => compileD1Query(forgedAffinity)).toThrowError(
+      expect.objectContaining({ code: "invalid_plan" }),
+    );
+  });
+});
+
+describe("generic self-membership elimination", () => {
+  function selfMembershipResult() {
+    const visits = scan(schema.visits);
+    const keys = distinct(
+      project(visits, {
+        duration: visits.columns.duration_ms,
+        reason: visits.columns.exit_reason,
+      }),
+    );
+    const matches = join(
+      visits,
+      keys,
+      and(
+        eq(visits.columns.duration_ms, keys.columns.duration),
+        eq(visits.columns.exit_reason, keys.columns.reason),
+      ),
+    );
+    return {
+      visits,
+      result: project(matches, {
+        visitId: matches.columns.left_visit_id,
+        duration: matches.columns.left_duration_ms,
+        reason: matches.columns.left_exit_reason,
+      }),
+    };
+  }
+
+  it("preserves the left bag while removing an exact BINARY self-membership Join", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    seedTupleFixture(database);
+    const update = database.prepare(
+      "UPDATE visits SET duration_ms = ?, exit_reason = ? WHERE visit_id = ?",
+    );
+    update.run(21, "same", "tuple-a-first");
+    update.run(21, "same", "tuple-a-second");
+    update.run(22, "other", "tuple-b-first");
+    update.run(null, "null-first", "tuple-cross-ab");
+    update.run(23, null, "tuple-cross-ba");
+    update.run(null, null, "tuple-leading-zero");
+    update.run(24, "different", "tuple-no-leading-zero");
+    update.run(25, "", "tuple-partial-null");
+    update.run(26, "blob-source", "tuple-blob-session");
+
+    expect(
+      database
+        .prepare(
+          "SELECT typeof(duration_ms) AS duration_type, typeof(exit_reason) AS reason_type FROM visits WHERE visit_id = ?",
+        )
+        .get("tuple-a-first"),
+    ).toEqual({ duration_type: "integer", reason_type: "text" });
+
+    const { visits, result } = selfMembershipResult();
+    const physical = lowerLogicalPlan(result);
+    expect(physical.selfMembershipChoices).toHaveLength(1);
+    expect(physical.selfMembershipChoices[0]?.leftKeyIndexes).toEqual([
+      visits.columns.duration_ms.index,
+      visits.columns.exit_reason.index,
+    ]);
+    expect(physical.selfMembershipChoices[0]?.nullableKeyIndexes).toEqual([
+      visits.columns.duration_ms.index,
+      visits.columns.exit_reason.index,
+    ]);
+    expect(physical.positiveTupleMembershipCandidates).toEqual([]);
+
+    const baseline = compileD1QueryUnoptimizedForTest(result);
+    const optimized = compileD1Query(physical);
+    expect(optimized.physicalPlanShape).toMatchObject({
+      version: 7,
+      selfMembershipCount: 1,
+    });
+    expect(optimized.sql).not.toContain("INNER JOIN");
+    expect(optimized.sql.match(/\bIS NOT NULL\b/gu)).toHaveLength(2);
+    expect(optimized.bindings ?? []).toEqual(baseline.bindings ?? []);
+    expect(runBag(database, optimized)).toEqual(runBag(database, baseline));
+    expect(runBag(database, optimized)).toEqual([
+      {
+        visitId: "tuple-a-first",
+        duration: 21,
+        reason: "same",
+      },
+      {
+        visitId: "tuple-a-second",
+        duration: 21,
+        reason: "same",
+      },
+      { visitId: "tuple-b-first", duration: 22, reason: "other" },
+      {
+        visitId: "tuple-blob-session",
+        duration: 26,
+        reason: "blob-source",
+      },
+      {
+        visitId: "tuple-no-leading-zero",
+        duration: 24,
+        reason: "different",
+      },
+      { visitId: "tuple-partial-null", duration: 25, reason: "" },
+    ]);
+
+    database.exec("UPDATE visits SET duration_ms = NULL, exit_reason = NULL");
+    expect(runBag(database, optimized)).toEqual([]);
+    expect(runBag(database, baseline)).toEqual([]);
+
+    const emptyInput = filter(
+      visits,
+      eq(visits.columns.site_pk, param(-999_999)),
+    );
+    const emptyKeys = distinct(
+      project(emptyInput, {
+        duration: emptyInput.columns.duration_ms,
+        reason: emptyInput.columns.exit_reason,
+      }),
+    );
+    const emptyJoin = join(
+      emptyInput,
+      emptyKeys,
+      and(
+        eq(emptyInput.columns.duration_ms, emptyKeys.columns.duration),
+        eq(emptyInput.columns.exit_reason, emptyKeys.columns.reason),
+      ),
+    );
+    const emptyResult = project(emptyJoin, {
+      visitId: emptyJoin.columns.left_visit_id,
+    });
+    const emptyPhysical = lowerLogicalPlan(emptyResult);
+    expect(emptyPhysical.selfMembershipChoices).toHaveLength(1);
+    const emptyBaseline = compileD1QueryUnoptimizedForTest(emptyResult);
+    const emptyOptimized = compileD1Query(emptyPhysical);
+    expect(runBag(database, emptyOptimized)).toEqual(
+      runBag(database, emptyBaseline),
+    );
+    expect(runBag(database, emptyOptimized)).toEqual([]);
+  });
+
+  it("rejects source, key, output, collation, and computed-expression mismatches", () => {
+    const visits = scan(schema.visits);
+    const separateVisits = scan(schema.visits);
+    const separateKeys = distinct(
+      project(separateVisits, {
+        duration: separateVisits.columns.duration_ms,
+        reason: separateVisits.columns.exit_reason,
+      }),
+    );
+    const separateJoin = join(
+      visits,
+      separateKeys,
+      and(
+        eq(visits.columns.duration_ms, separateKeys.columns.duration),
+        eq(visits.columns.exit_reason, separateKeys.columns.reason),
+      ),
+    );
+    expect(
+      lowerLogicalPlan(
+        project(separateJoin, {
+          visitId: separateJoin.columns.left_visit_id,
+        }),
+      ).selfMembershipChoices,
+    ).toEqual([]);
+
+    const filteredRight = filter(visits, eq(visits.columns.site_pk, param(-1)));
+    const filteredKeys = distinct(
+      project(filteredRight, {
+        duration: filteredRight.columns.duration_ms,
+        reason: filteredRight.columns.exit_reason,
+      }),
+    );
+    const filteredRightJoin = join(
+      visits,
+      filteredKeys,
+      and(
+        eq(visits.columns.duration_ms, filteredKeys.columns.duration),
+        eq(visits.columns.exit_reason, filteredKeys.columns.reason),
+      ),
+    );
+    expect(
+      lowerLogicalPlan(
+        project(filteredRightJoin, {
+          visitId: filteredRightJoin.columns.left_visit_id,
+        }),
+      ).selfMembershipChoices,
+    ).toEqual([]);
+
+    const wrongKeys = distinct(
+      project(visits, {
+        duration: visits.columns.started_at,
+        reason: visits.columns.exit_reason,
+      }),
+    );
+    const wrongJoin = join(
+      visits,
+      wrongKeys,
+      and(
+        eq(visits.columns.duration_ms, wrongKeys.columns.duration),
+        eq(visits.columns.exit_reason, wrongKeys.columns.reason),
+      ),
+    );
+    expect(
+      lowerLogicalPlan(
+        project(wrongJoin, { visitId: wrongJoin.columns.left_visit_id }),
+      ).selfMembershipChoices,
+    ).toEqual([]);
+
+    const partialKeys = distinct(
+      project(visits, {
+        duration: visits.columns.duration_ms,
+        reason: visits.columns.exit_reason,
+      }),
+    );
+    const partialJoin = join(
+      visits,
+      partialKeys,
+      eq(visits.columns.duration_ms, partialKeys.columns.duration),
+    );
+    expect(
+      lowerLogicalPlan(
+        project(partialJoin, { visitId: partialJoin.columns.left_visit_id }),
+      ).selfMembershipChoices,
+    ).toEqual([]);
+
+    const residualJoin = join(
+      visits,
+      partialKeys,
+      and(
+        eq(visits.columns.duration_ms, partialKeys.columns.duration),
+        eq(visits.columns.exit_reason, partialKeys.columns.reason),
+        eq(visits.columns.status, param("active")),
+      ),
+    );
+    expect(
+      lowerLogicalPlan(
+        project(residualJoin, { visitId: residualJoin.columns.left_visit_id }),
+      ).selfMembershipChoices,
+    ).toEqual([]);
+
+    const rightOutputJoin = join(
+      visits,
+      partialKeys,
+      and(
+        eq(visits.columns.duration_ms, partialKeys.columns.duration),
+        eq(visits.columns.exit_reason, partialKeys.columns.reason),
+      ),
+    );
+    expect(
+      lowerLogicalPlan(
+        project(rightOutputJoin, {
+          visitId: rightOutputJoin.columns.left_visit_id,
+          rightDuration: rightOutputJoin.columns.right_duration,
+        }),
+      ).selfMembershipChoices,
+    ).toEqual([]);
+
+    const computedKeys = distinct(
+      project(visits, {
+        duration: unixepoch(),
+        reason: visits.columns.exit_reason,
+      }),
+    );
+    const computedJoin = join(
+      visits,
+      computedKeys,
+      and(
+        eq(visits.columns.duration_ms, computedKeys.columns.duration),
+        eq(visits.columns.exit_reason, computedKeys.columns.reason),
+      ),
+    );
+    expect(
+      lowerLogicalPlan(
+        project(computedJoin, { visitId: computedJoin.columns.left_visit_id }),
+      ).selfMembershipChoices,
+    ).toEqual([]);
+
+    const unknownCollationVisits: SchemaObjectReference = {
+      ...schema.visits,
+      defaultCollation: "unknown",
+    };
+    const durationIndex = visits.columns.duration_ms.index;
+    expect(
+      hasKnownBinaryTableColumn(
+        schema.visits,
+        durationIndex,
+        visits.fields[durationIndex],
+      ),
+    ).toBe(true);
+    expect(
+      hasKnownBinaryTableColumn(
+        unknownCollationVisits,
+        durationIndex,
+        visits.fields[durationIndex],
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects forged self-membership metadata during physical validation", () => {
+    const { result } = selfMembershipResult();
+    const physical = lowerLogicalPlan(result);
+    expect(physical.selfMembershipChoices).toHaveLength(1);
+    const forged = {
+      ...physical,
+      selfMembershipChoices: [
+        {
+          ...physical.selfMembershipChoices[0]!,
+          nullableKeyIndexes: [],
+        },
+      ],
+    };
+    expect(() => compileD1Query(forged)).toThrowError(
       expect.objectContaining({ code: "invalid_plan" }),
     );
   });

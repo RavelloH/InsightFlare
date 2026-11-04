@@ -25,13 +25,15 @@ import {
   PAGE_TAB_OUTPUT_IDS,
 } from "@/lib/edge/analytics/engine/page-tabs-report-plan";
 import {
-  buildVisitFilterSql,
-  buildVisitSourceCte,
-  type QueryWindow,
   scopedDatasetFor,
   scopedDatasetForUnpreparedReader,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import { buildVisitFilterSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-filters";
+import {
+  buildVisitSourceCte,
   visitSourceBindings,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import { type QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { queryPageTabsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/dimensions";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
@@ -862,27 +864,27 @@ describe("Logical Page tabs report", () => {
       expect(budgets).toEqual([
         {
           name: "plain",
-          sqlBytes: 5988,
+          sqlBytes: 4984,
           bindings: 13,
           statements: 1,
           sha256:
-            "ca6b46c4c9628a656a1f6f5823bbfe6f966afb8b38b7f979622f76069b68948a",
+            "e8d2d77d60d4f80f12ac33cbce1f95e44aeff4f6b82e78dd93ec1c0521ebd30c",
         },
         {
           name: "prepared-session-128",
-          sqlBytes: 7169,
+          sqlBytes: 5861,
           bindings: 15,
           statements: 1,
           sha256:
-            "592b27c1b9cb78bbfecbebc1658d5bfc20b496ddb36cf4591732b8651142642a",
+            "d386a36ab10df100ca367a102bad3f1fcadee8460818895170bd28cb5fed97d5",
         },
         {
           name: "event-payload-40",
-          sqlBytes: 47289,
+          sqlBytes: 38480,
           bindings: 58,
           statements: 1,
           sha256:
-            "b9ff1325b1f267d9eb0ab9d36b6c14cb664cd550ca15154f0f03c0ee7f6236b1",
+            "eb9e350887f0bc6b8defd45a263312d0250fef979a06c028696c3acb7206d83c",
         },
       ]);
     } finally {

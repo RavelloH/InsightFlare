@@ -1,5 +1,10 @@
 /* Frozen baseline implementation for Wave66 SQLite semantic and budget comparisons. */
+import { queryLegacyD1All } from "@/lib/edge/__tests__/legacy-d1-oracle";
 import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
+import {
+  buildEventFilteredSourceCte,
+  visitSourceBindings,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import type {
   DimensionRow,
   EventAnalyticsContextCards,
@@ -8,12 +13,9 @@ import type {
   QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
-  buildEventFilteredSourceCte,
   cityValueExpr,
   clientDimensionDefinition,
-  queryD1All,
   regionValueExpr,
-  visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { SITE_PK_FROM_SITE_ID_SQL } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
@@ -250,7 +252,7 @@ ORDER BY cardType ASC, card_rank ASC
   ];
   const rows = executeParentSql
     ? await executeParentSql(sql, bindings)
-    : await queryD1All<ParentContextRow>(env, sql, bindings);
+    : await queryLegacyD1All<ParentContextRow>(env, sql, bindings);
   const byCard = new Map<
     string,
     Array<{

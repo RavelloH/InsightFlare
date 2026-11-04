@@ -24,13 +24,22 @@ import {
 import type { QueryWindow } from "@/lib/edge/analytics/contract/types";
 import { buildOverviewAggregatePlan } from "@/lib/edge/analytics/engine/overview-aggregate-report-plan";
 import {
-  buildVisitFilterSql,
-  buildVisitSourceCte,
   scopedDatasetFor,
   scopedDatasetForUnpreparedReader,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import { buildVisitFilterSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-filters";
+import {
+  buildVisitSourceCte,
   visitSourceBindings,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
-import { queryOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/overview";
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import * as hourlyRollupQueries from "@/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries";
+import {
+  buildOverviewClientDimensionTabs,
+  buildOverviewGeoDimensionTabs,
+  queryOverviewAggregate,
+  queryOverviewFromD1,
+  queryTrendAggregate,
+} from "@/lib/edge/analytics/providers/d1/internal/overview";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";
 import {
   createInvocationLogger,
@@ -478,6 +487,160 @@ afterEach(() => {
 });
 
 describe("Overview six-metric Logical report", () => {
+  it("selects complete hourly rollups only for unfiltered overview and trend reads", async () => {
+    const { database } = createDatabase();
+    const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+    const env = {
+      DB: createSqliteD1Database(database, trace),
+    } as unknown as Env;
+    const overviewValue = {
+      views: 7,
+      sessions: 5,
+      visitors: 4,
+      bounces: 2,
+      totalDuration: 90,
+      durationViews: 3,
+    };
+    const overviewRollup = vi
+      .spyOn(hourlyRollupQueries, "queryOverviewForSitesFromHourlyRollups")
+      .mockResolvedValue(new Map([[SITE_ID, overviewValue]]));
+    const trendRollupRow = {
+      siteId: SITE_ID,
+      bucket: 0,
+      timestampMs: 0,
+      views: 7,
+      sessions: 5,
+      visitors: 4,
+      bounces: 2,
+      totalDuration: 90,
+      durationViews: 3,
+    };
+    const trendRollup = vi
+      .spyOn(hourlyRollupQueries, "queryTrendForSitesFromHourlyRollups")
+      .mockResolvedValue([
+        trendRollupRow,
+        { ...trendRollupRow, siteId: OTHER_SITE_ID },
+      ]);
+
+    try {
+      const overview = await queryOverviewAggregate(
+        env,
+        SITE_ID,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+      );
+      const trend = await queryTrendAggregate(
+        env,
+        SITE_ID,
+        WINDOW,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+      );
+
+      expect(overview).toEqual({
+        value: overviewValue,
+        source: "d1",
+        diagnosticSource: "rollup",
+        approximateVisitors: false,
+      });
+      expect(trend).toEqual({
+        value: [
+          {
+            bucket: 0,
+            timestampMs: 0,
+            views: 7,
+            sessions: 5,
+            visitors: 4,
+            bounces: 2,
+            totalDuration: 90,
+            durationViews: 3,
+          },
+        ],
+        source: "d1",
+        diagnosticSource: "rollup",
+      });
+      expect(trace.preparedSql).toEqual([]);
+      expect(overviewRollup).toHaveBeenCalledWith(
+        env,
+        [SITE_ID],
+        WINDOW,
+        undefined,
+      );
+      expect(trendRollup).toHaveBeenCalledWith(
+        env,
+        [SITE_ID],
+        WINDOW,
+        "hour",
+        undefined,
+      );
+
+      overviewRollup.mockResolvedValue(null);
+      trendRollup.mockResolvedValue(null);
+      const overviewFallback = await queryOverviewAggregate(
+        env,
+        SITE_ID,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+      );
+      const trendFallback = await queryTrendAggregate(
+        env,
+        SITE_ID,
+        WINDOW,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+      );
+      expect(overviewFallback).toMatchObject({
+        source: "d1",
+        diagnosticSource: "raw",
+      });
+      expect(trendFallback).toMatchObject({
+        source: "d1",
+        diagnosticSource: "raw",
+      });
+      expect(trace.preparedSql.length).toBeGreaterThan(0);
+
+      const filtered = fieldFilter("geo.country", "US");
+      const overviewCallsBeforeFilter = overviewRollup.mock.calls.length;
+      const trendCallsBeforeFilter = trendRollup.mock.calls.length;
+      await queryOverviewAggregate(env, SITE_ID, WINDOW, filtered);
+      await queryTrendAggregate(env, SITE_ID, WINDOW, "hour", filtered);
+      expect(overviewRollup).toHaveBeenCalledTimes(overviewCallsBeforeFilter);
+      expect(trendRollup).toHaveBeenCalledTimes(trendCallsBeforeFilter);
+
+      const preparedEmpty = preparedFilter({
+        filters: EMPTY_FILTER_DOCUMENT,
+        scopePreference: "session",
+        advancedMatches: { entityIds: [] },
+      });
+      expect(scopedFilterMetadata(preparedEmpty)).toBeDefined();
+      const overviewCallsBeforePrepared = overviewRollup.mock.calls.length;
+      const trendCallsBeforePrepared = trendRollup.mock.calls.length;
+      await queryOverviewAggregate(env, SITE_ID, WINDOW, preparedEmpty);
+      await queryTrendAggregate(env, SITE_ID, WINDOW, "hour", preparedEmpty);
+      expect(overviewRollup).toHaveBeenCalledTimes(overviewCallsBeforePrepared);
+      expect(trendRollup).toHaveBeenCalledTimes(trendCallsBeforePrepared);
+
+      const clientTabs = await buildOverviewClientDimensionTabs(
+        env,
+        SITE_ID,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        10,
+      );
+      const geoTabs = await buildOverviewGeoDimensionTabs(
+        env,
+        SITE_ID,
+        WINDOW,
+        EMPTY_FILTER_DOCUMENT,
+        10,
+      );
+      expect(clientTabs).toBeDefined();
+      expect(geoTabs).toBeDefined();
+    } finally {
+      database.close();
+    }
+  });
+
   it("matches the frozen parent DTO across direct, prepared and empty-input scopes", async () => {
     const { database, sites } = createDatabase();
     try {

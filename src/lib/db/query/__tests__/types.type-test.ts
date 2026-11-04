@@ -28,6 +28,7 @@ import {
   textPosition,
   textStartsWith,
   textSubstring,
+  trimCharacters,
   trimSpaces,
   union,
   unixepoch,
@@ -66,6 +67,14 @@ export function compileTimeDatabaseTypeAssertions(): void {
   const visits = scan(schema.visits);
   const nonNullableTrim = trimSpaces(users.columns.email);
   const nullableTrim = trimSpaces(visits.columns.user_name);
+  const nullableCharacterTrim = trimCharacters(
+    visits.columns.user_name,
+    param(" \t"),
+  );
+  const nullableCharacterSetTrim = trimCharacters(
+    users.columns.email,
+    param(null),
+  );
   type TrimSpacesNonNullability = Assert<
     Equal<
       ExpressionResultOf<typeof nonNullableTrim>,
@@ -87,6 +96,23 @@ export function compileTimeDatabaseTypeAssertions(): void {
     NullableTrimSpacesValue,
   ] = [true, true, true];
   void trimSpacesChecks;
+  type TrimCharactersKeepsInputNullability = Assert<
+    Equal<
+      ExpressionResultOf<typeof nullableCharacterTrim>,
+      ExpressionResultType<"text", true>
+    >
+  >;
+  type TrimCharactersAcceptsNullableCharacterSet = Assert<
+    Equal<
+      ExpressionResultOf<typeof nullableCharacterSetTrim>,
+      ExpressionResultType<"text", true>
+    >
+  >;
+  const trimCharacterChecks: [
+    TrimCharactersKeepsInputNullability,
+    TrimCharactersAcceptsNullableCharacterSet,
+  ] = [true, true];
+  void trimCharacterChecks;
   const requiredTextMatch = textContains(users.columns.email, "example");
   const nullableTextMatch = textStartsWith(visits.columns.user_name, "A");
   const nullableSuffixMatch = textEndsWith(visits.columns.user_name, "Z");
@@ -194,6 +220,8 @@ export function compileTimeDatabaseTypeAssertions(): void {
   rowNumber({ partitionBy: [scheduledRuns.columns.task_key], orderBy: [] });
   // @ts-expect-error SQLite TRIM accepts text and unknown-affinity expressions only.
   trimSpaces(visits.columns.started_at);
+  // @ts-expect-error Explicit-character TRIM only accepts text operands.
+  trimCharacters(users.columns.email, visits.columns.started_at);
   const castNonNullable = castInteger(visits.columns.started_at);
   const castNullable = castInteger(visits.columns.ended_at);
   type CastIntegerKeepsNonNullability = Assert<

@@ -18,6 +18,7 @@ import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engin
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
+const BOOLEAN = { kind: "scalar", scalar: "boolean" } as const;
 const DATETIME = { kind: "scalar", scalar: "datetime" } as const;
 const NUMBER_MS = { kind: "scalar", scalar: "number", unit: "ms" } as const;
 const NUMBER_RATIO = {
@@ -26,7 +27,7 @@ const NUMBER_RATIO = {
   unit: "ratio",
 } as const;
 
-const PAGE_ATTRIBUTES = [
+export const JOURNEY_EVENT_PAGE_SOURCE_PAGE_ATTRIBUTES = [
   "page.report.localId",
   "page.report.sessionId",
   "page.report.visitorId",
@@ -55,7 +56,7 @@ const PAGE_ATTRIBUTES = [
   "page.report.perfInpMs",
 ] as const;
 
-const EVENT_ATTRIBUTES = [
+export const JOURNEY_EVENT_PAGE_SOURCE_EVENT_ATTRIBUTES = [
   "event.report.localId",
   "event.report.ownerVisitId",
   "event.report.eventName",
@@ -86,7 +87,7 @@ const EVENT_ATTRIBUTES = [
   "event.report.ownerPerfInpMs",
 ] as const;
 
-const OUTPUT_FIELDS = [
+export const JOURNEY_EVENT_PAGE_REPORT_FIELDS = [
   "id",
   "kind",
   "eventType",
@@ -137,6 +138,20 @@ export interface BuildJourneyEventPageReportPlanInput {
   readonly cursor?: JourneyEventPageCursor | null;
 }
 
+type JourneyEventPagePreparedPlanOperation =
+  "visitor-events" | "session-events";
+
+export interface AppendJourneyEventPageReportInput {
+  readonly builder: LogicalPlanBuilder;
+  readonly pages: LogicalRelationHandle;
+  readonly events: LogicalRelationHandle;
+  readonly prepared: boolean;
+  readonly target: BuildJourneyEventPageReportPlanInput["target"];
+  readonly limit: number;
+  readonly cursor?: JourneyEventPageCursor | null;
+  readonly suppressReportRows?: boolean;
+}
+
 function pageAttribute(
   builder: LogicalPlanBuilder,
   pages: LogicalRelationHandle,
@@ -158,6 +173,7 @@ function createSelection(input: {
   readonly scopePlan?: ScopedFilterPlan;
   readonly subject: ReturnType<typeof createSemanticSubjectDomain>;
   readonly time: ReturnType<typeof semanticTemporalDomainsFromQueryTime>;
+  readonly preparedPlanOperation?: JourneyEventPagePreparedPlanOperation;
 }) {
   return createSemanticScopedSourceSelection({
     profile: input.scopePlan
@@ -167,6 +183,9 @@ function createSelection(input: {
     subject: input.subject,
     time: input.time,
     ...(input.scopePlan ? { expectedPlan: input.scopePlan } : {}),
+    ...(input.preparedPlanOperation
+      ? { preparedPlanOperation: input.preparedPlanOperation }
+      : {}),
   });
 }
 
@@ -258,6 +277,106 @@ function projectCustomEventRows(
   });
 }
 
+/** Appends the existing Events-page projection and cursor semantics to a caller-owned plan. */
+export function appendJourneyEventPageReport(
+  input: AppendJourneyEventPageReportInput,
+): void {
+  const { builder } = input;
+  const targetAttribute =
+    input.target.type === "visitor" ? "visitorId" : "sessionId";
+  const targetValue = builder.literal(input.target.value, STRING);
+  const pages = builder.filter(
+    input.pages,
+    builder.compare(
+      "eq",
+      pageAttribute(builder, input.pages, targetAttribute),
+      targetValue,
+    ),
+  );
+
+  const eventName = eventAttribute(builder, input.events, "eventName");
+  let events = builder.filter(
+    input.events,
+    builder.and(
+      builder.isNull(
+        eventAttribute(builder, input.events, "ownerPresent"),
+        true,
+      ),
+      builder.isNull(eventName, true),
+      ...(input.prepared
+        ? [
+            builder.compare(
+              "eq",
+              eventAttribute(
+                builder,
+                input.events,
+                input.target.type === "visitor"
+                  ? "ownerVisitorId"
+                  : "ownerSessionId",
+              ),
+              targetValue,
+            ),
+          ]
+        : []),
+    ),
+  );
+
+  if (!input.prepared) {
+    const pageIds = builder.distinct(pages, [
+      { input: "attribute:page.report.localId", output: "visitId" },
+    ]);
+    events = builder.semiJoin(events, pageIds, [
+      {
+        left: "attribute:event.report.ownerVisitId",
+        right: "visitId",
+      },
+    ]);
+  }
+
+  const pageRows = projectPageRows(builder, pages);
+  const customEventRows = projectCustomEventRows(
+    builder,
+    events,
+    input.prepared,
+  );
+  let allRows = builder.appendRows(
+    [pageRows, customEventRows],
+    JOURNEY_EVENT_PAGE_REPORT_FIELDS,
+  );
+
+  if (input.cursor) {
+    const occurredAt = builder.slot(allRows, "occurredAt");
+    const id = builder.slot(allRows, "id");
+    const cursorTime = builder.literal(input.cursor.occurredAt, DATETIME);
+    const cursorId = builder.literal(input.cursor.id, STRING);
+    allRows = builder.filter(
+      allRows,
+      builder.or(
+        builder.compare("lt", occurredAt, cursorTime),
+        builder.and(
+          builder.compare("eq", occurredAt, cursorTime),
+          builder.compare("lt", id, cursorId),
+        ),
+      ),
+    );
+  }
+
+  if (input.suppressReportRows) {
+    allRows = builder.filter(allRows, builder.literal(false, BOOLEAN));
+  }
+
+  const sorted = builder.sort(allRows, [
+    { slot: "occurredAt", direction: "desc", nulls: "last" },
+    { slot: "id", direction: "desc", nulls: "last" },
+  ]);
+  const limited = builder.limit(sorted, input.limit + 1);
+  builder.output(
+    JOURNEY_EVENT_PAGE_REPORT_OUTPUT,
+    limited,
+    JOURNEY_EVENT_PAGE_REPORT_FIELDS.map((name) => ({ name, slot: name })),
+  );
+}
+
 /** Builds the one-statement Logical plan for the visitor/session Events page. */
 export function buildJourneyEventPageReportPlan(
   input: BuildJourneyEventPageReportPlanInput,
@@ -283,6 +402,8 @@ export function buildJourneyEventPageReportPlan(
         scopePlan,
         subject,
         time,
+        preparedPlanOperation:
+          input.target.type === "visitor" ? "visitor-events" : "session-events",
       })
     : undefined;
   const pageSelection =
@@ -301,99 +422,25 @@ export function buildJourneyEventPageReportPlan(
       time,
     });
 
-  let pages = builder.source("page", {
+  const pages = builder.source("page", {
     temporalDomain: "candidate",
-    attributes: PAGE_ATTRIBUTES,
+    attributes: JOURNEY_EVENT_PAGE_SOURCE_PAGE_ATTRIBUTES,
     selection: pageSelection,
   });
-  let events = builder.source("event", {
+  const events = builder.source("event", {
     temporalDomain: "candidate",
-    attributes: EVENT_ATTRIBUTES,
+    attributes: JOURNEY_EVENT_PAGE_SOURCE_EVENT_ATTRIBUTES,
     selection: eventSelection,
   });
 
-  const targetAttribute =
-    input.target.type === "visitor" ? "visitorId" : "sessionId";
-  const targetValue = builder.literal(input.target.value, STRING);
-  pages = builder.filter(
-    pages,
-    builder.compare(
-      "eq",
-      pageAttribute(builder, pages, targetAttribute),
-      targetValue,
-    ),
-  );
-
-  const eventName = eventAttribute(builder, events, "eventName");
-  events = builder.filter(
-    events,
-    builder.and(
-      builder.isNull(eventAttribute(builder, events, "ownerPresent"), true),
-      builder.isNull(eventName, true),
-      ...(scopePlan
-        ? [
-            builder.compare(
-              "eq",
-              eventAttribute(
-                builder,
-                events,
-                input.target.type === "visitor"
-                  ? "ownerVisitorId"
-                  : "ownerSessionId",
-              ),
-              targetValue,
-            ),
-          ]
-        : []),
-    ),
-  );
-
-  if (!scopePlan) {
-    const pageIds = builder.distinct(pages, [
-      { input: "attribute:page.report.localId", output: "visitId" },
-    ]);
-    events = builder.semiJoin(events, pageIds, [
-      {
-        left: "attribute:event.report.ownerVisitId",
-        right: "visitId",
-      },
-    ]);
-  }
-
-  const pageRows = projectPageRows(builder, pages);
-  const customEventRows = projectCustomEventRows(
+  appendJourneyEventPageReport({
     builder,
+    pages,
     events,
-    scopePlan !== undefined,
-  );
-  let allRows = builder.appendRows([pageRows, customEventRows], OUTPUT_FIELDS);
-
-  if (input.cursor) {
-    const occurredAt = builder.slot(allRows, "occurredAt");
-    const id = builder.slot(allRows, "id");
-    const cursorTime = builder.literal(input.cursor.occurredAt, DATETIME);
-    const cursorId = builder.literal(input.cursor.id, STRING);
-    allRows = builder.filter(
-      allRows,
-      builder.or(
-        builder.compare("lt", occurredAt, cursorTime),
-        builder.and(
-          builder.compare("eq", occurredAt, cursorTime),
-          builder.compare("lt", id, cursorId),
-        ),
-      ),
-    );
-  }
-
-  const sorted = builder.sort(allRows, [
-    { slot: "occurredAt", direction: "desc", nulls: "last" },
-    { slot: "id", direction: "desc", nulls: "last" },
-  ]);
-  const limited = builder.limit(sorted, input.limit + 1);
-  builder.output(
-    JOURNEY_EVENT_PAGE_REPORT_OUTPUT,
-    limited,
-    OUTPUT_FIELDS.map((name) => ({ name, slot: name })),
-  );
+    prepared: scopePlan !== undefined,
+    target: input.target,
+    limit: input.limit,
+    cursor: input.cursor,
+  });
   return builder.finish();
 }

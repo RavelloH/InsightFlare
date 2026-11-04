@@ -49,6 +49,8 @@ export default defineConfig({
       ),
     },
     exclude: [
+      // Planner evidence contains frozen test-source copies, not runnable tests.
+      "plan/**",
       "**/node_modules/**",
       "**/dist/**",
       "**/.cache/**",

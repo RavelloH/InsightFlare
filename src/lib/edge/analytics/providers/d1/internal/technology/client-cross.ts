@@ -23,7 +23,7 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { Env } from "@/lib/edge/types";
 
-interface DimensionDefinition {
+export interface CrossDimensionDefinition {
   selection: PageDimensionSelection;
   fallbackKeyBase: string;
 }
@@ -35,8 +35,8 @@ export async function queryCrossDimensionFromD1(
   filters: FilterDocument,
   primaryLimit: number,
   secondaryLimit: number,
-  primaryDimension: DimensionDefinition,
-  secondaryDimension: DimensionDefinition,
+  primaryDimension: CrossDimensionDefinition,
+  secondaryDimension: CrossDimensionDefinition,
 ): Promise<BrowserCrossBreakdownDimensionDataRow> {
   const metadata = scopedFilterMetadata(filters);
   const plan = buildTechnologyCrossBreakdownPlan({
@@ -73,6 +73,15 @@ export async function queryCrossDimensionFromD1(
       { field: "secondaryValue", direction: "asc", nulls: "first" },
     ],
   });
+  return mapCrossDimensionRows(queryRows, primaryDimension, secondaryDimension);
+}
+
+/** Maps both the legacy Cross query and its qualified multi-output rows. */
+export function mapCrossDimensionRows(
+  queryRows: readonly Record<string, unknown>[],
+  primaryDimension: CrossDimensionDefinition,
+  secondaryDimension: CrossDimensionDefinition,
+): BrowserCrossBreakdownDimensionDataRow {
   const topPrimaryRows = queryRows
     .filter((row) => row.rowType === "primary")
     .map((row) => ({

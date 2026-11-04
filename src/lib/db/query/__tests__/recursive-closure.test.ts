@@ -10,6 +10,7 @@ import {
   callFunction,
   caseWhen,
   castInteger,
+  castReal,
   coalesce,
   compileD1Query,
   count,
@@ -172,7 +173,7 @@ describe("finite typed recursive closure", () => {
 
     expect(compiled.sql.match(/WITH RECURSIVE/gu)).toHaveLength(1);
     expect(compiled.sql).toMatch(
-      /FROM "_d1_recursive_\d+" AS "r\d+" INNER JOIN/gu,
+      /FROM "_d1_recursive_\d+" AS r\d+ INNER JOIN/gu,
     );
     expect(compiled.sql.match(/FROM "_d1_recursive_\d+"/gu)).toHaveLength(2);
     expect(compiled.physicalPlanShape?.cteCount).toBe(1);
@@ -215,6 +216,58 @@ describe("finite typed recursive closure", () => {
     expect(runAll(db, importCompile(closure(emptySeed, candidates)))).toEqual(
       [],
     );
+  });
+
+  it("supports castReal in recursive closure predicates without crossing namespaces", () => {
+    const db = database();
+    const identities = scan(schema.site_identities);
+    const alphaSeed = edge(
+      db,
+      identities,
+      "g-cast-real-alpha-10",
+      "alpha",
+      10,
+      20,
+    );
+    const alpha20 = edge(
+      db,
+      identities,
+      "g-cast-real-alpha-20",
+      "alpha",
+      20,
+      null,
+    );
+    const beta20 = edge(
+      db,
+      identities,
+      "g-cast-real-beta-20",
+      "beta",
+      20,
+      null,
+    );
+    const candidates = allRows([alphaSeed, alpha20, beta20]);
+    const result = recursiveClosure(
+      alphaSeed,
+      candidates,
+      (current, candidate) =>
+        and(
+          eq(current.namespace, candidate.namespace),
+          eq(castReal(current.parentNodeId), castReal(candidate.nodeId)),
+        ),
+    );
+    const compiled = importCompile(result);
+    const rows = runAll(db, compiled) as Array<{
+      namespace: string;
+      nodeId: number;
+      parentNodeId: number | null;
+    }>;
+
+    expect(compiled.sql).toMatch(/CAST\s*\(/iu);
+    expect(compiled.bindings).toContain("alpha");
+    expect(rows).toEqual([
+      { namespace: "alpha", nodeId: 10, parentNodeId: 20 },
+      { namespace: "alpha", nodeId: 20, parentNodeId: null },
+    ]);
   });
 
   it("composes with Project, Filter, Sort, Limit, aggregates, and independent closures", () => {

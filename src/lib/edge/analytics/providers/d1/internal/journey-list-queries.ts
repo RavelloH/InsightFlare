@@ -112,7 +112,7 @@ export async function queryJourneyTargetExistsFromD1(
   const rows = await queryD1CompiledAll(env, query);
   return rows.length > 0;
 }
-function visitorCursorFromRow(
+export function visitorCursorFromRow(
   row: VisitorRow,
   sort: ListSort<VisitorListSortKey>,
 ): VisitorListCursor {
@@ -124,7 +124,22 @@ function visitorCursorFromRow(
         visitorId: row.visitorId,
       };
 }
-function sessionCursorFromRow(
+/** Maps the legacy Visitor list query rows and cursor using the shared DTO rules. */
+export function visitorListPageFromRecords(
+  records: readonly Record<string, unknown>[],
+  limit: number,
+  sort: ListSort<VisitorListSortKey>,
+): VisitorListPage {
+  const hasMore = records.length > limit;
+  const pageRecords = hasMore ? records.slice(0, limit) : records;
+  const rows = pageRecords.map(mapVisitorRow);
+  const lastRow = rows.at(-1);
+  return {
+    rows,
+    nextCursor: hasMore && lastRow ? visitorCursorFromRow(lastRow, sort) : null,
+  };
+}
+export function sessionCursorFromRow(
   row: SessionRow,
   sort: ListSort<SessionListSortKey>,
 ): SessionListCursor {
@@ -135,6 +150,22 @@ function sessionCursorFromRow(
         startedAt: row.startedAt,
         sessionId: row.sessionId,
       };
+}
+
+/** Maps the legacy Session list query rows and cursor using the shared DTO rules. */
+export function sessionListPageFromRecords(
+  records: readonly Record<string, unknown>[],
+  limit: number,
+  sort: ListSort<SessionListSortKey>,
+): SessionListPage {
+  const hasMore = records.length > limit;
+  const pageRecords = hasMore ? records.slice(0, limit) : records;
+  const rows = pageRecords.map(mapSessionRow);
+  const lastRow = rows.at(-1);
+  return {
+    rows,
+    nextCursor: hasMore && lastRow ? sessionCursorFromRow(lastRow, sort) : null,
+  };
 }
 export async function queryVisitorsFromD1(
   env: Env,
@@ -194,15 +225,7 @@ export async function queryVisitorListPageFromD1(
     plan,
     JOURNEY_VISITOR_LIST_REPORT_OUTPUT,
   );
-  const hasMore = records.length > options.limit;
-  const pageRecords = hasMore ? records.slice(0, options.limit) : records;
-  const rows = pageRecords.map(mapVisitorRow);
-  const lastRow = rows.at(-1);
-  return {
-    rows,
-    nextCursor:
-      hasMore && lastRow ? visitorCursorFromRow(lastRow, options.sort) : null,
-  };
+  return visitorListPageFromRecords(records, options.limit, options.sort);
 }
 export async function querySessionsFromD1(
   env: Env,
@@ -249,6 +272,7 @@ export async function querySessionListPageFromD1(
     cursor?: SessionListCursor | null;
     target?: { readonly type: "visitor" | "session"; readonly value: string };
     analysis?: JourneyListAnalysis;
+    preparedPlanOperation?: "sessions" | "visitor-sessions";
   },
 ): Promise<SessionListPage> {
   const plan = buildJourneySessionListReportPlan({
@@ -261,21 +285,14 @@ export async function querySessionListPageFromD1(
     cursor: options.cursor,
     sessionTarget: options.target,
     analysis: options.analysis,
+    preparedPlanOperation: options.preparedPlanOperation,
   });
   const records = await queryJourneyPageReportRowsFromD1(
     env,
     plan,
     JOURNEY_SESSION_LIST_REPORT_OUTPUT,
   );
-  const hasMore = records.length > options.limit;
-  const pageRecords = hasMore ? records.slice(0, options.limit) : records;
-  const rows = pageRecords.map(mapSessionRow);
-  const lastRow = rows.at(-1);
-  return {
-    rows,
-    nextCursor:
-      hasMore && lastRow ? sessionCursorFromRow(lastRow, options.sort) : null,
-  };
+  return sessionListPageFromRecords(records, options.limit, options.sort);
 }
 export async function queryJourneyEventsPageFromD1(
   env: Env,

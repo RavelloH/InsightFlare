@@ -1042,4 +1042,18 @@ describe("primitive Filter v1 condition lowering", () => {
       operator: "eq",
     });
   });
+
+  it("rejects raw primitive fields absent from the public registry", () => {
+    const condition = analyzedCondition(
+      "page.path",
+      "eq",
+      "/pricing",
+    ).condition;
+    expect(() =>
+      preparePrimitiveFieldCondition({
+        ...condition,
+        target: { kind: "field", field: "page.unregistered" },
+      } as unknown as FilterCondition),
+    ).toThrow("filter_lowering_unknown_field");
+  });
 });

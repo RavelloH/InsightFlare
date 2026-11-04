@@ -6,19 +6,35 @@ import {
   scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
+import type { QueryTime } from "@/lib/edge/analytics/contract/types";
 import {
   buildEventFieldValuesPagePlan,
   buildEventFieldValuesPlan,
   EVENT_FIELD_VALUES_OUTPUT,
+  EVENT_FIELD_VALUES_PAGE_FIELDS,
   EVENT_FIELD_VALUES_PAGE_OUTPUT,
 } from "@/lib/edge/analytics/engine/event-field-values-plan";
 import {
   buildEventFieldsPagePlan,
   buildEventFieldsPlan,
+  EVENT_FIELDS,
   EVENT_FIELDS_OUTPUT,
   EVENT_FIELDS_PAGE_OUTPUT,
 } from "@/lib/edge/analytics/engine/event-fields-plan";
 import { buildEventPayloadReportSource } from "@/lib/edge/analytics/engine/event-payload-report-source";
+import {
+  type DeferredEventFieldsQualification,
+  type DeferredEventFieldValuesQualification,
+  prepareDeferredEventQualificationFallback,
+} from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import {
+  type EventFieldsQualificationQuery,
+  type EventFieldValuesQualificationQuery,
+  executeEventFieldsQualificationProgram,
+  executeEventFieldValuesQualificationProgram,
+} from "@/lib/edge/analytics/providers/d1/internal/analytics-qualification-program";
+import type { D1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import type { Env } from "@/lib/edge/types";
 
 import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
@@ -173,6 +189,28 @@ export async function queryEventFieldsPageFromD1(
     plan,
     EVENT_FIELDS_PAGE_OUTPUT,
   )) as unknown as EventFieldRow[];
+  return eventFieldsPageFromRows(
+    env,
+    siteId,
+    window,
+    filters,
+    eventName,
+    limit,
+    audience,
+    rows,
+  );
+}
+
+async function eventFieldsPageFromRows(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  eventName: string | undefined,
+  limit: number,
+  audience: QueryAudience,
+  rows: readonly EventFieldRow[],
+): Promise<PageResult<EventFieldRow>> {
   const page = pageResult(rows, limit);
   const binding = await eventFieldBinding(
     "event-fields",
@@ -203,6 +241,104 @@ export async function queryEventFieldsPageFromD1(
       nextCursor,
     },
   };
+}
+
+interface QualifiedEventFieldsPageInput {
+  readonly env: Env;
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly eventName?: string;
+  readonly limit: number;
+  readonly cursor: EventFieldCursor | null;
+  readonly cursorToken: string | null;
+  readonly audience: QueryAudience;
+  readonly deferred: DeferredEventFieldsQualification;
+  readonly diagnostics?: D1ReadDiagnostics;
+}
+
+async function executeQualifiedEventFields(
+  input: QualifiedEventFieldsPageInput,
+  cursor: EventFieldCursor | null,
+) {
+  const query: EventFieldsQualificationQuery = {
+    env: input.env,
+    siteId: input.siteId,
+    queryTime: input.queryTime,
+    filters: input.filters,
+    ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    ...(input.eventName !== undefined ? { eventName: input.eventName } : {}),
+    limit: input.limit,
+    cursor,
+    cursorToken: input.cursorToken,
+    audience: input.audience,
+  };
+  return executeEventFieldsQualificationProgram({
+    env: input.env,
+    deferred: input.deferred,
+    query,
+    ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
+  });
+}
+
+function recordEventFieldsFallbackReason(
+  input: QualifiedEventFieldsPageInput,
+  result: Awaited<ReturnType<typeof executeQualifiedEventFields>>,
+): void {
+  if (result.kind !== "executed" && input.diagnostics)
+    input.diagnostics.advancedCountSqlFallbackReason = result.fallbackReason;
+}
+
+/** Runs the fused Count and Event-field query, with one whole-operation fallback. */
+export async function queryQualifiedEventFieldsPageFromD1(
+  input: QualifiedEventFieldsPageInput,
+): Promise<PageResult<EventFieldRow>> {
+  const result = await executeQualifiedEventFields(input, input.cursor);
+  recordEventFieldsFallbackReason(input, result);
+  if (result.kind === "executed") {
+    const rows = result.rows
+      .filter((row) => row.outputId === EVENT_FIELDS_PAGE_OUTPUT)
+      .map((row) => {
+        const fields: Record<string, unknown> = {};
+        for (const { name } of EVENT_FIELDS) fields[name] = row[name];
+        return fields as unknown as EventFieldRow;
+      });
+    return eventFieldsPageFromRows(
+      input.env,
+      input.siteId,
+      input.window,
+      input.filters,
+      input.eventName,
+      input.limit,
+      input.audience,
+      rows,
+    );
+  }
+  const fallbackFilters = await prepareDeferredEventQualificationFallback(
+    input.deferred,
+  );
+  return queryEventFieldsPageFromD1(
+    input.env,
+    input.siteId,
+    input.window,
+    fallbackFilters,
+    input.eventName,
+    input.limit,
+    input.cursor,
+    input.audience,
+  );
+}
+
+/** Preserves count/cap precedence when a supplied event-fields cursor is invalid. */
+export async function preflightQualifiedEventFieldsCursorFromD1(
+  input: QualifiedEventFieldsPageInput,
+): Promise<void> {
+  const result = await executeQualifiedEventFields(input, null);
+  recordEventFieldsFallbackReason(input, result);
+  if (result.kind !== "executed")
+    await prepareDeferredEventQualificationFallback(input.deferred);
 }
 
 export async function decodeEventFieldCursor(
@@ -310,6 +446,34 @@ export async function queryEventFieldValuesPageFromD1(
     plan,
     EVENT_FIELD_VALUES_PAGE_OUTPUT,
   )) as unknown as EventFieldValueRow[];
+  return eventFieldValuesPageFromRows(
+    env,
+    siteId,
+    window,
+    filters,
+    eventName,
+    fieldPath,
+    fieldValueType,
+    limit,
+    search,
+    audience,
+    rows,
+  );
+}
+
+async function eventFieldValuesPageFromRows(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  eventName: string | undefined,
+  fieldPath: string,
+  fieldValueType: string,
+  limit: number,
+  search: string | undefined,
+  audience: QueryAudience,
+  rows: readonly EventFieldValueRow[],
+): Promise<PageResult<EventFieldValueRow>> {
   const page = pageResult(rows, limit);
   const binding = await eventFieldBinding(
     "event-field-values",
@@ -341,6 +505,117 @@ export async function queryEventFieldValuesPageFromD1(
       nextCursor,
     },
   };
+}
+
+interface QualifiedEventFieldValuesPageInput {
+  readonly env: Env;
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly eventName?: string;
+  readonly fieldPath: string;
+  readonly fieldValueType: string;
+  readonly search?: string;
+  readonly limit: number;
+  readonly cursor: EventFieldValueCursor | null;
+  readonly cursorToken: string | null;
+  readonly audience: QueryAudience;
+  readonly deferred: DeferredEventFieldValuesQualification;
+  readonly diagnostics?: D1ReadDiagnostics;
+}
+
+async function executeQualifiedEventFieldValues(
+  input: QualifiedEventFieldValuesPageInput,
+  cursor: EventFieldValueCursor | null,
+) {
+  const query: EventFieldValuesQualificationQuery = {
+    env: input.env,
+    siteId: input.siteId,
+    queryTime: input.queryTime,
+    filters: input.filters,
+    ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    ...(input.eventName !== undefined ? { eventName: input.eventName } : {}),
+    fieldPath: input.fieldPath,
+    fieldValueType: input.fieldValueType,
+    ...(input.search !== undefined ? { search: input.search } : {}),
+    limit: input.limit,
+    cursor,
+    cursorToken: input.cursorToken,
+    audience: input.audience,
+  };
+  return executeEventFieldValuesQualificationProgram({
+    env: input.env,
+    deferred: input.deferred,
+    query,
+    ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
+  });
+}
+
+function recordEventFieldValuesFallbackReason(
+  input: QualifiedEventFieldValuesPageInput,
+  result: Awaited<ReturnType<typeof executeQualifiedEventFieldValues>>,
+): void {
+  if (result.kind !== "executed" && input.diagnostics)
+    input.diagnostics.advancedCountSqlFallbackReason = result.fallbackReason;
+}
+
+/** Runs Count and Event-field-values together, with one whole-operation fallback. */
+export async function queryQualifiedEventFieldValuesPageFromD1(
+  input: QualifiedEventFieldValuesPageInput,
+): Promise<PageResult<EventFieldValueRow>> {
+  const result = await executeQualifiedEventFieldValues(input, input.cursor);
+  recordEventFieldValuesFallbackReason(input, result);
+  if (result.kind === "executed") {
+    const rows = result.rows
+      .filter((row) => row.outputId === EVENT_FIELD_VALUES_PAGE_OUTPUT)
+      .map((row) => {
+        const fields: Record<string, unknown> = {};
+        for (const name of EVENT_FIELD_VALUES_PAGE_FIELDS)
+          fields[name] = row[name];
+        return fields as unknown as EventFieldValueRow;
+      });
+    return eventFieldValuesPageFromRows(
+      input.env,
+      input.siteId,
+      input.window,
+      input.filters,
+      input.eventName,
+      input.fieldPath,
+      input.fieldValueType,
+      input.limit,
+      input.search,
+      input.audience,
+      rows,
+    );
+  }
+  const fallbackFilters = await prepareDeferredEventQualificationFallback(
+    input.deferred,
+  );
+  return queryEventFieldValuesPageFromD1(
+    input.env,
+    input.siteId,
+    input.window,
+    fallbackFilters,
+    input.eventName,
+    input.fieldPath,
+    input.fieldValueType,
+    input.limit,
+    input.search,
+    input.cursor,
+    input.audience,
+  );
+}
+
+/** Preserves Count/cap precedence when a values cursor is invalid. */
+export async function preflightQualifiedEventFieldValuesCursorFromD1(
+  input: QualifiedEventFieldValuesPageInput,
+): Promise<void> {
+  const result = await executeQualifiedEventFieldValues(input, null);
+  recordEventFieldValuesFallbackReason(input, result);
+  if (result.kind !== "executed")
+    await prepareDeferredEventQualificationFallback(input.deferred);
 }
 
 export async function decodeEventFieldValueCursor(

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { EventRecordSortKey } from "@/lib/edge/analytics/contract";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import { buildEventRecordPagePlan } from "@/lib/edge/analytics/engine/event-record-page-plan";
@@ -106,4 +107,91 @@ describe("event record page output contract", () => {
         message,
       );
   });
+
+  it.each([
+    ["occurredAt", "asc", "event.report.occurredAt", ["asc", "asc", "asc"]],
+    ["occurredAt", "desc", "event.report.occurredAt", ["desc", "desc", "desc"]],
+    [
+      "eventName",
+      "asc",
+      "event.report.eventName",
+      ["asc", "desc", "desc", "desc"],
+    ],
+    [
+      "eventName",
+      "desc",
+      "event.report.eventName",
+      ["desc", "desc", "desc", "desc"],
+    ],
+    [
+      "pathname",
+      "asc",
+      "event.report.ownerPathname",
+      ["asc", "desc", "desc", "desc"],
+    ],
+    [
+      "pathname",
+      "desc",
+      "event.report.ownerPathname",
+      ["desc", "desc", "desc", "desc"],
+    ],
+  ] as const)(
+    "keeps the original %s %s page order in the shared appender",
+    (key, direction, firstAttribute, expectedDirections) => {
+      const sortedPlan = buildEventRecordPagePlan({
+        siteId: "event-record-output-site",
+        queryTime: createQueryTime(0, 100, "UTC", 100),
+        filters: EMPTY_FILTER_DOCUMENT,
+        options: {
+          limit: 3,
+          sort: { key: key as EventRecordSortKey, direction },
+        },
+      });
+      assertEventRecordPageOutputContract(sortedPlan);
+      const sortNode = sortedPlan.nodes.find((node) => node.kind === "sort");
+      expect(sortNode?.kind).toBe("sort");
+      if (sortNode?.kind !== "sort")
+        throw new Error("event_record_sort_missing");
+      const slots = new Map(sortedPlan.slots.map((slot) => [slot.id, slot]));
+      expect(
+        sortNode.keys.map((sortKey) => {
+          const slot = slots.get(sortKey.slot);
+          return {
+            attribute:
+              slot?.lineage.kind === "attribute"
+                ? slot.lineage.attribute
+                : null,
+            direction: sortKey.direction,
+          };
+        }),
+      ).toEqual([
+        { attribute: firstAttribute, direction: expectedDirections[0] },
+        ...(key === "occurredAt"
+          ? [
+              {
+                attribute: "event.report.localId",
+                direction: expectedDirections[1],
+              },
+              {
+                attribute: "event.report.internalPk",
+                direction: expectedDirections[2],
+              },
+            ]
+          : [
+              {
+                attribute: "event.report.occurredAt",
+                direction: expectedDirections[1],
+              },
+              {
+                attribute: "event.report.localId",
+                direction: expectedDirections[2],
+              },
+              {
+                attribute: "event.report.internalPk",
+                direction: expectedDirections[3],
+              },
+            ]),
+      ]);
+    },
+  );
 });

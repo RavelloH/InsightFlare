@@ -1,6 +1,13 @@
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
+import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { EventQualificationPlan } from "@/lib/edge/analytics/engine/event-qualified-source-plan";
+import {
+  addEventQualificationControlOutput,
+  buildEventQualifiedSource,
+  EVENT_QUALIFICATION_CONTROL_OUTPUT,
+} from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import {
   addEventReportSource,
   createEventReportSourceContext,
@@ -53,7 +60,7 @@ function ownerAttributeId(attribute: EventContextOwnerAttribute): string {
   return `event.report.${attribute}`;
 }
 
-function requiredOwnerAttributes(
+export function requiredOwnerAttributes(
   selected: readonly EventContextCardKey[],
 ): string[] {
   const attributes = new Set<string>(EVENT_CARD_BASE_ATTRIBUTES);
@@ -340,6 +347,122 @@ function boundaryCardRows(
   return projectRankedCard(builder, aggregate, key, false, limit);
 }
 
+export function appendEventContextCardOutputs(input: {
+  readonly builder: LogicalPlanBuilder;
+  readonly events: LogicalRelationHandle;
+  readonly pages?: LogicalRelationHandle;
+  readonly selected: readonly EventContextCardKey[];
+  readonly limit: number;
+}): void {
+  if (input.selected.length === 0) return;
+  const cardRows = input.selected.map((key) => {
+    const definition = EVENT_CONTEXT_CARDS[key];
+    if (definition.kind === "session-boundary") {
+      if (!input.pages)
+        throw new Error("event_context_boundary_page_source_missing");
+      return boundaryCardRows(
+        input.builder,
+        input.events,
+        input.pages,
+        key as "entry" | "exit",
+        definition.direction === "first" ? "asc" : "desc",
+        input.limit,
+      );
+    }
+    return ordinaryCardRows(
+      input.builder,
+      input.events,
+      key,
+      definition,
+      input.limit,
+    );
+  });
+  let rows =
+    cardRows.length === 1
+      ? cardRows[0]!
+      : input.builder.appendRows(cardRows, [
+          "cardType",
+          "value",
+          "label",
+          "views",
+          "sessions",
+          "visitors",
+          "cardRank",
+        ]);
+  rows = input.builder.sort(rows, [
+    { slot: "cardType", direction: "asc", nulls: "last" },
+    { slot: "cardRank", direction: "asc", nulls: "last" },
+  ]);
+  input.builder.output(
+    EVENT_CONTEXT_REPORT_OUTPUT,
+    rows,
+    EVENT_CONTEXT_REPORT_FIELDS.map((name) => ({ name, slot: name })),
+  );
+}
+
+/** Adds the Page report Source authorized by the shared Count qualification. */
+export function addEventContextQualifiedPages(input: {
+  readonly builder: LogicalPlanBuilder;
+  readonly siteId: string;
+  readonly scope: "session" | "visitor";
+  readonly matches: LogicalRelationHandle;
+}): {
+  readonly source: LogicalRelationHandle;
+  readonly pages: LogicalRelationHandle;
+} {
+  const { builder } = input;
+  const source = builder.source("page", {
+    temporalDomain: "candidate",
+    attributes: [
+      "page.report.sessionId",
+      "page.report.visitorId",
+      "page.report.startedAt",
+      "page.report.localId",
+      "page.report.pathname",
+    ],
+    selection: createSemanticScopedSourceSelection({
+      profile: "direct-page-analytics-v1",
+      filters: EMPTY_FILTER_DOCUMENT,
+      subject: builder.context.subject,
+      time: builder.context.time,
+    }),
+  });
+  const pageRows = builder.project(source, {
+    "attribute:page.report.sessionId": builder.slot(
+      source,
+      "attribute:page.report.sessionId",
+    ),
+    "attribute:page.report.visitorId": builder.slot(
+      source,
+      "attribute:page.report.visitorId",
+    ),
+    "attribute:page.report.startedAt": builder.slot(
+      source,
+      "attribute:page.report.startedAt",
+    ),
+    "attribute:page.report.localId": builder.slot(
+      source,
+      "attribute:page.report.localId",
+    ),
+    "attribute:page.report.pathname": builder.slot(
+      source,
+      "attribute:page.report.pathname",
+    ),
+    businessSiteId: builder.literal(input.siteId, STRING),
+  });
+  const qualifiedOwnerSlot =
+    input.scope === "session"
+      ? "attribute:page.report.sessionId"
+      : "attribute:page.report.visitorId";
+  return {
+    source,
+    pages: builder.semiJoin(pageRows, input.matches, [
+      { left: "businessSiteId", right: "siteId" },
+      { left: qualifiedOwnerSlot, right: "entityId" },
+    ]),
+  };
+}
+
 /** Builds the finite Event Context card set from one typed Event Source. */
 export function buildEventContextReportPlan(input: {
   readonly siteId: string;
@@ -387,47 +510,75 @@ export function buildEventContextReportPlan(input: {
       })
     : undefined;
 
-  const cardRows = selected.map((key) => {
-    const definition = EVENT_CONTEXT_CARDS[key];
-    if (definition.kind === "session-boundary") {
-      if (!pages) throw new Error("event_context_boundary_page_source_missing");
-      return boundaryCardRows(
-        context.builder,
-        events,
-        pages,
-        key as "entry" | "exit",
-        definition.direction === "first" ? "asc" : "desc",
-        input.limit,
-      );
-    }
-    return ordinaryCardRows(
-      context.builder,
-      events,
-      key,
-      definition,
-      input.limit,
-    );
+  appendEventContextCardOutputs({
+    builder: context.builder,
+    events,
+    ...(pages ? { pages } : {}),
+    selected,
+    limit: input.limit,
   });
-  let rows =
-    cardRows.length === 1
-      ? cardRows[0]!
-      : context.builder.appendRows(cardRows, [
-          "cardType",
-          "value",
-          "label",
-          "views",
-          "sessions",
-          "visitors",
-          "cardRank",
-        ]);
-  rows = context.builder.sort(rows, [
-    { slot: "cardType", direction: "asc", nulls: "last" },
-    { slot: "cardRank", direction: "asc", nulls: "last" },
-  ]);
-  context.builder.output(
-    EVENT_CONTEXT_REPORT_OUTPUT,
-    rows,
-    EVENT_CONTEXT_REPORT_FIELDS.map((name) => ({ name, slot: name })),
-  );
   return context.builder.finish();
+}
+
+/** Builds all selected Event Context cards from the shared Count qualification. */
+export function buildEventContextQualificationPlan(input: {
+  readonly siteId: string;
+  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly eventName?: string;
+  readonly limit: number;
+  readonly selectedKeys?: readonly EventContextCardKey[];
+}): EventQualificationPlan {
+  const selectedSet = new Set(input.selectedKeys ?? EVENT_CONTEXT_CARD_KEYS);
+  const selected = EVENT_CONTEXT_CARD_KEYS.filter((key) =>
+    selectedSet.has(key),
+  );
+  const qualified = buildEventQualifiedSource({
+    siteId: input.siteId,
+    count: input.count,
+    purpose: "event-context",
+    ...(input.eventName !== undefined ? { eventName: input.eventName } : {}),
+    reportAttributes: requiredOwnerAttributes(selected),
+  });
+  const builder = qualified.builder;
+  const needsBoundaryPages = selected.some(
+    (key) => EVENT_CONTEXT_CARDS[key].kind === "session-boundary",
+  );
+  let pages: LogicalRelationHandle | undefined;
+  let reportSourceRelations = [...qualified.reportSourceRelations];
+  if (needsBoundaryPages) {
+    const qualifiedPages = addEventContextQualifiedPages({
+      builder,
+      siteId: input.siteId,
+      scope: input.count.scope,
+      matches: qualified.qualification.matches,
+    });
+    reportSourceRelations = [
+      ...reportSourceRelations,
+      { relationId: qualifiedPages.source.id, entity: "page" },
+    ];
+    pages = qualifiedPages.pages;
+  }
+  appendEventContextCardOutputs({
+    builder,
+    events: qualified.events,
+    ...(pages ? { pages } : {}),
+    selected,
+    limit: input.limit,
+  });
+  addEventQualificationControlOutput(builder, qualified.qualification.controls);
+  const plan = builder.finish();
+  return {
+    plan,
+    primaryReportSourceRelationId: qualified.eventSourceRelationId,
+    eventSourceRelationId: qualified.eventSourceRelationId,
+    matchesRelationId: qualified.qualification.matches.id,
+    controlsRelationId: qualified.qualification.controls.id,
+    groupedSummaryRelationId: qualified.qualification.groupedSummary.id,
+    controlOutputId: EVENT_QUALIFICATION_CONTROL_OUTPUT,
+    reportOutputIds: selected.length > 0 ? [EVENT_CONTEXT_REPORT_OUTPUT] : [],
+    numericCompatibilityFields:
+      qualified.qualification.numericCompatibilityFields,
+    scope: qualified.qualification.scope,
+    reportSourceRelations,
+  };
 }

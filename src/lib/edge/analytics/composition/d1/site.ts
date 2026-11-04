@@ -8,19 +8,52 @@ import type {
   OverviewTabResult,
   PerformanceQuery,
   QueryInput,
+  QueryTime,
 } from "@/lib/edge/analytics/contract";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import { comparisonPageTab } from "@/lib/edge/analytics/engine/comparison-page-tabs";
 import {
   analyticsPageDimensionSelection,
+  dimensionPageSelection,
+  normalizeDimensionPageRequest,
+  normalizeOverviewPageTableRequest,
+  overviewPageTableDescriptor,
   PAGE_DIMENSION_SELECTIONS,
   type PageDimensionSelection,
 } from "@/lib/edge/analytics/engine/dimension-report-plan";
-import { queryChannelAggregate } from "@/lib/edge/analytics/providers/d1/internal/channels";
+import { normalizeEventNameDimensionListRequest } from "@/lib/edge/analytics/engine/event-type-summary-plan";
+import { normalizeReferrerOverviewTableRequest } from "@/lib/edge/analytics/engine/referrer-report-plan";
+import { normalizeSessionBoundaryDimensionRequest } from "@/lib/edge/analytics/engine/session-path-report-plan";
+import {
+  deferredChannelListQualificationFromQuery,
+  deferredChannelOverviewQualificationFromQuery,
+  deferredComparisonPageQualificationFromQuery,
+  deferredEventNameDimensionQualificationFromQuery,
+  deferredEventQualificationFromQuery,
+  deferredFilterValuesQualificationFromQuery,
+  deferredOverviewPageTableQualificationFromQuery,
+  deferredPageDimensionQualificationFromQuery,
+  deferredPagesAggregatePageQualificationFromQuery,
+  deferredPagesTabsQualificationFromQuery,
+  deferredPerformanceSummaryQualificationFromQuery,
+  deferredReferrerOverviewQualificationFromQuery,
+  deferredReferrersQualificationFromQuery,
+  deferredSessionBoundaryDimensionQualificationFromQuery,
+  deferredSessionBoundaryOverviewPageQualificationFromQuery,
+  prepareDeferredComparisonPageQualificationFallback,
+  prepareDeferredEventQualificationFallback,
+} from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import {
+  queryChannelAggregate,
+  queryQualifiedChannelListFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/channels";
 import {
   decodeComparisonDimensionCursor,
   queryComparisonDimensionPageFromD1,
   queryComparisonSessionPathPageFromD1,
+  tryQueryQualifiedComparisonDimensionPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/comparison-dimensions";
+import { comparisonReportFamilyForTab } from "@/lib/edge/analytics/providers/d1/internal/comparison-report-family";
 import {
   geoTabLabel,
   mapDimensionRows,
@@ -37,12 +70,24 @@ import {
 import {
   decodeDimensionCursor,
   decodeSessionPathDimensionCursor,
+  preflightQualifiedDimensionPageCursorFromD1,
   queryDimensionPageFromD1,
+  queryQualifiedDimensionPageFromD1,
   querySessionBoundaryDimensionFromD1,
+  querySessionBoundaryOverviewPageFromD1,
   querySessionPathDimensionPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/dimensions";
-import { queryEventTypeAggregate } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
+import {
+  queryEventNameDimensionFromD1,
+  queryEventTypeAggregate,
+} from "@/lib/edge/analytics/providers/d1/internal/events-summary";
 import { queryFilterValuesPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/filter-values";
+import { queryFilterValuesPageWithQualification } from "@/lib/edge/analytics/providers/d1/internal/filter-values-qualification-program";
+import { executeGeoPointsQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/geo-points-qualification-program";
+import {
+  deferredGeoPointsQualificationFromQuery,
+  geoPointsLimitFromQuery,
+} from "@/lib/edge/analytics/providers/d1/internal/geo-points-qualification-request";
 import {
   parseRetentionGranularity,
   queryRetentionFromD1,
@@ -52,20 +97,39 @@ import {
   queryPagesPageFromD1,
   queryPagesWithTabsFromD1,
   queryPageTabsAggregate,
+  queryQualifiedPagesAggregatePageFromD1,
+  queryQualifiedPagesTabsFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/pages";
 import { decodePagesCursor } from "@/lib/edge/analytics/providers/d1/internal/pages";
 import { queryPagesDashboard } from "@/lib/edge/analytics/providers/d1/internal/pages-dashboard";
-import { queryPerformanceDashboardFromD1 } from "@/lib/edge/analytics/providers/d1/internal/performance";
+import { executePagesDashboardQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/pages-dashboard-qualification-program";
+import { deferredPagesDashboardQualificationFromQuery } from "@/lib/edge/analytics/providers/d1/internal/pages-dashboard-qualification-request";
 import {
+  mapPerformanceSummaries,
+  queryPerformanceDashboardFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/performance";
+import { executePerformanceBreakdownDashboardQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/performance-breakdown-dashboard-qualification-program";
+import { executePerformanceSummaryQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/performance-summary-qualification-program";
+import { executePerformanceTimeseriesQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/performance-timeseries-qualification-program";
+import {
+  decodeReferrersCursor,
+  queryQualifiedReferrersFlatPageFromD1,
+  queryQualifiedReferrersPageFromD1,
+  queryQualifiedReferrerSummaryFromD1,
   queryReferrersPageFromD1,
   queryReferrerSummaryFromD1,
+  type ReferrerAggregateCursor,
 } from "@/lib/edge/analytics/providers/d1/internal/referrers";
-import { decodeReferrersCursor } from "@/lib/edge/analytics/providers/d1/internal/referrers";
+import { executeRetentionQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/retention-qualification-program";
+import { deferredRetentionQualificationFromQuery } from "@/lib/edge/analytics/providers/d1/internal/retention-qualification-request";
 import {
   readSitePerformanceBreakdown,
   readSitePerformanceSummary,
   readSitePerformanceTimeseries,
+  serializePerformanceBreakdown,
+  serializePerformanceTimeseries,
 } from "@/lib/edge/analytics/providers/d1/operations/site-performance";
+import type { FilterDocument } from "@/lib/filter-contract/filters";
 import { InvalidCursorError } from "@/lib/pagination";
 
 import {
@@ -75,6 +139,8 @@ import {
   timeWindow,
 } from "./shared";
 function overviewTabExpression(tab: string): string | null {
+  const comparisonTab = comparisonReportFamilyForTab(tab);
+  if (comparisonTab) return comparisonTab.cursorExpression;
   if (tab === "page.path") return "TRIM(COALESCE(pathname, ''))";
   if (tab === "page.query") return "TRIM(COALESCE(query_string, ''))";
   if (tab === "page.title") return "TRIM(COALESCE(title, ''))";
@@ -108,27 +174,13 @@ function overviewDimensionSelection(
   tab: string,
 ): PageDimensionSelection | null {
   if (tab === "source.channel") return PAGE_DIMENSION_SELECTIONS.trafficChannel;
+  const overviewTable = overviewPageTableDescriptor(tab);
+  if (overviewTable) return overviewTable.selection;
   const overviewSelections: Readonly<Record<string, PageDimensionSelection>> = {
     "page.path": PAGE_DIMENSION_SELECTIONS.pagePath,
     "page.query": PAGE_DIMENSION_SELECTIONS.pageQuery,
     "page.title": PAGE_DIMENSION_SELECTIONS.pageTitle,
     "page.hostname": PAGE_DIMENSION_SELECTIONS.pageHostname,
-    "client.browser": PAGE_DIMENSION_SELECTIONS.browser,
-    "client.osVersion": PAGE_DIMENSION_SELECTIONS.osVersion,
-    "client.deviceType": PAGE_DIMENSION_SELECTIONS.deviceType,
-    "client.language": PAGE_DIMENSION_SELECTIONS.language,
-    "client.screenSize": PAGE_DIMENSION_SELECTIONS.screenSize,
-    "utm.source": PAGE_DIMENSION_SELECTIONS.utmSource,
-    "utm.medium": PAGE_DIMENSION_SELECTIONS.utmMedium,
-    "utm.campaign": PAGE_DIMENSION_SELECTIONS.utmCampaign,
-    "utm.term": PAGE_DIMENSION_SELECTIONS.utmTerm,
-    "utm.content": PAGE_DIMENSION_SELECTIONS.utmContent,
-    "geo.country": PAGE_DIMENSION_SELECTIONS.country,
-    "geo.region": PAGE_DIMENSION_SELECTIONS.region,
-    "geo.city": PAGE_DIMENSION_SELECTIONS.city,
-    "geo.continent": PAGE_DIMENSION_SELECTIONS.continent,
-    "geo.timezone": PAGE_DIMENSION_SELECTIONS.timezone,
-    "geo.organization": PAGE_DIMENSION_SELECTIONS.organization,
   };
   return Object.hasOwn(overviewSelections, tab)
     ? overviewSelections[tab]!
@@ -138,6 +190,8 @@ function overviewDimensionSelection(
 function overviewComparisonDimensionSelection(
   tab: string,
 ): PageDimensionSelection | null {
+  const comparisonTab = comparisonPageTab(tab);
+  if (comparisonTab) return comparisonTab.selection;
   const comparisonSelections: Readonly<Record<string, PageDimensionSelection>> =
     {
       "page.path": PAGE_DIMENSION_SELECTIONS.pagePathTrimmed,
@@ -187,9 +241,313 @@ function isPerformanceQuery(input: QueryInput): input is PerformanceQuery {
     ["ttfb", "fcp", "lcp", "cls", "inp"].includes(String(input.metric))
   );
 }
+
+async function overviewPageTablePage(
+  options: D1SiteRuntimeBindings,
+  request: DimensionOverviewTabQuery | ChannelOverviewTabQuery,
+  window: ReturnType<typeof timeWindow>,
+  filters: FilterDocument,
+  tab: string,
+  controls: {
+    readonly limit: number;
+    readonly cursorText: string | null;
+    readonly sortBy: "views" | "sessions" | "visitors";
+    readonly sortDirection: "asc" | "desc";
+    readonly search?: string;
+  },
+  operation: "dimension" | "channels" = "dimension",
+) {
+  const normalized = normalizeOverviewPageTableRequest({
+    operation,
+    mode: request.mode,
+    tab,
+    limit: controls.limit,
+    cursor: controls.cursorText,
+    sort: controls.sortBy,
+    direction: controls.sortDirection,
+    search: controls.search,
+  });
+  if (!normalized) throw new Error(`unsupported-overview-page-table:${tab}`);
+  const audience = request.context.policy.audience;
+  const deferred =
+    operation === "channels"
+      ? deferredChannelOverviewQualificationFromQuery(request)
+      : deferredOverviewPageTableQualificationFromQuery(request);
+  const qualifiedInput = deferred
+    ? {
+        env: options.env,
+        siteId: options.siteId,
+        window,
+        queryTime: request.time,
+        filters,
+        ...(request.scopePlan ? { scopePlan: request.scopePlan } : {}),
+        family: "overview-tab" as const,
+        tab: normalized.tab,
+        limit: normalized.limit,
+        selection: normalized.selection,
+        options: {
+          excludeEmpty: normalized.excludeEmpty,
+          ...(normalized.search !== undefined
+            ? { search: normalized.search }
+            : {}),
+          sortBy: normalized.sortBy,
+          sortDirection: normalized.sortDirection,
+        },
+        cursor: null,
+        cursorToken: normalized.cursorText,
+        audience,
+        deferred,
+        ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
+      }
+    : undefined;
+  let cursor: Awaited<ReturnType<typeof decodeDimensionCursor>>;
+  try {
+    cursor = await decodeDimensionCursor(
+      options.env,
+      options.siteId,
+      window,
+      filters,
+      normalized.selection,
+      normalized.search,
+      normalized.cursorText,
+      audience,
+      normalized.sortBy,
+      normalized.sortDirection,
+    );
+  } catch (error) {
+    if (
+      normalized.cursorText &&
+      qualifiedInput &&
+      error instanceof InvalidCursorError
+    ) {
+      await preflightQualifiedDimensionPageCursorFromD1(qualifiedInput);
+      throw new InvalidCursorError("overview-tab");
+    }
+    throw error;
+  }
+  if (normalized.cursorText && !cursor) {
+    if (qualifiedInput)
+      await preflightQualifiedDimensionPageCursorFromD1(qualifiedInput);
+    throw new InvalidCursorError("overview-tab");
+  }
+  if (qualifiedInput) {
+    const qualified = await queryQualifiedDimensionPageFromD1({
+      ...qualifiedInput,
+      cursor,
+    });
+    if (qualified.kind === "executed") return qualified.page;
+    const fallbackFilters = await prepareDeferredEventQualificationFallback(
+      deferred!,
+    );
+    return queryDimensionPageFromD1(
+      options.env,
+      options.siteId,
+      window,
+      fallbackFilters,
+      normalized.limit,
+      normalized.selection,
+      {
+        excludeEmpty: normalized.excludeEmpty,
+        ...(normalized.search !== undefined
+          ? { search: normalized.search }
+          : {}),
+        sortBy: normalized.sortBy,
+        sortDirection: normalized.sortDirection,
+      },
+      cursor,
+      options.diagnostics,
+      audience,
+    );
+  }
+  return queryDimensionPageFromD1(
+    options.env,
+    options.siteId,
+    window,
+    filters,
+    normalized.limit,
+    normalized.selection,
+    {
+      excludeEmpty: normalized.excludeEmpty,
+      ...(normalized.search !== undefined ? { search: normalized.search } : {}),
+      sortBy: normalized.sortBy,
+      sortDirection: normalized.sortDirection,
+    },
+    cursor,
+    options.diagnostics,
+    audience,
+  );
+}
+
+async function referrerOverviewPage(
+  options: D1SiteRuntimeBindings,
+  request: DimensionOverviewTabQuery | ChannelOverviewTabQuery,
+  window: ReturnType<typeof timeWindow>,
+  filters: FilterDocument,
+  tab: string,
+  controls: {
+    readonly limit: number;
+    readonly cursorText: string | null;
+    readonly sortBy: "views" | "sessions" | "visitors";
+    readonly sortDirection: "asc" | "desc";
+    readonly search?: string;
+  },
+) {
+  const normalized = normalizeReferrerOverviewTableRequest({
+    mode: request.mode,
+    tab,
+    limit: controls.limit,
+    cursor: controls.cursorText,
+    sort: controls.sortBy,
+    direction: controls.sortDirection,
+    search: controls.search,
+  });
+  if (!normalized) throw new Error(`unsupported-referrer-overview-tab:${tab}`);
+  const audience = request.context.policy.audience;
+  const deferred = deferredReferrerOverviewQualificationFromQuery(request);
+  const qualifiedInput = deferred
+    ? {
+        env: options.env,
+        deferred,
+        siteId: options.siteId,
+        window,
+        filters,
+        limit: normalized.limit,
+        includeFullUrl: normalized.includeFullUrl,
+        ...(normalized.search !== undefined
+          ? { search: normalized.search }
+          : {}),
+        cursorToken: normalized.cursorText,
+        audience,
+        sortBy: normalized.sortBy,
+        sortDirection: normalized.sortDirection,
+        ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
+      }
+    : undefined;
+  let cursor: Awaited<ReturnType<typeof decodeReferrersCursor>>;
+  try {
+    cursor = await decodeReferrersCursor(
+      options.env,
+      options.siteId,
+      window,
+      filters,
+      normalized.includeFullUrl,
+      normalized.search,
+      normalized.cursorText,
+      audience,
+      normalized.sortBy,
+      normalized.sortDirection,
+    );
+  } catch (error) {
+    if (
+      normalized.cursorText &&
+      qualifiedInput &&
+      error instanceof InvalidCursorError
+    ) {
+      const execution = await queryQualifiedReferrersPageFromD1({
+        ...qualifiedInput,
+        cursor: null,
+      });
+      if (execution.kind !== "executed") {
+        const fallbackFilters = await prepareDeferredEventQualificationFallback(
+          deferred!,
+        );
+        await queryReferrersPageFromD1(
+          options.env,
+          options.siteId,
+          window,
+          fallbackFilters,
+          normalized.limit,
+          normalized.includeFullUrl,
+          normalized.search,
+          null,
+          options.diagnostics,
+          audience,
+          normalized.sortBy,
+          normalized.sortDirection,
+        );
+      }
+      throw new InvalidCursorError("overview-tab");
+    }
+    throw error;
+  }
+  if (normalized.cursorText && !cursor) {
+    if (qualifiedInput) {
+      const execution = await queryQualifiedReferrersPageFromD1({
+        ...qualifiedInput,
+        cursor: null,
+      });
+      if (execution.kind !== "executed") {
+        const fallbackFilters = await prepareDeferredEventQualificationFallback(
+          deferred!,
+        );
+        await queryReferrersPageFromD1(
+          options.env,
+          options.siteId,
+          window,
+          fallbackFilters,
+          normalized.limit,
+          normalized.includeFullUrl,
+          normalized.search,
+          null,
+          options.diagnostics,
+          audience,
+          normalized.sortBy,
+          normalized.sortDirection,
+        );
+      }
+    }
+    throw new InvalidCursorError("overview-tab");
+  }
+  let page: Awaited<ReturnType<typeof queryReferrersPageFromD1>>;
+  if (qualifiedInput) {
+    const execution = await queryQualifiedReferrersPageFromD1({
+      ...qualifiedInput,
+      cursor,
+    });
+    if (execution.kind === "executed") {
+      page = execution.page;
+    } else {
+      const fallbackFilters = await prepareDeferredEventQualificationFallback(
+        deferred!,
+      );
+      page = await queryReferrersPageFromD1(
+        options.env,
+        options.siteId,
+        window,
+        fallbackFilters,
+        normalized.limit,
+        normalized.includeFullUrl,
+        normalized.search,
+        cursor,
+        options.diagnostics,
+        audience,
+        normalized.sortBy,
+        normalized.sortDirection,
+      );
+    }
+  } else {
+    page = await queryReferrersPageFromD1(
+      options.env,
+      options.siteId,
+      window,
+      filters,
+      normalized.limit,
+      normalized.includeFullUrl,
+      normalized.search,
+      cursor,
+      options.diagnostics,
+      audience,
+      normalized.sortBy,
+      normalized.sortDirection,
+    );
+  }
+  return page;
+}
+
 export async function overviewTabData(
   options: D1SiteRuntimeBindings,
   request: DimensionOverviewTabQuery | ChannelOverviewTabQuery,
+  operation: "dimension" | "channels" = "dimension",
 ): Promise<OverviewTabResult> {
   const tab = stringField(request, "tab");
   const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
@@ -222,21 +580,110 @@ export async function overviewTabData(
     const currentFilters = comparisonCurrent.filters ?? EMPTY_FILTER_DOCUMENT;
     const referenceFilters =
       comparisonReference.filters ?? EMPTY_FILTER_DOCUMENT;
-    const cursor = await decodeComparisonDimensionCursor(
-      options.env,
-      options.siteId,
-      currentWindow,
-      currentFilters,
-      referenceWindow,
-      referenceFilters,
-      `session.${pageKind}`,
-      search,
-      cursorText,
-      audience,
-      comparison.metric,
-      comparison.sortBy,
-      comparison.direction,
-    );
+    const deferredComparison =
+      deferredComparisonPageQualificationFromQuery(request);
+    let cursor: Awaited<ReturnType<typeof decodeComparisonDimensionCursor>> =
+      null;
+    let invalidComparisonCursor = false;
+    try {
+      cursor = await decodeComparisonDimensionCursor(
+        options.env,
+        options.siteId,
+        currentWindow,
+        currentFilters,
+        referenceWindow,
+        referenceFilters,
+        `session.${pageKind}`,
+        search,
+        cursorText,
+        audience,
+        comparison.metric,
+        comparison.sortBy,
+        comparison.direction,
+      );
+      invalidComparisonCursor = cursorText !== null && cursor === null;
+    } catch (error) {
+      if (!deferredComparison || !(error instanceof InvalidCursorError))
+        throw error;
+      invalidComparisonCursor = true;
+    }
+    if (invalidComparisonCursor && !deferredComparison)
+      throw new InvalidCursorError("overview-tab");
+    if (deferredComparison) {
+      const qualified = await tryQueryQualifiedComparisonDimensionPageFromD1({
+        env: options.env,
+        request,
+        siteId: options.siteId,
+        current: currentWindow,
+        currentFilters,
+        reference: referenceWindow,
+        referenceFilters,
+        selectExpr: `session.${pageKind}`,
+        audience,
+        cursor,
+        cursorToken: cursorText,
+        deferred: deferredComparison,
+        ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
+      });
+      if (qualified.kind === "executed") {
+        if (invalidComparisonCursor)
+          throw new InvalidCursorError("overview-tab");
+        return {
+          data: {
+            items: qualified.page.items.map((row) => ({
+              key: row.key,
+              value: row.key,
+              label: row.key,
+              views: row.views,
+              sessions: row.sessions,
+              visitors: row.visitors,
+              reference: row.reference,
+              change: row.change,
+            })),
+            pagination: qualified.page.pagination,
+          },
+        };
+      }
+      const fallbackFilters =
+        await prepareDeferredComparisonPageQualificationFallback(
+          deferredComparison,
+        );
+      if (invalidComparisonCursor) throw new InvalidCursorError("overview-tab");
+      const fallbackPage = await queryComparisonSessionPathPageFromD1(
+        options.env,
+        options.siteId,
+        currentWindow,
+        fallbackFilters.currentFilters,
+        referenceWindow,
+        fallbackFilters.referenceFilters,
+        limit,
+        pageKind,
+        {
+          metric: comparison.metric,
+          sortBy: comparison.sortBy,
+          direction: comparison.direction,
+          search,
+        },
+        cursor,
+        audience,
+        options.diagnostics,
+      );
+      return {
+        data: {
+          items: fallbackPage.items.map((row) => ({
+            key: row.key,
+            value: row.key,
+            label: row.key,
+            views: row.views,
+            sessions: row.sessions,
+            visitors: row.visitors,
+            reference: row.reference,
+            change: row.change,
+          })),
+          pagination: fallbackPage.pagination,
+        },
+      };
+    }
     if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
     const page = await queryComparisonSessionPathPageFromD1(
       options.env,
@@ -281,21 +728,113 @@ export async function overviewTabData(
       const currentFilters = comparisonCurrent.filters ?? EMPTY_FILTER_DOCUMENT;
       const referenceFilters =
         comparisonReference.filters ?? EMPTY_FILTER_DOCUMENT;
-      const cursor = await decodeComparisonDimensionCursor(
-        options.env,
-        options.siteId,
-        currentWindow,
-        currentFilters,
-        referenceWindow,
-        referenceFilters,
-        expression,
-        search,
-        cursorText,
-        audience,
-        comparison.metric,
-        comparison.sortBy,
-        comparison.direction,
-      );
+      const deferredComparison =
+        deferredComparisonPageQualificationFromQuery(request);
+      let cursor = null as Awaited<
+        ReturnType<typeof decodeComparisonDimensionCursor>
+      >;
+      let invalidComparisonCursor = false;
+      try {
+        cursor = await decodeComparisonDimensionCursor(
+          options.env,
+          options.siteId,
+          currentWindow,
+          currentFilters,
+          referenceWindow,
+          referenceFilters,
+          expression,
+          search,
+          cursorText,
+          audience,
+          comparison.metric,
+          comparison.sortBy,
+          comparison.direction,
+        );
+        invalidComparisonCursor = cursorText !== null && cursor === null;
+      } catch (error) {
+        if (!deferredComparison || !(error instanceof InvalidCursorError))
+          throw error;
+        invalidComparisonCursor = true;
+      }
+      if (invalidComparisonCursor && !deferredComparison)
+        throw new InvalidCursorError("overview-tab");
+      if (deferredComparison) {
+        const qualified = await tryQueryQualifiedComparisonDimensionPageFromD1({
+          env: options.env,
+          request,
+          siteId: options.siteId,
+          current: currentWindow,
+          currentFilters,
+          reference: referenceWindow,
+          referenceFilters,
+          selectExpr: expression,
+          audience,
+          cursor,
+          cursorToken: cursorText,
+          deferred: deferredComparison,
+          ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
+        });
+        if (qualified.kind === "executed") {
+          if (invalidComparisonCursor)
+            throw new InvalidCursorError("overview-tab");
+          return {
+            data: {
+              items: qualified.page.items.map((row) => ({
+                key: row.key,
+                value: row.key,
+                label: row.key,
+                views: row.views,
+                sessions: row.sessions,
+                visitors: row.visitors,
+                reference: row.reference,
+                change: row.change,
+              })),
+              pagination: qualified.page.pagination,
+            },
+          };
+        }
+        const fallbackFilters =
+          await prepareDeferredComparisonPageQualificationFallback(
+            deferredComparison,
+          );
+        if (invalidComparisonCursor)
+          throw new InvalidCursorError("overview-tab");
+        const fallbackPage = await queryComparisonDimensionPageFromD1(
+          options.env,
+          options.siteId,
+          currentWindow,
+          fallbackFilters.currentFilters,
+          referenceWindow,
+          fallbackFilters.referenceFilters,
+          limit,
+          expression,
+          {
+            metric: comparison.metric,
+            sortBy: comparison.sortBy,
+            direction: comparison.direction,
+            search,
+            selection,
+          },
+          cursor,
+          audience,
+          options.diagnostics,
+        );
+        return {
+          data: {
+            items: fallbackPage.items.map((row) => ({
+              key: row.key,
+              value: row.key,
+              label: row.key,
+              views: row.views,
+              sessions: row.sessions,
+              visitors: row.visitors,
+              reference: row.reference,
+              change: row.change,
+            })),
+            pagination: fallbackPage.pagination,
+          },
+        };
+      }
       if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
       const page = await queryComparisonDimensionPageFromD1(
         options.env,
@@ -334,6 +873,29 @@ export async function overviewTabData(
     }
   }
   if (tab === "source.channel") {
+    if (operation === "channels") {
+      const page = await overviewPageTablePage(
+        options,
+        request,
+        window,
+        filters,
+        tab,
+        {
+          limit,
+          cursorText,
+          sortBy,
+          sortDirection,
+          ...(search !== undefined ? { search } : {}),
+        },
+        "channels",
+      );
+      return {
+        data: {
+          items: mapTabs([...page.items]),
+          pagination: page.pagination,
+        },
+      };
+    }
     const selection = PAGE_DIMENSION_SELECTIONS.trafficChannel;
     const cursor = await decodeDimensionCursor(
       options.env,
@@ -373,6 +935,41 @@ export async function overviewTabData(
     };
   }
   if (kind === "source") {
+    const referrerRequest = normalizeReferrerOverviewTableRequest({
+      mode: request.mode,
+      tab,
+      limit,
+      cursor: cursorText,
+      sort: sortBy,
+      direction: sortDirection,
+      search,
+    });
+    if (
+      referrerRequest &&
+      request.comparison === undefined &&
+      request.current === undefined &&
+      request.reference === undefined
+    ) {
+      const page = await referrerOverviewPage(
+        options,
+        request,
+        window,
+        filters,
+        tab,
+        { limit, cursorText, sortBy, sortDirection, search },
+      );
+      return {
+        data: {
+          items: page.items.map((row) => ({
+            label: row.referrer,
+            views: row.views,
+            sessions: row.sessions,
+            visitors: row.visitors,
+          })),
+          pagination: page.pagination,
+        },
+      };
+    }
     const includeFullUrl = tab === "source.link";
     const referrerSortBy = sortBy === "visitors" ? "visitors" : "views";
     const cursor = await decodeReferrersCursor(
@@ -419,18 +1016,72 @@ export async function overviewTabData(
       "path" | "query" | "title" | "hostname" | "entry" | "exit";
     if (pageTab === "entry" || pageTab === "exit") {
       const pageKind = pageTab === "entry" ? "entry" : "exit";
-      const cursor = await decodeSessionPathDimensionCursor(
-        options.env,
-        options.siteId,
-        window,
-        filters,
-        pageKind,
-        search,
-        cursorText,
-        audience,
-        sortBy,
-        sortDirection,
-      );
+      const sessionTab =
+        pageKind === "entry" ? ("page.entry" as const) : ("page.exit" as const);
+      const deferredOverviewPage =
+        deferredSessionBoundaryOverviewPageQualificationFromQuery(request);
+      let cursor: Awaited<ReturnType<typeof decodeSessionPathDimensionCursor>>;
+      try {
+        cursor = await decodeSessionPathDimensionCursor(
+          options.env,
+          options.siteId,
+          window,
+          filters,
+          pageKind,
+          search,
+          cursorText,
+          audience,
+          sortBy,
+          sortDirection,
+        );
+      } catch (error) {
+        if (!(error instanceof InvalidCursorError)) throw error;
+        if (!deferredOverviewPage) throw new InvalidCursorError("overview-tab");
+        cursor = null;
+      }
+      if (deferredOverviewPage) {
+        const page = await querySessionBoundaryOverviewPageFromD1(
+          options.env,
+          options.siteId,
+          window,
+          filters,
+          limit,
+          pageKind,
+          options.diagnostics,
+          search,
+          cursor,
+          cursorText,
+          audience,
+          sortBy,
+          sortDirection,
+          {
+            deferredQualification: deferredOverviewPage,
+            request: {
+              mode: "overview-tab",
+              tab: sessionTab,
+              kind: pageKind,
+              dimension:
+                pageKind === "entry" ? "session.entryPath" : "session.exitPath",
+              limit,
+              cursorToken: cursorText,
+              ...(search !== undefined ? { search } : {}),
+              sortBy,
+              sortDirection,
+              audience,
+            },
+            queryTime: request.time,
+            ...(request.scopePlan ? { scopePlan: request.scopePlan } : {}),
+            mode: request.mode,
+            tab: sessionTab,
+          },
+        );
+        return {
+          data: {
+            items: mapTabs([...page.items]),
+            pagination: page.pagination,
+          },
+        };
+      }
       if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
       const page = await querySessionPathDimensionPageFromD1(
         options.env,
@@ -452,6 +1103,34 @@ export async function overviewTabData(
           pagination: page.pagination,
         },
       };
+    }
+    const pageTable = overviewPageTableDescriptor(tab);
+    if (pageTable?.family === "page") {
+      const page = await overviewPageTablePage(
+        options,
+        request,
+        window,
+        filters,
+        tab,
+        {
+          limit,
+          cursorText,
+          sortBy,
+          sortDirection,
+          ...(search !== undefined ? { search } : {}),
+        },
+      );
+      const items =
+        pageTab === "query"
+          ? page.items.map((row) => ({
+              value: row.value,
+              label: row.value,
+              views: row.views,
+              sessions: row.sessions,
+              visitors: row.visitors,
+            }))
+          : mapTabs([...page.items]);
+      return { data: { items, pagination: page.pagination } };
     }
     const selection = overviewDimensionSelection(`page.${pageTab}`);
     if (!selection) throw new Error(`unsupported-dimension:page.${pageTab}`);
@@ -493,35 +1172,22 @@ export async function overviewTabData(
     return { data: { items, pagination: page.pagination } };
   }
   if (kind === "client") {
-    const clientTab = tab.slice("client.".length) as
-      "browser" | "osVersion" | "deviceType" | "language" | "screenSize";
-    const selection = overviewDimensionSelection(`client.${clientTab}`);
-    if (!selection)
-      throw new Error(`unsupported-dimension:client.${clientTab}`);
-    const cursor = await decodeDimensionCursor(
-      options.env,
-      options.siteId,
+    const descriptor = overviewPageTableDescriptor(tab);
+    if (!descriptor || descriptor.family !== "client")
+      throw new Error(`unsupported-dimension:${tab}`);
+    const page = await overviewPageTablePage(
+      options,
+      request,
       window,
       filters,
-      selection,
-      search,
-      cursorText,
-      audience,
-      sortBy,
-      sortDirection,
-    );
-    if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
-    const page = await queryDimensionPageFromD1(
-      options.env,
-      options.siteId,
-      window,
-      filters,
-      limit,
-      selection,
-      { excludeEmpty: true, search, sortBy, sortDirection },
-      cursor,
-      undefined,
-      audience,
+      tab,
+      {
+        limit,
+        cursorText,
+        sortBy,
+        sortDirection,
+        ...(search ? { search } : {}),
+      },
     );
     return {
       data: {
@@ -531,8 +1197,8 @@ export async function overviewTabData(
     };
   }
   if (kind === "utm") {
-    const selection = overviewDimensionSelection(tab);
-    if (!selection) {
+    const descriptor = overviewPageTableDescriptor(tab);
+    if (!descriptor || descriptor.family !== "utm") {
       return {
         data: {
           items: [],
@@ -545,30 +1211,19 @@ export async function overviewTabData(
         },
       };
     }
-    const cursor = await decodeDimensionCursor(
-      options.env,
-      options.siteId,
+    const page = await overviewPageTablePage(
+      options,
+      request,
       window,
       filters,
-      selection,
-      search,
-      cursorText,
-      audience,
-      sortBy,
-      sortDirection,
-    );
-    if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
-    const page = await queryDimensionPageFromD1(
-      options.env,
-      options.siteId,
-      window,
-      filters,
-      limit,
-      selection,
-      { excludeEmpty: false, search, sortBy, sortDirection },
-      cursor,
-      undefined,
-      audience,
+      tab,
+      {
+        limit,
+        cursorText,
+        sortBy,
+        sortDirection,
+        ...(search ? { search } : {}),
+      },
     );
     return {
       data: {
@@ -579,32 +1234,16 @@ export async function overviewTabData(
   }
   const geoTab = tab.slice("geo.".length) as
     "country" | "region" | "city" | "continent" | "timezone" | "organization";
-  const selection = overviewDimensionSelection(`geo.${geoTab}`);
-  if (!selection) throw new Error(`unsupported-dimension:geo.${geoTab}`);
-  const cursor = await decodeDimensionCursor(
-    options.env,
-    options.siteId,
+  const descriptor = overviewPageTableDescriptor(tab);
+  if (!descriptor || descriptor.family !== "geo")
+    throw new Error(`unsupported-dimension:${tab}`);
+  const page = await overviewPageTablePage(
+    options,
+    request,
     window,
     filters,
-    selection,
-    search,
-    cursorText,
-    audience,
-    sortBy,
-    sortDirection,
-  );
-  if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
-  const page = await queryDimensionPageFromD1(
-    options.env,
-    options.siteId,
-    window,
-    filters,
-    limit,
-    selection,
-    { excludeEmpty: true, search, sortBy, sortDirection },
-    cursor,
-    undefined,
-    audience,
+    tab,
+    { limit, cursorText, sortBy, sortDirection, ...(search ? { search } : {}) },
   );
   return {
     data: {
@@ -621,9 +1260,7 @@ export async function overviewTabData(
 export function dimensionSelection(
   dimension: string,
 ): PageDimensionSelection | null {
-  if (dimension === "traffic.channel")
-    return PAGE_DIMENSION_SELECTIONS.trafficChannel;
-  return analyticsPageDimensionSelection(dimension);
+  return dimensionPageSelection(dimension);
 }
 export function registerSiteContractProviders(
   registry: AnalyticsProviderRegistry,
@@ -649,8 +1286,6 @@ export function registerSiteContractProviders(
             Number.isFinite(pageRequest.limit)
               ? pageRequest.limit
               : numberField(request, "limit", 20);
-          const cursorText =
-            typeof pageRequest.cursor === "string" ? pageRequest.cursor : null;
           const sortRecord =
             request.sort && typeof request.sort === "object"
               ? (request.sort as { key?: unknown; direction?: unknown })
@@ -665,20 +1300,62 @@ export function registerSiteContractProviders(
             typeof request.search === "string" ? request.search : undefined;
           const dimension = stringField(request, "dimension");
           if (dimension === "event.name") {
-            const rows = await queryEventTypeAggregate(
-              options.env,
-              options.siteId,
-              window,
-              filters,
-              limit,
-              search,
-            );
+            const eventNameRequest = normalizeEventNameDimensionListRequest({
+              mode: request.mode,
+              dimension,
+              page: request.page,
+              limit: request.limit,
+              search: request.search,
+              audience: request.context.policy.audience,
+            });
+            const deferred = eventNameRequest
+              ? deferredEventNameDimensionQualificationFromQuery(request)
+              : undefined;
+            const rows = eventNameRequest
+              ? await queryEventNameDimensionFromD1(
+                  options.env,
+                  options.siteId,
+                  window,
+                  request.time,
+                  filters,
+                  eventNameRequest,
+                  {
+                    ...(deferred ? { deferredQualification: deferred } : {}),
+                    ...(request.scopePlan
+                      ? { scopePlan: request.scopePlan }
+                      : {}),
+                    ...(options.diagnostics
+                      ? { diagnostics: options.diagnostics }
+                      : {}),
+                  },
+                )
+              : await queryEventTypeAggregate(
+                  options.env,
+                  options.siteId,
+                  window,
+                  filters,
+                  limit,
+                  search,
+                );
             return { value: { items: mapDimensionRows(rows) } };
           }
           if (
             dimension === "session.entryPath" ||
             dimension === "session.exitPath"
           ) {
+            const sessionBoundaryRequest =
+              normalizeSessionBoundaryDimensionRequest({
+                mode: request.mode,
+                dimension,
+                page: request.page,
+                limit: request.limit,
+                sort: request.sort,
+                search: request.search,
+                audience: request.context.policy.audience,
+              });
+            const deferred = sessionBoundaryRequest
+              ? deferredSessionBoundaryDimensionQualificationFromQuery(request)
+              : undefined;
             const rows = await querySessionBoundaryDimensionFromD1(
               options.env,
               options.siteId,
@@ -690,41 +1367,135 @@ export function registerSiteContractProviders(
               search,
               sortBy,
               sortDirection,
+              sessionBoundaryRequest
+                ? {
+                    request: sessionBoundaryRequest,
+                    queryTime: request.time,
+                    ...(request.scopePlan
+                      ? { scopePlan: request.scopePlan }
+                      : {}),
+                    audience: request.context.policy.audience,
+                    ...(deferred ? { deferredQualification: deferred } : {}),
+                  }
+                : undefined,
             );
             return { value: { items: mapDimensionRows(rows) } };
           }
-          const selection = dimensionSelection(dimension);
-          if (!selection) throw new Error(`unsupported-dimension:${dimension}`);
-          const cursor = await decodeDimensionCursor(
-            options.env,
-            options.siteId,
-            window,
-            filters,
-            selection,
-            search,
-            cursorText,
-            request.context.policy.audience,
-            sortBy,
-            sortDirection,
-          );
-          if (cursorText && !cursor) throw new InvalidCursorError("dimension");
-          const page = await queryDimensionPageFromD1(
-            options.env,
-            options.siteId,
-            window,
-            filters,
-            limit,
-            selection,
-            {
-              excludeEmpty: false,
-              search,
-              sortBy,
-              sortDirection,
-            },
-            cursor,
-            undefined,
-            request.context.policy.audience,
-          );
+          const normalized = normalizeDimensionPageRequest({
+            dimension,
+            page: request.page,
+            limit: request.limit,
+            sort: request.sort,
+            search: request.search,
+          });
+          if (!normalized)
+            throw new Error(`unsupported-dimension:${dimension}`);
+          const selection = normalized.selection;
+          const audience = request.context.policy.audience;
+          const deferred = deferredPageDimensionQualificationFromQuery(request);
+          const normalizedCursorText = normalized.cursorText;
+          const qualifiedInput = deferred
+            ? {
+                env: options.env,
+                siteId: options.siteId,
+                window,
+                queryTime: request.time,
+                filters,
+                ...(request.scopePlan ? { scopePlan: request.scopePlan } : {}),
+                family: "breakdown" as const,
+                dimension: normalized.dimension,
+                limit: normalized.limit,
+                selection,
+                options: {
+                  excludeEmpty: false as const,
+                  ...(normalized.search !== undefined
+                    ? { search: normalized.search }
+                    : {}),
+                  sortBy: normalized.sortBy,
+                  sortDirection: normalized.sortDirection,
+                },
+                cursor: null,
+                cursorToken: normalizedCursorText,
+                audience,
+                deferred,
+                ...(options.diagnostics
+                  ? { diagnostics: options.diagnostics }
+                  : {}),
+              }
+            : undefined;
+          let cursor: Awaited<ReturnType<typeof decodeDimensionCursor>>;
+          try {
+            cursor = await decodeDimensionCursor(
+              options.env,
+              options.siteId,
+              window,
+              filters,
+              selection,
+              normalized.search,
+              normalizedCursorText,
+              audience,
+              normalized.sortBy,
+              normalized.sortDirection,
+            );
+          } catch (error) {
+            if (
+              normalizedCursorText &&
+              qualifiedInput &&
+              error instanceof InvalidCursorError
+            )
+              await preflightQualifiedDimensionPageCursorFromD1(qualifiedInput);
+            throw error;
+          }
+          if (normalizedCursorText && !cursor) {
+            if (qualifiedInput)
+              await preflightQualifiedDimensionPageCursorFromD1(qualifiedInput);
+            throw new InvalidCursorError("dimension");
+          }
+          let page: Awaited<ReturnType<typeof queryDimensionPageFromD1>>;
+          if (qualifiedInput) {
+            const qualified = await queryQualifiedDimensionPageFromD1({
+              ...qualifiedInput,
+              cursor,
+            });
+            if (qualified.kind === "executed") {
+              page = qualified.page;
+            } else {
+              const fallbackFilters =
+                await prepareDeferredEventQualificationFallback(deferred!);
+              page = await queryDimensionPageFromD1(
+                options.env,
+                options.siteId,
+                window,
+                fallbackFilters,
+                normalized.limit,
+                selection,
+                qualifiedInput.options,
+                cursor,
+                options.diagnostics,
+                audience,
+              );
+            }
+          } else {
+            page = await queryDimensionPageFromD1(
+              options.env,
+              options.siteId,
+              window,
+              filters,
+              normalized.limit,
+              selection,
+              {
+                excludeEmpty: false,
+                ...(normalized.search !== undefined
+                  ? { search: normalized.search }
+                  : {}),
+                sortBy: normalized.sortBy,
+                sortDirection: normalized.sortDirection,
+              },
+              cursor,
+              options.diagnostics,
+              audience,
+            );
+          }
           return {
             value: {
               items: mapDimensionRows([...page.items]),
@@ -738,12 +1509,31 @@ export function registerSiteContractProviders(
       "geo-points",
       typedQueryProviderFor("geo-points", async (input) => {
         const request = input;
+        const deferred = deferredGeoPointsQualificationFromQuery(input);
+        let filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
+        let limit = geoPointsLimitFromQuery(request);
+        if (deferred) {
+          const execution = await executeGeoPointsQualificationProgram({
+            env: options.env,
+            query: request,
+            request: deferred,
+            diagnostics: options.diagnostics,
+          });
+          if (execution.kind === "executed") return { value: execution.value };
+          if (options.diagnostics)
+            options.diagnostics.advancedCountSqlFallbackReason =
+              execution.fallbackReason;
+          filters = await prepareDeferredEventQualificationFallback(
+            deferred.qualification,
+          );
+          limit = deferred.configuration.limit;
+        }
         const aggregate = await queryGeoPointAggregate(
           options.env,
           options.siteId,
           timeWindow(request.time),
-          request.filters ?? EMPTY_FILTER_DOCUMENT,
-          numberField(request, "limit", 5000),
+          filters,
+          limit,
         );
         return {
           value: {
@@ -760,15 +1550,51 @@ export function registerSiteContractProviders(
       typedQueryProviderFor("channels", async (input) => {
         const request = input;
         if (request.mode === "overview-tab") {
-          return { value: await overviewTabData(options, request) };
+          return { value: await overviewTabData(options, request, "channels") };
         }
-        const rows = await queryChannelAggregate(
-          options.env,
-          options.siteId,
-          timeWindow(request.time),
-          request.filters ?? EMPTY_FILTER_DOCUMENT,
-          numberField(request, "limit", 100),
-        );
+        const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
+        const window = timeWindow(request.time);
+        const limit = numberField(request, "limit", 100);
+        const deferredChannelList =
+          request.mode === "list"
+            ? deferredChannelListQualificationFromQuery(request)
+            : undefined;
+        const requestFlags = request as unknown as Record<string, unknown>;
+        const rows =
+          deferredChannelList && request.mode === "list"
+            ? (
+                await queryQualifiedChannelListFromD1({
+                  env: options.env,
+                  siteId: options.siteId,
+                  window,
+                  queryTime: request.time,
+                  filters,
+                  ...(request.scopePlan
+                    ? { scopePlan: request.scopePlan }
+                    : {}),
+                  mode: request.mode,
+                  limit,
+                  sourceLimit:
+                    typeof request.limit === "number"
+                      ? request.limit
+                      : undefined,
+                  audience: request.context.policy.audience,
+                  hasComparison: requestFlags.comparison !== undefined,
+                  hasCurrent: requestFlags.current !== undefined,
+                  hasReference: requestFlags.reference !== undefined,
+                  deferred: deferredChannelList,
+                  ...(options.diagnostics
+                    ? { diagnostics: options.diagnostics }
+                    : {}),
+                })
+              ).rows
+            : await queryChannelAggregate(
+                options.env,
+                options.siteId,
+                window,
+                filters,
+                limit,
+              );
         return {
           value: {
             items: rows.map((row) => ({
@@ -785,30 +1611,45 @@ export function registerSiteContractProviders(
       "filter-values",
       typedQueryProviderFor("filter-values", async (input) => {
         const request = input;
-        const field = stringField(request, "field");
-        const pageValue = request.page;
-        const page =
-          pageValue && typeof pageValue === "object"
-            ? (pageValue as { limit?: unknown; cursor?: unknown })
-            : {};
-        const limit = page
-          ? typeof page.limit === "number" && Number.isFinite(page.limit)
-            ? page.limit
-            : 50
-          : numberField(request, "limit", 50);
-        const cursor =
-          page && typeof page.cursor === "string" ? page.cursor : null;
-        const rows = await queryFilterValuesPageFromD1(
-          options.env,
-          options.siteId,
-          timeWindow(request.time),
-          request.filters ?? EMPTY_FILTER_DOCUMENT,
-          field,
-          limit,
-          cursor,
-          typeof request.search === "string" ? request.search : undefined,
-          request.context.policy.audience,
-        );
+        const qualified = deferredFilterValuesQualificationFromQuery(request);
+        let field: string;
+        let rows: Awaited<ReturnType<typeof queryFilterValuesPageFromD1>>;
+        if (qualified) {
+          field = qualified.configuration.field;
+          rows = await queryFilterValuesPageWithQualification({
+            env: options.env,
+            query: request,
+            request: qualified,
+            ...(options.diagnostics
+              ? { diagnostics: options.diagnostics }
+              : {}),
+          });
+        } else {
+          field = stringField(request, "field");
+          const pageValue = request.page;
+          const page =
+            pageValue && typeof pageValue === "object"
+              ? (pageValue as { limit?: unknown; cursor?: unknown })
+              : {};
+          const limit = page
+            ? typeof page.limit === "number" && Number.isFinite(page.limit)
+              ? page.limit
+              : 50
+            : numberField(request, "limit", 50);
+          const cursor =
+            page && typeof page.cursor === "string" ? page.cursor : null;
+          rows = await queryFilterValuesPageFromD1(
+            options.env,
+            options.siteId,
+            timeWindow(request.time),
+            request.filters ?? EMPTY_FILTER_DOCUMENT,
+            field,
+            limit,
+            cursor,
+            typeof request.search === "string" ? request.search : undefined,
+            request.context.policy.audience,
+          );
+        }
         return {
           value: {
             field,
@@ -827,16 +1668,50 @@ export function registerSiteContractProviders(
     .register(
       "retention",
       typedQueryProviderFor("retention", async (input) => {
-        const request = input;
+        const request = input as QueryInput &
+          Record<string, unknown> & {
+            readonly time: QueryTime;
+            readonly granularity?: unknown;
+          };
+        const deferred = deferredRetentionQualificationFromQuery(request);
+        const genericDeferred = deferredEventQualificationFromQuery(
+          request,
+          "retention",
+        );
+        if (
+          genericDeferred &&
+          (!deferred || genericDeferred !== deferred.qualification)
+        )
+          throw new Error("retention_qualification_request_changed");
+        const window = timeWindow(request.time);
+        const granularity = parseRetentionGranularity(
+          stringField(request, "granularity", "week"),
+        );
+        let filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
+        if (deferred) {
+          const qualified = await executeRetentionQualificationProgram({
+            env: options.env,
+            query: request,
+            deferred,
+            ...(options.diagnostics
+              ? { diagnostics: options.diagnostics }
+              : {}),
+          });
+          if (qualified.kind === "executed") return { value: qualified.result };
+          if (options.diagnostics)
+            options.diagnostics.advancedCountSqlFallbackReason =
+              qualified.fallbackReason;
+          filters = await prepareDeferredEventQualificationFallback(
+            deferred.qualification,
+          );
+        }
         return {
           value: await queryRetentionFromD1(
             options.env,
             options.siteId,
-            timeWindow(request.time),
-            request.filters ?? EMPTY_FILTER_DOCUMENT,
-            parseRetentionGranularity(
-              stringField(request, "granularity", "week"),
-            ),
+            window,
+            filters,
+            granularity,
           ),
         };
       }),
@@ -848,10 +1723,45 @@ export function registerSiteContractProviders(
           throw new Error("unsupported-performance-query-mode");
         }
         const request = input;
+        const deferred = deferredPerformanceSummaryQualificationFromQuery(
+          request as unknown as QueryInput & Record<string, unknown>,
+        );
         const window = timeWindow(request.time);
         const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
         switch (request.mode) {
-          case "summary":
+          case "summary": {
+            if (deferred) {
+              const qualified =
+                await executePerformanceSummaryQualificationProgram({
+                  env: options.env,
+                  query: request as unknown as QueryInput &
+                    Record<string, unknown>,
+                  deferred,
+                  ...(options.diagnostics
+                    ? { diagnostics: options.diagnostics }
+                    : {}),
+                });
+              if (qualified.kind === "executed")
+                return {
+                  value: {
+                    metrics: mapPerformanceSummaries([
+                      qualified.row as Record<string, unknown>,
+                    ]),
+                  },
+                };
+              const fallbackFilters =
+                await prepareDeferredEventQualificationFallback(
+                  deferred.qualification,
+                );
+              return {
+                value: await readSitePerformanceSummary({
+                  env: options.env,
+                  siteId: options.siteId,
+                  window,
+                  filters: fallbackFilters,
+                }),
+              };
+            }
             return {
               value: await readSitePerformanceSummary({
                 env: options.env,
@@ -860,7 +1770,40 @@ export function registerSiteContractProviders(
                 filters,
               }),
             };
-          case "timeseries":
+          }
+          case "timeseries": {
+            if (deferred?.configuration.mode === "timeseries") {
+              const qualified =
+                await executePerformanceTimeseriesQualificationProgram({
+                  env: options.env,
+                  query: request as unknown as QueryInput &
+                    Record<string, unknown>,
+                  deferred,
+                  ...(options.diagnostics
+                    ? { diagnostics: options.diagnostics }
+                    : {}),
+                });
+              if (qualified.kind === "executed")
+                return {
+                  value: serializePerformanceTimeseries(
+                    request.interval,
+                    qualified.trends,
+                  ),
+                };
+              const fallbackFilters =
+                await prepareDeferredEventQualificationFallback(
+                  deferred.qualification,
+                );
+              return {
+                value: await readSitePerformanceTimeseries({
+                  env: options.env,
+                  siteId: options.siteId,
+                  window,
+                  filters: fallbackFilters,
+                  interval: request.interval,
+                }),
+              };
+            }
             return {
               value: await readSitePerformanceTimeseries({
                 env: options.env,
@@ -870,7 +1813,46 @@ export function registerSiteContractProviders(
                 interval: request.interval,
               }),
             };
-          case "breakdown":
+          }
+          case "breakdown": {
+            if (deferred?.configuration.mode === "breakdown") {
+              const qualified =
+                await executePerformanceBreakdownDashboardQualificationProgram({
+                  env: options.env,
+                  query: request as unknown as QueryInput &
+                    Record<string, unknown>,
+                  deferred,
+                  ...(options.diagnostics
+                    ? { diagnostics: options.diagnostics }
+                    : {}),
+                });
+              if (
+                qualified.kind === "executed" &&
+                qualified.value.mode === "breakdown"
+              )
+                return {
+                  value: serializePerformanceBreakdown(
+                    qualified.value.dimension,
+                    qualified.value.metric,
+                    qualified.value.rows,
+                  ),
+                };
+              const fallbackFilters =
+                await prepareDeferredEventQualificationFallback(
+                  deferred.qualification,
+                );
+              return {
+                value: await readSitePerformanceBreakdown({
+                  env: options.env,
+                  siteId: options.siteId,
+                  window,
+                  filters: fallbackFilters,
+                  dimension: request.dimension,
+                  metric: request.metric,
+                  limit: request.limit ?? 20,
+                }),
+              };
+            }
             return {
               value: await readSitePerformanceBreakdown({
                 env: options.env,
@@ -882,7 +1864,39 @@ export function registerSiteContractProviders(
                 limit: request.limit ?? 20,
               }),
             };
-          case "dashboard":
+          }
+          case "dashboard": {
+            if (deferred?.configuration.mode === "dashboard") {
+              const qualified =
+                await executePerformanceBreakdownDashboardQualificationProgram({
+                  env: options.env,
+                  query: request as unknown as QueryInput &
+                    Record<string, unknown>,
+                  deferred,
+                  ...(options.diagnostics
+                    ? { diagnostics: options.diagnostics }
+                    : {}),
+                });
+              if (
+                qualified.kind === "executed" &&
+                qualified.value.mode === "dashboard"
+              )
+                return { value: qualified.value.value };
+              const fallbackFilters =
+                await prepareDeferredEventQualificationFallback(
+                  deferred.qualification,
+                );
+              return {
+                value: await queryPerformanceDashboardFromD1(
+                  options.env,
+                  options.siteId,
+                  window,
+                  request.interval,
+                  fallbackFilters,
+                  request.limit ?? 18,
+                ),
+              };
+            }
             return {
               value: await queryPerformanceDashboardFromD1(
                 options.env,
@@ -893,6 +1907,7 @@ export function registerSiteContractProviders(
                 request.limit ?? 18,
               ),
             };
+          }
         }
       }),
     )
@@ -902,6 +1917,48 @@ export function registerSiteContractProviders(
         const request = input;
         const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
         if (request.variant === "tabs") {
+          deferredPagesAggregatePageQualificationFromQuery(request);
+          const deferred = deferredPagesTabsQualificationFromQuery(request);
+          if (deferred?.pagesTabsRequest.configuration === "tabs-only") {
+            const limit = numberField(request, "limit", 20);
+            const qualified = await queryQualifiedPagesTabsFromD1({
+              env: options.env,
+              siteId: options.siteId,
+              window: timeWindow(request.time),
+              filters,
+              limit,
+              includeDetails: false,
+              cursorText: null,
+              audience: request.context.policy.audience,
+              deferred,
+              ...(request.scopePlan ? { scopePlan: request.scopePlan } : {}),
+              ...(options.diagnostics
+                ? { diagnostics: options.diagnostics }
+                : {}),
+              variant: request.variant,
+              includeTabs: request.includeTabs,
+            });
+            if (
+              qualified.kind === "executed" &&
+              qualified.configuration === "tabs-only"
+            )
+              return { value: qualified.tabs };
+            if (qualified.kind === "executed")
+              throw new Error(
+                "pages_tabs_qualification_configuration_mismatch",
+              );
+            const fallbackFilters =
+              await prepareDeferredEventQualificationFallback(deferred);
+            return {
+              value: await queryPageTabsAggregate(
+                options.env,
+                options.siteId,
+                timeWindow(request.time),
+                fallbackFilters,
+                limit,
+              ),
+            };
+          }
           return {
             value: await queryPageTabsAggregate(
               options.env,
@@ -913,6 +1970,7 @@ export function registerSiteContractProviders(
           };
         }
         if (request.includeTabs === true) {
+          deferredPagesAggregatePageQualificationFromQuery(request);
           const rawPage = request.page;
           const page =
             rawPage && typeof rawPage === "object"
@@ -926,6 +1984,61 @@ export function registerSiteContractProviders(
               : numberField(request, "limit", 20);
           const cursorText =
             page && typeof page.cursor === "string" ? page.cursor : null;
+          const deferred = deferredPagesTabsQualificationFromQuery(request);
+          if (deferred?.pagesTabsRequest.configuration === "pages-with-tabs") {
+            const qualified = await queryQualifiedPagesTabsFromD1({
+              env: options.env,
+              siteId: options.siteId,
+              window: timeWindow(request.time),
+              filters,
+              limit,
+              includeDetails: request.includeDetails === true,
+              cursorText,
+              audience: request.context.policy.audience,
+              deferred,
+              ...(request.scopePlan ? { scopePlan: request.scopePlan } : {}),
+              ...(options.diagnostics
+                ? { diagnostics: options.diagnostics }
+                : {}),
+              variant: request.variant,
+              includeTabs: request.includeTabs,
+            });
+            if (
+              qualified.kind === "executed" &&
+              qualified.configuration === "pages-with-tabs"
+            )
+              return { value: qualified.result, source: "raw" };
+            if (qualified.kind === "executed")
+              throw new Error(
+                "pages_tabs_qualification_configuration_mismatch",
+              );
+            const fallbackFilters =
+              await prepareDeferredEventQualificationFallback(deferred);
+            const fallbackCursor = await decodePagesCursor(
+              options.env,
+              options.siteId,
+              timeWindow(request.time),
+              fallbackFilters,
+              request.includeDetails === true,
+              cursorText,
+              request.context.policy.audience,
+            );
+            if (cursorText && !fallbackCursor)
+              throw new InvalidCursorError("pages");
+            return {
+              value: await queryPagesWithTabsFromD1(
+                options.env,
+                options.siteId,
+                timeWindow(request.time),
+                fallbackFilters,
+                limit,
+                request.includeDetails === true,
+                fallbackCursor,
+                request.context.policy.audience,
+              ),
+              source: "raw",
+            };
+          }
           const cursor = await decodePagesCursor(
             options.env,
             options.siteId,
@@ -962,12 +2075,62 @@ export function registerSiteContractProviders(
               : numberField(request, "limit", 20);
           const cursorText =
             typeof page.cursor === "string" ? page.cursor : null;
+          const includeDetails = request.includeDetails === true;
+          deferredPagesTabsQualificationFromQuery(request);
+          const deferred =
+            deferredPagesAggregatePageQualificationFromQuery(request);
+          if (deferred) {
+            const qualified = await queryQualifiedPagesAggregatePageFromD1({
+              env: options.env,
+              siteId: options.siteId,
+              window: timeWindow(request.time),
+              filters,
+              limit,
+              includeDetails,
+              cursorText,
+              audience: request.context.policy.audience,
+              deferred,
+              ...(request.scopePlan ? { scopePlan: request.scopePlan } : {}),
+              ...(options.diagnostics
+                ? { diagnostics: options.diagnostics }
+                : {}),
+              variant: request.variant,
+              includeTabs: request.includeTabs,
+            });
+            if (qualified.kind === "executed")
+              return { value: qualified.page, source: "raw" };
+            const fallbackFilters =
+              await prepareDeferredEventQualificationFallback(deferred);
+            const cursor = await decodePagesCursor(
+              options.env,
+              options.siteId,
+              timeWindow(request.time),
+              fallbackFilters,
+              includeDetails,
+              cursorText,
+              request.context.policy.audience,
+            );
+            if (cursorText && !cursor) throw new InvalidCursorError("pages");
+            return {
+              value: await queryPagesPageFromD1(
+                options.env,
+                options.siteId,
+                timeWindow(request.time),
+                fallbackFilters,
+                limit,
+                includeDetails,
+                cursor,
+                request.context.policy.audience,
+              ),
+              source: "raw",
+            };
+          }
           const cursor = await decodePagesCursor(
             options.env,
             options.siteId,
             timeWindow(request.time),
             filters,
-            request.includeDetails === true,
+            includeDetails,
             cursorText,
             request.context.policy.audience,
           );
@@ -979,7 +2142,7 @@ export function registerSiteContractProviders(
               timeWindow(request.time),
               filters,
               limit,
-              request.includeDetails === true,
+              includeDetails,
               cursor,
               request.context.policy.audience,
             ),
@@ -998,6 +2161,31 @@ export function registerSiteContractProviders(
             "topN",
             numberField(request, "limit", 5),
           );
+          const deferred = deferredReferrersQualificationFromQuery(input);
+          if (deferred?.referrersRequest.kind === "summary") {
+            const execution = await queryQualifiedReferrerSummaryFromD1({
+              env: options.env,
+              deferred,
+              siteId: options.siteId,
+              topN,
+              diagnostics: options.diagnostics,
+            });
+            if (execution.kind === "executed")
+              return { value: execution.summary, source: "raw" };
+            const fallbackFilters =
+              await prepareDeferredEventQualificationFallback(deferred);
+            return {
+              value: await queryReferrerSummaryFromD1(
+                options.env,
+                options.siteId,
+                timeWindow(request.time),
+                fallbackFilters,
+                topN,
+                options.diagnostics,
+              ),
+              source: "raw",
+            };
+          }
           return {
             value: await queryReferrerSummaryFromD1(
               options.env,
@@ -1005,6 +2193,7 @@ export function registerSiteContractProviders(
               timeWindow(request.time),
               request.filters ?? EMPTY_FILTER_DOCUMENT,
               topN,
+              options.diagnostics,
             ),
             source: "raw",
           };
@@ -1027,19 +2216,93 @@ export function registerSiteContractProviders(
             stringField(request, "direction") === "asc" ? "asc" : "desc";
           const window = timeWindow(request.time);
           const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
-          const cursor = await decodeReferrersCursor(
-            options.env,
-            options.siteId,
-            window,
-            filters,
-            request.includeFullUrl === true,
-            typeof request.search === "string" ? request.search : undefined,
-            cursorText,
-            request.context.policy.audience,
-            sortBy,
-            sortDirection,
-          );
-          if (cursorText && !cursor) throw new InvalidCursorError("referrers");
+          const includeFullUrl = request.includeFullUrl === true;
+          const search =
+            typeof request.search === "string" ? request.search : undefined;
+          const deferred = deferredReferrersQualificationFromQuery(input);
+          let cursor: ReferrerAggregateCursor | null = null;
+          let cursorError: InvalidCursorError | undefined;
+          try {
+            cursor = await decodeReferrersCursor(
+              options.env,
+              options.siteId,
+              window,
+              filters,
+              includeFullUrl,
+              search,
+              cursorText,
+              request.context.policy.audience,
+              sortBy,
+              sortDirection,
+            );
+          } catch (error) {
+            if (error instanceof InvalidCursorError && cursorText)
+              cursorError = error;
+            else throw error;
+          }
+          if (cursorText && (!cursor || cursorError)) {
+            if (deferred?.referrersRequest.kind === "page") {
+              const execution = await queryQualifiedReferrersFlatPageFromD1({
+                env: options.env,
+                deferred,
+                siteId: options.siteId,
+                window,
+                filters,
+                limit,
+                includeFullUrl,
+                search,
+                cursor: null,
+                cursorToken: cursorText,
+                audience: request.context.policy.audience,
+                sortBy,
+                sortDirection,
+                diagnostics: options.diagnostics,
+              });
+              if (execution.kind !== "executed") {
+                await prepareDeferredEventQualificationFallback(deferred);
+              }
+            }
+            throw cursorError ?? new InvalidCursorError("referrers");
+          }
+          if (deferred?.referrersRequest.kind === "page") {
+            const execution = await queryQualifiedReferrersFlatPageFromD1({
+              env: options.env,
+              deferred,
+              siteId: options.siteId,
+              window,
+              filters,
+              limit,
+              includeFullUrl,
+              search,
+              cursor,
+              cursorToken: cursorText,
+              audience: request.context.policy.audience,
+              sortBy,
+              sortDirection,
+              diagnostics: options.diagnostics,
+            });
+            if (execution.kind === "executed")
+              return { value: execution.page, source: "raw" };
+            const fallbackFilters =
+              await prepareDeferredEventQualificationFallback(deferred);
+            return {
+              value: await queryReferrersPageFromD1(
+                options.env,
+                options.siteId,
+                window,
+                fallbackFilters,
+                limit,
+                includeFullUrl,
+                search,
+                cursor,
+                options.diagnostics,
+                request.context.policy.audience,
+                sortBy,
+                sortDirection,
+              ),
+              source: "raw",
+            };
+          }
           return {
             value: await queryReferrersPageFromD1(
               options.env,
@@ -1047,8 +2310,8 @@ export function registerSiteContractProviders(
               window,
               filters,
               limit,
-              request.includeFullUrl === true,
-              typeof request.search === "string" ? request.search : undefined,
+              includeFullUrl,
+              search,
               cursor,
               undefined,
               request.context.policy.audience,
@@ -1064,6 +2327,41 @@ export function registerSiteContractProviders(
       "pages-dashboard",
       typedQueryProviderFor("pages-dashboard", async (input) => {
         const request = input;
+        const deferred = deferredPagesDashboardQualificationFromQuery(request);
+        if (deferred) {
+          const qualified = await executePagesDashboardQualificationProgram({
+            env: options.env,
+            siteId: options.siteId,
+            query: request as unknown as QueryInput & Record<string, unknown>,
+            ...(options.diagnostics
+              ? { diagnostics: options.diagnostics }
+              : {}),
+            ...(options.pagesDashboardQualificationCompile
+              ? { compileProgram: options.pagesDashboardQualificationCompile }
+              : {}),
+          });
+          if (qualified.kind === "executed" || qualified.kind === "empty")
+            return { value: qualified.value, source: "raw" };
+          const fallbackFilters =
+            await prepareDeferredEventQualificationFallback(
+              deferred.qualification,
+            );
+          return {
+            value: await queryPagesDashboard(options.env, options.siteId, {
+              window: timeWindow(request.time),
+              filters: fallbackFilters,
+              interval: deferred.configuration.interval,
+              search: deferred.configuration.search,
+              sort: request.sort,
+              page: {
+                limit: deferred.configuration.limit,
+                cursor: deferred.configuration.cursorText,
+              },
+              audience: deferred.configuration.audience,
+            }),
+            source: "raw",
+          };
+        }
         return {
           value: await queryPagesDashboard(options.env, options.siteId, {
             window: timeWindow(request.time),

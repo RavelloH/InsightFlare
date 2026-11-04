@@ -3,8 +3,11 @@ import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
 import {
   buildTechnologyReferrerChannelTrendPlan,
   buildTechnologyShareTrendPlan,
+  CLIENT_DIMENSIONS,
   TECHNOLOGY_SHARE_TREND_OUTPUTS,
   type TechnologyShareTrendDimension,
+  type TechnologyShareTrendQualificationConfiguration,
+  UTM_DIMENSIONS,
 } from "@/lib/edge/analytics/engine/technology-share-trend-report-plan";
 import { queryAnalyticsReportOutputSetRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import type {
@@ -41,27 +44,6 @@ export interface ReferrerAndChannelTrendResult {
 type ShareTrendQueryRow = Record<string, unknown>;
 type ShareTrendOutputKind = "single" | "source" | "channel";
 
-const CLIENT_DIMENSIONS: Readonly<
-  Record<ClientDimensionKey, TechnologyShareTrendDimension>
-> = {
-  browser: "browser",
-  operatingSystem: "operatingSystem",
-  osVersion: "osVersion",
-  deviceType: "deviceType",
-  language: "language",
-  screenSize: "screenSize",
-};
-
-const UTM_DIMENSIONS: Readonly<
-  Record<UtmDimensionKey, TechnologyShareTrendDimension>
-> = {
-  source: "utmSource",
-  medium: "utmMedium",
-  campaign: "utmCampaign",
-  term: "utmTerm",
-  content: "utmContent",
-};
-
 const FALLBACK_KEY_BASE: Readonly<
   Record<TechnologyShareTrendDimension, string>
 > = {
@@ -82,7 +64,7 @@ const FALLBACK_KEY_BASE: Readonly<
 };
 
 function mapShareTrendRows(
-  rows: ShareTrendQueryRow[],
+  rows: readonly ShareTrendQueryRow[],
   buckets: TimeBucket[],
   fallbackKeyBase: string,
   trendKind: ShareTrendOutputKind,
@@ -211,6 +193,36 @@ function mapShareTrendRows(
     data.push(pointsByBucket.get(item.index) ?? createEmptyPoint(item.index));
 
   return { series, data };
+}
+
+export function mapQualifiedShareTrendRows(
+  rows: readonly ShareTrendQueryRow[],
+  window: QueryWindow,
+  interval: Interval,
+  configuration: TechnologyShareTrendQualificationConfiguration,
+): ShareTrendResult | ReferrerAndChannelTrendResult {
+  const buckets = buildTimeBuckets(window, interval);
+  if (configuration.kind === "single")
+    return mapShareTrendRows(
+      rows,
+      buckets,
+      FALLBACK_KEY_BASE[configuration.dimension],
+      "single",
+    );
+  return {
+    source: mapShareTrendRows(
+      rows,
+      buckets,
+      FALLBACK_KEY_BASE.referrerDomain,
+      "source",
+    ),
+    channel: mapShareTrendRows(
+      rows,
+      buckets,
+      FALLBACK_KEY_BASE.trafficChannel,
+      "channel",
+    ),
+  };
 }
 
 function trendOutputIds(kind: ShareTrendOutputKind): readonly string[] {

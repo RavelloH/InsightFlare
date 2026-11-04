@@ -22,14 +22,18 @@ import {
 import type { QueryWindow } from "@/lib/edge/analytics/contract/types";
 import { buildOverviewTrendPlan } from "@/lib/edge/analytics/engine/overview-trend-report-plan";
 import {
-  buildTimeBuckets,
-  buildVisitFilterSql,
-  buildVisitSourceCte,
   scopedDatasetFor,
   scopedDatasetForUnpreparedReader,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import { buildVisitFilterSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-filters";
+import {
+  buildVisitSourceCte,
+  visitSourceBindings,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import {
+  buildTimeBuckets,
   timeBucketCase,
   timeBucketTimestamp,
-  visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { queryTrendFromD1 } from "@/lib/edge/analytics/providers/d1/internal/overview";
 import type { Env } from "@/lib/edge/types";
@@ -1101,7 +1105,7 @@ describe("Overview Trend Logical report", () => {
       buildTimeBuckets(WINDOW, "minute")[0]!.timestampMs,
     ]);
     expect(calls[0]).toContain("ORDER BY");
-    expect(calls[0]).toContain('" ASC) AS');
+    expect(calls[0]).toMatch(/ORDER BY [a-z][a-z\d]*\._c0 ASC\) AS/u);
   });
 
   it("records the logical plain, direct-event, and prepared SQL plans", async () => {

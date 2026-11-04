@@ -13,12 +13,12 @@ import {
   buildFunnelSqlPlan,
   FUNNEL_SQL_CTES_PER_STEP,
   FUNNEL_SQL_STRUCTURAL_BUDGET,
-} from "@/lib/edge/analytics/providers/d1/internal/funnel-planner";
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-funnel-oracle";
 import {
   applyObservationFilterToScopedDataset,
   assertSafeScopedObservationCtePrefix,
   type ScopedDatasetSql,
-} from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
 import { parseFilterDsl } from "@/lib/filter-contract";
 
 const dataset: ScopedDatasetSql = {

@@ -45,7 +45,7 @@ interface PageCardSourceInput {
 
 function pageAttribute(
   builder: LogicalPlanBuilder,
-  pages: ReturnType<typeof createPageReportSource>["pages"],
+  pages: LogicalRelationHandle,
   name: "pathname" | "title" | "startedAt" | "visitorId",
 ) {
   return builder.slot(pages, `attribute:page.report.${name}`);
@@ -80,16 +80,17 @@ function createPageCardSource(
       ),
     ),
   );
-  return { builder, pages, filteredPages, pathname };
+  return { builder, pages, filteredPages };
 }
 
-function buildTitleRows(
+/** Appends ranked title rows from a caller-selected Page subrelation. */
+export function appendPageCardTitleRows(
   builder: LogicalPlanBuilder,
-  pages: ReturnType<typeof createPageReportSource>["pages"],
-  filteredPages: LogicalRelationHandle,
-  pathname: ReturnType<typeof pageAttribute>,
+  pages: LogicalRelationHandle,
+  selectedPages: LogicalRelationHandle,
   titleLimit: number,
 ) {
+  const pathname = pageAttribute(builder, pages, "pathname");
   const normalizedTitle = builder.normalizeString(
     builder.coalesce(
       pageAttribute(builder, pages, "title"),
@@ -98,7 +99,7 @@ function buildTitleRows(
     "trim-ascii-space",
   );
   const rollup = builder.aggregate(
-    filteredPages,
+    selectedPages,
     { pathname, title: normalizedTitle },
     [{ name: "views", kind: "count-rows" }],
   );
@@ -127,9 +128,11 @@ function buildTitleRows(
   );
 }
 
-function addStandaloneTitleOutput(
+/** Declares the standalone titles output on a caller-owned builder. */
+export function appendPageCardTitlesOutput(
   builder: LogicalPlanBuilder,
-  rows: ReturnType<LogicalPlanBuilder["project"]>,
+  rows: LogicalRelationHandle,
+  outputId = PAGE_CARD_DETAILS_OUTPUT_IDS.titles,
 ): void {
   const projected = builder.project(rows, {
     pathname: builder.slot(rows, "pathname"),
@@ -141,16 +144,18 @@ function addStandaloneTitleOutput(
     { slot: "pathname", direction: "asc", nulls: "first" },
     { slot: "rowOrder", direction: "asc", nulls: "first" },
   ]);
-  builder.output(PAGE_CARD_DETAILS_OUTPUT_IDS.titles, sorted, [
+  builder.output(outputId, sorted, [
     { name: "pathname", slot: "pathname" },
     { name: "title", slot: "title" },
     { name: "views", slot: "views" },
   ]);
 }
 
-function addDetailTitleOutput(
+/** Declares detail-shaped title rows for a caller-owned multi-output plan. */
+export function appendPageCardDetailTitlesOutput(
   builder: LogicalPlanBuilder,
-  rows: ReturnType<LogicalPlanBuilder["project"]>,
+  rows: LogicalRelationHandle,
+  outputId = PAGE_CARD_DETAILS_OUTPUT_IDS.detailTitles,
 ): void {
   const projected = builder.project(rows, {
     rowKind: builder.literal("title", STRING),
@@ -162,7 +167,7 @@ function addDetailTitleOutput(
     rowOrder: builder.slot(rows, "rank"),
   });
   builder.output(
-    PAGE_CARD_DETAILS_OUTPUT_IDS.detailTitles,
+    outputId,
     projected,
     PAGE_CARD_DETAILS_MULTI_OUTPUT_FIELDS.map((name) => ({ name, slot: name })),
   );
@@ -183,17 +188,18 @@ function nonemptyVisitor(
   );
 }
 
-function buildTrendRows(
+/** Appends bucketed trend rows from a caller-selected Page subrelation. */
+export function appendPageCardTrendRows(
   builder: LogicalPlanBuilder,
-  pages: ReturnType<typeof createPageReportSource>["pages"],
-  filteredPages: LogicalRelationHandle,
-  pathname: ReturnType<typeof pageAttribute>,
+  pages: LogicalRelationHandle,
+  selectedPages: LogicalRelationHandle,
   interval: CalendarGranularity,
 ) {
+  const pathname = pageAttribute(builder, pages, "pathname");
   const bucket = builder.bucketIndex(
     builder.timeBucket(pageAttribute(builder, pages, "startedAt"), interval),
   );
-  return builder.aggregate(filteredPages, { pathname, bucket }, [
+  return builder.aggregate(selectedPages, { pathname, bucket }, [
     { name: "views", kind: "count-rows" },
     {
       name: "visitors",
@@ -206,9 +212,11 @@ function buildTrendRows(
   ]);
 }
 
-function addStandaloneTrendOutput(
+/** Declares the standalone trend output on a caller-owned builder. */
+export function appendPageCardTrendOutput(
   builder: LogicalPlanBuilder,
   rows: LogicalRelationHandle,
+  outputId = PAGE_CARD_DETAILS_OUTPUT_IDS.trend,
 ): void {
   const projected = builder.project(rows, {
     pathname: builder.slot(rows, "pathname"),
@@ -220,7 +228,7 @@ function addStandaloneTrendOutput(
     { slot: "pathname", direction: "asc", nulls: "first" },
     { slot: "bucket", direction: "asc", nulls: "first" },
   ]);
-  builder.output(PAGE_CARD_DETAILS_OUTPUT_IDS.trend, sorted, [
+  builder.output(outputId, sorted, [
     { name: "pathname", slot: "pathname" },
     { name: "bucket", slot: "bucket" },
     { name: "views", slot: "views" },
@@ -228,9 +236,11 @@ function addStandaloneTrendOutput(
   ]);
 }
 
-function addDetailTrendOutput(
+/** Declares detail-shaped trend rows for a caller-owned multi-output plan. */
+export function appendPageCardDetailTrendOutput(
   builder: LogicalPlanBuilder,
   rows: LogicalRelationHandle,
+  outputId = PAGE_CARD_DETAILS_OUTPUT_IDS.detailTrend,
 ): void {
   const projected = builder.project(rows, {
     rowKind: builder.literal("trend", STRING),
@@ -245,7 +255,7 @@ function addDetailTrendOutput(
     ),
   });
   builder.output(
-    PAGE_CARD_DETAILS_OUTPUT_IDS.detailTrend,
+    outputId,
     projected,
     PAGE_CARD_DETAILS_MULTI_OUTPUT_FIELDS.map((name) => ({ name, slot: name })),
   );
@@ -254,31 +264,31 @@ function addDetailTrendOutput(
 export function buildPageCardTitlesPlan(
   input: PageCardSourceInput & { readonly titleLimit: number },
 ) {
-  const { builder, pages, filteredPages, pathname } = createPageCardSource(
-    input,
-    ["page.report.pathname", "page.report.title"],
-  );
-  const rows = buildTitleRows(
+  const { builder, pages, filteredPages } = createPageCardSource(input, [
+    "page.report.pathname",
+    "page.report.title",
+  ]);
+  const rows = appendPageCardTitleRows(
     builder,
     pages,
     filteredPages,
-    pathname,
     input.titleLimit,
   );
-  addStandaloneTitleOutput(builder, rows);
+  appendPageCardTitlesOutput(builder, rows);
   return builder.finish();
 }
 
 export function buildPageCardTrendPlan(
   input: PageCardSourceInput & { readonly interval: CalendarGranularity },
 ) {
-  const { builder, pages, filteredPages, pathname } = createPageCardSource(
-    input,
-    ["page.report.pathname", "page.report.startedAt", "page.report.visitorId"],
-  );
-  addStandaloneTrendOutput(
+  const { builder, pages, filteredPages } = createPageCardSource(input, [
+    "page.report.pathname",
+    "page.report.startedAt",
+    "page.report.visitorId",
+  ]);
+  appendPageCardTrendOutput(
     builder,
-    buildTrendRows(builder, pages, filteredPages, pathname, input.interval),
+    appendPageCardTrendRows(builder, pages, filteredPages, input.interval),
   );
   return builder.finish();
 }
@@ -293,22 +303,19 @@ export function buildPageCardDetailsPlan(input: {
   readonly pathnames: readonly string[];
   readonly titleLimit: number;
 }) {
-  const { builder, pages, filteredPages, pathname } = createPageCardSource(
-    input,
-    [
-      "page.report.pathname",
-      "page.report.title",
-      "page.report.startedAt",
-      "page.report.visitorId",
-    ],
-  );
-  addDetailTitleOutput(
+  const { builder, pages, filteredPages } = createPageCardSource(input, [
+    "page.report.pathname",
+    "page.report.title",
+    "page.report.startedAt",
+    "page.report.visitorId",
+  ]);
+  appendPageCardDetailTitlesOutput(
     builder,
-    buildTitleRows(builder, pages, filteredPages, pathname, input.titleLimit),
+    appendPageCardTitleRows(builder, pages, filteredPages, input.titleLimit),
   );
-  addDetailTrendOutput(
+  appendPageCardDetailTrendOutput(
     builder,
-    buildTrendRows(builder, pages, filteredPages, pathname, input.interval),
+    appendPageCardTrendRows(builder, pages, filteredPages, input.interval),
   );
   return builder.finish();
 }

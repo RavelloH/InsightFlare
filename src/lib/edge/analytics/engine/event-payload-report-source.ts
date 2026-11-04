@@ -20,6 +20,14 @@ export interface EventPayloadReportSource {
   readonly occurrences: LogicalRelationHandle;
 }
 
+/** Appends business Event payload occurrences to an existing shared builder. */
+export function appendEventPayloadOccurrences(
+  builder: LogicalPlanBuilder,
+  events: LogicalRelationHandle,
+): LogicalRelationHandle {
+  return builder.eventPayloadOccurrences(events);
+}
+
 /** Shared selected Event source and guarded payload occurrence bag for reports. */
 export function buildEventPayloadReportSource(
   input: EventPayloadReportSourceInput,
@@ -32,7 +40,7 @@ export function buildEventPayloadReportSource(
     ...(input.scopePlan
       ? { preparedTimePolicy: "reader-window" as const }
       : {}),
-    attributes: ["event.report.eventName", "event.report.internalPk"],
+    attributes: ["event.report.eventName"],
     ...(input.eventName !== undefined
       ? {
           eventName: input.eventName,
@@ -42,6 +50,6 @@ export function buildEventPayloadReportSource(
   });
   return {
     builder,
-    occurrences: builder.eventPayloadOccurrences(events),
+    occurrences: appendEventPayloadOccurrences(builder, events),
   };
 }

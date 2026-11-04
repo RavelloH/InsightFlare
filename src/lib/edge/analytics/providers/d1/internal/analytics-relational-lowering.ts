@@ -4,50 +4,30 @@ import {
   and,
   antiJoin,
   avg,
-  callFunction,
   caseWhen,
   castInteger,
-  castReal,
-  castText,
-  coalesce,
-  concatText,
   constant,
   count,
   countDistinct,
-  DatabaseCompilerError,
   distinct,
   div,
   eq,
   filter,
-  gt,
   gte,
-  inList,
   isNotNull,
   isNull,
   join,
   limit as limitRelation,
-  lt,
-  lte,
   max,
   min,
   mul,
   neq,
-  not,
-  or,
   param,
   project,
   rowNumber,
   semiJoin,
   sort as sortRelation,
-  sub,
   sum,
-  textContains,
-  textEndsWith,
-  textLike,
-  textPosition,
-  textStartsWith,
-  textSubstring,
-  trimSpaces,
   union,
   window as windowRelation,
   windowCountRows,
@@ -59,7 +39,6 @@ import type {
   SqlExpression,
 } from "@/lib/db/query/expression";
 import type { WindowOrderKey } from "@/lib/db/query/plan";
-import { buildCalendarBucketPlan } from "@/lib/edge/analytics/contract";
 import type { LogicalExpr } from "@/lib/edge/analytics/engine/logical/expression";
 import type {
   RelationId,
@@ -96,21 +75,18 @@ import type {
 } from "@/lib/edge/analytics/engine/logical/slots";
 import { isSameLogicalValueType } from "@/lib/edge/analytics/engine/logical/slots";
 import { validateLogicalPlan } from "@/lib/edge/analytics/engine/logical/validator";
-import {
-  inferLogicalExpression,
-  LogicalPlanError,
-} from "@/lib/edge/analytics/engine/logical/validator";
-import { semanticAttribute } from "@/lib/edge/analytics/engine/semantic/attributes";
 import type { AnalyticsEntityKind } from "@/lib/edge/analytics/engine/semantic/entities";
-import { semanticPageDimension } from "@/lib/edge/analytics/engine/semantic/page-dimensions";
-import type { SemanticTemporalDomains } from "@/lib/edge/analytics/engine/semantic/time";
 
+import { nodePath, reject } from "./lowering/errors";
+import { ScopedSourceLoweringPass } from "./lowering/scoped-source/scoped-source-lowering-pass";
 import {
-  browserEngineExpression,
-  osVersionExpression,
-  trafficChannelExpression,
-} from "./analytics-legacy-scalar-filter-lowering";
-import { AnalyticsLegacyScopedStorage } from "./analytics-legacy-scoped-storage";
+  type AnalyticsEventPayloadKeySourceBinding,
+  analyticsEventPayloadMetadataProviderId,
+  type AnalyticsEventPayloadPropertiesMetadataField,
+  type AnalyticsProviderSourceBindingRequest,
+  assertAnalyticsEventDistinctIdentityLayout,
+  assertAnalyticsEventPayloadKeySchema,
+} from "./analytics-event-identity-proof";
 import {
   type AnalyticsDbRelation,
   AnalyticsRelationalStorage,
@@ -118,1450 +94,62 @@ import {
   type LoweredAnalyticsSource,
   normalizeAnalyticsRelationalSiteIds,
 } from "./analytics-relational-storage";
-import { DIRECT_REFERRER_FILTER_VALUE } from "./core-types";
+export { AnalyticsRelationalLoweringError } from "./lowering/errors";
+import type {
+  AnalysisResultQualificationBinding,
+  ComparisonPageQualificationGate,
+  ComparisonPageQualificationGateSide,
+} from "./lowering/comparison-page-admission";
+import {
+  type AnalyticsQualificationAdmissionPolicy,
+  applyAnalyticsQualificationAdmissionGate,
+  createAnalyticsQualificationAdmittedControls,
+  type EventQualificationAdmissionPolicy,
+} from "./lowering/event-summary-admission";
+import { lowerExpression } from "./lowering/expressions";
+import {
+  type EventPayloadAdmissionPacket,
+  type EventPayloadAdmissionPolicy,
+  type EventPayloadCountLoweringContext,
+  type EventPayloadPropertiesIdentity,
+  lowerEventPayloadProperties,
+} from "./lowering/payload-count";
+import {
+  asPredicate,
+  combinePredicates,
+  comparableAggregateValue,
+  logicalSlot,
+  type LoweredRelation,
+  type LoweredValue,
+  numericAggregateExpression,
+  projectedValues,
+  type ProviderProjectionValue,
+  readValue,
+  relationColumn,
+  scalarAggregateValue,
+  scalarValue,
+  slotColumn,
+  type SlotLayout,
+} from "./lowering/values";
+import {
+  buildComparisonDomainAggregate,
+  type CompletedComparisonDomainAdmission,
+  isComparisonDomainSingletonAggregate,
+  type RegisteredComparisonAdmissionBinding,
+} from "./comparison-domain-admission";
 
-type SlotLayout =
-  | {
-      readonly kind: "scalar";
-      readonly type: LogicalValueType;
-      readonly nullable: boolean;
-      readonly valueColumn: string;
-      readonly candidateBounded: boolean;
-    }
-  | {
-      readonly kind: "entity";
-      readonly type: Extract<LogicalValueType, { readonly kind: "entity" }>;
-      readonly nullable: boolean;
-      readonly keyColumns: readonly string[];
-      readonly presentColumn?: string;
-      readonly candidateBounded: boolean;
-    };
-
-interface LoweredRelation {
-  readonly relation: AnalyticsDbRelation;
-  readonly slots: ReadonlyMap<SlotId, SlotLayout>;
-  readonly candidateActivity?: "page" | "event" | "observation";
-  readonly candidateActivitySessionRelation?: RelationId;
-  readonly candidateActivitySessionRestricted: boolean;
-}
-
-type LoweredValue =
-  | {
-      readonly kind: "scalar";
-      readonly expression: AnyExpression;
-      readonly type: LogicalValueType;
-      readonly nullable: boolean;
-      readonly candidateBounded: boolean;
-    }
-  | {
-      readonly kind: "entity";
-      readonly entity: AnalyticsEntityKind;
-      readonly keys: readonly AnyExpression[];
-      readonly present: Predicate;
-      readonly nullable: boolean;
-      readonly candidateBounded: boolean;
-    };
-
-export class AnalyticsRelationalLoweringError extends Error {
-  constructor(
-    readonly node: string,
-    reason: string,
-  ) {
-    super(reason);
-    this.name = "AnalyticsRelationalLoweringError";
-  }
-}
-
-function nodePath(id: RelationId): string {
-  return `nodes[${String(id)}]`;
-}
-
-function reject(node: string, reason: string): never {
-  throw new AnalyticsRelationalLoweringError(node, reason);
-}
-
-function slotColumn(index: number, role: string): string {
-  return `s${index}_${role}`;
-}
-
-function relationColumn(
-  relation: AnalyticsDbRelation,
-  name: string,
-  path: string,
-): AnyExpression {
-  const value = relation.columns[name];
-  if (!value)
-    reject(path, `Missing lowered DB column ${JSON.stringify(name)}.`);
-  return value;
-}
-
-function asPredicate(expression: AnyExpression, path: string): Predicate {
-  if (expression.resultType.affinity !== "integer")
-    reject(path, "A relational predicate must lower to an integer expression.");
-  return expression as Predicate;
-}
-
-function logicalSlot(
-  slots: ReadonlyMap<SlotId, LogicalSlot>,
-  id: SlotId,
-  path: string,
-): LogicalSlot {
-  const slot = slots.get(id);
-  if (!slot) reject(path, `Missing validated Logical slot ${String(id)}.`);
-  return slot;
-}
-
-function layoutValue(
-  relation: AnalyticsDbRelation,
-  slot: SlotLayout,
-  path: string,
-): LoweredValue {
-  if (slot.kind === "scalar") {
-    return {
-      kind: "scalar",
-      expression: relationColumn(relation, slot.valueColumn, path),
-      type: slot.type,
-      nullable: slot.nullable,
-      candidateBounded: slot.candidateBounded,
-    };
-  }
-  return {
-    kind: "entity",
-    entity: slot.type.entity,
-    keys: slot.keyColumns.map((name) => relationColumn(relation, name, path)),
-    present: slot.presentColumn
-      ? asPredicate(relationColumn(relation, slot.presentColumn, path), path)
-      : isNotNull(relationColumn(relation, slot.keyColumns[0]!, path)),
-    nullable: slot.nullable,
-    candidateBounded: slot.candidateBounded,
-  };
-}
-
-function slotLayout(
-  value: LoweredValue,
-  slot: LogicalSlot,
-  index: number,
-  path: string,
-): {
-  readonly layout: SlotLayout;
-  readonly projections: Record<string, AnyExpression>;
-} {
-  const projections: Record<string, AnyExpression> = {};
-  if (value.kind === "scalar") {
-    if (slot.type.kind === "entity")
-      reject(path, "An entity slot cannot be mapped from a scalar expression.");
-    if (value.expression.resultType.nullable && !slot.nullable)
-      reject(
-        path,
-        "The lowered scalar can be NULL but the Logical slot cannot.",
-      );
-    const valueColumn = slotColumn(index, "v");
-    projections[valueColumn] = value.expression;
-    return {
-      layout: {
-        kind: "scalar",
-        type: slot.type,
-        nullable: slot.nullable,
-        valueColumn,
-        candidateBounded: value.candidateBounded,
-      },
-      projections,
-    };
-  }
-
-  if (
-    slot.type.kind !== "entity" ||
-    slot.type.entity !== value.entity ||
-    value.nullable !== slot.nullable
-  )
-    reject(path, "The lowered entity key does not match its Logical slot.");
-  if (value.keys.length === 0)
-    reject(path, "Entity identity requires at least one physical key column.");
-  const keyColumns = value.keys.map((expression, keyIndex) => {
-    const name = slotColumn(index, `k${keyIndex}`);
-    projections[name] = expression;
-    return name;
-  });
-  const presentColumn = slot.nullable
-    ? slotColumn(index, "present")
-    : undefined;
-  if (presentColumn) projections[presentColumn] = value.present;
-  return {
-    layout: {
-      kind: "entity",
-      type: slot.type,
-      nullable: slot.nullable,
-      keyColumns,
-      ...(presentColumn ? { presentColumn } : {}),
-      candidateBounded: value.candidateBounded,
-    },
-    projections,
-  };
-}
-
-function projectedValues(
-  input: AnalyticsDbRelation,
-  values: readonly { readonly slot: SlotId; readonly value: LoweredValue }[],
-  logicalSlots: ReadonlyMap<SlotId, LogicalSlot>,
-  path: string,
-): LoweredRelation {
-  const projections: Record<string, AnyExpression> = {};
-  const layouts = new Map<SlotId, SlotLayout>();
-  values.forEach(({ slot, value }, index) => {
-    const meta = logicalSlot(logicalSlots, slot, `${path}.${String(slot)}`);
-    const projected = slotLayout(value, meta, index, `${path}.${String(slot)}`);
-    Object.assign(projections, projected.projections);
-    layouts.set(slot, projected.layout);
-  });
-  if (values.length === 0) {
-    const relation: AnalyticsDbRelation = project(input, {
-      __analytics_row: param(1),
-    });
-    return {
-      relation,
-      slots: layouts,
-      candidateActivitySessionRestricted: false,
-    };
-  }
-  const relation: AnalyticsDbRelation = project(input, projections);
-  return {
-    relation,
-    slots: layouts,
-    candidateActivitySessionRestricted: false,
-  };
-}
-
-function readValue(
-  relation: AnalyticsDbRelation,
-  slots: ReadonlyMap<SlotId, SlotLayout>,
-  id: SlotId,
-  path: string,
-): LoweredValue {
-  const layout = slots.get(id);
-  if (!layout)
-    reject(path, `Slot ${String(id)} is not visible in this relation.`);
-  return layoutValue(relation, layout, path);
-}
-
-function combinePredicates(
-  operator: "and" | "or",
-  predicates: readonly Predicate[],
-  path: string,
-): Predicate {
-  const [first, ...rest] = predicates;
-  if (!first) reject(path, "A Boolean expression must contain a term.");
-  if (rest.length === 0) return first;
-  return operator === "and" ? and(first, ...rest) : or(first, ...rest);
-}
-
-function scalarValue(value: LoweredValue, path: string): AnyExpression {
-  if (value.kind !== "scalar")
-    reject(path, "This expression requires a scalar Logical value.");
-  return value.expression;
-}
-
-function scalarAggregateValue(
-  value: LoweredValue,
-  path: string,
-): Extract<LoweredValue, { readonly kind: "scalar" }> & {
-  readonly type: Extract<
-    LogicalValueType,
-    { readonly kind: "scalar" | "bucket" }
+interface EventPayloadKeyProof {
+  readonly request: AnalyticsProviderSourceBindingRequest;
+  readonly sourceBinding: AnalyticsEventPayloadKeySourceBinding;
+  readonly sourceSignature: string;
+  readonly scopeRelation: RelationId;
+  readonly carrierRelation: AnalyticsDbRelation;
+  readonly keyColumn: string;
+  readonly eventKeyLayout: SlotLayout;
+  readonly metadataColumns: ReadonlyMap<
+    AnalyticsEventPayloadPropertiesMetadataField,
+    string
   >;
-} {
-  if (
-    value.kind !== "scalar" ||
-    (value.type.kind !== "scalar" && value.type.kind !== "bucket")
-  )
-    reject(path, "Scalar aggregation requires a scalar Logical value.");
-  return { ...value, type: value.type };
-}
-
-function numericAggregateExpression(
-  value: LoweredValue,
-  path: string,
-): SqlExpression<number | null> {
-  const scalar = scalarAggregateValue(value, path);
-  if (scalar.type.kind !== "scalar" || scalar.type.scalar !== "number")
-    reject(path, "SUM and AVG require numeric scalar values.");
-  return scalar.expression as SqlExpression<number | null>;
-}
-
-function comparableAggregateValue(
-  value: LoweredValue,
-  path: string,
-): Extract<LoweredValue, { readonly kind: "scalar" }> & {
-  readonly type: Extract<LogicalValueType, { readonly kind: "scalar" }>;
-} {
-  const scalar = scalarAggregateValue(value, path);
-  if (scalar.type.kind !== "scalar")
-    reject(path, "MIN and MAX require a comparable scalar value.");
-  if (
-    !["string", "number", "boolean", "date", "datetime"].includes(
-      scalar.type.scalar,
-    )
-  )
-    reject(path, "MIN and MAX require a comparable scalar value.");
-  return {
-    ...scalar,
-    type: scalar.type as Extract<LogicalValueType, { readonly kind: "scalar" }>,
-  };
-}
-
-function applyTrim(
-  expression: AnyExpression,
-  logicalType: LogicalValueType,
-  path: string,
-): AnyExpression {
-  if (logicalType.kind !== "scalar" || logicalType.scalar !== "string")
-    reject(path, "Trim normalization is supported only for string values.");
-  return callFunction("trim", expression as SqlExpression<string | null>);
-}
-
-function trimAsciiSpaces(value: string): string {
-  return value.replace(/^ +| +$/g, "");
-}
-
-function foldAsciiCase(value: string): string {
-  return value.replace(/[A-Z]/g, (character) => character.toLowerCase());
-}
-
-function normalizeStringComparisonValue(
-  expression: AnyExpression,
-  logicalType: LogicalValueType,
-  literal: LogicalExpr | undefined,
-  normalization: "trim-ascii-space" | "ascii-case-fold",
-  path: string,
-): AnyExpression {
-  if (logicalType.kind !== "scalar" || logicalType.scalar !== "string")
-    reject(path, "String normalization is supported only for string values.");
-  if (literal?.kind === "literal" && typeof literal.value === "string") {
-    return param(
-      normalization === "trim-ascii-space"
-        ? trimAsciiSpaces(literal.value)
-        : foldAsciiCase(literal.value),
-    );
-  }
-  const text = expression as SqlExpression<string | null>;
-  return normalization === "trim-ascii-space"
-    ? trimSpaces(text)
-    : callFunction("lower", text);
-}
-
-function equalityForEntities(
-  left: LoweredValue,
-  right: LoweredValue,
-  operator: "eq" | "neq",
-  path: string,
-): Predicate {
-  if (left.kind !== "entity" || right.kind !== "entity")
-    reject(path, "Entity comparison requires two entity identities.");
-  if (
-    left.entity !== right.entity ||
-    left.keys.length !== right.keys.length ||
-    left.nullable ||
-    right.nullable
-  )
-    reject(
-      path,
-      "Only matching non-null composite entity keys are comparable.",
-    );
-  const equalKeys = combinePredicates(
-    "and",
-    left.keys.map((key, index) => eq(key, right.keys[index]!)),
-    path,
-  );
-  return operator === "eq" ? equalKeys : not(equalKeys);
-}
-
-function lowerExpression(
-  expression: LogicalExpr,
-  relation: AnalyticsDbRelation,
-  logicalSlots: ReadonlyMap<SlotId, LogicalSlot>,
-  visible: ReadonlyMap<SlotId, SlotLayout>,
-  path: string,
-  time: SemanticTemporalDomains,
-): LoweredValue {
-  switch (expression.kind) {
-    case "slot": {
-      return readValue(relation, visible, expression.slot, `${path}.slot`);
-    }
-    case "literal":
-      return {
-        kind: "scalar",
-        expression:
-          expression.value === null
-            ? constant(null)
-            : expression.value === ""
-              ? constant("")
-              : param(expression.value),
-        type: expression.valueType,
-        nullable: expression.value === null,
-        candidateBounded: false,
-      };
-    case "comparison": {
-      const left = lowerExpression(
-        expression.left,
-        relation,
-        logicalSlots,
-        visible,
-        `${path}.left`,
-        time,
-      );
-      const right = lowerExpression(
-        expression.right,
-        relation,
-        logicalSlots,
-        visible,
-        `${path}.right`,
-        time,
-      );
-      if (left.kind === "entity" || right.kind === "entity") {
-        if (expression.stringNormalization !== undefined)
-          reject(path, "Entity comparisons do not use string normalization.");
-        if (expression.operator !== "eq" && expression.operator !== "neq")
-          reject(path, "Entity identities support equality only.");
-        return {
-          kind: "scalar",
-          expression: equalityForEntities(
-            left,
-            right,
-            expression.operator,
-            path,
-          ),
-          type: { kind: "scalar", scalar: "boolean" },
-          nullable: false,
-          candidateBounded: false,
-        };
-      }
-      let leftExpression = scalarValue(left, `${path}.left`);
-      let rightExpression = scalarValue(right, `${path}.right`);
-      const leftType =
-        left.kind === "scalar"
-          ? left.type
-          : reject(path, "Entity comparison requires matching entity keys.");
-      const rightType =
-        right.kind === "scalar"
-          ? right.type
-          : reject(path, "Entity comparison requires matching entity keys.");
-      if (
-        (expression.stringNormalization === "trim-ascii-space" ||
-          expression.stringNormalization === "ascii-case-fold") &&
-        expression.operator !== "eq" &&
-        expression.operator !== "neq"
-      )
-        reject(
-          path,
-          "ASCII normalization is supported only for equality comparisons.",
-        );
-      if (expression.stringNormalization === "trim") {
-        leftExpression =
-          expression.left.kind === "literal" &&
-          typeof expression.left.value === "string"
-            ? param(expression.left.value.trim())
-            : applyTrim(leftExpression, leftType, `${path}.left`);
-        rightExpression =
-          expression.right.kind === "literal" &&
-          typeof expression.right.value === "string"
-            ? param(expression.right.value.trim())
-            : applyTrim(rightExpression, rightType, `${path}.right`);
-      } else if (
-        expression.stringNormalization === "trim-ascii-space" ||
-        expression.stringNormalization === "ascii-case-fold"
-      ) {
-        leftExpression = normalizeStringComparisonValue(
-          leftExpression,
-          leftType,
-          expression.left,
-          expression.stringNormalization,
-          `${path}.left`,
-        );
-        rightExpression = normalizeStringComparisonValue(
-          rightExpression,
-          rightType,
-          expression.right,
-          expression.stringNormalization,
-          `${path}.right`,
-        );
-      } else if (expression.stringNormalization !== undefined) {
-        reject(path, "This adapter does not support case-fold normalization.");
-      }
-      let predicate: Predicate;
-      switch (expression.operator) {
-        case "eq":
-          predicate = eq(leftExpression, rightExpression);
-          break;
-        case "neq":
-          predicate = neq(leftExpression, rightExpression);
-          break;
-        case "gt":
-          predicate = gt(leftExpression, rightExpression);
-          break;
-        case "gte":
-          predicate = gte(leftExpression, rightExpression);
-          break;
-        case "lt":
-          predicate = lt(leftExpression, rightExpression);
-          break;
-        case "lte":
-          predicate = lte(leftExpression, rightExpression);
-          break;
-      }
-      return {
-        kind: "scalar",
-        expression: predicate,
-        type: { kind: "scalar", scalar: "boolean" },
-        nullable: left.nullable || right.nullable,
-        candidateBounded: false,
-      };
-    }
-    case "boolean": {
-      const loweredTerms = expression.terms.map((term, index) =>
-        lowerExpression(
-          term,
-          relation,
-          logicalSlots,
-          visible,
-          `${path}.terms[${index}]`,
-          time,
-        ),
-      );
-      const terms = loweredTerms.map((term, index) =>
-        asPredicate(
-          scalarValue(term, `${path}.terms[${index}]`),
-          `${path}.terms[${index}]`,
-        ),
-      );
-      return {
-        kind: "scalar",
-        expression: combinePredicates(expression.operator, terms, path),
-        type: { kind: "scalar", scalar: "boolean" },
-        nullable: loweredTerms.some((term) => term.nullable),
-        candidateBounded: false,
-      };
-    }
-    case "not": {
-      const loweredInput = lowerExpression(
-        expression.input,
-        relation,
-        logicalSlots,
-        visible,
-        `${path}.input`,
-        time,
-      );
-      const input = scalarValue(loweredInput, `${path}.input`);
-      return {
-        kind: "scalar",
-        expression: not(asPredicate(input, path)),
-        type: { kind: "scalar", scalar: "boolean" },
-        nullable: loweredInput.nullable,
-        candidateBounded: false,
-      };
-    }
-    case "null-test": {
-      const input = lowerExpression(
-        expression.input,
-        relation,
-        logicalSlots,
-        visible,
-        `${path}.input`,
-        time,
-      );
-      const predicate =
-        input.kind === "entity"
-          ? expression.negated
-            ? input.present
-            : not(input.present)
-          : expression.negated
-            ? isNotNull(input.expression)
-            : isNull(input.expression);
-      return {
-        kind: "scalar",
-        expression: predicate,
-        type: { kind: "scalar", scalar: "boolean" },
-        nullable: false,
-        candidateBounded: false,
-      };
-    }
-    case "set-membership": {
-      const input = lowerExpression(
-        expression.input,
-        relation,
-        logicalSlots,
-        visible,
-        `${path}.input`,
-        time,
-      );
-      const inputExpression = scalarValue(input, `${path}.input`);
-      const inputType =
-        input.kind === "scalar"
-          ? input.type
-          : reject(`${path}.input`, "Membership requires a scalar value.");
-      let membershipValue = inputExpression;
-      if (expression.stringNormalization === "trim")
-        membershipValue = applyTrim(
-          inputExpression,
-          inputType,
-          `${path}.input`,
-        );
-      else if (expression.stringNormalization !== undefined)
-        reject(path, "This adapter does not support case-fold normalization.");
-      const values = expression.values.map((literal, index) => {
-        if (literal.kind !== "literal")
-          reject(
-            `${path}.values[${index}]`,
-            "Membership values must be literals.",
-          );
-        const value =
-          expression.stringNormalization === "trim" &&
-          typeof literal.value === "string"
-            ? literal.value.trim()
-            : literal.value;
-        return value;
-      });
-      const included = inList(membershipValue, values);
-      const predicate = expression.negated ? not(included) : included;
-      return {
-        kind: "scalar",
-        expression: predicate,
-        type: { kind: "scalar", scalar: "boolean" },
-        nullable:
-          input.nullable ||
-          expression.values.some((value) => value.value === null),
-        candidateBounded: false,
-      };
-    }
-    case "coalesce": {
-      const loweredValues = expression.values.map((item, index) =>
-        lowerExpression(
-          item,
-          relation,
-          logicalSlots,
-          visible,
-          `${path}.values[${index}]`,
-          time,
-        ),
-      );
-      if (loweredValues.length === 0)
-        reject(path, "COALESCE requires at least one value.");
-      const values = loweredValues.map((value, index) =>
-        scalarValue(value, `${path}.values[${index}]`),
-      );
-      const first = loweredValues[0]!;
-      if (first.kind !== "scalar")
-        reject(path, "COALESCE currently supports scalar values only.");
-      let expressionValue: AnyExpression = values[0]!;
-      for (const value of values.slice(1))
-        expressionValue = coalesce(expressionValue, value);
-      return {
-        kind: "scalar",
-        expression: expressionValue,
-        type: first.type,
-        nullable: loweredValues.every((value) => value.nullable),
-        candidateBounded: false,
-      };
-    }
-    case "case": {
-      const branchNullabilities: boolean[] = [];
-      const branches = expression.branches.map((branch, index) => {
-        const when = lowerExpression(
-          branch.when,
-          relation,
-          logicalSlots,
-          visible,
-          `${path}.branches[${index}].when`,
-          time,
-        );
-        const then = lowerExpression(
-          branch.then,
-          relation,
-          logicalSlots,
-          visible,
-          `${path}.branches[${index}].then`,
-          time,
-        );
-        if (
-          when.kind !== "scalar" ||
-          when.type.kind !== "scalar" ||
-          when.type.scalar !== "boolean"
-        )
-          reject(
-            `${path}.branches[${index}].when`,
-            "CASE conditions must lower to boolean scalar values.",
-          );
-        if (then.kind !== "scalar")
-          reject(
-            `${path}.branches[${index}].then`,
-            "CASE branches cannot return entity values.",
-          );
-        branchNullabilities.push(then.nullable);
-        return {
-          when: asPredicate(when.expression, `${path}.branches[${index}].when`),
-          then: then.expression,
-        };
-      });
-      const otherwise = lowerExpression(
-        expression.otherwise,
-        relation,
-        logicalSlots,
-        visible,
-        `${path}.otherwise`,
-        time,
-      );
-      if (otherwise.kind !== "scalar")
-        reject(path, "CASE fallback cannot return an entity value.");
-      return {
-        kind: "scalar",
-        expression: caseWhen(
-          branches as [
-            { when: Predicate; then: AnyExpression },
-            ...{ when: Predicate; then: AnyExpression }[],
-          ],
-          otherwise.expression,
-        ),
-        type: otherwise.type,
-        nullable: otherwise.nullable || branchNullabilities.some(Boolean),
-        candidateBounded: false,
-      };
-    }
-    case "string-match": {
-      const input = lowerExpression(
-        expression.input,
-        relation,
-        logicalSlots,
-        visible,
-        `${path}.input`,
-        time,
-      );
-      if (
-        input.kind !== "scalar" ||
-        input.type.kind !== "scalar" ||
-        input.type.scalar !== "string"
-      )
-        reject(path, "String matching requires a string scalar expression.");
-      if (expression.semantics === "legacy-record-search-v1") {
-        if (
-          expression.operator !== "contains" ||
-          expression.caseSensitive ||
-          expression.stringNormalization !== undefined
-        )
-          reject(path, "The legacy record-search expression is malformed.");
-        const nullableText = input.expression as SqlExpression<
-          string | null,
-          ExpressionResultType<"text", boolean>
-        >;
-        const normalized = callFunction(
-          "lower",
-          trimSpaces(coalesce(nullableText, param(""))),
-        );
-        const escaped = expression.value
-          .replaceAll("\\", "\\\\")
-          .replaceAll("%", "\\%")
-          .replaceAll("_", "\\_");
-        return {
-          kind: "scalar",
-          expression: textLike(normalized, param(`%${escaped}%`), "\\"),
-          type: { kind: "scalar", scalar: "boolean" },
-          nullable: false,
-          candidateBounded: false,
-        };
-      }
-      if (expression.semantics === "legacy-report-search-v1") {
-        if (
-          expression.operator !== "contains" ||
-          expression.caseSensitive ||
-          expression.stringNormalization !== undefined ||
-          expression.value !== expression.value.trim().toLowerCase()
-        )
-          reject(path, "The legacy report-search expression is malformed.");
-        const nullableText = input.expression as SqlExpression<
-          string | null,
-          ExpressionResultType<"text", boolean>
-        >;
-        const normalized = callFunction(
-          "lower",
-          coalesce(nullableText, param("")),
-        );
-        const escaped = expression.value
-          .replaceAll("\\", "\\\\")
-          .replaceAll("%", "\\%")
-          .replaceAll("_", "\\_");
-        return {
-          kind: "scalar",
-          expression: textLike(normalized, param(`%${escaped}%`), "\\"),
-          type: { kind: "scalar", scalar: "boolean" },
-          nullable: false,
-          candidateBounded: false,
-        };
-      }
-      if (!expression.caseSensitive)
-        reject(
-          path,
-          "Case-insensitive matching is not supported by this adapter.",
-        );
-
-      let value = expression.value;
-      let stringInput = input.expression as SqlExpression<string | null>;
-      if (expression.stringNormalization === "trim") {
-        stringInput = applyTrim(
-          stringInput,
-          input.type,
-          `${path}.input`,
-        ) as SqlExpression<string | null>;
-        value = value.trim();
-      } else if (expression.stringNormalization !== undefined) {
-        reject(path, "This adapter does not support case-fold normalization.");
-      }
-
-      let predicate: AnyExpression;
-      try {
-        predicate =
-          expression.operator === "starts-with"
-            ? textStartsWith(stringInput, value)
-            : expression.operator === "ends-with"
-              ? textEndsWith(stringInput, value)
-              : textContains(stringInput, value);
-      } catch (error) {
-        if (
-          error instanceof DatabaseCompilerError &&
-          error.code === "invalid_plan" &&
-          error.message.includes("unpaired UTF-16 surrogate")
-        )
-          reject(`${path}.value`, error.message);
-        throw error;
-      }
-      return {
-        kind: "scalar",
-        expression: predicate,
-        type: { kind: "scalar", scalar: "boolean" },
-        nullable: input.nullable,
-        candidateBounded: false,
-      };
-    }
-    case "string-normalize": {
-      const input = lowerExpression(
-        expression.input,
-        relation,
-        logicalSlots,
-        visible,
-        `${path}.input`,
-        time,
-      );
-      if (
-        input.kind !== "scalar" ||
-        input.type.kind !== "scalar" ||
-        input.type.scalar !== "string"
-      )
-        reject(path, "String normalization requires a string scalar value.");
-      if (expression.normalization !== "trim-ascii-space")
-        reject(path, "The string normalization mode is unsupported.");
-      return {
-        kind: "scalar",
-        expression: trimSpaces(
-          input.expression as SqlExpression<string | null>,
-        ),
-        type: { kind: "scalar", scalar: "string" },
-        nullable: input.nullable,
-        candidateBounded: input.candidateBounded,
-      };
-    }
-    case "number-report-text": {
-      const input = lowerExpression(
-        expression.input,
-        relation,
-        logicalSlots,
-        visible,
-        `${path}.input`,
-        time,
-      );
-      if (
-        expression.semantics !== "legacy-report-number-v1" ||
-        input.kind !== "scalar" ||
-        input.type.kind !== "scalar" ||
-        input.type.scalar !== "number" ||
-        input.type.unit !== undefined ||
-        !["integer", "real", "numeric"].includes(
-          input.expression.resultType.affinity,
-        )
-      )
-        reject(
-          path,
-          "Legacy report number text requires a unitless numeric scalar.",
-        );
-      const numericExpression = input.expression as SqlExpression<
-        number | null,
-        ExpressionResultType<"integer" | "real" | "numeric", boolean>
-      >;
-      return {
-        kind: "scalar",
-        expression: castText(numericExpression),
-        type: { kind: "scalar", scalar: "string" },
-        nullable: input.nullable,
-        candidateBounded: input.candidateBounded,
-      };
-    }
-    case "text-concatenation": {
-      if (expression.values.length < 2)
-        reject(path, "Text concatenation requires at least two operands.");
-      const values = expression.values.map((value, index) =>
-        lowerExpression(
-          value,
-          relation,
-          logicalSlots,
-          visible,
-          `${path}.values[${index}]`,
-          time,
-        ),
-      );
-      const textValues = values.map((value) => {
-        if (
-          value.kind !== "scalar" ||
-          value.type.kind !== "scalar" ||
-          value.type.scalar !== "string"
-        )
-          reject(path, "Text concatenation accepts only scalar strings.");
-        return value.expression as SqlExpression<
-          string | null,
-          ExpressionResultType<"text", boolean>
-        >;
-      });
-      const concatenated = textValues
-        .slice(1)
-        .reduce<
-          SqlExpression<string | null, ExpressionResultType<"text", boolean>>
-        >((previous, next) => concatText(previous, next), textValues[0]!);
-      return {
-        kind: "scalar",
-        expression: concatenated,
-        type: { kind: "scalar", scalar: "string" },
-        nullable: values.some((value) => value.nullable),
-        candidateBounded: values.some((value) => value.candidateBounded),
-      };
-    }
-    case "page-dimension": {
-      const definition = semanticPageDimension(expression.dimension);
-      const names = expression.dependencies.map(
-        (dependency) => dependency.attribute,
-      );
-      if (
-        !definition ||
-        names.length !== definition.dependencies.length ||
-        new Set(names).size !== names.length ||
-        definition.dependencies.some((attribute) => !names.includes(attribute))
-      )
-        reject(
-          path,
-          "Page dimension dependencies do not match its definition.",
-        );
-
-      const dependencies = new Map<string, SqlExpression>();
-      const nullableDependencies = new Map<string, boolean>();
-      for (const dependency of expression.dependencies) {
-        const attribute = semanticAttribute(dependency.attribute);
-        const value = lowerExpression(
-          dependency.expression,
-          relation,
-          logicalSlots,
-          visible,
-          `${path}.dependencies.${dependency.attribute}`,
-          time,
-        );
-        if (
-          !attribute ||
-          attribute.valueType.kind !== "scalar" ||
-          value.kind !== "scalar" ||
-          value.type.kind !== "scalar" ||
-          !isSameLogicalValueType(value.type, attribute.valueType)
-        )
-          reject(
-            `${path}.dependencies.${dependency.attribute}`,
-            "Page dimension dependency has an incompatible scalar type.",
-          );
-        const expectedAffinity = attribute.valueType.scalar;
-        const actualAffinity = value.expression.resultType.affinity;
-        if (
-          (expectedAffinity === "string" && actualAffinity !== "text") ||
-          (expectedAffinity === "number" &&
-            !["integer", "real", "numeric"].includes(actualAffinity))
-        )
-          reject(
-            `${path}.dependencies.${dependency.attribute}`,
-            "Page dimension dependency has an incompatible SQL affinity.",
-          );
-        dependencies.set(
-          dependency.attribute,
-          value.expression as SqlExpression,
-        );
-        nullableDependencies.set(dependency.attribute, value.nullable);
-      }
-      const get = (attribute: string): SqlExpression => {
-        const value = dependencies.get(attribute);
-        if (!value)
-          reject(path, `Missing page dimension dependency ${attribute}.`);
-        return value;
-      };
-      const text = (attribute: string) =>
-        get(attribute) as SqlExpression<string | null>;
-      let result: AnyExpression;
-      switch (expression.dimension) {
-        case "countryCode":
-          result = callFunction(
-            "upper",
-            trimSpaces(coalesce(text("page.report.country"), constant(""))),
-          );
-          break;
-        case "trafficChannel":
-          result = trafficChannelExpression({
-            referrer_host: get("page.report.referrerHost"),
-            utm_source: get("page.report.utmSource"),
-            utm_medium: get("page.report.utmMedium"),
-            utm_campaign: get("page.report.utmCampaign"),
-          });
-          break;
-        case "browserEngine":
-          result = browserEngineExpression(
-            get("page.report.browser"),
-            get("page.report.os"),
-          );
-          break;
-        case "osVersion":
-          result = osVersionExpression(
-            get("page.report.os"),
-            get("page.report.osVersion"),
-          );
-          break;
-        case "overviewOsVersion": {
-          const os = trimSpaces(coalesce(text("page.report.os"), constant("")));
-          const version = trimSpaces(
-            coalesce(text("page.report.osVersion"), constant("")),
-          );
-          result = caseWhen(
-            [
-              {
-                when: and(neq(os, constant("")), neq(version, constant(""))),
-                then: concatText(os, constant(" "), version),
-              },
-              { when: neq(os, constant("")), then: os },
-              { when: neq(version, constant("")), then: version },
-            ],
-            constant(""),
-          );
-          break;
-        }
-        case "browserMajorVersion": {
-          const version = text("page.report.browserVersion") as SqlExpression<
-            string | null,
-            ExpressionResultType<"text", boolean>
-          >;
-          const position = textPosition(version, constant("."));
-          result = trimSpaces(
-            caseWhen(
-              [
-                { when: eq(version, constant("")), then: constant("") },
-                {
-                  when: gt(position, constant(0)),
-                  then: textSubstring(
-                    version,
-                    constant(1),
-                    sub(position, constant(1)),
-                  ),
-                },
-              ],
-              version,
-            ),
-          );
-          break;
-        }
-        case "screenSize": {
-          const width = get("page.report.screenWidth") as SqlExpression<
-            number | null,
-            ExpressionResultType<"integer" | "real" | "numeric", boolean>
-          >;
-          const height = get("page.report.screenHeight") as SqlExpression<
-            number | null,
-            ExpressionResultType<"integer" | "real" | "numeric", boolean>
-          >;
-          result = caseWhen(
-            [
-              {
-                when: and(gt(width, constant(0)), gt(height, constant(0))),
-                then: coalesce(
-                  concatText(castText(width), constant("x"), castText(height)),
-                  constant(""),
-                ),
-              },
-            ],
-            constant(""),
-          );
-          break;
-        }
-        case "referrerDomain": {
-          const host = trimSpaces(
-            coalesce(text("page.report.referrerHost"), constant("")),
-          );
-          result = caseWhen(
-            [{ when: neq(host, constant("")), then: host }],
-            constant(DIRECT_REFERRER_FILTER_VALUE),
-          );
-          break;
-        }
-        case "geoRegion":
-        case "geoCity": {
-          const country = trimSpaces(text("page.report.country"));
-          const regionCode = trimSpaces(text("page.report.regionCode"));
-          const region = trimSpaces(text("page.report.region"));
-          const selectedRegion = caseWhen(
-            [{ when: neq(regionCode, constant("")), then: regionCode }],
-            region,
-          );
-          const allEmpty = [
-            eq(country, constant("")),
-            eq(regionCode, constant("")),
-            eq(region, constant("")),
-          ];
-          if (expression.dimension === "geoCity") {
-            const city = trimSpaces(text("page.report.city"));
-            allEmpty.push(eq(city, constant("")));
-          }
-          const separator = constant("::");
-          const combined =
-            expression.dimension === "geoCity"
-              ? concatText(
-                  country,
-                  separator,
-                  selectedRegion,
-                  separator,
-                  region,
-                  separator,
-                  trimSpaces(text("page.report.city")),
-                )
-              : concatText(
-                  country,
-                  separator,
-                  selectedRegion,
-                  separator,
-                  region,
-                );
-          result = caseWhen(
-            [
-              {
-                when: and(...(allEmpty as [Predicate, ...Predicate[]])),
-                then: constant(""),
-              },
-            ],
-            combined,
-          );
-          break;
-        }
-        default:
-          return reject(path, "The page dimension is unsupported.");
-      }
-      if (result.resultType.affinity !== "text")
-        reject(path, "Page dimension expression must have text affinity.");
-      return {
-        kind: "scalar",
-        expression: result,
-        type: { kind: "scalar", scalar: "string" },
-        nullable:
-          definition.nullableFromDependencies &&
-          [...nullableDependencies.values()].some(Boolean),
-        candidateBounded: false,
-      };
-    }
-    case "absolute": {
-      const input = lowerExpression(
-        expression.input,
-        relation,
-        logicalSlots,
-        visible,
-        `${path}.input`,
-        time,
-      );
-      if (
-        input.kind !== "scalar" ||
-        input.type.kind !== "scalar" ||
-        input.type.scalar !== "number"
-      )
-        reject(path, "ABS requires a numeric scalar expression.");
-      return {
-        kind: "scalar",
-        expression: callFunction(
-          "abs",
-          input.expression as SqlExpression<number | null>,
-        ),
-        type: input.type,
-        nullable: input.nullable,
-        candidateBounded: input.candidateBounded,
-      };
-    }
-    case "arithmetic": {
-      if (
-        !["add", "subtract", "multiply", "divide"].includes(expression.operator)
-      )
-        reject(path, "The arithmetic operator is unsupported.");
-      if (
-        expression.operator === "divide" &&
-        expression.zeroDenominator !== "null"
-      )
-        reject(path, "Division must map a zero denominator to NULL.");
-      let inferred;
-      try {
-        inferred = inferLogicalExpression(
-          expression,
-          (id, slotPath) => {
-            if (!visible.has(id))
-              reject(slotPath, "Arithmetic references a hidden Logical slot.");
-            return logicalSlot(logicalSlots, id, slotPath);
-          },
-          path,
-        );
-      } catch (error) {
-        if (error instanceof AnalyticsRelationalLoweringError) throw error;
-        if (error instanceof LogicalPlanError)
-          reject(path, "Arithmetic operand type or unit is unsupported.");
-        throw error;
-      }
-      if (
-        expression.operator === "add" &&
-        expression.right.kind === "elapsed-duration-literal" &&
-        inferred.type.kind === "scalar" &&
-        inferred.type.scalar === "datetime"
-      ) {
-        const durationScale = {
-          ms: 1,
-          s: 1_000,
-          m: 60_000,
-          h: 3_600_000,
-          d: 86_400_000,
-          w: 604_800_000,
-        } as const;
-        const elapsedMs =
-          expression.right.amount * durationScale[expression.right.unit];
-        if (!Number.isFinite(elapsedMs))
-          reject(
-            path,
-            "Elapsed duration is outside finite epoch milliseconds.",
-          );
-        const left = lowerExpression(
-          expression.left,
-          relation,
-          logicalSlots,
-          visible,
-          `${path}.left`,
-          time,
-        );
-        if (
-          left.kind !== "scalar" ||
-          left.type.kind !== "scalar" ||
-          left.type.scalar !== "datetime"
-        )
-          reject(path, "Datetime addition requires a datetime left operand.");
-        const timestamp = scalarValue(left, `${path}.left`);
-        if (
-          !["integer", "real", "numeric", "unknown"].includes(
-            timestamp.resultType.affinity,
-          )
-        )
-          reject(path, "Datetime epoch addition requires a numeric SQL value.");
-        return {
-          kind: "scalar",
-          expression: add(
-            timestamp as SqlExpression<number | null>,
-            param(elapsedMs),
-          ),
-          type: inferred.type,
-          nullable: inferred.nullable,
-          candidateBounded: left.candidateBounded,
-        };
-      }
-      const left = lowerExpression(
-        expression.left,
-        relation,
-        logicalSlots,
-        visible,
-        `${path}.left`,
-        time,
-      );
-      const right = lowerExpression(
-        expression.right,
-        relation,
-        logicalSlots,
-        visible,
-        `${path}.right`,
-        time,
-      );
-      if (
-        left.kind !== "scalar" ||
-        right.kind !== "scalar" ||
-        left.type.kind !== "scalar" ||
-        right.type.kind !== "scalar" ||
-        left.type.scalar !== "number" ||
-        right.type.scalar !== "number"
-      )
-        reject(path, "Arithmetic requires numeric scalar expressions.");
-      const leftExpression = scalarValue(left, `${path}.left`);
-      const rightExpression = scalarValue(right, `${path}.right`);
-      if (
-        !["integer", "real", "numeric", "unknown"].includes(
-          leftExpression.resultType.affinity,
-        ) ||
-        !["integer", "real", "numeric", "unknown"].includes(
-          rightExpression.resultType.affinity,
-        )
-      )
-        reject(path, "Arithmetic requires numeric SQL affinities.");
-      const numericLeft = leftExpression as SqlExpression<number | null>;
-      const numericRight = rightExpression as SqlExpression<number | null>;
-      const result =
-        expression.operator === "add"
-          ? add(numericLeft, numericRight)
-          : expression.operator === "subtract"
-            ? sub(numericLeft, numericRight)
-            : expression.operator === "multiply"
-              ? mul(numericLeft, numericRight)
-              : div(castReal(numericLeft), numericRight);
-      return {
-        kind: "scalar",
-        expression: result,
-        type: inferred.type,
-        nullable: inferred.nullable,
-        candidateBounded: false,
-      };
-    }
-    case "time-bucket": {
-      const input = lowerExpression(
-        expression.input,
-        relation,
-        logicalSlots,
-        visible,
-        `${path}.input`,
-        time,
-      );
-      if (
-        input.kind !== "scalar" ||
-        input.type.kind !== "scalar" ||
-        !["date", "datetime", "number"].includes(input.type.scalar)
-      )
-        reject(path, "Time bucketing requires a temporal or epoch scalar.");
-      if (expression.reportingTimeZone !== time.reportingTimeZone)
-        reject(path, "Time buckets must use the Semantic reporting time zone.");
-      const calendar = buildCalendarBucketPlan({
-        range: time.candidate,
-        granularity: expression.granularity,
-        reportingTimeZone: expression.reportingTimeZone,
-        maxBuckets: 2000,
-      });
-      if (calendar.buckets.length === 0)
-        reject(path, "The candidate range has no calendar buckets.");
-      const value = input.expression as SqlExpression<
-        number | null,
-        ExpressionResultType<"integer" | "real" | "numeric", boolean>
-      >;
-      const first = calendar.buckets[0]!;
-      const last = calendar.buckets.at(-1)!;
-      // Calendar buckets are adjacent and ordered. Bound the whole CASE once,
-      // then test each exclusive end; repeating both bounds in every branch
-      // makes long, otherwise-valid windows exceed D1's SQL size budget.
-      const branches: Array<{ when: Predicate; then: AnyExpression }> = [
-        {
-          when: lt(value, constant(Number(first.startMs))),
-          then: constant(null),
-        },
-        {
-          when: gte(value, constant(Number(last.endExclusiveMs))),
-          then: constant(null),
-        },
-        ...calendar.buckets.map((bucket) => ({
-          when: lt(value, constant(Number(bucket.endExclusiveMs))),
-          then: constant(bucket.index),
-        })),
-      ];
-      return {
-        kind: "scalar",
-        expression: caseWhen(
-          branches as [
-            { when: Predicate; then: AnyExpression },
-            ...{ when: Predicate; then: AnyExpression }[],
-          ],
-          constant(null),
-        ),
-        type: {
-          kind: "bucket",
-          granularity: expression.granularity,
-          reportingTimeZone: expression.reportingTimeZone,
-        },
-        nullable: true,
-        candidateBounded: input.candidateBounded,
-      };
-    }
-    case "bucket-index": {
-      const input = lowerExpression(
-        expression.input,
-        relation,
-        logicalSlots,
-        visible,
-        `${path}.input`,
-        time,
-      );
-      if (input.kind !== "scalar" || input.type.kind !== "bucket")
-        reject(path, "Bucket-index requires a lowered calendar bucket.");
-      return {
-        kind: "scalar",
-        expression: input.expression,
-        type: { kind: "scalar", scalar: "number" },
-        nullable: true,
-        candidateBounded: input.candidateBounded,
-      };
-    }
-    case "round": {
-      const input = lowerExpression(
-        expression.input,
-        relation,
-        logicalSlots,
-        visible,
-        `${path}.input`,
-        time,
-      );
-      if (
-        input.kind !== "scalar" ||
-        input.type.kind !== "scalar" ||
-        input.type.scalar !== "number"
-      )
-        reject(path, "ROUND requires a lowered numeric scalar.");
-      const decimalPlaces = expression.decimalPlaces;
-      if (
-        decimalPlaces !== undefined &&
-        (!Number.isInteger(decimalPlaces) ||
-          decimalPlaces < 0 ||
-          decimalPlaces > 15)
-      )
-        reject(
-          path,
-          "ROUND precision must be a static integer from 0 through 15.",
-        );
-      // The validated logical scalar type is the source of truth here; the
-      // generic SQL expression node has intentionally erased its value type.
-      const numericExpression = input.expression as SqlExpression<
-        number | null
-      >;
-      return {
-        kind: "scalar",
-        expression:
-          decimalPlaces === undefined
-            ? callFunction("round", numericExpression)
-            : callFunction("round", numericExpression, constant(decimalPlaces)),
-        type: input.type,
-        nullable: input.nullable,
-        candidateBounded: input.candidateBounded,
-      };
-    }
-    case "elapsed-duration-literal":
-    case "calendar-period-literal":
-      reject(
-        path,
-        `Expression kind ${expression.kind} is outside the current D1 capability set.`,
-      );
-  }
 }
 
 function valueForSlot(
@@ -1650,6 +238,8 @@ function logicalNodeInputs(node: LogicalNode): readonly RelationId[] {
       return node.inputs;
     case "row-concatenation":
       return node.inputs;
+    case "event-payload-properties":
+      return [node.input];
     case "semi-join":
     case "anti-join":
     case "join":
@@ -1682,30 +272,193 @@ export class AnalyticsLogicalToDbLowerer {
   readonly #nodes: ReadonlyMap<RelationId, LogicalNode>;
   readonly #logicalSlots: ReadonlyMap<SlotId, LogicalSlot>;
   readonly #memo = new Map<RelationId, LoweredRelation>();
+  readonly #eventPayloadAdmissionPackets = new Map<
+    RelationId,
+    EventPayloadAdmissionPacket
+  >();
   readonly #loweredSources = new Map<
     string,
     {
       readonly relation: AnalyticsDbRelation;
       readonly layouts: readonly SlotLayout[];
+      readonly providerLayouts: ReadonlyMap<string, string>;
     }
   >();
   readonly #sourceSelectionIds = new WeakMap<object, number>();
   #nextSourceSelectionId = 1;
   readonly #requiredSlots = new Map<RelationId, Set<SlotId>>();
+  readonly #requiredProviderSourceBindings = new Map<
+    RelationId,
+    readonly AnalyticsProviderSourceBindingRequest[]
+  >();
+  readonly #eventPayloadKeyRequestsByOccurrence = new Map<
+    RelationId,
+    AnalyticsProviderSourceBindingRequest
+  >();
+  readonly #eventPayloadKeyRequestsByProperties = new Map<
+    RelationId,
+    AnalyticsProviderSourceBindingRequest
+  >();
+  readonly #eventPayloadKeyProofs = new Map<
+    RelationId,
+    ReadonlyMap<string, EventPayloadKeyProof>
+  >();
   readonly #analysisResultOutputs = new WeakMap<
     LogicalPlan,
     Map<string, LoweredAnalyticsLogicalOutput>
   >();
+  readonly #analysisResultQualificationBindings = new Map<
+    LogicalPlan,
+    AnalysisResultQualificationBinding
+  >();
+  readonly #analysisResultQualificationLowerers = new WeakMap<
+    LogicalPlan,
+    AnalyticsLogicalToDbLowerer
+  >();
+  readonly #comparisonPageQualificationGate:
+    ComparisonPageQualificationGate | undefined;
+  readonly #comparisonAdmissionBinding:
+    RegisteredComparisonAdmissionBinding | undefined;
+  #comparisonAdmissionEvidence: CompletedComparisonDomainAdmission | undefined;
+  #comparisonAdmissionEvidenceTaken = false;
   readonly #storageContext: AnalyticsRelationalStorageContext;
   readonly #storage: AnalyticsRelationalStorage;
-  readonly #scopedStorage: AnalyticsLegacyScopedStorage;
+  readonly #scopedSourceLowering: ScopedSourceLoweringPass;
+  readonly #eventPayloadAdmissionPolicy:
+    EventPayloadAdmissionPolicy | undefined;
+  readonly #qualificationAdmissionPolicy:
+    AnalyticsQualificationAdmissionPolicy | undefined;
+  #qualificationAdmittedControls: AnalyticsDbRelation | undefined;
+  #loweringQualificationControls = false;
+  readonly #qualificationAdmissionUngatedNodes = new Set<RelationId>();
 
   constructor(
     plan: ValidatedLogicalPlan,
     storageContext: AnalyticsRelationalStorageContext,
+    options: {
+      readonly eventPayloadAdmissionPolicy?: EventPayloadAdmissionPolicy;
+      readonly eventQualificationAdmissionPolicy?: EventQualificationAdmissionPolicy;
+      readonly analyticsQualificationAdmissionPolicy?: AnalyticsQualificationAdmissionPolicy;
+      readonly analysisResultQualificationBindings?: readonly AnalysisResultQualificationBinding[];
+      readonly comparisonPageQualificationGate?: ComparisonPageQualificationGate;
+      readonly comparisonDomainAdmissionBinding?: RegisteredComparisonAdmissionBinding;
+    } = {},
   ) {
     this.#plan = plan;
     this.#storageContext = storageContext;
+    this.#comparisonAdmissionBinding = options.comparisonDomainAdmissionBinding;
+    if (
+      this.#comparisonAdmissionBinding &&
+      !this.#comparisonAdmissionBinding.attach(this, plan)
+    )
+      reject(
+        "options.comparisonDomainAdmissionBinding",
+        "The comparison admission binding must be unused and target this exact frozen plan.",
+      );
+    this.#eventPayloadAdmissionPolicy = options.eventPayloadAdmissionPolicy;
+    if (
+      options.eventQualificationAdmissionPolicy &&
+      options.analyticsQualificationAdmissionPolicy
+    )
+      reject(
+        "options",
+        "Only one analytics qualification admission policy may be supplied.",
+      );
+    this.#qualificationAdmissionPolicy =
+      options.analyticsQualificationAdmissionPolicy ??
+      (options.eventQualificationAdmissionPolicy
+        ? {
+            ...options.eventQualificationAdmissionPolicy,
+            primaryReportSourceRelationId:
+              options.eventQualificationAdmissionPolicy.eventSourceRelationId,
+          }
+        : undefined);
+    for (const binding of options.analysisResultQualificationBindings ?? []) {
+      const importedChildNodes = plan.nodes.filter(
+        (node): node is AnalysisResultNode =>
+          node.kind === "analysis-result" &&
+          node.childPlan === binding.childPlan,
+      );
+      const reportOutputIds = [...binding.reportOutputIds];
+      const reportOutputIdSet = new Set(reportOutputIds);
+      const reportOutputs = reportOutputIds.map((outputId) =>
+        binding.childPlan.outputs.find((output) => output.id === outputId),
+      );
+      const controlsOutput = binding.childPlan.outputs.find(
+        (output) => output.id === binding.controlsOutputId,
+      );
+      const importedOutputIds = new Set(
+        importedChildNodes.map((node) => node.outputId),
+      );
+      const reportRelationIds = [
+        ...new Set(
+          reportOutputs.flatMap((output) => (output ? [output.relation] : [])),
+        ),
+      ];
+      const policyReportRelationIds = [...binding.policy.reportRelationIds];
+      const importedOutputsAreApproved = [...importedOutputIds].every(
+        (outputId) =>
+          reportOutputIdSet.has(outputId) ||
+          outputId === binding.controlsOutputId,
+      );
+      const reportRelationsMatchPolicy =
+        new Set(policyReportRelationIds).size ===
+          policyReportRelationIds.length &&
+        reportRelationIds.length === policyReportRelationIds.length &&
+        reportRelationIds.every((relationId) =>
+          policyReportRelationIds.includes(relationId),
+        );
+      if (
+        importedChildNodes.length === 0 ||
+        reportOutputIds.length === 0 ||
+        reportOutputIdSet.size !== reportOutputIds.length ||
+        reportOutputs.some((output) => output === undefined) ||
+        !reportOutputIds.every((outputId) => importedOutputIds.has(outputId)) ||
+        !importedChildNodes.some(
+          (node) => node.outputId === binding.controlsOutputId,
+        ) ||
+        reportOutputIdSet.has(binding.controlsOutputId) ||
+        !controlsOutput ||
+        binding.policy.controlsRelationId !== controlsOutput.relation ||
+        !importedOutputsAreApproved ||
+        !reportRelationsMatchPolicy
+      )
+        reject(
+          "options.analysisResultQualificationBindings",
+          "Each qualification binding must approve imported report outputs and controls from the exact child snapshot, with an exact report relation policy.",
+        );
+      if (this.#analysisResultQualificationBindings.has(binding.childPlan))
+        reject(
+          "options.analysisResultQualificationBindings",
+          "Each imported child snapshot must have one qualification binding.",
+        );
+      const policy = Object.freeze({
+        ...binding.policy,
+        reportSourceRelations: Object.freeze(
+          binding.policy.reportSourceRelations.map((source) =>
+            Object.freeze({ ...source }),
+          ),
+        ),
+        reportRelationIds: Object.freeze(policyReportRelationIds),
+        controlSlots: Object.freeze(
+          binding.policy.controlSlots.map((slot) => Object.freeze({ ...slot })),
+        ),
+        numericCompatibilityControlNames: Object.freeze([
+          ...binding.policy.numericCompatibilityControlNames,
+        ]),
+      });
+      this.#analysisResultQualificationBindings.set(
+        binding.childPlan,
+        Object.freeze({
+          childPlan: binding.childPlan,
+          reportOutputIds: Object.freeze(reportOutputIds),
+          controlsOutputId: binding.controlsOutputId,
+          policy,
+        }),
+      );
+    }
+    this.#comparisonPageQualificationGate =
+      options.comparisonPageQualificationGate;
     let subjectSiteIds: readonly string[];
     let storageSiteIds: readonly string[];
     try {
@@ -1733,7 +486,7 @@ export class AnalyticsLogicalToDbLowerer {
       plan.slots.map((slot) => [slot.id, slot] as const),
     );
     this.#storage = new AnalyticsRelationalStorage(storageContext);
-    this.#scopedStorage = new AnalyticsLegacyScopedStorage(
+    this.#scopedSourceLowering = new ScopedSourceLoweringPass(
       storageContext,
       plan.nodes.filter((node): node is SourceNode => node.kind === "source"),
     );
@@ -1748,6 +501,70 @@ export class AnalyticsLogicalToDbLowerer {
     return next;
   }
 
+  #eventPayloadSource(
+    relation: RelationId,
+    eventKey: SlotId,
+    path: string,
+  ): SourceNode {
+    const active = new Set<RelationId>();
+    let current = relation;
+    while (true) {
+      if (active.has(current))
+        reject(path, "Payload key ancestry contains a relation cycle.");
+      active.add(current);
+      const node = this.#nodes.get(current);
+      if (!node)
+        reject(path, "Payload key ancestry lost its Event identity slot.");
+      const eventKeySlot = this.#logicalSlots.get(eventKey);
+      const preservesEventIdentity =
+        node.grain.kind === "entity" &&
+        node.grain.entity === "event" &&
+        node.grain.key === eventKey &&
+        node.output.includes(eventKey) &&
+        eventKeySlot?.type.kind === "entity" &&
+        eventKeySlot.type.entity === "event" &&
+        !eventKeySlot.nullable;
+      if (!preservesEventIdentity)
+        reject(path, "Payload key ancestry lost its Event identity slot.");
+      if (node.kind === "filter") {
+        current = node.input;
+        continue;
+      }
+      if (node.kind === "semi-join") {
+        const left = this.#nodes.get(node.left);
+        if (
+          !left ||
+          left.grain.kind !== "entity" ||
+          left.grain.entity !== "event" ||
+          left.grain.key !== eventKey ||
+          left.output.length !== node.output.length ||
+          left.output.some((slot, index) => node.output[index] !== slot)
+        )
+          reject(
+            path,
+            "Payload key membership ancestry does not preserve the left Event rows.",
+          );
+        current = node.left;
+        continue;
+      }
+      if (
+        node.kind !== "source" ||
+        node.entity !== "event" ||
+        node.grain.kind !== "entity" ||
+        node.grain.entity !== "event" ||
+        node.grain.key !== eventKey ||
+        !node.values.some(
+          (binding) => binding.kind === "self" && binding.slot === eventKey,
+        )
+      )
+        reject(
+          path,
+          "Payload key request requires the canonical Event Source ancestry.",
+        );
+      return node;
+    }
+  }
+
   lower(output: LogicalOutput): LoweredAnalyticsLogicalOutput {
     return this.lowerMany([output])[0]!;
   }
@@ -1756,11 +573,116 @@ export class AnalyticsLogicalToDbLowerer {
   lowerMany(
     outputs: readonly LogicalOutput[],
   ): readonly LoweredAnalyticsLogicalOutput[] {
+    const binding = this.#comparisonAdmissionBinding;
+    if (
+      binding &&
+      !binding.begin(
+        this,
+        this.#plan,
+        this.#reachableNodeIds(outputs.map((output) => output.relation)),
+      )
+    )
+      reject(
+        "outputs",
+        "The comparison admission binding must match the selected relation graph and may be consumed only once.",
+      );
+    this.#comparisonAdmissionEvidence = undefined;
+    this.#comparisonAdmissionEvidenceTaken = false;
+    try {
+      let lowered = this.#lowerManyCore(outputs);
+      if (binding) {
+        const comparisonInput = binding.materialize(this, this);
+        if (!comparisonInput)
+          reject(
+            "outputs",
+            "The current lowerMany call did not materialize its comparison admission evidence.",
+          );
+        const policy = this.#qualificationAdmissionPolicy;
+        if (!policy || policy.reportRelationIds.length === 0)
+          reject(
+            "outputs",
+            "Comparison admission requires the exact provider report relation policy.",
+          );
+        const aggregate = buildComparisonDomainAggregate(comparisonInput);
+        const outputNames = comparisonInput.values.map(
+          ({ outputName }) => outputName,
+        );
+        if (!isComparisonDomainSingletonAggregate(aggregate, outputNames))
+          reject(
+            "outputs",
+            "Comparison admission requires one ungrouped counter aggregate row.",
+          );
+        const mismatchFree = comparisonInput.values.map(({ outputName }) => {
+          const value = aggregate.columns[outputName];
+          if (!value)
+            reject("outputs", "Comparison aggregate output is missing.");
+          return eq(value, param(0));
+        });
+        if (mismatchFree.length === 0)
+          reject(
+            "outputs",
+            "Comparison admission requires non-empty evidence.",
+          );
+        const comparisonGate = mismatchFree
+          .slice(1)
+          .reduce((gate, value) => and(gate, value), mismatchFree[0]!);
+        const admittedAggregate = filter(aggregate, comparisonGate);
+        const membershipCondition = eq(constant(1), constant(1));
+        const reportRelationIds = new Set(policy.reportRelationIds);
+        const gatedReports = lowered.filter((output) =>
+          reportRelationIds.has(output.output.relation),
+        );
+        if (gatedReports.length !== reportRelationIds.size)
+          reject(
+            "outputs",
+            "Comparison admission must gate every selected provider report output exactly once.",
+          );
+        lowered = lowered.map((output) =>
+          reportRelationIds.has(output.output.relation)
+            ? {
+                ...output,
+                relation: semiJoin(
+                  output.relation,
+                  admittedAggregate,
+                  membershipCondition,
+                ),
+              }
+            : output,
+        );
+        this.#comparisonAdmissionEvidence = Object.freeze({
+          input: comparisonInput,
+          aggregate,
+        });
+      }
+      return lowered;
+    } finally {
+      if (binding) binding.finish(this);
+    }
+  }
+
+  #lowerManyCore(
+    outputs: readonly LogicalOutput[],
+  ): readonly LoweredAnalyticsLogicalOutput[] {
     if (outputs.length === 0)
       reject("outputs", "At least one Logical output is required.");
     const selectedNodes = this.#reachableNodeIds(
       outputs.map((output) => output.relation),
     );
+    const admissionPolicy = this.#eventPayloadAdmissionPolicy;
+    if (admissionPolicy) {
+      const properties = this.#nodes.get(admissionPolicy.propertiesRelation);
+      if (
+        properties?.kind !== "event-payload-properties" ||
+        !selectedNodes.has(admissionPolicy.propertiesRelation) ||
+        !Number.isSafeInteger(admissionPolicy.maximumNodes) ||
+        admissionPolicy.maximumNodes <= 0 ||
+        !Number.isSafeInteger(admissionPolicy.maximumNodes + 1)
+      )
+        reject(
+          nodePath(admissionPolicy.propertiesRelation),
+          "Provider payload admission must target one reachable Properties relation with a safe M+1 maximum.",
+        );
+    }
     const declaredOutputNodes = this.#reachableNodeIds(
       this.#plan.outputs.map((candidate) => candidate.relation),
     );
@@ -1776,8 +698,11 @@ export class AnalyticsLogicalToDbLowerer {
     // A multi-output caller needs the union of required slots on shared nodes.
     // Lower all roots after that union is known so they share one source graph.
     this.#memo.clear();
+    this.#qualificationAdmittedControls = undefined;
+    this.#qualificationAdmissionUngatedNodes.clear();
+    this.#eventPayloadAdmissionPackets.clear();
     this.#prepareRequiredSlots(outputs, selectedNodes);
-    const roots = outputs.map((output) => this.#lowerNode(output.relation));
+    let roots = outputs.map((output) => this.#lowerNode(output.relation));
     if (this.#memo.size !== selectedNodes.size) {
       const unreachable = this.#plan.nodes.find(
         (node) => selectedNodes.has(node.id) && !this.#memo.has(node.id),
@@ -1785,6 +710,174 @@ export class AnalyticsLogicalToDbLowerer {
       reject(
         unreachable ? nodePath(unreachable.id) : "nodes",
         "Every relation in the selected output dependency graph must be lowered.",
+      );
+    }
+    const qualificationPolicy = this.#qualificationAdmissionPolicy;
+    if (qualificationPolicy) {
+      const primaryReportSource = this.#nodes.get(
+        qualificationPolicy.primaryReportSourceRelationId,
+      );
+      const controls = this.#nodes.get(qualificationPolicy.controlsRelationId);
+      const controlRoots = outputs.filter(
+        (output) => output.relation === qualificationPolicy.controlsRelationId,
+      );
+      const reportRelationIds = new Set(qualificationPolicy.reportRelationIds);
+      const reportSourceRelationIds = new Set(
+        qualificationPolicy.reportSourceRelations.map(
+          ({ relationId }) => relationId,
+        ),
+      );
+      const reportRoots = outputs.filter((output) =>
+        reportRelationIds.has(output.relation),
+      );
+      const reportSourcesValid =
+        qualificationPolicy.reportSourceRelations.length > 0 &&
+        reportSourceRelationIds.size ===
+          qualificationPolicy.reportSourceRelations.length &&
+        qualificationPolicy.reportSourceRelations.every(
+          ({ relationId, entity }) => {
+            const source = this.#nodes.get(relationId);
+            return (
+              source?.kind === "source" &&
+              source.entity === entity &&
+              selectedNodes.has(relationId)
+            );
+          },
+        );
+      if (
+        primaryReportSource?.kind !== "source" ||
+        (primaryReportSource.entity !== "event" &&
+          primaryReportSource.entity !== "page") ||
+        controls?.kind === undefined ||
+        !selectedNodes.has(qualificationPolicy.primaryReportSourceRelationId) ||
+        !reportSourcesValid ||
+        !reportSourceRelationIds.has(
+          qualificationPolicy.primaryReportSourceRelationId,
+        ) ||
+        !qualificationPolicy.reportSourceRelations.some(
+          ({ relationId, entity }) =>
+            relationId === qualificationPolicy.primaryReportSourceRelationId &&
+            entity === primaryReportSource.entity,
+        ) ||
+        !selectedNodes.has(qualificationPolicy.controlsRelationId) ||
+        controlRoots.length !== 1 ||
+        qualificationPolicy.reportRelationIds.length === 0 ||
+        reportRelationIds.size !==
+          qualificationPolicy.reportRelationIds.length ||
+        reportRoots.length !== qualificationPolicy.reportRelationIds.length ||
+        qualificationPolicy.reportRelationIds.some(
+          (relationId) =>
+            !selectedNodes.has(relationId) ||
+            relationId === qualificationPolicy.controlsRelationId ||
+            !outputs.some((output) => output.relation === relationId),
+        ) ||
+        !Number.isSafeInteger(qualificationPolicy.maximumActivities) ||
+        qualificationPolicy.maximumActivities < 0 ||
+        (qualificationPolicy.scope !== "session" &&
+          qualificationPolicy.scope !== "visitor")
+      )
+        reject(
+          "outputs",
+          "Provider analytics qualification admission must target its exact reachable primary Page/Event Source, report Sources, and one reachable controls output.",
+        );
+      const controlSlotIds = new Set(controls.output.map(String));
+      const controlNames = new Set(
+        qualificationPolicy.controlSlots.map(({ name }) => name),
+      );
+      const requiredControlSlots = [
+        "rawCount",
+        "nullActivityIdCount",
+        "siteIdentityMismatchCount",
+        "entityKind",
+        "invalidIdentityCount",
+        "duplicateIdentityCount",
+        ...qualificationPolicy.numericCompatibilityControlNames,
+      ];
+      if (
+        requiredControlSlots.some((slot) => !controlNames.has(slot)) ||
+        qualificationPolicy.controlSlots.some(
+          ({ slot }) => !controlSlotIds.has(String(slot)),
+        ) ||
+        new Set(qualificationPolicy.controlSlots.map(({ name }) => name))
+          .size !== qualificationPolicy.controlSlots.length ||
+        new Set(qualificationPolicy.numericCompatibilityControlNames).size !==
+          qualificationPolicy.numericCompatibilityControlNames.length
+      )
+        reject(
+          nodePath(qualificationPolicy.controlsRelationId),
+          "Provider analytics qualification controls do not match the declared admission policy.",
+        );
+    }
+    if (
+      admissionPolicy &&
+      !this.#eventPayloadAdmissionPackets.has(
+        admissionPolicy.propertiesRelation,
+      )
+    )
+      reject(
+        nodePath(admissionPolicy.propertiesRelation),
+        "The selected payload Properties relation did not produce its admission packet.",
+      );
+    const comparisonGate = this.#comparisonPageQualificationGate;
+    if (comparisonGate) {
+      const reportIndexes = outputs.flatMap((output, index) =>
+        output.relation === comparisonGate.reportRelationId ? [index] : [],
+      );
+      const controlIndexes = comparisonGate.sides.map((side) =>
+        outputs.flatMap((output, index) =>
+          output.relation === side.controlsRelationId ? [index] : [],
+        ),
+      );
+      const controlRelationIds = comparisonGate.sides.map(
+        ({ controlsRelationId }) => controlsRelationId,
+      );
+      if (
+        reportIndexes.length !== 1 ||
+        comparisonGate.sides.length < 1 ||
+        comparisonGate.sides.length > 2 ||
+        new Set(comparisonGate.sides.map(({ side }) => side)).size !==
+          comparisonGate.sides.length ||
+        new Set(controlRelationIds).size !== controlRelationIds.length ||
+        controlRelationIds.includes(comparisonGate.reportRelationId) ||
+        controlIndexes.some((indexes) => indexes.length !== 1) ||
+        !selectedNodes.has(comparisonGate.reportRelationId) ||
+        controlRelationIds.some((relationId) => !selectedNodes.has(relationId))
+      )
+        reject(
+          "options.comparisonPageQualificationGate",
+          "The final comparison report and each qualified-side controls output must be selected exactly once.",
+        );
+      const reportNode = this.#nodes.get(comparisonGate.reportRelationId);
+      if (reportNode?.grain.kind !== "keyed")
+        reject(
+          nodePath(comparisonGate.reportRelationId),
+          "The comparison admission gate requires its keyed report relation.",
+        );
+      const admittedControls = comparisonGate.sides.map((side, index) => {
+        const controlsNode = this.#nodes.get(side.controlsRelationId);
+        if (
+          controlsNode?.kind !== "analysis-result" ||
+          controlsNode.grain.kind !== "scalar"
+        )
+          reject(
+            "options.comparisonPageQualificationGate",
+            "Each final comparison control must be a scalar imported qualified child output.",
+          );
+        return this.#lowerComparisonAdmittedControls(
+          roots[controlIndexes[index]![0]!]!,
+          side,
+          nodePath(side.controlsRelationId),
+        );
+      });
+      const reportIndex = reportIndexes[0]!;
+      const report = roots[reportIndex]!;
+      const gated = admittedControls.reduce(
+        (relation, controls) =>
+          applyAnalyticsQualificationAdmissionGate(relation, controls),
+        report.relation,
+      );
+      roots = roots.map((root, index) =>
+        index === reportIndex ? { ...root, relation: gated } : root,
       );
     }
     return outputs.map((output, index) => {
@@ -1809,6 +902,82 @@ export class AnalyticsLogicalToDbLowerer {
         relationId: outputNode?.id ?? output.relation,
       };
     });
+  }
+
+  eventPayloadAdmissionPacket(
+    propertiesRelation: RelationId,
+  ): EventPayloadAdmissionPacket | undefined {
+    return this.#eventPayloadAdmissionPackets.get(propertiesRelation);
+  }
+
+  readComparisonAdmissionInput(
+    relationId: RelationId,
+    slotId: SlotId,
+  ):
+    | {
+        readonly relation: AnalyticsDbRelation;
+        readonly valueColumn: string;
+      }
+    | undefined {
+    const lowered = this.#memo.get(relationId);
+    const layout = lowered?.slots.get(slotId);
+    if (
+      !lowered ||
+      layout?.kind !== "scalar" ||
+      layout.type.kind !== "scalar" ||
+      layout.type.scalar !== "string"
+    )
+      return undefined;
+    const value = valueForSlot(
+      lowered.relation,
+      lowered.slots,
+      slotId,
+      nodePath(relationId),
+    );
+    if (
+      value.kind !== "scalar" ||
+      value.type.kind !== "scalar" ||
+      value.type.scalar !== "string"
+    )
+      return undefined;
+    return {
+      relation: lowered.relation,
+      valueColumn: layout.valueColumn,
+    };
+  }
+
+  takeComparisonDomainAdmissionEvidence():
+    CompletedComparisonDomainAdmission | undefined {
+    if (
+      !this.#comparisonAdmissionBinding ||
+      !this.#comparisonAdmissionEvidence ||
+      this.#comparisonAdmissionEvidenceTaken
+    )
+      return undefined;
+    this.#comparisonAdmissionEvidenceTaken = true;
+    return this.#comparisonAdmissionEvidence;
+  }
+
+  /** Returns a Generic relation only for a node lowered in the current demand. */
+  loweredRelationForPlan(
+    relationId: RelationId,
+  ): AnalyticsDbRelation | undefined {
+    return this.#memo.get(relationId)?.relation;
+  }
+
+  /** Resolves only a selected relation from the exact frozen bound child snapshot. */
+  loweredRelationForImportedChildPlan(
+    childPlan: LogicalPlan,
+    relationId: RelationId,
+  ): AnalyticsDbRelation | undefined {
+    if (
+      !Object.isFrozen(childPlan) ||
+      !this.#analysisResultQualificationBindings.has(childPlan)
+    )
+      return undefined;
+    const childLowerer =
+      this.#analysisResultQualificationLowerers.get(childPlan);
+    return childLowerer?.loweredRelationForPlan(relationId);
   }
 
   #reachableNodeIds(roots: readonly RelationId[]): Set<RelationId> {
@@ -1896,9 +1065,97 @@ export class AnalyticsLogicalToDbLowerer {
     return this.#lowerNode(relation).candidateActivitySessionRelation;
   }
 
+  #rebindEventDistinctIdentityLayouts(
+    input: LoweredRelation,
+    relation: AnalyticsDbRelation,
+    inputScope: RelationId,
+    outputScope: RelationId,
+    path: string,
+  ): LoweredRelation {
+    const slots = new Map(input.slots);
+    for (const [slot, layout] of input.slots) {
+      if (layout.kind !== "entity" || !layout.providerDistinctIdentity)
+        continue;
+      const proof = layout.providerDistinctIdentity;
+      if (
+        proof.identitySlot !== slot ||
+        proof.scopeRelation !== inputScope ||
+        proof.carrierRelation !== input.relation ||
+        proof.identityColumns[0] !== layout.keyColumns[0] ||
+        proof.identityColumns[1] !== layout.keyColumns[1] ||
+        !relation.columns[proof.identityColumns[0]] ||
+        !relation.columns[proof.identityColumns[1]] ||
+        !relation.columns[proof.discriminatorColumn]
+      )
+        reject(
+          path,
+          "A row-preserving relation cannot rebind a mismatched Event identity proof.",
+        );
+      slots.set(slot, {
+        ...layout,
+        providerDistinctIdentity: {
+          ...proof,
+          scopeRelation: outputScope,
+          carrierRelation: relation,
+        },
+      });
+    }
+    return { ...input, relation, slots };
+  }
+
+  #eventPayloadCountContext(): EventPayloadCountLoweringContext {
+    return {
+      logicalSlots: this.#logicalSlots,
+      storage: this.#storage,
+      lowerNode: (id) => this.#lowerNode(id),
+      requiredOutput: (node) => this.#requiredOutput(node),
+      eventPayloadIdentity: (
+        propertiesRelation,
+        sourceRelation,
+        eventKey,
+        input,
+        path,
+      ) =>
+        this.#eventPayloadPropertiesIdentity(
+          propertiesRelation,
+          sourceRelation,
+          eventKey,
+          input,
+          path,
+        ),
+      ...(this.#eventPayloadAdmissionPolicy
+        ? { admissionPolicy: this.#eventPayloadAdmissionPolicy }
+        : {}),
+      admissionPackets: {
+        get: (node) => this.#eventPayloadAdmissionPackets.get(node),
+        set: (node, packet) => {
+          this.#eventPayloadAdmissionPackets.set(node, packet);
+        },
+      },
+    };
+  }
+
   #lowerNode(id: RelationId): LoweredRelation {
     const existing = this.#memo.get(id);
-    if (existing) return existing;
+    if (existing) {
+      if (
+        !this.#loweringQualificationControls &&
+        this.#qualificationAdmissionUngatedNodes.has(id)
+      ) {
+        const node = this.#nodes.get(id);
+        if (!node)
+          reject(nodePath(id), "The relation references a missing node.");
+        const gated = this.#applyQualificationAdmissionGate(
+          node,
+          existing,
+          nodePath(id),
+        );
+        this.#qualificationAdmissionUngatedNodes.delete(id);
+        this.#memo.set(id, gated);
+        return gated;
+      }
+      return existing;
+    }
     const node = this.#nodes.get(id);
     if (!node) reject(nodePath(id), "The relation references a missing node.");
     const path = nodePath(id);
@@ -1925,6 +1182,13 @@ export class AnalyticsLogicalToDbLowerer {
               visible,
               `${path}.predicate`,
               this.#plan.context.time,
+              this.#comparisonAdmissionBinding
+                ? {
+                    binding: this.#comparisonAdmissionBinding,
+                    owner: this,
+                    relationId: node.input,
+                  }
+                : undefined,
             ),
             `${path}.predicate`,
           ),
@@ -1937,12 +1201,116 @@ export class AnalyticsLogicalToDbLowerer {
             slot,
             value: readValue(filtered, input.slots, slot, path),
           }));
+        const inputProofs = this.#eventPayloadKeyProofs.get(node.input);
+        const providerValues: ProviderProjectionValue[] = [];
+        for (const [id, proof] of inputProofs ?? []) {
+          if (
+            !node.output.includes(proof.request.eventKeySlot) ||
+            proof.carrierRelation !== input.relation ||
+            input.providerColumns?.get(id) !== proof.keyColumn
+          )
+            reject(
+              path,
+              "A transparent Filter cannot propagate a mismatched Event payload key carrier.",
+            );
+          const inputColumn = proof.keyColumn;
+          const expression = relationColumn(filtered, inputColumn, path);
+          providerValues.push({
+            id,
+            expression,
+            ...(proof.metadataColumns.size > 0
+              ? {
+                  additionalValues: [...proof.metadataColumns.entries()].map(
+                    ([field, column]) => ({
+                      id: analyticsEventPayloadMetadataProviderId(id, field),
+                      expression: relationColumn(filtered, column, path),
+                    }),
+                  ),
+                }
+              : {}),
+          });
+        }
+        for (const [slot, layout] of input.slots) {
+          if (layout.kind !== "entity" || !layout.providerDistinctIdentity)
+            continue;
+          const proof = layout.providerDistinctIdentity;
+          if (!node.output.includes(slot)) continue;
+          if (
+            layout.type.entity !== "event" ||
+            layout.nullable ||
+            proof.identitySlot !== slot ||
+            proof.scopeRelation !== node.input ||
+            proof.carrierRelation !== input.relation ||
+            proof.identityColumns[0] !== layout.keyColumns[0] ||
+            proof.identityColumns[1] !== layout.keyColumns[1]
+          )
+            reject(
+              path,
+              "A transparent Filter cannot propagate a mismatched Event distinct identity proof.",
+            );
+          providerValues.push({
+            id: proof.sourceBinding.request.id,
+            expression: relationColumn(
+              filtered,
+              proof.discriminatorColumn,
+              path,
+            ),
+            identitySlot: slot,
+            identitySeed: {
+              sourceBinding: proof.sourceBinding,
+              sourceSignature: proof.sourceSignature,
+              sourceId: proof.sourceId,
+              eventKeySlot: proof.eventKeySlot,
+              identitySlot: slot,
+              scopeRelation: node.id,
+              inputRelation: filtered,
+              inputIdentityColumns: proof.identityColumns,
+              inputDiscriminatorColumn: proof.discriminatorColumn,
+            },
+          });
+        }
         const projected = projectedValues(
           filtered,
           values,
           this.#logicalSlots,
           path,
+          providerValues,
         );
+        if (inputProofs && inputProofs.size > 0) {
+          const proofs = new Map<string, EventPayloadKeyProof>();
+          for (const [id, proof] of inputProofs) {
+            const keyColumn = projected.providerColumns?.get(id);
+            const eventKeyLayout = projected.slots.get(
+              proof.request.eventKeySlot,
+            );
+            if (!keyColumn || !eventKeyLayout)
+              reject(
+                path,
+                "A transparent Filter lost its Event payload key layout.",
+              );
+            proofs.set(id, {
+              ...proof,
+              scopeRelation: node.id,
+              carrierRelation: projected.relation,
+              keyColumn,
+              eventKeyLayout,
+              metadataColumns: new Map(
+                [...proof.metadataColumns.keys()].map((field) => {
+                  const column = projected.providerColumns?.get(
+                    analyticsEventPayloadMetadataProviderId(id, field),
+                  );
+                  if (!column)
+                    reject(
+                      path,
+                      "A transparent Filter lost hidden Event payload metadata.",
+                    );
+                  return [field, column] as const;
+                }),
+              ),
+            });
+          }
+          this.#eventPayloadKeyProofs.set(node.id, proofs);
+        }
         result = {
           ...projected,
           candidateActivity: input.candidateActivity,
@@ -1955,6 +1323,13 @@ export class AnalyticsLogicalToDbLowerer {
       }
       case "event-payload-occurrences":
         result = this.#lowerEventPayloadOccurrences(node, path);
+        break;
+      case "event-payload-properties":
+        result = lowerEventPayloadProperties(
+          node,
+          path,
+          this.#eventPayloadCountContext(),
+        );
         break;
       case "project":
         result = this.#lowerProject(node, path);
@@ -2020,34 +1395,220 @@ export class AnalyticsLogicalToDbLowerer {
           }
           keys.push({ expression: value.expression, direction });
         });
-        result = {
-          ...input,
-          relation: sortRelation(input.relation, keys),
-        };
+        const sorted = sortRelation(input.relation, keys);
+        result = this.#rebindEventDistinctIdentityLayouts(
+          input,
+          sorted,
+          node.input,
+          node.id,
+          path,
+        );
         break;
       }
       case "limit": {
         const input = this.#lowerNode(node.input);
-        result = {
-          ...input,
-          relation: limitRelation(input.relation, node.count),
-        };
+        const limited = limitRelation(input.relation, node.count);
+        result = this.#rebindEventDistinctIdentityLayouts(
+          input,
+          limited,
+          node.input,
+          node.id,
+          path,
+        );
         break;
+      }
+    }
+    const qualificationPolicy = this.#qualificationAdmissionPolicy;
+    if (
+      qualificationPolicy &&
+      ((node.kind === "source" &&
+        qualificationPolicy.reportSourceRelations.some(
+          ({ relationId }) => relationId === node.id,
+        )) ||
+        qualificationPolicy.reportRelationIds.includes(node.id))
+    ) {
+      if (this.#loweringQualificationControls) {
+        this.#qualificationAdmissionUngatedNodes.add(id);
+      } else {
+        result = this.#applyQualificationAdmissionGate(node, result, path);
+        this.#qualificationAdmissionUngatedNodes.delete(id);
       }
     }
     this.#memo.set(id, result);
     return result;
   }
 
+  #lowerQualificationAdmittedControls(path: string): AnalyticsDbRelation {
+    const cached = this.#qualificationAdmittedControls;
+    if (cached) return cached;
+    const policy = this.#qualificationAdmissionPolicy;
+    if (!policy)
+      reject(
+        path,
+        "Provider analytics qualification admission policy is missing.",
+      );
+    const wasLoweringQualificationControls =
+      this.#loweringQualificationControls;
+    this.#loweringQualificationControls = true;
+    let controls: LoweredRelation;
+    try {
+      controls = this.#lowerNode(policy.controlsRelationId);
+    } finally {
+      this.#loweringQualificationControls = wasLoweringQualificationControls;
+    }
+    const scalarControl = (name: string): AnyExpression => {
+      const slot = policy.controlSlots.find(
+        (controlSlot) => controlSlot.name === name,
+      )?.slot;
+      const layout = slot !== undefined ? controls.slots.get(slot) : undefined;
+      if (!layout || layout.kind !== "scalar")
+        reject(
+          nodePath(policy.controlsRelationId),
+          `Admission control ${JSON.stringify(name)} is not a scalar slot.`,
+        );
+      return relationColumn(
+        controls.relation,
+        layout.valueColumn,
+        nodePath(policy.controlsRelationId),
+      );
+    };
+    const admitted = createAnalyticsQualificationAdmittedControls({
+      controls: controls.relation,
+      policy,
+      readers: {
+        numeric: (name) =>
+          scalarControl(name) as unknown as SqlExpression<
+            number | null,
+            ExpressionResultType<"integer" | "real" | "numeric", boolean>
+          >,
+        text: (name) =>
+          scalarControl(name) as unknown as SqlExpression<
+            string | null,
+            ExpressionResultType<"text", boolean>
+          >,
+      },
+    });
+    this.#qualificationAdmittedControls = admitted;
+    return admitted;
+  }
+
+  #applyQualificationAdmissionGate(
+    node: LogicalNode,
+    result: LoweredRelation,
+    path: string,
+  ): LoweredRelation {
+    const admittedControls = this.#lowerQualificationAdmittedControls(path);
+    const admittedRelation = applyAnalyticsQualificationAdmissionGate(
+      result.relation,
+      admittedControls,
+    );
+    const rebound = this.#rebindEventDistinctIdentityLayouts(
+      result,
+      admittedRelation,
+      node.id,
+      node.id,
+      path,
+    );
+    const payloadKeyProofs = this.#eventPayloadKeyProofs.get(node.id);
+    if (payloadKeyProofs && payloadKeyProofs.size > 0) {
+      const reboundProofs = new Map<string, EventPayloadKeyProof>();
+      for (const [proofId, proof] of payloadKeyProofs) {
+        if (
+          !admittedRelation.columns[proof.keyColumn] ||
+          [...proof.metadataColumns.values()].some(
+            (column) => !admittedRelation.columns[column],
+          )
+        )
+          reject(
+            path,
+            "Event qualification admission lost a hidden Event payload key carrier.",
+          );
+        reboundProofs.set(proofId, {
+          ...proof,
+          carrierRelation: admittedRelation,
+        });
+      }
+      this.#eventPayloadKeyProofs.set(node.id, reboundProofs);
+    }
+    return { ...rebound };
+  }
+
+  #lowerComparisonAdmittedControls(
+    controls: LoweredRelation,
+    side: ComparisonPageQualificationGateSide,
+    path: string,
+  ): AnalyticsDbRelation {
+    const required = [
+      "rawCount",
+      "nullActivityIdCount",
+      "siteIdentityMismatchCount",
+      "entityKind",
+      "invalidIdentityCount",
+      "duplicateIdentityCount",
+      ...side.policy.numericCompatibilityControlNames,
+    ];
+    const names = side.controlSlots.map(({ name }) => name);
+    if (
+      (side.policy.scope !== "session" && side.policy.scope !== "visitor") ||
+      !Number.isSafeInteger(side.policy.maximumActivities) ||
+      side.policy.maximumActivities < 0 ||
+      new Set(side.policy.numericCompatibilityControlNames).size !==
+        side.policy.numericCompatibilityControlNames.length ||
+      !required.every((name) => names.includes(name)) ||
+      new Set(names).size !== names.length ||
+      side.controlSlots.length !== required.length ||
+      side.controlSlots.some(({ name, slot }) => {
+        const declared = this.#logicalSlots.get(slot);
+        return (
+          !controls.slots.has(slot) ||
+          declared?.type.kind !== "scalar" ||
+          declared.type.scalar !== (name === "entityKind" ? "string" : "number")
+        );
+      })
+    )
+      reject(path, "Comparison qualification controls are incomplete.");
+    const scalarControl = (name: string): AnyExpression => {
+      const slot = side.controlSlots.find(
+        (candidate) => candidate.name === name,
+      )?.slot;
+      const layout = slot === undefined ? undefined : controls.slots.get(slot);
+      if (!layout || layout.kind !== "scalar")
+        reject(
+          path,
+          `Comparison control ${JSON.stringify(name)} is not scalar.`,
+        );
+      return relationColumn(controls.relation, layout.valueColumn, path);
+    };
+    return createAnalyticsQualificationAdmittedControls({
+      controls: controls.relation,
+      policy: side.policy,
+      readers: {
+        numeric: (name) =>
+          scalarControl(name) as unknown as SqlExpression<
+            number | null,
+            ExpressionResultType<"integer" | "real" | "numeric", boolean>
+          >,
+        text: (name) =>
+          scalarControl(name) as unknown as SqlExpression<
+            string | null,
+            ExpressionResultType<"text", boolean>
+          >,
+      },
+    });
+  }
+
   #lowerSource(node: SourceNode, path: string): LoweredRelation {
     let lowered: LoweredAnalyticsSource;
+    const providerRequests =
+      this.#requiredProviderSourceBindings.get(node.id) ?? [];
     try {
       const source = this.#storage.lowerSource(
         node,
         path,
         this.#requiredOutput(node),
+        providerRequests,
       );
-      lowered = this.#scopedStorage.lowerSelectedReportSource(
+      lowered = this.#scopedSourceLowering.lowerSelectedReportSource(
         node,
         path,
         source,
@@ -2059,6 +1620,25 @@ export class AnalyticsLogicalToDbLowerer {
         reject(message.slice(0, separator), message.slice(separator + 2));
       reject(path, message);
     }
+    if (
+      lowered.providerBindings.length !== providerRequests.length ||
+      providerRequests.some(
+        (request) =>
+          !lowered.providerBindings.some(
+            (binding) =>
+              binding.request.id === request.id &&
+              binding.request.sourceId === request.sourceId &&
+              binding.request.eventKeySlot === request.eventKeySlot &&
+              binding.request.includePayloadPropertiesMetadata ===
+                request.includePayloadPropertiesMetadata &&
+              binding.kind === request.kind,
+          ),
+      )
+    )
+      reject(
+        path,
+        "Storage did not return every requested Provider source binding.",
+      );
     const values = node.output
       .filter((slot) => this.#requiredOutput(node).has(slot))
       .map((slot) => {
@@ -2124,10 +1704,107 @@ export class AnalyticsLogicalToDbLowerer {
           );
         return { slot, value };
       });
+    const providerValues: ProviderProjectionValue[] =
+      lowered.providerBindings.map((binding) => {
+        assertAnalyticsEventPayloadKeySchema(binding.schema, path);
+        if (
+          binding.kind !== "event-payload-key" ||
+          binding.relation !== lowered.relation ||
+          lowered.relation.columns[binding.columns.eventPk] !==
+            binding.eventPk ||
+          lowered.relation.columns[binding.columns.sitePk] !== binding.sitePk ||
+          lowered.relation.columns[binding.columns.eventId] !==
+            binding.eventId ||
+          binding.eventKey !==
+            lowered.values.get(binding.request.eventKeySlot) ||
+          binding.eventKey.kind !== "entity" ||
+          binding.eventKey.entity !== "event" ||
+          binding.eventKey.nullable ||
+          binding.eventKey.keys.length !== 2 ||
+          binding.eventKey.keys[0] !== binding.sitePk ||
+          binding.eventKey.keys[1] !== binding.eventId ||
+          binding.eventPk.resultType.affinity !== "integer" ||
+          binding.eventPk.resultType.nullable
+        )
+          reject(
+            path,
+            "Storage Event payload key evidence does not match the mapped business Event identity.",
+          );
+        const pkSlot = node.values.find(
+          (candidate) =>
+            candidate.kind === "attribute" &&
+            candidate.attribute === "event.report.internalPk",
+        )?.slot;
+        const reuseSlot =
+          pkSlot !== undefined && this.#requiredOutput(node).has(pkSlot)
+            ? pkSlot
+            : undefined;
+        const reuseValue =
+          reuseSlot === undefined
+            ? undefined
+            : values.find(({ slot }) => slot === reuseSlot)?.value;
+        if (
+          reuseSlot !== undefined &&
+          (reuseValue?.kind !== "scalar" ||
+            binding.reuseExpression !== reuseValue.expression)
+        )
+          reject(
+            path,
+            "A live Logical Event PK must share its exact Provider projection.",
+          );
+        return {
+          id: binding.request.id,
+          expression:
+            reuseSlot === undefined
+              ? binding.eventPk
+              : binding.reuseExpression!,
+          ...(reuseSlot !== undefined ? { reuseSlot } : {}),
+          ...(binding.propertiesMetadata
+            ? {
+                additionalValues: [
+                  {
+                    id: analyticsEventPayloadMetadataProviderId(
+                      binding.request.id,
+                      "siteId",
+                    ),
+                    expression: binding.propertiesMetadata.siteId,
+                  },
+                  {
+                    id: analyticsEventPayloadMetadataProviderId(
+                      binding.request.id,
+                      "eventNameId",
+                    ),
+                    expression: binding.propertiesMetadata.eventNameId,
+                  },
+                  {
+                    id: analyticsEventPayloadMetadataProviderId(
+                      binding.request.id,
+                      "occurredAt",
+                    ),
+                    expression: binding.propertiesMetadata.occurredAt,
+                  },
+                  {
+                    id: analyticsEventPayloadMetadataProviderId(
+                      binding.request.id,
+                      "visitId",
+                    ),
+                    expression: binding.propertiesMetadata.visitId,
+                  },
+                ],
+              }
+            : {}),
+        };
+      });
     const sourceSignature = JSON.stringify([
       node.entity,
       node.temporalDomain,
       this.#sourceSelectionId(node.selection),
+      lowered.providerBindings
+        .map(({ request }) => [
+          request.id,
+          request.includePayloadPropertiesMetadata === true,
+        ])
+        .sort(([left], [right]) => String(left).localeCompare(String(right))),
       node.values.map((binding) => {
         const logical = logicalSlot(
           this.#logicalSlots,
@@ -2153,15 +1830,35 @@ export class AnalyticsLogicalToDbLowerer {
     ]);
     const cached = this.#loweredSources.get(sourceSignature);
     if (cached) {
-      if (cached.layouts.length !== values.length)
+      const providerColumnIds = lowered.providerBindings.flatMap((binding) => [
+        binding.request.id,
+        ...(binding.propertiesMetadata
+          ? (["siteId", "eventNameId", "occurredAt", "visitId"] as const).map(
+              (field) =>
+                analyticsEventPayloadMetadataProviderId(
+                  binding.request.id,
+                  field,
+                ),
+            )
+          : []),
+      ]);
+      if (
+        cached.layouts.length !== values.length ||
+        cached.providerLayouts.size !== providerColumnIds.length ||
+        providerColumnIds.some((id) => !cached.providerLayouts.has(id))
+      )
         reject(path, "A reused Source carrier has a different slot layout.");
-      return {
+      const providerColumns = new Map(
+        providerColumnIds.map((id) => [id, cached.providerLayouts.get(id)!]),
+      );
+      const result: LoweredRelation = {
         relation: cached.relation,
         slots: new Map(
           values.map(
             ({ slot }, index) => [slot, cached.layouts[index]!] as const,
           ),
         ),
+        ...(providerColumns.size > 0 ? { providerColumns } : {}),
         candidateActivity:
           node.selection === undefined &&
           node.temporalDomain === "candidate" &&
@@ -2172,13 +1869,23 @@ export class AnalyticsLogicalToDbLowerer {
             : undefined,
         candidateActivitySessionRestricted: false,
       };
+      this.#installEventPayloadKeyProofs(
+        node.id,
+        lowered.providerBindings,
+        sourceSignature,
+        result,
+        path,
+      );
+      return result;
     }
     const result = projectedValues(
       lowered.relation,
       values,
       this.#logicalSlots,
       path,
+      providerValues,
     );
+    const providerLayouts = new Map(result.providerColumns ?? []);
     this.#loweredSources.set(sourceSignature, {
       relation: result.relation,
       layouts: values.map(({ slot }) => {
@@ -2187,7 +1894,15 @@ export class AnalyticsLogicalToDbLowerer {
           reject(path, `A lowered Source has no layout for ${String(slot)}.`);
         return layout;
       }),
+      providerLayouts,
     });
+    this.#installEventPayloadKeyProofs(
+      node.id,
+      lowered.providerBindings,
+      sourceSignature,
+      result,
+      path,
+    );
     return {
       ...result,
       candidateActivity:
@@ -2202,28 +1917,297 @@ export class AnalyticsLogicalToDbLowerer {
     };
   }
 
+  #installEventPayloadKeyProofs(
+    scopeRelation: RelationId,
+    bindings: readonly AnalyticsEventPayloadKeySourceBinding[],
+    sourceSignature: string,
+    lowered: LoweredRelation,
+    path: string,
+  ): void {
+    if (bindings.length === 0) return;
+    const proofs = new Map<string, EventPayloadKeyProof>();
+    for (const binding of bindings) {
+      assertAnalyticsEventPayloadKeySchema(binding.schema, path);
+      const eventKeyLayout = lowered.slots.get(binding.request.eventKeySlot);
+      const keyColumn = lowered.providerColumns?.get(binding.request.id);
+      const metadataColumns = new Map<
+        AnalyticsEventPayloadPropertiesMetadataField,
+        string
+      >();
+      if (binding.request.includePayloadPropertiesMetadata === true) {
+        for (const field of [
+          "siteId",
+          "eventNameId",
+          "occurredAt",
+          "visitId",
+        ] as const) {
+          const column = lowered.providerColumns?.get(
+            analyticsEventPayloadMetadataProviderId(binding.request.id, field),
+          );
+          if (!column || !lowered.relation.columns[column])
+            reject(
+              path,
+              "Source projection did not preserve hidden Event payload metadata.",
+            );
+          metadataColumns.set(field, column);
+        }
+      }
+      if (
+        binding.request.sourceId !== scopeRelation ||
+        binding.kind !== "event-payload-key" ||
+        (binding.request.includePayloadPropertiesMetadata === true) !==
+          (binding.propertiesMetadata !== undefined) ||
+        !keyColumn ||
+        !eventKeyLayout ||
+        eventKeyLayout.kind !== "entity" ||
+        eventKeyLayout.type.entity !== "event" ||
+        eventKeyLayout.nullable ||
+        eventKeyLayout.keyColumns.length !== 2 ||
+        !lowered.relation.columns[keyColumn] ||
+        eventKeyLayout.keyColumns.some(
+          (column) => !lowered.relation.columns[column],
+        )
+      )
+        reject(
+          path,
+          "Source projection did not preserve the Provider Event payload key and business identity layout.",
+        );
+      proofs.set(binding.request.id, {
+        request: binding.request,
+        sourceBinding: binding,
+        sourceSignature,
+        scopeRelation,
+        carrierRelation: lowered.relation,
+        keyColumn,
+        eventKeyLayout,
+        metadataColumns,
+      });
+    }
+    this.#eventPayloadKeyProofs.set(scopeRelation, proofs);
+  }
+
+  #eventPayloadKeyProofForRequest(
+    relation: RelationId,
+    eventKey: SlotId,
+    input: LoweredRelation,
+    path: string,
+    requested: AnalyticsProviderSourceBindingRequest,
+  ): EventPayloadKeyProof {
+    const proof = this.#eventPayloadKeyProofs.get(relation)?.get(requested.id);
+    if (!proof)
+      reject(path, "The Event payload key demand has no current Source proof.");
+    const source = this.#eventPayloadSource(
+      relation,
+      eventKey,
+      `${path}.input`,
+    );
+    const binding = proof.sourceBinding;
+    const eventKeyLayout = input.slots.get(eventKey);
+    const carrierColumn = input.providerColumns?.get(requested.id);
+    if (
+      requested.sourceId !== source.id ||
+      requested.eventKeySlot !== eventKey ||
+      proof.request.id !== requested.id ||
+      proof.request.sourceId !== source.id ||
+      proof.request.eventKeySlot !== eventKey ||
+      proof.request.includePayloadPropertiesMetadata !==
+        requested.includePayloadPropertiesMetadata ||
+      proof.sourceSignature.length === 0 ||
+      proof.scopeRelation !== relation ||
+      proof.carrierRelation !== input.relation ||
+      proof.keyColumn !== carrierColumn ||
+      proof.eventKeyLayout !== eventKeyLayout ||
+      binding.request.id !== requested.id ||
+      binding.request.sourceId !== source.id ||
+      binding.request.eventKeySlot !== eventKey ||
+      binding.request.includePayloadPropertiesMetadata !==
+        requested.includePayloadPropertiesMetadata ||
+      binding.relation.columns[binding.columns.eventPk] !== binding.eventPk ||
+      binding.relation.columns[binding.columns.sitePk] !== binding.sitePk ||
+      binding.relation.columns[binding.columns.eventId] !== binding.eventId ||
+      binding.eventKey.kind !== "entity" ||
+      binding.eventKey.entity !== "event" ||
+      binding.eventKey.nullable ||
+      binding.eventKey.keys.length !== 2 ||
+      binding.eventKey.keys[0] !== binding.sitePk ||
+      binding.eventKey.keys[1] !== binding.eventId ||
+      eventKeyLayout?.kind !== "entity" ||
+      eventKeyLayout.type.entity !== "event" ||
+      eventKeyLayout.nullable ||
+      eventKeyLayout.keyColumns.length !== 2 ||
+      (requested.includePayloadPropertiesMetadata === true) !==
+        (binding.propertiesMetadata !== undefined) ||
+      (requested.includePayloadPropertiesMetadata === true) !==
+        (proof.metadataColumns.size === 4)
+    )
+      reject(
+        path,
+        "The Event payload key proof does not match its canonical Source, current scope, or business identity mapping.",
+      );
+    assertAnalyticsEventPayloadKeySchema(binding.schema, path);
+    return proof;
+  }
+
+  #eventPayloadKeyForOccurrence(
+    node: EventPayloadOccurrencesNode,
+    input: LoweredRelation,
+    path: string,
+  ): {
+    readonly proof: EventPayloadKeyProof;
+    readonly eventPk: AnyExpression;
+    readonly sitePk: AnyExpression;
+    readonly eventId: AnyExpression;
+  } {
+    const requested = this.#eventPayloadKeyRequestsByOccurrence.get(node.id);
+    if (!requested)
+      reject(
+        path,
+        "Occurrence payload expansion has no Provider key demand proof.",
+      );
+    const proof = this.#eventPayloadKeyProofForRequest(
+      node.input,
+      node.eventKey,
+      input,
+      path,
+      requested,
+    );
+    const eventKeyLayout = input.slots.get(node.eventKey);
+    if (!eventKeyLayout || eventKeyLayout.kind !== "entity")
+      reject(path, "Occurrence payload Event identity layout is unavailable.");
+    const eventPk = relationColumn(input.relation, proof.keyColumn, path);
+    const sitePk = relationColumn(
+      input.relation,
+      eventKeyLayout.keyColumns[0]!,
+      path,
+    );
+    const eventId = relationColumn(
+      input.relation,
+      eventKeyLayout.keyColumns[1]!,
+      path,
+    );
+    if (
+      eventPk.resultType.affinity !== "integer" ||
+      eventPk.resultType.nullable ||
+      sitePk.resultType.affinity !== "integer" ||
+      sitePk.resultType.nullable ||
+      eventId.resultType.affinity !== "text" ||
+      eventId.resultType.nullable
+    )
+      reject(
+        path,
+        "Occurrence payload key carrier has an invalid physical schema.",
+      );
+    return { proof, eventPk, sitePk, eventId };
+  }
+
+  #eventPayloadPropertiesIdentity(
+    propertiesRelation: RelationId,
+    sourceRelation: RelationId,
+    eventKey: SlotId,
+    input: LoweredRelation,
+    path: string,
+  ): EventPayloadPropertiesIdentity {
+    const requested =
+      this.#eventPayloadKeyRequestsByProperties.get(propertiesRelation);
+    if (!requested)
+      reject(path, "Payload Properties has no Provider hidden-key demand.");
+    const proof = this.#eventPayloadKeyProofForRequest(
+      sourceRelation,
+      eventKey,
+      input,
+      path,
+      requested,
+    );
+    const eventKeyLayout = input.slots.get(eventKey);
+    const metadata = proof.sourceBinding.propertiesMetadata;
+    if (
+      !metadata ||
+      proof.metadataColumns.size !== 4 ||
+      eventKeyLayout?.kind !== "entity"
+    )
+      reject(path, "Payload Properties has no Provider metadata source proof.");
+
+    const metadataExpression = (
+      field: AnalyticsEventPayloadPropertiesMetadataField,
+    ) => {
+      const column = proof.metadataColumns.get(field);
+      const providerColumn = input.providerColumns?.get(
+        analyticsEventPayloadMetadataProviderId(requested.id, field),
+      );
+      if (!column || column !== providerColumn)
+        reject(path, "Payload Properties lost its hidden metadata carrier.");
+      return relationColumn(input.relation, column, path);
+    };
+    const eventPk = relationColumn(input.relation, proof.keyColumn, path);
+    const sitePk = relationColumn(
+      input.relation,
+      eventKeyLayout.keyColumns[0]!,
+      path,
+    );
+    const eventId = relationColumn(
+      input.relation,
+      eventKeyLayout.keyColumns[1]!,
+      path,
+    );
+    const propertiesMetadata = {
+      siteId: metadataExpression("siteId"),
+      eventNameId: metadataExpression("eventNameId"),
+      occurredAt: metadataExpression("occurredAt"),
+      visitId: metadataExpression("visitId"),
+    };
+    if (
+      eventPk.resultType.affinity !== "integer" ||
+      eventPk.resultType.nullable ||
+      sitePk.resultType.affinity !== "integer" ||
+      sitePk.resultType.nullable ||
+      eventId.resultType.affinity !== "text" ||
+      eventId.resultType.nullable ||
+      propertiesMetadata.siteId.resultType.affinity !== "text" ||
+      propertiesMetadata.siteId.resultType.nullable ||
+      propertiesMetadata.eventNameId.resultType.affinity !== "integer" ||
+      propertiesMetadata.eventNameId.resultType.nullable ||
+      propertiesMetadata.occurredAt.resultType.affinity !== "integer" ||
+      propertiesMetadata.occurredAt.resultType.nullable ||
+      propertiesMetadata.visitId.resultType.affinity !== "text" ||
+      propertiesMetadata.visitId.resultType.nullable
+    )
+      reject(
+        path,
+        "Payload Properties hidden source columns have invalid types.",
+      );
+    return {
+      requestId: requested.id,
+      sourceId: requested.sourceId,
+      eventKeySlot: requested.eventKeySlot,
+      scopeRelation: proof.scopeRelation,
+      sourceSignature: proof.sourceSignature,
+      carrierRelation: proof.carrierRelation,
+      keyColumn: proof.keyColumn,
+      sourceBinding: proof.sourceBinding,
+      eventPk,
+      sitePk,
+      eventId,
+      propertiesMetadata,
+    };
+  }
   #lowerEventPayloadOccurrences(
     node: EventPayloadOccurrencesNode,
     path: string,
   ): LoweredRelation {
-    if (!this.#hasStorageBackedEventPk(node.input, node.eventKey, node.eventPk))
-      reject(
-        path,
-        "Payload occurrence expansion requires the Event PK from the same registered Event Source ancestry.",
-      );
     const input = this.#lowerNode(node.input);
-    const eventPk = readValue(
-      input.relation,
-      input.slots,
-      node.eventPk,
-      `${path}.eventPk`,
-    );
-    if (eventPk.kind !== "scalar")
-      reject(`${path}.eventPk`, "Event PK must lower to a scalar value.");
-    const payload = this.#storage.eventPayloadOccurrences(
-      input.relation,
-      eventPk.expression,
-    );
+    const eventIdentity = this.#eventPayloadKeyForOccurrence(node, input, path);
+    const identitySlot = node.fields.find(
+      ({ field }) => field === "eventIdentity",
+    )?.slot;
+    const includeDistinctIdentity =
+      identitySlot !== undefined &&
+      this.#requiredOutput(node).has(identitySlot);
+    const payload = this.#storage.eventPayloadOccurrences(input.relation, {
+      eventPk: eventIdentity.eventPk,
+      sitePk: eventIdentity.sitePk,
+      eventId: eventIdentity.eventId,
+      includeDistinctIdentity,
+    });
     const values = node.fields
       .filter((field) => this.#requiredOutput(node).has(field.slot))
       .map(({ field, slot }) => {
@@ -2232,6 +2216,32 @@ export class AnalyticsLogicalToDbLowerer {
           slot,
           `${path}.${field}`,
         );
+        if (field === "eventIdentity") {
+          if (
+            logical.type.kind !== "entity" ||
+            logical.type.entity !== "event" ||
+            logical.nullable ||
+            !includeDistinctIdentity
+          )
+            reject(
+              `${path}.${field}`,
+              "Payload Event identity output must be a required non-null Event Entity slot.",
+            );
+          return {
+            slot,
+            value: {
+              kind: "entity" as const,
+              entity: "event" as const,
+              keys: [
+                relationColumn(payload, "eventSitePk", `${path}.${field}`),
+                relationColumn(payload, "eventId", `${path}.${field}`),
+              ],
+              present: asPredicate(constant(1), `${path}.${field}`),
+              nullable: false,
+              candidateBounded: false,
+            },
+          };
+        }
         return {
           slot,
           value: {
@@ -2243,7 +2253,34 @@ export class AnalyticsLogicalToDbLowerer {
           },
         };
       });
-    return projectedValues(payload, values, this.#logicalSlots, path);
+    const providerValues: ProviderProjectionValue[] =
+      includeDistinctIdentity && identitySlot !== undefined
+        ? [
+            {
+              id: eventIdentity.proof.request.id,
+              expression: relationColumn(payload, "providerEventPk", path),
+              identitySlot,
+              identitySeed: {
+                sourceBinding: eventIdentity.proof.sourceBinding,
+                sourceSignature: eventIdentity.proof.sourceSignature,
+                sourceId: eventIdentity.proof.request.sourceId,
+                eventKeySlot: eventIdentity.proof.request.eventKeySlot,
+                identitySlot,
+                scopeRelation: node.id,
+                inputRelation: payload,
+                inputIdentityColumns: ["eventSitePk", "eventId"],
+                inputDiscriminatorColumn: "providerEventPk",
+              },
+            },
+          ]
+        : [];
+    return projectedValues(
+      payload,
+      values,
+      this.#logicalSlots,
+      path,
+      providerValues,
+    );
   }
 
   #lowerAnalysisResult(
@@ -2252,6 +2289,90 @@ export class AnalyticsLogicalToDbLowerer {
   ): LoweredRelation {
     let byOutput = this.#analysisResultOutputs.get(node.childPlan);
     let childLowered = byOutput?.get(node.outputId);
+    if (!childLowered) {
+      const qualificationBinding =
+        this.#analysisResultQualificationBindings.get(node.childPlan);
+      const reportOutputIds = new Set(
+        qualificationBinding?.reportOutputIds ?? [],
+      );
+      if (
+        qualificationBinding &&
+        !reportOutputIds.has(node.outputId) &&
+        node.outputId !== qualificationBinding.controlsOutputId
+      )
+        reject(
+          `${path}.outputId`,
+          "The bound child snapshot contains an unapproved imported output.",
+        );
+      if (
+        qualificationBinding &&
+        (reportOutputIds.has(node.outputId) ||
+          node.outputId === qualificationBinding.controlsOutputId)
+      ) {
+        let childPlan: ValidatedLogicalPlan;
+        try {
+          childPlan = validateLogicalPlan(node.childPlan);
+        } catch (error) {
+          reject(
+            `${path}.childPlan`,
+            error instanceof Error
+              ? error.message
+              : "Child Logical plan is invalid.",
+          );
+        }
+        const reportOutputs = qualificationBinding.reportOutputIds.map(
+          (outputId) =>
+            childPlan.outputs.find((output) => output.id === outputId),
+        );
+        const controlsOutput = childPlan.outputs.find(
+          (output) => output.id === qualificationBinding.controlsOutputId,
+        );
+        if (reportOutputs.some((output) => !output) || !controlsOutput)
+          reject(
+            `${path}.childPlan.outputs`,
+            "The bound child report and controls outputs must all exist.",
+          );
+        let childLowerer = this.#analysisResultQualificationLowerers.get(
+          node.childPlan,
+        );
+        if (!childLowerer) {
+          childLowerer = new AnalyticsLogicalToDbLowerer(
+            childPlan,
+            {
+              ...this.#storageContext,
+              time: childPlan.context.time,
+            },
+            {
+              analyticsQualificationAdmissionPolicy:
+                qualificationBinding.policy,
+            },
+          );
+          this.#analysisResultQualificationLowerers.set(
+            node.childPlan,
+            childLowerer,
+          );
+        }
+        const approvedOutputs = [
+          ...reportOutputs,
+          controlsOutput,
+        ] as LogicalOutput[];
+        const loweredOutputs = childLowerer.lowerMany(approvedOutputs);
+        if (!byOutput) {
+          byOutput = new Map();
+          this.#analysisResultOutputs.set(node.childPlan, byOutput);
+        }
+        qualificationBinding.reportOutputIds.forEach((outputId, index) => {
+          byOutput!.set(outputId, loweredOutputs[index]!);
+        });
+        byOutput.set(
+          qualificationBinding.controlsOutputId,
+          loweredOutputs.at(-1)!,
+        );
+        childLowered = byOutput.get(node.outputId);
+        if (!childLowered)
+          reject(path, "The bound child output was not lowered.");
+      }
+    }
     if (!childLowered) {
       let childPlan: ValidatedLogicalPlan;
       try {
@@ -2330,6 +2451,13 @@ export class AnalyticsLogicalToDbLowerer {
           visible,
           `${path}.projections[${index}].expression`,
           this.#plan.context.time,
+          this.#comparisonAdmissionBinding
+            ? {
+                binding: this.#comparisonAdmissionBinding,
+                owner: this,
+                relationId: node.input,
+              }
+            : undefined,
         );
         const outputMeta = logicalSlot(
           this.#logicalSlots,
@@ -2918,6 +3046,76 @@ export class AnalyticsLogicalToDbLowerer {
         boundedSlots.add(key.left);
     }
     const required = this.#requiredOutput(node);
+    const membershipPayloadProofs =
+      node.kind === "semi-join"
+        ? this.#eventPayloadKeyProofs.get(node.left)
+        : undefined;
+    const providerValues: ProviderProjectionValue[] = [];
+    for (const [id, proof] of membershipPayloadProofs ?? []) {
+      if (
+        !node.output.includes(proof.request.eventKeySlot) ||
+        proof.carrierRelation !== left.relation ||
+        left.providerColumns?.get(id) !== proof.keyColumn
+      )
+        reject(
+          path,
+          "A transparent membership semi-join cannot propagate a mismatched Event payload key carrier.",
+        );
+      providerValues.push({
+        id,
+        expression: relationColumn(relation, proof.keyColumn, path),
+        ...(proof.metadataColumns.size > 0
+          ? {
+              additionalValues: [...proof.metadataColumns.entries()].map(
+                ([field, column]) => ({
+                  id: analyticsEventPayloadMetadataProviderId(id, field),
+                  expression: relationColumn(relation, column, path),
+                }),
+              ),
+            }
+          : {}),
+      });
+    }
+    if (node.kind === "semi-join") {
+      for (const [slot, layout] of left.slots) {
+        if (
+          layout.kind !== "entity" ||
+          !layout.providerDistinctIdentity ||
+          !node.output.includes(slot)
+        )
+          continue;
+        const proof = layout.providerDistinctIdentity;
+        if (
+          layout.type.entity !== "event" ||
+          layout.nullable ||
+          proof.identitySlot !== slot ||
+          proof.scopeRelation !== node.left ||
+          proof.carrierRelation !== left.relation ||
+          proof.identityColumns[0] !== layout.keyColumns[0] ||
+          proof.identityColumns[1] !== layout.keyColumns[1]
+        )
+          reject(
+            path,
+            "A membership semi-join cannot propagate a mismatched Event distinct identity proof.",
+          );
+        providerValues.push({
+          id: proof.sourceBinding.request.id,
+          expression: relationColumn(relation, proof.discriminatorColumn, path),
+          identitySlot: slot,
+          identitySeed: {
+            sourceBinding: proof.sourceBinding,
+            sourceSignature: proof.sourceSignature,
+            sourceId: proof.sourceId,
+            eventKeySlot: proof.eventKeySlot,
+            identitySlot: slot,
+            scopeRelation: node.id,
+            inputRelation: relation,
+            inputIdentityColumns: proof.identityColumns,
+            inputDiscriminatorColumn: proof.discriminatorColumn,
+          },
+        });
+      }
+    }
     const projected = projectedValues(
       relation,
       node.output
@@ -2928,6 +3126,7 @@ export class AnalyticsLogicalToDbLowerer {
         })),
       this.#logicalSlots,
       path,
+      providerValues,
     );
     const slots = new Map(
       [...projected.slots].map(
@@ -2938,6 +3137,39 @@ export class AnalyticsLogicalToDbLowerer {
           ] as const,
       ),
     );
+    if (membershipPayloadProofs && membershipPayloadProofs.size > 0) {
+      const proofs = new Map<string, EventPayloadKeyProof>();
+      for (const [id, proof] of membershipPayloadProofs) {
+        const keyColumn = projected.providerColumns?.get(id);
+        const eventKeyLayout = slots.get(proof.request.eventKeySlot);
+        if (!keyColumn || !eventKeyLayout)
+          reject(
+            path,
+            "A membership semi-join lost its Event payload key layout.",
+          );
+        proofs.set(id, {
+          ...proof,
+          scopeRelation: node.id,
+          carrierRelation: projected.relation,
+          keyColumn,
+          eventKeyLayout,
+          metadataColumns: new Map(
+            [...proof.metadataColumns.keys()].map((field) => {
+              const column = projected.providerColumns?.get(
+                analyticsEventPayloadMetadataProviderId(id, field),
+              );
+              if (!column)
+                reject(
+                  path,
+                  "A membership semi-join lost hidden Event payload metadata.",
+                );
+              return [field, column] as const;
+            }),
+          ),
+        });
+      }
+      this.#eventPayloadKeyProofs.set(node.id, proofs);
+    }
     const pageSessionRestricted =
       node.kind === "semi-join" &&
       left.candidateActivity === "page" &&
@@ -2957,6 +3189,9 @@ export class AnalyticsLogicalToDbLowerer {
     return {
       relation: projected.relation,
       slots,
+      ...(projected.providerColumns
+        ? { providerColumns: projected.providerColumns }
+        : {}),
       candidateActivity: left.candidateActivity,
       candidateActivitySessionRelation:
         left.candidateActivitySessionRelation ??
@@ -2964,46 +3199,6 @@ export class AnalyticsLogicalToDbLowerer {
       candidateActivitySessionRestricted:
         left.candidateActivitySessionRestricted || pageSessionRestricted,
     };
-  }
-
-  #hasStorageBackedEventPk(
-    relation: RelationId,
-    eventKey: SlotId,
-    eventPk: SlotId,
-    active = new Set<RelationId>(),
-  ): boolean {
-    if (active.has(relation)) return false;
-    const node = this.#nodes.get(relation);
-    if (
-      !node ||
-      !node.output.includes(eventKey) ||
-      !node.output.includes(eventPk)
-    )
-      return false;
-    const nextActive = new Set(active).add(relation);
-    if (node.kind === "filter")
-      return this.#hasStorageBackedEventPk(
-        node.input,
-        eventKey,
-        eventPk,
-        nextActive,
-      );
-    if (node.kind !== "source") return false;
-    return (
-      node.entity === "event" &&
-      node.grain.kind === "entity" &&
-      node.grain.entity === "event" &&
-      node.grain.key === eventKey &&
-      node.values.some(
-        (binding) => binding.kind === "self" && binding.slot === eventKey,
-      ) &&
-      node.values.some(
-        (binding) =>
-          binding.kind === "attribute" &&
-          binding.slot === eventPk &&
-          binding.attribute === "event.report.internalPk",
-      )
-    );
   }
 
   #hasStorageBackedObservationIdentity(
@@ -3110,6 +3305,7 @@ export class AnalyticsLogicalToDbLowerer {
       case "join":
       case "row-concatenation":
       case "event-payload-occurrences":
+      case "event-payload-properties":
         // Aggregates and joins do not supply a storage-backed Observation key.
         return false;
       case "analysis-result":
@@ -3157,6 +3353,13 @@ export class AnalyticsLogicalToDbLowerer {
           visible,
           groupPath,
           this.#plan.context.time,
+          this.#comparisonAdmissionBinding
+            ? {
+                binding: this.#comparisonAdmissionBinding,
+                owner: this,
+                relationId: node.input,
+              }
+            : undefined,
         ),
         groupPath,
       );
@@ -3214,10 +3417,51 @@ export class AnalyticsLogicalToDbLowerer {
           visible,
           measurePath,
           this.#plan.context.time,
+          this.#comparisonAdmissionBinding
+            ? {
+                binding: this.#comparisonAdmissionBinding,
+                owner: this,
+                relationId: node.input,
+              }
+            : undefined,
         );
         if (measure.kind === "count-distinct") {
-          const scalar = scalarAggregateValue(value, measurePath);
-          expression = countDistinct(scalar.expression);
+          if (value.kind === "scalar") {
+            const scalar = scalarAggregateValue(value, measurePath);
+            expression = countDistinct(scalar.expression);
+          } else {
+            const proof = value.providerDistinctIdentity;
+            const slot =
+              measure.input.kind === "slot" ? measure.input.slot : undefined;
+            const layout =
+              slot === undefined ? undefined : input.slots.get(slot);
+            if (
+              !proof ||
+              slot === undefined ||
+              slot !== proof.identitySlot ||
+              layout?.kind !== "entity" ||
+              layout.type.entity !== "event" ||
+              layout.nullable ||
+              value.entity !== "event" ||
+              value.nullable
+            )
+              reject(
+                measurePath,
+                "COUNT(DISTINCT) supports Entity values only with a proven non-null Event identity.",
+              );
+            const discriminator = assertAnalyticsEventDistinctIdentityLayout(
+              proof,
+              {
+                scopeRelation: node.input,
+                identitySlot: slot,
+                relation: input.relation,
+                identityColumns: layout.keyColumns,
+                keys: value.keys,
+              },
+              measurePath,
+            );
+            expression = countDistinct(discriminator);
+          }
           expectedType = { kind: "scalar", scalar: "number" };
           expectedNullable = false;
         } else if (measure.kind === "sum") {
@@ -3293,6 +3537,13 @@ export class AnalyticsLogicalToDbLowerer {
           visible,
           `${groupPath}.expression`,
           this.#plan.context.time,
+          this.#comparisonAdmissionBinding
+            ? {
+                binding: this.#comparisonAdmissionBinding,
+                owner: this,
+                relationId: node.input,
+              }
+            : undefined,
         ),
         `${groupPath}.expression`,
       );
@@ -3328,6 +3579,13 @@ export class AnalyticsLogicalToDbLowerer {
         visible,
         `${path}.value`,
         this.#plan.context.time,
+        this.#comparisonAdmissionBinding
+          ? {
+              binding: this.#comparisonAdmissionBinding,
+              owner: this,
+              relationId: node.input,
+            }
+          : undefined,
       ),
       `${path}.value`,
     );
@@ -3931,11 +4189,49 @@ export class AnalyticsLogicalToDbLowerer {
     reachable: ReadonlySet<RelationId>,
   ): void {
     this.#requiredSlots.clear();
+    this.#requiredProviderSourceBindings.clear();
+    this.#eventPayloadKeyRequestsByOccurrence.clear();
+    this.#eventPayloadKeyRequestsByProperties.clear();
+    this.#eventPayloadKeyProofs.clear();
     for (const output of outputs)
       this.#addRequiredSlots(
         output.relation,
         output.fields.map((field) => field.slot),
       );
+    for (const node of this.#plan.nodes) {
+      if (!reachable.has(node.id)) continue;
+      if (
+        node.kind !== "event-payload-occurrences" &&
+        node.kind !== "event-payload-properties"
+      )
+        continue;
+      const source = this.#eventPayloadSource(
+        node.input,
+        node.eventKey,
+        `${nodePath(node.id)}.input`,
+      );
+      const isProperties = node.kind === "event-payload-properties";
+      const request: AnalyticsProviderSourceBindingRequest = {
+        kind: "event-payload-key",
+        id: JSON.stringify([
+          isProperties ? "event-payload-properties-key" : "event-payload-key",
+          String(source.id),
+        ]),
+        sourceId: source.id,
+        eventKeySlot: node.eventKey,
+        ...(isProperties ? { includePayloadPropertiesMetadata: true } : {}),
+      };
+      const existing =
+        this.#requiredProviderSourceBindings.get(source.id) ?? [];
+      if (!existing.some((binding) => binding.id === request.id))
+        this.#requiredProviderSourceBindings.set(source.id, [
+          ...existing,
+          request,
+        ]);
+      if (isProperties)
+        this.#eventPayloadKeyRequestsByProperties.set(node.id, request);
+      else this.#eventPayloadKeyRequestsByOccurrence.set(node.id, request);
+    }
     let changed = true;
     while (changed) {
       changed = false;
@@ -3958,7 +4254,13 @@ export class AnalyticsLogicalToDbLowerer {
             ]);
             break;
           case "event-payload-occurrences":
-            add(node.input, [node.eventPk]);
+            add(node.input, [node.eventKey]);
+            break;
+          case "event-payload-properties":
+            add(node.input, [
+              ...node.output.filter((slot) => needed.has(slot)),
+              node.eventKey,
+            ]);
             break;
           case "project":
             for (const projection of node.projections) {
@@ -4139,6 +4441,7 @@ export class AnalyticsLogicalToDbLowerer {
       case "string-match":
       case "string-normalize":
       case "number-report-text":
+      case "numeric-value":
       case "absolute":
       case "round":
       case "time-bucket":

@@ -23,7 +23,7 @@ import {
   compileScopedDatasetSql,
   scopedDatasetFor,
   scopedDatasetForUnpreparedReader,
-} from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 
 const context = {

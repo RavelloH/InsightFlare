@@ -40,9 +40,10 @@ import {
   EVENT_TYPE_OVERVIEW_OUTPUTS,
 } from "@/lib/edge/analytics/engine/event-type-overview-plan";
 import { queryEventAnalyticsContextCardsParentOracleFromD1 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/event-context-parent-oracle";
+import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import { buildEventFilteredSourceCte } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import {
-  buildEventFilteredSourceCte,
   buildTimeBuckets,
   type Interval,
   type QueryWindow,
@@ -71,7 +72,6 @@ import {
   queryVisitorListPageFromD1,
   queryVisitorsFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
-import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import type { Env } from "@/lib/edge/types";
 import type { FilterExpression } from "@/lib/filter-contract/filters";
 import { sha256Hex } from "@/lib/sha256";
@@ -3624,7 +3624,7 @@ describe("event detail D1 SQL", () => {
       );
       const terminalOrder = actualQuery!.sql.slice(orderByIndex);
       expect(terminalOrder).toMatch(
-        /ORDER BY "[^"]+"\."_c0" ASC, "[^"]+"\."_c2" DESC, "[^"]+"\."_c4" DESC, "[^"]+"\."_c1" ASC/u,
+        /ORDER BY (?:"[^"]+"|[a-z][a-z\d]*)\."?_c0"? ASC, (?:"[^"]+"|[a-z][a-z\d]*)\."?_c2"? DESC, (?:"[^"]+"|[a-z][a-z\d]*)\."?_c4"? DESC, (?:"[^"]+"|[a-z][a-z\d]*)\."?_c1"? ASC/u,
       );
     } finally {
       d1.close();

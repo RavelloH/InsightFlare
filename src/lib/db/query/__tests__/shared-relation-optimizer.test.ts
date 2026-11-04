@@ -37,6 +37,7 @@ import {
   scan,
   semiJoin,
   sort,
+  sum,
   textLike,
   textPosition,
   textSubstring,
@@ -50,7 +51,14 @@ import {
 import { explainQueryPlan } from "@/lib/db/__tests__/query-plan";
 import { compileD1QueryUnoptimizedForTest } from "@/lib/db/query/compiler";
 import type { AnyExpression, Predicate } from "@/lib/db/query/expression";
-import { lowerLogicalPlan } from "@/lib/db/query/physical-plan";
+import {
+  isMaterializationSafePartitionedRowNumberWindow,
+  isMaterializationSafeProvenPartitionedRowNumberWindow,
+} from "@/lib/db/query/materialization-safety";
+import {
+  lowerLogicalPlan,
+  validatePhysicalQueryPlan,
+} from "@/lib/db/query/physical-plan";
 import type {
   Relation,
   TextRowRelationRow,
@@ -59,6 +67,185 @@ import type {
 import { schema } from "@/lib/db/schema";
 
 const databases = new Set<DatabaseSync>();
+
+function insertRankOneSiteIdentities(database: DatabaseSync): void {
+  database
+    .prepare("INSERT INTO site_identities (site_id) VALUES (?), (?)")
+    .run("rank-one-site-a", "rank-one-site-b");
+}
+
+function buildUniqueIndexRankOneBoundaryCandidate(boundary: Relation) {
+  const identities = scan(schema.site_identities);
+  const uniqueSiteIds = project(identities, {
+    siteId: identities.columns.site_id!,
+    groupKey: constant("alpha"),
+  });
+  const boundaryMembers = semiJoin(
+    uniqueSiteIds,
+    boundary,
+    eq(param(1), param(1)),
+  );
+  const ranked = window(boundaryMembers, {
+    rank: rowNumber({
+      partitionBy: [boundaryMembers.columns.siteId!],
+      orderBy: [
+        { expression: boundaryMembers.columns.siteId!, direction: "ASC" },
+      ],
+    }),
+  });
+  const selected = filter(ranked, eq(ranked.columns.rank!, constant(1)));
+  const candidate = project(
+    selected,
+    Object.fromEntries(
+      Array.from({ length: 17 }, (_unused, index) => [
+        `field${index}`,
+        index % 2 === 0 ? selected.columns.siteId! : selected.columns.groupKey!,
+      ]),
+    ),
+  );
+  return { candidate, ranked };
+}
+
+function buildUnstableUpstreamRankOneBoundaryCandidate(boundary: Relation) {
+  const identities = scan(schema.site_identities);
+  const source = project(identities, {
+    siteId: identities.columns.site_id!,
+    groupKey: constant("alpha"),
+  });
+  const unstableRanked = window(source, {
+    unstableRank: rowNumber({
+      partitionBy: [source.columns.groupKey!],
+      orderBy: [{ expression: source.columns.groupKey!, direction: "ASC" }],
+    }),
+  });
+  const unstableTop = filter(
+    unstableRanked,
+    eq(unstableRanked.columns.unstableRank!, constant(1)),
+  );
+  const boundaryMembers = semiJoin(
+    unstableTop,
+    boundary,
+    eq(param(1), param(1)),
+  );
+  const downstreamStableRanked = window(boundaryMembers, {
+    stableRank: rowNumber({
+      partitionBy: [boundaryMembers.columns.groupKey!],
+      orderBy: [
+        { expression: boundaryMembers.columns.siteId!, direction: "ASC" },
+      ],
+    }),
+  });
+  const downstreamTop = filter(
+    downstreamStableRanked,
+    eq(downstreamStableRanked.columns.stableRank!, constant(1)),
+  );
+  const candidate = project(
+    downstreamTop,
+    Object.fromEntries(
+      Array.from({ length: 17 }, (_unused, index) => [
+        `field${index}`,
+        index % 2 === 0
+          ? downstreamTop.columns.siteId!
+          : downstreamTop.columns.groupKey!,
+      ]),
+    ),
+  );
+  return { candidate, unstableRanked, downstreamStableRanked };
+}
+
+function buildRankOneBoundaryAggregateQuery(
+  candidate: Relation,
+  aggregateInput: Relation,
+): Relation {
+  const candidateColumns = candidate.columns as Readonly<
+    Record<string, AnyExpression>
+  >;
+  const buildRankBranch = (direction: "ASC" | "DESC") => {
+    const ranked = window(candidate, {
+      rank: rowNumber({
+        partitionBy: [candidateColumns.field1!],
+        orderBy: [{ expression: candidateColumns.field0!, direction }],
+      }),
+    });
+    const selected = filter(ranked, eq(ranked.columns.rank!, constant(1)));
+    return project(selected, { key: selected.columns.field1! });
+  };
+  const aggregateColumns = aggregateInput.columns as Readonly<
+    Record<string, AnyExpression>
+  >;
+  const aggregateBranch = aggregate(aggregateInput, {
+    groupBy: { key: aggregateColumns.key! },
+    aggregates: { total: count() },
+  });
+  const firstRank = buildRankBranch("ASC");
+  const secondRank = buildRankBranch("DESC");
+  const aggregateJoin = join(
+    aggregateBranch,
+    firstRank,
+    eq(aggregateBranch.columns.key as never, firstRank.columns.key as never),
+  );
+  const output = join(
+    aggregateJoin,
+    secondRank,
+    eq(
+      aggregateJoin.columns.right_key as never,
+      secondRank.columns.key as never,
+    ),
+  );
+  return sort(output, [
+    { expression: output.columns.left_left_total!, direction: "ASC" },
+  ]);
+}
+
+function reachableLogicalNodes(root: object): ReadonlySet<object> {
+  const kinds = new Set([
+    "scan",
+    "values-relation",
+    "json-scalar-array",
+    "filter",
+    "project",
+    "aggregate",
+    "distinct",
+    "window",
+    "sort",
+    "limit",
+    "recursive-closure",
+    "join",
+    "semi-join",
+    "anti-join",
+    "union",
+  ]);
+  const nodes = new Set<object>();
+  const visited = new WeakSet<object>();
+  const visit = (value: unknown): void => {
+    if (typeof value !== "object" || value === null || visited.has(value))
+      return;
+    visited.add(value);
+    if (
+      "kind" in value &&
+      typeof value.kind === "string" &&
+      kinds.has(value.kind)
+    )
+      nodes.add(value);
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    Object.values(value).forEach(visit);
+  };
+  visit(root);
+  return nodes;
+}
+
+function directWindowConsumerCount(root: object, target: object): number {
+  return [...reachableLogicalNodes(root)].filter((value) => {
+    const node = value as {
+      readonly kind?: unknown;
+      readonly input?: { readonly node?: object };
+    };
+    return node.kind === "window" && node.input?.node === target;
+  }).length;
+}
 
 function selectedProjection(width: number, selective = true) {
   const identities = scan(schema.site_identities);
@@ -369,6 +556,7 @@ function closedConstantExistenceWindowCandidate(
     readonly barrier?: "sort" | "limit";
     readonly nestedNonconstantQuery?: boolean;
     readonly queryKind?: "scalar" | "in";
+    readonly externalCorrelation?: AnyExpression;
   } = {},
 ) {
   const pageSchema = {
@@ -457,7 +645,10 @@ function closedConstantExistenceWindowCandidate(
   const matchingBoundary = filter(
     nestedQueryBoundary,
     and(
-      eq(ranked.columns.sitePk, outerPages.columns.sitePk),
+      eq(
+        ranked.columns.sitePk,
+        options.externalCorrelation ?? outerPages.columns.sitePk,
+      ),
       eq(ranked.columns.sessionId, outerPages.columns.sessionId),
       eq(ranked.columns.rank, param(1)),
     ),
@@ -1756,6 +1947,629 @@ describe("shared relation physical selection", () => {
     ).toBe(false);
   });
 
+  it("rank-one project license uses a fresh catalog key across a materialized boundary", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    insertRankOneSiteIdentities(database);
+
+    const materializedQualification =
+      closedExpressionWindowCandidate().candidate;
+    const { candidate, ranked } = buildUniqueIndexRankOneBoundaryCandidate(
+      materializedQualification,
+    );
+    expect(isMaterializationSafePartitionedRowNumberWindow(ranked.node)).toBe(
+      false,
+    );
+    expect(
+      isMaterializationSafeProvenPartitionedRowNumberWindow(ranked.node),
+    ).toBe(true);
+    expect(candidate.fields).toHaveLength(17);
+
+    const aggregateInput = project(materializedQualification, {
+      key: materializedQualification.columns.groupKey!,
+    });
+    const query = buildRankOneBoundaryAggregateQuery(candidate, aggregateInput);
+    expect(directWindowConsumerCount(query.node, candidate.node)).toBe(2);
+
+    const physical = lowerLogicalPlan(query);
+    const boundaryDefinition = physical.sharedRelations.find(
+      ({ node }) => node === materializedQualification.node,
+    );
+    const candidateDefinition = physical.sharedRelations.find(
+      ({ node }) => node === candidate.node,
+    );
+    expect(boundaryDefinition).toMatchObject({
+      materialization: "materialized",
+    });
+    expect(candidateDefinition).toMatchObject({
+      materialization: "materialized",
+      materializationSelection: {
+        kind: "current-boundary-derived-auto",
+      },
+    });
+    expect(candidateDefinition?.dependencies).toContain(
+      boundaryDefinition?.name,
+    );
+
+    const optimized = compileD1Query(physical);
+    const mechanical = compileD1QueryUnoptimizedForTest(query);
+    const optimizedRows = database
+      .prepare(optimized.sql)
+      .all(...(optimized.bindings as SQLInputValue[]));
+    const mechanicalRows = database
+      .prepare(mechanical.sql)
+      .all(...(mechanical.bindings as SQLInputValue[]));
+    expect(rowBag(optimizedRows)).toEqual(rowBag(mechanicalRows));
+    expect(optimizedRows.length).toBeGreaterThan(0);
+  });
+
+  it("follows retained auto projects to DISTINCT UNION consumers before licensing", () => {
+    const buildUnionConsumer = (retainRawValue: boolean) => {
+      const source = scan(schema.site_identities);
+      const narrow = project(source, {
+        id: source.columns.site_pk!,
+        key: source.columns.site_id!,
+      });
+      const boundary = filter(narrow, gt(narrow.columns.id!, param(0)));
+      const rankById = window(boundary, {
+        rank: rowNumber({
+          orderBy: [{ expression: boundary.columns.id!, direction: "ASC" }],
+        }),
+      });
+      const rankByKey = window(boundary, {
+        rank: rowNumber({
+          partitionBy: [boundary.columns.key!],
+          orderBy: [{ expression: boundary.columns.id!, direction: "DESC" }],
+        }),
+      });
+      const ranked = join(
+        rankById,
+        rankByKey,
+        eq(rankById.columns.key!, rankByKey.columns.key!),
+      );
+      const candidate = project(boundary, { value: boundary.columns.key! });
+      const retainedAutoProject = project(candidate, {
+        value: candidate.columns.value!,
+      });
+      const left = project(retainedAutoProject, {
+        value: retainedAutoProject.columns.value!,
+      });
+      const right = project(retainedAutoProject, {
+        value: retainedAutoProject.columns.value!,
+      });
+      const rawUnion = union(left, right, false);
+      const distinctValues = distinct(rawUnion);
+      const probe = project(candidate, { value: candidate.columns.value! });
+      const withProbe = join(
+        ranked,
+        probe,
+        eq(ranked.columns.left_key!, probe.columns.value!),
+      );
+      const joined = join(
+        withProbe,
+        distinctValues,
+        eq(withProbe.columns.right_value!, distinctValues.columns.value!),
+      );
+      const output = retainRawValue
+        ? project(joined, {
+            value: joined.columns.left_left_left_key!,
+            observed: joined.columns.right_value!,
+          })
+        : project(joined, { value: joined.columns.left_left_left_key! });
+      return { output, candidate, retainedAutoProject };
+    };
+
+    const legal = buildUnionConsumer(false);
+    const legalPhysical = lowerLogicalPlan(legal.output);
+    expect(
+      legalPhysical.sharedRelations.find(
+        ({ node }) => node === legal.candidate.node,
+      ),
+    ).toMatchObject({
+      materialization: "materialized",
+      materializationSelection: {
+        kind: "current-boundary-derived-auto",
+      },
+    });
+    expect(
+      legalPhysical.sharedRelations.find(
+        ({ node }) => node === legal.retainedAutoProject.node,
+      ),
+    ).toMatchObject({
+      materialization: "materialized",
+      materializationSelection: {
+        kind: "current-boundary-derived-auto",
+      },
+    });
+
+    const rawObservation = buildUnionConsumer(true);
+    const rawPhysical = lowerLogicalPlan(rawObservation.output);
+    expect(
+      rawPhysical.sharedRelations.find(
+        ({ node }) => node === rawObservation.retainedAutoProject.node,
+      ),
+    ).toMatchObject({ materialization: "auto" });
+    expect(
+      rawPhysical.sharedRelations.find(
+        ({ node }) => node === rawObservation.candidate.node,
+      ),
+    ).toMatchObject({ materialization: "auto" });
+    const rawInterfaceView = validatePhysicalQueryPlan(rawPhysical);
+    expect(
+      rawInterfaceView.interfaces.some(
+        ({ definition }) =>
+          definition.node === rawObservation.retainedAutoProject.node ||
+          definition.node === rawObservation.candidate.node,
+      ),
+    ).toBe(false);
+  });
+
+  it("derives tuple self-membership through a freshly licensed auto boundary", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    insertRankOneSiteIdentities(database);
+
+    const qualification = closedExpressionWindowCandidate().candidate;
+    const { candidate } =
+      buildUniqueIndexRankOneBoundaryCandidate(qualification);
+    const aggregateInput = project(qualification, {
+      key: qualification.columns.groupKey!,
+    });
+    const anchor = buildRankOneBoundaryAggregateQuery(
+      candidate,
+      aggregateInput,
+    );
+
+    const filtered = filter(
+      candidate,
+      eq(candidate.columns.field0!, param("rank-one-site-a")),
+    );
+    const left = project(filtered, {
+      key: filtered.columns.field0!,
+      marker: filtered.columns.field1!,
+    });
+    const keyProjection = project(candidate, {
+      key: candidate.columns.field0!,
+    });
+    const keys = distinct(keyProjection);
+    const selfJoin = join(left, keys, eq(left.columns.key!, keys.columns.key!));
+    const selfMembershipRows = project(selfJoin, {
+      value: selfJoin.columns.left_key!,
+    });
+    const selfRows = project(selfMembershipRows, {
+      kind: constant("self"),
+      value: selfMembershipRows.columns.value!,
+    });
+    const anchorRows = project(anchor, {
+      kind: constant("anchor"),
+      value: constant("anchor"),
+    });
+    const output = union(anchorRows, selfRows, true);
+    const physical = lowerLogicalPlan(output);
+    expect(physical.selfMembershipChoices).toHaveLength(1);
+    const boundary = physical.sharedRelations.find(
+      ({ node }) => node === candidate.node,
+    );
+    expect(boundary).toMatchObject({
+      materialization: "materialized",
+      materializationSelection: {
+        kind: "current-boundary-derived-auto",
+      },
+    });
+    const choice = physical.selfMembershipChoices.find(
+      ({ project: selectedProject }) =>
+        selectedProject === selfMembershipRows.node,
+    );
+    expect(choice?.witness).toMatchObject({
+      definition: { node: candidate.node },
+      path: [{ kind: "project" }, { kind: "filter" }],
+    });
+    if (!choice?.witness)
+      throw new Error("expected_current_self_membership_witness");
+    const witness = choice.witness;
+    const withChoice = (next: typeof choice) => ({
+      ...physical,
+      selfMembershipChoices: physical.selfMembershipChoices.map((item) =>
+        item === choice ? next : item,
+      ),
+    });
+    const invalidWitnesses: readonly (readonly [string, typeof witness])[] = [
+      [
+        "scope",
+        {
+          ...witness,
+          source: {
+            ...witness.source,
+            scope: {} as typeof witness.source.scope,
+          },
+        },
+      ],
+      [
+        "node",
+        {
+          ...witness,
+          source: { ...witness.source, node: qualification.node },
+        },
+      ],
+      [
+        "fields",
+        {
+          ...witness,
+          definition: {
+            ...witness.definition,
+            fields: [...witness.definition.fields].reverse(),
+          },
+        },
+      ],
+      [
+        "definition-dependencies",
+        {
+          ...witness,
+          definition: {
+            ...witness.definition,
+            dependencies: [...witness.definition.dependencies, "tampered"],
+          },
+        },
+      ],
+      [
+        "definition-selection",
+        {
+          ...witness,
+          definition: {
+            ...witness.definition,
+            materializationSelection: {
+              ...witness.definition.materializationSelection!,
+              choiceIndex:
+                witness.definition.materializationSelection!.choiceIndex + 1,
+            },
+          },
+        },
+      ],
+      [
+        "key-lineage",
+        {
+          ...witness,
+          rightProjectInputIndexes: witness.rightProjectInputIndexes.map(
+            () => 99,
+          ),
+        },
+      ],
+      [
+        "producer-order",
+        {
+          ...witness,
+          producerIndex: witness.definitionIndex,
+        },
+      ],
+      [
+        "license",
+        {
+          ...witness,
+          boundary: {
+            ...witness.boundary,
+            license: { kind: "strict-generic-facts" as const },
+          },
+        },
+      ],
+      [
+        "boundary-selectivity",
+        {
+          ...witness,
+          boundary: {
+            ...witness.boundary,
+            selective: !witness.boundary.selective,
+          },
+        },
+      ],
+      [
+        "boundary-closure",
+        {
+          ...witness,
+          boundary: {
+            ...witness.boundary,
+            closure: {
+              ...witness.boundary.closure,
+              referencedColumnCount:
+                witness.boundary.closure.referencedColumnCount + 1,
+            },
+          },
+        },
+      ],
+      [
+        "boundary-totality",
+        {
+          ...witness,
+          boundary: {
+            ...witness.boundary,
+            totality: {
+              ...witness.boundary.totality,
+              stoppedAt: [
+                ...witness.boundary.totality.stoppedAt,
+                qualification.node,
+              ],
+            },
+          },
+        },
+      ],
+    ];
+    for (const [label, invalidWitness] of invalidWitnesses) {
+      let rejected = false;
+      try {
+        compileD1Query(withChoice({ ...choice, witness: invalidWitness }));
+      } catch {
+        rejected = true;
+      }
+      expect(rejected, `tampered ${label} witness`).toBe(true);
+    }
+
+    try {
+      const optimized = compileD1Query(physical);
+      const optimizedRows = database
+        .prepare(optimized.sql)
+        .all(...(optimized.bindings as SQLInputValue[]));
+      expect(rowBag(optimizedRows)).toEqual(
+        rowBag([
+          { kind: "anchor", value: "anchor" },
+          { kind: "self", value: "rank-one-site-a" },
+        ]),
+      );
+      expect(optimized.physicalPlanShape?.version).toBe(13);
+      if (optimized.physicalPlanShape?.version !== 13)
+        throw new Error("expected_v13_derived_membership_shape");
+      expect(optimized.physicalPlanShape.derivedSelfMembershipCount).toBe(1);
+      expect(optimized.physicalPlanShape.derivedSelfMemberships).toEqual([
+        expect.objectContaining({
+          definitionIndex: expect.any(Number),
+          producerIndex: expect.any(Number),
+          tupleWidth: 1,
+          nullableGuardCount: 0,
+          emissionCount: 1,
+        }),
+      ]);
+    } finally {
+      database.close();
+      databases.delete(database);
+    }
+  });
+
+  it("preserves nullable composite keys, duplicate bags, and renamed projections", () => {
+    const source = valuesRelation(
+      {
+        first: { affinity: "text", nullable: true },
+        second: { affinity: "text", nullable: true },
+        marker: { affinity: "text", nullable: false },
+      },
+      [
+        { first: "a", second: "x", marker: "duplicate-one" },
+        { first: "a", second: "x", marker: "duplicate-two" },
+        { first: "b", second: "y", marker: "single" },
+        { first: null, second: "x", marker: "null-first" },
+        { first: "c", second: null, marker: "null-second" },
+        { first: null, second: null, marker: "null-pair" },
+        { first: "excluded", second: "row", marker: "skip" },
+      ],
+    );
+    const renamed = project(source, {
+      secondName: source.columns.second!,
+      firstName: source.columns.first!,
+      marker: source.columns.marker!,
+    });
+    const filtered = filter(
+      renamed,
+      neq(renamed.columns.marker!, constant("skip")),
+    );
+    const keys = distinct(
+      project(filtered, {
+        lookupSecond: filtered.columns.secondName!,
+        lookupFirst: filtered.columns.firstName!,
+      }),
+    );
+    const matched = join(
+      filtered,
+      keys,
+      and(
+        eq(filtered.columns.secondName!, keys.columns.lookupSecond!),
+        eq(filtered.columns.firstName!, keys.columns.lookupFirst!),
+      ),
+    );
+    const output = project(matched, {
+      second: matched.columns.left_secondName!,
+      first: matched.columns.left_firstName!,
+      marker: matched.columns.left_marker!,
+    });
+    const physical = lowerLogicalPlan(output);
+    const choice = physical.selfMembershipChoices.find(
+      ({ project: selected }) => selected === output.node,
+    );
+    expect(choice).toBeDefined();
+    expect(choice?.witness).toBeUndefined();
+    expect(choice?.nullableKeyIndexes).toEqual([0, 1]);
+    const optimized = compileD1Query(physical);
+    const mechanical = compileD1QueryUnoptimizedForTest(output);
+    expect(optimized.bindings?.length ?? 0).toBeLessThanOrEqual(100);
+    expect(mechanical.bindings?.length ?? 0).toBeLessThanOrEqual(100);
+
+    const database = new DatabaseSync(":memory:");
+    databases.add(database);
+    try {
+      const optimizedRows = database
+        .prepare(optimized.sql)
+        .all(...(optimized.bindings as SQLInputValue[]));
+      const mechanicalRows = database
+        .prepare(mechanical.sql)
+        .all(...(mechanical.bindings as SQLInputValue[]));
+      expect(rowBag(optimizedRows)).toEqual(rowBag(mechanicalRows));
+      expect(rowBag(optimizedRows)).toEqual(
+        rowBag([
+          { second: "x", first: "a", marker: "duplicate-one" },
+          { second: "x", first: "a", marker: "duplicate-two" },
+          { second: "y", first: "b", marker: "single" },
+        ]),
+      );
+    } finally {
+      database.close();
+      databases.delete(database);
+    }
+  });
+
+  it("rejects mixed-side keys and unsupported self-membership lineage", () => {
+    const leftRows = valuesRelation(
+      {
+        first: { affinity: "text", nullable: false },
+        second: { affinity: "text", nullable: false },
+      },
+      [
+        { first: "a", second: "x" },
+        { first: "b", second: "y" },
+      ],
+    );
+    const otherRows = valuesRelation(
+      {
+        owner: { affinity: "text", nullable: false },
+        key: { affinity: "text", nullable: false },
+      },
+      [
+        { owner: "a", key: "x" },
+        { owner: "b", key: "y" },
+      ],
+    );
+    const mixedSources = join(
+      leftRows,
+      otherRows,
+      eq(leftRows.columns.first!, otherRows.columns.owner!),
+    );
+    const mixedKeys = distinct(
+      project(mixedSources, {
+        firstKey: mixedSources.columns.left_first!,
+        secondKey: mixedSources.columns.right_key!,
+      }),
+    );
+    const mixedMatch = join(
+      leftRows,
+      mixedKeys,
+      and(
+        eq(leftRows.columns.first!, mixedKeys.columns.firstKey!),
+        eq(leftRows.columns.second!, mixedKeys.columns.secondKey!),
+      ),
+    );
+    const mixedOutput = project(mixedMatch, {
+      first: mixedMatch.columns.left_first!,
+      second: mixedMatch.columns.left_second!,
+    });
+    expect(lowerLogicalPlan(mixedOutput).selfMembershipChoices).toHaveLength(0);
+
+    const sorted = sort(leftRows, [
+      { expression: leftRows.columns.first!, direction: "ASC" },
+    ]);
+    const sortedKeys = distinct(
+      project(sorted, {
+        firstKey: sorted.columns.first!,
+        secondKey: sorted.columns.second!,
+      }),
+    );
+    const sortedMatch = join(
+      leftRows,
+      sortedKeys,
+      and(
+        eq(leftRows.columns.first!, sortedKeys.columns.firstKey!),
+        eq(leftRows.columns.second!, sortedKeys.columns.secondKey!),
+      ),
+    );
+    const sortedOutput = project(sortedMatch, {
+      first: sortedMatch.columns.left_first!,
+      second: sortedMatch.columns.left_second!,
+    });
+    expect(lowerLogicalPlan(sortedOutput).selfMembershipChoices).toHaveLength(
+      0,
+    );
+  });
+
+  it("rejects a rank-one candidate with a preceding unstable row number", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    insertRankOneSiteIdentities(database);
+
+    const materializedQualification =
+      closedExpressionWindowCandidate().candidate;
+    const { candidate, unstableRanked, downstreamStableRanked } =
+      buildUnstableUpstreamRankOneBoundaryCandidate(materializedQualification);
+    expect(
+      isMaterializationSafeProvenPartitionedRowNumberWindow(
+        unstableRanked.node,
+      ),
+    ).toBe(false);
+    expect(
+      isMaterializationSafeProvenPartitionedRowNumberWindow(
+        downstreamStableRanked.node,
+      ),
+    ).toBe(true);
+    expect(candidate.fields).toHaveLength(17);
+
+    const aggregateInput = project(materializedQualification, {
+      key: materializedQualification.columns.groupKey!,
+    });
+    const query = buildRankOneBoundaryAggregateQuery(candidate, aggregateInput);
+    expect(directWindowConsumerCount(query.node, candidate.node)).toBe(2);
+
+    const physical = lowerLogicalPlan(query);
+    const boundaryDefinition = physical.sharedRelations.find(
+      ({ node }) => node === materializedQualification.node,
+    );
+    expect(boundaryDefinition).toMatchObject({
+      materialization: "materialized",
+    });
+    expect(
+      physical.sharedRelations.some(({ node }) => node === candidate.node),
+    ).toBe(false);
+    expect(() => compileD1Query(physical)).not.toThrow();
+
+    const candidateMechanical = compileD1QueryUnoptimizedForTest(candidate);
+    const candidateRows = database
+      .prepare(candidateMechanical.sql)
+      .all(...(candidateMechanical.bindings as SQLInputValue[]));
+    expect(candidateRows).toHaveLength(1);
+    expect(candidateRows[0]).toMatchObject({ field1: "alpha" });
+
+    // The tied upstream winner is hidden by the candidate's projected group key.
+    const optimized = compileD1Query(physical);
+    const mechanical = compileD1QueryUnoptimizedForTest(query);
+    const optimizedRows = database
+      .prepare(optimized.sql)
+      .all(...(optimized.bindings as SQLInputValue[]));
+    const mechanicalRows = database
+      .prepare(mechanical.sql)
+      .all(...(mechanical.bindings as SQLInputValue[]));
+    expect(rowBag(optimizedRows)).toEqual(rowBag(mechanicalRows));
+
+    const candidateNodes = reachableLogicalNodes(candidate.node);
+    const forgedDependencies = physical.sharedRelations
+      .filter(({ node }) => candidateNodes.has(node))
+      .map(({ name }) => name);
+    expect(forgedDependencies).toContain(boundaryDefinition?.name);
+    const nextSharedId =
+      physical.sharedRelations.reduce((highest, { name }) => {
+        const match = /^_d1_shared_(\d+)$/.exec(name);
+        return Math.max(highest, match ? Number(match[1]) : -1);
+      }, -1) + 1;
+    const forgedPhysical = {
+      ...physical,
+      sharedRelations: [
+        ...physical.sharedRelations,
+        {
+          name: `_d1_shared_${nextSharedId}`,
+          node: candidate.node,
+          scope: candidate.scope,
+          fields: candidate.fields,
+          dependencies: forgedDependencies,
+          materialization: "materialized" as const,
+        },
+      ],
+    };
+    expect(() => compileD1Query(forgedPhysical)).toThrowError(
+      expect.objectContaining({ code: "invalid_plan" }),
+    );
+  });
+
   it("keeps a shared relation forbidden when a scalar-query edge reaches it in either join order", () => {
     const pages = valuesRelation(
       {
@@ -2221,6 +3035,257 @@ describe("shared relation physical selection", () => {
       2,
     );
     expect(lowerLogicalPlan(globalLimit).sharedRelations).toEqual([]);
+  });
+
+  it("selects strict rank-one materialization cuts from a serial Generic chain", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    database
+      .prepare("INSERT INTO site_identities (site_id) VALUES (?), (?), (?)")
+      .run("serial-stage-a", "serial-stage-b", "serial-stage-c");
+    const identities = scan(schema.site_identities);
+    const source = project(identities, { key: identities.columns.site_pk! });
+    let current: Relation = source;
+    const stages: Relation[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      const key = (current.columns as Record<string, AnyExpression>).key!;
+      const ranked = window(current, {
+        rank: rowNumber({
+          partitionBy: [key],
+          orderBy: [{ expression: key, direction: "ASC" }],
+        }),
+      });
+      const selected = filter(ranked, eq(ranked.columns.rank!, constant(1)));
+      current = project(selected, { key: selected.columns.key! });
+      stages.push(current);
+    }
+    const output = project(current, { key: current.columns.key! });
+    const physical = lowerLogicalPlan(output);
+    const selectedStages = physical.sharedRelations.filter(
+      ({ materializationSelection }) =>
+        materializationSelection?.kind === "strict-serial-rank-stage",
+    );
+    expect(selectedStages.length).toBeGreaterThan(0);
+    expect(
+      selectedStages.every(
+        ({ materialization }) => materialization === "materialized",
+      ),
+    ).toBe(true);
+    expect(
+      selectedStages.every(({ node }) =>
+        stages.some((stage) => stage.node === node),
+      ),
+    ).toBe(true);
+
+    try {
+      const optimized = compileD1Query(physical);
+      const mechanical = compileD1QueryUnoptimizedForTest(output);
+      const optimizedRows = database
+        .prepare(optimized.sql)
+        .all(...(optimized.bindings as SQLInputValue[]));
+      const mechanicalRows = database
+        .prepare(mechanical.sql)
+        .all(...(mechanical.bindings as SQLInputValue[]));
+      expect(optimizedRows).toEqual(mechanicalRows);
+      expect(optimized.sql).toContain("AS MATERIALIZED (");
+      expect(optimized.physicalPlanShape?.version).toBe(13);
+      if (optimized.physicalPlanShape?.version !== 13)
+        throw new Error("expected_v13_materialization_shape");
+      expect(
+        optimized.physicalPlanShape.materializationSelectionCount,
+      ).toBeGreaterThan(0);
+      expect(optimized.physicalPlanShape.materializationSelections).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "strict-serial-rank-stage",
+            emissionCount: 1,
+          }),
+        ]),
+      );
+    } finally {
+      database.close();
+      databases.delete(database);
+    }
+  });
+
+  it("closes a strict stage reader at exact SemiJoin membership and preserves outer bags", () => {
+    const database = createMigratedDatabase();
+    databases.add(database);
+    database
+      .prepare("INSERT INTO site_identities (site_id) VALUES (?), (?)")
+      .run("membership-observation-a", "membership-observation-b");
+
+    const membershipLookup = valuesRelation(
+      { member: { affinity: "text", nullable: true } },
+      [{ member: "membership-observation-a" }],
+    );
+    const scanned = scan(schema.site_identities);
+    const membershipScanned = join(
+      scanned,
+      membershipLookup,
+      eq(scanned.columns.site_id!, membershipLookup.columns.member!),
+      "left",
+    );
+    let current = project(membershipScanned, {
+      identity: membershipScanned.columns.left_site_pk!,
+      member: membershipScanned.columns.right_member!,
+    });
+    const stages: Relation[] = [];
+    for (let index = 0; index < 5; index++) {
+      const ranked = window(current, {
+        rank: rowNumber({
+          partitionBy: [current.columns.identity!],
+          orderBy: [
+            { expression: current.columns.identity!, direction: "ASC" },
+          ],
+        }),
+      });
+      const selected = filter(ranked, eq(ranked.columns.rank!, constant(1)));
+      current = project(selected, {
+        identity: selected.columns.identity!,
+        member: selected.columns.member!,
+      });
+      stages.push(current);
+    }
+
+    const candidate = stages[stages.length - 1]!;
+    const candidateMembers = project(candidate, {
+      member: candidate.columns.member!,
+    });
+    const duplicateAndNullMembers = valuesRelation(
+      { member: { affinity: "text", nullable: true } },
+      [
+        { member: "membership-observation-a" },
+        { member: "membership-observation-a" },
+        { member: null },
+      ],
+    );
+    const right = union(candidateMembers, duplicateAndNullMembers, true);
+    const leftScan = scan(schema.site_identities);
+    const membershipLeft = join(
+      leftScan,
+      membershipLookup,
+      eq(leftScan.columns.site_id!, membershipLookup.columns.member!),
+      "left",
+    );
+    const leftProjection = project(membershipLeft, {
+      amount: membershipLeft.columns.left_site_pk!,
+      member: membershipLeft.columns.right_member!,
+    });
+    const duplicateLeft = union(leftProjection, leftProjection, true);
+    const matched = semiJoin(
+      duplicateLeft,
+      right,
+      eq(duplicateLeft.columns.member!, right.columns.member!),
+    );
+    const output = aggregate(matched, {
+      groupBy: {},
+      aggregates: {
+        total: sum(matched.columns.amount!),
+        rowCount: count(),
+      },
+    });
+    const physical = lowerLogicalPlan(output);
+    const selectedStages = physical.sharedRelations.filter(
+      ({ node, materializationSelection }) =>
+        stages.some((stage) => stage.node === node) &&
+        materializationSelection?.kind === "strict-serial-rank-stage",
+    );
+    expect(selectedStages.length).toBeGreaterThan(0);
+    expect(
+      selectedStages.every(
+        ({ materialization }) => materialization === "materialized",
+      ),
+    ).toBe(true);
+    const diagnostics: Readonly<Record<string, unknown>>[] = [];
+    validatePhysicalQueryPlan(physical, {
+      onMaterializationDiagnostics: (diagnostic) =>
+        diagnostics.push(diagnostic),
+    });
+    expect(diagnostics).toHaveLength(1);
+    const diagnostic = diagnostics[0]!;
+    const stageSelection = diagnostic.stageSelection as
+      | {
+          readonly diagnostics?: {
+            readonly candidateAssessments?: readonly Record<string, unknown>[];
+          };
+        }
+      | undefined;
+    const assessments = stageSelection?.diagnostics?.candidateAssessments ?? [];
+    expect(
+      assessments.some((assessment) => {
+        const readers = assessment.readers as
+          | {
+              readonly details?: {
+                readonly membershipObservationTerminals?: readonly {
+                  readonly keyCount?: number;
+                  readonly comparisonFamilies?: readonly string[];
+                }[];
+                readonly readerContexts?: readonly Record<string, unknown>[];
+              };
+            }
+          | undefined;
+        const details = readers?.details;
+        return (
+          (details?.membershipObservationTerminals ?? []).some(
+            (terminal) =>
+              terminal.keyCount === 1 &&
+              terminal.comparisonFamilies?.includes("binary-text-family"),
+          ) &&
+          (details?.readerContexts ?? []).some(
+            (context) =>
+              context.bodyProof === "membership-observation" &&
+              context.allCandidatePathsClosed === true &&
+              context.passed === true,
+          )
+        );
+      }),
+    ).toBe(true);
+
+    const optimized = compileD1Query(physical);
+    const mechanical = compileD1QueryUnoptimizedForTest(output);
+    expect(optimized.bindings?.length ?? 0).toBeLessThanOrEqual(100);
+    expect(mechanical.bindings?.length ?? 0).toBeLessThanOrEqual(100);
+    const optimizedRows = database
+      .prepare(optimized.sql)
+      .all(...(optimized.bindings as SQLInputValue[]));
+    const mechanicalRows = database
+      .prepare(mechanical.sql)
+      .all(...(mechanical.bindings as SQLInputValue[]));
+    expect(rowBag(optimizedRows)).toEqual(rowBag(mechanicalRows));
+    const matchedIdentity = database
+      .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+      .get("membership-observation-a") as { site_pk: number };
+    expect(optimizedRows).toEqual([
+      { total: matchedIdentity.site_pk * 2, rowCount: 2 },
+    ]);
+    const storageType = (statement: {
+      readonly sql: string;
+      readonly bindings?: readonly unknown[];
+    }) =>
+      database
+        .prepare(
+          `SELECT typeof(result.total) AS total_type, typeof(result.rowCount) AS row_count_type FROM (${statement.sql}) AS result`,
+        )
+        .all(...(statement.bindings as SQLInputValue[]));
+    expect(storageType(optimized)).toEqual(storageType(mechanical));
+    expect(storageType(optimized)).toEqual([
+      { total_type: "integer", row_count_type: "integer" },
+    ]);
+
+    const rawObservation = project(candidateMembers, {
+      amount: constant(0),
+      member: candidateMembers.columns.member!,
+    });
+    const observable = union(matched, rawObservation, false);
+    const observablePhysical = lowerLogicalPlan(observable);
+    expect(
+      observablePhysical.sharedRelations.some(
+        ({ node, materializationSelection }) =>
+          node === candidate.node &&
+          materializationSelection?.kind === "strict-serial-rank-stage",
+      ),
+    ).toBe(false);
   });
 
   it("keeps Top-N sharing independent of branch traversal order", () => {
@@ -3356,6 +4421,118 @@ describe("shared relation physical selection", () => {
     );
   });
 
+  it("does not rank-one share across a legal same-name same-index outer scope", () => {
+    const database = new DatabaseSync(":memory:");
+    databases.add(database);
+    const outer = valuesRelation(
+      { field0: { affinity: "text", nullable: true } },
+      [{ field0: "same" }, { field0: "other" }, { field0: "missing" }],
+    );
+    const candidateSource = valuesRelation(
+      { field0: { affinity: "text", nullable: true } },
+      [
+        { field0: "same" },
+        { field0: "same" },
+        { field0: "other" },
+        { field0: "extra" },
+      ],
+    );
+    const candidate = project(
+      candidateSource,
+      Object.fromEntries(
+        Array.from({ length: 17 }, (_unused, index) => [
+          `field${index}`,
+          candidateSource.columns.field0!,
+        ]),
+      ),
+    );
+    const correlated = filter(
+      candidate,
+      eq(outer.columns.field0, candidate.columns.field0),
+    );
+    const correlatedWindow = window(candidate, {
+      rank: rowNumber({
+        partitionBy: [outer.columns.field0],
+        orderBy: [{ expression: candidate.columns.field1, direction: "ASC" }],
+      }),
+    });
+    const localWindow = window(candidate, {
+      rank: rowNumber({
+        partitionBy: [candidate.columns.field0],
+        orderBy: [{ expression: candidate.columns.field1, direction: "ASC" }],
+      }),
+    });
+    const correlatedCounted = aggregate(correlated, {
+      groupBy: {},
+      aggregates: { rowCount: count() },
+    });
+    const correlatedWindowCounted = aggregate(correlatedWindow, {
+      groupBy: {},
+      aggregates: { rowCount: count() },
+    });
+    const localWindowCounted = aggregate(localWindow, {
+      groupBy: {},
+      aggregates: { rowCount: count() },
+    });
+    const correlatedCount = scalar(
+      project(correlatedCounted, {
+        rowCount: correlatedCounted.columns.rowCount,
+      }),
+    );
+    const correlatedWindowCount = scalar(
+      project(correlatedWindowCounted, {
+        rowCount: correlatedWindowCounted.columns.rowCount,
+      }),
+    );
+    const localWindowCount = scalar(
+      project(localWindowCounted, {
+        rowCount: localWindowCounted.columns.rowCount,
+      }),
+    );
+    const output = project(outer, {
+      outerValue: outer.columns.field0,
+      correlatedCount,
+      correlatedWindowCount,
+      localWindowCount,
+    });
+    const physical = lowerLogicalPlan(output);
+    expect(
+      physical.sharedRelations.some(({ node }) => node === candidate.node),
+    ).toBe(false);
+
+    const optimized = compileD1Query(physical);
+    const mechanical = compileD1QueryUnoptimizedForTest(output);
+    const optimizedRows = database
+      .prepare(optimized.sql)
+      .all(...(optimized.bindings as SQLInputValue[]));
+    const mechanicalRows = database
+      .prepare(mechanical.sql)
+      .all(...(mechanical.bindings as SQLInputValue[]));
+    expect(rowBag(optimizedRows)).toEqual(rowBag(mechanicalRows));
+    expect(rowBag(optimizedRows)).toEqual(
+      rowBag([
+        {
+          outerValue: "same",
+          correlatedCount: 2,
+          correlatedWindowCount: 4,
+          localWindowCount: 4,
+        },
+        {
+          outerValue: "other",
+          correlatedCount: 1,
+          correlatedWindowCount: 4,
+          localWindowCount: 4,
+        },
+        {
+          outerValue: "missing",
+          correlatedCount: 0,
+          correlatedWindowCount: 4,
+          localWindowCount: 4,
+        },
+      ]),
+    );
+  });
+
   it("keeps nonclosed or unsafe constant-existence window shapes unshared", () => {
     for (const options of [
       { windowInputCorrelation: "input" },
@@ -3420,6 +4597,53 @@ describe("shared relation physical selection", () => {
         );
       }
     }
+  });
+
+  it("keeps a constant-existence interface local to its authorized input scope", () => {
+    const externalRows = valuesRelation(
+      {
+        sitePk: { affinity: "text", nullable: false },
+        sessionId: { affinity: "text", nullable: true },
+        startedAt: { affinity: "text", nullable: false },
+      },
+      [
+        { sitePk: "1", sessionId: "session-a", startedAt: "11" },
+        { sitePk: "3", sessionId: "session-a", startedAt: "11" },
+      ],
+    );
+    const { candidate } = closedConstantExistenceWindowCandidate({
+      externalCorrelation: externalRows.columns.sitePk,
+    });
+    const repeated = repeatedThree(candidate);
+    const selected = scalar(
+      project(repeated, { sitePk: repeated.columns.sitePk }),
+    );
+    const output = project(externalRows, {
+      sitePk: externalRows.columns.sitePk,
+      selectedSitePk: selected,
+    });
+    const physical = lowerLogicalPlan(output);
+    expect(
+      physical.sharedRelations.some(({ node }) => node === candidate.node),
+    ).toBe(false);
+
+    const database = new DatabaseSync(":memory:");
+    databases.add(database);
+    const optimized = compileD1Query(physical);
+    const mechanical = compileD1QueryUnoptimizedForTest(output);
+    const optimizedRows = database
+      .prepare(optimized.sql)
+      .all(...(optimized.bindings as SQLInputValue[]));
+    const mechanicalRows = database
+      .prepare(mechanical.sql)
+      .all(...(mechanical.bindings as SQLInputValue[]));
+    expect(rowBag(optimizedRows)).toEqual(rowBag(mechanicalRows));
+    expect(rowBag(optimizedRows)).toEqual(
+      rowBag([
+        { sitePk: "1", selectedSitePk: "1" },
+        { sitePk: "3", selectedSitePk: null },
+      ]),
+    );
   });
 
   it("keeps unsafe scalar-subquery shapes out of shared relations", () => {

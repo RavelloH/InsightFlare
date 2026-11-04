@@ -87,6 +87,7 @@ export {
   textPosition,
   textStartsWith,
   textSubstring,
+  trimCharacters,
   trimSpaces,
   unixepoch,
 } from "./query/expression";

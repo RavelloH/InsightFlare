@@ -688,7 +688,7 @@ describe("Analytics shared exact string matching", () => {
         status: "success",
         rowsRead: null,
         rowsWritten: null,
-        physicalPlanHash: expect.stringMatching(/^v1:/u),
+        physicalPlanHash: expect.stringMatching(/^v8:/u),
         sqlBytes: new TextEncoder().encode(identityQuery.sql).byteLength,
         bindings: identityQuery.bindings?.length ?? 0,
       });

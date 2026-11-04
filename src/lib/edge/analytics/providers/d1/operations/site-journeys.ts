@@ -44,7 +44,7 @@ interface JourneyDetailInput {
   readonly window: QueryWindow;
 }
 
-interface JourneySearchInput extends JourneyDetailInput {
+export interface JourneySearchInput extends JourneyDetailInput {
   readonly filters: FilterDocument;
   readonly search?: string;
   readonly page: { readonly limit: number; readonly cursor?: string | null };
@@ -52,12 +52,12 @@ interface JourneySearchInput extends JourneyDetailInput {
   readonly analysisContext?: JourneyAnalysisContext;
 }
 
-type VisitorSort = {
+export type VisitorSort = {
   readonly field: "firstSeenAt" | "lastSeenAt" | "sessions" | "views";
   readonly direction: "asc" | "desc";
 };
 
-type SessionSort = {
+export type SessionSort = {
   readonly field: "startedAt" | "durationMs" | "views";
   readonly direction: "asc" | "desc";
 };
@@ -82,7 +82,7 @@ async function cursorBinding(
   ]);
 }
 
-async function resolveJourneyListAnalysis(
+export async function resolveJourneyListAnalysis(
   input: JourneySearchInput,
   entity: "visitor" | "session",
 ): Promise<JourneyListAnalysis | undefined> {
@@ -197,6 +197,60 @@ async function decodeCursor(
   );
 }
 
+/** Uses the same signed cursor binding as the legacy Visitors reader. */
+export async function decodeSiteVisitorListCursor(
+  input: JourneySearchInput,
+  sort: VisitorSort,
+): Promise<VisitorListCursor | null> {
+  return (await decodeCursor(
+    input,
+    "visitors",
+    sort,
+  )) as VisitorListCursor | null;
+}
+
+/** Uses the same signed cursor binding as the legacy Visitors reader. */
+export async function encodeSiteVisitorListCursor(
+  input: JourneySearchInput,
+  sort: VisitorSort,
+  cursor: VisitorListCursor | null,
+): Promise<string | null> {
+  return cursor
+    ? encodePageCursor(
+        input.env,
+        await cursorBinding(input, "visitors", sort),
+        cursor,
+      )
+    : null;
+}
+
+/** Uses the same signed cursor binding as the legacy Sessions reader. */
+export async function decodeSiteSessionListCursor(
+  input: JourneySearchInput,
+  sort: SessionSort,
+): Promise<SessionListCursor | null> {
+  return (await decodeCursor(
+    input,
+    "sessions",
+    sort,
+  )) as SessionListCursor | null;
+}
+
+/** Uses the same signed cursor binding as the legacy Sessions reader. */
+export async function encodeSiteSessionListCursor(
+  input: JourneySearchInput,
+  sort: SessionSort,
+  cursor: SessionListCursor | null,
+): Promise<string | null> {
+  return cursor
+    ? encodePageCursor(
+        input.env,
+        await cursorBinding(input, "sessions", sort),
+        cursor,
+      )
+    : null;
+}
+
 export async function readSiteVisitorDetail(
   input: JourneyDetailInput & { readonly visitorId: string },
 ) {
@@ -251,15 +305,23 @@ export async function readSiteVisitors(
   },
 ) {
   const analysis = await resolveJourneyListAnalysis(input, "visitor");
+  return readSiteVisitorsWithResolvedAnalysis(input, analysis);
+}
+
+export async function readSiteVisitorsWithResolvedAnalysis(
+  input: JourneySearchInput & {
+    readonly sort: {
+      readonly field: "firstSeenAt" | "lastSeenAt" | "sessions" | "views";
+      readonly direction: "asc" | "desc";
+    };
+  },
+  analysis: JourneyListAnalysis | undefined,
+) {
   const sort = {
     key: input.sort.field,
     direction: input.sort.direction,
   } as const;
-  const cursor = (await decodeCursor(
-    input,
-    "visitors",
-    input.sort,
-  )) as VisitorListCursor | null;
+  const cursor = await decodeSiteVisitorListCursor(input, input.sort);
   const page = await queryVisitorListPageFromD1(
     input.env,
     input.siteId,
@@ -279,13 +341,11 @@ export async function readSiteVisitors(
       limit: input.page.limit,
       returned: page.rows.length,
       hasMore: page.nextCursor !== null,
-      nextCursor: page.nextCursor
-        ? await encodePageCursor(
-            input.env,
-            await cursorBinding(input, "visitors", input.sort),
-            page.nextCursor,
-          )
-        : null,
+      nextCursor: await encodeSiteVisitorListCursor(
+        input,
+        input.sort,
+        page.nextCursor,
+      ),
     },
   };
 }
@@ -299,15 +359,23 @@ export async function readSiteSessions(
   },
 ) {
   const analysis = await resolveJourneyListAnalysis(input, "session");
+  return readSiteSessionsWithResolvedAnalysis(input, analysis);
+}
+
+export async function readSiteSessionsWithResolvedAnalysis(
+  input: JourneySearchInput & {
+    readonly sort: {
+      readonly field: "startedAt" | "durationMs" | "views";
+      readonly direction: "asc" | "desc";
+    };
+  },
+  analysis: JourneyListAnalysis | undefined,
+) {
   const sort = {
     key: input.sort.field,
     direction: input.sort.direction,
   } as const;
-  const cursor = (await decodeCursor(
-    input,
-    "sessions",
-    input.sort,
-  )) as SessionListCursor | null;
+  const cursor = await decodeSiteSessionListCursor(input, input.sort);
   const page = await querySessionListPageFromD1(
     input.env,
     input.siteId,
@@ -327,18 +395,16 @@ export async function readSiteSessions(
       limit: input.page.limit,
       returned: page.rows.length,
       hasMore: page.nextCursor !== null,
-      nextCursor: page.nextCursor
-        ? await encodePageCursor(
-            input.env,
-            await cursorBinding(input, "sessions", input.sort),
-            page.nextCursor,
-          )
-        : null,
+      nextCursor: await encodeSiteSessionListCursor(
+        input,
+        input.sort,
+        page.nextCursor,
+      ),
     },
   };
 }
 
-interface JourneyTrajectoryInput extends JourneySearchInput {
+export interface JourneyTrajectoryInput extends JourneySearchInput {
   readonly limit?: number;
 }
 
@@ -361,7 +427,7 @@ function trajectoryBinding(
   ]);
 }
 
-interface TrajectoryCursor {
+export interface TrajectoryCursor {
   readonly occurredAt: number;
   readonly id: string;
 }
@@ -399,6 +465,52 @@ async function writeTrajectoryCursor(
     ? encodePageCursor(
         input.env,
         await trajectoryBinding(input, operation, target),
+        cursor,
+      )
+    : null;
+}
+
+/** Shared trajectory cursor decoder for the qualified visitor/session Events readers. */
+export function decodeSiteJourneyEventPageCursor(
+  input: JourneyTrajectoryInput,
+  operation: "visitor-events" | "session-events",
+  target: string,
+): Promise<TrajectoryCursor | null> {
+  return readTrajectoryCursor<TrajectoryCursor>(input, operation, target);
+}
+
+/** Shared trajectory cursor encoder for the qualified visitor/session Events readers. */
+export function encodeSiteJourneyEventPageCursor(
+  input: JourneyTrajectoryInput,
+  operation: "visitor-events" | "session-events",
+  target: string,
+  cursor: unknown,
+): Promise<string | null> {
+  return writeTrajectoryCursor(input, operation, target, cursor);
+}
+
+/** Decodes the legacy SessionListCursor with the visitor-sessions binding. */
+export async function decodeSiteVisitorSessionsCursor(
+  input: JourneyTrajectoryInput & { readonly visitorId: string },
+): Promise<SessionListCursor | null> {
+  return decodePageCursor(
+    input.env,
+    await trajectoryBinding(input, "visitor-sessions", input.visitorId),
+    input.page.cursor,
+    "visitor-sessions",
+    (value) => sessionCursor(value, { field: "startedAt", direction: "desc" }),
+  );
+}
+
+/** Encodes the legacy SessionListCursor with the visitor-sessions binding. */
+export async function encodeSiteVisitorSessionsCursor(
+  input: JourneyTrajectoryInput & { readonly visitorId: string },
+  cursor: SessionListCursor | null,
+): Promise<string | null> {
+  return cursor
+    ? encodePageCursor(
+        input.env,
+        await trajectoryBinding(input, "visitor-sessions", input.visitorId),
         cursor,
       )
     : null;
@@ -473,18 +585,19 @@ export async function readSiteVisitorSessions(
   const target = { type: "visitor" as const, value: input.visitorId };
   await assertJourneyTargetInWindow(input, target);
   const sort = { key: "startedAt", direction: "desc" } as const;
-  const cursor = await readTrajectoryCursor<SessionListCursor>(
-    input,
-    "visitor-sessions",
-    target.value,
-  );
-  const typedCursor = cursor as SessionListCursor | null;
+  const cursor = await decodeSiteVisitorSessionsCursor(input);
   const page = await querySessionListPageFromD1(
     input.env,
     input.siteId,
     input.window,
     input.filters,
-    { limit: input.page.limit, sort, cursor: typedCursor, target },
+    {
+      limit: input.page.limit,
+      sort,
+      cursor,
+      target,
+      preparedPlanOperation: "visitor-sessions",
+    },
   );
   return {
     items: page.rows,
@@ -492,14 +605,7 @@ export async function readSiteVisitorSessions(
       limit: input.page.limit,
       returned: page.rows.length,
       hasMore: page.nextCursor !== null,
-      nextCursor: page.nextCursor
-        ? await writeTrajectoryCursor(
-            input,
-            "visitor-sessions",
-            target.value,
-            page.nextCursor,
-          )
-        : null,
+      nextCursor: await encodeSiteVisitorSessionsCursor(input, page.nextCursor),
     },
   };
 }

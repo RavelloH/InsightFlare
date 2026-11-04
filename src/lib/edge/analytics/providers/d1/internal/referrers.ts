@@ -8,8 +8,16 @@ import {
   buildReferrerSummaryPlan,
   type ReferrerPageSortKey,
 } from "@/lib/edge/analytics/engine/referrer-report-plan";
+import type {
+  DeferredReferrerOverviewQualification,
+  DeferredReferrersQualification,
+} from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import type { Env } from "@/lib/edge/types";
 
+import {
+  executePageDimensionQualificationProgram,
+  executeReferrersQualificationProgram,
+} from "./analytics-qualification-program";
 import {
   queryAnalyticsReportOutputRowsFromD1,
   queryAnalyticsReportOutputSetRowsFromD1,
@@ -150,6 +158,69 @@ export async function queryReferrerSummaryFromD1(
     })),
   };
 }
+
+type ReferrersQualificationExecution = Awaited<
+  ReturnType<typeof executeReferrersQualificationProgram>
+>;
+type ExecutedReferrersQualification = Extract<
+  ReferrersQualificationExecution,
+  { readonly kind: "executed" }
+>;
+
+export type QualifiedReferrerSummaryResult =
+  | {
+      readonly kind: "executed";
+      readonly summary: ReferrerSummaryRow;
+      readonly evidence: ExecutedReferrersQualification["evidence"];
+    }
+  | Exclude<ReferrersQualificationExecution, { readonly kind: "executed" }>;
+
+/** Executes the real Referrers summary report behind Count qualification. */
+export async function queryQualifiedReferrerSummaryFromD1(input: {
+  readonly env: Env;
+  readonly deferred: DeferredReferrersQualification;
+  readonly siteId: string;
+  readonly topN: number;
+  readonly diagnostics?: D1ReadDiagnostics;
+}): Promise<QualifiedReferrerSummaryResult> {
+  const execution = await executeReferrersQualificationProgram({
+    env: input.env,
+    deferred: input.deferred,
+    query: {
+      siteId: input.siteId,
+      queryTime: input.deferred.time,
+      filters: input.deferred.filters,
+      scopePlan: input.deferred.metadata.plan,
+      configuration: { kind: "summary", topN: input.topN },
+      cursorToken: null,
+      audience: input.deferred.referrersRequest.audience,
+    },
+    ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
+  });
+  if (execution.kind !== "executed") return execution;
+  const reportRows = execution.rows.filter((row) => row.rowKind === "report");
+  const summary =
+    reportRows.find((row) => row.outputId === "referrer-summary") ?? {};
+  const topRows = reportRows.filter(
+    (row) => row.outputId === "referrer-top-sources",
+  );
+  return {
+    kind: "executed",
+    summary: {
+      totalViews: Number(summary.totalViews ?? 0),
+      directViews: Number(summary.directViews ?? 0),
+      externalViews: Number(summary.externalViews ?? 0),
+      uniqueDomains: Number(summary.uniqueDomains ?? 0),
+      uniqueLinks: Number(summary.uniqueLinks ?? 0),
+      truncated: topRows.length > input.topN,
+      topSources: topRows.slice(0, input.topN).map((row) => ({
+        referrer: String(row.referrer ?? ""),
+        views: Number(row.views ?? 0),
+      })),
+    },
+    evidence: execution.evidence,
+  };
+}
 /** Keyset-paginated referrer aggregate. */
 export async function queryReferrersPageFromD1(
   env: Env,
@@ -185,6 +256,63 @@ export async function queryReferrersPageFromD1(
     undefined,
     diagnostics,
   );
+  return referrerPageFromRows({
+    env,
+    siteId,
+    window,
+    filters,
+    limit,
+    includeFullUrl,
+    search,
+    audience,
+    sortBy,
+    sortDirection,
+    rows,
+  });
+}
+
+type ReferrerPageQualificationExecution = Awaited<
+  ReturnType<typeof executePageDimensionQualificationProgram>
+>;
+type ExecutedReferrerQualification = Extract<
+  ReferrerPageQualificationExecution,
+  { readonly kind: "executed" }
+>;
+
+export type QualifiedReferrersPageResult =
+  | {
+      readonly kind: "executed";
+      readonly page: PageResult<ReferrerRow>;
+      readonly evidence: ExecutedReferrerQualification["evidence"];
+    }
+  | Exclude<ReferrerPageQualificationExecution, { readonly kind: "executed" }>;
+
+export async function referrerPageFromRows(input: {
+  readonly env: Env;
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly filters: FilterDocument;
+  readonly limit: number;
+  readonly includeFullUrl: boolean;
+  readonly search?: string;
+  readonly audience: QueryAudience;
+  readonly sortBy: ReferrerPageSortKey;
+  readonly sortDirection: "asc" | "desc";
+  readonly rows: readonly Record<string, unknown>[];
+}): Promise<PageResult<ReferrerRow>> {
+  const {
+    env,
+    siteId,
+    window,
+    filters,
+    limit,
+    includeFullUrl,
+    search,
+    audience,
+    sortBy,
+    sortDirection,
+    rows,
+  } = input;
   const mapped = rows.map((row) => ({
     referrer: String(row.referrer ?? ""),
     views: Number(row.views ?? 0),
@@ -219,6 +347,133 @@ export async function queryReferrersPageFromD1(
     },
   };
 }
+
+/** Executes the existing Referrer page report behind Count qualification. */
+export async function queryQualifiedReferrersPageFromD1(input: {
+  readonly env: Env;
+  readonly deferred: DeferredReferrerOverviewQualification;
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly filters: FilterDocument;
+  readonly limit: number;
+  readonly includeFullUrl: boolean;
+  readonly search?: string;
+  readonly cursor: ReferrerAggregateCursor | null;
+  readonly cursorToken: string | null;
+  readonly audience: QueryAudience;
+  readonly sortBy: ReferrerPageSortKey;
+  readonly sortDirection: "asc" | "desc";
+  readonly diagnostics?: D1ReadDiagnostics;
+}): Promise<QualifiedReferrersPageResult> {
+  const prepared = input.deferred.referrerOverviewRequest;
+  const execution = await executePageDimensionQualificationProgram({
+    env: input.env,
+    deferred: input.deferred,
+    query: {
+      siteId: input.siteId,
+      queryTime: input.deferred.time,
+      filters: input.deferred.filters,
+      scopePlan: input.deferred.metadata.plan,
+      family: "referrer-overview",
+      tab: prepared.tab,
+      includeFullUrl: input.includeFullUrl,
+      limit: input.limit,
+      cursor: input.cursor,
+      cursorToken: input.cursorToken,
+      ...(input.search !== undefined ? { search: input.search } : {}),
+      sortBy: input.sortBy,
+      sortDirection: input.sortDirection,
+      audience: input.audience,
+    },
+    ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
+  });
+  if (execution.kind !== "executed") return execution;
+  const rows = execution.rows.filter(
+    (row) => row.rowKind === "report" && row.outputId === "referrers-page",
+  );
+  const page = await referrerPageFromRows({
+    env: input.env,
+    siteId: input.siteId,
+    window: input.window,
+    filters: input.filters,
+    limit: input.limit,
+    includeFullUrl: input.includeFullUrl,
+    search: input.search,
+    audience: input.audience,
+    sortBy: input.sortBy,
+    sortDirection: input.sortDirection,
+    rows,
+  });
+  return { kind: "executed", page, evidence: execution.evidence };
+}
+
+export type QualifiedReferrersFlatPageResult =
+  | {
+      readonly kind: "executed";
+      readonly page: PageResult<ReferrerRow>;
+      readonly evidence: ExecutedReferrersQualification["evidence"];
+    }
+  | Exclude<ReferrersQualificationExecution, { readonly kind: "executed" }>;
+
+/** Executes the ordinary flat Referrers page behind Count qualification. */
+export async function queryQualifiedReferrersFlatPageFromD1(input: {
+  readonly env: Env;
+  readonly deferred: DeferredReferrersQualification;
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly filters: FilterDocument;
+  readonly limit: number;
+  readonly includeFullUrl: boolean;
+  readonly search?: string;
+  readonly cursor: ReferrerAggregateCursor | null;
+  readonly cursorToken: string | null;
+  readonly audience: QueryAudience;
+  readonly sortBy: ReferrerPageSortKey;
+  readonly sortDirection: "asc" | "desc";
+  readonly diagnostics?: D1ReadDiagnostics;
+}): Promise<QualifiedReferrersFlatPageResult> {
+  const execution = await executeReferrersQualificationProgram({
+    env: input.env,
+    deferred: input.deferred,
+    query: {
+      siteId: input.siteId,
+      queryTime: input.deferred.time,
+      filters: input.deferred.filters,
+      scopePlan: input.deferred.metadata.plan,
+      configuration: {
+        kind: "page",
+        limit: input.limit,
+        includeFullUrl: input.includeFullUrl,
+        ...(input.search !== undefined ? { search: input.search } : {}),
+        sortBy: input.sortBy,
+        sortDirection: input.sortDirection,
+        cursor: input.cursor,
+      },
+      cursorToken: input.cursorToken,
+      audience: input.audience,
+    },
+    ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
+  });
+  if (execution.kind !== "executed") return execution;
+  const rows = execution.rows.filter(
+    (row) => row.rowKind === "report" && row.outputId === "referrers-page",
+  );
+  const page = await referrerPageFromRows({
+    env: input.env,
+    siteId: input.siteId,
+    window: input.window,
+    filters: input.filters,
+    limit: input.limit,
+    includeFullUrl: input.includeFullUrl,
+    search: input.search,
+    audience: input.audience,
+    sortBy: input.sortBy,
+    sortDirection: input.sortDirection,
+    rows,
+  });
+  return { kind: "executed", page, evidence: execution.evidence };
+}
+
 export async function decodeReferrersCursor(
   env: Env,
   siteId: string,

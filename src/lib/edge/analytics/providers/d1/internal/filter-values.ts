@@ -40,7 +40,7 @@ function matchesSearch(value: string, search?: string): boolean {
   const needle = search?.trim().toLocaleLowerCase();
   return !needle || value.toLocaleLowerCase().includes(needle);
 }
-function mapRows(
+export function mapFilterValueRows(
   rows: readonly DimensionRow[],
   search?: string,
 ): FilterValueRow[] {
@@ -146,7 +146,7 @@ export async function queryFilterValuesFromD1(
       { excludeEmpty: true, search },
     );
   }
-  return mapRows(rows, search).slice(0, limit);
+  return mapFilterValueRows(rows, search).slice(0, limit);
 }
 export async function queryFilterValuesPageFromD1(
   env: Env,
@@ -278,7 +278,7 @@ export async function queryFilterValuesPageFromD1(
       boundaryCursor,
       audience,
     );
-    const items = mapRows(page.items, search);
+    const items = mapFilterValueRows(page.items, search);
     return {
       items,
       pagination: {
@@ -324,7 +324,7 @@ export async function queryFilterValuesPageFromD1(
     audience,
   );
   return {
-    items: mapRows(page.items, search),
+    items: mapFilterValueRows(page.items, search),
     pagination: page.pagination,
   };
 }

@@ -28,6 +28,7 @@ import type {
 } from "@/lib/edge/analytics/contract/types";
 import { PAGE_DIMENSION_SELECTIONS } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import { buildTechnologyReferrerChannelTrendPlan } from "@/lib/edge/analytics/engine/technology-share-trend-report-plan";
+import { technologyVisitSource } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-technology-scoped-source";
 import type {
   BrowserVersionAggregateRow,
   BrowserVersionBreakdownRow,
@@ -57,7 +58,6 @@ import {
   queryBrowserVersionBreakdownFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/technology/browser";
 import { queryCrossDimensionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/client-cross";
-import { technologyVisitSource } from "@/lib/edge/analytics/providers/d1/internal/technology/scoped-source";
 import {
   queryReferrerAndChannelTrendFromD1,
   queryShareTrendFromD1,

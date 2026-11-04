@@ -8,6 +8,7 @@ export interface SchemaColumn {
   readonly declaredType: string;
   readonly affinity: SqliteAffinity;
   readonly nullable: boolean;
+  readonly rowidAlias?: true;
   readonly primaryKeyPosition: number;
   readonly defaultSql: string | null;
   readonly hidden: number;
@@ -18,6 +19,7 @@ export interface SchemaIndex {
   readonly name: string;
   readonly unique: boolean;
   readonly columns: readonly (string | null)[];
+  readonly collations: readonly (string | null)[];
   readonly partial: boolean;
   readonly rawExpressionSql?: string;
 }
@@ -33,6 +35,7 @@ export interface SchemaForeignKey {
 export interface SchemaObject {
   readonly kind: "table" | "view";
   readonly name: string;
+  readonly defaultCollation: "BINARY" | "unknown";
   readonly columns: readonly SchemaColumn[];
   readonly primaryKey: readonly string[];
   readonly indexes: readonly SchemaIndex[];
@@ -63,10 +66,19 @@ interface IndexListRow {
   partial: number;
 }
 
+interface TableListRow {
+  schema: string;
+  name: string;
+  type: "table" | "view" | "shadow" | "virtual";
+  wr: number;
+  strict: number;
+}
+
 interface IndexColumnRow {
   seqno: number;
   cid: number;
   name: string | null;
+  coll: string | null;
   key: number;
 }
 
@@ -110,10 +122,46 @@ function tableObjects(db: DatabaseSync): MasterRow[] {
   ).sort((a, b) => compare(a.name, b.name));
 }
 
-function readColumns(db: DatabaseSync, table: string): SchemaColumn[] {
+function readRowidAliasColumn(
+  db: DatabaseSync,
+  table: string,
+  objectType: MasterRow["type"],
+  rows: readonly ColumnRow[],
+): string | undefined {
+  if (objectType !== "table") return undefined;
+
+  const tableInfo = (
+    db.prepare("PRAGMA table_list").all() as unknown as TableListRow[]
+  ).find((row) => row.schema === "main" && row.name === table);
+  if (!tableInfo || tableInfo.type !== "table" || tableInfo.wr !== 0)
+    return undefined;
+
+  const primaryKeyColumns = rows.filter((row) => row.pk > 0);
+  if (
+    primaryKeyColumns.length !== 1 ||
+    (primaryKeyColumns[0]!.type ?? "").trim().toUpperCase() !== "INTEGER"
+  )
+    return undefined;
+
+  const hasPrimaryKeyIndex = (
+    db
+      .prepare(`PRAGMA index_list(${quotePragmaIdentifier(table)})`)
+      .all() as unknown as IndexListRow[]
+  ).some((index) => index.origin === "pk");
+  // SQLite's column-level `INTEGER PRIMARY KEY DESC` exception has a real
+  // primary-key index. The table-level `PRIMARY KEY (id DESC)` form does not.
+  return hasPrimaryKeyIndex ? undefined : primaryKeyColumns[0]!.name;
+}
+
+function readColumns(
+  db: DatabaseSync,
+  table: string,
+  objectType: MasterRow["type"],
+): SchemaColumn[] {
   const rows = db
     .prepare(`PRAGMA table_xinfo(${quotePragmaIdentifier(table)})`)
     .all() as unknown as ColumnRow[];
+  const rowidAlias = readRowidAliasColumn(db, table, objectType, rows);
   return rows
     .sort((a, b) => a.cid - b.cid)
     .map((row) => {
@@ -123,7 +171,8 @@ function readColumns(db: DatabaseSync, table: string): SchemaColumn[] {
         propertyName: row.name,
         declaredType,
         affinity: sqliteAffinity(declaredType),
-        nullable: row.notnull === 0,
+        nullable: rowidAlias === row.name ? false : row.notnull === 0,
+        ...(rowidAlias === row.name ? { rowidAlias: true as const } : {}),
         primaryKeyPosition: row.pk,
         defaultSql: row.dflt_value,
         hidden: row.hidden,
@@ -155,12 +204,29 @@ function readIndexes(db: DatabaseSync, table: string): SchemaIndex[] {
         name: index.name,
         unique: index.unique === 1,
         columns: keyParts.map((part) => (part.cid >= 0 ? part.name : null)),
+        collations: keyParts.map((part) => part.coll ?? null),
         partial: index.partial === 1,
         ...(hasExpression && master?.sql
           ? { rawExpressionSql: master.sql }
           : {}),
       };
     });
+}
+
+function defaultCollation(
+  db: DatabaseSync,
+  object: MasterRow,
+): "BINARY" | "unknown" {
+  if (
+    object.type !== "table" ||
+    object.sql === null ||
+    /\bcollate\b/iu.test(object.sql)
+  )
+    return "unknown";
+  const table = (
+    db.prepare("PRAGMA table_list").all() as unknown as TableListRow[]
+  ).find((row) => row.schema === "main" && row.name === object.name);
+  return table?.type === "table" ? "BINARY" : "unknown";
 }
 
 function readForeignKeys(db: DatabaseSync, table: string): SchemaForeignKey[] {
@@ -180,10 +246,11 @@ function readForeignKeys(db: DatabaseSync, table: string): SchemaForeignKey[] {
 
 export function introspectSchema(db: DatabaseSync): SchemaObject[] {
   return tableObjects(db).map((object) => {
-    const columns = readColumns(db, object.name);
+    const columns = readColumns(db, object.name, object.type);
     return {
       kind: object.type,
       name: object.name,
+      defaultCollation: defaultCollation(db, object),
       columns,
       primaryKey: columns
         .filter((column) => column.primaryKeyPosition > 0)

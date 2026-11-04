@@ -1,6 +1,17 @@
 import { Hono } from "hono";
 
-import { createDatabaseRuntime } from "@/lib/db";
+import {
+  compileD1Query,
+  createD1DatabaseClient,
+  createDatabaseRuntime,
+  eq,
+  filter,
+  limit,
+  param,
+  project,
+  scan,
+  schema,
+} from "@/lib/db";
 import { timingSafeEqualString } from "@/lib/edge/auth/api-key-store";
 import {
   advanceE2eClock,
@@ -42,12 +53,14 @@ async function siteExists(
   siteId: string,
 ): Promise<boolean> {
   if (!siteId) return false;
+  const sites = scan(schema.sites);
+  const matching = filter(sites, eq(sites.columns.id, param(siteId)));
   return Boolean(
-    await createDatabaseRuntime(env.DB).first<{ id: string }>({
-      sql: "SELECT id FROM sites WHERE id=? LIMIT 1",
-      bindings: [siteId],
-      tag: "hono.sites.first",
-    }),
+    await createD1DatabaseClient(env.DB).first(
+      compileD1Query(limit(project(matching, { id: matching.columns.id }), 1), {
+        tag: "hono.sites.first",
+      }),
+    ),
   );
 }
 export const e2eRoutes = new Hono<AppEnv>();

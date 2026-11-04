@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 import { afterAll, describe, expect, it } from "vitest";
@@ -8,24 +11,43 @@ import {
   createSqliteD1Database,
   type SqliteD1Trace,
 } from "@/lib/db/__tests__/sqlite-d1";
+import { createD1SiteProviderRegistry } from "@/lib/edge/analytics/composition/d1/create-site-runtime";
 import {
   attachScopedFilterMetadata,
   EMPTY_FILTER_DOCUMENT,
   prepareScopedQuery,
+  type QueryInput,
   scopedFilterMetadata,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
+import { buildEventFieldValuesQualificationPlan } from "@/lib/edge/analytics/engine/event-field-values-qualification-plan";
 import { buildEventFieldsPlan } from "@/lib/edge/analytics/engine/event-fields-plan";
-import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
+import { buildEventFieldsQualificationPlan } from "@/lib/edge/analytics/engine/event-fields-qualification-plan";
+import { LogicalPlanBuilder } from "@/lib/edge/analytics/engine/logical/builder";
+import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
+import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
+import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
+import { buildEventFilteredSourceCte } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import {
-  buildEventFilteredSourceCte,
+  d1AdvancedFilterMiddleware,
+  deferredEventFieldsQualificationFromQuery,
+  deferredEventFieldValuesQualificationFromQuery,
+  prepareDeferredEventQualificationFallback,
+} from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import { compileEventFieldsQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/analytics-qualification-program";
+import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
+import { queryAnalyticsReportOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
+import {
   type EventFieldRow,
   type EventFieldValueRow,
   type FilterDocument,
+  mapEventField,
+  mapEventFieldValue,
   type QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import {
   decodeEventFieldCursor,
   decodeEventFieldValueCursor,
@@ -37,7 +59,7 @@ import {
   queryEventFieldValuesPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-fields";
 import type { Env } from "@/lib/edge/types";
-import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
+import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 import {
   type FilterExpression,
   normalizeFilterDocument,
@@ -61,6 +83,22 @@ const PREVIOUS_WINDOW: QueryWindow = {
 };
 const DATABASES = new Set<DatabaseSync>();
 const CURSOR_SECRET = "wave64-event-fields-test-secret";
+const ARTIFACT_DIR = resolve(
+  process.env.WAVE95C_ARTIFACT_DIR ??
+    "plan/execution-wave95b-event-fields-qualification/run-1/runtime",
+);
+const runtimeEvidence: unknown[] = [];
+const errorEvidence: unknown[] = [];
+const compilationEvidence: Array<{
+  readonly scope: "session" | "visitor";
+  readonly evidence: unknown;
+  readonly logicalPlan: unknown;
+}> = [];
+const valuesCompilationEvidence: Array<{
+  readonly scope: "session" | "visitor";
+  readonly evidence: unknown;
+  readonly logicalPlan: unknown;
+}> = [];
 
 interface Site {
   readonly id: string;
@@ -266,6 +304,18 @@ function createDatabase(): {
     occurredAt: 126,
   });
   addEvent(database, site, {
+    id: "event-qualifier-one",
+    visitId: "visit-one",
+    nameId: 42,
+    occurredAt: 127,
+  });
+  addEvent(database, site, {
+    id: "event-qualifier-two",
+    visitId: "visit-one",
+    nameId: 42,
+    occurredAt: 128,
+  });
+  addEvent(database, site, {
     id: "event-previous",
     visitId: "visit-previous",
     nameId: 41,
@@ -436,6 +486,86 @@ function preparedFilters(
       },
     },
   });
+}
+
+type QualifiedEventFieldsTestQuery = QueryInput & {
+  readonly filters: FilterDocument;
+  readonly time: typeof TIME;
+} & Record<string, unknown>;
+
+function qualifiedEventFieldsQuery(
+  scopePreference: "session" | "visitor",
+  cursor: string | null = null,
+  filterDsl = 'count(page { page.path eq "/landing" }) eq 1',
+  eventName: string | undefined = "signup",
+  limit = 1,
+): QualifiedEventFieldsTestQuery {
+  const prepared = prepareScopedQuery("event-fields", {
+    context: siteQueryContext(SITE, "private-dashboard"),
+    time: TIME,
+    filters: parseFilterDsl(filterDsl, analyticsFilterRegistry),
+    scopePreference,
+  } as QueryInput & { readonly time: typeof TIME }) as QueryInput & {
+    readonly filters?: FilterDocument;
+    readonly time?: typeof TIME;
+  };
+  if (!prepared.filters || !prepared.time)
+    throw new Error("wave95b_event_fields_query_preparation_failed");
+  return {
+    ...prepared,
+    eventName,
+    limit,
+    cursor,
+  } as QualifiedEventFieldsTestQuery;
+}
+
+type QualifiedEventFieldValuesTestQuery = QueryInput & {
+  readonly filters: FilterDocument;
+  readonly time: typeof TIME;
+  readonly eventName?: string;
+  readonly fieldPath: string;
+  readonly fieldValueType: string;
+  readonly search?: string;
+  readonly limit: number;
+  readonly cursor?: string;
+} & Record<string, unknown>;
+
+function qualifiedEventFieldValuesQuery(
+  scopePreference: "session" | "visitor",
+  input: {
+    readonly fieldPath?: string;
+    readonly fieldValueType?: string;
+    readonly eventName?: string;
+    readonly search?: string;
+    readonly limit?: number;
+    readonly cursor?: string | null;
+    readonly filterDsl?: string;
+  } = {},
+): QualifiedEventFieldValuesTestQuery {
+  const prepared = prepareScopedQuery("event-field-values", {
+    context: siteQueryContext(SITE, "private-dashboard"),
+    time: TIME,
+    filters: parseFilterDsl(
+      input.filterDsl ??
+        `count(page { page.path eq "/landing" }) eq ${scopePreference === "visitor" ? 2 : 1}`,
+      analyticsFilterRegistry,
+    ),
+    scopePreference,
+  } as QueryInput & { readonly time: typeof TIME }) as QueryInput & {
+    readonly filters?: FilterDocument;
+    readonly time?: typeof TIME;
+  };
+  if (!prepared.filters || !prepared.time)
+    throw new Error("wave95c_event_field_values_query_preparation_failed");
+  return {
+    ...prepared,
+    eventName: input.eventName ?? "signup",
+    fieldPath: input.fieldPath ?? "/a",
+    fieldValueType: input.fieldValueType ?? "string",
+    ...(input.search !== undefined ? { search: input.search } : {}),
+    limit: input.limit ?? 1,
+    cursor: input.cursor ?? undefined,
+  } as QualifiedEventFieldValuesTestQuery;
 }
 
 function frozenSql(input: {
@@ -713,6 +843,51 @@ function testEnv(database: DatabaseSync, trace: SqliteD1Trace): Env {
   } as unknown as Env;
 }
 
+function testEnvWithQualifiedReadBehavior(
+  database: DatabaseSync,
+  trace: SqliteD1Trace,
+  behavior: "database-failure" | "malformed-controls",
+): { readonly env: Env; readonly prepareCount: () => number } {
+  const baseDatabase = createSqliteD1Database(database, trace);
+  let prepareCount = 0;
+  const DB = {
+    prepare(sql: string) {
+      prepareCount += 1;
+      if (behavior === "database-failure" && prepareCount === 2)
+        throw new Error("wave95b_database_failure");
+      const statement = baseDatabase.prepare(sql);
+      if (behavior !== "malformed-controls" || prepareCount !== 2)
+        return statement;
+
+      const replacement = Object.create(statement) as D1PreparedStatement;
+      Object.defineProperty(replacement, "bind", {
+        value: (...values: SQLInputValue[]) => {
+          statement.bind(...values);
+          return replacement;
+        },
+      });
+      const originalAll = statement.all.bind(statement);
+      Object.defineProperty(replacement, "all", {
+        value: async () => {
+          const result = await originalAll<Record<string, unknown>>();
+          return {
+            ...result,
+            results: result.results.map((row) => ({
+              ...row,
+              unexpected: "malformed-control-envelope",
+            })),
+          };
+        },
+      });
+      return replacement;
+    },
+  } as unknown as D1Database;
+  return {
+    env: { DB, MAIN_SECRET: CURSOR_SECRET } as unknown as Env,
+    prepareCount: () => prepareCount,
+  };
+}
+
 function traceFor(
   options: Pick<SqliteD1Trace, "readBigIntsAsNumbers"> = {},
 ): SqliteD1Trace {
@@ -720,11 +895,763 @@ function traceFor(
 }
 
 afterAll(() => {
+  mkdirSync(ARTIFACT_DIR, { recursive: true });
   for (const database of DATABASES) database.close();
   DATABASES.clear();
+  writeFileSync(
+    resolve(ARTIFACT_DIR, "runtime-dto-and-call-counts.json"),
+    JSON.stringify(runtimeEvidence, null, 2),
+    "utf8",
+  );
+  writeFileSync(
+    resolve(ARTIFACT_DIR, "error-and-call-counts.json"),
+    JSON.stringify(errorEvidence, null, 2),
+    "utf8",
+  );
+  for (const { scope, evidence, logicalPlan } of compilationEvidence) {
+    const graph = JSON.stringify(logicalPlan, null, 2);
+    writeFileSync(
+      resolve(ARTIFACT_DIR, `${scope}-default-qualification.json`),
+      JSON.stringify(
+        {
+          scope,
+          graphSha256: createHash("sha256").update(graph, "utf8").digest("hex"),
+          graph,
+          evidence,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+  }
+  for (const { scope, evidence, logicalPlan } of valuesCompilationEvidence) {
+    const graph = JSON.stringify(logicalPlan, null, 2);
+    writeFileSync(
+      resolve(ARTIFACT_DIR, `values-${scope}-default-qualification.json`),
+      JSON.stringify(
+        {
+          scope,
+          graphSha256: createHash("sha256").update(graph, "utf8").digest("hex"),
+          graph,
+          evidence,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+  }
 });
 
 describe("Event field occurrence report migration", () => {
+  it("keeps the real 20001 activity cap ahead of numeric fallback and invalid cursors", async () => {
+    const { database, site } = createDatabase();
+    database
+      .prepare(
+        `INSERT INTO sites (id, team_id, name, domain, created_at)
+         VALUES (?, 'wave95b-team', 'Event fields cap', 'cap.test', 0)`,
+      )
+      .run(SITE);
+    database.prepare("DELETE FROM custom_events WHERE site_id = ?").run(SITE);
+    database.prepare("DELETE FROM visits WHERE site_id = ?").run(SITE);
+    database
+      .prepare(
+        `WITH RECURSIVE generated(n) AS (
+           SELECT 1
+           UNION ALL SELECT n + 1 FROM generated WHERE n < 20001
+         )
+         INSERT INTO visits (
+           visit_id, site_id, site_pk, visitor_id, session_id, status,
+           started_at, last_activity_at, pathname, hostname, duration_ms
+         )
+         SELECT 'wave95b-cap-activity-' || n, ?, ?,
+           'wave95b-cap-visitor', 'wave95b-cap-session', 'closed',
+           ?, ?, '/cap-page', 'fields.test', 1
+         FROM generated`,
+      )
+      .run(SITE, site.pk, WINDOW.startMs + 5, WINDOW.startMs + 5);
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "wave95b-cap-activity-1");
+
+    const trace = traceFor();
+    const env = testEnv(database, trace);
+    const diagnostics = createD1ReadDiagnostics();
+    const provider = createD1SiteProviderRegistry({
+      env,
+      siteId: SITE,
+      diagnostics,
+    }).resolve("event-fields");
+    if (!provider) throw new Error("wave95b_event_fields_provider_missing");
+    const filterDsl = "count(page { page.durationMs gt 5 }) eq 1";
+    const capQuery = qualifiedEventFieldsQuery("session", null, filterDsl);
+    await expect(provider.execute(capQuery)).rejects.toMatchObject({
+      domainError: {
+        kind: "invalid-input",
+        issues: [{ path: "filters", code: "filter_activity_limit_exceeded" }],
+      },
+    });
+    expect(diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
+    expect(trace.preparedSql).toHaveLength(2);
+    const rawRows = database
+      .prepare(trace.preparedSql[1]!)
+      .all(...trace.bindings[1]!) as Record<string, unknown>[];
+    const controls = rawRows.filter((row) => row.rowKind === "control");
+    expect(controls).toHaveLength(1);
+    expect(Number(controls[0]!.rawCount)).toBe(20_001);
+    expect(
+      Object.entries(controls[0]!).some(
+        ([name, value]) =>
+          name.toLowerCase().includes("duration") && Number(value) > 0,
+      ),
+    ).toBe(true);
+    expect(rawRows.filter((row) => row.rowKind === "report")).toHaveLength(0);
+    errorEvidence.push({
+      kind: "real-activity-cap-before-numeric-fallback",
+      error: {
+        kind: "invalid-input",
+        path: "filters",
+        code: "filter_activity_limit_exceeded",
+      },
+      rawCount: Number(controls[0]!.rawCount),
+      numericIncompatibilityCount: Object.entries(controls[0]!).find(([name]) =>
+        name.toLowerCase().includes("duration"),
+      )?.[1],
+      reportRows: 0,
+      statementCount: trace.preparedSql.length,
+    });
+
+    trace.preparedSql.length = 0;
+    trace.bindings.length = 0;
+    const invalidCursorQuery = qualifiedEventFieldsQuery(
+      "session",
+      "invalid-cursor",
+      filterDsl,
+    );
+    await expect(provider.execute(invalidCursorQuery)).rejects.toMatchObject({
+      domainError: {
+        kind: "invalid-input",
+        issues: [{ path: "filters", code: "filter_activity_limit_exceeded" }],
+      },
+    });
+    expect(trace.preparedSql).toHaveLength(2);
+    errorEvidence.push({
+      kind: "invalid-cursor-after-cap-preflight",
+      error: {
+        kind: "invalid-input",
+        path: "filters",
+        code: "filter_activity_limit_exceeded",
+      },
+      statementCount: trace.preparedSql.length,
+    });
+  });
+
+  it("falls back once for numeric-domain incompatibility and keeps the legacy DTO", async () => {
+    const { database, site } = createDatabase();
+    database
+      .prepare(
+        `INSERT INTO sites (id, team_id, name, domain, created_at)
+         VALUES (?, 'wave95b-team', 'Event fields numeric', 'numeric.test', 0)`,
+      )
+      .run(SITE);
+    database
+      .prepare(
+        "UPDATE visits SET started_at = ?, last_activity_at = ?, duration_ms = ? WHERE visit_id = ?",
+      )
+      .run(125, 125, 10, "visit-one");
+    database
+      .prepare(
+        "UPDATE visits SET started_at = ?, last_activity_at = ?, duration_ms = ? WHERE visit_id = ?",
+      )
+      .run(126, 126, "invalid-duration", "visit-two");
+
+    const query = qualifiedEventFieldsQuery(
+      "session",
+      null,
+      "count(page { page.durationMs gt 5 }) eq 1",
+    );
+    const expectedTrace = traceFor();
+    const expectedEnv = testEnv(database, expectedTrace);
+    const deferredQuery = await d1AdvancedFilterMiddleware(expectedEnv)(
+      "event-fields",
+      query,
+      async (prepared) => prepared,
+    );
+    const deferred = deferredEventFieldsQualificationFromQuery(deferredQuery);
+    if (!deferred) throw new Error("wave95b_event_fields_deferred_missing");
+    const fallbackFilters =
+      await prepareDeferredEventQualificationFallback(deferred);
+    const expectedPage = await queryEventFieldsPageFromD1(
+      expectedEnv,
+      SITE,
+      WINDOW,
+      fallbackFilters,
+      "signup",
+      1,
+      null,
+      "private-dashboard",
+    );
+
+    const trace = traceFor();
+    const env = testEnv(database, trace);
+    const diagnostics = createD1ReadDiagnostics();
+    const provider = createD1SiteProviderRegistry({
+      env,
+      siteId: SITE,
+      diagnostics,
+    }).resolve("event-fields");
+    if (!provider) throw new Error("wave95b_event_fields_provider_missing");
+    const actual = await provider.execute(query);
+    expect(actual.value).toEqual({
+      eventName: "signup",
+      data: {
+        ...expectedPage,
+        items: expectedPage.items.map(mapEventField),
+      },
+    });
+    expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+      kind: "numeric-data-domain",
+    });
+    expect(trace.preparedSql).toEqual([
+      expectedTrace.preparedSql[0],
+      trace.preparedSql[1],
+      ...expectedTrace.preparedSql.slice(1),
+    ]);
+    runtimeEvidence.push({
+      scope: "session",
+      case: "numeric-domain-incompatibility",
+      actualDto: actual.value,
+      legacyDto: {
+        eventName: "signup",
+        data: {
+          ...expectedPage,
+          items: expectedPage.items.map(mapEventField),
+        },
+      },
+      fallbackReason: diagnostics.advancedCountSqlFallbackReason,
+      qualifiedStatementCount: trace.preparedSql.length,
+      legacyStatementCount: expectedTrace.preparedSql.length,
+      fallbackAddsOneStatement:
+        trace.preparedSql.length === expectedTrace.preparedSql.length + 1,
+    });
+  });
+
+  it.each(["session", "visitor"] as const)(
+    "matches the legacy public page for %s qualification with one query and signed cursor",
+    async (scope) => {
+      const { database, site } = createDatabase();
+      database
+        .prepare(
+          `INSERT INTO sites (id, team_id, name, domain, created_at)
+           VALUES (?, 'wave95b-team', 'Event fields', 'fields.test', 0)`,
+        )
+        .run(SITE);
+      database
+        .prepare("UPDATE custom_event_names SET name = ? WHERE id = 41")
+        .run(" signup ");
+      database
+        .prepare(
+          "UPDATE visits SET started_at = ?, last_activity_at = ? WHERE visit_id = ?",
+        )
+        .run(125, 125, "visit-one");
+      database
+        .prepare(
+          "UPDATE visits SET started_at = ?, last_activity_at = ? WHERE visit_id = ?",
+        )
+        .run(126, 126, "visit-two");
+      addName(database, site, 44, "   ");
+      addEvent(database, site, {
+        id: "event-empty-name",
+        visitId: "visit-one",
+        nameId: 44,
+        occurredAt: 127,
+      });
+      addPayload(database, site, "event-empty-name", "/blank", {
+        valueType: 1,
+        occurredAt: 107,
+        stringValue: "blank",
+      });
+      const trace = traceFor();
+      const env = testEnv(database, trace);
+      const query = qualifiedEventFieldsQuery(scope);
+      const deferredQuery = await d1AdvancedFilterMiddleware(env)(
+        "event-fields",
+        query,
+        async (prepared) => prepared,
+      );
+      const deferred = deferredEventFieldsQualificationFromQuery(deferredQuery);
+      if (!deferred) throw new Error("wave95b_event_fields_deferred_missing");
+      const compilation = compileEventFieldsQualificationProgram({
+        deferred,
+        query: {
+          env,
+          siteId: SITE,
+          queryTime: query.time,
+          filters: query.filters,
+          ...(query.scopePlan ? { scopePlan: query.scopePlan } : {}),
+          eventName: "signup",
+          limit: 1,
+          cursor: null,
+          cursorToken: null,
+          audience: "private-dashboard",
+        },
+      });
+      if (compilation.kind !== "compiled")
+        throw new Error("wave95b_event_fields_default_compile_unavailable");
+      const logicalQualification = buildEventFieldsQualificationPlan({
+        siteId: SITE,
+        queryTime: query.time,
+        filters: query.filters,
+        scopePlan: query.scopePlan ?? deferred.metadata.plan,
+        count: deferred.countInput,
+        options: { eventName: "signup", limit: 1, cursor: null },
+      });
+      compilationEvidence.push({
+        scope,
+        evidence: compilation.evidence,
+        logicalPlan: logicalQualification.plan,
+      });
+      const fallbackFilters =
+        await prepareDeferredEventQualificationFallback(deferred);
+      const expectedFirstPage = await queryEventFieldsPageFromD1(
+        env,
+        SITE,
+        WINDOW,
+        fallbackFilters,
+        "signup",
+        1,
+        null,
+        "private-dashboard",
+      );
+      trace.preparedSql.length = 0;
+      trace.bindings.length = 0;
+
+      const diagnostics = createD1ReadDiagnostics();
+      const provider = createD1SiteProviderRegistry({
+        env,
+        siteId: SITE,
+        diagnostics,
+      }).resolve("event-fields");
+      if (!provider) throw new Error("wave95b_event_fields_provider_missing");
+      const actualFirstPage = await provider.execute(query);
+      expect(actualFirstPage.value).toEqual({
+        eventName: "signup",
+        data: {
+          ...expectedFirstPage,
+          items: expectedFirstPage.items.map(mapEventField),
+        },
+      });
+      expect(trace.preparedSql).toHaveLength(2);
+      expect(diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
+      expect(expectedFirstPage.pagination.hasMore).toBe(true);
+      const firstPageEvidence = {
+        legacyDto: {
+          eventName: "signup",
+          data: {
+            ...expectedFirstPage,
+            items: expectedFirstPage.items.map(mapEventField),
+          },
+        },
+        actualDto: actualFirstPage.value,
+        statementCount: trace.preparedSql.length,
+      };
+
+      const cursor = actualFirstPage.value.data.pagination.nextCursor;
+      if (!cursor) throw new Error("wave95b_event_fields_cursor_missing");
+      const cursorQuery = qualifiedEventFieldsQuery(scope, cursor);
+      const expectedCursor = await decodeEventFieldCursor(
+        env,
+        SITE,
+        WINDOW,
+        fallbackFilters,
+        "signup",
+        cursor,
+        "private-dashboard",
+      );
+      if (!expectedCursor)
+        throw new Error("wave95b_event_fields_cursor_decode_failed");
+      const expectedNextPage = await queryEventFieldsPageFromD1(
+        env,
+        SITE,
+        WINDOW,
+        fallbackFilters,
+        "signup",
+        1,
+        expectedCursor,
+        "private-dashboard",
+      );
+      trace.preparedSql.length = 0;
+      trace.bindings.length = 0;
+      const actualNextPage = await provider.execute(cursorQuery);
+      expect(actualNextPage.value).toEqual({
+        eventName: "signup",
+        data: {
+          ...expectedNextPage,
+          items: expectedNextPage.items.map(mapEventField),
+        },
+      });
+      expect(trace.preparedSql).toHaveLength(2);
+      const nextPageEvidence = {
+        legacyDto: {
+          eventName: "signup",
+          data: {
+            ...expectedNextPage,
+            items: expectedNextPage.items.map(mapEventField),
+          },
+        },
+        actualDto: actualNextPage.value,
+        statementCount: trace.preparedSql.length,
+      };
+
+      const paddedRequestQuery = qualifiedEventFieldsQuery(
+        scope,
+        null,
+        undefined,
+        " signup ",
+      );
+      const expectedPaddedPage = await queryEventFieldsPageFromD1(
+        env,
+        SITE,
+        WINDOW,
+        fallbackFilters,
+        " signup ",
+        1,
+        null,
+        "private-dashboard",
+      );
+      trace.preparedSql.length = 0;
+      trace.bindings.length = 0;
+      const actualPaddedPage = await provider.execute(paddedRequestQuery);
+      expect(actualPaddedPage.value).toEqual({
+        eventName: " signup ",
+        data: {
+          ...expectedPaddedPage,
+          items: expectedPaddedPage.items.map(mapEventField),
+        },
+      });
+      expect(actualPaddedPage.value.data.items).toHaveLength(0);
+      expect(trace.preparedSql).toHaveLength(2);
+      const paddedNameEvidence = {
+        requestEventName: " signup ",
+        legacyDto: {
+          eventName: " signup ",
+          data: {
+            ...expectedPaddedPage,
+            items: expectedPaddedPage.items.map(mapEventField),
+          },
+        },
+        actualDto: actualPaddedPage.value,
+        statementCount: trace.preparedSql.length,
+      };
+
+      const whitespaceNameQuery = qualifiedEventFieldsQuery(
+        scope,
+        null,
+        undefined,
+        "   ",
+      );
+      const expectedWhitespacePage = await queryEventFieldsPageFromD1(
+        env,
+        SITE,
+        WINDOW,
+        fallbackFilters,
+        "   ",
+        1,
+        null,
+        "private-dashboard",
+      );
+      trace.preparedSql.length = 0;
+      trace.bindings.length = 0;
+      const actualWhitespaceName = await provider.execute(whitespaceNameQuery);
+      expect(actualWhitespaceName.value).toEqual({
+        eventName: "   ",
+        data: {
+          ...expectedWhitespacePage,
+          items: expectedWhitespacePage.items.map(mapEventField),
+        },
+      });
+      expect(actualWhitespaceName.value.data.items).toHaveLength(0);
+      expect(trace.preparedSql).toHaveLength(2);
+      const whitespaceNameEvidence = {
+        requestEventName: "   ",
+        legacyDto: {
+          eventName: "   ",
+          data: {
+            ...expectedWhitespacePage,
+            items: expectedWhitespacePage.items.map(mapEventField),
+          },
+        },
+        actualDto: actualWhitespaceName.value,
+        statementCount: trace.preparedSql.length,
+      };
+
+      const blankNameQuery = qualifiedEventFieldsQuery(
+        scope,
+        null,
+        undefined,
+        "",
+        100,
+      );
+      const expectedBlankNamePage = await queryEventFieldsPageFromD1(
+        env,
+        SITE,
+        WINDOW,
+        fallbackFilters,
+        undefined,
+        100,
+        null,
+        "private-dashboard",
+      );
+      trace.preparedSql.length = 0;
+      trace.bindings.length = 0;
+      const actualBlankName = await provider.execute(blankNameQuery);
+      expect(actualBlankName.value).toEqual({
+        eventName: undefined,
+        data: {
+          ...expectedBlankNamePage,
+          items: expectedBlankNamePage.items.map(mapEventField),
+        },
+      });
+      expect(
+        actualBlankName.value.data.items.some((item) => item.path === "/blank"),
+      ).toBe(true);
+      expect(trace.preparedSql).toHaveLength(2);
+      const blankNameEvidence = {
+        requestEventName: "",
+        legacyDto: {
+          eventName: undefined,
+          data: {
+            ...expectedBlankNamePage,
+            items: expectedBlankNamePage.items.map(mapEventField),
+          },
+        },
+        actualDto: actualBlankName.value,
+        statementCount: trace.preparedSql.length,
+      };
+
+      trace.preparedSql.length = 0;
+      trace.bindings.length = 0;
+      await expect(
+        provider.execute(qualifiedEventFieldsQuery(scope, "invalid-cursor")),
+      ).rejects.toThrow("invalid-cursor");
+      expect(trace.preparedSql).toHaveLength(2);
+
+      trace.preparedSql.length = 0;
+      trace.bindings.length = 0;
+      const mismatchedTimeQuery = {
+        ...query,
+        time: createQueryTime(110, 130, "UTC", 500),
+      } as QualifiedEventFieldsTestQuery;
+      await expect(provider.execute(mismatchedTimeQuery)).rejects.toThrow();
+      expect(trace.preparedSql).toHaveLength(0);
+
+      const mismatchedSiteQuery = {
+        ...query,
+        context: siteQueryContext(SIBLING_SITE, "private-dashboard"),
+      } as unknown as QualifiedEventFieldsTestQuery;
+      await expect(provider.execute(mismatchedSiteQuery)).rejects.toThrow();
+      expect(trace.preparedSql).toHaveLength(0);
+
+      const invalidLimitQuery = {
+        ...query,
+        limit: 0,
+      } as QualifiedEventFieldsTestQuery;
+      await expect(provider.execute(invalidLimitQuery)).rejects.toThrow();
+      expect(trace.preparedSql).toHaveLength(0);
+
+      runtimeEvidence.push({
+        scope,
+        pages: [firstPageEvidence, nextPageEvidence],
+        nameSemantics: [
+          paddedNameEvidence,
+          whitespaceNameEvidence,
+          blankNameEvidence,
+        ],
+        invalidCursor: { rejected: true, statementCount: 2 },
+        mismatchedTime: { rejected: true, statementCount: 0 },
+        mismatchedSite: { rejected: true, statementCount: 0 },
+        invalidLimit: { rejected: true, statementCount: 0 },
+      });
+    },
+  );
+
+  it("does not run fallback after cancellation, D1 failure, or malformed controls", async () => {
+    const { database } = createDatabase();
+    database
+      .prepare(
+        `INSERT INTO sites (id, team_id, name, domain, created_at)
+         VALUES (?, 'wave95b-team', 'Event fields failures', 'failures.test', 0)`,
+      )
+      .run(SITE);
+    database
+      .prepare(
+        "UPDATE visits SET started_at = ?, last_activity_at = ? WHERE visit_id = ?",
+      )
+      .run(125, 125, "visit-one");
+    database
+      .prepare(
+        "UPDATE visits SET started_at = ?, last_activity_at = ? WHERE visit_id = ?",
+      )
+      .run(126, 126, "visit-two");
+    const query = qualifiedEventFieldsQuery("session");
+
+    const abortTrace = traceFor();
+    const abortProvider = createD1SiteProviderRegistry({
+      env: testEnv(database, abortTrace),
+      siteId: SITE,
+    }).resolve("event-fields");
+    if (!abortProvider)
+      throw new Error("wave95b_event_fields_abort_provider_missing");
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      abortProvider.execute(query, { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(abortTrace.preparedSql).toHaveLength(0);
+    errorEvidence.push({
+      kind: "pre-abort",
+      error: { name: "AbortError" },
+      statementCount: abortTrace.preparedSql.length,
+    });
+
+    const failedTrace = traceFor();
+    const failedEnv = testEnvWithQualifiedReadBehavior(
+      database,
+      failedTrace,
+      "database-failure",
+    );
+    const failedProvider = createD1SiteProviderRegistry({
+      env: failedEnv.env,
+      siteId: SITE,
+    }).resolve("event-fields");
+    if (!failedProvider)
+      throw new Error("wave95b_event_fields_failure_provider_missing");
+    await expect(failedProvider.execute(query)).rejects.toThrow(
+      "wave95b_database_failure",
+    );
+    expect(failedEnv.prepareCount()).toBe(2);
+    expect(failedTrace.preparedSql).toHaveLength(1);
+    errorEvidence.push({
+      kind: "database-failure",
+      error: "wave95b_database_failure",
+      prepareCount: failedEnv.prepareCount(),
+      successfulPreparedStatements: failedTrace.preparedSql.length,
+      fallbackRan: false,
+    });
+
+    const malformedTrace = traceFor();
+    const malformedEnv = testEnvWithQualifiedReadBehavior(
+      database,
+      malformedTrace,
+      "malformed-controls",
+    );
+    const malformedProvider = createD1SiteProviderRegistry({
+      env: malformedEnv.env,
+      siteId: SITE,
+    }).resolve("event-fields");
+    if (!malformedProvider)
+      throw new Error("wave95b_event_fields_control_provider_missing");
+    await expect(malformedProvider.execute(query)).rejects.toThrow(
+      "analytics_event_summary_qualification_control_row_invalid",
+    );
+    expect(malformedEnv.prepareCount()).toBe(2);
+    expect(malformedTrace.preparedSql).toHaveLength(2);
+    errorEvidence.push({
+      kind: "malformed-control-row",
+      error: "analytics_event_summary_qualification_control_row_invalid",
+      prepareCount: malformedEnv.prepareCount(),
+      statementCount: malformedTrace.preparedSql.length,
+      fallbackRan: false,
+    });
+  });
+
+  it("keeps the selected Event bag when duplicate RHS owners qualify through a semi-join", async () => {
+    const { database } = createDatabase();
+    const trace = traceFor();
+    const builder = new LogicalPlanBuilder({
+      subject: createSemanticSubjectDomain({
+        origin: "site",
+        siteIds: [SITE as never],
+      }),
+      time: semanticTemporalDomainsFromQueryTime(TIME),
+      scope: resolveAnalyticsScope("event"),
+    });
+    const selectedSource = builder.source("event", {
+      temporalDomain: "read",
+      attributes: ["event.report.eventName", "event.report.ownerSessionId"],
+    });
+    const selectedByName = builder.filter(
+      selectedSource,
+      builder.compare(
+        "eq",
+        builder.slot(selectedSource, "attribute:event.report.eventName"),
+        builder.literal("signup", { kind: "scalar", scalar: "string" }),
+      ),
+    );
+    const qualificationSource = builder.source("event", {
+      temporalDomain: "read",
+      attributes: ["event.report.eventName", "event.report.ownerSessionId"],
+    });
+    const qualificationByName = builder.filter(
+      qualificationSource,
+      builder.compare(
+        "eq",
+        builder.slot(qualificationSource, "attribute:event.report.eventName"),
+        builder.literal("other", { kind: "scalar", scalar: "string" }),
+      ),
+    );
+    const qualifiedEvents = builder.semiJoin(
+      selectedByName,
+      qualificationByName,
+      [
+        {
+          left: "attribute:event.report.ownerSessionId",
+          right: "attribute:event.report.ownerSessionId",
+        },
+      ],
+    );
+    const occurrences = builder.eventPayloadOccurrences(qualifiedEvents);
+    const grouped = builder.aggregate(
+      occurrences,
+      {
+        path: builder.slot(occurrences, "path"),
+        valueType: builder.slot(occurrences, "valueType"),
+      },
+      [
+        {
+          name: "events",
+          kind: "count-distinct",
+          expression: builder.slot(occurrences, "eventIdentity"),
+        },
+        { name: "occurrences", kind: "count-rows" },
+      ],
+    );
+    builder.output("semi-qualified-event-fields", grouped, [
+      { name: "path", slot: "path" },
+      { name: "valueType", slot: "valueType" },
+      { name: "events", slot: "events" },
+      { name: "occurrences", slot: "occurrences" },
+    ]);
+
+    const rows = await queryAnalyticsReportOutputRowsFromD1(
+      testEnv(database, trace),
+      builder.finish(),
+      "semi-qualified-event-fields",
+    );
+
+    expect(trace.preparedSql).toHaveLength(1);
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        path: "/a",
+        valueType: 1,
+        events: 1,
+        occurrences: 2,
+      }),
+    );
+    expect(rows.some((row) => row.path === "/b")).toBe(false);
+  });
+
   it("matches frozen parent raw DTOs, occurrence ordering, and page cursor edges", async () => {
     const { database } = createDatabase();
     const envTrace = traceFor();
@@ -2157,5 +3084,409 @@ describe("Event field occurrence report migration", () => {
         );
       }
     }
+  });
+
+  it.each(["session", "visitor"] as const)(
+    "fuses field-value pages for %s and preserves the legacy DTO and cursor",
+    async (scope) => {
+      const { database, site } = createDatabase();
+      database
+        .prepare(
+          `INSERT INTO sites (id, team_id, name, domain, created_at)
+           VALUES (?, 'wave95c-team', 'Event field values', 'values.test', 0)`,
+        )
+        .run(SITE);
+      database
+        .prepare("UPDATE custom_event_names SET name = ? WHERE id = 41")
+        .run(" signup ");
+      database
+        .prepare(
+          "UPDATE visits SET started_at = ?, last_activity_at = ? WHERE visit_id = ?",
+        )
+        .run(125, 125, "visit-one");
+      database
+        .prepare(
+          "UPDATE visits SET started_at = ?, last_activity_at = ? WHERE visit_id = ?",
+        )
+        .run(126, 126, "visit-two");
+      addVisit(database, site, {
+        id: "visit-one-second-session",
+        sessionId: "session-three",
+        visitorId: "visitor-one",
+      });
+      database
+        .prepare(
+          "UPDATE visits SET started_at = ?, last_activity_at = ? WHERE visit_id = ?",
+        )
+        .run(127, 127, "visit-one-second-session");
+      addEvent(database, site, {
+        id: "event-one-second-session",
+        visitId: "visit-one-second-session",
+        nameId: 41,
+        occurredAt: 127,
+      });
+      addPayload(database, site, "event-one-second-session", "/a", {
+        valueType: 1,
+        occurredAt: 115,
+        stringValue: "a",
+        numberValue: 3,
+        booleanValue: 0,
+      });
+
+      const trace = traceFor();
+      const env = testEnv(database, trace);
+      const baseQuery = qualifiedEventFieldValuesQuery(scope);
+      const deferredQuery = await d1AdvancedFilterMiddleware(env)(
+        "event-field-values",
+        baseQuery,
+        async (prepared) => prepared,
+      );
+      const deferred =
+        deferredEventFieldValuesQualificationFromQuery(deferredQuery);
+      if (!deferred)
+        throw new Error("wave95c_event_field_values_deferred_missing");
+      const fallbackFilters =
+        await prepareDeferredEventQualificationFallback(deferred);
+      runtimeEvidence.push({
+        scope,
+        case: "qualified-values-fallback-match-identities",
+        advancedMatches:
+          scopedFilterMetadata(fallbackFilters)?.plan.advancedMatches,
+      });
+      const valuesQualification = buildEventFieldValuesQualificationPlan({
+        siteId: SITE,
+        queryTime: baseQuery.time,
+        filters: baseQuery.filters,
+        scopePlan: baseQuery.scopePlan ?? deferred.metadata.plan,
+        count: deferred.countInput,
+        eventName: baseQuery.eventName,
+        options: {
+          fieldPath: baseQuery.fieldPath,
+          valueTypeCode: 1,
+          limit: baseQuery.limit,
+        },
+      });
+      const provider = createD1SiteProviderRegistry({
+        env,
+        siteId: SITE,
+      }).resolve("event-field-values");
+      if (!provider)
+        throw new Error("wave95c_event_field_values_provider_missing");
+
+      const comparePage = async (query: QualifiedEventFieldValuesTestQuery) => {
+        const cursor = await decodeEventFieldValueCursor(
+          env,
+          SITE,
+          WINDOW,
+          fallbackFilters,
+          query.eventName,
+          query.fieldPath,
+          query.fieldValueType,
+          query.search,
+          query.cursor,
+          "private-dashboard",
+        );
+        if (query.cursor && !cursor)
+          throw new Error("wave95c_legacy_values_cursor_rejected");
+        const expectedPage = await queryEventFieldValuesPageFromD1(
+          env,
+          SITE,
+          WINDOW,
+          fallbackFilters,
+          query.eventName,
+          query.fieldPath,
+          query.fieldValueType,
+          query.limit,
+          query.search,
+          cursor,
+          "private-dashboard",
+        );
+        const expected = {
+          eventName: query.eventName,
+          fieldPath: query.fieldPath,
+          fieldValueType: query.fieldValueType,
+          data: {
+            ...expectedPage,
+            items: expectedPage.items.map(mapEventFieldValue),
+          },
+        };
+        trace.preparedSql.length = 0;
+        trace.bindings.length = 0;
+        const actual = await provider.execute(query);
+        expect(actual.value).toEqual(expected);
+        expect(trace.preparedSql).toHaveLength(2);
+        const sqlBytes = trace.preparedSql.map(
+          (sql) => new TextEncoder().encode(sql).byteLength,
+        );
+        const bindingCounts = trace.bindings.map(({ length }) => length);
+        expect(sqlBytes[1]).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+        expect(bindingCounts[1]).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+        runtimeEvidence.push({
+          scope,
+          case: `qualified-values-${query.fieldValueType}-${query.fieldPath}-${query.search ?? "no-search"}-${query.cursor ? "cursor" : "first"}`,
+          actualDto: actual.value,
+          legacyDto: expected,
+          statementCount: trace.preparedSql.length,
+          sqlBytes,
+          bindingCounts,
+        });
+        return actual.value as unknown as {
+          readonly data: {
+            readonly items: readonly {
+              readonly value: string | number | boolean | null;
+              readonly events: number;
+            }[];
+            readonly pagination: { readonly nextCursor: string | null };
+          };
+        };
+      };
+
+      const firstStringPage = await comparePage(baseQuery);
+      valuesCompilationEvidence.push({
+        scope,
+        evidence: {
+          statementCount: trace.preparedSql.length,
+          sqlBytes: new TextEncoder().encode(trace.preparedSql[1]!).byteLength,
+          bindingCount: trace.bindings[1]!.length,
+        },
+        logicalPlan: valuesQualification.plan,
+      });
+      expect(firstStringPage.data.items[0]).toMatchObject({
+        value: "a",
+        events: 2,
+      });
+      const nextCursor = firstStringPage.data.pagination.nextCursor;
+      expect(nextCursor).toBeTruthy();
+      await comparePage(
+        qualifiedEventFieldValuesQuery(scope, { cursor: nextCursor }),
+      );
+
+      for (const [fieldValueType, fieldPath] of [
+        ["null", "/a"],
+        ["number", "/a"],
+        ["boolean", "/a"],
+        ["object", "/a"],
+        ["array", "/a"],
+        ["number", "/b"],
+      ] as const)
+        await comparePage(
+          qualifiedEventFieldValuesQuery(scope, {
+            fieldPath,
+            fieldValueType,
+            limit: 25,
+          }),
+        );
+
+      await comparePage(
+        qualifiedEventFieldValuesQuery(scope, {
+          search: " A ",
+          limit: 5,
+        }),
+      );
+      await comparePage(
+        qualifiedEventFieldValuesQuery(scope, { fieldPath: " /a " }),
+      );
+      await comparePage(
+        qualifiedEventFieldValuesQuery(scope, { eventName: "signup " }),
+      );
+    },
+  );
+
+  it("prepares Count before an unknown field-value type and keeps cap ahead of an invalid cursor", async () => {
+    const { database, site } = createDatabase();
+    database
+      .prepare(
+        `INSERT INTO sites (id, team_id, name, domain, created_at)
+         VALUES (?, 'wave95c-team', 'Event field values guards', 'guards.test', 0)`,
+      )
+      .run(SITE);
+    const trace = traceFor();
+    const env = testEnv(database, trace);
+    const provider = createD1SiteProviderRegistry({
+      env,
+      siteId: SITE,
+    }).resolve("event-field-values");
+    if (!provider)
+      throw new Error("wave95c_event_field_values_provider_missing");
+    const unknownType = await provider.execute(
+      qualifiedEventFieldValuesQuery("session", {
+        fieldValueType: "String",
+      }),
+    );
+    expect(unknownType.value).toMatchObject({
+      data: {
+        items: [],
+        pagination: { returned: 0, hasMore: false, nextCursor: null },
+      },
+    });
+    expect(trace.preparedSql.length).toBeGreaterThan(0);
+    expect(trace.preparedSql).toHaveLength(trace.bindings.length);
+    errorEvidence.push({
+      kind: "unknown-event-field-value-type-keeps-count-preparation",
+      preparedStatementCount: trace.preparedSql.length,
+      returned: 0,
+    });
+
+    database.prepare("DELETE FROM custom_events WHERE site_id = ?").run(SITE);
+    database.prepare("DELETE FROM visits WHERE site_id = ?").run(SITE);
+    database
+      .prepare(
+        `WITH RECURSIVE generated(n) AS (
+           SELECT 1
+           UNION ALL SELECT n + 1 FROM generated WHERE n < 20001
+         )
+         INSERT INTO visits (
+           visit_id, site_id, site_pk, visitor_id, session_id, status,
+           started_at, last_activity_at, pathname, hostname, duration_ms
+         )
+         SELECT 'wave95c-values-cap-' || n, ?, ?,
+           'wave95c-values-cap-visitor', 'wave95c-values-cap-session', 'closed',
+           ?, ?, '/cap-page', 'values.test', 1
+         FROM generated`,
+      )
+      .run(SITE, site.pk, WINDOW.startMs + 5, WINDOW.startMs + 5);
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "wave95c-values-cap-1");
+    trace.preparedSql.length = 0;
+    trace.bindings.length = 0;
+    const diagnostics = createD1ReadDiagnostics();
+    const capProvider = createD1SiteProviderRegistry({
+      env,
+      siteId: SITE,
+      diagnostics,
+    }).resolve("event-field-values");
+    if (!capProvider)
+      throw new Error("wave95c_event_field_values_provider_missing");
+    await expect(
+      capProvider.execute(
+        qualifiedEventFieldValuesQuery("session", {
+          cursor: "invalid-cursor",
+          filterDsl: "count(page { page.durationMs gt 5 }) eq 1",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      domainError: {
+        kind: "invalid-input",
+        issues: [{ path: "filters", code: "filter_activity_limit_exceeded" }],
+      },
+    });
+    expect(trace.preparedSql).toHaveLength(2);
+    const rawRows = database
+      .prepare(trace.preparedSql[1]!)
+      .all(...trace.bindings[1]!) as Record<string, unknown>[];
+    const controls = rawRows.filter((row) => row.rowKind === "control");
+    expect(controls).toHaveLength(1);
+    expect(Number(controls[0]!.rawCount)).toBe(20_001);
+    const numericMismatch = Object.entries(controls[0]!).find(
+      ([name, value]) =>
+        name.toLowerCase().includes("duration") && Number(value) > 0,
+    );
+    expect(numericMismatch).toBeDefined();
+    const reportRowCount = rawRows.filter(
+      (row) => row.rowKind === "report",
+    ).length;
+    expect(reportRowCount).toBe(0);
+    errorEvidence.push({
+      kind: "event-field-values-cap-before-numeric-fallback-and-invalid-cursor",
+      preparedStatementCount: trace.preparedSql.length,
+      rawCount: Number(controls[0]!.rawCount),
+      numericMismatchCount: numericMismatch?.[1],
+      reportRowCount,
+      fallbackReason: diagnostics.advancedCountSqlFallbackReason,
+      error: {
+        path: "filters",
+        code: "filter_activity_limit_exceeded",
+      },
+    });
+  });
+
+  it("falls back once for field-value numeric incompatibility and keeps the legacy DTO", async () => {
+    const { database } = createDatabase();
+    database
+      .prepare(
+        `INSERT INTO sites (id, team_id, name, domain, created_at)
+         VALUES (?, 'wave95c-team', 'Event field values numeric', 'values-numeric.test', 0)`,
+      )
+      .run(SITE);
+    database
+      .prepare(
+        "UPDATE visits SET started_at = ?, last_activity_at = ?, duration_ms = ? WHERE visit_id = ?",
+      )
+      .run(125, 125, 10, "visit-one");
+    database
+      .prepare(
+        "UPDATE visits SET started_at = ?, last_activity_at = ?, duration_ms = ? WHERE visit_id = ?",
+      )
+      .run(126, 126, "invalid-duration", "visit-two");
+
+    const query = qualifiedEventFieldValuesQuery("session", {
+      filterDsl: "count(page { page.durationMs gt 5 }) eq 1",
+      limit: 5,
+    });
+    const expectedTrace = traceFor();
+    const expectedEnv = testEnv(database, expectedTrace);
+    const deferredQuery = await d1AdvancedFilterMiddleware(expectedEnv)(
+      "event-field-values",
+      query,
+      async (prepared) => prepared,
+    );
+    const deferred =
+      deferredEventFieldValuesQualificationFromQuery(deferredQuery);
+    if (!deferred)
+      throw new Error("wave95c_event_field_values_deferred_missing");
+    const fallbackFilters =
+      await prepareDeferredEventQualificationFallback(deferred);
+    const expectedPage = await queryEventFieldValuesPageFromD1(
+      expectedEnv,
+      SITE,
+      WINDOW,
+      fallbackFilters,
+      query.eventName,
+      query.fieldPath,
+      query.fieldValueType,
+      query.limit,
+      query.search,
+      null,
+      "private-dashboard",
+    );
+
+    const trace = traceFor();
+    const env = testEnv(database, trace);
+    const diagnostics = createD1ReadDiagnostics();
+    const provider = createD1SiteProviderRegistry({
+      env,
+      siteId: SITE,
+      diagnostics,
+    }).resolve("event-field-values");
+    if (!provider)
+      throw new Error("wave95c_event_field_values_provider_missing");
+    const actual = await provider.execute(query);
+    const expected = {
+      eventName: query.eventName,
+      fieldPath: query.fieldPath,
+      fieldValueType: query.fieldValueType,
+      data: {
+        ...expectedPage,
+        items: expectedPage.items.map(mapEventFieldValue),
+      },
+    };
+    expect(actual.value).toEqual(expected);
+    expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+      kind: "numeric-data-domain",
+    });
+    expect(trace.preparedSql).toEqual([
+      expectedTrace.preparedSql[0],
+      trace.preparedSql[1],
+      ...expectedTrace.preparedSql.slice(1),
+    ]);
+    runtimeEvidence.push({
+      scope: "session",
+      case: "event-field-values-numeric-domain-fallback-once",
+      actualDto: actual.value,
+      legacyDto: expected,
+      fallbackReason: diagnostics.advancedCountSqlFallbackReason,
+      statementCount: trace.preparedSql.length,
+    });
   });
 });

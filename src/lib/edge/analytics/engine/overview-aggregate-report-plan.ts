@@ -154,27 +154,17 @@ function bounceCount(
   return scalarCount(builder, bounceSessions, "bounces");
 }
 
-/** Builds all six legacy Overview metrics from one shared Page/Event context. */
-export function buildOverviewAggregatePlan(input: {
-  readonly siteId: string;
-  readonly queryTime: QueryTime;
-  readonly filters: FilterDocument;
-}): ValidatedLogicalPlan {
-  const { builder, pages, events, scoped } = createOverviewReportSource({
-    ...input,
-    pageAttributes: [
-      "page.report.sessionId",
-      "page.report.visitorId",
-      "page.report.durationMs",
-    ],
-    pageRelationships: ["page.session", "page.visitor"],
-    eventAttributes: [
-      "event.report.ownerSessionId",
-      "event.report.ownerVisitorId",
-    ],
-    eventRelationships: ["event.session", "event.visitor"],
-  });
-
+/** Appends all six legacy Overview metrics to a shared Page/Event builder. */
+export function appendOverviewAggregateReport(
+  builder: LogicalPlanBuilder,
+  input: {
+    readonly pages: LogicalRelationHandle;
+    readonly events?: LogicalRelationHandle;
+    readonly scoped: boolean;
+    readonly outputId?: string;
+  },
+): void {
+  const { pages, events, scoped } = input;
   const summary = pageSummary(builder, pages);
   const bounces = bounceCount(builder, pages);
   const outputs = [summary, bounces];
@@ -209,7 +199,7 @@ export function buildOverviewAggregatePlan(input: {
     totalDuration: builder.slot(combined, "totalDuration"),
     durationViews: builder.slot(combined, "durationViews"),
   });
-  builder.output("overview-aggregate", output, [
+  builder.output(input.outputId ?? "overview-aggregate", output, [
     { name: "views", slot: "views" },
     { name: "sessions", slot: "sessions" },
     { name: "visitors", slot: "visitors" },
@@ -217,5 +207,28 @@ export function buildOverviewAggregatePlan(input: {
     { name: "totalDuration", slot: "totalDuration" },
     { name: "durationViews", slot: "durationViews" },
   ]);
-  return builder.finish();
+}
+
+/** Builds all six legacy Overview metrics from one shared Page/Event context. */
+export function buildOverviewAggregatePlan(input: {
+  readonly siteId: string;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+}): ValidatedLogicalPlan {
+  const source = createOverviewReportSource({
+    ...input,
+    pageAttributes: [
+      "page.report.sessionId",
+      "page.report.visitorId",
+      "page.report.durationMs",
+    ],
+    pageRelationships: ["page.session", "page.visitor"],
+    eventAttributes: [
+      "event.report.ownerSessionId",
+      "event.report.ownerVisitorId",
+    ],
+    eventRelationships: ["event.session", "event.visitor"],
+  });
+  appendOverviewAggregateReport(source.builder, source);
+  return source.builder.finish();
 }

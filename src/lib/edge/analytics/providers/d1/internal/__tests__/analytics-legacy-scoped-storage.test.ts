@@ -106,6 +106,7 @@ const storage = new AnalyticsLegacyScopedStorage(
 const source = {
   relation: {} as LoweredAnalyticsSource["relation"],
   values: new Map(),
+  providerBindings: [],
 } satisfies LoweredAnalyticsSource;
 
 describe("legacy scoped Event storage guards", () => {

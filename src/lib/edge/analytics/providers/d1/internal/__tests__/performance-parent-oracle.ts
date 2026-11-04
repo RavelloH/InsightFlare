@@ -2,6 +2,12 @@
  * Frozen query and DTO implementation from parent commit
  * c2db43a0fd7f020709f778b3196edfbaaedd3c45, used only as a SQLite oracle.
  */
+import { scopedDatasetFor } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import { buildVisitFilterSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-filters";
+import {
+  buildVisitSourceCte,
+  visitSourceBindings,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import type {
   FilterDocument,
   Interval,
@@ -16,8 +22,6 @@ import type {
 import {
   appendSqlConditions,
   buildTimeBuckets,
-  buildVisitFilterSql,
-  buildVisitSourceCte,
   emptyPerformanceRouteMetrics,
   normalizePathname,
   PERFORMANCE_METRIC_COLUMNS,
@@ -26,9 +30,7 @@ import {
   roundPerformanceValue,
   timeBucketCase,
   timeBucketTimestamp,
-  visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { scopedDatasetFor } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import type { Env } from "@/lib/edge/types";
 
 async function queryD1All<T extends object>(

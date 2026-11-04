@@ -5,13 +5,19 @@ import {
 } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
 import { buildEventRecordDetailPlan } from "@/lib/edge/analytics/engine/event-record-detail-plan";
+import type { EventRecordPageOptions } from "@/lib/edge/analytics/engine/event-record-page-plan";
 import {
   buildEventRecordPagePlan,
   type EventRecordPageCursor,
 } from "@/lib/edge/analytics/engine/event-record-page-plan";
+import type { DeferredEventRecordsQualification } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { readCustomEventDetail } from "@/lib/edge/analytics/providers/d1/internal/custom-event-read";
 import type { Env } from "@/lib/edge/types";
 
+import {
+  type EventRecordsQualificationCompilationEvidence,
+  executeEventRecordsQualificationProgram,
+} from "./analytics-event-record-qualification-program";
 import type {
   EventRecordRow,
   EventRecordSortKey,
@@ -21,12 +27,17 @@ import type {
 } from "./core";
 import { mapEventRecord } from "./core";
 import { mapVisitPerformanceMetrics } from "./core-performance";
+import type {
+  AdvancedCountSqlFallbackReason,
+  D1ReadDiagnostics,
+} from "./diagnostics";
 import {
   type EventRecordDetailOutputRow,
   type EventRecordDetailRow,
   queryEventRecordDetailOutputRowsFromD1,
 } from "./event-record-detail-output";
 import {
+  EVENT_RECORD_PAGE_OUTPUT_TYPES,
   type EventRecordPageCursorRow,
   type EventRecordPageOutputRow,
   queryEventRecordPageOutputRowsFromD1,
@@ -70,6 +81,23 @@ function preserveEventRecordPageOutput(
   return row as unknown as EventRecordPageCursorRow;
 }
 
+function eventRecordPageFromOutputRows(
+  rawRows: readonly EventRecordPageOutputRow[],
+  options: Pick<EventRecordPageOptions, "limit" | "sort">,
+): EventRecordPage {
+  const rows = rawRows.map(preserveEventRecordPageOutput);
+  const hasMore = rows.length > options.limit;
+  const pageRows = hasMore ? rows.slice(0, options.limit) : rows;
+  const lastRow = pageRows.at(-1);
+  return {
+    rows: pageRows.map(withoutEventPk),
+    nextCursor:
+      hasMore && lastRow
+        ? eventRecordCursorFromRow(lastRow, options.sort)
+        : null,
+  };
+}
+
 export async function queryEventRecordPageFromD1(
   env: Env,
   siteId: string,
@@ -105,16 +133,37 @@ export async function queryEventRecordPageFromD1(
     options,
   });
   const rawRows = await queryEventRecordPageOutputRowsFromD1(env, plan);
-  const rows = rawRows.map(preserveEventRecordPageOutput);
-  const hasMore = rows.length > options.limit;
-  const pageRows = hasMore ? rows.slice(0, options.limit) : rows;
-  const lastRow = pageRows.at(-1);
+  return eventRecordPageFromOutputRows(rawRows, options);
+}
+
+export type QualifiedEventRecordPageExecution =
+  | {
+      readonly kind: "executed";
+      readonly page: EventRecordPage;
+      readonly evidence: EventRecordsQualificationCompilationEvidence;
+    }
+  | {
+      readonly kind: "fallback" | "unavailable";
+      readonly fallbackReason: AdvancedCountSqlFallbackReason;
+    };
+
+export async function queryQualifiedEventRecordPageFromD1(input: {
+  readonly env: Env;
+  readonly deferred: DeferredEventRecordsQualification;
+  readonly options: EventRecordPageOptions;
+  readonly cursorToken: string | null;
+  readonly diagnostics?: D1ReadDiagnostics;
+}): Promise<QualifiedEventRecordPageExecution> {
+  const result = await executeEventRecordsQualificationProgram(input);
+  if (result.kind !== "executed") return result;
+  const fields = Object.keys(EVENT_RECORD_PAGE_OUTPUT_TYPES);
+  const outputRows = result.rows.map((row) =>
+    Object.fromEntries(fields.map((field) => [field, row[field]])),
+  ) as unknown as EventRecordPageOutputRow[];
   return {
-    rows: pageRows.map(withoutEventPk),
-    nextCursor:
-      hasMore && lastRow
-        ? eventRecordCursorFromRow(lastRow, options.sort)
-        : null,
+    kind: "executed",
+    page: eventRecordPageFromOutputRows(outputRows, input.options),
+    evidence: result.evidence,
   };
 }
 export async function queryEventRecordDetailFromD1(

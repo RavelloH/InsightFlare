@@ -1,0 +1,79 @@
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
+import type { Interval, QueryTime } from "@/lib/edge/analytics/contract/types";
+import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { AnalyticsQualificationPlan } from "@/lib/edge/analytics/engine/event-qualified-source-plan";
+import { appendPageDimensionQualificationSource } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
+import {
+  appendPerformanceAllTrendsReport,
+  PERFORMANCE_METRICS,
+} from "@/lib/edge/analytics/engine/performance-sample-statistics-report-plan";
+import type { QualifiedSourceFilterMode } from "@/lib/edge/analytics/engine/qualified-page-source";
+import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
+import type { FilterDocument } from "@/lib/filter-contract/filters";
+
+export const PERFORMANCE_TIMESERIES_QUALIFICATION_CONTROL_OUTPUT =
+  "performance-timeseries-qualification-controls";
+
+export type PerformanceTimeseriesQualificationPlan =
+  AnalyticsQualificationPlan & {
+    readonly reportOutputIds: readonly string[];
+  };
+
+const PERFORMANCE_TIMESERIES_PAGE_ATTRIBUTES: readonly SemanticAttributeId[] = [
+  "page.report.sessionId",
+  "page.report.visitorId",
+  "page.report.startedAt",
+  ...PERFORMANCE_METRICS.map(
+    ({ attribute }) => ("page.report." + attribute) as SemanticAttributeId,
+  ),
+];
+
+export function buildPerformanceTimeseriesQualificationPlan(input: {
+  readonly siteId: string;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly filterMode?: QualifiedSourceFilterMode;
+  readonly scopePlan: ScopedFilterPlan;
+  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly interval: Interval;
+}): PerformanceTimeseriesQualificationPlan {
+  const source = appendPageDimensionQualificationSource({
+    semanticOperation: "performance",
+    preparedTimePolicy: "reader-window-v1",
+    siteId: input.siteId,
+    queryTime: input.queryTime,
+    filters: input.filters,
+    filterMode: input.filterMode ?? "split-only",
+    scopePlan: input.scopePlan,
+    count: input.count,
+    selections: [],
+    additionalAttributes: PERFORMANCE_TIMESERIES_PAGE_ATTRIBUTES,
+  });
+  const { builder, qualification, qualifiedPages } = source;
+  const reportOutputIds = appendPerformanceAllTrendsReport(
+    builder,
+    qualifiedPages,
+    input.interval,
+  );
+  builder.output(
+    PERFORMANCE_TIMESERIES_QUALIFICATION_CONTROL_OUTPUT,
+    qualification.controls,
+    Object.keys(qualification.controls.slots).map((name) => ({
+      name,
+      slot: name,
+    })),
+  );
+
+  return {
+    plan: builder.finish(),
+    primaryReportSourceRelationId: source.pageSource.pages.id,
+    matchesRelationId: qualification.matches.id,
+    controlsRelationId: qualification.controls.id,
+    groupedSummaryRelationId: qualification.groupedSummary.id,
+    controlOutputId: PERFORMANCE_TIMESERIES_QUALIFICATION_CONTROL_OUTPUT,
+    reportOutputIds,
+    numericCompatibilityFields: qualification.numericCompatibilityFields,
+    scope: qualification.scope,
+    reportSourceRelations: source.reportSourceRelations,
+  };
+}

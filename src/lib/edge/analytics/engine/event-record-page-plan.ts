@@ -18,6 +18,8 @@ import type { LogicalValueType } from "@/lib/edge/analytics/engine/semantic/valu
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
+
+export const EVENT_RECORD_PAGE_OUTPUT_ID = "event-record-page";
 const NUMBER = { kind: "scalar", scalar: "number" } as const;
 const DATETIME = { kind: "scalar", scalar: "datetime" } as const;
 
@@ -28,7 +30,7 @@ export interface EventRecordPageCursor {
   readonly eventPk: number;
 }
 
-const EVENT_RECORD_ATTRIBUTES = [
+export const EVENT_RECORD_ATTRIBUTES = [
   "event.report.internalPk",
   "event.report.localId",
   "event.report.eventName",
@@ -147,42 +149,15 @@ function cursorPredicate(
   );
 }
 
-/** Builds the shared Logical event-page query without D1 SQL or storage names. */
-export function buildEventRecordPagePlan(input: {
-  readonly siteId: string;
-  readonly queryTime: QueryTime;
-  readonly filters: FilterDocument;
-  readonly scopePlan?: ScopedFilterPlan;
-  readonly options: EventRecordPageOptions;
-}): ValidatedLogicalPlan {
-  const time = semanticTemporalDomainsFromQueryTime(input.queryTime);
-  const subject = createSemanticSubjectDomain({
-    origin: "site",
-    siteIds: [input.siteId as SiteId],
-  });
-  const selection = createSemanticScopedSourceSelection({
-    profile: input.scopePlan ? "prepared-scoped-v1" : "direct-event-records-v1",
-    filters: input.filters,
-    subject,
-    time,
-    ...(input.scopePlan ? { expectedPlan: input.scopePlan } : {}),
-    ...(input.options.eventName !== undefined
-      ? { eventName: input.options.eventName }
-      : {}),
-  });
-  const builder = new LogicalPlanBuilder({
-    subject,
-    time,
-    scope: resolveAnalyticsScope(input.scopePlan?.scope ?? "event"),
-    originOperation: "event-records",
-  });
-  let events = builder.source("event", {
-    temporalDomain: "candidate",
-    attributes: EVENT_RECORD_ATTRIBUTES,
-    selection,
-  });
-
-  const search = input.options.search;
+/** Appends the record page search, cursor, ordering, limit, and output contract
+ * to a caller-owned builder and Event relation. */
+export function appendEventRecordPage(
+  builder: LogicalPlanBuilder,
+  inputEvents: LogicalRelationHandle,
+  options: EventRecordPageOptions,
+): LogicalRelationHandle {
+  let events = inputEvents;
+  const search = options.search;
   if (search) {
     const searchable = [
       "eventName",
@@ -211,19 +186,14 @@ export function buildEventRecordPagePlan(input: {
     );
   }
 
-  if (input.options.cursor) {
+  if (options.cursor) {
     events = builder.filter(
       events,
-      cursorPredicate(
-        builder,
-        events,
-        input.options.cursor,
-        input.options.sort,
-      ),
+      cursorPredicate(builder, events, options.cursor, options.sort),
     );
   }
 
-  const sort = input.options.sort;
+  const sort = options.sort;
   const order: {
     readonly slot: string;
     readonly direction: "asc" | "desc";
@@ -273,7 +243,7 @@ export function buildEventRecordPagePlan(input: {
           },
         ];
   events = builder.sort(events, order);
-  events = builder.limit(events, input.options.limit + 1);
+  events = builder.limit(events, options.limit + 1);
 
   const projections = {
     eventPk: attribute(builder, events, "internalPk"),
@@ -302,9 +272,48 @@ export function buildEventRecordPagePlan(input: {
   };
   const projected = builder.project(events, projections);
   builder.output(
-    "event-record-page",
+    EVENT_RECORD_PAGE_OUTPUT_ID,
     projected,
     Object.keys(projections).map((name) => ({ name, slot: name })),
   );
+  return projected;
+}
+
+/** Builds the shared Logical event-page query without D1 SQL or storage names. */
+export function buildEventRecordPagePlan(input: {
+  readonly siteId: string;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly options: EventRecordPageOptions;
+}): ValidatedLogicalPlan {
+  const time = semanticTemporalDomainsFromQueryTime(input.queryTime);
+  const subject = createSemanticSubjectDomain({
+    origin: "site",
+    siteIds: [input.siteId as SiteId],
+  });
+  const selection = createSemanticScopedSourceSelection({
+    profile: input.scopePlan ? "prepared-scoped-v1" : "direct-event-records-v1",
+    filters: input.filters,
+    subject,
+    time,
+    ...(input.scopePlan ? { expectedPlan: input.scopePlan } : {}),
+    ...(input.options.eventName !== undefined
+      ? { eventName: input.options.eventName }
+      : {}),
+  });
+  const builder = new LogicalPlanBuilder({
+    subject,
+    time,
+    scope: resolveAnalyticsScope(input.scopePlan?.scope ?? "event"),
+    originOperation: "event-records",
+  });
+  const events = builder.source("event", {
+    temporalDomain: "candidate",
+    attributes: EVENT_RECORD_ATTRIBUTES,
+    selection,
+  });
+
+  appendEventRecordPage(builder, events, input.options);
   return builder.finish();
 }

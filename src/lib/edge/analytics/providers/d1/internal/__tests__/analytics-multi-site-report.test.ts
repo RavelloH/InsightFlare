@@ -476,9 +476,9 @@ describe("authorized multi-site Analytics report lowering", () => {
         D1_MAX_BOUND_PARAMETERS,
       );
     }
-    expect(pageA.metric.physicalPlanHash).toMatch(/^v1:/u);
-    expect(eventB.metric.physicalPlanHash).toMatch(/^v1:/u);
-    expect(observations.metric.physicalPlanHash).toMatch(/^v1:/u);
+    expect(pageA.metric.physicalPlanHash).toMatch(/^v8:/u);
+    expect(eventB.metric.physicalPlanHash).toMatch(/^v8:/u);
+    expect(observations.metric.physicalPlanHash).toMatch(/^v8:/u);
     expect(
       [pageA, eventB, observations].map((result) => ({
         tag: result.metric.tag,
@@ -490,26 +490,26 @@ describe("authorized multi-site Analytics report lowering", () => {
     ).toEqual([
       {
         tag: "wave25.analytics_report.page-report",
-        sqlBytes: 6323,
+        sqlBytes: 5386,
         bindings: 7,
         physicalPlanHash:
-          "v1:431901ecd4b4fefc78ad5d2c72120ed1bf8c137c50de63706a0a23c3a08e6107",
+          "v8:3335c0f480100bc6ebf2dbefec25928f255f10e7d96f5717e00981c215a880d6",
         statements: 1,
       },
       {
         tag: "wave25.analytics_report.event-report",
-        sqlBytes: 5949,
+        sqlBytes: 4988,
         bindings: 7,
         physicalPlanHash:
-          "v1:2f8aa6552bb6e150707a87b2ca3a0dd7b7cdc98f46a18b9f8653f76fe79358a6",
+          "v8:13b9de464354c36407f2db540cecac356fdd774fb9b39e245eafebecf9316e0d",
         statements: 1,
       },
       {
         tag: "wave25.analytics_report.observation-report",
-        sqlBytes: 3823,
+        sqlBytes: 3104,
         bindings: 9,
         physicalPlanHash:
-          "v1:61de2d201592fda458f79ac2cddb0af383d349df73ca51b51e79e6b82e884423",
+          "v8:79d5f7d2e4c8b221508e5589f5dfe4afc5ec03f6f02e4868f09c6c5ec939db57",
         statements: 1,
       },
     ]);
@@ -609,17 +609,17 @@ describe("authorized multi-site Analytics report lowering", () => {
       }).toEqual(
         siteCount === 90
           ? {
-              sqlBytes: 6584,
+              sqlBytes: 5647,
               bindings: 94,
               physicalPlanHash:
-                "v1:2d5fde37b9522d7a0345bc1e2d03900ca908f7cbd6cf51a202dff6f0af9df6c0",
+                "v8:e6fffe6e713ea3eb6a0f7d550b302439b44b30b42efb25a03982fc8fe9fd6ce5",
               statements: 1,
             }
           : {
-              sqlBytes: 6587,
+              sqlBytes: 5650,
               bindings: 95,
               physicalPlanHash:
-                "v1:59fb9e8ad2f6bcf185861c87a8a20a1bdf45565095bafe72ddf77ba61310f641",
+                "v8:64088ba539e808899dd5dc51de39282fa0890adfb8e3fea3a80b454f04a63c7e",
               statements: 1,
             },
       );
@@ -641,9 +641,9 @@ describe("authorized multi-site Analytics report lowering", () => {
           window: WINDOW,
         }),
         output: "journey-pageview-detail",
-        bytes: 11252,
+        bytes: 10160,
         bindings: 7,
-        hash: "v1:bfde1227b37718ab2d690d4544ecca1d32bfb118d74cd8dee98073c309e966d6",
+        hash: "v8:25b236f56b55fe2b65e66e39126cecdc319e13d6bb5bc35af6a30d636d13ccd5",
       },
       {
         plan: buildEventRecordDetailPlan({
@@ -657,9 +657,9 @@ describe("authorized multi-site Analytics report lowering", () => {
           },
         }),
         output: "event-record-detail",
-        bytes: 15793,
+        bytes: 12663,
         bindings: 7,
-        hash: "v1:fb839d3e3dcd4262ecf1e6bd3eeda80c485d19833724b03f7f47851f3c442bfb",
+        hash: "v8:267f3dd45bd7a186b74d278845ff7305408549bee167dc8397e72028eda5dc02",
       },
       {
         plan: buildJourneyObservationPlan({
@@ -669,17 +669,29 @@ describe("authorized multi-site Analytics report lowering", () => {
           window: WINDOW,
         }),
         output: "journey-observation-detail-source",
-        bytes: 14042,
+        bytes: 10216,
         bindings: 21,
-        hash: "v1:d7039ee2bcba513f1d402ab10537e594f628670ab5d13af94d9ebbbdbdfc85b7",
+        hash: "v8:dccefbdaf50a36445eb9e6e6b040f7ce55abfb78deba787d839728d980039639",
       },
     ];
 
+    const measured = [];
     for (const probe of probes) {
       const result = await queryOutput(db, probe.plan, probe.output);
-      expect(result.metric.sqlBytes).toBe(probe.bytes);
-      expect(result.metric.bindings).toBe(probe.bindings);
-      expect(result.metric.physicalPlanHash).toBe(probe.hash);
+      measured.push({
+        output: probe.output,
+        sqlBytes: result.metric.sqlBytes,
+        bindings: result.metric.bindings,
+        physicalPlanHash: result.metric.physicalPlanHash,
+      });
     }
+    expect(measured).toEqual(
+      probes.map(({ output, bytes, bindings, hash }) => ({
+        output,
+        sqlBytes: bytes,
+        bindings,
+        physicalPlanHash: hash,
+      })),
+    );
   });
 });

@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -37,11 +36,11 @@ import {
   semanticSubjectFromQuerySubject,
 } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
+import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { queryAnalyticsReportOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import { queryEventRecordPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
 import { queryEventSummaryMetricsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
-import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 import {
@@ -1169,7 +1168,7 @@ function legacyGroupedContainsOracle(
 interface QueryMetrics {
   readonly sqlBytes: number;
   readonly bindings: number;
-  readonly physicalPlanHash: string | null;
+  readonly physicalPlanShapeVersion: number | null;
   readonly nativeRowRelations: number;
   readonly jsonRowRelations: number;
 }
@@ -1217,37 +1216,14 @@ function compactExplainEvidence(
 
 function queryMetrics(query: ReturnType<typeof compileD1Query>): QueryMetrics {
   const shape = query.physicalPlanShape;
-  const payload = shape
-    ? JSON.stringify(
-        shape.version === 1
-          ? [
-              "d1-query-shape-v1",
-              query.sql,
-              shape.cteCount,
-              shape.directScanProjectionCount,
-              shape.nativeMembershipCount,
-              shape.jsonMembershipCount,
-            ]
-          : [
-              "d1-query-shape-v2",
-              query.sql,
-              shape.cteCount,
-              shape.directScanProjectionCount,
-              shape.nativeMembershipCount,
-              shape.jsonMembershipCount,
-              shape.nativeRowRelationCount,
-              shape.jsonRowRelationCount,
-            ],
-      )
-    : undefined;
+  const rowRelations =
+    shape && "jsonRowRelationCount" in shape ? shape : undefined;
   return {
     sqlBytes: new TextEncoder().encode(query.sql).byteLength,
     bindings: query.bindings?.length ?? 0,
-    physicalPlanHash: payload
-      ? `v${shape!.version}:${createHash("sha256").update(payload, "utf8").digest("hex")}`
-      : null,
-    nativeRowRelations: shape?.version === 2 ? shape.nativeRowRelationCount : 0,
-    jsonRowRelations: shape?.version === 2 ? shape.jsonRowRelationCount : 0,
+    physicalPlanShapeVersion: shape?.version ?? null,
+    nativeRowRelations: rowRelations?.nativeRowRelationCount ?? 0,
+    jsonRowRelations: rowRelations?.jsonRowRelationCount ?? 0,
   };
 }
 
@@ -3013,11 +2989,11 @@ describe("Wave37A event record scoped Source regressions", () => {
           });
           const compiled = compileOutput(productionPlan, "event-record-page");
           expect(compiled.physicalPlanShape).toMatchObject({
-            version: 2,
+            version: 8,
             jsonRowRelationCount: 0,
           });
-          expect(compiled.physicalPlanShape?.version).toBe(2);
-          if (compiled.physicalPlanShape?.version === 2)
+          expect(compiled.physicalPlanShape?.version).toBe(8);
+          if (compiled.physicalPlanShape?.version === 8)
             expect(
               compiled.physicalPlanShape.nativeRowRelationCount,
             ).toBeGreaterThan(0);
@@ -3687,7 +3663,7 @@ describe("Wave37A event record scoped Source regressions", () => {
       expect(pageTrace.preparedSql).toHaveLength(1);
       expect(pageTrace.preparedSql[0]).toBe(pageQuery?.sql);
       expect(pageTrace.bindings[0]?.length).toBe(pageMetrics?.bindings);
-      expect(pageMetrics?.physicalPlanHash).toMatch(/^v[12]:[a-f0-9]{64}$/u);
+      expect(pageMetrics?.physicalPlanShapeVersion).toBe(8);
       expect(tempIdentityOracleExplain.operationCount).toBeGreaterThan(0);
       expect(tempIdentityOracleExplain.indexedSearches.length).toBeGreaterThan(
         0,

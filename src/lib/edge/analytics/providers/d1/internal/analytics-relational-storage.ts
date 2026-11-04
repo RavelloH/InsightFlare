@@ -1,16 +1,28 @@
 import {
+  aggregate,
   and,
+  antiJoin,
+  callFunction,
+  caseWhen,
+  castInteger,
+  castText,
   coalesce,
   constant,
+  count,
   eq,
   filter,
   gte,
   inList,
   isNotNull,
+  isNull,
   join,
   limit,
   lt,
+  lte,
+  min,
   neq,
+  not,
+  or,
   param,
   project,
   scalar,
@@ -27,6 +39,7 @@ import type {
 } from "@/lib/db/query/expression";
 import type { Relation } from "@/lib/db/query/plan";
 import { schema } from "@/lib/db/schema";
+import { ADVANCED_FILTER_EXACT_AGGREGATE_VALUE_LIMIT } from "@/lib/edge/analytics/engine/advanced-filter-activity-plan";
 import type { SlotId } from "@/lib/edge/analytics/engine/logical/ids";
 import type {
   SourceNode,
@@ -39,8 +52,20 @@ import {
   semanticEventReportAttributeCatalog,
   semanticObservationAttributeCatalog,
 } from "@/lib/edge/analytics/engine/semantic/attributes";
+import {
+  advancedCountSelectorBooleanField,
+  advancedCountSelectorExactAggregateField,
+} from "@/lib/edge/analytics/engine/semantic/count-selector-fields";
+import type { EventPayloadTopLevelPath } from "@/lib/edge/analytics/engine/semantic/event-payload-logical";
 import type { SemanticTemporalDomains } from "@/lib/edge/analytics/engine/semantic/time";
 
+import type { EventPayloadNodeField } from "./lowering/payload-layout";
+import {
+  type AnalyticsEventPayloadKeySourceBinding,
+  type AnalyticsEventPayloadOccurrenceJoinIdentity,
+  type AnalyticsProviderSourceBindingRequest,
+  assertAnalyticsEventPayloadKeySchema,
+} from "./analytics-event-identity-proof";
 import {
   type NativePrimitiveFieldContract,
   nativePrimitiveFieldContract,
@@ -53,6 +78,7 @@ import {
   buildAnalyticsScopeFactRelation,
   isAnalyticsScopeFactId,
 } from "./analytics-scope-fact-storage";
+import { selectEventPayloadNodeFacts } from "./event-payload-node-selection";
 
 export type AnalyticsDbRelation = Relation<
   object,
@@ -77,6 +103,7 @@ export type AnalyticsSourceValue =
 export interface LoweredAnalyticsSource {
   readonly relation: AnalyticsDbRelation;
   readonly values: ReadonlyMap<SlotId, AnalyticsSourceValue>;
+  readonly providerBindings: readonly AnalyticsEventPayloadKeySourceBinding[];
 }
 
 export type AnalyticsRelationalStorageContext =
@@ -239,6 +266,68 @@ function observationReportColumn(attributeId: string): string | undefined {
   return pageReportColumnByAttribute[pageAttributeId];
 }
 
+function observationReportSourceColumn(
+  attributeId: string,
+): string | undefined {
+  const direct = observationReportColumn(attributeId);
+  if (direct) return direct;
+  const selectorField = advancedCountSelectorBooleanField(attributeId);
+  return selectorField?.collection === "page"
+    ? observationReportColumn(selectorField.valueAttribute)
+    : undefined;
+}
+
+function countSelectorBooleanValue(
+  field: NonNullable<ReturnType<typeof advancedCountSelectorBooleanField>>,
+  attributeId: string,
+  rawValue: AnyExpression,
+): AnyExpression {
+  if (field.kind === "string")
+    return eq(
+      callFunction("storage-class", rawValue as SqlExpression),
+      param("text"),
+    );
+  const storageClass = callFunction("storage-class", rawValue as SqlExpression);
+  // The count guard proves this raw value is numeric before a matcher runs.
+  // This narrows only the TypeScript comparison contract; SQL keeps the raw
+  // column and does not CAST legacy TEXT or BLOB values.
+  const numericRawValue = rawValue as SqlExpression<
+    number,
+    ExpressionResultType<"numeric", boolean>
+  >;
+  if (advancedCountSelectorExactAggregateField(attributeId)) {
+    const integerValue = castInteger(
+      numericRawValue,
+    ) as unknown as SqlExpression<
+      number,
+      ExpressionResultType<"numeric", boolean>
+    >;
+    return coalesce(
+      and(
+        or(eq(storageClass, param("integer")), eq(storageClass, param("real"))),
+        eq(numericRawValue, integerValue),
+        gte(
+          numericRawValue,
+          param(-ADVANCED_FILTER_EXACT_AGGREGATE_VALUE_LIMIT),
+        ),
+        lte(
+          numericRawValue,
+          param(ADVANCED_FILTER_EXACT_AGGREGATE_VALUE_LIMIT),
+        ),
+      ),
+      constant(0),
+    );
+  }
+  return coalesce(
+    and(
+      or(eq(storageClass, param("integer")), eq(storageClass, param("real"))),
+      gte(numericRawValue, param(-Number.MAX_SAFE_INTEGER)),
+      lte(numericRawValue, param(Number.MAX_SAFE_INTEGER)),
+    ),
+    constant(0),
+  );
+}
+
 function requirePageReportValue(
   expression: AnyExpression,
   attributeId: string,
@@ -346,14 +435,9 @@ function requireEventReportValue(
           : scalar === "boolean"
             ? expression.resultType.affinity === "integer"
             : false;
-  const sqliteIntegerPrimaryKeyIsNonNullByDefinition =
-    attributeId === "event.report.internalPk" &&
-    expression.resultType.affinity === "integer";
   if (
     !affinityMatches ||
-    (expression.resultType.nullable &&
-      !attribute.nullable &&
-      !sqliteIntegerPrimaryKeyIsNonNullByDefinition)
+    (expression.resultType.nullable && !attribute.nullable)
   )
     throw new Error(
       `${path}.values: ${attributeId} no longer maps to its registered D1 scalar contract.`,
@@ -413,6 +497,167 @@ function requireNativePrimitiveStorageColumn(
   }
 }
 
+function eqAny(left: AnyExpression, right: AnyExpression): Predicate {
+  const unknown = (value: AnyExpression) =>
+    value as SqlExpression<unknown, ExpressionResultType<"unknown", boolean>>;
+  return eq(unknown(left), unknown(right));
+}
+
+function isNullAny(value: AnyExpression): Predicate {
+  return isNull(value as SqlExpression);
+}
+
+/**
+ * Assigns each property-statistics input exactly one storage role:
+ * all roots, direct children of roots, or exact selected nodes outside those
+ * sets. The selected input is the canonical same-Event node relation, so its
+ * parent id classifies selected-other rows without repeating its enrichment.
+ */
+export function buildEventPayloadPropertyRoleRows(
+  eventMetadata: AnalyticsDbRelation,
+  selectedNodes: AnalyticsDbRelation,
+): AnalyticsDbRelation {
+  const rootNodes: AnalyticsDbRelation = scan(schema.custom_event_json_nodes);
+  const eventRootsJoin: AnalyticsDbRelation = join(
+    eventMetadata,
+    rootNodes,
+    and(
+      eqAny(eventMetadata.columns.event_pk, rootNodes.columns.event_pk),
+      isNullAny(rootNodes.columns.parent_node_id),
+    ),
+    "left",
+  );
+  const selectedNonRoots = filter(
+    selectedNodes,
+    isNotNull(selectedNodes.columns.parent_node_id as SqlExpression),
+  );
+  const eventRoots: AnalyticsDbRelation = project(eventRootsJoin, {
+    event_pk: eventRootsJoin.columns.left_event_pk,
+    site_id: eventRootsJoin.columns.left_site_id,
+    site_pk: eventRootsJoin.columns.left_site_pk,
+    event_name_id: eventRootsJoin.columns.left_event_name_id,
+    occurred_at: eventRootsJoin.columns.left_occurred_at,
+    root_node_id: eventRootsJoin.columns.right_node_id,
+    root_parent_node_id: eventRootsJoin.columns.right_parent_node_id,
+    root_key_id: eventRootsJoin.columns.right_key_id,
+    root_path_id: eventRootsJoin.columns.right_path_id,
+    root_node_type: eventRootsJoin.columns.right_value_type,
+    root_array_index: eventRootsJoin.columns.right_array_index,
+  });
+  const rootPaths: AnalyticsDbRelation = scan(schema.custom_event_json_paths);
+  const rootPathJoin: AnalyticsDbRelation = join(
+    eventRoots,
+    rootPaths,
+    eqAny(eventRoots.columns.root_path_id, rootPaths.columns.id),
+    "left",
+  );
+  const rootPathRows: AnalyticsDbRelation = project(rootPathJoin, {
+    event_pk: rootPathJoin.columns.left_event_pk,
+    site_id: rootPathJoin.columns.left_site_id,
+    site_pk: rootPathJoin.columns.left_site_pk,
+    event_name_id: rootPathJoin.columns.left_event_name_id,
+    occurred_at: rootPathJoin.columns.left_occurred_at,
+    node_id: rootPathJoin.columns.left_root_node_id,
+    parent_node_id: rootPathJoin.columns.left_root_parent_node_id,
+    key_id: rootPathJoin.columns.left_root_key_id,
+    path_id: rootPathJoin.columns.left_root_path_id,
+    node_type: rootPathJoin.columns.left_root_node_type,
+    array_index: rootPathJoin.columns.left_root_array_index,
+    path: rootPathJoin.columns.right_path,
+    path_site_id: rootPathJoin.columns.right_site_id,
+    path_site_pk: rootPathJoin.columns.right_site_pk,
+  });
+  const rootPathValid = and(
+    eqAny(rootPathRows.columns.node_type, constant(4)),
+    eqAny(rootPathRows.columns.path, constant("/")),
+    eqAny(rootPathRows.columns.path_site_id, rootPathRows.columns.site_id),
+    eqAny(rootPathRows.columns.path_site_pk, rootPathRows.columns.site_pk),
+    isNullAny(rootPathRows.columns.key_id),
+    isNullAny(rootPathRows.columns.array_index),
+  );
+  const rootRows: AnalyticsDbRelation = project(rootPathRows, {
+    event_pk: rootPathRows.columns.event_pk,
+    role_code: constant(0),
+    node_id: rootPathRows.columns.node_id,
+    parent_node_id: rootPathRows.columns.parent_node_id,
+    node_type: castInteger(constant(null)),
+    array_index: castInteger(constant(null)),
+    key_id: castInteger(constant(null)),
+    path_id: castInteger(constant(null)),
+    event_site_id: rootPathRows.columns.site_id,
+    event_site_pk: rootPathRows.columns.site_pk,
+    event_name_id: rootPathRows.columns.event_name_id,
+    occurred_at: rootPathRows.columns.occurred_at,
+    root_valid: caseWhen(
+      [{ when: rootPathValid, then: constant(1) }],
+      constant(0),
+    ),
+  });
+  const children: AnalyticsDbRelation = scan(schema.custom_event_json_nodes);
+  const rootChildrenJoin: AnalyticsDbRelation = join(
+    rootRows,
+    children,
+    and(
+      eqAny(rootRows.columns.event_pk, children.columns.event_pk),
+      eqAny(rootRows.columns.node_id, children.columns.parent_node_id),
+    ),
+  );
+  const rootChildRows: AnalyticsDbRelation = project(rootChildrenJoin, {
+    event_pk: rootChildrenJoin.columns.left_event_pk,
+    role_code: constant(1),
+    node_id: rootChildrenJoin.columns.right_node_id,
+    parent_node_id: rootChildrenJoin.columns.right_parent_node_id,
+    node_type: rootChildrenJoin.columns.right_value_type,
+    array_index: rootChildrenJoin.columns.right_array_index,
+    key_id: rootChildrenJoin.columns.right_key_id,
+    path_id: rootChildrenJoin.columns.right_path_id,
+    event_site_id: rootChildrenJoin.columns.left_event_site_id,
+    event_site_pk: rootChildrenJoin.columns.left_event_site_pk,
+    event_name_id: rootChildrenJoin.columns.left_event_name_id,
+    occurred_at: rootChildrenJoin.columns.left_occurred_at,
+    root_valid: rootChildrenJoin.columns.left_root_valid,
+  });
+
+  const selectedWithParent: AnalyticsDbRelation = selectedNonRoots;
+  const selectedParentRoots = rootNodes;
+  const selectedOther: AnalyticsDbRelation = antiJoin(
+    selectedWithParent,
+    selectedParentRoots,
+    and(
+      eqAny(
+        selectedWithParent.columns.event_pk,
+        selectedParentRoots.columns.event_pk,
+      ),
+      eqAny(
+        selectedWithParent.columns.parent_node_id,
+        selectedParentRoots.columns.node_id,
+      ),
+      isNullAny(selectedParentRoots.columns.parent_node_id),
+    ),
+  );
+  const selectedOtherRows: AnalyticsDbRelation = project(selectedOther, {
+    event_pk: selectedOther.columns.event_pk,
+    role_code: constant(2),
+    node_id: selectedOther.columns.node_id,
+    parent_node_id: selectedOther.columns.parent_node_id,
+    node_type: castInteger(constant(null)),
+    array_index: castInteger(constant(null)),
+    key_id: castInteger(constant(null)),
+    path_id: castInteger(constant(null)),
+    event_site_id: castText(castInteger(constant(null))),
+    event_site_pk: castInteger(constant(null)),
+    event_name_id: castInteger(constant(null)),
+    occurred_at: castInteger(constant(null)),
+    root_valid: constant(0),
+  });
+
+  return union(
+    union(rootRows, rootChildRows, true),
+    selectedOtherRows,
+    true,
+  ) as AnalyticsDbRelation;
+}
+
 /** D1-only physical carrier catalog for the currently proven Page/Event subset. */
 export class AnalyticsRelationalStorage {
   readonly #siteIds: readonly string[];
@@ -436,16 +681,1121 @@ export class AnalyticsRelationalStorage {
     this.#time = context.time;
   }
 
-  /** Expands payload rows only from the Event relation already selected upstream. */
-  eventPayloadOccurrences(
+  /** Selects exact path matches plus same-Event ancestors from a Logical Event input. */
+  eventPayloadNodes(
     selectedEvents: AnalyticsDbRelation,
+    eventKeyKeys: readonly AnyExpression[],
     eventPk: AnyExpression,
-  ): AnalyticsDbRelation {
+    propertiesMetadata: {
+      readonly siteId: AnyExpression;
+      readonly eventNameId: AnyExpression;
+      readonly occurredAt: AnyExpression;
+      readonly visitId: AnyExpression;
+    },
+    paths: readonly string[],
+    requiredFields: readonly EventPayloadNodeField[],
+  ): {
+    readonly relation: AnalyticsDbRelation;
+    readonly eventMetadata: AnalyticsDbRelation;
+  } {
     const eventPkValue = eventPk as SqlExpression<
       number,
       ExpressionResultType<"integer", false>
     >;
-    const eventKeys = project(selectedEvents, { event_pk: eventPkValue });
+    const eventKeys = project(selectedEvents, {
+      event_pk: eventPkValue,
+      event_id: eventKeyKeys[1]!,
+      event_site_id: propertiesMetadata.siteId,
+      site_pk: eventKeyKeys[0]!,
+      event_name_id: propertiesMetadata.eventNameId,
+      occurred_at: propertiesMetadata.occurredAt,
+      visit_id: propertiesMetadata.visitId,
+      ...Object.fromEntries(
+        eventKeyKeys.map((key, index) => [`event_key_${index}`, key]),
+      ),
+    });
+    const eventMetadata = project(eventKeys, {
+      event_pk: eventKeys.columns.event_pk,
+      site_id: eventKeys.columns.event_site_id,
+      site_pk: eventKeys.columns.site_pk,
+      event_name_id: eventKeys.columns.event_name_id,
+      occurred_at: eventKeys.columns.occurred_at,
+    });
+    const selectedNodeRows: AnalyticsDbRelation = selectEventPayloadNodeFacts(
+      eventKeys,
+      paths,
+    );
+    const eventNodes: AnalyticsDbRelation = join(
+      eventKeys,
+      selectedNodeRows,
+      eq(eventKeys.columns.event_pk, selectedNodeRows.columns.event_pk),
+    );
+    const eventNodeRows: AnalyticsDbRelation = project(eventNodes, {
+      event_pk: eventNodes.columns.left_event_pk,
+      event_id: eventNodes.columns.left_event_id,
+      event_site_id: eventNodes.columns.left_event_site_id,
+      site_pk: eventNodes.columns.left_site_pk,
+      event_name_id: eventNodes.columns.left_event_name_id,
+      occurred_at: eventNodes.columns.left_occurred_at,
+      visit_id: eventNodes.columns.left_visit_id,
+      event_key_0: eventNodes.columns.left_event_key_0,
+      ...Object.fromEntries(
+        eventKeyKeys
+          .slice(1)
+          .map((_, index) => [
+            `event_key_${index + 1}`,
+            (eventNodes.columns as Readonly<Record<string, AnyExpression>>)[
+              `left_event_key_${index + 1}`
+            ]!,
+          ]),
+      ),
+      node_id: eventNodes.columns.right_node_id,
+      parent_node_id: eventNodes.columns.right_parent_node_id,
+      key_id: eventNodes.columns.right_key_id,
+      path_id: eventNodes.columns.right_path_id,
+      value_type: eventNodes.columns.right_value_type,
+      array_index: eventNodes.columns.right_array_index,
+    });
+    const pathsTable: AnalyticsDbRelation = scan(
+      schema.custom_event_json_paths,
+    );
+    const withPaths: AnalyticsDbRelation = join(
+      eventNodeRows,
+      pathsTable,
+      and(
+        eq(eventNodeRows.columns.path_id, pathsTable.columns.id),
+        eq(eventNodeRows.columns.site_pk, pathsTable.columns.site_pk),
+        eq(eventNodeRows.columns.event_site_id, pathsTable.columns.site_id),
+      ),
+    );
+    const eventNodePathRows: AnalyticsDbRelation = project(withPaths, {
+      event_pk: withPaths.columns.left_event_pk,
+      event_id: withPaths.columns.left_event_id,
+      event_site_id: withPaths.columns.left_event_site_id,
+      site_pk: withPaths.columns.left_site_pk,
+      event_name_id: withPaths.columns.left_event_name_id,
+      occurred_at: withPaths.columns.left_occurred_at,
+      visit_id: withPaths.columns.left_visit_id,
+      event_key_0: withPaths.columns.left_event_key_0,
+      ...Object.fromEntries(
+        eventKeyKeys
+          .slice(1)
+          .map((_, index) => [
+            `event_key_${index + 1}`,
+            (withPaths.columns as Readonly<Record<string, AnyExpression>>)[
+              `left_event_key_${index + 1}`
+            ]!,
+          ]),
+      ),
+      node_id: withPaths.columns.left_node_id,
+      parent_node_id: withPaths.columns.left_parent_node_id,
+      key_id: withPaths.columns.left_key_id,
+      path_id: withPaths.columns.left_path_id,
+      path: withPaths.columns.right_path,
+      path_site_id: withPaths.columns.right_site_id,
+      path_site_pk: withPaths.columns.right_site_pk,
+      array_index: withPaths.columns.left_array_index,
+      value_type: withPaths.columns.left_value_type,
+    });
+    const keys: AnalyticsDbRelation = scan(schema.custom_event_json_keys);
+    const withKeys: AnalyticsDbRelation = join(
+      eventNodePathRows,
+      keys,
+      and(
+        eq(eventNodePathRows.columns.key_id, keys.columns.id),
+        eq(eventNodePathRows.columns.site_pk, keys.columns.site_pk),
+        eq(eventNodePathRows.columns.event_site_id, keys.columns.site_id),
+      ),
+      "left",
+    );
+    const eventNodeKeyRows: AnalyticsDbRelation = project(withKeys, {
+      event_pk: withKeys.columns.left_event_pk,
+      event_id: withKeys.columns.left_event_id,
+      event_site_id: withKeys.columns.left_event_site_id,
+      site_pk: withKeys.columns.left_site_pk,
+      event_name_id: withKeys.columns.left_event_name_id,
+      occurred_at: withKeys.columns.left_occurred_at,
+      visit_id: withKeys.columns.left_visit_id,
+      event_key_0: withKeys.columns.left_event_key_0,
+      ...Object.fromEntries(
+        eventKeyKeys
+          .slice(1)
+          .map((_, index) => [
+            `event_key_${index + 1}`,
+            (withKeys.columns as Readonly<Record<string, AnyExpression>>)[
+              `left_event_key_${index + 1}`
+            ]!,
+          ]),
+      ),
+      node_id: withKeys.columns.left_node_id,
+      parent_node_id: withKeys.columns.left_parent_node_id,
+      key: withKeys.columns.right_key,
+      key_site_id: withKeys.columns.right_site_id,
+      key_site_pk: withKeys.columns.right_site_pk,
+      path_id: withKeys.columns.left_path_id,
+      path: withKeys.columns.left_path,
+      path_site_id: withKeys.columns.left_path_site_id,
+      path_site_pk: withKeys.columns.left_path_site_pk,
+      array_index: withKeys.columns.left_array_index,
+      value_type: withKeys.columns.left_value_type,
+    });
+    const structuralFields = new Set<EventPayloadNodeField>([
+      "eventKey",
+      "eventPk",
+      "nodeId",
+      "parentNodeId",
+      "key",
+      "path",
+    ]);
+    if (
+      requiredFields.length > 0 &&
+      requiredFields.every((field) => structuralFields.has(field))
+    ) {
+      const visits: AnalyticsDbRelation = scan(schema.visits);
+      const withOwner: AnalyticsDbRelation = join(
+        eventNodeKeyRows,
+        visits,
+        and(
+          eq(eventNodeKeyRows.columns.site_pk, visits.columns.site_pk),
+          eq(eventNodeKeyRows.columns.visit_id, visits.columns.visit_id),
+        ),
+      );
+      const output: Record<string, AnyExpression> = {};
+      if (requiredFields.includes("eventPk"))
+        output.eventPk = withOwner.columns.left_event_pk;
+      if (requiredFields.includes("nodeId"))
+        output.nodeId = withOwner.columns.left_node_id;
+      if (requiredFields.includes("parentNodeId"))
+        output.parentNodeId = withOwner.columns.left_parent_node_id;
+      if (requiredFields.includes("key"))
+        output.key = withOwner.columns.left_key;
+      if (requiredFields.includes("path"))
+        output.path = withOwner.columns.left_path;
+      eventKeyKeys.forEach((_, index) => {
+        if (requiredFields.includes("eventKey"))
+          output[`eventKey${index}`] = (
+            withOwner.columns as Readonly<Record<string, AnyExpression>>
+          )[`left_event_key_${index}`]!;
+      });
+      return {
+        relation: project(withOwner, output),
+        eventMetadata,
+      };
+    }
+    const values: AnalyticsDbRelation = scan(schema.custom_event_json_values);
+    const withValues: AnalyticsDbRelation = join(
+      eventNodeKeyRows,
+      values,
+      and(
+        eq(eventNodeKeyRows.columns.event_pk, values.columns.event_pk),
+        eq(eventNodeKeyRows.columns.node_id, values.columns.node_id),
+      ),
+      "left",
+    );
+    const valueRows: AnalyticsDbRelation = project(withValues, {
+      event_pk: withValues.columns.left_event_pk,
+      event_id: withValues.columns.left_event_id,
+      event_site_id: withValues.columns.left_event_site_id,
+      site_pk: withValues.columns.left_site_pk,
+      event_name_id: withValues.columns.left_event_name_id,
+      occurred_at: withValues.columns.left_occurred_at,
+      visit_id: withValues.columns.left_visit_id,
+      event_key_0: withValues.columns.left_event_key_0,
+      ...Object.fromEntries(
+        eventKeyKeys
+          .slice(1)
+          .map((_, index) => [
+            `event_key_${index + 1}`,
+            (withValues.columns as Readonly<Record<string, AnyExpression>>)[
+              `left_event_key_${index + 1}`
+            ]!,
+          ]),
+      ),
+      node_id: withValues.columns.left_node_id,
+      parent_node_id: withValues.columns.left_parent_node_id,
+      key: withValues.columns.left_key,
+      key_site_id: withValues.columns.left_key_site_id,
+      key_site_pk: withValues.columns.left_key_site_pk,
+      path_id: withValues.columns.left_path_id,
+      path: withValues.columns.left_path,
+      path_site_id: withValues.columns.left_path_site_id,
+      path_site_pk: withValues.columns.left_path_site_pk,
+      array_index: withValues.columns.left_array_index,
+      value_type: withValues.columns.left_value_type,
+      value_node_id: withValues.columns.right_node_id,
+      value_type_row: withValues.columns.right_value_type,
+      value_site_id: withValues.columns.right_site_id,
+      value_site_pk: withValues.columns.right_site_pk,
+      value_name_id: withValues.columns.right_event_name_id,
+      value_path_id: withValues.columns.right_path_id,
+      value_occurred_at: withValues.columns.right_occurred_at,
+      string_value: withValues.columns.right_string_value,
+      number_value: withValues.columns.right_number_value,
+      boolean_value: withValues.columns.right_boolean_value,
+    });
+    const stringClass = callFunction(
+      "storage-class",
+      valueRows.columns.string_value as SqlExpression,
+    );
+    const numberClass = callFunction(
+      "storage-class",
+      valueRows.columns.number_value as SqlExpression,
+    );
+    const booleanClass = callFunction(
+      "storage-class",
+      valueRows.columns.boolean_value as SqlExpression,
+    );
+    const finiteNumber = and(
+      gte(
+        valueRows.columns.number_value as SqlExpression<
+          number | null,
+          ExpressionResultType<"numeric", boolean>
+        >,
+        param(-Number.MAX_VALUE),
+      ),
+      lte(
+        valueRows.columns.number_value as SqlExpression<
+          number | null,
+          ExpressionResultType<"numeric", boolean>
+        >,
+        param(Number.MAX_VALUE),
+      ),
+    );
+    const rawShapeValid = or(
+      and(
+        eqAny(valueRows.columns.value_type, constant(0)),
+        isNullAny(valueRows.columns.string_value),
+        isNullAny(valueRows.columns.number_value),
+        isNullAny(valueRows.columns.boolean_value),
+      ),
+      and(
+        eqAny(valueRows.columns.value_type, constant(1)),
+        eqAny(stringClass, constant("text")),
+        isNullAny(valueRows.columns.number_value),
+        isNullAny(valueRows.columns.boolean_value),
+      ),
+      and(
+        eqAny(valueRows.columns.value_type, constant(2)),
+        inList(numberClass, ["integer", "real"]),
+        finiteNumber,
+        isNullAny(valueRows.columns.string_value),
+        isNullAny(valueRows.columns.boolean_value),
+      ),
+      and(
+        eqAny(valueRows.columns.value_type, constant(3)),
+        eqAny(booleanClass, constant("integer")),
+        inList(
+          valueRows.columns.boolean_value as SqlExpression<number | null>,
+          [0, 1],
+        ),
+        isNullAny(valueRows.columns.string_value),
+        isNullAny(valueRows.columns.number_value),
+      ),
+    );
+    const valueIdentityValid = and(
+      isNotNull(valueRows.columns.value_node_id as SqlExpression),
+      eqAny(valueRows.columns.value_type_row, valueRows.columns.value_type),
+      eqAny(valueRows.columns.value_site_id, valueRows.columns.event_site_id),
+      eqAny(valueRows.columns.value_site_pk, valueRows.columns.site_pk),
+      eqAny(valueRows.columns.value_name_id, valueRows.columns.event_name_id),
+      eqAny(valueRows.columns.value_path_id, valueRows.columns.path_id),
+      eqAny(valueRows.columns.value_occurred_at, valueRows.columns.occurred_at),
+    );
+    const containerValueCompatible = and(
+      or(
+        eqAny(valueRows.columns.value_type, constant(4)),
+        eqAny(valueRows.columns.value_type, constant(5)),
+      ),
+      isNullAny(valueRows.columns.value_node_id),
+    );
+    const scalarValueCompatible = and(
+      or(
+        eqAny(valueRows.columns.value_type, constant(0)),
+        eqAny(valueRows.columns.value_type, constant(1)),
+        eqAny(valueRows.columns.value_type, constant(2)),
+        eqAny(valueRows.columns.value_type, constant(3)),
+      ),
+      valueIdentityValid,
+      rawShapeValid,
+    );
+    const valueCompatible = coalesce(
+      or(containerValueCompatible, scalarValueCompatible),
+      constant(0),
+    );
+    const compatibleValueRows: AnalyticsDbRelation = project(valueRows, {
+      event_pk: valueRows.columns.event_pk,
+      site_pk: valueRows.columns.site_pk,
+      visit_id: valueRows.columns.visit_id,
+      ...Object.fromEntries(
+        eventKeyKeys.map((_, index) => [
+          `event_key_${index}`,
+          (valueRows.columns as Readonly<Record<string, AnyExpression>>)[
+            `event_key_${index}`
+          ]!,
+        ]),
+      ),
+      node_id: valueRows.columns.node_id,
+      parent_node_id: valueRows.columns.parent_node_id,
+      key: valueRows.columns.key,
+      path: valueRows.columns.path,
+      value_type: valueRows.columns.value_type,
+      array_index: valueRows.columns.array_index,
+      string_value: valueRows.columns.string_value,
+      number_value: valueRows.columns.number_value,
+      boolean_value: valueRows.columns.boolean_value,
+      value_compatible: valueCompatible,
+    });
+    const visits: AnalyticsDbRelation = scan(schema.visits);
+    const withOwner: AnalyticsDbRelation = join(
+      compatibleValueRows,
+      visits,
+      and(
+        eq(compatibleValueRows.columns.site_pk, visits.columns.site_pk),
+        eq(compatibleValueRows.columns.visit_id, visits.columns.visit_id),
+      ),
+    );
+    const output: Record<string, AnyExpression> = {
+      eventPk: withOwner.columns.left_event_pk,
+      nodeId: withOwner.columns.left_node_id,
+      parentNodeId: withOwner.columns.left_parent_node_id,
+      key: withOwner.columns.left_key,
+      path: withOwner.columns.left_path,
+      valueType: withOwner.columns.left_value_type,
+      arrayIndex: withOwner.columns.left_array_index,
+      stringValue: withOwner.columns.left_string_value,
+      numberValue: withOwner.columns.left_number_value,
+      booleanValue: withOwner.columns.left_boolean_value,
+      valueCompatible: withOwner.columns.left_value_compatible,
+    };
+    eventKeyKeys.forEach((_, index) => {
+      output[`eventKey${index}`] = (
+        withOwner.columns as Readonly<Record<string, AnyExpression>>
+      )[`left_event_key_${index}`]!;
+    });
+    return {
+      relation: project(withOwner, output),
+      eventMetadata,
+    };
+  }
+
+  /** Produces one per-Event typed top-level property row with explicit proof controls. */
+  eventPayloadProperties(
+    eventMetadata: AnalyticsDbRelation,
+    selectedNodeRelation: AnalyticsDbRelation,
+    selectedNodeValues: {
+      readonly eventPk: AnyExpression;
+      readonly nodeId: AnyExpression;
+      readonly parentNodeId: AnyExpression;
+      readonly key: AnyExpression;
+      readonly path: AnyExpression;
+    },
+    paths: readonly EventPayloadTopLevelPath[],
+  ): AnalyticsDbRelation {
+    const selectedTargetInput: AnalyticsDbRelation = project(
+      selectedNodeRelation,
+      {
+        event_pk: selectedNodeValues.eventPk as SqlExpression<
+          number,
+          ExpressionResultType<"integer", false>
+        >,
+        node_id: selectedNodeValues.nodeId,
+        parent_node_id: selectedNodeValues.parentNodeId,
+        key: selectedNodeValues.key as SqlExpression<
+          string | null,
+          ExpressionResultType<"text", boolean>
+        >,
+        path: selectedNodeValues.path as SqlExpression<
+          string | null,
+          ExpressionResultType<"text", boolean>
+        >,
+      },
+    );
+    const roleRows = buildEventPayloadPropertyRoleRows(
+      eventMetadata,
+      selectedTargetInput,
+    );
+
+    // This is the one exact selected-node membership lookup for all three roles.
+    const selectedMembershipJoin: AnalyticsDbRelation = join(
+      roleRows,
+      selectedTargetInput,
+      and(
+        eqAny(roleRows.columns.event_pk, selectedTargetInput.columns.event_pk),
+        eqAny(roleRows.columns.node_id, selectedTargetInput.columns.node_id),
+      ),
+      "left",
+    );
+    const selectedRoleRows: AnalyticsDbRelation = project(
+      selectedMembershipJoin,
+      {
+        event_pk: selectedMembershipJoin.columns.left_event_pk,
+        role_code: selectedMembershipJoin.columns.left_role_code,
+        node_id: selectedMembershipJoin.columns.left_node_id,
+        node_type: selectedMembershipJoin.columns.left_node_type,
+        array_index: selectedMembershipJoin.columns.left_array_index,
+        key_id: selectedMembershipJoin.columns.left_key_id,
+        path_id: selectedMembershipJoin.columns.left_path_id,
+        event_site_id: selectedMembershipJoin.columns.left_event_site_id,
+        event_site_pk: selectedMembershipJoin.columns.left_event_site_pk,
+        event_name_id: selectedMembershipJoin.columns.left_event_name_id,
+        occurred_at: selectedMembershipJoin.columns.left_occurred_at,
+        root_valid: selectedMembershipJoin.columns.left_root_valid,
+        selected_node_id: selectedMembershipJoin.columns.right_node_id,
+        selected_key: selectedMembershipJoin.columns.right_key,
+        selected_path: selectedMembershipJoin.columns.right_path,
+      },
+    );
+
+    const keyTable: AnalyticsDbRelation = scan(schema.custom_event_json_keys);
+    const roleKeyJoin: AnalyticsDbRelation = join(
+      selectedRoleRows,
+      keyTable,
+      eqAny(selectedRoleRows.columns.key_id, keyTable.columns.id),
+      "left",
+    );
+    const keyedRoleRows: AnalyticsDbRelation = project(roleKeyJoin, {
+      event_pk: roleKeyJoin.columns.left_event_pk,
+      role_code: roleKeyJoin.columns.left_role_code,
+      node_id: roleKeyJoin.columns.left_node_id,
+      node_type: roleKeyJoin.columns.left_node_type,
+      array_index: roleKeyJoin.columns.left_array_index,
+      key: roleKeyJoin.columns.right_key,
+      key_site_id: roleKeyJoin.columns.right_site_id,
+      key_site_pk: roleKeyJoin.columns.right_site_pk,
+      path_id: roleKeyJoin.columns.left_path_id,
+      event_site_id: roleKeyJoin.columns.left_event_site_id,
+      event_site_pk: roleKeyJoin.columns.left_event_site_pk,
+      event_name_id: roleKeyJoin.columns.left_event_name_id,
+      occurred_at: roleKeyJoin.columns.left_occurred_at,
+      root_valid: roleKeyJoin.columns.left_root_valid,
+      selected_node_id: roleKeyJoin.columns.left_selected_node_id,
+      selected_key: roleKeyJoin.columns.left_selected_key,
+      selected_path: roleKeyJoin.columns.left_selected_path,
+    });
+    const pathTable: AnalyticsDbRelation = scan(schema.custom_event_json_paths);
+    const rolePathJoin: AnalyticsDbRelation = join(
+      keyedRoleRows,
+      pathTable,
+      eqAny(keyedRoleRows.columns.path_id, pathTable.columns.id),
+      "left",
+    );
+    const enrichedRoleRows: AnalyticsDbRelation = project(rolePathJoin, {
+      event_pk: rolePathJoin.columns.left_event_pk,
+      role_code: rolePathJoin.columns.left_role_code,
+      node_id: rolePathJoin.columns.left_node_id,
+      node_type: rolePathJoin.columns.left_node_type,
+      array_index: rolePathJoin.columns.left_array_index,
+      key: rolePathJoin.columns.left_key,
+      key_site_id: rolePathJoin.columns.left_key_site_id,
+      key_site_pk: rolePathJoin.columns.left_key_site_pk,
+      path_id: rolePathJoin.columns.left_path_id,
+      path: rolePathJoin.columns.right_path,
+      path_site_id: rolePathJoin.columns.right_site_id,
+      path_site_pk: rolePathJoin.columns.right_site_pk,
+      event_site_id: rolePathJoin.columns.left_event_site_id,
+      event_site_pk: rolePathJoin.columns.left_event_site_pk,
+      event_name_id: rolePathJoin.columns.left_event_name_id,
+      occurred_at: rolePathJoin.columns.left_occurred_at,
+      root_valid: rolePathJoin.columns.left_root_valid,
+      selected_node_id: rolePathJoin.columns.left_selected_node_id,
+      selected_key: rolePathJoin.columns.left_selected_key,
+      selected_path: rolePathJoin.columns.left_selected_path,
+    });
+
+    const candidateRelevantForJoin = or(
+      inList(
+        enrichedRoleRows.columns.key as SqlExpression<
+          string | null,
+          ExpressionResultType<"text", boolean>
+        >,
+        paths.map(({ key }) => key),
+      ),
+      inList(
+        enrichedRoleRows.columns.path as SqlExpression<
+          string | null,
+          ExpressionResultType<"text", boolean>
+        >,
+        paths.map(({ path }) => path),
+      ),
+    );
+    const valueTable: AnalyticsDbRelation = scan(
+      schema.custom_event_json_values,
+    );
+    const candidateValuesJoin: AnalyticsDbRelation = join(
+      enrichedRoleRows,
+      valueTable,
+      and(
+        eqAny(enrichedRoleRows.columns.event_pk, valueTable.columns.event_pk),
+        eqAny(enrichedRoleRows.columns.node_id, valueTable.columns.node_id),
+        eqAny(enrichedRoleRows.columns.role_code, constant(1)),
+        eqAny(enrichedRoleRows.columns.root_valid, constant(1)),
+        candidateRelevantForJoin,
+      ),
+      "left",
+    );
+    const candidateValueRows: AnalyticsDbRelation = project(
+      candidateValuesJoin,
+      {
+        event_pk: candidateValuesJoin.columns.left_event_pk,
+        role_code: candidateValuesJoin.columns.left_role_code,
+        node_id: candidateValuesJoin.columns.left_node_id,
+        node_type: candidateValuesJoin.columns.left_node_type,
+        node_path_id: candidateValuesJoin.columns.left_path_id,
+        key: candidateValuesJoin.columns.left_key,
+        key_site_id: candidateValuesJoin.columns.left_key_site_id,
+        key_site_pk: candidateValuesJoin.columns.left_key_site_pk,
+        path: candidateValuesJoin.columns.left_path,
+        path_site_id: candidateValuesJoin.columns.left_path_site_id,
+        path_site_pk: candidateValuesJoin.columns.left_path_site_pk,
+        event_site_id: candidateValuesJoin.columns.left_event_site_id,
+        event_site_pk: candidateValuesJoin.columns.left_event_site_pk,
+        event_name_id: candidateValuesJoin.columns.left_event_name_id,
+        occurred_at: candidateValuesJoin.columns.left_occurred_at,
+        array_index: candidateValuesJoin.columns.left_array_index,
+        root_valid: candidateValuesJoin.columns.left_root_valid,
+        selected_node_id: candidateValuesJoin.columns.left_selected_node_id,
+        selected_key: candidateValuesJoin.columns.left_selected_key,
+        selected_path: candidateValuesJoin.columns.left_selected_path,
+        value_node_id: candidateValuesJoin.columns.right_node_id,
+        value_type: candidateValuesJoin.columns.right_value_type,
+        value_site_id: candidateValuesJoin.columns.right_site_id,
+        value_site_pk: candidateValuesJoin.columns.right_site_pk,
+        value_name_id: candidateValuesJoin.columns.right_event_name_id,
+        value_path_id: candidateValuesJoin.columns.right_path_id,
+        value_occurred_at: candidateValuesJoin.columns.right_occurred_at,
+        string_value: candidateValuesJoin.columns.right_string_value,
+        number_value: candidateValuesJoin.columns.right_number_value,
+        boolean_value: candidateValuesJoin.columns.right_boolean_value,
+      },
+    );
+    const stringClass = callFunction(
+      "storage-class",
+      candidateValueRows.columns.string_value as SqlExpression,
+    );
+    const numberClass = callFunction(
+      "storage-class",
+      candidateValueRows.columns.number_value as SqlExpression,
+    );
+    const booleanClass = callFunction(
+      "storage-class",
+      candidateValueRows.columns.boolean_value as SqlExpression,
+    );
+    const finiteNumber = and(
+      gte(
+        candidateValueRows.columns.number_value as SqlExpression<
+          number | null,
+          ExpressionResultType<"numeric", boolean>
+        >,
+        param(-Number.MAX_VALUE),
+      ),
+      lte(
+        candidateValueRows.columns.number_value as SqlExpression<
+          number | null,
+          ExpressionResultType<"numeric", boolean>
+        >,
+        param(Number.MAX_VALUE),
+      ),
+    );
+    const rawShapeValid = or(
+      and(
+        eqAny(candidateValueRows.columns.value_type, constant(0)),
+        isNullAny(candidateValueRows.columns.string_value),
+        isNullAny(candidateValueRows.columns.number_value),
+        isNullAny(candidateValueRows.columns.boolean_value),
+      ),
+      and(
+        eqAny(candidateValueRows.columns.value_type, constant(1)),
+        eqAny(stringClass, constant("text")),
+        isNullAny(candidateValueRows.columns.number_value),
+        isNullAny(candidateValueRows.columns.boolean_value),
+      ),
+      and(
+        eqAny(candidateValueRows.columns.value_type, constant(2)),
+        inList(numberClass, ["integer", "real"]),
+        finiteNumber,
+        isNullAny(candidateValueRows.columns.string_value),
+        isNullAny(candidateValueRows.columns.boolean_value),
+      ),
+      and(
+        eqAny(candidateValueRows.columns.value_type, constant(3)),
+        eqAny(booleanClass, constant("integer")),
+        inList(
+          candidateValueRows.columns.boolean_value as SqlExpression<
+            number | null
+          >,
+          [0, 1],
+        ),
+        isNullAny(candidateValueRows.columns.string_value),
+        isNullAny(candidateValueRows.columns.number_value),
+      ),
+    );
+    const valueRowValid = and(
+      isNotNull(candidateValueRows.columns.value_node_id as SqlExpression),
+      eqAny(
+        candidateValueRows.columns.value_type,
+        candidateValueRows.columns.node_type,
+      ),
+      eqAny(
+        candidateValueRows.columns.value_site_id,
+        candidateValueRows.columns.event_site_id,
+      ),
+      eqAny(
+        candidateValueRows.columns.value_site_pk,
+        candidateValueRows.columns.event_site_pk,
+      ),
+      eqAny(
+        candidateValueRows.columns.value_name_id,
+        candidateValueRows.columns.event_name_id,
+      ),
+      eqAny(
+        candidateValueRows.columns.value_path_id,
+        candidateValueRows.columns.node_path_id,
+      ),
+      eqAny(
+        candidateValueRows.columns.value_occurred_at,
+        candidateValueRows.columns.occurred_at,
+      ),
+      rawShapeValid,
+    );
+    const valueShapeRows: AnalyticsDbRelation = project(candidateValueRows, {
+      event_pk: candidateValueRows.columns.event_pk,
+      role_code: candidateValueRows.columns.role_code,
+      node_id: candidateValueRows.columns.node_id,
+      node_type: candidateValueRows.columns.node_type,
+      key: candidateValueRows.columns.key,
+      path: candidateValueRows.columns.path,
+      root_valid: candidateValueRows.columns.root_valid,
+      selected_node_id: candidateValueRows.columns.selected_node_id,
+      selected_key: candidateValueRows.columns.selected_key,
+      selected_path: candidateValueRows.columns.selected_path,
+      value_node_id: candidateValueRows.columns.value_node_id,
+      string_value: candidateValueRows.columns.string_value,
+      number_value: candidateValueRows.columns.number_value,
+      boolean_value: candidateValueRows.columns.boolean_value,
+      value_row_valid: valueRowValid,
+      candidate_shape_valid: and(
+        eqAny(
+          candidateValueRows.columns.key_site_id,
+          candidateValueRows.columns.event_site_id,
+        ),
+        eqAny(
+          candidateValueRows.columns.key_site_pk,
+          candidateValueRows.columns.event_site_pk,
+        ),
+        eqAny(
+          candidateValueRows.columns.path_site_id,
+          candidateValueRows.columns.event_site_id,
+        ),
+        eqAny(
+          candidateValueRows.columns.path_site_pk,
+          candidateValueRows.columns.event_site_pk,
+        ),
+        isNullAny(candidateValueRows.columns.array_index),
+        gte(
+          candidateValueRows.columns.node_type as SqlExpression<
+            number | null,
+            ExpressionResultType<"integer", boolean>
+          >,
+          constant(0),
+        ),
+        lte(
+          candidateValueRows.columns.node_type as SqlExpression<
+            number | null,
+            ExpressionResultType<"integer", boolean>
+          >,
+          constant(5),
+        ),
+      ),
+      candidate_scope_valid: eqAny(
+        candidateValueRows.columns.root_valid,
+        constant(1),
+      ),
+    });
+    const candidateValid = (key: string, path: string) =>
+      and(
+        eqAny(valueShapeRows.columns.key, param(key)),
+        eqAny(valueShapeRows.columns.path, param(path)),
+        valueShapeRows.columns.candidate_shape_valid as Predicate,
+      );
+    const aggregateInputProjections: Record<string, AnyExpression> = {
+      event_pk: valueShapeRows.columns.event_pk,
+      role_code: valueShapeRows.columns.role_code,
+      node_id: valueShapeRows.columns.node_id,
+      node_type: valueShapeRows.columns.node_type,
+      root_valid: valueShapeRows.columns.root_valid,
+      selected_node_id: valueShapeRows.columns.selected_node_id,
+      value_node_id: valueShapeRows.columns.value_node_id,
+      value_row_valid: valueShapeRows.columns.value_row_valid,
+      string_value: valueShapeRows.columns.string_value,
+      number_value: valueShapeRows.columns.number_value,
+      boolean_value: valueShapeRows.columns.boolean_value,
+    };
+    paths.forEach(({ path, key }, index) => {
+      const prefix = "property_" + index;
+      const candidateMatches = or(
+        eqAny(valueShapeRows.columns.key, param(key)),
+        eqAny(valueShapeRows.columns.path, param(path)),
+      );
+      const relevantCandidate = and(
+        valueShapeRows.columns.candidate_scope_valid as Predicate,
+        candidateMatches,
+      );
+      const validCandidate = and(
+        valueShapeRows.columns.candidate_scope_valid as Predicate,
+        candidateValid(key, path),
+      );
+      aggregateInputProjections[prefix + "_candidate"] = relevantCandidate;
+      aggregateInputProjections[prefix + "_candidate_valid"] = validCandidate;
+      aggregateInputProjections[prefix + "_value_valid"] = and(
+        validCandidate,
+        valueShapeRows.columns.value_row_valid as Predicate,
+      );
+      aggregateInputProjections[prefix + "_selected"] = or(
+        eqAny(valueShapeRows.columns.selected_key, param(key)),
+        eqAny(valueShapeRows.columns.selected_path, param(path)),
+      );
+    });
+    const aggregateInput: AnalyticsDbRelation = project(
+      valueShapeRows,
+      aggregateInputProjections,
+    );
+    const countTrue = (predicate: Predicate) =>
+      count(caseWhen([{ when: predicate, then: constant(1) }]));
+    const aggregates: Record<string, SqlExpression> = {
+      root_count: countTrue(
+        and(
+          eqAny(aggregateInput.columns.role_code, constant(0)),
+          isNotNull(aggregateInput.columns.node_id as SqlExpression),
+        ),
+      ),
+      root_valid_count: countTrue(
+        and(
+          eqAny(aggregateInput.columns.role_code, constant(0)),
+          eqAny(aggregateInput.columns.root_valid, constant(1)),
+        ),
+      ),
+      selected_node_count: count(
+        aggregateInput.columns.selected_node_id as SqlExpression,
+      ),
+    };
+    paths.forEach((_, index) => {
+      const prefix = "property_" + index;
+      const relevantCandidate = aggregateInput.columns[
+        prefix + "_candidate"
+      ] as Predicate;
+      const validCandidate = aggregateInput.columns[
+        prefix + "_candidate_valid"
+      ] as Predicate;
+      const matchingValidValue = aggregateInput.columns[
+        prefix + "_value_valid"
+      ] as Predicate;
+      const selectedMatches = aggregateInput.columns[
+        prefix + "_selected"
+      ] as Predicate;
+      aggregates[prefix + "_candidate_count"] = countTrue(relevantCandidate);
+      aggregates[prefix + "_candidate_valid_count"] = countTrue(validCandidate);
+      aggregates[prefix + "_candidate_id"] = min(
+        caseWhen([
+          {
+            when: relevantCandidate,
+            then: aggregateInput.columns.node_id as SqlExpression,
+          },
+        ]) as SqlExpression,
+      );
+      aggregates[prefix + "_candidate_type"] = min(
+        caseWhen([
+          {
+            when: relevantCandidate,
+            then: aggregateInput.columns.node_type as SqlExpression,
+          },
+        ]) as SqlExpression,
+      );
+      aggregates[prefix + "_value_count"] = countTrue(
+        and(
+          relevantCandidate,
+          isNotNull(aggregateInput.columns.value_node_id as SqlExpression),
+        ),
+      );
+      aggregates[prefix + "_value_valid_count"] = countTrue(matchingValidValue);
+      aggregates[prefix + "_string_value"] = min(
+        caseWhen([
+          {
+            when: matchingValidValue,
+            then: aggregateInput.columns.string_value as SqlExpression,
+          },
+        ]) as SqlExpression,
+      );
+      aggregates[prefix + "_number_value"] = min(
+        caseWhen([
+          {
+            when: matchingValidValue,
+            then: aggregateInput.columns.number_value as SqlExpression,
+          },
+        ]) as SqlExpression,
+      );
+      aggregates[prefix + "_boolean_value"] = min(
+        caseWhen([
+          {
+            when: matchingValidValue,
+            then: aggregateInput.columns.boolean_value as SqlExpression,
+          },
+        ]) as SqlExpression,
+      );
+      aggregates[prefix + "_selected_count"] = countTrue(selectedMatches);
+      aggregates[prefix + "_selected_id"] = min(
+        caseWhen([
+          {
+            when: selectedMatches,
+            then: aggregateInput.columns.selected_node_id as SqlExpression,
+          },
+        ]) as SqlExpression,
+      );
+    });
+    const propertyStats: AnalyticsDbRelation = aggregate(aggregateInput, {
+      groupBy: { event_pk: aggregateInput.columns.event_pk },
+      aggregates,
+    });
+    const propertyColumns = propertyStats.columns as Readonly<
+      Record<string, AnyExpression>
+    >;
+    const rootOkay = and(
+      eqAny(propertyColumns.root_count!, constant(1)),
+      eqAny(propertyColumns.root_valid_count!, constant(1)),
+    );
+    const candidateInputPredicates: Predicate[] = paths.map((_, index) =>
+      not(
+        eqAny(
+          propertyColumns["property_" + index + "_candidate_count"]!,
+          constant(0),
+        ),
+      ),
+    );
+    const anyCandidateInput =
+      candidateInputPredicates.length === 0
+        ? eqAny(constant(0), constant(1))
+        : candidateInputPredicates
+            .slice(1)
+            .reduce<Predicate>(
+              (combined, predicate) => or(combined, predicate),
+              candidateInputPredicates[0]!,
+            );
+    const candidateStatsExist = and(rootOkay, anyCandidateInput);
+    const selectedStatsExist = not(
+      eqAny(propertyColumns.selected_node_count!, constant(0)),
+    );
+    const rootCount = propertyColumns.root_count! as SqlExpression;
+    const selectedNodeCount =
+      propertyColumns.selected_node_count! as SqlExpression;
+    const gatedFactProjections: Record<string, AnyExpression> = {
+      event_pk: propertyColumns.event_pk!,
+      root_count: rootCount,
+      selected_node_count: selectedNodeCount,
+      empty_tree: and(
+        eqAny(rootCount, constant(0)),
+        eqAny(selectedNodeCount, constant(0)),
+      ),
+      root_okay: caseWhen([{ when: rootOkay, then: constant(1) }], constant(0)),
+      candidate_stats_exist: caseWhen(
+        [{ when: candidateStatsExist, then: constant(1) }],
+        constant(0),
+      ),
+      selected_stats_exist: caseWhen(
+        [{ when: selectedStatsExist, then: constant(1) }],
+        constant(0),
+      ),
+    };
+    paths.forEach((_, index) => {
+      const prefix = "property_" + index;
+      for (const field of [
+        "candidate_count",
+        "candidate_valid_count",
+        "candidate_id",
+        "candidate_type",
+        "value_count",
+        "value_valid_count",
+        "string_value",
+        "number_value",
+        "boolean_value",
+        "selected_count",
+        "selected_id",
+      ] as const) {
+        gatedFactProjections[prefix + "_" + field] =
+          propertyColumns[prefix + "_" + field]!;
+      }
+    });
+    const gatedFacts = project(propertyStats, gatedFactProjections);
+    const gatedColumns = gatedFacts.columns as Readonly<
+      Record<string, AnyExpression>
+    >;
+    const propertyFactProjections: Record<string, AnyExpression> = {
+      event_pk: gatedColumns.event_pk!,
+      empty_tree: gatedColumns.empty_tree!,
+      root_okay: gatedColumns.root_okay!,
+    };
+    paths.forEach((_, index) => {
+      const prefix = "property_" + index;
+      for (const field of [
+        "candidate_count",
+        "candidate_valid_count",
+        "candidate_id",
+        "candidate_type",
+        "value_count",
+        "value_valid_count",
+        "string_value",
+        "number_value",
+        "boolean_value",
+      ] as const) {
+        propertyFactProjections[prefix + "_" + field] = caseWhen([
+          {
+            when: eqAny(gatedColumns.candidate_stats_exist!, constant(1)),
+            then: gatedColumns[prefix + "_" + field]! as SqlExpression,
+          },
+        ]);
+      }
+      for (const field of ["selected_count", "selected_id"] as const) {
+        propertyFactProjections[prefix + "_" + field] = caseWhen([
+          {
+            when: eqAny(gatedColumns.selected_stats_exist!, constant(1)),
+            then: gatedColumns[prefix + "_" + field]! as SqlExpression,
+          },
+        ]);
+      }
+    });
+    const stablePropertyFacts = project(gatedFacts, propertyFactProjections);
+    const stablePropertyColumns = stablePropertyFacts.columns as Readonly<
+      Record<string, AnyExpression>
+    >;
+    const result: Record<string, AnyExpression> = {
+      event_pk: stablePropertyColumns.event_pk!,
+    };
+    paths.forEach((_, index) => {
+      const prefix = "property_" + index;
+      const candidateCount = coalesce(
+        stablePropertyColumns[prefix + "_candidate_count"] as SqlExpression,
+        constant(0),
+      );
+      const candidateValidCount = coalesce(
+        stablePropertyColumns[
+          prefix + "_candidate_valid_count"
+        ] as SqlExpression,
+        constant(0),
+      );
+      const selectedCount = coalesce(
+        stablePropertyColumns[prefix + "_selected_count"] as SqlExpression,
+        constant(0),
+      );
+      const valueCount = coalesce(
+        stablePropertyColumns[prefix + "_value_count"] as SqlExpression,
+        constant(0),
+      );
+      const candidateId = stablePropertyColumns[
+        prefix + "_candidate_id"
+      ] as SqlExpression;
+      const candidateType = stablePropertyColumns[
+        prefix + "_candidate_type"
+      ] as SqlExpression;
+      const selectedId = stablePropertyColumns[
+        prefix + "_selected_id"
+      ] as SqlExpression;
+      const selectedCandidate = and(
+        eqAny(candidateCount, constant(1)),
+        eqAny(candidateValidCount, constant(1)),
+        eqAny(selectedCount, constant(1)),
+        eqAny(candidateId, selectedId),
+      );
+      const structureOkay = or(
+        stablePropertyColumns.empty_tree! as Predicate,
+        and(
+          stablePropertyColumns.root_okay! as Predicate,
+          or(eqAny(candidateCount, constant(0)), selectedCandidate),
+        ),
+      );
+      const containerValueCompatible = and(
+        or(
+          eqAny(candidateType, constant(4)),
+          eqAny(candidateType, constant(5)),
+        ),
+        eqAny(valueCount, constant(0)),
+      );
+      const scalarValueCompatible = and(
+        or(
+          eqAny(candidateType, constant(0)),
+          eqAny(candidateType, constant(1)),
+          eqAny(candidateType, constant(2)),
+          eqAny(candidateType, constant(3)),
+        ),
+        eqAny(valueCount, constant(1)),
+        eqAny(
+          stablePropertyColumns[prefix + "_value_valid_count"] as SqlExpression,
+          constant(1),
+        ),
+      );
+      const valueOkay = or(
+        stablePropertyColumns.empty_tree! as Predicate,
+        and(
+          structureOkay,
+          or(
+            eqAny(candidateCount, constant(0)),
+            and(
+              selectedCandidate,
+              or(containerValueCompatible, scalarValueCompatible),
+            ),
+          ),
+        ),
+      );
+      const present = and(structureOkay, eqAny(candidateCount, constant(1)));
+      const safeValue = and(present, valueOkay);
+      result[prefix + "_present"] = caseWhen(
+        [{ when: present, then: constant(1) }],
+        constant(0),
+      );
+      result[prefix + "_valueType"] = caseWhen([
+        { when: present, then: candidateType },
+      ]);
+      for (const [field, column] of [
+        ["stringValue", "string_value"],
+        ["numberValue", "number_value"],
+        ["booleanValue", "boolean_value"],
+      ] as const) {
+        result[prefix + "_" + field] = caseWhen([
+          {
+            when: safeValue,
+            then: stablePropertyColumns[prefix + "_" + column] as SqlExpression,
+          },
+        ]);
+      }
+      result[prefix + "_structureCompatible"] = coalesce(
+        structureOkay,
+        constant(0),
+      );
+      result[prefix + "_valueCompatible"] = coalesce(valueOkay, constant(0));
+    });
+    return project(stablePropertyFacts, result);
+  }
+  /** Expands payload rows only from the Event relation already selected upstream. */
+  eventPayloadOccurrences(
+    selectedEvents: AnalyticsDbRelation,
+    identity: AnalyticsEventPayloadOccurrenceJoinIdentity,
+  ): AnalyticsDbRelation {
+    const eventPkValue = identity.eventPk as SqlExpression<
+      number,
+      ExpressionResultType<"integer", false>
+    >;
+    const eventKeys = project(selectedEvents, {
+      event_pk: eventPkValue,
+      ...(identity.includeDistinctIdentity
+        ? {
+            site_pk: identity.sitePk as SqlExpression<
+              number,
+              ExpressionResultType<"integer", false>
+            >,
+            event_id: identity.eventId as SqlExpression<
+              string,
+              ExpressionResultType<"text", false>
+            >,
+          }
+        : {}),
+    });
     const occurrences = scan(schema.custom_event_json_values);
     const eventOccurrences = join(
       eventKeys,
@@ -465,7 +1815,13 @@ export class AnalyticsRelationalStorage {
       stringValue: occurrencesWithPaths.columns.left_right_string_value,
       numberValue: occurrencesWithPaths.columns.left_right_number_value,
       booleanValue: occurrencesWithPaths.columns.left_right_boolean_value,
-      internalEventKey: occurrencesWithPaths.columns.left_left_event_pk,
+      ...(identity.includeDistinctIdentity
+        ? {
+            eventSitePk: occurrencesWithPaths.columns.left_left_site_pk,
+            eventId: occurrencesWithPaths.columns.left_left_event_id,
+            providerEventPk: occurrencesWithPaths.columns.left_left_event_pk,
+          }
+        : {}),
     });
   }
 
@@ -473,7 +1829,44 @@ export class AnalyticsRelationalStorage {
     node: SourceNode,
     path: string,
     requiredSlots: ReadonlySet<SlotId> = new Set(node.output),
+    providerRequests: readonly AnalyticsProviderSourceBindingRequest[] = [],
   ): LoweredAnalyticsSource {
+    const eventPayloadKeyRequests = providerRequests.filter(
+      (request) => request.kind === "event-payload-key",
+    );
+    const needsEventPayloadPropertiesMetadata = eventPayloadKeyRequests.some(
+      (request) => request.includePayloadPropertiesMetadata === true,
+    );
+    if (
+      eventPayloadKeyRequests.length !== providerRequests.length ||
+      eventPayloadKeyRequests.some(
+        (request, index) =>
+          request.sourceId !== node.id ||
+          !request.id ||
+          eventPayloadKeyRequests
+            .slice(0, index)
+            .some((prior) => prior.id === request.id),
+      )
+    )
+      throw new Error(`${path}: Provider source binding request is invalid.`);
+    for (const request of eventPayloadKeyRequests) {
+      if (
+        node.entity !== "event" ||
+        node.grain.kind !== "entity" ||
+        node.grain.entity !== "event" ||
+        node.grain.key !== request.eventKeySlot ||
+        !node.output.includes(request.eventKeySlot) ||
+        !requiredSlots.has(request.eventKeySlot) ||
+        !node.values.some(
+          (binding) =>
+            binding.kind === "self" && binding.slot === request.eventKeySlot,
+        )
+      )
+        throw new Error(
+          `${path}: Provider Event payload key request does not match the canonical Source.`,
+        );
+      assertAnalyticsEventPayloadKeySchema(schema.custom_events, path);
+    }
     const relationships = node.values.filter(
       (binding) => binding.kind === "related-entity",
     );
@@ -660,6 +2053,7 @@ export class AnalyticsRelationalStorage {
           this.#time.read.kind === "retained-history",
       );
     } else if (node.entity === "event") {
+      const needsEventPayloadKey = eventPayloadKeyRequests.length > 0;
       if (
         declaredContracts.some(({ contract }) => contract.activity !== "event")
       )
@@ -681,7 +2075,8 @@ export class AnalyticsRelationalStorage {
         );
       if (
         declaredEventReportAttributes.length > 0 ||
-        node.selection !== undefined
+        node.selection !== undefined ||
+        needsEventPayloadKey
       ) {
         const ownerPageAttributes = [
           ...new Set(
@@ -704,7 +2099,9 @@ export class AnalyticsRelationalStorage {
         });
         carrier = this.#eventReport({
           domain: node.temporalDomain,
-          attributes: requiredEventReportAttributes,
+          attributes: needsEventPayloadKey
+            ? [...requiredEventReportAttributes, "event.report.internalPk"]
+            : requiredEventReportAttributes,
           ownerPageAttributes,
           // A selected Event report has a fixed legacy row domain even when
           // the output demand is only a count or a narrow identity projection.
@@ -712,16 +2109,22 @@ export class AnalyticsRelationalStorage {
           // Source relation without exposing them as required output slots.
           includeName:
             node.selection !== undefined ||
-            requiredEventReportAttributes.includes("event.report.eventName"),
-          includeOwner: node.selection !== undefined || needsOwner,
+            requiredEventReportAttributes.includes("event.report.eventName") ||
+            needsEventPayloadPropertiesMetadata,
+          includeOwner:
+            node.selection !== undefined ||
+            needsOwner ||
+            needsEventPayloadPropertiesMetadata,
           includeIdentity:
             node.selection !== undefined ||
+            needsEventPayloadKey ||
             selfRequired ||
             relationships.some(
               (binding) =>
                 binding.relationship === "event.observation" &&
                 requiredSlots.has(binding.slot),
             ),
+          includePropertiesMetadata: needsEventPayloadPropertiesMetadata,
           allowRetainedHistory:
             node.temporalDomain === "read" &&
             this.#time.read.kind === "retained-history",
@@ -1054,8 +2457,6 @@ export class AnalyticsRelationalStorage {
             carrier,
             binding.attribute,
           );
-          // SQLite INTEGER PRIMARY KEY aliases the rowid and is non-NULL by
-          // table invariant even though PRAGMA reports it as nullable.
           const reportValue =
             binding.attribute === "event.report.internalPk"
               ? this.#eventPrimaryKey(rawReportValue, path)
@@ -1173,7 +2574,80 @@ export class AnalyticsRelationalStorage {
       }
     }
 
-    return { relation: carrier, values };
+    const providerBindings = eventPayloadKeyRequests.map((request) => {
+      const eventKey = values.get(request.eventKeySlot);
+      const eventPkSlot = node.values.find(
+        (candidate) =>
+          candidate.kind === "attribute" &&
+          candidate.attribute === "event.report.internalPk",
+      )?.slot;
+      const eventPkValue =
+        eventPkSlot === undefined ? undefined : values.get(eventPkSlot);
+      const eventPk = column(carrier, "event_pk");
+      const sitePk = column(carrier, "site_pk");
+      const eventId = column(carrier, "event_id");
+      if (
+        !eventKey ||
+        eventKey.kind !== "entity" ||
+        eventKey.entity !== "event" ||
+        eventKey.nullable ||
+        eventKey.keys.length !== 2 ||
+        eventKey.keys[0] !== sitePk ||
+        eventKey.keys[1] !== eventId ||
+        carrier.columns.event_pk !== eventPk ||
+        carrier.columns.site_pk !== sitePk ||
+        carrier.columns.event_id !== eventId ||
+        eventPk.resultType.affinity !== "integer" ||
+        eventPk.resultType.nullable ||
+        eventId.resultType.affinity !== "text" ||
+        eventId.resultType.nullable ||
+        sitePk.resultType.affinity !== "integer" ||
+        sitePk.resultType.nullable
+      )
+        throw new Error(
+          `${path}: Provider Event payload key does not match the canonical Event identity columns.`,
+        );
+      return {
+        kind: "event-payload-key" as const,
+        request,
+        relation: carrier,
+        columns: {
+          eventPk: "event_pk",
+          sitePk: "site_pk",
+          eventId: "event_id",
+          ...(request.includePayloadPropertiesMetadata === true
+            ? {
+                propertiesMetadata: {
+                  siteId: "site_id",
+                  eventNameId: "event_name_id",
+                  occurredAt: "occurred_at",
+                  visitId: "visit_id",
+                },
+              }
+            : {}),
+        },
+        eventPk,
+        ...(eventPkValue?.kind === "scalar"
+          ? { reuseExpression: eventPkValue.value }
+          : {}),
+        sitePk,
+        eventId,
+        eventKey,
+        ...(request.includePayloadPropertiesMetadata === true
+          ? {
+              propertiesMetadata: {
+                siteId: column(carrier, "site_id"),
+                eventNameId: column(carrier, "event_name_id"),
+                occurredAt: column(carrier, "occurred_at"),
+                visitId: column(carrier, "visit_id"),
+              },
+            }
+          : {}),
+        schema: schema.custom_events,
+      };
+    });
+
+    return { relation: carrier, values, providerBindings };
   }
 
   observationPageIdentityRows(): AnalyticsDbRelation {
@@ -1304,6 +2778,8 @@ export class AnalyticsRelationalStorage {
       event_name_id: joined.columns.left_event_name_id,
       occurred_at: joined.columns.left_occurred_at,
     };
+    if (joined.columns.left_canonical_site_id)
+      projections.canonical_site_id = joined.columns.left_canonical_site_id;
     for (const name of canonicalColumns)
       projections[`owner_${name}`] = joined.columns[`right_${name}`]!;
     if (joined.columns.left_event_name)
@@ -1404,9 +2880,10 @@ export class AnalyticsRelationalStorage {
       "hash_fragment",
     ],
     allowRetainedHistory = false,
+    includeCanonicalSiteId = false,
   ): AnalyticsDbRelation {
     const columns = [...new Set(["site_pk", ...requiredColumns])].sort();
-    const cacheKey = `${String(domain)}:${allowRetainedHistory}:${columns.join(",")}`;
+    const cacheKey = `${String(domain)}:${allowRetainedHistory}:${includeCanonicalSiteId}:${columns.join(",")}`;
     const existing = this.#pageCarriers.get(cacheKey);
     if (existing) return existing;
     const pages = scan(schema.visits);
@@ -1426,7 +2903,9 @@ export class AnalyticsRelationalStorage {
       carrierColumns[name] =
         name === "site_pk"
           ? ranged.columns.left_site_pk
-          : ranged.columns[`left_${name}`]!;
+          : name === "canonical_site_id" && includeCanonicalSiteId
+            ? ranged.columns.right_site_id
+            : ranged.columns[`left_${name}`]!;
     const carrier = project(ranged, carrierColumns);
     this.#pageCarriers.set(cacheKey, carrier);
     return carrier;
@@ -1476,6 +2955,7 @@ export class AnalyticsRelationalStorage {
     readonly includeName: boolean;
     readonly includeOwner: boolean;
     readonly includeIdentity: boolean;
+    readonly includePropertiesMetadata: boolean;
     readonly allowRetainedHistory: boolean;
   }): AnalyticsDbRelation {
     const attributes = [...new Set(input.attributes)].sort();
@@ -1487,12 +2967,14 @@ export class AnalyticsRelationalStorage {
       input.includeName,
       input.includeOwner,
       input.includeIdentity,
+      input.includePropertiesMetadata,
       input.allowRetainedHistory,
     ]);
     const existing = this.#eventReportCarriers.get(cacheKey);
     if (existing) return existing;
 
     const eventColumns = new Set<string>(["occurred_at"]);
+    if (input.includePropertiesMetadata) eventColumns.add("site_id");
     if (input.includeIdentity) eventColumns.add("event_id");
     for (const attribute of attributes) {
       const physical = eventReportColumnByAttribute[attribute];
@@ -1583,24 +3065,15 @@ export class AnalyticsRelationalStorage {
     throw new Error(`No D1 Event report mapping exists for ${attributeId}.`);
   }
 
-  #eventPrimaryKey(
-    expression: AnyExpression,
-    path: string,
-  ): SqlExpression<number, ExpressionResultType<"integer", false>> {
-    if (expression.resultType.affinity !== "integer")
+  #eventPrimaryKey(expression: AnyExpression, path: string): AnyExpression {
+    if (
+      expression.resultType.affinity !== "integer" ||
+      expression.resultType.nullable
+    )
       throw new Error(
-        `${path}.values: Event internal primary key must remain an INTEGER.`,
+        `${path}.values: Event internal primary key must remain a non-null INTEGER.`,
       );
-    // PRAGMA marks INTEGER PRIMARY KEY as nullable; SQLite guarantees the
-    // rowid alias is present. COALESCE only carries that invariant into the
-    // Generic expression type and is value-preserving for valid rows.
-    return coalesce(
-      expression as SqlExpression<
-        number | null,
-        ExpressionResultType<"integer", true>
-      >,
-      constant(0),
-    ) as SqlExpression<number, ExpressionResultType<"integer", false>>;
+    return expression;
   }
 
   #requiredPageColumns(
@@ -1676,8 +3149,9 @@ export class AnalyticsRelationalStorage {
   #events(
     domain: SourceNode["temporalDomain"],
     allowRetainedHistory = false,
+    includeCanonicalSiteId = false,
   ): AnalyticsDbRelation {
-    const cacheKey = `${String(domain)}:${allowRetainedHistory}`;
+    const cacheKey = `${String(domain)}:${allowRetainedHistory}:${includeCanonicalSiteId}`;
     const existing = this.#eventCarriers.get(cacheKey);
     if (existing) return existing;
     const source = scan(schema.custom_events);
@@ -1700,14 +3174,17 @@ export class AnalyticsRelationalStorage {
       scoped.columns.left_occurred_at,
       allowRetainedHistory,
     );
-    const carrier = project(ranged, {
+    const carrierColumns: Record<string, AnyExpression> = {
       site_pk: ranged.columns.left_site_pk,
       site_id: ranged.columns.left_site_id,
       event_id: ranged.columns.left_event_id,
       visit_id: ranged.columns.left_visit_id,
       event_name_id: ranged.columns.left_event_name_id,
       occurred_at: ranged.columns.left_occurred_at,
-    });
+    };
+    if (includeCanonicalSiteId)
+      carrierColumns.canonical_site_id = ranged.columns.right_site_id;
+    const carrier = project(ranged, carrierColumns);
     this.#eventCarriers.set(cacheKey, carrier);
     return carrier;
   }
@@ -1739,6 +3216,7 @@ export class AnalyticsRelationalStorage {
     ownerColumns: readonly string[],
     allowRetainedHistory = false,
     optionalOwner = false,
+    includeCanonicalSiteId = false,
   ): AnalyticsDbRelation {
     const canonicalColumns = [...new Set(ownerColumns)].sort();
     const cacheKey = JSON.stringify([
@@ -1746,10 +3224,15 @@ export class AnalyticsRelationalStorage {
       allowRetainedHistory,
       canonicalColumns,
       optionalOwner,
+      includeCanonicalSiteId,
     ]);
     const existing = this.#ownedEventCarriers.get(cacheKey);
     if (existing) return existing;
-    const events = this.#events(domain, allowRetainedHistory);
+    const events = this.#events(
+      domain,
+      allowRetainedHistory,
+      includeCanonicalSiteId,
+    );
     const carrier = optionalOwner
       ? this.#attachOptionalOwner(events, canonicalColumns)
       : this.#attachOwner(events, canonicalColumns);
@@ -1901,6 +3384,10 @@ export class AnalyticsRelationalStorage {
     if (existing) return existing;
 
     const pageColumns = new Set<string>();
+    const includeSiteIdentityConsistency = attributes.includes(
+      "observation.siteIdentityConsistent",
+    );
+    if (includeSiteIdentityConsistency) pageColumns.add("site_id");
     if (
       input.includeIdentity ||
       attributes.includes("observation.id") ||
@@ -1913,11 +3400,19 @@ export class AnalyticsRelationalStorage {
     if (input.includeVisitor || attributes.includes("observation.visitorId"))
       pageColumns.add("visitor_id");
     for (const attribute of attributes) {
-      const physical = observationReportColumn(attribute);
+      const physical = observationReportSourceColumn(attribute);
       if (physical) pageColumns.add(physical);
     }
 
-    const pages = this.#pages(input.domain, [...pageColumns], true);
+    const pages = this.#pages(
+      input.domain,
+      [
+        ...pageColumns,
+        ...(includeSiteIdentityConsistency ? ["canonical_site_id"] : []),
+      ],
+      true,
+      includeSiteIdentityConsistency,
+    );
     const pageProjections: Record<string, AnyExpression> = {
       site_pk: pages.columns.site_pk,
     };
@@ -1954,16 +3449,20 @@ export class AnalyticsRelationalStorage {
     const canSkipOptionalOwnerLookup =
       input.optionalOwner && ownerColumns.length === 0;
     let events = canSkipOptionalOwnerLookup
-      ? this.#events(input.domain, true)
+      ? this.#events(input.domain, true, includeSiteIdentityConsistency)
       : this.#eventsWithOwner(
           input.domain,
           ownerColumns,
           true,
           input.optionalOwner,
+          includeSiteIdentityConsistency,
         );
     if (attributes.includes("observation.eventName"))
       events = this.#attachReportName(events);
-    if (attributes.includes("observation.sameSiteEventName"))
+    if (
+      attributes.includes("observation.sameSiteEventName") ||
+      attributes.includes("observation.sameSiteEventNameIsString")
+    )
       events = this.#attachSameSiteReportName(events);
     const eventProjections: Record<string, AnyExpression> = {
       site_pk: events.columns.site_pk,
@@ -2012,12 +3511,14 @@ export class AnalyticsRelationalStorage {
         attribute === "observation.eventId" ||
         attribute === "observation.eventName" ||
         attribute === "observation.sameSiteEventName" ||
+        attribute === "observation.sameSiteEventNameIsString" ||
         attribute === "observation.rawSiteId" ||
+        attribute === "observation.siteIdentityConsistent" ||
         attribute === "observation.visitId" ||
         this.#eventReportValueIsNull(attribute)
       )
         continue;
-      const physical = observationReportColumn(attribute);
+      const physical = observationReportSourceColumn(attribute);
       if (physical) columns.add(physical);
     }
     return [...columns];
@@ -2041,6 +3542,28 @@ export class AnalyticsRelationalStorage {
   ): AnyExpression {
     if (attribute === "observation.kind") return param("page");
     if (attribute === "observation.id") return column(pages, "visit_id");
+    const selectorBooleanField = advancedCountSelectorBooleanField(attribute);
+    if (selectorBooleanField?.collection === "page") {
+      const physical = observationReportColumn(
+        selectorBooleanField.valueAttribute,
+      );
+      if (!physical)
+        throw new Error(
+          `No D1 selector compatibility source column exists for ${attribute}.`,
+        );
+      return countSelectorBooleanValue(
+        selectorBooleanField,
+        attribute,
+        column(pages, physical),
+      );
+    }
+    if (attribute === "observation.sameSiteEventNameIsString")
+      return eq(callFunction("storage-class", param(null)), param("text"));
+    if (attribute === "observation.siteIdentityConsistent")
+      return coalesce(
+        eq(column(pages, "site_id"), column(pages, "canonical_site_id")),
+        constant(0),
+      );
     if (
       attribute === "observation.eventId" ||
       attribute === "observation.eventName" ||
@@ -2064,10 +3587,38 @@ export class AnalyticsRelationalStorage {
       return column(events, "event_id");
     if (attribute === "observation.sameSiteEventName")
       return column(events, "activity_event_name");
+    if (attribute === "observation.sameSiteEventNameIsString")
+      return eq(
+        callFunction(
+          "storage-class",
+          column(events, "activity_event_name") as SqlExpression,
+        ),
+        param("text"),
+      );
+    const selectorBooleanField = advancedCountSelectorBooleanField(attribute);
+    if (selectorBooleanField?.collection === "page") {
+      const physical = observationReportColumn(
+        selectorBooleanField.valueAttribute,
+      );
+      if (!physical)
+        throw new Error(
+          `No D1 selector compatibility source column exists for ${attribute}.`,
+        );
+      return countSelectorBooleanValue(
+        selectorBooleanField,
+        attribute,
+        column(events, `owner_${physical}`),
+      );
+    }
     if (attribute === "observation.eventName")
       return column(events, "event_name");
     if (attribute === "observation.visitId") return column(events, "visit_id");
     if (attribute === "observation.rawSiteId") return column(events, "site_id");
+    if (attribute === "observation.siteIdentityConsistent")
+      return coalesce(
+        eq(column(events, "site_id"), column(events, "canonical_site_id")),
+        constant(0),
+      );
     if (this.#eventReportValueIsNull(attribute)) return param(null);
     const physical = observationReportColumn(attribute);
     if (!physical)

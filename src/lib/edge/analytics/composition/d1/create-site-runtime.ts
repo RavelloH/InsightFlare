@@ -23,16 +23,23 @@ export type { D1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/intern
 export function createD1SiteProviderRegistry(options: D1SiteRuntimeBindings) {
   const diagnostics = options.diagnostics ?? createD1ReadDiagnostics();
   const reader = createOverviewReader(options.env, options.siteId, diagnostics);
+  const overviewTrendQualification = {
+    env: options.env,
+    siteId: options.siteId,
+    diagnostics,
+  };
   const registry = new AnalyticsProviderRegistry()
-    .register("overview", overviewProvider(reader))
-    .register("trend", trendProvider(reader));
+    .register("overview", overviewProvider(reader, overviewTrendQualification))
+    .register("trend", trendProvider(reader, overviewTrendQualification));
   registerSiteContractProviders(registry, options);
-  registerEventProviders(registry, options);
+  registerEventProviders(registry, { ...options, diagnostics });
   registerJourneyProviders(registry, options);
   registerTechnologyProviders(registry, options);
   registerFunnelProvider(registry, options);
   registerGoalProviders(registry, options);
-  registry.useMiddleware(d1AdvancedFilterMiddleware(options.env, diagnostics));
+  registry.useMiddleware(
+    d1AdvancedFilterMiddleware(options.env, diagnostics, options.siteId),
+  );
 
   return registry;
 }

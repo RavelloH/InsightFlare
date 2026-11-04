@@ -1,5 +1,13 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
+import type { QueryAudience } from "@/lib/edge/analytics/contract/types";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
+import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import {
+  addEventQualificationControlOutput,
+  buildEventQualifiedSource,
+  EVENT_QUALIFICATION_CONTROL_OUTPUT,
+  type EventQualificationPlan,
+} from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import {
   buildEventReportSource,
   EVENT_REPORT_BASE_ATTRIBUTES,
@@ -34,6 +42,59 @@ export type EventTypeSummaryQuery =
       readonly cursor?: EventTypeSummaryCursor | null;
     }
   | { readonly kind: "summary" };
+
+export type EventTypePageQuery = Extract<
+  EventTypeSummaryQuery,
+  { readonly kind: "page" }
+>;
+
+export type EventTypeListQuery = Extract<
+  EventTypeSummaryQuery,
+  { readonly kind: "list" }
+>;
+
+export type EventTypeQualificationQuery =
+  EventTypeListQuery | EventTypePageQuery;
+
+export interface EventNameDimensionListRequest {
+  readonly mode: "breakdown";
+  readonly dimension: "event.name";
+  readonly limit: number;
+  readonly search?: string;
+  readonly audience: QueryAudience;
+}
+
+/** Preserve the event.name list's existing page.limit → limit → 20 defaults. */
+export function normalizeEventNameDimensionListRequest(input: {
+  readonly mode: unknown;
+  readonly dimension: unknown;
+  readonly page?: unknown;
+  readonly limit?: unknown;
+  readonly search?: unknown;
+  readonly audience: QueryAudience;
+}): EventNameDimensionListRequest | null {
+  if (input.mode !== "breakdown" || input.dimension !== "event.name")
+    return null;
+  const page =
+    input.page && typeof input.page === "object"
+      ? (input.page as { readonly limit?: unknown })
+      : {};
+  const limit =
+    typeof page.limit === "number" && Number.isFinite(page.limit)
+      ? page.limit
+      : typeof input.limit === "number" && Number.isFinite(input.limit)
+        ? input.limit
+        : 20;
+  return Object.freeze({
+    mode: "breakdown",
+    dimension: "event.name",
+    limit,
+    ...(typeof input.search === "string" ? { search: input.search } : {}),
+    audience: input.audience,
+  });
+}
+
+export type EventTypeSummaryQualificationPlan = EventQualificationPlan;
 
 function eventAttribute(
   builder: LogicalPlanBuilder,
@@ -162,17 +223,12 @@ function addEventTypeOutput(
   ]);
 }
 
-/** Builds one validated Logical query for an Event type list, page, or summary. */
-export function buildEventTypeSummaryPlan(input: {
-  readonly siteId: string;
-  readonly queryTime: QueryTime;
-  readonly filters: FilterDocument;
-  readonly scopePlan?: ScopedFilterPlan;
-  readonly query: EventTypeSummaryQuery;
-}): ValidatedLogicalPlan {
-  const { builder, events } = eventSummarySource(input);
-
-  if (input.query.kind === "summary") {
+function addEventTypeSummaryOutput(
+  builder: LogicalPlanBuilder,
+  events: LogicalRelationHandle,
+  query: EventTypeSummaryQuery,
+): void {
+  if (query.kind === "summary") {
     const eventName = eventAttribute(builder, events, "eventName");
     const summary = builder.aggregate(events, {}, [
       { name: "events", kind: "count-rows" },
@@ -204,27 +260,27 @@ export function buildEventTypeSummaryPlan(input: {
       { name: "sessions", slot: "sessions" },
       { name: "visitors", slot: "visitors" },
     ]);
-    return builder.finish();
+    return;
   }
 
   let rows = eventValueFilter(
     builder,
     eventRollup(builder, events),
-    input.query.search,
-    input.query.kind === "list"
-      ? Boolean(input.query.search)
-      : Boolean(input.query.search?.trim()),
+    query.search,
+    query.kind === "list"
+      ? Boolean(query.search)
+      : Boolean(query.search?.trim()),
   );
-  if (input.query.kind === "page" && input.query.cursor) {
-    rows = applyEventTypeCursor(builder, rows, input.query.cursor);
+  if (query.kind === "page" && query.cursor) {
+    rows = applyEventTypeCursor(builder, rows, query.cursor);
   }
   rows = builder.sort(rows, [
     { slot: "views", direction: "desc", nulls: "last" },
     { slot: "sessions", direction: "desc", nulls: "last" },
     { slot: "value", direction: "asc", nulls: "last" },
   ]);
-  const limit = input.query.limit;
-  if (input.query.kind === "page") {
+  const limit = query.limit;
+  if (query.kind === "page") {
     rows = builder.limit(rows, limit + 1);
   } else if (limit > 0) {
     rows = builder.limit(rows, limit);
@@ -232,9 +288,59 @@ export function buildEventTypeSummaryPlan(input: {
   addEventTypeOutput(
     builder,
     rows,
-    input.query.kind === "list"
+    query.kind === "list"
       ? EVENT_TYPE_SUMMARY_OUTPUTS.list
       : EVENT_TYPE_SUMMARY_OUTPUTS.page,
   );
+}
+
+/** Builds one validated Logical query for an Event type list, page, or summary. */
+export function buildEventTypeSummaryPlan(input: {
+  readonly siteId: string;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly query: EventTypeSummaryQuery;
+}): ValidatedLogicalPlan {
+  const { builder, events } = eventSummarySource(input);
+  addEventTypeSummaryOutput(builder, events, input.query);
   return builder.finish();
+}
+
+/** Builds the event-type page and Count controls in one authorized builder. */
+export function buildEventTypeSummaryQualificationPlan(input: {
+  readonly siteId: string;
+  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly query: EventTypeQualificationQuery;
+  readonly reportFilters?: FilterDocument;
+}): EventTypeSummaryQualificationPlan {
+  const qualified = buildEventQualifiedSource({
+    siteId: input.siteId,
+    count: input.count,
+    purpose: "event-types",
+    ...(input.reportFilters ? { reportFilters: input.reportFilters } : {}),
+  });
+  addEventTypeSummaryOutput(qualified.builder, qualified.events, input.query);
+  addEventQualificationControlOutput(
+    qualified.builder,
+    qualified.qualification.controls,
+  );
+  return {
+    plan: qualified.builder.finish(),
+    primaryReportSourceRelationId: qualified.eventSourceRelationId,
+    eventSourceRelationId: qualified.eventSourceRelationId,
+    reportSourceRelations: qualified.reportSourceRelations,
+    matchesRelationId: qualified.qualification.matches.id,
+    controlsRelationId: qualified.qualification.controls.id,
+    groupedSummaryRelationId: qualified.qualification.groupedSummary.id,
+    controlOutputId: EVENT_QUALIFICATION_CONTROL_OUTPUT,
+    reportOutputIds: Object.freeze([
+      input.query.kind === "list"
+        ? EVENT_TYPE_SUMMARY_OUTPUTS.list
+        : EVENT_TYPE_SUMMARY_OUTPUTS.page,
+    ]),
+    numericCompatibilityFields:
+      qualified.qualification.numericCompatibilityFields,
+    scope: qualified.qualification.scope,
+  };
 }

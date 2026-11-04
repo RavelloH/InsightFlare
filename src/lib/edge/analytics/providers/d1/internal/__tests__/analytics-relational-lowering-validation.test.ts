@@ -21,6 +21,7 @@ import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/i
 
 const SITE_ID = "relational-lowering-validation-site";
 const STRING = { kind: "scalar", scalar: "string" } as const;
+const NUMBER = { kind: "scalar", scalar: "number" } as const;
 const NUMBER_MS = { kind: "scalar", scalar: "number", unit: "ms" } as const;
 
 function createBuilder(
@@ -111,6 +112,92 @@ function createComparisonPlan(numeric: boolean): ValidatedLogicalPlan {
     { name: "localId", slot: "attribute:page.report.localId" },
   ]);
   return builder.finish();
+}
+
+function createEventSummaryAdmissionPlan(): {
+  readonly plan: ValidatedLogicalPlan;
+  readonly policy: {
+    readonly eventSourceRelationId: RelationId;
+    readonly reportSourceRelations: readonly {
+      readonly relationId: RelationId;
+      readonly entity: "event" | "page";
+    }[];
+    readonly reportRelationIds: readonly RelationId[];
+    readonly controlsRelationId: RelationId;
+    readonly controlSlots: readonly {
+      readonly name: string;
+      readonly slot: SlotId;
+    }[];
+    readonly scope: "session";
+    readonly maximumActivities: 20_000;
+    readonly numericCompatibilityControlNames: readonly string[];
+  };
+} {
+  const builder = createBuilder();
+  const events = builder.source("event", {
+    temporalDomain: "read",
+    attributes: ["event.report.eventName"],
+  });
+  const activities = builder.source("observation", {
+    temporalDomain: "read",
+    attributes: ["observation.kind"],
+  });
+  const report = builder.aggregate(events, {}, [
+    { name: "reportRows", kind: "count-rows" },
+  ]);
+  const controls = builder.project(activities, {
+    rawCount: builder.literal(0, NUMBER),
+    nullActivityIdCount: builder.literal(0, NUMBER),
+    siteIdentityMismatchCount: builder.literal(0, NUMBER),
+    entityKind: builder.literal("session", STRING),
+    invalidIdentityCount: builder.literal(0, NUMBER),
+    duplicateIdentityCount: builder.literal(0, NUMBER),
+  });
+  builder.output("report", report, [
+    { name: "reportRows", slot: "reportRows" },
+  ]);
+  builder.output("controls", controls, [
+    { name: "rawCount", slot: "rawCount" },
+    { name: "nullActivityIdCount", slot: "nullActivityIdCount" },
+    { name: "siteIdentityMismatchCount", slot: "siteIdentityMismatchCount" },
+    { name: "entityKind", slot: "entityKind" },
+    { name: "invalidIdentityCount", slot: "invalidIdentityCount" },
+    { name: "duplicateIdentityCount", slot: "duplicateIdentityCount" },
+  ]);
+  const plan = builder.finish();
+  const controlSlots = [
+    { name: "rawCount", slot: controls.slots.rawCount! },
+    {
+      name: "nullActivityIdCount",
+      slot: controls.slots.nullActivityIdCount!,
+    },
+    {
+      name: "siteIdentityMismatchCount",
+      slot: controls.slots.siteIdentityMismatchCount!,
+    },
+    { name: "entityKind", slot: controls.slots.entityKind! },
+    {
+      name: "invalidIdentityCount",
+      slot: controls.slots.invalidIdentityCount!,
+    },
+    {
+      name: "duplicateIdentityCount",
+      slot: controls.slots.duplicateIdentityCount!,
+    },
+  ] as const;
+  return {
+    plan,
+    policy: {
+      eventSourceRelationId: events.id,
+      reportSourceRelations: [{ relationId: events.id, entity: "event" }],
+      reportRelationIds: [report.id],
+      controlsRelationId: controls.id,
+      controlSlots,
+      scope: "session",
+      maximumActivities: 20_000,
+      numericCompatibilityControlNames: [],
+    },
+  };
 }
 
 function createOrderedPlan(): {
@@ -279,6 +366,206 @@ function createPageDimensionPlan(): {
 }
 
 describe("relational lowerer validation guards", () => {
+  it("lowers Logical trim through typed SQLite TRIM with ECMAScript whitespace", () => {
+    const ecmaTrimCharacters =
+      "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
+    const inputs = [
+      ...Array.from(
+        ecmaTrimCharacters,
+        (character) => `${character}x${character}`,
+      ),
+      "\u0085x\u0085",
+      "\u180ex\u180e",
+      "\u200bx\u200b",
+      "😀 \"' \u00a0x\u00a0 \"' 😀",
+      "\0 \u00a0x\u00a0 \0",
+      " \n  internal\t whitespace \r ",
+      "",
+      " \u00a0\ufeff\u2028 ",
+      "\ud800x\udc00",
+    ];
+    const builder = createBuilder({ startMs: 0, endExclusiveMs: 100 });
+    const pages = builder.source("page", {
+      temporalDomain: "candidate",
+      attributes: ["page.report.status"],
+    });
+    const projections = Object.fromEntries(
+      inputs.map((value, index) => [
+        `trim${index}`,
+        builder.normalizeString(builder.literal(value, STRING), "trim"),
+      ]),
+    );
+    const projected = builder.project(pages, projections);
+    builder.output(
+      "trimmed-values",
+      projected,
+      Object.keys(projections).map((name) => ({ name, slot: name })),
+    );
+    const plan = builder.finish();
+    const output = plan.outputs[0]!;
+    const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+      siteId: SITE_ID,
+      time: plan.context.time,
+    });
+    const query = compileD1Query(
+      lowerer.projectOutput(
+        lowerer.lower(output),
+        output.fields.map(({ name, slot }) => ({ name, slot })),
+      ),
+    );
+
+    const database = createMigratedDatabase();
+    try {
+      database
+        .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
+        .run(SITE_ID);
+      const sitePk = Number(
+        (
+          database
+            .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+            .get(SITE_ID) as { readonly site_pk: number }
+        ).site_pk,
+      );
+      database
+        .prepare(
+          `INSERT INTO visits (
+            visit_id, site_id, site_pk, visitor_id, session_id, status,
+            started_at, last_activity_at, duration_ms, pathname, hostname
+          ) VALUES ('logical-trim-visit', ?, ?, 'trim-visitor', 'trim-session', 'complete', 10, 10, 1, '/', 'example.test')`,
+        )
+        .run(SITE_ID, sitePk);
+
+      const sqliteInputs = inputs.map(
+        (input) =>
+          (
+            database.prepare("SELECT ? AS value").get(input) as {
+              readonly value: string;
+            }
+          ).value,
+      );
+      const expected = Object.fromEntries(
+        sqliteInputs.map((input, index) => [`trim${index}`, input.trim()]),
+      );
+      const rows = database
+        .prepare(query.sql)
+        .all(...((query.bindings ?? []) as SQLInputValue[])) as Array<
+        Record<string, unknown>
+      >;
+      expect(query.bindings).not.toContain(ecmaTrimCharacters);
+      expect(query.sql).toContain("TRIM(");
+      expect(rows).toEqual([expected]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("rebuilds event-summary admission controls for each lowerMany pass", () => {
+    const { plan, policy } = createEventSummaryAdmissionPlan();
+    const lowerer = new AnalyticsLogicalToDbLowerer(
+      plan,
+      { siteId: SITE_ID, time: plan.context.time },
+      { eventQualificationAdmissionPolicy: policy },
+    );
+    const outputs = plan.outputs;
+    const admittedControlInput = (
+      report: ReturnType<AnalyticsLogicalToDbLowerer["lowerMany"]>[number],
+    ) => {
+      const gate = report.relation.node;
+      if (gate.kind !== "semi-join" || gate.right.node.kind !== "filter")
+        throw new Error("expected_event_summary_admission_gate");
+      return gate.right.node.input.node;
+    };
+
+    const first = lowerer.lowerMany(outputs);
+    expect(admittedControlInput(first[0]!)).toBe(first[1]!.relation.node);
+
+    const second = lowerer.lowerMany(outputs);
+    const secondControlInput = admittedControlInput(second[0]!);
+    expect(secondControlInput).toBe(second[1]!.relation.node);
+    expect(secondControlInput).not.toBe(first[1]!.relation.node);
+  });
+
+  it("lowers numeric-value through SQLite REAL while preserving NULL and signs", () => {
+    const builder = createBuilder({ startMs: 0, endExclusiveMs: 100 });
+    const pages = builder.source("page", {
+      temporalDomain: "candidate",
+      attributes: ["page.report.durationMs"],
+    });
+    const durationSlot = pages.slots["attribute:page.report.durationMs"]!;
+    const duration = builder.slot(pages, "attribute:page.report.durationMs");
+    const projected = builder.project(pages, {
+      durationMagnitude: builder.numericValue(duration),
+      negativeMagnitude: builder.numericValue(builder.literal(-2, NUMBER_MS)),
+      nullMagnitude: builder.numericValue(
+        builder.literal(null, { ...NUMBER_MS, unit: "px" }),
+      ),
+    });
+    builder.output("numeric-value", projected, [
+      { name: "durationMagnitude", slot: "durationMagnitude" },
+      { name: "negativeMagnitude", slot: "negativeMagnitude" },
+      { name: "nullMagnitude", slot: "nullMagnitude" },
+    ]);
+    const plan = builder.finish();
+    const output = plan.outputs[0]!;
+    const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
+      siteId: SITE_ID,
+      time: plan.context.time,
+    });
+    const query = compileD1Query(
+      lowerer.projectOutput(
+        lowerer.lower(output),
+        output.fields.map(({ name, slot }) => ({ name, slot })),
+      ),
+    );
+
+    expect(query.sql).toMatch(/CAST\([\s\S]* AS REAL\)/u);
+    expect(
+      plan.slots.find((slot) => slot.id === projected.slots.durationMagnitude)
+        ?.lineage,
+    ).toMatchObject({
+      kind: "derived",
+      operation: "numeric-value",
+      inputs: [durationSlot],
+    });
+
+    const database = createMigratedDatabase();
+    try {
+      database
+        .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
+        .run(SITE_ID);
+      const sitePk = Number(
+        (
+          database
+            .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+            .get(SITE_ID) as { readonly site_pk: number }
+        ).site_pk,
+      );
+      database
+        .prepare(
+          `INSERT INTO visits (
+            visit_id, site_id, site_pk, visitor_id, session_id, status,
+            started_at, last_activity_at, duration_ms, pathname, hostname
+          ) VALUES ('numeric-value-visit', ?, ?, 'numeric-value-visitor', 'numeric-value-session', 'complete', 10, 10, 123, '/', 'example.test')`,
+        )
+        .run(SITE_ID, sitePk);
+
+      const rows = database
+        .prepare(query.sql)
+        .all(...((query.bindings ?? []) as SQLInputValue[])) as Array<
+        Record<string, unknown>
+      >;
+      expect(rows).toEqual([
+        {
+          durationMagnitude: 123,
+          negativeMagnitude: -2,
+          nullMagnitude: null,
+        },
+      ]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("uses an inline fixed rank ordinal and preserves ordered-member tie and NULL behavior", () => {
     const plan = createOrderedExecutionPlan();
     const output = plan.outputs[0]!;

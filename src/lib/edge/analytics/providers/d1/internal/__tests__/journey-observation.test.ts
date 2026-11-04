@@ -31,20 +31,21 @@ import {
 } from "@/lib/edge/analytics/engine/journey-event-page-report-plan";
 import { buildJourneyObservationPlan } from "@/lib/edge/analytics/engine/journey-observation-plan";
 import { LogicalPlanBuilder } from "@/lib/edge/analytics/engine/logical/builder";
-import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
-import { AnalyticsRelationalStorage } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-storage";
-import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { scopedDatasetFor } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import { buildVisitFilterSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-filters";
 import {
   buildCustomEventSourceCte,
   buildDetailCustomEventSourceCte,
   buildTargetVisitSourceCte,
-  buildVisitFilterSql,
   buildVisitSourceCte,
   detailCustomEventSourceBindings,
   eventSourceBindings,
   targetVisitSourceBindings,
   visitSourceBindings,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
+import { AnalyticsRelationalStorage } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-storage";
+import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   queryJourneyEventsForDetailFromD1,
   querySessionDetailFromD1,
@@ -55,7 +56,6 @@ import {
   whereClauseWithTarget,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-helpers";
 import { queryJourneyEventsPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
-import { scopedDatasetFor } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";
 import {
   createInvocationLogger,
@@ -1940,7 +1940,7 @@ describe("Journey report Observation D1 lowering", () => {
       status: "success",
       sqlBytes: new TextEncoder().encode(trace.preparedSql[0]!).byteLength,
       bindings: trace.bindings[0]!.length,
-      physicalPlanHash: expect.stringMatching(/^v1:/u),
+      physicalPlanHash: expect.stringMatching(/^v8:/u),
     });
     expect(trace.preparedSql[0]).toContain("UNION ALL");
 
@@ -2008,7 +2008,7 @@ describe("Journey report Observation D1 lowering", () => {
       sqlBytes: new TextEncoder().encode(detailTrace.preparedSql[0]!)
         .byteLength,
       bindings: detailTrace.bindings[0]!.length,
-      physicalPlanHash: expect.stringMatching(/^v1:/u),
+      physicalPlanHash: expect.stringMatching(/^v8:/u),
     });
 
     const detailTypedQuery = compileTypedObservationQuery(

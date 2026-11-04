@@ -1,11 +1,20 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
+import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { AnalyticsQualificationPlan } from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import type {
   LogicalExpressionHandle,
   LogicalPlanBuilder,
   LogicalRelationHandle,
 } from "@/lib/edge/analytics/engine/logical/builder";
+import { snapshotLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
+import { validateLogicalPlan } from "@/lib/edge/analytics/engine/logical/validator";
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
+import {
+  appendQualifiedPageSource,
+  type QualifiedSourceFilterMode,
+} from "@/lib/edge/analytics/engine/qualified-page-source";
+import type { QualifiedGeoComparisonProvenance } from "@/lib/edge/analytics/engine/semantic/count-bare-fields";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
@@ -13,7 +22,9 @@ const NUMBER = { kind: "scalar", scalar: "number" } as const;
 
 export type JourneyGeoSummaryLevel = "country" | "region" | "city";
 
-const GEO_POINT_ATTRIBUTES = [
+export const JOURNEY_GEO_POINTS_OUTPUT = "journey-geo-points";
+
+export const JOURNEY_GEO_POINT_ATTRIBUTES = [
   "page.report.latitude",
   "page.report.longitude",
   "page.report.startedAt",
@@ -23,7 +34,7 @@ const GEO_POINT_ATTRIBUTES = [
   "page.report.city",
 ] as const;
 
-const GEO_SUMMARY_ATTRIBUTES = [
+export const JOURNEY_GEO_SUMMARY_ATTRIBUTES = [
   "page.report.country",
   "page.report.region",
   "page.report.regionCode",
@@ -31,6 +42,11 @@ const GEO_SUMMARY_ATTRIBUTES = [
   "page.report.sessionId",
   "page.report.visitorId",
 ] as const;
+
+export type JourneyGeoQualificationPlan = AnalyticsQualificationPlan & {
+  readonly reportOutputIds: readonly [string, string];
+  readonly comparisonProvenance: readonly QualifiedGeoComparisonProvenance[];
+};
 
 interface JourneyGeoPlanInput {
   readonly siteId: string;
@@ -69,21 +85,12 @@ function pageAttribute(
   return builder.slot(pages, `attribute:page.report.${name}`);
 }
 
-function finishGeoOutput(
+/** Appends the coordinate-grouped Page report to a caller-owned builder. */
+export function appendJourneyGeoPointsReport(
   builder: LogicalPlanBuilder,
-  outputId: string,
-  relation: LogicalRelationHandle,
-  fields: readonly { readonly name: string; readonly slot: string }[],
-) {
-  builder.output(outputId, relation, fields);
-  return builder.finish();
-}
-
-/** Builds the coordinate-grouped Page report used by the journey map. */
-export function buildJourneyGeoPointsPlan(
-  input: JourneyGeoPlanInput & { readonly limit: number },
-) {
-  const { builder, pages } = createGeoSource(input, GEO_POINT_ATTRIBUTES);
+  pages: LogicalRelationHandle,
+  limit: number,
+): LogicalRelationHandle {
   const latitude = pageAttribute(builder, pages, "latitude");
   const longitude = pageAttribute(builder, pages, "longitude");
   const validCoordinates = builder.filter(
@@ -127,10 +134,10 @@ export function buildJourneyGeoPointsPlan(
   ]);
   // SQLite treats a negative integer LIMIT as unbounded.
   const limited =
-    Number.isInteger(input.limit) && input.limit < 0
+    Number.isInteger(limit) && limit < 0
       ? sorted
-      : builder.limit(sorted, input.limit);
-  return finishGeoOutput(builder, "journey-geo-points", limited, [
+      : builder.limit(sorted, limit);
+  builder.output(JOURNEY_GEO_POINTS_OUTPUT, limited, [
     { name: "latitude", slot: "latitude" },
     { name: "longitude", slot: "longitude" },
     { name: "timestampMs", slot: "timestampMs" },
@@ -140,13 +147,27 @@ export function buildJourneyGeoPointsPlan(
     { name: "city", slot: "city" },
     { name: "pointCount", slot: "pointCount" },
   ]);
+  return limited;
 }
 
-/** Builds one selected country, region, or city rollup over all matching Pages. */
-export function buildJourneyGeoSummaryPlan(
-  input: JourneyGeoPlanInput & { readonly level: JourneyGeoSummaryLevel },
+/** Builds the standalone coordinate report used by the compatibility path. */
+export function buildJourneyGeoPointsPlan(
+  input: JourneyGeoPlanInput & { readonly limit: number },
 ) {
-  const { builder, pages } = createGeoSource(input, GEO_SUMMARY_ATTRIBUTES);
+  const { builder, pages } = createGeoSource(
+    input,
+    JOURNEY_GEO_POINT_ATTRIBUTES,
+  );
+  appendJourneyGeoPointsReport(builder, pages, input.limit);
+  return builder.finish();
+}
+
+/** Appends a selected country, region, or city rollup over matching Pages. */
+export function appendJourneyGeoSummaryReport(
+  builder: LogicalPlanBuilder,
+  pages: LogicalRelationHandle,
+  level: JourneyGeoSummaryLevel,
+): LogicalRelationHandle {
   const country = pageAttribute(builder, pages, "country");
   const region = pageAttribute(builder, pages, "region");
   const regionCode = pageAttribute(builder, pages, "regionCode");
@@ -169,7 +190,7 @@ export function buildJourneyGeoSummaryPlan(
   let groups: Record<string, LogicalExpressionHandle>;
   let outputFields: readonly { readonly name: string; readonly slot: string }[];
   let rowLimit: number;
-  if (input.level === "country") {
+  if (level === "country") {
     groups = { country };
     outputFields = [
       { name: "country", slot: "country" },
@@ -178,7 +199,7 @@ export function buildJourneyGeoSummaryPlan(
       { name: "visitors", slot: "visitors" },
     ];
     rowLimit = 300;
-  } else if (input.level === "region") {
+  } else if (level === "region") {
     const hasRegionCode = builder.compare(
       "neq",
       builder.normalizeString(
@@ -264,7 +285,7 @@ export function buildJourneyGeoSummaryPlan(
   const orderBy = [
     { slot: "views", direction: "desc" as const, nulls: "last" as const },
     { slot: "sessions", direction: "desc" as const, nulls: "last" as const },
-    ...(input.level === "country"
+    ...(level === "country"
       ? [
           {
             slot: "country",
@@ -272,7 +293,7 @@ export function buildJourneyGeoSummaryPlan(
             nulls: "first" as const,
           },
         ]
-      : input.level === "region"
+      : level === "region"
         ? [
             {
               slot: "region",
@@ -295,10 +316,108 @@ export function buildJourneyGeoSummaryPlan(
   ];
   const sorted = builder.sort(grouped, orderBy);
   const limited = builder.limit(sorted, rowLimit);
-  return finishGeoOutput(
-    builder,
-    `journey-geo-${input.level}-summary`,
-    limited,
-    outputFields,
+  builder.output(`journey-geo-${level}-summary`, limited, outputFields);
+  return limited;
+}
+
+/** Builds the standalone selected summary for the compatibility path. */
+export function buildJourneyGeoSummaryPlan(
+  input: JourneyGeoPlanInput & { readonly level: JourneyGeoSummaryLevel },
+) {
+  const { builder, pages } = createGeoSource(
+    input,
+    JOURNEY_GEO_SUMMARY_ATTRIBUTES,
   );
+  appendJourneyGeoSummaryReport(builder, pages, input.level);
+  return builder.finish();
+}
+
+/** Selects the legacy shallow root condition that controls the summary DTO. */
+export function journeyGeoSummaryLevelFromFilter(
+  filters: FilterDocument,
+): JourneyGeoSummaryLevel {
+  const conditions =
+    filters.root?.kind === "and"
+      ? filters.root.children
+      : [filters.root].filter(Boolean);
+  const valueFor = (field: string) => {
+    const condition = conditions.find(
+      (item) =>
+        item?.kind === "condition" &&
+        item.target.kind === "field" &&
+        item.target.field === field &&
+        item.operator === "eq" &&
+        typeof item.value === "string",
+    );
+    return condition?.kind === "condition" &&
+      typeof condition.value === "string"
+      ? condition.value
+      : undefined;
+  };
+  const country = valueFor("geo.country");
+  const regionCode = valueFor("geo.region");
+  return !country ? "country" : !regionCode ? "region" : "city";
+}
+
+/** Builds points and exactly one selected summary from one qualified Page bag. */
+export function buildJourneyGeoPointsQualificationPlan(input: {
+  readonly siteId: string;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly scopePlan: ScopedFilterPlan;
+  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly limit: number;
+  readonly level: JourneyGeoSummaryLevel;
+  readonly filterMode?: QualifiedSourceFilterMode;
+}): JourneyGeoQualificationPlan {
+  const source = appendQualifiedPageSource({
+    semanticOperation: "geo-points",
+    filterMode: input.filterMode ?? "split-only",
+    siteId: input.siteId,
+    queryTime: input.queryTime,
+    filters: input.filters,
+    scopePlan: input.scopePlan,
+    count: input.count,
+    selections: [],
+    additionalAttributes: [
+      ...JOURNEY_GEO_POINT_ATTRIBUTES,
+      ...JOURNEY_GEO_SUMMARY_ATTRIBUTES,
+    ],
+  });
+  appendJourneyGeoPointsReport(
+    source.builder,
+    source.qualifiedPages,
+    input.limit,
+  );
+  appendJourneyGeoSummaryReport(
+    source.builder,
+    source.qualifiedPages,
+    input.level,
+  );
+  const controlOutputId = "geo-points-qualification-controls";
+  source.builder.output(
+    controlOutputId,
+    source.qualification.controls,
+    Object.keys(source.qualification.controls.slots).map((name) => ({
+      name,
+      slot: name,
+    })),
+  );
+  const summaryOutputId = `journey-geo-${input.level}-summary`;
+  const logicalPlan = validateLogicalPlan(
+    snapshotLogicalPlan(source.builder.finish()),
+  );
+  return {
+    plan: logicalPlan,
+    primaryReportSourceRelationId: source.pageSource.pages.id,
+    matchesRelationId: source.qualification.matches.id,
+    controlsRelationId: source.qualification.controls.id,
+    groupedSummaryRelationId: source.qualification.groupedSummary.id,
+    controlOutputId,
+    reportOutputIds: [JOURNEY_GEO_POINTS_OUTPUT, summaryOutputId],
+    numericCompatibilityFields: source.qualification.numericCompatibilityFields,
+    comparisonProvenance: source.qualification.comparisonProvenance,
+    scope: source.qualification.scope,
+    reportSourceRelations: source.reportSourceRelations,
+  };
 }

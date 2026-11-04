@@ -15,6 +15,7 @@ import {
   semanticPageReportAttributeCatalog,
 } from "@/lib/edge/analytics/engine/semantic/attributes";
 import { validateSemanticCatalog } from "@/lib/edge/analytics/engine/semantic/catalog";
+import { ADVANCED_COUNT_SELECTOR_FIELDS } from "@/lib/edge/analytics/engine/semantic/count-selector-fields";
 import {
   semanticDimension,
   semanticDimensionCatalog,
@@ -95,6 +96,24 @@ describe("semantic attribute and dimension catalogs", () => {
     expect(validateSemanticCatalog()).toEqual([]);
   });
 
+  it("catalogs an exact aggregate proof attribute for every numeric Page scalar", () => {
+    const numericFields = ADVANCED_COUNT_SELECTOR_FIELDS.filter(
+      (field) => field.kind === "number",
+    );
+    expect(numericFields).toHaveLength(6);
+    for (const field of numericFields)
+      expect(
+        semanticObservationAttributeCatalog.find(
+          ({ id }) => id === field.exactAggregateAttribute,
+        ),
+      ).toMatchObject({
+        id: field.exactAggregateAttribute,
+        nativeEntity: "observation",
+        valueType: { kind: "scalar", scalar: "boolean" },
+        nullable: false,
+      });
+  });
+
   it("maps every contract dimension to a registered semantic attribute", () => {
     expect(semanticDimensionCatalog.map(({ id }) => id)).toEqual(
       ANALYTICS_DIMENSIONS,
@@ -114,9 +133,21 @@ describe("semantic attribute and dimension catalogs", () => {
         "observation.kind",
         "observation.id",
         "observation.eventName",
+        "observation.siteIdentityConsistent",
         "observation.ownerPageStartedAt",
         "observation.startedAt",
         "observation.perfCls",
+        "observation.contextPagePathnameIsString",
+        "observation.contextPageTitleIsString",
+        "observation.contextPageQueryStringIsString",
+        "observation.contextPageHashIsString",
+        "observation.sameSiteEventNameIsString",
+        "observation.contextPageDurationMsIsCountSafeNumber",
+        "observation.contextPagePerfTtfbMsIsCountSafeNumber",
+        "observation.contextPagePerfFcpMsIsCountSafeNumber",
+        "observation.contextPagePerfLcpMsIsCountSafeNumber",
+        "observation.contextPagePerfClsIsCountSafeNumber",
+        "observation.contextPagePerfInpMsIsCountSafeNumber",
       ]),
     );
     for (const attribute of semanticObservationAttributeCatalog) {
@@ -145,6 +176,49 @@ describe("semantic attribute and dimension catalogs", () => {
     expect(semanticAttribute("observation.perfCls")).toMatchObject({
       valueType: { kind: "scalar", scalar: "number", unit: "ratio" },
       nullable: true,
+    });
+    expect(
+      semanticAttribute("observation.siteIdentityConsistent"),
+    ).toMatchObject({
+      valueType: { kind: "scalar", scalar: "boolean" },
+      nullable: false,
+      nativeEntity: "observation",
+    });
+    for (const attributeId of [
+      "observation.contextPagePathnameIsString",
+      "observation.contextPageTitleIsString",
+      "observation.contextPageQueryStringIsString",
+      "observation.contextPageHashIsString",
+    ])
+      expect(semanticAttribute(attributeId)).toMatchObject({
+        valueType: { kind: "scalar", scalar: "boolean" },
+        nullable: false,
+      });
+    for (const attributeId of [
+      "observation.contextPageDurationMsIsCountSafeNumber",
+      "observation.contextPagePerfTtfbMsIsCountSafeNumber",
+      "observation.contextPagePerfFcpMsIsCountSafeNumber",
+      "observation.contextPagePerfLcpMsIsCountSafeNumber",
+      "observation.contextPagePerfClsIsCountSafeNumber",
+      "observation.contextPagePerfInpMsIsCountSafeNumber",
+    ])
+      expect(semanticAttribute(attributeId)).toMatchObject({
+        valueType: { kind: "scalar", scalar: "boolean" },
+        nullable: false,
+      });
+    expect(
+      semanticAttribute("observation.contextPageDurationMs"),
+    ).toMatchObject({
+      valueType: { kind: "scalar", scalar: "number", unit: "ms" },
+    });
+    expect(semanticAttribute("observation.contextPagePerfCls")).toMatchObject({
+      valueType: { kind: "scalar", scalar: "number", unit: "ratio" },
+    });
+    expect(
+      semanticAttribute("observation.sameSiteEventNameIsString"),
+    ).toMatchObject({
+      valueType: { kind: "scalar", scalar: "boolean" },
+      nullable: false,
     });
   });
 

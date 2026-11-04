@@ -8,19 +8,28 @@ import {
   type QueryAudience,
 } from "@/lib/edge/analytics/contract";
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
+import { scopedFilterMetadata } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
+import {
+  type DeferredEventRecordsQualification,
+  isDeferredEventQualification,
+  prepareDeferredEventQualificationFallback,
+} from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { mapEventRecord } from "@/lib/edge/analytics/providers/d1/internal/core-mappers";
+import type { D1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import {
   type EventRecordCursor,
   queryEventRecordDetailFromD1,
   queryEventRecordPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
+import { queryQualifiedEventRecordPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
 import type { Env } from "@/lib/edge/types";
 import {
   decodePageCursor,
   encodePageCursor,
   hasExactKeys,
+  InvalidCursorError,
   type PageResult,
   paginationBindingForWindow,
 } from "@/lib/pagination";
@@ -39,6 +48,8 @@ export interface ReadSiteEventRecordsInput {
     readonly direction: "asc" | "desc";
   };
   readonly audience?: QueryAudience;
+  readonly deferredQualification?: DeferredEventRecordsQualification;
+  readonly diagnostics?: D1ReadDiagnostics;
   readonly page: { readonly limit: number; readonly cursor?: string | null };
 }
 
@@ -115,22 +126,99 @@ export async function readSiteEventRecords(input: ReadSiteEventRecordsInput) {
     key: input.sort.field,
     direction: input.sort.direction,
   } as const;
-  const cursor = await decodeCursor(normalizedInput);
-  const page = await queryEventRecordPageFromD1(
-    input.env,
-    input.siteId,
-    input.window,
-    input.filters,
-    {
-      limit: input.page.limit,
-      sort,
-      search,
-      eventName,
-      cursor,
-      scopePlan: input.scopePlan,
-      queryTime: input.queryTime,
-    },
-  );
+  const deferred = input.deferredQualification;
+  if (deferred) {
+    const prepared = deferred.eventRecordsRequest;
+    if (
+      !isDeferredEventQualification(deferred) ||
+      deferred.operation !== "event-records" ||
+      !prepared ||
+      deferred.env !== input.env ||
+      deferred.siteId !== input.siteId ||
+      deferred.filters !== input.filters ||
+      deferred.requestTime !== input.queryTime ||
+      deferred.requestScopePlan !== input.scopePlan ||
+      deferred.time.range.startMs !== input.window.startMs ||
+      deferred.time.range.endExclusiveMs !== input.window.endExclusiveMs ||
+      deferred.time.reportingTimeZone !== input.window.timeZone ||
+      prepared.search !== search ||
+      prepared.eventName !== eventName ||
+      prepared.sort.field !== input.sort.field ||
+      prepared.sort.direction !== input.sort.direction ||
+      prepared.page.limit !== input.page.limit ||
+      prepared.page.cursor !== (input.page.cursor ?? null) ||
+      prepared.audience !== (input.audience ?? "private-dashboard")
+    )
+      throw new Error("event_records_deferred_request_binding_mismatch");
+  }
+  let cursor: EventRecordCursor | null;
+  try {
+    cursor = await decodeCursor(normalizedInput);
+  } catch (error) {
+    if (deferred && error instanceof InvalidCursorError) {
+      // Keep legacy cap-before-cursor precedence for malformed or stale cursors.
+      // SEM088 remains open for this invalid-cursor-only preparation bridge.
+      await prepareDeferredEventQualificationFallback(deferred);
+    }
+    throw error;
+  }
+
+  let page;
+  if (deferred) {
+    const execution = await queryQualifiedEventRecordPageFromD1({
+      env: input.env,
+      deferred,
+      options: {
+        limit: input.page.limit,
+        sort,
+        search,
+        eventName,
+        cursor,
+      },
+      cursorToken: input.page.cursor ?? null,
+      ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
+    });
+    if (execution.kind === "executed") {
+      page = execution.page;
+    } else {
+      if (input.diagnostics)
+        input.diagnostics.advancedCountSqlFallbackReason =
+          execution.fallbackReason;
+      const fallbackFilters =
+        await prepareDeferredEventQualificationFallback(deferred);
+      page = await queryEventRecordPageFromD1(
+        input.env,
+        input.siteId,
+        input.window,
+        fallbackFilters,
+        {
+          limit: input.page.limit,
+          sort,
+          search,
+          eventName,
+          cursor,
+          scopePlan: scopedFilterMetadata(fallbackFilters)?.plan,
+          queryTime: input.queryTime ?? deferred.time,
+        },
+      );
+    }
+  } else {
+    page = await queryEventRecordPageFromD1(
+      input.env,
+      input.siteId,
+      input.window,
+      input.filters,
+      {
+        limit: input.page.limit,
+        sort,
+        search,
+        eventName,
+        cursor,
+        scopePlan: input.scopePlan,
+        queryTime: input.queryTime,
+      },
+    );
+  }
   return {
     items: page.rows.map(mapEventRecord),
     pagination: {

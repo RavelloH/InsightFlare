@@ -4,9 +4,11 @@ import {
   effectiveScopeForPagination,
   filterFingerprint,
   type QueryAudience,
+  type QueryTime,
   scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import {
   buildOverviewClientDimensionsPlan,
   buildOverviewGeoDimensionsPlan,
@@ -17,6 +19,8 @@ import {
 import {
   buildDimensionPagePlan,
   buildDimensionTopPlan,
+  DIMENSION_PAGE_REPORT_OUTPUT,
+  type OverviewPageTableTab,
   type PageDimensionSelection,
   type PageDimensionSelectionId,
   validatePageDimensionSelection,
@@ -31,10 +35,32 @@ import { buildTopReferrersPlan } from "@/lib/edge/analytics/engine/referrer-repo
 import {
   buildSessionPathPagePlan,
   buildSessionPathTopPlan,
+  type NormalizedSessionBoundaryDimensionRequest,
+  SESSION_PATH_PAGE_REPORT_OUTPUT,
+  SESSION_PATH_TOP_REPORT_OUTPUT,
   sessionPathCursorBinding,
 } from "@/lib/edge/analytics/engine/session-path-report-plan";
 import type { Env } from "@/lib/edge/types";
+import { InvalidCursorError } from "@/lib/pagination";
 
+import {
+  type DeferredChannelOverviewQualification,
+  type DeferredOverviewPageTableQualification,
+  type DeferredPageDimensionQualification,
+  type DeferredSessionBoundaryDimensionQualification,
+  type DeferredSessionBoundaryOverviewPageQualification,
+  type DeferredSessionBoundaryOverviewPageRequest,
+  prepareDeferredEventQualificationFallback,
+} from "./advanced-filter-execution";
+import {
+  type EventSummaryQualificationCompilationEvidence,
+  executePageDimensionQualificationProgram,
+  executeSessionBoundaryDimensionQualificationProgram,
+  executeSessionBoundaryOverviewPageQualificationProgram,
+  type PageDimensionQualificationReportQuery,
+  type SessionBoundaryDimensionQualificationReportQuery,
+  type SessionBoundaryOverviewPageQualificationReportQuery,
+} from "./analytics-qualification-program";
 import {
   queryAnalyticsReportOutputRowsFromD1,
   queryAnalyticsReportOutputSetRowsFromD1,
@@ -55,6 +81,7 @@ import {
   utmDimensionDefinition,
 } from "./core-dimensions";
 import type { D1ReadDiagnostics } from "./diagnostics";
+import type { AdvancedCountSqlFallbackReason } from "./diagnostics";
 import {
   decodePageCursor,
   encodePageCursor,
@@ -286,7 +313,6 @@ export async function queryDimensionPageFromD1(
   const selection = validatePageDimensionSelection(selectionInput);
   const sortBy = dimensionSortKey(options?.sortBy);
   const sortDirection = dimensionSortDirection(options?.sortDirection);
-  const { primary, secondary } = dimensionSortColumns(sortBy);
   const metadata = scopedFilterMetadata(filters);
   const plan = buildDimensionPagePlan({
     siteId,
@@ -314,21 +340,50 @@ export async function queryDimensionPageFromD1(
     sessions: Number(row.sessions ?? 0),
     visitors: Number(row.visitors ?? 0),
   }));
-  const page = pageResult(mapped, limit);
-  const binding = await dimensionCursorBinding(
-    "dimensions",
+  return dimensionPageResultFromRows({
+    env,
     siteId,
     window,
     filters,
+    limit,
     selection,
-    options?.search,
+    options: { search: options?.search, sortBy, sortDirection },
     audience,
-    sortBy,
-    sortDirection,
+    rows: mapped,
+  });
+}
+
+export async function dimensionPageResultFromRows(input: {
+  readonly env: Env;
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly filters: FilterDocument;
+  readonly limit: number;
+  readonly selection: PageDimensionSelection;
+  readonly options: {
+    readonly search?: string;
+    readonly sortBy: DimensionPageSortKey;
+    readonly sortDirection: "asc" | "desc";
+  };
+  readonly audience: QueryAudience;
+  readonly rows: readonly DimensionRow[];
+}): Promise<PageResult<DimensionRow>> {
+  const { primary, secondary } = dimensionSortColumns(input.options.sortBy);
+  const page = pageResult([...input.rows], input.limit);
+  const binding = await dimensionCursorBinding(
+    "dimensions",
+    input.siteId,
+    input.window,
+    input.filters,
+    input.selection,
+    input.options.search,
+    input.audience,
+    input.options.sortBy,
+    input.options.sortDirection,
   );
   const nextCursor =
     page.hasMore && page.last
-      ? await encodePageCursor(env, binding, {
+      ? await encodePageCursor(input.env, binding, {
           primary: page.last[primary],
           secondary: page.last[secondary],
           value: page.last.value,
@@ -337,12 +392,164 @@ export async function queryDimensionPageFromD1(
   return {
     items: page.rows,
     pagination: {
-      limit,
+      limit: input.limit,
       returned: page.rows.length,
       hasMore: page.hasMore,
       nextCursor,
     },
   };
+}
+
+interface QualifiedDimensionPageInputBase {
+  readonly env: Env;
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly limit: number;
+  readonly selection: PageDimensionSelection;
+  readonly cursor: DimensionAggregateCursor | null;
+  readonly cursorToken: string | null;
+  readonly audience: QueryAudience;
+  readonly diagnostics?: D1ReadDiagnostics;
+}
+
+export type QualifiedDimensionPageInput =
+  | (QualifiedDimensionPageInputBase & {
+      readonly family: "breakdown";
+      readonly dimension: string;
+      readonly options: {
+        readonly excludeEmpty: false;
+        readonly search?: string;
+        readonly sortBy: DimensionPageSortKey;
+        readonly sortDirection: "asc" | "desc";
+      };
+      readonly deferred: DeferredPageDimensionQualification;
+    })
+  | (QualifiedDimensionPageInputBase & {
+      readonly family: "overview-tab";
+      readonly tab: OverviewPageTableTab;
+      readonly options: {
+        readonly excludeEmpty: boolean;
+        readonly search?: string;
+        readonly sortBy: DimensionPageSortKey;
+        readonly sortDirection: "asc" | "desc";
+      };
+      readonly deferred:
+        | DeferredOverviewPageTableQualification
+        | DeferredChannelOverviewQualification;
+    });
+
+export type QualifiedDimensionPageResult =
+  | {
+      readonly kind: "executed";
+      readonly page: PageResult<DimensionRow>;
+      readonly evidence: EventSummaryQualificationCompilationEvidence;
+    }
+  | {
+      readonly kind: "legacy" | "unavailable";
+      readonly fallbackReason: AdvancedCountSqlFallbackReason;
+    };
+
+function pageDimensionQualificationQuery(
+  input: QualifiedDimensionPageInput,
+): PageDimensionQualificationReportQuery {
+  const common = {
+    siteId: input.siteId,
+    queryTime: input.queryTime,
+    filters: input.filters,
+    ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    selection: input.selection,
+    limit: input.limit,
+    cursor: input.cursor,
+    cursorToken: input.cursorToken,
+    ...(input.options.search !== undefined
+      ? { search: input.options.search }
+      : {}),
+    sortBy: input.options.sortBy,
+    sortDirection: input.options.sortDirection,
+    audience: input.audience,
+  };
+  return input.family === "breakdown"
+    ? {
+        ...common,
+        family: "breakdown",
+        dimension: input.dimension,
+        excludeEmpty: false,
+      }
+    : {
+        ...common,
+        family: "overview-tab",
+        tab: input.tab,
+        excludeEmpty: input.options.excludeEmpty,
+      };
+}
+
+async function executeQualifiedDimensionPage(
+  input: QualifiedDimensionPageInput,
+) {
+  return executePageDimensionQualificationProgram({
+    env: input.env,
+    deferred: input.deferred,
+    query: pageDimensionQualificationQuery(input),
+    ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
+  });
+}
+
+/** Runs the same prepared Page dimension report with shared Count controls. */
+export async function queryQualifiedDimensionPageFromD1(
+  input: QualifiedDimensionPageInput,
+): Promise<QualifiedDimensionPageResult> {
+  const execution = await executeQualifiedDimensionPage(input);
+  if (execution.kind !== "executed") return execution;
+  const mapped = execution.rows
+    .filter(
+      (row) =>
+        row.rowKind === "report" &&
+        row.outputId === DIMENSION_PAGE_REPORT_OUTPUT,
+    )
+    .map((row) => ({
+      value: String(row.value ?? ""),
+      views: Number(row.views ?? 0),
+      sessions: Number(row.sessions ?? 0),
+      visitors: Number(row.visitors ?? 0),
+    }));
+  const page = await dimensionPageResultFromRows({
+    env: input.env,
+    siteId: input.siteId,
+    window: input.window,
+    filters: input.filters,
+    limit: input.limit,
+    selection: input.selection,
+    options: input.options,
+    audience: input.audience,
+    rows: mapped,
+  });
+  return { kind: "executed", page, evidence: execution.evidence };
+}
+
+/** Ensures Count errors retain precedence when the supplied cursor is bad. */
+export async function preflightQualifiedDimensionPageCursorFromD1(
+  input: QualifiedDimensionPageInput,
+): Promise<void> {
+  const execution = await executeQualifiedDimensionPage(input);
+  if (execution.kind === "executed") return;
+  const fallbackFilters = await prepareDeferredEventQualificationFallback(
+    input.deferred,
+  );
+  await queryDimensionPageFromD1(
+    input.env,
+    input.siteId,
+    input.window,
+    fallbackFilters,
+    input.limit,
+    input.selection,
+    input.options,
+    null,
+    input.diagnostics,
+    input.audience,
+  );
 }
 
 export async function decodeDimensionCursor(
@@ -453,32 +660,60 @@ export async function querySessionPathDimensionPageFromD1(
     undefined,
     diagnostics,
   );
-  const mapped = rows.map((row) => ({
+  return finalizeSessionPathDimensionPage({
+    env,
+    siteId,
+    window,
+    filters,
+    limit,
+    kind,
+    search,
+    audience,
+    sortBy: effectiveSortBy,
+    sortDirection: effectiveSortDirection,
+    rows,
+  });
+}
+
+export async function finalizeSessionPathDimensionPage(input: {
+  readonly env: Env;
+  readonly siteId: string;
+  readonly window: QueryWindow;
+  readonly filters: FilterDocument;
+  readonly limit: number;
+  readonly kind: SessionPathKind;
+  readonly search?: string;
+  readonly audience: QueryAudience;
+  readonly sortBy: DimensionPageSortKey;
+  readonly sortDirection: "asc" | "desc";
+  readonly rows: readonly Record<string, unknown>[];
+}): Promise<PageResult<DimensionRow>> {
+  const mapped = input.rows.map((row) => ({
     value: String(row.value ?? ""),
     views: Number(row.views ?? 0),
     sessions: Number(row.sessions ?? 0),
     visitors: Number(row.visitors ?? 0),
   }));
-  const page = pageResult(mapped, limit);
+  const page = pageResult(mapped, input.limit);
   const binding = await paginationBindingForWindow(
-    window,
+    input.window,
     sessionPathCursorBinding({
-      operation: kind,
-      siteId,
-      window,
-      filters,
-      search,
-      audience,
-      sortBy: effectiveSortBy,
-      sortDirection: effectiveSortDirection,
+      operation: input.kind,
+      siteId: input.siteId,
+      window: input.window,
+      filters: input.filters,
+      search: input.search,
+      audience: input.audience,
+      sortBy: input.sortBy,
+      sortDirection: input.sortDirection,
     }),
   );
   const nextCursor =
     page.hasMore && page.last
       ? await encodePageCursor(
-          env,
+          input.env,
           binding,
-          effectiveSortBy === "visitors"
+          input.sortBy === "visitors"
             ? {
                 views: page.last.views,
                 visitors: page.last.visitors,
@@ -486,7 +721,7 @@ export async function querySessionPathDimensionPageFromD1(
               }
             : {
                 views:
-                  effectiveSortBy === "sessions"
+                  input.sortBy === "sessions"
                     ? page.last.sessions
                     : page.last.views,
                 value: page.last.value,
@@ -496,12 +731,158 @@ export async function querySessionPathDimensionPageFromD1(
   return {
     items: page.rows,
     pagination: {
-      limit,
+      limit: input.limit,
       returned: page.rows.length,
       hasMore: page.hasMore,
       nextCursor,
     },
   };
+}
+
+export async function querySessionBoundaryOverviewPageFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  limit: number,
+  kind: SessionPathKind,
+  diagnostics: D1ReadDiagnostics | undefined,
+  search: string | undefined,
+  cursor: SessionPathDimensionCursor | null,
+  cursorToken: string | null,
+  audience: QueryAudience,
+  sortBy: DimensionPageSortKey,
+  sortDirection: "asc" | "desc",
+  options: {
+    readonly deferredQualification: DeferredSessionBoundaryOverviewPageQualification;
+    readonly request: DeferredSessionBoundaryOverviewPageRequest;
+    readonly queryTime: QueryTime;
+    readonly scopePlan?: ScopedFilterPlan;
+    readonly mode: "overview-tab";
+    readonly tab: "page.entry" | "page.exit";
+  },
+): Promise<PageResult<DimensionRow>> {
+  const deferred = options.deferredQualification;
+  const prepared = deferred.sessionBoundaryOverviewPageRequest;
+  const scopePlanMatches =
+    options.scopePlan === undefined
+      ? deferred.requestScopePlan === undefined
+      : deferred.requestScopePlan !== undefined &&
+        JSON.stringify(deferred.requestScopePlan) ===
+          JSON.stringify(options.scopePlan);
+  if (
+    !prepared ||
+    deferred.operation !== "session-boundary-overview-page" ||
+    deferred.siteId !== siteId ||
+    deferred.filters !== filters ||
+    !deferred.requestTime ||
+    !sameSessionBoundaryDimensionQueryTime(
+      deferred.requestTime,
+      options.queryTime,
+    ) ||
+    !sameSessionBoundaryDimensionQueryTime(deferred.time, options.queryTime) ||
+    !scopePlanMatches ||
+    options.request.mode !== prepared.mode ||
+    options.request.tab !== prepared.tab ||
+    options.request.kind !== prepared.kind ||
+    options.request.dimension !== prepared.dimension ||
+    options.request.limit !== prepared.limit ||
+    options.request.cursorToken !== prepared.cursorToken ||
+    options.request.search !== prepared.search ||
+    options.request.sortBy !== prepared.sortBy ||
+    options.request.sortDirection !== prepared.sortDirection ||
+    options.request.audience !== prepared.audience ||
+    prepared.mode !== options.mode ||
+    prepared.tab !== options.tab ||
+    prepared.kind !== kind ||
+    prepared.dimension !==
+      (kind === "entry" ? "session.entryPath" : "session.exitPath") ||
+    prepared.limit !== limit ||
+    prepared.search !== search ||
+    prepared.cursorToken !== cursorToken ||
+    prepared.sortBy !== dimensionSortKey(sortBy) ||
+    prepared.sortDirection !== dimensionSortDirection(sortDirection) ||
+    prepared.audience !== audience
+  )
+    throw new Error(
+      "session_boundary_overview_page_qualification_request_mismatch",
+    );
+
+  const query: SessionBoundaryOverviewPageQualificationReportQuery = {
+    siteId,
+    queryTime: options.queryTime,
+    filters,
+    ...(options.scopePlan ? { scopePlan: options.scopePlan } : {}),
+    mode: options.mode,
+    tab: options.tab,
+    dimension: prepared.dimension,
+    kind: prepared.kind,
+    limit: prepared.limit,
+    cursor,
+    cursorToken,
+    ...(prepared.search !== undefined ? { search: prepared.search } : {}),
+    sortBy: prepared.sortBy,
+    sortDirection: prepared.sortDirection,
+    audience: prepared.audience,
+  };
+  const execution =
+    await executeSessionBoundaryOverviewPageQualificationProgram({
+      env,
+      deferred,
+      query,
+      ...(diagnostics ? { diagnostics } : {}),
+    });
+  if (execution.kind === "executed") {
+    if (cursorToken !== null && cursor === null)
+      throw new InvalidCursorError("overview-tab");
+    return finalizeSessionPathDimensionPage({
+      env,
+      siteId,
+      window,
+      filters,
+      limit,
+      kind,
+      search,
+      audience,
+      sortBy: dimensionSortKey(sortBy),
+      sortDirection: dimensionSortDirection(sortDirection),
+      rows: execution.rows.filter(
+        (row) =>
+          row.rowKind === "report" &&
+          row.outputId === SESSION_PATH_PAGE_REPORT_OUTPUT,
+      ),
+    });
+  }
+  const fallbackAllowed =
+    execution.kind === "unavailable"
+      ? execution.fallbackReason.kind === "compile-budget" ||
+        execution.fallbackReason.kind === "grouped-summary-unavailable" ||
+        execution.fallbackReason.kind === "compiler-unavailable"
+      : execution.fallbackReason.kind === "numeric-data-domain";
+  if (!fallbackAllowed)
+    throw new Error(
+      "session_boundary_overview_page_qualification_proof_invalid",
+    );
+  if (diagnostics)
+    diagnostics.advancedCountSqlFallbackReason = execution.fallbackReason;
+  const fallbackFilters =
+    await prepareDeferredEventQualificationFallback(deferred);
+  if (cursorToken !== null && cursor === null)
+    throw new InvalidCursorError("overview-tab");
+  return querySessionPathDimensionPageFromD1(
+    env,
+    siteId,
+    window,
+    fallbackFilters,
+    limit,
+    kind,
+    diagnostics,
+    search,
+    cursor,
+    audience,
+    sortBy,
+    sortDirection,
+  );
 }
 
 export async function decodeSessionPathDimensionCursor(
@@ -582,7 +963,103 @@ export async function querySessionBoundaryDimensionFromD1(
   search?: string,
   sortBy: DimensionPageSortKey = "views",
   sortDirection: "asc" | "desc" = "desc",
+  options?: {
+    readonly deferredQualification?: DeferredSessionBoundaryDimensionQualification;
+    readonly request?: NormalizedSessionBoundaryDimensionRequest;
+    readonly queryTime?: QueryTime;
+    readonly scopePlan?: ScopedFilterPlan;
+    readonly audience?: QueryAudience;
+  },
 ): Promise<DimensionRow[]> {
+  const deferred = options?.deferredQualification;
+  if (deferred) {
+    const request = options.request;
+    const queryTime = options.queryTime;
+    const scopePlanMatches =
+      options.scopePlan === undefined
+        ? deferred.requestScopePlan === undefined
+        : deferred.requestScopePlan !== undefined &&
+          JSON.stringify(deferred.requestScopePlan) ===
+            JSON.stringify(options.scopePlan);
+    if (
+      !request ||
+      !queryTime ||
+      deferred.operation !== "session-boundary-dimension" ||
+      deferred.siteId !== siteId ||
+      deferred.filters !== filters ||
+      !deferred.requestTime ||
+      !sameSessionBoundaryDimensionQueryTime(deferred.requestTime, queryTime) ||
+      !sameSessionBoundaryDimensionQueryTime(deferred.time, queryTime) ||
+      !scopePlanMatches ||
+      request.kind !== kind ||
+      request.limit !== limit ||
+      request.search !== search ||
+      request.sortBy !== dimensionSortKey(sortBy) ||
+      request.sortDirection !== dimensionSortDirection(sortDirection) ||
+      request.audience !== (options.audience ?? "private-dashboard") ||
+      request.dimension !==
+        (kind === "entry" ? "session.entryPath" : "session.exitPath")
+    )
+      throw new Error(
+        "session_boundary_dimension_qualification_request_mismatch",
+      );
+
+    const query: SessionBoundaryDimensionQualificationReportQuery = {
+      siteId,
+      queryTime,
+      filters,
+      ...(options.scopePlan ? { scopePlan: options.scopePlan } : {}),
+      dimension: request.dimension,
+      kind: request.kind,
+      limit: request.limit,
+      ...(request.search !== undefined ? { search: request.search } : {}),
+      sortBy: request.sortBy,
+      sortDirection: request.sortDirection,
+      audience: request.audience,
+    };
+    const execution = await executeSessionBoundaryDimensionQualificationProgram(
+      {
+        env,
+        deferred,
+        query,
+        ...(diagnostics ? { diagnostics } : {}),
+      },
+    );
+    if (execution.kind === "executed")
+      return execution.rows
+        .filter(
+          (row) =>
+            row.rowKind === "report" &&
+            row.outputId === SESSION_PATH_TOP_REPORT_OUTPUT,
+        )
+        .map((row) => ({
+          value: String(row.value ?? ""),
+          views: Number(row.views ?? 0),
+          sessions: Number(row.sessions ?? 0),
+          visitors: Number(row.visitors ?? 0),
+        }));
+    if (
+      execution.kind === "legacy" &&
+      execution.fallbackReason.kind !== "numeric-data-domain"
+    )
+      throw new Error("session_boundary_dimension_qualification_proof_invalid");
+    if (diagnostics)
+      diagnostics.advancedCountSqlFallbackReason = execution.fallbackReason;
+    const fallbackFilters =
+      await prepareDeferredEventQualificationFallback(deferred);
+    return querySessionPathDimensionFromD1(
+      env,
+      siteId,
+      window,
+      fallbackFilters,
+      limit,
+      kind,
+      diagnostics,
+      search,
+      sortBy,
+      sortDirection,
+    );
+  }
   return querySessionPathDimensionFromD1(
     env,
     siteId,
@@ -594,6 +1071,25 @@ export async function querySessionBoundaryDimensionFromD1(
     search,
     sortBy,
     sortDirection,
+  );
+}
+
+function sameSessionBoundaryDimensionQueryTime(
+  left: QueryTime,
+  right: QueryTime,
+): boolean {
+  const leftRead = left.readRange ?? left.range;
+  const rightRead = right.readRange ?? right.range;
+  return (
+    left.range.startMs === right.range.startMs &&
+    left.range.endExclusiveMs === right.range.endExclusiveMs &&
+    leftRead.startMs === rightRead.startMs &&
+    leftRead.endExclusiveMs === rightRead.endExclusiveMs &&
+    JSON.stringify(left.filterRange) === JSON.stringify(right.filterRange) &&
+    left.filterRangeEmpty === right.filterRangeEmpty &&
+    left.fullHistory === right.fullHistory &&
+    left.reportingTimeZone === right.reportingTimeZone &&
+    left.capturedAtMs === right.capturedAtMs
   );
 }
 

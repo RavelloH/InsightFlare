@@ -1,10 +1,68 @@
+import type { D1StatementBudgetItem } from "@/lib/db";
 import type {
   FilterScope,
   FilterScopePreference,
   ScopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
 
+import type { QualificationCompatibilityMismatch } from "./qualification-compatibility";
+
+export type AdvancedCountSqlFallbackReason =
+  | {
+      readonly kind:
+        "invalid-range" | "null-activity-id" | "site-identity-mismatch";
+    }
+  | {
+      readonly kind: "compile-budget";
+      readonly item: D1StatementBudgetItem;
+      readonly actual: number;
+      readonly limit: number;
+    }
+  | {
+      readonly kind: "numeric-data-domain";
+      readonly fieldIds: readonly string[];
+    }
+  | {
+      readonly kind: "comparison-data-domain";
+      readonly fields: readonly Omit<
+        Extract<
+          QualificationCompatibilityMismatch,
+          { readonly kind: "comparison" }
+        >,
+        "kind"
+      >[];
+    }
+  | {
+      readonly kind: "payload-data-domain";
+      readonly controls: readonly (
+        | "missing-event-fact"
+        | "invalid-structure"
+        | "invalid-value"
+        | "event-fact-multiplicity"
+      )[];
+    }
+  | {
+      readonly kind: "grouped-summary-unavailable";
+      readonly groupWidth: number | null;
+    }
+  | {
+      readonly kind: "compiler-unavailable";
+    };
+
 export type AnalyticsDataSource = "raw" | "rollup" | "mixed" | "mock";
+
+export interface D1EventRecordsCompilationEvidence {
+  readonly statementTag: string;
+  readonly sql: string;
+  readonly bindings: readonly unknown[];
+  readonly sqlBytes: number;
+  readonly bindingCount: number;
+  readonly groupWidth: number;
+  readonly sharedRelationCount: number;
+  readonly rootKind: string;
+  readonly physicalScanKinds: readonly string[];
+  readonly logicalPlan: unknown;
+}
 
 export interface D1ReadDiagnostics {
   rowsRead: number;
@@ -13,6 +71,12 @@ export interface D1ReadDiagnostics {
   resolvedScope?: FilterScope;
   requiredSources?: readonly string[];
   requiresRawSource?: boolean;
+  /** Internal reason an otherwise supported count tree used the old evaluator. */
+  advancedCountSqlFallbackReason?: AdvancedCountSqlFallbackReason;
+  /** Test/runtime audit hook; absent from normal request diagnostics. */
+  onEventRecordsQualificationCompile?: (
+    evidence: D1EventRecordsCompilationEvidence,
+  ) => void;
 }
 
 interface D1ResultWithMeta {

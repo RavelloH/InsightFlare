@@ -1,5 +1,6 @@
 import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import type { QueryTime } from "@/lib/edge/analytics/contract/types";
 import {
   buildEventContextReportPlan,
   EVENT_CONTEXT_REPORT_OUTPUT,
@@ -11,6 +12,12 @@ import {
 } from "@/lib/edge/analytics/engine/semantic/event-context-cards";
 import type { Env } from "@/lib/edge/types";
 
+import type { DeferredEventContextQualification } from "./advanced-filter-execution";
+import { prepareDeferredEventQualificationFallback } from "./advanced-filter-execution";
+import {
+  type EventContextQualificationQuery,
+  executeEventContextQualificationProgram,
+} from "./analytics-qualification-program";
 import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
 import type {
   DimensionRow,
@@ -19,9 +26,15 @@ import type {
   GeoTabRow,
   QueryWindow,
 } from "./core";
+import type { D1ReadDiagnostics } from "./diagnostics";
 
 export { EVENT_CONTEXT_CARD_KEYS };
 export type { EventContextCardKey };
+
+export interface EventContextQueryOptions {
+  readonly deferredQualification?: DeferredEventContextQualification;
+  readonly diagnostics?: D1ReadDiagnostics;
+}
 
 function emptyCards(): EventAnalyticsContextCards {
   return {
@@ -52,7 +65,7 @@ function emptyCards(): EventAnalyticsContextCards {
   };
 }
 
-function mapContextCardRows(
+export function mapContextCardRows(
   rows: readonly Record<string, unknown>[],
 ): EventAnalyticsContextCards {
   const cards = emptyCards();
@@ -104,6 +117,54 @@ function mapContextCardRows(
   return cards;
 }
 
+function canonicalSelectedKeys(
+  selectedKeys: readonly EventContextCardKey[],
+): EventContextCardKey[] {
+  const selected = new Set(selectedKeys);
+  return EVENT_CONTEXT_CARD_KEYS.filter((key) => selected.has(key));
+}
+
+function contextQueryTimeMatchesWindow(
+  time: QueryTime,
+  window: QueryWindow,
+): boolean {
+  return (
+    time.range.startMs === window.startMs &&
+    time.range.endExclusiveMs === window.endExclusiveMs &&
+    time.capturedAtMs === window.nowMs &&
+    time.reportingTimeZone === window.timeZone
+  );
+}
+
+async function queryLegacyEventContextRowsFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  limit: number,
+  eventName: string | undefined,
+  selectedKeys: readonly EventContextCardKey[],
+  diagnostics?: D1ReadDiagnostics,
+): Promise<Record<string, unknown>[]> {
+  const metadata = scopedFilterMetadata(filters);
+  const plan = buildEventContextReportPlan({
+    siteId,
+    queryTime: queryWindowToTime(window),
+    filters,
+    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(eventName !== undefined ? { eventName } : {}),
+    limit,
+    selectedKeys,
+  });
+  return queryAnalyticsReportOutputRowsFromD1(
+    env,
+    plan,
+    EVENT_CONTEXT_REPORT_OUTPUT,
+    undefined,
+    diagnostics,
+  );
+}
+
 /** Reads Event-owner context cards in one validated Logical D1 query. */
 export async function queryEventAnalyticsContextCardsFromD1(
   env: Env,
@@ -113,26 +174,74 @@ export async function queryEventAnalyticsContextCardsFromD1(
   limit: number,
   eventName?: string,
   selectedKeys: readonly EventContextCardKey[] = EVENT_CONTEXT_CARD_KEYS,
+  options?: EventContextQueryOptions,
 ): Promise<EventAnalyticsContextCards> {
-  const selected = new Set(selectedKeys);
-  const plan = buildEventContextReportPlan({
-    siteId,
-    // The reader window is the candidate range; prepared scope time remains
-    // available on its validated selection as preparation-time metadata.
-    queryTime: queryWindowToTime(window),
-    filters,
-    ...(scopedFilterMetadata(filters)
-      ? { scopePlan: scopedFilterMetadata(filters)!.plan }
-      : {}),
-    ...(eventName !== undefined ? { eventName } : {}),
-    limit,
-    selectedKeys: EVENT_CONTEXT_CARD_KEYS.filter((key) => selected.has(key)),
-  });
-  if (selected.size === 0) return emptyCards();
-  const rows = await queryAnalyticsReportOutputRowsFromD1(
-    env,
-    plan,
-    EVENT_CONTEXT_REPORT_OUTPUT,
-  );
+  const selected = canonicalSelectedKeys(selectedKeys);
+  if (selected.length === 0) return emptyCards();
+  let reportFilters = filters;
+  let rows: Record<string, unknown>[] | undefined;
+  const deferred = options?.deferredQualification;
+  if (deferred) {
+    const request: EventContextQualificationQuery = {
+      limit,
+      selectedKeys: selected,
+      ...(eventName !== undefined ? { eventName } : {}),
+    };
+    const preparedRequest = deferred.eventContextRequest;
+    const deferredTime = deferred.time;
+    if (
+      deferred.operation !== "event-context" ||
+      deferred.siteId !== siteId ||
+      deferred.filters !== filters ||
+      !preparedRequest ||
+      preparedRequest.eventName !== (eventName ?? "") ||
+      preparedRequest.limit !== limit ||
+      preparedRequest.selectedKeys.length !== selected.length ||
+      preparedRequest.selectedKeys.some(
+        (key, index) => key !== selected[index],
+      ) ||
+      !contextQueryTimeMatchesWindow(deferredTime, window) ||
+      deferred.metadata.plan.scope !== deferred.countInput.scope ||
+      deferred.metadata.siteIds.length !== 1 ||
+      deferred.metadata.siteIds[0] !== siteId ||
+      deferred.countInput.subject.siteIds.length !== 1 ||
+      deferred.countInput.subject.siteIds[0] !== siteId ||
+      deferred.countInput.candidateRange.startMs !==
+        deferredTime.range.startMs ||
+      deferred.countInput.candidateRange.endExclusiveMs !==
+        deferredTime.range.endExclusiveMs ||
+      deferred.countInput.readRange.startMs !== deferredTime.range.startMs ||
+      deferred.countInput.readRange.endExclusiveMs !==
+        deferredTime.range.endExclusiveMs ||
+      deferred.countInput.capturedAtMs !== deferredTime.capturedAtMs ||
+      deferred.countInput.reportingTimeZone !== deferredTime.reportingTimeZone
+    )
+      throw new Error("event_context_qualification_request_mismatch");
+    const result = await executeEventContextQualificationProgram({
+      env,
+      deferred,
+      query: request,
+      ...(options?.diagnostics ? { diagnostics: options.diagnostics } : {}),
+    });
+    if (result.kind === "executed") {
+      rows = [...result.rows];
+    } else {
+      if (options?.diagnostics)
+        options.diagnostics.advancedCountSqlFallbackReason =
+          result.fallbackReason;
+      reportFilters = await prepareDeferredEventQualificationFallback(deferred);
+    }
+  }
+  if (!rows)
+    rows = await queryLegacyEventContextRowsFromD1(
+      env,
+      siteId,
+      window,
+      reportFilters,
+      limit,
+      eventName,
+      selected,
+      options?.diagnostics,
+    );
   return mapContextCardRows(rows);
 }

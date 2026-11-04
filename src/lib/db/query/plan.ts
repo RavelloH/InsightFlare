@@ -1247,30 +1247,36 @@ export function union<
 }
 
 export type InsertRequiredKeys<T extends SchemaObjectReference> = {
-  [K in keyof T["columns"]]: T["columns"][K]["nullable"] extends true
+  [K in keyof T["columns"]]: T["columns"][K]["rowidAlias"] extends true
     ? never
-    : T["columns"][K]["defaultSql"] extends null
-      ? T["columns"][K]["generated"] extends true
-        ? never
-        : T["columns"][K]["hidden"] extends 0
-          ? K
-          : never
-      : never;
+    : T["columns"][K]["nullable"] extends true
+      ? never
+      : T["columns"][K]["defaultSql"] extends null
+        ? T["columns"][K]["generated"] extends true
+          ? never
+          : T["columns"][K]["hidden"] extends 0
+            ? K
+            : never
+        : never;
 }[keyof T["columns"]];
+
+type InsertColumnInput<C extends SchemaColumnReference> =
+  SchemaColumnValue<C> | (C["rowidAlias"] extends true ? null : never);
+
+type InsertColumnValue<C extends SchemaColumnReference> =
+  InsertColumnInput<C> | SqlExpression<InsertColumnInput<C>>;
 
 export type InsertRow<T extends SchemaObjectReference> = {
   readonly [
     K in InsertRequiredKeys<T>
   ]: T["columns"][K] extends SchemaColumnReference
-    ? | SchemaColumnValue<T["columns"][K]>
-      | SqlExpression<SchemaColumnValue<T["columns"][K]>>
+    ? InsertColumnValue<T["columns"][K]>
     : never;
 } & {
   readonly [
     K in Exclude<keyof T["columns"], InsertRequiredKeys<T>>
   ]?: T["columns"][K] extends SchemaColumnReference
-    ? | SchemaColumnValue<T["columns"][K]>
-      | SqlExpression<SchemaColumnValue<T["columns"][K]>>
+    ? InsertColumnValue<T["columns"][K]>
     : never;
 };
 

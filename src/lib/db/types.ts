@@ -17,6 +17,99 @@ interface DatabasePhysicalPlanShapeFields {
   readonly jsonMembershipCount: number;
 }
 
+export interface DatabaseFactLocalIndexedJoinShape {
+  readonly tableName: string;
+  readonly indexName: string;
+  readonly keyColumns: readonly {
+    readonly name: string;
+    readonly leftIndex: number;
+    readonly rightIndex: number;
+  }[];
+}
+
+export interface DatabaseConditionalLookupShape {
+  readonly tableName: string;
+  readonly indexName: string;
+  readonly keyColumns: readonly {
+    readonly name: string;
+    readonly leftIndex: number;
+    readonly rightIndex: number;
+  }[];
+  readonly selectedKey: {
+    readonly name: string;
+    readonly leftIndex: number;
+    readonly rightIndex: number;
+  };
+  readonly guardConjunctCount: number;
+}
+
+export interface DatabaseRowPipelineShape {
+  readonly nodeKinds: readonly ("filter" | "project")[];
+  readonly outputColumnIndexes: readonly number[];
+  readonly filterColumnIndexes: readonly (readonly number[])[];
+}
+
+export interface DatabaseLexicographicComparisonShape {
+  readonly direction: ">" | "<";
+  readonly componentCount: number;
+  readonly emissionCount: number;
+}
+
+export interface DatabaseSemiMembershipShape {
+  /** Number of ordered key columns used by the scalar/tuple IN predicate. */
+  readonly keyCount: number;
+  readonly emissionCount: number;
+}
+
+export interface DatabaseSingletonRankFusionShape {
+  readonly partitionFieldCount: number;
+  readonly keyFieldCount: number;
+  readonly consumerCertificateCount: number;
+  readonly emissionCount: number;
+  readonly distinct: true;
+}
+
+export interface DatabaseNativeNullOrderingShape {
+  /** Deterministic plan-wide ordinal of a window specification with native choices. */
+  readonly windowIndex: number;
+  readonly pairIndex: number;
+  readonly columnIndex: number;
+  readonly valueDirection: "ASC" | "DESC";
+  readonly nullPlacement: "FIRST" | "LAST";
+  readonly emissionCount: number;
+}
+
+export interface DatabaseDirectMaterializedReferenceShape {
+  readonly definitionIndex: number;
+  readonly fieldCount: number;
+  readonly emissionCount: number;
+}
+
+export interface DatabaseMaterializationSelectionShape {
+  readonly definitionIndex: number;
+  readonly kind:
+    | "strict-serial-rank-stage"
+    | "stage-derived-auto"
+    | "current-boundary-derived-auto";
+  readonly choiceIndex: number;
+  readonly emissionCount: number;
+}
+
+export interface DatabaseDerivedSelfMembershipShape {
+  readonly definitionIndex: number;
+  readonly producerIndex: number;
+  readonly tupleWidth: number;
+  readonly nullableGuardCount: number;
+  readonly emissionCount: number;
+}
+
+export interface DatabaseCompileOrderHelperShape {
+  readonly helperCount: 1;
+  readonly leafCount: number;
+  readonly definitionIndexes: readonly number[];
+  readonly strategy: "dead-branch-materialization-order";
+}
+
 export type DatabasePhysicalPlanShape =
   | (DatabasePhysicalPlanShapeFields & { readonly version: 1 })
   | (DatabasePhysicalPlanShapeFields & {
@@ -38,6 +131,200 @@ export type DatabasePhysicalPlanShape =
       readonly jsonRowRelationCount: number;
       readonly rightAnchorJoinOrderCount: number;
       readonly uniqueLookupJoinOrderCount: number;
+      readonly parameterStrategy?: "numbered-reuse";
+      readonly parameterOccurrenceCount?: number;
+      readonly parameterSlotCount?: number;
+    })
+  | (DatabasePhysicalPlanShapeFields & {
+      readonly version: 5;
+      readonly nativeRowRelationCount: number;
+      readonly jsonRowRelationCount: number;
+      readonly rightAnchorJoinOrderCount: number;
+      readonly uniqueLookupJoinOrderCount: number;
+      readonly factLocalIndexedJoinStrategies: readonly DatabaseFactLocalIndexedJoinShape[];
+      readonly parameterStrategy?: "numbered-reuse";
+      readonly parameterOccurrenceCount?: number;
+      readonly parameterSlotCount?: number;
+    })
+  | (DatabasePhysicalPlanShapeFields & {
+      readonly version: 6;
+      readonly nativeRowRelationCount: number;
+      readonly jsonRowRelationCount: number;
+      readonly rightAnchorJoinOrderCount: number;
+      readonly uniqueLookupJoinOrderCount: number;
+      readonly factLocalIndexedJoinStrategies: readonly DatabaseFactLocalIndexedJoinShape[];
+      readonly conditionalLookupCount: number;
+      readonly conditionalLookupStrategies: readonly DatabaseConditionalLookupShape[];
+      readonly parameterStrategy?: "numbered-reuse";
+      readonly parameterOccurrenceCount?: number;
+      readonly parameterSlotCount?: number;
+    })
+  | (DatabasePhysicalPlanShapeFields & {
+      readonly version: 7;
+      readonly nativeRowRelationCount: number;
+      readonly jsonRowRelationCount: number;
+      readonly rightAnchorJoinOrderCount: number;
+      readonly uniqueLookupJoinOrderCount: number;
+      readonly factLocalIndexedJoinStrategies: readonly DatabaseFactLocalIndexedJoinShape[];
+      readonly conditionalLookupCount: number;
+      readonly conditionalLookupStrategies: readonly DatabaseConditionalLookupShape[];
+      readonly selfMembershipCount: number;
+      readonly parameterStrategy?: "numbered-reuse";
+      readonly parameterOccurrenceCount?: number;
+      readonly parameterSlotCount?: number;
+    })
+  | (DatabasePhysicalPlanShapeFields & {
+      readonly version: 8;
+      readonly nativeRowRelationCount: number;
+      readonly jsonRowRelationCount: number;
+      readonly rightAnchorJoinOrderCount: number;
+      readonly uniqueLookupJoinOrderCount: number;
+      readonly factLocalIndexedJoinStrategies: readonly DatabaseFactLocalIndexedJoinShape[];
+      readonly conditionalLookupCount: number;
+      readonly conditionalLookupStrategies: readonly DatabaseConditionalLookupShape[];
+      readonly selfMembershipCount: number;
+      readonly rowPipelineChoices: readonly DatabaseRowPipelineShape[];
+      readonly parameterStrategy?: "numbered-reuse";
+      readonly parameterOccurrenceCount?: number;
+      readonly parameterSlotCount?: number;
+    })
+  | (DatabasePhysicalPlanShapeFields & {
+      readonly version: 9;
+      readonly nativeRowRelationCount: number;
+      readonly jsonRowRelationCount: number;
+      readonly rightAnchorJoinOrderCount: number;
+      readonly uniqueLookupJoinOrderCount: number;
+      readonly factLocalIndexedJoinStrategies: readonly DatabaseFactLocalIndexedJoinShape[];
+      readonly conditionalLookupCount: number;
+      readonly conditionalLookupStrategies: readonly DatabaseConditionalLookupShape[];
+      readonly selfMembershipCount: number;
+      readonly rowPipelineChoices: readonly DatabaseRowPipelineShape[];
+      readonly lexicographicComparisonCount: number;
+      readonly lexicographicComparisons: readonly DatabaseLexicographicComparisonShape[];
+      readonly parameterStrategy?: "numbered-reuse";
+      readonly parameterOccurrenceCount?: number;
+      readonly parameterSlotCount?: number;
+    })
+  | (DatabasePhysicalPlanShapeFields & {
+      readonly version: 10;
+      readonly nativeRowRelationCount: number;
+      readonly jsonRowRelationCount: number;
+      readonly rightAnchorJoinOrderCount: number;
+      readonly uniqueLookupJoinOrderCount: number;
+      readonly factLocalIndexedJoinStrategies: readonly DatabaseFactLocalIndexedJoinShape[];
+      readonly conditionalLookupCount: number;
+      readonly conditionalLookupStrategies: readonly DatabaseConditionalLookupShape[];
+      readonly selfMembershipCount: number;
+      readonly rowPipelineChoices: readonly DatabaseRowPipelineShape[];
+      readonly lexicographicComparisonCount: number;
+      readonly lexicographicComparisons: readonly DatabaseLexicographicComparisonShape[];
+      readonly semiMembershipCount: number;
+      readonly semiMemberships: readonly DatabaseSemiMembershipShape[];
+      readonly parameterStrategy?: "numbered-reuse";
+      readonly parameterOccurrenceCount?: number;
+      readonly parameterSlotCount?: number;
+    })
+  | (DatabasePhysicalPlanShapeFields & {
+      readonly version: 11;
+      readonly nativeRowRelationCount: number;
+      readonly jsonRowRelationCount: number;
+      readonly rightAnchorJoinOrderCount: number;
+      readonly uniqueLookupJoinOrderCount: number;
+      readonly factLocalIndexedJoinStrategies: readonly DatabaseFactLocalIndexedJoinShape[];
+      readonly conditionalLookupCount: number;
+      readonly conditionalLookupStrategies: readonly DatabaseConditionalLookupShape[];
+      readonly selfMembershipCount: number;
+      readonly rowPipelineChoices: readonly DatabaseRowPipelineShape[];
+      readonly lexicographicComparisonCount: number;
+      readonly lexicographicComparisons: readonly DatabaseLexicographicComparisonShape[];
+      readonly semiMembershipCount: number;
+      readonly semiMemberships: readonly DatabaseSemiMembershipShape[];
+      readonly singletonRankFusionCount: number;
+      readonly singletonRankFusions: readonly DatabaseSingletonRankFusionShape[];
+      readonly parameterStrategy?: "numbered-reuse";
+      readonly parameterOccurrenceCount?: number;
+      readonly parameterSlotCount?: number;
+    })
+  | (DatabasePhysicalPlanShapeFields & {
+      readonly version: 12;
+      readonly nativeRowRelationCount: number;
+      readonly jsonRowRelationCount: number;
+      readonly rightAnchorJoinOrderCount: number;
+      readonly uniqueLookupJoinOrderCount: number;
+      readonly factLocalIndexedJoinStrategies: readonly DatabaseFactLocalIndexedJoinShape[];
+      readonly conditionalLookupCount: number;
+      readonly conditionalLookupStrategies: readonly DatabaseConditionalLookupShape[];
+      readonly selfMembershipCount: number;
+      readonly rowPipelineChoices: readonly DatabaseRowPipelineShape[];
+      readonly lexicographicComparisonCount: number;
+      readonly lexicographicComparisons: readonly DatabaseLexicographicComparisonShape[];
+      readonly semiMembershipCount: number;
+      readonly semiMemberships: readonly DatabaseSemiMembershipShape[];
+      readonly singletonRankFusionCount: number;
+      readonly singletonRankFusions: readonly DatabaseSingletonRankFusionShape[];
+      readonly nativeNullOrderingCount: number;
+      readonly nativeNullOrderings: readonly DatabaseNativeNullOrderingShape[];
+      readonly directMaterializedReferenceCount: number;
+      readonly directMaterializedReferences: readonly DatabaseDirectMaterializedReferenceShape[];
+      readonly parameterStrategy?: "numbered-reuse";
+      readonly parameterOccurrenceCount?: number;
+      readonly parameterSlotCount?: number;
+    })
+  | (DatabasePhysicalPlanShapeFields & {
+      readonly version: 13;
+      readonly nativeRowRelationCount: number;
+      readonly jsonRowRelationCount: number;
+      readonly rightAnchorJoinOrderCount: number;
+      readonly uniqueLookupJoinOrderCount: number;
+      readonly factLocalIndexedJoinStrategies: readonly DatabaseFactLocalIndexedJoinShape[];
+      readonly conditionalLookupCount: number;
+      readonly conditionalLookupStrategies: readonly DatabaseConditionalLookupShape[];
+      readonly selfMembershipCount: number;
+      readonly rowPipelineChoices: readonly DatabaseRowPipelineShape[];
+      readonly lexicographicComparisonCount: number;
+      readonly lexicographicComparisons: readonly DatabaseLexicographicComparisonShape[];
+      readonly semiMembershipCount: number;
+      readonly semiMemberships: readonly DatabaseSemiMembershipShape[];
+      readonly singletonRankFusionCount: number;
+      readonly singletonRankFusions: readonly DatabaseSingletonRankFusionShape[];
+      readonly nativeNullOrderingCount: number;
+      readonly nativeNullOrderings: readonly DatabaseNativeNullOrderingShape[];
+      readonly directMaterializedReferenceCount: number;
+      readonly directMaterializedReferences: readonly DatabaseDirectMaterializedReferenceShape[];
+      readonly materializationSelectionCount: number;
+      readonly materializationSelections: readonly DatabaseMaterializationSelectionShape[];
+      readonly derivedSelfMembershipCount: number;
+      readonly derivedSelfMemberships: readonly DatabaseDerivedSelfMembershipShape[];
+      readonly parameterStrategy?: "numbered-reuse";
+      readonly parameterOccurrenceCount?: number;
+      readonly parameterSlotCount?: number;
+    })
+  | (DatabasePhysicalPlanShapeFields & {
+      readonly version: 14;
+      readonly nativeRowRelationCount: number;
+      readonly jsonRowRelationCount: number;
+      readonly rightAnchorJoinOrderCount: number;
+      readonly uniqueLookupJoinOrderCount: number;
+      readonly factLocalIndexedJoinStrategies: readonly DatabaseFactLocalIndexedJoinShape[];
+      readonly conditionalLookupCount: number;
+      readonly conditionalLookupStrategies: readonly DatabaseConditionalLookupShape[];
+      readonly selfMembershipCount: number;
+      readonly rowPipelineChoices: readonly DatabaseRowPipelineShape[];
+      readonly lexicographicComparisonCount: number;
+      readonly lexicographicComparisons: readonly DatabaseLexicographicComparisonShape[];
+      readonly semiMembershipCount: number;
+      readonly semiMemberships: readonly DatabaseSemiMembershipShape[];
+      readonly singletonRankFusionCount: number;
+      readonly singletonRankFusions: readonly DatabaseSingletonRankFusionShape[];
+      readonly nativeNullOrderingCount: number;
+      readonly nativeNullOrderings: readonly DatabaseNativeNullOrderingShape[];
+      readonly directMaterializedReferenceCount: number;
+      readonly directMaterializedReferences: readonly DatabaseDirectMaterializedReferenceShape[];
+      readonly materializationSelectionCount: number;
+      readonly materializationSelections: readonly DatabaseMaterializationSelectionShape[];
+      readonly derivedSelfMembershipCount: number;
+      readonly derivedSelfMemberships: readonly DatabaseDerivedSelfMembershipShape[];
+      readonly compileOrder: DatabaseCompileOrderHelperShape;
       readonly parameterStrategy?: "numbered-reuse";
       readonly parameterOccurrenceCount?: number;
       readonly parameterSlotCount?: number;

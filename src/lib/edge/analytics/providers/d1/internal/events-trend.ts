@@ -7,24 +7,29 @@ import {
   buildEventTypeTrendPlan,
   EVENT_TREND_OUTPUTS,
 } from "@/lib/edge/analytics/engine/event-trend-plan";
+import type { DeferredEventTrendQualification } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import type { Env } from "@/lib/edge/types";
 
+import { prepareDeferredEventQualificationFallback } from "./advanced-filter-execution";
+import {
+  type EventTrendQualificationQuery,
+  executeEventTrendQualificationProgram,
+} from "./analytics-qualification-program";
 import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
 import {
+  buildTimeBuckets,
   type EventTrendPointRow,
   type EventTrendSeriesRow,
   type EventTypeTrendPointRow,
   type FilterDocument,
   type Interval,
   type QueryWindow,
-} from "./core";
-import {
-  buildTimeBuckets,
   SHARE_TREND_OTHER_KEY,
   SHARE_TREND_OTHER_LABEL,
   SHARE_TREND_OTHER_TOKEN,
   shareTrendSeriesKey,
 } from "./core";
+import type { D1ReadDiagnostics } from "./diagnostics";
 
 function trendPlanInput(
   siteId: string,
@@ -52,25 +57,22 @@ function seriesRow(row: Record<string, unknown>): EventTrendSeriesRow {
   };
 }
 
-export async function queryEventsTrendFromD1(
-  env: Env,
-  siteId: string,
-  window: QueryWindow,
-  interval: Interval,
-  filters: FilterDocument,
-  limit: number,
-  eventName?: string,
-) {
-  const source = trendPlanInput(siteId, window, filters);
-  const eventFilter = eventName !== undefined ? { eventName } : {};
-  const seriesRows = (
-    await queryAnalyticsReportOutputRowsFromD1(
-      env,
-      buildEventTrendSeriesPlan({ ...source, ...eventFilter, limit }),
-      EVENT_TREND_OUTPUTS.series,
-    )
-  ).map(seriesRow);
-  const buckets = buildTimeBuckets(window, interval);
+type MappedEventTrendSeries = {
+  readonly seriesKeyByName: Map<string, string>;
+  readonly series: Array<{
+    key: string;
+    eventName: string;
+    label: string;
+    events: number;
+    sessions: number;
+    visitors: number;
+    isOther?: boolean;
+  }>;
+};
+
+function mapEventTrendSeries(
+  seriesRows: readonly EventTrendSeriesRow[],
+): MappedEventTrendSeries {
   const seriesKeyByName = new Map<string, string>();
   const usedKeys = new Set<string>();
   for (const row of seriesRows) {
@@ -79,6 +81,126 @@ export async function queryEventsTrendFromD1(
       shareTrendSeriesKey(row.eventName, usedKeys, "event"),
     );
   }
+  return {
+    seriesKeyByName,
+    series: seriesRows.map((row) => ({
+      key: seriesKeyByName.get(row.eventName)!,
+      eventName: row.eventName,
+      label: row.eventName,
+      events: row.events,
+      sessions: row.sessions,
+      visitors: row.visitors,
+    })),
+  };
+}
+
+export async function queryEventsTrendFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  interval: Interval,
+  filters: FilterDocument,
+  limit: number,
+  eventName?: string,
+  options?: {
+    readonly deferredQualification?: DeferredEventTrendQualification;
+    readonly diagnostics?: D1ReadDiagnostics;
+  },
+) {
+  const deferred = options?.deferredQualification;
+  if (deferred) {
+    if (
+      deferred.operation !== "event-trend" ||
+      deferred.siteId !== siteId ||
+      deferred.filters !== filters
+    )
+      throw new Error("event_trend_qualification_request_mismatch");
+    const query: EventTrendQualificationQuery = {
+      interval,
+      limit,
+      otherToken: SHARE_TREND_OTHER_TOKEN,
+      otherLabel: SHARE_TREND_OTHER_LABEL,
+      ...(eventName !== undefined ? { eventName } : {}),
+    };
+    const result = await executeEventTrendQualificationProgram({
+      env,
+      deferred,
+      query,
+      ...(options?.diagnostics ? { diagnostics: options.diagnostics } : {}),
+    });
+    if (result.kind === "executed") {
+      const seriesRows = result.rows
+        .filter((row) => row.outputId === EVENT_TREND_OUTPUTS.series)
+        .map(seriesRow);
+      const mappedSeries = mapEventTrendSeries(seriesRows);
+      const trendRows = result.rows
+        .filter((row) => row.outputId === EVENT_TREND_OUTPUTS.points)
+        .map((row): EventTrendPointRow => ({
+          bucket: Number(row.bucket ?? -1),
+          seriesKey: String(row.seriesName ?? ""),
+          events: Number(row.events ?? 0),
+        }));
+      const [otherRow] = result.rows
+        .filter((row) => row.outputId === EVENT_TREND_OUTPUTS.other)
+        .map(seriesRow);
+      return mapEventTrendResult(
+        mappedSeries,
+        trendRows,
+        otherRow,
+        window,
+        interval,
+      );
+    }
+    if (options?.diagnostics)
+      options.diagnostics.advancedCountSqlFallbackReason =
+        result.fallbackReason;
+    const reportFilters =
+      await prepareDeferredEventQualificationFallback(deferred);
+    return queryLegacyEventsTrendFromD1(
+      env,
+      siteId,
+      window,
+      interval,
+      reportFilters,
+      limit,
+      eventName,
+      options?.diagnostics,
+    );
+  }
+  return queryLegacyEventsTrendFromD1(
+    env,
+    siteId,
+    window,
+    interval,
+    filters,
+    limit,
+    eventName,
+    options?.diagnostics,
+  );
+}
+
+async function queryLegacyEventsTrendFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  interval: Interval,
+  filters: FilterDocument,
+  limit: number,
+  eventName?: string,
+  diagnostics?: D1ReadDiagnostics,
+) {
+  const source = trendPlanInput(siteId, window, filters);
+  const eventFilter = eventName !== undefined ? { eventName } : {};
+  const seriesRows = (
+    await queryAnalyticsReportOutputRowsFromD1(
+      env,
+      buildEventTrendSeriesPlan({ ...source, ...eventFilter, limit }),
+      EVENT_TREND_OUTPUTS.series,
+      undefined,
+      diagnostics,
+    )
+  ).map(seriesRow);
+  const mappedSeries = mapEventTrendSeries(seriesRows);
   const seriesNames = seriesRows.map((row) => row.eventName);
   const trendRows = (
     await queryAnalyticsReportOutputRowsFromD1(
@@ -91,6 +213,8 @@ export async function queryEventsTrendFromD1(
         otherToken: SHARE_TREND_OTHER_TOKEN,
       }),
       EVENT_TREND_OUTPUTS.points,
+      undefined,
+      diagnostics,
     )
   ).map((row): EventTrendPointRow => ({
     bucket: Number(row.bucket ?? -1),
@@ -111,25 +235,32 @@ export async function queryEventsTrendFromD1(
             otherLabel: SHARE_TREND_OTHER_LABEL,
           }),
           EVENT_TREND_OUTPUTS.other,
+          undefined,
+          diagnostics,
         )
       ).map(seriesRow)
     : [];
-  const series: Array<{
-    key: string;
-    eventName: string;
-    label: string;
-    events: number;
-    sessions: number;
-    visitors: number;
-    isOther?: boolean;
-  }> = seriesRows.map((row) => ({
-    key: seriesKeyByName.get(row.eventName)!,
-    eventName: row.eventName,
-    label: row.eventName,
-    events: row.events,
-    sessions: row.sessions,
-    visitors: row.visitors,
-  }));
+  return mapEventTrendResult(
+    mappedSeries,
+    trendRows,
+    otherRow,
+    window,
+    interval,
+  );
+}
+
+function mapEventTrendResult(
+  mappedSeries: ReturnType<typeof mapEventTrendSeries>,
+  trendRows: readonly EventTrendPointRow[],
+  otherRow: EventTrendSeriesRow | undefined,
+  window: QueryWindow,
+  interval: Interval,
+) {
+  const buckets = buildTimeBuckets(window, interval);
+  const { series, seriesKeyByName } = mappedSeries;
+  const hasOther = trendRows.some(
+    (row) => String(row.seriesKey) === SHARE_TREND_OTHER_TOKEN,
+  );
   if (hasOther) {
     series.push({
       key: SHARE_TREND_OTHER_KEY,

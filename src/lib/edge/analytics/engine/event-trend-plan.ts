@@ -3,6 +3,13 @@ import type {
   CalendarGranularity,
   QueryTime,
 } from "@/lib/edge/analytics/contract/types";
+import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import {
+  addEventQualificationControlOutput,
+  buildEventQualifiedSource,
+  EVENT_QUALIFICATION_CONTROL_OUTPUT,
+  type EventQualificationPlan,
+} from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import {
   buildEventReportSource,
   EVENT_REPORT_TREND_ATTRIBUTES,
@@ -14,6 +21,7 @@ import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/p
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
+const NUMBER = { kind: "scalar", scalar: "number" } as const;
 
 export const EVENT_TREND_OUTPUTS = {
   series: "event-trend-series",
@@ -63,11 +71,11 @@ function addOutput(
   builder.output(id, relation, fields);
 }
 
-export function buildEventTrendSeriesPlan(
-  input: EventTrendPlanInput & { readonly limit: number },
-): ValidatedLogicalPlan {
-  const { builder, events } = eventTrendSource(input);
-  const series = builder.aggregate(
+function eventTrendSeriesAggregate(
+  builder: LogicalPlanBuilder,
+  events: LogicalRelationHandle,
+): LogicalRelationHandle {
+  return builder.aggregate(
     events,
     { eventName: attribute(builder, events, "eventName") },
     [
@@ -90,6 +98,13 @@ export function buildEventTrendSeriesPlan(
       },
     ],
   );
+}
+
+export function buildEventTrendSeriesPlan(
+  input: EventTrendPlanInput & { readonly limit: number },
+): ValidatedLogicalPlan {
+  const { builder, events } = eventTrendSource(input);
+  const series = eventTrendSeriesAggregate(builder, events);
   const sorted = builder.sort(series, [
     { slot: "events", direction: "desc", nulls: "last" },
     { slot: "sessions", direction: "desc", nulls: "last" },
@@ -210,10 +225,213 @@ export function buildEventTrendOtherPlan(
   return builder.finish();
 }
 
-export function buildEventTypeTrendPlan(
-  input: EventTrendPlanInput & { readonly interval: CalendarGranularity },
-): ValidatedLogicalPlan {
-  const { builder, events } = eventTrendSource(input);
+export interface EventTrendQualificationInput extends EventTrendPlanInput {
+  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly interval: CalendarGranularity;
+  readonly limit: number;
+  readonly otherToken: string;
+  readonly otherLabel: string;
+}
+
+/** Builds Count controls and every Event trend output in one Logical graph. */
+export function buildEventTrendQualificationPlan(
+  input: EventTrendQualificationInput,
+): EventQualificationPlan {
+  const qualified = buildEventQualifiedSource({
+    siteId: input.siteId,
+    count: input.count,
+    purpose: "event-trend",
+    ...(input.eventName !== undefined
+      ? {
+          eventName: input.eventName,
+          eventNameInputSemantics: "legacy-truthy-raw" as const,
+        }
+      : {}),
+  });
+  const { builder, events } = qualified;
+  const normalizedEvents = builder.project(events, {
+    eventName: attribute(builder, events, "eventName"),
+    ownerSessionId: attribute(builder, events, "ownerSessionId"),
+    ownerVisitorId: attribute(builder, events, "ownerVisitorId"),
+    occurredAt: attribute(builder, events, "occurredAt"),
+  });
+  const series = builder.sort(eventTrendSeriesAggregate(builder, events), [
+    { slot: "events", direction: "desc", nulls: "last" },
+    { slot: "sessions", direction: "desc", nulls: "last" },
+    { slot: "eventName", direction: "asc", nulls: "last" },
+  ]);
+  const topSeries = builder.limit(series, input.limit);
+  addOutput(builder, topSeries, EVENT_TREND_OUTPUTS.series, [
+    { name: "eventName", slot: "eventName" },
+    { name: "events", slot: "events" },
+    { name: "sessions", slot: "sessions" },
+    { name: "visitors", slot: "visitors" },
+  ]);
+
+  const bucketed = builder.project(normalizedEvents, {
+    eventName: builder.slot(normalizedEvents, "eventName"),
+    bucket: builder.timeBucket(
+      builder.slot(normalizedEvents, "occurredAt"),
+      input.interval,
+    ),
+  });
+  const inTopSeries = builder.semiJoin(bucketed, topSeries, [
+    { left: "eventName", right: "eventName" },
+  ]);
+  const outsideTopSeries = builder.antiJoin(bucketed, topSeries, [
+    { left: "eventName", right: "eventName" },
+  ]);
+  const topPointsInput = builder.project(inTopSeries, {
+    bucket: builder.slot(inTopSeries, "bucket"),
+    seriesName: builder.slot(inTopSeries, "eventName"),
+  });
+  const topPoints = builder.aggregate(
+    topPointsInput,
+    {
+      bucket: builder.slot(topPointsInput, "bucket"),
+      seriesName: builder.slot(topPointsInput, "seriesName"),
+    },
+    [{ name: "events", kind: "count-rows" }],
+  );
+  const otherPointsInput = builder.project(outsideTopSeries, {
+    bucket: builder.slot(outsideTopSeries, "bucket"),
+    seriesName: builder.literal(input.otherToken, STRING),
+  });
+  const otherPoints = builder.aggregate(
+    otherPointsInput,
+    {
+      bucket: builder.slot(otherPointsInput, "bucket"),
+      seriesName: builder.slot(otherPointsInput, "seriesName"),
+    },
+    [{ name: "events", kind: "count-rows" }],
+  );
+  const allPointRows = builder.appendRows(
+    [topPoints, otherPoints],
+    ["bucket", "seriesName", "events"],
+  );
+  const points = builder.aggregate(
+    allPointRows,
+    {
+      bucket: builder.slot(allPointRows, "bucket"),
+      seriesName: builder.slot(allPointRows, "seriesName"),
+    },
+    [
+      {
+        name: "events",
+        kind: "sum",
+        expression: builder.slot(allPointRows, "events"),
+      },
+    ],
+  );
+  const inRange = builder.filter(
+    points,
+    builder.isNull(builder.slot(points, "bucket"), true),
+  );
+  const sortedPoints = builder.sort(inRange, [
+    { slot: "bucket", direction: "asc", nulls: "last" },
+  ]);
+  addOutput(builder, sortedPoints, EVENT_TREND_OUTPUTS.points, [
+    { name: "bucket", slot: "bucket" },
+    { name: "seriesName", slot: "seriesName" },
+    { name: "events", slot: "events" },
+  ]);
+
+  let otherEvents = normalizedEvents;
+  if (input.limit > 0) {
+    const nullTopSeries = builder.filter(
+      topSeries,
+      builder.isNull(builder.slot(topSeries, "eventName")),
+    );
+    const nullTopCount = builder.aggregate(nullTopSeries, {}, [
+      { name: "nullTopCount", kind: "count-rows" },
+    ]);
+    const keyedEvents = builder.project(normalizedEvents, {
+      eventName: builder.slot(normalizedEvents, "eventName"),
+      ownerSessionId: builder.slot(normalizedEvents, "ownerSessionId"),
+      ownerVisitorId: builder.slot(normalizedEvents, "ownerVisitorId"),
+      gateKey: builder.literal(1, NUMBER),
+    });
+    const keyedNullTopCount = builder.project(nullTopCount, {
+      gateKey: builder.literal(1, NUMBER),
+      nullTopCount: builder.slot(nullTopCount, "nullTopCount"),
+    });
+    const gatedEvents = builder.join(keyedEvents, keyedNullTopCount, [
+      { left: "gateKey", right: "gateKey" },
+    ]);
+    const noNullTopSeries = builder.filter(
+      gatedEvents,
+      builder.and(
+        builder.compare(
+          "eq",
+          builder.slot(gatedEvents, "right.nullTopCount"),
+          builder.literal(0, NUMBER),
+        ),
+        builder.isNull(builder.slot(gatedEvents, "eventName"), true),
+      ),
+    );
+    otherEvents = builder.antiJoin(noNullTopSeries, topSeries, [
+      { left: "eventName", right: "eventName" },
+    ]);
+  }
+  const otherTotals = builder.aggregate(otherEvents, {}, [
+    { name: "events", kind: "count-rows" },
+    {
+      name: "sessions",
+      kind: "count-distinct",
+      expression: nonEmptyDistinctValue(
+        builder,
+        builder.slot(otherEvents, "ownerSessionId"),
+      ),
+    },
+    {
+      name: "visitors",
+      kind: "count-distinct",
+      expression: nonEmptyDistinctValue(
+        builder,
+        builder.slot(otherEvents, "ownerVisitorId"),
+      ),
+    },
+  ]);
+  const labeledOther = builder.project(otherTotals, {
+    eventName: builder.literal(input.otherLabel, STRING),
+    events: builder.slot(otherTotals, "events"),
+    sessions: builder.slot(otherTotals, "sessions"),
+    visitors: builder.slot(otherTotals, "visitors"),
+  });
+  addOutput(builder, labeledOther, EVENT_TREND_OUTPUTS.other, [
+    { name: "eventName", slot: "eventName" },
+    { name: "events", slot: "events" },
+    { name: "sessions", slot: "sessions" },
+    { name: "visitors", slot: "visitors" },
+  ]);
+  addEventQualificationControlOutput(builder, qualified.qualification.controls);
+
+  return {
+    plan: builder.finish(),
+    primaryReportSourceRelationId: qualified.eventSourceRelationId,
+    eventSourceRelationId: qualified.eventSourceRelationId,
+    reportSourceRelations: qualified.reportSourceRelations,
+    matchesRelationId: qualified.qualification.matches.id,
+    controlsRelationId: qualified.qualification.controls.id,
+    groupedSummaryRelationId: qualified.qualification.groupedSummary.id,
+    controlOutputId: EVENT_QUALIFICATION_CONTROL_OUTPUT,
+    reportOutputIds: Object.freeze([
+      EVENT_TREND_OUTPUTS.series,
+      EVENT_TREND_OUTPUTS.points,
+      EVENT_TREND_OUTPUTS.other,
+    ]),
+    numericCompatibilityFields:
+      qualified.qualification.numericCompatibilityFields,
+    scope: qualified.qualification.scope,
+  };
+}
+
+export function appendEventTypeTrendPoints(input: {
+  readonly builder: LogicalPlanBuilder;
+  readonly events: LogicalRelationHandle;
+  readonly interval: CalendarGranularity;
+}): void {
+  const { builder, events } = input;
   const bucketed = builder.project(events, {
     bucket: builder.timeBucket(
       attribute(builder, events, "occurredAt"),
@@ -248,5 +466,16 @@ export function buildEventTypeTrendPlan(
     { name: "events", slot: "events" },
     { name: "visitors", slot: "visitors" },
   ]);
+}
+
+export function buildEventTypeTrendPlan(
+  input: EventTrendPlanInput & { readonly interval: CalendarGranularity },
+): ValidatedLogicalPlan {
+  const { builder, events } = eventTrendSource(input);
+  appendEventTypeTrendPoints({
+    builder,
+    events,
+    interval: input.interval,
+  });
   return builder.finish();
 }

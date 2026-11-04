@@ -15,6 +15,20 @@ const RATIO = { kind: "scalar", scalar: "number", unit: "ratio" } as const;
 
 export type TechnologyRadarDimension = "browser" | "referrer";
 
+export type TechnologyRadarQualificationConfiguration =
+  | { readonly dimension: "browser" }
+  | { readonly dimension: "referrer"; readonly limit: number }
+  | {
+      readonly dimension: "version";
+      readonly browserLimit: number;
+      readonly versionLimit: number;
+    };
+
+export type TechnologyRadarDimensionQualificationConfiguration = Extract<
+  TechnologyRadarQualificationConfiguration,
+  { readonly dimension: "browser" | "referrer" }
+>;
+
 export const TECHNOLOGY_RADAR_OUTPUTS = {
   browser: "technology-browser-radar",
   referrer: "technology-referrer-radar",
@@ -69,13 +83,13 @@ function safeDivision(
   );
 }
 
-function finishOutput(
+function appendOutput(
   builder: LogicalPlanBuilder,
-  input: TechnologyRadarPlanInput,
+  dimension: TechnologyRadarDimension,
   relation: LogicalRelationHandle,
-): ValidatedLogicalPlan {
-  const dimensionName = input.dimension;
-  builder.output(TECHNOLOGY_RADAR_OUTPUTS[input.dimension], relation, [
+): void {
+  const dimensionName = dimension;
+  builder.output(TECHNOLOGY_RADAR_OUTPUTS[dimension], relation, [
     { name: dimensionName, slot: dimensionName },
     { name: "sessions", slot: "sessions" },
     { name: "bounces", slot: "bounces" },
@@ -86,33 +100,18 @@ function finishOutput(
     { name: "avgFrequency", slot: "avgFrequency" },
     { name: "trafficShare", slot: "trafficShare" },
   ]);
-  return builder.finish();
 }
 
-/** Builds the one-statement Browser or Referrer technology radar report. */
-export function buildTechnologyRadarPlan(
-  input: TechnologyRadarPlanInput,
-): ValidatedLogicalPlan {
+/** Adds the existing Browser or Referrer metrics to a caller-owned Page bag. */
+export function appendTechnologyRadarReport(input: {
+  readonly builder: LogicalPlanBuilder;
+  readonly pages: LogicalRelationHandle;
+  readonly dimension: TechnologyRadarDimension;
+  readonly limit?: number;
+}): void {
+  const { builder, pages } = input;
   const dimensionAttribute =
     input.dimension === "browser" ? "browser" : "referrerHost";
-  const { builder, pages } = createPageReportSource({
-    siteId: input.siteId,
-    queryTime: input.queryTime,
-    filters: input.filters,
-    ...(input.scopePlan
-      ? {
-          scopePlan: input.scopePlan,
-          preparedTimePolicy: "reader-window-v1" as const,
-        }
-      : {}),
-    attributes: [
-      `page.report.${dimensionAttribute}`,
-      "page.report.sessionId",
-      "page.report.visitorId",
-      "page.report.durationMs",
-    ],
-  });
-
   const rawDimension = pageAttribute(builder, pages, dimensionAttribute);
   const dimension = builder.normalizeString(
     builder.coalesce(rawDimension, builder.literal("", STRING)),
@@ -298,5 +297,37 @@ export function buildTechnologyRadarPlan(
         : builder.limit(sorted, input.limit ?? 0)
       : sorted;
 
-  return finishOutput(builder, input, limited);
+  appendOutput(builder, input.dimension, limited);
+}
+
+/** Builds the one-statement Browser or Referrer technology radar report. */
+export function buildTechnologyRadarPlan(
+  input: TechnologyRadarPlanInput,
+): ValidatedLogicalPlan {
+  const dimensionAttribute =
+    input.dimension === "browser" ? "browser" : "referrerHost";
+  const { builder, pages } = createPageReportSource({
+    siteId: input.siteId,
+    queryTime: input.queryTime,
+    filters: input.filters,
+    ...(input.scopePlan
+      ? {
+          scopePlan: input.scopePlan,
+          preparedTimePolicy: "reader-window-v1" as const,
+        }
+      : {}),
+    attributes: [
+      `page.report.${dimensionAttribute}`,
+      "page.report.sessionId",
+      "page.report.visitorId",
+      "page.report.durationMs",
+    ],
+  });
+  appendTechnologyRadarReport({
+    builder,
+    pages,
+    dimension: input.dimension,
+    ...(input.limit === undefined ? {} : { limit: input.limit }),
+  });
+  return builder.finish();
 }

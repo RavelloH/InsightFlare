@@ -1,9 +1,15 @@
+import { queryLegacyD1All } from "@/lib/edge/__tests__/legacy-d1-oracle";
 import {
   createScopedFilterPlan,
   EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
 } from "@/lib/edge/analytics/contract";
-import { queryD1All } from "@/lib/edge/analytics/providers/d1/internal/core-sources";
+import {
+  compileScopedDatasetSql,
+  executeObservationFilterOnScopedDataset,
+  scopedDatasetFor,
+  type ScopedDatasetSql,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
 import {
   buildTimeBuckets,
   timeBucketCase,
@@ -13,12 +19,6 @@ import type {
   Interval,
   QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core-types";
-import {
-  compileScopedDatasetSql,
-  executeObservationFilterOnScopedDataset,
-  scopedDatasetFor,
-  type ScopedDatasetSql,
-} from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import type { Env } from "@/lib/edge/types";
 
 export interface GoalTimeseriesAggregateRow {
@@ -92,7 +92,7 @@ export async function queryGoalTimeseriesParentOracle(
   const buckets = buildTimeBuckets(window, interval);
   const observationBucket = timeBucketCase(buckets, "observations.observed_at");
 
-  const rows = await queryD1All<Record<string, unknown>>(
+  const rows = await queryLegacyD1All<Record<string, unknown>>(
     env,
     `WITH
 ${dataset.ctes.trim()},

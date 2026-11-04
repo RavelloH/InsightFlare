@@ -4,8 +4,10 @@ import type {
   PerformanceMetricKey,
   QueryTime,
 } from "@/lib/edge/analytics/contract/types";
-import type { LogicalRelationHandle } from "@/lib/edge/analytics/engine/logical/builder";
-import type { LogicalPlanBuilder } from "@/lib/edge/analytics/engine/logical/builder";
+import type {
+  LogicalPlanBuilder,
+  LogicalRelationHandle,
+} from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import type { LogicalValueType } from "@/lib/edge/analytics/engine/logical/slots";
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
@@ -26,6 +28,15 @@ export const PERFORMANCE_METRICS = [
 }[];
 
 const METRICS = PERFORMANCE_METRICS;
+
+export const PERFORMANCE_SUMMARY_OUTPUT_FIELDS: readonly string[] =
+  PERFORMANCE_METRICS.flatMap(({ key }) => [
+    key + "Samples",
+    key + "AvgValue",
+    key + "P50",
+    key + "P75",
+    key + "P95",
+  ]);
 
 function metricOutputIds(report: "summary" | "trend" | "route" | "country") {
   return PERFORMANCE_METRICS.map(
@@ -107,6 +118,39 @@ function metricFields(prefix: string) {
   ] as const;
 }
 
+export function appendPerformanceSummariesReport(
+  builder: LogicalPlanBuilder,
+  pages: LogicalRelationHandle,
+): LogicalRelationHandle {
+  const branches = METRICS.map(({ key, attribute }) => {
+    const value = pageAttribute(builder, pages, attribute);
+    const statistics = builder.sampleStatistics(pages, {}, value, [
+      ...SAMPLE_PERCENTILES,
+    ]);
+    const renamed = builder.project(statistics, {
+      [key + "Samples"]: builder.slot(statistics, "samples"),
+      [key + "AvgValue"]: builder.slot(statistics, "avg"),
+      [key + "P50"]: builder.slot(statistics, "p50"),
+      [key + "P75"]: builder.slot(statistics, "p75"),
+      [key + "P95"]: builder.slot(statistics, "p95"),
+    });
+    return { relation: renamed };
+  });
+
+  let joined = branches[0]!.relation;
+  for (const branch of branches.slice(1))
+    joined = builder.join(joined, branch.relation, [], "inner");
+
+  const fields = METRICS.flatMap(({ key }, index) =>
+    metricFields(key).map(({ name, slot }) => ({
+      name,
+      slot: index === 0 ? slot : "right." + slot,
+    })),
+  );
+  builder.output(PERFORMANCE_SUMMARY_OUTPUT_ID, joined, fields);
+  return joined;
+}
+
 export function buildPerformanceSummariesPlan(input: {
   readonly siteId: string;
   readonly queryTime: QueryTime;
@@ -116,38 +160,9 @@ export function buildPerformanceSummariesPlan(input: {
 }): ValidatedLogicalPlan {
   const source = createSource({
     ...input,
-    attributes: METRICS.map(({ attribute }) => `page.report.${attribute}`),
+    attributes: METRICS.map(({ attribute }) => "page.report." + attribute),
   });
-  const branches = METRICS.map(({ key, attribute }) => {
-    const value = pageAttribute(source.builder, source.pages, attribute);
-    const statistics = source.builder.sampleStatistics(
-      source.pages,
-      {},
-      value,
-      [...SAMPLE_PERCENTILES],
-    );
-    const renamed = source.builder.project(statistics, {
-      [`${key}Samples`]: source.builder.slot(statistics, "samples"),
-      [`${key}AvgValue`]: source.builder.slot(statistics, "avg"),
-      [`${key}P50`]: source.builder.slot(statistics, "p50"),
-      [`${key}P75`]: source.builder.slot(statistics, "p75"),
-      [`${key}P95`]: source.builder.slot(statistics, "p95"),
-    });
-    return { relation: renamed };
-  });
-
-  let joined = branches[0]!.relation;
-  for (const branch of branches.slice(1)) {
-    joined = source.builder.join(joined, branch.relation, [], "inner");
-  }
-
-  const fields = METRICS.flatMap(({ key }, index) =>
-    metricFields(key).map(({ name, slot }) => ({
-      name,
-      slot: index === 0 ? slot : `right.${slot}`,
-    })),
-  );
-  source.builder.output(PERFORMANCE_SUMMARY_OUTPUT_ID, joined, fields);
+  appendPerformanceSummariesReport(source.builder, source.pages);
   return source.builder.finish();
 }
 
@@ -366,6 +381,15 @@ function addTrendOutputs(
   });
 }
 
+export function appendPerformanceAllTrendsReport(
+  builder: LogicalPlanBuilder,
+  qualifiedPages: LogicalRelationHandle,
+  interval: Interval,
+): readonly string[] {
+  const pages = reportPages(builder, qualifiedPages, { interval });
+  return addTrendOutputs(builder, pages, "trend");
+}
+
 function addRouteOutputs(
   builder: LogicalPlanBuilder,
   pages: LogicalRelationHandle,
@@ -485,10 +509,21 @@ function buildRoutePlan(
     "page.report.pathname",
     ...PERFORMANCE_METRICS.map(({ attribute }) => `page.report.${attribute}`),
   ]);
-  const pages = reportPages(source.builder, source.pages, { path: true });
-  const paths = pathViews(source.builder, pages, limit);
-  addRouteOutputs(source.builder, pages, paths, "route");
+  appendPerformanceRoutesReport(source.builder, source.pages, limit);
   return source.builder.finish();
+}
+
+/** Append the existing five-metric route report to a qualified Page relation. */
+export function appendPerformanceRoutesReport(
+  builder: LogicalPlanBuilder,
+  qualifiedPages: LogicalRelationHandle,
+  limit: number,
+): readonly string[] {
+  if (!Number.isInteger(limit))
+    throw new Error("performance_invalid_route_limit");
+  const pages = reportPages(builder, qualifiedPages, { path: true });
+  const paths = pathViews(builder, pages, limit);
+  return addRouteOutputs(builder, pages, paths, "route");
 }
 
 export function buildPerformanceAllTrendsPlan(input: {
@@ -503,10 +538,11 @@ export function buildPerformanceAllTrendsPlan(input: {
     "page.report.startedAt",
     ...PERFORMANCE_METRICS.map(({ attribute }) => `page.report.${attribute}`),
   ]);
-  const pages = reportPages(source.builder, source.pages, {
-    interval: input.interval,
-  });
-  addTrendOutputs(source.builder, pages, "trend");
+  appendPerformanceAllTrendsReport(
+    source.builder,
+    source.pages,
+    input.interval,
+  );
   return source.builder.finish();
 }
 
@@ -523,10 +559,18 @@ export function buildPerformanceCountriesPlan(
     "page.report.country",
     ...PERFORMANCE_METRICS.map(({ attribute }) => `page.report.${attribute}`),
   ]);
-  const pages = reportPages(source.builder, source.pages, { country: true });
-  const views = countryViews(source.builder, pages);
-  addCountryOutputs(source.builder, pages, views, "country");
+  appendPerformanceCountriesReport(source.builder, source.pages);
   return source.builder.finish();
+}
+
+/** Append the existing five-metric country report to a qualified Page relation. */
+export function appendPerformanceCountriesReport(
+  builder: LogicalPlanBuilder,
+  qualifiedPages: LogicalRelationHandle,
+): readonly string[] {
+  const pages = reportPages(builder, qualifiedPages, { country: true });
+  const views = countryViews(builder, pages);
+  return addCountryOutputs(builder, pages, views, "country");
 }
 
 export function buildPerformanceDashboardPlan(input: {
@@ -546,7 +590,22 @@ export function buildPerformanceDashboardPlan(input: {
     "page.report.country",
     ...PERFORMANCE_METRICS.map(({ attribute }) => `page.report.${attribute}`),
   ]);
-  const pages = reportPages(source.builder, source.pages, {
+  appendPerformanceDashboardReport(source.builder, source.pages, {
+    interval: input.interval,
+    routeLimit: input.routeLimit,
+  });
+  return source.builder.finish();
+}
+
+/** Append the existing 20-output dashboard to a qualified Page relation. */
+export function appendPerformanceDashboardReport(
+  builder: LogicalPlanBuilder,
+  qualifiedPages: LogicalRelationHandle,
+  input: { readonly interval: Interval; readonly routeLimit: number },
+): readonly string[] {
+  if (!Number.isInteger(input.routeLimit))
+    throw new Error("performance_invalid_route_limit");
+  const pages = reportPages(builder, qualifiedPages, {
     interval: input.interval,
     path: true,
     country: true,
@@ -554,22 +613,22 @@ export function buildPerformanceDashboardPlan(input: {
   const outputIds: string[] = [];
 
   for (const { key } of PERFORMANCE_METRICS) {
-    const stats = metricStatistics(source.builder, pages, key);
-    const nonempty = source.builder.filter(
+    const stats = metricStatistics(builder, pages, key);
+    const nonempty = builder.filter(
       stats,
-      source.builder.compare(
+      builder.compare(
         "gt",
-        source.builder.slot(stats, "samples"),
-        source.builder.literal(0, NUMBER_TYPE),
+        builder.slot(stats, "samples"),
+        builder.literal(0, NUMBER_TYPE),
       ),
     );
-    outputIds.push(wireMetricOutput(source.builder, "summary", key, nonempty));
+    outputIds.push(wireMetricOutput(builder, "summary", key, nonempty));
   }
 
-  outputIds.push(...addTrendOutputs(source.builder, pages, "trend"));
-  const topPaths = pathViews(source.builder, pages, input.routeLimit);
-  outputIds.push(...addRouteOutputs(source.builder, pages, topPaths, "route"));
-  const views = countryViews(source.builder, pages);
-  outputIds.push(...addCountryOutputs(source.builder, pages, views, "country"));
-  return source.builder.finish();
+  outputIds.push(...addTrendOutputs(builder, pages, "trend"));
+  const topPaths = pathViews(builder, pages, input.routeLimit);
+  outputIds.push(...addRouteOutputs(builder, pages, topPaths, "route"));
+  const views = countryViews(builder, pages);
+  outputIds.push(...addCountryOutputs(builder, pages, views, "country"));
+  return outputIds;
 }

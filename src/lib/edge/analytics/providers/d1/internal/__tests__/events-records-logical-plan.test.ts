@@ -2,9 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock(
   "@/lib/edge/analytics/providers/d1/internal/event-record-page-output",
-  () => ({
-    queryEventRecordPageOutputRowsFromD1: vi.fn(),
-  }),
+  async (importOriginal) => {
+    const actual = await importOriginal<typeof EventRecordPageOutputModule>();
+    return {
+      ...actual,
+      queryEventRecordPageOutputRowsFromD1: vi.fn(),
+    };
+  },
 );
 
 import {
@@ -12,6 +16,7 @@ import {
   EMPTY_FILTER_DOCUMENT,
 } from "@/lib/edge/analytics/contract";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
+import type * as EventRecordPageOutputModule from "@/lib/edge/analytics/providers/d1/internal/event-record-page-output";
 import { queryEventRecordPageOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/event-record-page-output";
 import { queryEventRecordPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
 import type { Env } from "@/lib/edge/types";

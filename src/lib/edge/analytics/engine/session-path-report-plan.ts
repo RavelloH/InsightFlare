@@ -29,6 +29,65 @@ const NUMBER = { kind: "scalar", scalar: "number" } as const;
 
 export type SessionPathKind = "entry" | "exit";
 export type SessionPathSortKey = "views" | "sessions" | "visitors";
+export const SESSION_PATH_TOP_REPORT_OUTPUT = "session-path-top";
+export const SESSION_PATH_PAGE_REPORT_OUTPUT = "session-path-page";
+export const SESSION_PATH_COMPARISON_ROLLUP_OUTPUT =
+  "session-path-comparison-rollup";
+
+export interface NormalizedSessionBoundaryDimensionRequest {
+  readonly dimension: "session.entryPath" | "session.exitPath";
+  readonly kind: SessionPathKind;
+  readonly limit: number;
+  readonly search?: string;
+  readonly sortBy: SessionPathSortKey;
+  readonly sortDirection: "asc" | "desc";
+  readonly audience: QueryAudience;
+}
+
+export function normalizeSessionBoundaryDimensionRequest(input: {
+  readonly mode?: unknown;
+  readonly dimension: string;
+  readonly page?: unknown;
+  readonly limit?: unknown;
+  readonly search?: unknown;
+  readonly sort?: unknown;
+  readonly audience: QueryAudience;
+}): NormalizedSessionBoundaryDimensionRequest | null {
+  if (input.mode === "overview-tab") return null;
+  const kind =
+    input.dimension === "session.entryPath"
+      ? "entry"
+      : input.dimension === "session.exitPath"
+        ? "exit"
+        : null;
+  if (!kind) return null;
+  const page =
+    input.page && typeof input.page === "object"
+      ? (input.page as { limit?: unknown })
+      : {};
+  const sort =
+    input.sort && typeof input.sort === "object"
+      ? (input.sort as { key?: unknown; direction?: unknown })
+      : null;
+  const limit =
+    typeof page.limit === "number" && Number.isFinite(page.limit)
+      ? page.limit
+      : typeof input.limit === "number" && Number.isFinite(input.limit)
+        ? input.limit
+        : 20;
+  if (!Number.isSafeInteger(limit) || limit < 1) return null;
+  const dimension = kind === "entry" ? "session.entryPath" : "session.exitPath";
+  return Object.freeze({
+    dimension,
+    kind,
+    limit,
+    ...(typeof input.search === "string" ? { search: input.search } : {}),
+    sortBy:
+      sort?.key === "sessions" || sort?.key === "visitors" ? sort.key : "views",
+    sortDirection: sort?.direction === "asc" ? "asc" : "desc",
+    audience: input.audience,
+  });
+}
 
 export interface SessionPathCursor {
   readonly views: number;
@@ -160,19 +219,15 @@ function sessionPathCursorPredicate(
   );
 }
 
-function baseSessionPathPlan(input: {
-  readonly siteId: string;
-  readonly queryTime: QueryTime;
-  readonly filters: FilterDocument;
-  readonly scopePlan?: ScopedFilterPlan;
-  readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
-  readonly kind: SessionPathKind;
-  readonly search?: string;
-  readonly sortBy: SessionPathSortKey;
-  readonly sortDirection: "asc" | "desc";
-}) {
-  const { builder, pages } = sessionPathSource(input);
-  const boundaries = selectedSessionBoundary(builder, pages, input.kind);
+function appendSessionPathAggregate(
+  builder: LogicalPlanBuilder,
+  pages: LogicalRelationHandle,
+  options: {
+    readonly kind: SessionPathKind;
+    readonly search?: string;
+  },
+): LogicalRelationHandle {
+  const boundaries = selectedSessionBoundary(builder, pages, options.kind);
   let result = aggregateSessionBoundaries(builder, boundaries);
   result = builder.filter(
     result,
@@ -185,8 +240,34 @@ function baseSessionPathPlan(input: {
       builder.literal("", STRING),
     ),
   );
-  result = filterSessionPaths(builder, result, input);
-  return { builder, result };
+  return filterSessionPaths(builder, result, options);
+}
+
+export function appendSessionPathTopReport(
+  builder: LogicalPlanBuilder,
+  pages: LogicalRelationHandle,
+  options: {
+    readonly limit: number;
+    readonly kind: SessionPathKind;
+    readonly search?: string;
+    readonly sortBy: SessionPathSortKey;
+    readonly sortDirection: "asc" | "desc";
+  },
+): void {
+  let result = appendSessionPathAggregate(builder, pages, options);
+  result = sortedSessionPaths(
+    builder,
+    result,
+    options.sortBy,
+    options.sortDirection,
+  );
+  if (options.limit > 0) result = builder.limit(result, options.limit);
+  builder.output(SESSION_PATH_TOP_REPORT_OUTPUT, result, [
+    { name: "value", slot: "value" },
+    { name: "views", slot: "views" },
+    { name: "sessions", slot: "sessions" },
+    { name: "visitors", slot: "visitors" },
+  ]);
 }
 
 export function buildSessionPathTopPlan(input: {
@@ -201,20 +282,8 @@ export function buildSessionPathTopPlan(input: {
   readonly sortBy: SessionPathSortKey;
   readonly sortDirection: "asc" | "desc";
 }): ValidatedLogicalPlan {
-  const { builder, result: filtered } = baseSessionPathPlan(input);
-  let result = sortedSessionPaths(
-    builder,
-    filtered,
-    input.sortBy,
-    input.sortDirection,
-  );
-  if (input.limit > 0) result = builder.limit(result, input.limit);
-  builder.output("session-path-top", result, [
-    { name: "value", slot: "value" },
-    { name: "views", slot: "views" },
-    { name: "sessions", slot: "sessions" },
-    { name: "visitors", slot: "visitors" },
-  ]);
+  const { builder, pages } = sessionPathSource(input);
+  appendSessionPathTopReport(builder, pages, input);
   return builder.finish();
 }
 
@@ -228,10 +297,21 @@ export function buildSessionPathComparisonRollupPlan(input: {
   readonly kind: SessionPathKind;
 }): ValidatedLogicalPlan {
   const { builder, pages } = sessionPathSource(input);
+  appendSessionPathComparisonRollup(builder, pages, input.kind);
+  return builder.finish();
+}
+
+/** Appends the unpaged Session edge rollup shared by native and qualified comparisons. */
+export function appendSessionPathComparisonRollup(
+  builder: LogicalPlanBuilder,
+  pages: LogicalRelationHandle,
+  kind: SessionPathKind,
+  outputId = SESSION_PATH_COMPARISON_ROLLUP_OUTPUT,
+): void {
   const boundaries = selectedSessionPathComparisonBoundary(
     builder,
     pages,
-    input.kind,
+    kind,
   );
   let result = aggregateSessionBoundaries(builder, boundaries);
   result = builder.filter(
@@ -245,13 +325,12 @@ export function buildSessionPathComparisonRollupPlan(input: {
       builder.literal("", STRING),
     ),
   );
-  builder.output("session-path-comparison-rollup", result, [
+  builder.output(outputId, result, [
     { name: "value", slot: "value" },
     { name: "views", slot: "views" },
     { name: "sessions", slot: "sessions" },
     { name: "visitors", slot: "visitors" },
   ]);
-  return builder.finish();
 }
 
 export function buildSessionPathPagePlan(input: {
@@ -267,34 +346,49 @@ export function buildSessionPathPagePlan(input: {
   readonly sortDirection: "asc" | "desc";
   readonly cursor?: SessionPathCursor | null;
 }): ValidatedLogicalPlan {
-  const { builder, result: filtered } = baseSessionPathPlan(input);
-  let result = filtered;
-  if (input.cursor) {
+  const { builder, pages } = sessionPathSource(input);
+  appendSessionPathPageReport(builder, pages, input);
+  return builder.finish();
+}
+
+export function appendSessionPathPageReport(
+  builder: LogicalPlanBuilder,
+  pages: LogicalRelationHandle,
+  options: {
+    readonly limit: number;
+    readonly kind: SessionPathKind;
+    readonly search?: string;
+    readonly sortBy: SessionPathSortKey;
+    readonly sortDirection: "asc" | "desc";
+    readonly cursor?: SessionPathCursor | null;
+  },
+): void {
+  let result = appendSessionPathAggregate(builder, pages, options);
+  if (options.cursor) {
     result = builder.filter(
       result,
       sessionPathCursorPredicate(
         builder,
         result,
-        input.cursor,
-        input.sortBy,
-        input.sortDirection,
+        options.cursor,
+        options.sortBy,
+        options.sortDirection,
       ),
     );
   }
   result = sortedSessionPaths(
     builder,
     result,
-    input.sortBy,
-    input.sortDirection,
+    options.sortBy,
+    options.sortDirection,
   );
-  result = builder.limit(result, input.limit + 1);
-  builder.output("session-path-page", result, [
+  result = builder.limit(result, options.limit + 1);
+  builder.output(SESSION_PATH_PAGE_REPORT_OUTPUT, result, [
     { name: "value", slot: "value" },
     { name: "views", slot: "views" },
     { name: "sessions", slot: "sessions" },
     { name: "visitors", slot: "visitors" },
   ]);
-  return builder.finish();
 }
 
 export function sessionPathCursorBinding(input: {

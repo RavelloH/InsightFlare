@@ -33,7 +33,7 @@ import {
   buildDetailCustomEventSourceCte,
   buildEventAnalyticsSourceCte,
   VISIT_SOURCE_COLUMNS,
-} from "@/lib/edge/analytics/providers/d1/internal/core-sources";
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import { compileFilterDocument } from "@/lib/edge/analytics/providers/d1/internal/filter-compiler";
 
 const field = (fieldId: string, operator: string, value?: unknown) => ({

@@ -229,6 +229,19 @@ export function buildOverviewChannelsPlan(input: {
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
     selections: [selection],
   });
+  appendOverviewChannelsReport(builder, pages, input.limit);
+  return builder.finish();
+}
+
+export const OVERVIEW_CHANNELS_REPORT_OUTPUT = "overview-channels";
+
+/** Appends the ordinary channel-list aggregate over an existing Page source. */
+export function appendOverviewChannelsReport(
+  builder: LogicalPlanBuilder,
+  pages: LogicalRelationHandle,
+  limit: number,
+): void {
+  const selection = PAGE_DIMENSION_SELECTIONS.trafficChannel;
   let rows = dimensionRollup(
     builder,
     pages,
@@ -239,14 +252,13 @@ export function buildOverviewChannelsPlan(input: {
     { slot: "sessions", direction: "desc", nulls: "last" },
     { slot: "value", direction: "asc", nulls: "first" },
   ]);
-  if (input.limit >= 0) rows = builder.limit(rows, input.limit);
-  builder.output("overview-channels", rows, [
+  if (limit >= 0) rows = builder.limit(rows, limit);
+  builder.output(OVERVIEW_CHANNELS_REPORT_OUTPUT, rows, [
     { name: "channel", slot: "value" },
     { name: "views", slot: "views" },
     { name: "sessions", slot: "sessions" },
     { name: "visitors", slot: "visitors" },
   ]);
-  return builder.finish();
 }
 
 export function buildOverviewClientDimensionsPlan(input: {

@@ -16,12 +16,12 @@ import {
   scopedFilterMetadata,
   type ScopedFilterPlan,
 } from "@/lib/edge/analytics/contract";
-import { buildVisitFilterSql } from "@/lib/edge/analytics/providers/d1/internal/core-filters";
+import { buildVisitFilterSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-filters";
 import {
   buildEventAnalyticsSourceCte,
   buildVisitSourceCte,
   VISIT_SOURCE_COLUMNS,
-} from "@/lib/edge/analytics/providers/d1/internal/core-sources";
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core-types";
 import { compileFilterDocument } from "@/lib/edge/analytics/providers/d1/internal/filter-compiler";
 import {

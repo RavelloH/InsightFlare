@@ -173,13 +173,29 @@ function createPageReportSourceForDomain(
     scope: resolveAnalyticsScope(selection.scope),
     originOperation: "pages",
   });
-  const pages = builder.source("page", {
-    temporalDomain: "candidate",
+  return addPageReportSourceToBuilder(builder, {
     attributes: input.attributes,
     ...(input.relationships ? { relationships: input.relationships } : {}),
     selection,
   });
-  return { builder, pages, selection };
+}
+
+/** Adds a Page report Source to an existing Logical builder. */
+export function addPageReportSourceToBuilder(
+  builder: LogicalPlanBuilder,
+  input: {
+    readonly attributes: readonly string[];
+    readonly selection: SemanticScopedSourceSelection;
+    readonly relationships?: readonly SemanticRelationshipId[];
+  },
+) {
+  const pages = builder.source("page", {
+    temporalDomain: "candidate",
+    attributes: input.attributes,
+    ...(input.relationships ? { relationships: input.relationships } : {}),
+    selection: input.selection,
+  });
+  return { builder, pages, selection: input.selection };
 }
 
 function pageAttribute(

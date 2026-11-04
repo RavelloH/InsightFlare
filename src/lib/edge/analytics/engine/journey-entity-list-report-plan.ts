@@ -52,7 +52,7 @@ const BOOLEAN = { kind: "scalar", scalar: "boolean" } as const;
 export const JOURNEY_VISITOR_LIST_REPORT_OUTPUT = "journey-visitor-list";
 export const JOURNEY_SESSION_LIST_REPORT_OUTPUT = "journey-session-list";
 
-const PAGE_ATTRIBUTES = [
+export const JOURNEY_LIST_PAGE_ATTRIBUTES = [
   "page.report.localId",
   "page.report.visitorId",
   "page.report.sessionId",
@@ -85,7 +85,7 @@ const PAGE_ATTRIBUTES = [
   "page.report.screenHeight",
 ] as const;
 
-const EVENT_ATTRIBUTES = [
+export const JOURNEY_LIST_EVENT_ATTRIBUTES = [
   "event.report.localId",
   "event.report.ownerVisitId",
   "event.report.ownerSessionId",
@@ -149,6 +149,7 @@ interface VisitorListInput extends CommonListInput {
 interface SessionListInput extends CommonListInput {
   readonly sort: ListSort<SessionListSortKey>;
   readonly cursor?: SessionListCursor | null;
+  readonly preparedPlanOperation?: "sessions" | "visitor-sessions";
 }
 
 interface JourneyListSources {
@@ -165,6 +166,7 @@ interface JourneyListSources {
 function createJourneyListSources(
   input: CommonListInput,
   entity: ListEntity,
+  preparedPlanOperation?: "sessions" | "visitor-sessions",
 ): JourneyListSources {
   const metadata = scopedFilterMetadata(input.filters);
   if (input.analysis || metadata) {
@@ -173,6 +175,7 @@ function createJourneyListSources(
       window: input.window,
       filters: input.filters,
       entityScope: entity,
+      ...(preparedPlanOperation ? { preparedPlanOperation } : {}),
     });
     const pageSelection = selections.page;
     const eventSelection = selections.event;
@@ -186,12 +189,12 @@ function createJourneyListSources(
       builder,
       pages: builder.source("page", {
         temporalDomain: "candidate",
-        attributes: PAGE_ATTRIBUTES,
+        attributes: JOURNEY_LIST_PAGE_ATTRIBUTES,
         selection: pageSelection,
       }),
       events: builder.source("event", {
         temporalDomain: "candidate",
-        attributes: EVENT_ATTRIBUTES,
+        attributes: JOURNEY_LIST_EVENT_ATTRIBUTES,
         selection: eventSelection,
       }),
       filters: selections.filters,
@@ -243,12 +246,12 @@ function createJourneyListSources(
     builder,
     pages: builder.source("page", {
       temporalDomain: "candidate",
-      attributes: PAGE_ATTRIBUTES,
+      attributes: JOURNEY_LIST_PAGE_ATTRIBUTES,
       selection: allPagesSelection,
     }),
     events: builder.source("event", {
       temporalDomain: "candidate",
-      attributes: EVENT_ATTRIBUTES,
+      attributes: JOURNEY_LIST_EVENT_ATTRIBUTES,
       selection: eventSelection,
     }),
     filters: input.filters,
@@ -386,7 +389,7 @@ function eventSearchSource(input: {
     : input.relation;
 }
 
-function uniqueIdentities(
+function membershipIdentityRows(
   builder: LogicalPlanBuilder,
   input: {
     readonly relations: readonly LogicalRelationHandle[];
@@ -395,6 +398,7 @@ function uniqueIdentities(
     ) => LogicalExpressionHandle;
   },
 ): LogicalRelationHandle {
+  // Membership joins observe only existence; duplicate identity rows are valid.
   const identityRows = input.relations.map((relation) =>
     builder.project(relation, {
       identity: input.entityField(relation),
@@ -404,24 +408,22 @@ function uniqueIdentities(
     identityRows.length === 1
       ? identityRows[0]!
       : builder.appendRows(identityRows, ["identity"]);
-  return builder.aggregate(
-    combined,
-    { identity: builder.slot(combined, "identity") },
-    [{ name: "identityCount", kind: "count-rows" }],
-  );
+  return combined;
 }
 
-function createStageSelection(
+export function createJourneyListAnalysisStageSelection(
   selection: SemanticScopedSourceSelection,
   filters: FilterDocument,
   expectedPlan: JourneyListSources["expectedPlan"],
   stage: FilterDocument,
+  preparedPlanOperation?: "visitors" | "sessions" | "visitor-sessions",
 ): SemanticScopedSourceSelection {
   return createSemanticScopedSourceSelection({
     profile: selection.profile,
     filters,
     subject: selection.subject,
     time: selection.time,
+    ...(preparedPlanOperation ? { preparedPlanOperation } : {}),
     ...(expectedPlan ? { expectedPlan } : {}),
     ...(selection.profile === "direct-page-entity-only-compat-v1"
       ? { compatibilityScope: selection.entityKind! }
@@ -430,6 +432,43 @@ function createStageSelection(
       filter: stage,
     }),
   });
+}
+
+export function appendJourneyListAnalysisIdentityRestriction(input: {
+  readonly builder: LogicalPlanBuilder;
+  readonly pages: LogicalRelationHandle;
+  readonly events: LogicalRelationHandle;
+  readonly goalPages: LogicalRelationHandle;
+  readonly goalEvents: LogicalRelationHandle;
+  readonly entity: "visitor" | "session";
+}): { pages: LogicalRelationHandle; events: LogicalRelationHandle } {
+  const ids = membershipIdentityRows(input.builder, {
+    relations: [input.goalPages, input.goalEvents],
+    entityField: (relation) =>
+      relation === input.goalPages
+        ? pageIdentityField(input.builder, relation, input.entity)
+        : eventIdentityField(input.builder, relation, input.entity),
+  });
+  return {
+    pages: input.builder.semiJoin(input.pages, ids, [
+      {
+        left:
+          input.entity === "visitor"
+            ? "attribute:page.report.visitorId"
+            : "attribute:page.report.sessionId",
+        right: "identity",
+      },
+    ]),
+    events: input.builder.semiJoin(input.events, ids, [
+      {
+        left:
+          input.entity === "visitor"
+            ? "attribute:event.report.ownerVisitorId"
+            : "attribute:event.report.ownerSessionId",
+        right: "identity",
+      },
+    ]),
+  };
 }
 
 function applySessionTarget(
@@ -504,7 +543,7 @@ function pageEntityIds(
     relation,
     builder.compare("neq", id, builder.literal("", STRING)),
   );
-  return uniqueIdentities(builder, {
+  return membershipIdentityRows(builder, {
     relations: [nonempty],
     entityField: (input) => pageIdentityField(builder, input, entity),
   });
@@ -681,12 +720,13 @@ function restrictAnalysis(
         ? sources.pages
         : builder.source("page", {
             temporalDomain: "candidate",
-            attributes: PAGE_ATTRIBUTES,
-            selection: createStageSelection(
+            attributes: JOURNEY_LIST_PAGE_ATTRIBUTES,
+            selection: createJourneyListAnalysisStageSelection(
               sources.pageSelection,
               sources.filters,
               sources.expectedPlan,
               analysis.filter,
+              entity === "visitor" ? "visitors" : undefined,
             ),
           });
     const goalEvents =
@@ -694,48 +734,30 @@ function restrictAnalysis(
         ? sources.events
         : builder.source("event", {
             temporalDomain: "candidate",
-            attributes: EVENT_ATTRIBUTES,
-            selection: createStageSelection(
+            attributes: JOURNEY_LIST_EVENT_ATTRIBUTES,
+            selection: createJourneyListAnalysisStageSelection(
               sources.eventSelection,
               sources.filters,
               sources.expectedPlan,
               analysis.filter,
+              entity === "visitor" ? "visitors" : undefined,
             ),
           });
-    const ids = uniqueIdentities(builder, {
-      relations: [goalPages, goalEvents],
-      entityField: (relation) =>
-        relation === goalPages
-          ? pageIdentityField(builder, relation, entity)
-          : eventIdentityField(builder, relation, entity),
+    return appendJourneyListAnalysisIdentityRestriction({
+      builder,
+      pages: sources.pages,
+      events: sources.events,
+      goalPages,
+      goalEvents,
+      entity,
     });
-    return {
-      pages: builder.semiJoin(sources.pages, ids, [
-        {
-          left:
-            entity === "visitor"
-              ? "attribute:page.report.visitorId"
-              : "attribute:page.report.sessionId",
-          right: "identity",
-        },
-      ]),
-      events: builder.semiJoin(sources.events, ids, [
-        {
-          left:
-            entity === "visitor"
-              ? "attribute:event.report.ownerVisitorId"
-              : "attribute:event.report.ownerSessionId",
-          right: "identity",
-        },
-      ]),
-    };
   }
-
   const progressionSources = createJourneyFunnelProgressionSourceSelections({
     siteId: input.siteId,
     window: input.window,
     filters: input.filters,
     entityScope: entity,
+    preparedPlanOperation: entity === "visitor" ? "visitors" : "sessions",
   });
   const throughStepIndex = analysis.stepIndex;
   const progression = appendFunnelProgressionRelations({
@@ -743,6 +765,7 @@ function restrictAnalysis(
     sources: progressionSources,
     config: analysis.config,
     throughStepIndex,
+    preparedPlanOperation: entity === "visitor" ? "visitors" : "sessions",
   });
   const reached = progression.reachedSteps[analysis.stepIndex];
   const membership =
@@ -790,7 +813,7 @@ function filteredRows(input: {
   const needsEntityExpansion =
     filters.root !== null || Boolean(input.search?.trim());
   if (!needsEntityExpansion) return input.qualifyingRows;
-  const ids = uniqueIdentities(builder, {
+  const ids = membershipIdentityRows(builder, {
     relations: [hitRows],
     entityField: (relation) =>
       builder.slot(relation, entity === "visitor" ? "visitorId" : "sessionId"),
@@ -819,7 +842,7 @@ function searchScopedRows(input: {
     search: input.search,
   });
   if (!input.search?.trim()) return hitRows;
-  const ids = uniqueIdentities(input.builder, {
+  const ids = membershipIdentityRows(input.builder, {
     relations: [hitRows],
     entityField: (relation) =>
       input.builder.slot(
@@ -1353,14 +1376,14 @@ function appendSessionOutput(
   });
 }
 
-function finishListPlan(input: {
+function appendListOutput(input: {
   readonly builder: LogicalPlanBuilder;
   readonly relation: LogicalRelationHandle;
   readonly entity: ListEntity;
   readonly limit: number;
   readonly sort: ListSort<VisitorListSortKey | SessionListSortKey>;
   readonly cursor?: VisitorListCursor | SessionListCursor | null;
-}): ValidatedLogicalPlan {
+}): LogicalRelationHandle {
   const cursor = cursorPredicate(
     input.builder,
     input.relation,
@@ -1392,7 +1415,103 @@ function finishListPlan(input: {
     output,
     fields.map((name) => ({ name, slot: name })),
   );
+  return output;
+}
+
+function finishListPlan(input: {
+  readonly builder: LogicalPlanBuilder;
+  readonly relation: LogicalRelationHandle;
+  readonly entity: ListEntity;
+  readonly limit: number;
+  readonly sort: ListSort<VisitorListSortKey | SessionListSortKey>;
+  readonly cursor?: VisitorListCursor | SessionListCursor | null;
+}): ValidatedLogicalPlan {
+  appendListOutput(input);
   return input.builder.finish();
+}
+
+/** Appends the existing scoped Session list algorithm to a caller-owned builder. */
+export function appendJourneySessionListReport(input: {
+  readonly builder: LogicalPlanBuilder;
+  readonly pages: LogicalRelationHandle;
+  readonly events: LogicalRelationHandle;
+  readonly limit: number;
+  readonly sort: ListSort<SessionListSortKey>;
+  readonly search?: string;
+  readonly cursor?: SessionListCursor | null;
+  readonly sessionTarget?: CommonListInput["sessionTarget"];
+  readonly suppressReportRows?: boolean;
+}): LogicalRelationHandle {
+  let rows = scopedObservationRows({
+    builder: input.builder,
+    pages: input.pages,
+    events: input.events,
+    entity: "session",
+  });
+  rows = applySessionTarget(
+    input.builder,
+    rows,
+    "session",
+    input.sessionTarget,
+  );
+  rows = searchScopedRows({
+    builder: input.builder,
+    rows,
+    entity: "session",
+    search: input.search,
+  });
+  const eligible = nonemptyEntityRows(input.builder, rows, "session");
+  const facts = eventCounts(input.builder, input.events, "session");
+  const joined = joinListFacts(input.builder, "session", eligible, facts);
+  const reportRows = input.suppressReportRows
+    ? input.builder.filter(joined, input.builder.literal(false, BOOLEAN))
+    : joined;
+  return appendListOutput({
+    builder: input.builder,
+    relation: reportRows,
+    entity: "session",
+    limit: input.limit,
+    sort: input.sort,
+    cursor: input.cursor,
+  });
+}
+
+/** Appends the existing scoped Visitor list algorithm to a caller-owned builder. */
+export function appendJourneyVisitorListReport(input: {
+  readonly builder: LogicalPlanBuilder;
+  readonly pages: LogicalRelationHandle;
+  readonly events: LogicalRelationHandle;
+  readonly limit: number;
+  readonly sort: ListSort<VisitorListSortKey>;
+  readonly search?: string;
+  readonly cursor?: VisitorListCursor | null;
+  readonly suppressReportRows?: boolean;
+}): LogicalRelationHandle {
+  const rows = searchScopedRows({
+    builder: input.builder,
+    rows: scopedObservationRows({
+      builder: input.builder,
+      pages: input.pages,
+      events: input.events,
+      entity: "visitor",
+    }),
+    entity: "visitor",
+    search: input.search,
+  });
+  const eligible = nonemptyEntityRows(input.builder, rows, "visitor");
+  const facts = eventCounts(input.builder, input.events, "visitor");
+  const joined = joinListFacts(input.builder, "visitor", eligible, facts);
+  const reportRows = input.suppressReportRows
+    ? input.builder.filter(joined, input.builder.literal(false, BOOLEAN))
+    : joined;
+  return appendListOutput({
+    builder: input.builder,
+    relation: reportRows,
+    entity: "visitor",
+    limit: input.limit,
+    sort: input.sort,
+    cursor: input.cursor,
+  });
 }
 
 export function buildJourneyVisitorListReportPlan(
@@ -1400,49 +1519,45 @@ export function buildJourneyVisitorListReportPlan(
 ): ValidatedLogicalPlan {
   const sources = createJourneyListSources(input, "visitor");
   const selected = restrictAnalysis(sources, input, "visitor");
-  let rows: LogicalRelationHandle;
-  const events = selected.events;
   if (sources.scoped) {
-    rows = scopedObservationRows({
+    appendJourneyVisitorListReport({
       builder: sources.builder,
       pages: selected.pages,
       events: selected.events,
-      entity: "visitor",
-    });
-    rows = searchScopedRows({
-      builder: sources.builder,
-      rows,
-      entity: "visitor",
+      limit: input.limit,
+      sort: input.sort,
       search: input.search,
+      cursor: input.cursor,
     });
-  } else {
-    const pageBase = sources.pages;
-    const filteredPage =
-      input.filters.root === null
-        ? pageBase
-        : sources.builder.source("page", {
-            temporalDomain: "candidate",
-            attributes: PAGE_ATTRIBUTES,
-            selection: sources.pageSelection,
-          });
-    const qualifyingRows = projectPageObservationRows(
-      sources.builder,
-      filteredPage,
-    );
-    const expansionRows =
-      input.filters.root !== null || Boolean(input.search?.trim())
-        ? projectPageObservationRows(sources.builder, pageBase)
-        : qualifyingRows;
-    rows = filteredRows({
-      builder: sources.builder,
-      qualifyingRows,
-      expansionRows,
-      entity: "visitor",
-      filters: input.filters,
-      search: input.search,
-      targetApplied: false,
-    });
+    return sources.builder.finish();
   }
+  const events = selected.events;
+  const pageBase = sources.pages;
+  const filteredPage =
+    input.filters.root === null
+      ? pageBase
+      : sources.builder.source("page", {
+          temporalDomain: "candidate",
+          attributes: JOURNEY_LIST_PAGE_ATTRIBUTES,
+          selection: sources.pageSelection,
+        });
+  const qualifyingRows = projectPageObservationRows(
+    sources.builder,
+    filteredPage,
+  );
+  const expansionRows =
+    input.filters.root !== null || Boolean(input.search?.trim())
+      ? projectPageObservationRows(sources.builder, pageBase)
+      : qualifyingRows;
+  const rows = filteredRows({
+    builder: sources.builder,
+    qualifyingRows,
+    expansionRows,
+    entity: "visitor",
+    filters: input.filters,
+    search: input.search,
+    targetApplied: false,
+  });
   const eligible = nonemptyEntityRows(sources.builder, rows, "visitor");
   const facts = eventCounts(sources.builder, events, "visitor");
   const joined = joinListFacts(sources.builder, "visitor", eligible, facts);
@@ -1459,62 +1574,57 @@ export function buildJourneyVisitorListReportPlan(
 export function buildJourneySessionListReportPlan(
   input: SessionListInput,
 ): ValidatedLogicalPlan {
-  const sources = createJourneyListSources(input, "session");
+  const sources = createJourneyListSources(
+    input,
+    "session",
+    input.preparedPlanOperation,
+  );
   const selected = restrictAnalysis(sources, input, "session");
-  let rows: LogicalRelationHandle;
   const events = selected.events;
   if (sources.scoped) {
-    rows = scopedObservationRows({
+    appendJourneySessionListReport({
       builder: sources.builder,
       pages: selected.pages,
       events,
-      entity: "session",
-    });
-    rows = applySessionTarget(
-      sources.builder,
-      rows,
-      "session",
-      input.sessionTarget,
-    );
-    rows = searchScopedRows({
-      builder: sources.builder,
-      rows,
-      entity: "session",
+      limit: input.limit,
+      sort: input.sort,
       search: input.search,
+      cursor: input.cursor,
+      sessionTarget: input.sessionTarget,
     });
-  } else {
-    const pageBase = sources.pages;
-    const filteredPage =
-      input.filters.root === null
-        ? pageBase
-        : sources.builder.source("page", {
-            temporalDomain: "candidate",
-            attributes: PAGE_ATTRIBUTES,
-            selection: sources.pageSelection,
-          });
-    const targetedPage = applyPageTarget(
-      sources.builder,
-      filteredPage,
-      input.sessionTarget,
-    );
-    const qualifyingRows = projectPageObservationRows(
-      sources.builder,
-      targetedPage,
-    );
-    const expansionRows =
-      input.filters.root !== null || Boolean(input.search?.trim())
-        ? projectPageObservationRows(sources.builder, pageBase)
-        : qualifyingRows;
-    rows = filteredRows({
-      builder: sources.builder,
-      qualifyingRows,
-      expansionRows,
-      entity: "session",
-      filters: input.filters,
-      search: input.search,
-      targetApplied: Boolean(input.sessionTarget),
-    });
+    return sources.builder.finish();
   }
+  const pageBase = sources.pages;
+  const filteredPage =
+    input.filters.root === null
+      ? pageBase
+      : sources.builder.source("page", {
+          temporalDomain: "candidate",
+          attributes: JOURNEY_LIST_PAGE_ATTRIBUTES,
+          selection: sources.pageSelection,
+        });
+  const targetedPage = applyPageTarget(
+    sources.builder,
+    filteredPage,
+    input.sessionTarget,
+  );
+  const qualifyingRows = projectPageObservationRows(
+    sources.builder,
+    targetedPage,
+  );
+  const expansionRows =
+    input.filters.root !== null || Boolean(input.search?.trim())
+      ? projectPageObservationRows(sources.builder, pageBase)
+      : qualifyingRows;
+  const rows = filteredRows({
+    builder: sources.builder,
+    qualifyingRows,
+    expansionRows,
+    entity: "session",
+    filters: input.filters,
+    search: input.search,
+    targetApplied: Boolean(input.sessionTarget),
+  });
   const eligible = nonemptyEntityRows(sources.builder, rows, "session");
   const facts = eventCounts(sources.builder, events, "session");
   const joined = joinListFacts(sources.builder, "session", eligible, facts);

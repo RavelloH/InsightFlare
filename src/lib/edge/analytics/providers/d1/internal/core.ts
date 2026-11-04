@@ -6,4 +6,3 @@ export * from "./core-sources";
 export * from "./core-time";
 export * from "./core-types";
 export * from "./core-values";
-export * from "./scoped-dataset";

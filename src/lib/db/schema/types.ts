@@ -8,6 +8,7 @@ export interface SchemaColumnReference {
   readonly declaredType: string;
   readonly affinity: SqliteAffinity;
   readonly nullable: boolean;
+  readonly rowidAlias?: true;
   readonly primaryKeyPosition: number;
   readonly defaultSql: string | null;
   readonly hidden: number;
@@ -18,6 +19,8 @@ export interface SchemaIndexReference {
   readonly name: string;
   readonly unique: boolean;
   readonly columns: readonly (string | null)[];
+  /** Collation returned by PRAGMA index_xinfo for each key column, in key order. */
+  readonly collations?: readonly (string | null)[];
   readonly partial: boolean;
   readonly rawExpressionSql?: string;
 }
@@ -33,6 +36,8 @@ export interface SchemaForeignKeyReference {
 export interface SchemaObjectReference {
   readonly kind: "table" | "view";
   readonly name: string;
+  /** Proven table-column default only when the source DDL permits it. */
+  readonly defaultCollation?: "BINARY" | "unknown";
   readonly columns: Readonly<Record<string, SchemaColumnReference>>;
   readonly primaryKey: readonly string[];
   readonly indexes: readonly SchemaIndexReference[];

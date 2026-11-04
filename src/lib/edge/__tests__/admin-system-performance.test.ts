@@ -633,11 +633,28 @@ describe("system performance typed query plans", () => {
         "admin.visits.first",
       ].sort(),
     );
+    const physicalPlanVersionsByStatement = new Map<string, Set<number>>();
+    for (const query of compiled) {
+      const version = query.physicalPlanShape?.version;
+      if (version === undefined) continue;
+      const key = `${query.tag}:${Buffer.byteLength(query.sql, "utf8")}:${query.bindings?.length ?? 0}`;
+      const versions = physicalPlanVersionsByStatement.get(key) ?? new Set();
+      versions.add(version);
+      physicalPlanVersionsByStatement.set(key, versions);
+    }
     for (const observation of observations) {
       expect(observation.status).toBe("success");
       expect(observation.sqlBytes).toBeGreaterThan(0);
       expect(observation.bindings).toBeGreaterThan(0);
-      expect(observation.physicalPlanHash).toMatch(/^v1:/u);
+      const key = `${observation.tag}:${observation.sqlBytes}:${observation.bindings}`;
+      const versions = physicalPlanVersionsByStatement.get(key);
+      expect(versions?.size).toBeGreaterThan(0);
+      expect(observation.physicalPlanHash).toMatch(
+        new RegExp(
+          `^v(?:${[...(versions ?? [])].join("|")}):[a-f0-9]{64}$`,
+          "u",
+        ),
+      );
     }
   });
 

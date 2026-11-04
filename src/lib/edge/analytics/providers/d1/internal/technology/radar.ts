@@ -13,9 +13,7 @@ import type {
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { Env } from "@/lib/edge/types";
 
-interface TechnologyRadarRow {
-  readonly browser?: string;
-  readonly referrer?: string;
+interface TechnologyRadarMetrics {
   readonly sessions: number;
   readonly bounces: number;
   readonly avgDurationMs: number;
@@ -24,6 +22,43 @@ interface TechnologyRadarRow {
   readonly returningVisitors: number;
   readonly avgFrequency: number;
   readonly trafficShare: number;
+}
+
+type TechnologyRadarRow = TechnologyRadarMetrics & {
+  readonly browser?: string;
+  readonly referrer?: string;
+};
+
+/** Preserves the existing Radar DTO conversion for native and qualified rows. */
+export function mapTechnologyRadarRows(
+  rows: readonly Record<string, unknown>[],
+  dimension: "browser",
+): Array<TechnologyRadarMetrics & { readonly browser: string }>;
+export function mapTechnologyRadarRows(
+  rows: readonly Record<string, unknown>[],
+  dimension: "referrer",
+): Array<TechnologyRadarMetrics & { readonly referrer: string }>;
+export function mapTechnologyRadarRows(
+  rows: readonly Record<string, unknown>[],
+  dimension: TechnologyRadarDimension,
+): TechnologyRadarRow[];
+export function mapTechnologyRadarRows(
+  rows: readonly Record<string, unknown>[],
+  dimension: TechnologyRadarDimension,
+): TechnologyRadarRow[] {
+  return rows.map((row) => ({
+    ...(dimension === "browser"
+      ? { browser: String(row.browser ?? "").trim() }
+      : { referrer: String(row.referrer ?? "").trim() }),
+    sessions: Number(row.sessions ?? 0),
+    bounces: Number(row.bounces ?? 0),
+    avgDurationMs: Number(row.avgDurationMs ?? 0),
+    avgDepth: Number(row.avgDepth ?? 0),
+    visitors: Number(row.visitors ?? 0),
+    returningVisitors: Number(row.returningVisitors ?? 0),
+    avgFrequency: Number(row.avgFrequency ?? 0),
+    trafficShare: Number(row.trafficShare ?? 0),
+  }));
 }
 
 async function queryTechnologyRadarFromD1(
@@ -48,19 +83,7 @@ async function queryTechnologyRadarFromD1(
     }),
     TECHNOLOGY_RADAR_OUTPUTS[dimension],
   );
-  return rows.map((row) => ({
-    ...(dimension === "browser"
-      ? { browser: String(row.browser ?? "").trim() }
-      : { referrer: String(row.referrer ?? "").trim() }),
-    sessions: Number(row.sessions ?? 0),
-    bounces: Number(row.bounces ?? 0),
-    avgDurationMs: Number(row.avgDurationMs ?? 0),
-    avgDepth: Number(row.avgDepth ?? 0),
-    visitors: Number(row.visitors ?? 0),
-    returningVisitors: Number(row.returningVisitors ?? 0),
-    avgFrequency: Number(row.avgFrequency ?? 0),
-    trafficShare: Number(row.trafficShare ?? 0),
-  }));
+  return mapTechnologyRadarRows(rows, dimension);
 }
 
 export async function queryBrowserRadarFromD1(

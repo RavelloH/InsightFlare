@@ -20,6 +20,7 @@ import {
   type LogicalRelationHandle,
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
+import { appendQualifiedObservationMembership } from "@/lib/edge/analytics/engine/qualified-page-source";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
 import type { SemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import {
@@ -67,7 +68,7 @@ export function createFunnelProgressionSourceSelections(input: {
   readonly siteId: string;
   readonly window: QueryWindow;
   readonly filters: FilterDocument;
-  readonly preparedPlanOperation?: "visitors" | "sessions";
+  readonly preparedPlanOperation?: "visitors" | "sessions" | "visitor-sessions";
 }): FunnelProgressionSourceSelections {
   const metadata = scopedFilterMetadata(input.filters);
   const queryTime = createQueryTime(
@@ -115,6 +116,7 @@ function stepSelection(
   expectedPlan: ScopedFilterPlan | undefined,
   document: FilterDocument,
   predicate: ReturnType<typeof planObservationFilter>["visit"],
+  preparedPlanOperation?: "visitors" | "sessions" | "visitor-sessions",
 ): SemanticScopedSourceSelection {
   if (predicate.kind !== "expression") return base;
   return createSemanticScopedSourceSelection({
@@ -122,6 +124,7 @@ function stepSelection(
     filters,
     subject: base.subject,
     time: base.time,
+    ...(preparedPlanOperation ? { preparedPlanOperation } : {}),
     ...(expectedPlan ? { expectedPlan } : {}),
     ...(base.profile === "direct-page-entity-only-compat-v1"
       ? { compatibilityScope: base.entityKind! }
@@ -461,6 +464,12 @@ export interface AppendFunnelProgressionRelationsInput {
   readonly builder: LogicalPlanBuilder;
   readonly sources: FunnelProgressionSourceSelections;
   readonly config: FunnelConfigV2;
+  readonly qualificationMembership?: {
+    readonly matches: LogicalRelationHandle;
+    readonly siteId: string;
+    readonly countScope: "session" | "visitor";
+  };
+  readonly preparedPlanOperation?: "visitors" | "sessions" | "visitor-sessions";
   /** Omit for only the first matched bag; otherwise build the reached prefix. */
   readonly throughStepIndex?: number;
 }
@@ -574,15 +583,28 @@ export function appendFunnelProgressionRelations(
         sources.expectedPlan,
         document,
         applicability.visit,
+        input.preparedPlanOperation,
       );
       const pages = builder.source("page", {
         temporalDomain: "candidate",
         attributes: PAGE_ATTRIBUTES,
         selection,
       });
+      const qualifiedPages = input.qualificationMembership
+        ? appendQualifiedObservationMembership({
+            builder,
+            observations: pages,
+            matches: input.qualificationMembership.matches,
+            siteId: input.qualificationMembership.siteId,
+            ownerAttribute:
+              input.qualificationMembership.countScope === "session"
+                ? "page.report.sessionId"
+                : "page.report.visitorId",
+          })
+        : pages;
       pageRows = projectPageObservations({
         builder,
-        relation: pages,
+        relation: qualifiedPages,
         scope: config.progressionScope,
       });
     }
@@ -594,15 +616,28 @@ export function appendFunnelProgressionRelations(
         sources.expectedPlan,
         document,
         applicability.event,
+        input.preparedPlanOperation,
       );
       const events = builder.source("event", {
         temporalDomain: "candidate",
         attributes: EVENT_ATTRIBUTES,
         selection,
       });
+      const qualifiedEvents = input.qualificationMembership
+        ? appendQualifiedObservationMembership({
+            builder,
+            observations: events,
+            matches: input.qualificationMembership.matches,
+            siteId: input.qualificationMembership.siteId,
+            ownerAttribute:
+              input.qualificationMembership.countScope === "session"
+                ? "event.report.ownerSessionId"
+                : "event.report.ownerVisitorId",
+          })
+        : events;
       eventRows = projectEventObservations({
         builder,
-        relation: events,
+        relation: qualifiedEvents,
         scope: config.progressionScope,
       });
     }
@@ -714,10 +749,12 @@ export function createJourneyFunnelProgressionSourceSelections(input: {
   readonly window: QueryWindow;
   readonly filters: FilterDocument;
   readonly entityScope: "session" | "visitor";
+  readonly preparedPlanOperation?: "visitors" | "sessions" | "visitor-sessions";
 }): FunnelProgressionSourceSelections {
   const metadata = scopedFilterMetadata(input.filters);
   const preparedPlanOperation =
-    input.entityScope === "visitor" ? "visitors" : "sessions";
+    input.preparedPlanOperation ??
+    (input.entityScope === "visitor" ? "visitors" : "sessions");
   if (metadata || input.filters.root === null)
     return createFunnelProgressionSourceSelections({
       ...input,

@@ -26,12 +26,14 @@ import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
 import {
-  buildVisitFilterSql,
-  buildVisitSourceCte,
   scopedDatasetFor,
   scopedDatasetForUnpreparedReader,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import { buildVisitFilterSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-filters";
+import {
+  buildVisitSourceCte,
   visitSourceBindings,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import { queryLatestSiteActivity } from "@/lib/edge/analytics/providers/d1/internal/overview";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";

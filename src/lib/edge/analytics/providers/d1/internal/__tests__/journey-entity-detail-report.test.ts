@@ -13,17 +13,17 @@ import {
   buildJourneySessionDetailPlan,
   buildJourneyVisitorDetailPlan,
 } from "@/lib/edge/analytics/engine/journey-entity-detail-plan";
-import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
+import {
+  buildSessionAggregationSql,
+  buildVisitorAggregationSql,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-aggregation-oracle";
 import {
   buildDetailCustomEventSourceCte,
   buildTargetVisitSourceCte,
   detailCustomEventSourceBindings,
   targetVisitSourceBindings,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
-import {
-  buildSessionAggregationSql,
-  buildVisitorAggregationSql,
-} from "@/lib/edge/analytics/providers/d1/internal/journey-aggregation-sql";
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import {
   querySessionsForDetailFromD1,
   queryVisitorForDetailFromD1,
@@ -73,7 +73,7 @@ type LegacyReportRow = Record<string, unknown>;
 type JourneyDetailPlan = ReturnType<typeof buildJourneyVisitorDetailPlan>;
 type PhysicalPlanShape = Extract<
   NonNullable<ReturnType<typeof compileD1Query>["physicalPlanShape"]>,
-  { readonly version: 4 }
+  { readonly version: 12 }
 >;
 
 const databases = new Set<DatabaseSync>();
@@ -92,7 +92,6 @@ interface DetailQueryEvidence {
   readonly sqlBytes: number;
   readonly bindingCount: number;
   readonly sqlSha256: string;
-  readonly physicalPlanHash?: string;
   readonly physicalPlanShape?: PhysicalPlanShape;
   readonly explainDetails: readonly string[];
   readonly rawTableScanDetails: readonly string[];
@@ -528,23 +527,6 @@ function collectQueryEvidence(
       .prepare(`EXPLAIN QUERY PLAN ${sql}`)
       .all(...bindings) as unknown as ExplainQueryPlanRow[]
   ).map((row) => row.detail);
-  const physicalPlanPayload = physicalPlanShape
-    ? JSON.stringify([
-        "d1-query-shape-v4",
-        sql,
-        physicalPlanShape.cteCount,
-        physicalPlanShape.directScanProjectionCount,
-        physicalPlanShape.nativeMembershipCount,
-        physicalPlanShape.jsonMembershipCount,
-        physicalPlanShape.nativeRowRelationCount,
-        physicalPlanShape.jsonRowRelationCount,
-        physicalPlanShape.rightAnchorJoinOrderCount,
-        physicalPlanShape.uniqueLookupJoinOrderCount,
-        physicalPlanShape.parameterStrategy ?? null,
-        physicalPlanShape.parameterOccurrenceCount ?? null,
-        physicalPlanShape.parameterSlotCount ?? null,
-      ])
-    : undefined;
   return {
     statementCount,
     sqlBytes: Buffer.byteLength(sql, "utf8"),
@@ -553,7 +535,6 @@ function collectQueryEvidence(
     ...(physicalPlanShape
       ? {
           physicalPlanShape,
-          physicalPlanHash: `v4:${createHash("sha256").update(physicalPlanPayload!, "utf8").digest("hex")}`,
         }
       : {}),
     explainDetails,
@@ -604,9 +585,9 @@ function assertDetailQueryEvidence(
   const typedQuery = compileJourneyDetailQuery(plan, outputId);
   expect(typedQuery.sql).toBe(sql);
   expect(typedQuery.bindings).toEqual(bindings);
-  expect(typedQuery.physicalPlanShape?.version).toBe(4);
+  expect(typedQuery.physicalPlanShape?.version).toBe(12);
   const typedShape =
-    typedQuery.physicalPlanShape?.version === 4
+    typedQuery.physicalPlanShape?.version === 12
       ? typedQuery.physicalPlanShape
       : undefined;
   const evidence = collectQueryEvidence(
@@ -623,9 +604,6 @@ function assertDetailQueryEvidence(
   expect(evidence.sqlBytes, failureContext).toBeLessThanOrEqual(100_000);
   expect(evidence.bindingCount, failureContext).toBeLessThanOrEqual(100);
   expect(evidence.sqlSha256, failureContext).toMatch(/^[a-f0-9]{64}$/u);
-  expect(evidence.physicalPlanHash, failureContext).toMatch(
-    /^v4:[a-f0-9]{64}$/u,
-  );
   expect(evidence.physicalPlanShape?.rightAnchorJoinOrderCount).toBe(1);
   expect(evidence.physicalPlanShape?.uniqueLookupJoinOrderCount).toBe(1);
   expect(legacyEvidence.statementCount, failureContext).toBe(1);

@@ -2,14 +2,45 @@ import type {
   EpochMs,
   ReportingTimeZone,
 } from "@/lib/edge/analytics/contract/types";
-import { LogicalPlanBuilder } from "@/lib/edge/analytics/engine/logical/builder";
+import {
+  LogicalPlanBuilder,
+  type LogicalRelationHandle,
+} from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
 import type { SemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { createSemanticTemporalDomains } from "@/lib/edge/analytics/engine/semantic/time";
 
 export const ADVANCED_FILTER_ACTIVITY_OUTPUT_ID = "advanced-filter-activity";
-export const ADVANCED_FILTER_ACTIVITY_LIMIT = 20_001;
+export const ADVANCED_FILTER_MAX_ACTIVITIES = 20_000;
+if (
+  !Number.isSafeInteger(ADVANCED_FILTER_MAX_ACTIVITIES) ||
+  ADVANCED_FILTER_MAX_ACTIVITIES <= 0
+)
+  throw new Error("advanced_filter_activity_cap_must_be_positive_safe_integer");
+
+export const ADVANCED_FILTER_EXACT_AGGREGATE_VALUE_LIMIT = Math.floor(
+  Number.MAX_SAFE_INTEGER / ADVANCED_FILTER_MAX_ACTIVITIES,
+);
+export const ADVANCED_FILTER_ACTIVITY_LIMIT =
+  ADVANCED_FILTER_MAX_ACTIVITIES + 1;
+
+/** Keep Page / same-site Event eligibility shared by full-row and SQL paths. */
+export function eligibleAdvancedFilterActivities(
+  builder: LogicalPlanBuilder,
+  activities: LogicalRelationHandle,
+): LogicalRelationHandle {
+  const isPage = builder.compare(
+    "eq",
+    builder.slot(activities, "attribute:observation.kind"),
+    builder.literal("page", { kind: "scalar", scalar: "string" }),
+  );
+  const hasSameSiteEventName = builder.isNull(
+    builder.slot(activities, "attribute:observation.sameSiteEventName"),
+    true,
+  );
+  return builder.filter(activities, builder.or(isPage, hasSameSiteEventName));
+}
 
 const ADVANCED_FILTER_ACTIVITY_CONTEXT_FIELDS = [
   ["started_at", "observation.contextPageStartedAt"],
@@ -110,20 +141,9 @@ export function buildAdvancedFilterActivityPlan(input: {
     attributes,
     includeOccurrenceTime: true,
   });
-  const attribute = (name: string) =>
-    builder.slot(activities, `attribute:observation.${name}`);
-  const isPage = builder.compare(
-    "eq",
-    attribute("kind"),
-    builder.literal("page", { kind: "scalar", scalar: "string" }),
-  );
-  const hasSameSiteEventName = builder.isNull(
-    attribute("sameSiteEventName"),
-    true,
-  );
-  const eligibleActivities = builder.filter(
+  const eligibleActivities = eligibleAdvancedFilterActivities(
+    builder,
     activities,
-    builder.or(isPage, hasSameSiteEventName),
   );
 
   const projections = Object.fromEntries([

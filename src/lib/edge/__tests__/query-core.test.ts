@@ -28,22 +28,30 @@ import {
   parseWindow,
 } from "@/lib/edge/analytics/interfaces/dashboard/protocol/parsers";
 import {
+  compileScopedDatasetSql,
+  scopedDatasetFor,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import {
+  buildEventFilterSql,
+  buildVisitFilterSql,
+  eventRecordOrderBy,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-filters";
+import {
+  buildVisitSourceCte,
+  visitSourceBindings,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import {
   addDimensionValue,
   addGeoDimensionValue,
   appendSqlConditions,
-  buildEventFilterSql,
   buildTimeBuckets,
-  buildVisitFilterSql,
-  buildVisitSourceCte,
   clientDimensionDefinition,
-  compileScopedDatasetSql,
   customEventJsonTypeCode,
   customEventJsonTypeLabel,
   dedupeFilterOptions,
   DIRECT_REFERRER_FILTER_VALUE,
   emptyOverviewAggregateRow,
   emptyPerformanceRouteMetrics,
-  eventRecordOrderBy,
   finalizeDimensionBuckets,
   finalizeGeoDimensionBuckets,
   formatPageLabel,
@@ -64,12 +72,10 @@ import {
   mapVisitors,
   mapVisitPerformanceMetrics,
   performanceMetricColumn,
-  scopedDatasetFor,
   shareTrendSeriesKey,
   sourceLabel,
   timeBucketCase,
   timeBucketTimestamp,
-  visitSourceBindings,
   withoutFilterKey,
   withoutGeoFilter,
 } from "@/lib/edge/analytics/providers/d1/internal/core";

@@ -13,6 +13,20 @@ const STRING = { kind: "scalar", scalar: "string" } as const;
 const NUMBER = { kind: "scalar", scalar: "number" } as const;
 const BROWSER_VERSION_UNKNOWN_TOKEN = "__browser_version_unknown__";
 
+export function normalizeBrowserVersionBreakdownBrowserLimit(
+  browserLimit: number,
+): number | null {
+  return Number.isFinite(browserLimit) && browserLimit > 0
+    ? Math.max(1, Math.floor(browserLimit))
+    : null;
+}
+
+export function normalizeBrowserVersionBreakdownVersionLimit(
+  versionLimit: number,
+): number {
+  return Math.min(Math.max(1, versionLimit), 8);
+}
+
 export const BROWSER_VERSION_BREAKDOWN_OUTPUT =
   "technology-browser-version-breakdown";
 
@@ -47,10 +61,10 @@ function distinctNonempty(
   );
 }
 
-function finishOutput(
+function appendOutput(
   builder: LogicalPlanBuilder,
   relation: LogicalRelationHandle,
-): ValidatedLogicalPlan {
+): void {
   builder.output(BROWSER_VERSION_BREAKDOWN_OUTPUT, relation, [
     { name: "browser", slot: "browser" },
     { name: "views", slot: "views" },
@@ -63,31 +77,15 @@ function finishOutput(
     { name: "versionVisitors", slot: "versionVisitors" },
     { name: "versionSessions", slot: "versionSessions" },
   ]);
-  return builder.finish();
 }
 
-/** Builds the one-statement browser and browser-major-version breakdown. */
-export function buildBrowserVersionBreakdownPlan(
-  input: BrowserVersionBreakdownPlanInput,
-): ValidatedLogicalPlan {
-  const { builder, pages } = createPageReportSource({
-    siteId: input.siteId,
-    queryTime: input.queryTime,
-    filters: input.filters,
-    ...(input.scopePlan
-      ? {
-          scopePlan: input.scopePlan,
-          preparedTimePolicy: "reader-window-v1" as const,
-        }
-      : {}),
-    attributes: [
-      "page.report.browser",
-      "page.report.browserVersion",
-      "page.report.visitorId",
-      "page.report.sessionId",
-    ],
-  });
-
+/** Appends the existing Browser and browser-major-version outputs to a Page bag. */
+export function appendBrowserVersionBreakdownReport(input: {
+  readonly builder: LogicalPlanBuilder;
+  readonly pages: LogicalRelationHandle;
+  readonly browserLimit: number;
+}): void {
+  const { builder, pages } = input;
   const browser = builder.normalizeString(
     builder.coalesce(
       pageAttribute(builder, pages, "browser"),
@@ -162,10 +160,9 @@ export function buildBrowserVersionBreakdownPlan(
       { slot: "browser", direction: "asc", nulls: "first" },
     ],
   });
-  const normalizedBrowserLimit =
-    Number.isFinite(input.browserLimit) && input.browserLimit > 0
-      ? Math.max(1, Math.floor(input.browserLimit))
-      : null;
+  const normalizedBrowserLimit = normalizeBrowserVersionBreakdownBrowserLimit(
+    input.browserLimit,
+  );
   const topBrowsers =
     normalizedBrowserLimit === null
       ? rankedBrowsers
@@ -236,5 +233,34 @@ export function buildBrowserVersionBreakdownPlan(
     { slot: "versionSessions", direction: "desc", nulls: "last" },
     { slot: "version", direction: "asc", nulls: "first" },
   ]);
-  return finishOutput(builder, sorted);
+  appendOutput(builder, sorted);
+}
+
+/** Builds the one-statement browser and browser-major-version breakdown. */
+export function buildBrowserVersionBreakdownPlan(
+  input: BrowserVersionBreakdownPlanInput,
+): ValidatedLogicalPlan {
+  const { builder, pages } = createPageReportSource({
+    siteId: input.siteId,
+    queryTime: input.queryTime,
+    filters: input.filters,
+    ...(input.scopePlan
+      ? {
+          scopePlan: input.scopePlan,
+          preparedTimePolicy: "reader-window-v1" as const,
+        }
+      : {}),
+    attributes: [
+      "page.report.browser",
+      "page.report.browserVersion",
+      "page.report.visitorId",
+      "page.report.sessionId",
+    ],
+  });
+  appendBrowserVersionBreakdownReport({
+    builder,
+    pages,
+    browserLimit: input.browserLimit,
+  });
+  return builder.finish();
 }

@@ -618,7 +618,7 @@ describe("notification rule Typed DAL differential checks", () => {
     // Keep sorting as the terminal relation operation so no projection sits
     // outside the order clause.
     expect(trace.preparedSql[adminBefore]).toMatch(
-      /ORDER BY .+ ASC\) AS "q\d+"$/,
+      /ORDER BY .+ ASC\) AS q\d+$/,
     );
     expect(trace.preparedSql[adminBefore]).toContain("created_at");
     expect(trace.preparedSql).toHaveLength(adminBefore + 1);

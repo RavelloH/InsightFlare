@@ -24,17 +24,17 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { PAGE_DIMENSION_SELECTIONS } from "@/lib/edge/analytics/engine/dimension-report-plan";
+import { scopedDatasetFor } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import { buildVisitFilterSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-filters";
+import {
+  buildVisitSourceCte,
+  visitSourceBindings,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import {
   decodeComparisonDimensionCursor,
   queryComparisonDimensionPageFromD1,
   queryComparisonSessionPathPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/comparison-dimensions";
-import {
-  buildVisitFilterSql,
-  buildVisitSourceCte,
-  scopedDatasetFor,
-  visitSourceBindings,
-} from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core-types";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";

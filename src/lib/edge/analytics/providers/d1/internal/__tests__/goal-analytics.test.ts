@@ -16,9 +16,9 @@ import {
   queryGoalTimeseriesParentOracle as queryGoalTimeseriesFromD1,
   withGoalTimeseriesTimestamps,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/goal-timeseries-parent-oracle";
+import type { ScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
 import { buildTimeBuckets } from "@/lib/edge/analytics/providers/d1/internal/core-time";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core-types";
-import type { ScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import { parseFilterDsl } from "@/lib/filter-contract";
 
 type Binding = string | number | null;

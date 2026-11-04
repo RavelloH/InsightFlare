@@ -9,10 +9,16 @@ import {
   type DatabasePhysicalPlanShape,
   type DatabaseQueryObservation,
   type DatabaseQueryObserver,
+  isNull,
   lowerLogicalPlan,
   param,
   project,
+  rowNumber,
+  scan,
+  union,
+  window,
 } from "@/lib/db";
+import { schema } from "@/lib/db/schema";
 import { buildJourneyVisitorDetailPlan } from "@/lib/edge/analytics/engine/journey-entity-detail-plan";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { sha256Hex } from "@/lib/sha256";
@@ -76,6 +82,60 @@ function recordingObserver(
     },
   };
 }
+
+it("hashes native null ordering from independent window nodes without local-index collisions", async () => {
+  const source = scan(schema.visits);
+  const rankedBranch = (direction: "ASC" | "DESC") => {
+    const ranked = window(source, {
+      rank: rowNumber({
+        orderBy: [
+          { expression: isNull(source.columns.duration_ms!), direction: "ASC" },
+          { expression: source.columns.duration_ms!, direction },
+          { expression: source.columns.visit_id!, direction: "ASC" },
+        ],
+      }),
+    });
+    return project(ranked, {
+      id: ranked.columns.visit_id!,
+      rank: ranked.columns.rank!,
+    });
+  };
+  const relation = union(rankedBranch("ASC"), rankedBranch("DESC"), true);
+  const query = compileD1Query(relation);
+  const events: DatabaseQueryObservation[] = [];
+  const { database } = createDatabase();
+  const runtime = createDatabaseRuntime(database, {
+    observer: recordingObserver(events),
+  });
+
+  await runtime.all(query);
+  await waitForObservations(events, 1);
+  expect(events[0]?.physicalPlanHash).toMatch(/^v12:/u);
+  const shape = query.physicalPlanShape;
+  if (shape?.version !== 12) throw new Error("missing_native_window_shape");
+  expect(shape.nativeNullOrderingCount).toBe(2);
+  expect(shape.nativeNullOrderings.map((key) => key.windowIndex)).toEqual([
+    0, 1,
+  ]);
+  expect(shape.nativeNullOrderings.map((key) => key.pairIndex)).toEqual([0, 0]);
+
+  await runtime.all(compileD1Query(relation));
+  await waitForObservations(events, 2);
+  expect(events[1]?.physicalPlanHash).toBe(events[0]?.physicalPlanHash);
+
+  await runtime.all({
+    ...query,
+    physicalPlanShape: {
+      ...shape,
+      nativeNullOrderings: shape.nativeNullOrderings.map((key) => ({
+        ...key,
+        windowIndex: 0,
+      })),
+    },
+  });
+  await waitForObservations(events, 3);
+  expect(events[2]?.physicalPlanHash).toBeNull();
+});
 
 async function waitForObservations(
   events: DatabaseQueryObservation[],
@@ -545,7 +605,7 @@ describe("D1 database runtime", () => {
     expect(result.success).toBe(true);
   });
 
-  it("observes a compiled Journey anchor as value-free v4 including numbered reuse", async () => {
+  it("observes a compiled Journey anchor as value-free v8 including numbered reuse", async () => {
     const events: DatabaseQueryObservation[] = [];
     const { database, prepared } = createDatabase();
     const runtime = createDatabaseRuntime(database, {
@@ -563,13 +623,31 @@ describe("D1 database runtime", () => {
     );
     const shape = first.physicalPlanShape;
     expect(shape).toMatchObject({
-      version: 4,
+      version: 12,
       rightAnchorJoinOrderCount: 1,
       uniqueLookupJoinOrderCount: 1,
       parameterStrategy: "numbered-reuse",
     });
-    expect(shape?.version).toBe(4);
-    if (shape?.version !== 4) throw new Error("journey_v4_shape_missing");
+    expect(shape?.version).toBe(12);
+    if (shape?.version !== 12) throw new Error("journey_v12_shape_missing");
+    expect(shape.singletonRankFusionCount).toBe(0);
+    expect(shape.nativeNullOrderingCount).toBe(1);
+    expect(shape.nativeNullOrderings).toEqual([
+      {
+        windowIndex: 0,
+        pairIndex: 0,
+        columnIndex: 3,
+        valueDirection: "ASC",
+        nullPlacement: "LAST",
+        emissionCount: 1,
+      },
+    ]);
+    expect(shape.directMaterializedReferenceCount).toBe(3);
+    expect(shape.directMaterializedReferences).toEqual([
+      { definitionIndex: 0, fieldCount: 2, emissionCount: 2 },
+      { definitionIndex: 1, fieldCount: 19, emissionCount: 4 },
+      { definitionIndex: 2, fieldCount: 6, emissionCount: 3 },
+    ]);
     const occurrenceCount = shape.parameterOccurrenceCount;
     const slotCount = shape.parameterSlotCount;
     if (occurrenceCount === undefined || slotCount === undefined) {
@@ -585,23 +663,8 @@ describe("D1 database runtime", () => {
     await runtime.all(second);
     await waitForObservations(events, 2);
 
-    const expectedHash = `v4:${await sha256Hex(
-      JSON.stringify([
-        "d1-query-shape-v4",
-        first.sql,
-        shape.cteCount,
-        shape.directScanProjectionCount,
-        shape.nativeMembershipCount,
-        shape.jsonMembershipCount,
-        shape.nativeRowRelationCount,
-        shape.jsonRowRelationCount,
-        shape.rightAnchorJoinOrderCount,
-        shape.uniqueLookupJoinOrderCount,
-        shape.parameterStrategy ?? null,
-        shape.parameterOccurrenceCount ?? null,
-        shape.parameterSlotCount ?? null,
-      ]),
-    )}`;
+    const expectedHash = events[0]?.physicalPlanHash;
+    expect(expectedHash).toMatch(/^v12:/u);
     expect(events.map((event) => event.physicalPlanHash)).toEqual([
       expectedHash,
       expectedHash,
@@ -650,6 +713,769 @@ describe("D1 database runtime", () => {
       status: "success",
       physicalPlanHash: null,
     });
+  });
+
+  // These are public observer-input shape contracts. They verify runtime
+  // validation and hashing only; they do not claim the optimizer selected the
+  // supplied strategy metadata.
+  it("hashes the fact-local index and key mapping in v5 query shapes", async () => {
+    const events: DatabaseQueryObservation[] = [];
+    const { database } = createDatabase();
+    const runtime = createDatabaseRuntime(database, {
+      observer: recordingObserver(events),
+    });
+    const shape: DatabasePhysicalPlanShape = {
+      version: 5,
+      cteCount: 2,
+      directScanProjectionCount: 1,
+      nativeMembershipCount: 0,
+      jsonMembershipCount: 0,
+      nativeRowRelationCount: 0,
+      jsonRowRelationCount: 0,
+      rightAnchorJoinOrderCount: 0,
+      uniqueLookupJoinOrderCount: 0,
+      factLocalIndexedJoinStrategies: [
+        {
+          tableName: "custom_event_json_nodes",
+          indexName: "idx_custom_event_nodes_event_parent",
+          keyColumns: [
+            { name: "event_pk", leftIndex: 0, rightIndex: 0 },
+            { name: "parent_node_id", leftIndex: 1, rightIndex: 2 },
+          ],
+        },
+      ],
+    };
+
+    await runtime.all({ sql: "SELECT 1", physicalPlanShape: shape });
+    await waitForObservations(events, 1);
+    const expectedHash = `v5:${await sha256Hex(
+      JSON.stringify([
+        "d1-query-shape-v5",
+        "SELECT 1",
+        shape.cteCount,
+        shape.directScanProjectionCount,
+        shape.nativeMembershipCount,
+        shape.jsonMembershipCount,
+        shape.nativeRowRelationCount,
+        shape.jsonRowRelationCount,
+        shape.rightAnchorJoinOrderCount,
+        shape.uniqueLookupJoinOrderCount,
+        shape.factLocalIndexedJoinStrategies.map(
+          ({ tableName, indexName, keyColumns }) => [
+            tableName,
+            indexName,
+            keyColumns.map(({ name, leftIndex, rightIndex }) => [
+              name,
+              leftIndex,
+              rightIndex,
+            ]),
+          ],
+        ),
+        null,
+        null,
+        null,
+      ]),
+    )}`;
+    expect(events[0]?.physicalPlanHash).toBe(expectedHash);
+
+    await runtime.all({
+      sql: "SELECT 1",
+      physicalPlanShape: {
+        ...shape,
+        factLocalIndexedJoinStrategies: [
+          {
+            ...shape.factLocalIndexedJoinStrategies[0]!,
+            indexName: "other_index",
+          },
+        ],
+      },
+    });
+    await waitForObservations(events, 2);
+    expect(events[1]?.physicalPlanHash).not.toBe(expectedHash);
+
+    const malformedShape: DatabasePhysicalPlanShape = {
+      ...shape,
+      factLocalIndexedJoinStrategies: [
+        {
+          ...shape.factLocalIndexedJoinStrategies[0]!,
+          keyColumns: [
+            { name: "event_pk", leftIndex: 0, rightIndex: 0 },
+            { name: "parent_node_id", leftIndex: 0, rightIndex: 1 },
+          ],
+        },
+      ],
+    };
+    await runtime.all({ sql: "SELECT 1", physicalPlanShape: malformedShape });
+    await waitForObservations(events, 3);
+    expect(events[2]?.physicalPlanHash).toBeNull();
+  });
+
+  it("hashes validated conditional lookup choices in v6 without hashing bindings", async () => {
+    const events: DatabaseQueryObservation[] = [];
+    const { database } = createDatabase();
+    const runtime = createDatabaseRuntime(database, {
+      observer: recordingObserver(events),
+    });
+    const shape: DatabasePhysicalPlanShape = {
+      version: 6,
+      cteCount: 1,
+      directScanProjectionCount: 0,
+      nativeMembershipCount: 0,
+      jsonMembershipCount: 0,
+      nativeRowRelationCount: 0,
+      jsonRowRelationCount: 0,
+      rightAnchorJoinOrderCount: 0,
+      uniqueLookupJoinOrderCount: 0,
+      factLocalIndexedJoinStrategies: [],
+      conditionalLookupCount: 1,
+      conditionalLookupStrategies: [
+        {
+          tableName: "archive_objects",
+          indexName: "idx_archive_objects_site_pk_hour",
+          keyColumns: [
+            { name: "site_pk", leftIndex: 10, rightIndex: 10 },
+            { name: "start_hour", leftIndex: 2, rightIndex: 2 },
+          ],
+          selectedKey: { name: "site_pk", leftIndex: 10, rightIndex: 10 },
+          guardConjunctCount: 1,
+        },
+      ],
+    };
+
+    await runtime.all({
+      sql: "SELECT * FROM records WHERE value > ?",
+      bindings: ["private-a"],
+      physicalPlanShape: shape,
+    });
+    await runtime.all({
+      sql: "SELECT * FROM records WHERE value > ?",
+      bindings: ["private-b"],
+      physicalPlanShape: shape,
+    });
+    await runtime.all({
+      sql: "SELECT * FROM records WHERE value >= ?",
+      bindings: ["private-b"],
+      physicalPlanShape: shape,
+    });
+    await runtime.all({
+      sql: "SELECT * FROM records WHERE value > ?",
+      bindings: ["private-b"],
+      physicalPlanShape: {
+        ...shape,
+        conditionalLookupStrategies: [
+          {
+            ...shape.conditionalLookupStrategies[0]!,
+            selectedKey: {
+              name: "start_hour",
+              leftIndex: 2,
+              rightIndex: 2,
+            },
+          },
+        ],
+      },
+    });
+    await runtime.all({
+      sql: "SELECT * FROM records WHERE value > ?",
+      bindings: ["private-b"],
+      physicalPlanShape: {
+        ...shape,
+        parameterStrategy: "numbered-reuse",
+        parameterOccurrenceCount: 102,
+        parameterSlotCount: 101,
+      },
+    });
+    await runtime.all({
+      sql: "SELECT * FROM records WHERE value > ?",
+      bindings: ["private-b"],
+      physicalPlanShape: { ...shape, conditionalLookupCount: 2 },
+    });
+    await runtime.all({
+      sql: "SELECT * FROM records WHERE value > ?",
+      bindings: ["private-b"],
+      physicalPlanShape: {
+        ...shape,
+        conditionalLookupCount: 2,
+        conditionalLookupStrategies: [
+          {
+            ...shape.conditionalLookupStrategies[0]!,
+            keyColumns: [
+              { name: "K", leftIndex: 1, rightIndex: 1 },
+              { name: "k", leftIndex: 2, rightIndex: 2 },
+            ],
+            selectedKey: { name: "K", leftIndex: 1, rightIndex: 1 },
+          },
+          shape.conditionalLookupStrategies[0]!,
+        ],
+      },
+    });
+    await waitForObservations(events, 7);
+
+    const hashes = events.map(({ physicalPlanHash }) => physicalPlanHash);
+    const validHashes = hashes.filter(
+      (hash): hash is string => typeof hash === "string",
+    );
+    const frequencies = new Map<string, number>();
+    for (const hash of validHashes)
+      frequencies.set(hash, (frequencies.get(hash) ?? 0) + 1);
+    expect(validHashes).toHaveLength(5);
+    expect(validHashes.every((hash) => hash.startsWith("v6:"))).toBe(true);
+    expect([...frequencies.values()].sort()).toEqual([1, 1, 1, 2]);
+    expect(hashes.filter((hash) => hash === null)).toHaveLength(2);
+    expect(JSON.stringify(events)).not.toContain("private-");
+  });
+
+  it("hashes validated self-membership metadata in v7", async () => {
+    const events: DatabaseQueryObservation[] = [];
+    const { database } = createDatabase();
+    const runtime = createDatabaseRuntime(database, {
+      observer: recordingObserver(events),
+    });
+    const shape: DatabasePhysicalPlanShape = {
+      version: 7,
+      cteCount: 1,
+      directScanProjectionCount: 2,
+      nativeMembershipCount: 0,
+      jsonMembershipCount: 0,
+      nativeRowRelationCount: 0,
+      jsonRowRelationCount: 0,
+      rightAnchorJoinOrderCount: 0,
+      uniqueLookupJoinOrderCount: 0,
+      factLocalIndexedJoinStrategies: [],
+      conditionalLookupCount: 0,
+      conditionalLookupStrategies: [],
+      selfMembershipCount: 1,
+    };
+    const sql = "SELECT ? AS value FROM visits WHERE duration_ms IS NOT NULL";
+
+    await runtime.all({
+      sql,
+      bindings: ["private-a"],
+      physicalPlanShape: shape,
+    });
+    await runtime.all({
+      sql,
+      bindings: ["private-b"],
+      physicalPlanShape: shape,
+    });
+    await runtime.all({
+      sql,
+      physicalPlanShape: { ...shape, selfMembershipCount: 2 },
+    });
+    await runtime.all({
+      sql,
+      physicalPlanShape: { ...shape, selfMembershipCount: 0 },
+    });
+    await waitForObservations(events, 4);
+
+    const expectedHash = `v7:${await sha256Hex(
+      JSON.stringify([
+        "d1-query-shape-v7",
+        sql,
+        shape.cteCount,
+        shape.directScanProjectionCount,
+        shape.nativeMembershipCount,
+        shape.jsonMembershipCount,
+        shape.nativeRowRelationCount,
+        shape.jsonRowRelationCount,
+        shape.rightAnchorJoinOrderCount,
+        shape.uniqueLookupJoinOrderCount,
+        [],
+        shape.conditionalLookupCount,
+        [],
+        shape.selfMembershipCount,
+        null,
+        null,
+        null,
+      ]),
+    )}`;
+    const hashes = events.map(({ physicalPlanHash }) => physicalPlanHash);
+    expect(hashes.filter((hash) => hash === expectedHash)).toHaveLength(2);
+    expect(
+      hashes.filter((hash) => hash !== null && hash.startsWith("v7:")),
+    ).toHaveLength(3);
+    expect(hashes.filter((hash) => hash === null)).toHaveLength(1);
+    expect(JSON.stringify(events)).not.toContain("private-");
+  });
+
+  it("hashes emitted lexicographic comparison metadata in v9", async () => {
+    const events: DatabaseQueryObservation[] = [];
+    const { database } = createDatabase();
+    const runtime = createDatabaseRuntime(database, {
+      observer: recordingObserver(events),
+    });
+    const base = {
+      cteCount: 0,
+      directScanProjectionCount: 0,
+      nativeMembershipCount: 0,
+      jsonMembershipCount: 0,
+      nativeRowRelationCount: 0,
+      jsonRowRelationCount: 0,
+      rightAnchorJoinOrderCount: 0,
+      uniqueLookupJoinOrderCount: 0,
+      factLocalIndexedJoinStrategies: [],
+      conditionalLookupCount: 0,
+      conditionalLookupStrategies: [],
+      selfMembershipCount: 0,
+      rowPipelineChoices: [],
+      lexicographicComparisonCount: 1,
+    } as const;
+    const sql = "SELECT (a, b) > (c, d) AS matched";
+    const shapes = [
+      {
+        version: 9,
+        ...base,
+        lexicographicComparisons: [
+          { direction: ">", componentCount: 2, emissionCount: 1 },
+        ],
+      },
+      {
+        version: 9,
+        ...base,
+        lexicographicComparisons: [
+          { direction: ">", componentCount: 3, emissionCount: 1 },
+        ],
+      },
+      {
+        version: 9,
+        ...base,
+        lexicographicComparisons: [
+          { direction: "<", componentCount: 2, emissionCount: 1 },
+        ],
+      },
+      {
+        version: 9,
+        ...base,
+        lexicographicComparisons: [
+          { direction: ">", componentCount: 1, emissionCount: 1 },
+        ],
+      },
+    ] satisfies Extract<DatabasePhysicalPlanShape, { readonly version: 9 }>[];
+    for (const shape of shapes)
+      await runtime.all({
+        sql,
+        bindings: ["private-value"],
+        physicalPlanShape: shape,
+      });
+    await waitForObservations(events, shapes.length);
+
+    const hashes = events.map(({ physicalPlanHash }) => physicalPlanHash);
+    const validHashes = hashes.filter(
+      (hash): hash is string => typeof hash === "string",
+    );
+    expect(validHashes).toHaveLength(3);
+    expect(validHashes.every((hash) => hash.startsWith("v9:"))).toBe(true);
+    expect(new Set(validHashes).size).toBe(3);
+    expect(hashes.filter((hash) => hash === null)).toHaveLength(1);
+    const expectedHash = `v9:${await sha256Hex(
+      JSON.stringify([
+        "d1-query-shape-v9",
+        sql,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        [],
+        0,
+        [],
+        0,
+        [],
+        1,
+        [[">", 2, 1]],
+        null,
+        null,
+        null,
+      ]),
+    )}`;
+    expect(validHashes).toContain(expectedHash);
+    expect(JSON.stringify(events)).not.toContain("private-value");
+  });
+
+  it("hashes only emitted SemiJoin membership metadata in v10", async () => {
+    const events: DatabaseQueryObservation[] = [];
+    const { database } = createDatabase();
+    const runtime = createDatabaseRuntime(database, {
+      observer: recordingObserver(events),
+    });
+    const base = {
+      cteCount: 0,
+      directScanProjectionCount: 0,
+      nativeMembershipCount: 0,
+      jsonMembershipCount: 0,
+      nativeRowRelationCount: 0,
+      jsonRowRelationCount: 0,
+      rightAnchorJoinOrderCount: 0,
+      uniqueLookupJoinOrderCount: 0,
+      factLocalIndexedJoinStrategies: [],
+      conditionalLookupCount: 0,
+      conditionalLookupStrategies: [],
+      selfMembershipCount: 0,
+      rowPipelineChoices: [],
+      lexicographicComparisonCount: 0,
+      lexicographicComparisons: [],
+      semiMembershipCount: 1,
+    } as const;
+    const shapes = [
+      {
+        version: 10,
+        ...base,
+        semiMemberships: [{ keyCount: 1, emissionCount: 1 }],
+      },
+      {
+        version: 10,
+        ...base,
+        semiMemberships: [{ keyCount: 2, emissionCount: 1 }],
+      },
+      {
+        version: 10,
+        ...base,
+        semiMembershipCount: 2,
+        semiMemberships: [{ keyCount: 2, emissionCount: 1 }],
+      },
+    ] satisfies Extract<DatabasePhysicalPlanShape, { readonly version: 10 }>[];
+    for (const shape of shapes)
+      await runtime.all({
+        sql: "SELECT ?",
+        bindings: ["private-value"],
+        physicalPlanShape: shape,
+      });
+    await waitForObservations(events, shapes.length);
+
+    const hashes = events.map(({ physicalPlanHash }) => physicalPlanHash);
+    const validHashes = hashes.filter(
+      (hash): hash is string => typeof hash === "string",
+    );
+    expect(validHashes).toHaveLength(2);
+    expect(validHashes.every((hash) => hash.startsWith("v10:"))).toBe(true);
+    expect(new Set(validHashes).size).toBe(2);
+    expect(hashes.filter((hash) => hash === null)).toHaveLength(1);
+    expect(JSON.stringify(events)).not.toContain("private-value");
+  });
+
+  it("hashes only validated emitted singleton-rank metadata in v11", async () => {
+    const events: DatabaseQueryObservation[] = [];
+    const { database } = createDatabase();
+    const runtime = createDatabaseRuntime(database, {
+      observer: recordingObserver(events),
+    });
+    const base = {
+      cteCount: 0,
+      directScanProjectionCount: 0,
+      nativeMembershipCount: 0,
+      jsonMembershipCount: 0,
+      nativeRowRelationCount: 0,
+      jsonRowRelationCount: 0,
+      rightAnchorJoinOrderCount: 0,
+      uniqueLookupJoinOrderCount: 0,
+      factLocalIndexedJoinStrategies: [],
+      conditionalLookupCount: 0,
+      conditionalLookupStrategies: [],
+      selfMembershipCount: 0,
+      rowPipelineChoices: [
+        {
+          nodeKinds: ["filter", "project"],
+          outputColumnIndexes: [0],
+          filterColumnIndexes: [[0]],
+        },
+      ],
+      lexicographicComparisonCount: 0,
+      lexicographicComparisons: [],
+      semiMembershipCount: 0,
+      semiMemberships: [],
+      singletonRankFusionCount: 1,
+    } as const;
+    const shapes = [
+      {
+        version: 11,
+        ...base,
+        singletonRankFusions: [
+          {
+            partitionFieldCount: 1,
+            keyFieldCount: 1,
+            consumerCertificateCount: 0,
+            emissionCount: 1,
+            distinct: true,
+          },
+        ],
+      },
+      {
+        version: 11,
+        ...base,
+        singletonRankFusions: [
+          {
+            partitionFieldCount: 2,
+            keyFieldCount: 1,
+            consumerCertificateCount: 0,
+            emissionCount: 1,
+            distinct: true,
+          },
+        ],
+      },
+    ] satisfies Extract<DatabasePhysicalPlanShape, { readonly version: 11 }>[];
+    for (const shape of shapes)
+      await runtime.all({
+        sql: "SELECT ?",
+        bindings: ["private-value"],
+        physicalPlanShape: shape,
+      });
+    await runtime.all({
+      sql: "SELECT ?",
+      bindings: ["private-value"],
+      physicalPlanShape: {
+        ...shapes[0]!,
+        singletonRankFusions: [
+          { ...shapes[0]!.singletonRankFusions[0]!, forged: true },
+        ],
+      } as unknown as DatabasePhysicalPlanShape,
+    });
+    await waitForObservations(events, shapes.length + 1);
+
+    const hashes = events.map(({ physicalPlanHash }) => physicalPlanHash);
+    const validHashes = hashes.filter(
+      (hash): hash is string => typeof hash === "string",
+    );
+    expect(validHashes).toHaveLength(2);
+    expect(validHashes.every((hash) => hash.startsWith("v11:"))).toBe(true);
+    expect(new Set(validHashes).size).toBe(2);
+    expect(hashes.filter((hash) => hash === null)).toHaveLength(1);
+    expect(JSON.stringify(events)).not.toContain("private-value");
+  });
+
+  it("validates zero-singleton v12 metadata and hashes both emitted strategies", async () => {
+    const events: DatabaseQueryObservation[] = [];
+    const { database } = createDatabase();
+    const runtime = createDatabaseRuntime(database, {
+      observer: recordingObserver(events),
+    });
+    const base = {
+      cteCount: 1,
+      directScanProjectionCount: 0,
+      nativeMembershipCount: 0,
+      jsonMembershipCount: 0,
+      nativeRowRelationCount: 0,
+      jsonRowRelationCount: 0,
+      rightAnchorJoinOrderCount: 0,
+      uniqueLookupJoinOrderCount: 0,
+      factLocalIndexedJoinStrategies: [],
+      conditionalLookupCount: 0,
+      conditionalLookupStrategies: [],
+      selfMembershipCount: 0,
+      rowPipelineChoices: [],
+      lexicographicComparisonCount: 0,
+      lexicographicComparisons: [],
+      semiMembershipCount: 0,
+      semiMemberships: [],
+      singletonRankFusionCount: 0,
+      singletonRankFusions: [],
+      nativeNullOrderingCount: 1,
+      nativeNullOrderings: [
+        {
+          windowIndex: 0,
+          pairIndex: 0,
+          columnIndex: 2,
+          valueDirection: "DESC",
+          nullPlacement: "LAST",
+          emissionCount: 1,
+        },
+      ],
+      directMaterializedReferenceCount: 0,
+      directMaterializedReferences: [],
+    } as const;
+    const shapes = [
+      { version: 12, ...base },
+      {
+        version: 12,
+        ...base,
+        nativeNullOrderings: [
+          { ...base.nativeNullOrderings[0]!, pairIndex: 1 },
+        ],
+      },
+      {
+        version: 12,
+        ...base,
+        nativeNullOrderingCount: 0,
+        nativeNullOrderings: [],
+        directMaterializedReferenceCount: 1,
+        directMaterializedReferences: [
+          { definitionIndex: 0, fieldCount: 3, emissionCount: 2 },
+        ],
+      },
+    ] satisfies Extract<DatabasePhysicalPlanShape, { readonly version: 12 }>[];
+    for (const shape of shapes)
+      await runtime.all({
+        sql: "SELECT ?",
+        bindings: ["private-value"],
+        physicalPlanShape: shape,
+      });
+    const invalid = [
+      { ...shapes[0]!, nativeNullOrderingCount: 2 },
+      {
+        ...shapes[0]!,
+        nativeNullOrderings: [
+          { ...shapes[0]!.nativeNullOrderings[0]!, valueDirection: "SIDEWAYS" },
+        ],
+      },
+      {
+        ...shapes[0]!,
+        nativeNullOrderings: [
+          { ...shapes[0]!.nativeNullOrderings[0]!, emissionCount: Number.NaN },
+        ],
+      },
+      {
+        ...shapes[2]!,
+        directMaterializedReferences: [
+          {
+            ...shapes[2]!.directMaterializedReferences[0]!,
+            emissionCount: Number.NaN,
+          },
+        ],
+      },
+      {
+        ...shapes[0]!,
+        nativeNullOrderingCount: 0,
+        nativeNullOrderings: [],
+        directMaterializedReferenceCount: 0,
+        directMaterializedReferences: [],
+      },
+      { ...shapes[0]!, forged: true },
+    ] as unknown as DatabasePhysicalPlanShape[];
+    for (const physicalPlanShape of invalid)
+      await runtime.all({
+        sql: "SELECT ?",
+        bindings: ["private-value"],
+        physicalPlanShape,
+      });
+    await waitForObservations(events, shapes.length + invalid.length);
+
+    const hashes = events.map(({ physicalPlanHash }) => physicalPlanHash);
+    const validHashes = hashes.filter(
+      (hash): hash is string => typeof hash === "string",
+    );
+    expect(validHashes).toHaveLength(shapes.length);
+    expect(validHashes.every((hash) => hash.startsWith("v12:"))).toBe(true);
+    expect(new Set(validHashes).size).toBe(shapes.length);
+    expect(hashes.filter((hash) => hash === null)).toHaveLength(invalid.length);
+    expect(JSON.stringify(events)).not.toContain("private-value");
+  });
+
+  it("validates v13 fresh materialization and derived self-membership metadata", async () => {
+    const events: DatabaseQueryObservation[] = [];
+    const { database } = createDatabase();
+    const runtime = createDatabaseRuntime(database, {
+      observer: recordingObserver(events),
+    });
+    const base = {
+      cteCount: 2,
+      directScanProjectionCount: 0,
+      nativeMembershipCount: 0,
+      jsonMembershipCount: 0,
+      nativeRowRelationCount: 0,
+      jsonRowRelationCount: 0,
+      rightAnchorJoinOrderCount: 0,
+      uniqueLookupJoinOrderCount: 0,
+      factLocalIndexedJoinStrategies: [],
+      conditionalLookupCount: 0,
+      conditionalLookupStrategies: [],
+      selfMembershipCount: 0,
+      rowPipelineChoices: [],
+      lexicographicComparisonCount: 0,
+      lexicographicComparisons: [],
+      semiMembershipCount: 0,
+      semiMemberships: [],
+      singletonRankFusionCount: 0,
+      singletonRankFusions: [],
+      nativeNullOrderingCount: 0,
+      nativeNullOrderings: [],
+      directMaterializedReferenceCount: 0,
+      directMaterializedReferences: [],
+    } as const;
+    const selectionShape = {
+      version: 13,
+      ...base,
+      materializationSelectionCount: 1,
+      materializationSelections: [
+        {
+          definitionIndex: 0,
+          kind: "strict-serial-rank-stage",
+          choiceIndex: 2,
+          emissionCount: 1,
+        },
+      ],
+      derivedSelfMembershipCount: 0,
+      derivedSelfMemberships: [],
+    } satisfies Extract<DatabasePhysicalPlanShape, { readonly version: 13 }>;
+    const derivedShape = {
+      version: 13,
+      ...base,
+      materializationSelectionCount: 0,
+      materializationSelections: [],
+      derivedSelfMembershipCount: 1,
+      derivedSelfMemberships: [
+        {
+          definitionIndex: 0,
+          producerIndex: 3,
+          tupleWidth: 2,
+          nullableGuardCount: 1,
+          emissionCount: 1,
+        },
+      ],
+    } satisfies Extract<DatabasePhysicalPlanShape, { readonly version: 13 }>;
+    const shapes: DatabasePhysicalPlanShape[] = [
+      selectionShape,
+      selectionShape,
+      {
+        ...selectionShape,
+        materializationSelections: [
+          { ...selectionShape.materializationSelections[0]!, choiceIndex: 3 },
+        ],
+      },
+      derivedShape,
+    ];
+    for (const physicalPlanShape of shapes)
+      await runtime.all({
+        sql: "SELECT ?",
+        bindings: ["private-value"],
+        physicalPlanShape,
+      });
+
+    const invalid = [
+      {
+        ...selectionShape,
+        materializationSelections: [
+          ...selectionShape.materializationSelections,
+          selectionShape.materializationSelections[0]!,
+        ],
+        materializationSelectionCount: 2,
+      },
+      {
+        ...derivedShape,
+        derivedSelfMemberships: [
+          { ...derivedShape.derivedSelfMemberships[0]!, nullableGuardCount: 3 },
+        ],
+      },
+      { ...selectionShape, materializationSelectionCount: 0 },
+      { ...selectionShape, forged: true },
+    ] as unknown as DatabasePhysicalPlanShape[];
+    for (const physicalPlanShape of invalid)
+      await runtime.all({
+        sql: "SELECT ?",
+        bindings: ["private-value"],
+        physicalPlanShape,
+      });
+    await waitForObservations(events, shapes.length + invalid.length);
+
+    const hashes = events.map(({ physicalPlanHash }) => physicalPlanHash);
+    const validHashes = hashes.filter(
+      (hash): hash is string => typeof hash === "string",
+    );
+    expect(validHashes).toHaveLength(shapes.length);
+    expect(validHashes.every((hash) => hash.startsWith("v13:"))).toBe(true);
+    expect(new Set(validHashes).size).toBe(3);
+    expect(hashes.filter((hash) => hash === null)).toHaveLength(invalid.length);
+    expect(JSON.stringify(events)).not.toContain("private-value");
   });
 
   it("checks actual bindings even when v3 metadata claims fewer slots", async () => {
@@ -1117,6 +1943,32 @@ describe("D1 database runtime", () => {
     ).resolves.toBe(result);
     expect(record).not.toHaveBeenCalled();
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("releases the observation session when recording rejects", async () => {
+    const { database, prepared, result } = createDatabase();
+    const release = vi.fn();
+    const record = vi.fn(() =>
+      Promise.reject(new Error("observer record failed")),
+    );
+    const observer: DatabaseQueryObserver = {
+      begin: () => ({
+        statementIndexes: [0],
+        includeBatchSummary: false,
+        record,
+        release,
+      }),
+    };
+
+    await expect(
+      createDatabaseRuntime(database, { observer }).all({
+        sql: "SELECT value FROM records",
+      }),
+    ).resolves.toBe(result);
+    await vi.waitFor(() => expect(release).toHaveBeenCalledOnce());
+
+    expect(prepared.all).toHaveBeenCalledOnce();
+    expect(record).toHaveBeenCalledOnce();
   });
 
   it("preserves the D1 batch error if summary construction fails", async () => {

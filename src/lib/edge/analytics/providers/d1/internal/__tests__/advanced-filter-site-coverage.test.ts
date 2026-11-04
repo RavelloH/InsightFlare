@@ -300,7 +300,7 @@ describe("advanced filter site coverage", () => {
       status: "success",
       sqlBytes: new TextEncoder().encode(trace.preparedSql[0]!).byteLength,
       bindings: 1,
-      physicalPlanHash: expect.stringMatching(/^v1:/u),
+      physicalPlanHash: expect.stringMatching(/^v8:/u),
     });
     expect(
       record.performance.operations?.["advanced_filter.site_coverage"],

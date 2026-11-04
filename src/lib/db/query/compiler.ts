@@ -1,13 +1,11 @@
 import {
   assertD1StatementBudget,
   D1_MAX_BOUND_PARAMETERS,
+  D1StatementBudgetError,
 } from "@/lib/db/d1-budget";
 import {
-  concat,
   getParameterPlaceholderOffsets,
-  join,
   parameter,
-  parenthesize,
   type SqlFragment,
   text,
 } from "@/lib/db/sql/fragment";
@@ -17,6 +15,49 @@ import type {
   DatabaseStatement,
 } from "@/lib/db/types";
 
+import {
+  compileConditionalLookupCondition,
+  type PhysicalConditionalLookupChoice,
+} from "./physical/conditional-lookup";
+import type {
+  PhysicalNativeNullOrderingChoice,
+  PhysicalSingletonRankChoice,
+} from "./physical/contracts";
+import type { PhysicalLexicographicComparisonChoice } from "./physical/lexicographic-comparison";
+import { rowPipelineShape } from "./physical/row-pipeline";
+import type {
+  PhysicalSelfMembershipChoice,
+  PhysicalSelfMembershipWitness,
+} from "./physical/self-membership";
+import type { PhysicalSharedRelationInterfaceView } from "./physical/shared-relation-interfaces";
+import {
+  assertPhysicalSharedRelationInterfaceViewMatches,
+  findPhysicalSharedRelationInterface,
+} from "./physical/shared-relation-interfaces";
+import {
+  type CompileOrderSharedReference,
+  renderCompileOrderCrossJoin,
+  renderCompileOrderGuard,
+  renderCompileOrderHelper,
+  type RenderedCompileOrderHelper,
+  scheduledCompileOrderLeaves,
+} from "./render/compile-order";
+import {
+  createFinalRenderSession,
+  type FinalRenderEmissionCounts,
+  type FinalRenderSession,
+  type FinalRenderTestDiagnostic,
+} from "./render/final-render-session";
+import {
+  concat,
+  finalRenderEmissionCounts,
+  inheritFinalRenderProvenance,
+  join,
+  parenthesize,
+  recordFinalRenderEmission,
+} from "./render/fragment-provenance";
+import { renderMaterializedRelationReference } from "./render/materialized-relation-reference";
+import { renderWindowOrderBy } from "./render/order-by";
 import type { CompiledQuery } from "./compiled";
 import { DatabaseCompilerError } from "./errors";
 import type {
@@ -36,6 +77,8 @@ import {
   type PhysicalMembershipUsage,
   type PhysicalParameterSlotLayout,
   type PhysicalQueryPlan,
+  type PhysicalRowPipelineChoice,
+  type PhysicalSemiMembershipChoice,
   type PhysicalTextRowStrategy,
   type PhysicalTextRowUsage,
   type PositiveTupleMembershipCandidate,
@@ -49,7 +92,9 @@ import type {
   LogicalQueryNode,
   QuerySource,
   Relation,
+  SemiJoinNode,
   ValuesRelationNode,
+  WindowNode,
 } from "./plan";
 import type { ProjectNode } from "./plan";
 
@@ -65,6 +110,7 @@ interface RenderContext {
   rightAlias: number;
   recursiveCteAlias: number;
   readonly reservedIdentifiers: Set<string>;
+  readonly generatedAliases: Set<string>;
   readonly sharedRelations: ReadonlyMap<LogicalQueryNode, string>;
   readonly directScanProjections: ReadonlyMap<
     ProjectNode,
@@ -74,6 +120,31 @@ interface RenderContext {
     ProjectNode,
     PassthroughProjectFusion
   >;
+  readonly rowPipelines: ReadonlyMap<
+    LogicalQueryNode,
+    PhysicalRowPipelineChoice
+  >;
+  readonly singletonRankChoices: ReadonlyMap<
+    LogicalQueryNode,
+    PhysicalSingletonRankChoice
+  >;
+  readonly singletonRankEmissions: Map<PhysicalSingletonRankChoice, number>;
+  readonly singletonRankFusionEnabled: boolean;
+  finalRenderSession?: FinalRenderSession;
+  suppressFinalRenderEmissions?: boolean;
+  readonly nativeNullOrderingChoices: ReadonlyMap<
+    WindowNode,
+    readonly PhysicalNativeNullOrderingChoice[]
+  >;
+  readonly lexicographicComparisons: ReadonlyMap<
+    SqlExpression,
+    PhysicalLexicographicComparisonChoice
+  >;
+  readonly lexicographicComparisonEmissions: Map<
+    PhysicalLexicographicComparisonChoice,
+    number
+  >;
+  readonly sharedRelationInterfaces?: PhysicalSharedRelationInterfaceView;
   readonly constantFilterJoinProjections: ReadonlyMap<
     ProjectNode,
     ConstantFilterJoinProjection
@@ -83,9 +154,22 @@ interface RenderContext {
     ProjectNode,
     PositiveTupleMembershipCandidate
   >;
+  readonly selfMembershipChoices: ReadonlyMap<
+    ProjectNode,
+    PhysicalSelfMembershipChoice
+  >;
+  readonly semiMemberships: ReadonlyMap<
+    SemiJoinNode,
+    PhysicalSemiMembershipChoice
+  >;
+  readonly semiMembershipEmissions: Map<PhysicalSemiMembershipChoice, number>;
   readonly joinOrderStrategies: ReadonlyMap<
     JoinNode,
     PhysicalJoinOrderStrategy
+  >;
+  readonly conditionalLookupChoices: ReadonlyMap<
+    JoinNode,
+    PhysicalConditionalLookupChoice
   >;
   readonly membershipStrategies?: ReadonlyMap<
     AnyInListExpression,
@@ -101,7 +185,20 @@ interface RenderContext {
   >;
   readonly textRowUsage?: Map<ValuesRelationNode, number>;
   readonly projectionTransportSimplifications: boolean;
+  readonly compactGeneratedColumnAliases: boolean;
+  compileOrderRoot?: Extract<LogicalQueryNode, { readonly kind: "sort" }>;
+  compileOrderHelper?: RenderedCompileOrderHelper;
   bypassSharedNode?: LogicalQueryNode;
+}
+
+function recordContextFinalRenderEmission(
+  context: RenderContext,
+  fragment: SqlFragment,
+  emission: Parameters<typeof recordFinalRenderEmission>[2],
+): SqlFragment {
+  return context.suppressFinalRenderEmissions
+    ? fragment
+    : recordFinalRenderEmission(context.finalRenderSession, fragment, emission);
 }
 
 function nextAlias(
@@ -118,14 +215,41 @@ function nextAlias(
           : "rightAlias";
   const value = context[key];
   context[key]++;
-  return `${prefix}${value}`;
+  const alias = `${prefix}${value}`;
+  context.generatedAliases.add(alias);
+  return alias;
 }
 
-function column(index: number, alias: string, fieldName?: string): SqlFragment {
+const SAFE_GENERATED_IDENTIFIER =
+  /^(?:[qlrt][0-9]+|_c[0-9]+|_d1_shared_[0-9]+)$/u;
+
+function generatedIdentifier(value: string): SqlFragment {
+  return SAFE_GENERATED_IDENTIFIER.test(value)
+    ? text(value)
+    : identifier(value);
+}
+
+function generatedColumn(
+  index: number,
+  alias: string,
+  fieldName?: string,
+): SqlFragment {
   return concat(
-    identifier(alias),
+    generatedIdentifier(alias),
     text("."),
-    identifier(fieldName ?? `_c${index}`),
+    fieldName === undefined
+      ? generatedIdentifier(`_c${index}`)
+      : identifier(fieldName),
+  );
+}
+
+function generatedColumnOutputAlias(
+  context: RenderContext,
+  index: number,
+): SqlFragment {
+  return concat(
+    text(context.compactGeneratedColumnAliases ? " " : " AS "),
+    generatedIdentifier(`_c${index}`),
   );
 }
 
@@ -140,9 +264,12 @@ function outputList(
     width > 0 &&
     outputOffset === 0
   )
-    return [concat(identifier(alias), text(".*"))];
+    return [concat(generatedIdentifier(alias), text(".*"))];
   return Array.from({ length: width }, (_, index) =>
-    concat(column(index, alias), text(` AS "_c${index + outputOffset}"`)),
+    concat(
+      generatedColumn(index, alias),
+      generatedColumnOutputAlias(context, index + outputOffset),
+    ),
   );
 }
 
@@ -230,9 +357,11 @@ function constantSql(value: string | number | null): SqlFragment {
 function compileSharedRelationDefinition(
   shared: SharedRelationDefinition,
   body: SqlFragment,
+  definitionIndex: number,
+  finalRenderSession: FinalRenderSession,
 ): SqlFragment {
-  return concat(
-    identifier(shared.name),
+  const definition = concat(
+    generatedIdentifier(shared.name),
     text(
       shared.materialization === "materialized"
         ? " AS MATERIALIZED ("
@@ -241,11 +370,22 @@ function compileSharedRelationDefinition(
     body,
     text(")"),
   );
+  const selection = shared.materializationSelection;
+  return selection
+    ? recordFinalRenderEmission(finalRenderSession, definition, {
+        kind: "materialization-definition",
+        definition: shared.node,
+        definitionIndex,
+        selectionKind: selection.kind,
+        choiceIndex: selection.choiceIndex,
+      })
+    : definition;
 }
 
 function resolveColumn(
   expression: Extract<SqlExpression, { kind: "column" }>,
   scopes: ReadonlyMap<RelationScope, ScopeBinding>,
+  context: RenderContext,
 ): SqlFragment {
   const binding = scopes.get(expression.scope);
   if (!binding)
@@ -253,10 +393,14 @@ function resolveColumn(
       "invalid_plan",
       `No SQL scope is available for column "${expression.name}"`,
     );
-  return column(
-    expression.index,
-    binding.alias,
-    binding.fieldNames?.[expression.index],
+  return concat(
+    context.generatedAliases.has(binding.alias)
+      ? generatedIdentifier(binding.alias)
+      : identifier(binding.alias),
+    text("."),
+    binding.fieldNames?.[expression.index] === undefined
+      ? generatedIdentifier(`_c${expression.index}`)
+      : identifier(binding.fieldNames[expression.index]!),
   );
 }
 
@@ -265,9 +409,39 @@ export function compileD1Expression(
   scopes: ReadonlyMap<RelationScope, ScopeBinding>,
   context: RenderContext = renderContext(new Map()),
 ): SqlFragment {
+  const lexicographicChoice = context.lexicographicComparisons.get(expression);
+  if (lexicographicChoice) {
+    if (!context.suppressFinalRenderEmissions)
+      context.lexicographicComparisonEmissions.set(
+        lexicographicChoice,
+        (context.lexicographicComparisonEmissions.get(lexicographicChoice) ??
+          0) + 1,
+      );
+    return recordContextFinalRenderEmission(
+      context,
+      parenthesize(
+        concat(
+          text("("),
+          join(
+            lexicographicChoice.components.map(({ left }) =>
+              compileD1Expression(left, scopes, context),
+            ),
+          ),
+          text(`) ${lexicographicChoice.direction} (`),
+          join(
+            lexicographicChoice.components.map(({ right }) =>
+              compileD1Expression(right, scopes, context),
+            ),
+          ),
+          text(")"),
+        ),
+      ),
+      { kind: "lexicographic", choice: lexicographicChoice },
+    );
+  }
   switch (expression.kind) {
     case "column":
-      return resolveColumn(expression, scopes);
+      return resolveColumn(expression, scopes, context);
     case "parameter":
       return parameter(expression.value);
     case "excluded":
@@ -407,6 +581,18 @@ export function compileD1Expression(
         text(")"),
       );
     case "function":
+      if (expression.name === "storage-class")
+        return concat(
+          text("typeof("),
+          compileD1Expression(expression.arguments[0]!, scopes, context),
+          text(")"),
+        );
+      if (expression.name === "byte-length")
+        return concat(
+          text("LENGTH(CAST("),
+          compileD1Expression(expression.arguments[0]!, scopes, context),
+          text(" AS BLOB))"),
+        );
       if (expression.name === "concat-text") {
         return parenthesize(
           join(
@@ -478,6 +664,15 @@ export function compileD1Expression(
         return concat(
           text("TRIM("),
           compileD1Expression(expression.arguments[0]!, scopes, context),
+          text(")"),
+        );
+      }
+      if (expression.name === "trim-characters") {
+        return concat(
+          text("TRIM("),
+          compileD1Expression(expression.arguments[0]!, scopes, context),
+          text(", "),
+          compileD1Expression(expression.arguments[1]!, scopes, context),
           text(")"),
         );
       }
@@ -559,6 +754,132 @@ function extendScopes(
   return new Map([...outerScopes, ...bindings]);
 }
 
+function sameOutputFields(
+  left: QuerySource["fields"],
+  right: QuerySource["fields"],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (field, index) =>
+        field.name === right[index]?.name &&
+        field.affinity === right[index]?.affinity &&
+        field.nullable === right[index]?.nullable,
+    )
+  );
+}
+
+function sameStringList(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
+function sameMaterializationSelection(
+  left: SharedRelationDefinition["materializationSelection"],
+  right: SharedRelationDefinition["materializationSelection"],
+): boolean {
+  return left?.kind === right?.kind && left?.choiceIndex === right?.choiceIndex;
+}
+
+function assertCurrentSelfMembershipWitness(
+  choice: PhysicalSelfMembershipChoice,
+  witness: PhysicalSelfMembershipWitness,
+  context: RenderContext,
+): void {
+  const interfaces = context.sharedRelationInterfaces;
+  const producer = context.bypassSharedNode ?? interfaces?.root;
+  const producerIndex = interfaces
+    ? producer === interfaces.root
+      ? interfaces.layout.length
+      : interfaces.layout.findIndex(
+          (definition) => definition.node === producer,
+        )
+    : -1;
+  const definition = interfaces?.layout[witness.definitionIndex];
+  const evidence = interfaces
+    ? findPhysicalSharedRelationInterface(
+        interfaces,
+        witness.definition.node,
+        producer ?? interfaces.root,
+      )
+    : undefined;
+  if (
+    !interfaces ||
+    !producer ||
+    producer !== witness.producer ||
+    producerIndex !== witness.producerIndex ||
+    witness.definitionIndex < 0 ||
+    witness.definitionIndex >= producerIndex ||
+    definition?.node !== witness.definition.node ||
+    definition.name !== witness.definition.name ||
+    definition.materialization !== "materialized" ||
+    definition.scope !== witness.definition.scope ||
+    !sameStringList(definition.dependencies, witness.definition.dependencies) ||
+    !sameMaterializationSelection(
+      definition.materializationSelection,
+      witness.definition.materializationSelection,
+    ) ||
+    !sameOutputFields(definition.fields, witness.definition.fields) ||
+    !sameOutputFields(definition.fields, witness.definition.node.fields) ||
+    context.sharedRelations.get(witness.definition.node) !== definition.name ||
+    witness.source.node !== witness.definition.node ||
+    witness.source.scope !== witness.definition.node.scope ||
+    !sameOutputFields(witness.source.fields, witness.definition.node.fields) ||
+    !evidence ||
+    evidence.definition.name !== witness.boundary.definition.name ||
+    evidence.definition.node !== witness.boundary.definition.node ||
+    evidence.definition.scope !== witness.boundary.definition.scope ||
+    evidence.definition.materialization !==
+      witness.boundary.definition.materialization ||
+    !sameStringList(
+      evidence.definition.dependencies,
+      witness.boundary.definition.dependencies,
+    ) ||
+    !sameMaterializationSelection(
+      evidence.definition.materializationSelection,
+      witness.boundary.definition.materializationSelection,
+    ) ||
+    !sameOutputFields(
+      evidence.definition.fields,
+      witness.boundary.definition.fields,
+    ) ||
+    evidence.selective !== witness.boundary.selective ||
+    evidence.license.kind !== witness.boundary.license.kind ||
+    evidence.boundary.kind !== witness.boundary.boundary.kind ||
+    evidence.closure.kind !== witness.boundary.closure.kind ||
+    evidence.closure.scopeCount !== witness.boundary.closure.scopeCount ||
+    evidence.closure.referencedScopeCount !==
+      witness.boundary.closure.referencedScopeCount ||
+    evidence.closure.referencedColumnCount !==
+      witness.boundary.closure.referencedColumnCount ||
+    evidence.totality.kind !== witness.boundary.totality.kind ||
+    evidence.totality.stoppedAt.length !==
+      witness.boundary.totality.stoppedAt.length ||
+    evidence.totality.stoppedAt.some(
+      (node, index) => node !== witness.boundary.totality.stoppedAt[index],
+    ) ||
+    choice.join.left.scope !== choice.join.left.node.scope ||
+    !sameOutputFields(choice.join.left.fields, choice.join.left.node.fields) ||
+    choice.leftKeyIndexes.length !== choice.rightKeyIndexes.length ||
+    witness.sourceKeyIndexes.length !== choice.rightKeyIndexes.length ||
+    witness.sourceKeyIndexes.some(
+      (index) =>
+        !Number.isSafeInteger(index) ||
+        index < 0 ||
+        index >= witness.source.fields.length,
+    )
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Derived self-membership witness does not match the current producer interface",
+    );
+}
+
 function compileNode(
   node: LogicalQueryNode,
   context: RenderContext,
@@ -567,23 +888,155 @@ function compileNode(
   const sharedName = context.sharedRelations.get(node);
   if (sharedName && context.bypassSharedNode !== node) {
     const alias = nextAlias(context, "q");
-    return concat(
+    const rendered = concat(
       text("SELECT "),
       join(outputList(context, node.fields.length, alias)),
       text(" FROM "),
-      identifier(sharedName),
+      generatedIdentifier(sharedName),
       text(" AS "),
-      identifier(alias),
+      generatedIdentifier(alias),
     );
+    const definitionIndex =
+      context.sharedRelationInterfaces?.layout.findIndex(
+        (definition) => definition.node === node,
+      ) ?? -1;
+    if (context.finalRenderSession && definitionIndex < 0)
+      throw new DatabaseCompilerError(
+        "invalid_plan",
+        "Shared relation reference is outside the current physical layout",
+      );
+    return definitionIndex < 0
+      ? rendered
+      : recordContextFinalRenderEmission(context, rendered, {
+          kind: "shared-reference",
+          definition: node,
+          definitionIndex,
+        });
+  }
+  const rowPipeline = context.rowPipelines.get(node);
+  if (rowPipeline) {
+    const singletonRankChoice = context.singletonRankChoices.get(node);
+    const emitSingletonRankFusion =
+      singletonRankChoice !== undefined &&
+      canRenderSingletonRankFusion(singletonRankChoice, context);
+    const scanLeaf =
+      rowPipeline.leaf.node.kind === "scan" ? rowPipeline.leaf.node : undefined;
+    const leafIndexes = scanLeaf
+      ? [
+          ...new Set([
+            ...rowPipeline.outputColumnIndexes,
+            ...rowPipeline.filters.flatMap(
+              ({ predicateColumnIndexes }) => predicateColumnIndexes,
+            ),
+          ]),
+        ].sort((left, right) => left - right)
+      : Array.from(
+          { length: rowPipeline.leaf.fields.length },
+          (_unused, index) => index,
+        );
+    const leafIndexOffsets = new Map(
+      leafIndexes.map((index, offset) => [index, offset] as const),
+    );
+    const source =
+      emitSingletonRankFusion && singletonRankChoice
+        ? compileSingletonRankWindow(singletonRankChoice, context, outerScopes)
+        : scanLeaf
+          ? (() => {
+              const alias = nextAlias(context, "t");
+              const columns = Object.values(scanLeaf.table.columns);
+              const selections = leafIndexes.map((index, offset) => {
+                const column = columns[index];
+                if (!column)
+                  throw new DatabaseCompilerError(
+                    "invalid_plan",
+                    "Row-pipeline scan column is outside its source schema",
+                  );
+                return concat(
+                  generatedIdentifier(alias),
+                  text("."),
+                  identifier(column.sqlName),
+                  generatedColumnOutputAlias(context, offset),
+                );
+              });
+              return concat(
+                text("SELECT "),
+                join(selections),
+                text(" FROM "),
+                identifier(scanLeaf.table.name),
+                text(" AS "),
+                generatedIdentifier(alias),
+              );
+            })()
+          : compileNode(rowPipeline.leaf.node, context, outerScopes);
+    const alias = nextAlias(context, "q");
+    const scopes = new Map(outerScopes);
+    scopes.set(rowPipeline.leaf.scope, {
+      alias,
+      fieldNames: rowPipeline.leaf.fields.map((_field, index) => {
+        const offset = leafIndexOffsets.get(index);
+        return `_c${offset ?? index}`;
+      }),
+    });
+    for (const filter of rowPipeline.filters)
+      scopes.set(filter.filter.input.scope, {
+        alias,
+        fieldNames: filter.inputColumnIndexes.map(
+          (index) => `_c${leafIndexOffsets.get(index) ?? index}`,
+        ),
+      });
+    const selections = rowPipeline.outputColumnIndexes.map(
+      (inputIndex, index) =>
+        concat(
+          generatedColumn(
+            leafIndexOffsets.get(inputIndex) ?? inputIndex,
+            alias,
+          ),
+          generatedColumnOutputAlias(context, index),
+        ),
+    );
+    const predicates = rowPipeline.filters.flatMap(({ filter }) => {
+      if (emitSingletonRankFusion && filter === singletonRankChoice.filter)
+        return [];
+      return [compileD1Expression(filter.predicate, scopes, context)];
+    });
+    if (emitSingletonRankFusion && !context.suppressFinalRenderEmissions)
+      context.singletonRankEmissions.set(
+        singletonRankChoice,
+        (context.singletonRankEmissions.get(singletonRankChoice) ?? 0) + 1,
+      );
+    const rendered = concat(
+      text("SELECT "),
+      join(selections),
+      text(" FROM "),
+      renderSourceFrom(rowPipeline.leaf, source, alias, context),
+      ...(predicates.length === 0
+        ? []
+        : [text(" WHERE "), join(predicates, text(" AND "))]),
+    );
+    return emitSingletonRankFusion && singletonRankChoice
+      ? recordContextFinalRenderEmission(context, rendered, {
+          kind: "singleton-rank",
+          choice: singletonRankChoice,
+        })
+      : rendered;
   }
   switch (node.kind) {
     case "json-scalar-array": {
-      if (node.values.length === 0) return text('SELECT NULL AS "_c0" WHERE 0');
+      if (node.values.length === 0)
+        return concat(
+          text("SELECT NULL"),
+          generatedColumnOutputAlias(context, 0),
+          text(" WHERE 0"),
+        );
       const segments = jsonScalarArraySegments(node);
       return join(
         segments.map((segment) =>
           concat(
-            text('SELECT "_json_scalar".value AS "_c0" FROM json_each('),
+            concat(
+              text('SELECT "_json_scalar".value'),
+              generatedColumnOutputAlias(context, 0),
+              text(" FROM json_each("),
+            ),
             parameter(segment),
             text(') AS "_json_scalar"'),
           ),
@@ -611,7 +1064,7 @@ function compileNode(
                 text("."),
                 identifier(`column${index + 1}`),
               ),
-          text(` AS "_c${index}"`),
+          generatedColumnOutputAlias(context, index),
         ),
       );
       if (node.rows.length === 0)
@@ -619,7 +1072,7 @@ function compileNode(
           text("SELECT "),
           join(
             node.fields.map((_field, index) =>
-              concat(text("NULL"), text(` AS "_c${index}"`)),
+              concat(text("NULL"), generatedColumnOutputAlias(context, index)),
             ),
           ),
           text(" WHERE 0"),
@@ -661,10 +1114,10 @@ function compileNode(
       const columns = Object.values(node.table.columns);
       const selections = columns.map((item, index) =>
         concat(
-          identifier(alias),
+          generatedIdentifier(alias),
           text("."),
           identifier(item.sqlName),
-          text(` AS "_c${index}"`),
+          generatedColumnOutputAlias(context, index),
         ),
       );
       return concat(
@@ -673,7 +1126,7 @@ function compileNode(
         text(" FROM "),
         identifier(node.table.name),
         text(" AS "),
-        identifier(alias),
+        generatedIdentifier(alias),
       );
     }
     case "filter": {
@@ -684,9 +1137,7 @@ function compileNode(
         text("SELECT "),
         join(outputList(context, node.fields.length, alias)),
         text(" FROM "),
-        parenthesize(source),
-        text(" AS "),
-        identifier(alias),
+        renderSourceFrom(node.input, source, alias, context),
         text(" WHERE "),
         compileD1Expression(node.predicate, scopes, context),
       );
@@ -700,10 +1151,10 @@ function compileNode(
         const selections = directScanProjection.sqlColumnNames.map(
           (sqlColumnName, index) =>
             concat(
-              identifier(alias),
+              generatedIdentifier(alias),
               text("."),
               identifier(sqlColumnName),
-              text(` AS "_c${index}"`),
+              generatedColumnOutputAlias(context, index),
             ),
         );
         return concat(
@@ -712,7 +1163,7 @@ function compileNode(
           text(" FROM "),
           identifier(directScanProjection.scan.table.name),
           text(" AS "),
-          identifier(alias),
+          generatedIdentifier(alias),
         );
       }
       const constantFilterJoin =
@@ -733,14 +1184,17 @@ function compileNode(
             node.projections.map((projection, index) =>
               concat(
                 compileD1Expression(projection.expression, scopes, context),
-                text(` AS "_c${index}"`),
+                generatedColumnOutputAlias(context, index),
               ),
             ),
           ),
           text(" FROM "),
-          parenthesize(source),
-          text(" AS "),
-          identifier(alias),
+          renderSourceFrom(
+            constantFilterJoin.filter.input,
+            source,
+            alias,
+            context,
+          ),
           text(" WHERE "),
           compileD1Expression(
             constantFilterJoin.filter.predicate,
@@ -751,6 +1205,76 @@ function compileNode(
       }
       const positiveTupleMembership =
         context.positiveTupleMemberships.get(node);
+      const selfMembership = context.selfMembershipChoices.get(node);
+      if (selfMembership) {
+        if (selfMembership.witness)
+          assertCurrentSelfMembershipWitness(
+            selfMembership,
+            selfMembership.witness,
+            context,
+          );
+        const leftSource = compileNode(
+          selfMembership.join.left.node,
+          context,
+          outerScopes,
+        );
+        if (selfMembership.witness) {
+          const priorSession = context.finalRenderSession;
+          const priorSuppression = context.suppressFinalRenderEmissions;
+          context.finalRenderSession = undefined;
+          context.suppressFinalRenderEmissions = true;
+          let discardedRightSource: SqlFragment;
+          try {
+            discardedRightSource = compileNode(
+              selfMembership.join.right.node,
+              context,
+              outerScopes,
+            );
+          } finally {
+            context.finalRenderSession = priorSession;
+            context.suppressFinalRenderEmissions = priorSuppression;
+          }
+          if (discardedRightSource.bindings.length !== 0)
+            throw new DatabaseCompilerError(
+              "invalid_plan",
+              "Derived self-membership cannot discard a parameterized right source",
+            );
+        }
+        const leftAlias = nextAlias(context, "q");
+        const leftScopes = extendScopes(outerScopes, [
+          [selfMembership.join.scope, { alias: leftAlias }],
+        ]);
+        const selections = node.projections.map((projection, index) =>
+          concat(
+            compileD1Expression(projection.expression, leftScopes, context),
+            generatedColumnOutputAlias(context, index),
+          ),
+        );
+        const nullableKeyChecks = selfMembership.nullableKeyIndexes.map(
+          (index) =>
+            concat(generatedColumn(index, leftAlias), text(" IS NOT NULL")),
+        );
+        const emitted = concat(
+          text("SELECT "),
+          join(selections),
+          text(" FROM "),
+          renderSourceFrom(
+            selfMembership.join.left,
+            leftSource,
+            leftAlias,
+            context,
+          ),
+          ...(nullableKeyChecks.length === 0
+            ? []
+            : [text(" WHERE "), join(nullableKeyChecks, text(" AND "))]),
+        );
+        return selfMembership.witness
+          ? recordContextFinalRenderEmission(context, emitted, {
+              kind: "derived-self-membership",
+              choice: selfMembership,
+            })
+          : emitted;
+      }
       if (positiveTupleMembership) {
         const joinNode = positiveTupleMembership.join;
         const leftSource = compileNode(
@@ -769,32 +1293,28 @@ function compileNode(
           [joinNode.scope, { alias: leftAlias }],
         ]);
         const leftTuple = positiveTupleMembership.leftKeyIndexes.map((index) =>
-          column(index, leftAlias),
+          generatedColumn(index, leftAlias),
         );
         const rightTuple = positiveTupleMembership.rightKeyIndexes.map(
-          (index) => column(index, rightAlias),
+          (index) => generatedColumn(index, rightAlias),
         );
         const selections = node.projections.map((projection, index) =>
           concat(
             compileD1Expression(projection.expression, leftScopes, context),
-            text(` AS "_c${index}"`),
+            generatedColumnOutputAlias(context, index),
           ),
         );
         return concat(
           text("SELECT "),
           join(selections),
           text(" FROM "),
-          parenthesize(leftSource),
-          text(" AS "),
-          identifier(leftAlias),
+          renderSourceFrom(joinNode.left, leftSource, leftAlias, context),
           text(" WHERE "),
           parenthesize(join(leftTuple)),
           text(" IN (SELECT "),
           join(rightTuple),
           text(" FROM "),
-          parenthesize(rightSource),
-          text(" AS "),
-          identifier(rightAlias),
+          renderSourceFrom(joinNode.right, rightSource, rightAlias, context),
           text(")"),
         );
       }
@@ -806,16 +1326,14 @@ function compileNode(
       const selections = node.projections.map((projection, index) =>
         concat(
           compileD1Expression(projection.expression, scopes, context),
-          text(` AS "_c${index}"`),
+          generatedColumnOutputAlias(context, index),
         ),
       );
       return concat(
         text("SELECT "),
         join(selections),
         text(" FROM "),
-        parenthesize(source),
-        text(" AS "),
-        identifier(alias),
+        renderSourceFrom(input, source, alias, context),
       );
     }
     case "join": {
@@ -828,14 +1346,26 @@ function compileNode(
         [node.right.scope, { alias: rightAlias }],
       ]);
       const sparseOutputs = context.sparseJoinOutputs.get(node);
+      const joinOrder = context.joinOrderStrategies.get(node);
+      const conditionalLookup = context.conditionalLookupChoices.get(node);
+      const joinCondition = conditionalLookup
+        ? compileConditionalLookupCondition(conditionalLookup)
+        : node.condition;
       const selections = sparseOutputs
         ? node.fields.map((_field, index) => {
-            if (!sparseOutputs.has(index)) return text(`NULL AS "_c${index}"`);
+            if (!sparseOutputs.has(index))
+              return concat(
+                text("NULL"),
+                generatedColumnOutputAlias(context, index),
+              );
             return index < node.left.fields.length
-              ? concat(column(index, leftAlias), text(` AS "_c${index}"`))
+              ? concat(
+                  generatedColumn(index, leftAlias),
+                  generatedColumnOutputAlias(context, index),
+                )
               : concat(
-                  column(index - node.left.fields.length, rightAlias),
-                  text(` AS "_c${index}"`),
+                  generatedColumn(index - node.left.fields.length, rightAlias),
+                  generatedColumnOutputAlias(context, index),
                 );
           })
         : [
@@ -851,29 +1381,29 @@ function compileNode(
         text("SELECT "),
         join(selections),
         text(" FROM "),
-        context.joinOrderStrategies.has(node)
+        joinOrder?.driver === "right"
           ? concat(
-              parenthesize(rightSql),
-              text(" AS "),
-              identifier(rightAlias),
+              renderSourceFrom(node.right, rightSql, rightAlias, context),
               text(" CROSS JOIN "),
-              parenthesize(leftSql),
-              text(" AS "),
-              identifier(leftAlias),
+              renderSourceFrom(node.left, leftSql, leftAlias, context),
               text(" WHERE "),
-              compileD1Expression(node.condition, scopes, context),
+              compileD1Expression(joinCondition, scopes, context),
             )
-          : concat(
-              parenthesize(leftSql),
-              text(" AS "),
-              identifier(leftAlias),
-              text(node.joinType === "left" ? " LEFT JOIN " : " INNER JOIN "),
-              parenthesize(rightSql),
-              text(" AS "),
-              identifier(rightAlias),
-              text(" ON "),
-              compileD1Expression(node.condition, scopes, context),
-            ),
+          : joinOrder?.driver === "left"
+            ? concat(
+                renderSourceFrom(node.left, leftSql, leftAlias, context),
+                text(" CROSS JOIN "),
+                renderSourceFrom(node.right, rightSql, rightAlias, context),
+                text(" WHERE "),
+                compileD1Expression(joinCondition, scopes, context),
+              )
+            : concat(
+                renderSourceFrom(node.left, leftSql, leftAlias, context),
+                text(node.joinType === "left" ? " LEFT JOIN " : " INNER JOIN "),
+                renderSourceFrom(node.right, rightSql, rightAlias, context),
+                text(" ON "),
+                compileD1Expression(joinCondition, scopes, context),
+              ),
       );
     }
     case "semi-join":
@@ -882,6 +1412,40 @@ function compileNode(
       const rightSql = compileNode(node.right.node, context, outerScopes);
       const leftAlias = nextAlias(context, "l");
       const rightAlias = nextAlias(context, "r");
+      const semiMembership =
+        node.kind === "semi-join"
+          ? context.semiMemberships.get(node)
+          : undefined;
+      if (semiMembership && canRenderSemiMembership(semiMembership, context)) {
+        const leftKeys = semiMembership.leftKeyIndexes.map((index) =>
+          generatedColumn(index, leftAlias),
+        );
+        const rightKeys = semiMembership.rightKeyIndexes.map((index) =>
+          generatedColumn(index, rightAlias),
+        );
+        if (!context.suppressFinalRenderEmissions)
+          context.semiMembershipEmissions.set(
+            semiMembership,
+            (context.semiMembershipEmissions.get(semiMembership) ?? 0) + 1,
+          );
+        return recordContextFinalRenderEmission(
+          context,
+          concat(
+            text("SELECT "),
+            join(outputList(context, node.fields.length, leftAlias)),
+            text(" FROM "),
+            renderSourceFrom(node.left, leftSql, leftAlias, context),
+            text(" WHERE "),
+            parenthesize(join(leftKeys)),
+            text(" IN (SELECT "),
+            join(rightKeys),
+            text(" FROM "),
+            renderSourceFrom(node.right, rightSql, rightAlias, context),
+            text(")"),
+          ),
+          { kind: "semi-membership", choice: semiMembership },
+        );
+      }
       const scopes = extendScopes(outerScopes, [
         [node.left.scope, { alias: leftAlias }],
         [node.right.scope, { alias: rightAlias }],
@@ -890,17 +1454,13 @@ function compileNode(
         text("SELECT "),
         join(outputList(context, node.fields.length, leftAlias)),
         text(" FROM "),
-        parenthesize(leftSql),
-        text(" AS "),
-        identifier(leftAlias),
+        renderSourceFrom(node.left, leftSql, leftAlias, context),
         text(
           node.kind === "semi-join"
             ? " WHERE EXISTS (SELECT 1 FROM "
             : " WHERE NOT EXISTS (SELECT 1 FROM ",
         ),
-        parenthesize(rightSql),
-        text(" AS "),
-        identifier(rightAlias),
+        renderSourceFrom(node.right, rightSql, rightAlias, context),
         text(" WHERE "),
         compileD1Expression(node.condition, scopes, context),
         text(")"),
@@ -914,16 +1474,14 @@ function compileNode(
         (projection, index) =>
           concat(
             compileD1Expression(projection.expression, scopes, context),
-            text(` AS "_c${index}"`),
+            generatedColumnOutputAlias(context, index),
           ),
       );
       return concat(
         text("SELECT "),
         join(projected),
         text(" FROM "),
-        parenthesize(source),
-        text(" AS "),
-        identifier(alias),
+        renderSourceFrom(node.input, source, alias, context),
         ...(node.groups.length === 0
           ? []
           : [
@@ -943,9 +1501,7 @@ function compileNode(
         text("SELECT DISTINCT "),
         join(outputList(context, node.fields.length, alias)),
         text(" FROM "),
-        parenthesize(source),
-        text(" AS "),
-        identifier(alias),
+        renderSourceFrom(node.input, source, alias, context),
       );
     }
     case "window": {
@@ -973,20 +1529,20 @@ function compileNode(
                 ...partition,
                 ...(partitions.length > 0 ? [text(" ")] : []),
                 text("ORDER BY "),
-                join(
-                  specification.orderBy.map((key) =>
-                    concat(
-                      compileD1Expression(key.expression, scopes, context),
-                      text(` ${key.direction}`),
-                    ),
-                  ),
-                ),
+                renderWindowOrderBy({
+                  keys: specification.orderBy,
+                  windowIndex: index,
+                  choices: context.nativeNullOrderingChoices.get(node) ?? [],
+                  renderExpression: (expression) =>
+                    compileD1Expression(expression, scopes, context),
+                  session: context.finalRenderSession,
+                }),
                 text(")"),
               )
             : concat(text("COUNT(*) OVER ("), ...partition, text(")"));
         return concat(
           functionSql,
-          text(` AS "_c${node.input.fields.length + index}"`),
+          generatedColumnOutputAlias(context, node.input.fields.length + index),
         );
       });
       return concat(
@@ -996,22 +1552,31 @@ function compileNode(
           ...selections,
         ]),
         text(" FROM "),
-        parenthesize(source),
-        text(" AS "),
-        identifier(alias),
+        renderSourceFrom(node.input, source, alias, context),
       );
     }
     case "sort": {
       const source = compileNode(node.input.node, context, outerScopes);
       const alias = nextAlias(context, "q");
       const scopes = extendScopes(outerScopes, [[node.input.scope, { alias }]]);
+      const compileOrderHelper =
+        context.compileOrderRoot === node
+          ? context.compileOrderHelper
+          : undefined;
       return concat(
         text("SELECT "),
         join(outputList(context, node.fields.length, alias)),
         text(" FROM "),
-        parenthesize(source),
-        text(" AS "),
-        identifier(alias),
+        ...(compileOrderHelper
+          ? [
+              renderCompileOrderCrossJoin(compileOrderHelper),
+              text(" CROSS JOIN "),
+            ]
+          : []),
+        renderSourceFrom(node.input, source, alias, context),
+        ...(compileOrderHelper
+          ? [text(" WHERE "), renderCompileOrderGuard(compileOrderHelper)]
+          : []),
         text(" ORDER BY "),
         join(
           node.keys.map((key) =>
@@ -1030,9 +1595,7 @@ function compileNode(
         text("SELECT "),
         join(outputList(context, node.fields.length, alias)),
         text(" FROM "),
-        parenthesize(source),
-        text(" AS "),
-        identifier(alias),
+        renderSourceFrom(node.input, source, alias, context),
         text(" LIMIT "),
         compileD1Expression(node.count, outerScopes, context),
         ...(node.offset
@@ -1054,14 +1617,14 @@ function compileNode(
         text(" FROM "),
         parenthesize(leftSql),
         text(" AS "),
-        identifier(leftAlias),
+        generatedIdentifier(leftAlias),
         text(node.all ? " UNION ALL " : " UNION "),
         text("SELECT "),
         join(outputList(context, node.fields.length, rightAlias)),
         text(" FROM "),
         parenthesize(rightSql),
         text(" AS "),
-        identifier(rightAlias),
+        generatedIdentifier(rightAlias),
       );
     }
     case "recursive-closure":
@@ -1095,19 +1658,19 @@ function compileRecursiveClosure(
     join(
       node.candidates.fields.map((field, index) =>
         concat(
-          column(index, candidateAlias, field.name),
-          text(` AS "_c${index}"`),
+          generatedColumn(index, candidateAlias, field.name),
+          generatedColumnOutputAlias(context, index),
         ),
       ),
     ),
     text(" FROM "),
     identifier(cteName),
     text(" AS "),
-    identifier(recursiveAlias),
+    generatedIdentifier(recursiveAlias),
     text(" INNER JOIN "),
     parenthesize(candidate),
     text(" AS "),
-    identifier(candidateAlias),
+    generatedIdentifier(candidateAlias),
     text(" ON "),
     compileD1Expression(node.predicate, predicateScopes, context),
   );
@@ -1115,7 +1678,7 @@ function compileRecursiveClosure(
     text("WITH RECURSIVE "),
     identifier(cteName),
     text(" ("),
-    join(cteColumns.map(identifier)),
+    join(cteColumns.map(generatedIdentifier)),
     text(") AS ("),
     anchor,
     text(" UNION "),
@@ -1125,7 +1688,7 @@ function compileRecursiveClosure(
     text(" FROM "),
     identifier(cteName),
     text(" AS "),
-    identifier(outputAlias),
+    generatedIdentifier(outputAlias),
   );
 }
 
@@ -1137,7 +1700,7 @@ function compileQuerySource(
   const inner = compileNode(source.node, context, outerScopes);
   const alias = nextAlias(context, "q");
   const projections = source.fields.map((field, index) =>
-    concat(column(index, alias), text(" AS "), identifier(field.name)),
+    concat(generatedColumn(index, alias), text(" AS "), identifier(field.name)),
   );
   return concat(
     text("SELECT "),
@@ -1145,7 +1708,101 @@ function compileQuerySource(
     text(" FROM "),
     parenthesize(inner),
     text(" AS "),
-    identifier(alias),
+    generatedIdentifier(alias),
+  );
+}
+
+function renderSourceFrom(
+  source: QuerySource,
+  sourceSql: SqlFragment,
+  alias: string,
+  context: RenderContext,
+): SqlFragment {
+  return renderMaterializedRelationReference({
+    source,
+    producer: context.bypassSharedNode ?? null,
+    interfaces: context.sharedRelationInterfaces,
+    definitionName: context.sharedRelations.get(source.node),
+    sourceSql,
+    alias,
+    session: context.finalRenderSession,
+  });
+}
+
+function canRenderSingletonRankFusion(
+  choice: PhysicalSingletonRankChoice,
+  context: RenderContext,
+): boolean {
+  const interfaces = context.sharedRelationInterfaces;
+  if (!context.singletonRankFusionEnabled || !interfaces) return false;
+  const producer = context.bypassSharedNode ?? null;
+  const producerIndex = producer
+    ? interfaces.layout.findIndex((definition) => definition.node === producer)
+    : interfaces.layout.length;
+  if (producer && producerIndex < 0) return false;
+  if (
+    !choice.renderContexts.some(
+      (candidate) =>
+        candidate.producer === producer &&
+        candidate.producerIndex === producerIndex,
+    )
+  )
+    return false;
+  for (const dependency of choice.boundaryDependencies) {
+    if (
+      dependency.consumerProducer !== producer ||
+      dependency.consumerProducerIndex !== producerIndex
+    )
+      continue;
+    const layoutIndex = interfaces.layout.findIndex(
+      (definition) => definition.node === dependency.node,
+    );
+    const boundary = interfaces.interfaces.find(
+      (candidate) => candidate.definition.node === dependency.node,
+    );
+    if (
+      layoutIndex !== dependency.producerIndex ||
+      layoutIndex < 0 ||
+      layoutIndex >= producerIndex ||
+      interfaces.layout[layoutIndex]?.name !== dependency.definitionName ||
+      interfaces.layout[layoutIndex]?.materialization !== "materialized" ||
+      boundary?.definition.name !== dependency.definitionName ||
+      !findPhysicalSharedRelationInterface(
+        interfaces,
+        dependency.node,
+        producer ?? interfaces.root,
+      )
+    )
+      return false;
+  }
+  return true;
+}
+
+function compileSingletonRankWindow(
+  choice: PhysicalSingletonRankChoice,
+  context: RenderContext,
+  outerScopes: ReadonlyMap<RelationScope, ScopeBinding>,
+): SqlFragment {
+  const { window } = choice;
+  const source = compileNode(window.input.node, context, outerScopes);
+  const alias = nextAlias(context, "q");
+  const selections = window.input.fields.map((_field, index) =>
+    concat(
+      generatedColumn(index, alias),
+      generatedColumnOutputAlias(context, index),
+    ),
+  );
+  selections.push(
+    concat(
+      text("1"),
+      generatedColumnOutputAlias(context, choice.rankOutputIndex),
+    ),
+  );
+  return concat(
+    text("SELECT DISTINCT "),
+    join(selections),
+    text(" FROM "),
+    renderSourceFrom(window.input, source, alias, context),
   );
 }
 
@@ -1161,9 +1818,32 @@ function renderContext(
   constantFilterJoinProjections: RenderContext["constantFilterJoinProjections"] = new Map(),
   sparseJoinOutputs: RenderContext["sparseJoinOutputs"] = new Map(),
   positiveTupleMemberships: RenderContext["positiveTupleMemberships"] = new Map(),
+  selfMembershipChoices: RenderContext["selfMembershipChoices"] = new Map(),
   projectionTransportSimplifications = true,
   joinOrderStrategies: RenderContext["joinOrderStrategies"] = new Map(),
+  conditionalLookupChoices: RenderContext["conditionalLookupChoices"] = new Map(),
+  rowPipelines: RenderContext["rowPipelines"] = new Map(),
+  compactGeneratedColumnAliases = false,
+  lexicographicChoices: readonly PhysicalLexicographicComparisonChoice[] = [],
+  sharedRelationInterfaces?: PhysicalSharedRelationInterfaceView,
+  semiMembershipChoices: readonly PhysicalSemiMembershipChoice[] = [],
+  singletonRankChoices: readonly PhysicalSingletonRankChoice[] = [],
+  singletonRankFusionEnabled = true,
+  finalRenderSession?: FinalRenderSession,
+  nativeNullOrderingChoices: readonly PhysicalNativeNullOrderingChoice[] = [],
 ): RenderContext {
+  const lexicographicComparisons = new Map(
+    lexicographicChoices.map((choice) => [choice.expression, choice] as const),
+  );
+  const nullOrderingByWindow = new Map<
+    WindowNode,
+    PhysicalNativeNullOrderingChoice[]
+  >();
+  for (const choice of nativeNullOrderingChoices) {
+    const choices = nullOrderingByWindow.get(choice.window) ?? [];
+    choices.push(choice);
+    nullOrderingByWindow.set(choice.window, choices);
+  }
   return {
     scanAlias: 0,
     queryAlias: 0,
@@ -1171,19 +1851,95 @@ function renderContext(
     rightAlias: 0,
     recursiveCteAlias: 0,
     reservedIdentifiers: new Set(reservedIdentifiers),
+    generatedAliases: new Set(),
     sharedRelations,
     directScanProjections,
     passthroughProjectFusions,
+    rowPipelines,
+    singletonRankChoices: new Map(
+      singletonRankChoices.map(
+        (choice) => [choice.pipeline.root, choice] as const,
+      ),
+    ),
+    singletonRankEmissions: new Map(),
+    singletonRankFusionEnabled,
+    nativeNullOrderingChoices: nullOrderingByWindow,
+    ...(finalRenderSession ? { finalRenderSession } : {}),
+    lexicographicComparisons,
+    lexicographicComparisonEmissions: new Map(),
+    ...(sharedRelationInterfaces ? { sharedRelationInterfaces } : {}),
     constantFilterJoinProjections,
     sparseJoinOutputs,
     positiveTupleMemberships,
+    selfMembershipChoices,
+    semiMemberships: new Map(
+      semiMembershipChoices.map((choice) => [choice.node, choice] as const),
+    ),
+    semiMembershipEmissions: new Map(),
     joinOrderStrategies,
+    conditionalLookupChoices,
     projectionTransportSimplifications,
+    compactGeneratedColumnAliases,
     ...(membershipStrategies ? { membershipStrategies } : {}),
     ...(membershipUsage ? { membershipUsage } : {}),
     ...(textRowStrategies ? { textRowStrategies } : {}),
     ...(textRowUsage ? { textRowUsage } : {}),
   };
+}
+
+/** A shadow main render owns only disposable counters and emission maps. */
+function forkRenderContextForProbe(context: RenderContext): RenderContext {
+  return {
+    ...context,
+    reservedIdentifiers: new Set(context.reservedIdentifiers),
+    generatedAliases: new Set(context.generatedAliases),
+    lexicographicComparisonEmissions: new Map(),
+    singletonRankEmissions: new Map(),
+    semiMembershipEmissions: new Map(),
+    ...(context.membershipUsage ? { membershipUsage: new Map() } : {}),
+    ...(context.textRowUsage ? { textRowUsage: new Map() } : {}),
+    bypassSharedNode: undefined,
+    compileOrderRoot: undefined,
+    compileOrderHelper: undefined,
+  };
+}
+
+function compileOrderReferencesForFragment(
+  session: FinalRenderSession,
+  fragment: SqlFragment,
+): readonly CompileOrderSharedReference[] {
+  return [...finalRenderEmissionCounts(session, fragment).sharedReferences].map(
+    ([definition, reference]) => ({
+      definition: definition as LogicalQueryNode,
+      definitionIndex: reference.definitionIndex,
+      emissionCount: reference.emissionCount,
+    }),
+  );
+}
+
+function canRenderSemiMembership(
+  choice: PhysicalSemiMembershipChoice,
+  context: RenderContext,
+): boolean {
+  const interfaces = context.sharedRelationInterfaces;
+  if (!interfaces) return false;
+  const currentProducer = context.bypassSharedNode ?? interfaces.root;
+  for (const stop of choice.materializedStops) {
+    if (!context.sharedRelations.has(stop)) return false;
+    const evidence = findPhysicalSharedRelationInterface(
+      interfaces,
+      stop,
+      currentProducer,
+    );
+    if (
+      !evidence ||
+      evidence.boundary.kind !== "materialized-relation" ||
+      evidence.closure.kind !== "scope-and-exported-columns-closed" ||
+      evidence.totality.kind !== "checked-through-current-boundaries"
+    )
+      return false;
+  }
+  return true;
 }
 
 function recursiveCteName(context: RenderContext): string {
@@ -1322,8 +2078,53 @@ function reservePlanIdentifiers(
   return identifiers;
 }
 
+function reserveCompileOrderIdentifiers(
+  physical: PhysicalQueryPlan<object>,
+  current: ReadonlySet<string>,
+): Set<string> {
+  const identifiers = new Set(current);
+  for (const field of physical.fields) identifiers.add(field.name);
+  for (const definition of physical.sharedRelations)
+    for (const field of definition.fields) identifiers.add(field.name);
+  return identifiers;
+}
+
 export interface D1CompileOptions {
   readonly tag?: string;
+}
+
+interface FinalRenderCompileCapture {
+  compiledQuery?: CompiledQuery<object>;
+  diagnostic?: FinalRenderTestDiagnostic;
+  compileOrderGraph?: {
+    readonly mainReferences: readonly {
+      readonly definitionIndex: number;
+      readonly emissionCount: number;
+    }[];
+    readonly definitionReferences: readonly {
+      readonly definitionIndex: number;
+      readonly referenceIndexes: readonly number[];
+    }[];
+    readonly scheduledDefinitionIndexes: readonly number[] | null;
+  };
+}
+
+export type D1CompilePhase =
+  | "lower-physical-validation-and-selection"
+  | "sql-render-parameter-layout-budget"
+  | "compiler-total";
+export type D1CompilePhaseReporter = (
+  phase: D1CompilePhase,
+  elapsedMs: number,
+) => void;
+
+function compileClockNow(): number {
+  try {
+    const value = globalThis.performance?.now() ?? Date.now();
+    return Number.isFinite(value) ? value : Date.now();
+  } catch {
+    return Date.now();
+  }
 }
 
 export function compileD1Query<
@@ -1346,6 +2147,81 @@ export function compileD1Query(
   return compileD1QueryInternal(plan, options, true);
 }
 
+/** @internal Exposes the exact final render frame to focused compiler tests. */
+export function compileD1QueryWithFinalRenderForTest(
+  plan:
+    | Relation<object, Readonly<Record<string, AnyExpression>>>
+    | PhysicalQueryPlan<object>,
+  options: D1CompileOptions = {},
+): {
+  readonly query: CompiledQuery<object>;
+  readonly finalRender: FinalRenderTestDiagnostic & {
+    readonly query: CompiledQuery<object>;
+  };
+} {
+  const capture: FinalRenderCompileCapture = {};
+  const query = compileD1QueryInternal(
+    plan,
+    options,
+    true,
+    true,
+    true,
+    false,
+    true,
+    true,
+    false,
+    true,
+    capture,
+  );
+  if (capture.compiledQuery !== query || capture.diagnostic === undefined)
+    throw new Error("final_render_capture_did_not_match_compiled_query");
+  return {
+    query,
+    finalRender: { ...capture.diagnostic, query },
+  };
+}
+
+/** @internal Captures one exact compile attempt and request-local phase timings. */
+export function compileD1QueryWithDiagnosticsForTest(
+  plan:
+    | Relation<object, Readonly<Record<string, AnyExpression>>>
+    | PhysicalQueryPlan<object>,
+  options: D1CompileOptions = {},
+  reportPhase?: D1CompilePhaseReporter,
+): {
+  readonly query: CompiledQuery<object>;
+  readonly finalRender: FinalRenderTestDiagnostic & {
+    readonly query: CompiledQuery<object>;
+  };
+  readonly compileOrderGraph?: FinalRenderCompileCapture["compileOrderGraph"];
+} {
+  const capture: FinalRenderCompileCapture = {};
+  const query = compileD1QueryInternal(
+    plan,
+    options,
+    true,
+    true,
+    true,
+    false,
+    true,
+    true,
+    false,
+    true,
+    capture,
+    false,
+    reportPhase,
+  );
+  if (capture.compiledQuery !== query || capture.diagnostic === undefined)
+    throw new Error("compile_diagnostic_capture_did_not_match_query");
+  return {
+    query,
+    finalRender: { ...capture.diagnostic, query },
+    ...(capture.compileOrderGraph
+      ? { compileOrderGraph: capture.compileOrderGraph }
+      : {}),
+  };
+}
+
 /** Internal, budget-checked expansion path for compiler differential tests. */
 export function compileD1QueryUnoptimizedForTest(
   plan:
@@ -1353,7 +2229,7 @@ export function compileD1QueryUnoptimizedForTest(
     | PhysicalQueryPlan<object>,
   options: D1CompileOptions = {},
 ): CompiledQuery<object> {
-  return compileD1QueryInternal(plan, options, false);
+  return compileD1QueryInternal(plan, options, false, false, false, false);
 }
 
 /** Exercise the defensive non-tuple renderer for final-choice tests. */
@@ -1363,7 +2239,92 @@ export function compileD1QueryTupleMembershipFallbackForTest(
     | PhysicalQueryPlan<object>,
   options: D1CompileOptions = {},
 ): CompiledQuery<object> {
-  return compileD1QueryInternal(plan, options, true, true, true, true);
+  return compileD1QueryInternal(plan, options, true, true, true, true, true);
+}
+
+/** Keep all physical choices enabled except Generic SemiJoin membership. */
+export function compileD1QuerySemiMembershipFallbackForTest(
+  plan:
+    | Relation<object, Readonly<Record<string, AnyExpression>>>
+    | PhysicalQueryPlan<object>,
+  options: D1CompileOptions = {},
+): CompiledQuery<object> {
+  return compileD1QueryInternal(
+    plan,
+    options,
+    true,
+    true,
+    true,
+    false,
+    true,
+    false,
+  );
+}
+
+/**
+ * Emit freshly validated safe candidates while bypassing only default cost
+ * selection. Domain, totality, validator, and producer checks still run.
+ */
+export function compileD1QuerySemiMembershipForceSafeForTest(
+  plan:
+    | Relation<object, Readonly<Record<string, AnyExpression>>>
+    | PhysicalQueryPlan<object>,
+): CompiledQuery<object> {
+  return compileD1QueryInternal(
+    plan,
+    {},
+    true,
+    true,
+    true,
+    false,
+    true,
+    true,
+    true,
+  );
+}
+
+/** @internal Keep every existing optimizer enabled while disabling only singleton-rank fusion. */
+export function compileD1QueryWithoutSingletonRankFusionForTest(
+  plan:
+    | Relation<object, Readonly<Record<string, AnyExpression>>>
+    | PhysicalQueryPlan<object>,
+  options: D1CompileOptions = {},
+): CompiledQuery<object> {
+  return compileD1QueryInternal(
+    plan,
+    options,
+    true,
+    true,
+    true,
+    false,
+    true,
+    true,
+    false,
+    false,
+  );
+}
+
+/** @internal Disable only the materialization compile-order helper for differential tests. */
+export function compileD1QueryWithoutCompileOrderForTest(
+  plan:
+    | Relation<object, Readonly<Record<string, AnyExpression>>>
+    | PhysicalQueryPlan<object>,
+  options: D1CompileOptions = {},
+): CompiledQuery<object> {
+  return compileD1QueryInternal(
+    plan,
+    options,
+    true,
+    true,
+    true,
+    false,
+    true,
+    true,
+    false,
+    true,
+    undefined,
+    true,
+  );
 }
 
 function compileD1QueryInternal(
@@ -1375,19 +2336,59 @@ function compileD1QueryInternal(
   includePassthroughProjectFusions = includeSharedRelations,
   includeConstantFilterJoinProjections = includeSharedRelations,
   forceTupleMembershipFallbackForTest = false,
+  includeRowPipelines = includeSharedRelations,
+  includeSemiMemberships = includeSharedRelations,
+  forceSafeSemiMembershipsForTest = false,
+  enableSingletonRankFusion = true,
+  finalRenderCapture?: FinalRenderCompileCapture,
+  disableCompileOrderForTest = false,
+  reportPhase?: D1CompilePhaseReporter,
 ): CompiledQuery<object> {
-  const physical: PhysicalQueryPlan<object> =
+  const compilerStartedAt = reportPhase ? compileClockNow() : 0;
+  const physical = (
     "kind" in plan && plan.kind === "physical-query"
       ? plan
-      : lowerLogicalPlan(plan);
-  validatePhysicalQueryPlan(physical);
-  const { physical: canonicalPhysical, nativeQuery } = optimizeForFinalShape(
+      : lowerLogicalPlan(plan)
+  ) as PhysicalQueryPlan<object>;
+  const sharedRelationInterfaces = validatePhysicalQueryPlan(physical);
+  const {
+    physical: canonicalPhysical,
+    nativeQuery,
+    finalRenderSession,
+  } = optimizeForFinalShape(
     physical,
     includePassthroughProjectFusions,
     includeConstantFilterJoinProjections,
     includeSharedRelations,
     forceTupleMembershipFallbackForTest,
+    includeRowPipelines,
+    includeSharedRelations,
+    sharedRelationInterfaces,
+    includeSemiMemberships,
+    forceSafeSemiMembershipsForTest,
+    enableSingletonRankFusion,
   );
+  if (reportPhase)
+    reportPhase(
+      "lower-physical-validation-and-selection",
+      compileClockNow() - compilerStartedAt,
+    );
+  const runFinalCompile = (
+    compile: () => CompiledQuery<object>,
+  ): CompiledQuery<object> => {
+    if (!reportPhase) return compile();
+    const renderStartedAt = compileClockNow();
+    try {
+      return compile();
+    } finally {
+      const finishedAt = compileClockNow();
+      reportPhase(
+        "sql-render-parameter-layout-budget",
+        finishedAt - renderStartedAt,
+      );
+      reportPhase("compiler-total", finishedAt - compilerStartedAt);
+    }
+  };
   if (
     physical.membershipOptimization !== undefined &&
     !hasSamePhysicalMembershipOptimization(
@@ -1408,35 +2409,93 @@ function compileD1QueryInternal(
       ) ||
       (membershipOptimization.rowStrategies ?? []).some(
         (strategy) => strategy.strategy === "json-rows",
-      );
-    if (!hasJsonStrategy)
-      return compileAndBudget(
-        nativeQuery,
+      ) ||
+      (membershipOptimization.tupleMemberships ?? []).length > 0;
+    if (!hasJsonStrategy && !canonicalPhysical.compileOrderPolicy) {
+      try {
+        return runFinalCompile(() =>
+          compileAndBudget(
+            nativeQuery,
+            options,
+            undefined,
+            (emissions) =>
+              physicalPlanShape(canonicalPhysical, true, emissions),
+            finalRenderSession,
+            finalRenderCapture,
+          ),
+        );
+      } catch (error) {
+        if (
+          !(error instanceof D1StatementBudgetError) ||
+          error.item !== "sql_bytes"
+        )
+          throw error;
+        return runFinalCompile(() =>
+          renderAndBudget(
+            canonicalPhysical,
+            options,
+            true,
+            sharedRelationInterfaces,
+            membershipOptimization.strategies,
+            membershipOptimization.selectedBindingCount,
+            membershipOptimization.rowStrategies ?? [],
+            includePassthroughProjectFusions,
+            includeConstantFilterJoinProjections,
+            includeRowPipelines,
+            true,
+            false,
+            includeSemiMemberships,
+            forceSafeSemiMembershipsForTest,
+            enableSingletonRankFusion,
+            finalRenderCapture,
+            disableCompileOrderForTest,
+          ),
+        );
+      }
+    }
+    return runFinalCompile(() =>
+      renderAndBudget(
+        canonicalPhysical,
         options,
-        undefined,
-        physicalPlanShape(canonicalPhysical, true),
-      );
-    return renderAndBudget(
-      canonicalPhysical,
-      options,
-      true,
-      membershipOptimization.strategies,
-      membershipOptimization.selectedBindingCount,
-      membershipOptimization.rowStrategies ?? [],
-      includePassthroughProjectFusions,
-      includeConstantFilterJoinProjections,
+        true,
+        sharedRelationInterfaces,
+        membershipOptimization.strategies,
+        membershipOptimization.selectedBindingCount,
+        membershipOptimization.rowStrategies ?? [],
+        includePassthroughProjectFusions,
+        includeConstantFilterJoinProjections,
+        includeRowPipelines,
+        false,
+        true,
+        includeSemiMemberships,
+        forceSafeSemiMembershipsForTest,
+        enableSingletonRankFusion,
+        finalRenderCapture,
+        disableCompileOrderForTest,
+      ),
     );
   }
 
-  return renderAndBudget(
-    physical,
-    options,
-    false,
-    undefined,
-    undefined,
-    [],
-    includePassthroughProjectFusions,
-    includeConstantFilterJoinProjections,
+  return runFinalCompile(() =>
+    renderAndBudget(
+      physical,
+      options,
+      false,
+      sharedRelationInterfaces,
+      undefined,
+      undefined,
+      [],
+      includePassthroughProjectFusions,
+      includeConstantFilterJoinProjections,
+      includeRowPipelines,
+      false,
+      true,
+      includeSemiMemberships,
+      forceSafeSemiMembershipsForTest,
+      enableSingletonRankFusion,
+      finalRenderCapture,
+      disableCompileOrderForTest,
+    ),
   );
 }
 
@@ -1446,10 +2505,34 @@ function optimizeForFinalShape(
   includeConstantFilterJoinProjections: boolean,
   includePositiveTupleMemberships = true,
   forceTupleMembershipFallbackForTest = false,
+  includeRowPipelines = includePositiveTupleMemberships,
+  includeLexicographicComparisons = true,
+  sharedRelationInterfaces: PhysicalSharedRelationInterfaceView,
+  includeSemiMemberships = true,
+  forceSafeSemiMembershipsForTest = false,
+  enableSingletonRankFusion = true,
 ): {
   readonly physical: PhysicalQueryPlan<object>;
   readonly nativeQuery: SqlFragment;
+  readonly lexicographicEmissions: ReadonlyMap<
+    PhysicalLexicographicComparisonChoice,
+    number
+  >;
+  readonly semiMembershipEmissions: ReadonlyMap<
+    PhysicalSemiMembershipChoice,
+    number
+  >;
+  readonly singletonRankEmissions: ReadonlyMap<
+    PhysicalSingletonRankChoice,
+    number
+  >;
+  readonly finalRenderSession: FinalRenderSession;
 } {
+  assertPhysicalSharedRelationInterfaceViewMatches(
+    sharedRelationInterfaces,
+    physical.root,
+    physical.sharedRelations,
+  );
   const source: QuerySource = {
     node: physical.root,
     scope: physical.scope,
@@ -1489,8 +2572,14 @@ function optimizeForFinalShape(
   const renderNative = (
     tupleMemberships: readonly PositiveTupleMembershipCandidate[] = [],
   ) => {
+    assertPhysicalSharedRelationInterfaceViewMatches(
+      sharedRelationInterfaces,
+      physical.root,
+      physical.sharedRelations,
+    );
     const membershipUsage = new Map<AnyInListExpression, number>();
     const textRowUsage = new Map<ValuesRelationNode, number>();
+    const finalRenderSession = createFinalRenderSession();
     const context = renderContext(
       sharedNames,
       undefined,
@@ -1503,18 +2592,55 @@ function optimizeForFinalShape(
       constantFilterJoinProjections,
       sparseJoinOutputs,
       new Map(tupleMemberships.map((item) => [item.project, item] as const)),
+      new Map(
+        (includePositiveTupleMemberships
+          ? physical.selfMembershipChoices
+          : []
+        ).map((item) => [item.project, item] as const),
+      ),
       true,
       new Map(
         physical.joinOrderStrategies.map(
           (strategy) => [strategy.join, strategy] as const,
         ),
       ),
+      new Map(
+        physical.conditionalLookupChoices.map(
+          (choice) => [choice.join, choice] as const,
+        ),
+      ),
+      new Map(
+        includeRowPipelines
+          ? physical.rowPipelineChoices.map(
+              (choice) => [choice.root, choice] as const,
+            )
+          : [],
+      ),
+      false,
+      includeLexicographicComparisons
+        ? physical.lexicographicComparisonChoices
+        : [],
+      sharedRelationInterfaces,
+      semiMembershipChoicesForRender(
+        physical,
+        includeSemiMemberships,
+        forceSafeSemiMembershipsForTest,
+      ),
+      includeRowPipelines ? physical.singletonRankChoices : [],
+      enableSingletonRankFusion,
+      finalRenderSession,
+      physical.nativeNullOrderingChoices,
     );
-    const definitions = sharedRelations.map((shared) => {
+    const definitions = sharedRelations.map((shared, definitionIndex) => {
       context.bypassSharedNode = shared.node;
       const body = compileNode(shared.node, context, new Map());
       context.bypassSharedNode = undefined;
-      return compileSharedRelationDefinition(shared, body);
+      return compileSharedRelationDefinition(
+        shared,
+        body,
+        definitionIndex,
+        finalRenderSession,
+      );
     });
     const main = compileQuerySource(source, context, new Map());
     const query =
@@ -1523,6 +2649,7 @@ function optimizeForFinalShape(
         : concat(text("WITH "), join(definitions, text(", ")), text(" "), main);
     return {
       query,
+      finalRenderSession,
       facts: {
         nativeBindingCount: query.bindings.length,
         usage: [...membershipUsage].map(
@@ -1533,6 +2660,11 @@ function optimizeForFinalShape(
           ([node, occurrences]) =>
             ({ node, occurrences }) satisfies PhysicalTextRowUsage,
         ),
+        lexicographicEmissions: new Map(
+          context.lexicographicComparisonEmissions,
+        ),
+        semiMembershipEmissions: new Map(context.semiMembershipEmissions),
+        singletonRankEmissions: new Map(context.singletonRankEmissions),
       },
     };
   };
@@ -1549,7 +2681,14 @@ function optimizeForFinalShape(
   const tupleMemberships =
     firstChoice.membershipOptimization?.tupleMemberships ?? [];
   if (tupleMemberships.length === 0)
-    return { physical: firstChoice, nativeQuery: unselected.query };
+    return {
+      physical: firstChoice,
+      nativeQuery: unselected.query,
+      finalRenderSession: unselected.finalRenderSession,
+      lexicographicEmissions: unselected.facts.lexicographicEmissions,
+      semiMembershipEmissions: unselected.facts.semiMembershipEmissions,
+      singletonRankEmissions: unselected.facts.singletonRankEmissions,
+    };
 
   // Re-measure the selected relational shape before finalizing packing metadata.
   const selected = renderNative(tupleMemberships);
@@ -1565,14 +2704,28 @@ function optimizeForFinalShape(
       firstChoice.membershipOptimization!,
     )
   )
-    return { physical: finalChoice, nativeQuery: selected.query };
+    return {
+      physical: finalChoice,
+      nativeQuery: selected.query,
+      finalRenderSession: selected.finalRenderSession,
+      lexicographicEmissions: selected.facts.lexicographicEmissions,
+      semiMembershipEmissions: selected.facts.semiMembershipEmissions,
+      singletonRankEmissions: selected.facts.singletonRankEmissions,
+    };
 
   // If a structural rewrite changes packed-choice costs, keep the measured
   // original Join plan rather than allowing choices to oscillate. The
   // test-only seam forces this path to verify final SQL and budget metadata.
   const fallbackOptimization = firstChoice.membershipOptimization;
   if (!fallbackOptimization)
-    return { physical: firstChoice, nativeQuery: unselected.query };
+    return {
+      physical: firstChoice,
+      nativeQuery: unselected.query,
+      finalRenderSession: unselected.finalRenderSession,
+      lexicographicEmissions: unselected.facts.lexicographicEmissions,
+      semiMembershipEmissions: unselected.facts.semiMembershipEmissions,
+      singletonRankEmissions: unselected.facts.singletonRankEmissions,
+    };
   return {
     physical: {
       ...firstChoice,
@@ -1582,13 +2735,30 @@ function optimizeForFinalShape(
       },
     },
     nativeQuery: unselected.query,
+    finalRenderSession: unselected.finalRenderSession,
+    lexicographicEmissions: unselected.facts.lexicographicEmissions,
+    semiMembershipEmissions: unselected.facts.semiMembershipEmissions,
+    singletonRankEmissions: unselected.facts.singletonRankEmissions,
   };
+}
+
+function semiMembershipChoicesForRender(
+  physical: PhysicalQueryPlan<object>,
+  includeSemiMemberships: boolean,
+  forceSafeSemiMembershipsForTest: boolean,
+): readonly PhysicalSemiMembershipChoice[] {
+  if (!includeSemiMemberships) return [];
+  if (forceSafeSemiMembershipsForTest) return physical.semiMembershipChoices;
+  return physical.semiMembershipCostSelections.flatMap((selection) =>
+    selection.strategy === "in" ? [selection.choice] : [],
+  );
 }
 
 function renderAndBudget(
   physical: PhysicalQueryPlan<object>,
   options: D1CompileOptions,
   includeSharedRelations: boolean,
+  sharedRelationInterfaces: PhysicalSharedRelationInterfaceView,
   strategies?: NonNullable<
     PhysicalQueryPlan<object>["membershipOptimization"]
   >["strategies"],
@@ -1596,7 +2766,20 @@ function renderAndBudget(
   rowStrategies: readonly PhysicalTextRowStrategy[] = [],
   includePassthroughProjectFusions = true,
   includeConstantFilterJoinProjections = true,
+  includeRowPipelines = includeSharedRelations,
+  compactGeneratedColumnAliases = false,
+  allowCompactGeneratedColumnAliasRetry = true,
+  includeSemiMemberships = true,
+  forceSafeSemiMembershipsForTest = false,
+  enableSingletonRankFusion = true,
+  finalRenderCapture?: FinalRenderCompileCapture,
+  disableCompileOrderForTest = false,
 ): CompiledQuery<object> {
+  assertPhysicalSharedRelationInterfaceViewMatches(
+    sharedRelationInterfaces,
+    physical.root,
+    physical.sharedRelations,
+  );
   const source: QuerySource = {
     node: physical.root,
     scope: physical.scope,
@@ -1605,6 +2788,7 @@ function renderAndBudget(
   const sharedRelations = includeSharedRelations
     ? physical.sharedRelations
     : [];
+  const finalRenderSession = createFinalRenderSession();
   const sharedNames = new Map(
     sharedRelations.map(({ node, name }) => [node, name] as const),
   );
@@ -1690,12 +2874,41 @@ function renderAndBudget(
         constantFilterJoinProjections,
         sparseJoinOutputs,
         positiveTupleMemberships,
+        new Map(
+          (includeSharedRelations ? physical.selfMembershipChoices : []).map(
+            (item) => [item.project, item] as const,
+          ),
+        ),
         includeSharedRelations,
         new Map(
           physical.joinOrderStrategies.map(
             (strategy) => [strategy.join, strategy] as const,
           ),
         ),
+        new Map(
+          physical.conditionalLookupChoices.map(
+            (choice) => [choice.join, choice] as const,
+          ),
+        ),
+        new Map(
+          includeRowPipelines
+            ? physical.rowPipelineChoices.map(
+                (choice) => [choice.root, choice] as const,
+              )
+            : [],
+        ),
+        compactGeneratedColumnAliases,
+        includeSharedRelations ? physical.lexicographicComparisonChoices : [],
+        sharedRelationInterfaces,
+        semiMembershipChoicesForRender(
+          physical,
+          includeSemiMemberships,
+          forceSafeSemiMembershipsForTest,
+        ),
+        includeRowPipelines ? physical.singletonRankChoices : [],
+        enableSingletonRankFusion,
+        finalRenderSession,
+        physical.nativeNullOrderingChoices,
       )
     : renderContext(
         sharedNames,
@@ -1709,35 +2922,230 @@ function renderAndBudget(
         constantFilterJoinProjections,
         sparseJoinOutputs,
         positiveTupleMemberships,
+        new Map(),
         includeSharedRelations,
         new Map(),
+        new Map(
+          physical.conditionalLookupChoices.map(
+            (choice) => [choice.join, choice] as const,
+          ),
+        ),
+        new Map(
+          includeRowPipelines
+            ? physical.rowPipelineChoices.map(
+                (choice) => [choice.root, choice] as const,
+              )
+            : [],
+        ),
+        compactGeneratedColumnAliases,
+        includeSharedRelations ? physical.lexicographicComparisonChoices : [],
+        sharedRelationInterfaces,
+        semiMembershipChoicesForRender(
+          physical,
+          includeSemiMemberships,
+          forceSafeSemiMembershipsForTest,
+        ),
+        includeRowPipelines ? physical.singletonRankChoices : [],
+        enableSingletonRankFusion,
+        finalRenderSession,
+        physical.nativeNullOrderingChoices,
       );
-  const definitions = sharedRelations.map((shared) => {
+  const definitionBodies: SqlFragment[] = [];
+  const definitions = sharedRelations.map((shared, definitionIndex) => {
     context.bypassSharedNode = shared.node;
     const body = compileNode(shared.node, context, new Map());
     context.bypassSharedNode = undefined;
-    return compileSharedRelationDefinition(shared, body);
+    definitionBodies.push(body);
+    return compileSharedRelationDefinition(
+      shared,
+      body,
+      definitionIndex,
+      finalRenderSession,
+    );
   });
-  const main = compileQuerySource(source, context, new Map());
+  let main: SqlFragment;
+  let compileOrderHelper: RenderedCompileOrderHelper | undefined;
+  let compileOrderGraph: FinalRenderCompileCapture["compileOrderGraph"];
+  if (
+    includeSharedRelations &&
+    physical.compileOrderPolicy &&
+    !disableCompileOrderForTest
+  ) {
+    const probeContext = forkRenderContextForProbe(context);
+    const probeMain = compileQuerySource(source, probeContext, new Map());
+    const definitionReferences = definitionBodies.map((body) =>
+      compileOrderReferencesForFragment(finalRenderSession, body),
+    );
+    const mainReferences = compileOrderReferencesForFragment(
+      finalRenderSession,
+      probeMain,
+    );
+    const scheduledDefinitionIndexes = scheduledCompileOrderLeaves({
+      policy: physical.compileOrderPolicy,
+      definitions: sharedRelations,
+      referencesByDefinition: definitionReferences,
+      mainReferences,
+    });
+    compileOrderGraph = Object.freeze({
+      mainReferences: Object.freeze(
+        mainReferences.map(({ definitionIndex, emissionCount }) => ({
+          definitionIndex,
+          emissionCount,
+        })),
+      ),
+      definitionReferences: Object.freeze(
+        definitionReferences.map((references, definitionIndex) =>
+          Object.freeze({
+            definitionIndex,
+            referenceIndexes: Object.freeze(
+              references
+                .map(({ definitionIndex: referenceIndex }) => referenceIndex)
+                .sort((left, right) => left - right),
+            ),
+          }),
+        ),
+      ),
+      scheduledDefinitionIndexes: scheduledDefinitionIndexes ?? null,
+    });
+    if (scheduledDefinitionIndexes) {
+      const reservedIdentifiers = reserveCompileOrderIdentifiers(
+        physical,
+        probeContext.reservedIdentifiers,
+      );
+      compileOrderHelper = renderCompileOrderHelper({
+        definitions: sharedRelations,
+        definitionIndexes: scheduledDefinitionIndexes,
+        reservedIdentifiers,
+        session: finalRenderSession,
+      });
+      const finalMainContext = forkRenderContextForProbe(context);
+      finalMainContext.reservedIdentifiers.add(compileOrderHelper.cteName);
+      finalMainContext.reservedIdentifiers.add(compileOrderHelper.alias);
+      finalMainContext.reservedIdentifiers.add(compileOrderHelper.marker);
+      finalMainContext.compileOrderRoot = physical.compileOrderPolicy.rootSort;
+      finalMainContext.compileOrderHelper = compileOrderHelper;
+      main = compileQuerySource(source, finalMainContext, new Map());
+    } else {
+      main = probeMain;
+    }
+  } else {
+    main = compileQuerySource(source, context, new Map());
+  }
+  const allDefinitions = compileOrderHelper
+    ? [...definitions, compileOrderHelper.definition]
+    : definitions;
   const query =
-    definitions.length === 0
+    allDefinitions.length === 0
       ? main
-      : concat(text("WITH "), join(definitions, text(", ")), text(" "), main);
-  return compileAndBudget(
-    query,
-    options,
-    expectedBindingCount,
-    includeSharedRelations
-      ? physicalPlanShape(physical, true, strategies)
-      : undefined,
-  );
+      : concat(
+          text("WITH "),
+          join(allDefinitions, text(", ")),
+          text(" "),
+          main,
+        );
+  try {
+    const compiled = compileAndBudget(
+      query,
+      options,
+      expectedBindingCount,
+      includeSharedRelations
+        ? (emissions) =>
+            physicalPlanShape(physical, true, emissions, strategies)
+        : undefined,
+      finalRenderSession,
+      finalRenderCapture,
+    );
+    if (finalRenderCapture && compileOrderGraph)
+      finalRenderCapture.compileOrderGraph = compileOrderGraph;
+    return compiled;
+  } catch (error) {
+    if (
+      !allowCompactGeneratedColumnAliasRetry ||
+      compactGeneratedColumnAliases ||
+      !(error instanceof D1StatementBudgetError) ||
+      error.item !== "sql_bytes"
+    )
+      throw error;
+    return renderAndBudget(
+      physical,
+      options,
+      includeSharedRelations,
+      sharedRelationInterfaces,
+      strategies,
+      expectedBindingCount,
+      rowStrategies,
+      includePassthroughProjectFusions,
+      includeConstantFilterJoinProjections,
+      includeRowPipelines,
+      true,
+      false,
+      includeSemiMemberships,
+      forceSafeSemiMembershipsForTest,
+      enableSingletonRankFusion,
+      finalRenderCapture,
+      disableCompileOrderForTest,
+    );
+  }
 }
 
 function physicalPlanShape(
   physical: PhysicalQueryPlan<object>,
   includeSharedRelations: boolean,
+  emissions: FinalRenderEmissionCounts,
   strategies = physical.membershipOptimization?.strategies ?? [],
 ): DatabasePhysicalPlanShape {
+  const helpers = [...emissions.compileOrderHelpers.values()].filter(
+    ({ emissionCount }) => emissionCount > 0,
+  );
+  const base = physicalPlanShapeBase(
+    physical,
+    includeSharedRelations,
+    emissions,
+    strategies,
+  );
+  if (helpers.length === 0) return base;
+  if (
+    helpers.length !== 1 ||
+    helpers[0]!.emissionCount !== 1 ||
+    base.version !== 13 ||
+    helpers[0]!.leafDefinitionIndexes.length < 2 ||
+    helpers[0]!.leafDefinitionIndexes.length > 100
+  )
+    throw new DatabaseCompilerError(
+      "invalid_plan",
+      "Compile-order helper emission is inconsistent with the final query",
+    );
+  return {
+    ...base,
+    version: 14,
+    cteCount: base.cteCount + 1,
+    compileOrder: {
+      helperCount: 1,
+      leafCount: helpers[0]!.leafDefinitionIndexes.length,
+      definitionIndexes: [...helpers[0]!.leafDefinitionIndexes],
+      strategy: helpers[0]!.strategy,
+    },
+  };
+}
+
+function physicalPlanShapeBase(
+  physical: PhysicalQueryPlan<object>,
+  includeSharedRelations: boolean,
+  emissions: FinalRenderEmissionCounts,
+  strategies = physical.membershipOptimization?.strategies ?? [],
+): DatabasePhysicalPlanShape {
+  const lexicographicEmissions = emissions.lexicographic as ReadonlyMap<
+    PhysicalLexicographicComparisonChoice,
+    number
+  >;
+  const semiMembershipEmissions = emissions.semiMembership as ReadonlyMap<
+    PhysicalSemiMembershipChoice,
+    number
+  >;
+  const singletonRankEmissions = emissions.singletonRank as ReadonlyMap<
+    PhysicalSingletonRankChoice,
+    number
+  >;
   let nativeMembershipCount = 0;
   let jsonMembershipCount = 0;
   let nativeRowRelationCount = 0;
@@ -1767,6 +3175,313 @@ function physicalPlanShape(
   const uniqueLookupJoinOrderCount = physical.joinOrderStrategies.filter(
     ({ kind }) => kind === "unique-lookup",
   ).length;
+  const factLocalIndexedJoinStrategies = physical.joinOrderStrategies
+    .filter((strategy) => strategy.kind === "fact-local-indexed")
+    .map(({ tableName, indexName, keyColumns }) => ({
+      tableName,
+      indexName,
+      keyColumns: keyColumns.map(({ name, leftIndex, rightIndex }) => ({
+        name,
+        leftIndex,
+        rightIndex,
+      })),
+    }));
+  const conditionalLookupStrategies = physical.conditionalLookupChoices.map(
+    ({ tableName, indexName, keyColumns, selectedKey, guardConjuncts }) => ({
+      tableName,
+      indexName,
+      keyColumns: keyColumns.map(({ name, leftIndex, rightIndex }) => ({
+        name,
+        leftIndex,
+        rightIndex,
+      })),
+      selectedKey: {
+        name: selectedKey.name,
+        leftIndex: selectedKey.leftIndex,
+        rightIndex: selectedKey.rightIndex,
+      },
+      guardConjunctCount: guardConjuncts.length,
+    }),
+  );
+  const selfMembershipCount = physical.selfMembershipChoices.length;
+  const rowPipelineShapes = physical.rowPipelineChoices.map(rowPipelineShape);
+  const lexicographicComparisons =
+    physical.lexicographicComparisonChoices.flatMap((choice) => {
+      const emissionCount = lexicographicEmissions.get(choice) ?? 0;
+      return emissionCount > 0
+        ? [
+            {
+              direction: choice.direction,
+              componentCount: choice.components.length,
+              emissionCount,
+            },
+          ]
+        : [];
+    });
+  const emittedSemiMemberships = [...semiMembershipEmissions].flatMap(
+    ([choice, emissionCount]) =>
+      emissionCount > 0
+        ? [{ keyCount: choice.leftKeyIndexes.length, emissionCount }]
+        : [],
+  );
+  const emittedSingletonRankFusions = [...singletonRankEmissions].flatMap(
+    ([choice, emissionCount]) =>
+      emissionCount > 0
+        ? [
+            {
+              partitionFieldCount: choice.partitionColumnIndexes.length,
+              keyFieldCount: choice.keyFields.length,
+              consumerCertificateCount: choice.consumerCertificates.length,
+              emissionCount,
+              distinct: true as const,
+            },
+          ]
+        : [],
+  );
+  const nativeWindowIndexes = new Map<LogicalQueryNode, Map<number, number>>();
+  let nextNativeWindowIndex = 0;
+  for (const choice of physical.nativeNullOrderingChoices) {
+    let specifications = nativeWindowIndexes.get(choice.window);
+    if (!specifications) {
+      specifications = new Map();
+      nativeWindowIndexes.set(choice.window, specifications);
+    }
+    if (!specifications.has(choice.windowIndex))
+      specifications.set(choice.windowIndex, nextNativeWindowIndex++);
+  }
+  const emittedNativeNullOrderings = physical.nativeNullOrderingChoices.flatMap(
+    (choice) => {
+      const emissionCount = emissions.nativeNullOrdering.get(choice) ?? 0;
+      return emissionCount > 0
+        ? [
+            {
+              windowIndex: nativeWindowIndexes
+                .get(choice.window)!
+                .get(choice.windowIndex)!,
+              pairIndex: choice.pairIndex,
+              columnIndex: choice.columnIndex,
+              valueDirection: choice.valueDirection,
+              nullPlacement: choice.nullPlacement,
+              emissionCount,
+            },
+          ]
+        : [];
+    },
+  );
+  const emittedMaterializedReferences = physical.sharedRelations.flatMap(
+    (definition, definitionIndex) => {
+      const emission = emissions.materializedReferences.get(definition.node);
+      return emission && emission.emissionCount > 0
+        ? [
+            {
+              definitionIndex,
+              fieldCount: emission.fieldCount,
+              emissionCount: emission.emissionCount,
+            },
+          ]
+        : [];
+    },
+  );
+  const emittedMaterializationSelections = physical.sharedRelations.flatMap(
+    (definition, definitionIndex) => {
+      const emission = emissions.materializationDefinitions.get(
+        definition.node,
+      );
+      const selection = definition.materializationSelection;
+      return emission &&
+        selection &&
+        emission.emissionCount > 0 &&
+        emission.definitionIndex === definitionIndex &&
+        emission.selectionKind === selection.kind &&
+        emission.choiceIndex === selection.choiceIndex
+        ? [
+            {
+              definitionIndex,
+              kind: emission.selectionKind,
+              choiceIndex: emission.choiceIndex,
+              emissionCount: emission.emissionCount,
+            },
+          ]
+        : [];
+    },
+  );
+  const emittedDerivedSelfMemberships = physical.selfMembershipChoices.flatMap(
+    (choice) => {
+      const emissionCount = emissions.derivedSelfMembership.get(choice) ?? 0;
+      return choice.witness && emissionCount > 0
+        ? [
+            {
+              definitionIndex: choice.witness.definitionIndex,
+              producerIndex: choice.witness.producerIndex,
+              tupleWidth: choice.leftKeyIndexes.length,
+              nullableGuardCount: choice.nullableKeyIndexes.length,
+              emissionCount,
+            },
+          ]
+        : [];
+    },
+  );
+  if (
+    emittedMaterializationSelections.length > 0 ||
+    emittedDerivedSelfMemberships.length > 0
+  )
+    return {
+      version: 13,
+      ...common,
+      nativeRowRelationCount,
+      jsonRowRelationCount,
+      rightAnchorJoinOrderCount,
+      uniqueLookupJoinOrderCount,
+      factLocalIndexedJoinStrategies,
+      conditionalLookupCount: conditionalLookupStrategies.length,
+      conditionalLookupStrategies,
+      selfMembershipCount,
+      rowPipelineChoices: rowPipelineShapes,
+      lexicographicComparisonCount: lexicographicComparisons.length,
+      lexicographicComparisons,
+      semiMembershipCount: emittedSemiMemberships.length,
+      semiMemberships: emittedSemiMemberships,
+      singletonRankFusionCount: emittedSingletonRankFusions.length,
+      singletonRankFusions: emittedSingletonRankFusions,
+      nativeNullOrderingCount: emittedNativeNullOrderings.length,
+      nativeNullOrderings: emittedNativeNullOrderings,
+      directMaterializedReferenceCount: emittedMaterializedReferences.length,
+      directMaterializedReferences: emittedMaterializedReferences,
+      materializationSelectionCount: emittedMaterializationSelections.length,
+      materializationSelections: emittedMaterializationSelections,
+      derivedSelfMembershipCount: emittedDerivedSelfMemberships.length,
+      derivedSelfMemberships: emittedDerivedSelfMemberships,
+    };
+  if (
+    emittedNativeNullOrderings.length > 0 ||
+    emittedMaterializedReferences.length > 0
+  )
+    return {
+      version: 12,
+      ...common,
+      nativeRowRelationCount,
+      jsonRowRelationCount,
+      rightAnchorJoinOrderCount,
+      uniqueLookupJoinOrderCount,
+      factLocalIndexedJoinStrategies,
+      conditionalLookupCount: conditionalLookupStrategies.length,
+      conditionalLookupStrategies,
+      selfMembershipCount,
+      rowPipelineChoices: rowPipelineShapes,
+      lexicographicComparisonCount: lexicographicComparisons.length,
+      lexicographicComparisons,
+      semiMembershipCount: emittedSemiMemberships.length,
+      semiMemberships: emittedSemiMemberships,
+      singletonRankFusionCount: emittedSingletonRankFusions.length,
+      singletonRankFusions: emittedSingletonRankFusions,
+      nativeNullOrderingCount: emittedNativeNullOrderings.length,
+      nativeNullOrderings: emittedNativeNullOrderings,
+      directMaterializedReferenceCount: emittedMaterializedReferences.length,
+      directMaterializedReferences: emittedMaterializedReferences,
+    };
+  if (emittedSingletonRankFusions.length > 0)
+    return {
+      version: 11,
+      ...common,
+      nativeRowRelationCount,
+      jsonRowRelationCount,
+      rightAnchorJoinOrderCount,
+      uniqueLookupJoinOrderCount,
+      factLocalIndexedJoinStrategies,
+      conditionalLookupCount: conditionalLookupStrategies.length,
+      conditionalLookupStrategies,
+      selfMembershipCount,
+      rowPipelineChoices: rowPipelineShapes,
+      lexicographicComparisonCount: lexicographicComparisons.length,
+      lexicographicComparisons,
+      semiMembershipCount: emittedSemiMemberships.length,
+      semiMemberships: emittedSemiMemberships,
+      singletonRankFusionCount: emittedSingletonRankFusions.length,
+      singletonRankFusions: emittedSingletonRankFusions,
+    };
+  if (emittedSemiMemberships.length > 0)
+    return {
+      version: 10,
+      ...common,
+      nativeRowRelationCount,
+      jsonRowRelationCount,
+      rightAnchorJoinOrderCount,
+      uniqueLookupJoinOrderCount,
+      factLocalIndexedJoinStrategies,
+      conditionalLookupCount: conditionalLookupStrategies.length,
+      conditionalLookupStrategies,
+      selfMembershipCount,
+      rowPipelineChoices: rowPipelineShapes,
+      lexicographicComparisonCount: lexicographicComparisons.length,
+      lexicographicComparisons,
+      semiMembershipCount: emittedSemiMemberships.length,
+      semiMemberships: emittedSemiMemberships,
+    };
+  if (lexicographicComparisons.length > 0)
+    return {
+      version: 9,
+      ...common,
+      nativeRowRelationCount,
+      jsonRowRelationCount,
+      rightAnchorJoinOrderCount,
+      uniqueLookupJoinOrderCount,
+      factLocalIndexedJoinStrategies,
+      conditionalLookupCount: conditionalLookupStrategies.length,
+      conditionalLookupStrategies,
+      selfMembershipCount,
+      rowPipelineChoices: rowPipelineShapes,
+      lexicographicComparisonCount: lexicographicComparisons.length,
+      lexicographicComparisons,
+    };
+  if (rowPipelineShapes.length > 0)
+    return {
+      version: 8,
+      ...common,
+      nativeRowRelationCount,
+      jsonRowRelationCount,
+      rightAnchorJoinOrderCount,
+      uniqueLookupJoinOrderCount,
+      factLocalIndexedJoinStrategies,
+      conditionalLookupCount: conditionalLookupStrategies.length,
+      conditionalLookupStrategies,
+      selfMembershipCount,
+      rowPipelineChoices: rowPipelineShapes,
+    };
+  if (selfMembershipCount > 0)
+    return {
+      version: 7,
+      ...common,
+      nativeRowRelationCount,
+      jsonRowRelationCount,
+      rightAnchorJoinOrderCount,
+      uniqueLookupJoinOrderCount,
+      factLocalIndexedJoinStrategies,
+      conditionalLookupCount: conditionalLookupStrategies.length,
+      conditionalLookupStrategies,
+      selfMembershipCount,
+    };
+  if (conditionalLookupStrategies.length > 0)
+    return {
+      version: 6,
+      ...common,
+      nativeRowRelationCount,
+      jsonRowRelationCount,
+      rightAnchorJoinOrderCount,
+      uniqueLookupJoinOrderCount,
+      factLocalIndexedJoinStrategies,
+      conditionalLookupCount: conditionalLookupStrategies.length,
+      conditionalLookupStrategies,
+    };
+  if (factLocalIndexedJoinStrategies.length > 0)
+    return {
+      version: 5,
+      ...common,
+      nativeRowRelationCount,
+      jsonRowRelationCount,
+      rightAnchorJoinOrderCount,
+      uniqueLookupJoinOrderCount,
+      factLocalIndexedJoinStrategies,
+    };
   if (rightAnchorJoinOrderCount + uniqueLookupJoinOrderCount > 0)
     return {
       version: 4,
@@ -1790,7 +3505,11 @@ function compileAndBudget(
   query: SqlFragment,
   options: D1CompileOptions,
   expectedBindingCount?: number,
-  shape?: DatabasePhysicalPlanShape,
+  createShape?: (
+    emissions: FinalRenderEmissionCounts,
+  ) => DatabasePhysicalPlanShape,
+  finalRenderSession?: FinalRenderSession,
+  finalRenderCapture?: FinalRenderCompileCapture,
 ): CompiledQuery<object> {
   if (
     expectedBindingCount !== undefined &&
@@ -1801,8 +3520,14 @@ function compileAndBudget(
       "Physical membership strategy binding cost does not match its SQL",
     );
   let finalQuery = query;
-  let finalShape = shape;
-  if (shape !== undefined) {
+  let finalShape: DatabasePhysicalPlanShape | undefined;
+  if (createShape !== undefined || finalRenderCapture !== undefined) {
+    if (!finalRenderSession)
+      throw new Error("final_render_session_required_for_metadata");
+  }
+  if (createShape !== undefined) {
+    if (!finalRenderSession)
+      throw new Error("final_render_session_required_for_physical_shape");
     const parameterLayout = optimizePhysicalParameterSlots(query.bindings);
     if (parameterLayout) {
       const numberedQuery = renderNumberedParameterSlots(
@@ -1811,9 +3536,14 @@ function compileAndBudget(
       );
       if (numberedQuery) {
         finalQuery = numberedQuery;
-        finalShape = withParameterSlotShape(shape, parameterLayout);
       }
     }
+    const emissions = finalRenderEmissionCounts(finalRenderSession, finalQuery);
+    finalShape = createShape(emissions);
+    if (parameterLayout && finalQuery !== query)
+      finalShape = withParameterSlotShape(finalShape, parameterLayout);
+  } else if (finalRenderSession) {
+    finalRenderEmissionCounts(finalRenderSession, finalQuery);
   }
   const statement: DatabaseStatement = {
     sql: finalQuery.text,
@@ -1822,7 +3552,18 @@ function compileAndBudget(
     ...(options.tag === undefined ? {} : { tag: options.tag }),
   };
   assertD1StatementBudget(statement);
-  return { ...statement, kind: "query" };
+  const compiledQuery = {
+    ...statement,
+    kind: "query",
+  } as CompiledQuery<object>;
+  if (finalRenderCapture && finalRenderSession) {
+    finalRenderCapture.compiledQuery = compiledQuery;
+    finalRenderCapture.diagnostic = {
+      fragment: finalQuery,
+      emissionCounts: finalRenderEmissionCounts(finalRenderSession, finalQuery),
+    };
+  }
+  return compiledQuery;
 }
 
 function renderNumberedParameterSlots(
@@ -1852,14 +3593,34 @@ function renderNumberedParameterSlots(
     copiedThrough = offset + 1;
   }
   sql.push(query.text.slice(copiedThrough));
-  return { text: sql.join(""), bindings: layout.bindings };
+  return inheritFinalRenderProvenance(query, {
+    text: sql.join(""),
+    bindings: layout.bindings,
+  });
 }
 
 function withParameterSlotShape(
   shape: DatabasePhysicalPlanShape,
   layout: PhysicalParameterSlotLayout,
 ): DatabasePhysicalPlanShape {
-  if (shape.version === 4)
+  if (shape.version === 14)
+    return {
+      ...shape,
+      parameterStrategy: layout.strategy,
+      parameterOccurrenceCount: layout.occurrenceCount,
+      parameterSlotCount: layout.slotCount,
+    };
+  if (
+    shape.version === 11 ||
+    shape.version === 12 ||
+    shape.version === 10 ||
+    shape.version === 9 ||
+    shape.version === 8 ||
+    shape.version === 4 ||
+    shape.version === 5 ||
+    shape.version === 6 ||
+    shape.version === 7
+  )
     return {
       ...shape,
       parameterStrategy: layout.strategy,

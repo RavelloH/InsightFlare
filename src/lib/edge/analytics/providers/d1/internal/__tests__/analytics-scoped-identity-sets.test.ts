@@ -2097,6 +2097,88 @@ describe("Wave31 scoped identity raw-SQL oracle", () => {
           "observation",
         ),
       ).toEqual(legacyCandidateSet(db, siteAPk, "observation"));
+
+      const readSetBuilder = new LogicalPlanBuilder(context);
+      const readSetLeft = readSetBuilder.source("observation", {
+        temporalDomain: "read",
+      });
+      const readSetRight = readSetBuilder.source("observation", {
+        temporalDomain: "read",
+      });
+      const readSetUnion = readSetBuilder.setOperation("union", [
+        readSetLeft,
+        readSetRight,
+      ]);
+      readSetBuilder.output("read-observation-union", readSetUnion, [
+        { name: "entity", slot: "entity" },
+      ]);
+      const readSetPlan = readSetBuilder.finish();
+      expect(() =>
+        new AnalyticsLogicalToDbLowerer(readSetPlan, {
+          siteIds: [SITE_A],
+          time: readSetPlan.context.time,
+        }).lower(readSetPlan.outputs[0]!),
+      ).toThrow(
+        "An unqualified Observation source is supported only for the candidate Page/Event union.",
+      );
+
+      const candidateSetBuilder = new LogicalPlanBuilder(context);
+      const candidateSetLeft = candidateSetBuilder.source("observation", {
+        temporalDomain: "candidate",
+      });
+      const candidateSetRight = candidateSetBuilder.source("observation", {
+        temporalDomain: "candidate",
+      });
+      const candidateSetUnion = candidateSetBuilder.setOperation("union", [
+        candidateSetLeft,
+        candidateSetRight,
+      ]);
+      candidateSetBuilder.output(
+        "candidate-observation-union",
+        candidateSetUnion,
+        [{ name: "entity", slot: "entity" }],
+      );
+      const candidateSetPlan = candidateSetBuilder.finish();
+      const candidateSetLowerer = new AnalyticsLogicalToDbLowerer(
+        candidateSetPlan,
+        {
+          siteIds: [SITE_A],
+          time: candidateSetPlan.context.time,
+        },
+      );
+      const candidateSetOutput = candidateSetPlan.outputs[0]!;
+      const candidateSetDbOutput =
+        candidateSetLowerer.lower(candidateSetOutput);
+      const candidateSetQuery = compileD1Query(
+        candidateSetLowerer.projectOutput(candidateSetDbOutput, [
+          {
+            name: "site_pk",
+            slot: candidateSetOutput.fields[0]!.slot,
+            component: 0,
+          },
+          {
+            name: "observation_kind",
+            slot: candidateSetOutput.fields[0]!.slot,
+            component: 1,
+          },
+          {
+            name: "entity_id",
+            slot: candidateSetOutput.fields[0]!.slot,
+            component: 2,
+          },
+        ]),
+      );
+      const candidateSetRows = await createD1DatabaseClient(
+        createSqliteD1Database(db),
+      ).all(candidateSetQuery);
+      expect(
+        outputIdentitySet(
+          candidateSetRows.results as Array<
+            Readonly<Record<string, number | string>>
+          >,
+          "observation",
+        ),
+      ).toEqual(legacyCandidateSet(db, siteAPk, "observation"));
     } finally {
       db.close();
     }
@@ -2742,7 +2824,7 @@ describe("Wave31 scoped identity raw-SQL oracle", () => {
         observations[0]!.physicalPlanHash,
         observations[0]!.physicalPlanHash,
       ]);
-      expect(observations[0]!.physicalPlanHash).toMatch(/^v1:/u);
+      expect(observations[0]!.physicalPlanHash).toMatch(/^v8:/u);
       expect(observations[0]).toMatchObject({
         status: "success",
         sqlBytes,

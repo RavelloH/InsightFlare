@@ -34,47 +34,17 @@ function pageField(
   return builder.slot(pages, `attribute:page.report.${name}`);
 }
 
-function retentionSource(input: JourneyRetentionPlanInput) {
-  const source = createPageReportSource({
-    siteId: input.siteId,
-    queryTime: input.queryTime,
-    filters: input.filters,
-    ...(input.scopePlan
-      ? {
-          scopePlan: input.scopePlan,
-          preparedTimePolicy: "reader-window-v1" as const,
-        }
-      : {}),
-    attributes: RETENTION_PAGE_ATTRIBUTES,
-  });
-
-  if (input.scopePlan || input.filters.root === null)
-    return { ...source, trackingPages: source.pages };
-
-  // Direct filters choose the cohort; SEM050 keeps later tracking on every
-  // Page in the reader window. Prepared queries already expose their final
-  // scoped Page set and intentionally reuse it for both stages.
-  const trackingSelection = createSemanticScopedSourceSelection({
-    profile: "direct-page-analytics-v1",
-    filters: EMPTY_FILTER_DOCUMENT,
-    subject: source.builder.context.subject,
-    time: source.builder.context.time,
-  });
-  const trackingPages = source.builder.source("page", {
-    temporalDomain: "candidate",
-    attributes: RETENTION_PAGE_ATTRIBUTES,
-    selection: trackingSelection,
-  });
-  return { ...source, trackingPages };
-}
-
-/** Builds retention cohorts from matching Pages and tracks the selected visitors. */
-export function buildJourneyRetentionPlan(input: JourneyRetentionPlanInput) {
-  const { builder, pages: cohortPages, trackingPages } = retentionSource(input);
+/** Appends the shared cohort/returning-visitor algorithm to caller-owned Pages. */
+export function appendJourneyRetentionReport(
+  builder: LogicalPlanBuilder,
+  cohortPages: LogicalRelationHandle,
+  trackingPages: LogicalRelationHandle,
+  granularity: Interval,
+): LogicalRelationHandle {
   const cohortBucket = builder.bucketIndex(
     builder.timeBucket(
       pageField(builder, cohortPages, "startedAt"),
-      input.granularity,
+      granularity,
     ),
   );
   const eligibleCohortPages = builder.filter(
@@ -97,7 +67,7 @@ export function buildJourneyRetentionPlan(input: JourneyRetentionPlanInput) {
   const trackingBucket = builder.bucketIndex(
     builder.timeBucket(
       pageField(builder, trackingPages, "startedAt"),
-      input.granularity,
+      granularity,
     ),
   );
   const eligibleTrackingPages = builder.filter(
@@ -151,5 +121,51 @@ export function buildJourneyRetentionPlan(input: JourneyRetentionPlanInput) {
     { name: "visitBucket", slot: "visitBucket" },
     { name: "visitors", slot: "visitors" },
   ]);
+  return sorted;
+}
+
+function retentionSource(input: JourneyRetentionPlanInput) {
+  const source = createPageReportSource({
+    siteId: input.siteId,
+    queryTime: input.queryTime,
+    filters: input.filters,
+    ...(input.scopePlan
+      ? {
+          scopePlan: input.scopePlan,
+          preparedTimePolicy: "reader-window-v1" as const,
+        }
+      : {}),
+    attributes: RETENTION_PAGE_ATTRIBUTES,
+  });
+
+  if (input.scopePlan || input.filters.root === null)
+    return { ...source, trackingPages: source.pages };
+
+  // Direct filters choose the cohort; SEM050 keeps later tracking on every
+  // Page in the reader window. Prepared queries already expose their final
+  // scoped Page set and intentionally reuse it for both stages.
+  const trackingSelection = createSemanticScopedSourceSelection({
+    profile: "direct-page-analytics-v1",
+    filters: EMPTY_FILTER_DOCUMENT,
+    subject: source.builder.context.subject,
+    time: source.builder.context.time,
+  });
+  const trackingPages = source.builder.source("page", {
+    temporalDomain: "candidate",
+    attributes: RETENTION_PAGE_ATTRIBUTES,
+    selection: trackingSelection,
+  });
+  return { ...source, trackingPages };
+}
+
+/** Builds retention cohorts from matching Pages and tracks the selected visitors. */
+export function buildJourneyRetentionPlan(input: JourneyRetentionPlanInput) {
+  const { builder, pages: cohortPages, trackingPages } = retentionSource(input);
+  appendJourneyRetentionReport(
+    builder,
+    cohortPages,
+    trackingPages,
+    input.granularity,
+  );
   return builder.finish();
 }

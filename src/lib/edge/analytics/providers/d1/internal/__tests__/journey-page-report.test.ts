@@ -466,7 +466,7 @@ describe("Journey Page report D1 lowering", () => {
       status: "success",
       sqlBytes: new TextEncoder().encode(trace.preparedSql[0]!).byteLength,
       bindings: trace.bindings[0]!.length,
-      physicalPlanHash: expect.stringMatching(/^v1:/u),
+      physicalPlanHash: expect.stringMatching(/^v8:/u),
     });
     expect(
       record.performance.operations?.["site_journeys.session_location_points"],
@@ -555,7 +555,7 @@ describe("Journey Page report D1 lowering", () => {
       status: "success",
       sqlBytes: new TextEncoder().encode(trace.preparedSql[0]!).byteLength,
       bindings: trace.bindings[0]!.length,
-      physicalPlanHash: expect.stringMatching(/^v1:/u),
+      physicalPlanHash: expect.stringMatching(/^v8:/u),
     });
     expect(
       record.performance.operations?.["site_journeys.event_detail"],
@@ -737,7 +737,7 @@ describe("Journey Page report D1 lowering", () => {
     expect(query.sql).toContain("started_at");
     expect(query.sql).toContain("DESC");
     expect(query.sql).not.toMatch(/custom_events|custom_event_names/u);
-    expect(query.physicalPlanShape).toMatchObject({ version: 1 });
+    expect(query.physicalPlanShape).toMatchObject({ version: 8 });
   });
 
   it("rejects mixing internal Page report and primitive field bindings", () => {

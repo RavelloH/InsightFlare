@@ -681,7 +681,7 @@ describe("advanced filter activity report query differential", () => {
       sqlBytes: new TextEncoder().encode(actual.trace.preparedSql[0]!)
         .byteLength,
       bindings: actual.trace.bindings[0]!.length,
-      physicalPlanHash: expect.stringMatching(/^v1:/u),
+      physicalPlanHash: expect.stringMatching(/^v8:/u),
     });
     expect(actual.trace.bindings[0]!.length).toBeLessThanOrEqual(
       D1_MAX_BOUND_PARAMETERS,

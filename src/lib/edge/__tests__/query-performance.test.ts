@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
+import * as database from "@/lib/db";
 import type { FilterDocument } from "@/lib/edge/analytics/contract";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import { handlePerformanceContract as handlePerformance } from "@/lib/edge/analytics/interfaces/dashboard/protocol/analysis";
@@ -17,6 +20,63 @@ import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";
 import { installVisitSiteIdentityFixture } from "./site-identity-fixture";
+
+const reportCompilerBoundary = vi.hoisted(() => ({
+  enabled: false,
+  entries: [] as Array<Record<string, unknown>>,
+}));
+
+vi.mock("@/lib/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof database>();
+  return {
+    ...actual,
+    lowerLogicalPlan: (
+      relation: Parameters<typeof actual.lowerLogicalPlan>[0],
+    ) => {
+      const physical = actual.lowerLogicalPlan(relation);
+      if (reportCompilerBoundary.enabled) {
+        reportCompilerBoundary.entries.push({
+          genericRelation: relation,
+          physicalPlan: physical,
+          compilerInput: null,
+          compilerOptions: null,
+          compiledQuery: null,
+        });
+      }
+      return physical;
+    },
+    compileD1Query: (
+      plan: Parameters<typeof actual.compileD1Query>[0],
+      options: Parameters<typeof actual.compileD1Query>[1],
+    ) => {
+      const query = actual.compileD1Query(plan, options);
+      if (reportCompilerBoundary.enabled) {
+        const entry = [...reportCompilerBoundary.entries]
+          .reverse()
+          .find(
+            (candidate) =>
+              candidate.physicalPlan === plan &&
+              candidate.compiledQuery === null,
+          );
+        if (entry) {
+          entry.compilerInput = plan;
+          entry.compilerOptions = options;
+          entry.compiledQuery = query;
+        } else {
+          reportCompilerBoundary.entries.push({
+            genericRelation: null,
+            physicalPlan: plan,
+            compilerInput: plan,
+            compilerOptions: options,
+            compiledQuery: query,
+          });
+        }
+      }
+      return query;
+    },
+  };
+});
+
 interface PreparedQuery {
   sql: string;
   bindings: Array<string | number | null>;
@@ -181,6 +241,318 @@ const window: QueryWindow = {
   timeZone: "UTC",
 };
 const visitBindings = [siteId, window.startMs, window.endExclusiveMs];
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function createCompilerObjectGraph(roots: Record<string, unknown>) {
+  const ids = new WeakMap<object, string>();
+  const objects: Record<string, unknown> = Object.create(null) as Record<
+    string,
+    unknown
+  >;
+  let nextId = 0;
+
+  const schemaSummary = (value: Record<string, unknown>) => {
+    const columns = isObjectRecord(value.columns)
+      ? Object.entries(value.columns).map(([key, column]) => ({
+          key,
+          ...(isObjectRecord(column)
+            ? {
+                propertyName: column.propertyName,
+                sqlName: column.sqlName,
+                declaredType: column.declaredType,
+                affinity: column.affinity,
+                nullable: column.nullable,
+                rowidAlias: column.rowidAlias ?? false,
+                primaryKeyPosition: column.primaryKeyPosition,
+                generated: column.generated,
+                hidden: column.hidden,
+              }
+            : { value: column }),
+        }))
+      : [];
+    return {
+      kind: value.kind,
+      name: value.name,
+      defaultCollation: value.defaultCollation ?? null,
+      primaryKey: value.primaryKey ?? [],
+      columns,
+      indexes: value.indexes ?? [],
+      foreignKeys: value.foreignKeys ?? [],
+    };
+  };
+
+  const reference = (value: unknown): unknown => {
+    if (
+      value === null ||
+      typeof value === "string" ||
+      typeof value === "boolean"
+    )
+      return value;
+    if (typeof value === "number")
+      return Number.isFinite(value) ? value : String(value);
+    if (typeof value === "undefined") return { kind: "undefined" };
+    if (typeof value === "symbol")
+      return { kind: "symbol", description: value.description ?? null };
+    if (typeof value === "function")
+      return { kind: "function", name: value.name || null };
+    if (typeof value !== "object") return String(value);
+
+    const existing = ids.get(value);
+    if (existing) return { ref: existing };
+    const id = `o${nextId++}`;
+    ids.set(value, id);
+    objects[id] = null;
+
+    if (Array.isArray(value)) {
+      objects[id] = { kind: "array", items: value.map(reference) };
+      return { ref: id };
+    }
+    if (value instanceof Map) {
+      objects[id] = {
+        kind: "map",
+        entries: [...value.entries()].map(([key, item]) => [
+          reference(key),
+          reference(item),
+        ]),
+      };
+      return { ref: id };
+    }
+    if (value instanceof Set) {
+      objects[id] = { kind: "set", items: [...value].map(reference) };
+      return { ref: id };
+    }
+
+    const record = value as Record<string, unknown>;
+    const properties: Record<string, unknown> = Object.create(null) as Record<
+      string,
+      unknown
+    >;
+    for (const key of Object.keys(record).sort()) {
+      if (key === "__row") continue;
+      const property = record[key];
+      if (
+        key === "table" &&
+        isObjectRecord(property) &&
+        (property.kind === "table" || property.kind === "view") &&
+        typeof property.name === "string"
+      ) {
+        properties[key] = schemaSummary(property);
+      } else {
+        properties[key] = reference(property);
+      }
+    }
+    objects[id] = {
+      kind:
+        typeof record.kind === "string"
+          ? record.kind
+          : value.constructor?.name || "object",
+      properties,
+    };
+    return { ref: id };
+  };
+
+  const rootReferences = reference(roots);
+  return {
+    roots: rootReferences,
+    objects,
+    idOf(value: unknown) {
+      return typeof value === "object" && value !== null
+        ? (ids.get(value) ?? null)
+        : null;
+    },
+  };
+}
+
+function compilerStructuralHash(value: unknown): string {
+  const active = new WeakSet<object>();
+  const localScopes = new WeakMap<object, number>();
+  let nextScope = 0;
+  const canonicalize = (current: unknown): unknown => {
+    if (
+      current === null ||
+      typeof current === "string" ||
+      typeof current === "boolean"
+    )
+      return current;
+    if (typeof current === "number")
+      return Number.isFinite(current) ? current : String(current);
+    if (typeof current === "undefined") return { kind: "undefined" };
+    if (typeof current === "symbol")
+      return { kind: "symbol", description: current.description ?? null };
+    if (typeof current === "function")
+      return { kind: "function", name: current.name || null };
+    if (typeof current !== "object") return String(current);
+    if (Array.isArray(current)) return current.map(canonicalize);
+    if (active.has(current))
+      return {
+        kind: "cycle",
+        nodeKind:
+          isObjectRecord(current) && typeof current.kind === "string"
+            ? current.kind
+            : "object",
+      };
+    active.add(current);
+    try {
+      const record = current as Record<string, unknown>;
+      if (
+        Object.hasOwn(record, "marker") &&
+        typeof record.marker === "symbol"
+      ) {
+        let scope = localScopes.get(current);
+        if (scope === undefined) {
+          scope = nextScope++;
+          localScopes.set(current, scope);
+        }
+        return { kind: "relation-scope", localScope: scope };
+      }
+      if (
+        (record.kind === "table" || record.kind === "view") &&
+        typeof record.name === "string"
+      )
+        return {
+          kind: record.kind,
+          name: record.name,
+          primaryKey: record.primaryKey ?? [],
+          columns: isObjectRecord(record.columns)
+            ? Object.entries(record.columns).map(([name, column]) => ({
+                name,
+                ...(isObjectRecord(column)
+                  ? {
+                      declaredType: column.declaredType,
+                      affinity: column.affinity,
+                      nullable: column.nullable,
+                      rowidAlias: column.rowidAlias ?? false,
+                      primaryKeyPosition: column.primaryKeyPosition,
+                    }
+                  : { value: canonicalize(column) }),
+              }))
+            : [],
+        };
+      if (current instanceof Map)
+        return [...current.entries()].map(([key, item]) => [
+          canonicalize(key),
+          canonicalize(item),
+        ]);
+      if (current instanceof Set) return [...current].map(canonicalize);
+      return Object.fromEntries(
+        Object.keys(record)
+          .filter((key) => key !== "__row")
+          .sort()
+          .map((key) => [key, canonicalize(record[key])]),
+      );
+    } finally {
+      active.delete(current);
+    }
+  };
+  return createHash("sha256")
+    .update(JSON.stringify(canonicalize(value)))
+    .digest("hex");
+}
+
+function summarizeCompilerPhysical(
+  physical: unknown,
+  graph: ReturnType<typeof createCompilerObjectGraph>,
+) {
+  if (!isObjectRecord(physical)) return null;
+  const objectRef = (value: unknown) => ({ ref: graph.idOf(value) });
+  const sharedRelations = Array.isArray(physical.sharedRelations)
+    ? physical.sharedRelations.map((shared) => {
+        if (!isObjectRecord(shared)) return shared;
+        const node = shared.node;
+        return {
+          name: shared.name,
+          materialization: shared.materialization,
+          dependencies: shared.dependencies,
+          scope: objectRef(shared.scope),
+          fields: shared.fields,
+          node: objectRef(node),
+          structuralShapeSha256: compilerStructuralHash(node),
+        };
+      })
+    : [];
+  const summarizeChoice = (value: unknown) => {
+    if (!isObjectRecord(value)) return value;
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        typeof item === "object" && item !== null ? objectRef(item) : item,
+      ]),
+    );
+  };
+  const choices = [
+    "directScanProjections",
+    "passthroughProjectFusions",
+    "constantFilterJoinProjections",
+    "positiveTupleMembershipCandidates",
+    "joinOrderStrategies",
+    "conditionalLookupChoices",
+  ];
+  return {
+    root: objectRef(physical.root),
+    scope: objectRef(physical.scope),
+    fields: physical.fields,
+    sharedRelations,
+    choices: Object.fromEntries(
+      choices.map((key) => [
+        key,
+        Array.isArray(physical[key]) ? physical[key].map(summarizeChoice) : [],
+      ]),
+    ),
+    membershipOptimization: physical.membershipOptimization ?? null,
+  };
+}
+
+function findVisitScans(
+  roots: Record<string, unknown>,
+  graph: ReturnType<typeof createCompilerObjectGraph>,
+) {
+  const results = new Map<
+    string,
+    { object: object; paths: string[]; fields: unknown; scope: unknown }
+  >();
+  const visit = (value: unknown, path: string, active: WeakSet<object>) => {
+    if (typeof value !== "object" || value === null) return;
+    if (active.has(value)) return;
+    active.add(value);
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => visit(item, `${path}[${index}]`, active));
+    } else {
+      const record = value as Record<string, unknown>;
+      if (
+        record.kind === "scan" &&
+        isObjectRecord(record.table) &&
+        record.table.name === "visits"
+      ) {
+        const id = graph.idOf(value) ?? `unindexed-${results.size}`;
+        const previous = results.get(id);
+        results.set(id, {
+          object: value,
+          paths: [...(previous?.paths ?? []), path],
+          fields: record.fields,
+          scope: record.scope,
+        });
+      }
+      for (const key of Object.keys(record).sort()) {
+        if (key === "table" || key === "__row") continue;
+        visit(record[key], `${path}.${key}`, active);
+      }
+    }
+    active.delete(value);
+  };
+  for (const [name, root] of Object.entries(roots))
+    visit(root, name, new WeakSet());
+  return [...results.entries()].map(([id, scan]) => ({
+    objectId: id,
+    paths: [...new Set(scan.paths)].slice(0, 64),
+    fields: scan.fields,
+    scopeObjectId: graph.idOf(scan.scope),
+    structuralShapeSha256: compilerStructuralHash(scan.object),
+  }));
+}
+
 describe("edge query performance D1 helpers", () => {
   it("maps metric summaries, leaves missing metrics empty, and binds filters", async () => {
     const { env, calls } = createD1Env([
@@ -833,13 +1205,20 @@ describe("edge query performance D1 helpers", () => {
         ).toHaveLength(1);
       }
 
-      const response = await handlePerformance(
-        env,
-        siteId,
-        new URL(
-          `https://edge.test/performance?from=${window.startMs}&to=${window.endExclusiveMs}&interval=hour`,
-        ),
-      );
+      reportCompilerBoundary.entries.length = 0;
+      reportCompilerBoundary.enabled = true;
+      let response: Response;
+      try {
+        response = await handlePerformance(
+          env,
+          siteId,
+          new URL(
+            `https://edge.test/performance?from=${window.startMs}&to=${window.endExclusiveMs}&interval=hour`,
+          ),
+        );
+      } finally {
+        reportCompilerBoundary.enabled = false;
+      }
       const payload = (await response.json()) as {
         summaries: Record<string, { p50: number | null }>;
         trends: Record<string, Array<{ bucket: number; p50: number | null }>>;
@@ -856,13 +1235,216 @@ describe("edge query performance D1 helpers", () => {
       expect(d1.calls).toHaveLength(5);
       const dashboardPlan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${d1.calls[4]?.sql}`)
-        .all(...(d1.calls[4]?.bindings ?? [])) as Array<{ detail: string }>;
+        .all(...(d1.calls[4]?.bindings ?? [])) as Array<{
+        id: number;
+        parent: number;
+        notused: number;
+        detail: string;
+      }>;
+      const performanceDiagnosticPath =
+        process.env.INSIGHTFLARE_WAVE92D_PERF_DIAG_PATH;
+      if (performanceDiagnosticPath) {
+        const actual = d1.calls[4];
+        if (!actual)
+          throw new Error("wave92d_performance_dashboard_query_missing");
+        const completePlan = dashboardPlan;
+        const byId = new Map(completePlan.map((row) => [row.id, row]));
+        const visitIndexUses = completePlan
+          .filter((row) => row.detail.includes("idx_visits_site_pk_started_at"))
+          .map((row) => {
+            const ancestors: Array<{
+              id: number;
+              parent: number;
+              detail: string;
+            }> = [];
+            let parentId = row.parent;
+            for (let depth = 0; depth < completePlan.length; depth += 1) {
+              const parent = byId.get(parentId);
+              if (!parent) break;
+              ancestors.push({
+                id: parent.id,
+                parent: parent.parent,
+                detail: parent.detail,
+              });
+              if (parent.parent === parent.id) break;
+              parentId = parent.parent;
+            }
+            return { row, ancestors };
+          });
+        const exactCaptures = reportCompilerBoundary.entries.filter(
+          (entry) =>
+            isObjectRecord(entry.compiledQuery) &&
+            entry.compiledQuery.sql === actual.sql &&
+            JSON.stringify(entry.compiledQuery.bindings) ===
+              JSON.stringify(actual.bindings),
+        );
+        const exactCapture = exactCaptures[0] ?? null;
+        const genericRelation = exactCapture?.genericRelation ?? null;
+        const initialPhysical = exactCapture?.physicalPlan ?? null;
+        const compilerInput = exactCapture?.compilerInput ?? null;
+        const compilerOutput = exactCapture?.compiledQuery ?? null;
+        const compilerOptions = exactCapture?.compilerOptions ?? null;
+        const objectRoots = {
+          genericRelation,
+          initialPhysical,
+          compilerInput,
+        };
+        const objectGraph = createCompilerObjectGraph(objectRoots);
+        const visitScans = findVisitScans(objectRoots, objectGraph);
+        const compilerResult = isObjectRecord(compilerOutput)
+          ? compilerOutput
+          : null;
+        let recompiled: ReturnType<typeof database.compileD1Query> | null =
+          null;
+        let recompileError: string | null = null;
+        if (initialPhysical && compilerOptions) {
+          try {
+            recompiled = database.compileD1Query(
+              compilerInput as Parameters<typeof database.compileD1Query>[0],
+              compilerOptions as Parameters<typeof database.compileD1Query>[1],
+            );
+          } catch (error) {
+            recompileError =
+              error instanceof Error
+                ? `${error.name}: ${error.message}`
+                : String(error);
+          }
+        }
+        const recompileMatches =
+          recompiled && compilerResult
+            ? {
+                sql: recompiled.sql === actual.sql,
+                bindings:
+                  JSON.stringify(recompiled.bindings) ===
+                  JSON.stringify(actual.bindings),
+                physicalPlanShape:
+                  JSON.stringify(recompiled.physicalPlanShape) ===
+                  JSON.stringify(compilerResult.physicalPlanShape),
+              }
+            : null;
+        const visitAliases = [
+          ...actual.sql.matchAll(
+            /FROM\s+"visits"\s+AS\s+([A-Za-z_][A-Za-z0-9_]*)/giu,
+          ),
+        ].map((match) => ({
+          alias: match[1],
+          sqlOffset: match.index,
+        }));
+        const sharedAliases = [
+          ...actual.sql.matchAll(
+            /(?:WITH|,)\s*(_d1_shared_[0-9]+)\s+AS\s+(?:(?:NOT\s+)?MATERIALIZED\s+)?\(/giu,
+          ),
+        ].map((match) => ({
+          name: match[1],
+          sqlOffset: match.index,
+        }));
+        writeFileSync(
+          performanceDiagnosticPath,
+          JSON.stringify(
+            {
+              captureBoundary: "analytics-report-query.executeReportRelation",
+              assertion: {
+                expectedVisitsIndexUses: 1,
+                actualVisitsIndexUses: visitIndexUses.length,
+              },
+              actual: {
+                sql: actual.sql,
+                bindings: actual.bindings,
+                sqlBytes: Buffer.byteLength(actual.sql, "utf8"),
+                sqlSha256: createHash("sha256")
+                  .update(actual.sql)
+                  .digest("hex"),
+                visitAliases,
+                sharedAliases,
+                explainQueryPlan: completePlan,
+                visitIndexUses,
+              },
+              compilerBoundary: {
+                captureCountForExactD1Statement: exactCaptures.length,
+                capturedCandidates: reportCompilerBoundary.entries.map(
+                  (entry) => {
+                    const query = isObjectRecord(entry.compiledQuery)
+                      ? entry.compiledQuery
+                      : null;
+                    return {
+                      genericRelationObjectId: objectGraph.idOf(
+                        entry.genericRelation,
+                      ),
+                      physicalObjectId: objectGraph.idOf(entry.physicalPlan),
+                      compilerInputObjectId: objectGraph.idOf(
+                        entry.compilerInput,
+                      ),
+                      sqlBytes:
+                        typeof query?.sql === "string"
+                          ? Buffer.byteLength(query.sql, "utf8")
+                          : null,
+                      sqlSha256:
+                        typeof query?.sql === "string"
+                          ? createHash("sha256").update(query.sql).digest("hex")
+                          : null,
+                      bindingCount: Array.isArray(query?.bindings)
+                        ? query.bindings.length
+                        : null,
+                    };
+                  },
+                ),
+                compileOptions: compilerOptions,
+                genericRelationObjectId: objectGraph.idOf(genericRelation),
+                initialPhysicalObjectId: objectGraph.idOf(initialPhysical),
+                compilerInputObjectId: objectGraph.idOf(compilerInput),
+                sameInitialPhysicalPassedToCompiler:
+                  initialPhysical === compilerInput,
+                compilerResult: compilerResult
+                  ? {
+                      kind: compilerResult.kind,
+                      tag: compilerResult.tag ?? null,
+                      sqlBytes: Buffer.byteLength(actual.sql, "utf8"),
+                      sqlSha256: createHash("sha256")
+                        .update(actual.sql)
+                        .digest("hex"),
+                      bindingCount: actual.bindings.length,
+                      bindings: actual.bindings,
+                      physicalPlanShape:
+                        compilerResult.physicalPlanShape ?? null,
+                    }
+                  : null,
+                recompileError,
+                recompileMatches,
+              },
+              initialPhysicalSummary: summarizeCompilerPhysical(
+                initialPhysical,
+                objectGraph,
+              ),
+              visitScanObjects: visitScans,
+              objectGraph,
+              exactCapture: {
+                sqlEqualsD1Execution: compilerResult?.sql === actual.sql,
+                bindingsEqualD1Execution:
+                  JSON.stringify(compilerResult?.bindings) ===
+                  JSON.stringify(actual.bindings),
+              },
+            },
+            null,
+            2,
+          ) + "\n",
+          { encoding: "utf8", flag: "wx" },
+        );
+        expect(exactCaptures).toHaveLength(1);
+        expect(genericRelation).toBeTruthy();
+        expect(initialPhysical).toBe(compilerInput);
+        expect(recompileError).toBeNull();
+        expect(recompileMatches).toEqual({
+          sql: true,
+          bindings: true,
+          physicalPlanShape: true,
+        });
+      }
       expect(
         dashboardPlan.filter((row) =>
           row.detail.includes("idx_visits_site_pk_started_at"),
         ),
       ).toHaveLength(1);
-      expect(d1.calls[4]?.sql).toContain('"_d1_shared_0" AS MATERIALIZED');
+      expect(d1.calls[4]?.sql).toContain("_d1_shared_0 AS MATERIALIZED");
     } finally {
       d1.close();
     }

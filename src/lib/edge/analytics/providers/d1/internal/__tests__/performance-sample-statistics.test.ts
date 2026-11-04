@@ -44,6 +44,12 @@ import {
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { createSemanticTemporalDomains } from "@/lib/edge/analytics/engine/semantic/time";
+import { scopedDatasetFor } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import { buildVisitFilterSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-filters";
+import {
+  buildVisitSourceCte,
+  visitSourceBindings,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import {
   queryAllPerformanceTrendsFromD1 as queryParentAllTrends,
   queryPerformanceCountriesFromD1 as queryParentCountries,
@@ -59,12 +65,8 @@ import type {
 import {
   appendSqlConditions,
   buildTimeBuckets,
-  buildVisitFilterSql,
-  buildVisitSourceCte,
-  scopedDatasetFor,
   timeBucketCase,
   timeBucketTimestamp,
-  visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   queryAllPerformanceTrendsFromD1,

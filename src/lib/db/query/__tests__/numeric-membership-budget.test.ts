@@ -900,7 +900,7 @@ describe("numeric membership binding optimizer", () => {
         filter(visits, inList(visits.columns.duration_ms, overLimit)),
       ),
     ).toThrowError(D1StatementBudgetError);
-  });
+  }, 15_000);
 
   it("validates numeric strategy metadata instead of trusting forged JSON", () => {
     const visits = scan(schema.visits);

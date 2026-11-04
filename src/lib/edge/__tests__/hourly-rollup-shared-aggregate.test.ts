@@ -699,7 +699,7 @@ describe("hourly rollup shared aggregate", () => {
       status: "success",
       bindings: metricsQuery.bindings?.length,
       sqlBytes: new TextEncoder().encode(metricsQuery.sql).byteLength,
-      physicalPlanHash: expect.stringMatching(/^v1:/u),
+      physicalPlanHash: expect.stringMatching(/^v12:/u),
     });
     expect(metricsQuery.sql).not.toContain("site-e2e");
     expect(metricsQuery.sql).not.toContain("visitor-a");

@@ -54,7 +54,7 @@ function emptyPerformanceSummaries(): Record<
     inp: { avg: null, p50: null, p75: null, p95: null, samples: 0 },
   };
 }
-function mapPerformanceSummaries(
+export function mapPerformanceSummaries(
   rows: Record<string, unknown>[],
 ): Record<PerformanceMetricKey, PerformanceSummaryRow> {
   const summaries = emptyPerformanceSummaries();
@@ -159,6 +159,16 @@ function mapPerformanceTrends(
   }
   return trends;
 }
+export function mapPerformanceTrendReportRows(
+  rows: Record<string, unknown>[],
+  window: QueryWindow,
+  interval: Interval,
+): Record<PerformanceMetricKey, PerformanceTrendPointRow[]> {
+  return mapPerformanceTrends(
+    performanceMetricRows(rows),
+    buildTimeBuckets(window, interval),
+  );
+}
 function mapPerformanceRoutes(
   rows: Record<string, unknown>[],
 ): PerformanceRouteRow[] {
@@ -208,6 +218,41 @@ function mapPerformanceCountries(
     byCountry.set(country, current);
   }
   return [...byCountry.values()];
+}
+
+export function mapPerformanceRouteReportRows(
+  rows: Record<string, unknown>[],
+): PerformanceRouteRow[] {
+  return mapPerformanceRoutes(performanceMetricRows(rows));
+}
+
+export function mapPerformanceCountryReportRows(
+  rows: Record<string, unknown>[],
+): PerformanceCountryRow[] {
+  return mapPerformanceCountries(performanceMetricRows(rows));
+}
+
+export function mapPerformanceDashboardReportRows(
+  rows: Record<string, unknown>[],
+  window: QueryWindow,
+  interval: Interval,
+): PerformanceDashboardResult {
+  const buckets = buildTimeBuckets(window, interval);
+  return {
+    summaries: mapLegacyPerformanceSummaries(
+      rows.filter((row) => row.rowType === "summary"),
+    ),
+    trends: mapPerformanceTrends(
+      performanceMetricRows(rows.filter((row) => row.rowType === "trend")),
+      buckets,
+    ),
+    routes: mapPerformanceRouteReportRows(
+      rows.filter((row) => row.rowType === "route"),
+    ),
+    countries: mapPerformanceCountryReportRows(
+      rows.filter((row) => row.rowType === "country"),
+    ),
+  };
 }
 export async function queryPerformanceSummariesFromD1(
   env: Env,
@@ -272,7 +317,6 @@ export async function queryAllPerformanceTrendsFromD1(
     ...performancePlanInput(siteId, window, filters),
     interval,
   });
-  const buckets = buildTimeBuckets(window, interval);
   const rows = await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
     outputIds: PERFORMANCE_ALL_TRENDS_OUTPUT_IDS,
     fields: PERFORMANCE_REPORT_OUTPUT_FIELDS,
@@ -281,7 +325,7 @@ export async function queryAllPerformanceTrendsFromD1(
       { field: "bucket", direction: "asc", nulls: "first" },
     ],
   });
-  return mapPerformanceTrends(performanceMetricRows(rows), buckets);
+  return mapPerformanceTrendReportRows(rows, window, interval);
 }
 
 export async function queryPerformanceRoutesFromD1(
@@ -304,7 +348,7 @@ export async function queryPerformanceRoutesFromD1(
       { field: "metric", direction: "asc", nulls: "first" },
     ],
   });
-  return mapPerformanceRoutes(performanceMetricRows(rows));
+  return mapPerformanceRouteReportRows(rows);
 }
 
 export async function queryPerformanceCountriesFromD1(
@@ -325,7 +369,7 @@ export async function queryPerformanceCountriesFromD1(
       { field: "metric", direction: "asc", nulls: "first" },
     ],
   });
-  return mapPerformanceCountries(performanceMetricRows(rows));
+  return mapPerformanceCountryReportRows(rows);
 }
 
 export async function queryPerformanceDashboardFromD1(
@@ -341,7 +385,6 @@ export async function queryPerformanceDashboardFromD1(
     interval,
     routeLimit,
   });
-  const buckets = buildTimeBuckets(window, interval);
   const rows = await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
     outputIds: PERFORMANCE_DASHBOARD_OUTPUT_IDS,
     fields: PERFORMANCE_REPORT_OUTPUT_FIELDS,
@@ -353,19 +396,5 @@ export async function queryPerformanceDashboardFromD1(
       { field: "country", direction: "asc", nulls: "first" },
     ],
   });
-  return {
-    summaries: mapLegacyPerformanceSummaries(
-      rows.filter((row) => row.rowType === "summary"),
-    ),
-    trends: mapPerformanceTrends(
-      performanceMetricRows(rows.filter((row) => row.rowType === "trend")),
-      buckets,
-    ),
-    routes: mapPerformanceRoutes(
-      performanceMetricRows(rows.filter((row) => row.rowType === "route")),
-    ),
-    countries: mapPerformanceCountries(
-      performanceMetricRows(rows.filter((row) => row.rowType === "country")),
-    ),
-  };
+  return mapPerformanceDashboardReportRows(rows, window, interval);
 }

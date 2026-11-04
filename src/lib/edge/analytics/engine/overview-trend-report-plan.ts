@@ -279,29 +279,17 @@ function metricRows(
   return builder.appendRows(rows, TREND_METRIC_FIELDS);
 }
 
-export function buildOverviewTrendPlan(input: {
-  readonly siteId: string;
-  readonly queryTime: QueryTime;
-  readonly filters: FilterDocument;
-  readonly interval: CalendarGranularity;
-}): ValidatedLogicalPlan {
-  const { builder, pages, events, scoped } = createOverviewReportSource({
-    siteId: input.siteId,
-    queryTime: input.queryTime,
-    filters: input.filters,
-    pageAttributes: [
-      "page.report.sessionId",
-      "page.report.visitorId",
-      "page.report.startedAt",
-      "page.report.durationMs",
-    ],
-    eventAttributes: [
-      "event.report.ownerSessionId",
-      "event.report.ownerVisitorId",
-      "event.report.occurredAt",
-    ],
-  });
-  const pageRows = pageBucketRollup(builder, pages, input.interval, scoped);
+export function appendOverviewTrendReport(
+  builder: LogicalPlanBuilder,
+  input: {
+    readonly pages: LogicalRelationHandle;
+    readonly events?: LogicalRelationHandle;
+    readonly scoped: boolean;
+    readonly interval: CalendarGranularity;
+  },
+): void {
+  const { pages, events, scoped, interval } = input;
+  const pageRows = pageBucketRollup(builder, pages, interval, scoped);
   const observations =
     scoped && events
       ? scopedObservations(builder, pages, events)
@@ -314,11 +302,11 @@ export function buildOverviewTrendPlan(input: {
   const sessionRows = sessionBucketRollup(
     builder,
     observations,
-    input.interval,
+    interval,
     scoped,
   );
   const visitorRows = scoped
-    ? visitorBucketRollup(builder, observations, input.interval)
+    ? visitorBucketRollup(builder, observations, interval)
     : undefined;
   const combinedRows = metricRows(builder, pageRows, sessionRows, visitorRows);
   const finalRows = builder.aggregate(
@@ -365,5 +353,33 @@ export function buildOverviewTrendPlan(input: {
     sorted,
     TREND_METRIC_FIELDS.map((name) => ({ name, slot: name })),
   );
-  return builder.finish();
+}
+
+export function buildOverviewTrendPlan(input: {
+  readonly siteId: string;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly interval: CalendarGranularity;
+}): ValidatedLogicalPlan {
+  const source = createOverviewReportSource({
+    siteId: input.siteId,
+    queryTime: input.queryTime,
+    filters: input.filters,
+    pageAttributes: [
+      "page.report.sessionId",
+      "page.report.visitorId",
+      "page.report.startedAt",
+      "page.report.durationMs",
+    ],
+    eventAttributes: [
+      "event.report.ownerSessionId",
+      "event.report.ownerVisitorId",
+      "event.report.occurredAt",
+    ],
+  });
+  appendOverviewTrendReport(source.builder, {
+    ...source,
+    interval: input.interval,
+  });
+  return source.builder.finish();
 }
