@@ -48,37 +48,149 @@
   </tr>
 </table>
 
-<details>
-<summary><strong>查看完整功能截图索引</strong></summary>
+## 完整功能预览
 
-全部原始截图仍按功能分类提供直达链接，避免 README 被大量图片撑得过长。
+与 NeutralPress 一样，直接展示真实界面截图。按功能分类排列，点击缩略图即可查看原图。
 
-- **完整的访问维度追踪**: [001](/.github/screenshot/001.webp) · [002](/.github/screenshot/002.webp) · [003](/.github/screenshot/003.webp)
-- **实时查看访客情况**: [004](/.github/screenshot/004.webp) · [005](/.github/screenshot/005.webp)
-- **分页面查看访问情况**: [006](/.github/screenshot/006.webp)
-- **追踪访客的真实访问性能**: [007](/.github/screenshot/007.webp) · [008](/.github/screenshot/008.webp) · [009](/.github/screenshot/009.webp)
-- **对比各个来源的访问质量**: [010](/.github/screenshot/010.webp) · [011](/.github/screenshot/011.webp) · [012](/.github/screenshot/012.webp)
-- **追踪 UTM 活动效果**: [013](/.github/screenshot/013.webp) · [014](/.github/screenshot/014.webp)
-- **记录并分析自定义事件**: [015](/.github/screenshot/015.webp) · [016](/.github/screenshot/016.webp) · [017](/.github/screenshot/017.webp)
-- **洞察每一次会话**: [018](/.github/screenshot/018.webp) · [019](/.github/screenshot/019.webp) · [020](/.github/screenshot/020.webp) · [021](/.github/screenshot/021.webp)
-- **了解你的每一位访客**: [022](/.github/screenshot/022.webp) · [023](/.github/screenshot/023.webp)
-- **追踪站点的回访情况**: [024](/.github/screenshot/024.webp) · [025](/.github/screenshot/025.webp)
-- **了解访客的地理分布与市场情报**: [026](/.github/screenshot/026.webp) · [027](/.github/screenshot/027.webp) · [028](/.github/screenshot/028.webp)
-- **查看访客的设备情况**: [029](/.github/screenshot/029.webp) · [030](/.github/screenshot/030.webp) · [031](/.github/screenshot/031.webp)
-- **了解用户的浏览器及其能力**: [032](/.github/screenshot/032.webp) · [033](/.github/screenshot/033.webp) · [034](/.github/screenshot/034.webp) · [035](/.github/screenshot/035.webp) · [036](/.github/screenshot/036.webp)
-- **随时调整你的追踪设置，无需修改前端 SDK**: [037](/.github/screenshot/037.webp) · [038](/.github/screenshot/038.webp)
-- **为团队协作而设计**: [039](/.github/screenshot/039.webp) · [040](/.github/screenshot/040.webp)
-- **轻松了解系统的运行状况**: [041](/.github/screenshot/041.webp) · [042](/.github/screenshot/042.webp)
-- **完整的多语言翻译**: [043](/.github/screenshot/043.webp) · [044](/.github/screenshot/044.webp)
-- **公开分享系统**: [045](/.github/screenshot/045.webp) · [046](/.github/screenshot/046.webp)
-- **作用域分明的 API 系统**: [047](/.github/screenshot/047.webp)
-- **定时任务**: [048](/.github/screenshot/048.webp)
-- **对 JSON 格式的自定义事件进行深度分析**: [049](/.github/screenshot/049.webp) · [050](/.github/screenshot/050.webp) · [051](/.github/screenshot/051.webp) · [052](/.github/screenshot/052.webp) · [053](/.github/screenshot/053.webp)
-- **使用漏斗来分析访问与事件**: [054](/.github/screenshot/054.webp)
-- **定时 / 按条件接收通知邮件**: [055](/.github/screenshot/055.webp) · [056](/.github/screenshot/056.webp) · [057](/.github/screenshot/057.webp)
-- **多维度的机器人防护与观测系统**: [058](/.github/screenshot/058.webp) · [059](/.github/screenshot/059.webp) · [060](/.github/screenshot/060.webp) · [061](/.github/screenshot/061.webp) · [062](/.github/screenshot/062.webp)
+### 流量概览与来源分析
 
-</details>
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/001.webp"><img src="/.github/screenshot/001.webp" width="100%" alt="完整的访问维度追踪" title="完整的访问维度追踪"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/002.webp"><img src="/.github/screenshot/002.webp" width="100%" alt="完整的访问维度追踪" title="完整的访问维度追踪"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/003.webp"><img src="/.github/screenshot/003.webp" width="100%" alt="完整的访问维度追踪" title="完整的访问维度追踪"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/004.webp"><img src="/.github/screenshot/004.webp" width="100%" alt="实时查看访客情况" title="实时查看访客情况"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/005.webp"><img src="/.github/screenshot/005.webp" width="100%" alt="实时查看访客情况" title="实时查看访客情况"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/006.webp"><img src="/.github/screenshot/006.webp" width="100%" alt="分页面查看访问情况" title="分页面查看访问情况"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/007.webp"><img src="/.github/screenshot/007.webp" width="100%" alt="追踪访客的真实访问性能" title="追踪访客的真实访问性能"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/008.webp"><img src="/.github/screenshot/008.webp" width="100%" alt="追踪访客的真实访问性能" title="追踪访客的真实访问性能"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/009.webp"><img src="/.github/screenshot/009.webp" width="100%" alt="追踪访客的真实访问性能" title="追踪访客的真实访问性能"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/010.webp"><img src="/.github/screenshot/010.webp" width="100%" alt="对比各个来源的访问质量" title="对比各个来源的访问质量"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/011.webp"><img src="/.github/screenshot/011.webp" width="100%" alt="对比各个来源的访问质量" title="对比各个来源的访问质量"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/012.webp"><img src="/.github/screenshot/012.webp" width="100%" alt="对比各个来源的访问质量" title="对比各个来源的访问质量"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/013.webp"><img src="/.github/screenshot/013.webp" width="100%" alt="追踪 UTM 活动效果" title="追踪 UTM 活动效果"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/014.webp"><img src="/.github/screenshot/014.webp" width="100%" alt="追踪 UTM 活动效果" title="追踪 UTM 活动效果"></a></td>
+    <td width="33%"></td>
+  </tr>
+</table>
+
+### 事件、会话与访客旅程
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/015.webp"><img src="/.github/screenshot/015.webp" width="100%" alt="记录并分析自定义事件" title="记录并分析自定义事件"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/016.webp"><img src="/.github/screenshot/016.webp" width="100%" alt="记录并分析自定义事件" title="记录并分析自定义事件"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/017.webp"><img src="/.github/screenshot/017.webp" width="100%" alt="记录并分析自定义事件" title="记录并分析自定义事件"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/018.webp"><img src="/.github/screenshot/018.webp" width="100%" alt="洞察每一次会话" title="洞察每一次会话"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/019.webp"><img src="/.github/screenshot/019.webp" width="100%" alt="洞察每一次会话" title="洞察每一次会话"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/020.webp"><img src="/.github/screenshot/020.webp" width="100%" alt="洞察每一次会话" title="洞察每一次会话"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/021.webp"><img src="/.github/screenshot/021.webp" width="100%" alt="洞察每一次会话" title="洞察每一次会话"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/022.webp"><img src="/.github/screenshot/022.webp" width="100%" alt="了解你的每一位访客" title="了解你的每一位访客"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/023.webp"><img src="/.github/screenshot/023.webp" width="100%" alt="了解你的每一位访客" title="了解你的每一位访客"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/024.webp"><img src="/.github/screenshot/024.webp" width="100%" alt="追踪站点的回访情况" title="追踪站点的回访情况"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/025.webp"><img src="/.github/screenshot/025.webp" width="100%" alt="追踪站点的回访情况" title="追踪站点的回访情况"></a></td>
+    <td width="33%"></td>
+  </tr>
+</table>
+
+### 受众、设备与地理分析
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/026.webp"><img src="/.github/screenshot/026.webp" width="100%" alt="了解访客的地理分布与市场情报" title="了解访客的地理分布与市场情报"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/027.webp"><img src="/.github/screenshot/027.webp" width="100%" alt="了解访客的地理分布与市场情报" title="了解访客的地理分布与市场情报"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/028.webp"><img src="/.github/screenshot/028.webp" width="100%" alt="了解访客的地理分布与市场情报" title="了解访客的地理分布与市场情报"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/029.webp"><img src="/.github/screenshot/029.webp" width="100%" alt="查看访客的设备情况" title="查看访客的设备情况"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/030.webp"><img src="/.github/screenshot/030.webp" width="100%" alt="查看访客的设备情况" title="查看访客的设备情况"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/031.webp"><img src="/.github/screenshot/031.webp" width="100%" alt="查看访客的设备情况" title="查看访客的设备情况"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/032.webp"><img src="/.github/screenshot/032.webp" width="100%" alt="了解用户的浏览器及其能力" title="了解用户的浏览器及其能力"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/033.webp"><img src="/.github/screenshot/033.webp" width="100%" alt="了解用户的浏览器及其能力" title="了解用户的浏览器及其能力"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/034.webp"><img src="/.github/screenshot/034.webp" width="100%" alt="了解用户的浏览器及其能力" title="了解用户的浏览器及其能力"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/035.webp"><img src="/.github/screenshot/035.webp" width="100%" alt="了解用户的浏览器及其能力" title="了解用户的浏览器及其能力"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/036.webp"><img src="/.github/screenshot/036.webp" width="100%" alt="了解用户的浏览器及其能力" title="了解用户的浏览器及其能力"></a></td>
+    <td width="33%"></td>
+  </tr>
+</table>
+
+### 设置、团队协作与分享
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/037.webp"><img src="/.github/screenshot/037.webp" width="100%" alt="随时调整你的追踪设置，无需修改前端 SDK" title="随时调整你的追踪设置，无需修改前端 SDK"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/038.webp"><img src="/.github/screenshot/038.webp" width="100%" alt="随时调整你的追踪设置，无需修改前端 SDK" title="随时调整你的追踪设置，无需修改前端 SDK"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/039.webp"><img src="/.github/screenshot/039.webp" width="100%" alt="为团队协作而设计" title="为团队协作而设计"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/040.webp"><img src="/.github/screenshot/040.webp" width="100%" alt="为团队协作而设计" title="为团队协作而设计"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/041.webp"><img src="/.github/screenshot/041.webp" width="100%" alt="轻松了解系统的运行状况" title="轻松了解系统的运行状况"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/042.webp"><img src="/.github/screenshot/042.webp" width="100%" alt="轻松了解系统的运行状况" title="轻松了解系统的运行状况"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/043.webp"><img src="/.github/screenshot/043.webp" width="100%" alt="完整的多语言翻译" title="完整的多语言翻译"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/044.webp"><img src="/.github/screenshot/044.webp" width="100%" alt="完整的多语言翻译" title="完整的多语言翻译"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/045.webp"><img src="/.github/screenshot/045.webp" width="100%" alt="公开分享系统" title="公开分享系统"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/046.webp"><img src="/.github/screenshot/046.webp" width="100%" alt="公开分享系统" title="公开分享系统"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/047.webp"><img src="/.github/screenshot/047.webp" width="100%" alt="作用域分明的 API 系统" title="作用域分明的 API 系统"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/048.webp"><img src="/.github/screenshot/048.webp" width="100%" alt="定时任务" title="定时任务"></a></td>
+  </tr>
+</table>
+
+### 深度事件分析与转化漏斗
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/049.webp"><img src="/.github/screenshot/049.webp" width="100%" alt="对 JSON 格式的自定义事件进行深度分析" title="对 JSON 格式的自定义事件进行深度分析"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/050.webp"><img src="/.github/screenshot/050.webp" width="100%" alt="对 JSON 格式的自定义事件进行深度分析" title="对 JSON 格式的自定义事件进行深度分析"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/051.webp"><img src="/.github/screenshot/051.webp" width="100%" alt="对 JSON 格式的自定义事件进行深度分析" title="对 JSON 格式的自定义事件进行深度分析"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/052.webp"><img src="/.github/screenshot/052.webp" width="100%" alt="对 JSON 格式的自定义事件进行深度分析" title="对 JSON 格式的自定义事件进行深度分析"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/053.webp"><img src="/.github/screenshot/053.webp" width="100%" alt="对 JSON 格式的自定义事件进行深度分析" title="对 JSON 格式的自定义事件进行深度分析"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/054.webp"><img src="/.github/screenshot/054.webp" width="100%" alt="使用漏斗来分析访问与事件" title="使用漏斗来分析访问与事件"></a></td>
+  </tr>
+</table>
+
+### 运行监控、通知与机器人防护
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/055.webp"><img src="/.github/screenshot/055.webp" width="100%" alt="定时 / 按条件接收通知邮件" title="定时 / 按条件接收通知邮件"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/056.webp"><img src="/.github/screenshot/056.webp" width="100%" alt="定时 / 按条件接收通知邮件" title="定时 / 按条件接收通知邮件"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/057.webp"><img src="/.github/screenshot/057.webp" width="100%" alt="定时 / 按条件接收通知邮件" title="定时 / 按条件接收通知邮件"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/058.webp"><img src="/.github/screenshot/058.webp" width="100%" alt="多维度的机器人防护与观测系统" title="多维度的机器人防护与观测系统"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/059.webp"><img src="/.github/screenshot/059.webp" width="100%" alt="多维度的机器人防护与观测系统" title="多维度的机器人防护与观测系统"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/060.webp"><img src="/.github/screenshot/060.webp" width="100%" alt="多维度的机器人防护与观测系统" title="多维度的机器人防护与观测系统"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/061.webp"><img src="/.github/screenshot/061.webp" width="100%" alt="多维度的机器人防护与观测系统" title="多维度的机器人防护与观测系统"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/062.webp"><img src="/.github/screenshot/062.webp" width="100%" alt="多维度的机器人防护与观测系统" title="多维度的机器人防护与观测系统"></a></td>
+    <td width="33%"></td>
+  </tr>
+</table>
 
 ---
 
