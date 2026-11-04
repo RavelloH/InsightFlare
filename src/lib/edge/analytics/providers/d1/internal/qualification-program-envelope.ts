@@ -41,6 +41,10 @@ import {
   validateQualificationCompatibilityFields,
 } from "./qualification-compatibility";
 import {
+  type GroupedSummaryRelationEvidence,
+  proveGroupedSummaryRelations,
+} from "./qualification-grouped-summary-evidence";
+import {
   compileQualificationQuery,
   type QualificationSignal,
 } from "./qualification-program-runtime";
@@ -66,6 +70,7 @@ export interface QualificationEnvelopeCompilationEvidence {
   readonly bindingCount: number;
   readonly groupWidth: number;
   readonly groupedSummaryProof: QualificationEnvelopeGroupedSummaryProof;
+  readonly additionalGroupedSummaryProofs?: readonly QualificationEnvelopeGroupedSummaryProof[];
   readonly sharedRelationCount: number;
   readonly rootKind: string;
   readonly physicalPlanShape?: CompiledQuery["physicalPlanShape"];
@@ -103,9 +108,11 @@ export interface QualificationEnvelopeQualification {
   readonly primaryReportSourceRelationId: AnalyticsQualificationPlan["primaryReportSourceRelationId"];
   readonly controlsRelationId: AnalyticsQualificationPlan["controlsRelationId"];
   readonly groupedSummaryRelationId?: AnalyticsQualificationPlan["groupedSummaryRelationId"];
+  readonly additionalGroupedSummaryRelationIds?: readonly RelationId[];
+  readonly candidateGrain?: "event-candidate";
   readonly controlOutputId: string;
   readonly numericCompatibilityFields: AnalyticsQualificationPlan["numericCompatibilityFields"];
-  readonly scope: AnalyticsQualificationPlan["scope"];
+  readonly scope: "session" | "visitor" | "event";
   readonly reportSourceRelations: readonly EventQualificationReportSource[];
   readonly comparisonProvenance?: readonly QualifiedGeoComparisonProvenance[];
 }
@@ -128,6 +135,7 @@ export type QualificationEnvelopeCompilation =
       readonly admissionEvidence?: {
         readonly groupWidth: number | null;
         readonly groupedSummaryProof: QualificationEnvelopeGroupedSummaryProof;
+        readonly additionalGroupedSummaryProofs?: readonly QualificationEnvelopeGroupedSummaryProof[];
         readonly sharedRelationCount: number;
         readonly rootKind: string;
         readonly sharedRelations: readonly {
@@ -302,7 +310,17 @@ export function compileQualificationProgramEnvelope(input: {
     input.controlsOutput.id !== qualification.controlOutputId ||
     qualification.reportSourceRelations.length === 0 ||
     new Set(input.reports.map(({ output }) => output.id)).size !==
-      input.reports.length
+      input.reports.length ||
+    (qualification.candidateGrain === "event-candidate" &&
+      (qualification.scope !== "event" ||
+        input.reports.length !== 1 ||
+        qualification.reportSourceRelations.length !== 1 ||
+        qualification.comparisonProvenance !== undefined ||
+        qualification.reportSourceRelations[0]!.entity !== "event" ||
+        qualification.reportSourceRelations[0]!.relationId !==
+          qualification.primaryReportSourceRelationId)) ||
+    (qualification.candidateGrain === undefined &&
+      qualification.additionalGroupedSummaryRelationIds !== undefined)
   )
     throw new Error(`${input.errorPrefix}_plan_identity_invalid`);
   const controlFieldNames = input.controlsOutput.fields.map(({ name }) => name);
@@ -319,7 +337,7 @@ export function compileQualificationProgramEnvelope(input: {
           plan: qualification.plan,
           provenance: qualification.comparisonProvenance,
           siteId: input.siteId,
-          scope: qualification.scope,
+          scope: qualification.scope as "session" | "visitor",
           reportSourceRelationIds: qualification.reportSourceRelations.map(
             ({ relationId }) => relationId,
           ),
@@ -346,6 +364,9 @@ export function compileQualificationProgramEnvelope(input: {
       slot,
     })),
     scope: qualification.scope,
+    ...(qualification.candidateGrain
+      ? { candidateGrain: qualification.candidateGrain }
+      : {}),
     maximumActivities: ADVANCED_FILTER_MAX_ACTIVITIES,
     numericCompatibilityControlNames: compatibilityControlFields,
   };
@@ -442,6 +463,54 @@ export function compileQualificationProgramEnvelope(input: {
   const physical = lowerLogicalPlan(envelope);
   const localGroupedSummaryId = qualification.groupedSummaryRelationId;
   const importedGroupedSummary = input.importedGroupedSummaryReference;
+  const eventCandidate = qualification.candidateGrain === "event-candidate";
+  const groupedSummaryIds = [
+    ...(localGroupedSummaryId === undefined ? [] : [localGroupedSummaryId]),
+    ...(qualification.additionalGroupedSummaryRelationIds ?? []),
+  ];
+  const eventCandidateGroupedEvidence = eventCandidate
+    ? proveGroupedSummaryRelations({
+        relationIds: groupedSummaryIds,
+        planNodes: qualification.plan.nodes,
+        physicalSharedRelations: physical.sharedRelations,
+        lowerRelation: (relationId) =>
+          lowerer.loweredRelationForPlan(relationId),
+      })
+    : undefined;
+  const eventCandidateProof = (
+    item?: GroupedSummaryRelationEvidence,
+  ): QualificationEnvelopeGroupedSummaryProof =>
+    item
+      ? Object.freeze({
+          source: "local-plan",
+          relationId: item.relationId,
+          nodeKind: item.nodeKind,
+          groupKeyCount: item.groupKeyCount,
+          fieldCount: item.fieldCount,
+          matchingSharedRelationCount: item.matchingSharedRelationCount,
+          materialization: item.materialization,
+          sharedRelations: item.sharedRelations,
+        })
+      : Object.freeze({
+          source: "missing",
+          relationId: null,
+          nodeKind: null,
+          groupKeyCount: null,
+          fieldCount: null,
+          matchingSharedRelationCount: 0,
+          materialization: null,
+          sharedRelations: Object.freeze(
+            physical.sharedRelations.map((relation) =>
+              Object.freeze({
+                nodeKind: relation.node.kind,
+                materialization: relation.materialization,
+                fieldCount: relation.fields.length,
+                sameNode: false,
+              }),
+            ),
+          ),
+        });
+
   const groupedSummarySource: "local-plan" | "imported-child" | "missing" =
     localGroupedSummaryId !== undefined && !importedGroupedSummary
       ? "local-plan"
@@ -452,14 +521,15 @@ export function compileQualificationProgramEnvelope(input: {
     groupedSummarySource === "local-plan"
       ? localGroupedSummaryId!
       : groupedSummarySource === "imported-child" && importedGroupedSummary
-        ? importedGroupedSummary!.relationId
+        ? importedGroupedSummary.relationId
         : null;
-  const grouped =
-    groupedSummarySource === "local-plan"
+  const legacyGrouped = eventCandidate
+    ? undefined
+    : groupedSummarySource === "local-plan"
       ? lowerer.loweredRelationForPlan(groupedSummaryId!)
       : groupedSummarySource === "imported-child" &&
           importedGroupedSummary !== undefined &&
-          importedGroupedSummary!.kind === "imported-child" &&
+          importedGroupedSummary.kind === "imported-child" &&
           Object.isFrozen(importedGroupedSummary) &&
           Object.isFrozen(importedGroupedSummary.childPlan)
         ? lowerer.loweredRelationForImportedChildPlan(
@@ -467,41 +537,62 @@ export function compileQualificationProgramEnvelope(input: {
             groupedSummaryId!,
           )
         : undefined;
+  const legacyGroupedCandidates = physical.sharedRelations.filter(
+    (relation) => relation.node === legacyGrouped?.node,
+  );
+  const groupedSummaryProof: QualificationEnvelopeGroupedSummaryProof =
+    eventCandidate
+      ? eventCandidateProof(eventCandidateGroupedEvidence!.entries[0])
+      : Object.freeze({
+          source: groupedSummarySource,
+          relationId: groupedSummaryId,
+          nodeKind: legacyGrouped?.node.kind ?? null,
+          groupKeyCount:
+            legacyGrouped?.node.kind === "aggregate"
+              ? legacyGrouped.node.groups.length
+              : null,
+          fieldCount: legacyGrouped?.fields.length ?? null,
+          matchingSharedRelationCount: legacyGroupedCandidates.length,
+          materialization:
+            legacyGroupedCandidates.length === 1
+              ? legacyGroupedCandidates[0]!.materialization
+              : null,
+          sharedRelations: Object.freeze(
+            physical.sharedRelations.map((relation) =>
+              Object.freeze({
+                nodeKind: relation.node.kind,
+                materialization: relation.materialization,
+                fieldCount: relation.fields.length,
+                sameNode: relation.node === legacyGrouped?.node,
+              }),
+            ),
+          ),
+        });
+  const additionalGroupedSummaryProofs = eventCandidate
+    ? Object.freeze(
+        eventCandidateGroupedEvidence!.entries
+          .slice(1)
+          .map(eventCandidateProof),
+      )
+    : undefined;
+  const grouped = eventCandidate
+    ? (eventCandidateGroupedEvidence!.entries[0]?.lowered as
+        AnalyticsDbRelation | undefined)
+    : legacyGrouped;
   const groupedCandidates = physical.sharedRelations.filter(
     (relation) => relation.node === grouped?.node,
   );
-  const groupedSummaryProof: QualificationEnvelopeGroupedSummaryProof =
-    Object.freeze({
-      source: groupedSummarySource,
-      relationId: groupedSummaryId,
-      nodeKind: grouped?.node.kind ?? null,
-      groupKeyCount:
-        grouped?.node.kind === "aggregate" ? grouped.node.groups.length : null,
-      fieldCount: grouped?.fields.length ?? null,
-      matchingSharedRelationCount: groupedCandidates.length,
-      materialization:
-        groupedCandidates.length === 1
-          ? groupedCandidates[0]!.materialization
-          : null,
-      sharedRelations: Object.freeze(
-        physical.sharedRelations.map((relation) =>
-          Object.freeze({
-            nodeKind: relation.node.kind,
-            materialization: relation.materialization,
-            fieldCount: relation.fields.length,
-            sameNode: relation.node === grouped?.node,
-          }),
-        ),
-      ),
-    });
   if (
-    !grouped ||
-    grouped.node.kind !== "aggregate" ||
-    grouped.node.groups.length !== 2 ||
-    grouped.fields.length > 16 ||
-    groupedCandidates.length !== 1 ||
-    groupedCandidates[0]!.materialization !== "materialized" ||
-    groupedCandidates[0]!.fields.length > 16
+    (eventCandidate
+      ? !eventCandidateGroupedEvidence!.valid || groupedSummaryIds.length !== 2
+      : !grouped ||
+        grouped.node.kind !== "aggregate" ||
+        grouped.node.groups.length !== 2 ||
+        grouped.fields.length > 16 ||
+        groupedCandidates.length !== 1 ||
+        groupedCandidates[0]!.materialization !== "materialized" ||
+        groupedCandidates[0]!.fields.length > 16) ||
+    !grouped
   )
     return {
       kind: "unavailable",
@@ -512,6 +603,9 @@ export function compileQualificationProgramEnvelope(input: {
       admissionEvidence: {
         groupWidth: grouped?.fields.length ?? null,
         groupedSummaryProof,
+        ...(additionalGroupedSummaryProofs
+          ? { additionalGroupedSummaryProofs }
+          : {}),
         sharedRelationCount: physical.sharedRelations.length,
         rootKind: physical.root.kind,
         sharedRelations: Object.freeze(
@@ -540,6 +634,9 @@ export function compileQualificationProgramEnvelope(input: {
       admissionEvidence: {
         groupWidth,
         groupedSummaryProof,
+        ...(additionalGroupedSummaryProofs
+          ? { additionalGroupedSummaryProofs }
+          : {}),
         sharedRelationCount: physical.sharedRelations.length,
         rootKind: physical.root.kind,
         sharedRelations: Object.freeze(
@@ -565,6 +662,9 @@ export function compileQualificationProgramEnvelope(input: {
       bindingCount: query.bindings?.length ?? 0,
       groupWidth,
       groupedSummaryProof,
+      ...(additionalGroupedSummaryProofs
+        ? { additionalGroupedSummaryProofs }
+        : {}),
       sharedRelationCount: physical.sharedRelations.length,
       rootKind: physical.root.kind,
       ...(query.physicalPlanShape

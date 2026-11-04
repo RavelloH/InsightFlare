@@ -4,6 +4,10 @@ import {
   type QueryInput,
   type QueryTime,
 } from "@/lib/edge/analytics/contract";
+import type {
+  AdvancedCountFilterMatchPlanInput,
+  AdvancedCountQualificationPlanInput,
+} from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import type { PageDimensionSelection } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import {
   crossBreakdownPageDimensionSelection,
@@ -46,20 +50,54 @@ export type FilterValuesQualificationConfiguration =
       readonly field: "referrer.domain" | "referrer.url";
     });
 
-export type DeferredFilterValuesQualificationInput =
-  DeferredEventQualification & {
-    readonly operation: "filter-values";
-    readonly requestTime: QueryTime;
-    readonly filterValuesRequest: FilterValuesQualificationConfiguration;
-  };
-
-export interface DeferredFilterValuesQualification {
+type DeferredFilterValuesQualificationBase = Omit<
+  DeferredEventQualification,
+  "operation" | "countInput" | "filterValuesRequest"
+> & {
   readonly operation: "filter-values";
-  readonly configuration: FilterValuesQualificationConfiguration;
-  readonly filterMode: "split-only" | "allow-whole-filter";
-  readonly qualification: DeferredFilterValuesQualificationInput;
-  readonly requestSnapshot: string;
-}
+  readonly requestTime: QueryTime;
+};
+
+type DeferredFilterValuesOwnerConfiguration = Exclude<
+  FilterValuesQualificationConfiguration,
+  { readonly reportKind: "event" }
+>;
+type DeferredFilterValuesEventConfiguration = Extract<
+  FilterValuesQualificationConfiguration,
+  { readonly reportKind: "event" }
+>;
+
+export type DeferredFilterValuesQualificationInput =
+  | (DeferredFilterValuesQualificationBase & {
+      readonly countInput: AdvancedCountFilterMatchPlanInput;
+      readonly filterValuesRequest: DeferredFilterValuesOwnerConfiguration;
+    })
+  | (DeferredFilterValuesQualificationBase & {
+      readonly countInput: AdvancedCountQualificationPlanInput;
+      readonly filterValuesRequest: DeferredFilterValuesEventConfiguration;
+    });
+
+export type DeferredFilterValuesQualification =
+  | {
+      readonly operation: "filter-values";
+      readonly configuration: DeferredFilterValuesOwnerConfiguration;
+      readonly filterMode: "split-only" | "allow-whole-filter";
+      readonly qualification: Extract<
+        DeferredFilterValuesQualificationInput,
+        { readonly filterValuesRequest: DeferredFilterValuesOwnerConfiguration }
+      >;
+      readonly requestSnapshot: string;
+    }
+  | {
+      readonly operation: "filter-values";
+      readonly configuration: DeferredFilterValuesEventConfiguration;
+      readonly filterMode: "split-only" | "allow-whole-filter";
+      readonly qualification: Extract<
+        DeferredFilterValuesQualificationInput,
+        { readonly filterValuesRequest: DeferredFilterValuesEventConfiguration }
+      >;
+      readonly requestSnapshot: string;
+    };
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -261,13 +299,32 @@ export function attachFilterValuesQualificationToQuery(
     );
   if (snapshot === undefined)
     throw new Error("filter_values_qualification_request_snapshot_invalid");
-  const request: DeferredFilterValuesQualification = Object.freeze({
-    operation: "filter-values",
-    configuration,
-    filterMode: qualification.filterValuesFilterMode ?? "split-only",
-    qualification,
-    requestSnapshot: snapshot,
-  });
+  const request: DeferredFilterValuesQualification =
+    configuration.reportKind === "event"
+      ? Object.freeze({
+          operation: "filter-values",
+          configuration,
+          filterMode: qualification.filterValuesFilterMode ?? "split-only",
+          qualification: qualification as Extract<
+            DeferredFilterValuesQualificationInput,
+            {
+              readonly filterValuesRequest: DeferredFilterValuesEventConfiguration;
+            }
+          >,
+          requestSnapshot: snapshot,
+        })
+      : Object.freeze({
+          operation: "filter-values",
+          configuration,
+          filterMode: qualification.filterValuesFilterMode ?? "split-only",
+          qualification: qualification as Extract<
+            DeferredFilterValuesQualificationInput,
+            {
+              readonly filterValuesRequest: DeferredFilterValuesOwnerConfiguration;
+            }
+          >,
+          requestSnapshot: snapshot,
+        });
   brandedRequests.add(request);
   requestOrigins.set(request, query);
   Object.defineProperty(query, REQUEST_BRAND, {

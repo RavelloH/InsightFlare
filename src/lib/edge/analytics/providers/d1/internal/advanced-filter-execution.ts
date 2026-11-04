@@ -524,12 +524,15 @@ export type DeferredEventTypesQualification = Omit<
   readonly countInput: AdvancedCountQualificationPlanInput;
 };
 
-export type DeferredEventNameDimensionQualification =
-  DeferredEventQualification & {
-    readonly operation: "event-name-dimension";
-    readonly eventNameDimensionRequest: EventNameDimensionListRequest;
-    readonly eventNameDimensionReportFilters: FilterDocument;
-  };
+export type DeferredEventNameDimensionQualification = Omit<
+  DeferredEventQualification,
+  "operation" | "countInput" | "eventNameDimensionReportFilters"
+> & {
+  readonly operation: "event-name-dimension";
+  readonly countInput: AdvancedCountQualificationPlanInput;
+  readonly eventNameDimensionRequest: EventNameDimensionListRequest;
+  readonly eventNameDimensionReportFilters?: FilterDocument;
+};
 
 export type DeferredEventTrendQualification = DeferredEventQualification & {
   readonly operation: "event-trend";
@@ -4497,64 +4500,109 @@ async function prepareDeferredEventQualification(input: {
   readonly allowPrivateGeoPointsWholeFilterOptIn?: boolean;
   readonly allowPrivateRetentionWholeFilterOptIn?: boolean;
   readonly allowPrivateFilterValuesWholeFilterOptIn?: boolean;
+  readonly allowEventNameDimensionEventCandidate?: boolean;
   readonly subject: SemanticSubjectDomain;
   readonly diagnostics?: D1ReadDiagnostics;
   readonly signal?: AbortSignal;
   readonly expectedSiteId?: string;
 }): Promise<
-  DeferredEventQualification | DeferredEventTypesQualification | null
+  | DeferredEventQualification
+  | DeferredEventTypesQualification
+  | DeferredEventNameDimensionQualification
+  | DeferredFilterValuesQualificationInput
+  | null
 > {
   const { query } = input;
-  const eventCandidateFiltersDescriptor =
-    input.operation === "event-types"
-      ? ownDescriptor(query, "filters")
+  const filterValuesRequest =
+    input.operation === "filter-values"
+      ? filterValuesQualificationConfigurationFromQuery(query)
       : undefined;
+  const eventCandidateConsumerOperation =
+    input.operation === "event-types" ||
+    input.operation === "event-name-dimension" ||
+    (input.operation === "filter-values" &&
+      filterValuesRequest?.reportKind === "event");
+  const eventCandidateFiltersDescriptor = eventCandidateConsumerOperation
+    ? ownDescriptor(query, "filters")
+    : undefined;
   if (
-    input.operation === "event-types" &&
+    eventCandidateConsumerOperation &&
     eventCandidateFiltersDescriptor !== undefined &&
     (!eventCandidateFiltersDescriptor.enumerable ||
       !("value" in eventCandidateFiltersDescriptor))
   )
     throw invalidInput(
       "query",
-      "event_types_qualification_request_context_mismatch",
+      input.operation === "event-types"
+        ? "event_types_qualification_request_context_mismatch"
+        : input.operation === "filter-values"
+          ? "filter_values_request_context_mismatch"
+          : "event_name_dimension_request_context_mismatch",
     );
-  const eventCandidateFilters =
-    input.operation === "event-types"
-      ? (ownDataValue(query, "filters") as FilterDocument | undefined)
-      : undefined;
-  const eventCandidateMetadata =
-    input.operation === "event-types"
-      ? scopedFilterMetadata(eventCandidateFilters)
-      : undefined;
-  const eventCandidateRequestSnapshot =
-    input.operation === "event-types"
-      ? qualificationRequestOwnDataSnapshot(query)
+  const eventCandidateFilters = eventCandidateConsumerOperation
+    ? (ownDataValue(query, "filters") as FilterDocument | undefined)
+    : undefined;
+  const eventCandidateMetadata = eventCandidateConsumerOperation
+    ? scopedFilterMetadata(eventCandidateFilters)
+    : undefined;
+  const eventCandidateRequestSnapshot = eventCandidateConsumerOperation
+    ? qualificationRequestOwnDataSnapshot(query)
+    : undefined;
+  const eventNameDimensionRequest =
+    input.operation === "event-name-dimension"
+      ? (normalizeEventNameDimensionListRequest({
+          mode: ownDataValue(query, "mode"),
+          dimension: ownDataValue(query, "dimension"),
+          page: ownDataValue(query, "page"),
+          limit: ownDataValue(query, "limit"),
+          search: ownDataValue(query, "search"),
+          audience: query.context.policy.audience,
+        }) ?? undefined)
       : undefined;
   const eventCandidateScopePlanMatches = eventCandidateMetadata
     ? queryScopePlanMatchesMetadata(query, eventCandidateMetadata.plan)
     : false;
   if (
-    input.operation === "event-types" &&
+    eventCandidateConsumerOperation &&
     eventCandidateMetadata?.plan.scope === "event" &&
     (eventCandidateRequestSnapshot === undefined ||
       !eventCandidateScopePlanMatches)
   )
     throw invalidInput(
       "query",
-      "event_types_qualification_request_context_mismatch",
+      input.operation === "event-types"
+        ? "event_types_qualification_request_context_mismatch"
+        : input.operation === "filter-values"
+          ? "filter_values_request_context_mismatch"
+          : "event_name_dimension_request_context_mismatch",
     );
-  const eventCandidatePageRequest =
-    input.operation === "event-types" &&
+  const eventCandidateBaseRequest =
     eventCandidateMetadata?.plan.scope === "event" &&
     eventCandidateRequestSnapshot !== undefined &&
     ownDataValue(
       ownDataValue(ownDataValue(query, "context"), "policy"),
       "audience",
     ) === "private-dashboard" &&
-    ownDataValue(query, "mode") === undefined &&
     queryHasNoComparisonState(query) &&
     eventCandidateScopePlanMatches;
+  const eventCandidatePageRequest =
+    input.operation === "event-types" &&
+    eventCandidateBaseRequest &&
+    ownDataValue(query, "mode") === undefined;
+  const eventCandidateDimensionListRequest =
+    input.operation === "event-name-dimension" &&
+    input.allowEventNameDimensionEventCandidate === true &&
+    eventCandidateBaseRequest &&
+    eventNameDimensionRequest !== undefined;
+  const eventCandidateFilterValuesRequest =
+    input.operation === "filter-values" &&
+    input.allowPrivateFilterValuesWholeFilterOptIn === true &&
+    filterValuesRequest?.reportKind === "event" &&
+    eventCandidateBaseRequest;
+  const eventCandidateRequest =
+    eventCandidatePageRequest ||
+    eventCandidateDimensionListRequest ||
+    eventCandidateFilterValuesRequest;
   const overviewTrendConfiguration =
     input.operation === "overview" || input.operation === "trend"
       ? overviewTrendConfigurationForQuery(input.operation, query)
@@ -4582,10 +4630,6 @@ async function prepareDeferredEventQualification(input: {
   const geoPointsQualificationConfiguration =
     input.operation === "geo-points"
       ? geoPointsQualificationConfigurationFromQuery(query)
-      : undefined;
-  const filterValuesRequest =
-    input.operation === "filter-values"
-      ? filterValuesQualificationConfigurationFromQuery(query)
       : undefined;
   const retentionConfiguration =
     input.operation === "retention"
@@ -4785,11 +4829,11 @@ async function prepareDeferredEventQualification(input: {
     metadata.plan.advancedMatches !== undefined ||
     (metadata.plan.scope !== "session" &&
       metadata.plan.scope !== "visitor" &&
-      !(metadata.plan.scope === "event" && eventCandidatePageRequest)) ||
-    (metadata.plan.scope === "event" && !eventCandidatePageRequest) ||
+      !(metadata.plan.scope === "event" && eventCandidateRequest)) ||
+    (metadata.plan.scope === "event" && !eventCandidateRequest) ||
     metadata.siteIds.length !== 1 ||
     metadata.siteIds[0] !== query.context.subject.siteId ||
-    (eventCandidatePageRequest && !eventCandidateScopePlanMatches)
+    (eventCandidateRequest && !eventCandidateScopePlanMatches)
   )
     return null;
   const time = metadata.time;
@@ -5145,17 +5189,6 @@ async function prepareDeferredEventQualification(input: {
         ? { overviewPageRequest: sessionBoundaryOverviewPageRequest }
         : {}),
     });
-  const eventNameDimensionRequest =
-    input.operation === "event-name-dimension"
-      ? (normalizeEventNameDimensionListRequest({
-          mode: query.mode,
-          dimension: query.dimension,
-          page: query.page,
-          limit: query.limit,
-          search: query.search,
-          audience: query.context.policy.audience,
-        }) ?? undefined)
-      : undefined;
   if (
     input.operation === "page-dimension" &&
     !pageDimensionRequest &&
@@ -5283,7 +5316,7 @@ async function prepareDeferredEventQualification(input: {
   if (
     (input.operation === "event-fields" ||
       input.operation === "event-field-values" ||
-      eventCandidatePageRequest ||
+      eventCandidateRequest ||
       pageDimensionRequest !== undefined ||
       pagesAggregatePageRequest !== undefined ||
       pagesTabsRequest !== undefined ||
@@ -5315,7 +5348,7 @@ async function prepareDeferredEventQualification(input: {
   if (
     (input.operation === "event-fields" ||
       input.operation === "event-field-values" ||
-      eventCandidatePageRequest ||
+      eventCandidateRequest ||
       pageDimensionRequest !== undefined ||
       pagesAggregatePageRequest !== undefined ||
       pagesTabsRequest !== undefined ||
@@ -5344,7 +5377,7 @@ async function prepareDeferredEventQualification(input: {
             query.scopePlan as ScopedFilterPlan,
             metadata.plan,
           )
-        : eventCandidatePageRequest
+        : eventCandidateRequest
           ? !eventCandidateScopePlanMatches
           : JSON.stringify(query.scopePlan) !== JSON.stringify(metadata.plan))
   )
@@ -5465,8 +5498,9 @@ async function prepareDeferredEventQualification(input: {
     geoPointsQualificationConfiguration !== undefined
       ? splitPageDimensionNativeFilters(filters)
       : undefined;
-  const supportFilters =
-    journeyListFilterResolution?.kind === "supported"
+  const supportFilters = eventCandidateRequest
+    ? filters
+    : journeyListFilterResolution?.kind === "supported"
       ? journeyListFilterResolution.countFilters
       : journeyEventPageFilterResolution?.kind === "supported"
         ? journeyEventPageFilterResolution.countFilters
@@ -5516,7 +5550,7 @@ async function prepareDeferredEventQualification(input: {
     return null;
   let eventNameDimensionReportFilters: FilterDocument | undefined;
   let filterValuesReportFilters: FilterDocument | undefined;
-  if (eventNameDimensionRequest) {
+  if (eventNameDimensionRequest && !eventCandidateDimensionListRequest) {
     const split = splitPageDimensionNativeFilters(filters);
     if (split.kind === "unsupported") return null;
     const nativeScopePlan = createScopedFilterPlan(
@@ -5536,7 +5570,10 @@ async function prepareDeferredEventQualification(input: {
       },
     );
   }
-  if (filterValuesRequest?.reportKind === "event") {
+  if (
+    filterValuesRequest?.reportKind === "event" &&
+    !eventCandidateFilterValuesRequest
+  ) {
     const filterResolution = filterValuesFilterResolution;
     if (filterResolution?.kind !== "supported") return null;
     const nativeScopePlan = createScopedFilterPlan(
@@ -5761,7 +5798,9 @@ async function prepareDeferredEventQualification(input: {
     ...(eventNameDimensionRequest
       ? {
           eventNameDimensionRequest,
-          eventNameDimensionReportFilters: eventNameDimensionReportFilters!,
+          ...(eventNameDimensionReportFilters
+            ? { eventNameDimensionReportFilters }
+            : {}),
         }
       : {}),
     ...(pageDimensionRequest ? { pageDimensionRequest } : {}),
@@ -5812,6 +5851,7 @@ async function prepareDeferredEventQualification(input: {
     ...(filterValuesFilterResolution?.kind === "supported"
       ? {
           filterValuesFilterMode:
+            eventCandidateFilterValuesRequest ||
             filterValuesFilterResolution.mode === "whole-filter"
               ? ("allow-whole-filter" as const)
               : ("split-only" as const),
@@ -5822,14 +5862,29 @@ async function prepareDeferredEventQualification(input: {
     ...(sessionListRequest ? { sessionListRequest } : {}),
     ...(journeyEventPageRequest ? { journeyEventPageRequest } : {}),
   };
-  const deferred: DeferredEventQualification | DeferredEventTypesQualification =
-    eventCandidatePageRequest
+  const deferred:
+    | DeferredEventQualification
+    | DeferredEventTypesQualification
+    | DeferredEventNameDimensionQualification
+    | DeferredFilterValuesQualificationInput = eventCandidatePageRequest
+    ? (Object.freeze({
+        ...deferredBase,
+        operation: "event-types" as const,
+        countInput: countInput as AdvancedEventCandidateCountPlanInput,
+      }) as DeferredEventTypesQualification)
+    : eventCandidateDimensionListRequest
       ? (Object.freeze({
           ...deferredBase,
-          operation: "event-types" as const,
+          operation: "event-name-dimension" as const,
           countInput: countInput as AdvancedEventCandidateCountPlanInput,
-        }) as DeferredEventTypesQualification)
-      : (Object.freeze(deferredBase) as DeferredEventQualification);
+        }) as DeferredEventNameDimensionQualification)
+      : eventCandidateFilterValuesRequest
+        ? (Object.freeze({
+            ...deferredBase,
+            operation: "filter-values" as const,
+            countInput: countInput as AdvancedEventCandidateCountPlanInput,
+          }) as DeferredFilterValuesQualificationInput)
+        : (Object.freeze(deferredBase) as DeferredEventQualification);
   deferredEventQualifications.add(deferred);
   return deferred;
 }
@@ -5857,16 +5912,33 @@ export function deferredEventQualificationFromQuery(
 ): DeferredEventTypesQualification | undefined;
 export function deferredEventQualificationFromQuery(
   input: unknown,
-  operation: Exclude<DeferredEventQualificationOperation, "event-types">,
+  operation: "event-name-dimension",
+): DeferredEventNameDimensionQualification | undefined;
+export function deferredEventQualificationFromQuery(
+  input: unknown,
+  operation: Exclude<
+    DeferredEventQualificationOperation,
+    "event-types" | "event-name-dimension"
+  >,
 ): DeferredEventQualification | undefined;
 export function deferredEventQualificationFromQuery(
   input: unknown,
   operation: DeferredEventQualificationOperation,
-): DeferredEventQualification | DeferredEventTypesQualification | undefined;
+):
+  | DeferredEventQualification
+  | DeferredEventTypesQualification
+  | DeferredEventNameDimensionQualification
+  | DeferredFilterValuesQualificationInput
+  | undefined;
 export function deferredEventQualificationFromQuery(
   input: unknown,
   operation: DeferredEventQualificationOperation,
-): DeferredEventQualification | DeferredEventTypesQualification | undefined {
+):
+  | DeferredEventQualification
+  | DeferredEventTypesQualification
+  | DeferredEventNameDimensionQualification
+  | DeferredFilterValuesQualificationInput
+  | undefined {
   if (!input || typeof input !== "object") return undefined;
   const value = (input as Record<PropertyKey, unknown>)[
     DEFERRED_EVENT_QUALIFICATION
@@ -5876,7 +5948,11 @@ export function deferredEventQualificationFromQuery(
     deferredEventQualifications.has(value) &&
     (value as DeferredEventQualification | DeferredEventTypesQualification)
       .operation === operation
-    ? (value as DeferredEventQualification | DeferredEventTypesQualification)
+    ? (value as
+        | DeferredEventQualification
+        | DeferredEventTypesQualification
+        | DeferredEventNameDimensionQualification
+        | DeferredFilterValuesQualificationInput)
     : undefined;
 }
 
@@ -6279,7 +6355,11 @@ export function deferredSessionBoundaryOverviewPageQualificationFromQuery(
 
 export function isDeferredEventQualification(
   value: unknown,
-): value is DeferredEventQualification | DeferredEventTypesQualification {
+): value is
+  | DeferredEventQualification
+  | DeferredEventTypesQualification
+  | DeferredEventNameDimensionQualification
+  | DeferredFilterValuesQualificationInput {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -6299,7 +6379,11 @@ export function isDeferredComparisonPageQualification(
 
 /** Prepare the existing evaluator route if fused compilation is refused. */
 export async function prepareDeferredEventQualificationFallback(
-  deferred: DeferredEventQualification | DeferredEventTypesQualification,
+  deferred:
+    | DeferredEventQualification
+    | DeferredEventTypesQualification
+    | DeferredEventNameDimensionQualification
+    | DeferredFilterValuesQualificationInput,
 ): Promise<FilterDocument> {
   if (!isDeferredEventQualification(deferred))
     throw new Error("deferred_event_qualification_untrusted");
@@ -6417,7 +6501,7 @@ export function d1AdvancedFilterMiddleware(
       operation === "filter-values" &&
       rawFilterValuesRequestSnapshot === undefined
     )
-      return next(input as QueryInput);
+      throw invalidInput("query", "filter_values_request_own_data_required");
     const rawFilterValuesQualificationConfiguration =
       operation === "filter-values"
         ? filterValuesQualificationConfigurationFromQuery(input)
@@ -6428,6 +6512,40 @@ export function d1AdvancedFilterMiddleware(
         input,
         rawFilterValuesQualificationConfiguration,
       );
+    const rawEventNameDimensionCandidate =
+      operation === "dimension" &&
+      ownDataValue(input, "mode") === "breakdown" &&
+      ownDataValue(input, "dimension") === "event.name";
+    const rawEventNameDimensionRequestSnapshot = rawEventNameDimensionCandidate
+      ? qualificationRequestOwnDataSnapshot(input)
+      : undefined;
+    if (
+      rawEventNameDimensionCandidate &&
+      rawEventNameDimensionRequestSnapshot === undefined
+    )
+      throw invalidInput(
+        "query",
+        "event_name_dimension_request_own_data_required",
+      );
+    const rawEventNameDimensionContext = ownDataValue(input, "context");
+    const rawEventNameDimensionPolicy = ownDataValue(
+      rawEventNameDimensionContext,
+      "policy",
+    );
+    const rawEventNameDimensionAudience = ownDataValue(
+      rawEventNameDimensionPolicy,
+      "audience",
+    ) as QueryAudience;
+    const rawEventNameDimensionRequest = rawEventNameDimensionCandidate
+      ? normalizeEventNameDimensionListRequest({
+          mode: ownDataValue(input, "mode"),
+          dimension: ownDataValue(input, "dimension"),
+          page: ownDataValue(input, "page"),
+          limit: ownDataValue(input, "limit"),
+          search: ownDataValue(input, "search"),
+          audience: rawEventNameDimensionAudience,
+        })
+      : null;
     const rawPrivateTechnologyWholeFilterOptIn =
       operation === "share-trend" ||
       operation === "radar" ||
@@ -6514,6 +6632,36 @@ export function d1AdvancedFilterMiddleware(
       ownDataValue(input, "mode") === "overview-tab" &&
       ownDataValue(input, "tab") === "source.channel";
     const output = { ...query } as Record<string, unknown>;
+    const outputEventNameDimensionRequest =
+      rawEventNameDimensionRequest !== null
+        ? normalizeEventNameDimensionListRequest({
+            mode: ownDataValue(query, "mode"),
+            dimension: ownDataValue(query, "dimension"),
+            page: ownDataValue(query, "page"),
+            limit: ownDataValue(query, "limit"),
+            search: ownDataValue(query, "search"),
+            audience: query.context.policy.audience,
+          })
+        : null;
+    const allowEventNameDimensionEventCandidate =
+      rawEventNameDimensionRequest !== null &&
+      outputEventNameDimensionRequest !== null &&
+      rawEventNameDimensionRequestSnapshot !== undefined &&
+      qualificationRequestOwnDataSnapshot(output) ===
+        rawEventNameDimensionRequestSnapshot &&
+      rawEventNameDimensionAudience === "private-dashboard" &&
+      queryHasNoComparisonState(input) &&
+      queryHasNoComparisonState(query) &&
+      rawEventNameDimensionRequest.mode ===
+        outputEventNameDimensionRequest.mode &&
+      rawEventNameDimensionRequest.dimension ===
+        outputEventNameDimensionRequest.dimension &&
+      rawEventNameDimensionRequest.limit ===
+        outputEventNameDimensionRequest.limit &&
+      rawEventNameDimensionRequest.search ===
+        outputEventNameDimensionRequest.search &&
+      rawEventNameDimensionRequest.audience ===
+        outputEventNameDimensionRequest.audience;
     const channelOverviewRequest =
       operation === "channels" &&
       query.mode === "overview-tab" &&
@@ -6837,6 +6985,7 @@ export function d1AdvancedFilterMiddleware(
         allowPrivateGeoPointsWholeFilterOptIn,
         allowPrivateRetentionWholeFilterOptIn,
         allowPrivateFilterValuesWholeFilterOptIn,
+        allowEventNameDimensionEventCandidate,
         subject,
         diagnostics,
         signal: execution?.signal,

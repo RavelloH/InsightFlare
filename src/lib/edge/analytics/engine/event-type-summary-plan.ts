@@ -320,9 +320,10 @@ export function buildEventTypeSummaryQualificationPlan<
 }): EventTypeSummaryQualificationPlan<Count["scope"]> {
   if (
     input.count.scope === "event" &&
-    (input.query.kind !== "page" || input.reportFilters !== undefined)
+    (input.reportFilters !== undefined ||
+      (input.query.kind !== "page" && input.query.kind !== "list"))
   )
-    throw new Error("event_candidate_count_requires_event_type_page");
+    throw new Error("event_candidate_count_requires_event_type_query");
   const qualified = buildEventQualifiedSource({
     siteId: input.siteId,
     count: input.count,

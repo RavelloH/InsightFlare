@@ -267,7 +267,7 @@ function createIsolatedEventFixture(options?: {
 }
 
 function queryFor(
-  scope: "session" | "visitor",
+  scope: "session" | "visitor" | "event",
   options: TestQueryOptions = {},
 ): EventNameDimensionQuery {
   const prepared = prepareScopedQuery("dimension", {
@@ -487,6 +487,20 @@ async function writeEvidence(name: string, value: unknown): Promise<void> {
   );
 }
 
+async function writeWave97ebEvidence(
+  name: string,
+  value: unknown,
+): Promise<void> {
+  const directory = process.env.WAVE97EB_ARTIFACT_DIR;
+  if (!directory) return;
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    join(directory, name),
+    JSON.stringify(value, null, 2),
+    "utf8",
+  );
+}
+
 beforeAll(() => createFixture());
 afterAll(() => database?.close());
 
@@ -596,6 +610,64 @@ describe("event.name dimension Count qualification", () => {
       });
     },
   );
+
+  it("uses a request-bound Event candidate for the event.name list and matches Core", async () => {
+    const query = queryFor("event", { dsl: COUNT_FILTER });
+    const actualTrace = traceFor();
+    let observedDeferred:
+      | ReturnType<typeof deferredEventNameDimensionQualificationFromQuery>
+      | undefined;
+    const actual = await runPublicProviderQuery(query, actualTrace, {
+      onPrepared: (input) => {
+        observedDeferred =
+          deferredEventNameDimensionQualificationFromQuery(input);
+      },
+    });
+    const legacyTrace = traceFor();
+    const legacy = await runLegacyList(query, legacyTrace);
+    expect(observedDeferred).toBeDefined();
+    expect(observedDeferred?.countInput.scope).toBe("event");
+    expect(observedDeferred?.countInput.candidateAnchor).toEqual({
+      kind: "event-candidate",
+    });
+    expect(observedDeferred?.eventNameDimensionReportFilters).toBeUndefined();
+    expect(actual).toEqual(legacy);
+    expect(actualTrace.preparedSql).toHaveLength(2);
+    expect(legacyTrace.preparedSql.length).toBeGreaterThan(2);
+
+    const sessionTrace = traceFor();
+    const sessionForwarded = await d1AdvancedFilterMiddleware(
+      testEnv(sessionTrace),
+      undefined,
+      SITE,
+    )(
+      "dimension",
+      queryFor("session", { dsl: COUNT_FILTER }),
+      async (value) => value,
+    );
+    const sessionDeferred =
+      deferredEventNameDimensionQualificationFromQuery(sessionForwarded);
+    expect(sessionDeferred?.countInput.scope).toBe("session");
+    expect(sessionDeferred?.countInput.candidateAnchor).toBeUndefined();
+    await writeWave97ebEvidence("event-name-dimension-event-candidate.json", {
+      request: {
+        mode: query.mode,
+        dimension: query.dimension,
+        audience: query.context.policy.audience,
+      },
+      candidateAnchor: observedDeferred?.countInput.candidateAnchor,
+      countScope: observedDeferred?.countInput.scope,
+      reportFilters: observedDeferred?.eventNameDimensionReportFilters,
+      actualDto: actual,
+      coreDto: legacy,
+      sessionOwnerScope: sessionDeferred?.countInput.scope,
+      dtoMatchesCore: JSON.stringify(actual) === JSON.stringify(legacy),
+      ownerRouteRemainedSessionScoped:
+        sessionDeferred?.countInput.scope === "session",
+      fusedStatements: tracedStatements(actualTrace),
+      coreStatements: tracedStatements(legacyTrace),
+    });
+  });
 
   it.each(["session", "visitor"] as const)(
     "matches the old full Count-plus-list DTO and order for %s scope",

@@ -39,7 +39,10 @@ import {
 import { compileQualificationProgramEnvelope } from "@/lib/edge/analytics/providers/d1/internal/qualification-program-envelope";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
-import type { FilterDocument } from "@/lib/filter-contract/filters";
+import {
+  type FilterDocument,
+  normalizeFilterDocument,
+} from "@/lib/filter-contract/filters";
 import { InvalidCursorError } from "@/lib/pagination";
 
 const SITE = "wave97k-filter-values-event-name";
@@ -53,6 +56,8 @@ const WINDOW = {
 } as const;
 const FILTER_DSL =
   'page.path neq "/excluded" and count(event { event.name eq "qualifier" }) eq 1';
+const EVENT_WHOLE_BOOLEAN_DSL =
+  '(page.path eq "/included" and not (count(event { event.name eq "owner-filter-leak-visible" }) eq 1)) or count(event { event.name eq "owner-filter-leak-visible" }) eq 1';
 const REPORT_FIELDS = ["value", "views", "sessions", "visitors"] as const;
 const EXPECTED_EVENT_NAME_VALUES = {
   session: [
@@ -86,6 +91,7 @@ const DATABASES = new Set<DatabaseSync>();
 const beforeEvidence: Array<Record<string, unknown>> = [];
 const afterEvidence: Array<Record<string, unknown>> = [];
 const wave97dvEvidence: Array<Record<string, unknown>> = [];
+const wave97ebEvidence: Array<Record<string, unknown>> = [];
 
 interface QueryOptions {
   readonly limit?: number;
@@ -93,7 +99,7 @@ interface QueryOptions {
   readonly search?: string;
   readonly filters?: FilterDocument;
   readonly filterDsl?: string;
-  readonly scopePreference?: "session" | "visitor";
+  readonly scopePreference?: "session" | "visitor" | "event";
 }
 
 interface SiteFilterValuesPage {
@@ -127,6 +133,8 @@ function setDurationFixture(database: DatabaseSync): void {
 }
 
 const NUMERIC_COUNT_DSL = `${FILTER_DSL} and count(page { page.durationMs gt 5 }) eq 1`;
+const EVENT_WHOLE_NUMERIC_DSL =
+  'page.path eq "/included" or (count(event { event.name eq "owner-filter-leak-visible" }) eq 1 and count(page { page.durationMs gt 5 }) eq 1)';
 
 function traceFor(): SqliteD1Trace {
   return { preparedSql: [], bindings: [] };
@@ -326,7 +334,7 @@ function envFor(
 }
 
 function queryFor(
-  scope: "session" | "visitor",
+  scope: "session" | "visitor" | "event",
   field: string,
   options: QueryOptions = {},
 ) {
@@ -351,7 +359,7 @@ function queryFor(
 
 async function legacyPage(
   database: DatabaseSync,
-  scope: "session" | "visitor",
+  scope: "session" | "visitor" | "event",
   field: string,
   options: QueryOptions = {},
   trace = traceFor(),
@@ -562,6 +570,16 @@ afterAll(async () => {
         null,
         2,
       ),
+      "utf8",
+    );
+  }
+  const wave97ebDirectory = process.env.WAVE97EB_ARTIFACT_DIR;
+  if (wave97ebDirectory && wave97ebEvidence.length > 0) {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(wave97ebDirectory, { recursive: true });
+    await writeFile(
+      `${wave97ebDirectory}/filter-values-event-name-candidates.json`,
+      JSON.stringify({ wave: "97EB", evidence: wave97ebEvidence }, null, 2),
       "utf8",
     );
   }
@@ -1043,6 +1061,363 @@ describe("filter-values event.name qualification baseline", () => {
         groupedSummaryProof: compilation.evidence.groupedSummaryProof,
       });
     }
+  });
+
+  it("uses Event candidates for the whole OR/NOT Count tree and preserves both cursor pages", async () => {
+    const preparedDatabase = createFixture();
+    const preparedTrace = traceFor();
+    const prepared = await d1AdvancedFilterMiddleware(
+      envFor(preparedDatabase, preparedTrace),
+      undefined,
+      SITE,
+    )(
+      "filter-values",
+      queryFor("event", "event.name", {
+        limit: 1,
+        filterDsl: EVENT_WHOLE_BOOLEAN_DSL,
+      }),
+      async (value) => value,
+    );
+    const request = deferredFilterValuesQualificationFromQuery(prepared);
+    if (!request)
+      throw new Error("wave97eb_event_filter_values_candidate_missing");
+    expect(request.configuration.reportKind).toBe("event");
+    expect(request.filterMode).toBe("allow-whole-filter");
+    expect(request.qualification.countInput.scope).toBe("event");
+    expect(request.qualification.countInput.candidateAnchor).toEqual({
+      kind: "event-candidate",
+    });
+    expect(request.qualification.filterValuesReportFilters).toBeUndefined();
+    expect(request.qualification.countInput.analysis.document).toEqual(
+      normalizeFilterDocument(
+        request.qualification.filters,
+        analyticsFilterRegistry,
+      ),
+    );
+    const compilation = compileFilterValuesQualificationProgram({
+      request,
+      cursor: null,
+    });
+    if (compilation.kind !== "compiled")
+      throw new Error("wave97eb_event_filter_values_compile_unavailable");
+    expect(compilation.evidence.reportSourceRelations).toEqual([
+      expect.objectContaining({ entity: "event" }),
+    ]);
+    expect(compilation.evidence.groupedSummaryProof).toMatchObject({
+      source: "local-plan",
+      nodeKind: "aggregate",
+      groupKeyCount: 2,
+      matchingSharedRelationCount: 1,
+      materialization: "materialized",
+    });
+    expect(compilation.evidence.additionalGroupedSummaryProofs).toHaveLength(1);
+    expect(
+      compilation.evidence.additionalGroupedSummaryProofs?.[0],
+    ).toMatchObject({
+      source: "local-plan",
+      nodeKind: "aggregate",
+      groupKeyCount: 2,
+      matchingSharedRelationCount: 1,
+      materialization: "materialized",
+    });
+
+    const actualDatabase = createFixture();
+    const actualTrace = traceFor();
+    const actualProvider = createD1SiteProviderRegistry({
+      env: envFor(actualDatabase, actualTrace),
+      siteId: SITE,
+    }).resolve("filter-values");
+    if (!actualProvider)
+      throw new Error("wave97eb_event_filter_values_provider_missing");
+    const oracle = await legacyPage(createFixture(), "event", "event.name", {
+      limit: 1,
+      filterDsl: EVENT_WHOLE_BOOLEAN_DSL,
+    });
+    const actualPages: unknown[] = [];
+    const corePages: unknown[] = [];
+    let cursor: string | null = null;
+    for (let pageIndex = 0; pageIndex < 2; pageIndex += 1) {
+      const actual = sitePage(
+        (
+          await actualProvider.execute(
+            queryFor("event", "event.name", {
+              limit: 1,
+              cursor,
+              filterDsl: EVENT_WHOLE_BOOLEAN_DSL,
+            }),
+          )
+        ).value,
+      );
+      const expected = await oracle.page(cursor);
+      expect(actual.data.items).toEqual(
+        expected.items.map((row) => ({
+          value: row.value,
+          label: row.value,
+          occurrences: row.occurrences,
+        })),
+      );
+      expect(actual.data.pagination).toEqual(expected.pagination);
+      actualPages.push(actual.data);
+      corePages.push(expected);
+      cursor = actual.data.pagination.nextCursor;
+      if (!cursor || !actual.data.pagination.hasMore) break;
+    }
+    expect(
+      actualTrace.preparedSql.filter(isFusedEventFilterValuesReport),
+    ).toHaveLength(actualPages.length);
+    expect(actualPages).toHaveLength(2);
+    wave97ebEvidence.push({
+      case: "event-candidate-whole-or-not-cursor-pages",
+      configuration: request.configuration,
+      filterMode: request.filterMode,
+      countScope: request.qualification.countInput.scope,
+      candidateAnchor: request.qualification.countInput.candidateAnchor,
+      reportFilters: request.qualification.filterValuesReportFilters,
+      groupedSummaryProof: compilation.evidence.groupedSummaryProof,
+      additionalGroupedSummaryProofs:
+        compilation.evidence.additionalGroupedSummaryProofs,
+      controlFields: compilation.evidence.controlFields,
+      outputDescriptors: compilation.evidence.outputDescriptors,
+      actualPages,
+      corePages,
+      fusedStatements: traceEvidence(actualTrace),
+      coreStatements: traceEvidence(oracle.trace),
+    });
+  });
+
+  it("uses Event candidates for the complete split-eligible AND filter", async () => {
+    const preparedTrace = traceFor();
+    const prepared = await d1AdvancedFilterMiddleware(
+      envFor(createFixture(), preparedTrace),
+      undefined,
+      SITE,
+    )(
+      "filter-values",
+      queryFor("event", "event.name", { filterDsl: FILTER_DSL }),
+      async (value) => value,
+    );
+    const request = deferredFilterValuesQualificationFromQuery(prepared);
+    if (!request)
+      throw new Error("wave97eb_event_and_filter_values_candidate_missing");
+    expect(request.configuration.reportKind).toBe("event");
+    expect(request.filterMode).toBe("allow-whole-filter");
+    expect(request.qualification.countInput.scope).toBe("event");
+    expect(request.qualification.countInput.candidateAnchor).toEqual({
+      kind: "event-candidate",
+    });
+    expect(request.qualification.filterValuesReportFilters).toBeUndefined();
+    expect(request.qualification.countInput.analysis.document).toEqual(
+      normalizeFilterDocument(
+        request.qualification.filters,
+        analyticsFilterRegistry,
+      ),
+    );
+    const compilation = compileFilterValuesQualificationProgram({
+      request,
+      cursor: null,
+    });
+    if (compilation.kind !== "compiled")
+      throw new Error("wave97eb_event_and_filter_values_compile_unavailable");
+    expect(compilation.evidence.reportSourceRelations).toEqual([
+      expect.objectContaining({ entity: "event" }),
+    ]);
+    const ownerForwarded = await d1AdvancedFilterMiddleware(
+      envFor(createFixture(), traceFor()),
+      undefined,
+      SITE,
+    )(
+      "filter-values",
+      queryFor("session", "page.path"),
+      async (value) => value,
+    );
+    const ownerRequest =
+      deferredFilterValuesQualificationFromQuery(ownerForwarded);
+    if (!ownerRequest)
+      throw new Error("wave97eb_owner_scope_guard_setup_missing");
+    expect(ownerRequest.configuration.reportKind).toBe("page");
+    expect(ownerRequest.qualification.countInput.scope).toBe("session");
+    const invalidOwnerRequest = {
+      ...ownerRequest,
+      qualification: {
+        ...ownerRequest.qualification,
+        countInput: request.qualification.countInput,
+      },
+    } as unknown as Parameters<
+      typeof compileFilterValuesQualificationProgram
+    >[0]["request"];
+    expect(() =>
+      compileFilterValuesQualificationProgram({
+        request: invalidOwnerRequest,
+        cursor: null,
+      }),
+    ).toThrow("filter_values_qualification_owner_count_scope_invalid");
+
+    const diagnostics = createD1ReadDiagnostics();
+    const actualTrace = traceFor();
+    const actualProvider = createD1SiteProviderRegistry({
+      env: envFor(createFixture(), actualTrace),
+      siteId: SITE,
+      diagnostics,
+    }).resolve("filter-values");
+    if (!actualProvider)
+      throw new Error("wave97eb_event_and_filter_values_provider_missing");
+    const actual = sitePage(
+      (
+        await actualProvider.execute(
+          queryFor("event", "event.name", { filterDsl: FILTER_DSL }),
+        )
+      ).value,
+    );
+    const oracle = await legacyPage(createFixture(), "event", "event.name", {
+      filterDsl: FILTER_DSL,
+    });
+    const expected = await oracle.page(null);
+    expect(actual).toEqual({
+      field: "event.name",
+      data: {
+        items: expected.items.map((row) => ({
+          value: row.value,
+          label: row.value,
+          occurrences: row.occurrences,
+        })),
+        pagination: expected.pagination,
+      },
+    });
+    expect(diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
+    expect(
+      actualTrace.preparedSql.filter(isFusedEventFilterValuesReport),
+    ).toHaveLength(1);
+    wave97ebEvidence.push({
+      case: "event-candidate-split-eligible-and",
+      configuration: request.configuration,
+      filterMode: request.filterMode,
+      countScope: request.qualification.countInput.scope,
+      candidateAnchor: request.qualification.countInput.candidateAnchor,
+      reportFilters: request.qualification.filterValuesReportFilters,
+      countDocument: request.qualification.countInput.analysis.document,
+      actualPage: actual.data,
+      corePage: expected,
+      fusedStatements: traceEvidence(actualTrace),
+      coreStatements: traceEvidence(oracle.trace),
+    });
+  });
+
+  it("rejects unsafe FilterValues inputs and keeps other Event report families on Core", async () => {
+    const unsafeQuery = queryFor("event", "event.name") as Record<
+      string,
+      unknown
+    >;
+    let fieldGetterReads = 0;
+    Object.defineProperty(unsafeQuery, "field", {
+      enumerable: true,
+      get() {
+        fieldGetterReads += 1;
+        throw new Error("event candidate field getter must not run");
+      },
+    });
+    const unsafeTrace = traceFor();
+    await expect(
+      d1AdvancedFilterMiddleware(
+        envFor(createFixture(), unsafeTrace),
+        undefined,
+        SITE,
+      )("filter-values", unsafeQuery, async (value) => value),
+    ).rejects.toThrow();
+    expect(fieldGetterReads).toBe(0);
+    expect(unsafeTrace.preparedSql).toHaveLength(0);
+
+    const wrongFamilyQuery = queryFor("event", "page.path", {
+      limit: 2,
+      filterDsl: EVENT_WHOLE_BOOLEAN_DSL,
+    });
+    const wrongFamilyTrace = traceFor();
+    const wrongFamilyForwarded = await d1AdvancedFilterMiddleware(
+      envFor(createFixture(), wrongFamilyTrace),
+      undefined,
+      SITE,
+    )("filter-values", wrongFamilyQuery, async (value) => value);
+    expect(
+      deferredFilterValuesQualificationFromQuery(wrongFamilyForwarded),
+    ).toBeUndefined();
+    wave97ebEvidence.push({
+      case: "event-candidate-unsafe-and-wrong-family",
+      unsafeFieldGetterReads: fieldGetterReads,
+      unsafeStatements: traceEvidence(unsafeTrace),
+      wrongFamilyReportKind:
+        filterValuesQualificationConfigurationFromQuery(wrongFamilyQuery)
+          ?.reportKind,
+      wrongFamilyDeferred: false,
+      wrongFamilyStatements: traceEvidence(wrongFamilyTrace),
+    });
+  });
+
+  it("falls back once for an Event candidate numeric guard over the whole Count tree", async () => {
+    const actualDatabase = createFixture();
+    setDurationFixture(actualDatabase);
+    const actualRows: Record<string, unknown>[][] = [];
+    const actualTrace = traceFor();
+    const diagnostics = createD1ReadDiagnostics();
+    const actualProvider = createD1SiteProviderRegistry({
+      env: envFor(actualDatabase, actualTrace, (sql, rows) => {
+        if (isFusedEventFilterValuesReport(sql)) actualRows.push(rows);
+        return rows;
+      }),
+      siteId: SITE,
+      diagnostics,
+    }).resolve("filter-values");
+    if (!actualProvider)
+      throw new Error("wave97eb_event_numeric_provider_missing");
+    const oracle = await legacyPage(createFixture(), "event", "event.name", {
+      limit: 2,
+      filterDsl: EVENT_WHOLE_NUMERIC_DSL,
+    });
+    const expected = await oracle.page(null);
+    const actual = sitePage(
+      (
+        await actualProvider.execute(
+          queryFor("event", "event.name", {
+            limit: 2,
+            filterDsl: EVENT_WHOLE_NUMERIC_DSL,
+          }),
+        )
+      ).value,
+    );
+    expect(actual.data.items).toEqual(
+      expected.items.map((row) => ({
+        value: row.value,
+        label: row.value,
+        occurrences: row.occurrences,
+      })),
+    );
+    expect(actual.data.pagination).toEqual(expected.pagination);
+    const fallbackReason = diagnostics.advancedCountSqlFallbackReason;
+    expect(["numeric-data-domain", "compile-budget"]).toContain(
+      fallbackReason?.kind,
+    );
+    if (fallbackReason?.kind === "numeric-data-domain") {
+      expect(fallbackReason.fieldIds).toContain("page.durationMs");
+      expect(actualRows).toHaveLength(1);
+      expect(
+        actualRows[0]!.filter((row) => row.rowKind === "report"),
+      ).toHaveLength(0);
+      expect(
+        actualTrace.preparedSql.filter(isFusedEventFilterValuesReport),
+      ).toHaveLength(1);
+    } else {
+      expect(actualRows).toHaveLength(0);
+      expect(
+        actualTrace.preparedSql.filter(isFusedEventFilterValuesReport),
+      ).toHaveLength(0);
+    }
+    wave97ebEvidence.push({
+      case: "event-candidate-whole-numeric-fallback",
+      actual,
+      core: expected,
+      fallbackReason,
+      rejectedFusedRows: actualRows[0],
+      fusedStatements: traceEvidence(actualTrace),
+      coreStatements: traceEvidence(oracle.trace),
+    });
   });
 
   it("uses one whole Event fallback for a real TEXT numeric guard", async () => {

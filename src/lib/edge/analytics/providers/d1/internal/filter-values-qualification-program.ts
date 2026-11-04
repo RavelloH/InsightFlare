@@ -1,3 +1,7 @@
+import type {
+  AdvancedCountFilterMatchPlanInput,
+  AdvancedCountQualificationPlanInput,
+} from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import { DIMENSION_PAGE_REPORT_OUTPUT } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import { EVENT_QUALIFICATION_CONTROL_OUTPUT } from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import {
@@ -118,6 +122,14 @@ function exactOutput(
   return matches[0]!;
 }
 
+function requireOwnerCountInput(
+  countInput: AdvancedCountQualificationPlanInput,
+): AdvancedCountFilterMatchPlanInput {
+  if (countInput.scope === "event")
+    throw new Error(`${ERROR_PREFIX}_owner_count_scope_invalid`);
+  return countInput;
+}
+
 function compile(
   request: DeferredFilterValuesQualification,
   cursor: FilterValuesQualificationCursor | null,
@@ -133,21 +145,38 @@ function compile(
   let outputs: readonly LogicalOutput[];
   if (configuration.reportKind === "event") {
     const reportFilters = deferred.filterValuesReportFilters;
-    if (!reportFilters)
-      throw new Error(`${ERROR_PREFIX}_event_report_filters_missing`);
-    if (request.filterMode === "allow-whole-filter") {
+    const eventCandidate =
+      deferred.countInput.scope === "event" &&
+      deferred.countInput.candidateAnchor.kind === "event-candidate";
+    if (eventCandidate) {
+      if (request.filterMode !== "allow-whole-filter" || reportFilters)
+        throw new Error(`${ERROR_PREFIX}_event_candidate_filter_mode_invalid`);
       assertWholeFilterCountDocument(
         deferred.filters,
         deferred.countInput.analysis.document,
         `${ERROR_PREFIX}_event_whole_count_document_mismatch`,
       );
-      if (reportFilters.root !== null)
-        throw new Error(`${ERROR_PREFIX}_event_whole_report_filters_not_empty`);
+    } else {
+      if (!reportFilters)
+        throw new Error(`${ERROR_PREFIX}_event_report_filters_missing`);
+      if (request.filterMode === "allow-whole-filter") {
+        assertWholeFilterCountDocument(
+          deferred.filters,
+          deferred.countInput.analysis.document,
+          `${ERROR_PREFIX}_event_whole_count_document_mismatch`,
+        );
+        if (reportFilters.root !== null)
+          throw new Error(
+            `${ERROR_PREFIX}_event_whole_report_filters_not_empty`,
+          );
+      }
     }
+    if (eventCandidate && reportFilters !== undefined)
+      throw new Error(`${ERROR_PREFIX}_event_whole_report_filters_not_empty`);
     const plan = buildEventTypeSummaryQualificationPlan({
       siteId: deferred.siteId,
       count: deferred.countInput,
-      reportFilters,
+      ...(reportFilters !== undefined ? { reportFilters } : {}),
       query: {
         kind: "page",
         limit: configuration.limit,
@@ -165,8 +194,15 @@ function compile(
       numericCompatibilityFields: plan.numericCompatibilityFields,
       scope: plan.scope,
       reportSourceRelations: plan.reportSourceRelations,
+      ...(plan.candidateGrain ? { candidateGrain: plan.candidateGrain } : {}),
       ...(plan.groupedSummaryRelationId
         ? { groupedSummaryRelationId: plan.groupedSummaryRelationId }
+        : {}),
+      ...(plan.additionalGroupedSummaryRelationIds
+        ? {
+            additionalGroupedSummaryRelationIds:
+              plan.additionalGroupedSummaryRelationIds,
+          }
         : {}),
     };
     reportOutputId = EVENT_TYPE_SUMMARY_OUTPUTS.page;
@@ -176,13 +212,14 @@ function compile(
     valueNulls = "last";
     outputs = plan.plan.outputs;
   } else if (configuration.reportKind === "referrer") {
+    const ownerCountInput = requireOwnerCountInput(deferred.countInput);
     const plan = buildReferrerPageQualificationPlan({
       semanticOperation: "filter-values",
       siteId: deferred.siteId,
       queryTime: deferred.requestTime,
       filters: deferred.filters,
       scopePlan: deferred.metadata.plan,
-      count: deferred.countInput,
+      count: ownerCountInput,
       filterMode: request.filterMode,
       options: {
         limit: configuration.limit,
@@ -203,13 +240,14 @@ function compile(
     valueNulls = "first";
     outputs = plan.plan.outputs;
   } else if (configuration.reportKind === "session-boundary") {
+    const ownerCountInput = requireOwnerCountInput(deferred.countInput);
     const plan = buildSessionBoundaryOverviewPageQualificationPlan({
       semanticOperation: "filter-values",
       siteId: deferred.siteId,
       queryTime: deferred.requestTime,
       filters: deferred.filters,
       scopePlan: deferred.metadata.plan,
-      count: deferred.countInput,
+      count: ownerCountInput,
       filterMode: request.filterMode,
       kind: configuration.field === "session.entryPath" ? "entry" : "exit",
       limit: configuration.limit,
@@ -228,13 +266,14 @@ function compile(
     valueNulls = "first";
     outputs = plan.plan.outputs;
   } else {
+    const ownerCountInput = requireOwnerCountInput(deferred.countInput);
     const plan = buildPageDimensionQualificationPlan({
       semanticOperation: "filter-values",
       siteId: deferred.siteId,
       queryTime: deferred.requestTime,
       filters: deferred.filters,
       scopePlan: deferred.metadata.plan,
-      count: deferred.countInput,
+      count: ownerCountInput,
       filterMode: request.filterMode,
       options: {
         limit: configuration.limit,

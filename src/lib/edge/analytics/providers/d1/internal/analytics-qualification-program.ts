@@ -164,6 +164,7 @@ import {
   type QualificationCompatibilityField,
   qualificationCompatibilityFieldsFromNumeric,
 } from "./qualification-compatibility";
+import { proveGroupedSummaryRelations } from "./qualification-grouped-summary-evidence";
 import {
   assertQualificationNotAborted,
   compileQualificationQuery,
@@ -464,7 +465,9 @@ interface EventQualificationProgram {
   readonly query: CompiledQuery<Record<string, unknown>>;
   readonly evidence: EventSummaryQualificationCompilationEvidence;
   readonly deferred:
-    DeferredEventQualification | DeferredEventTypesQualification;
+    | DeferredEventQualification
+    | DeferredEventTypesQualification
+    | DeferredEventNameDimensionQualification;
   readonly reportKind: QualifiedReportKind;
   readonly reportOutputIds: readonly string[];
   readonly controlOutputId: string;
@@ -1669,7 +1672,8 @@ function compileProgram(request: EventQualificationCompileRequest):
             siteId: deferred.siteId,
             count: request.deferred.countInput,
             query: request.query,
-            ...(deferred.operation === "event-name-dimension"
+            ...(deferred.operation === "event-name-dimension" &&
+            deferred.eventNameDimensionReportFilters !== undefined
               ? {
                   reportFilters: deferred.eventNameDimensionReportFilters,
                 }
@@ -1926,10 +1930,16 @@ function compileProgram(request: EventQualificationCompileRequest):
     deferred.metadata.plan.scope === "event" &&
     deferred.countInput.scope === "event" &&
     deferred.countInput.candidateAnchor.kind === "event-candidate";
+  const eventCandidateList =
+    eventNameDimensionList &&
+    deferred.metadata.plan.scope === "event" &&
+    deferred.countInput.scope === "event" &&
+    deferred.countInput.candidateAnchor.kind === "event-candidate";
+  const eventCandidateEventTypeQuery = eventCandidatePage || eventCandidateList;
   const qualificationScopeValid =
     ((qualification.scope === "session" || qualification.scope === "visitor") &&
       qualification.candidateGrain === undefined) ||
-    (eventCandidatePage &&
+    (eventCandidateEventTypeQuery &&
       qualification.scope === "event" &&
       qualification.candidateGrain === "event-candidate");
   if (
@@ -2205,43 +2215,28 @@ function compileProgram(request: EventQualificationCompileRequest):
     qualification.groupedSummaryRelationId,
     ...(qualification.additionalGroupedSummaryRelationIds ?? []),
   ];
-  const groupedSummaries = groupedSummaryIds.map((relationId) => {
-    const node = plan.nodes.find((candidate) => candidate.id === relationId);
-    const inputNode =
-      node?.kind === "aggregate"
-        ? plan.nodes.find((candidate) => candidate.id === node.input)
-        : undefined;
-    const lowered = lowerer.loweredRelationForPlan(relationId);
-    const materialized = lowered
-      ? physical.sharedRelations.filter(
-          (relation) => relation.node === lowered.node,
-        )
-      : [];
-    return {
-      relationId,
-      lowered,
-      validShape:
-        node?.kind === "aggregate" &&
-        node.groups.length === 2 &&
-        inputNode?.kind === "limit" &&
-        lowered?.node.kind === "aggregate" &&
-        lowered.node.groups.length === 2 &&
-        lowered.fields.length <= 16,
-      materialized:
-        materialized.length === 1 &&
-        materialized[0]!.materialization === "materialized" &&
-        materialized[0]!.fields.length <= 16,
-    };
+  const groupedSummaryEvidence = proveGroupedSummaryRelations({
+    relationIds: groupedSummaryIds,
+    planNodes: plan.nodes,
+    physicalSharedRelations: physical.sharedRelations,
+    lowerRelation: (relationId) => lowerer.loweredRelationForPlan(relationId),
   });
+  const groupedSummaries = groupedSummaryEvidence.entries;
+  const expectedGroupedSummaryCount =
+    qualification.candidateGrain === "event-candidate" ? 2 : 1;
   const failedGroupedSummary = groupedSummaries.find(
     ({ validShape, materialized }) => !validShape || !materialized,
   );
-  if (failedGroupedSummary) {
+  if (
+    !groupedSummaryEvidence.valid ||
+    failedGroupedSummary ||
+    groupedSummaryIds.length !== expectedGroupedSummaryCount
+  ) {
     return {
       kind: "unavailable",
       fallbackReason: {
         kind: "grouped-summary-unavailable",
-        groupWidth: failedGroupedSummary.lowered?.fields.length ?? null,
+        groupWidth: failedGroupedSummary?.lowered?.fields.length ?? null,
       },
     };
   }
