@@ -160,3 +160,15 @@ jobs:
               "$RUNNER_TEMP/nightly-final.json" >/dev/null
           done
           echo "Nightly pointer updated to $sha without creating a versioned Release."
+
+
+      - name: Remove only old SHA-addressed nightly assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Retain 20 previous source commits and all assets younger than 72h.
+          # This never modifies the current nightly, stable releases, or assets
+          # whose names do not match the exact SHA-addressed build pattern.
+          node scripts/prune-nightly-artifacts.mjs --execute "$GITHUB_SHA"
