@@ -48,37 +48,149 @@
   </tr>
 </table>
 
-<details>
-<summary><strong>すべての機能スクリーンショット</strong></summary>
+## すべての機能をプレビュー
 
-既存のスクリーンショットは機能別にリンクから閲覧できます。README を簡潔に保ちながら、詳細を残しています。
+実際の画面を機能別の画像ギャラリーで紹介します。サムネイルをクリックすると拡大できます。
 
-- **多面的なトラフィック分析**: [001](/.github/screenshot/001.webp) · [002](/.github/screenshot/002.webp) · [003](/.github/screenshot/003.webp)
-- **リアルタイム訪問者モニタリング**: [004](/.github/screenshot/004.webp) · [005](/.github/screenshot/005.webp)
-- **ページ別トラフィック分析**: [006](/.github/screenshot/006.webp)
-- **実ユーザーのパフォーマンス追跡**: [007](/.github/screenshot/007.webp) · [008](/.github/screenshot/008.webp) · [009](/.github/screenshot/009.webp)
-- **流入元ごとのトラフィック品質比較**: [010](/.github/screenshot/010.webp) · [011](/.github/screenshot/011.webp) · [012](/.github/screenshot/012.webp)
-- **UTM キャンペーンの効果測定**: [013](/.github/screenshot/013.webp) · [014](/.github/screenshot/014.webp)
-- **カスタムイベントの記録と分析**: [015](/.github/screenshot/015.webp) · [016](/.github/screenshot/016.webp) · [017](/.github/screenshot/017.webp)
-- **すべてのセッションを詳しく確認**: [018](/.github/screenshot/018.webp) · [019](/.github/screenshot/019.webp) · [020](/.github/screenshot/020.webp) · [021](/.github/screenshot/021.webp)
-- **すべての訪問者を把握**: [022](/.github/screenshot/022.webp) · [023](/.github/screenshot/023.webp)
-- **リピーターの追跡**: [024](/.github/screenshot/024.webp) · [025](/.github/screenshot/025.webp)
-- **地理的分布と市場インテリジェンス**: [026](/.github/screenshot/026.webp) · [027](/.github/screenshot/027.webp) · [028](/.github/screenshot/028.webp)
-- **訪問者デバイスの詳細**: [029](/.github/screenshot/029.webp) · [030](/.github/screenshot/030.webp) · [031](/.github/screenshot/031.webp)
-- **ブラウザーとその機能の把握**: [032](/.github/screenshot/032.webp) · [033](/.github/screenshot/033.webp) · [034](/.github/screenshot/034.webp) · [035](/.github/screenshot/035.webp) · [036](/.github/screenshot/036.webp)
-- **フロントエンド SDK を変更せずに追跡設定を調整**: [037](/.github/screenshot/037.webp) · [038](/.github/screenshot/038.webp)
-- **チームコラボレーションのための設計**: [039](/.github/screenshot/039.webp) · [040](/.github/screenshot/040.webp)
-- **システムの健全性をひと目で確認**: [041](/.github/screenshot/041.webp) · [042](/.github/screenshot/042.webp)
-- **完全な多言語対応**: [043](/.github/screenshot/043.webp) · [044](/.github/screenshot/044.webp)
-- **公開共有システム**: [045](/.github/screenshot/045.webp) · [046](/.github/screenshot/046.webp)
-- **明確にスコープされた API システム**: [047](/.github/screenshot/047.webp)
-- **定時タスク**: [048](/.github/screenshot/048.webp)
-- **JSON 形式のカスタムイベントを深く分析**: [049](/.github/screenshot/049.webp) · [050](/.github/screenshot/050.webp) · [051](/.github/screenshot/051.webp) · [052](/.github/screenshot/052.webp) · [053](/.github/screenshot/053.webp)
-- **ファネルによる訪問・イベント分析**: [054](/.github/screenshot/054.webp)
-- **定時または条件付きメール通知**: [055](/.github/screenshot/055.webp) · [056](/.github/screenshot/056.webp) · [057](/.github/screenshot/057.webp)
-- **多面的なボット対策とリクエスト観測**: [058](/.github/screenshot/058.webp) · [059](/.github/screenshot/059.webp) · [060](/.github/screenshot/060.webp) · [061](/.github/screenshot/061.webp) · [062](/.github/screenshot/062.webp)
+### トラフィック概要と流入元
 
-</details>
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/001.webp"><img src="/.github/screenshot/001.webp" width="100%" alt="多面的なトラフィック分析" title="多面的なトラフィック分析"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/002.webp"><img src="/.github/screenshot/002.webp" width="100%" alt="多面的なトラフィック分析" title="多面的なトラフィック分析"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/003.webp"><img src="/.github/screenshot/003.webp" width="100%" alt="多面的なトラフィック分析" title="多面的なトラフィック分析"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/004.webp"><img src="/.github/screenshot/004.webp" width="100%" alt="リアルタイム訪問者モニタリング" title="リアルタイム訪問者モニタリング"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/005.webp"><img src="/.github/screenshot/005.webp" width="100%" alt="リアルタイム訪問者モニタリング" title="リアルタイム訪問者モニタリング"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/006.webp"><img src="/.github/screenshot/006.webp" width="100%" alt="ページ別トラフィック分析" title="ページ別トラフィック分析"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/007.webp"><img src="/.github/screenshot/007.webp" width="100%" alt="実ユーザーのパフォーマンス追跡" title="実ユーザーのパフォーマンス追跡"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/008.webp"><img src="/.github/screenshot/008.webp" width="100%" alt="実ユーザーのパフォーマンス追跡" title="実ユーザーのパフォーマンス追跡"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/009.webp"><img src="/.github/screenshot/009.webp" width="100%" alt="実ユーザーのパフォーマンス追跡" title="実ユーザーのパフォーマンス追跡"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/010.webp"><img src="/.github/screenshot/010.webp" width="100%" alt="流入元ごとのトラフィック品質比較" title="流入元ごとのトラフィック品質比較"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/011.webp"><img src="/.github/screenshot/011.webp" width="100%" alt="流入元ごとのトラフィック品質比較" title="流入元ごとのトラフィック品質比較"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/012.webp"><img src="/.github/screenshot/012.webp" width="100%" alt="流入元ごとのトラフィック品質比較" title="流入元ごとのトラフィック品質比較"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/013.webp"><img src="/.github/screenshot/013.webp" width="100%" alt="UTM キャンペーンの効果測定" title="UTM キャンペーンの効果測定"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/014.webp"><img src="/.github/screenshot/014.webp" width="100%" alt="UTM キャンペーンの効果測定" title="UTM キャンペーンの効果測定"></a></td>
+    <td width="33%"></td>
+  </tr>
+</table>
+
+### イベント・セッション・訪問経路
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/015.webp"><img src="/.github/screenshot/015.webp" width="100%" alt="カスタムイベントの記録と分析" title="カスタムイベントの記録と分析"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/016.webp"><img src="/.github/screenshot/016.webp" width="100%" alt="カスタムイベントの記録と分析" title="カスタムイベントの記録と分析"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/017.webp"><img src="/.github/screenshot/017.webp" width="100%" alt="カスタムイベントの記録と分析" title="カスタムイベントの記録と分析"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/018.webp"><img src="/.github/screenshot/018.webp" width="100%" alt="すべてのセッションを詳しく確認" title="すべてのセッションを詳しく確認"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/019.webp"><img src="/.github/screenshot/019.webp" width="100%" alt="すべてのセッションを詳しく確認" title="すべてのセッションを詳しく確認"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/020.webp"><img src="/.github/screenshot/020.webp" width="100%" alt="すべてのセッションを詳しく確認" title="すべてのセッションを詳しく確認"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/021.webp"><img src="/.github/screenshot/021.webp" width="100%" alt="すべてのセッションを詳しく確認" title="すべてのセッションを詳しく確認"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/022.webp"><img src="/.github/screenshot/022.webp" width="100%" alt="すべての訪問者を把握" title="すべての訪問者を把握"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/023.webp"><img src="/.github/screenshot/023.webp" width="100%" alt="すべての訪問者を把握" title="すべての訪問者を把握"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/024.webp"><img src="/.github/screenshot/024.webp" width="100%" alt="リピーターの追跡" title="リピーターの追跡"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/025.webp"><img src="/.github/screenshot/025.webp" width="100%" alt="リピーターの追跡" title="リピーターの追跡"></a></td>
+    <td width="33%"></td>
+  </tr>
+</table>
+
+### ユーザー・端末・地域分析
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/026.webp"><img src="/.github/screenshot/026.webp" width="100%" alt="地理的分布と市場インテリジェンス" title="地理的分布と市場インテリジェンス"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/027.webp"><img src="/.github/screenshot/027.webp" width="100%" alt="地理的分布と市場インテリジェンス" title="地理的分布と市場インテリジェンス"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/028.webp"><img src="/.github/screenshot/028.webp" width="100%" alt="地理的分布と市場インテリジェンス" title="地理的分布と市場インテリジェンス"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/029.webp"><img src="/.github/screenshot/029.webp" width="100%" alt="訪問者デバイスの詳細" title="訪問者デバイスの詳細"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/030.webp"><img src="/.github/screenshot/030.webp" width="100%" alt="訪問者デバイスの詳細" title="訪問者デバイスの詳細"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/031.webp"><img src="/.github/screenshot/031.webp" width="100%" alt="訪問者デバイスの詳細" title="訪問者デバイスの詳細"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/032.webp"><img src="/.github/screenshot/032.webp" width="100%" alt="ブラウザーとその機能の把握" title="ブラウザーとその機能の把握"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/033.webp"><img src="/.github/screenshot/033.webp" width="100%" alt="ブラウザーとその機能の把握" title="ブラウザーとその機能の把握"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/034.webp"><img src="/.github/screenshot/034.webp" width="100%" alt="ブラウザーとその機能の把握" title="ブラウザーとその機能の把握"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/035.webp"><img src="/.github/screenshot/035.webp" width="100%" alt="ブラウザーとその機能の把握" title="ブラウザーとその機能の把握"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/036.webp"><img src="/.github/screenshot/036.webp" width="100%" alt="ブラウザーとその機能の把握" title="ブラウザーとその機能の把握"></a></td>
+    <td width="33%"></td>
+  </tr>
+</table>
+
+### 設定・チーム・共有
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/037.webp"><img src="/.github/screenshot/037.webp" width="100%" alt="フロントエンド SDK を変更せずに追跡設定を調整" title="フロントエンド SDK を変更せずに追跡設定を調整"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/038.webp"><img src="/.github/screenshot/038.webp" width="100%" alt="フロントエンド SDK を変更せずに追跡設定を調整" title="フロントエンド SDK を変更せずに追跡設定を調整"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/039.webp"><img src="/.github/screenshot/039.webp" width="100%" alt="チームコラボレーションのための設計" title="チームコラボレーションのための設計"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/040.webp"><img src="/.github/screenshot/040.webp" width="100%" alt="チームコラボレーションのための設計" title="チームコラボレーションのための設計"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/041.webp"><img src="/.github/screenshot/041.webp" width="100%" alt="システムの健全性をひと目で確認" title="システムの健全性をひと目で確認"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/042.webp"><img src="/.github/screenshot/042.webp" width="100%" alt="システムの健全性をひと目で確認" title="システムの健全性をひと目で確認"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/043.webp"><img src="/.github/screenshot/043.webp" width="100%" alt="完全な多言語対応" title="完全な多言語対応"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/044.webp"><img src="/.github/screenshot/044.webp" width="100%" alt="完全な多言語対応" title="完全な多言語対応"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/045.webp"><img src="/.github/screenshot/045.webp" width="100%" alt="公開共有システム" title="公開共有システム"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/046.webp"><img src="/.github/screenshot/046.webp" width="100%" alt="公開共有システム" title="公開共有システム"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/047.webp"><img src="/.github/screenshot/047.webp" width="100%" alt="明確にスコープされた API システム" title="明確にスコープされた API システム"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/048.webp"><img src="/.github/screenshot/048.webp" width="100%" alt="定時タスク" title="定時タスク"></a></td>
+  </tr>
+</table>
+
+### イベントの詳細分析とファネル
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/049.webp"><img src="/.github/screenshot/049.webp" width="100%" alt="JSON 形式のカスタムイベントを深く分析" title="JSON 形式のカスタムイベントを深く分析"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/050.webp"><img src="/.github/screenshot/050.webp" width="100%" alt="JSON 形式のカスタムイベントを深く分析" title="JSON 形式のカスタムイベントを深く分析"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/051.webp"><img src="/.github/screenshot/051.webp" width="100%" alt="JSON 形式のカスタムイベントを深く分析" title="JSON 形式のカスタムイベントを深く分析"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/052.webp"><img src="/.github/screenshot/052.webp" width="100%" alt="JSON 形式のカスタムイベントを深く分析" title="JSON 形式のカスタムイベントを深く分析"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/053.webp"><img src="/.github/screenshot/053.webp" width="100%" alt="JSON 形式のカスタムイベントを深く分析" title="JSON 形式のカスタムイベントを深く分析"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/054.webp"><img src="/.github/screenshot/054.webp" width="100%" alt="ファネルによる訪問・イベント分析" title="ファネルによる訪問・イベント分析"></a></td>
+  </tr>
+</table>
+
+### 運用監視・通知・ボット対策
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/055.webp"><img src="/.github/screenshot/055.webp" width="100%" alt="定時または条件付きメール通知" title="定時または条件付きメール通知"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/056.webp"><img src="/.github/screenshot/056.webp" width="100%" alt="定時または条件付きメール通知" title="定時または条件付きメール通知"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/057.webp"><img src="/.github/screenshot/057.webp" width="100%" alt="定時または条件付きメール通知" title="定時または条件付きメール通知"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/058.webp"><img src="/.github/screenshot/058.webp" width="100%" alt="多面的なボット対策とリクエスト観測" title="多面的なボット対策とリクエスト観測"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/059.webp"><img src="/.github/screenshot/059.webp" width="100%" alt="多面的なボット対策とリクエスト観測" title="多面的なボット対策とリクエスト観測"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/060.webp"><img src="/.github/screenshot/060.webp" width="100%" alt="多面的なボット対策とリクエスト観測" title="多面的なボット対策とリクエスト観測"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/061.webp"><img src="/.github/screenshot/061.webp" width="100%" alt="多面的なボット対策とリクエスト観測" title="多面的なボット対策とリクエスト観測"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/062.webp"><img src="/.github/screenshot/062.webp" width="100%" alt="多面的なボット対策とリクエスト観測" title="多面的なボット対策とリクエスト観測"></a></td>
+    <td width="33%"></td>
+  </tr>
+</table>
 
 ---
 
