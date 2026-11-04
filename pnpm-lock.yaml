@@ -334,6 +334,9 @@ importers:
       recharts:
         specifier: ^2.15.4
         version: 2.15.4(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      shadcn:
+        specifier: ^4.22.1
+        version: 4.22.1
       sonner:
         specifier: ^2.0.8
         version: 2.0.8(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -353,9 +356,6 @@ importers:
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
-      shadcn:
-        specifier: ^4.22.1
-        version: 4.22.1
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
