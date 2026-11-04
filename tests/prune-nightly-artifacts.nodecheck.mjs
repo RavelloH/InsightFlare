@@ -2,47 +2,32 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { planPruneNightlyAssets } from "../scripts/prune-nightly-artifacts.mjs";
 
-const now = Date.parse("2026-11-05T00:00:00Z");
-const current = "f".repeat(40);
+const now = "f".repeat(40);
 const sha = n => n.toString(16).padStart(40, "0");
-function build(n, daysOld, id = n * 100) {
-  const created_at = new Date(now - daysOld * 86400000).toISOString();
-  const commit = sha(n);
-  return [
-    { id: id + 1, name: "insightflare-deploy-" + commit + ".json", created_at },
-    { id: id + 2, name: "insightflare-deploy-" + commit + ".tar.gz", created_at }
-  ];
-}
-describe("rolling Nightly retention, never deletes current or unrelated assets", () => {
-  it("keeps 20 newest previous SHA groups and prunes only old groups", () => {
-    const assets = [ ...Array.from({ length: 25 }, (_, i) => build(i + 1, 10 + i / 10)).flat(),
-      { id: 9999, name: "insightflare-deploy-" + current + ".json", created_at: new Date(now - 10000000).toISOString() }
-    ];
-    const doomed = planPruneNightlyAssets(assets, current, now);
-    assert.equal(doomed.length, 10);
-    assert.ok(doomed.every(item => /^insightflare-deploy-[0-9a-f]{40}\.(?:json|tar\.gz)$/.test(item.name)));
-    assert.ok(!doomed.some(item => item.name.includes(current)));
-  });
+const active = { id: 1, name: "insightflare-deploy-" + now + ".tar.gz" };
+const old = n => ({ id: n + 10, name: "insightflare-deploy-" + sha(n) + ".tar.gz" });
 
-  it("does not prune recent builds even when there are more than 20 groups", () => {
-    const assets = Array.from({ length: 50 }, (_, i) => build(i + 1, 0.5)).flat();
-    assert.deepEqual(planPruneNightlyAssets(assets, current, now), []);
+describe("nightly release keeps only one active tar.gz", () => {
+  it("removes every previous SHA archive, never current", () => {
+    const previous = Array.from({ length: 30 }, (_, n) => old(n + 1));
+    assert.deepEqual(planPruneNightlyAssets([active, ...previous], now).map(x => x.name),
+      previous.map(x => x.name));
   });
-
-  it("keeps foreign assets and rejects malformed entries", () => {
-    const assets = [
-      ...Array.from({ length: 25 }, (_, i) => build(i + 1, 15)).flat(),
-      { id: 99991, name: "v0.7.1.zip", created_at: new Date(now - 30 * 86400000).toISOString() },
-      { id: 99992, name: "notes.md", created_at: new Date(now - 30 * 86400000).toISOString() },
-      { id: -1, name: "insightflare-deploy-" + sha(8) + ".json", created_at: new Date(now - 30 * 86400000).toISOString() },
-      { id: 99993, name: "insightflare-deploy-" + sha(7) + ".tar.gz", created_at: "not-a-date" }
-    ];
-    const doomed = planPruneNightlyAssets(assets, current, now);
-    assert.ok(!doomed.some(x => x.id >= 99991));
+  it("removes legacy JSON sidecars, including current SHA sidecar", () => {
+    const sidecar = { id: 99, name: "insightflare-deploy-" + now + ".json" };
+    assert.deepEqual(planPruneNightlyAssets([active, sidecar], now), [sidecar]);
   });
-
-  it("rejects invalid source pointer or asset inventory", () => {
-    assert.throws(() => planPruneNightlyAssets([], "main", now));
-    assert.throws(() => planPruneNightlyAssets(null, current, now));
+  it("accepts the single active archive with no deletion", () => {
+    assert.deepEqual(planPruneNightlyAssets([active], now), []);
+  });
+  it("fails closed for unknown files, malformed metadata, missing/duplicate current", () => {
+    assert.throws(() => planPruneNightlyAssets([old(5)], now), /Exactly one/);
+    assert.throws(() => planPruneNightlyAssets([active, active], now), /Exactly one/);
+    assert.throws(() => planPruneNightlyAssets([active, { id: 3, name: "other.zip" }], now), /Unrecognized/);
+    assert.throws(() => planPruneNightlyAssets([active, { name: "bad" }], now), /Malformed/);
+  });
+  it("rejects invalid current commit or list", () => {
+    assert.throws(() => planPruneNightlyAssets([active], "main"), /Invalid/);
+    assert.throws(() => planPruneNightlyAssets(null, now), /Invalid/);
   });
 });
