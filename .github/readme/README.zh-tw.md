@@ -33,8 +33,6 @@
 
 ## 介面預覽
 
-精選真實介面截圖，點選可檢視原圖。
-
 <table>
   <tr>
     <td width="33%" align="center"><a href="/.github/screenshot/004.webp"><img src="/.github/screenshot/004.webp" alt="即時訪問" width="100%"><br><strong>即時訪問</strong></a></td>
@@ -49,8 +47,6 @@
 </table>
 
 ## 完整功能預覽
-
-參考 NeutralPress 的展示方式，直接呈現真實介面截圖。依功能分類，點擊縮圖即可檢視原圖。
 
 ### 流量概覽與來源分析
 
