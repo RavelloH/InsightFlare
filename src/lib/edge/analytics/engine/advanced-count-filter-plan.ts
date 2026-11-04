@@ -172,7 +172,7 @@ function builderFor(input: {
   };
   readonly reportingTimeZone: string;
   readonly capturedAtMs: number;
-  readonly scope: "session" | "visitor";
+  readonly scope: "session" | "visitor" | "event";
 }): LogicalPlanBuilder {
   const candidate = epochRange(input.candidateRange);
   const read = epochRange(input.readRange);
@@ -937,6 +937,7 @@ function predicateExpression(
   selectorCounts: ReadonlyMap<string, CountSelectorContribution>,
   scalarCollections: ReadonlyMap<string, ScalarCollectionContribution>,
   bareStringFields: ReadonlyMap<string, BareFieldContribution>,
+  bareFieldMode: "contribution" | "candidate" = "contribution",
 ): ReturnType<LogicalPlanBuilder["slot"]> {
   if (expression.kind === "not")
     return builder.not(
@@ -947,6 +948,7 @@ function predicateExpression(
         selectorCounts,
         scalarCollections,
         bareStringFields,
+        bareFieldMode,
       ),
     );
   if (expression.kind === "and" || expression.kind === "or") {
@@ -958,6 +960,7 @@ function predicateExpression(
         selectorCounts,
         scalarCollections,
         bareStringFields,
+        bareFieldMode,
       ),
     );
     return expression.kind === "and"
@@ -973,6 +976,12 @@ function predicateExpression(
     );
     if (!contribution)
       throw new Error("advanced_count_plan_missing_bare_field_contribution");
+    if (bareFieldMode === "candidate")
+      return registeredFieldLeafPredicateExpression(
+        builder,
+        relation,
+        contribution.condition,
+      );
     return builder.compare(
       "gt",
       builder.slot(relation, contribution.name),
@@ -1070,7 +1079,7 @@ function predicateExpression(
   );
 }
 
-export interface AdvancedCountFilterMatchPlanInput {
+interface AdvancedCountFilterMatchPlanCommon {
   readonly subject: SemanticSubjectDomain;
   readonly candidateRange: {
     readonly startMs: number;
@@ -1090,7 +1099,6 @@ export interface AdvancedCountFilterMatchPlanInput {
   };
   readonly expressionUsesExplicitRange: boolean;
   readonly lowerBounds: readonly AdvancedCountFilterSiteLowerBound[];
-  readonly scope: "session" | "visitor";
   readonly reportingTimeZone: string;
   readonly capturedAtMs: number;
   readonly analysis: AnalyzedFilterDocument;
@@ -1099,7 +1107,24 @@ export interface AdvancedCountFilterMatchPlanInput {
   readonly allowPrivateQualifiedGeoBareFields?: true;
 }
 
-export interface AdvancedCountQualificationFragment {
+export type AdvancedCountFilterMatchPlanInput =
+  AdvancedCountFilterMatchPlanCommon & {
+    readonly scope: "session" | "visitor";
+    readonly candidateAnchor?: never;
+  };
+
+export type AdvancedEventCandidateCountPlanInput =
+  AdvancedCountFilterMatchPlanCommon & {
+    readonly scope: "event";
+    readonly candidateAnchor: { readonly kind: "event-candidate" };
+  };
+
+export type AdvancedCountQualificationPlanInput =
+  AdvancedCountFilterMatchPlanInput | AdvancedEventCandidateCountPlanInput;
+
+export interface AdvancedCountQualificationFragment<
+  Scope extends "session" | "visitor" | "event" = "session" | "visitor",
+> {
   readonly matches: LogicalRelationHandle;
   readonly controls: LogicalRelationHandle;
   readonly groupedSummary: LogicalRelationHandle;
@@ -1108,13 +1133,15 @@ export interface AdvancedCountQualificationFragment {
     readonly invalidCountOutput: string;
   }[];
   readonly comparisonProvenance: readonly QualifiedGeoComparisonProvenance[];
-  readonly scope: "session" | "visitor";
+  readonly scope: Scope;
+  readonly candidateGrain?: "event-candidate";
+  readonly additionalGroupedSummaries?: readonly LogicalRelationHandle[];
   readonly subject: SemanticSubjectDomain;
 }
 
 /** Creates the exact Count context that can also own the consuming report. */
 export function createAdvancedCountQualificationBuilder(
-  input: AdvancedCountFilterMatchPlanInput,
+  input: AdvancedCountQualificationPlanInput,
 ): LogicalPlanBuilder {
   return builderFor({
     subject: input.subject,
@@ -1134,6 +1161,26 @@ export function appendAdvancedCountQualification(
   builder: LogicalPlanBuilder,
   input: AdvancedCountFilterMatchPlanInput,
 ): AdvancedCountQualificationFragment {
+  return appendAdvancedCountQualificationChecked(
+    builder,
+    input,
+  ) as AdvancedCountQualificationFragment;
+}
+
+export function appendAdvancedEventCandidateCountQualification(
+  builder: LogicalPlanBuilder,
+  input: AdvancedEventCandidateCountPlanInput,
+): AdvancedCountQualificationFragment<"event"> {
+  return appendAdvancedCountQualificationChecked(
+    builder,
+    input,
+  ) as AdvancedCountQualificationFragment<"event">;
+}
+
+function appendAdvancedCountQualificationChecked(
+  builder: LogicalPlanBuilder,
+  input: AdvancedCountQualificationPlanInput,
+): AdvancedCountQualificationFragment<"session" | "visitor" | "event"> {
   const context = builder.context;
   const validTime =
     context.time.candidate.startMs === input.candidateRange.startMs &&
@@ -1149,7 +1196,11 @@ export function appendAdvancedCountQualification(
     !sameSemanticSubjectDomain(context.subject, input.subject) ||
     context.scope.requested !== input.scope ||
     context.scope.contractScope !== input.scope ||
-    context.scope.logicalScope !== input.scope ||
+    context.scope.logicalScope !==
+      resolveAnalyticsScope(input.scope).logicalScope ||
+    (input.scope === "event" &&
+      input.candidateAnchor?.kind !== "event-candidate") ||
+    (input.scope !== "event" && input.candidateAnchor !== undefined) ||
     !validTime
   )
     throw new Error("advanced_count_qualification_context_mismatch");
@@ -1224,12 +1275,24 @@ function buildAdvancedCountFilterPlan(
 }
 
 function appendAdvancedCountFilterPlan(
-  input: AdvancedCountFilterMatchPlanInput,
+  input: AdvancedCountQualificationPlanInput,
   combined: boolean,
   payloadCombined: boolean,
   builder: LogicalPlanBuilder,
   qualificationOnly: boolean,
-): AdvancedCountQualificationFragment | undefined {
+):
+  | AdvancedCountQualificationFragment<"session" | "visitor" | "event">
+  | undefined {
+  if (input.scope === "event") {
+    if (
+      input.candidateAnchor?.kind !== "event-candidate" ||
+      !combined ||
+      !qualificationOnly ||
+      payloadCombined
+    )
+      throw new Error("advanced_count_event_candidate_plan_not_applicable");
+    return appendEventCandidateCountQualification(builder, input);
+  }
   if (combined) {
     const exactRange =
       input.candidateRange.startMs === input.readRange.startMs &&
@@ -2718,6 +2781,474 @@ function appendAdvancedCountFilterPlan(
     outputNames.map((name) => ({ name, slot: name })),
   );
   return undefined;
+}
+
+function appendEventCandidateCountQualification(
+  builder: LogicalPlanBuilder,
+  input: AdvancedEventCandidateCountPlanInput,
+): AdvancedCountQualificationFragment<"event"> {
+  const exactRange =
+    input.candidateRange.startMs === input.readRange.startMs &&
+    input.candidateRange.endExclusiveMs === input.readRange.endExclusiveMs &&
+    input.candidateRange.startMs === input.expressionRange.startMs &&
+    input.candidateRange.endExclusiveMs ===
+      input.expressionRange.endExclusiveMs;
+  if (
+    input.subject.siteIds.length !== 1 ||
+    input.expressionUsesExplicitRange ||
+    !exactRange ||
+    input.lowerBounds.length !== 1 ||
+    input.lowerBounds[0]?.siteId !== input.subject.siteIds[0] ||
+    input.lowerBounds[0]?.startMs !== input.candidateRange.startMs
+  )
+    throw new Error("advanced_count_event_candidate_plan_not_applicable");
+
+  const root = input.analysis.document.root;
+  if (!root)
+    throw new Error("advanced_count_event_candidate_plan_requires_root");
+  const selectorCounts = countSelectorContributions(root);
+  const scalarCollections = scalarCollectionContributions(root);
+  if (scalarCollections.size > 0)
+    throw new Error(
+      "advanced_count_event_candidate_scalar_reducer_unsupported",
+    );
+  const numericCompatibilityRequirements =
+    matchNumericCompatibilityRequirements({
+      root,
+      numericCompatibilityRequirements: input.numericCompatibilityRequirements,
+      numericCompatibilityFieldIds: input.numericCompatibilityFieldIds,
+    });
+  const numericCompatibilityFields = numericCompatibilityRequirements.map(
+    ({ fieldId }): Extract<AdvancedCountSelectorField, { kind: "number" }> => {
+      const field = advancedCountSelectorField(fieldId);
+      if (!field || field.kind !== "number")
+        throw new Error(
+          "advanced_count_event_candidate_unchecked_numeric_field",
+        );
+      return field;
+    },
+  );
+  const numericCompatibilityDomains = new Map(
+    numericCompatibilityRequirements.map(({ fieldId, domain }) => [
+      fieldId,
+      domain,
+    ]),
+  );
+  const numericCompatibilityProofs = new Map(
+    numericCompatibilityRequirements.map(({ fieldId, proof }) => [
+      fieldId,
+      proof ?? "safe-number",
+    ]),
+  );
+  const bareFields = bareFieldContributions(root, false);
+  const selectorAttributes = new Set<string>();
+  for (const { input: selector } of selectorCounts.values()) {
+    if (selector.collection.kind !== "entity-root")
+      throw new Error("advanced_count_event_candidate_selector_unchecked");
+    if (
+      selector.collection.entity !== "page" &&
+      selector.collection.entity !== "event"
+    )
+      throw new Error("advanced_count_event_candidate_selector_unchecked");
+    collectSelectorPredicateAttributes(
+      selector.predicate,
+      selector.collection.entity,
+      selectorAttributes,
+    );
+  }
+  const bareAttributes = new Set<string>();
+  collectBareFieldAttributes(bareFields, bareAttributes);
+  const numericAttributes = numericCompatibilityFields.flatMap((field) => [
+    field.valueAttribute,
+    numericCompatibilityProofs.get(field.fieldId) === "exact-aggregate"
+      ? field.exactAggregateAttribute
+      : field.safeRangeAttribute,
+  ]);
+  const attributes = [
+    ...COUNT_ATTRIBUTES,
+    "observation.id",
+    "observation.sessionId",
+    "observation.visitId",
+    "observation.siteIdentityConsistent",
+    ...selectorAttributes,
+    ...bareAttributes,
+    ...numericAttributes,
+  ];
+  const source = builder.source("observation", {
+    temporalDomain: "candidate",
+    attributes: [...new Set(attributes)],
+    includeOccurrenceTime: true,
+  });
+  const eligible = eligibleAdvancedFilterActivities(builder, source);
+  // Candidate order cannot affect Count; the 20,001st row only raises the
+  // existing cap control and suppresses the report. Keep the bounded bag
+  // directly over its eligible relation for the shared grouped-summary proof.
+  const bounded = builder.limit(eligible, ADVANCED_FILTER_ACTIVITY_LIMIT);
+  const zero = builder.literal(0, { kind: "scalar", scalar: "number" });
+  const one = builder.literal(1, { kind: "scalar", scalar: "number" });
+  const string = (value: string) =>
+    builder.literal(value, { kind: "scalar", scalar: "string" });
+  const kind = builder.slot(bounded, "attribute:observation.kind");
+  const siteId = builder.slot(bounded, "attribute:observation.rawSiteId");
+  const activityContribution = (activityKind: "page" | "event") =>
+    builder.caseWhen(
+      [
+        {
+          when: builder.compare("eq", kind, string(activityKind)),
+          then: one,
+        },
+      ],
+      zero,
+    );
+  const selectorContribution = (
+    contribution: CountSelectorContribution,
+  ): LogicalExpressionHandle => {
+    if (contribution.input.collection.kind !== "entity-root")
+      throw new Error("advanced_count_event_candidate_selector_unchecked");
+    const collection = contribution.input.collection.entity;
+    if (collection !== "page" && collection !== "event")
+      throw new Error("advanced_count_event_candidate_selector_unchecked");
+    return builder.caseWhen(
+      [
+        {
+          when: builder.and(
+            builder.compare("eq", kind, string(collection)),
+            selectorPredicateExpression(
+              builder,
+              bounded,
+              collection,
+              contribution.input.predicate,
+              new Map(),
+            ),
+          ),
+          then: one,
+        },
+      ],
+      zero,
+    );
+  };
+  const numericCompatibilityContribution = (
+    field: Extract<AdvancedCountSelectorField, { kind: "number" }>,
+  ): LogicalExpressionHandle => {
+    const raw = builder.slot(bounded, `attribute:${field.valueAttribute}`);
+    const rangeAttribute =
+      numericCompatibilityProofs.get(field.fieldId) === "exact-aggregate"
+        ? field.exactAggregateAttribute
+        : field.safeRangeAttribute;
+    const validRange = builder.slot(bounded, `attribute:${rangeAttribute}`);
+    const rowKind = builder.slot(bounded, "attribute:observation.kind");
+    const isPage = builder.compare("eq", rowKind, string("page"));
+    const isEvent = builder.compare("eq", rowKind, string("event"));
+    const domain = numericCompatibilityDomains.get(field.fieldId)!;
+    return builder.caseWhen(
+      [
+        {
+          when: builder.and(
+            domain === "page-only" ? isPage : builder.or(isPage, isEvent),
+            builder.isNull(raw, true),
+            builder.not(validRange),
+          ),
+          then: one,
+        },
+      ],
+      zero,
+    );
+  };
+  const measures = [
+    {
+      name: "pageCount",
+      kind: "sum" as const,
+      expression: activityContribution("page"),
+    },
+    {
+      name: "eventCount",
+      kind: "sum" as const,
+      expression: activityContribution("event"),
+    },
+    ...[...selectorCounts.values()].map((contribution) => ({
+      name: contribution.name,
+      kind: "sum" as const,
+      expression: selectorContribution(contribution),
+    })),
+  ];
+  const summary = (rootAttribute: "observation.sessionId" | "observation.id") =>
+    builder.aggregate(
+      bounded,
+      {
+        siteId,
+        rootId: builder.slot(bounded, `attribute:${rootAttribute}`),
+      },
+      measures,
+    );
+  const sessionSummary = summary("observation.sessionId");
+  const localIdSummary = summary("observation.id");
+  const rawControls = builder.aggregate(bounded, {}, [
+    { name: "rawCount", kind: "count-rows" },
+    {
+      name: "nullActivityIdCount",
+      kind: "sum",
+      expression: builder.caseWhen(
+        [
+          {
+            when: builder.isNull(
+              builder.slot(bounded, "attribute:observation.id"),
+            ),
+            then: one,
+          },
+        ],
+        zero,
+      ),
+    },
+    {
+      name: "siteIdentityMismatchCount",
+      kind: "sum",
+      expression: builder.caseWhen(
+        [
+          {
+            when: builder.not(
+              builder.slot(
+                bounded,
+                "attribute:observation.siteIdentityConsistent",
+              ),
+            ),
+            then: one,
+          },
+        ],
+        zero,
+      ),
+    },
+    ...numericCompatibilityFields.map((field) => ({
+      name: field.invalidCountOutput,
+      kind: "sum" as const,
+      expression: numericCompatibilityContribution(field),
+    })),
+  ]);
+  const controlsBase = builder.project(
+    rawControls,
+    Object.fromEntries([
+      [
+        "rawCount",
+        builder.coalesce(builder.slot(rawControls, "rawCount"), zero),
+      ],
+      [
+        "nullActivityIdCount",
+        builder.coalesce(
+          builder.slot(rawControls, "nullActivityIdCount"),
+          zero,
+        ),
+      ],
+      [
+        "siteIdentityMismatchCount",
+        builder.coalesce(
+          builder.slot(rawControls, "siteIdentityMismatchCount"),
+          zero,
+        ),
+      ],
+      ...numericCompatibilityFields.map((field) => [
+        field.invalidCountOutput,
+        builder.coalesce(
+          builder.slot(rawControls, field.invalidCountOutput),
+          zero,
+        ),
+      ]),
+    ]),
+  );
+  const rawSessionId = builder.slot(bounded, "attribute:observation.sessionId");
+  const hasSession = builder.and(
+    builder.isNull(rawSessionId, true),
+    builder.compare("neq", rawSessionId, string("")),
+  );
+  const noSession = builder.or(
+    builder.isNull(rawSessionId),
+    builder.compare("eq", rawSessionId, string("")),
+  );
+  const sessionCandidates = builder.filter(bounded, hasSession);
+  const localIdCandidates = builder.filter(bounded, noSession);
+  const joinSummary = (
+    candidates: LogicalRelationHandle,
+    grouped: LogicalRelationHandle,
+    rootAttribute: "observation.sessionId" | "observation.id",
+  ) =>
+    builder.join(
+      candidates,
+      grouped,
+      [
+        { left: "attribute:observation.rawSiteId", right: "siteId" },
+        { left: `attribute:${rootAttribute}`, right: "rootId" },
+      ],
+      "left",
+    );
+  const matchedRootCandidates = [
+    joinSummary(sessionCandidates, sessionSummary, "observation.sessionId"),
+    joinSummary(localIdCandidates, localIdSummary, "observation.id"),
+  ];
+  const projectedCandidateNames = [
+    "siteId",
+    "entityId",
+    "candidateKind",
+    "visitId",
+    "pageCount",
+    "eventCount",
+    ...[...selectorCounts.values()].map(({ name }) => name),
+    ...[
+      ...new Set([
+        ...bareAttributes,
+        ...[...bareFields.values()].map(({ field }) => field.valueAttribute),
+      ]),
+    ].map((attribute) => `attribute:${attribute}`),
+  ];
+  const candidateRows = matchedRootCandidates.map((relation) =>
+    builder.project(relation, {
+      siteId: builder.slot(relation, "attribute:observation.rawSiteId"),
+      entityId: builder.slot(relation, "attribute:observation.id"),
+      candidateKind: builder.slot(relation, "attribute:observation.kind"),
+      visitId: builder.slot(relation, "attribute:observation.visitId"),
+      pageCount: builder.coalesce(
+        builder.slot(relation, "right.pageCount"),
+        zero,
+      ),
+      eventCount: builder.coalesce(
+        builder.slot(relation, "right.eventCount"),
+        zero,
+      ),
+      ...Object.fromEntries(
+        [...selectorCounts.values()].map(({ name }) => [
+          name,
+          builder.coalesce(builder.slot(relation, `right.${name}`), zero),
+        ]),
+      ),
+      ...Object.fromEntries(
+        [
+          ...new Set([
+            ...bareAttributes,
+            ...[...bareFields.values()].map(
+              ({ field }) => field.valueAttribute,
+            ),
+          ]),
+        ].map((attribute) => [
+          `attribute:${attribute}`,
+          builder.slot(relation, `attribute:${attribute}`),
+        ]),
+      ),
+    }),
+  );
+  const candidates = builder.appendRows(candidateRows, projectedCandidateNames);
+  const filterMatch = predicateExpression(
+    builder,
+    candidates,
+    root,
+    selectorCounts,
+    scalarCollections,
+    bareFields,
+    "candidate",
+  );
+  const matchingCandidates = builder.filter(candidates, filterMatch);
+  const matches = builder.project(matchingCandidates, {
+    siteId: builder.slot(matchingCandidates, "siteId"),
+    entityId: builder.slot(matchingCandidates, "entityId"),
+    candidateKind: builder.slot(matchingCandidates, "candidateKind"),
+    visitId: builder.slot(matchingCandidates, "visitId"),
+  });
+  const invalidMatches = builder.filter(
+    matches,
+    builder.or(
+      builder.isNull(builder.slot(matches, "siteId")),
+      builder.compare("eq", builder.slot(matches, "siteId"), string("")),
+      builder.compare(
+        "neq",
+        builder.slot(matches, "siteId"),
+        string(input.subject.siteIds[0]!),
+      ),
+      builder.isNull(builder.slot(matches, "entityId")),
+      builder.compare("eq", builder.slot(matches, "entityId"), string("")),
+      builder.and(
+        builder.compare(
+          "neq",
+          builder.slot(matches, "candidateKind"),
+          string("page"),
+        ),
+        builder.compare(
+          "neq",
+          builder.slot(matches, "candidateKind"),
+          string("event"),
+        ),
+      ),
+    ),
+  );
+  const invalidIdentitySummary = builder.aggregate(invalidMatches, {}, [
+    { name: "invalidIdentityCount", kind: "count-rows" },
+  ]);
+  const identityGroups = builder.aggregate(
+    matches,
+    {
+      siteId: builder.slot(matches, "siteId"),
+      candidateKind: builder.slot(matches, "candidateKind"),
+      entityId: builder.slot(matches, "entityId"),
+    },
+    [{ name: "identityMultiplicity", kind: "count-rows" }],
+  );
+  const repeatedIdentityGroups = builder.filter(
+    identityGroups,
+    builder.compare(
+      "gt",
+      builder.slot(identityGroups, "identityMultiplicity"),
+      one,
+    ),
+  );
+  const duplicateIdentitySummary = builder.aggregate(
+    repeatedIdentityGroups,
+    {},
+    [{ name: "duplicateIdentityCount", kind: "count-rows" }],
+  );
+  const withInvalidIdentity = builder.join(
+    controlsBase,
+    invalidIdentitySummary,
+    [],
+  );
+  const withIdentityControls = builder.join(
+    withInvalidIdentity,
+    duplicateIdentitySummary,
+    [],
+  );
+  const controls = builder.project(withIdentityControls, {
+    rawCount: builder.slot(withIdentityControls, "rawCount"),
+    nullActivityIdCount: builder.slot(
+      withIdentityControls,
+      "nullActivityIdCount",
+    ),
+    siteIdentityMismatchCount: builder.slot(
+      withIdentityControls,
+      "siteIdentityMismatchCount",
+    ),
+    entityKind: string("event"),
+    invalidIdentityCount: builder.coalesce(
+      builder.slot(withIdentityControls, "right.invalidIdentityCount"),
+      zero,
+    ),
+    duplicateIdentityCount: builder.coalesce(
+      builder.slot(withIdentityControls, "right.duplicateIdentityCount"),
+      zero,
+    ),
+    ...Object.fromEntries(
+      numericCompatibilityFields.map((field) => [
+        field.invalidCountOutput,
+        builder.slot(withIdentityControls, field.invalidCountOutput),
+      ]),
+    ),
+  });
+  return {
+    matches,
+    controls,
+    groupedSummary: sessionSummary,
+    additionalGroupedSummaries: [localIdSummary],
+    numericCompatibilityFields: numericCompatibilityFields.map(
+      ({ fieldId, invalidCountOutput }) => ({ fieldId, invalidCountOutput }),
+    ),
+    comparisonProvenance: Object.freeze([]),
+    scope: "event",
+    candidateGrain: "event-candidate",
+    subject: input.subject,
+  };
 }
 
 export const ADVANCED_COUNT_FILTER_OUTPUTS = {

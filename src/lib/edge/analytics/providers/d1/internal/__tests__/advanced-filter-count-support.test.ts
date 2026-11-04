@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { SiteId } from "@/lib/edge/analytics/contract/types";
 import { buildAdvancedCountFilterMatchPlan } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
-import { classifyAdvancedCountFilter } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
+import {
+  classifyAdvancedCountFilter,
+  classifyAdvancedEventCandidateCountFilter,
+} from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import {
   analyticsFilterRegistry,
   analyzeFilterDocument,
@@ -19,6 +22,34 @@ function classify(source: string, scope: "session" | "visitor" = "session") {
 }
 
 describe("advanced count SQL capability preflight", () => {
+  it("keeps the default Event gate closed and admits only the narrow candidate Count slice", () => {
+    const document = parseFilterDsl(
+      'count(event { event.name eq "purchase" }) eq 1 AND (page.path eq "/pricing" OR NOT event.name eq "internal")',
+      analyticsFilterRegistry,
+    );
+    expect(classifyAdvancedCountFilter(document, "event")).toMatchObject({
+      kind: "unsupported",
+      code: "count_sql_requires_session_or_visitor_scope",
+    });
+    expect(classifyAdvancedEventCandidateCountFilter(document)).toMatchObject({
+      kind: "supported",
+      code: "supported_event_candidate_count_sql",
+    });
+    for (const source of [
+      'page.path eq "/pricing"',
+      "sum(page.durationMs) gt 0 AND count(event) gte 1",
+      'count(event { event.payload("/kind") eq "purchase" }) eq 1',
+      'count(session { event.name eq "purchase" }) eq 1',
+      'count(event) eq 1 AND sequence([event { event.name eq "first" }, event { event.name eq "second" }]) exists',
+    ])
+      expect(
+        classifyAdvancedEventCandidateCountFilter(
+          parseFilterDsl(source, analyticsFilterRegistry),
+        ),
+        source,
+      ).toMatchObject({ kind: "unsupported" });
+  });
+
   it("supports the complete boolean and arithmetic count tree", () => {
     expect(
       classify(

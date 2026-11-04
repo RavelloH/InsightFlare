@@ -1,9 +1,10 @@
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import { scopedFilterMetadata } from "@/lib/edge/analytics/contract/scoped-filter";
 import {
-  type AdvancedCountFilterMatchPlanInput,
   type AdvancedCountQualificationFragment,
+  type AdvancedCountQualificationPlanInput,
   appendAdvancedCountQualification,
+  appendAdvancedEventCandidateCountQualification,
   createAdvancedCountQualificationBuilder,
 } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import { EVENT_RECORD_ATTRIBUTES } from "@/lib/edge/analytics/engine/event-record-page-plan";
@@ -38,15 +39,19 @@ export interface EventQualificationReportSource {
   readonly entity: "event" | "page";
 }
 
-export interface EventQualifiedSource {
+export interface EventQualifiedSource<
+  Scope extends "session" | "visitor" | "event" = "session" | "visitor",
+> {
   readonly builder: ReturnType<typeof createAdvancedCountQualificationBuilder>;
   readonly events: LogicalRelationHandle;
   readonly eventSourceRelationId: RelationId;
   readonly reportSourceRelations: readonly EventQualificationReportSource[];
-  readonly qualification: AdvancedCountQualificationFragment;
+  readonly qualification: AdvancedCountQualificationFragment<Scope>;
 }
 
-export interface AnalyticsQualificationPlan {
+export interface AnalyticsQualificationPlan<
+  Scope extends "session" | "visitor" | "event" = "session" | "visitor",
+> {
   readonly plan: ValidatedLogicalPlan;
   readonly primaryReportSourceRelationId: RelationId;
   readonly matchesRelationId: RelationId;
@@ -58,11 +63,15 @@ export interface AnalyticsQualificationPlan {
     readonly fieldId: string;
     readonly invalidCountOutput: string;
   }[];
-  readonly scope: "session" | "visitor";
+  readonly scope: Scope;
+  readonly candidateGrain?: "event-candidate";
+  readonly additionalGroupedSummaryRelationIds?: readonly RelationId[];
   readonly reportSourceRelations: readonly EventQualificationReportSource[];
 }
 
-export interface EventQualificationPlan extends AnalyticsQualificationPlan {
+export interface EventQualificationPlan<
+  Scope extends "session" | "visitor" | "event" = "session" | "visitor",
+> extends AnalyticsQualificationPlan<Scope> {
   readonly eventSourceRelationId: RelationId;
 }
 
@@ -70,15 +79,22 @@ export interface EventQualificationPlan extends AnalyticsQualificationPlan {
  * Appends the authorized Event Source to the same Engine builder as Count.
  * Both operations use this relation and the exact same site/owner join.
  */
-export function buildEventQualifiedSource(input: {
+export function buildEventQualifiedSource<
+  Count extends AdvancedCountQualificationPlanInput,
+>(input: {
   readonly siteId: string;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: Count;
   readonly purpose: EventQualifiedSourcePurpose;
   readonly reportFilters?: FilterDocument;
   readonly eventName?: string;
   readonly eventNameInputSemantics?: EventNameInputSemantics;
   readonly reportAttributes?: readonly string[];
-}): EventQualifiedSource {
+}): EventQualifiedSource<Count["scope"]> {
+  if (
+    input.count.scope === "event" &&
+    (input.purpose !== "event-types" || input.reportFilters !== undefined)
+  )
+    throw new Error("event_candidate_count_reader_not_authorized");
   if (
     input.count.subject.siteIds.length !== 1 ||
     input.count.subject.siteIds[0] !== input.siteId
@@ -86,7 +102,10 @@ export function buildEventQualifiedSource(input: {
     throw new Error("event_qualification_site_subject_mismatch");
 
   const builder = createAdvancedCountQualificationBuilder(input.count);
-  const qualification = appendAdvancedCountQualification(builder, input.count);
+  const qualification =
+    input.count.scope === "event"
+      ? appendAdvancedEventCandidateCountQualification(builder, input.count)
+      : appendAdvancedCountQualification(builder, input.count);
   const reportMetadata = input.reportFilters
     ? scopedFilterMetadata(input.reportFilters)
     : undefined;
@@ -106,6 +125,7 @@ export function buildEventQualifiedSource(input: {
   // source's raw dictionary-name selection.
   const hasPreparedRecordsNameGate =
     input.purpose === "records" && Boolean(input.eventName?.trim());
+  const isEventCandidate = input.count.scope === "event";
   const source = addEventReportSource(context, {
     attributes: [
       ...new Set([
@@ -119,6 +139,7 @@ export function buildEventQualifiedSource(input: {
           ? (input.reportAttributes ?? [])
           : []),
         ...(input.purpose === "records" ? EVENT_RECORD_ATTRIBUTES : []),
+        ...(isEventCandidate ? ["event.report.localId"] : []),
       ]),
     ],
     ...(input.purpose !== "event-context" &&
@@ -190,6 +211,14 @@ export function buildEventQualifiedSource(input: {
     ]),
   );
   const eventRows = builder.project(eventNameMatches, {
+    ...(isEventCandidate
+      ? {
+          "attribute:event.report.localId": builder.slot(
+            eventNameMatches,
+            "attribute:event.report.localId",
+          ),
+        }
+      : {}),
     "attribute:event.report.eventName": builder.slot(
       eventNameMatches,
       "attribute:event.report.eventName",
@@ -229,14 +258,33 @@ export function buildEventQualifiedSource(input: {
     ...additionalEventSlots,
     businessSiteId: builder.literal(input.siteId, STRING),
   });
-  const ownerSlot =
-    input.count.scope === "session"
-      ? "attribute:event.report.ownerSessionId"
-      : "attribute:event.report.ownerVisitorId";
-  const events = builder.semiJoin(eventRows, qualification.matches, [
-    { left: "businessSiteId", right: "siteId" },
-    { left: ownerSlot, right: "entityId" },
-  ]);
+  const events =
+    input.count.scope === "event"
+      ? builder.semiJoin(
+          eventRows,
+          builder.filter(
+            qualification.matches,
+            builder.compare(
+              "eq",
+              builder.slot(qualification.matches, "candidateKind"),
+              builder.literal("event", STRING),
+            ),
+          ),
+          [
+            { left: "businessSiteId", right: "siteId" },
+            { left: "attribute:event.report.localId", right: "entityId" },
+          ],
+        )
+      : builder.semiJoin(eventRows, qualification.matches, [
+          { left: "businessSiteId", right: "siteId" },
+          {
+            left:
+              input.count.scope === "session"
+                ? "attribute:event.report.ownerSessionId"
+                : "attribute:event.report.ownerVisitorId",
+            right: "entityId",
+          },
+        ]);
 
   return {
     builder,
@@ -244,7 +292,7 @@ export function buildEventQualifiedSource(input: {
     eventSourceRelationId: source.id,
     reportSourceRelations: [{ relationId: source.id, entity: "event" }],
     qualification,
-  };
+  } as EventQualifiedSource<Count["scope"]>;
 }
 
 export function addEventQualificationControlOutput(

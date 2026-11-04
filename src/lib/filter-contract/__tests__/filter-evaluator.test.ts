@@ -158,6 +158,144 @@ describe("filter evaluator", () => {
     expect(eventResult.matchingEventIds).toEqual(new Set(["orphan-event"]));
   });
 
+  it("keeps Event candidates distinct while using direct owner fields and truthy-session roots", () => {
+    const dataset: FilterEvaluationDataset = {
+      pages: [
+        {
+          kind: "page",
+          id: "same-id",
+          visitId: "page-same-id",
+          time: 12,
+          fields: { "page.path": "/same-id-page" },
+        },
+        {
+          kind: "page",
+          id: "empty-session",
+          visitId: "page-empty-session",
+          sessionId: "",
+          time: 13,
+          fields: { "page.path": "/empty-session-page" },
+        },
+        {
+          kind: "page",
+          id: "space-session",
+          visitId: "page-space-session",
+          sessionId: "",
+          time: 14,
+          fields: { "page.path": "/space-session-page" },
+        },
+        {
+          kind: "page",
+          id: "outside-owner",
+          visitId: "outside-owner-page-visit",
+          sessionId: "outside-owner-session",
+          time: 5,
+          fields: { "page.path": "/outside-owner" },
+        },
+        {
+          kind: "page",
+          id: "zero-page",
+          visitId: "zero-page-visit",
+          time: 15,
+          fields: { "page.path": "/zero-page" },
+        },
+      ],
+      events: [
+        {
+          kind: "event",
+          id: "same-id",
+          visitId: "same-id-event-visit",
+          sessionId: "",
+          time: 12,
+          fields: {
+            "event.name": "same-id-event",
+            "page.path": "/same-id-owner",
+          },
+        },
+        {
+          kind: "event",
+          id: "empty-session",
+          visitId: "empty-session-event-visit",
+          sessionId: "",
+          time: 13,
+          fields: {
+            "event.name": "empty-session-event",
+            "page.path": "/empty-session-owner",
+          },
+        },
+        {
+          kind: "event",
+          id: "space-session",
+          visitId: "space-session-event-visit",
+          sessionId: " ",
+          time: 14,
+          fields: {
+            "event.name": "space-session-event",
+            "page.path": "/space-session-owner",
+          },
+        },
+        {
+          kind: "event",
+          id: "outside-owner-event",
+          visitId: "outside-owner-event-visit",
+          sessionId: "outside-owner-session",
+          time: 16,
+          fields: {
+            "event.name": "outside-owner-event",
+            "page.path": "/outside-owner",
+          },
+        },
+      ],
+      coverageRange: { startMs: 0, endExclusiveMs: 100 },
+    };
+    const options = {
+      scope: "event" as const,
+      candidateRange: { startMs: 10, endExclusiveMs: 20 },
+      reportingTimeZone: "UTC",
+      capturedAtMs: 80,
+    };
+    const evaluateEvent = (source: string) =>
+      evaluateFilterDocument(
+        parseFilterDsl(source, analyticsFilterRegistry),
+        dataset,
+        options,
+      );
+
+    const sameId = evaluateEvent(
+      'count(page) eq 1 AND count(event) eq 1 AND page.path eq "/same-id-owner" AND event.name eq "same-id-event"',
+    );
+    expect(sameId.matchingEventIds).toEqual(new Set(["same-id"]));
+    expect(sameId.matchingVisitIds).toEqual(new Set(["same-id-event-visit"]));
+
+    const emptySession = evaluateEvent(
+      'count(page) eq 1 AND page.path eq "/empty-session-owner" AND event.name eq "empty-session-event"',
+    );
+    expect(emptySession.matchingEventIds).toEqual(new Set(["empty-session"]));
+
+    const whitespaceSession = evaluateEvent(
+      'count(page) eq 0 AND page.path eq "/space-session-owner" AND event.name eq "space-session-event"',
+    );
+    expect(whitespaceSession.matchingEventIds).toEqual(
+      new Set(["space-session"]),
+    );
+
+    const outsideOwner = evaluateEvent(
+      'count(page) eq 0 AND page.path eq "/outside-owner" AND event.name eq "outside-owner-event"',
+    );
+    expect(outsideOwner.matchingEventIds).toEqual(
+      new Set(["outside-owner-event"]),
+    );
+    expect(outsideOwner.matchingVisitIds).toEqual(
+      new Set(["outside-owner-event-visit"]),
+    );
+
+    const zeroCount = evaluateEvent(
+      'count(event) eq 0 AND page.path eq "/zero-page"',
+    );
+    expect(zeroCount.matchingEventIds).toEqual(new Set());
+    expect(zeroCount.matchingVisitIds).toEqual(new Set(["zero-page-visit"]));
+  });
+
   it("evaluates all conditions in a Selector against the same event", () => {
     const result = evaluate(
       'count(event { event.name eq "purchase" AND event.payload("/amount") gt 20 }) eq 1',

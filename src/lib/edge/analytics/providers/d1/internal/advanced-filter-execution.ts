@@ -33,6 +33,8 @@ import {
 import {
   advancedCountFilterCombinedGroupWidth,
   type AdvancedCountFilterMatchPlanInput,
+  type AdvancedCountQualificationPlanInput,
+  type AdvancedEventCandidateCountPlanInput,
   buildAdvancedCountFilterCombinedPlan,
   buildAdvancedCountFilterGuardPlan,
   buildAdvancedCountFilterMatchPlan,
@@ -122,7 +124,10 @@ import {
 } from "./advanced-filter-count-query";
 import { ADVANCED_FILTER_MAX_PAYLOAD_NODES } from "./advanced-filter-count-resource-policy";
 import type { AdvancedCountFilterSupport } from "./advanced-filter-count-support";
-import { classifyAdvancedCountFilter } from "./advanced-filter-count-support";
+import {
+  classifyAdvancedCountFilter,
+  classifyAdvancedEventCandidateCountFilter,
+} from "./advanced-filter-count-support";
 import type { AdvancedFilterPayloadNode } from "./advanced-filter-payload-query";
 import { queryAdvancedFilterPayloadNodes } from "./advanced-filter-payload-query";
 import { siteCoverage } from "./advanced-filter-site-coverage";
@@ -511,8 +516,12 @@ export type DeferredEventSummaryQualification = DeferredEventQualification & {
   readonly operation: "event-summary";
 };
 
-export type DeferredEventTypesQualification = DeferredEventQualification & {
+export type DeferredEventTypesQualification = Omit<
+  DeferredEventQualification,
+  "operation" | "countInput"
+> & {
   readonly operation: "event-types";
+  readonly countInput: AdvancedCountQualificationPlanInput;
 };
 
 export type DeferredEventNameDimensionQualification =
@@ -2154,7 +2163,10 @@ async function prepareDeferredComparisonPageQualification(input: {
       ? qualification?.sessionBoundaryOverviewPageRequest
       : qualification?.overviewPageTableRequest;
     return qualification && reportRequest
-      ? Object.freeze({ kind, qualification })
+      ? Object.freeze({
+          kind,
+          qualification: qualification as DeferredEventQualification,
+        })
       : null;
   };
   const currentDeferred = await prepareSide(current!, currentKind);
@@ -3691,6 +3703,24 @@ function queryHasNoComparisonState(query: unknown): boolean {
   });
 }
 
+function queryScopePlanMatchesMetadata(
+  query: unknown,
+  metadataPlan: ScopedFilterPlan,
+): boolean {
+  const descriptor = ownDescriptor(query, "scopePlan");
+  if (descriptor === undefined) return true;
+  if (!descriptor.enumerable || !("value" in descriptor)) return false;
+  if (descriptor.value === undefined || descriptor.value === metadataPlan)
+    return true;
+  const requestSnapshot = qualificationRequestOwnDataSnapshot(descriptor.value);
+  const metadataSnapshot = qualificationRequestOwnDataSnapshot(metadataPlan);
+  return (
+    requestSnapshot !== undefined &&
+    metadataSnapshot !== undefined &&
+    requestSnapshot === metadataSnapshot
+  );
+}
+
 function canonicalPrivateFilterValuesWholeFilterOptIn(
   query: unknown,
   configuration: FilterValuesQualificationConfiguration | undefined,
@@ -4471,8 +4501,60 @@ async function prepareDeferredEventQualification(input: {
   readonly diagnostics?: D1ReadDiagnostics;
   readonly signal?: AbortSignal;
   readonly expectedSiteId?: string;
-}): Promise<DeferredEventQualification | null> {
+}): Promise<
+  DeferredEventQualification | DeferredEventTypesQualification | null
+> {
   const { query } = input;
+  const eventCandidateFiltersDescriptor =
+    input.operation === "event-types"
+      ? ownDescriptor(query, "filters")
+      : undefined;
+  if (
+    input.operation === "event-types" &&
+    eventCandidateFiltersDescriptor !== undefined &&
+    (!eventCandidateFiltersDescriptor.enumerable ||
+      !("value" in eventCandidateFiltersDescriptor))
+  )
+    throw invalidInput(
+      "query",
+      "event_types_qualification_request_context_mismatch",
+    );
+  const eventCandidateFilters =
+    input.operation === "event-types"
+      ? (ownDataValue(query, "filters") as FilterDocument | undefined)
+      : undefined;
+  const eventCandidateMetadata =
+    input.operation === "event-types"
+      ? scopedFilterMetadata(eventCandidateFilters)
+      : undefined;
+  const eventCandidateRequestSnapshot =
+    input.operation === "event-types"
+      ? qualificationRequestOwnDataSnapshot(query)
+      : undefined;
+  const eventCandidateScopePlanMatches = eventCandidateMetadata
+    ? queryScopePlanMatchesMetadata(query, eventCandidateMetadata.plan)
+    : false;
+  if (
+    input.operation === "event-types" &&
+    eventCandidateMetadata?.plan.scope === "event" &&
+    (eventCandidateRequestSnapshot === undefined ||
+      !eventCandidateScopePlanMatches)
+  )
+    throw invalidInput(
+      "query",
+      "event_types_qualification_request_context_mismatch",
+    );
+  const eventCandidatePageRequest =
+    input.operation === "event-types" &&
+    eventCandidateMetadata?.plan.scope === "event" &&
+    eventCandidateRequestSnapshot !== undefined &&
+    ownDataValue(
+      ownDataValue(ownDataValue(query, "context"), "policy"),
+      "audience",
+    ) === "private-dashboard" &&
+    ownDataValue(query, "mode") === undefined &&
+    queryHasNoComparisonState(query) &&
+    eventCandidateScopePlanMatches;
   const overviewTrendConfiguration =
     input.operation === "overview" || input.operation === "trend"
       ? overviewTrendConfigurationForQuery(input.operation, query)
@@ -4701,9 +4783,13 @@ async function prepareDeferredEventQualification(input: {
   if (
     !metadata ||
     metadata.plan.advancedMatches !== undefined ||
-    (metadata.plan.scope !== "session" && metadata.plan.scope !== "visitor") ||
+    (metadata.plan.scope !== "session" &&
+      metadata.plan.scope !== "visitor" &&
+      !(metadata.plan.scope === "event" && eventCandidatePageRequest)) ||
+    (metadata.plan.scope === "event" && !eventCandidatePageRequest) ||
     metadata.siteIds.length !== 1 ||
-    metadata.siteIds[0] !== query.context.subject.siteId
+    metadata.siteIds[0] !== query.context.subject.siteId ||
+    (eventCandidatePageRequest && !eventCandidateScopePlanMatches)
   )
     return null;
   const time = metadata.time;
@@ -5197,6 +5283,7 @@ async function prepareDeferredEventQualification(input: {
   if (
     (input.operation === "event-fields" ||
       input.operation === "event-field-values" ||
+      eventCandidatePageRequest ||
       pageDimensionRequest !== undefined ||
       pagesAggregatePageRequest !== undefined ||
       pagesTabsRequest !== undefined ||
@@ -5228,6 +5315,7 @@ async function prepareDeferredEventQualification(input: {
   if (
     (input.operation === "event-fields" ||
       input.operation === "event-field-values" ||
+      eventCandidatePageRequest ||
       pageDimensionRequest !== undefined ||
       pagesAggregatePageRequest !== undefined ||
       pagesTabsRequest !== undefined ||
@@ -5256,7 +5344,9 @@ async function prepareDeferredEventQualification(input: {
             query.scopePlan as ScopedFilterPlan,
             metadata.plan,
           )
-        : JSON.stringify(query.scopePlan) !== JSON.stringify(metadata.plan))
+        : eventCandidatePageRequest
+          ? !eventCandidateScopePlanMatches
+          : JSON.stringify(query.scopePlan) !== JSON.stringify(metadata.plan))
   )
     throw invalidInput("scopePlan", requestContextMismatchCode);
   const readRange = time.readRange ?? time.range;
@@ -5392,13 +5482,16 @@ async function prepareDeferredEventQualification(input: {
     geoPointsWholeFilterOptIn &&
     geoPointsFilterResolution?.kind === "supported" &&
     geoPointsFilterResolution.mode === "whole-filter";
-  const support = classifyAdvancedCountFilter(
-    supportFilters,
-    metadata.plan.scope,
-    allowPrivateQualifiedGeoBareFields
-      ? { allowPrivateQualifiedGeoBareFields: true }
-      : {},
-  );
+  const support =
+    metadata.plan.scope === "event"
+      ? classifyAdvancedEventCandidateCountFilter(supportFilters)
+      : classifyAdvancedCountFilter(
+          supportFilters,
+          metadata.plan.scope,
+          allowPrivateQualifiedGeoBareFields
+            ? { allowPrivateQualifiedGeoBareFields: true }
+            : {},
+        );
   if (
     support.kind !== "supported" ||
     advancedCountPayloadPaths(support.document.root!).length > 0 ||
@@ -5533,7 +5626,7 @@ async function prepareDeferredEventQualification(input: {
   const createdAt = coverage.get(siteId);
   if (createdAt === undefined || readRange.startMs < createdAt)
     throw invalidInput("readRange", "filter_evaluation_range_unavailable");
-  const countInput: AdvancedCountFilterMatchPlanInput = {
+  const countInput: AdvancedCountQualificationPlanInput = {
     subject: semanticSubjectForAuthorizedSubset(
       input.subject,
       [siteId],
@@ -5544,7 +5637,12 @@ async function prepareDeferredEventQualification(input: {
     expressionRange: time.range,
     expressionUsesExplicitRange: false,
     lowerBounds: [{ siteId, startMs: readRange.startMs }],
-    scope: metadata.plan.scope,
+    ...(metadata.plan.scope === "event"
+      ? {
+          scope: "event" as const,
+          candidateAnchor: { kind: "event-candidate" as const },
+        }
+      : { scope: metadata.plan.scope }),
     reportingTimeZone: time.reportingTimeZone,
     capturedAtMs: time.capturedAtMs,
     analysis: support.analysis,
@@ -5639,7 +5737,7 @@ async function prepareDeferredEventQualification(input: {
           });
         })()
       : undefined;
-  const deferred: DeferredEventQualification = Object.freeze({
+  const deferredBase = {
     operation: input.operation,
     env: input.env,
     siteId,
@@ -5651,7 +5749,7 @@ async function prepareDeferredEventQualification(input: {
       ? { requestScopePlan: query.scopePlan as ScopedFilterPlan }
       : {}),
     subject: input.subject,
-    countInput,
+    countInput: countInput as AdvancedCountFilterMatchPlanInput,
     coverage,
     ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
@@ -5723,7 +5821,15 @@ async function prepareDeferredEventQualification(input: {
     ...(visitorListRequest ? { visitorListRequest } : {}),
     ...(sessionListRequest ? { sessionListRequest } : {}),
     ...(journeyEventPageRequest ? { journeyEventPageRequest } : {}),
-  });
+  };
+  const deferred: DeferredEventQualification | DeferredEventTypesQualification =
+    eventCandidatePageRequest
+      ? (Object.freeze({
+          ...deferredBase,
+          operation: "event-types" as const,
+          countInput: countInput as AdvancedEventCandidateCountPlanInput,
+        }) as DeferredEventTypesQualification)
+      : (Object.freeze(deferredBase) as DeferredEventQualification);
   deferredEventQualifications.add(deferred);
   return deferred;
 }
@@ -5747,8 +5853,20 @@ function sameEventFieldsQueryTime(left: QueryTime, right: QueryTime): boolean {
 /** Read a branded request-local qualification for its matching operation. */
 export function deferredEventQualificationFromQuery(
   input: unknown,
+  operation: "event-types",
+): DeferredEventTypesQualification | undefined;
+export function deferredEventQualificationFromQuery(
+  input: unknown,
+  operation: Exclude<DeferredEventQualificationOperation, "event-types">,
+): DeferredEventQualification | undefined;
+export function deferredEventQualificationFromQuery(
+  input: unknown,
   operation: DeferredEventQualificationOperation,
-): DeferredEventQualification | undefined {
+): DeferredEventQualification | DeferredEventTypesQualification | undefined;
+export function deferredEventQualificationFromQuery(
+  input: unknown,
+  operation: DeferredEventQualificationOperation,
+): DeferredEventQualification | DeferredEventTypesQualification | undefined {
   if (!input || typeof input !== "object") return undefined;
   const value = (input as Record<PropertyKey, unknown>)[
     DEFERRED_EVENT_QUALIFICATION
@@ -5756,8 +5874,9 @@ export function deferredEventQualificationFromQuery(
   return value &&
     typeof value === "object" &&
     deferredEventQualifications.has(value) &&
-    (value as DeferredEventQualification).operation === operation
-    ? (value as DeferredEventQualification)
+    (value as DeferredEventQualification | DeferredEventTypesQualification)
+      .operation === operation
+    ? (value as DeferredEventQualification | DeferredEventTypesQualification)
     : undefined;
 }
 
@@ -6160,7 +6279,7 @@ export function deferredSessionBoundaryOverviewPageQualificationFromQuery(
 
 export function isDeferredEventQualification(
   value: unknown,
-): value is DeferredEventQualification {
+): value is DeferredEventQualification | DeferredEventTypesQualification {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -6180,7 +6299,7 @@ export function isDeferredComparisonPageQualification(
 
 /** Prepare the existing evaluator route if fused compilation is refused. */
 export async function prepareDeferredEventQualificationFallback(
-  deferred: DeferredEventQualification,
+  deferred: DeferredEventQualification | DeferredEventTypesQualification,
 ): Promise<FilterDocument> {
   if (!isDeferredEventQualification(deferred))
     throw new Error("deferred_event_qualification_untrusted");
@@ -6267,6 +6386,22 @@ export function d1AdvancedFilterMiddleware(
   expectedSiteId?: string,
 ): TypedQueryProviderMiddleware {
   return async (operation: QueryOperation, input: unknown, next, execution) => {
+    if (operation === "event-types") {
+      const filtersDescriptor = ownDescriptor(input, "filters");
+      const eventTypesFilters =
+        filtersDescriptor && "value" in filtersDescriptor
+          ? (filtersDescriptor.value as FilterDocument | undefined)
+          : undefined;
+      const eventTypesMetadata = scopedFilterMetadata(eventTypesFilters);
+      if (
+        eventTypesMetadata?.plan.scope === "event" &&
+        qualificationRequestOwnDataSnapshot(input) === undefined
+      )
+        throw invalidInput(
+          "query",
+          "event_types_qualification_request_context_mismatch",
+        );
+    }
     const comparisonRequestProof = comparisonParentRequestProof(
       input,
       operation,

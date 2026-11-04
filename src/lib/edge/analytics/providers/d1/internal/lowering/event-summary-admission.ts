@@ -22,7 +22,8 @@ export interface AnalyticsQualificationAdmissionPolicy {
     readonly name: string;
     readonly slot: SlotId;
   }[];
-  readonly scope: "session" | "visitor";
+  readonly scope: "session" | "visitor" | "event";
+  readonly candidateGrain?: "event-candidate";
   readonly maximumActivities: number;
   readonly numericCompatibilityControlNames: readonly string[];
 }

@@ -144,6 +144,128 @@ export type AdvancedCountFilterSupport =
 const COUNT_COMPARISONS = new Set(["eq", "neq", "gt", "gte", "lt", "lte"]);
 const COUNT_SET_OPERATORS = new Set(["in", "notIn"]);
 
+function eventCandidateShapeSupport(
+  root: FilterExpression,
+):
+  | { readonly kind: "supported" }
+  | Extract<AdvancedCountFilterSupport, { kind: "unsupported" }> {
+  let hasCount = false;
+  const checkSelector = (
+    target: FilterTargetExpression,
+    path: string,
+  ):
+    | Extract<AdvancedCountFilterSupport, { kind: "unsupported" }>
+    | undefined => {
+    if (target.kind !== "selector") return undefined;
+    if (
+      target.collection.kind !== "entity-root" ||
+      (target.collection.entity !== "page" &&
+        target.collection.entity !== "event")
+    )
+      return unsupported(
+        path,
+        "count_sql_event_candidate_selector_scope_unsupported",
+        "Event-candidate Count selectors are limited to Page and Event collections.",
+      );
+    return undefined;
+  };
+  const visitTarget = (
+    target: FilterTargetExpression,
+    path: string,
+  ):
+    | Extract<AdvancedCountFilterSupport, { kind: "unsupported" }>
+    | undefined => {
+    if (target.kind === "arithmetic") {
+      return (
+        visitTarget(target.left, `${path}.left`) ??
+        visitTarget(target.right, `${path}.right`)
+      );
+    }
+    if (target.kind === "reducer") {
+      if (target.reducer !== "count")
+        return unsupported(
+          path,
+          "count_sql_event_candidate_scalar_reducer_unsupported",
+          "Event-candidate scope currently supports Count over Page or Event collections only.",
+        );
+      const collection = resolveAdvancedCountFiniteCollection(target.input);
+      if (!collection)
+        return unsupported(
+          path,
+          "count_sql_event_candidate_count_collection_unsupported",
+          "Event-candidate Count requires a finite Page or Event collection.",
+        );
+      hasCount = true;
+      if (collection.kind === "selector")
+        return checkSelector(collection.selector, `${path}.input`);
+      return undefined;
+    }
+    if (target.kind === "selector") return checkSelector(target, path);
+    if (target.kind === "event-payload")
+      return unsupported(
+        path,
+        "count_sql_event_candidate_payload_unsupported",
+        "Event payload predicates are outside the first Event-candidate slice.",
+      );
+    if (
+      target.kind === "entity-root" &&
+      target.entity !== "page" &&
+      target.entity !== "event"
+    )
+      return unsupported(
+        path,
+        "count_sql_event_candidate_selector_scope_unsupported",
+        "Event-candidate Count selectors are limited to Page and Event collections.",
+      );
+    if (target.kind === "member")
+      return visitTarget(target.object, `${path}.object`);
+    if (target.kind === "projection")
+      return visitTarget(target.collection, `${path}.collection`);
+    if (
+      target.kind === "context-intrinsic" ||
+      target.kind === "occurrence-time"
+    )
+      return unsupported(
+        path,
+        "count_sql_event_candidate_temporal_or_context_target_unsupported",
+        "Event-candidate scope excludes temporal and context-intrinsic targets.",
+      );
+    return undefined;
+  };
+  const visit = (
+    expression: FilterExpression,
+    path: string,
+  ):
+    | Extract<AdvancedCountFilterSupport, { kind: "unsupported" }>
+    | undefined => {
+    if (expression.kind === "not")
+      return visit(expression.child, `${path}.child`);
+    if (expression.kind === "and" || expression.kind === "or") {
+      for (const [index, child] of expression.children.entries()) {
+        const result = visit(child, `${path}.children[${index}]`);
+        if (result) return result;
+      }
+      return undefined;
+    }
+    if (expression.kind !== "condition")
+      return unsupported(
+        path,
+        "count_sql_event_candidate_expression_unsupported",
+        "Event-candidate scope requires a whole Filter boolean expression.",
+      );
+    return visitTarget(expression.target, `${path}.target`);
+  };
+  const result = visit(root, "root");
+  if (result) return result;
+  if (!hasCount)
+    return unsupported(
+      "root",
+      "count_sql_event_candidate_requires_count",
+      "The first Event-candidate slice requires at least one Count expression.",
+    );
+  return { kind: "supported" };
+}
+
 function unsupported(
   path: string,
   code: string,
@@ -613,6 +735,59 @@ export function classifyAdvancedCountFilter(
     path: "root",
     code: "supported_count_sql",
     reason: "The complete Filter tree fits the bounded count SQL capability.",
+    document,
+    analysis,
+    numericCompatibilityFieldIds: numericCompatibilityRequirements.map(
+      ({ fieldId }) => fieldId,
+    ),
+    numericCompatibilityRequirements,
+  };
+}
+
+/** Internal Event Types page capability; the public/default Event gate stays closed. */
+export function classifyAdvancedEventCandidateCountFilter(
+  input: FilterDocument,
+): AdvancedCountFilterSupport {
+  let document: FilterDocument;
+  let analysis: ReturnType<typeof analyzeFilterDocument>;
+  try {
+    document = normalizeFilterDocument(input, analyticsFilterRegistry);
+    analysis = analyzeFilterDocument(document, analyticsFilterRegistry);
+    validateFilterConditionDomains(document, "event", analyticsFilterRegistry);
+    validateFilterRelationDomains(document, "event", analysis);
+  } catch (error) {
+    return error instanceof FilterValidationError
+      ? unsupported(error.path, error.code, error.message)
+      : unsupported(
+          "root",
+          "count_sql_invalid_analysis",
+          error instanceof Error ? error.message : String(error),
+        );
+  }
+  if (!document.root)
+    return unsupported(
+      "root",
+      "count_sql_requires_filter_expression",
+      "An empty FilterDocument has no Event-candidate predicate to lower.",
+    );
+  const shape = eventCandidateShapeSupport(document.root);
+  if (shape.kind === "unsupported") return shape;
+  const result = visitExpression(document.root, analysis, "root", false);
+  if (result) return result;
+  if (advancedCountPayloadPaths(document.root).length > 0)
+    return unsupported(
+      "root",
+      "count_sql_event_candidate_payload_unsupported",
+      "Event payload predicates are outside the first Event-candidate slice.",
+    );
+  const numericCompatibilityRequirements =
+    deriveAdvancedFilterNumericCompatibilityRequirements(document.root);
+  return {
+    kind: "supported",
+    path: "root",
+    code: "supported_event_candidate_count_sql",
+    reason:
+      "The whole Event Types page Filter fits the bounded Event-candidate Count capability.",
     document,
     analysis,
     numericCompatibilityFieldIds: numericCompatibilityRequirements.map(

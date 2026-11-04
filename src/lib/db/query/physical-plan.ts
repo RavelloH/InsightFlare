@@ -4085,7 +4085,7 @@ function sharedRelationDefinitionsForCandidates(
     const incomingCount = incoming.get(node) ?? 0;
     const hasTerminalBagLicense = terminalBagCandidates.has(node);
     if (
-      incomingCount < 2 ||
+      (incomingCount < 2 && !boundedGroupSummaryCandidates.has(node)) ||
       node.kind === "scan" ||
       (hoist.forbidden.has(node) &&
         !hasTerminalBagLicense &&

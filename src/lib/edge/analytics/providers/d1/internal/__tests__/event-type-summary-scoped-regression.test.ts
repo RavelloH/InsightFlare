@@ -6,7 +6,11 @@ import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
-import { D1_MAX_BOUND_PARAMETERS, D1_MAX_SQL_UTF8_BYTES } from "@/lib/db";
+import {
+  createD1DatabaseClient,
+  D1_MAX_BOUND_PARAMETERS,
+  D1_MAX_SQL_UTF8_BYTES,
+} from "@/lib/db";
 import { explainQueryPlan } from "@/lib/db/__tests__/query-plan";
 import {
   createSqliteD1Database,
@@ -196,7 +200,7 @@ interface PreparedEventTypesQuery extends QueryInput {
 
 function prepareEventTypesQuery(
   dsl: string,
-  scope: "session" | "visitor",
+  scope: "event" | "session" | "visitor",
   options: {
     readonly limit: number;
     readonly search?: string;
@@ -1239,7 +1243,7 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
     }
   });
 
-  it.each(["session", "visitor"] as const)(
+  it.each(["session", "visitor", "event"] as const)(
     "qualifies Event type keyset pages in one report statement for %s scope",
     async (scope) => {
       const qualifiedDatabase = createFixture();
@@ -1488,6 +1492,406 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
     },
   );
 
+  it("qualifies Event candidates against the Core oracle through the Event Types page and keeps its cursor", async () => {
+    const candidateDatabase = createFixture();
+    const siteIdentity = candidateDatabase
+      .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+      .get(SITE_ID) as { readonly site_pk: number };
+    const sitePk = Number(siteIdentity.site_pk);
+    addName(candidateDatabase, sitePk, 8, "candidate-collision-event");
+    addName(candidateDatabase, sitePk, 9, "candidate-owner-outside-event");
+    addName(candidateDatabase, sitePk, 10, "candidate-whitespace-event");
+    addVisit(candidateDatabase, sitePk, {
+      id: "candidate-collision",
+      sessionId: "",
+      visitorId: "candidate-empty-visitor",
+      pathname: "/candidate-collision-owner",
+    });
+    addEvent(candidateDatabase, sitePk, {
+      id: "candidate-collision",
+      visitId: "candidate-collision",
+      nameId: 8,
+    });
+    addVisit(candidateDatabase, sitePk, {
+      id: "candidate-owner-outside",
+      sessionId: "candidate-owner-session",
+      visitorId: "candidate-owner-visitor",
+      pathname: "/candidate-owner-outside",
+    });
+    candidateDatabase
+      .prepare("UPDATE visits SET started_at = 110 WHERE visit_id = ?")
+      .run("candidate-owner-outside");
+    addEvent(candidateDatabase, sitePk, {
+      id: "candidate-owner-outside-event",
+      visitId: "candidate-owner-outside",
+      nameId: 9,
+    });
+    addVisit(candidateDatabase, sitePk, {
+      id: "candidate-whitespace-event",
+      sessionId: "",
+      visitorId: "candidate-local-visitor",
+      pathname: "/candidate-whitespace-page",
+    });
+    addVisit(candidateDatabase, sitePk, {
+      id: "candidate-whitespace-owner",
+      sessionId: " ",
+      visitorId: "candidate-whitespace-visitor",
+      pathname: "/candidate-whitespace-owner",
+    });
+    addEvent(candidateDatabase, sitePk, {
+      id: "candidate-whitespace-event",
+      visitId: "candidate-whitespace-owner",
+      nameId: 10,
+    });
+
+    const dsl =
+      '(count(page) eq 1 AND count(event) eq 1 AND page.path eq "/candidate-collision-owner" AND event.name eq "candidate-collision-event") OR (count(page) eq 0 AND count(event) eq 1 AND page.path eq "/candidate-owner-outside" AND event.name eq "candidate-owner-outside-event") OR (count(page) eq 0 AND count(event) eq 1 AND page.path eq "/candidate-whitespace-owner" AND event.name eq "candidate-whitespace-event")';
+    const runActual = async (
+      prepared: PreparedEventTypesQuery,
+      requestDsl: string,
+    ) => {
+      const trace = newTrace();
+      const env = testEnv(candidateDatabase, trace);
+      const registry = createD1SiteProviderRegistry({ env, siteId: SITE_ID });
+      let deferred:
+        ReturnType<typeof deferredEventTypesQualificationFromQuery> | undefined;
+      registry.useMiddleware(async (operation, input, next) => {
+        if (operation === "event-types")
+          deferred = deferredEventTypesQualificationFromQuery(input);
+        return next(input);
+      });
+      const provider = registry.resolve("event-types");
+      if (!provider)
+        throw new Error("event_candidate_event_types_provider_missing");
+      const actual = await provider.execute(prepared as never);
+      if (!deferred)
+        throw new Error("event_candidate_event_types_deferred_missing");
+      const compilation = compileEventTypesQualificationProgram({
+        deferred,
+        query: {
+          kind: "page",
+          limit: prepared.limit,
+          ...(prepared.search !== undefined ? { search: prepared.search } : {}),
+          ...(prepared.cursor
+            ? {
+                cursor: await decodeEventTypeCursor(
+                  env,
+                  SITE_ID,
+                  WINDOW,
+                  prepared.filters!,
+                  prepared.search,
+                  prepared.cursor,
+                  prepared.context.policy.audience,
+                ),
+              }
+            : {}),
+        },
+      });
+      if (compilation.kind !== "compiled")
+        return {
+          actual,
+          deferred,
+          compilation,
+          rawRows: null,
+          trace,
+          env,
+          requestDsl,
+        };
+      const rawQueryRows = await createD1DatabaseClient(
+        createSqliteD1Database(candidateDatabase),
+      ).all<Record<string, unknown>>({
+        tag: compilation.evidence.statementTag,
+        sql: compilation.evidence.sql,
+        bindings: [...compilation.evidence.bindings],
+      } as never);
+      return {
+        actual,
+        deferred,
+        compilation: {
+          kind: "compiled" as const,
+          evidence: compilation.evidence,
+        },
+        rawRows: rawQueryRows.results,
+        trace,
+        env,
+        requestDsl,
+      };
+    };
+    const toLegacyDto = (
+      value: Awaited<ReturnType<typeof executeLegacyEventTypesRequest>>,
+    ) => ({ items: mapTabs(value.items), pagination: value.pagination });
+    const evidenceDirectory = process.env.WAVE97EA_EVENT_TYPES_EVIDENCE_DIR;
+    const evidencePath = evidenceDirectory
+      ? resolve(evidenceDirectory, "event-candidate-page.json")
+      : undefined;
+    const statementEvidence = (trace: SqliteD1Trace) =>
+      trace.preparedSql.map((sql, index) => ({
+        sql,
+        bindings: trace.bindings[index],
+        sqlUtf8Bytes: new TextEncoder().encode(sql).byteLength,
+        sha256: createHash("sha256").update(sql).digest("hex"),
+      }));
+    const evidenceForPage = (
+      actual: Awaited<ReturnType<typeof runActual>>,
+      baseline: Awaited<ReturnType<typeof executeLegacyEventTypesRequest>>,
+      baselineTrace: SqliteD1Trace,
+    ) => ({
+      request: {
+        operation: "event-types",
+        audience: "private-dashboard",
+        siteId: actual.deferred.siteId,
+        requestedScope: actual.deferred.metadata.requestedScope,
+        resolvedScope: actual.deferred.metadata.resolvedScope,
+        candidateGrain:
+          actual.deferred.countInput.scope === "event"
+            ? actual.deferred.countInput.candidateAnchor.kind
+            : null,
+        filter: actual.requestDsl,
+      },
+      fusedRoute: {
+        statementCount: actual.trace.preparedSql.length,
+        statements: statementEvidence(actual.trace),
+        rawEnvelopeRows: actual.rawRows,
+        dto: actual.actual.value,
+        compilation: actual.compilation,
+      },
+      legacyCoreRoute: {
+        statementCount: baselineTrace.preparedSql.length,
+        statements: statementEvidence(baselineTrace),
+        dto: toLegacyDto(baseline),
+      },
+    });
+    const saveEvidence = (evidence: unknown) => {
+      if (!evidencePath) return;
+      mkdirSync(dirname(evidencePath), { recursive: true });
+      writeFileSync(evidencePath, JSON.stringify(evidence, null, 2), "utf8");
+    };
+    const firstPrepared = prepareEventTypesQuery(dsl, "event", {
+      limit: 1,
+      search: "candidate",
+    });
+    const firstActual = await runActual(firstPrepared, dsl);
+    const firstDto = firstActual.actual.value as {
+      readonly items: readonly unknown[];
+      readonly pagination: { readonly nextCursor: string | null };
+    };
+    expect(firstActual.deferred.countInput).toMatchObject({
+      scope: "event",
+      candidateAnchor: { kind: "event-candidate" },
+    });
+    expect(firstActual.compilation.kind).toBe("unavailable");
+    if (firstActual.compilation.kind !== "unavailable")
+      throw new Error("event_candidate_budget_fallback_not_reported");
+    expect(firstActual.compilation.fallbackReason).toMatchObject({
+      kind: "compile-budget",
+      item: "sql_bytes",
+      limit: 100_000,
+    });
+    if (firstActual.compilation.fallbackReason.kind !== "compile-budget")
+      throw new Error("event_candidate_budget_fallback_reason_changed");
+    expect(firstActual.compilation.fallbackReason.actual).toBeGreaterThan(
+      firstActual.compilation.fallbackReason.limit,
+    );
+    expect(firstDto.pagination.nextCursor).toEqual(expect.any(String));
+
+    const firstBaselineTrace = newTrace();
+    const firstBaseline = await executeLegacyEventTypesRequest({
+      env: testEnv(candidateDatabase, firstBaselineTrace),
+      prepared: firstPrepared,
+    });
+    saveEvidence({
+      kind: "wave97ea-event-types-candidate-scope-sqlite-evidence",
+      fallbackRequest: {
+        search: "candidate",
+        limit: 1,
+        firstPage: evidenceForPage(
+          firstActual,
+          firstBaseline,
+          firstBaselineTrace,
+        ),
+      },
+    });
+    expect(firstDto).toEqual(toLegacyDto(firstBaseline));
+    expect(firstDto.items).toHaveLength(1);
+    expect(firstActual.trace.preparedSql).toEqual(
+      firstBaselineTrace.preparedSql,
+    );
+    expect(firstActual.trace.bindings).toEqual(firstBaselineTrace.bindings);
+
+    const continuationPrepared = prepareEventTypesQuery(dsl, "event", {
+      limit: 1,
+      search: "candidate",
+      cursor: firstDto.pagination.nextCursor!,
+    });
+    const continuationActual = await runActual(continuationPrepared, dsl);
+    const continuationDto = continuationActual.actual.value;
+    expect(continuationActual.compilation.kind).toBe("unavailable");
+    if (continuationActual.compilation.kind !== "unavailable")
+      throw new Error("event_candidate_continuation_budget_fallback_missing");
+    expect(continuationActual.compilation.fallbackReason).toMatchObject({
+      kind: "compile-budget",
+      item: "sql_bytes",
+      limit: 100_000,
+    });
+    if (continuationActual.compilation.fallbackReason.kind !== "compile-budget")
+      throw new Error("event_candidate_continuation_budget_reason_changed");
+    expect(
+      continuationActual.compilation.fallbackReason.actual,
+    ).toBeGreaterThan(continuationActual.compilation.fallbackReason.limit);
+    const continuationBaselineTrace = newTrace();
+    const continuationBaseline = await executeLegacyEventTypesRequest({
+      env: testEnv(candidateDatabase, continuationBaselineTrace),
+      prepared: continuationPrepared,
+    });
+    saveEvidence({
+      kind: "wave97ea-event-types-candidate-scope-sqlite-evidence",
+      fallbackRequest: {
+        search: "candidate",
+        limit: 1,
+        firstPage: evidenceForPage(
+          firstActual,
+          firstBaseline,
+          firstBaselineTrace,
+        ),
+        continuationPage: evidenceForPage(
+          continuationActual,
+          continuationBaseline,
+          continuationBaselineTrace,
+        ),
+      },
+    });
+    expect(continuationDto).toEqual(toLegacyDto(continuationBaseline));
+    expect(continuationActual.trace.preparedSql).toEqual(
+      continuationBaselineTrace.preparedSql,
+    );
+    expect(continuationActual.trace.bindings).toEqual(
+      continuationBaselineTrace.bindings,
+    );
+    expect(firstDto.items).not.toEqual(
+      (continuationDto as { readonly items: readonly unknown[] }).items,
+    );
+
+    const nativeDsl =
+      'count(event) eq 1 AND (event.name eq "candidate-collision-event" OR NOT event.name eq "candidate-owner-outside-event")';
+    const nativePrepared = prepareEventTypesQuery(nativeDsl, "event", {
+      limit: 1,
+    });
+    expect(nativePrepared.search).toBeUndefined();
+    const nativeActual = await runActual(nativePrepared, nativeDsl);
+    if (nativeActual.compilation.kind !== "compiled")
+      throw new Error(
+        `event_candidate_native_mixed_compile_unavailable:${JSON.stringify(nativeActual.compilation.fallbackReason)}`,
+      );
+    expect(nativeActual.deferred.countInput).toMatchObject({
+      scope: "event",
+      candidateAnchor: { kind: "event-candidate" },
+    });
+    expect(
+      nativeActual.compilation.evidence.groupedSummaryMaterializations,
+    ).toHaveLength(2);
+    expect(
+      nativeActual.compilation.evidence.groupedSummaryMaterializations?.every(
+        ({ groupWidth, materialization }) =>
+          groupWidth <= 16 && materialization === "materialized",
+      ),
+    ).toBe(true);
+    expect(nativeActual.compilation.evidence.sqlBytes).toBeLessThanOrEqual(
+      100_000,
+    );
+    expect(nativeActual.compilation.evidence.bindingCount).toBeLessThanOrEqual(
+      100,
+    );
+    expect(nativeActual.trace.preparedSql).toHaveLength(2);
+    expect(nativeActual.trace.preparedSql[1]).toBe(
+      nativeActual.compilation.evidence.sql,
+    );
+    expect(nativeActual.trace.bindings[1]).toEqual(
+      nativeActual.compilation.evidence.bindings,
+    );
+    const nativeDto = nativeActual.actual.value as {
+      readonly items: readonly unknown[];
+      readonly pagination: { readonly nextCursor: string | null };
+    };
+    expect(nativeDto.items).toHaveLength(1);
+    expect(nativeDto.pagination.nextCursor).toEqual(expect.any(String));
+    const nativeBaselineTrace = newTrace();
+    const nativeBaseline = await executeLegacyEventTypesRequest({
+      env: testEnv(candidateDatabase, nativeBaselineTrace),
+      prepared: nativePrepared,
+    });
+    expect(nativeDto).toEqual(toLegacyDto(nativeBaseline));
+
+    const nativeContinuationPrepared = prepareEventTypesQuery(
+      nativeDsl,
+      "event",
+      { limit: 1, cursor: nativeDto.pagination.nextCursor! },
+    );
+    const nativeContinuationActual = await runActual(
+      nativeContinuationPrepared,
+      nativeDsl,
+    );
+    if (nativeContinuationActual.compilation.kind !== "compiled")
+      throw new Error(
+        `event_candidate_native_mixed_continuation_unavailable:${JSON.stringify(nativeContinuationActual.compilation.fallbackReason)}`,
+      );
+    const nativeContinuationDto = nativeContinuationActual.actual.value;
+    expect(
+      nativeContinuationActual.compilation.evidence
+        .groupedSummaryMaterializations,
+    ).toHaveLength(2);
+    expect(
+      nativeContinuationActual.compilation.evidence.sqlBytes,
+    ).toBeLessThanOrEqual(100_000);
+    expect(nativeContinuationActual.trace.preparedSql).toHaveLength(2);
+    expect(nativeContinuationActual.trace.preparedSql[1]).toBe(
+      nativeContinuationActual.compilation.evidence.sql,
+    );
+    const nativeContinuationBaselineTrace = newTrace();
+    const nativeContinuationBaseline = await executeLegacyEventTypesRequest({
+      env: testEnv(candidateDatabase, nativeContinuationBaselineTrace),
+      prepared: nativeContinuationPrepared,
+    });
+    expect(nativeContinuationDto).toEqual(
+      toLegacyDto(nativeContinuationBaseline),
+    );
+    expect(nativeDto.items).not.toEqual(
+      (nativeContinuationDto as { readonly items: readonly unknown[] }).items,
+    );
+
+    saveEvidence({
+      kind: "wave97ea-event-types-candidate-scope-sqlite-evidence",
+      scope: "event",
+      fallbackRequest: {
+        search: "candidate",
+        limit: 1,
+        firstPage: evidenceForPage(
+          firstActual,
+          firstBaseline,
+          firstBaselineTrace,
+        ),
+        continuationPage: evidenceForPage(
+          continuationActual,
+          continuationBaseline,
+          continuationBaselineTrace,
+        ),
+      },
+      nativeMixedRequest: {
+        search: null,
+        limit: 1,
+        firstPage: evidenceForPage(
+          nativeActual,
+          nativeBaseline,
+          nativeBaselineTrace,
+        ),
+        continuationPage: evidenceForPage(
+          nativeContinuationActual,
+          nativeContinuationBaseline,
+          nativeContinuationBaselineTrace,
+        ),
+      },
+    });
+  });
+
   it("rejects Event type cursors when the Count filter or owner scope changes", async () => {
     const qualifiedDatabase = createFixture();
     const siteIdentity = qualifiedDatabase
@@ -1543,6 +1947,47 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
       expect(trace.preparedSql).toHaveLength(2);
       expect(trace.preparedSql.join(" ")).not.toContain("event-type-page");
     }
+  });
+
+  it("rejects accessor-shaped Event candidate request state before report reads", async () => {
+    const unsafeDatabase = createFixture();
+    databases.add(unsafeDatabase);
+    const prepared = prepareEventTypesQuery(
+      'count(page { page.path eq "/scoped" }) eq 1',
+      "event",
+      { limit: 1 },
+    );
+    const scopePlan = prepared.scopePlan;
+    let scopePlanReads = 0;
+    Object.defineProperty(prepared, "scopePlan", {
+      enumerable: true,
+      configurable: true,
+      get() {
+        scopePlanReads += 1;
+        return scopePlan;
+      },
+    });
+
+    const trace = newTrace();
+    const provider = createD1SiteProviderRegistry({
+      env: testEnv(unsafeDatabase, trace),
+      siteId: SITE_ID,
+    }).resolve("event-types");
+    if (!provider)
+      throw new Error("event_candidate_unsafe_request_provider_missing");
+    await expect(provider.execute(prepared as never)).rejects.toMatchObject({
+      domainError: {
+        kind: "invalid-input",
+        issues: [
+          {
+            path: "query",
+            code: "event_types_qualification_request_context_mismatch",
+          },
+        ],
+      },
+    });
+    expect(scopePlanReads).toBe(0);
+    expect(trace.preparedSql.join(" ")).not.toContain("event-type-page");
   });
 
   it("preserves activity-cap priority before an invalid Event type cursor", async () => {
@@ -1699,7 +2144,7 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
     }
   });
 
-  it.each(["session", "visitor"] as const)(
+  it.each(["session", "visitor", "event"] as const)(
     "returns an empty qualified Event type page without report leakage for %s scope",
     async (scope) => {
       const emptyDatabase = createFixture();
@@ -1770,7 +2215,7 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
     expect(trace.preparedSql.length).toBeGreaterThan(2);
   });
 
-  it.each(["session", "visitor"] as const)(
+  it.each(["session", "visitor", "event"] as const)(
     "preserves numeric compatibility fallback for qualified Event type pages in %s scope",
     async (scope) => {
       const repairDatabase = createFixture();
@@ -1795,15 +2240,6 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
       if (!provider)
         throw new Error("wave94c_numeric_fallback_provider_missing");
       const actual = await provider.execute(prepared as never);
-      expect(actual.value).toEqual({
-        items: mapTabs(baseline.items),
-        pagination: baseline.pagination,
-      });
-      expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
-        kind: "numeric-data-domain",
-        fieldIds: ["page.durationMs"],
-      });
-      expect(trace.preparedSql.length).toBeGreaterThan(2);
 
       const evidenceDirectory = process.env.WAVE94C_EVENT_TYPES_EVIDENCE_DIR;
       if (evidenceDirectory) {
@@ -1859,6 +2295,16 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
           "utf8",
         );
       }
+
+      expect(actual.value).toEqual({
+        items: mapTabs(baseline.items),
+        pagination: baseline.pagination,
+      });
+      expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
+        kind: "numeric-data-domain",
+        fieldIds: ["page.durationMs"],
+      });
+      expect(trace.preparedSql.length).toBeGreaterThan(2);
     },
   );
 

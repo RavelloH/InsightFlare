@@ -342,6 +342,11 @@ export interface EventSummaryQualificationCompilationEvidence {
   readonly bindingCount: number;
   readonly groupWidth: number;
   readonly groupedSummaryMaterialization: "materialized";
+  readonly groupedSummaryMaterializations?: readonly {
+    readonly relationId: string;
+    readonly groupWidth: number;
+    readonly materialization: "materialized";
+  }[];
   readonly qualifiedReportInputWidth?: number;
   readonly qualifiedReportInputMaterialization?: "materialized";
   readonly sharedRelationCount: number;
@@ -458,7 +463,8 @@ function sessionBoundaryDimensionReportOrder(
 interface EventQualificationProgram {
   readonly query: CompiledQuery<Record<string, unknown>>;
   readonly evidence: EventSummaryQualificationCompilationEvidence;
-  readonly deferred: DeferredEventQualification;
+  readonly deferred:
+    DeferredEventQualification | DeferredEventTypesQualification;
   readonly reportKind: QualifiedReportKind;
   readonly reportOutputIds: readonly string[];
   readonly controlOutputId: string;
@@ -1650,16 +1656,18 @@ function compileProgram(request: EventQualificationCompileRequest):
   if (request.kind === "session-boundary-overview-page")
     validateSessionBoundaryOverviewPageRequest(request);
   assertQualificationNotAborted(deferred.signal);
-  const qualification: AnalyticsQualificationPlan =
+  const qualification: AnalyticsQualificationPlan<
+    "session" | "visitor" | "event"
+  > =
     request.kind === "event-summary"
       ? buildEventSummaryCardsQualificationPlan({
           siteId: deferred.siteId,
-          count: deferred.countInput,
+          count: request.deferred.countInput,
         })
       : request.kind === "event-types"
         ? buildEventTypeSummaryQualificationPlan({
             siteId: deferred.siteId,
-            count: deferred.countInput,
+            count: request.deferred.countInput,
             query: request.query,
             ...(deferred.operation === "event-name-dimension"
               ? {
@@ -1673,19 +1681,19 @@ function compileProgram(request: EventQualificationCompileRequest):
               queryTime: deferred.time,
               filters: deferred.filters,
               scopePlan: deferred.metadata.plan,
-              count: deferred.countInput,
+              count: request.deferred.countInput,
               ...request.query,
             })
           : request.kind === "event-context"
             ? buildEventContextQualificationPlan({
                 siteId: deferred.siteId,
-                count: deferred.countInput,
+                count: request.deferred.countInput,
                 ...request.query,
               })
             : request.kind === "event-type-detail"
               ? buildEventTypeDetailQualificationPlan({
                   siteId: deferred.siteId,
-                  count: deferred.countInput,
+                  count: request.deferred.countInput,
                   ...request.query,
                   contextLimit:
                     request.query.contextLimit ??
@@ -1698,7 +1706,7 @@ function compileProgram(request: EventQualificationCompileRequest):
                     filters: request.query.filters,
                     scopePlan:
                       request.query.scopePlan ?? deferred.metadata.plan,
-                    count: deferred.countInput,
+                    count: request.deferred.countInput,
                     limit: request.query.limit,
                     includeDetails: request.query.includeDetails,
                     cursor: request.query.cursor,
@@ -1711,7 +1719,7 @@ function compileProgram(request: EventQualificationCompileRequest):
                       filters: request.query.filters,
                       scopePlan:
                         request.query.scopePlan ?? deferred.metadata.plan,
-                      count: deferred.countInput,
+                      count: request.deferred.countInput,
                       limit: request.query.limit,
                       includeDetails: request.query.includeDetails,
                       cursor: request.query.cursor,
@@ -1723,7 +1731,7 @@ function compileProgram(request: EventQualificationCompileRequest):
                         filters: request.query.filters,
                         scopePlan:
                           request.query.scopePlan ?? deferred.metadata.plan,
-                        count: deferred.countInput,
+                        count: request.deferred.countInput,
                         configuration: request.query.configuration,
                       })
                     : request.kind === "page-dimension"
@@ -1737,7 +1745,7 @@ function compileProgram(request: EventQualificationCompileRequest):
                             filters: request.query.filters,
                             scopePlan:
                               request.query.scopePlan ?? deferred.metadata.plan,
-                            count: deferred.countInput,
+                            count: request.deferred.countInput,
                             options: {
                               limit: request.query.limit,
                               includeFullUrl: request.query.includeFullUrl,
@@ -1762,7 +1770,7 @@ function compileProgram(request: EventQualificationCompileRequest):
                             filters: request.query.filters,
                             scopePlan:
                               request.query.scopePlan ?? deferred.metadata.plan,
-                            count: deferred.countInput,
+                            count: request.deferred.countInput,
                             options: {
                               selection: request.query.selection,
                               limit: request.query.limit,
@@ -1789,7 +1797,7 @@ function compileProgram(request: EventQualificationCompileRequest):
                             filters: request.query.filters,
                             scopePlan:
                               request.query.scopePlan ?? deferred.metadata.plan,
-                            count: deferred.countInput,
+                            count: request.deferred.countInput,
                             kind: request.query.kind,
                             limit: request.query.limit,
                             ...(request.query.search !== undefined
@@ -1813,7 +1821,7 @@ function compileProgram(request: EventQualificationCompileRequest):
                               scopePlan:
                                 request.query.scopePlan ??
                                 deferred.metadata.plan,
-                              count: deferred.countInput,
+                              count: request.deferred.countInput,
                               kind: request.query.kind,
                               limit: request.query.limit,
                               ...(request.query.search !== undefined
@@ -1837,7 +1845,7 @@ function compileProgram(request: EventQualificationCompileRequest):
                                 scopePlan:
                                   request.query.scopePlan ??
                                   deferred.metadata.plan,
-                                count: deferred.countInput,
+                                count: request.deferred.countInput,
                                 limit: request.query.limit,
                               })
                             : buildPayloadQualificationPlan(request);
@@ -1911,9 +1919,22 @@ function compileProgram(request: EventQualificationCompileRequest):
                             : request.kind === "channel-list"
                               ? [OVERVIEW_CHANNELS_REPORT_OUTPUT]
                               : [];
+  const eventCandidatePage =
+    request.kind === "event-types" &&
+    request.query.kind === "page" &&
+    deferred.operation === "event-types" &&
+    deferred.metadata.plan.scope === "event" &&
+    deferred.countInput.scope === "event" &&
+    deferred.countInput.candidateAnchor.kind === "event-candidate";
+  const qualificationScopeValid =
+    ((qualification.scope === "session" || qualification.scope === "visitor") &&
+      qualification.candidateGrain === undefined) ||
+    (eventCandidatePage &&
+      qualification.scope === "event" &&
+      qualification.candidateGrain === "event-candidate");
   if (
     qualification.scope !== deferred.countInput.scope ||
-    (qualification.scope !== "session" && qualification.scope !== "visitor") ||
+    !qualificationScopeValid ||
     qualification.reportOutputIds.length !== expectedReportOutputIds.length ||
     new Set(qualification.reportOutputIds).size !==
       expectedReportOutputIds.length ||
@@ -1972,6 +1993,9 @@ function compileProgram(request: EventQualificationCompileRequest):
       slot,
     })),
     scope: qualification.scope,
+    ...(qualification.candidateGrain
+      ? { candidateGrain: qualification.candidateGrain }
+      : {}),
     maximumActivities: ADVANCED_FILTER_MAX_ACTIVITIES,
     numericCompatibilityControlNames: compatibilityFields.map(
       ({ outputName }) => outputName,
@@ -2177,49 +2201,51 @@ function compileProgram(request: EventQualificationCompileRequest):
   });
   const sorted = sort(envelope, orderKeys);
   const physical = lowerLogicalPlan(sorted);
-  const groupedSummaryNode = plan.nodes.find(
-    (node) => node.id === qualification.groupedSummaryRelationId,
-  );
-  const groupedSummaryInput =
-    groupedSummaryNode?.kind === "aggregate"
-      ? plan.nodes.find((node) => node.id === groupedSummaryNode.input)
-      : undefined;
-  const boundedGroupedSummary =
-    groupedSummaryNode?.kind === "aggregate" &&
-    groupedSummaryNode.groups.length === 2 &&
-    groupedSummaryInput?.kind === "limit";
-  const groupedSummary = lowerer.loweredRelationForPlan(
+  const groupedSummaryIds = [
     qualification.groupedSummaryRelationId,
+    ...(qualification.additionalGroupedSummaryRelationIds ?? []),
+  ];
+  const groupedSummaries = groupedSummaryIds.map((relationId) => {
+    const node = plan.nodes.find((candidate) => candidate.id === relationId);
+    const inputNode =
+      node?.kind === "aggregate"
+        ? plan.nodes.find((candidate) => candidate.id === node.input)
+        : undefined;
+    const lowered = lowerer.loweredRelationForPlan(relationId);
+    const materialized = lowered
+      ? physical.sharedRelations.filter(
+          (relation) => relation.node === lowered.node,
+        )
+      : [];
+    return {
+      relationId,
+      lowered,
+      validShape:
+        node?.kind === "aggregate" &&
+        node.groups.length === 2 &&
+        inputNode?.kind === "limit" &&
+        lowered?.node.kind === "aggregate" &&
+        lowered.node.groups.length === 2 &&
+        lowered.fields.length <= 16,
+      materialized:
+        materialized.length === 1 &&
+        materialized[0]!.materialization === "materialized" &&
+        materialized[0]!.fields.length <= 16,
+    };
+  });
+  const failedGroupedSummary = groupedSummaries.find(
+    ({ validShape, materialized }) => !validShape || !materialized,
   );
-  if (
-    !boundedGroupedSummary ||
-    !groupedSummary ||
-    groupedSummary.node.kind !== "aggregate" ||
-    groupedSummary.node.groups.length !== 2 ||
-    groupedSummary.fields.length > 16
-  )
+  if (failedGroupedSummary) {
     return {
       kind: "unavailable",
       fallbackReason: {
         kind: "grouped-summary-unavailable",
-        groupWidth: groupedSummary?.fields.length ?? null,
+        groupWidth: failedGroupedSummary.lowered?.fields.length ?? null,
       },
     };
-  const materializedCandidates = physical.sharedRelations.filter(
-    (relation) => relation.node === groupedSummary.node,
-  );
-  if (
-    materializedCandidates.length !== 1 ||
-    materializedCandidates[0]!.materialization !== "materialized" ||
-    materializedCandidates[0]!.fields.length > 16
-  )
-    return {
-      kind: "unavailable",
-      fallbackReason: {
-        kind: "grouped-summary-unavailable",
-        groupWidth: groupedSummary.fields.length,
-      },
-    };
+  }
+  const groupedSummary = groupedSummaries[0]!.lowered!;
   const qualifiedReportInput =
     request.kind === "event-context" || request.kind === "event-type-detail"
       ? physical.sharedRelations.find(
@@ -2252,6 +2278,17 @@ function compileProgram(request: EventQualificationCompileRequest):
     bindingCount: query.bindings?.length ?? 0,
     groupWidth: groupedSummary.fields.length,
     groupedSummaryMaterialization: "materialized",
+    ...(groupedSummaries.length > 1
+      ? {
+          groupedSummaryMaterializations: Object.freeze(
+            groupedSummaries.map(({ relationId, lowered }) => ({
+              relationId: String(relationId),
+              groupWidth: lowered!.fields.length,
+              materialization: "materialized" as const,
+            })),
+          ),
+        }
+      : {}),
     ...(qualifiedReportInput?.materialization === "materialized"
       ? {
           qualifiedReportInputWidth: qualifiedReportInput.fields.length,

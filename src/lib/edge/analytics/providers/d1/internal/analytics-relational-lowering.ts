@@ -744,6 +744,17 @@ export class AnalyticsLogicalToDbLowerer {
             );
           },
         );
+      const qualifiedScopeValid =
+        ((qualificationPolicy.scope === "session" ||
+          qualificationPolicy.scope === "visitor") &&
+          qualificationPolicy.candidateGrain === undefined) ||
+        (qualificationPolicy.scope === "event" &&
+          qualificationPolicy.candidateGrain === "event-candidate" &&
+          primaryReportSource?.kind === "source" &&
+          primaryReportSource.entity === "event" &&
+          qualificationPolicy.reportSourceRelations.length === 1 &&
+          qualificationPolicy.reportSourceRelations[0]?.entity === "event" &&
+          qualificationPolicy.reportRelationIds.length === 1);
       if (
         primaryReportSource?.kind !== "source" ||
         (primaryReportSource.entity !== "event" &&
@@ -773,8 +784,7 @@ export class AnalyticsLogicalToDbLowerer {
         ) ||
         !Number.isSafeInteger(qualificationPolicy.maximumActivities) ||
         qualificationPolicy.maximumActivities < 0 ||
-        (qualificationPolicy.scope !== "session" &&
-          qualificationPolicy.scope !== "visitor")
+        !qualifiedScopeValid
       )
         reject(
           "outputs",

@@ -1,7 +1,7 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryAudience } from "@/lib/edge/analytics/contract/types";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { AdvancedCountQualificationPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import {
   addEventQualificationControlOutput,
   buildEventQualifiedSource,
@@ -94,7 +94,9 @@ export function normalizeEventNameDimensionListRequest(input: {
   });
 }
 
-export type EventTypeSummaryQualificationPlan = EventQualificationPlan;
+export type EventTypeSummaryQualificationPlan<
+  Scope extends "session" | "visitor" | "event" = "session" | "visitor",
+> = EventQualificationPlan<Scope>;
 
 function eventAttribute(
   builder: LogicalPlanBuilder,
@@ -308,12 +310,19 @@ export function buildEventTypeSummaryPlan(input: {
 }
 
 /** Builds the event-type page and Count controls in one authorized builder. */
-export function buildEventTypeSummaryQualificationPlan(input: {
+export function buildEventTypeSummaryQualificationPlan<
+  Count extends AdvancedCountQualificationPlanInput,
+>(input: {
   readonly siteId: string;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: Count;
   readonly query: EventTypeQualificationQuery;
   readonly reportFilters?: FilterDocument;
-}): EventTypeSummaryQualificationPlan {
+}): EventTypeSummaryQualificationPlan<Count["scope"]> {
+  if (
+    input.count.scope === "event" &&
+    (input.query.kind !== "page" || input.reportFilters !== undefined)
+  )
+    throw new Error("event_candidate_count_requires_event_type_page");
   const qualified = buildEventQualifiedSource({
     siteId: input.siteId,
     count: input.count,
@@ -333,6 +342,17 @@ export function buildEventTypeSummaryQualificationPlan(input: {
     matchesRelationId: qualified.qualification.matches.id,
     controlsRelationId: qualified.qualification.controls.id,
     groupedSummaryRelationId: qualified.qualification.groupedSummary.id,
+    ...(qualified.qualification.candidateGrain
+      ? { candidateGrain: qualified.qualification.candidateGrain }
+      : {}),
+    ...(qualified.qualification.additionalGroupedSummaries
+      ? {
+          additionalGroupedSummaryRelationIds:
+            qualified.qualification.additionalGroupedSummaries.map(
+              ({ id }) => id,
+            ),
+        }
+      : {}),
     controlOutputId: EVENT_QUALIFICATION_CONTROL_OUTPUT,
     reportOutputIds: Object.freeze([
       input.query.kind === "list"
@@ -342,5 +362,5 @@ export function buildEventTypeSummaryQualificationPlan(input: {
     numericCompatibilityFields:
       qualified.qualification.numericCompatibilityFields,
     scope: qualified.qualification.scope,
-  };
+  } as EventTypeSummaryQualificationPlan<Count["scope"]>;
 }
