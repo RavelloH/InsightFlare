@@ -1,24 +1,192 @@
+<div align="center">
+
 # InsightFlare
+
+### 資料屬於你，分析運行在自己的 Cloudflare 上。
+
+兼顧隱私與分析深度的開源網站分析平台：即時流量、訪客旅程、轉換漏斗，以及 AI Agent 資料分析。
+
+[**線上體驗**](https://insight-demo.ravelloh.com/) &nbsp;·&nbsp; [**一鍵部署到 Cloudflare**](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FRavelloH%2FInsightFlare) &nbsp;·&nbsp; [**原始碼**](https://github.com/RavelloH/InsightFlare)
+
+[![GitHub stars](https://img.shields.io/github/stars/RavelloH/InsightFlare?style=flat-square&logo=github)](https://github.com/RavelloH/InsightFlare/stargazers) [![Latest release](https://img.shields.io/github/v/release/RavelloH/InsightFlare?style=flat-square)](https://github.com/RavelloH/InsightFlare/releases) [![License: MIT](https://img.shields.io/github/license/RavelloH/InsightFlare?style=flat-square)](/LICENSE)
 
 <!-- auto-readme-i18n-switcher start -->
 | [English](/.github/readme/README.en.md) | [日本語](/.github/readme/README.ja.md) | 中文（台灣） | [中文](/.github/readme/README.zh.md) |
 <!-- auto-readme-i18n-switcher end -->
 
-> 功能強大、注重隱私的開源網站流量分析工具，完全執行於 Cloudflare 上。
+</div>
 
-Demo: [http://insight-demo.ravelloh.com](http://insight-demo.ravelloh.com/)
+<a href="https://insight-demo.ravelloh.com/"><img src="/.github/screenshot/001.webp" alt="InsightFlare analytics dashboard" width="100%"></a>
 
-![ScreenShot](/.github/screenshot/001.webp)
+## 為什麼選擇 InsightFlare？
 
-完全符合 GDPR，無任何 Cookie，無需使用者同意即可合法追蹤造訪資料。獨創的智慧追蹤強度機制，可根據不同地區的隱私法規自動調整訪客識別碼的持久性，最大程度兼顧資料完整性與使用者隱私保護。
+不只統計瀏覽量，也不必把分析資料交給第三方平台。InsightFlare 運行在你自己的 Cloudflare 帳戶中，整合流量、訪客行為與運作觀測。
 
-前端統計指令碼 SDK 在 gzip 壓縮後僅約 3 KB，透過 Cloudflare 全球 CDN 分發，造訪效能優秀。SDK 自帶自訂事件追蹤（`data-insightflare-event`）和效能指標追蹤。
+- **自己的基礎設施，自己的資料。** 基於 Cloudflare Workers、D1 與 Durable Objects 自行託管，不需註冊第三方分析 SaaS。
+- **理解訪客行為。** 分析工作階段、訪問旅程、漏斗、自訂事件、UTM 活動與流量來源品質。
+- **即時掌握網站動態。** 觀察即時訪問、效能指標、地理分布、瀏覽器與裝置。
+- **辨識無效流量。** 透過機器人防護與異常請求觀測，區分訪問數量與真正有價值的流量。
+- **讓 AI Agent 協助分析。** 使用 Skills 入口與具權限範圍的 API，以自然語言查詢網站資料。
+- **從小規模開始，按需擴充。** 支援一鍵部署、多站點與團隊、可選的 R2 封存與靈活設定。
 
-多語言的儀表盤使用前所未有的視覺化效果，讓你對造訪資料瞭如指掌。獨創的地名多語言翻譯功能，自動翻譯全球 95% 以上的地名，讓你輕鬆瞭解訪客的地理分佈。
+**隱私與費用說明：** 追蹤器採用無 Cookie 設計，且不儲存原始 IP。具體法規要求和 Cloudflare 費用取決於部署設定、流量及適用地區。
 
-Cloudflare 的免費額度可提供每日 10 萬次造訪的免費追蹤，結合邊緣計算帶來極佳效能。
+## 介面預覽
 
-我們不儲存原始 IP 資訊，依靠 Cloudflare 進行地理位置解析，在保護使用者隱私的同時提供高準確度的分析。
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/004.webp"><img src="/.github/screenshot/004.webp" alt="即時訪問" width="100%"><br><strong>即時訪問</strong></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/018.webp"><img src="/.github/screenshot/018.webp" alt="訪客工作階段" width="100%"><br><strong>訪客工作階段</strong></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/054.webp"><img src="/.github/screenshot/054.webp" alt="事件漏斗" width="100%"><br><strong>事件漏斗</strong></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/010.webp"><img src="/.github/screenshot/010.webp" alt="來源分析" width="100%"><br><strong>來源分析</strong></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/026.webp"><img src="/.github/screenshot/026.webp" alt="地理分布" width="100%"><br><strong>地理分布</strong></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/058.webp"><img src="/.github/screenshot/058.webp" alt="機器人觀測" width="100%"><br><strong>機器人觀測</strong></a></td>
+  </tr>
+</table>
+
+## 完整功能預覽
+
+### 流量概覽與來源分析
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/001.webp"><img src="/.github/screenshot/001.webp" width="100%" alt="完整的造訪維度追蹤" title="完整的造訪維度追蹤"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/002.webp"><img src="/.github/screenshot/002.webp" width="100%" alt="完整的造訪維度追蹤" title="完整的造訪維度追蹤"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/003.webp"><img src="/.github/screenshot/003.webp" width="100%" alt="完整的造訪維度追蹤" title="完整的造訪維度追蹤"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/004.webp"><img src="/.github/screenshot/004.webp" width="100%" alt="即時檢視訪客情況" title="即時檢視訪客情況"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/005.webp"><img src="/.github/screenshot/005.webp" width="100%" alt="即時檢視訪客情況" title="即時檢視訪客情況"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/006.webp"><img src="/.github/screenshot/006.webp" width="100%" alt="分頁面檢視造訪情況" title="分頁面檢視造訪情況"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/007.webp"><img src="/.github/screenshot/007.webp" width="100%" alt="追蹤訪客的真實造訪效能" title="追蹤訪客的真實造訪效能"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/008.webp"><img src="/.github/screenshot/008.webp" width="100%" alt="追蹤訪客的真實造訪效能" title="追蹤訪客的真實造訪效能"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/009.webp"><img src="/.github/screenshot/009.webp" width="100%" alt="追蹤訪客的真實造訪效能" title="追蹤訪客的真實造訪效能"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/010.webp"><img src="/.github/screenshot/010.webp" width="100%" alt="對比各個來源的造訪品質" title="對比各個來源的造訪品質"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/011.webp"><img src="/.github/screenshot/011.webp" width="100%" alt="對比各個來源的造訪品質" title="對比各個來源的造訪品質"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/012.webp"><img src="/.github/screenshot/012.webp" width="100%" alt="對比各個來源的造訪品質" title="對比各個來源的造訪品質"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/013.webp"><img src="/.github/screenshot/013.webp" width="100%" alt="追蹤 UTM 活動效果" title="追蹤 UTM 活動效果"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/014.webp"><img src="/.github/screenshot/014.webp" width="100%" alt="追蹤 UTM 活動效果" title="追蹤 UTM 活動效果"></a></td>
+    <td width="33%"></td>
+  </tr>
+</table>
+
+### 事件、工作階段與訪客旅程
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/015.webp"><img src="/.github/screenshot/015.webp" width="100%" alt="記錄並分析自訂事件" title="記錄並分析自訂事件"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/016.webp"><img src="/.github/screenshot/016.webp" width="100%" alt="記錄並分析自訂事件" title="記錄並分析自訂事件"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/017.webp"><img src="/.github/screenshot/017.webp" width="100%" alt="記錄並分析自訂事件" title="記錄並分析自訂事件"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/018.webp"><img src="/.github/screenshot/018.webp" width="100%" alt="洞察每一次工作階段" title="洞察每一次工作階段"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/019.webp"><img src="/.github/screenshot/019.webp" width="100%" alt="洞察每一次工作階段" title="洞察每一次工作階段"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/020.webp"><img src="/.github/screenshot/020.webp" width="100%" alt="洞察每一次工作階段" title="洞察每一次工作階段"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/021.webp"><img src="/.github/screenshot/021.webp" width="100%" alt="洞察每一次工作階段" title="洞察每一次工作階段"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/022.webp"><img src="/.github/screenshot/022.webp" width="100%" alt="瞭解你的每一位訪客" title="瞭解你的每一位訪客"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/023.webp"><img src="/.github/screenshot/023.webp" width="100%" alt="瞭解你的每一位訪客" title="瞭解你的每一位訪客"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/024.webp"><img src="/.github/screenshot/024.webp" width="100%" alt="追蹤站點的回訪情況" title="追蹤站點的回訪情況"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/025.webp"><img src="/.github/screenshot/025.webp" width="100%" alt="追蹤站點的回訪情況" title="追蹤站點的回訪情況"></a></td>
+    <td width="33%"></td>
+  </tr>
+</table>
+
+### 受眾、裝置與地理分析
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/026.webp"><img src="/.github/screenshot/026.webp" width="100%" alt="瞭解訪客的地理分佈與市場情報" title="瞭解訪客的地理分佈與市場情報"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/027.webp"><img src="/.github/screenshot/027.webp" width="100%" alt="瞭解訪客的地理分佈與市場情報" title="瞭解訪客的地理分佈與市場情報"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/028.webp"><img src="/.github/screenshot/028.webp" width="100%" alt="瞭解訪客的地理分佈與市場情報" title="瞭解訪客的地理分佈與市場情報"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/029.webp"><img src="/.github/screenshot/029.webp" width="100%" alt="檢視訪客的裝置情況" title="檢視訪客的裝置情況"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/030.webp"><img src="/.github/screenshot/030.webp" width="100%" alt="檢視訪客的裝置情況" title="檢視訪客的裝置情況"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/031.webp"><img src="/.github/screenshot/031.webp" width="100%" alt="檢視訪客的裝置情況" title="檢視訪客的裝置情況"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/032.webp"><img src="/.github/screenshot/032.webp" width="100%" alt="瞭解使用者的瀏覽器及其能力" title="瞭解使用者的瀏覽器及其能力"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/033.webp"><img src="/.github/screenshot/033.webp" width="100%" alt="瞭解使用者的瀏覽器及其能力" title="瞭解使用者的瀏覽器及其能力"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/034.webp"><img src="/.github/screenshot/034.webp" width="100%" alt="瞭解使用者的瀏覽器及其能力" title="瞭解使用者的瀏覽器及其能力"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/035.webp"><img src="/.github/screenshot/035.webp" width="100%" alt="瞭解使用者的瀏覽器及其能力" title="瞭解使用者的瀏覽器及其能力"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/036.webp"><img src="/.github/screenshot/036.webp" width="100%" alt="瞭解使用者的瀏覽器及其能力" title="瞭解使用者的瀏覽器及其能力"></a></td>
+    <td width="33%"></td>
+  </tr>
+</table>
+
+### 設定、團隊協作與分享
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/037.webp"><img src="/.github/screenshot/037.webp" width="100%" alt="隨時調整你的追蹤設定，無需修改前端 SDK" title="隨時調整你的追蹤設定，無需修改前端 SDK"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/038.webp"><img src="/.github/screenshot/038.webp" width="100%" alt="隨時調整你的追蹤設定，無需修改前端 SDK" title="隨時調整你的追蹤設定，無需修改前端 SDK"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/039.webp"><img src="/.github/screenshot/039.webp" width="100%" alt="為團隊協作而設計" title="為團隊協作而設計"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/040.webp"><img src="/.github/screenshot/040.webp" width="100%" alt="為團隊協作而設計" title="為團隊協作而設計"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/041.webp"><img src="/.github/screenshot/041.webp" width="100%" alt="輕鬆瞭解系統的執行狀況" title="輕鬆瞭解系統的執行狀況"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/042.webp"><img src="/.github/screenshot/042.webp" width="100%" alt="輕鬆瞭解系統的執行狀況" title="輕鬆瞭解系統的執行狀況"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/043.webp"><img src="/.github/screenshot/043.webp" width="100%" alt="完整的多語言翻譯" title="完整的多語言翻譯"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/044.webp"><img src="/.github/screenshot/044.webp" width="100%" alt="完整的多語言翻譯" title="完整的多語言翻譯"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/045.webp"><img src="/.github/screenshot/045.webp" width="100%" alt="公開分享系統" title="公開分享系統"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/046.webp"><img src="/.github/screenshot/046.webp" width="100%" alt="公開分享系統" title="公開分享系統"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/047.webp"><img src="/.github/screenshot/047.webp" width="100%" alt="作用域分明的 API 系統" title="作用域分明的 API 系統"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/048.webp"><img src="/.github/screenshot/048.webp" width="100%" alt="定時任務" title="定時任務"></a></td>
+  </tr>
+</table>
+
+### 深度事件分析與轉換漏斗
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/049.webp"><img src="/.github/screenshot/049.webp" width="100%" alt="對 JSON 格式的自訂事件進行深度分析" title="對 JSON 格式的自訂事件進行深度分析"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/050.webp"><img src="/.github/screenshot/050.webp" width="100%" alt="對 JSON 格式的自訂事件進行深度分析" title="對 JSON 格式的自訂事件進行深度分析"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/051.webp"><img src="/.github/screenshot/051.webp" width="100%" alt="對 JSON 格式的自訂事件進行深度分析" title="對 JSON 格式的自訂事件進行深度分析"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/052.webp"><img src="/.github/screenshot/052.webp" width="100%" alt="對 JSON 格式的自訂事件進行深度分析" title="對 JSON 格式的自訂事件進行深度分析"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/053.webp"><img src="/.github/screenshot/053.webp" width="100%" alt="對 JSON 格式的自訂事件進行深度分析" title="對 JSON 格式的自訂事件進行深度分析"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/054.webp"><img src="/.github/screenshot/054.webp" width="100%" alt="使用漏斗來分析造訪與事件" title="使用漏斗來分析造訪與事件"></a></td>
+  </tr>
+</table>
+
+### 運作監控、通知與機器人防護
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/055.webp"><img src="/.github/screenshot/055.webp" width="100%" alt="定時 / 按條件接收通知郵件" title="定時 / 按條件接收通知郵件"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/056.webp"><img src="/.github/screenshot/056.webp" width="100%" alt="定時 / 按條件接收通知郵件" title="定時 / 按條件接收通知郵件"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/057.webp"><img src="/.github/screenshot/057.webp" width="100%" alt="定時 / 按條件接收通知郵件" title="定時 / 按條件接收通知郵件"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/058.webp"><img src="/.github/screenshot/058.webp" width="100%" alt="多維度的機器人防護與觀測系統" title="多維度的機器人防護與觀測系統"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/059.webp"><img src="/.github/screenshot/059.webp" width="100%" alt="多維度的機器人防護與觀測系統" title="多維度的機器人防護與觀測系統"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/060.webp"><img src="/.github/screenshot/060.webp" width="100%" alt="多維度的機器人防護與觀測系統" title="多維度的機器人防護與觀測系統"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/061.webp"><img src="/.github/screenshot/061.webp" width="100%" alt="多維度的機器人防護與觀測系統" title="多維度的機器人防護與觀測系統"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/062.webp"><img src="/.github/screenshot/062.webp" width="100%" alt="多維度的機器人防護與觀測系統" title="多維度的機器人防護與觀測系統"></a></td>
+    <td width="33%"></td>
+  </tr>
+</table>
 
 ---
 
@@ -40,142 +208,6 @@ Cloudflare 會自動複製此儲存庫、建立並綁定所需要的資源。其
 `BOOTSTRAP_ADMIN_PASSWORD` 是你的預設管理員帳號密碼。你需要使用 `admin` 帳號和這個密碼登入儀表盤，此後可以在個人設定頁面修改使用者名稱和密碼。
 
 填寫完畢後，等待 3 分鐘讓專案部署完畢，你就可以登入到儀表盤並開始追蹤造訪資料了。此外，你可以在專案的設定頁面自訂其網域。預設網址為 `https://insightflare.<your-cloudflare-username>.workers.dev`
-
-## 特性
-
-### 完整的造訪維度追蹤
-
-![001](/.github/screenshot/001.webp)
-![002](/.github/screenshot/002.webp)
-![003](/.github/screenshot/003.webp)
-
-### 即時檢視訪客情況
-
-![004](/.github/screenshot/004.webp)
-![005](/.github/screenshot/005.webp)
-
-### 分頁面檢視造訪情況
-
-![006](/.github/screenshot/006.webp)
-
-### 追蹤訪客的真實造訪效能
-
-![007](/.github/screenshot/007.webp)
-![008](/.github/screenshot/008.webp)
-![009](/.github/screenshot/009.webp)
-
-### 對比各個來源的造訪品質
-
-![010](/.github/screenshot/010.webp)
-![011](/.github/screenshot/011.webp)
-![012](/.github/screenshot/012.webp)
-
-### 追蹤 UTM 活動效果
-
-![013](/.github/screenshot/013.webp)
-![014](/.github/screenshot/014.webp)
-
-### 記錄並分析自訂事件
-
-![015](/.github/screenshot/015.webp)
-![016](/.github/screenshot/016.webp)
-![017](/.github/screenshot/017.webp)
-
-### 洞察每一次工作階段
-
-![018](/.github/screenshot/018.webp)
-![019](/.github/screenshot/019.webp)
-![020](/.github/screenshot/020.webp)
-![021](/.github/screenshot/021.webp)
-
-### 瞭解你的每一位訪客
-
-![022](/.github/screenshot/022.webp)
-![023](/.github/screenshot/023.webp)
-
-### 追蹤站點的回訪情況
-
-![024](/.github/screenshot/024.webp)
-![025](/.github/screenshot/025.webp)
-
-### 瞭解訪客的地理分佈與市場情報
-
-![026](/.github/screenshot/026.webp)
-![027](/.github/screenshot/027.webp)
-![028](/.github/screenshot/028.webp)
-
-### 檢視訪客的裝置情況
-
-![029](/.github/screenshot/029.webp)
-![030](/.github/screenshot/030.webp)
-![031](/.github/screenshot/031.webp)
-
-### 瞭解使用者的瀏覽器及其能力
-
-![032](/.github/screenshot/032.webp)
-![033](/.github/screenshot/033.webp)
-![034](/.github/screenshot/034.webp)
-![035](/.github/screenshot/035.webp)
-![036](/.github/screenshot/036.webp)
-
-### 隨時調整你的追蹤設定，無需修改前端 SDK
-
-![037](/.github/screenshot/037.webp)
-![038](/.github/screenshot/038.webp)
-
-### 為團隊協作而設計
-
-![039](/.github/screenshot/039.webp)
-![040](/.github/screenshot/040.webp)
-
-### 輕鬆瞭解系統的執行狀況
-
-![041](/.github/screenshot/041.webp)
-![042](/.github/screenshot/042.webp)
-
-### 完整的多語言翻譯
-
-![043](/.github/screenshot/043.webp)
-![044](/.github/screenshot/044.webp)
-
-### 公開分享系統
-
-![045](/.github/screenshot/045.webp)
-![046](/.github/screenshot/046.webp)
-
-### 作用域分明的 API 系統
-
-![047](/.github/screenshot/047.webp)
-
-### 定時任務
-
-![048](/.github/screenshot/048.webp)
-
-### 對 JSON 格式的自訂事件進行深度分析
-
-![049](/.github/screenshot/049.webp)
-![050](/.github/screenshot/050.webp)
-![051](/.github/screenshot/051.webp)
-![052](/.github/screenshot/052.webp)
-![053](/.github/screenshot/053.webp)
-
-### 使用漏斗來分析造訪與事件
-
-![054](/.github/screenshot/054.webp)
-
-### 定時 / 按條件接收通知郵件
-
-![055](/.github/screenshot/055.webp)
-![056](/.github/screenshot/056.webp)
-![057](/.github/screenshot/057.webp)
-
-### 多維度的機器人防護與觀測系統
-
-![058](/.github/screenshot/058.webp)
-![059](/.github/screenshot/059.webp)
-![060](/.github/screenshot/060.webp)
-![061](/.github/screenshot/061.webp)
-![062](/.github/screenshot/062.webp)
 
 ---
 
