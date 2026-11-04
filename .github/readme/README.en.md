@@ -48,37 +48,149 @@ A few highlights from the live interface. Select any image for its full-size vie
   </tr>
 </table>
 
-<details>
-<summary><strong>Browse every feature screenshot</strong></summary>
+## Feature gallery
 
-All original screenshots remain available as direct links, grouped by feature. This keeps the README fast to skim without hiding the details.
+Browse the real interface below. Screenshots are grouped by task, and each thumbnail opens the full-size image.
 
-- **Comprehensive Traffic Dimension Tracking**: [001](/.github/screenshot/001.webp) · [002](/.github/screenshot/002.webp) · [003](/.github/screenshot/003.webp)
-- **Real-Time Visitor Monitoring**: [004](/.github/screenshot/004.webp) · [005](/.github/screenshot/005.webp)
-- **Page-Level Traffic Analytics**: [006](/.github/screenshot/006.webp)
-- **Track Real Visitor Performance**: [007](/.github/screenshot/007.webp) · [008](/.github/screenshot/008.webp) · [009](/.github/screenshot/009.webp)
-- **Compare Traffic Quality Across Sources**: [010](/.github/screenshot/010.webp) · [011](/.github/screenshot/011.webp) · [012](/.github/screenshot/012.webp)
-- **Track UTM Campaign Performance**: [013](/.github/screenshot/013.webp) · [014](/.github/screenshot/014.webp)
-- **Record and Analyze Custom Events**: [015](/.github/screenshot/015.webp) · [016](/.github/screenshot/016.webp) · [017](/.github/screenshot/017.webp)
-- **Inspect Every Session**: [018](/.github/screenshot/018.webp) · [019](/.github/screenshot/019.webp) · [020](/.github/screenshot/020.webp) · [021](/.github/screenshot/021.webp)
-- **Understand Every Visitor**: [022](/.github/screenshot/022.webp) · [023](/.github/screenshot/023.webp)
-- **Track Return Visits**: [024](/.github/screenshot/024.webp) · [025](/.github/screenshot/025.webp)
-- **Understand Geographic Distribution and Market Intelligence**: [026](/.github/screenshot/026.webp) · [027](/.github/screenshot/027.webp) · [028](/.github/screenshot/028.webp)
-- **View Visitor Device Details**: [029](/.github/screenshot/029.webp) · [030](/.github/screenshot/030.webp) · [031](/.github/screenshot/031.webp)
-- **Understand Browsers and Their Capabilities**: [032](/.github/screenshot/032.webp) · [033](/.github/screenshot/033.webp) · [034](/.github/screenshot/034.webp) · [035](/.github/screenshot/035.webp) · [036](/.github/screenshot/036.webp)
-- **Adjust Tracking Settings Anytime, Without Changing the Frontend SDK**: [037](/.github/screenshot/037.webp) · [038](/.github/screenshot/038.webp)
-- **Designed for Team Collaboration**: [039](/.github/screenshot/039.webp) · [040](/.github/screenshot/040.webp)
-- **Understand System Health at a Glance**: [041](/.github/screenshot/041.webp) · [042](/.github/screenshot/042.webp)
-- **Complete Multilingual Translation**: [043](/.github/screenshot/043.webp) · [044](/.github/screenshot/044.webp)
-- **Public Sharing System**: [045](/.github/screenshot/045.webp) · [046](/.github/screenshot/046.webp)
-- **Clearly Scoped API System**: [047](/.github/screenshot/047.webp)
-- **Scheduled Tasks**: [048](/.github/screenshot/048.webp)
-- **Deep Analysis for JSON Custom Events**: [049](/.github/screenshot/049.webp) · [050](/.github/screenshot/050.webp) · [051](/.github/screenshot/051.webp) · [052](/.github/screenshot/052.webp) · [053](/.github/screenshot/053.webp)
-- **Analyze Visits and Events with Funnels**: [054](/.github/screenshot/054.webp)
-- **Receive Scheduled or Conditional Email Notifications**: [055](/.github/screenshot/055.webp) · [056](/.github/screenshot/056.webp) · [057](/.github/screenshot/057.webp)
-- **Multi-Dimensional Bot Protection and Request Observation**: [058](/.github/screenshot/058.webp) · [059](/.github/screenshot/059.webp) · [060](/.github/screenshot/060.webp) · [061](/.github/screenshot/061.webp) · [062](/.github/screenshot/062.webp)
+### Traffic overview & acquisition
 
-</details>
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/001.webp"><img src="/.github/screenshot/001.webp" width="100%" alt="Comprehensive Traffic Dimension Tracking" title="Comprehensive Traffic Dimension Tracking"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/002.webp"><img src="/.github/screenshot/002.webp" width="100%" alt="Comprehensive Traffic Dimension Tracking" title="Comprehensive Traffic Dimension Tracking"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/003.webp"><img src="/.github/screenshot/003.webp" width="100%" alt="Comprehensive Traffic Dimension Tracking" title="Comprehensive Traffic Dimension Tracking"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/004.webp"><img src="/.github/screenshot/004.webp" width="100%" alt="Real-Time Visitor Monitoring" title="Real-Time Visitor Monitoring"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/005.webp"><img src="/.github/screenshot/005.webp" width="100%" alt="Real-Time Visitor Monitoring" title="Real-Time Visitor Monitoring"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/006.webp"><img src="/.github/screenshot/006.webp" width="100%" alt="Page-Level Traffic Analytics" title="Page-Level Traffic Analytics"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/007.webp"><img src="/.github/screenshot/007.webp" width="100%" alt="Track Real Visitor Performance" title="Track Real Visitor Performance"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/008.webp"><img src="/.github/screenshot/008.webp" width="100%" alt="Track Real Visitor Performance" title="Track Real Visitor Performance"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/009.webp"><img src="/.github/screenshot/009.webp" width="100%" alt="Track Real Visitor Performance" title="Track Real Visitor Performance"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/010.webp"><img src="/.github/screenshot/010.webp" width="100%" alt="Compare Traffic Quality Across Sources" title="Compare Traffic Quality Across Sources"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/011.webp"><img src="/.github/screenshot/011.webp" width="100%" alt="Compare Traffic Quality Across Sources" title="Compare Traffic Quality Across Sources"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/012.webp"><img src="/.github/screenshot/012.webp" width="100%" alt="Compare Traffic Quality Across Sources" title="Compare Traffic Quality Across Sources"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/013.webp"><img src="/.github/screenshot/013.webp" width="100%" alt="Track UTM Campaign Performance" title="Track UTM Campaign Performance"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/014.webp"><img src="/.github/screenshot/014.webp" width="100%" alt="Track UTM Campaign Performance" title="Track UTM Campaign Performance"></a></td>
+    <td width="33%"></td>
+  </tr>
+</table>
+
+### Events, sessions & visitor journeys
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/015.webp"><img src="/.github/screenshot/015.webp" width="100%" alt="Record and Analyze Custom Events" title="Record and Analyze Custom Events"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/016.webp"><img src="/.github/screenshot/016.webp" width="100%" alt="Record and Analyze Custom Events" title="Record and Analyze Custom Events"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/017.webp"><img src="/.github/screenshot/017.webp" width="100%" alt="Record and Analyze Custom Events" title="Record and Analyze Custom Events"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/018.webp"><img src="/.github/screenshot/018.webp" width="100%" alt="Inspect Every Session" title="Inspect Every Session"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/019.webp"><img src="/.github/screenshot/019.webp" width="100%" alt="Inspect Every Session" title="Inspect Every Session"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/020.webp"><img src="/.github/screenshot/020.webp" width="100%" alt="Inspect Every Session" title="Inspect Every Session"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/021.webp"><img src="/.github/screenshot/021.webp" width="100%" alt="Inspect Every Session" title="Inspect Every Session"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/022.webp"><img src="/.github/screenshot/022.webp" width="100%" alt="Understand Every Visitor" title="Understand Every Visitor"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/023.webp"><img src="/.github/screenshot/023.webp" width="100%" alt="Understand Every Visitor" title="Understand Every Visitor"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/024.webp"><img src="/.github/screenshot/024.webp" width="100%" alt="Track Return Visits" title="Track Return Visits"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/025.webp"><img src="/.github/screenshot/025.webp" width="100%" alt="Track Return Visits" title="Track Return Visits"></a></td>
+    <td width="33%"></td>
+  </tr>
+</table>
+
+### Audience, devices & geography
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/026.webp"><img src="/.github/screenshot/026.webp" width="100%" alt="Understand Geographic Distribution and Market Intelligence" title="Understand Geographic Distribution and Market Intelligence"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/027.webp"><img src="/.github/screenshot/027.webp" width="100%" alt="Understand Geographic Distribution and Market Intelligence" title="Understand Geographic Distribution and Market Intelligence"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/028.webp"><img src="/.github/screenshot/028.webp" width="100%" alt="Understand Geographic Distribution and Market Intelligence" title="Understand Geographic Distribution and Market Intelligence"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/029.webp"><img src="/.github/screenshot/029.webp" width="100%" alt="View Visitor Device Details" title="View Visitor Device Details"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/030.webp"><img src="/.github/screenshot/030.webp" width="100%" alt="View Visitor Device Details" title="View Visitor Device Details"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/031.webp"><img src="/.github/screenshot/031.webp" width="100%" alt="View Visitor Device Details" title="View Visitor Device Details"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/032.webp"><img src="/.github/screenshot/032.webp" width="100%" alt="Understand Browsers and Their Capabilities" title="Understand Browsers and Their Capabilities"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/033.webp"><img src="/.github/screenshot/033.webp" width="100%" alt="Understand Browsers and Their Capabilities" title="Understand Browsers and Their Capabilities"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/034.webp"><img src="/.github/screenshot/034.webp" width="100%" alt="Understand Browsers and Their Capabilities" title="Understand Browsers and Their Capabilities"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/035.webp"><img src="/.github/screenshot/035.webp" width="100%" alt="Understand Browsers and Their Capabilities" title="Understand Browsers and Their Capabilities"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/036.webp"><img src="/.github/screenshot/036.webp" width="100%" alt="Understand Browsers and Their Capabilities" title="Understand Browsers and Their Capabilities"></a></td>
+    <td width="33%"></td>
+  </tr>
+</table>
+
+### Configuration, teams & sharing
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/037.webp"><img src="/.github/screenshot/037.webp" width="100%" alt="Adjust Tracking Settings Anytime, Without Changing the Frontend SDK" title="Adjust Tracking Settings Anytime, Without Changing the Frontend SDK"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/038.webp"><img src="/.github/screenshot/038.webp" width="100%" alt="Adjust Tracking Settings Anytime, Without Changing the Frontend SDK" title="Adjust Tracking Settings Anytime, Without Changing the Frontend SDK"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/039.webp"><img src="/.github/screenshot/039.webp" width="100%" alt="Designed for Team Collaboration" title="Designed for Team Collaboration"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/040.webp"><img src="/.github/screenshot/040.webp" width="100%" alt="Designed for Team Collaboration" title="Designed for Team Collaboration"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/041.webp"><img src="/.github/screenshot/041.webp" width="100%" alt="Understand System Health at a Glance" title="Understand System Health at a Glance"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/042.webp"><img src="/.github/screenshot/042.webp" width="100%" alt="Understand System Health at a Glance" title="Understand System Health at a Glance"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/043.webp"><img src="/.github/screenshot/043.webp" width="100%" alt="Complete Multilingual Translation" title="Complete Multilingual Translation"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/044.webp"><img src="/.github/screenshot/044.webp" width="100%" alt="Complete Multilingual Translation" title="Complete Multilingual Translation"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/045.webp"><img src="/.github/screenshot/045.webp" width="100%" alt="Public Sharing System" title="Public Sharing System"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/046.webp"><img src="/.github/screenshot/046.webp" width="100%" alt="Public Sharing System" title="Public Sharing System"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/047.webp"><img src="/.github/screenshot/047.webp" width="100%" alt="Clearly Scoped API System" title="Clearly Scoped API System"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/048.webp"><img src="/.github/screenshot/048.webp" width="100%" alt="Scheduled Tasks" title="Scheduled Tasks"></a></td>
+  </tr>
+</table>
+
+### Deep event analysis & funnels
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/049.webp"><img src="/.github/screenshot/049.webp" width="100%" alt="Deep Analysis for JSON Custom Events" title="Deep Analysis for JSON Custom Events"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/050.webp"><img src="/.github/screenshot/050.webp" width="100%" alt="Deep Analysis for JSON Custom Events" title="Deep Analysis for JSON Custom Events"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/051.webp"><img src="/.github/screenshot/051.webp" width="100%" alt="Deep Analysis for JSON Custom Events" title="Deep Analysis for JSON Custom Events"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/052.webp"><img src="/.github/screenshot/052.webp" width="100%" alt="Deep Analysis for JSON Custom Events" title="Deep Analysis for JSON Custom Events"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/053.webp"><img src="/.github/screenshot/053.webp" width="100%" alt="Deep Analysis for JSON Custom Events" title="Deep Analysis for JSON Custom Events"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/054.webp"><img src="/.github/screenshot/054.webp" width="100%" alt="Analyze Visits and Events with Funnels" title="Analyze Visits and Events with Funnels"></a></td>
+  </tr>
+</table>
+
+### Operations, alerts & bot protection
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/055.webp"><img src="/.github/screenshot/055.webp" width="100%" alt="Receive Scheduled or Conditional Email Notifications" title="Receive Scheduled or Conditional Email Notifications"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/056.webp"><img src="/.github/screenshot/056.webp" width="100%" alt="Receive Scheduled or Conditional Email Notifications" title="Receive Scheduled or Conditional Email Notifications"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/057.webp"><img src="/.github/screenshot/057.webp" width="100%" alt="Receive Scheduled or Conditional Email Notifications" title="Receive Scheduled or Conditional Email Notifications"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/058.webp"><img src="/.github/screenshot/058.webp" width="100%" alt="Multi-Dimensional Bot Protection and Request Observation" title="Multi-Dimensional Bot Protection and Request Observation"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/059.webp"><img src="/.github/screenshot/059.webp" width="100%" alt="Multi-Dimensional Bot Protection and Request Observation" title="Multi-Dimensional Bot Protection and Request Observation"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/060.webp"><img src="/.github/screenshot/060.webp" width="100%" alt="Multi-Dimensional Bot Protection and Request Observation" title="Multi-Dimensional Bot Protection and Request Observation"></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/061.webp"><img src="/.github/screenshot/061.webp" width="100%" alt="Multi-Dimensional Bot Protection and Request Observation" title="Multi-Dimensional Bot Protection and Request Observation"></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/062.webp"><img src="/.github/screenshot/062.webp" width="100%" alt="Multi-Dimensional Bot Protection and Request Observation" title="Multi-Dimensional Bot Protection and Request Observation"></a></td>
+    <td width="33%"></td>
+  </tr>
+</table>
 
 ---
 
