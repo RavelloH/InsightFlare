@@ -1,24 +1,84 @@
+<div align="center">
+
 # InsightFlare
+
+### 数据属于你，分析运行在自己的 Cloudflare 上。
+
+兼顾隐私与分析深度的开源网站统计平台：实时流量、访客旅程、转化漏斗，以及 AI Agent 数据分析。
+
+[**在线体验**](https://insight-demo.ravelloh.com/) &nbsp;·&nbsp; [**一键部署到 Cloudflare**](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FRavelloH%2FInsightFlare) &nbsp;·&nbsp; [**源代码**](https://github.com/RavelloH/InsightFlare)
+
+[![GitHub stars](https://img.shields.io/github/stars/RavelloH/InsightFlare?style=flat-square&logo=github)](https://github.com/RavelloH/InsightFlare/stargazers) [![Latest release](https://img.shields.io/github/v/release/RavelloH/InsightFlare?style=flat-square)](https://github.com/RavelloH/InsightFlare/releases) [![License: MIT](https://img.shields.io/github/license/RavelloH/InsightFlare?style=flat-square)](/LICENSE)
 
 <!-- auto-readme-i18n-switcher start -->
 | [English](/.github/readme/README.en.md) | [日本語](/.github/readme/README.ja.md) | [中文（台灣）](/.github/readme/README.zh-tw.md) | 中文 |
 <!-- auto-readme-i18n-switcher end -->
 
-> 功能强大、隐私友好的开源网站访问分析工具，完全运行于 Cloudflare 上。
+</div>
 
-Demo: [http://insight-demo.ravelloh.com](http://insight-demo.ravelloh.com/)
+<a href="https://insight-demo.ravelloh.com/"><img src="/.github/screenshot/001.webp" alt="InsightFlare analytics dashboard" width="100%"></a>
 
-![ScreenShot](/.github/screenshot/001.webp)
+## 为什么选择 InsightFlare？
 
-完全符合 GDPR，无任何 Cookie ，无需用户同意即可合法追踪访问数据。独创的智能跟踪强度机制，可根据不同地区的隐私法规自动调整访客标识的持久性，最大程度兼顾数据完整性与用户隐私保护。
+不止于访问量统计，也不必将分析数据交给第三方平台。InsightFlare 运行在你自己的 Cloudflare 账户中，将流量、访客行为和运行观测整合在一个仪表盘里。
 
-前端统计脚本 SDK 在 gzip 压缩后仅约 3 KB，通过 Cloudflare 全球 CDN 分发，访问性能优秀。SDK 自带自定义事件追踪（`data-insightflare-event`）和性能指标追踪。
+- **自己的基础设施，自己的数据。** 基于 Cloudflare Workers、D1 和 Durable Objects 自托管，无需注册第三方分析 SaaS。
+- **看懂访客行为。** 分析会话、访问旅程、漏斗、自定义事件、UTM 活动和流量来源质量。
+- **实时掌握网站动态。** 观察实时访问、性能指标、地理分布、浏览器和设备。
+- **辨别无效流量。** 通过机器人防护和异常请求观测，区分纯粹的访问量与真实有价值的访问。
+- **让 AI Agent 帮忙分析。** 借助 Skills 入口和具备权限控制的 API，自然语言查询访问数据。
+- **从小规模开始，按需扩展。** 支持一键部署、多站点与团队、可选的 R2 归档及灵活配置。
 
-多语言的仪表盘使用前所未有的可视化效果，让你对访问数据了如指掌。独创的地名多语言翻译功能，自动翻译全球 95% 以上的地名，让你轻松了解访客的地理分布。
+**隐私与费用说明：** 追踪器采用无 Cookie 设计，不保存原始 IP。具体法律合规要求与 Cloudflare 费用取决于部署配置、流量和适用地区。
 
-Cloudflare 的免费额度可提供每日 10 万次访问的免费追踪，结合边缘计算带来极佳性能。
+## 界面预览
 
-我们不存储原始 IP 信息，依靠 Cloudflare 进行地理位置解析，在保护用户隐私的同时提供极高精准度的分析。
+精选真实界面截图，点击即可查看原图。
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/004.webp"><img src="/.github/screenshot/004.webp" alt="实时访问" width="100%"><br><strong>实时访问</strong></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/018.webp"><img src="/.github/screenshot/018.webp" alt="访客会话" width="100%"><br><strong>访客会话</strong></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/054.webp"><img src="/.github/screenshot/054.webp" alt="事件漏斗" width="100%"><br><strong>事件漏斗</strong></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/010.webp"><img src="/.github/screenshot/010.webp" alt="来源分析" width="100%"><br><strong>来源分析</strong></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/026.webp"><img src="/.github/screenshot/026.webp" alt="地理分布" width="100%"><br><strong>地理分布</strong></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/058.webp"><img src="/.github/screenshot/058.webp" alt="机器人观测" width="100%"><br><strong>机器人观测</strong></a></td>
+  </tr>
+</table>
+
+<details>
+<summary><strong>查看完整功能截图索引</strong></summary>
+
+全部原始截图仍按功能分类提供直达链接，避免 README 被大量图片撑得过长。
+
+- **完整的访问维度追踪**: [001](/.github/screenshot/001.webp) · [002](/.github/screenshot/002.webp) · [003](/.github/screenshot/003.webp)
+- **实时查看访客情况**: [004](/.github/screenshot/004.webp) · [005](/.github/screenshot/005.webp)
+- **分页面查看访问情况**: [006](/.github/screenshot/006.webp)
+- **追踪访客的真实访问性能**: [007](/.github/screenshot/007.webp) · [008](/.github/screenshot/008.webp) · [009](/.github/screenshot/009.webp)
+- **对比各个来源的访问质量**: [010](/.github/screenshot/010.webp) · [011](/.github/screenshot/011.webp) · [012](/.github/screenshot/012.webp)
+- **追踪 UTM 活动效果**: [013](/.github/screenshot/013.webp) · [014](/.github/screenshot/014.webp)
+- **记录并分析自定义事件**: [015](/.github/screenshot/015.webp) · [016](/.github/screenshot/016.webp) · [017](/.github/screenshot/017.webp)
+- **洞察每一次会话**: [018](/.github/screenshot/018.webp) · [019](/.github/screenshot/019.webp) · [020](/.github/screenshot/020.webp) · [021](/.github/screenshot/021.webp)
+- **了解你的每一位访客**: [022](/.github/screenshot/022.webp) · [023](/.github/screenshot/023.webp)
+- **追踪站点的回访情况**: [024](/.github/screenshot/024.webp) · [025](/.github/screenshot/025.webp)
+- **了解访客的地理分布与市场情报**: [026](/.github/screenshot/026.webp) · [027](/.github/screenshot/027.webp) · [028](/.github/screenshot/028.webp)
+- **查看访客的设备情况**: [029](/.github/screenshot/029.webp) · [030](/.github/screenshot/030.webp) · [031](/.github/screenshot/031.webp)
+- **了解用户的浏览器及其能力**: [032](/.github/screenshot/032.webp) · [033](/.github/screenshot/033.webp) · [034](/.github/screenshot/034.webp) · [035](/.github/screenshot/035.webp) · [036](/.github/screenshot/036.webp)
+- **随时调整你的追踪设置，无需修改前端 SDK**: [037](/.github/screenshot/037.webp) · [038](/.github/screenshot/038.webp)
+- **为团队协作而设计**: [039](/.github/screenshot/039.webp) · [040](/.github/screenshot/040.webp)
+- **轻松了解系统的运行状况**: [041](/.github/screenshot/041.webp) · [042](/.github/screenshot/042.webp)
+- **完整的多语言翻译**: [043](/.github/screenshot/043.webp) · [044](/.github/screenshot/044.webp)
+- **公开分享系统**: [045](/.github/screenshot/045.webp) · [046](/.github/screenshot/046.webp)
+- **作用域分明的 API 系统**: [047](/.github/screenshot/047.webp)
+- **定时任务**: [048](/.github/screenshot/048.webp)
+- **对 JSON 格式的自定义事件进行深度分析**: [049](/.github/screenshot/049.webp) · [050](/.github/screenshot/050.webp) · [051](/.github/screenshot/051.webp) · [052](/.github/screenshot/052.webp) · [053](/.github/screenshot/053.webp)
+- **使用漏斗来分析访问与事件**: [054](/.github/screenshot/054.webp)
+- **定时 / 按条件接收通知邮件**: [055](/.github/screenshot/055.webp) · [056](/.github/screenshot/056.webp) · [057](/.github/screenshot/057.webp)
+- **多维度的机器人防护与观测系统**: [058](/.github/screenshot/058.webp) · [059](/.github/screenshot/059.webp) · [060](/.github/screenshot/060.webp) · [061](/.github/screenshot/061.webp) · [062](/.github/screenshot/062.webp)
+
+</details>
 
 ---
 
@@ -40,142 +100,6 @@ Cloudflare 会自动 Clone 这个仓库、创建并绑定所需要的资源。�
 `BOOTSTRAP_ADMIN_PASSWORD` 是你的默认账号管理员密码。你需要使用 `admin` 账号和这个密码登录仪表板，此后可以在个人设置页面修改用户名和密码。
 
 填写完毕后，等待 3 分钟让项目部署完毕，你就可以登录到仪表盘并开始追踪访问数据了。此外，你可以在项目的设置页面自定义其域名。默认的访问地址是 `https://insightflare.<your-cloudflare-username>.workers.dev`
-
-## 特性
-
-### 完整的访问维度追踪
-
-![001](/.github/screenshot/001.webp)
-![002](/.github/screenshot/002.webp)
-![003](/.github/screenshot/003.webp)
-
-### 实时查看访客情况
-
-![004](/.github/screenshot/004.webp)
-![005](/.github/screenshot/005.webp)
-
-### 分页面查看访问情况
-
-![006](/.github/screenshot/006.webp)
-
-### 追踪访客的真实访问性能
-
-![007](/.github/screenshot/007.webp)
-![008](/.github/screenshot/008.webp)
-![009](/.github/screenshot/009.webp)
-
-### 对比各个来源的访问质量
-
-![010](/.github/screenshot/010.webp)
-![011](/.github/screenshot/011.webp)
-![012](/.github/screenshot/012.webp)
-
-### 追踪 UTM 活动效果
-
-![013](/.github/screenshot/013.webp)
-![014](/.github/screenshot/014.webp)
-
-### 记录并分析自定义事件
-
-![015](/.github/screenshot/015.webp)
-![016](/.github/screenshot/016.webp)
-![017](/.github/screenshot/017.webp)
-
-### 洞察每一次会话
-
-![018](/.github/screenshot/018.webp)
-![019](/.github/screenshot/019.webp)
-![020](/.github/screenshot/020.webp)
-![021](/.github/screenshot/021.webp)
-
-### 了解你的每一位访客
-
-![022](/.github/screenshot/022.webp)
-![023](/.github/screenshot/023.webp)
-
-### 追踪站点的回访情况
-
-![024](/.github/screenshot/024.webp)
-![025](/.github/screenshot/025.webp)
-
-### 了解访客的地理分布与市场情报
-
-![026](/.github/screenshot/026.webp)
-![027](/.github/screenshot/027.webp)
-![028](/.github/screenshot/028.webp)
-
-### 查看访客的设备情况
-
-![029](/.github/screenshot/029.webp)
-![030](/.github/screenshot/030.webp)
-![031](/.github/screenshot/031.webp)
-
-### 了解用户的浏览器及其能力
-
-![032](/.github/screenshot/032.webp)
-![033](/.github/screenshot/033.webp)
-![034](/.github/screenshot/034.webp)
-![035](/.github/screenshot/035.webp)
-![036](/.github/screenshot/036.webp)
-
-### 随时调整你的追踪设置，无需修改前端 SDK
-
-![037](/.github/screenshot/037.webp)
-![038](/.github/screenshot/038.webp)
-
-### 为团队协作而设计
-
-![039](/.github/screenshot/039.webp)
-![040](/.github/screenshot/040.webp)
-
-### 轻松了解系统的运行状况
-
-![041](/.github/screenshot/041.webp)
-![042](/.github/screenshot/042.webp)
-
-### 完整的多语言翻译
-
-![043](/.github/screenshot/043.webp)
-![044](/.github/screenshot/044.webp)
-
-### 公开分享系统
-
-![045](/.github/screenshot/045.webp)
-![046](/.github/screenshot/046.webp)
-
-### 作用域分明的 API 系统
-
-![047](/.github/screenshot/047.webp)
-
-### 定时任务
-
-![048](/.github/screenshot/048.webp)
-
-### 对 JSON 格式的自定义事件进行深度分析
-
-![049](/.github/screenshot/049.webp)
-![050](/.github/screenshot/050.webp)
-![051](/.github/screenshot/051.webp)
-![052](/.github/screenshot/052.webp)
-![053](/.github/screenshot/053.webp)
-
-### 使用漏斗来分析访问与事件
-
-![054](/.github/screenshot/054.webp)
-
-### 定时 / 按条件接收通知邮件
-
-![055](/.github/screenshot/055.webp)
-![056](/.github/screenshot/056.webp)
-![057](/.github/screenshot/057.webp)
-
-### 多维度的机器人防护与观测系统
-
-![058](/.github/screenshot/058.webp)
-![059](/.github/screenshot/059.webp)
-![060](/.github/screenshot/060.webp)
-![061](/.github/screenshot/061.webp)
-![062](/.github/screenshot/062.webp)
 
 ---
 
