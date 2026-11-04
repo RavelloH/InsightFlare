@@ -1,0 +1,140 @@
+name: Publish Nightly Deploy Artifact
+
+# One rolling prerelease, not a formal version. Each main commit is compiled
+# independently, and only the newest fully uploaded commit is advertised.
+# Publishing is NOT enabled until this workflow is merged into upstream main.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Serialize publication to avoid races between push and manual runs.
+concurrency:
+  group: insightflare-rolling-nightly
+  cancel-in-progress: false
+
+jobs:
+  nightly:
+    name: Compile exact main SHA and update rolling nightly
+    if: github.repository == 'RavelloH/InsightFlare' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      WORKERS_CI: "1"
+      WRANGLER_SEND_METRICS: "false"
+      DO_NOT_TRACK: "1"
+
+    steps:
+      - name: Checkout exact source commit
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Cloudflare Worker and static assets without remote database access
+        run: pnpm exec tsx scripts/build.ts --target cf --skip-prebuild
+
+      - name: Package SHA-addressed worker, assets and migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/package-deploy-artifact.mjs "$GITHUB_SHA" --archive
+          base=".tmp/deploy-release/insightflare-deploy-$GITHUB_SHA"
+          test -s "$base.tar.gz"
+          test -s "$base.json"
+          tar -tzf "$base.tar.gz" > "$RUNNER_TEMP/nightly-contents.txt"
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+          const sha = process.env.GITHUB_SHA;
+          const m = JSON.parse(readFileSync(".tmp/deploy-release/insightflare-deploy-" + sha + ".json", "utf8"));
+          if (m.schemaVersion !== 1 || m.source.repository !== "RavelloH/InsightFlare" ||
+              m.source.sha !== sha || m.totals.modules < 100 || m.totals.assets < 100 ||
+              m.totals.migrations < 1 || !/^[a-f0-9]{64}$/.test(m.artifactDigest)) {
+            throw new Error("Incomplete or mismatched nightly build.");
+          }
+          console.log("Verified source SHA", sha, "artifact digest", m.artifactDigest);
+          NODE
+
+      - name: Publish one verified nightly tar.gz attachment
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          sha="$GITHUB_SHA"
+          archive=".tmp/deploy-release/insightflare-deploy-$sha.tar.gz"
+          manifest=".tmp/deploy-release/insightflare-deploy-$sha.json"
+          name="insightflare-deploy-$sha.tar.gz"
+          archive_hash="sha256:$(sha256sum "$archive" | cut -d' ' -f1)"
+          digest="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).artifactDigest' "$manifest")"
+
+          current="$(gh api "repos/$GH_REPO/commits/main" --jq .sha)"
+          if [[ "$sha" != "$current" ]]; then
+            echo "Main moved to $current; do not roll nightly backwards."
+            exit 0
+          fi
+
+          {
+            printf '# InsightFlare nightly\n\n'
+            printf 'Rolling CI build of the latest official main commit; not a formal release.\n\n'
+            printf '<!-- insightflare-deploy-nightly-v1 {"sha":"%s","artifactDigest":"%s","archive":"%s"} -->\n\n' "$sha" "$digest" "$name"
+            printf 'Source commit: %s\n' "$sha"
+          } > "$RUNNER_TEMP/nightly-notes.md"
+
+          if ! gh release view nightly >/dev/null 2>&1; then
+            gh release create nightly "$archive" --target "$sha" \
+              --title "Nightly (rolling main builds)" \
+              --notes-file "$RUNNER_TEMP/nightly-notes.md" \
+              --prerelease --latest=false
+          else
+            gh api "repos/$GH_REPO/releases/tags/nightly" > "$RUNNER_TEMP/before.json"
+            jq -e '.tag_name == "nightly" and .draft == false and .prerelease == true and .immutable == false
+                    and (.body | contains("insightflare-deploy-nightly-v1"))' "$RUNNER_TEMP/before.json" >/dev/null
+            existing="$(jq -r --arg name "$name" '[.assets[] | select(.name == $name) | .digest] | first // empty' "$RUNNER_TEMP/before.json")"
+            if [[ -n "$existing" ]]; then
+              [[ "$existing" == "$archive_hash" ]] || { echo "Same SHA has different bytes" >&2; exit 1; }
+            else
+              gh release upload nightly "$archive"
+            fi
+          fi
+
+          gh api "repos/$GH_REPO/releases/tags/nightly" > "$RUNNER_TEMP/uploaded.json"
+          jq -e --arg name "$name" --arg digest "$archive_hash" \
+            'any(.assets[]; .name == $name and .digest == $digest)' "$RUNNER_TEMP/uploaded.json" >/dev/null
+          current="$(gh api "repos/$GH_REPO/commits/main" --jq .sha)"
+          if [[ "$sha" != "$current" ]]; then
+            echo "Main changed during upload; leave previous pointer intact."
+            exit 0
+          fi
+
+          gh release edit nightly --notes-file "$RUNNER_TEMP/nightly-notes.md" --prerelease --latest=false
+
+          # Delete old SHA archives and legacy JSON sidecars only after the
+          # verified new archive is publicly referenced by the pointer.
+          node scripts/prune-nightly-artifacts.mjs --execute "$sha"
+
+          gh api "repos/$GH_REPO/releases/tags/nightly" > "$RUNNER_TEMP/final.json"
+          jq -e --arg name "$name" --arg digest "$archive_hash" --arg sha "$sha" \
+            '.tag_name == "nightly" and .prerelease == true
+             and (.body | contains("\"sha\":\"" + $sha + "\""))
+             and (.assets | length == 1)
+             and .assets[0].name == $name and .assets[0].digest == $digest' \
+             "$RUNNER_TEMP/final.json" >/dev/null
+          echo "Nightly contains exactly one verified tar.gz: $name"
