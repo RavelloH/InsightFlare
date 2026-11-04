@@ -33,8 +33,6 @@ Go beyond pageview counts without outsourcing your analytics. InsightFlare runs 
 
 ## Explore the dashboard
 
-A few highlights from the live interface. Select any image for its full-size view.
-
 <table>
   <tr>
     <td width="33%" align="center"><a href="/.github/screenshot/004.webp"><img src="/.github/screenshot/004.webp" alt="Real-time activity" width="100%"><br><strong>Real-time activity</strong></a></td>
@@ -49,8 +47,6 @@ A few highlights from the live interface. Select any image for its full-size vie
 </table>
 
 ## Feature gallery
-
-Browse the real interface below. Screenshots are grouped by task, and each thumbnail opens the full-size image.
 
 ### Traffic overview & acquisition
 
