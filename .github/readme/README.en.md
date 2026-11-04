@@ -1,24 +1,84 @@
+<div align="center">
+
 # InsightFlare
+
+### Own your analytics. Run it on Cloudflare.
+
+Privacy-aware, open-source web analytics with real-time insights, user journeys, funnels, and AI-agent access — on infrastructure you control.
+
+[**Live demo**](https://insight-demo.ravelloh.com/) &nbsp;·&nbsp; [**Deploy to Cloudflare**](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FRavelloH%2FInsightFlare) &nbsp;·&nbsp; [**Source code**](https://github.com/RavelloH/InsightFlare)
+
+[![GitHub stars](https://img.shields.io/github/stars/RavelloH/InsightFlare?style=flat-square&logo=github)](https://github.com/RavelloH/InsightFlare/stargazers) [![Latest release](https://img.shields.io/github/v/release/RavelloH/InsightFlare?style=flat-square)](https://github.com/RavelloH/InsightFlare/releases) [![License: MIT](https://img.shields.io/github/license/RavelloH/InsightFlare?style=flat-square)](/LICENSE)
 
 <!-- auto-readme-i18n-switcher start -->
 | English | [日本語](/.github/readme/README.ja.md) | [中文（台灣）](/.github/readme/README.zh-tw.md) | [中文](/.github/readme/README.zh.md) |
 <!-- auto-readme-i18n-switcher end -->
 
-> A powerful, privacy-friendly open source web analytics tool that runs entirely on Cloudflare.
+</div>
 
-Demo: [http://insight-demo.ravelloh.com](http://insight-demo.ravelloh.com/)
+<a href="https://insight-demo.ravelloh.com/"><img src="/.github/screenshot/001.webp" alt="InsightFlare analytics dashboard" width="100%"></a>
 
-![ScreenShot](/.github/screenshot/001.webp)
+## Why InsightFlare?
 
-Fully compliant with GDPR, with no cookies, so visits can be tracked legally without asking users for consent. Its original smart tracking intensity mechanism automatically adjusts visitor identifier persistence based on regional privacy regulations, balancing data integrity with privacy protection.
+Go beyond pageview counts without outsourcing your analytics. InsightFlare runs on your own Cloudflare account and brings website traffic, user behavior, and operational visibility together in one dashboard.
 
-The frontend analytics SDK is only about 3 KB after gzip compression and is distributed through Cloudflare's global CDN for excellent performance. The SDK includes custom event tracking (`data-insightflare-event`) and performance metric tracking.
+- **Your infrastructure, your data.** Self-host on Cloudflare Workers with D1 and Durable Objects. No third-party analytics dashboard account required.
+- **Understand what visitors do.** Inspect sessions, journeys, funnels, custom events, UTM campaigns, and traffic-source quality.
+- **See what's happening now.** Follow real-time activity, site performance, geography, browsers, and devices.
+- **Filter out the noise.** Investigate bots, abnormal requests, and the difference between traffic volume and useful visits.
+- **Bring your AI agent.** Connect through the published Skills endpoint and scoped APIs to ask questions about your analytics.
+- **Start small, grow as needed.** One-click deployment, multiple sites and teams, optional R2 archiving, and flexible configuration.
 
-The multilingual dashboard uses unprecedented visualizations to give you a clear picture of traffic data. Its original multilingual place-name translation feature automatically translates more than 95% of place names worldwide, making it easy to understand where visitors come from.
+**Privacy & pricing:** The tracker is designed to be cookieless and does not store raw IP addresses. Regulatory requirements and Cloudflare usage costs depend on your deployment, settings, traffic, and jurisdiction.
 
-Cloudflare's free quotas can support free tracking for 100,000 visits per day, with excellent performance from edge computing.
+## Explore the dashboard
 
-InsightFlare does not store raw IP information. It relies on Cloudflare for geolocation resolution, protecting user privacy while still providing highly accurate analytics.
+A few highlights from the live interface. Select any image for its full-size view.
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/004.webp"><img src="/.github/screenshot/004.webp" alt="Real-time activity" width="100%"><br><strong>Real-time activity</strong></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/018.webp"><img src="/.github/screenshot/018.webp" alt="Visitor sessions" width="100%"><br><strong>Visitor sessions</strong></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/054.webp"><img src="/.github/screenshot/054.webp" alt="Event funnels" width="100%"><br><strong>Event funnels</strong></a></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center"><a href="/.github/screenshot/010.webp"><img src="/.github/screenshot/010.webp" alt="Traffic sources" width="100%"><br><strong>Traffic sources</strong></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/026.webp"><img src="/.github/screenshot/026.webp" alt="Geography" width="100%"><br><strong>Geography</strong></a></td>
+    <td width="33%" align="center"><a href="/.github/screenshot/058.webp"><img src="/.github/screenshot/058.webp" alt="Bot observability" width="100%"><br><strong>Bot observability</strong></a></td>
+  </tr>
+</table>
+
+<details>
+<summary><strong>Browse every feature screenshot</strong></summary>
+
+All original screenshots remain available as direct links, grouped by feature. This keeps the README fast to skim without hiding the details.
+
+- **Comprehensive Traffic Dimension Tracking**: [001](/.github/screenshot/001.webp) · [002](/.github/screenshot/002.webp) · [003](/.github/screenshot/003.webp)
+- **Real-Time Visitor Monitoring**: [004](/.github/screenshot/004.webp) · [005](/.github/screenshot/005.webp)
+- **Page-Level Traffic Analytics**: [006](/.github/screenshot/006.webp)
+- **Track Real Visitor Performance**: [007](/.github/screenshot/007.webp) · [008](/.github/screenshot/008.webp) · [009](/.github/screenshot/009.webp)
+- **Compare Traffic Quality Across Sources**: [010](/.github/screenshot/010.webp) · [011](/.github/screenshot/011.webp) · [012](/.github/screenshot/012.webp)
+- **Track UTM Campaign Performance**: [013](/.github/screenshot/013.webp) · [014](/.github/screenshot/014.webp)
+- **Record and Analyze Custom Events**: [015](/.github/screenshot/015.webp) · [016](/.github/screenshot/016.webp) · [017](/.github/screenshot/017.webp)
+- **Inspect Every Session**: [018](/.github/screenshot/018.webp) · [019](/.github/screenshot/019.webp) · [020](/.github/screenshot/020.webp) · [021](/.github/screenshot/021.webp)
+- **Understand Every Visitor**: [022](/.github/screenshot/022.webp) · [023](/.github/screenshot/023.webp)
+- **Track Return Visits**: [024](/.github/screenshot/024.webp) · [025](/.github/screenshot/025.webp)
+- **Understand Geographic Distribution and Market Intelligence**: [026](/.github/screenshot/026.webp) · [027](/.github/screenshot/027.webp) · [028](/.github/screenshot/028.webp)
+- **View Visitor Device Details**: [029](/.github/screenshot/029.webp) · [030](/.github/screenshot/030.webp) · [031](/.github/screenshot/031.webp)
+- **Understand Browsers and Their Capabilities**: [032](/.github/screenshot/032.webp) · [033](/.github/screenshot/033.webp) · [034](/.github/screenshot/034.webp) · [035](/.github/screenshot/035.webp) · [036](/.github/screenshot/036.webp)
+- **Adjust Tracking Settings Anytime, Without Changing the Frontend SDK**: [037](/.github/screenshot/037.webp) · [038](/.github/screenshot/038.webp)
+- **Designed for Team Collaboration**: [039](/.github/screenshot/039.webp) · [040](/.github/screenshot/040.webp)
+- **Understand System Health at a Glance**: [041](/.github/screenshot/041.webp) · [042](/.github/screenshot/042.webp)
+- **Complete Multilingual Translation**: [043](/.github/screenshot/043.webp) · [044](/.github/screenshot/044.webp)
+- **Public Sharing System**: [045](/.github/screenshot/045.webp) · [046](/.github/screenshot/046.webp)
+- **Clearly Scoped API System**: [047](/.github/screenshot/047.webp)
+- **Scheduled Tasks**: [048](/.github/screenshot/048.webp)
+- **Deep Analysis for JSON Custom Events**: [049](/.github/screenshot/049.webp) · [050](/.github/screenshot/050.webp) · [051](/.github/screenshot/051.webp) · [052](/.github/screenshot/052.webp) · [053](/.github/screenshot/053.webp)
+- **Analyze Visits and Events with Funnels**: [054](/.github/screenshot/054.webp)
+- **Receive Scheduled or Conditional Email Notifications**: [055](/.github/screenshot/055.webp) · [056](/.github/screenshot/056.webp) · [057](/.github/screenshot/057.webp)
+- **Multi-Dimensional Bot Protection and Request Observation**: [058](/.github/screenshot/058.webp) · [059](/.github/screenshot/059.webp) · [060](/.github/screenshot/060.webp) · [061](/.github/screenshot/061.webp) · [062](/.github/screenshot/062.webp)
+
+</details>
 
 ---
 
@@ -40,142 +100,6 @@ Cloudflare will automatically clone this repository and create and bind the requ
 `BOOTSTRAP_ADMIN_PASSWORD` is the default administrator password. Sign in to the dashboard with the `admin` account and this password. You can change the username and password later on the personal settings page.
 
 After filling in the variables, wait about 3 minutes for the deployment to finish. You can then sign in to the dashboard and start tracking traffic data. You can also customize the domain name on the project settings page. The default URL is `https://insightflare.<your-cloudflare-username>.workers.dev`.
-
-## Features
-
-### Comprehensive Traffic Dimension Tracking
-
-![001](/.github/screenshot/001.webp)
-![002](/.github/screenshot/002.webp)
-![003](/.github/screenshot/003.webp)
-
-### Real-Time Visitor Monitoring
-
-![004](/.github/screenshot/004.webp)
-![005](/.github/screenshot/005.webp)
-
-### Page-Level Traffic Analytics
-
-![006](/.github/screenshot/006.webp)
-
-### Track Real Visitor Performance
-
-![007](/.github/screenshot/007.webp)
-![008](/.github/screenshot/008.webp)
-![009](/.github/screenshot/009.webp)
-
-### Compare Traffic Quality Across Sources
-
-![010](/.github/screenshot/010.webp)
-![011](/.github/screenshot/011.webp)
-![012](/.github/screenshot/012.webp)
-
-### Track UTM Campaign Performance
-
-![013](/.github/screenshot/013.webp)
-![014](/.github/screenshot/014.webp)
-
-### Record and Analyze Custom Events
-
-![015](/.github/screenshot/015.webp)
-![016](/.github/screenshot/016.webp)
-![017](/.github/screenshot/017.webp)
-
-### Inspect Every Session
-
-![018](/.github/screenshot/018.webp)
-![019](/.github/screenshot/019.webp)
-![020](/.github/screenshot/020.webp)
-![021](/.github/screenshot/021.webp)
-
-### Understand Every Visitor
-
-![022](/.github/screenshot/022.webp)
-![023](/.github/screenshot/023.webp)
-
-### Track Return Visits
-
-![024](/.github/screenshot/024.webp)
-![025](/.github/screenshot/025.webp)
-
-### Understand Geographic Distribution and Market Intelligence
-
-![026](/.github/screenshot/026.webp)
-![027](/.github/screenshot/027.webp)
-![028](/.github/screenshot/028.webp)
-
-### View Visitor Device Details
-
-![029](/.github/screenshot/029.webp)
-![030](/.github/screenshot/030.webp)
-![031](/.github/screenshot/031.webp)
-
-### Understand Browsers and Their Capabilities
-
-![032](/.github/screenshot/032.webp)
-![033](/.github/screenshot/033.webp)
-![034](/.github/screenshot/034.webp)
-![035](/.github/screenshot/035.webp)
-![036](/.github/screenshot/036.webp)
-
-### Adjust Tracking Settings Anytime, Without Changing the Frontend SDK
-
-![037](/.github/screenshot/037.webp)
-![038](/.github/screenshot/038.webp)
-
-### Designed for Team Collaboration
-
-![039](/.github/screenshot/039.webp)
-![040](/.github/screenshot/040.webp)
-
-### Understand System Health at a Glance
-
-![041](/.github/screenshot/041.webp)
-![042](/.github/screenshot/042.webp)
-
-### Complete Multilingual Translation
-
-![043](/.github/screenshot/043.webp)
-![044](/.github/screenshot/044.webp)
-
-### Public Sharing System
-
-![045](/.github/screenshot/045.webp)
-![046](/.github/screenshot/046.webp)
-
-### Clearly Scoped API System
-
-![047](/.github/screenshot/047.webp)
-
-### Scheduled Tasks
-
-![048](/.github/screenshot/048.webp)
-
-### Deep Analysis for JSON Custom Events
-
-![049](/.github/screenshot/049.webp)
-![050](/.github/screenshot/050.webp)
-![051](/.github/screenshot/051.webp)
-![052](/.github/screenshot/052.webp)
-![053](/.github/screenshot/053.webp)
-
-### Analyze Visits and Events with Funnels
-
-![054](/.github/screenshot/054.webp)
-
-### Receive Scheduled or Conditional Email Notifications
-
-![055](/.github/screenshot/055.webp)
-![056](/.github/screenshot/056.webp)
-![057](/.github/screenshot/057.webp)
-
-### Multi-Dimensional Bot Protection and Request Observation
-
-![058](/.github/screenshot/058.webp)
-![059](/.github/screenshot/059.webp)
-![060](/.github/screenshot/060.webp)
-![061](/.github/screenshot/061.webp)
-![062](/.github/screenshot/062.webp)
 
 ---
 
