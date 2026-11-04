@@ -33,8 +33,6 @@
 
 ## ダッシュボードのプレビュー
 
-実際の画面から主な機能を紹介します。画像をクリックすると拡大できます。
-
 <table>
   <tr>
     <td width="33%" align="center"><a href="/.github/screenshot/004.webp"><img src="/.github/screenshot/004.webp" alt="リアルタイム" width="100%"><br><strong>リアルタイム</strong></a></td>
@@ -49,8 +47,6 @@
 </table>
 
 ## すべての機能をプレビュー
-
-実際の画面を機能別の画像ギャラリーで紹介します。サムネイルをクリックすると拡大できます。
 
 ### トラフィック概要と流入元
 
