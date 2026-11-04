@@ -33,8 +33,6 @@
 
 ## 界面预览
 
-精选真实界面截图，点击即可查看原图。
-
 <table>
   <tr>
     <td width="33%" align="center"><a href="/.github/screenshot/004.webp"><img src="/.github/screenshot/004.webp" alt="实时访问" width="100%"><br><strong>实时访问</strong></a></td>
@@ -49,8 +47,6 @@
 </table>
 
 ## 完整功能预览
-
-与 NeutralPress 一样，直接展示真实界面截图。按功能分类排列，点击缩略图即可查看原图。
 
 ### 流量概览与来源分析
 
