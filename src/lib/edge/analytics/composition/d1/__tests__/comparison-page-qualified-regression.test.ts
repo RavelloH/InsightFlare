@@ -4,6 +4,7 @@ import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
+import { D1_MAX_BOUND_PARAMETERS, D1_MAX_SQL_UTF8_BYTES } from "@/lib/db";
 import {
   createSqliteD1Database,
   type SqliteD1Trace,
@@ -185,6 +186,130 @@ function createFixture(): DatabaseSync {
   seedSide(database, "current", (key) => key + 1, 110);
   seedSide(database, "reference", (key) => 8 - key, 210);
   return database;
+}
+
+function seedWholeBooleanProofRows(
+  database: DatabaseSync,
+  side: "current" | "reference",
+): void {
+  const insertVisit = database.prepare(
+    `INSERT INTO visits (
+      visit_id, site_id, site_pk, visitor_id, session_id, status,
+      started_at, last_activity_at, pathname, query_string, title,
+      hostname, timezone, as_organization, duration_ms
+    ) VALUES (?, ?, 1, ?, ?, 'closed', ?, ?, ?, '', '', 'proof.example', 'UTC', '', 1)`,
+  );
+  const insertQualifier = database.prepare(
+    `INSERT INTO custom_events (
+      event_id, site_id, site_pk, visit_id, event_name_id, occurred_at,
+      received_at, sequence, node_count, value_count
+    ) VALUES (?, ?, 1, ?, 1, ?, ?, 1, 0, 0)`,
+  );
+  const add = (input: {
+    readonly suffix: string;
+    readonly pathname: string;
+    readonly startedAt: number;
+    readonly sessionId?: string;
+    readonly visitorId?: string;
+    readonly qualifier: boolean;
+  }) => {
+    const visitId = `${side}-boolean-${input.suffix}`;
+    insertVisit.run(
+      visitId,
+      SITE,
+      input.visitorId ?? `${visitId}-visitor`,
+      input.sessionId ?? `${visitId}-session`,
+      input.startedAt,
+      input.startedAt,
+      input.pathname,
+    );
+    if (input.qualifier)
+      insertQualifier.run(
+        `${visitId}-qualifier`,
+        SITE,
+        visitId,
+        input.startedAt + 1,
+        input.startedAt + 1,
+      );
+  };
+
+  if (side === "current") {
+    add({
+      suffix: "native-only",
+      pathname: "/current-only",
+      startedAt: 111,
+      qualifier: false,
+    });
+    add({
+      suffix: "count-only",
+      pathname: "/count-only",
+      startedAt: 112,
+      qualifier: true,
+    });
+    return;
+  }
+
+  add({
+    suffix: "not-true",
+    pathname: "/excluded",
+    startedAt: 211,
+    qualifier: false,
+  });
+  add({
+    suffix: "not-false",
+    pathname: "/excluded",
+    startedAt: 212,
+    qualifier: true,
+  });
+}
+
+function wholeBooleanFixtureOwnerRows(
+  database: DatabaseSync,
+  side: "current" | "reference",
+): Record<string, unknown>[] {
+  return database
+    .prepare(
+      `SELECT v.visit_id, v.pathname, v.started_at, v.session_id, v.visitor_id,
+              COUNT(c.event_id) AS qualifier_count
+       FROM visits AS v
+       LEFT JOIN custom_events AS c
+         ON c.visit_id = v.visit_id AND c.event_name_id = 1
+       WHERE v.site_id = ? AND v.visit_id LIKE ?
+       GROUP BY v.visit_id
+       ORDER BY v.started_at, v.visit_id`,
+    )
+    .all(SITE, `${side}-boolean-%`) as Record<string, unknown>[];
+}
+
+function comparisonExecutionShape(
+  trace: SqliteD1Trace,
+  diagnostics: D1ReadDiagnostics,
+) {
+  const metadataIndexes = trace.preparedSql.flatMap((sql, index) =>
+    /^\s*SELECT\b[\s\S]*?\bFROM\s+(?:"sites"(?=\s)|sites\b)/iu.test(sql)
+      ? [index]
+      : [],
+  );
+  const metadataIndexSet = new Set(metadataIndexes);
+  return {
+    statementCount: trace.preparedSql.length,
+    metadataQueryCount: metadataIndexes.length,
+    factQueryCount: trace.preparedSql.length - metadataIndexes.length,
+    metadataQueries: metadataIndexes.map((index) => trace.preparedSql[index]),
+    factQueries: trace.preparedSql.flatMap((sql, index) =>
+      metadataIndexSet.has(index) ? [] : [sql],
+    ),
+    sqlUtf8Bytes: trace.preparedSql.map(
+      (sql) => new TextEncoder().encode(sql).byteLength,
+    ),
+    bindingCounts: trace.bindings.map((bindings) => bindings.length),
+    sqlUtf8ByteLimit: D1_MAX_SQL_UTF8_BYTES,
+    bindingLimit: D1_MAX_BOUND_PARAMETERS,
+    requestedScope: diagnostics.requestedScope,
+    resolvedScope: diagnostics.resolvedScope,
+    requiredSources: diagnostics.requiredSources,
+    requiresRawSource: diagnostics.requiresRawSource,
+  };
 }
 
 function addQualifyingVisits(
@@ -732,8 +857,7 @@ afterEach(() => {
 });
 
 afterAll(async () => {
-  const directory =
-    process.env.WAVE95Y_ARTIFACT_DIR ?? process.env.WAVE95W_ARTIFACT_DIR;
+  const directory = process.env.WAVE97DY_COMPARISON_EVIDENCE_DIR;
   if (!directory) return;
   await mkdir(directory, { recursive: true });
   await writeFile(
@@ -1768,6 +1892,428 @@ describe("qualified Page comparison tabs", () => {
       kind: "unsupported-native-paths",
       selections: ["geo.country", "page.path/public-share"],
       deferred: false,
+      matchesLegacy: true,
+    });
+  });
+
+  it("qualifies whole-boolean Page comparisons across supported scopes and cursor pages", async () => {
+    for (const scope of ["session", "visitor"] as const) {
+      const database = createFixture();
+      seedWholeBooleanProofRows(database, "current");
+      seedWholeBooleanProofRows(database, "reference");
+      const options = {
+        currentScope: scope,
+        referenceScope: scope,
+        currentFilterDsl:
+          'page.path eq "/current-only" or count(event { event.name eq "qualifier" }) gte 1',
+        referenceFilterDsl:
+          'not (page.path eq "/excluded" and count(event { event.name eq "qualifier" }) eq 1)',
+        limit: 2,
+        metric: "visitors" as const,
+        sortBy: "change" as const,
+        direction: "asc" as const,
+      };
+      const query = queryFor(options);
+      const preparationTrace = traceFor();
+      const forwarded = await d1AdvancedFilterMiddleware(
+        testEnv(database, preparationTrace),
+        undefined,
+        SITE,
+      )("dimension", query, async (prepared) => prepared);
+      const deferred = deferredComparisonPageQualificationFromQuery(forwarded);
+      const trace = traceFor();
+      const actual = await makeProvider(database, trace).execute(query);
+      const legacyTrace = traceFor();
+      const legacy = await legacyComparisonPage(database, query, legacyTrace);
+      const firstPage = actual.value as typeof legacy.dto;
+      const nextCursor = firstPage.data.pagination.nextCursor;
+
+      const nextQuery = queryFor({
+        ...options,
+        cursor: typeof nextCursor === "string" ? nextCursor : null,
+      });
+      const nextTrace = traceFor();
+      const nextActual = await makeProvider(database, nextTrace).execute(
+        nextQuery,
+      );
+      const nextLegacyTrace = traceFor();
+      const nextLegacy = await legacyComparisonPage(
+        database,
+        nextQuery,
+        nextLegacyTrace,
+      );
+
+      const fullQuery = queryFor({ ...options, limit: 100 });
+      const fullTrace = traceFor();
+      const fullDiagnostics = createD1ReadDiagnostics();
+      const rawReportControlRows: Array<{
+        readonly sql: string;
+        readonly rows: readonly Record<string, unknown>[];
+      }> = [];
+      const fullEnv = testEnvWithResultMutation(
+        database,
+        fullTrace,
+        (rows) => rows,
+        (sql, rows) => rawReportControlRows.push({ sql, rows }),
+      );
+      const fullActual = await makeProvider(
+        database,
+        fullTrace,
+        fullDiagnostics,
+        fullEnv,
+      ).execute(fullQuery);
+      const fullLegacyTrace = traceFor();
+      const fullLegacy = await legacyComparisonPage(
+        database,
+        fullQuery,
+        fullLegacyTrace,
+      );
+      const incorrectAndQuery = queryFor({
+        ...options,
+        currentFilterDsl:
+          'page.path eq "/current-only" and count(event { event.name eq "qualifier" }) gte 1',
+        limit: 100,
+      });
+      const incorrectAndTrace = traceFor();
+      const incorrectAndDiagnostics = createD1ReadDiagnostics();
+      const incorrectAnd = await makeProvider(
+        database,
+        incorrectAndTrace,
+        incorrectAndDiagnostics,
+      ).execute(incorrectAndQuery);
+      const wholeBooleanEvidence = {
+        kind: "whole-boolean-page-comparison",
+        scope,
+        qualifiedSides: [deferred?.current.kind, deferred?.reference.kind],
+        qualificationModes: [
+          deferred?.current.kind === "qualified"
+            ? deferred.current.qualification.pageDimensionFilterMode
+            : undefined,
+          deferred?.reference.kind === "qualified"
+            ? deferred.reference.qualification.pageDimensionFilterMode
+            : undefined,
+        ],
+        currentWindow: query.current.time.range,
+        referenceWindow: query.reference.time.range,
+        currentFilter:
+          deferred?.current.kind === "qualified"
+            ? deferred.current.qualification.filters.root
+            : undefined,
+        referenceFilter:
+          deferred?.reference.kind === "qualified"
+            ? deferred.reference.qualification.filters.root
+            : undefined,
+        fixtureOwnerRows: {
+          current: wholeBooleanFixtureOwnerRows(database, "current"),
+          reference: wholeBooleanFixtureOwnerRows(database, "reference"),
+        },
+        middlewareSql: preparationTrace.preparedSql,
+        reportSql: fullTrace.preparedSql,
+        reportBindings: fullTrace.bindings,
+        reportShape: comparisonExecutionShape(fullTrace, fullDiagnostics),
+        legacySql: fullLegacyTrace.preparedSql,
+        legacyBindings: fullLegacyTrace.bindings,
+        incorrectAndSql: incorrectAndTrace.preparedSql,
+        incorrectAndBindings: incorrectAndTrace.bindings,
+        incorrectAndShape: comparisonExecutionShape(
+          incorrectAndTrace,
+          incorrectAndDiagnostics,
+        ),
+        actual: fullActual.value,
+        legacy: fullLegacy.dto,
+        incorrectAnd: incorrectAnd.value,
+        actualReportRows: (fullActual.value as typeof fullLegacy.dto).data
+          .items,
+        rawReportControlRows,
+        incorrectAndControlRows: (incorrectAnd.value as typeof fullLegacy.dto)
+          .data.items,
+        cursorPages: {
+          first: actual.value,
+          firstSql: trace.preparedSql,
+          firstBindings: trace.bindings,
+          next: nextActual.value,
+          nextSql: nextTrace.preparedSql,
+          nextBindings: nextTrace.bindings,
+          nextLegacySql: nextLegacyTrace.preparedSql,
+        },
+      };
+      evidence.push(wholeBooleanEvidence);
+
+      expect(deferred?.current.kind).toBe("qualified");
+      expect(deferred?.reference.kind).toBe("qualified");
+      expect(wholeBooleanEvidence.qualificationModes).toEqual([
+        "allow-whole-filter",
+        "allow-whole-filter",
+      ]);
+      expect(preparationTrace.preparedSql).toHaveLength(2);
+      expect(legacy.deferred).toBeUndefined();
+      expect(actual.value).toEqual(legacy.dto);
+      expect(nextLegacy.deferred).toBeUndefined();
+      expect(nextActual.value).toEqual(nextLegacy.dto);
+      expect(nextCursor).toEqual(expect.any(String));
+      expect(fullLegacy.deferred).toBeUndefined();
+      expect(fullActual.value).toEqual(fullLegacy.dto);
+      expect(
+        fullTrace.preparedSql.every(
+          (sql) =>
+            new TextEncoder().encode(sql).byteLength <= D1_MAX_SQL_UTF8_BYTES,
+        ),
+      ).toBe(true);
+      expect(
+        fullTrace.bindings.every(
+          (bindings) => bindings.length <= D1_MAX_BOUND_PARAMETERS,
+        ),
+      ).toBe(true);
+      const fullItems = (fullActual.value as typeof fullLegacy.dto).data.items;
+      expect(
+        fullItems.find((row) => row.key === "/current-only")?.views,
+      ).toBeGreaterThan(0);
+      expect(
+        fullItems.find((row) => row.key === "/count-only")?.views,
+      ).toBeGreaterThan(0);
+      const incorrectAndItems = (incorrectAnd.value as typeof fullLegacy.dto)
+        .data.items;
+      expect(
+        incorrectAndItems.find((row) => row.key === "/current-only")?.views ??
+          0,
+      ).toBe(0);
+      expect(incorrectAnd.value).not.toEqual(fullActual.value);
+    }
+  });
+
+  it("keeps a native Page side paired with one whole-boolean qualified side", async () => {
+    const database = createFixture();
+    seedWholeBooleanProofRows(database, "current");
+    seedWholeBooleanProofRows(database, "reference");
+    const query = queryFor({
+      currentScope: "session",
+      referenceScope: "session",
+      currentFilterDsl:
+        'page.path eq "/current-only" or count(event { event.name eq "qualifier" }) gte 1',
+      referenceFilterDsl: 'page.path neq "/reference-only"',
+      limit: 8,
+    });
+    const preparationTrace = traceFor();
+    const forwarded = await d1AdvancedFilterMiddleware(
+      testEnv(database, preparationTrace),
+      undefined,
+      SITE,
+    )("dimension", query, async (prepared) => prepared);
+    const deferred = deferredComparisonPageQualificationFromQuery(forwarded);
+    expect(deferred?.current.kind).toBe("qualified");
+    expect(deferred?.reference.kind).toBe("native");
+    expect(preparationTrace.preparedSql).toHaveLength(1);
+
+    const trace = traceFor();
+    const actual = await makeProvider(database, trace).execute(query);
+    const legacy = await legacyComparisonPage(database, query, traceFor());
+    expect(legacy.deferred).toBeUndefined();
+    expect(actual.value).toEqual(legacy.dto);
+    evidence.push({
+      kind: "whole-boolean-qualified-with-native-side",
+      currentKind: deferred?.current.kind,
+      referenceKind: deferred?.reference.kind,
+      currentWindow: query.current.time.range,
+      referenceWindow: query.reference.time.range,
+      preparationSql: preparationTrace.preparedSql,
+      reportSql: trace.preparedSql,
+      reportBindings: trace.bindings,
+      actual: actual.value,
+      matchesLegacy: true,
+    });
+  });
+
+  it("accepts cloned comparison configs, gates parent mismatches, and rejects getters without reading them", async () => {
+    const database = createFixture();
+    const query = queryFor({
+      currentScope: "visitor",
+      referenceScope: "visitor",
+      currentFilterDsl:
+        'page.path eq "/current-only" or count(event { event.name eq "qualifier" }) gte 1',
+      referenceFilterDsl:
+        'not (page.path eq "/excluded" and count(event { event.name eq "qualifier" }) eq 1)',
+      limit: 8,
+    });
+    const clonedQuery = {
+      ...query,
+      comparison: {
+        ...query.comparison,
+        current: { ...query.current },
+        reference: { ...query.reference },
+      },
+    } as ComparisonQuery;
+    const clonedForwarded = await d1AdvancedFilterMiddleware(
+      testEnv(database, traceFor()),
+      undefined,
+      SITE,
+    )("dimension", clonedQuery, async (prepared) => prepared);
+    expect(
+      deferredComparisonPageQualificationFromQuery(clonedForwarded),
+    ).toBeDefined();
+
+    const mismatchedQuery = {
+      ...query,
+      comparison: {
+        ...query.comparison,
+        current: {
+          ...query.comparison.current,
+          time: createQueryTime(101, 200, "UTC", 400),
+        },
+      },
+    } as ComparisonQuery;
+    const mismatchForwarded = await d1AdvancedFilterMiddleware(
+      testEnv(database, traceFor()),
+      undefined,
+      SITE,
+    )("dimension", mismatchedQuery, async (prepared) => prepared);
+    expect(
+      deferredComparisonPageQualificationFromQuery(mismatchForwarded),
+    ).toBeUndefined();
+    const mismatchActual = await makeProvider(database, traceFor()).execute(
+      mismatchedQuery,
+    );
+    const mismatchLegacy = await legacyComparisonPage(
+      database,
+      mismatchedQuery,
+      traceFor(),
+    );
+    expect(mismatchLegacy.deferred).toBeUndefined();
+    expect(mismatchActual.value).toEqual(mismatchLegacy.dto);
+
+    let getterReads = 0;
+    const comparisonWithGetter = { ...query.comparison };
+    Object.defineProperty(comparisonWithGetter, "current", {
+      enumerable: true,
+      get() {
+        getterReads += 1;
+        return query.current;
+      },
+    });
+    const getterQuery = {
+      ...query,
+      comparison: comparisonWithGetter,
+    } as ComparisonQuery;
+    await expect(
+      d1AdvancedFilterMiddleware(
+        testEnv(database, traceFor()),
+        undefined,
+        SITE,
+      )("dimension", getterQuery, async (prepared) => prepared),
+    ).rejects.toMatchObject({
+      domainError: {
+        kind: "invalid-input",
+        issues: [
+          {
+            path: "comparison",
+            code: "comparison_request_own_data_required",
+          },
+        ],
+      },
+    });
+    expect(getterReads).toBe(0);
+    evidence.push({
+      kind: "comparison-parent-own-data-gate",
+      structuralCloneAccepted: true,
+      parentMismatchDeferred: false,
+      parentMismatchMatchesLegacy: true,
+      getterReads,
+    });
+  });
+
+  it("keeps explicit undefined comparison slots on the ordinary page path", async () => {
+    const database = createFixture();
+    const scoped = prepareScopedQuery("dimension", {
+      context: siteQueryContext(SITE, "private-dashboard"),
+      time: CURRENT_TIME,
+      filters: parseFilterDsl(BASE_FILTER, analyticsFilterRegistry),
+      scopePreference: "session",
+    } as QueryInput & { readonly time: QueryTime });
+    const query = {
+      ...scoped,
+      mode: "overview-tab",
+      tab: "page.path",
+      limit: 5,
+      comparison: undefined,
+      current: undefined,
+      reference: undefined,
+    };
+    const forwarded = await d1AdvancedFilterMiddleware(
+      testEnv(database, traceFor()),
+      undefined,
+      SITE,
+    )("dimension", query, async (prepared) => prepared);
+    const result = {
+      forwardedMode: (forwarded as typeof query).mode,
+      forwardedTab: (forwarded as typeof query).tab,
+      deferredComparison: Boolean(
+        deferredComparisonPageQualificationFromQuery(forwarded),
+      ),
+    };
+    evidence.push({
+      kind: "ordinary-page-undefined-comparison-slots",
+      ...result,
+    });
+    expect(result).toEqual({
+      forwardedMode: "overview-tab",
+      forwardedTab: "page.path",
+      deferredComparison: false,
+    });
+  });
+
+  it("falls back both sides when a whole-filter Count numeric check mismatches", async () => {
+    const database = createFixture();
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "current-visit-0-0");
+    const numericBooleanFilter =
+      'page.path eq "/not-a-real-path" or (count(event { event.name eq "qualifier" }) gte 1 and count(page { page.durationMs gt 5 }) eq 1)';
+    const query = queryFor({
+      currentScope: "session",
+      referenceScope: "session",
+      currentFilterDsl: numericBooleanFilter,
+      referenceFilterDsl: 'page.path neq "/reference-only"',
+      limit: 8,
+    });
+    const legacyTrace = traceFor();
+    const legacy = await legacyComparisonPage(database, query, legacyTrace);
+    const trace = traceFor();
+    const diagnostics = createD1ReadDiagnostics();
+    const actual = await makeProvider(database, trace, diagnostics).execute(
+      query,
+    );
+    expect(legacy.deferred).toBeUndefined();
+    expect(actual.value).toEqual(legacy.dto);
+    expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+      kind: "numeric-data-domain",
+    });
+    expect(trace.preparedSql).toHaveLength(legacyTrace.preparedSql.length + 1);
+    const qualifiedIndex = trace.preparedSql.findIndex((sql) =>
+      sql.includes("'current-control'"),
+    );
+    expect(qualifiedIndex).toBeGreaterThanOrEqual(0);
+    const qualifiedRows = database
+      .prepare(trace.preparedSql[qualifiedIndex]!)
+      .all(...(trace.bindings[qualifiedIndex] as SQLInputValue[])) as Record<
+      string,
+      unknown
+    >[];
+    expect(
+      qualifiedRows.filter((row) => row.rowKind === "current-control"),
+    ).toHaveLength(1);
+    expect(
+      qualifiedRows.filter((row) => row.rowKind === "reference-control"),
+    ).toHaveLength(0);
+    expect(
+      qualifiedRows.filter((row) => row.rowKind === "report"),
+    ).toHaveLength(0);
+    evidence.push({
+      kind: "whole-boolean-one-sided-numeric-fallback",
+      fallbackReason: diagnostics.advancedCountSqlFallbackReason,
+      currentWindow: query.current.time.range,
+      referenceWindow: query.reference.time.range,
+      qualificationSql: trace.preparedSql[qualifiedIndex],
+      qualificationBindings: trace.bindings[qualifiedIndex],
+      reportSqlWasProduced: false,
       matchesLegacy: true,
     });
   });

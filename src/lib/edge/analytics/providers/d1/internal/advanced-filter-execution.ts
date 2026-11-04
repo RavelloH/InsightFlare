@@ -1643,97 +1643,337 @@ function sameRange(
   );
 }
 
-function stableSnapshotValue(
+type ComparisonParentRequestProof = {
+  readonly kind: "absent" | "unsafe" | "mismatch" | "matched";
+  readonly allowWholeFilter: boolean;
+};
+
+const COMPARISON_PARENT_REQUEST_KEYS = [
+  "context",
+  "filters",
+  "scopePreference",
+  "scopePlan",
+  "time",
+  "mode",
+  "tab",
+  "limit",
+  "cursor",
+  "sort",
+  "direction",
+  "search",
+  "current",
+  "reference",
+  "comparison",
+] as const;
+const COMPARISON_SIDE_REQUEST_KEYS = [
+  "filters",
+  "time",
+  "scopePreference",
+] as const;
+const COMPARISON_REQUEST_KEYS = [
+  "current",
+  "reference",
+  "metric",
+  "sortBy",
+  "direction",
+] as const;
+
+function comparisonOwnDataRecord(
   value: unknown,
-  active = new WeakSet<object>(),
-): unknown {
-  if (value === null || typeof value === "string" || typeof value === "boolean")
-    return value;
-  if (typeof value === "number")
-    return Number.isFinite(value) ? value : `number:${String(value)}`;
-  if (typeof value === "undefined") return "undefined";
-  if (typeof value !== "object") return `${typeof value}:${String(value)}`;
-  if (active.has(value)) throw new Error("comparison_page_request_cycle");
-  active.add(value);
-  let result: unknown;
-  if (Array.isArray(value)) {
-    result = value.map((item) => stableSnapshotValue(item, active));
-  } else if (value instanceof Set) {
-    result = [...value]
-      .map((item) => stableSnapshotValue(item, active))
-      .sort((left, right) =>
-        JSON.stringify(left).localeCompare(JSON.stringify(right)),
-      );
-  } else if (value instanceof Map) {
-    result = [...value.entries()]
-      .map(([key, item]) => [
-        stableSnapshotValue(key, active),
-        stableSnapshotValue(item, active),
-      ])
-      .sort((left, right) =>
-        JSON.stringify(left[0]).localeCompare(JSON.stringify(right[0])),
-      );
-  } else {
-    const record = value as Record<string, unknown>;
-    result = Object.fromEntries(
-      Object.keys(record)
-        .sort()
-        .map((key) => [key, stableSnapshotValue(record[key], active)]),
-    );
+  allowedKeys: readonly string[],
+  allowedHiddenSymbols: readonly symbol[] = [],
+): Record<string, unknown> | undefined {
+  try {
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+      return undefined;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return undefined;
+    const record = Object.create(null) as Record<string, unknown>;
+    for (const key of Reflect.ownKeys(value)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor) return undefined;
+      if (typeof key === "symbol") {
+        if (
+          allowedHiddenSymbols.includes(key) &&
+          !descriptor.enumerable &&
+          "value" in descriptor
+        )
+          continue;
+        return undefined;
+      }
+      if (typeof key !== "string" || !allowedKeys.includes(key))
+        return undefined;
+      if (!descriptor || !descriptor.enumerable || !("value" in descriptor))
+        return undefined;
+      record[key] = descriptor.value;
+    }
+    return record;
+  } catch {
+    return undefined;
   }
-  active.delete(value);
-  return result;
+}
+
+function comparisonOwnPropertiesAreData(value: unknown): boolean {
+  try {
+    if (typeof value !== "object" || value === null) return false;
+    for (const key of Reflect.ownKeys(value)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor) return false;
+      if (
+        typeof key === "symbol" &&
+        !descriptor.enumerable &&
+        "value" in descriptor
+      )
+        continue;
+      if (!descriptor.enumerable || !("value" in descriptor)) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function comparisonRequestOwnDataSnapshot(
+  query: Record<string, unknown>,
+  comparison: Record<string, unknown>,
+): string | undefined {
+  const current = qualificationRequestOwnDataSnapshot(query.current);
+  const reference = qualificationRequestOwnDataSnapshot(query.reference);
+  const comparisonCurrent = qualificationRequestOwnDataSnapshot(
+    comparison.current,
+  );
+  const comparisonReference = qualificationRequestOwnDataSnapshot(
+    comparison.reference,
+  );
+  const controls = qualificationRequestOwnDataSnapshot({
+    metric: comparison.metric,
+    sortBy: comparison.sortBy,
+    direction: comparison.direction,
+  });
+  const remainder = Object.create(null) as Record<string, unknown>;
+  for (const [key, value] of Object.entries(query)) {
+    if (key !== "current" && key !== "reference" && key !== "comparison")
+      remainder[key] = value;
+  }
+  const rest = qualificationRequestOwnDataSnapshot(remainder);
+  if (
+    current === undefined ||
+    reference === undefined ||
+    comparisonCurrent === undefined ||
+    comparisonReference === undefined ||
+    controls === undefined ||
+    rest === undefined
+  )
+    return undefined;
+  return JSON.stringify({
+    rest,
+    current,
+    reference,
+    comparison: {
+      current: comparisonCurrent,
+      reference: comparisonReference,
+      controls,
+    },
+  });
+}
+
+function comparisonSideSemanticSnapshot(
+  value: unknown,
+  fallbackScopePreference: unknown,
+): string | undefined {
+  const side = comparisonOwnDataRecord(value, COMPARISON_SIDE_REQUEST_KEYS);
+  if (!side || !Object.hasOwn(side, "filters") || !Object.hasOwn(side, "time"))
+    return undefined;
+  const snapshot = qualificationRequestOwnDataSnapshot(value);
+  if (snapshot === undefined) return undefined;
+
+  try {
+    const safeSide = JSON.parse(snapshot) as Record<string, unknown>;
+    const time = safeSide.time as Record<string, unknown> | null;
+    const filters = safeSide.filters as Record<string, unknown> | null;
+    if (
+      !time ||
+      typeof time !== "object" ||
+      Array.isArray(time) ||
+      !filters ||
+      typeof filters !== "object" ||
+      Array.isArray(filters)
+    )
+      return undefined;
+    const range = time.range as Record<string, unknown> | null;
+    if (!range || typeof range !== "object" || Array.isArray(range))
+      return undefined;
+
+    const symbolMetadata = filters.$internalSymbols as
+      Record<string, unknown> | undefined;
+    const scopedMetadata = symbolMetadata?.[
+      "insightflare.scoped-filter-metadata"
+    ] as Record<string, unknown> | undefined;
+    const requestedScope =
+      scopedMetadata?.requestedScope ??
+      safeSide.scopePreference ??
+      fallbackScopePreference;
+    const { $internalSymbols: _internalSymbols, ...filterDocument } = filters;
+    void _internalSymbols;
+
+    // These values came from the own-data snapshot above, not from the input.
+    return JSON.stringify({
+      time: {
+        range: {
+          startMs: range.startMs,
+          endExclusiveMs: range.endExclusiveMs,
+        },
+        reportingTimeZone: time.reportingTimeZone,
+        capturedAtMs: time.capturedAtMs,
+        ...(time.paginationBinding !== undefined
+          ? { paginationBinding: time.paginationBinding }
+          : {}),
+      },
+      filters: filterDocument,
+      requestedScope,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function comparisonParentRequestProof(
+  value: unknown,
+  operation: QueryOperation,
+  expectedSiteId?: string,
+): ComparisonParentRequestProof {
+  if (operation !== "dimension")
+    return { kind: "absent", allowWholeFilter: false };
+  if (typeof value !== "object" || value === null)
+    return { kind: "absent", allowWholeFilter: false };
+
+  let keys: PropertyKey[];
+  try {
+    keys = Reflect.ownKeys(value);
+  } catch {
+    return { kind: "unsafe", allowWholeFilter: false };
+  }
+  let carriesComparisonState = false;
+  let hasDefinedComparisonState = false;
+  for (const key of ["comparison", "current", "reference"] as const) {
+    if (!keys.includes(key)) continue;
+    carriesComparisonState = true;
+    const descriptor = ownDescriptor(value, key);
+    if (!descriptor || !descriptor.enumerable || !("value" in descriptor))
+      return { kind: "unsafe", allowWholeFilter: false };
+    if (descriptor.value !== undefined) hasDefinedComparisonState = true;
+  }
+  if (!carriesComparisonState || !hasDefinedComparisonState)
+    return { kind: "absent", allowWholeFilter: false };
+
+  const query = comparisonOwnDataRecord(value, COMPARISON_PARENT_REQUEST_KEYS);
+  if (!query) {
+    if (!comparisonOwnPropertiesAreData(value))
+      return { kind: "unsafe", allowWholeFilter: false };
+    return { kind: "mismatch", allowWholeFilter: false };
+  }
+  const comparison = comparisonOwnDataRecord(
+    query.comparison,
+    COMPARISON_REQUEST_KEYS,
+  );
+  if (!comparison) {
+    if (!comparisonOwnPropertiesAreData(query.comparison))
+      return { kind: "unsafe", allowWholeFilter: false };
+    return { kind: "mismatch", allowWholeFilter: false };
+  }
+  if (comparisonRequestOwnDataSnapshot(query, comparison) === undefined)
+    return { kind: "unsafe", allowWholeFilter: false };
+
+  const parentScopePreference = query.scopePreference;
+  const currentTop = comparisonSideSemanticSnapshot(
+    query.current,
+    parentScopePreference,
+  );
+  const referenceTop = comparisonSideSemanticSnapshot(
+    query.reference,
+    parentScopePreference,
+  );
+  const currentNested = comparisonSideSemanticSnapshot(
+    comparison.current,
+    parentScopePreference,
+  );
+  const referenceNested = comparisonSideSemanticSnapshot(
+    comparison.reference,
+    parentScopePreference,
+  );
+  if (
+    currentTop === undefined ||
+    referenceTop === undefined ||
+    currentNested === undefined ||
+    referenceNested === undefined
+  )
+    return { kind: "mismatch", allowWholeFilter: false };
+  if (currentTop !== currentNested || referenceTop !== referenceNested)
+    return { kind: "mismatch", allowWholeFilter: false };
+
+  const context = query.context;
+  const subject = ownDataValue(context, "subject");
+  const policy = ownDataValue(context, "policy");
+  const subjectKind = ownDataValue(subject, "kind");
+  const siteId = ownDataValue(subject, "siteId");
+  const audience = ownDataValue(policy, "audience");
+  const tab = query.tab;
+  const family =
+    typeof tab === "string"
+      ? comparisonReportFamilyForTab(tab)?.family
+      : undefined;
+  const allowedWholeFilterTab =
+    tab === "page.path" ||
+    tab === "page.query" ||
+    tab === "page.title" ||
+    tab === "page.hostname" ||
+    tab === "page.entry" ||
+    tab === "page.exit";
+  const limit = query.limit === undefined ? 100 : query.limit;
+  const controlsAreCanonical =
+    typeof limit === "number" &&
+    Number.isFinite(limit) &&
+    Number.isSafeInteger(limit) &&
+    limit >= 1 &&
+    (query.search === undefined || typeof query.search === "string") &&
+    (query.cursor === undefined ||
+      query.cursor === null ||
+      typeof query.cursor === "string") &&
+    ["views", "sessions", "visitors"].includes(String(comparison.metric)) &&
+    ["current", "reference", "change"].includes(String(comparison.sortBy)) &&
+    (comparison.direction === "asc" || comparison.direction === "desc");
+  const allowWholeFilter =
+    query.mode === "overview-tab" &&
+    subjectKind === "site" &&
+    typeof siteId === "string" &&
+    (expectedSiteId === undefined || expectedSiteId === siteId) &&
+    audience === "private-dashboard" &&
+    allowedWholeFilterTab &&
+    family !== undefined &&
+    controlsAreCanonical;
+  return { kind: "matched", allowWholeFilter };
 }
 
 function comparisonPageRequestSnapshot(
   query: QueryInput & Record<string, unknown>,
   operation: QueryOperation,
 ): string {
-  const tab = typeof query.tab === "string" ? query.tab : "";
-  const reportFamily = comparisonReportFamilyForTab(tab)?.family ?? null;
-  const sideSnapshot = (side: FilterSide | undefined) => {
-    const filters = side?.filters;
-    const metadata = scopedFilterMetadata(filters);
-    return {
-      time: side?.time,
-      filters,
-      scopePreference: side?.scopePreference,
-      metadata: metadata
-        ? {
-            requestedScope: metadata.requestedScope,
-            resolvedScope: metadata.resolvedScope,
-            siteIds: metadata.siteIds,
-            time: metadata.time,
-            scope: metadata.plan.scope,
-            mode: metadata.plan.mode,
-            expansion: metadata.plan.expansion,
-            requiredSources: metadata.plan.requiredSources,
-            requiresRawSource: metadata.plan.requiresRawSource,
-            advancedMatches: metadata.plan.advancedMatches,
-          }
-        : null,
-    };
-  };
-  const snapshot = {
-    operation,
-    context: query.context,
-    mode: query.mode,
-    tab: query.tab,
-    reportFamily,
-    comparison: query.comparison,
-    current: sideSnapshot(query.current as FilterSide | undefined),
-    reference: sideSnapshot(query.reference as FilterSide | undefined),
-    filters: query.filters,
-    time: query.time,
-    scopePlan: query.scopePlan,
-    scopePreference: query.scopePreference,
-    limit: query.limit,
-    cursor: query.cursor,
-    sort: query.sort,
-    direction: query.direction,
-    search: query.search,
-  };
-  return JSON.stringify(stableSnapshotValue(snapshot));
+  const parent = comparisonOwnDataRecord(
+    query,
+    COMPARISON_PARENT_REQUEST_KEYS,
+    [DEFERRED_COMPARISON_PAGE_QUALIFICATION],
+  );
+  const comparison = comparisonOwnDataRecord(
+    parent?.comparison,
+    COMPARISON_REQUEST_KEYS,
+  );
+  const snapshot =
+    parent && comparison
+      ? comparisonRequestOwnDataSnapshot(parent, comparison)
+      : undefined;
+  if (snapshot === undefined)
+    throw new Error("comparison_page_request_own_data_invalid");
+  return `${operation}:${snapshot}`;
 }
 
 function canonicalComparisonQueryTime(time: QueryTime): QueryTime {
@@ -1748,6 +1988,7 @@ function canonicalComparisonQueryTime(time: QueryTime): QueryTime {
 function comparisonSideCanBeQualified(
   side: FilterSide | undefined,
   siteId: string,
+  filterMode: QualifiedSourceFilterMode,
 ): boolean {
   const filters = side?.filters;
   if (!filters?.root || !filterDocumentUsesAdvancedExpressions(filters))
@@ -1772,7 +2013,7 @@ function comparisonSideCanBeQualified(
       metadata.time.readRange ?? metadata.time.range,
       metadata.time.range,
     ) ||
-    splitPageDimensionNativeFilters(filters).kind !== "supported"
+    resolveQualifiedSourceFilters(filters, filterMode).kind !== "supported"
   )
     return false;
   const support = classifyAdvancedCountFilter(filters, metadata.plan.scope);
@@ -1785,11 +2026,16 @@ function comparisonSideCanBeQualified(
 function comparisonSideQualificationKind(
   side: FilterSide | undefined,
   siteId: string,
+  allowWholeFilter: boolean,
 ): "native" | "qualified" | "unsupported" {
   if (!side?.time) return "unsupported";
   const filters = side.filters ?? EMPTY_FILTER_DOCUMENT;
   if (!filterDocumentUsesAdvancedExpressions(filters)) return "native";
-  return comparisonSideCanBeQualified({ ...side, filters }, siteId)
+  return comparisonSideCanBeQualified(
+    { ...side, filters },
+    siteId,
+    allowWholeFilter ? "allow-whole-filter" : "split-only",
+  )
     ? "qualified"
     : "unsupported";
 }
@@ -1797,6 +2043,7 @@ function comparisonSideQualificationKind(
 async function prepareDeferredComparisonPageQualification(input: {
   readonly env: Env;
   readonly query: QueryInput & Record<string, unknown>;
+  readonly parentWholeFilterProof: boolean;
   readonly operation: QueryOperation;
   readonly subject: SemanticSubjectDomain;
   readonly diagnostics?: D1ReadDiagnostics;
@@ -1840,10 +2087,12 @@ async function prepareDeferredComparisonPageQualification(input: {
   const currentKind = comparisonSideQualificationKind(
     current,
     query.context.subject.siteId,
+    input.parentWholeFilterProof,
   );
   const referenceKind = comparisonSideQualificationKind(
     reference,
     query.context.subject.siteId,
+    input.parentWholeFilterProof,
   );
   if (
     currentKind === "unsupported" ||
@@ -1894,6 +2143,12 @@ async function prepareDeferredComparisonPageQualification(input: {
       diagnostics: input.diagnostics,
       signal: input.signal,
       expectedSiteId: input.expectedSiteId,
+      ...(input.parentWholeFilterProof && sessionBoundary
+        ? { allowPrivateSessionBoundaryWholeFilterOptIn: true }
+        : {}),
+      ...(input.parentWholeFilterProof && !sessionBoundary
+        ? { allowPageFieldWholeFilterOptIn: true }
+        : {}),
     });
     const reportRequest = sessionBoundary
       ? qualification?.sessionBoundaryOverviewPageRequest
@@ -6012,6 +6267,13 @@ export function d1AdvancedFilterMiddleware(
   expectedSiteId?: string,
 ): TypedQueryProviderMiddleware {
   return async (operation: QueryOperation, input: unknown, next, execution) => {
+    const comparisonRequestProof = comparisonParentRequestProof(
+      input,
+      operation,
+      expectedSiteId,
+    );
+    if (comparisonRequestProof.kind === "unsafe")
+      throw invalidInput("comparison", "comparison_request_own_data_required");
     const rawFilterValuesRequestSnapshot =
       operation === "filter-values"
         ? qualificationRequestOwnDataSnapshot(input)
@@ -6347,11 +6609,15 @@ export function d1AdvancedFilterMiddleware(
       channelOverviewRequest ||
       channelListRequest
     ) {
-      if (operation === "dimension") {
+      if (
+        operation === "dimension" &&
+        comparisonRequestProof.kind === "matched"
+      ) {
         const deferredComparison =
           await prepareDeferredComparisonPageQualification({
             env,
             query,
+            parentWholeFilterProof: comparisonRequestProof.allowWholeFilter,
             operation,
             subject,
             diagnostics,

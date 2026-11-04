@@ -281,6 +281,7 @@ export function buildPagesTabsQualificationPlan(input: {
 
 /** Builds an unpaginated Page rollup and independent qualification controls. */
 export function buildComparisonPageDimensionQualificationPlan(input: {
+  readonly filterMode?: QualifiedSourceFilterMode;
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
@@ -294,6 +295,7 @@ export function buildComparisonPageDimensionQualificationPlan(input: {
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
+    filterMode: input.filterMode ?? "split-only",
     scopePlan: input.scopePlan,
     count: input.count,
     selections: [input.selection],

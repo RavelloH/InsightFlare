@@ -150,6 +150,7 @@ export function buildSessionBoundaryOverviewPageQualificationPlan(input: {
 }
 
 export function buildSessionBoundaryComparisonQualificationPlan(input: {
+  readonly filterMode?: QualifiedSourceFilterMode;
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
@@ -163,6 +164,7 @@ export function buildSessionBoundaryComparisonQualificationPlan(input: {
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
+    filterMode: input.filterMode ?? "split-only",
     scopePlan: input.scopePlan,
     count: input.count,
     selections: [],

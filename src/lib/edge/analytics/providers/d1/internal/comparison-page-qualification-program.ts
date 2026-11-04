@@ -26,6 +26,7 @@ import {
   type ComparisonDimensionCursor,
 } from "@/lib/edge/analytics/engine/comparison-report-plan";
 import { buildComparisonPageDimensionQualificationPlan } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
+import type { QualifiedSourceFilterMode } from "@/lib/edge/analytics/engine/qualified-page-source";
 import { buildSessionBoundaryComparisonQualificationPlan } from "@/lib/edge/analytics/engine/session-boundary-dimension-qualification-plan";
 import { SESSION_PATH_COMPARISON_ROLLUP_OUTPUT } from "@/lib/edge/analytics/engine/session-path-report-plan";
 import type { Env } from "@/lib/edge/types";
@@ -186,10 +187,15 @@ async function executeQualifiedComparisonDimensionProgram(input: {
   ) => {
     if (side.kind !== "qualified") return undefined;
     const qualification = side.qualification;
+    const filterMode: QualifiedSourceFilterMode =
+      deferred.reportFamily.kind === "page-dimension"
+        ? (qualification.pageDimensionFilterMode ?? "split-only")
+        : (qualification.sessionBoundaryFilterMode ?? "split-only");
     const common = {
       siteId: input.siteId,
       queryTime: qualification.time,
       filters: qualification.filters,
+      filterMode,
       scopePlan: qualification.metadata.plan,
       count: qualification.countInput,
     };
