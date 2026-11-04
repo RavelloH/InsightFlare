@@ -1,0 +1,162 @@
+name: Publish Nightly Deploy Artifact
+
+# One rolling prerelease, not a formal version. Each main commit is compiled
+# independently, and only the newest fully uploaded commit is advertised.
+# Publishing is NOT enabled until this workflow is merged into upstream main.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Each push runs its own build. The last-minute main SHA check prevents
+# an older run finishing late from moving nightly backwards.
+
+jobs:
+  nightly:
+    name: Compile exact main SHA and update rolling nightly
+    if: github.repository == 'RavelloH/InsightFlare'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      WORKERS_CI: "1"
+      WRANGLER_SEND_METRICS: "false"
+      DO_NOT_TRACK: "1"
+
+    steps:
+      - name: Checkout exact source commit
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Cloudflare Worker and static assets without remote database access
+        run: pnpm exec tsx scripts/build.ts --target cf --skip-prebuild
+
+      - name: Package SHA-addressed worker, assets and migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/package-deploy-artifact.mjs "$GITHUB_SHA" --archive
+          base=".tmp/deploy-release/insightflare-deploy-$GITHUB_SHA"
+          test -s "$base.tar.gz"
+          test -s "$base.json"
+          tar -tzf "$base.tar.gz" > "$RUNNER_TEMP/nightly-contents.txt"
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+          const sha = process.env.GITHUB_SHA;
+          const m = JSON.parse(readFileSync(".tmp/deploy-release/insightflare-deploy-" + sha + ".json", "utf8"));
+          if (m.schemaVersion !== 1 || m.source.repository !== "RavelloH/InsightFlare" ||
+              m.source.sha !== sha || m.totals.modules < 100 || m.totals.assets < 100 ||
+              m.totals.migrations < 1 || !/^[a-f0-9]{64}$/.test(m.artifactDigest)) {
+            throw new Error("Incomplete or mismatched nightly build.");
+          }
+          console.log("Verified source SHA", sha, "artifact digest", m.artifactDigest);
+          NODE
+
+      - name: Add new files to the rolling prerelease and switch its pointer last
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          sha="$GITHUB_SHA"
+          base=".tmp/deploy-release/insightflare-deploy-$sha"
+          archive="$base.tar.gz"
+          manifest="$base.json"
+          archive_name="insightflare-deploy-$sha.tar.gz"
+          manifest_name="insightflare-deploy-$sha.json"
+
+          # Always point to the latest main commit, never a stale job finishing late.
+          main_sha="$(gh api "repos/$GH_REPO/commits/main" --jq '.sha')"
+          if [[ "$main_sha" != "$sha" ]]; then
+            echo "Main advanced to $main_sha; this job is not allowed to change nightly."
+            exit 0
+          fi
+
+          digest="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).artifactDigest' "$manifest")"
+          printf '# InsightFlare nightly\n\n' > "$RUNNER_TEMP/nightly-notes.md"
+          printf 'Rolling CI build for the latest official `main` commit. This is **not** a stable release.\n\n' >> "$RUNNER_TEMP/nightly-notes.md"
+          printf '<!-- insightflare-deploy-nightly-v1 {"sha":"%s","artifactDigest":"%s","archive":"%s","manifest":"%s"} -->\n' \
+            "$sha" "$digest" "$archive_name" "$manifest_name" >> "$RUNNER_TEMP/nightly-notes.md"
+          printf '\nBuilt from `%s`; the associated tag is only a fixed nightly channel identity.\n' "$sha" >> "$RUNNER_TEMP/nightly-notes.md"
+
+          if ! gh release view nightly >/dev/null 2>&1; then
+            # First creation is a prerelease and must never become "Latest".
+            gh release create nightly "$archive" "$manifest" \
+              --target "$sha" --title "Nightly (rolling main builds)" \
+              --notes-file "$RUNNER_TEMP/nightly-notes.md" --prerelease --latest=false
+          else
+            gh api "repos/$GH_REPO/releases/tags/nightly" > "$RUNNER_TEMP/nightly-release.json"
+            jq -e '.tag_name == "nightly" and .draft == false and .prerelease == true and .immutable == false' \
+              "$RUNNER_TEMP/nightly-release.json" >/dev/null
+            # Once the channel has been initialized, do not adopt an unrelated
+            # prerelease or rewrite its assets without an explicit operator review.
+            jq -e '.body | contains("insightflare-deploy-nightly-v1")' \
+              "$RUNNER_TEMP/nightly-release.json" >/dev/null
+
+            for candidate in "$archive" "$manifest"; do
+              filename="$(basename "$candidate")"
+              local_digest="sha256:$(sha256sum "$candidate" | cut -d' ' -f1)"
+              remote_digest="$(jq -r --arg name "$filename" \
+                '[.assets[] | select(.name == $name) | .digest] | first // empty' \
+                "$RUNNER_TEMP/nightly-release.json")"
+              if [[ -n "$remote_digest" ]]; then
+                if [[ "$remote_digest" != "$local_digest" ]]; then
+                  echo "Existing SHA-addressed asset differs: $filename" >&2
+                  exit 1
+                fi
+                echo "Already uploaded and matching: $filename"
+              else
+                # Do not use --clobber: GitHub deletes the previous asset first.
+                gh release upload nightly "$candidate"
+              fi
+            done
+
+            # All referenced assets must exist and match before advancing pointer.
+            gh api "repos/$GH_REPO/releases/tags/nightly" > "$RUNNER_TEMP/nightly-updated.json"
+            for candidate in "$archive" "$manifest"; do
+              filename="$(basename "$candidate")"
+              local_digest="sha256:$(sha256sum "$candidate" | cut -d' ' -f1)"
+              jq -e --arg name "$filename" --arg digest "$local_digest" \
+                'any(.assets[]; .name == $name and .digest == $digest)' \
+                "$RUNNER_TEMP/nightly-updated.json" >/dev/null
+            done
+
+            main_sha="$(gh api "repos/$GH_REPO/commits/main" --jq '.sha')"
+            if [[ "$main_sha" != "$sha" ]]; then
+              echo "A newer main commit is building; leave the existing nightly pointer unchanged."
+              exit 0
+            fi
+            gh release edit nightly --notes-file "$RUNNER_TEMP/nightly-notes.md" --prerelease --latest=false
+          fi
+
+          # Final check: the release body advertises only a fully uploaded pair.
+          gh api "repos/$GH_REPO/releases/tags/nightly" > "$RUNNER_TEMP/nightly-final.json"
+          jq -e --arg sha "$sha" '.prerelease == true and .draft == false and (.body | contains($sha))' \
+            "$RUNNER_TEMP/nightly-final.json" >/dev/null
+          for candidate in "$archive" "$manifest"; do
+            filename="$(basename "$candidate")"
+            local_digest="sha256:$(sha256sum "$candidate" | cut -d' ' -f1)"
+            jq -e --arg name "$filename" --arg digest "$local_digest" \
+              'any(.assets[]; .name == $name and .digest == $digest)' \
+              "$RUNNER_TEMP/nightly-final.json" >/dev/null
+          done
+          echo "Nightly pointer updated to $sha without creating a versioned Release."
