@@ -467,7 +467,8 @@ interface EventQualificationProgram {
   readonly deferred:
     | DeferredEventQualification
     | DeferredEventTypesQualification
-    | DeferredEventNameDimensionQualification;
+    | DeferredEventNameDimensionQualification
+    | DeferredEventTrendQualification;
   readonly reportKind: QualifiedReportKind;
   readonly reportOutputIds: readonly string[];
   readonly controlOutputId: string;
@@ -1936,10 +1937,19 @@ function compileProgram(request: EventQualificationCompileRequest):
     deferred.countInput.scope === "event" &&
     deferred.countInput.candidateAnchor.kind === "event-candidate";
   const eventCandidateEventTypeQuery = eventCandidatePage || eventCandidateList;
+  const eventCandidateEventTrendQuery =
+    request.kind === "event-trend" &&
+    deferred.operation === "event-trend" &&
+    deferred.metadata.plan.scope === "event" &&
+    deferred.countInput.scope === "event" &&
+    deferred.countInput.candidateAnchor.kind === "event-candidate";
   const qualificationScopeValid =
     ((qualification.scope === "session" || qualification.scope === "visitor") &&
       qualification.candidateGrain === undefined) ||
     (eventCandidateEventTypeQuery &&
+      qualification.scope === "event" &&
+      qualification.candidateGrain === "event-candidate") ||
+    (eventCandidateEventTrendQuery &&
       qualification.scope === "event" &&
       qualification.candidateGrain === "event-candidate");
   if (

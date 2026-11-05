@@ -1,3 +1,4 @@
+import { hasSafeBoundedUnitSumInput } from "./bounded-unit-sum-proof";
 import type { RelationScope, SqlExpression } from "./expression";
 import type { LogicalQueryNode, QuerySource } from "./plan";
 import { hasStableRowNumberOrdering } from "./relational-key-facts";
@@ -540,6 +541,8 @@ export function isMaterializationSafeAggregateExpression(
     (expression.name === "SUM" &&
       boundedCountGroupInput(input) &&
       unitBoundedNumericExpression(expression.expression, input)) ||
+    (expression.name === "SUM" &&
+      hasSafeBoundedUnitSumInput(expression, input)) ||
     (expression.name === "SUM" &&
       expression.expression.kind === "column" &&
       expression.expression.scope === input.scope &&

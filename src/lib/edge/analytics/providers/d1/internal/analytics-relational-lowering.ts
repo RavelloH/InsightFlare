@@ -753,8 +753,7 @@ export class AnalyticsLogicalToDbLowerer {
           primaryReportSource?.kind === "source" &&
           primaryReportSource.entity === "event" &&
           qualificationPolicy.reportSourceRelations.length === 1 &&
-          qualificationPolicy.reportSourceRelations[0]?.entity === "event" &&
-          qualificationPolicy.reportRelationIds.length === 1);
+          qualificationPolicy.reportSourceRelations[0]?.entity === "event");
       if (
         primaryReportSource?.kind !== "source" ||
         (primaryReportSource.entity !== "event" &&

@@ -29,7 +29,11 @@ import {
 } from "@/lib/db";
 import { compileD1QueryUnoptimizedForTest } from "@/lib/db/query/compiler";
 import type { AnyExpression, SqlExpression } from "@/lib/db/query/expression";
-import { lowerLogicalPlan } from "@/lib/db/query/physical-plan";
+import { isMaterializationSafeAggregateExpression } from "@/lib/db/query/materialization-safety";
+import {
+  lowerLogicalPlan,
+  validatePhysicalQueryPlan,
+} from "@/lib/db/query/physical-plan";
 import type { Relation } from "@/lib/db/query/plan";
 import { schema } from "@/lib/db/schema";
 
@@ -505,5 +509,30 @@ describe("bounded grouped lookup reuse", () => {
       physical.sharedRelations.find(({ node }) => node === built.summary.node),
     ).toMatchObject({ materialization: "materialized" });
     expect(optimized.sql).toContain("AS MATERIALIZED (");
+    if (built.summary.node.kind !== "aggregate")
+      throw new Error("bounded-unit-sum-fixture-must-be-grouped");
+    const unitSum = built.summary.node.aggregates.find(
+      ({ expression }) =>
+        expression.kind === "aggregate" && expression.name === "SUM",
+    );
+    expect(unitSum).toBeDefined();
+    if (!unitSum) throw new Error("bounded-unit-sum-fixture-missing-sum");
+    expect(
+      isMaterializationSafeAggregateExpression(
+        unitSum.expression,
+        built.summary.node.input,
+      ),
+    ).toBe(true);
+    const interfaceView = validatePhysicalQueryPlan(physical);
+    expect(
+      interfaceView.interfaces.find(
+        ({ definition }) => definition.node === built.summary.node,
+      ),
+    ).toMatchObject({ license: { kind: "bounded-group-summary" } });
+    expect(
+      interfaceView.unlicensed.some(
+        ({ definition }) => definition.node === built.summary.node,
+      ),
+    ).toBe(false);
   });
 });

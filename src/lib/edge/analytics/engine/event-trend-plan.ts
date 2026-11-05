@@ -3,7 +3,10 @@ import type {
   CalendarGranularity,
   QueryTime,
 } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type {
+  AdvancedCountFilterMatchPlanInput,
+  AdvancedCountQualificationPlanInput,
+} from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import {
   addEventQualificationControlOutput,
   buildEventQualifiedSource,
@@ -225,8 +228,11 @@ export function buildEventTrendOtherPlan(
   return builder.finish();
 }
 
-export interface EventTrendQualificationInput extends EventTrendPlanInput {
-  readonly count: AdvancedCountFilterMatchPlanInput;
+export interface EventTrendQualificationInput<
+  Count extends AdvancedCountQualificationPlanInput =
+    AdvancedCountFilterMatchPlanInput,
+> extends EventTrendPlanInput {
+  readonly count: Count;
   readonly interval: CalendarGranularity;
   readonly limit: number;
   readonly otherToken: string;
@@ -234,9 +240,11 @@ export interface EventTrendQualificationInput extends EventTrendPlanInput {
 }
 
 /** Builds Count controls and every Event trend output in one Logical graph. */
-export function buildEventTrendQualificationPlan(
-  input: EventTrendQualificationInput,
-): EventQualificationPlan {
+export function buildEventTrendQualificationPlan<
+  Count extends AdvancedCountQualificationPlanInput,
+>(
+  input: EventTrendQualificationInput<Count>,
+): EventQualificationPlan<Count["scope"]> {
   const qualified = buildEventQualifiedSource({
     siteId: input.siteId,
     count: input.count,
@@ -423,6 +431,18 @@ export function buildEventTrendQualificationPlan(
     numericCompatibilityFields:
       qualified.qualification.numericCompatibilityFields,
     scope: qualified.qualification.scope,
+    ...(qualified.qualification.candidateGrain
+      ? { candidateGrain: qualified.qualification.candidateGrain }
+      : {}),
+    ...(qualified.qualification.additionalGroupedSummaries
+      ? {
+          additionalGroupedSummaryRelationIds: Object.freeze(
+            qualified.qualification.additionalGroupedSummaries.map(
+              ({ id }) => id,
+            ),
+          ),
+        }
+      : {}),
   };
 }
 

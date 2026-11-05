@@ -534,9 +534,14 @@ export type DeferredEventNameDimensionQualification = Omit<
   readonly eventNameDimensionReportFilters?: FilterDocument;
 };
 
-export type DeferredEventTrendQualification = DeferredEventQualification & {
-  readonly operation: "event-trend";
-};
+export type DeferredEventTrendQualification =
+  | (DeferredEventQualification & {
+      readonly operation: "event-trend";
+    })
+  | (Omit<DeferredEventQualification, "operation" | "countInput"> & {
+      readonly operation: "event-trend";
+      readonly countInput: AdvancedEventCandidateCountPlanInput;
+    });
 
 export type DeferredEventContextQualification = DeferredEventQualification & {
   readonly operation: "event-context";
@@ -4580,6 +4585,7 @@ async function prepareDeferredEventQualification(input: {
   readonly allowPrivateRetentionWholeFilterOptIn?: boolean;
   readonly allowPrivateFilterValuesWholeFilterOptIn?: boolean;
   readonly allowEventNameDimensionEventCandidate?: boolean;
+  readonly eventTrendRequestSnapshot?: string;
   readonly subject: SemanticSubjectDomain;
   readonly diagnostics?: D1ReadDiagnostics;
   readonly signal?: AbortSignal;
@@ -4588,6 +4594,7 @@ async function prepareDeferredEventQualification(input: {
   | DeferredEventQualification
   | DeferredEventTypesQualification
   | DeferredEventNameDimensionQualification
+  | DeferredEventTrendQualification
   | DeferredFilterValuesQualificationInput
   | null
 > {
@@ -4599,6 +4606,7 @@ async function prepareDeferredEventQualification(input: {
   const eventCandidateConsumerOperation =
     input.operation === "event-types" ||
     input.operation === "event-name-dimension" ||
+    input.operation === "event-trend" ||
     (input.operation === "filter-values" &&
       filterValuesRequest?.reportKind === "event");
   const eventCandidateFiltersDescriptor = eventCandidateConsumerOperation
@@ -4616,7 +4624,9 @@ async function prepareDeferredEventQualification(input: {
         ? "event_types_qualification_request_context_mismatch"
         : input.operation === "filter-values"
           ? "filter_values_request_context_mismatch"
-          : "event_name_dimension_request_context_mismatch",
+          : input.operation === "event-trend"
+            ? "event_trend_qualification_request_context_mismatch"
+            : "event_name_dimension_request_context_mismatch",
     );
   const eventCandidateFilters = eventCandidateConsumerOperation
     ? (ownDataValue(query, "filters") as FilterDocument | undefined)
@@ -4653,7 +4663,9 @@ async function prepareDeferredEventQualification(input: {
         ? "event_types_qualification_request_context_mismatch"
         : input.operation === "filter-values"
           ? "filter_values_request_context_mismatch"
-          : "event_name_dimension_request_context_mismatch",
+          : input.operation === "event-trend"
+            ? "event_trend_qualification_request_context_mismatch"
+            : "event_name_dimension_request_context_mismatch",
     );
   const eventCandidateBaseRequest =
     eventCandidateMetadata?.plan.scope === "event" &&
@@ -4678,10 +4690,16 @@ async function prepareDeferredEventQualification(input: {
     input.allowPrivateFilterValuesWholeFilterOptIn === true &&
     filterValuesRequest?.reportKind === "event" &&
     eventCandidateBaseRequest;
+  const eventCandidateEventTrendRequest =
+    input.operation === "event-trend" &&
+    eventCandidateBaseRequest &&
+    input.eventTrendRequestSnapshot !== undefined &&
+    eventCandidateRequestSnapshot === input.eventTrendRequestSnapshot;
   const eventCandidateRequest =
     eventCandidatePageRequest ||
     eventCandidateDimensionListRequest ||
-    eventCandidateFilterValuesRequest;
+    eventCandidateFilterValuesRequest ||
+    eventCandidateEventTrendRequest;
   const overviewTrendConfiguration =
     input.operation === "overview" || input.operation === "trend"
       ? overviewTrendConfigurationForQuery(input.operation, query)
@@ -5313,6 +5331,7 @@ async function prepareDeferredEventQualification(input: {
       visitorListRequest !== undefined ||
       journeyEventPageRequest !== undefined ||
       input.operation === "event-name-dimension" ||
+      eventCandidateRequest ||
       radarConfiguration !== undefined ||
       shareTrendConfiguration !== undefined) &&
     input.expectedSiteId !== undefined &&
@@ -5322,76 +5341,80 @@ async function prepareDeferredEventQualification(input: {
       "siteId",
       input.operation === "share-trend"
         ? "share_trend_request_context_mismatch"
-        : input.operation === "radar"
-          ? "radar_request_context_mismatch"
-          : input.operation === "event-name-dimension"
-            ? "event_name_dimension_request_context_mismatch"
-            : input.operation === "channel-overview"
-              ? "channel_overview_request_context_mismatch"
-              : input.operation === "channel-list"
-                ? "channel_list_request_context_mismatch"
-                : input.operation === "session-boundary-dimension"
-                  ? "session_boundary_dimension_request_context_mismatch"
-                  : input.operation === "session-boundary-overview-page"
-                    ? "session_boundary_overview_page_request_context_mismatch"
-                    : input.operation === "pages-aggregate-page"
-                      ? "pages_aggregate_page_request_context_mismatch"
-                      : input.operation === "pages-tabs"
-                        ? "pages_tabs_request_context_mismatch"
-                        : input.operation === "pages-dashboard"
-                          ? "pages_dashboard_request_context_mismatch"
-                          : input.operation === "geo-points"
-                            ? "geo_points_request_context_mismatch"
-                            : input.operation === "filter-values"
-                              ? "filter_values_request_context_mismatch"
-                              : input.operation === "referrers"
-                                ? "referrers_request_context_mismatch"
-                                : input.operation === "visitor-events" ||
-                                    input.operation === "session-events"
-                                  ? "journey_event_page_qualification_request_context_mismatch"
-                                  : "page_dimension_request_context_mismatch",
+        : input.operation === "event-trend"
+          ? "event_trend_qualification_request_context_mismatch"
+          : input.operation === "radar"
+            ? "radar_request_context_mismatch"
+            : input.operation === "event-name-dimension"
+              ? "event_name_dimension_request_context_mismatch"
+              : input.operation === "channel-overview"
+                ? "channel_overview_request_context_mismatch"
+                : input.operation === "channel-list"
+                  ? "channel_list_request_context_mismatch"
+                  : input.operation === "session-boundary-dimension"
+                    ? "session_boundary_dimension_request_context_mismatch"
+                    : input.operation === "session-boundary-overview-page"
+                      ? "session_boundary_overview_page_request_context_mismatch"
+                      : input.operation === "pages-aggregate-page"
+                        ? "pages_aggregate_page_request_context_mismatch"
+                        : input.operation === "pages-tabs"
+                          ? "pages_tabs_request_context_mismatch"
+                          : input.operation === "pages-dashboard"
+                            ? "pages_dashboard_request_context_mismatch"
+                            : input.operation === "geo-points"
+                              ? "geo_points_request_context_mismatch"
+                              : input.operation === "filter-values"
+                                ? "filter_values_request_context_mismatch"
+                                : input.operation === "referrers"
+                                  ? "referrers_request_context_mismatch"
+                                  : input.operation === "visitor-events" ||
+                                      input.operation === "session-events"
+                                    ? "journey_event_page_qualification_request_context_mismatch"
+                                    : "page_dimension_request_context_mismatch",
     );
   const requestContextMismatchCode =
     input.operation === "share-trend"
       ? "share_trend_request_context_mismatch"
-      : input.operation === "radar"
-        ? "radar_request_context_mismatch"
-        : input.operation === "event-field-values"
-          ? "event_field_values_request_context_mismatch"
-          : input.operation === "channel-overview"
-            ? "channel_overview_request_context_mismatch"
-            : input.operation === "channel-list"
-              ? "channel_list_request_context_mismatch"
-              : input.operation === "page-dimension"
-                ? "page_dimension_request_context_mismatch"
-                : input.operation === "referrers"
-                  ? "referrers_request_context_mismatch"
-                  : input.operation === "pages-aggregate-page"
-                    ? "pages_aggregate_page_request_context_mismatch"
-                    : input.operation === "pages-tabs"
-                      ? "pages_tabs_request_context_mismatch"
-                      : input.operation === "event-name-dimension"
-                        ? "event_name_dimension_request_context_mismatch"
-                        : input.operation === "geo-points"
-                          ? "geo_points_request_context_mismatch"
-                          : input.operation === "session-boundary-dimension"
-                            ? "session_boundary_dimension_request_context_mismatch"
-                            : input.operation ===
-                                "session-boundary-overview-page"
-                              ? "session_boundary_overview_page_request_context_mismatch"
-                              : input.operation === "pages-dashboard"
-                                ? "pages_dashboard_request_context_mismatch"
-                                : input.operation === "filter-values"
-                                  ? "filter_values_request_context_mismatch"
-                                  : input.operation === "visitors"
-                                    ? "visitor_list_qualification_request_context_mismatch"
-                                    : input.operation === "visitor-events" ||
-                                        input.operation === "session-events"
-                                      ? "journey_event_page_qualification_request_context_mismatch"
-                                      : input.operation === "overview" ||
-                                          input.operation === "trend"
-                                        ? "overview_trend_request_context_mismatch"
-                                        : "event_fields_request_context_mismatch";
+      : input.operation === "event-trend"
+        ? "event_trend_qualification_request_context_mismatch"
+        : input.operation === "radar"
+          ? "radar_request_context_mismatch"
+          : input.operation === "event-field-values"
+            ? "event_field_values_request_context_mismatch"
+            : input.operation === "channel-overview"
+              ? "channel_overview_request_context_mismatch"
+              : input.operation === "channel-list"
+                ? "channel_list_request_context_mismatch"
+                : input.operation === "page-dimension"
+                  ? "page_dimension_request_context_mismatch"
+                  : input.operation === "referrers"
+                    ? "referrers_request_context_mismatch"
+                    : input.operation === "pages-aggregate-page"
+                      ? "pages_aggregate_page_request_context_mismatch"
+                      : input.operation === "pages-tabs"
+                        ? "pages_tabs_request_context_mismatch"
+                        : input.operation === "event-name-dimension"
+                          ? "event_name_dimension_request_context_mismatch"
+                          : input.operation === "geo-points"
+                            ? "geo_points_request_context_mismatch"
+                            : input.operation === "session-boundary-dimension"
+                              ? "session_boundary_dimension_request_context_mismatch"
+                              : input.operation ===
+                                  "session-boundary-overview-page"
+                                ? "session_boundary_overview_page_request_context_mismatch"
+                                : input.operation === "pages-dashboard"
+                                  ? "pages_dashboard_request_context_mismatch"
+                                  : input.operation === "filter-values"
+                                    ? "filter_values_request_context_mismatch"
+                                    : input.operation === "visitors"
+                                      ? "visitor_list_qualification_request_context_mismatch"
+                                      : input.operation === "visitor-events" ||
+                                          input.operation === "session-events"
+                                        ? "journey_event_page_qualification_request_context_mismatch"
+                                        : input.operation === "overview" ||
+                                            input.operation === "trend"
+                                          ? "overview_trend_request_context_mismatch"
+                                          : "event_fields_request_context_mismatch";
   if (
     (input.operation === "event-fields" ||
       input.operation === "event-field-values" ||
@@ -5945,25 +5968,32 @@ async function prepareDeferredEventQualification(input: {
     | DeferredEventQualification
     | DeferredEventTypesQualification
     | DeferredEventNameDimensionQualification
-    | DeferredFilterValuesQualificationInput = eventCandidatePageRequest
+    | DeferredEventTrendQualification
+    | DeferredFilterValuesQualificationInput = eventCandidateEventTrendRequest
     ? (Object.freeze({
         ...deferredBase,
-        operation: "event-types" as const,
+        operation: "event-trend" as const,
         countInput: countInput as AdvancedEventCandidateCountPlanInput,
-      }) as DeferredEventTypesQualification)
-    : eventCandidateDimensionListRequest
+      }) as DeferredEventTrendQualification)
+    : eventCandidatePageRequest
       ? (Object.freeze({
           ...deferredBase,
-          operation: "event-name-dimension" as const,
+          operation: "event-types" as const,
           countInput: countInput as AdvancedEventCandidateCountPlanInput,
-        }) as DeferredEventNameDimensionQualification)
-      : eventCandidateFilterValuesRequest
+        }) as DeferredEventTypesQualification)
+      : eventCandidateDimensionListRequest
         ? (Object.freeze({
             ...deferredBase,
-            operation: "filter-values" as const,
+            operation: "event-name-dimension" as const,
             countInput: countInput as AdvancedEventCandidateCountPlanInput,
-          }) as DeferredFilterValuesQualificationInput)
-        : (Object.freeze(deferredBase) as DeferredEventQualification);
+          }) as DeferredEventNameDimensionQualification)
+        : eventCandidateFilterValuesRequest
+          ? (Object.freeze({
+              ...deferredBase,
+              operation: "filter-values" as const,
+              countInput: countInput as AdvancedEventCandidateCountPlanInput,
+            }) as DeferredFilterValuesQualificationInput)
+          : (Object.freeze(deferredBase) as DeferredEventQualification);
   deferredEventQualifications.add(deferred);
   return deferred;
 }
@@ -5995,9 +6025,13 @@ export function deferredEventQualificationFromQuery(
 ): DeferredEventNameDimensionQualification | undefined;
 export function deferredEventQualificationFromQuery(
   input: unknown,
+  operation: "event-trend",
+): DeferredEventTrendQualification | undefined;
+export function deferredEventQualificationFromQuery(
+  input: unknown,
   operation: Exclude<
     DeferredEventQualificationOperation,
-    "event-types" | "event-name-dimension"
+    "event-types" | "event-name-dimension" | "event-trend"
   >,
 ): DeferredEventQualification | undefined;
 export function deferredEventQualificationFromQuery(
@@ -6007,6 +6041,7 @@ export function deferredEventQualificationFromQuery(
   | DeferredEventQualification
   | DeferredEventTypesQualification
   | DeferredEventNameDimensionQualification
+  | DeferredEventTrendQualification
   | DeferredFilterValuesQualificationInput
   | undefined;
 export function deferredEventQualificationFromQuery(
@@ -6016,6 +6051,7 @@ export function deferredEventQualificationFromQuery(
   | DeferredEventQualification
   | DeferredEventTypesQualification
   | DeferredEventNameDimensionQualification
+  | DeferredEventTrendQualification
   | DeferredFilterValuesQualificationInput
   | undefined {
   if (!input || typeof input !== "object") return undefined;
@@ -6031,6 +6067,7 @@ export function deferredEventQualificationFromQuery(
         | DeferredEventQualification
         | DeferredEventTypesQualification
         | DeferredEventNameDimensionQualification
+        | DeferredEventTrendQualification
         | DeferredFilterValuesQualificationInput)
     : undefined;
 }
@@ -6154,8 +6191,7 @@ export function deferredEventNameDimensionQualificationFromQuery(
 export function deferredEventTrendQualificationFromQuery(
   input: unknown,
 ): DeferredEventTrendQualification | undefined {
-  return deferredEventQualificationFromQuery(input, "event-trend") as
-    DeferredEventTrendQualification | undefined;
+  return deferredEventQualificationFromQuery(input, "event-trend");
 }
 
 export function deferredEventContextQualificationFromQuery(
@@ -6438,6 +6474,7 @@ export function isDeferredEventQualification(
   | DeferredEventQualification
   | DeferredEventTypesQualification
   | DeferredEventNameDimensionQualification
+  | DeferredEventTrendQualification
   | DeferredFilterValuesQualificationInput {
   return (
     typeof value === "object" &&
@@ -6462,6 +6499,7 @@ export async function prepareDeferredEventQualificationFallback(
     | DeferredEventQualification
     | DeferredEventTypesQualification
     | DeferredEventNameDimensionQualification
+    | DeferredEventTrendQualification
     | DeferredFilterValuesQualificationInput,
 ): Promise<FilterDocument> {
   if (!isDeferredEventQualification(deferred))
@@ -6549,6 +6587,18 @@ export function d1AdvancedFilterMiddleware(
   expectedSiteId?: string,
 ): TypedQueryProviderMiddleware {
   return async (operation: QueryOperation, input: unknown, next, execution) => {
+    const rawEventTrendRequestSnapshot =
+      operation === "event-trend"
+        ? qualificationRequestOwnDataSnapshot(input)
+        : undefined;
+    if (
+      operation === "event-trend" &&
+      rawEventTrendRequestSnapshot === undefined
+    )
+      throw invalidInput(
+        "query",
+        "event_trend_qualification_request_own_data_required",
+      );
     if (operation === "event-types") {
       const filtersDescriptor = ownDescriptor(input, "filters");
       const eventTypesFilters =
@@ -6711,6 +6761,15 @@ export function d1AdvancedFilterMiddleware(
       ownDataValue(input, "mode") === "overview-tab" &&
       ownDataValue(input, "tab") === "source.channel";
     const output = { ...query } as Record<string, unknown>;
+    if (
+      operation === "event-trend" &&
+      qualificationRequestOwnDataSnapshot(output) !==
+        rawEventTrendRequestSnapshot
+    )
+      throw invalidInput(
+        "query",
+        "event_trend_qualification_request_context_mismatch",
+      );
     const outputEventNameDimensionRequest =
       rawEventNameDimensionRequest !== null
         ? normalizeEventNameDimensionListRequest({
@@ -7065,6 +7124,9 @@ export function d1AdvancedFilterMiddleware(
         allowPrivateRetentionWholeFilterOptIn,
         allowPrivateFilterValuesWholeFilterOptIn,
         allowEventNameDimensionEventCandidate,
+        ...(operation === "event-trend"
+          ? { eventTrendRequestSnapshot: rawEventTrendRequestSnapshot }
+          : {}),
         subject,
         diagnostics,
         signal: execution?.signal,

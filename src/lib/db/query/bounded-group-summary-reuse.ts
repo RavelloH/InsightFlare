@@ -1,4 +1,5 @@
 import type { BoundedAdmissionEvidence } from "./bounded-admission-reuse";
+import { isUnitIndicator } from "./bounded-unit-sum-proof";
 import type { RelationScope, SqlExpression } from "./expression";
 import {
   hasSafeMaterializationOrderingAncestors,
@@ -236,32 +237,6 @@ function safeAdmittedRowsInput(
   );
 }
 
-function unitIndicator(expression: SqlExpression): boolean {
-  if (
-    (expression.kind === "parameter" || expression.kind === "constant") &&
-    (expression.resultType.affinity === "integer" ||
-      expression.resultType.affinity === "numeric") &&
-    !expression.resultType.nullable &&
-    typeof expression.value === "number" &&
-    Number.isSafeInteger(expression.value) &&
-    (expression.value === 0 || expression.value === 1)
-  )
-    return true;
-  if (expression.kind === "case")
-    return (
-      expression.branches.length > 0 &&
-      expression.branches.every(({ then }) => unitIndicator(then)) &&
-      expression.else !== undefined &&
-      unitIndicator(expression.else)
-    );
-  if (expression.kind === "coalesce")
-    return (
-      expression.expressions.length > 0 &&
-      expression.expressions.every(unitIndicator)
-    );
-  return false;
-}
-
 function safeBoundedAdmissionSum(
   expression: SqlExpression,
   input: QuerySource,
@@ -280,7 +255,7 @@ function safeBoundedAdmissionSum(
     isMaterializationSafeExpression(
       expression.expression,
       new Map([[input.scope, input.fields.length]]),
-    ) && unitIndicator(expression.expression)
+    ) && isUnitIndicator(expression.expression)
   );
 }
 

@@ -1,15 +1,28 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  aggregate,
+  callFunction,
   constant,
+  count,
+  eq,
   filter,
+  join,
+  limit,
   neq,
   project,
   rowNumber,
   scan,
+  sum,
   union,
   window,
 } from "@/lib/db";
+import type { AnyExpression, SqlExpression } from "@/lib/db/query/expression";
+import {
+  inspectTotalMaterializationSubtree,
+  isMaterializationSafeAggregateExpression,
+  isMaterializationSafeNode,
+} from "@/lib/db/query/materialization-safety";
 import {
   assertPhysicalSharedRelationInterfaceViewMatches,
   findPhysicalSharedRelationInterface,
@@ -19,7 +32,7 @@ import {
   lowerLogicalPlan,
   validatePhysicalQueryPlan,
 } from "@/lib/db/query/physical-plan";
-import type { Relation } from "@/lib/db/query/plan";
+import type { LogicalQueryNode, Relation } from "@/lib/db/query/plan";
 import { schema } from "@/lib/db/schema";
 
 function repeatedWindowInput(): {
@@ -63,7 +76,112 @@ function expectInvalidPlan(operation: () => unknown): void {
   }
 }
 
+type AnyRelation = Relation<object, Readonly<Record<string, AnyExpression>>>;
+
+function safeUnitSum(
+  input: AnyRelation,
+  value: SqlExpression = constant(1),
+): boolean {
+  return isMaterializationSafeAggregateExpression(
+    sum(value as SqlExpression<number | null>),
+    input,
+  );
+}
+
 describe("validated physical shared-relation interfaces", () => {
+  it("bounds unit SUM only through current finite relation shapes", () => {
+    const unbounded = scan(schema.site_identities) as AnyRelation;
+    const bounded = limit(unbounded, 20_001) as AnyRelation;
+    const projected = project(bounded, {
+      indicator: constant(1),
+    }) as AnyRelation;
+    const filtered = filter(
+      projected,
+      eq(projected.columns.indicator!, constant(1) as never),
+    ) as AnyRelation;
+    expect(safeUnitSum(filtered)).toBe(true);
+
+    const scalarInput = aggregate(unbounded, {
+      groupBy: {},
+      aggregates: { rowCount: count() },
+    }) as AnyRelation;
+    const scalarProjection = project(scalarInput, {
+      marker: constant(1),
+    }) as AnyRelation;
+    const scalarFilter = filter(
+      scalarProjection,
+      eq(scalarProjection.columns.marker!, constant(1) as never),
+    ) as AnyRelation;
+    const innerBounded = join(
+      bounded,
+      scalarFilter,
+      eq(constant(1), constant(1)),
+    ) as AnyRelation;
+    const leftBounded = join(
+      bounded,
+      scalarFilter,
+      eq(constant(1), constant(1)),
+      "left",
+    ) as AnyRelation;
+    expect(safeUnitSum(innerBounded)).toBe(true);
+    expect(safeUnitSum(leftBounded)).toBe(true);
+
+    const multirowRight = join(
+      bounded,
+      unbounded,
+      eq(constant(1), constant(1)),
+    ) as AnyRelation;
+    expect(safeUnitSum(unbounded)).toBe(false);
+    expect(safeUnitSum(multirowRight)).toBe(false);
+    expect(safeUnitSum(bounded, constant(2))).toBe(false);
+
+    const offsetLimit = limit(unbounded, 8, 1) as AnyRelation;
+    expect(safeUnitSum(offsetLimit)).toBe(false);
+    const computedLimit = limit(unbounded, 8) as AnyRelation;
+    Reflect.set(computedLimit.node, "count", callFunction("abs", constant(8)));
+    expect(safeUnitSum(computedLimit)).toBe(false);
+
+    const wrongScope = {
+      ...projected,
+      scope: { marker: Symbol("wrong-scope") },
+    } as unknown as AnyRelation;
+    expect(safeUnitSum(wrongScope)).toBe(false);
+    const wrongFields = {
+      ...projected,
+      fields: projected.fields.map((field, index) =>
+        index === 0 ? { ...field, name: "forged" } : field,
+      ),
+    } as AnyRelation;
+    expect(safeUnitSum(wrongFields)).toBe(false);
+
+    const cyclic = project(bounded, { indicator: constant(1) }) as AnyRelation;
+    Reflect.set(cyclic.node, "input", {
+      node: cyclic.node,
+      scope: cyclic.scope,
+      fields: cyclic.fields,
+    });
+    expect(safeUnitSum(cyclic)).toBe(false);
+  });
+
+  it("keeps finite row safety separate from full materialization permission", () => {
+    const capped = limit(scan(schema.site_identities) as AnyRelation, 4);
+    const input = project(capped, { indicator: constant(1) }) as AnyRelation;
+    const summary = aggregate(input, {
+      groupBy: {},
+      aggregates: { units: sum(constant(1)) },
+    }) as AnyRelation;
+
+    expect(safeUnitSum(input)).toBe(true);
+    expect(isMaterializationSafeNode(summary.node)).toBe(true);
+    expect(
+      inspectTotalMaterializationSubtree(summary.node, new Set()),
+    ).toMatchObject({
+      safe: false,
+      blocker: capped.node as LogicalQueryNode,
+      reason: "limit-barrier",
+    });
+  });
+
   it("only lets a shared producer read an earlier certified definition", () => {
     const first = repeatedWindowInput();
     const second = repeatedWindowInput();

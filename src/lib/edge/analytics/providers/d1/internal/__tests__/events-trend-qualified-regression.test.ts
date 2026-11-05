@@ -24,6 +24,7 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
+import { EVENT_TREND_OUTPUTS } from "@/lib/edge/analytics/engine/event-trend-plan";
 import {
   d1AdvancedFilterMiddleware,
   deferredEventTrendQualificationFromQuery,
@@ -73,7 +74,7 @@ interface PreparedEventTrendQuery extends QueryInput {
 
 interface TrendScenario {
   readonly label: string;
-  readonly scope: "session" | "visitor";
+  readonly scope: "session" | "visitor" | "event";
   readonly limit: number;
   readonly interval: Interval;
   readonly eventName?: string;
@@ -341,7 +342,7 @@ async function runScenario(
     );
     expect(actualTrace.preparedSql.length).toBeGreaterThan(2);
   } else {
-    expect(compilation.kind).toBe("compiled");
+    expect(compilation.kind, JSON.stringify(compilation)).toBe("compiled");
     if (compilation.kind !== "compiled")
       throw new Error("wave94d_event_trend_compilation_unavailable");
     expect(compilation.evidence.groupWidth).toBeLessThanOrEqual(16);
@@ -410,8 +411,27 @@ async function runScenario(
               fallbackReason: compilation.fallbackReason,
             },
       rawQualificationRows: rawRows,
+      reportRowCounts: Object.fromEntries(
+        [
+          EVENT_TREND_OUTPUTS.series,
+          EVENT_TREND_OUTPUTS.points,
+          EVENT_TREND_OUTPUTS.other,
+        ].map((outputId) => [
+          outputId,
+          rawRows.filter((row) => row.outputId === outputId).length,
+        ]),
+      ),
+      controlPayload: rawRows.find((row) => row.rowKind === "control") ?? null,
       diagnosticsFallback: diagnostics.advancedCountSqlFallbackReason ?? null,
       ownerIdentifiersBound: false,
+      resourceLimits: {
+        sqlUtf8Bytes: D1_MAX_SQL_UTF8_BYTES,
+        boundParameters: D1_MAX_BOUND_PARAMETERS,
+        groupedSummaryWidth: 16,
+        rawActivityRows: 20_000,
+        rawActivityOverflow: 20_001,
+        timeZone: WINDOW.timeZone,
+      },
     },
   };
 }
@@ -430,6 +450,34 @@ afterAll(() => {
       absolutePath,
       JSON.stringify(
         { kind: "wave94d-event-trend-qualified-evidence-v1", evidenceBatches },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+  }
+  const artifactDirectory = process.env.WAVE97EG_ARTIFACT_DIR;
+  if (artifactDirectory) {
+    const evidencePath = resolve(
+      artifactDirectory,
+      "event-trend-qualified-evidence.json",
+    );
+    mkdirSync(dirname(evidencePath), { recursive: true });
+    writeFileSync(
+      evidencePath,
+      JSON.stringify(
+        {
+          kind: "wave97eg-event-candidate-trend-evidence-v1",
+          resourceLimits: {
+            sqlUtf8Bytes: D1_MAX_SQL_UTF8_BYTES,
+            boundParameters: D1_MAX_BOUND_PARAMETERS,
+            groupedSummaryWidth: 16,
+            rawActivityRows: 20_000,
+            rawActivityOverflow: 20_001,
+            timeZone: WINDOW.timeZone,
+          },
+          evidenceBatches,
+        },
         null,
         2,
       ),
@@ -512,6 +560,324 @@ describe("Wave94D qualified Event trend", () => {
       });
     },
   );
+
+  it("qualifies a complete Event Count tree once for all three trend outputs", async () => {
+    const database = createFixture();
+    const result = await runScenario(database, {
+      label: "event-candidate-full-count-tree",
+      scope: "event",
+      limit: 3,
+      interval: "day",
+      countDsl:
+        'count(event { event.name eq "alpha" AND (event.name notEmpty OR NOT (event.name eq "beta")) }) eq 3',
+    });
+    if (result.qualified.compilation.kind !== "compiled")
+      throw new Error("wave97eg_event_trend_native_compile_missing");
+    expect(result.qualified.statementCount).toBe(2);
+    expect(result.qualified.reportRowCounts).toEqual({
+      [EVENT_TREND_OUTPUTS.series]: expect.any(Number),
+      [EVENT_TREND_OUTPUTS.points]: expect.any(Number),
+      [EVENT_TREND_OUTPUTS.other]: 1,
+    });
+    expect(
+      Object.values(result.qualified.reportRowCounts).every(
+        (count) => count > 0,
+      ),
+    ).toBe(true);
+    expect(result.qualified.controlPayload).toMatchObject({
+      rowKind: "control",
+      entityKind: "event",
+      rawCount: expect.any(Number),
+    });
+    expect(
+      result.qualified.compilation.evidence.groupedSummaryMaterializations,
+    ).toHaveLength(2);
+    expect(
+      result.qualified.compilation.evidence.groupedSummaryMaterializations?.every(
+        (summary) =>
+          summary.materialization === "materialized" &&
+          summary.groupWidth <= 16,
+      ),
+    ).toBe(true);
+    expect(result.qualified.compilation.evidence.sqlBytes).toBeLessThanOrEqual(
+      D1_MAX_SQL_UTF8_BYTES,
+    );
+    expect(
+      result.qualified.compilation.evidence.bindingCount,
+    ).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+    writeEvidence({
+      kind: "wave97eg-event-candidate-three-output-native-v1",
+      scenario: result,
+    });
+  });
+
+  const eventCandidateTopLevelBooleanCases = [
+    {
+      label: "top-level-count-and-bare-event",
+      scenario: {
+        label: "event-candidate-top-level-count-and-bare-event",
+        scope: "event",
+        limit: 3,
+        interval: "day",
+        countDsl:
+          'count(event { event.name eq "alpha" }) eq 3 AND event.name eq "alpha"',
+      },
+    },
+    {
+      label: "top-level-mixed-or-not",
+      scenario: {
+        label: "event-candidate-top-level-mixed-or-not",
+        scope: "event",
+        limit: 3,
+        interval: "day",
+        countDsl:
+          'count(event { event.name eq "alpha" }) eq 3 OR NOT (event.name eq "alpha")',
+      },
+    },
+  ] as const;
+
+  it.each(eventCandidateTopLevelBooleanCases)(
+    "preserves top-level Event Count logic with bare Event predicates: $label",
+    async ({ scenario }) => {
+      const result = await runScenario(createFixture(), scenario);
+      if (result.qualified.compilation.kind !== "compiled")
+        throw new Error("wave97eg_event_trend_top_level_compile_missing");
+
+      expect(result.qualified.dtoEqual).toBe(true);
+      expect(result.qualified.dto).toEqual({
+        interval: scenario.interval,
+        ...result.baseline.dto,
+      });
+      if (scenario.label === "event-candidate-top-level-mixed-or-not") {
+        const dto = result.qualified.dto as {
+          readonly series: readonly { readonly label: string }[];
+        };
+        expect(dto.series.map(({ label }) => label)).toContain("alpha");
+      }
+      expect(result.baseline.statementCount).toBeGreaterThan(2);
+      expect(result.qualified.statementCount).toBe(2);
+      expect(result.qualified.reportRowCounts).toEqual({
+        [EVENT_TREND_OUTPUTS.series]: expect.any(Number),
+        [EVENT_TREND_OUTPUTS.points]: expect.any(Number),
+        [EVENT_TREND_OUTPUTS.other]: 1,
+      });
+      expect(
+        Object.values(result.qualified.reportRowCounts).every(
+          (count) => count > 0,
+        ),
+      ).toBe(true);
+      expect(result.qualified.controlPayload).toMatchObject({
+        rowKind: "control",
+        entityKind: "event",
+        rawCount: expect.any(Number),
+        nullActivityIdCount: 0,
+        siteIdentityMismatchCount: 0,
+        invalidIdentityCount: 0,
+        duplicateIdentityCount: 0,
+      });
+      expect(
+        result.qualified.compilation.evidence.sqlBytes,
+      ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+      expect(
+        result.qualified.compilation.evidence.bindingCount,
+      ).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+      expect(
+        result.qualified.compilation.evidence.groupedSummaryMaterializations
+          ?.length,
+      ).toBeGreaterThan(0);
+      expect(
+        result.qualified.compilation.evidence.groupedSummaryMaterializations?.every(
+          (summary) => summary.materialization === "materialized",
+        ),
+      ).toBe(true);
+      expect(result.qualified.compilation.evidence.physicalScanKinds).toContain(
+        "custom_events",
+      );
+      writeEvidence({
+        kind: "wave97eg-event-candidate-top-level-boolean-v1",
+        scenario: result,
+      });
+    },
+  );
+
+  const eventCandidateBoundaryCases = [
+    {
+      label: "top-three-other-and-zero-fill",
+      expected: "top-three",
+      scenario: {
+        label: "event-candidate-top-three-other-and-zero-fill",
+        scope: "event",
+        limit: 3,
+        interval: "day",
+        countDsl: 'count(event { event.name eq "alpha" }) eq 3',
+      },
+    },
+    {
+      label: "zero-limit-other",
+      expected: "zero-limit",
+      scenario: {
+        label: "event-candidate-zero-limit-other",
+        scope: "event",
+        limit: 0,
+        interval: "day",
+        countDsl: 'count(event { event.name eq "alpha" }) eq 3',
+      },
+    },
+    {
+      label: "legacy-truthy-raw-name",
+      expected: "raw-name",
+      scenario: {
+        label: "event-candidate-legacy-truthy-raw-name",
+        scope: "event",
+        limit: 8,
+        interval: "hour",
+        eventName: " ",
+        countDsl: 'count(event { event.name eq "alpha" }) eq 3',
+      },
+    },
+  ] as const;
+
+  it.each(eventCandidateBoundaryCases)(
+    "preserves Event-candidate TopN, Other, zero-fill, timezone, and raw name behavior: $label",
+    async ({ expected, scenario }) => {
+      const result = await runScenario(createFixture(), scenario);
+      expect(result.qualified.compilation.kind).toBe("compiled");
+      if (expected === "top-three") {
+        const topThree = result.qualified.dto as {
+          readonly series: readonly { readonly label: string }[];
+          readonly data: readonly { readonly totalEvents: number }[];
+        };
+        expect(topThree.series.map(({ label }) => label)).toEqual([
+          "alpha",
+          "beta",
+          "gamma",
+          SHARE_TREND_OTHER_LABEL,
+        ]);
+        expect(topThree.data.some(({ totalEvents }) => totalEvents === 0)).toBe(
+          true,
+        );
+      } else if (expected === "zero-limit") {
+        const zeroLimit = result.qualified.dto as {
+          readonly series: readonly { readonly label: string }[];
+        };
+        expect(zeroLimit.series.map(({ label }) => label)).toEqual([
+          SHARE_TREND_OTHER_LABEL,
+        ]);
+      } else {
+        const rawName = result.qualified.dto as {
+          readonly series: readonly unknown[];
+          readonly data: readonly { readonly totalEvents: number }[];
+        };
+        expect(rawName.series).toEqual([]);
+        expect(rawName.data.every(({ totalEvents }) => totalEvents === 0)).toBe(
+          true,
+        );
+      }
+      writeEvidence({
+        kind: "wave97eg-event-candidate-dto-boundaries-v1",
+        scenarios: [result],
+        timeZone: WINDOW.timeZone,
+      });
+    },
+  );
+
+  it("falls back at the compile budget and keeps Event-trend errors observable", async () => {
+    const budgetDatabase = createFixture();
+    const terms = Array.from(
+      { length: D1_MAX_BOUND_PARAMETERS + 1 },
+      (_unused, index) =>
+        `page.path contains ${JSON.stringify(`/event-budget-${index}`)}`,
+    ).join(" OR ");
+    const budget = await runScenario(budgetDatabase, {
+      label: "event-candidate-compile-budget-fallback",
+      scope: "event",
+      limit: 5,
+      interval: "day",
+      countDsl: `count(page { ${terms} }) eq 1`,
+      expectedFallback: "compile-budget",
+    });
+    expect(budget.qualified.compilation.kind).toBe("unavailable");
+    expect(budget.qualified.diagnosticsFallback?.kind).toBe("compile-budget");
+
+    const prepared = prepareTrendQuery({
+      scope: "event",
+      limit: 5,
+      interval: "day",
+    });
+    const trace = newTrace();
+    const provider = createD1SiteProviderRegistry({
+      env: testEnv(createFixture(), trace),
+      siteId: SITE_ID,
+    }).resolve("event-trend");
+    if (!provider) throw new Error("wave97eg_event_trend_provider_missing");
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      provider.execute(prepared as never, { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(trace.preparedSql).toHaveLength(0);
+
+    const brokenEnv = {
+      DB: {
+        prepare: () => ({
+          bind: () => ({
+            all: async () => {
+              throw new Error("wave97eg-database-read-failed");
+            },
+          }),
+        }),
+      },
+      MAIN_SECRET: "wave94d-event-trend-qualified-test-secret",
+    } as unknown as Env;
+    const brokenProvider = createD1SiteProviderRegistry({
+      env: brokenEnv,
+      siteId: SITE_ID,
+    }).resolve("event-trend");
+    if (!brokenProvider)
+      throw new Error("wave97eg_event_trend_provider_missing");
+    await expect(brokenProvider.execute(prepared as never)).rejects.toThrow(
+      "wave97eg-database-read-failed",
+    );
+
+    const accessorTrace = newTrace();
+    const accessorRequest = prepareTrendQuery({
+      scope: "event",
+      limit: 5,
+      interval: "day",
+    });
+    let getterReads = 0;
+    let nextEntered = false;
+    Object.defineProperty(accessorRequest, "limit", {
+      enumerable: true,
+      get: () => {
+        getterReads += 1;
+        return 5;
+      },
+    });
+    const accessorMiddleware = d1AdvancedFilterMiddleware(
+      testEnv(createFixture(), accessorTrace),
+    );
+    await expect(
+      accessorMiddleware("event-trend", accessorRequest, async (query) => {
+        nextEntered = true;
+        return query;
+      }),
+    ).rejects.toThrow();
+    expect(getterReads).toBe(0);
+    expect(nextEntered).toBe(false);
+    expect(accessorTrace.preparedSql).toHaveLength(0);
+    writeEvidence({
+      kind: "wave97eg-event-candidate-fallback-error-v1",
+      budget,
+      abortPreserved: true,
+      databaseErrorPreserved: true,
+      accessorRequestRejectedBeforeRead: {
+        getterReads,
+        nextEntered,
+        sqlStatementCount: accessorTrace.preparedSql.length,
+      },
+    });
+  });
 
   it("preserves zero limit, bucket gaps, raw names, Other, and public key collisions", async () => {
     const database = createFixture();

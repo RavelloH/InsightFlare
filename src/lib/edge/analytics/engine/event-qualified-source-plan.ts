@@ -92,7 +92,8 @@ export function buildEventQualifiedSource<
 }): EventQualifiedSource<Count["scope"]> {
   if (
     input.count.scope === "event" &&
-    (input.purpose !== "event-types" || input.reportFilters !== undefined)
+    ((input.purpose !== "event-types" && input.purpose !== "event-trend") ||
+      input.reportFilters !== undefined)
   )
     throw new Error("event_candidate_count_reader_not_authorized");
   if (

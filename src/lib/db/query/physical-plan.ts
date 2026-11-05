@@ -3,6 +3,7 @@ import type {
   SchemaObjectReference,
 } from "@/lib/db/schema/types";
 
+import { currentBoundaryBagProjectCandidates } from "./physical/bag-project-reuse";
 import {
   assertCurrentPhysicalCompileOrderPolicy,
   derivePhysicalCompileOrderPolicy,
@@ -4065,6 +4066,7 @@ function sharedRelationDefinitionsForCandidates(
   >,
   boundaryAwareWindowProjectCandidates: ReadonlySet<LogicalQueryNode> = new Set(),
   legacyStrictRankOneProjectCandidates: ReadonlySet<LogicalQueryNode> = rankOneProjectCandidates,
+  boundaryAwareBagProjectCandidates: ReadonlySet<LogicalQueryNode> = new Set(),
 ): readonly SharedRelationDefinition[] {
   const {
     incoming,
@@ -4097,7 +4099,8 @@ function sharedRelationDefinitionsForCandidates(
         !boundedAdmissionCandidates.has(node) &&
         !boundedAdmissionCounterCandidates.has(node) &&
         !completeKeyedLookupCandidates.has(node) &&
-        !boundedFactLocalReuseCandidates.has(node)) ||
+        !boundedFactLocalReuseCandidates.has(node) &&
+        !boundaryAwareBagProjectCandidates.has(node)) ||
       node.fields.length === 0 ||
       node.fields.length > MAX_REPEATED_WINDOW_INPUT_PROJECT_FIELDS
     )
@@ -4131,6 +4134,10 @@ function sharedRelationDefinitionsForCandidates(
       continue;
     }
     if (boundedFactLocalReuseCandidates.has(node)) {
+      sharedMaterializations.set(node, "materialized");
+      continue;
+    }
+    if (boundaryAwareBagProjectCandidates.has(node)) {
       sharedMaterializations.set(node, "materialized");
       continue;
     }
@@ -4417,6 +4424,26 @@ function sharedRelationDefinitions(
       analysis,
       boundaryContext.interfaces,
     );
+  const boundaryAwareBagProjectCandidates = currentBoundaryBagProjectCandidates(
+    {
+      root,
+      postorder: analysis.postorder,
+      incomingCounts: analysis.incoming,
+      edges: consumerEdges,
+      interfaces: boundaryContext.interfaces,
+      sameFields,
+      candidateFacts: (node, boundaries) =>
+        candidateFacts(
+          node,
+          analysis.closedWindowScopeMemo,
+          boundaries,
+          true,
+          true,
+          provenWindowAnalysis.isSafe,
+        ),
+      candidateFactsAreClosed,
+    },
+  );
   const shieldedExpressionQueryEdges = expressionQueryEdgeSubtrees(
     analysis.postorder,
     new Set(boundaryContext.interfaces.keys()),
@@ -4453,6 +4480,7 @@ function sharedRelationDefinitions(
     ...analysis.boundedSummaryDerivedCandidates,
     ...analysis.sharedMembershipInputCandidates,
     ...analysis.sharedScalarCountCandidates,
+    ...boundaryAwareBagProjectCandidates,
     ...rankOneProjectCandidates,
     ...rankOneFactFilterCandidates,
   ]);
@@ -4480,6 +4508,7 @@ function sharedRelationDefinitions(
     boundaryContext.interfaces,
     boundaryAwareWindowProjectCandidates,
     baselineRankOneProjectCandidates,
+    boundaryAwareBagProjectCandidates,
   );
   const independentAutoPromotionCandidates =
     autoMaterializationPromotionCandidates(baseDefinitions, analysis.postorder);
