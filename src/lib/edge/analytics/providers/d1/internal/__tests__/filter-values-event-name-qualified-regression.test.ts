@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -58,6 +58,8 @@ const FILTER_DSL =
   'page.path neq "/excluded" and count(event { event.name eq "qualifier" }) eq 1';
 const EVENT_WHOLE_BOOLEAN_DSL =
   '(page.path eq "/included" and not (count(event { event.name eq "owner-filter-leak-visible" }) eq 1)) or count(event { event.name eq "owner-filter-leak-visible" }) eq 1';
+const EVENT_CANDIDATE_CAP_DSL =
+  'count(event { event.name eq "qualifier" }) gt 0';
 const REPORT_FIELDS = ["value", "views", "sessions", "visitors"] as const;
 const EXPECTED_EVENT_NAME_VALUES = {
   session: [
@@ -92,6 +94,7 @@ const beforeEvidence: Array<Record<string, unknown>> = [];
 const afterEvidence: Array<Record<string, unknown>> = [];
 const wave97dvEvidence: Array<Record<string, unknown>> = [];
 const wave97ebEvidence: Array<Record<string, unknown>> = [];
+const wave97edEvidence: Array<Record<string, unknown>> = [];
 
 interface QueryOptions {
   readonly limit?: number;
@@ -282,6 +285,80 @@ function createFixture(): DatabaseSync {
   add("visit-owner-excluded-only", "qualifier");
   add("visit-owner-excluded-only", "owner-filter-leak-visible");
   return database;
+}
+
+function populateEventCandidateActivities(
+  database: DatabaseSync,
+  targetActivityCount: number,
+): number {
+  const pageCount = Number(
+    (
+      database
+        .prepare("SELECT COUNT(*) AS count FROM visits WHERE site_id = ?")
+        .get(SITE) as { readonly count: number }
+    ).count,
+  );
+  const eventCount = Number(
+    (
+      database
+        .prepare(
+          "SELECT COUNT(*) AS count FROM custom_events WHERE site_id = ?",
+        )
+        .get(SITE) as { readonly count: number }
+    ).count,
+  );
+  const missing = targetActivityCount - pageCount - eventCount;
+  if (missing < 0)
+    throw new Error("wave97ed_event_candidate_fixture_already_over_target");
+  if (missing === 0) return 0;
+
+  const sitePk = Number(
+    (
+      database
+        .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+        .get(SITE) as { readonly site_pk: number }
+    ).site_pk,
+  );
+  const eventNameId = Number(
+    (
+      database
+        .prepare(
+          "SELECT id FROM custom_event_names WHERE site_id = ? AND name = ?",
+        )
+        .get(SITE, "qualifier") as { readonly id: number }
+    ).id,
+  );
+  const maxSequence = Number(
+    (
+      database
+        .prepare(
+          "SELECT COALESCE(MAX(sequence), 0) AS sequence FROM custom_events",
+        )
+        .get() as { readonly sequence: number }
+    ).sequence,
+  );
+  const insert = database.prepare(
+    `INSERT INTO custom_events (
+       event_id, site_id, site_pk, visit_id, event_name_id, occurred_at,
+       received_at, sequence, node_count, value_count
+     ) VALUES (?, ?, ?, 'visit-a-included', ?, 125, 125, ?, 0, 0)`,
+  );
+  database.exec("BEGIN");
+  try {
+    for (let index = 1; index <= missing; index += 1)
+      insert.run(
+        `wave97ed-cap-event-${targetActivityCount}-${index}`,
+        SITE,
+        sitePk,
+        eventNameId,
+        maxSequence + index,
+      );
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+  return missing;
 }
 
 function envFor(
@@ -580,6 +657,16 @@ afterAll(async () => {
     await writeFile(
       `${wave97ebDirectory}/filter-values-event-name-candidates.json`,
       JSON.stringify({ wave: "97EB", evidence: wave97ebEvidence }, null, 2),
+      "utf8",
+    );
+  }
+  const wave97edDirectory = process.env.WAVE97ED_ARTIFACT_DIR;
+  if (wave97edDirectory && wave97edEvidence.length > 0) {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(wave97edDirectory, { recursive: true });
+    await writeFile(
+      `${wave97edDirectory}/filter-values-event-candidate-admission.json`,
+      JSON.stringify({ wave: "97ED", evidence: wave97edEvidence }, null, 2),
       "utf8",
     );
   }
@@ -1183,6 +1270,126 @@ describe("filter-values event.name qualification baseline", () => {
       fusedStatements: traceEvidence(actualTrace),
       coreStatements: traceEvidence(oracle.trace),
     });
+  });
+
+  it("pre-admits actual Event activity rows at 20,000 and 20,001", async () => {
+    for (const targetActivityCount of [20_000, 20_001]) {
+      const database = createFixture();
+      const insertedActivityCount = populateEventCandidateActivities(
+        database,
+        targetActivityCount,
+      );
+      const preparedTrace = traceFor();
+      const prepared = await d1AdvancedFilterMiddleware(
+        envFor(database, preparedTrace),
+        undefined,
+        SITE,
+      )(
+        "filter-values",
+        queryFor("event", "event.name", {
+          limit: 1,
+          filterDsl: EVENT_CANDIDATE_CAP_DSL,
+        }),
+        async (value) => value,
+      );
+      const request = deferredFilterValuesQualificationFromQuery(prepared);
+      if (!request)
+        throw new Error("wave97ed_event_candidate_cap_request_missing");
+      const compilation = compileFilterValuesQualificationProgram({
+        request,
+        cursor: null,
+      });
+      if (compilation.kind !== "compiled")
+        throw new Error("wave97ed_event_candidate_cap_compile_unavailable");
+
+      const rows = database
+        .prepare(compilation.evidence.sql)
+        .all(
+          ...((compilation.evidence.bindings ?? []) as SQLInputValue[]),
+        ) as Record<string, unknown>[];
+      const controlRows = rows.filter((row) => row.rowKind === "control");
+      const reportRows = rows.filter((row) => row.rowKind === "report");
+      expect(controlRows).toHaveLength(1);
+      const control = controlRows[0]!;
+      expect(control).toMatchObject({
+        entityKind: "event",
+        rawCount: targetActivityCount,
+        nullActivityIdCount: 0,
+        siteIdentityMismatchCount: 0,
+        invalidIdentityCount: 0,
+        duplicateIdentityCount: 0,
+      });
+      expect(compilation.evidence.groupedSummaryProof).toMatchObject({
+        source: "local-plan",
+        nodeKind: "aggregate",
+        groupKeyCount: 2,
+        matchingSharedRelationCount: 1,
+        materialization: "materialized",
+      });
+      expect(compilation.evidence.additionalGroupedSummaryProofs).toHaveLength(
+        1,
+      );
+      expect(
+        compilation.evidence.additionalGroupedSummaryProofs?.[0],
+      ).toMatchObject({
+        source: "local-plan",
+        nodeKind: "aggregate",
+        groupKeyCount: 2,
+        matchingSharedRelationCount: 1,
+        materialization: "materialized",
+      });
+
+      if (targetActivityCount === 20_000) {
+        expect(reportRows.length).toBeGreaterThan(0);
+        expect(reportRows.map(({ value }) => value)).toContain("qualifier");
+      } else {
+        expect(reportRows).toEqual([]);
+        const capTrace = traceFor();
+        const provider = createD1SiteProviderRegistry({
+          env: envFor(database, capTrace),
+          siteId: SITE,
+        }).resolve("filter-values");
+        if (!provider)
+          throw new Error("wave97ed_event_candidate_cap_provider_missing");
+        await expect(
+          provider.execute(
+            queryFor("event", "event.name", {
+              limit: 1,
+              cursor: "malformed-cursor",
+              filterDsl: EVENT_CANDIDATE_CAP_DSL,
+            }),
+          ),
+        ).rejects.toMatchObject({
+          domainError: {
+            kind: "invalid-input",
+            issues: [
+              { path: "filters", code: "filter_activity_limit_exceeded" },
+            ],
+          },
+        });
+        expect(
+          capTrace.preparedSql.filter(isFusedEventFilterValuesReport),
+        ).toHaveLength(1);
+      }
+
+      wave97edEvidence.push({
+        case: `event-candidate-activity-count/${targetActivityCount}`,
+        targetActivityCount,
+        initialActivityCount: targetActivityCount - insertedActivityCount,
+        insertedActivityCount,
+        control,
+        reportRows,
+        sql: compilation.evidence.sql,
+        bindings: compilation.evidence.bindings,
+        sqlBytes: compilation.evidence.sqlBytes,
+        bindingCount: compilation.evidence.bindingCount,
+        outputDescriptors: compilation.evidence.outputDescriptors,
+        controlFields: compilation.evidence.controlFields,
+        groupedSummaryProof: compilation.evidence.groupedSummaryProof,
+        additionalGroupedSummaryProofs:
+          compilation.evidence.additionalGroupedSummaryProofs,
+      });
+    }
   });
 
   it("uses Event candidates for the complete split-eligible AND filter", async () => {

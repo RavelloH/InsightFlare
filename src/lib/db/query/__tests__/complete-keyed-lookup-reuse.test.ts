@@ -24,6 +24,7 @@ import {
   limit,
   max,
   or,
+  param,
   project,
   recursiveClosure,
   rowNumber,
@@ -37,7 +38,10 @@ import {
   window,
 } from "@/lib/db";
 import { compileD1QueryUnoptimizedForTest } from "@/lib/db/query/compiler";
-import { completeKeyedLookupReuseCandidates } from "@/lib/db/query/complete-keyed-lookup-reuse";
+import {
+  completeKeyedLookupReuseCandidates,
+  inspectClosedStableSubtree,
+} from "@/lib/db/query/complete-keyed-lookup-reuse";
 import type {
   AnyExpression,
   ExpressionResultType,
@@ -45,7 +49,11 @@ import type {
   SqlExpression,
 } from "@/lib/db/query/expression";
 import { lowerLogicalPlan } from "@/lib/db/query/physical-plan";
-import type { QuerySource, Relation } from "@/lib/db/query/plan";
+import type {
+  LogicalQueryNode,
+  QuerySource,
+  Relation,
+} from "@/lib/db/query/plan";
 import { schema } from "@/lib/db/schema";
 
 type AnyRelation = Relation<object, Readonly<Record<string, AnyExpression>>>;
@@ -810,6 +818,152 @@ function buildQuery(options: QueryOptions = {}): BuiltQuery {
 }
 
 describe("complete keyed lookup reuse", () => {
+  it.each([
+    ["parameter NULL on the left", "left", "parameter"],
+    ["parameter NULL on the right", "right", "parameter"],
+    ["constant NULL on the left", "left", "constant"],
+    ["constant NULL on the right", "right", "constant"],
+  ] as const)(
+    "proves a direct NULL-only UNION ALL placeholder with %s",
+    (_label, nullSide, nullKind) => {
+      const db = database();
+      const insert = db.prepare(
+        "INSERT INTO site_identities (site_id) VALUES (?)",
+      );
+      insert.run("null-union-a");
+      insert.run("null-union-b");
+      const nullInput = scan(schema.site_identities);
+      const nullRows = project(nullInput, {
+        value: nullKind === "parameter" ? param(null) : constant(null),
+      }) as AnyRelation;
+      const textInput = scan(schema.site_identities);
+      const textRows = project(textInput, {
+        value: constant("known-text"),
+      }) as AnyRelation;
+      const result = (
+        nullSide === "left"
+          ? union(nullRows, textRows, true)
+          : union(textRows, nullRows, true)
+      ) as AnyRelation;
+
+      expect(inspectClosedStableSubtree(result.node)).toEqual({
+        containsRecursiveClosure: false,
+      });
+      const optimized = compileD1Query(lowerLogicalPlan(result));
+      const unoptimized = compileD1QueryUnoptimizedForTest(result);
+      const rows = runAll(db, optimized);
+      expect(normalizeRows(rows)).toEqual(
+        normalizeRows(runAll(db, unoptimized)),
+      );
+      expect(rows).toHaveLength(4);
+      expect(rows.filter(({ value }) => value === null)).toHaveLength(2);
+      expect(rows.filter(({ value }) => value === "known-text")).toHaveLength(
+        2,
+      );
+    },
+  );
+
+  it("keeps two unknown NULL-only UNION ALL arms under the original proof", () => {
+    const leftInput = scan(schema.site_identities);
+    const leftNulls = project(leftInput, { value: param(null) }) as AnyRelation;
+    const rightInput = scan(schema.site_identities);
+    const rightNulls = project(rightInput, {
+      value: constant(null),
+    }) as AnyRelation;
+    const result = union(leftNulls, rightNulls, true) as AnyRelation;
+
+    expect(inspectClosedStableSubtree(result.node)).toEqual({
+      containsRecursiveClosure: false,
+    });
+  });
+
+  it.each([
+    "non-NULL unknown project",
+    "unknown scan field",
+    "forged source fields",
+    "forged project output metadata",
+    "forged source scope",
+  ] as const)(
+    "rejects a UNION unknown affinity that is not proven NULL: %s",
+    (shape) => {
+      const nullInput = scan(schema.site_identities);
+      const nullRows = project(nullInput, {
+        value: param(null),
+      }) as AnyRelation;
+      const textInput = scan(schema.site_identities);
+      const textRows = project(textInput, {
+        value: constant("known-text"),
+      }) as AnyRelation;
+      const result = union(nullRows, textRows, true) as AnyRelation;
+      let forged = result.node;
+      const unionNode = result.node as Extract<
+        LogicalQueryNode,
+        { readonly kind: "union" }
+      >;
+
+      if (shape === "non-NULL unknown project") {
+        const source = scan(schema.site_identities);
+        const unknownValue = {
+          kind: "parameter",
+          value: "not-null",
+          resultType: { affinity: "unknown", nullable: false },
+        } as unknown as AnyExpression;
+        const unknownRows = project(source, {
+          value: unknownValue,
+        }) as AnyRelation;
+        forged = union(unknownRows, textRows, true).node;
+      } else if (shape === "unknown scan field") {
+        const scanNode = {
+          ...nullInput.node,
+          fields: [{ name: "value", affinity: "unknown", nullable: true }],
+        };
+        const scanSource = {
+          node: scanNode,
+          scope: scanNode.scope,
+          fields: scanNode.fields,
+        } as unknown as QuerySource;
+        forged = {
+          ...unionNode,
+          left: scanSource,
+        } as typeof unionNode;
+      } else if (shape === "forged source fields") {
+        forged = {
+          ...unionNode,
+          left: {
+            ...unionNode.left,
+            fields: [...unionNode.left.fields],
+          },
+        } as typeof unionNode;
+      } else if (shape === "forged project output metadata") {
+        const projectNode = {
+          ...nullRows.node,
+          fields: nullRows.node.fields.map((field) => ({
+            ...field,
+            affinity: "text" as const,
+          })),
+        };
+        forged = {
+          ...unionNode,
+          left: {
+            ...unionNode.left,
+            node: projectNode,
+            fields: projectNode.fields,
+          },
+        } as typeof unionNode;
+      } else {
+        forged = {
+          ...unionNode,
+          left: {
+            ...unionNode.left,
+            scope: {} as QuerySource["scope"],
+          },
+        } as typeof unionNode;
+      }
+
+      expect(inspectClosedStableSubtree(forged)).toBeUndefined();
+    },
+  );
+
   it("reuses a closed complete fact across duplicate-safe semi/anti membership", () => {
     const {
       root,

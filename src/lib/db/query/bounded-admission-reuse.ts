@@ -10,6 +10,7 @@ import type {
   LimitNode,
   LogicalQueryNode,
   ProjectNode,
+  QuerySource,
 } from "./plan";
 
 export interface BoundedAdmissionIncomingEdge {
@@ -22,6 +23,7 @@ export interface BoundedAdmissionEvidence extends ClosedStableSubtreeEvidence {
   readonly counter: AggregateNode;
   readonly admissionFilter: FilterNode;
   readonly boundedRowsJoin: JoinNode;
+  readonly admittedGateInput: QuerySource;
   readonly otherRowsJoins: readonly JoinNode[];
   readonly limitRows: number;
   readonly maximumRows: number;
@@ -76,7 +78,8 @@ function positiveSafeInteger(
 ): number | undefined {
   if (
     (expression.kind !== "parameter" && expression.kind !== "constant") ||
-    expression.resultType.affinity !== "integer" ||
+    (expression.resultType.affinity !== "integer" &&
+      expression.resultType.affinity !== "numeric") ||
     expression.resultType.nullable ||
     typeof expression.value !== "number" ||
     !Number.isSafeInteger(expression.value) ||
@@ -100,11 +103,17 @@ function positiveSafeLimitRows(expression: SqlExpression): number | undefined {
   return expression.value;
 }
 
-function zeroOrOneInteger(expression: SqlExpression, expected: 0 | 1): boolean {
+function zeroOrOneSafeInteger(
+  expression: SqlExpression,
+  expected: 0 | 1,
+): boolean {
   return (
     (expression.kind === "parameter" || expression.kind === "constant") &&
-    expression.resultType.affinity === "integer" &&
+    (expression.resultType.affinity === "integer" ||
+      expression.resultType.affinity === "numeric") &&
     !expression.resultType.nullable &&
+    typeof expression.value === "number" &&
+    Number.isSafeInteger(expression.value) &&
     expression.value === expected
   );
 }
@@ -140,10 +149,34 @@ function globalTrueJoin(node: JoinNode): boolean {
     node.joinType === "inner" &&
     condition.kind === "binary" &&
     condition.operator === "=" &&
-    zeroOrOneInteger(condition.left, 1) &&
-    zeroOrOneInteger(condition.right, 1) &&
+    zeroOrOneSafeInteger(condition.left, 1) &&
+    zeroOrOneSafeInteger(condition.right, 1) &&
     condition.resultType.affinity === "integer" &&
     !condition.resultType.nullable
+  );
+}
+
+function exactAdmissionMarkerProject(
+  node: LogicalQueryNode,
+  admissionFilter: FilterNode,
+): node is ProjectNode {
+  if (
+    node.kind !== "project" ||
+    node.input.node !== admissionFilter ||
+    node.input.scope !== admissionFilter.scope ||
+    node.input.fields !== admissionFilter.fields ||
+    node.fields.length !== node.projections.length ||
+    node.fields.length !== 1 ||
+    node.projections.length !== 1
+  )
+    return false;
+  const field = node.fields[0]!;
+  const projection = node.projections[0]!;
+  return (
+    field.name === projection.name &&
+    field.affinity === projection.expression.resultType.affinity &&
+    field.nullable === projection.expression.resultType.nullable &&
+    zeroOrOneSafeInteger(projection.expression, 1)
   );
 }
 
@@ -458,22 +491,40 @@ function boundedRootCandidate(
 
   const admissionConsumers = input.incoming.get(admissionFilter) ?? [];
   if (
-    admissionConsumers.length < 2 ||
+    admissionConsumers.length < 1 ||
     admissionConsumers.length !==
       (input.incomingCounts.get(admissionFilter) ?? 0) ||
     admissionConsumers.some(({ kind }) => kind !== "relation")
   )
     return undefined;
-  const gatedJoins = admissionConsumers.map(({ parent }) => parent);
-  if (
-    gatedJoins.some(
-      (parent) =>
-        parent.kind !== "join" ||
-        parent.right.node !== admissionFilter ||
-        !globalTrueJoin(parent),
+  const gatedJoins: JoinNode[] = [];
+  for (const { parent } of admissionConsumers) {
+    if (
+      parent.kind === "join" &&
+      parent.right.node === admissionFilter &&
+      globalTrueJoin(parent)
+    ) {
+      gatedJoins.push(parent);
+      continue;
+    }
+    if (!exactAdmissionMarkerProject(parent, admissionFilter)) return undefined;
+    const markerConsumers = input.incoming.get(parent) ?? [];
+    if (
+      markerConsumers.length < 1 ||
+      markerConsumers.length !== (input.incomingCounts.get(parent) ?? 0) ||
+      markerConsumers.some(
+        ({ kind, parent: consumer }) =>
+          kind !== "relation" ||
+          consumer.kind !== "join" ||
+          consumer.right.node !== parent ||
+          !globalTrueJoin(consumer),
+      )
     )
-  )
-    return undefined;
+      return undefined;
+    gatedJoins.push(
+      ...markerConsumers.map(({ parent: consumer }) => consumer as JoinNode),
+    );
+  }
   const boundedRowsJoins = gatedJoins.filter(
     (parent): parent is JoinNode =>
       parent.kind === "join" && parent.left.node === bounded,
@@ -481,14 +532,15 @@ function boundedRootCandidate(
   const boundedRowsJoin = boundedRowsJoins[0];
   const otherRowsJoins = gatedJoins.filter(
     (parent): parent is JoinNode =>
-      parent.kind === "join" &&
-      parent !== boundedRowsJoin &&
-      !subtreeContains(parent.left.node, bounded),
+      parent.kind === "join" && parent !== boundedRowsJoin,
+  );
+  const hasUnclassifiedBoundedReader = otherRowsJoins.some((parent) =>
+    subtreeContains(parent.left.node, bounded),
   );
   if (
     boundedRowsJoins.length !== 1 ||
     !boundedRowsJoin ||
-    otherRowsJoins.length === 0
+    hasUnclassifiedBoundedReader
   )
     return undefined;
 
@@ -505,6 +557,7 @@ function boundedRootCandidate(
     counter,
     admissionFilter,
     boundedRowsJoin,
+    admittedGateInput: boundedRowsJoin.right,
     otherRowsJoins,
     limitRows,
     maximumRows,

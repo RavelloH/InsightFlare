@@ -2,21 +2,26 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
   aggregate,
   and,
   callFunction,
+  caseWhen,
   coalesce,
   compileD1Query,
+  constant,
   count,
   eq,
   filter,
   gt,
   join,
   limit,
+  lte,
   neq,
   param,
   project,
+  scan,
   sort,
   sum,
   union,
@@ -26,6 +31,7 @@ import { compileD1QueryUnoptimizedForTest } from "@/lib/db/query/compiler";
 import type { AnyExpression, SqlExpression } from "@/lib/db/query/expression";
 import { lowerLogicalPlan } from "@/lib/db/query/physical-plan";
 import type { Relation } from "@/lib/db/query/plan";
+import { schema } from "@/lib/db/schema";
 
 type AnyRelation = Relation<object, Readonly<Record<string, AnyExpression>>>;
 type LogicalColumnMap = Readonly<Record<string, AnyExpression>>;
@@ -41,6 +47,9 @@ interface LookupOptions {
   readonly selectionBarrier?: boolean;
   readonly wrongSource?: boolean;
   readonly nullableKey?: boolean;
+  readonly admissionGate?: boolean;
+  readonly admissionInputProjection?: boolean;
+  readonly unitBoundedSum?: boolean;
 }
 
 const databases = new Set<DatabaseSync>();
@@ -109,14 +118,111 @@ function boundedInput(
   return limit(ordered, 32) as AnyRelation;
 }
 
+function boundedScanInput(): AnyRelation {
+  const visits = scan(schema.visits);
+  const scopedVisits = filter(
+    visits,
+    eq(visits.columns.site_id, constant("admission-a")),
+  );
+  const siteIdentities = scan(schema.site_identities);
+  const joined = join(
+    scopedVisits,
+    siteIdentities,
+    eq(scopedVisits.columns.site_pk, siteIdentities.columns.site_pk),
+  ) as AnyRelation;
+  const eligible = filter(
+    joined,
+    eq(columns(joined).right_site_id!, constant("admission-a") as never),
+  ) as AnyRelation;
+  const shaped = project(eligible, {
+    left_keyA: columns(eligible).left_site_id!,
+    left_keyB: columns(eligible).left_visit_id!,
+    left_token: columns(eligible).left_pathname!,
+  }) as AnyRelation;
+  return limit(shaped, 32) as AnyRelation;
+}
+
+function admissionDatabase(): DatabaseSync {
+  const result = createMigratedDatabase();
+  databases.add(result);
+  const insertSite = result.prepare(
+    "INSERT INTO site_identities (site_id) VALUES (?)",
+  );
+  insertSite.run("admission-a");
+  const sitePk = Number(
+    (
+      result
+        .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+        .get("admission-a") as { readonly site_pk: number }
+    ).site_pk,
+  );
+  const insertVisit = result.prepare(
+    `INSERT INTO visits (
+       visit_id, site_id, visitor_id, session_id, status, started_at,
+       last_activity_at, duration_source, pathname, hostname, site_pk
+     ) VALUES (?, 'admission-a', ?, ?, 'complete', ?, ?, 'timer', ?, 'example.test', ?)`,
+  );
+  for (const [index, token] of ["keep-a", "keep-b", "keep-null"].entries())
+    insertVisit.run(
+      `admission-visit-${index}`,
+      `admission-visitor-${index}`,
+      `admission-session-${index}`,
+      index + 1,
+      index + 1,
+      token,
+      sitePk,
+    );
+  return result;
+}
+
 function buildLookupQuery(options: LookupOptions = {}): {
   readonly summary: AnyRelation;
   readonly output: AnyRelation;
+  readonly bounded?: AnyRelation;
+  readonly counter?: AnyRelation;
+  readonly admittedRows?: AnyRelation;
 } {
-  const input = boundedInput(
-    options.selectionBarrier,
-    options.nullableKey ?? true,
-  );
+  const bounded = options.admissionGate
+    ? boundedScanInput()
+    : boundedInput(options.selectionBarrier, options.nullableKey ?? true);
+  let input = bounded;
+  let counter: AnyRelation | undefined;
+  let admittedRows: AnyRelation | undefined;
+  let countControl: AnyRelation | undefined;
+  if (options.admissionGate) {
+    counter = aggregate(bounded, {
+      groupBy: {},
+      aggregates: { rowCount: count() },
+    }) as AnyRelation;
+    const admittedCounter = filter(
+      counter,
+      // Numeric parameters are also accepted by the event builder's count
+      // threshold proof; this generic fixture uses its integer literal form.
+      lte(counter.columns.rowCount!, constant(31) as never),
+    ) as AnyRelation;
+    const truePredicate = eq(constant(1), constant(1));
+    const boundedRowsJoin = join(
+      bounded,
+      admittedCounter,
+      truePredicate,
+    ) as AnyRelation;
+    admittedRows = project(boundedRowsJoin, {
+      left_keyA: columns(boundedRowsJoin).left_left_keyA!,
+      left_keyB: columns(boundedRowsJoin).left_left_keyB!,
+      left_token: columns(boundedRowsJoin).left_left_token!,
+    }) as AnyRelation;
+    input = admittedRows;
+    if (options.admissionInputProjection) {
+      input = project(input, {
+        left_keyA: columns(input).left_keyA!,
+        left_keyB: columns(input).left_keyB!,
+        left_token: columns(input).left_token!,
+      }) as AnyRelation;
+    }
+    countControl = project(counter, {
+      rowCount: counter.columns.rowCount!,
+    }) as AnyRelation;
+  }
   const keys: Readonly<Record<string, AnyExpression>> = {
     keyA: columns(input).left_keyA!,
     keyB: columns(input).left_keyB!,
@@ -130,7 +236,22 @@ function buildLookupQuery(options: LookupOptions = {}): {
       orderedKeyNames.map((name) => [`group_${name}`, keys[name]!]),
     ),
     aggregates: {
-      rowCount: count(),
+      rowCount: options.unitBoundedSum
+        ? sum(
+            caseWhen(
+              [
+                {
+                  when: eq(
+                    columns(input).left_token!,
+                    param("keep-a") as never,
+                  ),
+                  then: constant(1),
+                },
+              ],
+              constant(0),
+            ) as SqlExpression<number>,
+          )
+        : count(),
       ...(options.unsafeAggregate
         ? {
             unsafeAmount: sum(
@@ -239,7 +360,22 @@ function buildLookupQuery(options: LookupOptions = {}): {
     output = branchA;
   }
 
-  return { summary, output };
+  if (countControl) {
+    output = union(
+      output,
+      project(countControl, {
+        token: constant("count"),
+        rowCount: columns(countControl).rowCount!,
+      }) as AnyRelation,
+      true,
+    ) as AnyRelation;
+  }
+
+  return {
+    summary,
+    output,
+    ...(options.admissionGate ? { bounded, counter, admittedRows: input } : {}),
+  };
 }
 
 function execute(
@@ -258,7 +394,10 @@ function rowBag(rows: readonly Record<string, unknown>[]): string[] {
   return rows.map((row) => JSON.stringify(row)).sort();
 }
 
-function assertSqliteEquivalent(output: AnyRelation): {
+function assertSqliteEquivalent(
+  output: AnyRelation,
+  db: DatabaseSync = database(),
+): {
   readonly physical: ReturnType<typeof lowerLogicalPlan>;
   readonly optimized: ReturnType<typeof compileD1Query>;
   readonly optimizedRows: Record<string, unknown>[];
@@ -266,7 +405,6 @@ function assertSqliteEquivalent(output: AnyRelation): {
   const physical = lowerLogicalPlan(output);
   const optimized = compileD1Query(physical);
   const unoptimized = compileD1QueryUnoptimizedForTest(output);
-  const db = database();
   const optimizedRows = execute(db, optimized);
   expect(rowBag(optimizedRows)).toEqual(rowBag(execute(db, unoptimized)));
   return { physical, optimized, optimizedRows };
@@ -331,5 +469,41 @@ describe("bounded grouped lookup reuse", () => {
     expect(
       optimizedRows.find(({ token }) => token === "keep-null"),
     ).toMatchObject({ rowCount: 0 });
+  });
+
+  it("rechecks a grouped summary through one fresh bounded admission join", () => {
+    const built = buildLookupQuery({ admissionGate: true });
+    const { physical, optimized } = assertSqliteEquivalent(
+      built.output,
+      admissionDatabase(),
+    );
+    expect(built.bounded).toBeDefined();
+    expect(built.counter).toBeDefined();
+    expect(
+      physical.sharedRelations.find(({ node }) => node === built.bounded?.node),
+    ).toMatchObject({ materialization: "materialized" });
+    expect(
+      physical.sharedRelations.find(({ node }) => node === built.counter?.node),
+    ).toMatchObject({ materialization: "materialized" });
+    expect(
+      physical.sharedRelations.find(({ node }) => node === built.summary.node),
+    ).toMatchObject({ materialization: "materialized" });
+    expect(optimized.sql).toContain("AS MATERIALIZED (");
+  });
+
+  it("proves a unit-bounded SUM through an exact admitted-row projection", () => {
+    const built = buildLookupQuery({
+      admissionGate: true,
+      admissionInputProjection: true,
+      unitBoundedSum: true,
+    });
+    const { physical, optimized } = assertSqliteEquivalent(
+      built.output,
+      admissionDatabase(),
+    );
+    expect(
+      physical.sharedRelations.find(({ node }) => node === built.summary.node),
+    ).toMatchObject({ materialization: "materialized" });
+    expect(optimized.sql).toContain("AS MATERIALIZED (");
   });
 });

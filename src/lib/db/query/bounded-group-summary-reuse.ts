@@ -1,3 +1,4 @@
+import type { BoundedAdmissionEvidence } from "./bounded-admission-reuse";
 import type { RelationScope, SqlExpression } from "./expression";
 import {
   hasSafeMaterializationOrderingAncestors,
@@ -11,6 +12,7 @@ import type {
   JoinNode,
   LogicalQueryNode,
   OutputField,
+  ProjectNode,
   QuerySource,
 } from "./plan";
 
@@ -23,6 +25,10 @@ export interface BoundedGroupSummaryReuseInput {
   >;
   readonly forbiddenAncestors: ReadonlySet<LogicalQueryNode>;
   readonly expressionQueryEdges: ReadonlySet<LogicalQueryNode>;
+  readonly boundedAdmissionCandidates: ReadonlyMap<
+    LogicalQueryNode,
+    BoundedAdmissionEvidence
+  >;
   readonly maximumFields: number;
 }
 
@@ -101,16 +107,197 @@ function safeBoundedInput(root: LogicalQueryNode): boolean {
   return visit(root.input.node) && hasSelectiveFilter && hasJoin;
 }
 
+function exactAdmittedRowsProject(
+  node: LogicalQueryNode,
+  evidence: BoundedAdmissionEvidence,
+  incomingCounts: ReadonlyMap<LogicalQueryNode, number>,
+  incoming: ReadonlyMap<
+    LogicalQueryNode,
+    readonly SharedMembershipInputIncomingEdge[]
+  >,
+): boolean {
+  const join = evidence.boundedRowsJoin;
+  const bounded = evidence.bounded;
+  if (
+    node.kind !== "project" ||
+    node.input.node !== join ||
+    node.input.scope !== join.scope ||
+    node.input.fields !== join.fields ||
+    join.joinType !== "inner" ||
+    join.left.node !== bounded ||
+    join.left.scope !== bounded.scope ||
+    join.left.fields !== bounded.fields ||
+    join.right.node !== evidence.admittedGateInput.node ||
+    join.right.scope !== evidence.admittedGateInput.scope ||
+    join.right.fields !== evidence.admittedGateInput.fields ||
+    join.right.fields.length !== 1 ||
+    node.projections.length !== bounded.fields.length ||
+    !sameFieldShape(node.fields, bounded.fields) ||
+    join.fields.length !== bounded.fields.length + join.right.fields.length ||
+    !samePrefixedFieldShape(
+      join.fields.slice(0, bounded.fields.length),
+      bounded.fields,
+      "left",
+    ) ||
+    !samePrefixedFieldShape(
+      join.fields.slice(bounded.fields.length),
+      join.right.fields,
+      "right",
+    )
+  )
+    return false;
+
+  const joinConsumers = incoming.get(join) ?? [];
+  if (
+    joinConsumers.length !== 1 ||
+    joinConsumers.length !== (incomingCounts.get(join) ?? 0) ||
+    joinConsumers[0]?.kind !== "relation" ||
+    joinConsumers[0]?.parent !== node
+  )
+    return false;
+
+  return node.projections.every(({ name, expression }, index) => {
+    const source = bounded.fields[index];
+    return (
+      name === source?.name &&
+      expression.kind === "column" &&
+      expression.scope === node.input.scope &&
+      expression.index === index &&
+      expression.name === node.input.fields[index]?.name &&
+      expression.resultType.affinity === source.affinity &&
+      expression.resultType.nullable === source.nullable &&
+      isMaterializationSafeExpression(
+        expression,
+        new Map([[node.input.scope, node.input.fields.length]]),
+      )
+    );
+  });
+}
+
+function safeDirectFieldProject(node: LogicalQueryNode): node is ProjectNode {
+  if (node.kind !== "project" || node.projections.length !== node.fields.length)
+    return false;
+  const indexes = new Set<number>();
+  return node.projections.every(({ name, expression }, index) => {
+    const inputIndex = directColumnIndex(expression, node.input);
+    const inputField =
+      inputIndex === undefined ? undefined : node.input.fields[inputIndex];
+    const output = node.fields[index];
+    if (
+      output?.name !== name ||
+      name !== inputField?.name ||
+      output.affinity !== expression.resultType.affinity ||
+      output.nullable !== expression.resultType.nullable ||
+      inputIndex === undefined ||
+      indexes.has(inputIndex)
+    )
+      return false;
+    indexes.add(inputIndex);
+    return true;
+  });
+}
+
+function hasExactAdmittedRowsProject(
+  root: LogicalQueryNode,
+  evidence: BoundedAdmissionEvidence,
+  incomingCounts: ReadonlyMap<LogicalQueryNode, number>,
+  incoming: ReadonlyMap<
+    LogicalQueryNode,
+    readonly SharedMembershipInputIncomingEdge[]
+  >,
+): boolean {
+  if (exactAdmittedRowsProject(root, evidence, incomingCounts, incoming))
+    return true;
+  if (!safeDirectFieldProject(root)) return false;
+  return exactAdmittedRowsProject(
+    root.input.node,
+    evidence,
+    incomingCounts,
+    incoming,
+  );
+}
+
+function safeAdmittedRowsInput(
+  root: LogicalQueryNode,
+  evidence: BoundedAdmissionEvidence,
+  incomingCounts: ReadonlyMap<LogicalQueryNode, number>,
+  incoming: ReadonlyMap<
+    LogicalQueryNode,
+    readonly SharedMembershipInputIncomingEdge[]
+  >,
+): boolean {
+  return (
+    hasExactAdmittedRowsProject(root, evidence, incomingCounts, incoming) &&
+    isMaterializationSafeNode(evidence.boundedRowsJoin) &&
+    isMaterializationSafeNode(evidence.admittedGateInput.node) &&
+    isMaterializationSafeNode(evidence.admissionFilter) &&
+    isMaterializationSafeNode(evidence.counter) &&
+    safeBoundedInput(evidence.bounded)
+  );
+}
+
+function unitIndicator(expression: SqlExpression): boolean {
+  if (
+    (expression.kind === "parameter" || expression.kind === "constant") &&
+    (expression.resultType.affinity === "integer" ||
+      expression.resultType.affinity === "numeric") &&
+    !expression.resultType.nullable &&
+    typeof expression.value === "number" &&
+    Number.isSafeInteger(expression.value) &&
+    (expression.value === 0 || expression.value === 1)
+  )
+    return true;
+  if (expression.kind === "case")
+    return (
+      expression.branches.length > 0 &&
+      expression.branches.every(({ then }) => unitIndicator(then)) &&
+      expression.else !== undefined &&
+      unitIndicator(expression.else)
+    );
+  if (expression.kind === "coalesce")
+    return (
+      expression.expressions.length > 0 &&
+      expression.expressions.every(unitIndicator)
+    );
+  return false;
+}
+
+function safeBoundedAdmissionSum(
+  expression: SqlExpression,
+  input: QuerySource,
+  evidence: BoundedAdmissionEvidence,
+): boolean {
+  if (
+    expression.kind !== "aggregate" ||
+    expression.name !== "SUM" ||
+    !expression.expression ||
+    !Number.isSafeInteger(evidence.maximumRows) ||
+    evidence.maximumRows < 1 ||
+    evidence.limitRows !== evidence.maximumRows + 1
+  )
+    return false;
+  return (
+    isMaterializationSafeExpression(
+      expression.expression,
+      new Map([[input.scope, input.fields.length]]),
+    ) && unitIndicator(expression.expression)
+  );
+}
+
 function stableAggregateExpressions(
   node: Extract<LogicalQueryNode, { kind: "aggregate" }>,
+  boundedAdmission?: BoundedAdmissionEvidence,
 ): boolean {
   const allowedFields = new Map([[node.input.scope, node.input.fields.length]]);
   return (
     node.groups.every(({ expression }) =>
       expressionFitsFields(expression, allowedFields),
     ) &&
-    node.aggregates.every(({ expression }) =>
-      isMaterializationSafeAggregateExpression(expression, node.input),
+    node.aggregates.every(
+      ({ expression }) =>
+        isMaterializationSafeAggregateExpression(expression, node.input) ||
+        (boundedAdmission !== undefined &&
+          safeBoundedAdmissionSum(expression, node.input, boundedAdmission)),
     )
   );
 }
@@ -182,6 +369,22 @@ function sameFieldShape(
   );
 }
 
+function samePrefixedFieldShape(
+  output: readonly OutputField[],
+  input: readonly OutputField[],
+  prefix: "left" | "right",
+): boolean {
+  return (
+    output.length === input.length &&
+    output.every(
+      (field, index) =>
+        field.name === `${prefix}_${input[index]?.name}` &&
+        field.affinity === input[index]?.affinity &&
+        field.nullable === input[index]?.nullable,
+    )
+  );
+}
+
 function sourceFieldLineage(
   source: QuerySource,
   target: LogicalQueryNode,
@@ -246,7 +449,8 @@ function aggregateGroupInputIndexes(
   candidate: AggregateNode,
 ): readonly number[] | undefined {
   if (
-    candidate.input.node.kind !== "limit" ||
+    (candidate.input.node.kind !== "limit" &&
+      candidate.input.node.kind !== "project") ||
     candidate.input.scope !== candidate.input.node.scope ||
     candidate.input.fields !== candidate.input.node.fields ||
     candidate.groups.length === 0 ||
@@ -562,10 +766,21 @@ export function boundedGroupSummaryReuseCandidates({
   incoming,
   forbiddenAncestors,
   expressionQueryEdges,
+  boundedAdmissionCandidates,
   maximumFields,
 }: BoundedGroupSummaryReuseInput): ReadonlySet<LogicalQueryNode> {
   const candidates = new Set<LogicalQueryNode>();
   for (const node of nodes) {
+    const input = node.kind === "aggregate" ? node.input.node : undefined;
+    const boundedAdmission =
+      input === undefined
+        ? undefined
+        : [...boundedAdmissionCandidates.values()].find((evidence) =>
+            safeAdmittedRowsInput(input, evidence, incomingCounts, incoming),
+          );
+    const hasSafeInput =
+      (input !== undefined && safeBoundedInput(input)) ||
+      boundedAdmission !== undefined;
     if (
       node.kind !== "aggregate" ||
       node.groups.length === 0 ||
@@ -584,8 +799,8 @@ export function boundedGroupSummaryReuseCandidates({
           true,
         )) ||
       expressionQueryEdges.has(node) ||
-      !safeBoundedInput(node.input.node) ||
-      !stableAggregateExpressions(node)
+      !hasSafeInput ||
+      !stableAggregateExpressions(node, boundedAdmission)
     )
       continue;
 

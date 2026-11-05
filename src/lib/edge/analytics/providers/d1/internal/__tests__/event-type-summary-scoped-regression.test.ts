@@ -1679,18 +1679,30 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
       scope: "event",
       candidateAnchor: { kind: "event-candidate" },
     });
-    expect(firstActual.compilation.kind).toBe("unavailable");
-    if (firstActual.compilation.kind !== "unavailable")
-      throw new Error("event_candidate_budget_fallback_not_reported");
-    expect(firstActual.compilation.fallbackReason).toMatchObject({
-      kind: "compile-budget",
-      item: "sql_bytes",
-      limit: 100_000,
-    });
-    if (firstActual.compilation.fallbackReason.kind !== "compile-budget")
-      throw new Error("event_candidate_budget_fallback_reason_changed");
-    expect(firstActual.compilation.fallbackReason.actual).toBeGreaterThan(
-      firstActual.compilation.fallbackReason.limit,
+    expect(firstActual.compilation.kind).toBe("compiled");
+    if (firstActual.compilation.kind !== "compiled")
+      throw new Error("event_candidate_optimized_compile_missing");
+    expect(
+      firstActual.compilation.evidence.groupedSummaryMaterializations,
+    ).toHaveLength(2);
+    expect(
+      firstActual.compilation.evidence.groupedSummaryMaterializations?.every(
+        ({ groupWidth, materialization }) =>
+          groupWidth <= 16 && materialization === "materialized",
+      ),
+    ).toBe(true);
+    expect(firstActual.compilation.evidence.sqlBytes).toBeLessThanOrEqual(
+      100_000,
+    );
+    expect(firstActual.compilation.evidence.bindingCount).toBeLessThanOrEqual(
+      100,
+    );
+    expect(firstActual.trace.preparedSql).toHaveLength(2);
+    expect(firstActual.trace.preparedSql[1]).toBe(
+      firstActual.compilation.evidence.sql,
+    );
+    expect(firstActual.trace.bindings[1]).toEqual(
+      firstActual.compilation.evidence.bindings,
     );
     expect(firstDto.pagination.nextCursor).toEqual(expect.any(String));
 
@@ -1701,7 +1713,7 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
     });
     saveEvidence({
       kind: "wave97ea-event-types-candidate-scope-sqlite-evidence",
-      fallbackRequest: {
+      candidateRequest: {
         search: "candidate",
         limit: 1,
         firstPage: evidenceForPage(
@@ -1713,10 +1725,12 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
     });
     expect(firstDto).toEqual(toLegacyDto(firstBaseline));
     expect(firstDto.items).toHaveLength(1);
-    expect(firstActual.trace.preparedSql).toEqual(
-      firstBaselineTrace.preparedSql,
+    expect(firstActual.trace.preparedSql[0]).toEqual(
+      firstBaselineTrace.preparedSql[0],
     );
-    expect(firstActual.trace.bindings).toEqual(firstBaselineTrace.bindings);
+    expect(firstActual.trace.bindings[0]).toEqual(
+      firstBaselineTrace.bindings[0],
+    );
 
     const continuationPrepared = prepareEventTypesQuery(dsl, "event", {
       limit: 1,
@@ -1725,19 +1739,25 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
     });
     const continuationActual = await runActual(continuationPrepared, dsl);
     const continuationDto = continuationActual.actual.value;
-    expect(continuationActual.compilation.kind).toBe("unavailable");
-    if (continuationActual.compilation.kind !== "unavailable")
-      throw new Error("event_candidate_continuation_budget_fallback_missing");
-    expect(continuationActual.compilation.fallbackReason).toMatchObject({
-      kind: "compile-budget",
-      item: "sql_bytes",
-      limit: 100_000,
-    });
-    if (continuationActual.compilation.fallbackReason.kind !== "compile-budget")
-      throw new Error("event_candidate_continuation_budget_reason_changed");
+    expect(continuationActual.compilation.kind).toBe("compiled");
+    if (continuationActual.compilation.kind !== "compiled")
+      throw new Error("event_candidate_continuation_compile_missing");
     expect(
-      continuationActual.compilation.fallbackReason.actual,
-    ).toBeGreaterThan(continuationActual.compilation.fallbackReason.limit);
+      continuationActual.compilation.evidence.groupedSummaryMaterializations,
+    ).toHaveLength(2);
+    expect(
+      continuationActual.compilation.evidence.sqlBytes,
+    ).toBeLessThanOrEqual(100_000);
+    expect(
+      continuationActual.compilation.evidence.bindingCount,
+    ).toBeLessThanOrEqual(100);
+    expect(continuationActual.trace.preparedSql).toHaveLength(2);
+    expect(continuationActual.trace.preparedSql[1]).toBe(
+      continuationActual.compilation.evidence.sql,
+    );
+    expect(continuationActual.trace.bindings[1]).toEqual(
+      continuationActual.compilation.evidence.bindings,
+    );
     const continuationBaselineTrace = newTrace();
     const continuationBaseline = await executeLegacyEventTypesRequest({
       env: testEnv(candidateDatabase, continuationBaselineTrace),
@@ -1745,7 +1765,7 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
     });
     saveEvidence({
       kind: "wave97ea-event-types-candidate-scope-sqlite-evidence",
-      fallbackRequest: {
+      candidateRequest: {
         search: "candidate",
         limit: 1,
         firstPage: evidenceForPage(
@@ -1761,11 +1781,11 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
       },
     });
     expect(continuationDto).toEqual(toLegacyDto(continuationBaseline));
-    expect(continuationActual.trace.preparedSql).toEqual(
-      continuationBaselineTrace.preparedSql,
+    expect(continuationActual.trace.preparedSql[0]).toEqual(
+      continuationBaselineTrace.preparedSql[0],
     );
-    expect(continuationActual.trace.bindings).toEqual(
-      continuationBaselineTrace.bindings,
+    expect(continuationActual.trace.bindings[0]).toEqual(
+      continuationBaselineTrace.bindings[0],
     );
     expect(firstDto.items).not.toEqual(
       (continuationDto as { readonly items: readonly unknown[] }).items,
@@ -1861,7 +1881,7 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
     saveEvidence({
       kind: "wave97ea-event-types-candidate-scope-sqlite-evidence",
       scope: "event",
-      fallbackRequest: {
+      candidateRequest: {
         search: "candidate",
         limit: 1,
         firstPage: evidenceForPage(

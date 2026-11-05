@@ -19,6 +19,7 @@ import {
   limit,
   lte,
   max,
+  param,
   project,
   recursiveClosure,
   rowNumber,
@@ -28,7 +29,10 @@ import {
   unixepoch,
   window,
 } from "@/lib/db";
-import { boundedAdmissionReuseCandidates } from "@/lib/db/query/bounded-admission-reuse";
+import {
+  type BoundedAdmissionIncomingEdge,
+  boundedAdmissionReuseCandidates,
+} from "@/lib/db/query/bounded-admission-reuse";
 import { compileD1QueryUnoptimizedForTest } from "@/lib/db/query/compiler";
 import type { AnyExpression } from "@/lib/db/query/expression";
 import { lowerLogicalPlan } from "@/lib/db/query/physical-plan";
@@ -108,6 +112,15 @@ interface AdmissionFixtureOptions {
   readonly threshold?: number;
   readonly offset?: number;
   readonly boundedRowsGate?: "inner" | "left";
+  readonly singleAdmissionJoin?: boolean;
+  readonly numericGlobalTrueGate?: boolean;
+  readonly admissionGateShape?:
+    "direct" | "alias" | "two" | "zero" | "zero-value" | "null";
+  readonly admissionGateName?: string;
+  readonly thresholdAsParameter?: boolean;
+  readonly fractionalThreshold?: boolean;
+  readonly nullThresholdParameter?: boolean;
+  readonly computedThreshold?: boolean;
   readonly thirdConsumer?: boolean;
   readonly additionalAdmissionGates?: number;
   readonly differentCounter?: boolean;
@@ -120,6 +133,7 @@ function admissionFixture(options: AdmissionFixtureOptions): {
   readonly root: AnyRelation;
   readonly bounded: AnyRelation;
   readonly counter: AnyRelation;
+  readonly admissionGate: AnyRelation;
 } {
   const rowsSource = scan(schema.visits);
   const scopedRows = filter(
@@ -187,17 +201,53 @@ function admissionFixture(options: AdmissionFixtureOptions): {
     gateCounter,
     lte(
       gateCounter.columns.rowCount,
-      constant(options.threshold ?? options.maximumRows),
+      options.computedThreshold
+        ? add(constant(options.threshold ?? options.maximumRows), constant(0))
+        : options.nullThresholdParameter
+          ? (param(null) as never)
+          : options.fractionalThreshold
+            ? (param(options.threshold ?? options.maximumRows + 0.5) as never)
+            : options.thresholdAsParameter
+              ? param(options.threshold ?? options.maximumRows)
+              : constant(options.threshold ?? options.maximumRows),
     ),
   );
-  const truePredicate = eq(constant(1), constant(1));
+  let admissionGate = admittedCounter as AnyRelation;
+  if (
+    options.admissionGateShape !== undefined &&
+    options.admissionGateShape !== "direct"
+  ) {
+    const gateName = options.admissionGateName ?? "admission_gate";
+    const gateProject =
+      options.admissionGateShape === "two"
+        ? project(admittedCounter, {
+            [gateName]: param(1),
+            second: param(1),
+          })
+        : project(admittedCounter, {
+            [gateName]:
+              options.admissionGateShape === "null"
+                ? param(null)
+                : options.admissionGateShape === "zero-value"
+                  ? param(0)
+                  : param(1),
+          });
+    admissionGate = gateProject as AnyRelation;
+    if (options.admissionGateShape === "zero") {
+      Object.assign(gateProject.node, { fields: [], projections: [] });
+      Object.assign(admissionGate, { fields: [] });
+    }
+  }
+  const truePredicate = options.numericGlobalTrueGate
+    ? eq(param(1), param(1))
+    : eq(constant(1), constant(1));
   const admittedRows = join(
     bounded,
-    admittedCounter,
+    admissionGate,
     truePredicate,
     options.boundedRowsGate ?? "inner",
   );
-  const otherRows = join(scopedRows, admittedCounter, truePredicate);
+  const otherRows = join(scopedRows, admissionGate, truePredicate);
   const boundedRows = project(admittedRows, {
     rowKind: constant(1),
     domain: constant(options.domain),
@@ -213,15 +263,14 @@ function admissionFixture(options: AdmissionFixtureOptions): {
     domain: constant(options.domain),
     value: counter.columns.rowCount,
   });
-  const root = union(
-    union(control, boundedRows, true),
-    otherRowsWithKind,
-    true,
-  );
+  const baseRoot = union(control, boundedRows, true);
+  const root = options.singleAdmissionJoin
+    ? baseRoot
+    : union(baseRoot, otherRowsWithKind, true);
   const rootWithAdditionalGates = Array.from(
     { length: options.additionalAdmissionGates ?? 0 },
     (_, index) => {
-      const gatedRows = join(scopedRows, admittedCounter, truePredicate);
+      const gatedRows = join(scopedRows, admissionGate, truePredicate);
       return project(gatedRows, {
         rowKind: constant(4 + index),
         domain: constant(options.domain),
@@ -246,7 +295,47 @@ function admissionFixture(options: AdmissionFixtureOptions): {
       : rootWithAdditionalGates,
     bounded,
     counter,
+    admissionGate,
   };
+}
+
+function admissionCandidates(root: AnyRelation) {
+  const nodes: LogicalQueryNode[] = [];
+  const incomingCounts = new Map<LogicalQueryNode, number>([[root.node, 1]]);
+  const incoming = new Map<LogicalQueryNode, BoundedAdmissionIncomingEdge[]>();
+  const visited = new Set<LogicalQueryNode>();
+  const pending = [root.node as LogicalQueryNode];
+  while (pending.length > 0) {
+    const node = pending.pop()!;
+    if (visited.has(node)) continue;
+    visited.add(node);
+    nodes.push(node);
+    const children =
+      node.kind === "recursive-closure"
+        ? [node.seed.node, node.candidates.node]
+        : node.kind === "join" ||
+            node.kind === "semi-join" ||
+            node.kind === "anti-join" ||
+            node.kind === "union"
+          ? [node.left.node, node.right.node]
+          : "input" in node
+            ? [node.input.node]
+            : [];
+    for (const child of children) {
+      incomingCounts.set(child, (incomingCounts.get(child) ?? 0) + 1);
+      const edges = incoming.get(child) ?? [];
+      edges.push({ parent: node, kind: "relation" });
+      incoming.set(child, edges);
+      pending.push(child);
+    }
+  }
+  return boundedAdmissionReuseCandidates({
+    nodes,
+    incomingCounts,
+    incoming,
+    maximumFields: 16,
+    inspectLocalStableExpression: () => ({ valid: true, columns: [] }),
+  });
 }
 
 type EarlyEvaluationLocation =
@@ -427,6 +516,104 @@ describe("bounded admission relation reuse", () => {
     );
   });
 
+  it("admits a single-one gate Project without depending on its output name", () => {
+    const fixture = admissionFixture({
+      domainId: "admission-a",
+      domain: 1,
+      maximumRows: 3,
+      singleAdmissionJoin: true,
+      admissionGateShape: "alias",
+      admissionGateName: "opaque_gate_token",
+    });
+    const evidence = admissionCandidates(fixture.root).get(
+      fixture.bounded.node,
+    );
+    expect(evidence?.admittedGateInput.node).toBe(fixture.admissionGate.node);
+
+    const physical = lowerLogicalPlan(fixture.root);
+    expect(
+      physical.sharedRelations.some(
+        ({ node }) => node === fixture.bounded.node,
+      ),
+    ).toBe(true);
+    const optimized = compileD1Query(physical);
+    const unoptimized = compileD1QueryUnoptimizedForTest(fixture.root);
+    const db = database();
+    expect(normalizedBag(runAll(db, optimized))).toEqual(
+      normalizedBag(runAll(db, unoptimized)),
+    );
+  });
+
+  it.each([
+    ["two projected columns", "two"],
+    ["zero projected columns", "zero"],
+    ["zero marker value", "zero-value"],
+    ["NULL marker value", "null"],
+  ] as const)("rejects a scalar admission gate with %s", (_name, shape) => {
+    const fixture = admissionFixture({
+      domainId: "admission-a",
+      domain: 1,
+      maximumRows: 3,
+      admissionGateShape: shape,
+    });
+    expect(admissionCandidates(fixture.root).has(fixture.bounded.node)).toBe(
+      false,
+    );
+  });
+
+  it("licenses a single admitted-rows join when the bounded limit has exactly two readers", () => {
+    const fixture = admissionFixture({
+      domainId: "admission-a",
+      domain: 1,
+      maximumRows: 3,
+      singleAdmissionJoin: true,
+    });
+    const physical = lowerLogicalPlan(fixture.root);
+    const boundedDefinition = physical.sharedRelations.find(
+      ({ node }) => node === fixture.bounded.node,
+    );
+    const counterDefinition = physical.sharedRelations.find(
+      ({ node }) => node === fixture.counter.node,
+    );
+    expect(boundedDefinition).toMatchObject({
+      materialization: "materialized",
+    });
+    expect(counterDefinition).toMatchObject({
+      materialization: "materialized",
+      dependencies: [boundedDefinition?.name],
+    });
+
+    const optimized = compileD1Query(physical);
+    const unoptimized = compileD1QueryUnoptimizedForTest(fixture.root);
+    const db = database();
+    expect(normalizedBag(runAll(db, optimized))).toEqual(
+      normalizedBag(runAll(db, unoptimized)),
+    );
+  });
+
+  it("accepts a known numeric-affinity safe integer admission threshold", () => {
+    const fixture = admissionFixture({
+      domainId: "admission-a",
+      domain: 1,
+      maximumRows: 3,
+      thresholdAsParameter: true,
+      singleAdmissionJoin: true,
+      numericGlobalTrueGate: true,
+    });
+    const physical = lowerLogicalPlan(fixture.root);
+    expect(
+      physical.sharedRelations.some(
+        ({ node }) => node === fixture.bounded.node,
+      ),
+    ).toBe(true);
+    const optimized = compileD1Query(physical);
+    const unoptimized = compileD1QueryUnoptimizedForTest(fixture.root);
+    const db = database();
+    expect(normalizedBag(runAll(db, optimized))).toEqual(
+      normalizedBag(runAll(db, unoptimized)),
+    );
+  });
+
   it("shares only each bounded root and preserves both admitted bags and raw counts", () => {
     const empty = admissionFixture({
       domainId: "admission-empty",
@@ -519,6 +706,9 @@ describe("bounded admission relation reuse", () => {
 
   it.each([
     ["mismatched count threshold", { threshold: 4 }],
+    ["fractional numeric threshold", { fractionalThreshold: true }],
+    ["nullable numeric threshold", { nullThresholdParameter: true }],
+    ["computed numeric threshold", { computedThreshold: true }],
     ["LEFT bounded-row gate", { boundedRowsGate: "left" as const }],
     ["OFFSET limit", { offset: 1 }],
     ["third ungated bounded consumer", { thirdConsumer: true }],

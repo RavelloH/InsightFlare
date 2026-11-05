@@ -3887,6 +3887,7 @@ function analyzeSharedRelations(
     incoming: incomingEdges,
     forbiddenAncestors: hoist.forbidden,
     expressionQueryEdges: expressionQueryEdgeNodes,
+    boundedAdmissionCandidates,
     maximumFields: MAX_MATERIALIZED_SHARED_RELATION_FIELDS,
   });
   const boundedSummaryDerivedCandidates = boundedSummaryDerivedReuseCandidates({

@@ -2880,16 +2880,42 @@ function appendEventCandidateCountQualification(
     includeOccurrenceTime: true,
   });
   const eligible = eligibleAdvancedFilterActivities(builder, source);
-  // Candidate order cannot affect Count; the 20,001st row only raises the
-  // existing cap control and suppresses the report. Keep the bounded bag
-  // directly over its eligible relation for the shared grouped-summary proof.
+  // Count the M+1 bounded prefix independently. Reports, summaries, and
+  // diagnostics consume admittedRows: the full bag under the cap, empty above.
   const bounded = builder.limit(eligible, ADVANCED_FILTER_ACTIVITY_LIMIT);
+  const counter = builder.aggregate(bounded, {}, [
+    { name: "rawCount", kind: "count-rows" },
+  ]);
+  const admittedCounter = builder.filter(
+    counter,
+    builder.compare(
+      "lte",
+      builder.slot(counter, "rawCount"),
+      builder.literal(ADVANCED_FILTER_MAX_ACTIVITIES, {
+        kind: "scalar",
+        scalar: "number",
+      }),
+    ),
+  );
+  const countControl = builder.project(counter, {
+    rawCount: builder.slot(counter, "rawCount"),
+  });
+  const boundedRowsWithAdmission = builder.join(bounded, admittedCounter, []);
+  const admittedRows = builder.project(
+    boundedRowsWithAdmission,
+    Object.fromEntries(
+      Object.keys(bounded.slots).map((name) => [
+        name,
+        builder.slot(boundedRowsWithAdmission, name),
+      ]),
+    ),
+  );
   const zero = builder.literal(0, { kind: "scalar", scalar: "number" });
   const one = builder.literal(1, { kind: "scalar", scalar: "number" });
   const string = (value: string) =>
     builder.literal(value, { kind: "scalar", scalar: "string" });
-  const kind = builder.slot(bounded, "attribute:observation.kind");
-  const siteId = builder.slot(bounded, "attribute:observation.rawSiteId");
+  const kind = builder.slot(admittedRows, "attribute:observation.kind");
+  const siteId = builder.slot(admittedRows, "attribute:observation.rawSiteId");
   const activityContribution = (activityKind: "page" | "event") =>
     builder.caseWhen(
       [
@@ -2915,7 +2941,7 @@ function appendEventCandidateCountQualification(
             builder.compare("eq", kind, string(collection)),
             selectorPredicateExpression(
               builder,
-              bounded,
+              admittedRows,
               collection,
               contribution.input.predicate,
               new Map(),
@@ -2930,13 +2956,16 @@ function appendEventCandidateCountQualification(
   const numericCompatibilityContribution = (
     field: Extract<AdvancedCountSelectorField, { kind: "number" }>,
   ): LogicalExpressionHandle => {
-    const raw = builder.slot(bounded, `attribute:${field.valueAttribute}`);
+    const raw = builder.slot(admittedRows, `attribute:${field.valueAttribute}`);
     const rangeAttribute =
       numericCompatibilityProofs.get(field.fieldId) === "exact-aggregate"
         ? field.exactAggregateAttribute
         : field.safeRangeAttribute;
-    const validRange = builder.slot(bounded, `attribute:${rangeAttribute}`);
-    const rowKind = builder.slot(bounded, "attribute:observation.kind");
+    const validRange = builder.slot(
+      admittedRows,
+      `attribute:${rangeAttribute}`,
+    );
+    const rowKind = builder.slot(admittedRows, "attribute:observation.kind");
     const isPage = builder.compare("eq", rowKind, string("page"));
     const isEvent = builder.compare("eq", rowKind, string("event"));
     const domain = numericCompatibilityDomains.get(field.fieldId)!;
@@ -2973,17 +3002,16 @@ function appendEventCandidateCountQualification(
   ];
   const summary = (rootAttribute: "observation.sessionId" | "observation.id") =>
     builder.aggregate(
-      bounded,
+      admittedRows,
       {
         siteId,
-        rootId: builder.slot(bounded, `attribute:${rootAttribute}`),
+        rootId: builder.slot(admittedRows, `attribute:${rootAttribute}`),
       },
       measures,
     );
   const sessionSummary = summary("observation.sessionId");
   const localIdSummary = summary("observation.id");
-  const rawControls = builder.aggregate(bounded, {}, [
-    { name: "rawCount", kind: "count-rows" },
+  const rawControls = builder.aggregate(admittedRows, {}, [
     {
       name: "nullActivityIdCount",
       kind: "sum",
@@ -2991,7 +3019,7 @@ function appendEventCandidateCountQualification(
         [
           {
             when: builder.isNull(
-              builder.slot(bounded, "attribute:observation.id"),
+              builder.slot(admittedRows, "attribute:observation.id"),
             ),
             then: one,
           },
@@ -3007,7 +3035,7 @@ function appendEventCandidateCountQualification(
           {
             when: builder.not(
               builder.slot(
-                bounded,
+                admittedRows,
                 "attribute:observation.siteIdentityConsistent",
               ),
             ),
@@ -3026,10 +3054,6 @@ function appendEventCandidateCountQualification(
   const controlsBase = builder.project(
     rawControls,
     Object.fromEntries([
-      [
-        "rawCount",
-        builder.coalesce(builder.slot(rawControls, "rawCount"), zero),
-      ],
       [
         "nullActivityIdCount",
         builder.coalesce(
@@ -3053,7 +3077,10 @@ function appendEventCandidateCountQualification(
       ]),
     ]),
   );
-  const rawSessionId = builder.slot(bounded, "attribute:observation.sessionId");
+  const rawSessionId = builder.slot(
+    admittedRows,
+    "attribute:observation.sessionId",
+  );
   const hasSession = builder.and(
     builder.isNull(rawSessionId, true),
     builder.compare("neq", rawSessionId, string("")),
@@ -3062,8 +3089,8 @@ function appendEventCandidateCountQualification(
     builder.isNull(rawSessionId),
     builder.compare("eq", rawSessionId, string("")),
   );
-  const sessionCandidates = builder.filter(bounded, hasSession);
-  const localIdCandidates = builder.filter(bounded, noSession);
+  const sessionCandidates = builder.filter(admittedRows, hasSession);
+  const localIdCandidates = builder.filter(admittedRows, noSession);
   const joinSummary = (
     candidates: LogicalRelationHandle,
     grouped: LogicalRelationHandle,
@@ -3200,8 +3227,9 @@ function appendEventCandidateCountQualification(
     {},
     [{ name: "duplicateIdentityCount", kind: "count-rows" }],
   );
+  const withRawControls = builder.join(countControl, controlsBase, []);
   const withInvalidIdentity = builder.join(
-    controlsBase,
+    withRawControls,
     invalidIdentitySummary,
     [],
   );
@@ -3214,11 +3242,11 @@ function appendEventCandidateCountQualification(
     rawCount: builder.slot(withIdentityControls, "rawCount"),
     nullActivityIdCount: builder.slot(
       withIdentityControls,
-      "nullActivityIdCount",
+      "right.nullActivityIdCount",
     ),
     siteIdentityMismatchCount: builder.slot(
       withIdentityControls,
-      "siteIdentityMismatchCount",
+      "right.siteIdentityMismatchCount",
     ),
     entityKind: string("event"),
     invalidIdentityCount: builder.coalesce(
@@ -3232,7 +3260,7 @@ function appendEventCandidateCountQualification(
     ...Object.fromEntries(
       numericCompatibilityFields.map((field) => [
         field.invalidCountOutput,
-        builder.slot(withIdentityControls, field.invalidCountOutput),
+        builder.slot(withIdentityControls, `right.${field.invalidCountOutput}`),
       ]),
     ),
   });

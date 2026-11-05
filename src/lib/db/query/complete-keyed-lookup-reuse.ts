@@ -410,16 +410,96 @@ function sameFields(
 
 function outputMatchesUnionFields(
   output: QuerySource["fields"],
-  left: QuerySource["fields"],
-  right: QuerySource["fields"],
+  left: QuerySource,
+  right: QuerySource,
 ): boolean {
-  return (
-    sameFields(output, left) &&
-    sameFields(output, right) &&
-    output.every(
-      (field, index) =>
-        field.nullable === (left[index]!.nullable || right[index]!.nullable),
+  if (
+    !querySourceMetadataMatches(left) ||
+    !querySourceMetadataMatches(right) ||
+    output.length !== left.fields.length ||
+    output.length !== right.fields.length
+  )
+    return false;
+  return output.every((field, index) => {
+    const leftField = left.fields[index]!;
+    const rightField = right.fields[index]!;
+    if (
+      field.name !== leftField.name ||
+      field.name !== rightField.name ||
+      field.nullable !== (leftField.nullable || rightField.nullable)
     )
+      return false;
+    if (
+      field.affinity === leftField.affinity &&
+      field.affinity === rightField.affinity
+    )
+      return true;
+
+    const leftNullPlaceholder =
+      leftField.affinity === "unknown" &&
+      leftField.nullable &&
+      field.affinity !== "unknown" &&
+      field.nullable &&
+      isDirectUnknownNullProjection(left, index);
+    const rightNullPlaceholder =
+      rightField.affinity === "unknown" &&
+      rightField.nullable &&
+      field.affinity !== "unknown" &&
+      field.nullable &&
+      isDirectUnknownNullProjection(right, index);
+    return (
+      (leftNullPlaceholder && rightField.affinity === field.affinity) ||
+      (rightNullPlaceholder && leftField.affinity === field.affinity)
+    );
+  });
+}
+
+function querySourceMetadataMatches(source: QuerySource): boolean {
+  const node = source.node;
+  if (node.scope !== source.scope || node.fields !== source.fields)
+    return false;
+  if (node.kind !== "project") return true;
+  return (
+    node.fields.length === node.projections.length &&
+    node.fields.every((field, index) => {
+      const projection = node.projections[index]!;
+      return (
+        field.name === projection.name &&
+        field.affinity === projection.expression.resultType.affinity &&
+        field.nullable === projection.expression.resultType.nullable
+      );
+    })
+  );
+}
+
+function isDirectUnknownNullProjection(
+  source: QuerySource,
+  index: number,
+): boolean {
+  const node = source.node;
+  if (
+    node.kind !== "project" ||
+    node.scope !== source.scope ||
+    node.fields !== source.fields ||
+    node.fields.length !== node.projections.length
+  )
+    return false;
+  const field = source.fields[index];
+  const projection = node.projections[index];
+  if (
+    !field ||
+    !projection ||
+    projection.name !== field.name ||
+    field.affinity !== "unknown" ||
+    !field.nullable
+  )
+    return false;
+  const expression = projection.expression;
+  return (
+    (expression.kind === "parameter" || expression.kind === "constant") &&
+    expression.value === null &&
+    expression.resultType.affinity === "unknown" &&
+    expression.resultType.nullable
   );
 }
 
@@ -615,11 +695,7 @@ export function inspectClosedStableSubtree(
       case "union":
         if (
           !node.all ||
-          !outputMatchesUnionFields(
-            node.fields,
-            node.left.fields,
-            node.right.fields,
-          )
+          !outputMatchesUnionFields(node.fields, node.left, node.right)
         ) {
           valid = false;
         }

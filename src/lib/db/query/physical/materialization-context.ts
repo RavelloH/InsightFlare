@@ -981,10 +981,15 @@ export function materializedBoundaryContext(input: {
         },
       });
     }
+    // The provider callback issues bounded-admission only for a freshly
+    // recomputed exact M+1 Limit witness. Let that Limit become a readable
+    // boundary so its admitted summaries and counter are rechecked through
+    // the current license; arbitrary Limit nodes remain forbidden.
     const licensedBoundedLimit =
-      licenseSource === "bounded-group-summary" &&
       facts.limitBarrier &&
-      !facts.sortBarrier;
+      !facts.sortBarrier &&
+      (licenseSource === "bounded-group-summary" ||
+        (licenseSource === "bounded-admission" && node.kind === "limit"));
     if (!licenseSource) {
       vetoes.set(node, "no-current-license");
       continue;
