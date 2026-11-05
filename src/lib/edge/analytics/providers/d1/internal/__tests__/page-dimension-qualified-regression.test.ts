@@ -2511,10 +2511,30 @@ describe("Private Page field whole Boolean qualification", () => {
 
   it("opts in only for exact private fields without comparison state", async () => {
     const { database } = createFixture();
-    const env = testEnv(database, traceFor());
+    const gateTrace = traceFor();
+    const env = testEnv(database, gateTrace);
     const middleware = d1AdvancedFilterMiddleware(env, undefined, SITE);
     const forward = (query: DimensionTestQuery) =>
       middleware("dimension", query, async (prepared) => prepared);
+    const expectUnsafeWithoutReads = async (
+      query: DimensionTestQuery,
+      reads: { value: number },
+    ) => {
+      const statementsBefore = gateTrace.preparedSql.length;
+      await expect(forward(query)).rejects.toMatchObject({
+        domainError: {
+          kind: "invalid-input",
+          issues: [
+            {
+              path: "comparison",
+              code: "comparison_request_own_data_required",
+            },
+          ],
+        },
+      });
+      expect(reads.value).toBe(0);
+      expect(gateTrace.preparedSql).toHaveLength(statementsBefore);
+    };
     const mixedOr = filterCases[0]!.filterDsl;
     const eligible = queryFor("session", {
       dimension: "page.path",
@@ -2581,25 +2601,17 @@ describe("Private Page field whole Boolean qualification", () => {
       }) as DimensionTestQuery;
     const privateGetterCalls = { value: 0 };
     const getterQuery = withCurrentGetter(eligible, privateGetterCalls);
-    const getterForwarded = await forward(getterQuery);
-    expect(
-      deferredPageDimensionQualificationFromQuery(getterForwarded),
-    ).toBeUndefined();
+    await expectUnsafeWithoutReads(getterQuery, privateGetterCalls);
     const publicGetterCalls = { value: 0 };
-    const publicGetterForwarded = await forward(
-      withCurrentGetter(
-        queryFor("session", {
-          audience: "api-v1",
-          dimension: "page.path",
-          filterDsl: mixedOr,
-        }),
-        publicGetterCalls,
-      ),
+    const publicGetterQuery = withCurrentGetter(
+      queryFor("session", {
+        audience: "api-v1",
+        dimension: "page.path",
+        filterDsl: mixedOr,
+      }),
+      publicGetterCalls,
     );
-    expect(
-      deferredPageDimensionQualificationFromQuery(publicGetterForwarded),
-    ).toBeUndefined();
-    expect(privateGetterCalls.value).toBe(publicGetterCalls.value);
+    await expectUnsafeWithoutReads(publicGetterQuery, publicGetterCalls);
 
     const withComparisonGetter = (
       query: DimensionTestQuery,
@@ -2617,28 +2629,22 @@ describe("Private Page field whole Boolean qualification", () => {
       eligible,
       privateComparisonGetterCalls,
     );
-    const comparisonGetterForwarded = await forward(comparisonGetterQuery);
-    expect(
-      deferredPageDimensionQualificationFromQuery(comparisonGetterForwarded),
-    ).toBeUndefined();
-    const nonPrivateComparisonGetterCalls = { value: 0 };
-    const nonPrivateComparisonGetterForwarded = await forward(
-      withComparisonGetter(
-        queryFor("session", {
-          audience: "api-v1",
-          dimension: "page.path",
-          filterDsl: mixedOr,
-        }),
-        nonPrivateComparisonGetterCalls,
-      ),
+    await expectUnsafeWithoutReads(
+      comparisonGetterQuery,
+      privateComparisonGetterCalls,
     );
-    expect(
-      deferredPageDimensionQualificationFromQuery(
-        nonPrivateComparisonGetterForwarded,
-      ),
-    ).toBeUndefined();
-    expect(privateComparisonGetterCalls.value).toBe(
-      nonPrivateComparisonGetterCalls.value,
+    const nonPrivateComparisonGetterCalls = { value: 0 };
+    const nonPrivateComparisonGetterQuery = withComparisonGetter(
+      queryFor("session", {
+        audience: "api-v1",
+        dimension: "page.path",
+        filterDsl: mixedOr,
+      }),
+      nonPrivateComparisonGetterCalls,
+    );
+    await expectUnsafeWithoutReads(
+      nonPrivateComparisonGetterQuery,
+      nonPrivateComparisonGetterCalls,
     );
 
     const conjunction = queryFor("session", {
@@ -2718,10 +2724,11 @@ describe("Private Page field whole Boolean qualification", () => {
         "comparison-accessor",
         "selection-swap",
       ],
-      privateGetterCalls: privateGetterCalls.value,
-      nonPrivateGetterCalls: publicGetterCalls.value,
-      privateComparisonGetterCalls: privateComparisonGetterCalls.value,
-      nonPrivateComparisonGetterCalls: nonPrivateComparisonGetterCalls.value,
+      privateGetterReads: privateGetterCalls.value,
+      nonPrivateGetterReads: publicGetterCalls.value,
+      privateComparisonGetterReads: privateComparisonGetterCalls.value,
+      nonPrivateComparisonGetterReads: nonPrivateComparisonGetterCalls.value,
+      accessorSqlReads: gateTrace.preparedSql.length,
       conjunctionStillDeferred: true,
       conjunctionResolvedAs: "split",
       canonicalDimensionMappings: canonicalDimensions.map((dimension) => ({

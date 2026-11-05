@@ -753,9 +753,12 @@ describe("bounded complete-fact local reuse", () => {
     seedCustomEventTrees(db, foreignDomainId);
     const optimized = compileD1Query(physical);
     const mechanical = compileD1QueryUnoptimizedForTest(graph.root);
-    expect(optimized.physicalPlanShape).toMatchObject({
-      version: 8,
-      factLocalIndexedJoinStrategies: [
+    const shape = optimized.physicalPlanShape;
+    expect(shape?.version).toBe(12);
+    if (shape?.version !== 12)
+      throw new Error("fact_local_materialized_reference_v12_missing");
+    expect(shape.factLocalIndexedJoinStrategies).toEqual(
+      expect.arrayContaining([
         {
           tableName: "custom_event_json_nodes",
           indexName: "idx_custom_event_nodes_event_parent",
@@ -772,8 +775,23 @@ describe("bounded complete-fact local reuse", () => {
             { name: "parent_node_id", leftIndex: 1, rightIndex: 0 },
           ],
         },
-      ],
-    });
+      ]),
+    );
+    expect(shape.directMaterializedReferenceCount).toBeGreaterThan(0);
+    expect(shape.directMaterializedReferences).toHaveLength(
+      shape.directMaterializedReferenceCount,
+    );
+    expect(
+      shape.directMaterializedReferences.every((reference) => {
+        const definition = physical.sharedRelations[reference.definitionIndex];
+        return (
+          definition?.materialization === "materialized" &&
+          reference.fieldCount === definition.fields.length &&
+          reference.emissionCount > 0
+        );
+      }),
+    ).toBe(true);
+    expect(shape.factLocalIndexedJoinStrategies).toHaveLength(2);
     const optimizedRows = runAll(db, optimized);
     expect(rowBag(optimizedRows)).toEqual(rowBag(runAll(db, mechanical)));
     expect(optimizedRows).toContainEqual({

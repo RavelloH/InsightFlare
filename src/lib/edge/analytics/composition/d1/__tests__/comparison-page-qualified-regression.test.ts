@@ -857,7 +857,9 @@ afterEach(() => {
 });
 
 afterAll(async () => {
-  const directory = process.env.WAVE97DY_COMPARISON_EVIDENCE_DIR;
+  const directory =
+    process.env.WAVE97EF_ARTIFACT_DIR ??
+    process.env.WAVE97DY_COMPARISON_EVIDENCE_DIR;
   if (!directory) return;
   await mkdir(directory, { recursive: true });
   await writeFile(
@@ -2257,6 +2259,231 @@ describe("qualified Page comparison tabs", () => {
       forwardedMode: "overview-tab",
       forwardedTab: "page.path",
       deferredComparison: false,
+    });
+  });
+
+  it("separates incomplete comparison data from unsafe comparison inputs", async () => {
+    const database = createFixture();
+    const query = queryFor({
+      currentScope: "visitor",
+      referenceScope: "visitor",
+      limit: 8,
+    });
+    const forward = (input: unknown, trace: SqliteD1Trace) =>
+      d1AdvancedFilterMiddleware(testEnv(database, trace), undefined, SITE)(
+        "dimension",
+        input,
+        async (prepared) => prepared,
+      );
+    const expectUnsafeComparisonToReject = async (
+      comparison: unknown,
+      getGetterReads: () => number,
+    ) => {
+      const unsafeQuery = {
+        ...query,
+        comparison,
+      } as unknown as ComparisonQuery;
+      const unsafeTrace = traceFor();
+      await expect(forward(unsafeQuery, unsafeTrace)).rejects.toMatchObject({
+        domainError: {
+          kind: "invalid-input",
+          issues: [
+            {
+              path: "comparison",
+              code: "comparison_request_own_data_required",
+            },
+          ],
+        },
+      });
+      expect(getGetterReads()).toBe(0);
+      expect(unsafeTrace.preparedSql).toHaveLength(0);
+    };
+
+    const ordinaryTrace = traceFor();
+    const ordinaryQuery = {
+      ...query,
+      comparison: undefined,
+      current: undefined,
+      reference: undefined,
+    } as unknown as ComparisonQuery;
+    const ordinaryForwarded = await forward(ordinaryQuery, ordinaryTrace);
+    expect(
+      deferredComparisonPageQualificationFromQuery(ordinaryForwarded),
+    ).toBeUndefined();
+    expect(ordinaryTrace.preparedSql).toHaveLength(0);
+
+    const partialQuery = {
+      ...query,
+      comparison: {
+        ...query.comparison,
+        current: { time: query.current.time },
+      },
+    } as unknown as ComparisonQuery;
+    const partialForwardTrace = traceFor();
+    const partialForwarded = await forward(partialQuery, partialForwardTrace);
+    expect(
+      deferredComparisonPageQualificationFromQuery(partialForwarded),
+    ).toBeUndefined();
+    const partialLegacyTrace = traceFor();
+    const partialLegacy = await legacyComparisonPage(
+      database,
+      partialQuery,
+      partialLegacyTrace,
+    );
+    const partialActualTrace = traceFor();
+    const partialActual = await makeProvider(
+      database,
+      partialActualTrace,
+    ).execute(partialQuery);
+    expect(partialActual.value).toEqual(partialLegacy.dto);
+
+    const primitivePartialQuery = {
+      ...query,
+      comparison: {
+        ...query.comparison,
+        current: 7,
+        reference: undefined,
+      },
+    } as unknown as ComparisonQuery;
+    const primitivePartialTrace = traceFor();
+    const primitivePartialForwarded = await forward(
+      primitivePartialQuery,
+      primitivePartialTrace,
+    );
+    expect(
+      deferredComparisonPageQualificationFromQuery(primitivePartialForwarded),
+    ).toBeUndefined();
+
+    let getterReads = 0;
+    const partialComparisonWithGetter = {
+      ...query.comparison,
+      current: undefined,
+    };
+    Object.defineProperty(partialComparisonWithGetter, "reference", {
+      enumerable: true,
+      get() {
+        getterReads += 1;
+        return query.comparison.reference;
+      },
+    });
+    await expectUnsafeComparisonToReject(
+      partialComparisonWithGetter,
+      () => getterReads,
+    );
+
+    let functionTimeGetterReads = 0;
+    const functionSide = () => undefined;
+    Object.defineProperty(functionSide, "time", {
+      enumerable: true,
+      get() {
+        functionTimeGetterReads += 1;
+        return query.current.time;
+      },
+    });
+    await expectUnsafeComparisonToReject(
+      {
+        ...query.comparison,
+        current: functionSide,
+        reference: undefined,
+      },
+      () => functionTimeGetterReads,
+    );
+
+    let inheritedTimeGetterReads = 0;
+    const inheritedTimePrototype = {};
+    Object.defineProperty(inheritedTimePrototype, "time", {
+      get() {
+        inheritedTimeGetterReads += 1;
+        return query.current.time;
+      },
+    });
+    const inheritedSide = Object.create(inheritedTimePrototype);
+    await expectUnsafeComparisonToReject(
+      {
+        ...query.comparison,
+        current: inheritedSide,
+        reference: undefined,
+      },
+      () => inheritedTimeGetterReads,
+    );
+
+    await expectUnsafeComparisonToReject(
+      {
+        ...query.comparison,
+        current: [],
+        reference: undefined,
+      },
+      () => 0,
+    );
+
+    let nonPlainComparisonGetterReads = 0;
+    const nonPlainComparisonPrototype = {};
+    Object.defineProperty(nonPlainComparisonPrototype, "current", {
+      get() {
+        nonPlainComparisonGetterReads += 1;
+        return query.current;
+      },
+    });
+    const nonPlainComparison = Object.assign(
+      Object.create(nonPlainComparisonPrototype),
+      {
+        metric: query.comparison.metric,
+        sortBy: query.comparison.sortBy,
+        direction: query.comparison.direction,
+        reference: undefined,
+      },
+    );
+    await expectUnsafeComparisonToReject(
+      nonPlainComparison,
+      () => nonPlainComparisonGetterReads,
+    );
+
+    const clonedQuery = {
+      ...query,
+      current: { ...query.current },
+      reference: { ...query.reference },
+      comparison: {
+        ...query.comparison,
+        current: { ...query.comparison.current },
+        reference: { ...query.comparison.reference },
+      },
+    };
+    const clonedTrace = traceFor();
+    const clonedForwarded = await forward(clonedQuery, clonedTrace);
+    expect(
+      deferredComparisonPageQualificationFromQuery(clonedForwarded),
+    ).toBeDefined();
+
+    evidence.push({
+      kind: "comparison-incomplete-versus-unsafe",
+      ordinaryUndefinedSlots: {
+        deferred: false,
+        sqlCount: ordinaryTrace.preparedSql.length,
+      },
+      partialNestedSide: {
+        deferred: false,
+        middlewareSqlCount: partialForwardTrace.preparedSql.length,
+        actualSqlCount: partialActualTrace.preparedSql.length,
+        legacySqlCount: partialLegacyTrace.preparedSql.length,
+        actualDto: partialActual.value,
+        legacyDto: partialLegacy.dto,
+        matchesLegacy: true,
+      },
+      unsafeOtherSideGetter: {
+        rejected: true,
+        getterReads,
+        sqlCount: 0,
+      },
+      unsafeNonPlainInputs: {
+        functionSideGetterReads: functionTimeGetterReads,
+        inheritedSideGetterReads: inheritedTimeGetterReads,
+        nonPlainComparisonGetterReads,
+        sqlCount: 0,
+      },
+      completeStructuralClone: {
+        deferred: true,
+        preparationSqlCount: clonedTrace.preparedSql.length,
+      },
     });
   });
 

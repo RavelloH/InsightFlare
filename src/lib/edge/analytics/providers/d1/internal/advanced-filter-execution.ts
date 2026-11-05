@@ -1726,8 +1726,16 @@ function comparisonOwnDataRecord(
 }
 
 function comparisonOwnPropertiesAreData(value: unknown): boolean {
+  if (
+    value === undefined ||
+    value === null ||
+    (typeof value !== "object" && typeof value !== "function")
+  )
+    return true;
   try {
-    if (typeof value !== "object" || value === null) return false;
+    if (typeof value === "function" || Array.isArray(value)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return false;
     for (const key of Reflect.ownKeys(value)) {
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (!descriptor) return false;
@@ -1745,48 +1753,86 @@ function comparisonOwnPropertiesAreData(value: unknown): boolean {
   }
 }
 
+type ComparisonRequestOwnDataSnapshot =
+  | { readonly kind: "unsafe" }
+  | { readonly kind: "incomplete" }
+  | { readonly kind: "matched"; readonly snapshot: string };
+
+type ComparisonRequestComponentSnapshot = ComparisonRequestOwnDataSnapshot;
+
+function comparisonRequestComponentSnapshot(
+  value: unknown,
+): ComparisonRequestComponentSnapshot {
+  if (value === undefined || value === null) return { kind: "incomplete" };
+  if (typeof value === "function") return { kind: "unsafe" };
+  if (typeof value !== "object") return { kind: "incomplete" };
+  if (!comparisonOwnPropertiesAreData(value)) return { kind: "unsafe" };
+  try {
+    const snapshot = qualificationRequestOwnDataSnapshot(value);
+    return snapshot === undefined
+      ? { kind: "unsafe" }
+      : { kind: "matched", snapshot };
+  } catch {
+    return { kind: "unsafe" };
+  }
+}
+
 function comparisonRequestOwnDataSnapshot(
   query: Record<string, unknown>,
   comparison: Record<string, unknown>,
-): string | undefined {
-  const current = qualificationRequestOwnDataSnapshot(query.current);
-  const reference = qualificationRequestOwnDataSnapshot(query.reference);
-  const comparisonCurrent = qualificationRequestOwnDataSnapshot(
-    comparison.current,
-  );
-  const comparisonReference = qualificationRequestOwnDataSnapshot(
-    comparison.reference,
-  );
-  const controls = qualificationRequestOwnDataSnapshot({
-    metric: comparison.metric,
-    sortBy: comparison.sortBy,
-    direction: comparison.direction,
-  });
+): ComparisonRequestOwnDataSnapshot {
+  const [current, reference, comparisonCurrent, comparisonReference, controls] =
+    [
+      query.current,
+      query.reference,
+      comparison.current,
+      comparison.reference,
+      {
+        metric: comparison.metric,
+        sortBy: comparison.sortBy,
+        direction: comparison.direction,
+      },
+    ].map(comparisonRequestComponentSnapshot);
   const remainder = Object.create(null) as Record<string, unknown>;
   for (const [key, value] of Object.entries(query)) {
     if (key !== "current" && key !== "reference" && key !== "comparison")
       remainder[key] = value;
   }
-  const rest = qualificationRequestOwnDataSnapshot(remainder);
-  if (
-    current === undefined ||
-    reference === undefined ||
-    comparisonCurrent === undefined ||
-    comparisonReference === undefined ||
-    controls === undefined ||
-    rest === undefined
-  )
-    return undefined;
-  return JSON.stringify({
-    rest,
+  const rest = comparisonRequestComponentSnapshot(remainder);
+  const components = [
     current,
     reference,
-    comparison: {
-      current: comparisonCurrent,
-      reference: comparisonReference,
-      controls,
-    },
-  });
+    comparisonCurrent,
+    comparisonReference,
+    controls,
+    rest,
+  ];
+  if (components.some((component) => component.kind === "unsafe"))
+    return { kind: "unsafe" };
+  if (components.some((component) => component.kind === "incomplete"))
+    return { kind: "incomplete" };
+  if (
+    current.kind !== "matched" ||
+    reference.kind !== "matched" ||
+    comparisonCurrent.kind !== "matched" ||
+    comparisonReference.kind !== "matched" ||
+    controls.kind !== "matched" ||
+    rest.kind !== "matched"
+  )
+    return { kind: "incomplete" };
+  return {
+    kind: "matched",
+    snapshot: JSON.stringify({
+      rest: rest.snapshot,
+      current: current.snapshot,
+      reference: reference.snapshot,
+      comparison: {
+        current: comparisonCurrent.snapshot,
+        reference: comparisonReference.snapshot,
+        controls: controls.snapshot,
+      },
+    }),
+  };
 }
 
 function comparisonSideSemanticSnapshot(
@@ -1867,14 +1913,42 @@ function comparisonParentRequestProof(
   }
   let carriesComparisonState = false;
   let hasDefinedComparisonState = false;
+  const comparisonComponents: unknown[] = [];
+  let comparisonValue: unknown;
   for (const key of ["comparison", "current", "reference"] as const) {
     if (!keys.includes(key)) continue;
     carriesComparisonState = true;
     const descriptor = ownDescriptor(value, key);
     if (!descriptor || !descriptor.enumerable || !("value" in descriptor))
       return { kind: "unsafe", allowWholeFilter: false };
+    if (key === "comparison") comparisonValue = descriptor.value;
+    else comparisonComponents.push(descriptor.value);
     if (descriptor.value !== undefined) hasDefinedComparisonState = true;
   }
+  let nestedComparisonComponents: unknown[] = [];
+  if (
+    comparisonValue !== undefined &&
+    comparisonValue !== null &&
+    (typeof comparisonValue === "object" ||
+      typeof comparisonValue === "function")
+  ) {
+    if (!comparisonOwnPropertiesAreData(comparisonValue))
+      return { kind: "unsafe", allowWholeFilter: false };
+    nestedComparisonComponents = [];
+    for (const key of ["current", "reference"] as const) {
+      const descriptor = ownDescriptor(comparisonValue, key);
+      if (!descriptor) continue;
+      if (!descriptor.enumerable || !("value" in descriptor))
+        return { kind: "unsafe", allowWholeFilter: false };
+      nestedComparisonComponents.push(descriptor.value);
+    }
+  }
+  const componentSnapshots = [
+    ...comparisonComponents,
+    ...nestedComparisonComponents,
+  ].map(comparisonRequestComponentSnapshot);
+  if (componentSnapshots.some((component) => component.kind === "unsafe"))
+    return { kind: "unsafe", allowWholeFilter: false };
   if (!carriesComparisonState || !hasDefinedComparisonState)
     return { kind: "absent", allowWholeFilter: false };
 
@@ -1893,8 +1967,11 @@ function comparisonParentRequestProof(
       return { kind: "unsafe", allowWholeFilter: false };
     return { kind: "mismatch", allowWholeFilter: false };
   }
-  if (comparisonRequestOwnDataSnapshot(query, comparison) === undefined)
+  const requestSnapshot = comparisonRequestOwnDataSnapshot(query, comparison);
+  if (requestSnapshot.kind === "unsafe")
     return { kind: "unsafe", allowWholeFilter: false };
+  if (requestSnapshot.kind === "incomplete")
+    return { kind: "mismatch", allowWholeFilter: false };
 
   const parentScopePreference = query.scopePreference;
   const currentTop = comparisonSideSemanticSnapshot(
@@ -1951,8 +2028,10 @@ function comparisonParentRequestProof(
     (query.cursor === undefined ||
       query.cursor === null ||
       typeof query.cursor === "string") &&
-    ["views", "sessions", "visitors"].includes(String(comparison.metric)) &&
-    ["current", "reference", "change"].includes(String(comparison.sortBy)) &&
+    typeof comparison.metric === "string" &&
+    ["views", "sessions", "visitors"].includes(comparison.metric) &&
+    typeof comparison.sortBy === "string" &&
+    ["current", "reference", "change"].includes(comparison.sortBy) &&
     (comparison.direction === "asc" || comparison.direction === "desc");
   const allowWholeFilter =
     query.mode === "overview-tab" &&
@@ -1982,10 +2061,10 @@ function comparisonPageRequestSnapshot(
   const snapshot =
     parent && comparison
       ? comparisonRequestOwnDataSnapshot(parent, comparison)
-      : undefined;
-  if (snapshot === undefined)
+      : { kind: "incomplete" as const };
+  if (snapshot.kind !== "matched")
     throw new Error("comparison_page_request_own_data_invalid");
-  return `${operation}:${snapshot}`;
+  return `${operation}:${snapshot.snapshot}`;
 }
 
 function canonicalComparisonQueryTime(time: QueryTime): QueryTime {
