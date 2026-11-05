@@ -57,6 +57,7 @@ import type {
 import {
   buildEventSummaryCardsQualificationPlan,
   EVENT_SUMMARY_CARD_OUTPUTS,
+  EVENT_SUMMARY_QUALIFICATION_CONTROL_OUTPUT,
 } from "@/lib/edge/analytics/engine/event-summary-cards-plan";
 import {
   buildEventTrendQualificationPlan,
@@ -466,6 +467,7 @@ interface EventQualificationProgram {
   readonly evidence: EventSummaryQualificationCompilationEvidence;
   readonly deferred:
     | DeferredEventQualification
+    | DeferredEventSummaryQualification
     | DeferredEventTypesQualification
     | DeferredEventNameDimensionQualification
     | DeferredEventTrendQualification;
@@ -1869,7 +1871,7 @@ function compileProgram(request: EventQualificationCompileRequest):
   const payloadFamily = payloadReportFamily(request.kind);
   const expectedReportOutputIds =
     request.kind === "event-summary"
-      ? REPORT_OUTPUT_TYPES.map(([outputId]) => outputId)
+      ? Object.values(EVENT_SUMMARY_CARD_OUTPUTS)
       : request.kind === "event-types"
         ? [
             request.query.kind === "list"
@@ -1943,6 +1945,12 @@ function compileProgram(request: EventQualificationCompileRequest):
     deferred.metadata.plan.scope === "event" &&
     deferred.countInput.scope === "event" &&
     deferred.countInput.candidateAnchor.kind === "event-candidate";
+  const eventCandidateEventSummaryQuery =
+    request.kind === "event-summary" &&
+    deferred.operation === "event-summary" &&
+    deferred.metadata.plan.scope === "event" &&
+    deferred.countInput.scope === "event" &&
+    deferred.countInput.candidateAnchor.kind === "event-candidate";
   const qualificationScopeValid =
     ((qualification.scope === "session" || qualification.scope === "visitor") &&
       qualification.candidateGrain === undefined) ||
@@ -1950,6 +1958,9 @@ function compileProgram(request: EventQualificationCompileRequest):
       qualification.scope === "event" &&
       qualification.candidateGrain === "event-candidate") ||
     (eventCandidateEventTrendQuery &&
+      qualification.scope === "event" &&
+      qualification.candidateGrain === "event-candidate") ||
+    (eventCandidateEventSummaryQuery &&
       qualification.scope === "event" &&
       qualification.candidateGrain === "event-candidate");
   if (
@@ -1961,6 +1972,12 @@ function compileProgram(request: EventQualificationCompileRequest):
     (request.kind === "channel-list" &&
       qualification.controlOutputId !==
         CHANNEL_LIST_QUALIFICATION_CONTROL_OUTPUT) ||
+    (request.kind === "event-summary" &&
+      (qualification.controlOutputId !==
+        EVENT_SUMMARY_QUALIFICATION_CONTROL_OUTPUT ||
+        qualification.reportOutputIds.includes(
+          qualification.controlOutputId,
+        ))) ||
     (request.kind === "pages-aggregate-page" &&
       qualification.controlOutputId !==
         PAGES_AGGREGATE_QUALIFICATION_CONTROL_OUTPUT) ||

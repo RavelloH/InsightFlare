@@ -1,6 +1,6 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { AdvancedCountQualificationPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import {
   addEventQualificationControlOutput,
   buildEventQualifiedSource,
@@ -31,7 +31,9 @@ export const EVENT_SUMMARY_CARD_OUTPUTS = {
 export const EVENT_SUMMARY_QUALIFICATION_CONTROL_OUTPUT =
   EVENT_QUALIFICATION_CONTROL_OUTPUT;
 
-export type EventSummaryQualificationPlan = EventQualificationPlan;
+export type EventSummaryQualificationPlan<
+  Scope extends "session" | "visitor" | "event" = "session" | "visitor",
+> = EventQualificationPlan<Scope>;
 
 const CARD_FIELDS = [
   { name: "cardType", slot: "cardType" },
@@ -83,10 +85,12 @@ export function buildEventSummaryCardsPlan(input: {
 }
 
 /** Builds summary/cards and Count qualification under one subject/time builder. */
-export function buildEventSummaryCardsQualificationPlan(input: {
+export function buildEventSummaryCardsQualificationPlan<
+  Count extends AdvancedCountQualificationPlanInput,
+>(input: {
   readonly siteId: string;
-  readonly count: AdvancedCountFilterMatchPlanInput;
-}): EventSummaryQualificationPlan {
+  readonly count: Count;
+}): EventSummaryQualificationPlan<Count["scope"]> {
   const qualified = buildEventQualifiedSource({
     siteId: input.siteId,
     count: input.count,
@@ -105,11 +109,22 @@ export function buildEventSummaryCardsQualificationPlan(input: {
     matchesRelationId: qualified.qualification.matches.id,
     controlsRelationId: qualified.qualification.controls.id,
     groupedSummaryRelationId: qualified.qualification.groupedSummary.id,
+    ...(qualified.qualification.additionalGroupedSummaries
+      ? {
+          additionalGroupedSummaryRelationIds:
+            qualified.qualification.additionalGroupedSummaries.map(
+              ({ id }) => id,
+            ),
+        }
+      : {}),
     controlOutputId: EVENT_SUMMARY_QUALIFICATION_CONTROL_OUTPUT,
     reportOutputIds: Object.freeze(Object.values(EVENT_SUMMARY_CARD_OUTPUTS)),
     numericCompatibilityFields:
       qualified.qualification.numericCompatibilityFields,
     scope: qualified.qualification.scope,
+    ...(qualified.qualification.candidateGrain
+      ? { candidateGrain: qualified.qualification.candidateGrain }
+      : {}),
   };
 }
 

@@ -28,6 +28,10 @@ import {
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
+import {
+  EVENT_SUMMARY_CARD_OUTPUTS,
+  EVENT_SUMMARY_QUALIFICATION_CONTROL_OUTPUT,
+} from "@/lib/edge/analytics/engine/event-summary-cards-plan";
 import { buildEventFilteredSourceCte } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import {
   d1AdvancedFilterMiddleware,
@@ -168,9 +172,27 @@ function eventSummaryDto(
   };
 }
 
+function eventSummaryCandidateStatementEvidence(trace: SqliteD1Trace) {
+  return trace.preparedSql.map((sql, index) => ({
+    sql,
+    bindings: trace.bindings[index],
+    sqlUtf8Bytes: new TextEncoder().encode(sql).byteLength,
+    bindingCount: trace.bindings[index]?.length ?? 0,
+    sha256: createHash("sha256").update(sql).digest("hex"),
+  }));
+}
+
+function writeEventSummaryCandidateEvidence(name: string, value: unknown) {
+  const artifactDirectory = process.env.WAVE97EH_ARTIFACT_DIR;
+  if (!artifactDirectory) return;
+  const evidencePath = resolve(artifactDirectory, name);
+  mkdirSync(dirname(evidencePath), { recursive: true });
+  writeFileSync(evidencePath, JSON.stringify(value, null, 2), "utf8");
+}
+
 function prepareEventSummaryQuery(
   dsl: string,
-  scope: "session" | "visitor" = "session",
+  scope: "session" | "visitor" | "event" = "session",
 ): QueryInput & {
   readonly filters?: FilterDocument;
   readonly time?: QueryTime;
@@ -2657,6 +2679,313 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
         .summary.events,
     ).toBe(2);
     expect(trace.preparedSql).toHaveLength(2);
+  });
+
+  it.each([
+    [
+      "native Event Count AND",
+      'count(event { event.name eq "alpha" }) gte 1 AND event.name eq "alpha"',
+    ],
+    [
+      "top-level mixed OR and NOT",
+      'count(event { event.name eq "alpha" }) gte 1 OR NOT (event.name eq "alpha")',
+    ],
+  ] as const)(
+    "executes summary cards from an Event candidate for %s",
+    async (label, dsl) => {
+      const prepared = prepareEventSummaryQuery(dsl, "event");
+      const trace = newTrace();
+      const registry = createD1SiteProviderRegistry({
+        env: testEnv(database, trace),
+        siteId: SITE_ID,
+      });
+      let deferred:
+        | ReturnType<typeof deferredEventSummaryQualificationFromQuery>
+        | undefined;
+      let compilation:
+        ReturnType<typeof compileEventSummaryQualificationProgram> | undefined;
+      registry.useMiddleware(async (_operation, input, next) => {
+        deferred = deferredEventSummaryQualificationFromQuery(input);
+        if (deferred)
+          compilation = compileEventSummaryQualificationProgram(deferred);
+        return next(input);
+      });
+      const provider = registry.resolve("event-summary");
+      if (!provider)
+        throw new Error("wave97eh_event_candidate_summary_provider_missing");
+      const actual = await provider.execute(prepared as never);
+
+      expect(deferred?.operation).toBe("event-summary");
+      expect(deferred?.metadata.plan.scope).toBe("event");
+      expect(deferred?.countInput).toMatchObject({
+        scope: "event",
+        candidateAnchor: { kind: "event-candidate" },
+      });
+      expect(compilation?.kind).toBe("compiled");
+      if (compilation?.kind !== "compiled")
+        throw new Error("wave97eh_event_candidate_summary_compile_unavailable");
+      expect(trace.preparedSql).toHaveLength(2);
+      expect(trace.preparedSql[1]).toBe(compilation.evidence.sql);
+      expect(trace.bindings[1]).toEqual(compilation.evidence.bindings);
+      expect(compilation.evidence.sqlBytes).toBeLessThanOrEqual(
+        D1_MAX_SQL_UTF8_BYTES,
+      );
+      expect(compilation.evidence.bindingCount).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+      expect(compilation.evidence.groupWidth).toBeLessThanOrEqual(16);
+      expect(compilation.evidence.groupedSummaryMaterializations).toHaveLength(
+        2,
+      );
+      expect(
+        compilation.evidence.groupedSummaryMaterializations?.every(
+          (item) =>
+            item.materialization === "materialized" && item.groupWidth <= 16,
+        ),
+      ).toBe(true);
+
+      const nativeRows = database
+        .prepare(compilation.evidence.sql)
+        .all(...(compilation.evidence.bindings as SQLInputValue[])) as Record<
+        string,
+        unknown
+      >[];
+      const controlRows = nativeRows.filter((row) => row.rowKind === "control");
+      const reportRows = nativeRows.filter((row) => row.rowKind === "report");
+      expect(controlRows).toHaveLength(1);
+      expect(controlRows[0]).toMatchObject({
+        outputId: EVENT_SUMMARY_QUALIFICATION_CONTROL_OUTPUT,
+        entityKind: "event",
+        nullActivityIdCount: 0,
+        siteIdentityMismatchCount: 0,
+        invalidIdentityCount: 0,
+        duplicateIdentityCount: 0,
+      });
+      const reportRowCounts = Object.fromEntries(
+        Object.values(EVENT_SUMMARY_CARD_OUTPUTS).map((outputId) => [
+          outputId,
+          reportRows.filter((row) => row.outputId === outputId).length,
+        ]),
+      );
+      expect(Object.keys(reportRowCounts).sort()).toEqual(
+        Object.values(EVENT_SUMMARY_CARD_OUTPUTS).sort(),
+      );
+      expect(reportRowCounts[EVENT_SUMMARY_CARD_OUTPUTS.summary]).toBe(1);
+
+      const baselineTrace = newTrace();
+      const legacy = await executeLegacyEventSummaryRequest({
+        env: testEnv(database, baselineTrace),
+        prepared,
+      });
+      expect(baselineTrace.preparedSql.length).toBeGreaterThan(2);
+      expect(actual.value).toEqual(eventSummaryDto(legacy));
+
+      const actualDto = actual.value as ReturnType<typeof eventSummaryDto>;
+      expect(actualDto.summary.events).toBeGreaterThan(0);
+      expect(actualDto.cards.event.name.map(({ label }) => label)).toContain(
+        "alpha",
+      );
+
+      writeEventSummaryCandidateEvidence(
+        `${label === "native Event Count AND" ? "event-count-and" : "event-count-mixed-or-not"}.json`,
+        {
+          kind: "wave97eh-event-candidate-summary-cards-v1",
+          label,
+          dsl,
+          scope: deferred?.countInput.scope,
+          candidateAnchor: deferred?.countInput.candidateAnchor,
+          compiled: compilation.evidence,
+          groupedSummaryMaterializations:
+            compilation.evidence.groupedSummaryMaterializations,
+          controlRows,
+          reportRowCounts,
+          legacyCore: {
+            statementCount: baselineTrace.preparedSql.length,
+            statements: eventSummaryCandidateStatementEvidence(baselineTrace),
+            dto: eventSummaryDto(legacy),
+          },
+          eventCandidate: {
+            statementCount: trace.preparedSql.length,
+            statements: eventSummaryCandidateStatementEvidence(trace),
+            dto: actual.value,
+          },
+          dtoEqual: true,
+        },
+      );
+    },
+  );
+
+  it("falls back to Core for an invalid numeric domain in an Event candidate", async () => {
+    const numericDatabase = createFixture();
+    numericDatabase
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "visit-alpha-1");
+    const prepared = prepareEventSummaryQuery(
+      "count(page { page.durationMs gt 5 }) eq 1",
+      "event",
+    );
+    const trace = newTrace();
+    const diagnostics = createD1ReadDiagnostics();
+    const registry = createD1SiteProviderRegistry({
+      env: testEnv(numericDatabase, trace),
+      siteId: SITE_ID,
+      diagnostics,
+    });
+    let deferred:
+      ReturnType<typeof deferredEventSummaryQualificationFromQuery> | undefined;
+    let compilation:
+      ReturnType<typeof compileEventSummaryQualificationProgram> | undefined;
+    registry.useMiddleware(async (_operation, input, next) => {
+      deferred = deferredEventSummaryQualificationFromQuery(input);
+      if (deferred)
+        compilation = compileEventSummaryQualificationProgram(deferred);
+      return next(input);
+    });
+    const provider = registry.resolve("event-summary");
+    if (!provider)
+      throw new Error("wave97eh_event_candidate_numeric_provider_missing");
+    const actual = await provider.execute(prepared as never);
+
+    expect(deferred?.countInput).toMatchObject({
+      scope: "event",
+      candidateAnchor: { kind: "event-candidate" },
+    });
+    expect(compilation?.kind).toBe("compiled");
+    if (compilation?.kind !== "compiled")
+      throw new Error("wave97eh_event_candidate_numeric_compile_unavailable");
+    const nativeRows = numericDatabase
+      .prepare(compilation.evidence.sql)
+      .all(...(compilation.evidence.bindings as SQLInputValue[])) as Record<
+      string,
+      unknown
+    >[];
+    const controlRows = nativeRows.filter((row) => row.rowKind === "control");
+    const reportRows = nativeRows.filter((row) => row.rowKind === "report");
+    expect(controlRows).toHaveLength(1);
+    expect(
+      Number(controlRows[0]?.invalidContextPageDurationMsCount),
+    ).toBeGreaterThan(0);
+    expect(reportRows).toHaveLength(0);
+    expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
+      kind: "numeric-data-domain",
+      fieldIds: ["page.durationMs"],
+    });
+
+    const baselineTrace = newTrace();
+    const legacy = await executeLegacyEventSummaryRequest({
+      env: testEnv(numericDatabase, baselineTrace),
+      prepared,
+    });
+    expect(actual.value).toEqual(eventSummaryDto(legacy));
+    expect(trace.preparedSql.length).toBeGreaterThan(2);
+
+    writeEventSummaryCandidateEvidence(
+      "event-candidate-numeric-fallback.json",
+      {
+        kind: "wave97eh-event-candidate-summary-numeric-fallback-v1",
+        dsl: "count(page { page.durationMs gt 5 }) eq 1",
+        scope: deferred?.countInput.scope,
+        candidateAnchor: deferred?.countInput.candidateAnchor,
+        compiled: compilation.evidence,
+        controlRows,
+        reportRowCount: reportRows.length,
+        fallbackReason: diagnostics.advancedCountSqlFallbackReason,
+        legacyCore: {
+          statementCount: baselineTrace.preparedSql.length,
+          statements: eventSummaryCandidateStatementEvidence(baselineTrace),
+          dto: eventSummaryDto(legacy),
+        },
+        eventCandidateRequest: {
+          statementCount: trace.preparedSql.length,
+          statements: eventSummaryCandidateStatementEvidence(trace),
+          dto: actual.value,
+        },
+        dtoEqual: true,
+      },
+    );
+  });
+
+  it("rejects accessor and mismatched Event summary request state before reads", async () => {
+    const prepared = prepareEventSummaryQuery(
+      'count(event { event.name eq "alpha" }) gte 1',
+      "event",
+    );
+    const accessorTrace = newTrace();
+    const accessorRequest = { ...prepared } as typeof prepared;
+    let getterReads = 0;
+    let accessorNextEntered = false;
+    Object.defineProperty(accessorRequest, "filters", {
+      enumerable: true,
+      get() {
+        getterReads += 1;
+        return prepared.filters;
+      },
+    });
+    const accessorMiddleware = d1AdvancedFilterMiddleware(
+      testEnv(createFixture(), accessorTrace),
+    );
+    await expect(
+      accessorMiddleware("event-summary", accessorRequest, async (query) => {
+        accessorNextEntered = true;
+        return query;
+      }),
+    ).rejects.toMatchObject({
+      domainError: {
+        kind: "invalid-input",
+        issues: [
+          {
+            path: "query",
+            code: "event_summary_qualification_request_own_data_required",
+          },
+        ],
+      },
+    });
+    expect(getterReads).toBe(0);
+    expect(accessorNextEntered).toBe(false);
+    expect(accessorTrace.preparedSql).toHaveLength(0);
+
+    const mismatchTrace = newTrace();
+    const mismatchRequest = {
+      ...prepared,
+      time: createQueryTime(121, 130, "UTC", 500),
+    };
+    let mismatchNextEntered = false;
+    const mismatchMiddleware = d1AdvancedFilterMiddleware(
+      testEnv(createFixture(), mismatchTrace),
+    );
+    await expect(
+      mismatchMiddleware("event-summary", mismatchRequest, async (query) => {
+        mismatchNextEntered = true;
+        return query;
+      }),
+    ).rejects.toMatchObject({
+      domainError: {
+        kind: "invalid-input",
+        issues: [
+          {
+            path: "query",
+            code: "event_summary_qualification_request_context_mismatch",
+          },
+        ],
+      },
+    });
+    expect(mismatchNextEntered).toBe(false);
+    expect(mismatchTrace.preparedSql).toHaveLength(0);
+
+    writeEventSummaryCandidateEvidence("event-summary-request-safety.json", {
+      kind: "wave97eh-event-summary-request-safety-v1",
+      accessorRequest: {
+        getterReads,
+        nextEntered: accessorNextEntered,
+        sqlStatementCount: accessorTrace.preparedSql.length,
+        rejectionCode: "event_summary_qualification_request_own_data_required",
+      },
+      contextMismatch: {
+        nextEntered: mismatchNextEntered,
+        sqlStatementCount: mismatchTrace.preparedSql.length,
+        rejectionCode: "event_summary_qualification_request_context_mismatch",
+      },
+    });
   });
 
   it("keeps payload Count on the static legacy path", async () => {
