@@ -634,7 +634,10 @@ function activeRelationConsumer(
       sameFieldShape(parent.fields, parent.right.fields)
     );
   if (parent.kind === "semi-join" || parent.kind === "anti-join")
-    return parent.left.node === child && isMaterializationSafeNode(parent);
+    return (
+      (parent.left.node === child || parent.right.node === child) &&
+      isMaterializationSafeNode(parent)
+    );
   if (parent.kind === "aggregate" || parent.kind === "join")
     return isMaterializationSafeNode(parent);
   return false;
@@ -687,6 +690,12 @@ function validSingleLookupConsumer(
   forbiddenAncestors: ReadonlySet<LogicalQueryNode>,
   expressionQueryEdges: ReadonlySet<LogicalQueryNode>,
 ): boolean {
+  const safeOrderingAncestors = hasSafeMaterializationOrderingAncestors(
+    candidate,
+    incoming,
+    expressionQueryEdges,
+    true,
+  );
   let current: LogicalQueryNode = candidate;
   const visited = new Set<LogicalQueryNode>();
   while (!visited.has(current)) {
@@ -704,7 +713,7 @@ function validSingleLookupConsumer(
     if (relationReferenceCount(parent, current) !== 1) return false;
     if (
       (parent.kind === "project" || parent.kind === "filter") &&
-      !forbiddenAncestors.has(parent) &&
+      (!forbiddenAncestors.has(parent) || safeOrderingAncestors) &&
       isMaterializationSafeNode(parent) &&
       parent.input.node === current
     ) {
@@ -714,7 +723,7 @@ function validSingleLookupConsumer(
     if (
       parent.kind !== "join" ||
       parent.right.node !== current ||
-      forbiddenAncestors.has(parent) ||
+      (forbiddenAncestors.has(parent) && !safeOrderingAncestors) ||
       expressionQueryEdges.has(parent) ||
       !safeLookupJoin(candidate, parent)
     )

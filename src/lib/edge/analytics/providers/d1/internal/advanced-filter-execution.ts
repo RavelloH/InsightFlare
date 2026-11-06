@@ -559,10 +559,16 @@ export type DeferredEventTypeDetailQualification =
     readonly eventTypeDetailRequest: DeferredEventTypeDetailRequest;
   };
 
-export type DeferredEventRecordsQualification = DeferredEventQualification & {
-  readonly operation: "event-records";
-  readonly eventRecordsRequest: DeferredEventRecordsRequest;
-};
+export type DeferredEventRecordsQualification =
+  | (DeferredEventQualification & {
+      readonly operation: "event-records";
+      readonly eventRecordsRequest: DeferredEventRecordsRequest;
+    })
+  | (Omit<DeferredEventQualification, "operation" | "countInput"> & {
+      readonly operation: "event-records";
+      readonly countInput: AdvancedEventCandidateCountPlanInput;
+      readonly eventRecordsRequest: DeferredEventRecordsRequest;
+    });
 
 export type DeferredEventFieldsQualification = DeferredEventQualification & {
   readonly operation: "event-fields";
@@ -4591,6 +4597,7 @@ async function prepareDeferredEventQualification(input: {
   readonly allowPrivateFilterValuesWholeFilterOptIn?: boolean;
   readonly allowEventNameDimensionEventCandidate?: boolean;
   readonly eventSummaryRequestSnapshot?: string;
+  readonly eventRecordsRequestSnapshot?: string;
   readonly eventTrendRequestSnapshot?: string;
   readonly subject: SemanticSubjectDomain;
   readonly diagnostics?: D1ReadDiagnostics;
@@ -4599,6 +4606,7 @@ async function prepareDeferredEventQualification(input: {
 }): Promise<
   | DeferredEventQualification
   | DeferredEventSummaryQualification
+  | DeferredEventRecordsQualification
   | DeferredEventTypesQualification
   | DeferredEventNameDimensionQualification
   | DeferredEventTrendQualification
@@ -4612,6 +4620,7 @@ async function prepareDeferredEventQualification(input: {
       : undefined;
   const eventCandidateConsumerOperation =
     input.operation === "event-summary" ||
+    input.operation === "event-records" ||
     input.operation === "event-types" ||
     input.operation === "event-name-dimension" ||
     input.operation === "event-trend" ||
@@ -4630,13 +4639,15 @@ async function prepareDeferredEventQualification(input: {
       "query",
       input.operation === "event-summary"
         ? "event_summary_qualification_request_context_mismatch"
-        : input.operation === "event-types"
-          ? "event_types_qualification_request_context_mismatch"
-          : input.operation === "filter-values"
-            ? "filter_values_request_context_mismatch"
-            : input.operation === "event-trend"
-              ? "event_trend_qualification_request_context_mismatch"
-              : "event_name_dimension_request_context_mismatch",
+        : input.operation === "event-records"
+          ? "event_records_qualification_request_context_mismatch"
+          : input.operation === "event-types"
+            ? "event_types_qualification_request_context_mismatch"
+            : input.operation === "filter-values"
+              ? "filter_values_request_context_mismatch"
+              : input.operation === "event-trend"
+                ? "event_trend_qualification_request_context_mismatch"
+                : "event_name_dimension_request_context_mismatch",
     );
   const eventCandidateFilters = eventCandidateConsumerOperation
     ? (ownDataValue(query, "filters") as FilterDocument | undefined)
@@ -4671,13 +4682,15 @@ async function prepareDeferredEventQualification(input: {
       "query",
       input.operation === "event-summary"
         ? "event_summary_qualification_request_context_mismatch"
-        : input.operation === "event-types"
-          ? "event_types_qualification_request_context_mismatch"
-          : input.operation === "filter-values"
-            ? "filter_values_request_context_mismatch"
-            : input.operation === "event-trend"
-              ? "event_trend_qualification_request_context_mismatch"
-              : "event_name_dimension_request_context_mismatch",
+        : input.operation === "event-records"
+          ? "event_records_qualification_request_context_mismatch"
+          : input.operation === "event-types"
+            ? "event_types_qualification_request_context_mismatch"
+            : input.operation === "filter-values"
+              ? "filter_values_request_context_mismatch"
+              : input.operation === "event-trend"
+                ? "event_trend_qualification_request_context_mismatch"
+                : "event_name_dimension_request_context_mismatch",
     );
   const eventCandidateBaseRequest =
     eventCandidateMetadata?.plan.scope === "event" &&
@@ -4712,11 +4725,17 @@ async function prepareDeferredEventQualification(input: {
     eventCandidateBaseRequest &&
     input.eventSummaryRequestSnapshot !== undefined &&
     eventCandidateRequestSnapshot === input.eventSummaryRequestSnapshot;
+  const eventCandidateRecordsRequest =
+    input.operation === "event-records" &&
+    eventCandidateBaseRequest &&
+    input.eventRecordsRequestSnapshot !== undefined &&
+    eventCandidateRequestSnapshot === input.eventRecordsRequestSnapshot;
   const eventCandidateRequest =
     eventCandidatePageRequest ||
     eventCandidateDimensionListRequest ||
     eventCandidateFilterValuesRequest ||
     eventCandidateSummaryRequest ||
+    eventCandidateRecordsRequest ||
     eventCandidateEventTrendRequest;
   const overviewTrendConfiguration =
     input.operation === "overview" || input.operation === "trend"
@@ -5363,34 +5382,36 @@ async function prepareDeferredEventQualification(input: {
           ? "event_trend_qualification_request_context_mismatch"
           : input.operation === "event-summary"
             ? "event_summary_qualification_request_context_mismatch"
-            : input.operation === "radar"
-              ? "radar_request_context_mismatch"
-              : input.operation === "event-name-dimension"
-                ? "event_name_dimension_request_context_mismatch"
-                : input.operation === "channel-overview"
-                  ? "channel_overview_request_context_mismatch"
-                  : input.operation === "channel-list"
-                    ? "channel_list_request_context_mismatch"
-                    : input.operation === "session-boundary-dimension"
-                      ? "session_boundary_dimension_request_context_mismatch"
-                      : input.operation === "session-boundary-overview-page"
-                        ? "session_boundary_overview_page_request_context_mismatch"
-                        : input.operation === "pages-aggregate-page"
-                          ? "pages_aggregate_page_request_context_mismatch"
-                          : input.operation === "pages-tabs"
-                            ? "pages_tabs_request_context_mismatch"
-                            : input.operation === "pages-dashboard"
-                              ? "pages_dashboard_request_context_mismatch"
-                              : input.operation === "geo-points"
-                                ? "geo_points_request_context_mismatch"
-                                : input.operation === "filter-values"
-                                  ? "filter_values_request_context_mismatch"
-                                  : input.operation === "referrers"
-                                    ? "referrers_request_context_mismatch"
-                                    : input.operation === "visitor-events" ||
-                                        input.operation === "session-events"
-                                      ? "journey_event_page_qualification_request_context_mismatch"
-                                      : "page_dimension_request_context_mismatch",
+            : input.operation === "event-records"
+              ? "event_records_qualification_request_context_mismatch"
+              : input.operation === "radar"
+                ? "radar_request_context_mismatch"
+                : input.operation === "event-name-dimension"
+                  ? "event_name_dimension_request_context_mismatch"
+                  : input.operation === "channel-overview"
+                    ? "channel_overview_request_context_mismatch"
+                    : input.operation === "channel-list"
+                      ? "channel_list_request_context_mismatch"
+                      : input.operation === "session-boundary-dimension"
+                        ? "session_boundary_dimension_request_context_mismatch"
+                        : input.operation === "session-boundary-overview-page"
+                          ? "session_boundary_overview_page_request_context_mismatch"
+                          : input.operation === "pages-aggregate-page"
+                            ? "pages_aggregate_page_request_context_mismatch"
+                            : input.operation === "pages-tabs"
+                              ? "pages_tabs_request_context_mismatch"
+                              : input.operation === "pages-dashboard"
+                                ? "pages_dashboard_request_context_mismatch"
+                                : input.operation === "geo-points"
+                                  ? "geo_points_request_context_mismatch"
+                                  : input.operation === "filter-values"
+                                    ? "filter_values_request_context_mismatch"
+                                    : input.operation === "referrers"
+                                      ? "referrers_request_context_mismatch"
+                                      : input.operation === "visitor-events" ||
+                                          input.operation === "session-events"
+                                        ? "journey_event_page_qualification_request_context_mismatch"
+                                        : "page_dimension_request_context_mismatch",
     );
   const requestContextMismatchCode =
     input.operation === "share-trend"
@@ -5399,45 +5420,49 @@ async function prepareDeferredEventQualification(input: {
         ? "event_trend_qualification_request_context_mismatch"
         : input.operation === "event-summary"
           ? "event_summary_qualification_request_context_mismatch"
-          : input.operation === "radar"
-            ? "radar_request_context_mismatch"
-            : input.operation === "event-field-values"
-              ? "event_field_values_request_context_mismatch"
-              : input.operation === "channel-overview"
-                ? "channel_overview_request_context_mismatch"
-                : input.operation === "channel-list"
-                  ? "channel_list_request_context_mismatch"
-                  : input.operation === "page-dimension"
-                    ? "page_dimension_request_context_mismatch"
-                    : input.operation === "referrers"
-                      ? "referrers_request_context_mismatch"
-                      : input.operation === "pages-aggregate-page"
-                        ? "pages_aggregate_page_request_context_mismatch"
-                        : input.operation === "pages-tabs"
-                          ? "pages_tabs_request_context_mismatch"
-                          : input.operation === "event-name-dimension"
-                            ? "event_name_dimension_request_context_mismatch"
-                            : input.operation === "geo-points"
-                              ? "geo_points_request_context_mismatch"
-                              : input.operation === "session-boundary-dimension"
-                                ? "session_boundary_dimension_request_context_mismatch"
+          : input.operation === "event-records"
+            ? "event_records_qualification_request_context_mismatch"
+            : input.operation === "radar"
+              ? "radar_request_context_mismatch"
+              : input.operation === "event-field-values"
+                ? "event_field_values_request_context_mismatch"
+                : input.operation === "channel-overview"
+                  ? "channel_overview_request_context_mismatch"
+                  : input.operation === "channel-list"
+                    ? "channel_list_request_context_mismatch"
+                    : input.operation === "page-dimension"
+                      ? "page_dimension_request_context_mismatch"
+                      : input.operation === "referrers"
+                        ? "referrers_request_context_mismatch"
+                        : input.operation === "pages-aggregate-page"
+                          ? "pages_aggregate_page_request_context_mismatch"
+                          : input.operation === "pages-tabs"
+                            ? "pages_tabs_request_context_mismatch"
+                            : input.operation === "event-name-dimension"
+                              ? "event_name_dimension_request_context_mismatch"
+                              : input.operation === "geo-points"
+                                ? "geo_points_request_context_mismatch"
                                 : input.operation ===
-                                    "session-boundary-overview-page"
-                                  ? "session_boundary_overview_page_request_context_mismatch"
-                                  : input.operation === "pages-dashboard"
-                                    ? "pages_dashboard_request_context_mismatch"
-                                    : input.operation === "filter-values"
-                                      ? "filter_values_request_context_mismatch"
-                                      : input.operation === "visitors"
-                                        ? "visitor_list_qualification_request_context_mismatch"
-                                        : input.operation ===
-                                              "visitor-events" ||
-                                            input.operation === "session-events"
-                                          ? "journey_event_page_qualification_request_context_mismatch"
-                                          : input.operation === "overview" ||
-                                              input.operation === "trend"
-                                            ? "overview_trend_request_context_mismatch"
-                                            : "event_fields_request_context_mismatch";
+                                    "session-boundary-dimension"
+                                  ? "session_boundary_dimension_request_context_mismatch"
+                                  : input.operation ===
+                                      "session-boundary-overview-page"
+                                    ? "session_boundary_overview_page_request_context_mismatch"
+                                    : input.operation === "pages-dashboard"
+                                      ? "pages_dashboard_request_context_mismatch"
+                                      : input.operation === "filter-values"
+                                        ? "filter_values_request_context_mismatch"
+                                        : input.operation === "visitors"
+                                          ? "visitor_list_qualification_request_context_mismatch"
+                                          : input.operation ===
+                                                "visitor-events" ||
+                                              input.operation ===
+                                                "session-events"
+                                            ? "journey_event_page_qualification_request_context_mismatch"
+                                            : input.operation === "overview" ||
+                                                input.operation === "trend"
+                                              ? "overview_trend_request_context_mismatch"
+                                              : "event_fields_request_context_mismatch";
   if (
     (input.operation === "event-fields" ||
       input.operation === "event-field-values" ||
@@ -5990,6 +6015,7 @@ async function prepareDeferredEventQualification(input: {
   const deferred:
     | DeferredEventQualification
     | DeferredEventSummaryQualification
+    | DeferredEventRecordsQualification
     | DeferredEventTypesQualification
     | DeferredEventNameDimensionQualification
     | DeferredEventTrendQualification
@@ -5999,31 +6025,39 @@ async function prepareDeferredEventQualification(input: {
         operation: "event-summary" as const,
         countInput: countInput as AdvancedEventCandidateCountPlanInput,
       }) as DeferredEventSummaryQualification)
-    : eventCandidateEventTrendRequest
+    : eventCandidateRecordsRequest
       ? (Object.freeze({
           ...deferredBase,
-          operation: "event-trend" as const,
+          operation: "event-records" as const,
           countInput: countInput as AdvancedEventCandidateCountPlanInput,
-        }) as DeferredEventTrendQualification)
-      : eventCandidatePageRequest
+          eventRecordsRequest: eventRecordsRequest!,
+        }) as DeferredEventRecordsQualification)
+      : eventCandidateEventTrendRequest
         ? (Object.freeze({
             ...deferredBase,
-            operation: "event-types" as const,
+            operation: "event-trend" as const,
             countInput: countInput as AdvancedEventCandidateCountPlanInput,
-          }) as DeferredEventTypesQualification)
-        : eventCandidateDimensionListRequest
+          }) as DeferredEventTrendQualification)
+        : eventCandidatePageRequest
           ? (Object.freeze({
               ...deferredBase,
-              operation: "event-name-dimension" as const,
+              operation: "event-types" as const,
               countInput: countInput as AdvancedEventCandidateCountPlanInput,
-            }) as DeferredEventNameDimensionQualification)
-          : eventCandidateFilterValuesRequest
+            }) as DeferredEventTypesQualification)
+          : eventCandidateDimensionListRequest
             ? (Object.freeze({
                 ...deferredBase,
-                operation: "filter-values" as const,
+                operation: "event-name-dimension" as const,
                 countInput: countInput as AdvancedEventCandidateCountPlanInput,
-              }) as DeferredFilterValuesQualificationInput)
-            : (Object.freeze(deferredBase) as DeferredEventQualification);
+              }) as DeferredEventNameDimensionQualification)
+            : eventCandidateFilterValuesRequest
+              ? (Object.freeze({
+                  ...deferredBase,
+                  operation: "filter-values" as const,
+                  countInput:
+                    countInput as AdvancedEventCandidateCountPlanInput,
+                }) as DeferredFilterValuesQualificationInput)
+              : (Object.freeze(deferredBase) as DeferredEventQualification);
   deferredEventQualifications.add(deferred);
   return deferred;
 }
@@ -6051,6 +6085,10 @@ export function deferredEventQualificationFromQuery(
 ): DeferredEventSummaryQualification | undefined;
 export function deferredEventQualificationFromQuery(
   input: unknown,
+  operation: "event-records",
+): DeferredEventRecordsQualification | undefined;
+export function deferredEventQualificationFromQuery(
+  input: unknown,
   operation: "event-types",
 ): DeferredEventTypesQualification | undefined;
 export function deferredEventQualificationFromQuery(
@@ -6065,7 +6103,11 @@ export function deferredEventQualificationFromQuery(
   input: unknown,
   operation: Exclude<
     DeferredEventQualificationOperation,
-    "event-summary" | "event-types" | "event-name-dimension" | "event-trend"
+    | "event-summary"
+    | "event-records"
+    | "event-types"
+    | "event-name-dimension"
+    | "event-trend"
   >,
 ): DeferredEventQualification | undefined;
 export function deferredEventQualificationFromQuery(
@@ -6074,6 +6116,7 @@ export function deferredEventQualificationFromQuery(
 ):
   | DeferredEventQualification
   | DeferredEventSummaryQualification
+  | DeferredEventRecordsQualification
   | DeferredEventTypesQualification
   | DeferredEventNameDimensionQualification
   | DeferredEventTrendQualification
@@ -6085,6 +6128,7 @@ export function deferredEventQualificationFromQuery(
 ):
   | DeferredEventQualification
   | DeferredEventSummaryQualification
+  | DeferredEventRecordsQualification
   | DeferredEventTypesQualification
   | DeferredEventNameDimensionQualification
   | DeferredEventTrendQualification
@@ -6102,6 +6146,7 @@ export function deferredEventQualificationFromQuery(
     ? (value as
         | DeferredEventQualification
         | DeferredEventSummaryQualification
+        | DeferredEventRecordsQualification
         | DeferredEventTypesQualification
         | DeferredEventNameDimensionQualification
         | DeferredEventTrendQualification
@@ -6510,6 +6555,7 @@ export function isDeferredEventQualification(
 ): value is
   | DeferredEventQualification
   | DeferredEventSummaryQualification
+  | DeferredEventRecordsQualification
   | DeferredEventTypesQualification
   | DeferredEventNameDimensionQualification
   | DeferredEventTrendQualification
@@ -6536,6 +6582,7 @@ export async function prepareDeferredEventQualificationFallback(
   deferred:
     | DeferredEventQualification
     | DeferredEventSummaryQualification
+    | DeferredEventRecordsQualification
     | DeferredEventTypesQualification
     | DeferredEventNameDimensionQualification
     | DeferredEventTrendQualification
@@ -6626,6 +6673,45 @@ export function d1AdvancedFilterMiddleware(
   expectedSiteId?: string,
 ): TypedQueryProviderMiddleware {
   return async (operation: QueryOperation, input: unknown, next, execution) => {
+    const rawEventRecordsRequestSnapshot =
+      operation === "event-records"
+        ? qualificationRequestOwnDataSnapshot(input)
+        : undefined;
+    if (operation === "event-records") {
+      const filters = ownDataValue(input, "filters") as
+        FilterDocument | undefined;
+      const metadata = scopedFilterMetadata(filters);
+      const filtersDescriptor = ownDescriptor(input, "filters");
+      if (
+        rawEventRecordsRequestSnapshot === undefined &&
+        (metadata?.plan.scope === "event" ||
+          (filtersDescriptor !== undefined && !("value" in filtersDescriptor)))
+      )
+        throw invalidInput(
+          "query",
+          "event_records_qualification_request_own_data_required",
+        );
+      if (metadata?.plan.scope === "event") {
+        const context = ownDataValue(input, "context");
+        const subject = ownDataValue(context, "subject");
+        const siteId = ownDataValue(subject, "siteId");
+        const requestTime = ownDataValue(input, "time");
+        if (
+          ownDataValue(subject, "kind") !== "site" ||
+          metadata.siteIds.length !== 1 ||
+          metadata.siteIds[0] !== siteId ||
+          (expectedSiteId !== undefined && expectedSiteId !== siteId) ||
+          !metadata.time ||
+          !requestTime ||
+          !sameEventFieldsQueryTime(requestTime as QueryTime, metadata.time) ||
+          !queryScopePlanMatchesMetadata(input, metadata.plan)
+        )
+          throw invalidInput(
+            "query",
+            "event_records_qualification_request_context_mismatch",
+          );
+      }
+    }
     const rawEventSummaryRequestSnapshot =
       operation === "event-summary"
         ? qualificationRequestOwnDataSnapshot(input)
@@ -7204,6 +7290,9 @@ export function d1AdvancedFilterMiddleware(
           : {}),
         ...(operation === "event-summary"
           ? { eventSummaryRequestSnapshot: rawEventSummaryRequestSnapshot }
+          : {}),
+        ...(operation === "event-records"
+          ? { eventRecordsRequestSnapshot: rawEventRecordsRequestSnapshot }
           : {}),
         subject,
         diagnostics,

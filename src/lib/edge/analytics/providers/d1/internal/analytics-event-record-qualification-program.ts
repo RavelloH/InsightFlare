@@ -45,10 +45,15 @@ import {
   type QualificationCompatibilityField,
   qualificationCompatibilityFieldsFromNumeric,
 } from "./qualification-compatibility";
+import { proveGroupedSummaryRelations } from "./qualification-grouped-summary-evidence";
 import {
   decodeQualificationControl,
   judgeQualificationControl,
 } from "./qualification-program-runtime";
+
+type EventRecordsQualificationPlan = EventQualificationPlan<
+  "session" | "visitor" | "event"
+>;
 
 export interface EventRecordsQualificationCompilationEvidence {
   readonly statementTag: string;
@@ -57,10 +62,15 @@ export interface EventRecordsQualificationCompilationEvidence {
   readonly sqlBytes: number;
   readonly bindingCount: number;
   readonly groupWidth: number;
+  readonly groupedSummaryMaterializations: readonly {
+    readonly relationId: string;
+    readonly groupWidth: number;
+    readonly materialization: "materialized";
+  }[];
   readonly sharedRelationCount: number;
   readonly rootKind: string;
   readonly physicalScanKinds: readonly string[];
-  readonly logicalPlan: EventQualificationPlan["plan"];
+  readonly logicalPlan: EventRecordsQualificationPlan["plan"];
   readonly compatibilityFields: readonly QualificationCompatibilityField[];
 }
 
@@ -151,7 +161,9 @@ function scanKinds(root: LogicalQueryNode): string[] {
   return [...kinds].sort();
 }
 
-function controlNamesFor(qualification: EventQualificationPlan): string[] {
+function controlNamesFor(
+  qualification: EventRecordsQualificationPlan,
+): string[] {
   const compatibilityFields = qualificationCompatibilityFieldsFromNumeric(
     qualification.numericCompatibilityFields,
   );
@@ -162,7 +174,7 @@ function controlNamesFor(qualification: EventQualificationPlan): string[] {
 }
 
 function verifyQualificationPlan(
-  qualification: EventQualificationPlan,
+  qualification: EventRecordsQualificationPlan,
   deferred: DeferredEventRecordsQualification,
 ): {
   readonly reportOutput: LogicalOutput;
@@ -170,11 +182,24 @@ function verifyQualificationPlan(
   readonly controlNames: readonly string[];
   readonly compatibilityFields: readonly QualificationCompatibilityField[];
 } {
+  const eventCandidate =
+    deferred.metadata.plan.scope === "event" &&
+    deferred.countInput.scope === "event" &&
+    deferred.countInput.candidateAnchor?.kind === "event-candidate";
+  const qualificationScopeValid =
+    ((qualification.scope === "session" || qualification.scope === "visitor") &&
+      qualification.candidateGrain === undefined) ||
+    (eventCandidate &&
+      qualification.scope === "event" &&
+      qualification.candidateGrain === "event-candidate");
   if (
     qualification.scope !== deferred.countInput.scope ||
-    (qualification.scope !== "session" && qualification.scope !== "visitor") ||
+    !qualificationScopeValid ||
+    qualification.controlOutputId !== EVENT_QUALIFICATION_CONTROL_OUTPUT ||
     qualification.reportOutputIds.length !== 1 ||
-    qualification.reportOutputIds[0] !== EVENT_RECORD_PAGE_OUTPUT_ID
+    new Set(qualification.reportOutputIds).size !== 1 ||
+    qualification.reportOutputIds[0] !== EVENT_RECORD_PAGE_OUTPUT_ID ||
+    qualification.reportOutputIds.includes(qualification.controlOutputId)
   )
     throw new Error("event_records_qualification_plan_identity_invalid");
   assertEventRecordPageOutputContract(qualification.plan);
@@ -347,7 +372,7 @@ function compileProgram(input: {
         typeof compileD1Query<Record<string, unknown>>
       >;
       readonly evidence: EventRecordsQualificationCompilationEvidence;
-      readonly qualification: EventQualificationPlan;
+      readonly qualification: EventRecordsQualificationPlan;
     }
   | {
       readonly kind: "unavailable";
@@ -394,6 +419,9 @@ function compileProgram(input: {
       slot,
     })),
     scope: qualification.scope,
+    ...(qualification.candidateGrain
+      ? { candidateGrain: qualification.candidateGrain }
+      : {}),
     maximumActivities: ADVANCED_FILTER_MAX_ACTIVITIES,
     numericCompatibilityControlNames: compatibilityControlNames,
   };
@@ -421,26 +449,32 @@ function compileProgram(input: {
     options,
   );
   const physical = lowerLogicalPlan(envelope);
-  const grouped = lowerer.loweredRelationForPlan(
+  const groupedSummaryIds = [
     qualification.groupedSummaryRelationId,
-  );
-  const groupedCandidates = physical.sharedRelations.filter(
-    (relation) => relation.node === grouped?.node,
+    ...(qualification.additionalGroupedSummaryRelationIds ?? []),
+  ];
+  const groupedSummaryEvidence = proveGroupedSummaryRelations({
+    relationIds: groupedSummaryIds,
+    planNodes: qualification.plan.nodes,
+    physicalSharedRelations: physical.sharedRelations,
+    lowerRelation: (relationId) => lowerer.loweredRelationForPlan(relationId),
+  });
+  const groupedSummaries = groupedSummaryEvidence.entries;
+  const expectedGroupedSummaryCount =
+    qualification.candidateGrain === "event-candidate" ? 2 : 1;
+  const failedGroupedSummary = groupedSummaries.find(
+    ({ validShape, materialized }) => !validShape || !materialized,
   );
   if (
-    !grouped ||
-    grouped.node.kind !== "aggregate" ||
-    grouped.node.groups.length !== 2 ||
-    grouped.fields.length > 16 ||
-    groupedCandidates.length !== 1 ||
-    groupedCandidates[0]!.materialization !== "materialized" ||
-    groupedCandidates[0]!.fields.length > 16
+    !groupedSummaryEvidence.valid ||
+    failedGroupedSummary ||
+    groupedSummaryIds.length !== expectedGroupedSummaryCount
   )
     return {
       kind: "unavailable",
       fallbackReason: {
         kind: "grouped-summary-unavailable",
-        groupWidth: grouped?.fields.length ?? null,
+        groupWidth: failedGroupedSummary?.lowered?.fields.length ?? null,
       },
     };
 
@@ -471,7 +505,16 @@ function compileProgram(input: {
     bindings: Object.freeze([...(query.bindings ?? [])]),
     sqlBytes: new TextEncoder().encode(query.sql).byteLength,
     bindingCount: query.bindings?.length ?? 0,
-    groupWidth: grouped.fields.length,
+    groupWidth: groupedSummaries[0]!.lowered!.fields.length,
+    groupedSummaryMaterializations: Object.freeze(
+      groupedSummaries.map(({ relationId, lowered }) =>
+        Object.freeze({
+          relationId: String(relationId),
+          groupWidth: lowered!.fields.length,
+          materialization: "materialized" as const,
+        }),
+      ),
+    ),
     sharedRelationCount: physical.sharedRelations.length,
     rootKind: physical.root.kind,
     physicalScanKinds: Object.freeze(scanKinds(physical.root)),

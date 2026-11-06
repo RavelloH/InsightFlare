@@ -6,6 +6,7 @@ import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
+import { D1_MAX_BOUND_PARAMETERS, D1_MAX_SQL_UTF8_BYTES } from "@/lib/db";
 import {
   createSqliteD1Database,
   type SqliteD1Trace,
@@ -18,11 +19,14 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
+import { EVENT_QUALIFICATION_CONTROL_OUTPUT } from "@/lib/edge/analytics/engine/event-qualified-source-plan";
+import { EVENT_RECORD_PAGE_OUTPUT_ID } from "@/lib/edge/analytics/engine/event-record-page-plan";
 import {
   d1AdvancedFilterMiddleware,
   deferredEventRecordsQualificationFromQuery,
   prepareDeferredEventQualificationFallback,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import type { EventRecordsQualificationCompilationEvidence } from "@/lib/edge/analytics/providers/d1/internal/analytics-event-record-qualification-program";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import { readSiteEventRecords } from "@/lib/edge/analytics/providers/d1/operations/site-event-records";
 import type { Env } from "@/lib/edge/types";
@@ -42,15 +46,15 @@ const QUERY_TIME = createQueryTime(
   WINDOW.timeZone,
   WINDOW.nowMs,
 );
-const ARTIFACT_DIR = resolve(
-  "plan/execution-wave95a-name-gate-repair/run-1/runtime",
-);
+const ARTIFACT_DIR = process.env.WAVE97EI_ARTIFACT_DIR
+  ? resolve(process.env.WAVE97EI_ARTIFACT_DIR)
+  : resolve("plan/execution-wave95a-name-gate-repair/run-1/runtime");
 const databases = new Set<DatabaseSync>();
 const runtimeEvidence: unknown[] = [];
 const nameGateEvidence: unknown[] = [];
 const compileBudgetEvidence: unknown[] = [];
 const compilationEvidence: Array<{
-  readonly scope: "session" | "visitor";
+  readonly scope: "session" | "visitor" | "event";
   readonly evidence: unknown;
 }> = [];
 
@@ -73,6 +77,16 @@ function newTrace(): SqliteD1Trace {
 function clearTrace(trace: SqliteD1Trace): void {
   trace.preparedSql.length = 0;
   trace.bindings.length = 0;
+}
+
+function statementEvidence(trace: SqliteD1Trace) {
+  return trace.preparedSql.map((sql, index) => ({
+    sql,
+    bindings: trace.bindings[index],
+    sqlBytes: new TextEncoder().encode(sql).byteLength,
+    bindingCount: trace.bindings[index]?.length ?? 0,
+    sha256: createHash("sha256").update(sql, "utf8").digest("hex"),
+  }));
 }
 
 function testEnv(database: DatabaseSync, trace: SqliteD1Trace): Env {
@@ -184,18 +198,20 @@ function createFixture(): DatabaseSync {
 }
 
 function prepareQuery(
-  scope: "session" | "visitor",
+  scope: "session" | "visitor" | "event",
   direction: "asc" | "desc",
   overrides: Partial<Pick<RecordsQuery, "search" | "eventName" | "page">> & {
     readonly filterDsl?: string;
   } = {},
+  audience:
+    "private-dashboard" | "public-share" | "api-v1" = "private-dashboard",
 ): RecordsQuery {
   const filters = parseFilterDsl(
     overrides.filterDsl ?? 'count(page { page.path eq "/scoped" }) eq 1',
     analyticsFilterRegistry,
   );
   const prepared = prepareScopedQuery("event-records", {
-    context: siteQueryContext(SITE_ID, "private-dashboard"),
+    context: siteQueryContext(SITE_ID, audience),
     time: QUERY_TIME,
     filters,
     scopePreference: scope,
@@ -237,6 +253,35 @@ async function legacyPage(env: Env, query: RecordsQuery) {
   if (!deferred)
     throw new Error("wave95a_event_records_deferred_query_missing");
   const filters = await prepareDeferredEventQualificationFallback(deferred);
+  return readSiteEventRecords({
+    env,
+    siteId: SITE_ID,
+    window: timeWindow(query.time),
+    filters,
+    queryTime: query.time,
+    search: query.search,
+    eventName: query.eventName,
+    sort: { field: "occurredAt", direction: query.sort.direction },
+    audience: query.context.policy.audience,
+    page: query.page,
+  });
+}
+
+async function legacyCorePage(env: Env, query: RecordsQuery) {
+  const preparedQuery = await d1AdvancedFilterMiddleware(
+    env,
+    undefined,
+    SITE_ID,
+  )("event-records", query, async (value) => value);
+  if (deferredEventRecordsQualificationFromQuery(preparedQuery))
+    throw new Error("wave97ei_expected_api_v1_event_records_core_path");
+  const filters = (
+    preparedQuery as QueryInput & {
+      readonly filters?: FilterDocument;
+    }
+  ).filters;
+  if (!filters)
+    throw new Error("wave97ei_api_v1_event_records_core_filters_missing");
   return readSiteEventRecords({
     env,
     siteId: SITE_ID,
@@ -402,6 +447,457 @@ describe("event records runtime qualification", () => {
       });
     },
   );
+
+  it.each([
+    {
+      label: "top-level Count AND bare Event",
+      filterDsl:
+        'count(page { page.path eq "/scoped" }) eq 1 AND event.name eq "signup"',
+      expectedIds: ["event-b"],
+    },
+    {
+      label: "top-level Count OR NOT bare Event",
+      filterDsl:
+        'count(page { page.path eq "/scoped" }) eq 1 OR NOT event.name eq "purchase"',
+      expectedIds: ["event-a", "event-b"],
+    },
+  ] as const)(
+    "executes complete Event candidate record pages for $label",
+    async ({ label, filterDsl, expectedIds }) => {
+      const actualDatabase = createFixture();
+      const legacyDatabase = createFixture();
+      const query = prepareQuery("event", "asc", {
+        filterDsl,
+        page: { limit: 1, cursor: null },
+      });
+      const diagnostics = createD1ReadDiagnostics();
+      const compilations: EventRecordsQualificationCompilationEvidence[] = [];
+      diagnostics.onEventRecordsQualificationCompile = (evidence) => {
+        compilationEvidence.push({ scope: "event", evidence });
+        compilations.push(
+          evidence as EventRecordsQualificationCompilationEvidence,
+        );
+      };
+
+      const actualTrace = newTrace();
+      const actualEnv = testEnv(actualDatabase, actualTrace);
+      const provider = createD1SiteProviderRegistry({
+        env: actualEnv,
+        siteId: SITE_ID,
+        diagnostics,
+      }).resolve("event-records");
+      if (!provider)
+        throw new Error("wave97ei_event_candidate_records_provider_missing");
+      const legacyFirstTrace = newTrace();
+      const expectedFirst = await legacyPage(
+        testEnv(legacyDatabase, legacyFirstTrace),
+        query,
+      );
+      const actualFirst = (await provider.execute(query)).value;
+      expect(actualFirst).toEqual(expectedFirst);
+      expect(actualFirst.items.map(({ eventId }) => eventId)).toEqual([
+        expectedIds[0],
+      ]);
+      expect(actualFirst.pagination.nextCursor).toBe(
+        expectedFirst.pagination.nextCursor,
+      );
+      expect(actualFirst.pagination.hasMore).toBe(expectedIds.length > 1);
+      expect(actualTrace.preparedSql).toHaveLength(2);
+      expect(compilations).toHaveLength(1);
+
+      const compilation = compilations[0]!;
+      expect(actualTrace.preparedSql[1]).toBe(compilation.sql);
+      expect(actualTrace.bindings[1]).toEqual(compilation.bindings);
+      expect(compilation.sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+      expect(compilation.bindingCount).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+      expect(compilation.groupWidth).toBeLessThanOrEqual(16);
+      expect(compilation.groupedSummaryMaterializations).toHaveLength(2);
+      expect(
+        compilation.groupedSummaryMaterializations.every(
+          (summary) =>
+            summary.materialization === "materialized" &&
+            summary.groupWidth <= 16,
+        ),
+      ).toBe(true);
+
+      const rawRows = actualDatabase
+        .prepare(compilation.sql)
+        .all(...(compilation.bindings as SQLInputValue[])) as Record<
+        string,
+        unknown
+      >[];
+      const controls = rawRows.filter((row) => row.rowKind === "control");
+      const reportRows = rawRows.filter((row) => row.rowKind === "record");
+      expect(controls).toHaveLength(1);
+      expect(controls[0]).toMatchObject({
+        outputId: EVENT_QUALIFICATION_CONTROL_OUTPUT,
+        entityKind: "event",
+        nullActivityIdCount: 0,
+        siteIdentityMismatchCount: 0,
+        invalidIdentityCount: 0,
+        duplicateIdentityCount: 0,
+      });
+      expect(Number(controls[0]?.rawCount)).toBeGreaterThan(0);
+      expect(reportRows.length).toBe(Math.min(expectedIds.length, 2));
+      expect(
+        reportRows.every((row) => row.outputId === EVENT_RECORD_PAGE_OUTPUT_ID),
+      ).toBe(true);
+
+      const pageRuns: Array<Record<string, unknown>> = [
+        {
+          cursor: null,
+          dto: actualFirst,
+          legacyDto: expectedFirst,
+          statements: statementEvidence(actualTrace),
+          legacyStatements: statementEvidence(legacyFirstTrace),
+        },
+      ];
+      const returnedIds = actualFirst.items.map(({ eventId }) => eventId);
+      let cursor = actualFirst.pagination.nextCursor;
+      let pageNumber = 2;
+      while (cursor) {
+        const nextQuery = {
+          ...query,
+          page: { limit: query.page.limit, cursor },
+        } as RecordsQuery;
+        const legacyPageTrace = newTrace();
+        const expectedPage = await legacyPage(
+          testEnv(legacyDatabase, legacyPageTrace),
+          nextQuery,
+        );
+        clearTrace(actualTrace);
+        const actualPage = (await provider.execute(nextQuery)).value;
+        expect(actualPage).toEqual(expectedPage);
+        expect(actualPage.pagination.nextCursor).toBe(
+          expectedPage.pagination.nextCursor,
+        );
+        expect(actualTrace.preparedSql).toHaveLength(2);
+        expect(actualPage.items.map(({ eventId }) => eventId)).toEqual([
+          expectedIds[pageNumber - 1],
+        ]);
+        returnedIds.push(...actualPage.items.map(({ eventId }) => eventId));
+        pageRuns.push({
+          pageNumber,
+          cursor,
+          dto: actualPage,
+          legacyDto: expectedPage,
+          statements: statementEvidence(actualTrace),
+          legacyStatements: statementEvidence(legacyPageTrace),
+        });
+        cursor = actualPage.pagination.nextCursor;
+        pageNumber += 1;
+        if (pageNumber > expectedIds.length + 1)
+          throw new Error("wave97ei_event_candidate_cursor_did_not_terminate");
+      }
+      expect(returnedIds).toEqual(expectedIds);
+      expect(new Set(returnedIds).size).toBe(expectedIds.length);
+      expect(pageRuns.at(-1)?.dto).toMatchObject({
+        pagination: { hasMore: false, nextCursor: null },
+      });
+
+      runtimeEvidence.push({
+        kind: "wave97ei-event-candidate-record-pages-v1",
+        label,
+        filterDsl,
+        expectedIds,
+        firstCompilation: compilation,
+        rawRows,
+        controls,
+        reportRows,
+        pages: pageRuns,
+        returnedIds,
+        dtoEqualToLegacyCore: true,
+      });
+    },
+  );
+
+  it("keeps normalized Event search separate from the Count candidate universe", async () => {
+    const filterDsl =
+      'count(page { page.path eq "/scoped" }) eq 1 OR NOT event.name eq "purchase"';
+    const query = prepareQuery("event", "desc", {
+      filterDsl,
+      search: " EVENT-B ",
+      eventName: "   ",
+      page: { limit: 10, cursor: null },
+    });
+    const actualDatabase = createFixture();
+    const legacyDatabase = createFixture();
+    const actualTrace = newTrace();
+    const diagnostics = createD1ReadDiagnostics();
+    let compilation:
+      | Parameters<
+          NonNullable<typeof diagnostics.onEventRecordsQualificationCompile>
+        >[0]
+      | undefined;
+    diagnostics.onEventRecordsQualificationCompile = (evidence) => {
+      compilation = evidence;
+      compilationEvidence.push({ scope: "event", evidence });
+    };
+    const provider = createD1SiteProviderRegistry({
+      env: testEnv(actualDatabase, actualTrace),
+      siteId: SITE_ID,
+      diagnostics,
+    }).resolve("event-records");
+    if (!provider)
+      throw new Error("wave97ei_event_candidate_search_provider_missing");
+    const legacyTrace = newTrace();
+    const expected = await legacyPage(
+      testEnv(legacyDatabase, legacyTrace),
+      query,
+    );
+    const actual = (await provider.execute(query)).value;
+    expect(actual).toEqual(expected);
+    expect(actual.items.map(({ eventId }) => eventId)).toEqual(["event-b"]);
+    expect(actual.pagination.hasMore).toBe(false);
+    expect(actualTrace.preparedSql).toHaveLength(2);
+    expect(compilation).toBeDefined();
+    if (!compilation)
+      throw new Error("wave97ei_event_candidate_search_compile_missing");
+    const rawRows = actualDatabase
+      .prepare(compilation.sql)
+      .all(...(compilation.bindings as SQLInputValue[])) as Record<
+      string,
+      unknown
+    >[];
+    const controls = rawRows.filter((row) => row.rowKind === "control");
+    const reportRows = rawRows.filter((row) => row.rowKind === "record");
+    expect(controls).toHaveLength(1);
+    expect(Number(controls[0]?.rawCount)).toBe(5);
+    expect(reportRows).toHaveLength(1);
+    runtimeEvidence.push({
+      kind: "wave97ei-event-candidate-record-search-v1",
+      filterDsl,
+      search: query.search,
+      normalizedSearch: query.search?.trim(),
+      eventName: query.eventName,
+      normalizedEventName: undefined,
+      compilation,
+      rawRows,
+      actualDto: actual,
+      legacyCoreDto: expected,
+      actualStatements: statementEvidence(actualTrace),
+      legacyCoreStatements: statementEvidence(legacyTrace),
+      dtoEqualToLegacyCore: true,
+    });
+  });
+
+  it("uses whole-operation Core fallback for Event candidate numeric anomalies", async () => {
+    const filterDsl = "count(page { page.durationMs gt 5 }) eq 1";
+    const actualDatabase = createFixture();
+    actualDatabase
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "visit-scoped");
+    const legacyDatabase = createFixture();
+    legacyDatabase
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "visit-scoped");
+    const query = prepareQuery("event", "desc", {
+      filterDsl,
+      page: { limit: 10, cursor: null },
+    });
+    const actualTrace = newTrace();
+    const diagnostics = createD1ReadDiagnostics();
+    let compilation:
+      | Parameters<
+          NonNullable<typeof diagnostics.onEventRecordsQualificationCompile>
+        >[0]
+      | undefined;
+    diagnostics.onEventRecordsQualificationCompile = (evidence) => {
+      compilation = evidence;
+      compilationEvidence.push({ scope: "event", evidence });
+    };
+    const provider = createD1SiteProviderRegistry({
+      env: testEnv(actualDatabase, actualTrace),
+      siteId: SITE_ID,
+      diagnostics,
+    }).resolve("event-records");
+    if (!provider)
+      throw new Error("wave97ei_event_candidate_numeric_provider_missing");
+    const legacyTrace = newTrace();
+    const expected = await legacyPage(
+      testEnv(legacyDatabase, legacyTrace),
+      query,
+    );
+    const actual = (await provider.execute(query)).value;
+    expect(actual).toEqual(expected);
+    expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
+      kind: "numeric-data-domain",
+      fieldIds: ["page.durationMs"],
+    });
+    expect(actualTrace.preparedSql.length).toBeGreaterThanOrEqual(4);
+    expect(compilation).toBeDefined();
+    if (!compilation)
+      throw new Error("wave97ei_event_candidate_numeric_compile_missing");
+    const rawRows = actualDatabase
+      .prepare(compilation.sql)
+      .all(...(compilation.bindings as SQLInputValue[])) as Record<
+      string,
+      unknown
+    >[];
+    const controls = rawRows.filter((row) => row.rowKind === "control");
+    const reportRows = rawRows.filter((row) => row.rowKind === "record");
+    const numericControl = Object.entries(controls[0] ?? {}).find(
+      ([name]) =>
+        name.toLowerCase().includes("duration") && name.endsWith("Count"),
+    );
+    expect(controls).toHaveLength(1);
+    expect(controls[0]).toMatchObject({
+      outputId: EVENT_QUALIFICATION_CONTROL_OUTPUT,
+      entityKind: "event",
+      rawCount: 5,
+    });
+    expect(Number(numericControl?.[1])).toBeGreaterThan(0);
+    expect(reportRows).toHaveLength(0);
+    runtimeEvidence.push({
+      kind: "wave97ei-event-candidate-record-numeric-fallback-v1",
+      filterDsl,
+      compilation,
+      rawRows,
+      controls,
+      reportRowCount: reportRows.length,
+      fallbackReason: diagnostics.advancedCountSqlFallbackReason,
+      actualDto: actual,
+      legacyCoreDto: expected,
+      actualStatements: statementEvidence(actualTrace),
+      legacyCoreStatements: statementEvidence(legacyTrace),
+      dtoEqualToLegacyCore: true,
+    });
+  });
+
+  it("rejects accessor and context-mismatched Event requests before reads", async () => {
+    const query = prepareQuery("event", "asc");
+    const accessorTrace = newTrace();
+    const accessorRequest = { ...query } as RecordsQuery;
+    let getterReads = 0;
+    let accessorNextEntered = false;
+    Object.defineProperty(accessorRequest, "search", {
+      enumerable: true,
+      get() {
+        getterReads += 1;
+        return query.search;
+      },
+    });
+    const accessorMiddleware = d1AdvancedFilterMiddleware(
+      testEnv(createFixture(), accessorTrace),
+      undefined,
+      SITE_ID,
+    );
+    await expect(
+      accessorMiddleware("event-records", accessorRequest, async (value) => {
+        accessorNextEntered = true;
+        return value;
+      }),
+    ).rejects.toMatchObject({
+      domainError: {
+        kind: "invalid-input",
+        issues: [
+          {
+            path: "query",
+            code: "event_records_qualification_request_own_data_required",
+          },
+        ],
+      },
+    });
+    expect(getterReads).toBe(0);
+    expect(accessorNextEntered).toBe(false);
+    expect(accessorTrace.preparedSql).toHaveLength(0);
+
+    const mismatchTrace = newTrace();
+    const mismatchRequest = {
+      ...query,
+      context: siteQueryContext(`${SITE_ID}-mismatch`, "private-dashboard"),
+    } as RecordsQuery;
+    let mismatchNextEntered = false;
+    const mismatchMiddleware = d1AdvancedFilterMiddleware(
+      testEnv(createFixture(), mismatchTrace),
+      undefined,
+      SITE_ID,
+    );
+    await expect(
+      mismatchMiddleware("event-records", mismatchRequest, async (value) => {
+        mismatchNextEntered = true;
+        return value;
+      }),
+    ).rejects.toMatchObject({
+      domainError: {
+        kind: "invalid-input",
+        issues: [
+          {
+            path: "query",
+            code: "event_records_qualification_request_context_mismatch",
+          },
+        ],
+      },
+    });
+    expect(mismatchNextEntered).toBe(false);
+    expect(mismatchTrace.preparedSql).toHaveLength(0);
+    runtimeEvidence.push({
+      kind: "wave97ei-event-record-request-safety-v1",
+      accessor: {
+        getterReads,
+        nextEntered: accessorNextEntered,
+        statementCount: accessorTrace.preparedSql.length,
+        rejectionCode: "event_records_qualification_request_own_data_required",
+      },
+      contextMismatch: {
+        nextEntered: mismatchNextEntered,
+        statementCount: mismatchTrace.preparedSql.length,
+        rejectionCode: "event_records_qualification_request_context_mismatch",
+      },
+    });
+  });
+
+  it("preserves api-v1 Event Count requests on the legacy Core records path", async () => {
+    const query = prepareQuery(
+      "event",
+      "desc",
+      { page: { limit: 20, cursor: null } },
+      "api-v1",
+    );
+    const actualDatabase = createFixture();
+    const legacyDatabase = createFixture();
+    const actualTrace = newTrace();
+    const diagnostics = createD1ReadDiagnostics();
+    let compileCalls = 0;
+    diagnostics.onEventRecordsQualificationCompile = () => {
+      compileCalls += 1;
+    };
+    const provider = createD1SiteProviderRegistry({
+      env: testEnv(actualDatabase, actualTrace),
+      siteId: SITE_ID,
+      diagnostics,
+    }).resolve("event-records");
+    if (!provider)
+      throw new Error("wave97ei_api_v1_event_records_provider_missing");
+
+    const expected = await legacyCorePage(
+      testEnv(legacyDatabase, newTrace()),
+      query,
+    );
+    const actual = (await provider.execute(query)).value;
+    expect(actual).toEqual(expected);
+    expect(actual.items.map(({ eventId }) => eventId).sort()).toEqual([
+      "event-a",
+      "event-b",
+    ]);
+    expect(actual.pagination).toMatchObject({
+      hasMore: false,
+      nextCursor: null,
+    });
+    expect(compileCalls).toBe(0);
+    runtimeEvidence.push({
+      kind: "wave97ei-api-v1-event-count-core-compatibility-v1",
+      audience: query.context.policy.audience,
+      scope: "event",
+      actualDto: actual,
+      legacyCoreDto: expected,
+      actualStatements: statementEvidence(actualTrace),
+      compileCalls,
+      dtoEqualToLegacyCore: true,
+    });
+  });
 
   it("preserves normalized search and blank-name behavior", async () => {
     const database = createFixture();

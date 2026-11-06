@@ -6,6 +6,7 @@ import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
   aggregate,
   and,
+  antiJoin,
   callFunction,
   caseWhen,
   coalesce,
@@ -22,6 +23,7 @@ import {
   param,
   project,
   scan,
+  semiJoin,
   sort,
   sum,
   union,
@@ -76,9 +78,13 @@ function columns(relation: AnyRelation): LogicalColumnMap {
 function boundedInput(
   selectionBarrier = false,
   nullableKey = true,
+  duplicateGroupKey = false,
 ): AnyRelation {
   const activityRows = [
     { keyA: "a", keyB: "x", token: "keep-a" },
+    ...(duplicateGroupKey
+      ? [{ keyA: "a", keyB: "x", token: "keep-a-duplicate" }]
+      : []),
     { keyA: "a", keyB: "y", token: "keep-b" },
     ...(nullableKey
       ? [
@@ -382,6 +388,115 @@ function buildLookupQuery(options: LookupOptions = {}): {
   };
 }
 
+interface SummaryMembershipLookupOptions {
+  readonly duplicateGroupKey?: boolean;
+  readonly rawLimitOnly?: boolean;
+  readonly rawLimitBranch?: boolean;
+}
+
+function buildSummaryMembershipLookupQuery(
+  options: SummaryMembershipLookupOptions = {},
+): {
+  readonly summary: AnyRelation;
+  readonly lookup: AnyRelation;
+  readonly output: AnyRelation;
+} {
+  const bounded = boundedInput(
+    false,
+    false,
+    options.duplicateGroupKey === true,
+  );
+  const boundedColumns = columns(bounded);
+  const summary = aggregate(bounded, {
+    groupBy: {
+      groupA: boundedColumns.left_keyA!,
+      groupB: boundedColumns.left_keyB!,
+    },
+    aggregates: { rowCount: count() },
+  }) as AnyRelation;
+  const summaryColumns = columns(summary);
+  const summaryLookup = project(summary, {
+    lookupA: summaryColumns.groupA!,
+    lookupB: summaryColumns.groupB!,
+    lookupCount: summaryColumns.rowCount!,
+  }) as AnyRelation;
+  const lookupSourceColumns = columns(summaryLookup);
+  const lookup = join(
+    bounded,
+    summaryLookup,
+    and(
+      eq(boundedColumns.left_keyA!, lookupSourceColumns.lookupA as never),
+      eq(boundedColumns.left_keyB!, lookupSourceColumns.lookupB as never),
+    ),
+    "left",
+  ) as AnyRelation;
+  const lookupColumns = columns(lookup);
+  if (options.rawLimitOnly)
+    return {
+      summary,
+      lookup,
+      output: limit(lookup, 1) as AnyRelation,
+    };
+
+  const reportRows = valuesRelation(
+    {
+      keyA: { affinity: "text", nullable: false },
+      keyB: { affinity: "text", nullable: false },
+      token: { affinity: "text", nullable: false },
+    },
+    [
+      { keyA: "a", keyB: "x", token: "semi-hit-x" },
+      { keyA: "a", keyB: "y", token: "semi-hit-y" },
+      { keyA: "b", keyB: "z", token: "anti-miss" },
+    ],
+  ) as AnyRelation;
+  const reportColumns = columns(reportRows);
+  const membershipPredicate = and(
+    eq(reportColumns.keyA!, lookupColumns.left_left_keyA! as never),
+    eq(reportColumns.keyB!, lookupColumns.left_left_keyB! as never),
+  );
+  const semi = semiJoin(reportRows, lookup, membershipPredicate) as AnyRelation;
+  const anti = antiJoin(reportRows, lookup, membershipPredicate) as AnyRelation;
+  const projectMembershipRows = (
+    relation: AnyRelation,
+    branch: "semi" | "anti",
+  ): AnyRelation => {
+    const relationColumns = columns(relation);
+    return project(relation, {
+      branch: constant(branch),
+      keyA: relationColumns.keyA!,
+      keyB: relationColumns.keyB!,
+      token: relationColumns.token!,
+    }) as AnyRelation;
+  };
+  let output = union(
+    projectMembershipRows(semi, "semi"),
+    projectMembershipRows(anti, "anti"),
+    true,
+  ) as AnyRelation;
+  if (options.rawLimitBranch) {
+    const limitedLookup = limit(lookup, 1) as AnyRelation;
+    const limitedColumns = columns(limitedLookup);
+    const directLookupRows = project(limitedLookup, {
+      branch: constant("raw-limit"),
+      keyA: limitedColumns.left_left_keyA!,
+      keyB: limitedColumns.left_left_keyB!,
+      token: limitedColumns.left_left_token!,
+    }) as AnyRelation;
+    output = union(output, directLookupRows, true) as AnyRelation;
+  }
+  const outputColumns = columns(output);
+  const ordered = sort(output, [
+    { expression: outputColumns.token!, direction: "ASC" },
+    { expression: outputColumns.branch!, direction: "ASC" },
+  ]) as AnyRelation;
+  return {
+    summary,
+    lookup,
+    output: limit(ordered, 20) as AnyRelation,
+  };
+}
+
 function execute(
   database: DatabaseSync,
   query: { readonly sql: string; readonly bindings?: readonly unknown[] },
@@ -443,6 +558,75 @@ describe("bounded grouped lookup reuse", () => {
     expect(
       physical.sharedRelations.find(({ node }) => node === summary.node),
     ).toMatchObject({ materialization: "materialized" });
+  });
+
+  it("materializes a grouped lookup reused by Semi and Anti report membership", () => {
+    const built = buildSummaryMembershipLookupQuery({
+      duplicateGroupKey: true,
+    });
+    const db = database();
+    const { physical, optimized, optimizedRows } = assertSqliteEquivalent(
+      built.output,
+      db,
+    );
+    const unoptimizedRows = execute(
+      db,
+      compileD1QueryUnoptimizedForTest(built.output),
+    );
+    expect(optimizedRows).toEqual(unoptimizedRows);
+    expect(optimizedRows.map(({ branch, token }) => [branch, token])).toEqual([
+      ["anti", "anti-miss"],
+      ["semi", "semi-hit-x"],
+      ["semi", "semi-hit-y"],
+    ]);
+    expect(
+      optimizedRows.filter(
+        ({ branch, token }) => branch === "semi" && token === "semi-hit-x",
+      ),
+    ).toHaveLength(1);
+
+    const duplicateMembershipRows = execute(
+      db,
+      compileD1QueryUnoptimizedForTest(built.lookup),
+    ).filter(
+      ({ left_left_keyA, left_left_keyB }) =>
+        left_left_keyA === "a" && left_left_keyB === "x",
+    );
+    expect(duplicateMembershipRows).toHaveLength(2);
+    expect(
+      physical.sharedRelations.find(({ node }) => node === built.summary.node),
+    ).toMatchObject({ materialization: "materialized" });
+    expect(optimized.sql).toContain("AS MATERIALIZED (");
+
+    const freshPhysical = validatePhysicalQueryPlan(physical);
+    expect(
+      freshPhysical.interfaces.find(
+        ({ definition }) => definition.node === built.summary.node,
+      ),
+    ).toMatchObject({ license: { kind: "bounded-group-summary" } });
+    expect(
+      freshPhysical.unlicensed.some(
+        ({ definition }) => definition.node === built.summary.node,
+      ),
+    ).toBe(false);
+  });
+
+  it("does not materialize a grouped lookup on a raw data Limit path", () => {
+    const built = buildSummaryMembershipLookupQuery({ rawLimitOnly: true });
+    const { physical } = assertSqliteEquivalent(built.output);
+    expect(
+      physical.sharedRelations.some(({ node }) => node === built.summary.node),
+    ).toBe(false);
+  });
+
+  it("keeps a summary unmaterialized when membership and raw Limit paths mix", () => {
+    const built = buildSummaryMembershipLookupQuery({
+      rawLimitBranch: true,
+    });
+    const { physical } = assertSqliteEquivalent(built.output);
+    expect(
+      physical.sharedRelations.some(({ node }) => node === built.summary.node),
+    ).toBe(false);
   });
 
   it.each([
