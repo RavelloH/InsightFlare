@@ -1,6 +1,6 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { AdvancedCountQualificationPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import {
   appendEventFieldsPage,
   EVENT_FIELDS_PAGE_OUTPUT,
@@ -17,20 +17,24 @@ export interface EventFieldsQualificationOptions {
   readonly cursor?: EventFieldCursorValue | null;
 }
 
-export type EventFieldsQualificationPlan = EventQualificationPlan & {
+export type EventFieldsQualificationPlan<
+  TScope extends "session" | "visitor" | "event" = "session" | "visitor",
+> = EventQualificationPlan<TScope> & {
   readonly plan: ValidatedLogicalPlan;
   readonly reportOutputIds: readonly [typeof EVENT_FIELDS_PAGE_OUTPUT];
 };
 
 /** Builds the Event field report beside its Count qualification. */
-export function buildEventFieldsQualificationPlan(input: {
+export function buildEventFieldsQualificationPlan<
+  TCount extends AdvancedCountQualificationPlanInput,
+>(input: {
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: TCount;
   readonly options: EventFieldsQualificationOptions;
-}): EventFieldsQualificationPlan {
+}): EventFieldsQualificationPlan<TCount["scope"]> {
   return buildEventPayloadQualificationPlan({
     siteId: input.siteId,
     queryTime: input.queryTime,

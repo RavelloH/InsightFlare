@@ -570,16 +570,27 @@ export type DeferredEventRecordsQualification =
       readonly eventRecordsRequest: DeferredEventRecordsRequest;
     });
 
-export type DeferredEventFieldsQualification = DeferredEventQualification & {
-  readonly operation: "event-fields";
-  readonly eventFieldsRequest: DeferredEventFieldsRequest;
-};
+export type DeferredEventFieldsQualification =
+  | (DeferredEventQualification & {
+      readonly operation: "event-fields";
+      readonly eventFieldsRequest: DeferredEventFieldsRequest;
+    })
+  | (Omit<DeferredEventQualification, "operation" | "countInput"> & {
+      readonly operation: "event-fields";
+      readonly countInput: AdvancedEventCandidateCountPlanInput;
+      readonly eventFieldsRequest: DeferredEventFieldsRequest;
+    });
 
 export type DeferredEventFieldValuesQualification =
-  DeferredEventQualification & {
-    readonly operation: "event-field-values";
-    readonly eventFieldValuesRequest: DeferredEventFieldValuesRequest;
-  };
+  | (DeferredEventQualification & {
+      readonly operation: "event-field-values";
+      readonly eventFieldValuesRequest: DeferredEventFieldValuesRequest;
+    })
+  | (Omit<DeferredEventQualification, "operation" | "countInput"> & {
+      readonly operation: "event-field-values";
+      readonly countInput: AdvancedEventCandidateCountPlanInput;
+      readonly eventFieldValuesRequest: DeferredEventFieldValuesRequest;
+    });
 
 export type DeferredPageDimensionQualification = DeferredEventQualification & {
   readonly operation: "page-dimension";
@@ -4599,6 +4610,7 @@ async function prepareDeferredEventQualification(input: {
   readonly eventSummaryRequestSnapshot?: string;
   readonly eventRecordsRequestSnapshot?: string;
   readonly eventTrendRequestSnapshot?: string;
+  readonly eventPayloadRequestSnapshot?: string;
   readonly subject: SemanticSubjectDomain;
   readonly diagnostics?: D1ReadDiagnostics;
   readonly signal?: AbortSignal;
@@ -4607,6 +4619,8 @@ async function prepareDeferredEventQualification(input: {
   | DeferredEventQualification
   | DeferredEventSummaryQualification
   | DeferredEventRecordsQualification
+  | DeferredEventFieldsQualification
+  | DeferredEventFieldValuesQualification
   | DeferredEventTypesQualification
   | DeferredEventNameDimensionQualification
   | DeferredEventTrendQualification
@@ -4624,6 +4638,8 @@ async function prepareDeferredEventQualification(input: {
     input.operation === "event-types" ||
     input.operation === "event-name-dimension" ||
     input.operation === "event-trend" ||
+    input.operation === "event-fields" ||
+    input.operation === "event-field-values" ||
     (input.operation === "filter-values" &&
       filterValuesRequest?.reportKind === "event");
   const eventCandidateFiltersDescriptor = eventCandidateConsumerOperation
@@ -4647,7 +4663,11 @@ async function prepareDeferredEventQualification(input: {
               ? "filter_values_request_context_mismatch"
               : input.operation === "event-trend"
                 ? "event_trend_qualification_request_context_mismatch"
-                : "event_name_dimension_request_context_mismatch",
+                : input.operation === "event-fields"
+                  ? "event_fields_qualification_request_context_mismatch"
+                  : input.operation === "event-field-values"
+                    ? "event_field_values_qualification_request_context_mismatch"
+                    : "event_name_dimension_request_context_mismatch",
     );
   const eventCandidateFilters = eventCandidateConsumerOperation
     ? (ownDataValue(query, "filters") as FilterDocument | undefined)
@@ -4690,7 +4710,11 @@ async function prepareDeferredEventQualification(input: {
               ? "filter_values_request_context_mismatch"
               : input.operation === "event-trend"
                 ? "event_trend_qualification_request_context_mismatch"
-                : "event_name_dimension_request_context_mismatch",
+                : input.operation === "event-fields"
+                  ? "event_fields_qualification_request_context_mismatch"
+                  : input.operation === "event-field-values"
+                    ? "event_field_values_qualification_request_context_mismatch"
+                    : "event_name_dimension_request_context_mismatch",
     );
   const eventCandidateBaseRequest =
     eventCandidateMetadata?.plan.scope === "event" &&
@@ -4730,13 +4754,49 @@ async function prepareDeferredEventQualification(input: {
     eventCandidateBaseRequest &&
     input.eventRecordsRequestSnapshot !== undefined &&
     eventCandidateRequestSnapshot === input.eventRecordsRequestSnapshot;
+  const eventCandidateFieldsRequest =
+    input.operation === "event-fields" &&
+    eventCandidateBaseRequest &&
+    input.eventPayloadRequestSnapshot !== undefined &&
+    eventCandidateRequestSnapshot === input.eventPayloadRequestSnapshot &&
+    (() => {
+      const requestedLimit = ownDataValue(query, "limit");
+      const limit =
+        typeof requestedLimit === "number" && Number.isFinite(requestedLimit)
+          ? requestedLimit
+          : 100;
+      return Number.isSafeInteger(limit) && limit >= 1 && limit <= 200;
+    })();
+  const eventCandidateFieldValuesRequest =
+    input.operation === "event-field-values" &&
+    eventCandidateBaseRequest &&
+    input.eventPayloadRequestSnapshot !== undefined &&
+    eventCandidateRequestSnapshot === input.eventPayloadRequestSnapshot &&
+    (() => {
+      const requestedType = ownDataValue(query, "fieldValueType");
+      const fieldValueType =
+        typeof requestedType === "string" ? requestedType : "";
+      const requestedLimit = ownDataValue(query, "limit");
+      const limit =
+        typeof requestedLimit === "number" && Number.isFinite(requestedLimit)
+          ? requestedLimit
+          : 25;
+      return (
+        eventPayloadValueTypeCode(fieldValueType) !== null &&
+        Number.isSafeInteger(limit) &&
+        limit >= 1 &&
+        limit <= 200
+      );
+    })();
   const eventCandidateRequest =
     eventCandidatePageRequest ||
     eventCandidateDimensionListRequest ||
     eventCandidateFilterValuesRequest ||
     eventCandidateSummaryRequest ||
     eventCandidateRecordsRequest ||
-    eventCandidateEventTrendRequest;
+    eventCandidateEventTrendRequest ||
+    eventCandidateFieldsRequest ||
+    eventCandidateFieldValuesRequest;
   const overviewTrendConfiguration =
     input.operation === "overview" || input.operation === "trend"
       ? overviewTrendConfigurationForQuery(input.operation, query)
@@ -6016,6 +6076,8 @@ async function prepareDeferredEventQualification(input: {
     | DeferredEventQualification
     | DeferredEventSummaryQualification
     | DeferredEventRecordsQualification
+    | DeferredEventFieldsQualification
+    | DeferredEventFieldValuesQualification
     | DeferredEventTypesQualification
     | DeferredEventNameDimensionQualification
     | DeferredEventTrendQualification
@@ -6032,32 +6094,48 @@ async function prepareDeferredEventQualification(input: {
           countInput: countInput as AdvancedEventCandidateCountPlanInput,
           eventRecordsRequest: eventRecordsRequest!,
         }) as DeferredEventRecordsQualification)
-      : eventCandidateEventTrendRequest
+      : eventCandidateFieldsRequest
         ? (Object.freeze({
             ...deferredBase,
-            operation: "event-trend" as const,
+            operation: "event-fields" as const,
             countInput: countInput as AdvancedEventCandidateCountPlanInput,
-          }) as DeferredEventTrendQualification)
-        : eventCandidatePageRequest
+            eventFieldsRequest: eventFieldsRequest!,
+          }) as DeferredEventFieldsQualification)
+        : eventCandidateFieldValuesRequest
           ? (Object.freeze({
               ...deferredBase,
-              operation: "event-types" as const,
+              operation: "event-field-values" as const,
               countInput: countInput as AdvancedEventCandidateCountPlanInput,
-            }) as DeferredEventTypesQualification)
-          : eventCandidateDimensionListRequest
+              eventFieldValuesRequest: eventFieldValuesRequest!,
+            }) as DeferredEventFieldValuesQualification)
+          : eventCandidateEventTrendRequest
             ? (Object.freeze({
                 ...deferredBase,
-                operation: "event-name-dimension" as const,
+                operation: "event-trend" as const,
                 countInput: countInput as AdvancedEventCandidateCountPlanInput,
-              }) as DeferredEventNameDimensionQualification)
-            : eventCandidateFilterValuesRequest
+              }) as DeferredEventTrendQualification)
+            : eventCandidatePageRequest
               ? (Object.freeze({
                   ...deferredBase,
-                  operation: "filter-values" as const,
+                  operation: "event-types" as const,
                   countInput:
                     countInput as AdvancedEventCandidateCountPlanInput,
-                }) as DeferredFilterValuesQualificationInput)
-              : (Object.freeze(deferredBase) as DeferredEventQualification);
+                }) as DeferredEventTypesQualification)
+              : eventCandidateDimensionListRequest
+                ? (Object.freeze({
+                    ...deferredBase,
+                    operation: "event-name-dimension" as const,
+                    countInput:
+                      countInput as AdvancedEventCandidateCountPlanInput,
+                  }) as DeferredEventNameDimensionQualification)
+                : eventCandidateFilterValuesRequest
+                  ? (Object.freeze({
+                      ...deferredBase,
+                      operation: "filter-values" as const,
+                      countInput:
+                        countInput as AdvancedEventCandidateCountPlanInput,
+                    }) as DeferredFilterValuesQualificationInput)
+                  : (Object.freeze(deferredBase) as DeferredEventQualification);
   deferredEventQualifications.add(deferred);
   return deferred;
 }
@@ -6089,6 +6167,14 @@ export function deferredEventQualificationFromQuery(
 ): DeferredEventRecordsQualification | undefined;
 export function deferredEventQualificationFromQuery(
   input: unknown,
+  operation: "event-fields",
+): DeferredEventFieldsQualification | undefined;
+export function deferredEventQualificationFromQuery(
+  input: unknown,
+  operation: "event-field-values",
+): DeferredEventFieldValuesQualification | undefined;
+export function deferredEventQualificationFromQuery(
+  input: unknown,
   operation: "event-types",
 ): DeferredEventTypesQualification | undefined;
 export function deferredEventQualificationFromQuery(
@@ -6105,6 +6191,8 @@ export function deferredEventQualificationFromQuery(
     DeferredEventQualificationOperation,
     | "event-summary"
     | "event-records"
+    | "event-fields"
+    | "event-field-values"
     | "event-types"
     | "event-name-dimension"
     | "event-trend"
@@ -6117,6 +6205,8 @@ export function deferredEventQualificationFromQuery(
   | DeferredEventQualification
   | DeferredEventSummaryQualification
   | DeferredEventRecordsQualification
+  | DeferredEventFieldsQualification
+  | DeferredEventFieldValuesQualification
   | DeferredEventTypesQualification
   | DeferredEventNameDimensionQualification
   | DeferredEventTrendQualification
@@ -6129,6 +6219,8 @@ export function deferredEventQualificationFromQuery(
   | DeferredEventQualification
   | DeferredEventSummaryQualification
   | DeferredEventRecordsQualification
+  | DeferredEventFieldsQualification
+  | DeferredEventFieldValuesQualification
   | DeferredEventTypesQualification
   | DeferredEventNameDimensionQualification
   | DeferredEventTrendQualification
@@ -6147,6 +6239,8 @@ export function deferredEventQualificationFromQuery(
         | DeferredEventQualification
         | DeferredEventSummaryQualification
         | DeferredEventRecordsQualification
+        | DeferredEventFieldsQualification
+        | DeferredEventFieldValuesQualification
         | DeferredEventTypesQualification
         | DeferredEventNameDimensionQualification
         | DeferredEventTrendQualification
@@ -6556,6 +6650,8 @@ export function isDeferredEventQualification(
   | DeferredEventQualification
   | DeferredEventSummaryQualification
   | DeferredEventRecordsQualification
+  | DeferredEventFieldsQualification
+  | DeferredEventFieldValuesQualification
   | DeferredEventTypesQualification
   | DeferredEventNameDimensionQualification
   | DeferredEventTrendQualification
@@ -6583,6 +6679,8 @@ export async function prepareDeferredEventQualificationFallback(
     | DeferredEventQualification
     | DeferredEventSummaryQualification
     | DeferredEventRecordsQualification
+    | DeferredEventFieldsQualification
+    | DeferredEventFieldValuesQualification
     | DeferredEventTypesQualification
     | DeferredEventNameDimensionQualification
     | DeferredEventTrendQualification
@@ -6710,6 +6808,53 @@ export function d1AdvancedFilterMiddleware(
             "query",
             "event_records_qualification_request_context_mismatch",
           );
+      }
+    }
+    const rawEventPayloadRequestSnapshot =
+      operation === "event-fields" || operation === "event-field-values"
+        ? qualificationRequestOwnDataSnapshot(input)
+        : undefined;
+    if (operation === "event-fields" || operation === "event-field-values") {
+      const filters = ownDataValue(input, "filters") as
+        FilterDocument | undefined;
+      const metadata = scopedFilterMetadata(filters);
+      const filtersDescriptor = ownDescriptor(input, "filters");
+      const contextMismatchCode =
+        operation === "event-fields"
+          ? "event_fields_qualification_request_context_mismatch"
+          : "event_field_values_qualification_request_context_mismatch";
+      if (
+        rawEventPayloadRequestSnapshot === undefined &&
+        (metadata?.plan.scope === "event" ||
+          (filtersDescriptor !== undefined && !("value" in filtersDescriptor)))
+      )
+        throw invalidInput(
+          "query",
+          operation === "event-fields"
+            ? "event_fields_qualification_request_own_data_required"
+            : "event_field_values_qualification_request_own_data_required",
+        );
+      if (metadata?.plan.scope === "event") {
+        const context = ownDataValue(input, "context");
+        const subject = ownDataValue(context, "subject");
+        const siteId = ownDataValue(subject, "siteId");
+        const requestTime = ownDataValue(input, "time");
+        if (
+          ownDataValue(subject, "kind") !== "site" ||
+          metadata.siteIds.length !== 1 ||
+          metadata.siteIds[0] !== siteId
+        )
+          throw invalidInput("query", contextMismatchCode);
+        if (expectedSiteId !== undefined && expectedSiteId !== siteId)
+          throw invalidInput("siteId", contextMismatchCode);
+        if (
+          !metadata.time ||
+          !requestTime ||
+          !sameEventFieldsQueryTime(requestTime as QueryTime, metadata.time)
+        )
+          throw invalidInput("time", contextMismatchCode);
+        if (!queryScopePlanMatchesMetadata(input, metadata.plan))
+          throw invalidInput("scopePlan", contextMismatchCode);
       }
     }
     const rawEventSummaryRequestSnapshot =
@@ -7293,6 +7438,9 @@ export function d1AdvancedFilterMiddleware(
           : {}),
         ...(operation === "event-records"
           ? { eventRecordsRequestSnapshot: rawEventRecordsRequestSnapshot }
+          : {}),
+        ...(operation === "event-fields" || operation === "event-field-values"
+          ? { eventPayloadRequestSnapshot: rawEventPayloadRequestSnapshot }
           : {}),
         subject,
         diagnostics,

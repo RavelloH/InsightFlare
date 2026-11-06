@@ -469,6 +469,8 @@ interface EventQualificationProgram {
     | DeferredEventQualification
     | DeferredEventSummaryQualification
     | DeferredEventTypesQualification
+    | DeferredEventFieldsQualification
+    | DeferredEventFieldValuesQualification
     | DeferredEventNameDimensionQualification
     | DeferredEventTrendQualification;
   readonly reportKind: QualifiedReportKind;
@@ -1047,7 +1049,8 @@ type EventPayloadQualificationRequest = Extract<
 >;
 
 function payloadRequestContextMatches(
-  deferred: DeferredEventQualification,
+  deferred:
+    DeferredEventFieldsQualification | DeferredEventFieldValuesQualification,
   query: EventFieldsQualificationQuery | EventFieldValuesQualificationQuery,
 ): boolean {
   return (
@@ -1066,6 +1069,21 @@ function payloadRequestContextMatches(
 }
 
 function validatePayloadRequest(request: EventPayloadQualificationRequest) {
+  const eventCandidatePayloadRequest =
+    (request.kind === "event-fields" &&
+      request.deferred.operation === "event-fields" &&
+      request.deferred.countInput.scope === "event" &&
+      request.deferred.countInput.candidateAnchor.kind === "event-candidate") ||
+    (request.kind === "event-field-values" &&
+      request.deferred.operation === "event-field-values" &&
+      request.deferred.countInput.scope === "event" &&
+      request.deferred.countInput.candidateAnchor.kind === "event-candidate");
+  if (
+    eventCandidatePayloadRequest &&
+    (request.deferred.metadata.plan.scope !== "event" ||
+      request.query.audience !== "private-dashboard")
+  )
+    throw invalidInput("query", "event_payload_candidate_request_invalid");
   if (request.kind === "event-fields") {
     const prepared = request.deferred.eventFieldsRequest;
     const query = request.query;
@@ -1550,7 +1568,7 @@ function validateSessionBoundaryOverviewPageRequest(
 
 function buildPayloadQualificationPlan(
   request: EventPayloadQualificationRequest,
-): EventQualificationPlan {
+): EventQualificationPlan<"session" | "visitor" | "event"> {
   if (request.kind === "event-fields") {
     return buildEventFieldsQualificationPlan({
       siteId: request.query.siteId,
@@ -1951,6 +1969,18 @@ function compileProgram(request: EventQualificationCompileRequest):
     deferred.metadata.plan.scope === "event" &&
     deferred.countInput.scope === "event" &&
     deferred.countInput.candidateAnchor.kind === "event-candidate";
+  const eventCandidateEventFieldsQuery =
+    request.kind === "event-fields" &&
+    deferred.operation === "event-fields" &&
+    deferred.metadata.plan.scope === "event" &&
+    deferred.countInput.scope === "event" &&
+    deferred.countInput.candidateAnchor.kind === "event-candidate";
+  const eventCandidateEventFieldValuesQuery =
+    request.kind === "event-field-values" &&
+    deferred.operation === "event-field-values" &&
+    deferred.metadata.plan.scope === "event" &&
+    deferred.countInput.scope === "event" &&
+    deferred.countInput.candidateAnchor.kind === "event-candidate";
   const qualificationScopeValid =
     ((qualification.scope === "session" || qualification.scope === "visitor") &&
       qualification.candidateGrain === undefined) ||
@@ -1961,6 +1991,9 @@ function compileProgram(request: EventQualificationCompileRequest):
       qualification.scope === "event" &&
       qualification.candidateGrain === "event-candidate") ||
     (eventCandidateEventSummaryQuery &&
+      qualification.scope === "event" &&
+      qualification.candidateGrain === "event-candidate") ||
+    ((eventCandidateEventFieldsQuery || eventCandidateEventFieldValuesQuery) &&
       qualification.scope === "event" &&
       qualification.candidateGrain === "event-candidate");
   if (

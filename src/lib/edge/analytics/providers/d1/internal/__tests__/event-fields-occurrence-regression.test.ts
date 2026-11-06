@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import { D1_MAX_BOUND_PARAMETERS, D1_MAX_SQL_UTF8_BYTES } from "@/lib/db";
@@ -36,7 +36,7 @@ import {
   deferredEventFieldValuesQualificationFromQuery,
   prepareDeferredEventQualificationFallback,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
-import { compileEventFieldsQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/analytics-qualification-program";
+import * as analyticsQualificationProgram from "@/lib/edge/analytics/providers/d1/internal/analytics-qualification-program";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { queryAnalyticsReportOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import {
@@ -84,7 +84,8 @@ const PREVIOUS_WINDOW: QueryWindow = {
 const DATABASES = new Set<DatabaseSync>();
 const CURSOR_SECRET = "wave64-event-fields-test-secret";
 const ARTIFACT_DIR = resolve(
-  process.env.WAVE95C_ARTIFACT_DIR ??
+  process.env.WAVE97EJ_ARTIFACT_DIR ??
+    process.env.WAVE95C_ARTIFACT_DIR ??
     "plan/execution-wave95b-event-fields-qualification/run-1/runtime",
 );
 const runtimeEvidence: unknown[] = [];
@@ -494,14 +495,15 @@ type QualifiedEventFieldsTestQuery = QueryInput & {
 } & Record<string, unknown>;
 
 function qualifiedEventFieldsQuery(
-  scopePreference: "session" | "visitor",
+  scopePreference: "event" | "session" | "visitor",
   cursor: string | null = null,
   filterDsl = 'count(page { page.path eq "/landing" }) eq 1',
-  eventName: string | undefined = "signup",
+  eventName: string | null = "signup",
   limit = 1,
+  audience: "private-dashboard" | "api-v1" = "private-dashboard",
 ): QualifiedEventFieldsTestQuery {
   const prepared = prepareScopedQuery("event-fields", {
-    context: siteQueryContext(SITE, "private-dashboard"),
+    context: siteQueryContext(SITE, audience),
     time: TIME,
     filters: parseFilterDsl(filterDsl, analyticsFilterRegistry),
     scopePreference,
@@ -513,7 +515,7 @@ function qualifiedEventFieldsQuery(
     throw new Error("wave95b_event_fields_query_preparation_failed");
   return {
     ...prepared,
-    eventName,
+    eventName: eventName ?? undefined,
     limit,
     cursor,
   } as QualifiedEventFieldsTestQuery;
@@ -531,19 +533,20 @@ type QualifiedEventFieldValuesTestQuery = QueryInput & {
 } & Record<string, unknown>;
 
 function qualifiedEventFieldValuesQuery(
-  scopePreference: "session" | "visitor",
+  scopePreference: "event" | "session" | "visitor",
   input: {
     readonly fieldPath?: string;
     readonly fieldValueType?: string;
-    readonly eventName?: string;
+    readonly eventName?: string | null;
     readonly search?: string;
     readonly limit?: number;
     readonly cursor?: string | null;
     readonly filterDsl?: string;
+    readonly audience?: "private-dashboard" | "api-v1";
   } = {},
 ): QualifiedEventFieldValuesTestQuery {
   const prepared = prepareScopedQuery("event-field-values", {
-    context: siteQueryContext(SITE, "private-dashboard"),
+    context: siteQueryContext(SITE, input.audience ?? "private-dashboard"),
     time: TIME,
     filters: parseFilterDsl(
       input.filterDsl ??
@@ -559,7 +562,8 @@ function qualifiedEventFieldValuesQuery(
     throw new Error("wave95c_event_field_values_query_preparation_failed");
   return {
     ...prepared,
-    eventName: input.eventName ?? "signup",
+    eventName:
+      input.eventName === null ? undefined : (input.eventName ?? "signup"),
     fieldPath: input.fieldPath ?? "/a",
     fieldValueType: input.fieldValueType ?? "string",
     ...(input.search !== undefined ? { search: input.search } : {}),
@@ -894,6 +898,106 @@ function traceFor(
   return { preparedSql: [], bindings: [], ...options };
 }
 
+type EventPayloadProgramEvidence = Extract<
+  Awaited<
+    ReturnType<
+      typeof analyticsQualificationProgram.executeEventFieldsQualificationProgram
+    >
+  >,
+  { readonly kind: "executed" }
+>["evidence"];
+
+async function captureEventFieldsExecution<T>(run: () => Promise<T>): Promise<{
+  readonly value: T;
+  readonly callCount: number;
+  readonly evidence: readonly EventPayloadProgramEvidence[];
+}> {
+  const evidence: EventPayloadProgramEvidence[] = [];
+  const execute =
+    analyticsQualificationProgram.executeEventFieldsQualificationProgram;
+  const spy = vi
+    .spyOn(
+      analyticsQualificationProgram,
+      "executeEventFieldsQualificationProgram",
+    )
+    .mockImplementation(async (input) => {
+      const result = await execute(input);
+      if (result.kind === "executed") evidence.push(result.evidence);
+      return result;
+    });
+  try {
+    const value = await run();
+    return { value, callCount: spy.mock.calls.length, evidence };
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+async function captureEventFieldValuesExecution<T>(
+  run: () => Promise<T>,
+): Promise<{
+  readonly value: T;
+  readonly callCount: number;
+  readonly evidence: readonly EventPayloadProgramEvidence[];
+}> {
+  const evidence: EventPayloadProgramEvidence[] = [];
+  const execute =
+    analyticsQualificationProgram.executeEventFieldValuesQualificationProgram;
+  const spy = vi
+    .spyOn(
+      analyticsQualificationProgram,
+      "executeEventFieldValuesQualificationProgram",
+    )
+    .mockImplementation(async (input) => {
+      const result = await execute(input);
+      if (result.kind === "executed") evidence.push(result.evidence);
+      return result;
+    });
+  try {
+    const value = await run();
+    return { value, callCount: spy.mock.calls.length, evidence };
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+function prepareEventCandidateFixture(
+  database: DatabaseSync,
+  label: string,
+): void {
+  database
+    .prepare(
+      `INSERT INTO sites (id, team_id, name, domain, created_at)
+       VALUES (?, 'wave97ej-team', ?, ?, 0)`,
+    )
+    .run(SITE, label, `${label}.test`);
+  database
+    .prepare(
+      `UPDATE visits
+       SET started_at = CASE visit_id
+             WHEN 'visit-one' THEN 125
+             WHEN 'visit-two' THEN 126
+           END,
+           last_activity_at = CASE visit_id
+             WHEN 'visit-one' THEN 125
+             WHEN 'visit-two' THEN 126
+           END
+       WHERE visit_id IN ('visit-one', 'visit-two')`,
+    )
+    .run();
+}
+
+const EVENT_CANDIDATE_FILTERS = [
+  {
+    shape: "top-level AND",
+    dsl: 'count(event { event.name eq "other" }) eq 2 AND event.name eq "signup"',
+  },
+  {
+    shape: "top-level OR/NOT",
+    dsl: 'count(event { event.name eq "other" }) eq 2 OR NOT (event.name eq "signup")',
+  },
+] as const;
+
 afterAll(() => {
   mkdirSync(ARTIFACT_DIR, { recursive: true });
   for (const database of DATABASES) database.close();
@@ -1182,21 +1286,22 @@ describe("Event field occurrence report migration", () => {
       );
       const deferred = deferredEventFieldsQualificationFromQuery(deferredQuery);
       if (!deferred) throw new Error("wave95b_event_fields_deferred_missing");
-      const compilation = compileEventFieldsQualificationProgram({
-        deferred,
-        query: {
-          env,
-          siteId: SITE,
-          queryTime: query.time,
-          filters: query.filters,
-          ...(query.scopePlan ? { scopePlan: query.scopePlan } : {}),
-          eventName: "signup",
-          limit: 1,
-          cursor: null,
-          cursorToken: null,
-          audience: "private-dashboard",
-        },
-      });
+      const compilation =
+        analyticsQualificationProgram.compileEventFieldsQualificationProgram({
+          deferred,
+          query: {
+            env,
+            siteId: SITE,
+            queryTime: query.time,
+            filters: query.filters,
+            ...(query.scopePlan ? { scopePlan: query.scopePlan } : {}),
+            eventName: "signup",
+            limit: 1,
+            cursor: null,
+            cursorToken: null,
+            audience: "private-dashboard",
+          },
+        });
       if (compilation.kind !== "compiled")
         throw new Error("wave95b_event_fields_default_compile_unavailable");
       const logicalQualification = buildEventFieldsQualificationPlan({
@@ -3487,6 +3592,1035 @@ describe("Event field occurrence report migration", () => {
       legacyDto: expected,
       fallbackReason: diagnostics.advancedCountSqlFallbackReason,
       statementCount: trace.preparedSql.length,
+    });
+  });
+
+  it.each(EVENT_CANDIDATE_FILTERS)(
+    "qualifies Event field pages through Count with $shape and preserves the signed next page",
+    async ({ shape, dsl: filterDsl }) => {
+      const { database, site } = createDatabase();
+      prepareEventCandidateFixture(database, "Event field candidate");
+      if (shape === "top-level OR/NOT") {
+        addEvent(database, site, {
+          id: "event-or-other",
+          visitId: "visit-two",
+          nameId: 42,
+          occurredAt: 129,
+        });
+        addPayload(database, site, "event-or-other", "/or-only", {
+          valueType: 1,
+          occurredAt: 129,
+          stringValue: "or-only",
+        });
+      }
+      const reportEventName = shape === "top-level AND" ? "signup" : null;
+      const pageLimit = shape === "top-level AND" ? 2 : 3;
+      const query = qualifiedEventFieldsQuery(
+        "event",
+        null,
+        filterDsl,
+        reportEventName,
+        pageLimit,
+      );
+      const oracleTrace = traceFor();
+      const oracleEnv = testEnv(database, oracleTrace);
+      const prepared = await d1AdvancedFilterMiddleware(oracleEnv)(
+        "event-fields",
+        query,
+        async (value) => value,
+      );
+      const deferred = deferredEventFieldsQualificationFromQuery(prepared);
+      if (!deferred) throw new Error("wave97ej_event_fields_deferred_missing");
+      expect(deferred.countInput.scope).toBe("event");
+      expect(deferred.countInput.candidateAnchor?.kind).toBe("event-candidate");
+
+      const fallbackFilters =
+        await prepareDeferredEventQualificationFallback(deferred);
+      oracleTrace.preparedSql.length = 0;
+      oracleTrace.bindings.length = 0;
+      const expectedFirstPage = await queryEventFieldsPageFromD1(
+        oracleEnv,
+        SITE,
+        WINDOW,
+        fallbackFilters,
+        reportEventName ?? undefined,
+        pageLimit,
+        null,
+        "private-dashboard",
+      );
+      const firstCoreTrace = {
+        preparedSql: [...oracleTrace.preparedSql],
+        bindings: oracleTrace.bindings.map((bindings) => [...bindings]),
+      };
+      const trace = traceFor();
+      const env = testEnv(database, trace);
+      const diagnostics = createD1ReadDiagnostics();
+      const provider = createD1SiteProviderRegistry({
+        env,
+        siteId: SITE,
+        diagnostics,
+      }).resolve("event-fields");
+      if (!provider) throw new Error("wave97ej_event_fields_provider_missing");
+      const firstExecution = await captureEventFieldsExecution(() =>
+        provider.execute(query),
+      );
+      const actualFirstPage = firstExecution.value;
+      expect(firstExecution.callCount).toBe(1);
+      expect(firstExecution.evidence).toHaveLength(1);
+      expect(
+        firstExecution.evidence[0]!.groupedSummaryMaterializations,
+      ).toHaveLength(2);
+      expect(
+        firstExecution.evidence[0]!.groupedSummaryMaterializations?.every(
+          ({ materialization }) => materialization === "materialized",
+        ),
+      ).toBe(true);
+      const expectedFirstDto = {
+        eventName: reportEventName ?? undefined,
+        data: {
+          ...expectedFirstPage,
+          items: expectedFirstPage.items.map(mapEventField),
+        },
+      };
+      expect(actualFirstPage.value).toEqual(expectedFirstDto);
+      expect(trace.preparedSql).toHaveLength(2);
+      const firstRows = database
+        .prepare(trace.preparedSql[1]!)
+        .all(...trace.bindings[1]!) as Record<string, unknown>[];
+      expect(firstRows.filter((row) => row.rowKind === "control")).toHaveLength(
+        1,
+      );
+      expect(
+        firstRows.filter((row) => row.rowKind === "report").length,
+      ).toBeGreaterThan(0);
+      expect(
+        new TextEncoder().encode(trace.preparedSql[1]!).byteLength,
+      ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+      expect(trace.bindings[1]!.length).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+      const firstNativeTrace = {
+        preparedSql: [...trace.preparedSql],
+        bindings: trace.bindings.map((bindings) => [...bindings]),
+      };
+
+      const firstCursor = (
+        actualFirstPage.value as unknown as {
+          readonly data: {
+            readonly pagination: { readonly nextCursor: string | null };
+          };
+        }
+      ).data.pagination.nextCursor;
+      expect(firstCursor).toEqual(expect.any(String));
+      const decodedCursor = await decodeEventFieldCursor(
+        oracleEnv,
+        SITE,
+        WINDOW,
+        fallbackFilters,
+        reportEventName ?? undefined,
+        firstCursor,
+        "private-dashboard",
+      );
+      expect(decodedCursor).not.toBeNull();
+      oracleTrace.preparedSql.length = 0;
+      oracleTrace.bindings.length = 0;
+      const expectedNextPage = await queryEventFieldsPageFromD1(
+        oracleEnv,
+        SITE,
+        WINDOW,
+        fallbackFilters,
+        reportEventName ?? undefined,
+        pageLimit,
+        decodedCursor,
+        "private-dashboard",
+      );
+      const nextCoreTrace = {
+        preparedSql: [...oracleTrace.preparedSql],
+        bindings: oracleTrace.bindings.map((bindings) => [...bindings]),
+      };
+      trace.preparedSql.length = 0;
+      trace.bindings.length = 0;
+      const nextExecution = await captureEventFieldsExecution(() =>
+        provider.execute({ ...query, cursor: firstCursor ?? undefined }),
+      );
+      const actualNextPage = nextExecution.value;
+      expect(nextExecution.callCount).toBe(1);
+      expect(nextExecution.evidence).toHaveLength(1);
+      expect(
+        nextExecution.evidence[0]!.groupedSummaryMaterializations,
+      ).toHaveLength(2);
+      expect(actualNextPage.value).toEqual({
+        eventName: reportEventName ?? undefined,
+        data: {
+          ...expectedNextPage,
+          items: expectedNextPage.items.map(mapEventField),
+        },
+      });
+      expect(expectedNextPage.pagination).toMatchObject({
+        hasMore: false,
+        nextCursor: null,
+      });
+      const completeFieldKeys = [
+        ...expectedFirstDto.data.items,
+        ...expectedNextPage.items.map(mapEventField),
+      ].map(({ path, valueType }) => `${path}:${valueType}`);
+      expect(completeFieldKeys.sort()).toEqual(
+        [
+          "/a:boolean",
+          "/a:number",
+          "/a:string",
+          ...(shape === "top-level OR/NOT" ? ["/or-only:string"] : []),
+        ].sort(),
+      );
+      expect(trace.preparedSql).toHaveLength(2);
+      const nextRows = database
+        .prepare(trace.preparedSql[1]!)
+        .all(...trace.bindings[1]!) as Record<string, unknown>[];
+      const nextNativeTrace = {
+        preparedSql: [...trace.preparedSql],
+        bindings: trace.bindings.map((bindings) => [...bindings]),
+      };
+      runtimeEvidence.push({
+        scope: "event",
+        case: `event-fields-${shape}-first-and-next-page`,
+        actualFirstDto: actualFirstPage.value,
+        legacyFirstDto: expectedFirstDto,
+        actualNextDto: actualNextPage.value,
+        legacyNextDto: {
+          eventName: reportEventName ?? undefined,
+          data: {
+            ...expectedNextPage,
+            items: expectedNextPage.items.map(mapEventField),
+          },
+        },
+        firstExecutionEvidence: firstExecution.evidence[0],
+        nextExecutionEvidence: nextExecution.evidence[0],
+        firstNativeTrace,
+        nextNativeTrace,
+        firstCoreTrace,
+        nextCoreTrace,
+        firstControls: firstRows.filter((row) => row.rowKind === "control"),
+        firstReportRows: firstRows.filter((row) => row.rowKind === "report"),
+        nextControls: nextRows.filter((row) => row.rowKind === "control"),
+        nextReportRows: nextRows.filter((row) => row.rowKind === "report"),
+        statementCount: firstNativeTrace.preparedSql.length,
+      });
+    },
+  );
+
+  it.each(EVENT_CANDIDATE_FILTERS)(
+    "qualifies Event field-value pages through Count with $shape and preserves search and cursor semantics",
+    async ({ shape, dsl: filterDsl }) => {
+      const { database, site } = createDatabase();
+      prepareEventCandidateFixture(database, "Event field-value candidate");
+      if (shape === "top-level OR/NOT") {
+        addEvent(database, site, {
+          id: "event-or-other",
+          visitId: "visit-two",
+          nameId: 42,
+          occurredAt: 129,
+        });
+        addPayload(database, site, "event-or-other", "/a", {
+          valueType: 1,
+          occurredAt: 129,
+          stringValue: "or-only",
+        });
+      }
+      const reportEventName = shape === "top-level AND" ? "signup" : null;
+      const pageLimit = shape === "top-level AND" ? 1 : 2;
+      const query = qualifiedEventFieldValuesQuery("event", {
+        filterDsl,
+        eventName: reportEventName,
+        fieldPath: "/a",
+        fieldValueType: "string",
+        limit: pageLimit,
+      });
+      const oracleTrace = traceFor();
+      const oracleEnv = testEnv(database, oracleTrace);
+      const prepared = await d1AdvancedFilterMiddleware(oracleEnv)(
+        "event-field-values",
+        query,
+        async (value) => value,
+      );
+      const deferred = deferredEventFieldValuesQualificationFromQuery(prepared);
+      if (!deferred)
+        throw new Error("wave97ej_event_field_values_deferred_missing");
+      expect(deferred.countInput.scope).toBe("event");
+      expect(deferred.countInput.candidateAnchor?.kind).toBe("event-candidate");
+
+      const fallbackFilters =
+        await prepareDeferredEventQualificationFallback(deferred);
+      oracleTrace.preparedSql.length = 0;
+      oracleTrace.bindings.length = 0;
+      const expectedFirstPage = await queryEventFieldValuesPageFromD1(
+        oracleEnv,
+        SITE,
+        WINDOW,
+        fallbackFilters,
+        reportEventName ?? undefined,
+        "/a",
+        "string",
+        pageLimit,
+        undefined,
+        null,
+        "private-dashboard",
+      );
+      const firstCoreTrace = {
+        preparedSql: [...oracleTrace.preparedSql],
+        bindings: oracleTrace.bindings.map((bindings) => [...bindings]),
+      };
+      const trace = traceFor();
+      const env = testEnv(database, trace);
+      const diagnostics = createD1ReadDiagnostics();
+      const provider = createD1SiteProviderRegistry({
+        env,
+        siteId: SITE,
+        diagnostics,
+      }).resolve("event-field-values");
+      if (!provider)
+        throw new Error("wave97ej_event_field_values_provider_missing");
+      const firstExecution = await captureEventFieldValuesExecution(() =>
+        provider.execute(query),
+      );
+      const actualFirstPage = firstExecution.value;
+      expect(firstExecution.callCount).toBe(1);
+      expect(firstExecution.evidence).toHaveLength(1);
+      expect(
+        firstExecution.evidence[0]!.groupedSummaryMaterializations,
+      ).toHaveLength(2);
+      expect(
+        firstExecution.evidence[0]!.groupedSummaryMaterializations?.every(
+          ({ materialization }) => materialization === "materialized",
+        ),
+      ).toBe(true);
+      const expectedFirstDto = {
+        eventName: reportEventName ?? undefined,
+        fieldPath: "/a",
+        fieldValueType: "string",
+        data: {
+          ...expectedFirstPage,
+          items: expectedFirstPage.items.map(mapEventFieldValue),
+        },
+      };
+      expect(actualFirstPage.value).toEqual(expectedFirstDto);
+      expect(trace.preparedSql).toHaveLength(2);
+      const firstRows = database
+        .prepare(trace.preparedSql[1]!)
+        .all(...trace.bindings[1]!) as Record<string, unknown>[];
+      expect(firstRows.filter((row) => row.rowKind === "control")).toHaveLength(
+        1,
+      );
+      expect(
+        firstRows.filter((row) => row.rowKind === "report").length,
+      ).toBeGreaterThan(0);
+      expect(
+        new TextEncoder().encode(trace.preparedSql[1]!).byteLength,
+      ).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+      expect(trace.bindings[1]!.length).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+      const firstNativeTrace = {
+        preparedSql: [...trace.preparedSql],
+        bindings: trace.bindings.map((bindings) => [...bindings]),
+      };
+
+      const firstCursor = (
+        actualFirstPage.value as unknown as {
+          readonly data: {
+            readonly pagination: { readonly nextCursor: string | null };
+          };
+        }
+      ).data.pagination.nextCursor;
+      expect(firstCursor).toEqual(expect.any(String));
+      const decodedCursor = await decodeEventFieldValueCursor(
+        oracleEnv,
+        SITE,
+        WINDOW,
+        fallbackFilters,
+        reportEventName ?? undefined,
+        "/a",
+        "string",
+        undefined,
+        firstCursor,
+        "private-dashboard",
+      );
+      expect(decodedCursor).not.toBeNull();
+      oracleTrace.preparedSql.length = 0;
+      oracleTrace.bindings.length = 0;
+      const expectedNextPage = await queryEventFieldValuesPageFromD1(
+        oracleEnv,
+        SITE,
+        WINDOW,
+        fallbackFilters,
+        reportEventName ?? undefined,
+        "/a",
+        "string",
+        pageLimit,
+        undefined,
+        decodedCursor,
+        "private-dashboard",
+      );
+      const nextCoreTrace = {
+        preparedSql: [...oracleTrace.preparedSql],
+        bindings: oracleTrace.bindings.map((bindings) => [...bindings]),
+      };
+      trace.preparedSql.length = 0;
+      trace.bindings.length = 0;
+      const nextExecution = await captureEventFieldValuesExecution(() =>
+        provider.execute({ ...query, cursor: firstCursor ?? undefined }),
+      );
+      const actualNextPage = nextExecution.value;
+      expect(nextExecution.callCount).toBe(1);
+      expect(nextExecution.evidence).toHaveLength(1);
+      expect(
+        nextExecution.evidence[0]!.groupedSummaryMaterializations,
+      ).toHaveLength(2);
+      expect(actualNextPage.value).toEqual({
+        eventName: reportEventName ?? undefined,
+        fieldPath: "/a",
+        fieldValueType: "string",
+        data: {
+          ...expectedNextPage,
+          items: expectedNextPage.items.map(mapEventFieldValue),
+        },
+      });
+      expect(expectedNextPage.pagination).toMatchObject({
+        hasMore: false,
+        nextCursor: null,
+      });
+      const completeValues = [
+        ...expectedFirstDto.data.items,
+        ...expectedNextPage.items.map(mapEventFieldValue),
+      ].map(({ value }) => value);
+      expect(completeValues.sort()).toEqual(
+        ["a", "z", ...(shape === "top-level OR/NOT" ? ["or-only"] : [])].sort(),
+      );
+      expect(trace.preparedSql).toHaveLength(2);
+      const nextRows = database
+        .prepare(trace.preparedSql[1]!)
+        .all(...trace.bindings[1]!) as Record<string, unknown>[];
+      const nextNativeTrace = {
+        preparedSql: [...trace.preparedSql],
+        bindings: trace.bindings.map((bindings) => [...bindings]),
+      };
+      let searchExecutionEvidence: EventPayloadProgramEvidence | undefined;
+      let searchActualDto: unknown;
+      let searchLegacyDto: unknown;
+      let searchRows: Record<string, unknown>[] | undefined;
+      let searchNativeTrace:
+        | {
+            readonly preparedSql: readonly string[];
+            readonly bindings: readonly (readonly SQLInputValue[])[];
+          }
+        | undefined;
+      let searchCoreTrace:
+        | {
+            readonly preparedSql: readonly string[];
+            readonly bindings: readonly (readonly SQLInputValue[])[];
+          }
+        | undefined;
+      if (shape === "top-level OR/NOT") {
+        const firstItems = (
+          actualFirstPage.value as unknown as {
+            readonly data: {
+              readonly items: readonly { readonly value: unknown }[];
+            };
+          }
+        ).data.items;
+        const nextItems = (
+          actualNextPage.value as unknown as {
+            readonly data: {
+              readonly items: readonly { readonly value: unknown }[];
+            };
+          }
+        ).data.items;
+        expect(
+          [...firstItems, ...nextItems].map(({ value }) => value),
+        ).toContain("or-only");
+      }
+
+      if (shape === "top-level AND") {
+        const searchQuery = qualifiedEventFieldValuesQuery("event", {
+          filterDsl,
+          eventName: "signup",
+          fieldPath: "/a",
+          fieldValueType: "string",
+          search: "a",
+          limit: 5,
+        });
+        oracleTrace.preparedSql.length = 0;
+        oracleTrace.bindings.length = 0;
+        const expectedSearchPage = await queryEventFieldValuesPageFromD1(
+          oracleEnv,
+          SITE,
+          WINDOW,
+          fallbackFilters,
+          "signup",
+          "/a",
+          "string",
+          5,
+          "a",
+          null,
+          "private-dashboard",
+        );
+        searchCoreTrace = {
+          preparedSql: [...oracleTrace.preparedSql],
+          bindings: oracleTrace.bindings.map((bindings) => [...bindings]),
+        };
+        trace.preparedSql.length = 0;
+        trace.bindings.length = 0;
+        const searchExecution = await captureEventFieldValuesExecution(() =>
+          provider.execute(searchQuery),
+        );
+        const actualSearchPage = searchExecution.value;
+        searchActualDto = actualSearchPage.value;
+        expect(searchExecution.callCount).toBe(1);
+        expect(searchExecution.evidence).toHaveLength(1);
+        expect(
+          searchExecution.evidence[0]!.groupedSummaryMaterializations,
+        ).toHaveLength(2);
+        searchExecutionEvidence = searchExecution.evidence[0];
+        expect(actualSearchPage.value).toEqual({
+          eventName: "signup",
+          fieldPath: "/a",
+          fieldValueType: "string",
+          data: {
+            ...expectedSearchPage,
+            items: expectedSearchPage.items.map(mapEventFieldValue),
+          },
+        });
+        searchLegacyDto = {
+          eventName: "signup",
+          fieldPath: "/a",
+          fieldValueType: "string",
+          data: {
+            ...expectedSearchPage,
+            items: expectedSearchPage.items.map(mapEventFieldValue),
+          },
+        };
+        expect(
+          (
+            actualSearchPage.value as unknown as {
+              readonly data: {
+                readonly items: readonly { readonly value: unknown }[];
+              };
+            }
+          ).data.items.map(({ value }) => value),
+        ).toEqual(["a"]);
+        expect(trace.preparedSql).toHaveLength(2);
+        searchNativeTrace = {
+          preparedSql: [...trace.preparedSql],
+          bindings: trace.bindings.map((bindings) => [...bindings]),
+        };
+        searchRows = database
+          .prepare(trace.preparedSql[1]!)
+          .all(...trace.bindings[1]!) as Record<string, unknown>[];
+      }
+
+      const coreTrace = {
+        preparedSql: [...oracleTrace.preparedSql],
+        bindings: oracleTrace.bindings.map((bindings) => [...bindings]),
+      };
+      runtimeEvidence.push({
+        scope: "event",
+        case: `event-field-values-${shape}-first-next-and-search`,
+        actualFirstDto: actualFirstPage.value,
+        legacyFirstDto: expectedFirstDto,
+        actualNextDto: actualNextPage.value,
+        legacyNextDto: {
+          eventName: reportEventName ?? undefined,
+          fieldPath: "/a",
+          fieldValueType: "string",
+          data: {
+            ...expectedNextPage,
+            items: expectedNextPage.items.map(mapEventFieldValue),
+          },
+        },
+        searchActualDto,
+        searchLegacyDto,
+        firstExecutionEvidence: firstExecution.evidence[0],
+        nextExecutionEvidence: nextExecution.evidence[0],
+        searchExecutionEvidence,
+        firstNativeTrace,
+        nextNativeTrace,
+        searchNativeTrace,
+        firstCoreTrace,
+        nextCoreTrace,
+        searchCoreTrace,
+        coreTrace,
+        firstControls: firstRows.filter((row) => row.rowKind === "control"),
+        firstReportRows: firstRows.filter((row) => row.rowKind === "report"),
+        nextControls: nextRows.filter((row) => row.rowKind === "control"),
+        nextReportRows: nextRows.filter((row) => row.rowKind === "report"),
+        searchControls: searchRows?.filter((row) => row.rowKind === "control"),
+        searchReportRows: searchRows?.filter((row) => row.rowKind === "report"),
+        statementCount: firstNativeTrace.preparedSql.length,
+      });
+    },
+  );
+
+  it("keeps Page-only Count membership out of Event payloads when local IDs collide", async () => {
+    const { database, site } = createDatabase();
+    prepareEventCandidateFixture(database, "Event payload ID collision");
+    addVisit(database, site, {
+      id: "event-collision-id",
+      sessionId: "collision-page-session",
+      visitorId: "collision-page-visitor",
+      startedAt: 125,
+    });
+    addVisit(database, site, {
+      id: "collision-event-owner",
+      sessionId: "collision-owner-session",
+      visitorId: "collision-owner-visitor",
+      startedAt: 125,
+    });
+    database
+      .prepare(
+        `UPDATE visits SET started_at = 125, last_activity_at = 125,
+         pathname = '/page-id-collision' WHERE visit_id = 'event-collision-id'`,
+      )
+      .run();
+    database
+      .prepare(
+        `UPDATE visits SET started_at = 125, last_activity_at = 125,
+         pathname = '/event-owner' WHERE visit_id = 'collision-event-owner'`,
+      )
+      .run();
+    addEvent(database, site, {
+      id: "event-collision-id",
+      visitId: "collision-event-owner",
+      nameId: 41,
+      occurredAt: 125,
+    });
+    addPayload(database, site, "event-collision-id", "/collision", {
+      valueType: 1,
+      occurredAt: 125,
+      stringValue: "must-not-leak-from-page-candidate",
+    });
+
+    const filterDsl =
+      'count(page) eq 1 AND count(event) eq 0 AND page.path eq "/page-id-collision"';
+    const query = qualifiedEventFieldsQuery(
+      "event",
+      null,
+      filterDsl,
+      "signup",
+      10,
+    );
+    const oracleTrace = traceFor();
+    const oracleEnv = testEnv(database, oracleTrace);
+    const prepared = await d1AdvancedFilterMiddleware(oracleEnv)(
+      "event-fields",
+      query,
+      async (value) => value,
+    );
+    const deferred = deferredEventFieldsQualificationFromQuery(prepared);
+    if (!deferred)
+      throw new Error("wave97ej_event_payload_collision_deferred_missing");
+    const fallbackFilters =
+      await prepareDeferredEventQualificationFallback(deferred);
+    oracleTrace.preparedSql.length = 0;
+    oracleTrace.bindings.length = 0;
+    const expectedPage = await queryEventFieldsPageFromD1(
+      oracleEnv,
+      SITE,
+      WINDOW,
+      fallbackFilters,
+      "signup",
+      10,
+      null,
+      "private-dashboard",
+    );
+    expect(expectedPage.items).toEqual([]);
+    const legacyDto = {
+      eventName: "signup",
+      data: { ...expectedPage, items: [] },
+    };
+    const legacyTrace = {
+      preparedSql: [...oracleTrace.preparedSql],
+      bindings: oracleTrace.bindings.map((bindings) => [...bindings]),
+    };
+
+    const trace = traceFor();
+    const env = testEnv(database, trace);
+    const provider = createD1SiteProviderRegistry({
+      env,
+      siteId: SITE,
+    }).resolve("event-fields");
+    if (!provider)
+      throw new Error("wave97ej_event_fields_collision_provider_missing");
+    const actual = await provider.execute(query);
+    const actualDto = {
+      eventName: "signup",
+      data: { ...expectedPage, items: [] },
+    };
+    expect(actual.value).toEqual(actualDto);
+    expect(trace.preparedSql).toHaveLength(2);
+    const candidateRows = database
+      .prepare(trace.preparedSql[1]!)
+      .all(...trace.bindings[1]!) as Record<string, unknown>[];
+    const controls = candidateRows.filter((row) => row.rowKind === "control");
+    expect(controls).toHaveLength(1);
+    expect(
+      candidateRows.filter((row) => row.rowKind === "report"),
+    ).toHaveLength(0);
+    runtimeEvidence.push({
+      scope: "event",
+      case: "page-event-local-id-collision-does-not-qualify-payload",
+      actualDto: actualDto,
+      legacyDto,
+      nativeTrace: {
+        preparedSql: [...trace.preparedSql],
+        bindings: trace.bindings.map((bindings) => [...bindings]),
+      },
+      legacyTrace,
+      controls,
+      candidateRows,
+      reportRows: candidateRows.filter((row) => row.rowKind === "report"),
+      collidingPageId: "event-collision-id",
+      collidingEventPayload: "must-not-leak-from-page-candidate",
+    });
+  });
+
+  it.each(["event-fields", "event-field-values"] as const)(
+    "preserves numeric Count controls and falls back for Event candidate %s",
+    async (operation) => {
+      const { database } = createDatabase();
+      prepareEventCandidateFixture(database, `${operation} numeric fallback`);
+      database
+        .prepare(
+          "UPDATE visits SET duration_ms = ? WHERE visit_id = 'visit-one'",
+        )
+        .run(10);
+      database
+        .prepare(
+          "UPDATE visits SET duration_ms = ? WHERE visit_id = 'visit-two'",
+        )
+        .run("invalid-duration");
+      const filterDsl =
+        'count(event { event.name eq "other" }) eq 2 AND count(page { page.durationMs gt 5 }) eq 1 AND event.name eq "signup"';
+      const query =
+        operation === "event-fields"
+          ? qualifiedEventFieldsQuery("event", null, filterDsl, "signup", 10)
+          : qualifiedEventFieldValuesQuery("event", {
+              filterDsl,
+              eventName: "signup",
+              limit: 10,
+            });
+      const expectedTrace = traceFor();
+      const oracleEnv = testEnv(database, expectedTrace);
+      const prepared = await d1AdvancedFilterMiddleware(oracleEnv)(
+        operation,
+        query,
+        async (value) => value,
+      );
+      const deferred =
+        operation === "event-fields"
+          ? deferredEventFieldsQualificationFromQuery(prepared)
+          : deferredEventFieldValuesQualificationFromQuery(prepared);
+      if (!deferred)
+        throw new Error("wave97ej_numeric_event_candidate_deferred_missing");
+      expect(deferred.countInput.scope).toBe("event");
+      const fallbackFilters =
+        await prepareDeferredEventQualificationFallback(deferred);
+      const expectedEnv = testEnv(database, expectedTrace);
+      const trace = traceFor();
+      const env = testEnv(database, trace);
+      const diagnostics = createD1ReadDiagnostics();
+      const registry = createD1SiteProviderRegistry({
+        env,
+        siteId: SITE,
+        diagnostics,
+      });
+      let actualDto: unknown;
+      let legacyDto: unknown;
+      if (operation === "event-fields") {
+        const fieldsQuery = query as QualifiedEventFieldsTestQuery;
+        const expectedPage = await queryEventFieldsPageFromD1(
+          expectedEnv,
+          SITE,
+          WINDOW,
+          fallbackFilters,
+          "signup",
+          10,
+          null,
+          "private-dashboard",
+        );
+        const provider = registry.resolve("event-fields");
+        if (!provider)
+          throw new Error("wave97ej_numeric_event_fields_provider_missing");
+        const actual = await provider.execute(fieldsQuery);
+        actualDto = actual.value;
+        legacyDto = {
+          eventName: "signup",
+          data: {
+            ...expectedPage,
+            items: expectedPage.items.map(mapEventField),
+          },
+        };
+        expect(actualDto).toEqual(legacyDto);
+      } else {
+        const valuesQuery = query as QualifiedEventFieldValuesTestQuery;
+        const expectedPage = await queryEventFieldValuesPageFromD1(
+          expectedEnv,
+          SITE,
+          WINDOW,
+          fallbackFilters,
+          "signup",
+          valuesQuery.fieldPath,
+          valuesQuery.fieldValueType,
+          valuesQuery.limit,
+          valuesQuery.search,
+          null,
+          "private-dashboard",
+        );
+        const provider = registry.resolve("event-field-values");
+        if (!provider)
+          throw new Error(
+            "wave97ej_numeric_event_field_values_provider_missing",
+          );
+        const actual = await provider.execute(valuesQuery);
+        actualDto = actual.value;
+        legacyDto = {
+          eventName: "signup",
+          fieldPath: valuesQuery.fieldPath,
+          fieldValueType: valuesQuery.fieldValueType,
+          data: {
+            ...expectedPage,
+            items: expectedPage.items.map(mapEventFieldValue),
+          },
+        };
+        expect(actualDto).toEqual(legacyDto);
+      }
+      expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+        kind: "numeric-data-domain",
+      });
+      const controlRows = trace.preparedSql
+        .map(
+          (sql, index) =>
+            database.prepare(sql).all(...trace.bindings[index]!) as Record<
+              string,
+              unknown
+            >[],
+        )
+        .flat()
+        .filter((row) => row.rowKind === "control");
+      expect(controlRows).toHaveLength(1);
+      const control = controlRows[0]!;
+      expect(Number(control.rawCount)).toBeGreaterThan(0);
+      const numericMismatch = Object.entries(control).find(
+        ([name, value]) =>
+          name.toLowerCase().includes("duration") && Number(value) > 0,
+      );
+      expect(numericMismatch).toBeDefined();
+      const reportRows = trace.preparedSql
+        .map(
+          (sql, index) =>
+            database.prepare(sql).all(...trace.bindings[index]!) as Record<
+              string,
+              unknown
+            >[],
+        )
+        .flat()
+        .filter((row) => row.rowKind === "report");
+      expect(reportRows).toHaveLength(0);
+      const legacyCoreTrace = {
+        preparedSql: [...expectedTrace.preparedSql],
+        bindings: expectedTrace.bindings.map((bindings) => [...bindings]),
+      };
+      const actualTrace = {
+        preparedSql: [...trace.preparedSql],
+        bindings: trace.bindings.map((bindings) => [...bindings]),
+      };
+      expect(expectedTrace.preparedSql).toHaveLength(3);
+      expect(trace.preparedSql).toHaveLength(4);
+      runtimeEvidence.push({
+        scope: "event",
+        case: `${operation}-event-candidate-numeric-domain-fallback`,
+        fallbackReason: diagnostics.advancedCountSqlFallbackReason,
+        actualDto,
+        legacyDto,
+        legacyCoreTrace,
+        actualTrace,
+        control,
+        reportRows,
+        reportRowCount: reportRows.length,
+        qualifiedStatementCount: trace.preparedSql.length,
+        legacyStatementCount: expectedTrace.preparedSql.length,
+        fallbackAttemptCount:
+          trace.preparedSql.length - expectedTrace.preparedSql.length,
+      });
+    },
+  );
+
+  it.each([
+    {
+      operation: "event-fields" as const,
+      getterField: "eventName",
+      ownDataCode: "event_fields_qualification_request_own_data_required",
+      contextCode: "event_fields_qualification_request_context_mismatch",
+    },
+    {
+      operation: "event-field-values" as const,
+      getterField: "search",
+      ownDataCode: "event_field_values_qualification_request_own_data_required",
+      contextCode: "event_field_values_qualification_request_context_mismatch",
+    },
+  ])(
+    "rejects Event payload $operation accessors before reading or querying",
+    async ({ operation, getterField, ownDataCode, contextCode }) => {
+      const { database } = createDatabase();
+      const baseQuery =
+        operation === "event-fields"
+          ? qualifiedEventFieldsQuery(
+              "event",
+              null,
+              EVENT_CANDIDATE_FILTERS[0].dsl,
+              "signup",
+              1,
+            )
+          : qualifiedEventFieldValuesQuery("event", {
+              filterDsl: EVENT_CANDIDATE_FILTERS[0].dsl,
+              eventName: "signup",
+              search: "a",
+              limit: 1,
+            });
+      const trace = traceFor();
+      const env = testEnv(database, trace);
+      const accessorQuery = { ...baseQuery } as Record<string, unknown>;
+      let getterReads = 0;
+      Object.defineProperty(accessorQuery, getterField, {
+        enumerable: true,
+        configurable: true,
+        get() {
+          getterReads += 1;
+          return getterField === "eventName" ? "signup" : "a";
+        },
+      });
+      let accessorNextCalls = 0;
+      await expect(
+        d1AdvancedFilterMiddleware(env, undefined, SITE)(
+          operation,
+          accessorQuery,
+          async () => {
+            accessorNextCalls += 1;
+            return accessorQuery;
+          },
+        ),
+      ).rejects.toMatchObject({
+        domainError: {
+          kind: "invalid-input",
+          issues: [{ code: ownDataCode }],
+        },
+      });
+      expect(getterReads).toBe(0);
+      expect(accessorNextCalls).toBe(0);
+      expect(trace.preparedSql).toHaveLength(0);
+
+      let mismatchedNextCalls = 0;
+      await expect(
+        d1AdvancedFilterMiddleware(env, undefined, SIBLING_SITE)(
+          operation,
+          baseQuery,
+          async () => {
+            mismatchedNextCalls += 1;
+            return baseQuery;
+          },
+        ),
+      ).rejects.toMatchObject({
+        domainError: {
+          kind: "invalid-input",
+          issues: [{ path: "siteId", code: contextCode }],
+        },
+      });
+      expect(mismatchedNextCalls).toBe(0);
+      expect(trace.preparedSql).toHaveLength(0);
+      errorEvidence.push({
+        kind: `${operation}-own-data-and-context-rejection`,
+        ownDataCode,
+        contextCode,
+        getterReads,
+        accessorNextCalls,
+        mismatchedNextCalls,
+        statementCount: trace.preparedSql.length,
+      });
+    },
+  );
+
+  it("keeps API v1 Event fields on the legacy Core path", async () => {
+    const { database } = createDatabase();
+    prepareEventCandidateFixture(database, "API v1 Event fields");
+    const query = qualifiedEventFieldsQuery(
+      "event",
+      null,
+      'count(event { event.name eq "signup" }) gte 0 AND event.name eq "signup"',
+      "signup",
+      10,
+      "api-v1",
+    );
+    const preparedTrace = traceFor();
+    const prepared = await d1AdvancedFilterMiddleware(
+      testEnv(database, preparedTrace),
+    )("event-fields", query, async (value) => value);
+    expect(deferredEventFieldsQualificationFromQuery(prepared)).toBeUndefined();
+    const legacyFilters = (prepared as QueryInput).filters;
+    if (!legacyFilters)
+      throw new Error("wave97ej_api_v1_legacy_filters_missing");
+
+    const expectedTrace = traceFor();
+    const expectedPage = await queryEventFieldsPageFromD1(
+      testEnv(database, expectedTrace),
+      SITE,
+      WINDOW,
+      legacyFilters,
+      "signup",
+      10,
+      null,
+      "api-v1",
+    );
+    const actualTrace = traceFor();
+    const provider = createD1SiteProviderRegistry({
+      env: testEnv(database, actualTrace),
+      siteId: SITE,
+    }).resolve("event-fields");
+    if (!provider)
+      throw new Error("wave97ej_api_v1_event_fields_provider_missing");
+    const actualExecution = await captureEventFieldsExecution(() =>
+      provider.execute(query),
+    );
+    expect(actualExecution.callCount).toBe(0);
+    const actual = actualExecution.value;
+    expect(actual.value).toEqual({
+      eventName: "signup",
+      data: {
+        ...expectedPage,
+        items: expectedPage.items.map(mapEventField),
+      },
+    });
+    runtimeEvidence.push({
+      scope: "event",
+      case: "api-v1-event-fields-legacy-core-compatibility",
+      candidateExecutionCalls: actualExecution.callCount,
+      actualDto: actual.value,
+      legacyDto: {
+        eventName: "signup",
+        data: {
+          ...expectedPage,
+          items: expectedPage.items.map(mapEventField),
+        },
+      },
+      preparedCoreTrace: {
+        preparedSql: [...preparedTrace.preparedSql],
+        bindings: preparedTrace.bindings.map((bindings) => [...bindings]),
+      },
+      legacyCoreTrace: {
+        preparedSql: [...expectedTrace.preparedSql],
+        bindings: expectedTrace.bindings.map((bindings) => [...bindings]),
+      },
+      actualTrace: {
+        preparedSql: [...actualTrace.preparedSql],
+        bindings: actualTrace.bindings.map((bindings) => [...bindings]),
+      },
     });
   });
 });

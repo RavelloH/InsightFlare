@@ -1,6 +1,6 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { AdvancedCountQualificationPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import {
   appendEventFieldValuesPage,
   EVENT_FIELD_VALUES_PAGE_OUTPUT,
@@ -10,12 +10,14 @@ import { buildEventPayloadQualificationPlan } from "@/lib/edge/analytics/engine/
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 /** Builds the paged Event value report beside its Count qualification. */
-export function buildEventFieldValuesQualificationPlan(input: {
+export function buildEventFieldValuesQualificationPlan<
+  TCount extends AdvancedCountQualificationPlanInput,
+>(input: {
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: TCount;
   readonly eventName?: string;
   readonly options: EventFieldValuesPageOptions;
 }) {
