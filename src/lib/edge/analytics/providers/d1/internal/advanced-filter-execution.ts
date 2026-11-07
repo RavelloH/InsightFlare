@@ -268,6 +268,8 @@ export interface DeferredEventTypeDetailRequest {
   readonly interval: CalendarGranularity;
   readonly includeBreakdowns: boolean;
   readonly includeContext: boolean;
+  readonly contextLimit: number;
+  readonly selectedKeys: readonly EventContextCardKey[];
 }
 
 export interface DeferredEventRecordsRequest {
@@ -548,16 +550,27 @@ export type DeferredEventTrendQualification =
       readonly countInput: AdvancedEventCandidateCountPlanInput;
     });
 
-export type DeferredEventContextQualification = DeferredEventQualification & {
-  readonly operation: "event-context";
-  readonly eventContextRequest: DeferredEventContextRequest;
-};
+export type DeferredEventContextQualification =
+  | (DeferredEventQualification & {
+      readonly operation: "event-context";
+      readonly eventContextRequest: DeferredEventContextRequest;
+    })
+  | (Omit<DeferredEventQualification, "operation" | "countInput"> & {
+      readonly operation: "event-context";
+      readonly countInput: AdvancedEventCandidateCountPlanInput;
+      readonly eventContextRequest: DeferredEventContextRequest;
+    });
 
 export type DeferredEventTypeDetailQualification =
-  DeferredEventQualification & {
-    readonly operation: "event-type-detail";
-    readonly eventTypeDetailRequest: DeferredEventTypeDetailRequest;
-  };
+  | (DeferredEventQualification & {
+      readonly operation: "event-type-detail";
+      readonly eventTypeDetailRequest: DeferredEventTypeDetailRequest;
+    })
+  | (Omit<DeferredEventQualification, "operation" | "countInput"> & {
+      readonly operation: "event-type-detail";
+      readonly countInput: AdvancedEventCandidateCountPlanInput;
+      readonly eventTypeDetailRequest: DeferredEventTypeDetailRequest;
+    });
 
 export type DeferredEventRecordsQualification =
   | (DeferredEventQualification & {
@@ -4610,6 +4623,8 @@ async function prepareDeferredEventQualification(input: {
   readonly eventSummaryRequestSnapshot?: string;
   readonly eventRecordsRequestSnapshot?: string;
   readonly eventTrendRequestSnapshot?: string;
+  readonly eventContextRequestSnapshot?: string;
+  readonly eventTypeDetailRequestSnapshot?: string;
   readonly eventPayloadRequestSnapshot?: string;
   readonly subject: SemanticSubjectDomain;
   readonly diagnostics?: D1ReadDiagnostics;
@@ -4624,6 +4639,8 @@ async function prepareDeferredEventQualification(input: {
   | DeferredEventTypesQualification
   | DeferredEventNameDimensionQualification
   | DeferredEventTrendQualification
+  | DeferredEventContextQualification
+  | DeferredEventTypeDetailQualification
   | DeferredFilterValuesQualificationInput
   | null
 > {
@@ -4634,6 +4651,8 @@ async function prepareDeferredEventQualification(input: {
       : undefined;
   const eventCandidateConsumerOperation =
     input.operation === "event-summary" ||
+    input.operation === "event-context" ||
+    input.operation === "event-type-detail" ||
     input.operation === "event-records" ||
     input.operation === "event-types" ||
     input.operation === "event-name-dimension" ||
@@ -4655,19 +4674,23 @@ async function prepareDeferredEventQualification(input: {
       "query",
       input.operation === "event-summary"
         ? "event_summary_qualification_request_context_mismatch"
-        : input.operation === "event-records"
-          ? "event_records_qualification_request_context_mismatch"
-          : input.operation === "event-types"
-            ? "event_types_qualification_request_context_mismatch"
-            : input.operation === "filter-values"
-              ? "filter_values_request_context_mismatch"
-              : input.operation === "event-trend"
-                ? "event_trend_qualification_request_context_mismatch"
-                : input.operation === "event-fields"
-                  ? "event_fields_qualification_request_context_mismatch"
-                  : input.operation === "event-field-values"
-                    ? "event_field_values_qualification_request_context_mismatch"
-                    : "event_name_dimension_request_context_mismatch",
+        : input.operation === "event-context"
+          ? "event_context_qualification_request_context_mismatch"
+          : input.operation === "event-type-detail"
+            ? "event_type_detail_qualification_request_context_mismatch"
+            : input.operation === "event-records"
+              ? "event_records_qualification_request_context_mismatch"
+              : input.operation === "event-types"
+                ? "event_types_qualification_request_context_mismatch"
+                : input.operation === "filter-values"
+                  ? "filter_values_request_context_mismatch"
+                  : input.operation === "event-trend"
+                    ? "event_trend_qualification_request_context_mismatch"
+                    : input.operation === "event-fields"
+                      ? "event_fields_qualification_request_context_mismatch"
+                      : input.operation === "event-field-values"
+                        ? "event_field_values_qualification_request_context_mismatch"
+                        : "event_name_dimension_request_context_mismatch",
     );
   const eventCandidateFilters = eventCandidateConsumerOperation
     ? (ownDataValue(query, "filters") as FilterDocument | undefined)
@@ -4702,19 +4725,23 @@ async function prepareDeferredEventQualification(input: {
       "query",
       input.operation === "event-summary"
         ? "event_summary_qualification_request_context_mismatch"
-        : input.operation === "event-records"
-          ? "event_records_qualification_request_context_mismatch"
-          : input.operation === "event-types"
-            ? "event_types_qualification_request_context_mismatch"
-            : input.operation === "filter-values"
-              ? "filter_values_request_context_mismatch"
-              : input.operation === "event-trend"
-                ? "event_trend_qualification_request_context_mismatch"
-                : input.operation === "event-fields"
-                  ? "event_fields_qualification_request_context_mismatch"
-                  : input.operation === "event-field-values"
-                    ? "event_field_values_qualification_request_context_mismatch"
-                    : "event_name_dimension_request_context_mismatch",
+        : input.operation === "event-context"
+          ? "event_context_qualification_request_context_mismatch"
+          : input.operation === "event-type-detail"
+            ? "event_type_detail_qualification_request_context_mismatch"
+            : input.operation === "event-records"
+              ? "event_records_qualification_request_context_mismatch"
+              : input.operation === "event-types"
+                ? "event_types_qualification_request_context_mismatch"
+                : input.operation === "filter-values"
+                  ? "filter_values_request_context_mismatch"
+                  : input.operation === "event-trend"
+                    ? "event_trend_qualification_request_context_mismatch"
+                    : input.operation === "event-fields"
+                      ? "event_fields_qualification_request_context_mismatch"
+                      : input.operation === "event-field-values"
+                        ? "event_field_values_qualification_request_context_mismatch"
+                        : "event_name_dimension_request_context_mismatch",
     );
   const eventCandidateBaseRequest =
     eventCandidateMetadata?.plan.scope === "event" &&
@@ -4749,6 +4776,22 @@ async function prepareDeferredEventQualification(input: {
     eventCandidateBaseRequest &&
     input.eventSummaryRequestSnapshot !== undefined &&
     eventCandidateRequestSnapshot === input.eventSummaryRequestSnapshot;
+  const rawEventContextSelectedKeys =
+    input.operation === "event-context"
+      ? ownDataValue(query, "selectedKeys")
+      : undefined;
+  const eventCandidateContextRequest =
+    input.operation === "event-context" &&
+    eventCandidateBaseRequest &&
+    (!Array.isArray(rawEventContextSelectedKeys) ||
+      rawEventContextSelectedKeys.length > 0) &&
+    input.eventContextRequestSnapshot !== undefined &&
+    eventCandidateRequestSnapshot === input.eventContextRequestSnapshot;
+  const eventCandidateTypeDetailRequest =
+    input.operation === "event-type-detail" &&
+    eventCandidateBaseRequest &&
+    input.eventTypeDetailRequestSnapshot !== undefined &&
+    eventCandidateRequestSnapshot === input.eventTypeDetailRequestSnapshot;
   const eventCandidateRecordsRequest =
     input.operation === "event-records" &&
     eventCandidateBaseRequest &&
@@ -4793,6 +4836,8 @@ async function prepareDeferredEventQualification(input: {
     eventCandidateDimensionListRequest ||
     eventCandidateFilterValuesRequest ||
     eventCandidateSummaryRequest ||
+    eventCandidateContextRequest ||
+    eventCandidateTypeDetailRequest ||
     eventCandidateRecordsRequest ||
     eventCandidateEventTrendRequest ||
     eventCandidateFieldsRequest ||
@@ -5904,7 +5949,7 @@ async function prepareDeferredEventQualification(input: {
       ? (() => {
           const rawKeys = Array.isArray(query.selectedKeys)
             ? query.selectedKeys
-            : [];
+            : EVENT_CONTEXT_CARD_KEYS;
           const keySet = new Set(
             rawKeys.filter(
               (key): key is EventContextCardKey =>
@@ -5922,25 +5967,43 @@ async function prepareDeferredEventQualification(input: {
               typeof query.limit === "number" && Number.isFinite(query.limit)
                 ? query.limit
                 : 100,
-            selectedKeys: Object.freeze(
-              selectedKeys.length > 0
-                ? selectedKeys
-                : [...EVENT_CONTEXT_CARD_KEYS],
-            ),
+            selectedKeys: Object.freeze(selectedKeys),
           });
         })()
       : undefined;
   const eventTypeDetailRequest =
     input.operation === "event-type-detail"
-      ? Object.freeze({
-          eventName: typeof query.eventName === "string" ? query.eventName : "",
-          interval:
-            typeof query.interval === "string"
-              ? (query.interval as CalendarGranularity)
-              : ("day" as const),
-          includeBreakdowns: query.includeBreakdowns !== false,
-          includeContext: query.includeContext !== false,
-        })
+      ? (() => {
+          const rawKeys = Array.isArray(query.selectedKeys)
+            ? query.selectedKeys
+            : EVENT_CONTEXT_CARD_KEYS;
+          const keySet = new Set(
+            rawKeys.filter(
+              (key): key is EventContextCardKey =>
+                typeof key === "string" &&
+                EVENT_CONTEXT_CARD_KEYS.includes(key as EventContextCardKey),
+            ),
+          );
+          const selectedKeys = EVENT_CONTEXT_CARD_KEYS.filter((key) =>
+            keySet.has(key),
+          );
+          return Object.freeze({
+            eventName:
+              typeof query.eventName === "string" ? query.eventName : "",
+            interval:
+              typeof query.interval === "string"
+                ? (query.interval as CalendarGranularity)
+                : ("day" as const),
+            includeBreakdowns: query.includeBreakdowns !== false,
+            includeContext: query.includeContext !== false,
+            contextLimit:
+              typeof query.contextLimit === "number" &&
+              Number.isFinite(query.contextLimit)
+                ? query.contextLimit
+                : 100,
+            selectedKeys: Object.freeze(selectedKeys),
+          });
+        })()
       : undefined;
   const eventRecordsRequest =
     input.operation === "event-records"
@@ -6081,6 +6144,8 @@ async function prepareDeferredEventQualification(input: {
     | DeferredEventTypesQualification
     | DeferredEventNameDimensionQualification
     | DeferredEventTrendQualification
+    | DeferredEventContextQualification
+    | DeferredEventTypeDetailQualification
     | DeferredFilterValuesQualificationInput = eventCandidateSummaryRequest
     ? (Object.freeze({
         ...deferredBase,
@@ -6114,28 +6179,46 @@ async function prepareDeferredEventQualification(input: {
                 operation: "event-trend" as const,
                 countInput: countInput as AdvancedEventCandidateCountPlanInput,
               }) as DeferredEventTrendQualification)
-            : eventCandidatePageRequest
+            : eventCandidateContextRequest
               ? (Object.freeze({
                   ...deferredBase,
-                  operation: "event-types" as const,
+                  operation: "event-context" as const,
                   countInput:
                     countInput as AdvancedEventCandidateCountPlanInput,
-                }) as DeferredEventTypesQualification)
-              : eventCandidateDimensionListRequest
+                  eventContextRequest: eventContextRequest!,
+                }) as DeferredEventContextQualification)
+              : eventCandidateTypeDetailRequest
                 ? (Object.freeze({
                     ...deferredBase,
-                    operation: "event-name-dimension" as const,
+                    operation: "event-type-detail" as const,
                     countInput:
                       countInput as AdvancedEventCandidateCountPlanInput,
-                  }) as DeferredEventNameDimensionQualification)
-                : eventCandidateFilterValuesRequest
+                    eventTypeDetailRequest: eventTypeDetailRequest!,
+                  }) as DeferredEventTypeDetailQualification)
+                : eventCandidatePageRequest
                   ? (Object.freeze({
                       ...deferredBase,
-                      operation: "filter-values" as const,
+                      operation: "event-types" as const,
                       countInput:
                         countInput as AdvancedEventCandidateCountPlanInput,
-                    }) as DeferredFilterValuesQualificationInput)
-                  : (Object.freeze(deferredBase) as DeferredEventQualification);
+                    }) as DeferredEventTypesQualification)
+                  : eventCandidateDimensionListRequest
+                    ? (Object.freeze({
+                        ...deferredBase,
+                        operation: "event-name-dimension" as const,
+                        countInput:
+                          countInput as AdvancedEventCandidateCountPlanInput,
+                      }) as DeferredEventNameDimensionQualification)
+                    : eventCandidateFilterValuesRequest
+                      ? (Object.freeze({
+                          ...deferredBase,
+                          operation: "filter-values" as const,
+                          countInput:
+                            countInput as AdvancedEventCandidateCountPlanInput,
+                        }) as DeferredFilterValuesQualificationInput)
+                      : (Object.freeze(
+                          deferredBase,
+                        ) as DeferredEventQualification);
   deferredEventQualifications.add(deferred);
   return deferred;
 }
@@ -6187,6 +6270,14 @@ export function deferredEventQualificationFromQuery(
 ): DeferredEventTrendQualification | undefined;
 export function deferredEventQualificationFromQuery(
   input: unknown,
+  operation: "event-context",
+): DeferredEventContextQualification | undefined;
+export function deferredEventQualificationFromQuery(
+  input: unknown,
+  operation: "event-type-detail",
+): DeferredEventTypeDetailQualification | undefined;
+export function deferredEventQualificationFromQuery(
+  input: unknown,
   operation: Exclude<
     DeferredEventQualificationOperation,
     | "event-summary"
@@ -6196,6 +6287,8 @@ export function deferredEventQualificationFromQuery(
     | "event-types"
     | "event-name-dimension"
     | "event-trend"
+    | "event-context"
+    | "event-type-detail"
   >,
 ): DeferredEventQualification | undefined;
 export function deferredEventQualificationFromQuery(
@@ -6210,6 +6303,8 @@ export function deferredEventQualificationFromQuery(
   | DeferredEventTypesQualification
   | DeferredEventNameDimensionQualification
   | DeferredEventTrendQualification
+  | DeferredEventContextQualification
+  | DeferredEventTypeDetailQualification
   | DeferredFilterValuesQualificationInput
   | undefined;
 export function deferredEventQualificationFromQuery(
@@ -6224,6 +6319,8 @@ export function deferredEventQualificationFromQuery(
   | DeferredEventTypesQualification
   | DeferredEventNameDimensionQualification
   | DeferredEventTrendQualification
+  | DeferredEventContextQualification
+  | DeferredEventTypeDetailQualification
   | DeferredFilterValuesQualificationInput
   | undefined {
   if (!input || typeof input !== "object") return undefined;
@@ -6244,6 +6341,8 @@ export function deferredEventQualificationFromQuery(
         | DeferredEventTypesQualification
         | DeferredEventNameDimensionQualification
         | DeferredEventTrendQualification
+        | DeferredEventContextQualification
+        | DeferredEventTypeDetailQualification
         | DeferredFilterValuesQualificationInput)
     : undefined;
 }
@@ -6655,6 +6754,8 @@ export function isDeferredEventQualification(
   | DeferredEventTypesQualification
   | DeferredEventNameDimensionQualification
   | DeferredEventTrendQualification
+  | DeferredEventContextQualification
+  | DeferredEventTypeDetailQualification
   | DeferredFilterValuesQualificationInput {
   return (
     typeof value === "object" &&
@@ -6684,6 +6785,8 @@ export async function prepareDeferredEventQualificationFallback(
     | DeferredEventTypesQualification
     | DeferredEventNameDimensionQualification
     | DeferredEventTrendQualification
+    | DeferredEventContextQualification
+    | DeferredEventTypeDetailQualification
     | DeferredFilterValuesQualificationInput,
 ): Promise<FilterDocument> {
   if (!isDeferredEventQualification(deferred))
@@ -6771,6 +6874,55 @@ export function d1AdvancedFilterMiddleware(
   expectedSiteId?: string,
 ): TypedQueryProviderMiddleware {
   return async (operation: QueryOperation, input: unknown, next, execution) => {
+    const rawEventContextRequestSnapshot =
+      operation === "event-context"
+        ? qualificationRequestOwnDataSnapshot(input)
+        : undefined;
+    const rawEventTypeDetailRequestSnapshot =
+      operation === "event-type-detail"
+        ? qualificationRequestOwnDataSnapshot(input)
+        : undefined;
+    if (operation === "event-context" || operation === "event-type-detail") {
+      const rawRequestSnapshot =
+        operation === "event-context"
+          ? rawEventContextRequestSnapshot
+          : rawEventTypeDetailRequestSnapshot;
+      const filters = ownDataValue(input, "filters") as
+        FilterDocument | undefined;
+      const metadata = scopedFilterMetadata(filters);
+      const filtersDescriptor = ownDescriptor(input, "filters");
+      const ownDataRequiredCode =
+        operation === "event-context"
+          ? "event_context_qualification_request_own_data_required"
+          : "event_type_detail_qualification_request_own_data_required";
+      const contextMismatchCode =
+        operation === "event-context"
+          ? "event_context_qualification_request_context_mismatch"
+          : "event_type_detail_qualification_request_context_mismatch";
+      if (
+        rawRequestSnapshot === undefined &&
+        (metadata?.plan.scope === "event" ||
+          (filtersDescriptor !== undefined && !("value" in filtersDescriptor)))
+      )
+        throw invalidInput("query", ownDataRequiredCode);
+      if (metadata?.plan.scope === "event") {
+        const context = ownDataValue(input, "context");
+        const subject = ownDataValue(context, "subject");
+        const siteId = ownDataValue(subject, "siteId");
+        const requestTime = ownDataValue(input, "time");
+        if (
+          ownDataValue(subject, "kind") !== "site" ||
+          metadata.siteIds.length !== 1 ||
+          metadata.siteIds[0] !== siteId ||
+          (expectedSiteId !== undefined && expectedSiteId !== siteId) ||
+          !metadata.time ||
+          !requestTime ||
+          !sameEventFieldsQueryTime(requestTime as QueryTime, metadata.time) ||
+          !queryScopePlanMatchesMetadata(input, metadata.plan)
+        )
+          throw invalidInput("query", contextMismatchCode);
+      }
+    }
     const rawEventRecordsRequestSnapshot =
       operation === "event-records"
         ? qualificationRequestOwnDataSnapshot(input)
@@ -7075,6 +7227,24 @@ export function d1AdvancedFilterMiddleware(
       throw invalidInput(
         "query",
         "event_trend_qualification_request_context_mismatch",
+      );
+    if (
+      operation === "event-context" &&
+      qualificationRequestOwnDataSnapshot(output) !==
+        rawEventContextRequestSnapshot
+    )
+      throw invalidInput(
+        "query",
+        "event_context_qualification_request_context_mismatch",
+      );
+    if (
+      operation === "event-type-detail" &&
+      qualificationRequestOwnDataSnapshot(output) !==
+        rawEventTypeDetailRequestSnapshot
+    )
+      throw invalidInput(
+        "query",
+        "event_type_detail_qualification_request_context_mismatch",
       );
     const outputEventNameDimensionRequest =
       rawEventNameDimensionRequest !== null
@@ -7435,6 +7605,14 @@ export function d1AdvancedFilterMiddleware(
           : {}),
         ...(operation === "event-summary"
           ? { eventSummaryRequestSnapshot: rawEventSummaryRequestSnapshot }
+          : {}),
+        ...(operation === "event-context"
+          ? { eventContextRequestSnapshot: rawEventContextRequestSnapshot }
+          : {}),
+        ...(operation === "event-type-detail"
+          ? {
+              eventTypeDetailRequestSnapshot: rawEventTypeDetailRequestSnapshot,
+            }
           : {}),
         ...(operation === "event-records"
           ? { eventRecordsRequestSnapshot: rawEventRecordsRequestSnapshot }

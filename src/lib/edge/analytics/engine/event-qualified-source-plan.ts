@@ -95,6 +95,7 @@ export function buildEventQualifiedSource<
     ((input.purpose !== "event-types" &&
       input.purpose !== "event-trend" &&
       input.purpose !== "summary-cards" &&
+      input.purpose !== "event-context" &&
       input.purpose !== "records") ||
       input.reportFilters !== undefined)
   )

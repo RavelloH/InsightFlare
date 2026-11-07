@@ -1,7 +1,7 @@
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { AdvancedCountQualificationPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import type { EventQualificationPlan } from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import {
   addEventQualificationControlOutput,
@@ -404,7 +404,7 @@ export function appendEventContextCardOutputs(input: {
 export function addEventContextQualifiedPages(input: {
   readonly builder: LogicalPlanBuilder;
   readonly siteId: string;
-  readonly scope: "session" | "visitor";
+  readonly scope: "session" | "visitor" | "event";
   readonly matches: LogicalRelationHandle;
 }): {
   readonly source: LogicalRelationHandle;
@@ -450,6 +450,23 @@ export function addEventContextQualifiedPages(input: {
     ),
     businessSiteId: builder.literal(input.siteId, STRING),
   });
+  if (input.scope === "event") {
+    const matchedVisits = builder.filter(
+      input.matches,
+      builder.compare(
+        "neq",
+        builder.slot(input.matches, "visitId"),
+        builder.literal("", STRING),
+      ),
+    );
+    return {
+      source,
+      pages: builder.semiJoin(pageRows, matchedVisits, [
+        { left: "businessSiteId", right: "siteId" },
+        { left: "attribute:page.report.localId", right: "visitId" },
+      ]),
+    };
+  }
   const qualifiedOwnerSlot =
     input.scope === "session"
       ? "attribute:page.report.sessionId"
@@ -521,13 +538,15 @@ export function buildEventContextReportPlan(input: {
 }
 
 /** Builds all selected Event Context cards from the shared Count qualification. */
-export function buildEventContextQualificationPlan(input: {
+export function buildEventContextQualificationPlan<
+  Count extends AdvancedCountQualificationPlanInput,
+>(input: {
   readonly siteId: string;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: Count;
   readonly eventName?: string;
   readonly limit: number;
   readonly selectedKeys?: readonly EventContextCardKey[];
-}): EventQualificationPlan {
+}): EventQualificationPlan<Count["scope"]> {
   const selectedSet = new Set(input.selectedKeys ?? EVENT_CONTEXT_CARD_KEYS);
   const selected = EVENT_CONTEXT_CARD_KEYS.filter((key) =>
     selectedSet.has(key),
@@ -579,6 +598,17 @@ export function buildEventContextQualificationPlan(input: {
     numericCompatibilityFields:
       qualified.qualification.numericCompatibilityFields,
     scope: qualified.qualification.scope,
+    ...(qualified.qualification.candidateGrain
+      ? { candidateGrain: qualified.qualification.candidateGrain }
+      : {}),
+    ...(qualified.qualification.additionalGroupedSummaries
+      ? {
+          additionalGroupedSummaryRelationIds:
+            qualified.qualification.additionalGroupedSummaries.map(
+              ({ id }) => id,
+            ),
+        }
+      : {}),
     reportSourceRelations,
   };
 }

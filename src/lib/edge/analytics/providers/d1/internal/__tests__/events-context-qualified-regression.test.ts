@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
@@ -31,9 +31,11 @@ import {
   deferredEventContextQualificationFromQuery,
   prepareDeferredEventQualificationFallback,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import * as qualificationProgram from "@/lib/edge/analytics/providers/d1/internal/analytics-qualification-program";
 import {
   compileEventContextQualificationProgram,
   type EventContextQualificationQuery,
+  type executeEventContextQualificationProgram,
 } from "@/lib/edge/analytics/providers/d1/internal/analytics-qualification-program";
 import {
   mapEventAnalyticsContextCards,
@@ -77,6 +79,7 @@ interface PreparedEventContextQuery extends QueryInput {
 interface ContextScenario {
   readonly label: string;
   readonly scope: "session" | "visitor";
+  readonly audience?: "private-dashboard" | "api-v1";
   readonly limit: number;
   readonly eventName?: string;
   readonly selectedKeys?: readonly EventContextCardKey[];
@@ -85,6 +88,10 @@ interface ContextScenario {
   readonly expectedFallback?: "numeric-data-domain" | "compile-budget";
 }
 
+type EventCandidateContextScenario = Omit<ContextScenario, "scope"> & {
+  readonly scope: "event";
+};
+
 function newTrace(): SqliteD1Trace {
   return { preparedSql: [], bindings: [] };
 }
@@ -92,6 +99,38 @@ function newTrace(): SqliteD1Trace {
 function testEnv(database: DatabaseSync, trace: SqliteD1Trace): Env {
   return {
     DB: createSqliteD1Database(database, trace),
+    MAIN_SECRET: "wave94e-event-context-qualified-test-secret",
+  } as unknown as Env;
+}
+
+function testEnvWithRowsCapture(
+  database: DatabaseSync,
+  trace: SqliteD1Trace,
+  batches: Record<string, unknown>[][],
+): Env {
+  const adapter = createSqliteD1Database(database, trace);
+  const DB = {
+    ...adapter,
+    prepare(sql: string) {
+      const statement = adapter.prepare(sql);
+      const wrapped = {
+        ...statement,
+        bind(...values: Parameters<typeof statement.bind>) {
+          statement.bind(...values);
+          return this;
+        },
+        async all<Row>() {
+          const result = await statement.all<Row>();
+          const rows = Array.isArray(result.results) ? result.results : [];
+          batches.push(rows as unknown as Record<string, unknown>[]);
+          return result;
+        },
+      };
+      return wrapped as unknown as D1PreparedStatement;
+    },
+  };
+  return {
+    DB,
     MAIN_SECRET: "wave94e-event-context-qualified-test-secret",
   } as unknown as Env;
 }
@@ -358,8 +397,43 @@ function createFixture(): DatabaseSync {
   return database;
 }
 
+function createCandidateFixture(): DatabaseSync {
+  const database = createFixture();
+  const sitePk = Number(
+    (
+      database
+        .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+        .get(SITE_ID) as { readonly site_pk: number }
+    ).site_pk,
+  );
+  insertVisit(database, {
+    id: "visit-a-page-only",
+    siteId: SITE_ID,
+    sitePk,
+    visitorId: "wave94e-visitor-a",
+    sessionId: "wave94e-shared-session",
+    startedAt: WINDOW.startMs + 15,
+    pathname: "/page-only-qualified",
+  });
+  database
+    .prepare(
+      "UPDATE custom_events SET event_id = ? WHERE site_id = ? AND event_id = ?",
+    )
+    .run("visit-a-later", SITE_ID, "event-a-qualifying-1");
+  // Keep unrelated owner and tie fixtures outside the two matching Events.
+  database
+    .prepare(
+      `UPDATE custom_events SET event_name_id = 3
+       WHERE site_id = ? AND event_id IN (?, ?, ?, ?)`,
+    )
+    .run(SITE_ID, "event-a-later", "event-b", "event-tie-z", "event-tie-a");
+  return database;
+}
+
 function prepareContextQuery(input: {
-  readonly scope: ContextScenario["scope"];
+  readonly scope:
+    ContextScenario["scope"] | EventCandidateContextScenario["scope"];
+  readonly audience?: ContextScenario["audience"];
   readonly limit: number;
   readonly eventName?: string;
   readonly selectedKeys?: readonly EventContextCardKey[];
@@ -372,7 +446,7 @@ function prepareContextQuery(input: {
     analyticsFilterRegistry,
   );
   const prepared = prepareScopedQuery("event-context", {
-    context: siteQueryContext(SITE_ID, "private-dashboard"),
+    context: siteQueryContext(SITE_ID, input.audience ?? "private-dashboard"),
     time: QUERY_TIME,
     filters,
     scopePreference: input.scope,
@@ -481,6 +555,9 @@ async function runScenario(database: DatabaseSync, scenario: ContextScenario) {
       matchesRelationId: plan.matchesRelationId,
       controlsRelationId: plan.controlsRelationId,
       groupedSummaryRelationId: plan.groupedSummaryRelationId,
+      additionalGroupedSummaryRelationIds:
+        plan.additionalGroupedSummaryRelationIds ?? [],
+      candidateGrain: plan.candidateGrain ?? null,
       controlOutputId: plan.controlOutputId,
       reportOutputIds: plan.reportOutputIds,
       reportSourceRelations: plan.reportSourceRelations ?? [],
@@ -576,25 +653,158 @@ async function runScenario(database: DatabaseSync, scenario: ContextScenario) {
   };
 }
 
+async function runEventCandidateScenario(
+  database: DatabaseSync,
+  scenario: EventCandidateContextScenario,
+) {
+  const prepared = prepareContextQuery(scenario);
+  const corePreparationTrace = newTrace();
+  const forwarded = await d1AdvancedFilterMiddleware(
+    testEnv(database, corePreparationTrace),
+  )("event-context", prepared, async (value) => value);
+  const deferred = deferredEventContextQualificationFromQuery(forwarded);
+  if (!deferred) throw new Error(`wave97em_${scenario.label}_deferred_missing`);
+  const coreFilters = await prepareDeferredEventQualificationFallback(deferred);
+  const selectedKeys = EVENT_CONTEXT_CARD_KEYS.filter((key) =>
+    new Set(scenario.selectedKeys ?? EVENT_CONTEXT_CARD_KEYS).has(key),
+  );
+  const plan = buildEventContextQualificationPlan({
+    siteId: SITE_ID,
+    count: deferred.countInput,
+    limit: scenario.limit,
+    selectedKeys,
+    eventName: scenario.eventName ?? "",
+  });
+
+  const coreReportTrace = newTrace();
+  const baselineRaw = await queryEventAnalyticsContextCardsParentOracleFromD1(
+    testEnv(database, coreReportTrace),
+    SITE_ID,
+    WINDOW,
+    coreFilters,
+    scenario.limit,
+    scenario.eventName ?? "",
+    selectedKeys,
+  );
+  const baseline = {
+    eventName: scenario.eventName ?? "",
+    cards: mapEventAnalyticsContextCards(baselineRaw),
+  };
+
+  const actualTrace = newTrace();
+  const actualRowsByQuery: Record<string, unknown>[][] = [];
+  const diagnostics = createD1ReadDiagnostics();
+  const executionSpy = vi.spyOn(
+    qualificationProgram,
+    "executeEventContextQualificationProgram",
+  );
+  let actual: { readonly value: unknown } | undefined;
+  let executionCallCount = 0;
+  let execution:
+    | Awaited<ReturnType<typeof executeEventContextQualificationProgram>>
+    | undefined;
+  try {
+    const provider = createD1SiteProviderRegistry({
+      env: testEnvWithRowsCapture(database, actualTrace, actualRowsByQuery),
+      siteId: SITE_ID,
+      diagnostics,
+    }).resolve("event-context");
+    if (!provider)
+      throw new Error(`wave97em_${scenario.label}_provider_missing`);
+    actual = await provider.execute(prepared as never);
+    executionCallCount = executionSpy.mock.calls.length;
+    const originalCall = executionSpy.mock.results[0]?.value;
+    if (!originalCall)
+      throw new Error(`wave97em_${scenario.label}_qualification_not_called`);
+    execution = (await Promise.resolve(originalCall)) as Awaited<
+      ReturnType<typeof executeEventContextQualificationProgram>
+    >;
+  } finally {
+    executionCallCount = executionSpy.mock.calls.length;
+    executionSpy.mockRestore();
+  }
+  expect(executionCallCount).toBe(1);
+  expect(actual!.value).toEqual(baseline);
+
+  const actualStatements = statementEvidence(actualTrace);
+  const actualQueries = actualRowsByQuery.map((rows, index) => ({
+    ...actualStatements[index],
+    rows,
+  }));
+  const rawRows = actualQueries.flatMap(({ rows }) => rows);
+  const controls = rawRows.filter((row) => row.rowKind === "control");
+  const reportRows = rawRows.filter((row) => row.rowKind === "report");
+  const executionEvidence =
+    execution && "evidence" in execution ? execution.evidence : null;
+  return {
+    scenario,
+    baseline: {
+      corePreparationTrace: statementEvidence(corePreparationTrace),
+      reportTrace: statementEvidence(coreReportTrace),
+      totalStatementCount:
+        corePreparationTrace.preparedSql.length +
+        coreReportTrace.preparedSql.length,
+      dto: baseline,
+    },
+    actual: {
+      statements: actualStatements,
+      queries: actualQueries,
+      dto: actual!.value,
+      dtoEqual: true,
+      executionKind: execution?.kind,
+      executionEvidence,
+      reportRows,
+      controls,
+      reportRowsByOutput: Object.fromEntries(
+        [...new Set(reportRows.map((row) => String(row.outputId)))].map(
+          (outputId) => [
+            outputId,
+            reportRows.filter((row) => row.outputId === outputId),
+          ],
+        ),
+      ),
+      diagnosticsFallback: diagnostics.advancedCountSqlFallbackReason ?? null,
+      qualificationGraph: {
+        candidateGrain: plan.candidateGrain ?? null,
+        eventSourceRelationId: plan.eventSourceRelationId,
+        matchesRelationId: plan.matchesRelationId,
+        controlsRelationId: plan.controlsRelationId,
+        groupedSummaryRelationId: plan.groupedSummaryRelationId,
+        additionalGroupedSummaryRelationIds:
+          plan.additionalGroupedSummaryRelationIds ?? [],
+        controlOutputId: plan.controlOutputId,
+        reportOutputIds: plan.reportOutputIds,
+        reportSourceRelations: plan.reportSourceRelations,
+      },
+    },
+  };
+}
+
 function writeEvidence(value: unknown): void {
   evidenceBatches.push(value);
 }
 
 afterAll(() => {
   for (const database of databases) database.close();
-  const evidencePath = process.env.WAVE94E_EVENT_CONTEXT_EVIDENCE_PATH;
-  if (!evidencePath) return;
-  const absolutePath = resolve(evidencePath);
-  mkdirSync(dirname(absolutePath), { recursive: true });
-  writeFileSync(
-    absolutePath,
-    JSON.stringify(
-      { kind: "wave94e-event-context-qualified-evidence-v1", evidenceBatches },
-      null,
-      2,
-    ),
-    "utf8",
-  );
+  for (const [evidencePath, kind] of [
+    [
+      process.env.WAVE94E_EVENT_CONTEXT_EVIDENCE_PATH,
+      "wave94e-event-context-qualified-evidence-v1",
+    ],
+    [
+      process.env.WAVE97EM_CONTEXT_EVIDENCE_PATH,
+      "wave97em-event-context-evidence-v1",
+    ],
+  ] as const) {
+    if (!evidencePath) continue;
+    const absolutePath = resolve(evidencePath);
+    mkdirSync(dirname(absolutePath), { recursive: true });
+    writeFileSync(
+      absolutePath,
+      JSON.stringify({ kind, evidenceBatches }, null, 2),
+      "utf8",
+    );
+  }
 });
 
 describe("Wave94E qualified Event Context", () => {
@@ -780,6 +990,219 @@ describe("Wave94E qualified Event Context", () => {
     });
   }, 20_000);
 
+  it.each([
+    {
+      name: "top-level AND uses Event-only visits",
+      scenario: {
+        label: "event-candidate-top-level-and-event-only-visits",
+        scope: "event" as const,
+        limit: 20,
+        eventName: "signup",
+        selectedKeys: EVENT_CONTEXT_CARD_KEYS,
+        countDsl:
+          'count(event { event.name eq " signup " }) eq 2 AND event.name eq " signup "',
+      },
+      expectedEntry: "/qualifying",
+      expectedExit: "/qualifying",
+    },
+    {
+      name: "top-level OR/NOT includes the Page-only visit",
+      scenario: {
+        label: "event-candidate-top-level-or-not-page-only-visit",
+        scope: "event" as const,
+        limit: 20,
+        eventName: "signup",
+        selectedKeys: ["entry", "exit", "path"] as const,
+        countDsl:
+          '(count(event { event.name eq " signup " }) eq 2 AND event.name eq " signup ") OR NOT (page.path neq "/page-only-qualified")',
+      },
+      expectedEntry: "/page-only-qualified",
+      expectedExit: "/qualifying",
+    },
+  ])(
+    "propagates Context visits: $name",
+    async ({ scenario, expectedEntry, expectedExit }) => {
+      const database = createCandidateFixture();
+      const result = await runEventCandidateScenario(database, scenario);
+      expect(result.actual.executionKind).toBe("executed");
+      expect(result.actual.dto).toEqual(result.baseline.dto);
+      expect(result.actual.qualificationGraph).toMatchObject({
+        candidateGrain: "event-candidate",
+        reportSourceRelations: [{ entity: "event" }, { entity: "page" }],
+      });
+      expect(result.actual.controls).toHaveLength(1);
+      expect(result.actual.controls[0]).toMatchObject({
+        rowKind: "control",
+        entityKind: "event",
+      });
+      const executionEvidence = result.actual.executionEvidence as {
+        readonly sqlBytes: number;
+        readonly bindingCount: number;
+        readonly groupWidth: number;
+        readonly groupedSummaryMaterializations?: readonly unknown[];
+      };
+      expect(executionEvidence.sqlBytes).toBeLessThanOrEqual(
+        D1_MAX_SQL_UTF8_BYTES,
+      );
+      expect(executionEvidence.bindingCount).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+      expect(executionEvidence.groupWidth).toBeLessThanOrEqual(16);
+      expect(executionEvidence.groupedSummaryMaterializations).toHaveLength(2);
+      const cards = result.actual.dto as {
+        readonly cards: {
+          readonly page: {
+            readonly entry: readonly {
+              readonly label: string;
+              readonly views: number;
+            }[];
+            readonly exit: readonly {
+              readonly label: string;
+              readonly views: number;
+            }[];
+          };
+        };
+      };
+      expect(cards.cards.page.entry).toEqual([
+        expect.objectContaining({ label: expectedEntry, views: 2 }),
+      ]);
+      expect(cards.cards.page.exit).toEqual([
+        expect.objectContaining({ label: expectedExit, views: 2 }),
+      ]);
+      writeEvidence({
+        kind: "wave97em-event-context-candidate-page-propagation-v1",
+        scenario: result,
+        collision: {
+          eventLocalId: "visit-a-later",
+          eventVisitId: "visit-a-qualifying",
+          pageLocalId: "visit-a-later",
+        },
+        sharedEventVisitId: "visit-a-qualifying",
+      });
+    },
+  );
+
+  it("rejects Event-candidate getters and context mismatches before SQL", async () => {
+    const database = createCandidateFixture();
+    const prepared = prepareContextQuery({
+      scope: "event",
+      limit: 10,
+      eventName: "signup",
+      selectedKeys: ["entry"],
+      countDsl:
+        'count(event { event.name eq " signup " }) eq 2 AND event.name eq " signup "',
+    });
+    let selectedKeysReads = 0;
+    const getterRequest = { ...prepared };
+    Object.defineProperty(getterRequest, "selectedKeys", {
+      enumerable: true,
+      get() {
+        selectedKeysReads += 1;
+        return ["entry"];
+      },
+    });
+    const getterTrace = newTrace();
+    await expect(
+      d1AdvancedFilterMiddleware(testEnv(database, getterTrace))(
+        "event-context",
+        getterRequest,
+        async (value) => value,
+      ),
+    ).rejects.toMatchObject({
+      domainError: {
+        issues: [
+          { code: "event_context_qualification_request_own_data_required" },
+        ],
+      },
+    });
+    expect(selectedKeysReads).toBe(0);
+    expect(getterTrace.preparedSql).toHaveLength(0);
+
+    const mismatchTrace = newTrace();
+    const mismatchedTime = createQueryTime(
+      WINDOW.startMs + 1,
+      WINDOW.endExclusiveMs,
+      WINDOW.timeZone,
+      WINDOW.nowMs,
+    );
+    await expect(
+      d1AdvancedFilterMiddleware(testEnv(database, mismatchTrace))(
+        "event-context",
+        { ...prepared, time: mismatchedTime },
+        async (value) => value,
+      ),
+    ).rejects.toMatchObject({
+      domainError: {
+        issues: [
+          { code: "event_context_qualification_request_context_mismatch" },
+        ],
+      },
+    });
+    expect(mismatchTrace.preparedSql).toHaveLength(0);
+    writeEvidence({
+      kind: "wave97em-event-context-request-safety-v1",
+      getterReads: selectedKeysReads,
+      getterSqlCount: getterTrace.preparedSql.length,
+      contextMismatchSqlCount: mismatchTrace.preparedSql.length,
+    });
+  });
+
+  it("keeps a full api-v1 Event-scope request on the Core path", async () => {
+    const database = createCandidateFixture();
+    const filters = parseFilterDsl(
+      'count(event { event.name eq " signup " }) eq 2 AND event.name eq " signup "',
+      analyticsFilterRegistry,
+    );
+    const prepared = prepareScopedQuery("event-context", {
+      context: siteQueryContext(SITE_ID, "api-v1"),
+      time: QUERY_TIME,
+      filters,
+      scopePreference: "event",
+    } as QueryInput & {
+      readonly time: QueryTime;
+    }) as PreparedEventContextQuery;
+    const forwarded = await d1AdvancedFilterMiddleware(
+      testEnv(database, newTrace()),
+    )("event-context", prepared, async (value) => value);
+    expect(
+      deferredEventContextQualificationFromQuery(forwarded),
+    ).toBeUndefined();
+
+    const baselineCards = await queryEventAnalyticsContextCardsFromD1(
+      testEnv(database, newTrace()),
+      SITE_ID,
+      WINDOW,
+      (forwarded as PreparedEventContextQuery).filters,
+      100,
+      "signup",
+      EVENT_CONTEXT_CARD_KEYS,
+    );
+    const actualTrace = newTrace();
+    const provider = createD1SiteProviderRegistry({
+      env: testEnv(database, actualTrace),
+      siteId: SITE_ID,
+    }).resolve("event-context");
+    if (!provider) throw new Error("wave97em_api_v1_context_provider_missing");
+    const actual = await provider.execute({
+      ...prepared,
+      eventName: "signup",
+      limit: 100,
+      selectedKeys: EVENT_CONTEXT_CARD_KEYS,
+    } as never);
+    expect(actual.value).toEqual({
+      eventName: "signup",
+      cards: mapEventAnalyticsContextCards(baselineCards),
+    });
+    expect(actualTrace.preparedSql.length).toBeGreaterThan(0);
+    writeEvidence({
+      kind: "wave97em-event-context-api-v1-core-compatibility-v1",
+      statementCount: actualTrace.preparedSql.length,
+      statements: statementEvidence(actualTrace),
+      dto: actual.value,
+      dtoEqual: true,
+    });
+  });
+
   it("returns the empty DTO without SQL for direct empty selection and for empty qualification", async () => {
     const database = createFixture();
     const directTrace = newTrace();
@@ -822,6 +1245,42 @@ describe("Wave94E qualified Event Context", () => {
       },
     });
     expect(directTrace.preparedSql).toHaveLength(0);
+    const emptyEventInput = {
+      scope: "event",
+      limit: 10,
+      eventName: "signup",
+      selectedKeys: [],
+      countDsl:
+        'count(event { event.name eq "signup" }) eq 1 AND event.name eq "signup"',
+    } as const;
+    const candidateDatabase = createCandidateFixture();
+    const eventPrepared = prepareContextQuery(emptyEventInput);
+    const eventTrace = newTrace();
+    const forwarded = await d1AdvancedFilterMiddleware(
+      testEnv(candidateDatabase, eventTrace),
+    )("event-context", eventPrepared, async (value) => value);
+    const corePrepared = prepareContextQuery({
+      ...emptyEventInput,
+      audience: "api-v1",
+    });
+    const coreTrace = newTrace();
+    const coreForwarded = await d1AdvancedFilterMiddleware(
+      testEnv(candidateDatabase, coreTrace),
+    )("event-context", corePrepared, async (value) => value);
+    expect(
+      deferredEventContextQualificationFromQuery(forwarded),
+    ).toBeUndefined();
+    expect(
+      deferredEventContextQualificationFromQuery(coreForwarded),
+    ).toBeUndefined();
+    expect(eventTrace.preparedSql).toEqual(coreTrace.preparedSql);
+    expect(eventTrace.bindings).toEqual(coreTrace.bindings);
+    writeEvidence({
+      kind: "wave97em-event-context-empty-selection-core-preparation-v1",
+      eventPreparationTrace: statementEvidence(eventTrace),
+      corePreparationTrace: statementEvidence(coreTrace),
+      tracesEqual: JSON.stringify(eventTrace) === JSON.stringify(coreTrace),
+    });
     const empty = await runScenario(database, {
       label: "empty-qualified-owner-result",
       scope: "visitor",
@@ -872,6 +1331,35 @@ describe("Wave94E qualified Event Context", () => {
       scenarios: [numeric, budget],
     });
   }, 20_000);
+
+  it("falls back as a whole Event-candidate report for numeric compatibility", async () => {
+    const database = createCandidateFixture();
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "visit-a-qualifying");
+    const result = await runEventCandidateScenario(database, {
+      label: "event-candidate-numeric-compatibility-fallback",
+      scope: "event",
+      limit: 5,
+      eventName: "signup",
+      selectedKeys: ["entry", "path"],
+      countDsl:
+        'count(page { page.durationMs gt 5 }) eq 1 AND event.name eq " signup "',
+    });
+    expect(result.actual.executionKind).toBe("legacy");
+    expect(
+      (result.actual.diagnosticsFallback as { readonly kind?: string } | null)
+        ?.kind,
+    ).toBe("numeric-data-domain");
+    expect(result.actual.dto).toEqual(result.baseline.dto);
+    expect(result.actual.statements.length).toBeGreaterThan(2);
+    expect(result.actual.controls).toHaveLength(1);
+    expect(result.actual.reportRows).toEqual([]);
+    writeEvidence({
+      kind: "wave97em-event-context-numeric-fallback-evidence-v1",
+      scenario: result,
+    });
+  });
 
   it("keeps activity-cap errors, aborts, and database failures observable without report leakage", async () => {
     const database = createFixture();

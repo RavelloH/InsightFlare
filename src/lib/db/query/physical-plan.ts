@@ -76,6 +76,7 @@ import {
   sameSingletonRankChoices,
 } from "./physical/singleton-rank";
 import { reviewStrictRankStages } from "./physical/strict-rank-stage-review";
+import { currentBoundaryWideCountProjectCandidates as analyzeWideCountProjectCandidates } from "./physical/wide-count-project-reuse";
 import {
   type BoundedAdmissionEvidence,
   boundedAdmissionReuseCandidates,
@@ -2837,6 +2838,9 @@ function candidateFacts(
   requireTotalExpressions = false,
   allowRankOnePartitionedRowNumberProof = false,
   isSafeProvenPartitionedRowNumberWindow = isMaterializationSafeProvenPartitionedRowNumberWindow,
+  readerWindowTotality?: (
+    node: Extract<LogicalQueryNode, { kind: "window" }>,
+  ) => boolean,
 ): CandidateFacts {
   const facts: CandidateFacts = {
     scopes: new Set(),
@@ -2910,6 +2914,9 @@ function candidateFacts(
       (requireTotalExpressions &&
         allowRankOnePartitionedRowNumberProof &&
         isSafeProvenPartitionedRowNumberWindow(node)) ||
+      (requireTotalExpressions &&
+        node.kind === "window" &&
+        readerWindowTotality?.(node) === true) ||
       (querySourcePath &&
         constantExistencePath &&
         correlationContext !== undefined &&
@@ -4020,6 +4027,7 @@ function selectedMaterializedBoundaryLicenseSource(
   completeKeyedLookupCandidates: ReadonlySet<LogicalQueryNode>,
   rankOneProjectCandidates: ReadonlySet<LogicalQueryNode>,
   rankOneFactFilterCandidates: ReadonlySet<LogicalQueryNode>,
+  wideCountProjectCandidates: ReadonlySet<LogicalQueryNode>,
   facts: CandidateFacts,
 ): PhysicalSharedRelationLicenseKind | undefined {
   if (analysis.boundedGroupSummaryCandidates.has(node))
@@ -4036,6 +4044,7 @@ function selectedMaterializedBoundaryLicenseSource(
   if (completeKeyedLookupCandidates.has(node)) return "complete-keyed-lookup";
   if (rankOneProjectCandidates.has(node)) return "rank-one-project";
   if (rankOneFactFilterCandidates.has(node)) return "rank-one-fact-filter";
+  if (wideCountProjectCandidates.has(node)) return "wide-count-project-reuse";
   if (facts.selective && !facts.forbidden) return "strict-generic-facts";
   return undefined;
 }
@@ -4067,6 +4076,7 @@ function sharedRelationDefinitionsForCandidates(
   boundaryAwareWindowProjectCandidates: ReadonlySet<LogicalQueryNode> = new Set(),
   legacyStrictRankOneProjectCandidates: ReadonlySet<LogicalQueryNode> = rankOneProjectCandidates,
   boundaryAwareBagProjectCandidates: ReadonlySet<LogicalQueryNode> = new Set(),
+  wideCountProjectCandidates: ReadonlySet<LogicalQueryNode> = new Set(),
 ): readonly SharedRelationDefinition[] {
   const {
     incoming,
@@ -4100,7 +4110,8 @@ function sharedRelationDefinitionsForCandidates(
         !boundedAdmissionCounterCandidates.has(node) &&
         !completeKeyedLookupCandidates.has(node) &&
         !boundedFactLocalReuseCandidates.has(node) &&
-        !boundaryAwareBagProjectCandidates.has(node)) ||
+        !boundaryAwareBagProjectCandidates.has(node) &&
+        !wideCountProjectCandidates.has(node)) ||
       node.fields.length === 0 ||
       node.fields.length > MAX_REPEATED_WINDOW_INPUT_PROJECT_FIELDS
     )
@@ -4141,13 +4152,15 @@ function sharedRelationDefinitionsForCandidates(
       sharedMaterializations.set(node, "materialized");
       continue;
     }
+    const hasWideCountProjectPermit = wideCountProjectCandidates.has(node);
     if (node.fields.length === 1 && isScalarCountRows(node)) continue;
     const hasLegacyStrictRankOnePermit =
       legacyStrictRankOneProjectCandidates.has(node);
     const boundaryContext =
       !hasLegacyStrictRankOnePermit &&
       (rankOneProjectCandidates.has(node) ||
-        boundaryAwareWindowProjectCandidates.has(node))
+        boundaryAwareWindowProjectCandidates.has(node) ||
+        hasWideCountProjectPermit)
         ? materializedBoundaries
         : undefined;
     const initialFacts = candidateFacts(
@@ -4159,6 +4172,7 @@ function sharedRelationDefinitionsForCandidates(
     if (
       consumesMaterializedBoundary &&
       node.fields.length > MAX_MATERIALIZED_SHARED_RELATION_FIELDS &&
+      !hasWideCountProjectPermit &&
       !wideRankOneBoundaryUsesExistingLicense(
         node,
         initialFacts,
@@ -4172,7 +4186,8 @@ function sharedRelationDefinitionsForCandidates(
           closedWindowScopeMemo,
           boundaryContext,
           true,
-          rankOneProjectCandidates.has(node) && !hasLegacyStrictRankOnePermit,
+          (rankOneProjectCandidates.has(node) || hasWideCountProjectPermit) &&
+            !hasLegacyStrictRankOnePermit,
           isSafeProvenPartitionedRowNumberWindow,
         )
       : initialFacts;
@@ -4205,6 +4220,10 @@ function sharedRelationDefinitionsForCandidates(
     }
     if (rankOneFactFilterCandidates.has(node)) {
       sharedMaterializations.set(node, "auto");
+      continue;
+    }
+    if (hasWideCountProjectPermit) {
+      sharedMaterializations.set(node, "materialized");
       continue;
     }
 
@@ -4362,6 +4381,71 @@ function sharedRelationDefinitions(
     nodeExpressions,
     expressionSources,
   );
+  let boundaryAwareWideCountProjectCandidates: ReadonlySet<LogicalQueryNode> =
+    new Set();
+  const wideCountProjectCandidatesFor = (
+    interfaces: ReadonlyMap<
+      LogicalQueryNode,
+      PhysicalSharedRelationBoundaryEvidence
+    >,
+  ) =>
+    analyzeWideCountProjectCandidates({
+      root,
+      postorder: analysis.postorder,
+      incomingCounts: analysis.incoming,
+      edges: consumerEdges,
+      interfaces,
+      sameFields,
+      candidateFacts: (node, boundaries, readerWindowTotality) =>
+        candidateFacts(
+          node,
+          analysis.closedWindowScopeMemo,
+          boundaries,
+          true,
+          true,
+          provenWindowAnalysis.isSafe,
+          readerWindowTotality,
+        ),
+      candidateFactsAreClosed,
+      isSafeWindow: (node) => provenWindowAnalysis.isSafe(node),
+      isTotalOrderedReaderWindow: (node) => {
+        if (
+          node.input.node.scope !== node.input.scope ||
+          !sameFields(node.input.node.fields, node.input.fields)
+        )
+          return false;
+        const fieldsByScope = new Map([
+          [node.input.scope, node.input.fields.length],
+        ]);
+        return (
+          node.windows.length > 0 &&
+          node.windows.every(
+            ({ specification }) =>
+              specification.kind === "row-number" &&
+              specification.orderBy.length > 0 &&
+              specification.partitionBy.every(
+                (expression) =>
+                  expressionFitsLocalFields(
+                    expression,
+                    node.input.scope,
+                    node.input.fields.length,
+                  ) &&
+                  isMaterializationSafeExpression(expression, fieldsByScope),
+              ) &&
+              specification.orderBy.every(
+                ({ expression, direction }) =>
+                  (direction === "ASC" || direction === "DESC") &&
+                  expressionFitsLocalFields(
+                    expression,
+                    node.input.scope,
+                    node.input.fields.length,
+                  ) &&
+                  isMaterializationSafeExpression(expression, fieldsByScope),
+              ),
+          )
+        );
+      },
+    });
   const createBoundaryContext = (
     definitions: readonly SharedRelationDefinition[],
     projectCandidates: ReadonlySet<LogicalQueryNode>,
@@ -4376,8 +4460,11 @@ function sharedRelationDefinitions(
       LogicalQueryNode,
       PhysicalSharedRelationBoundaryEvidence
     >,
-  ) =>
-    materializedBoundaryContext({
+  ) => {
+    const wideCountProjectCandidates = initialInterfaces
+      ? wideCountProjectCandidatesFor(initialInterfaces)
+      : boundaryAwareWideCountProjectCandidates;
+    return materializedBoundaryContext({
       root,
       postorder: analysis.postorder,
       closedWindowScopeMemo: analysis.closedWindowScopeMemo,
@@ -4409,15 +4496,20 @@ function sharedRelationDefinitions(
           completeKeyedLookup,
           projectCandidates,
           factFilterCandidates,
+          wideCountProjectCandidates,
           facts,
         ),
       isSafeReader: (node) =>
         isMaterializationSafeNode(node) || provenWindowAnalysis.isSafe(node),
     });
+  };
   const boundaryContext = createBoundaryContext(
     baseline,
     baselineRankOneProjectCandidates,
     baselineRankOneFactFilterCandidates,
+  );
+  boundaryAwareWideCountProjectCandidates = wideCountProjectCandidatesFor(
+    boundaryContext.interfaces,
   );
   const boundaryAwareWindowProjectCandidates =
     sharedMaterializedBoundaryProjectCandidates(
@@ -4481,6 +4573,7 @@ function sharedRelationDefinitions(
     ...analysis.sharedMembershipInputCandidates,
     ...analysis.sharedScalarCountCandidates,
     ...boundaryAwareBagProjectCandidates,
+    ...boundaryAwareWideCountProjectCandidates,
     ...rankOneProjectCandidates,
     ...rankOneFactFilterCandidates,
   ]);
@@ -4509,6 +4602,7 @@ function sharedRelationDefinitions(
     boundaryAwareWindowProjectCandidates,
     baselineRankOneProjectCandidates,
     boundaryAwareBagProjectCandidates,
+    boundaryAwareWideCountProjectCandidates,
   );
   const independentAutoPromotionCandidates =
     autoMaterializationPromotionCandidates(baseDefinitions, analysis.postorder);

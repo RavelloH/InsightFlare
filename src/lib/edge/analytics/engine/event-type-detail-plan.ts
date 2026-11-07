@@ -1,8 +1,6 @@
-import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import type { CalendarGranularity } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
-import {
-  appendAdvancedCountQualification,
+import type {
+  AdvancedCountQualificationPlanInput,
   createAdvancedCountQualificationBuilder,
 } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import {
@@ -13,13 +11,12 @@ import {
 } from "@/lib/edge/analytics/engine/event-context-report-plan";
 import {
   addEventQualificationControlOutput,
+  buildEventQualifiedSource,
   EVENT_QUALIFICATION_CONTROL_OUTPUT,
   type EventQualificationPlan,
   type EventQualificationReportSource,
 } from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import {
-  addEventReportSource,
-  createEventReportSourceContextForBuilder,
   EVENT_REPORT_BASE_ATTRIBUTES,
   EVENT_REPORT_TREND_ATTRIBUTES,
 } from "@/lib/edge/analytics/engine/event-source-plan";
@@ -46,7 +43,7 @@ export const EVENT_TYPE_DETAIL_CONTEXT_LIMIT = 100;
 
 export interface EventTypeDetailQualificationInput {
   readonly siteId: string;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: AdvancedCountQualificationPlanInput;
   readonly eventName: string;
   readonly interval: CalendarGranularity;
   readonly includeBreakdowns: boolean;
@@ -77,9 +74,11 @@ function matchingEventName(
 }
 
 /** Builds Overview, Type Trend, and optional Context from one Count match set. */
-export function buildEventTypeDetailQualificationPlan(
-  input: EventTypeDetailQualificationInput,
-): EventQualificationPlan {
+export function buildEventTypeDetailQualificationPlan<
+  Count extends AdvancedCountQualificationPlanInput,
+>(
+  input: EventTypeDetailQualificationInput & { readonly count: Count },
+): EventQualificationPlan<Count["scope"]> {
   if (
     input.count.subject.siteIds.length !== 1 ||
     input.count.subject.siteIds[0] !== input.siteId
@@ -92,12 +91,6 @@ export function buildEventTypeDetailQualificationPlan(
   const selected = EVENT_CONTEXT_CARD_KEYS.filter((key) =>
     selectedSet.has(key),
   );
-  const builder = createAdvancedCountQualificationBuilder(input.count);
-  const qualification = appendAdvancedCountQualification(builder, input.count);
-  const context = createEventReportSourceContextForBuilder(
-    builder,
-    EMPTY_FILTER_DOCUMENT,
-  );
   const attributes = [
     ...new Set([
       ...EVENT_REPORT_BASE_ATTRIBUTES,
@@ -108,27 +101,15 @@ export function buildEventTypeDetailQualificationPlan(
       ...(input.includeContext ? requiredOwnerAttributes(selected) : []),
     ]),
   ];
-  const eventSource = addEventReportSource(context, { attributes });
-  const eventRows = builder.project(
-    eventSource,
-    Object.fromEntries([
-      ...attributes.map((attribute) => [
-        `attribute:${attribute}`,
-        builder.slot(eventSource, `attribute:${attribute}`),
-      ]),
-      ["businessSiteId", builder.literal(input.siteId, STRING)],
-    ]),
-  );
-  const qualifiedEvents = builder.semiJoin(eventRows, qualification.matches, [
-    { left: "businessSiteId", right: "siteId" },
-    {
-      left:
-        input.count.scope === "session"
-          ? "attribute:event.report.ownerSessionId"
-          : "attribute:event.report.ownerVisitorId",
-      right: "entityId",
-    },
-  ]);
+  const qualified = buildEventQualifiedSource({
+    siteId: input.siteId,
+    count: input.count,
+    purpose: "event-context",
+    reportAttributes: attributes,
+  });
+  const builder = qualified.builder;
+  const qualification = qualified.qualification;
+  const qualifiedEvents = qualified.events;
   const overviewEvents = matchingEventName(
     builder,
     qualifiedEvents,
@@ -151,7 +132,7 @@ export function buildEventTypeDetailQualificationPlan(
   });
 
   const reportSourceRelations: EventQualificationReportSource[] = [
-    { relationId: eventSource.id, entity: "event" },
+    ...qualified.reportSourceRelations,
   ];
   if (selected.length > 0) {
     const needsBoundaryPages = selected.some(
@@ -196,8 +177,8 @@ export function buildEventTypeDetailQualificationPlan(
   const plan: ValidatedLogicalPlan = builder.finish();
   return {
     plan,
-    primaryReportSourceRelationId: eventSource.id,
-    eventSourceRelationId: eventSource.id,
+    primaryReportSourceRelationId: qualified.eventSourceRelationId,
+    eventSourceRelationId: qualified.eventSourceRelationId,
     matchesRelationId: qualification.matches.id,
     controlsRelationId: qualification.controls.id,
     groupedSummaryRelationId: qualification.groupedSummary.id,
@@ -205,6 +186,15 @@ export function buildEventTypeDetailQualificationPlan(
     reportOutputIds: Object.freeze(reportOutputIds),
     numericCompatibilityFields: qualification.numericCompatibilityFields,
     scope: qualification.scope,
+    ...(qualification.candidateGrain
+      ? { candidateGrain: qualification.candidateGrain }
+      : {}),
+    ...(qualification.additionalGroupedSummaries
+      ? {
+          additionalGroupedSummaryRelationIds:
+            qualification.additionalGroupedSummaries.map(({ id }) => id),
+        }
+      : {}),
     reportSourceRelations: Object.freeze(reportSourceRelations),
   };
 }

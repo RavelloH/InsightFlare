@@ -15,6 +15,7 @@ export type PhysicalSharedRelationLicenseKind =
   | "rank-one-fact-filter"
   | "strict-generic-facts"
   | "strict-serial-rank-stage"
+  | "wide-count-project-reuse"
   | "stage-derived-auto"
   | "current-boundary-derived-auto";
 
@@ -113,6 +114,7 @@ const licenseKinds = new Set<PhysicalSharedRelationLicenseKind>([
   "rank-one-fact-filter",
   "strict-generic-facts",
   "strict-serial-rank-stage",
+  "wide-count-project-reuse",
   "stage-derived-auto",
   "current-boundary-derived-auto",
 ]);

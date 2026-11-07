@@ -91,6 +91,14 @@ function assertDeferredRequestMatches(input: {
     prepared.interval !== query.interval ||
     prepared.includeBreakdowns !== query.includeBreakdowns ||
     prepared.includeContext !== query.includeContext ||
+    prepared.contextLimit !==
+      (query.contextLimit ?? EVENT_TYPE_DETAIL_CONTEXT_LIMIT) ||
+    prepared.selectedKeys.length !==
+      (query.selectedKeys ?? EVENT_CONTEXT_CARD_KEYS).length ||
+    prepared.selectedKeys.some(
+      (key, index) =>
+        key !== (query.selectedKeys ?? EVENT_CONTEXT_CARD_KEYS)[index],
+    ) ||
     !contextQueryTimeMatchesWindow(deferredTime, window) ||
     deferred.metadata.plan.scope !== deferred.countInput.scope ||
     deferred.metadata.siteIds.length !== 1 ||

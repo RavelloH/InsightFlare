@@ -472,7 +472,9 @@ interface EventQualificationProgram {
     | DeferredEventFieldsQualification
     | DeferredEventFieldValuesQualification
     | DeferredEventNameDimensionQualification
-    | DeferredEventTrendQualification;
+    | DeferredEventTrendQualification
+    | DeferredEventContextQualification
+    | DeferredEventTypeDetailQualification;
   readonly reportKind: QualifiedReportKind;
   readonly reportOutputIds: readonly string[];
   readonly controlOutputId: string;
@@ -1881,7 +1883,16 @@ function compileProgram(request: EventQualificationCompileRequest):
       prepared.eventName !== request.query.eventName ||
       prepared.interval !== request.query.interval ||
       prepared.includeBreakdowns !== request.query.includeBreakdowns ||
-      prepared.includeContext !== request.query.includeContext
+      prepared.includeContext !== request.query.includeContext ||
+      prepared.contextLimit !==
+        (request.query.contextLimit ?? EVENT_TYPE_DETAIL_CONTEXT_LIMIT) ||
+      prepared.selectedKeys.length !==
+        (request.query.selectedKeys ?? EVENT_CONTEXT_CARD_KEYS).length ||
+      prepared.selectedKeys.some(
+        (key, index) =>
+          key !==
+          (request.query.selectedKeys ?? EVENT_CONTEXT_CARD_KEYS)[index],
+      )
     )
       throw new Error("event_type_detail_qualification_request_mismatch");
   }
@@ -1981,6 +1992,39 @@ function compileProgram(request: EventQualificationCompileRequest):
     deferred.metadata.plan.scope === "event" &&
     deferred.countInput.scope === "event" &&
     deferred.countInput.candidateAnchor.kind === "event-candidate";
+  const eventCandidateEventContextQuery =
+    request.kind === "event-context" &&
+    deferred.operation === "event-context" &&
+    deferred.metadata.plan.scope === "event" &&
+    deferred.countInput.scope === "event" &&
+    deferred.countInput.candidateAnchor.kind === "event-candidate";
+  const eventCandidateEventTypeDetailQuery =
+    request.kind === "event-type-detail" &&
+    deferred.operation === "event-type-detail" &&
+    deferred.metadata.plan.scope === "event" &&
+    deferred.countInput.scope === "event" &&
+    deferred.countInput.candidateAnchor.kind === "event-candidate";
+  const eventCandidateContextDetailQuery =
+    eventCandidateEventContextQuery || eventCandidateEventTypeDetailQuery;
+  const eventCandidateContextKeys =
+    request.kind === "event-context"
+      ? request.query.selectedKeys
+      : request.kind === "event-type-detail" && request.query.includeContext
+        ? (request.query.selectedKeys ?? EVENT_CONTEXT_CARD_KEYS)
+        : [];
+  const eventCandidateRequiresPageSource = eventCandidateContextKeys.some(
+    (key) => key === "entry" || key === "exit",
+  );
+  const eventCandidateSourcesMatch =
+    !eventCandidateContextDetailQuery ||
+    (qualification.reportSourceRelations.length ===
+      (eventCandidateRequiresPageSource ? 2 : 1) &&
+      qualification.reportSourceRelations[0]?.entity === "event" &&
+      qualification.reportSourceRelations[0]?.relationId ===
+        qualification.primaryReportSourceRelationId &&
+      (eventCandidateRequiresPageSource
+        ? qualification.reportSourceRelations[1]?.entity === "page"
+        : qualification.reportSourceRelations[1] === undefined));
   const qualificationScopeValid =
     ((qualification.scope === "session" || qualification.scope === "visitor") &&
       qualification.candidateGrain === undefined) ||
@@ -1993,12 +2037,16 @@ function compileProgram(request: EventQualificationCompileRequest):
     (eventCandidateEventSummaryQuery &&
       qualification.scope === "event" &&
       qualification.candidateGrain === "event-candidate") ||
+    (eventCandidateContextDetailQuery &&
+      qualification.scope === "event" &&
+      qualification.candidateGrain === "event-candidate") ||
     ((eventCandidateEventFieldsQuery || eventCandidateEventFieldValuesQuery) &&
       qualification.scope === "event" &&
       qualification.candidateGrain === "event-candidate");
   if (
     qualification.scope !== deferred.countInput.scope ||
     !qualificationScopeValid ||
+    !eventCandidateSourcesMatch ||
     qualification.reportOutputIds.length !== expectedReportOutputIds.length ||
     new Set(qualification.reportOutputIds).size !==
       expectedReportOutputIds.length ||

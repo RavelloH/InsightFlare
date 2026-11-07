@@ -752,8 +752,13 @@ export class AnalyticsLogicalToDbLowerer {
           qualificationPolicy.candidateGrain === "event-candidate" &&
           primaryReportSource?.kind === "source" &&
           primaryReportSource.entity === "event" &&
-          qualificationPolicy.reportSourceRelations.length === 1 &&
-          qualificationPolicy.reportSourceRelations[0]?.entity === "event");
+          qualificationPolicy.reportSourceRelations.length >= 1 &&
+          qualificationPolicy.reportSourceRelations.length <= 2 &&
+          qualificationPolicy.reportSourceRelations[0]?.relationId ===
+            qualificationPolicy.primaryReportSourceRelationId &&
+          qualificationPolicy.reportSourceRelations[0]?.entity === "event" &&
+          (qualificationPolicy.reportSourceRelations.length === 1 ||
+            qualificationPolicy.reportSourceRelations[1]?.entity === "page"));
       if (
         primaryReportSource?.kind !== "source" ||
         (primaryReportSource.entity !== "event" &&
