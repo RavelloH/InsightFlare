@@ -1,12 +1,13 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { AdvancedCountQualificationPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import {
   PAGE_DIMENSION_SELECTIONS,
   type PageDimensionSelection,
 } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import type { AnalyticsQualificationPlan } from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import { appendPageDimensionQualificationSource } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
+import { qualificationPlanMetadata } from "@/lib/edge/analytics/engine/qualification-plan-metadata";
 import type { QualifiedSourceFilterMode } from "@/lib/edge/analytics/engine/qualified-page-source";
 import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
 import {
@@ -78,12 +79,14 @@ export type TechnologyCrossQualificationConfiguration =
   | TechnologyCrossDimensionQualificationConfiguration
   | TechnologyBrowserCrossQualificationConfiguration;
 
-export type TechnologyCrossQualificationPlan = AnalyticsQualificationPlan & {
+export type TechnologyCrossQualificationPlan = AnalyticsQualificationPlan<
+  "session" | "visitor" | "event"
+> & {
   readonly reportOutputIds: readonly [string, string, string];
 };
 
 export type TechnologyBrowserCrossQualificationPlan =
-  AnalyticsQualificationPlan & {
+  AnalyticsQualificationPlan<"session" | "visitor" | "event"> & {
     readonly reportOutputIds: typeof TECHNOLOGY_BROWSER_CROSS_REPORT_OUTPUT_IDS;
   };
 
@@ -246,7 +249,8 @@ export function buildTechnologyCrossQualificationPlan(input: {
   readonly filters: FilterDocument;
   readonly filterMode?: QualifiedSourceFilterMode;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: AdvancedCountQualificationPlanInput;
+  readonly eventCandidateReportProjection?: "page-visits";
 }): TechnologyCrossQualificationPlan {
   const source = appendPageDimensionQualificationSource({
     semanticOperation: "cross-dimension",
@@ -254,9 +258,14 @@ export function buildTechnologyCrossQualificationPlan(input: {
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
-    filterMode: input.filterMode,
+    filterMode: input.eventCandidateReportProjection
+      ? "allow-whole-filter"
+      : input.filterMode,
     scopePlan: input.scopePlan,
     count: input.count,
+    ...(input.eventCandidateReportProjection
+      ? { eventCandidateReportProjection: input.eventCandidateReportProjection }
+      : {}),
     selections: [
       input.configuration.primarySelection,
       input.configuration.secondarySelection,
@@ -296,6 +305,10 @@ export function buildTechnologyCrossQualificationPlan(input: {
     numericCompatibilityFields: source.qualification.numericCompatibilityFields,
     scope: source.qualification.scope,
     reportSourceRelations: source.reportSourceRelations,
+    ...qualificationPlanMetadata(
+      source.qualification,
+      source.eventCandidateReportProjection,
+    ),
   };
 }
 
@@ -307,7 +320,8 @@ export function buildTechnologyBrowserCrossQualificationPlan(input: {
   readonly filters: FilterDocument;
   readonly filterMode?: QualifiedSourceFilterMode;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: AdvancedCountQualificationPlanInput;
+  readonly eventCandidateReportProjection?: "page-visits";
 }): TechnologyBrowserCrossQualificationPlan {
   const source = appendPageDimensionQualificationSource({
     semanticOperation: "cross-dimension",
@@ -315,9 +329,14 @@ export function buildTechnologyBrowserCrossQualificationPlan(input: {
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
-    filterMode: input.filterMode,
+    filterMode: input.eventCandidateReportProjection
+      ? "allow-whole-filter"
+      : input.filterMode,
     scopePlan: input.scopePlan,
     count: input.count,
+    ...(input.eventCandidateReportProjection
+      ? { eventCandidateReportProjection: input.eventCandidateReportProjection }
+      : {}),
     selections: [
       PAGE_DIMENSION_SELECTIONS.browser,
       PAGE_DIMENSION_SELECTIONS.operatingSystem,
@@ -366,5 +385,9 @@ export function buildTechnologyBrowserCrossQualificationPlan(input: {
     numericCompatibilityFields: source.qualification.numericCompatibilityFields,
     scope: source.qualification.scope,
     reportSourceRelations: source.reportSourceRelations,
+    ...qualificationPlanMetadata(
+      source.qualification,
+      source.eventCandidateReportProjection,
+    ),
   };
 }

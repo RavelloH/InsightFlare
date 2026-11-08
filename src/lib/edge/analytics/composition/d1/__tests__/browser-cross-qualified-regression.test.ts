@@ -47,10 +47,12 @@ const WINDOW = {
 };
 const FILTER_DSL =
   'page.path neq "/excluded" and count(event { event.name eq "qualifier" }) gte 1';
+const EVENT_SCOPE_FILTER_DSL =
+  'page.path neq "/excluded" and (count(event { event.name eq "qualifier" }) gte 1 or not (page.path neq "/nine"))';
 const EVIDENCE_DIRECTORY = process.env.INSIGHTFLARE_QUERY_EVIDENCE_DIR?.trim();
 const EVIDENCE_PHASE = process.env.INSIGHTFLARE_QUERY_EVIDENCE_PHASE?.trim();
 
-type Scope = "session" | "visitor";
+type Scope = "session" | "visitor" | "event";
 type BrowserCrossRequest = QueryInput & {
   readonly time: QueryTime;
   readonly variant: "browser";
@@ -769,13 +771,17 @@ describe("Browser Cross qualified regression", () => {
       reverseState.reverse_unordered_selects === 1;
     let reverseRestoredValue: number | undefined;
     try {
-      for (const scope of ["session", "visitor"] as const) {
+      for (const scope of ["session", "visitor", "event"] as const) {
         for (const reverseUnordered of [false, true]) {
           database.exec(
             `PRAGMA reverse_unordered_selects = ${reverseUnordered ? "ON" : "OFF"}`,
           );
           const limits = { browserLimit: 2, osLimit: 1, deviceTypeLimit: 2 };
-          const query = browserQuery(scope, limits);
+          const query = browserQuery(
+            scope,
+            limits,
+            scope === "event" ? EVENT_SCOPE_FILTER_DSL : FILTER_DSL,
+          );
           const { deferred, forwarded } = await forwardBrowserCandidate(query);
           const compilation = compileCrossQualificationProgram({
             deferred,

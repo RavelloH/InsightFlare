@@ -561,7 +561,12 @@ export async function queryQualifiedPagesTabsFromD1(input: {
     query,
     ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
   });
-  if (execution.kind !== "executed") return execution;
+  if (execution.kind !== "executed") {
+    if (input.diagnostics)
+      input.diagnostics.advancedCountSqlFallbackReason =
+        execution.fallbackReason;
+    return execution;
+  }
   if (invalidCursor) throw new InvalidCursorError("pages");
   if (configuration === "tabs-only") {
     const tabRows = execution.rows.filter(

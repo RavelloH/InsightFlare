@@ -5,7 +5,7 @@ import type {
   PerformanceMetricKey,
   QueryTime,
 } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { AdvancedCountQualificationPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import type { AnalyticsQualificationPlan } from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import { appendPageDimensionQualificationSource } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
 import {
@@ -14,6 +14,7 @@ import {
   appendPerformanceRoutesReport,
   PERFORMANCE_METRICS,
 } from "@/lib/edge/analytics/engine/performance-sample-statistics-report-plan";
+import { qualificationPlanMetadata } from "@/lib/edge/analytics/engine/qualification-plan-metadata";
 import type { QualifiedSourceFilterMode } from "@/lib/edge/analytics/engine/qualified-page-source";
 import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
@@ -35,7 +36,7 @@ export type PerformanceBreakdownDashboardQualificationMode =
     };
 
 export type PerformanceBreakdownDashboardQualificationPlan =
-  AnalyticsQualificationPlan & {
+  AnalyticsQualificationPlan<"session" | "visitor" | "event"> & {
     readonly mode: PerformanceBreakdownDashboardQualificationMode["mode"];
     readonly reportOutputIds: readonly string[];
   };
@@ -68,7 +69,8 @@ export function buildPerformanceBreakdownDashboardQualificationPlan(input: {
   readonly filters: FilterDocument;
   readonly filterMode?: QualifiedSourceFilterMode;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: AdvancedCountQualificationPlanInput;
+  readonly eventCandidateReportProjection?: "page-visits";
   readonly mode: PerformanceBreakdownDashboardQualificationMode;
 }): PerformanceBreakdownDashboardQualificationPlan {
   const source = appendPageDimensionQualificationSource({
@@ -77,9 +79,14 @@ export function buildPerformanceBreakdownDashboardQualificationPlan(input: {
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
-    filterMode: input.filterMode ?? "split-only",
+    filterMode: input.eventCandidateReportProjection
+      ? "allow-whole-filter"
+      : (input.filterMode ?? "split-only"),
     scopePlan: input.scopePlan,
     count: input.count,
+    ...(input.eventCandidateReportProjection
+      ? { eventCandidateReportProjection: input.eventCandidateReportProjection }
+      : {}),
     selections: [],
     additionalAttributes: attributesFor(input.mode),
   });
@@ -118,5 +125,9 @@ export function buildPerformanceBreakdownDashboardQualificationPlan(input: {
     numericCompatibilityFields: qualification.numericCompatibilityFields,
     scope: qualification.scope,
     reportSourceRelations: source.reportSourceRelations,
+    ...qualificationPlanMetadata(
+      qualification,
+      source.eventCandidateReportProjection,
+    ),
   };
 }

@@ -119,7 +119,22 @@ function compileProgram(input: PerformanceTimeseriesProgramInput) {
     scopePlan: deferred.qualification.metadata.plan,
     count: deferred.qualification.countInput,
     interval,
+    ...("eventCandidateReportProjection" in deferred.qualification &&
+    deferred.qualification.eventCandidateReportProjection === "page-visits"
+      ? { eventCandidateReportProjection: "page-visits" as const }
+      : {}),
   });
+  if (
+    qualification.reportOutputIds.length !==
+      PERFORMANCE_ALL_TRENDS_OUTPUT_IDS.length ||
+    qualification.reportOutputIds.some(
+      (outputId, index) =>
+        outputId !== PERFORMANCE_ALL_TRENDS_OUTPUT_IDS[index],
+    )
+  )
+    throw new Error(
+      "performance_timeseries_qualification_plan_identity_invalid",
+    );
   const reports = PERFORMANCE_ALL_TRENDS_OUTPUT_IDS.map((outputId) => {
     const output = exactOutput(qualification.plan.outputs, outputId);
     return {
@@ -274,7 +289,12 @@ export async function executePerformanceTimeseriesQualificationProgram(
   },
 ): Promise<PerformanceTimeseriesQualificationExecution> {
   const { deferred, interval, compilation } = compileProgram(input);
-  if (compilation.kind === "unavailable") return compilation;
+  if (compilation.kind === "unavailable") {
+    if (input.diagnostics)
+      input.diagnostics.advancedCountSqlFallbackReason =
+        compilation.fallbackReason;
+    return compilation;
+  }
   const rows = await executeQualificationQuery(
     deferred.qualification.signal,
     () =>
@@ -284,5 +304,8 @@ export async function executePerformanceTimeseriesQualificationProgram(
         input.diagnostics,
       ),
   );
-  return decodeRows(rows, deferred, interval, compilation.evidence);
+  const execution = decodeRows(rows, deferred, interval, compilation.evidence);
+  if (execution.kind === "fallback" && input.diagnostics)
+    input.diagnostics.advancedCountSqlFallbackReason = execution.fallbackReason;
+  return execution;
 }

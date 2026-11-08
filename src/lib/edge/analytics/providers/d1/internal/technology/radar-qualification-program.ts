@@ -13,6 +13,7 @@ import {
 import {
   type DeferredRadarQualification,
   deferredRadarQualificationFromQuery,
+  isDeferredEventCandidatePageProjection,
   isDeferredEventQualification,
   isDeferredRadarQualificationRequest,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
@@ -145,7 +146,7 @@ function sameConfiguration(
 }
 
 function verifyPlan(
-  qualification: AnalyticsQualificationPlan,
+  qualification: AnalyticsQualificationPlan<"session" | "visitor" | "event">,
   deferred: DeferredRadarQualification,
 ): {
   readonly report: LogicalOutput;
@@ -167,9 +168,23 @@ function verifyPlan(
     dimension === "version"
       ? BROWSER_VERSION_REPORT_FIELDS
       : [dimension, ...REPORT_METRICS];
+  const pageVisitsProjection =
+    deferred.qualification.countInput.scope === "event" &&
+    "eventCandidateReportProjection" in deferred.qualification &&
+    deferred.qualification.eventCandidateReportProjection === "page-visits";
   if (
     qualification.scope !== deferred.qualification.countInput.scope ||
-    (qualification.scope !== "session" && qualification.scope !== "visitor") ||
+    (qualification.scope === "event"
+      ? !pageVisitsProjection
+      : qualification.scope !== "session" &&
+        qualification.scope !== "visitor") ||
+    qualification.candidateGrain !==
+      (pageVisitsProjection ? "event-candidate" : undefined) ||
+    qualification.eventCandidateReportProjection !==
+      (pageVisitsProjection ? "page-visits" : undefined) ||
+    (pageVisitsProjection
+      ? qualification.additionalGroupedSummaryRelationIds?.length !== 1
+      : qualification.additionalGroupedSummaryRelationIds !== undefined) ||
     qualification.controlOutputId !==
       TECHNOLOGY_RADAR_QUALIFICATION_CONTROL_OUTPUT ||
     qualification.reportOutputIds.length !== 1 ||
@@ -223,7 +238,8 @@ function compileProgram(input: {
     !Object.isFrozen(input.deferred) ||
     !Object.isFrozen(input.deferred.configuration) ||
     !sameConfiguration(input.configuration, input.deferred.configuration) ||
-    !isDeferredEventQualification(input.deferred.qualification) ||
+    (!isDeferredEventQualification(input.deferred.qualification) &&
+      !isDeferredEventCandidatePageProjection(input.deferred.qualification)) ||
     input.deferred.operation !== "radar" ||
     input.deferred.qualification.operation !== "radar"
   )
@@ -242,6 +258,11 @@ function compileProgram(input: {
             : {}),
           scopePlan: deferred.qualification.metadata.plan,
           count: deferred.qualification.countInput,
+          ...("eventCandidateReportProjection" in deferred.qualification &&
+          deferred.qualification.eventCandidateReportProjection ===
+            "page-visits"
+            ? { eventCandidateReportProjection: "page-visits" as const }
+            : {}),
         })
       : buildTechnologyRadarQualificationPlan({
           configuration,
@@ -254,6 +275,11 @@ function compileProgram(input: {
             : {}),
           scopePlan: deferred.qualification.metadata.plan,
           count: deferred.qualification.countInput,
+          ...("eventCandidateReportProjection" in deferred.qualification &&
+          deferred.qualification.eventCandidateReportProjection ===
+            "page-visits"
+            ? { eventCandidateReportProjection: "page-visits" as const }
+            : {}),
         });
   const verified = verifyPlan(qualification, deferred);
   const dimension = configuration.dimension;

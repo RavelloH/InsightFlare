@@ -74,7 +74,7 @@ const MIXED_NOT_FILTER_DSL =
 const EVIDENCE_DIRECTORY = process.env.INSIGHTFLARE_QUERY_EVIDENCE_DIR?.trim();
 const BEFORE_BASELINE = process.env.INSIGHTFLARE_QUERY_BASELINE_PATH?.trim();
 
-type Scope = "session" | "visitor";
+type Scope = "session" | "visitor" | "event";
 type PerformanceRequest = QueryInput & Record<string, unknown>;
 type ModeRequest =
   | {
@@ -479,6 +479,8 @@ function seedBinaryOrderPages(): readonly string[] {
 }
 
 function qualifiedPages(scope: Scope): readonly PageSeed[] {
+  if (scope === "event")
+    return FIXTURE.filter((page) => page.events?.includes("qualifier"));
   const qualifyingIdentity = new Set(
     FIXTURE.filter((page) => page.events?.includes("qualifier")).map((page) =>
       scope === "session" ? page.session : page.visitor,
@@ -1314,78 +1316,148 @@ FROM visits WHERE visit_id IN (?, ?) ORDER BY visit_id`,
     }
   });
 
-  it("falls back once on an incompatible numeric Count field and rejects a malformed dashboard envelope", async () => {
-    database
-      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
-      .run("invalid-duration", "a1");
-    try {
-      const prepared = await prepareQualifiedQuery(
-        "session",
-        {
-          mode: "dashboard",
-          interval: "hour",
-        },
-        numericCountFilters(),
+  it.each([
+    ...(["ttfb", "fcp", "lcp", "cls", "inp"] as const).flatMap((metric) => [
+      {
+        mode: "breakdown" as const,
+        dimension: "page.path" as const,
+        metric,
+        limit: 2,
+      },
+      {
+        mode: "breakdown" as const,
+        dimension: "geo.country" as const,
+        metric,
+        limit: 2,
+      },
+    ]),
+    { mode: "dashboard" as const, interval: "hour" as const },
+  ])(
+    "matches complete Event-candidate Performance mode %j against Core",
+    async (mode) => {
+      const prepared = await prepareQualifiedQuery("event", mode);
+      const evidence = compileEvidence(prepared);
+      const actualTrace = trace();
+      const actual = await executePerformance(
+        performanceQuery("event", mode),
+        actualTrace,
       );
-      const diagnostics = createD1ReadDiagnostics();
-      const fallbackTrace = trace();
-      const fallback = await executePerformance(
-        performanceQuery(
-          "session",
-          { mode: "dashboard", interval: "hour" },
-          numericCountFilters(),
-        ),
-        fallbackTrace,
-        { env: envFor(fallbackTrace), diagnostics },
-      );
+      const legacyTrace = trace();
       const legacy = await legacyPerformance(
         prepared.deferred,
-        { mode: "dashboard", interval: "hour" },
-        trace(),
+        mode,
+        legacyTrace,
       );
-      expect(fallback.value).toEqual(legacy.value);
-      expect(
-        fallbackTrace.preparedSql.filter(
-          (sql) => sql === legacy.queryTrace.preparedSql[0],
-        ),
-      ).toHaveLength(1);
-      expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
-        kind: "numeric-data-domain",
-        fieldIds: ["page.durationMs"],
-      });
-      writeEvidence("numeric-domain-fallback.json", {
-        fallbackReason: diagnostics.advancedCountSqlFallbackReason,
-        statementCount: fallbackTrace.preparedSql.length,
-        sql: fallbackTrace.preparedSql,
-        bindings: fallbackTrace.bindings,
-        output: fallback.value,
-        legacyOutput: legacy.value,
-      });
 
-      const badTrace = trace();
-      const badEnv = createBadReportOutputEnv(badTrace);
-      const badProvider = createD1SiteProviderRegistry({
-        env: badEnv,
-        siteId: SITE_ID,
-      }).resolve("performance");
-      if (!badProvider) throw new Error("wave96u_performance_provider_missing");
-      await expect(
-        badProvider.execute(
-          performanceQuery("session", {
+      expect(
+        actual.value,
+        `${mode.mode}:${"metric" in mode ? mode.metric : mode.interval}`,
+      ).toEqual(legacy.value);
+      expect(actualTrace.preparedSql).toHaveLength(2);
+      expect(actualTrace.preparedSql[1]).toBe(evidence.sql);
+      expect(actualTrace.bindings[1]).toEqual(evidence.bindings);
+      expect(evidence.outputDescriptors).toHaveLength(
+        mode.mode === "dashboard" ? 20 : 5,
+      );
+      expect(
+        evidence.outputDescriptors.every(
+          ({ fields }) =>
+            JSON.stringify(fields) ===
+            JSON.stringify(PERFORMANCE_REPORT_OUTPUT_FIELDS),
+        ),
+      ).toBe(true);
+      writeEvidence(
+        `qualified-event-${mode.mode}-${"metric" in mode ? mode.dimension + "-" + mode.metric : mode.interval}.json`,
+        {
+          mode,
+          output: actual.value,
+          coreOutput: legacy.value,
+          outputDescriptors: evidence.outputDescriptors,
+          sql: actualTrace.preparedSql,
+          bindings: actualTrace.bindings,
+        },
+      );
+    },
+  );
+
+  it.each(["session", "event"] as const)(
+    "falls back completely for numeric %s Count and rejects malformed dashboard output",
+    async (scope) => {
+      database
+        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+        .run("invalid-duration", "a1");
+      try {
+        const prepared = await prepareQualifiedQuery(
+          scope,
+          {
             mode: "dashboard",
             interval: "hour",
-          }) as never,
-        ),
-      ).rejects.toThrow(
-        "performance_breakdown_dashboard_qualification_report_row_invalid",
-      );
-      expect(badTrace.preparedSql).toHaveLength(2);
-    } finally {
-      database
-        .prepare("UPDATE visits SET duration_ms = NULL WHERE visit_id = ?")
-        .run("a1");
-    }
-  });
+          },
+          numericCountFilters(),
+        );
+        const diagnostics = createD1ReadDiagnostics();
+        const fallbackTrace = trace();
+        const fallback = await executePerformance(
+          performanceQuery(
+            scope,
+            { mode: "dashboard", interval: "hour" },
+            numericCountFilters(),
+          ),
+          fallbackTrace,
+          { env: envFor(fallbackTrace), diagnostics },
+        );
+        const legacy = await legacyPerformance(
+          prepared.deferred,
+          { mode: "dashboard", interval: "hour" },
+          trace(),
+        );
+        expect(fallback.value).toEqual(legacy.value);
+        expect(
+          fallbackTrace.preparedSql.filter(
+            (sql) => sql === legacy.queryTrace.preparedSql[0],
+          ),
+        ).toHaveLength(1);
+        expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+          kind: "numeric-data-domain",
+          fieldIds: ["page.durationMs"],
+        });
+        writeEvidence(`numeric-domain-fallback-${scope}.json`, {
+          fallbackReason: diagnostics.advancedCountSqlFallbackReason,
+          statementCount: fallbackTrace.preparedSql.length,
+          sql: fallbackTrace.preparedSql,
+          bindings: fallbackTrace.bindings,
+          output: fallback.value,
+          legacyOutput: legacy.value,
+        });
+
+        if (scope === "session") {
+          const badTrace = trace();
+          const badEnv = createBadReportOutputEnv(badTrace);
+          const badProvider = createD1SiteProviderRegistry({
+            env: badEnv,
+            siteId: SITE_ID,
+          }).resolve("performance");
+          if (!badProvider)
+            throw new Error("wave96u_performance_provider_missing");
+          await expect(
+            badProvider.execute(
+              performanceQuery("session", {
+                mode: "dashboard",
+                interval: "hour",
+              }) as never,
+            ),
+          ).rejects.toThrow(
+            "performance_breakdown_dashboard_qualification_report_row_invalid",
+          );
+          expect(badTrace.preparedSql).toHaveLength(2);
+        }
+      } finally {
+        database
+          .prepare("UPDATE visits SET duration_ms = NULL WHERE visit_id = ?")
+          .run("a1");
+      }
+    },
+  );
 
   it("binds every public request field to its trusted performance qualification", async () => {
     const pathMode = {

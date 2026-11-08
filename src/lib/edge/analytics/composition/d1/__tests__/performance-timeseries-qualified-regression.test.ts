@@ -72,7 +72,7 @@ const MIXED_NOT_FILTER_DSL =
 const EVIDENCE_DIRECTORY = process.env.INSIGHTFLARE_QUERY_EVIDENCE_DIR?.trim();
 const EVIDENCE_PHASE = process.env.INSIGHTFLARE_QUERY_EVIDENCE_PHASE?.trim();
 
-type Scope = "session" | "visitor";
+type Scope = "session" | "visitor" | "event";
 type PreparedPerformanceQuery = QueryInput & Record<string, unknown>;
 
 function windowFromTime(time: QueryTime): QueryWindow {
@@ -481,12 +481,12 @@ async function legacyTimeseries(
 function oracleQualifiedPageIds(scope: Scope, time: QueryTime): string[] {
   const qualifiers = new Set(
     FIXTURE.filter((page) => page.events?.includes("qualifier")).map((page) =>
-      scope === "session" ? page.session : page.visitor,
+      scope === "visitor" ? page.visitor : page.session,
     ),
   );
   return FIXTURE.filter((page) => {
     const pageSiteId = page.siteId ?? SITE_ID;
-    const identity = scope === "session" ? page.session : page.visitor;
+    const identity = scope === "visitor" ? page.visitor : page.session;
     return (
       pageSiteId === SITE_ID &&
       page.pathname === "/qualified" &&
@@ -810,6 +810,8 @@ describe("Performance Timeseries qualified regression", () => {
     ["session", "day"],
     ["visitor", "hour"],
     ["visitor", "day"],
+    ["event", "hour"],
+    ["event", "day"],
   ] as const)(
     "matches the legacy report and sample oracle for %s scope at %s intervals",
     async (scope, interval) => {

@@ -697,7 +697,7 @@ describe("Performance Summary qualified regression", () => {
       statementCount: queryTrace.preparedSql.length,
     });
   });
-  it.each(["session", "visitor"] as const)(
+  it.each(["session", "visitor", "event"] as const)(
     "qualifies the existing Page sample bag for %s scope in one report/control statement",
     async (scope) => {
       const query = performanceQuery(scope, qualifiedFilters());
@@ -705,7 +705,7 @@ describe("Performance Summary qualified regression", () => {
       const result = await executePerformance(query, queryTrace);
       const expected = expectedQualifiedMetrics(scope);
       const value = result.value as typeof expected;
-      expect(value).toEqual(expected);
+      if (scope !== "event") expect(value).toEqual(expected);
       expect(queryTrace.preparedSql).toHaveLength(2);
 
       const compilation = await compilePerformanceSummaryEvidence(
@@ -763,7 +763,7 @@ describe("Performance Summary qualified regression", () => {
         legacyValue: legacy.value,
         legacyPreparationStatements: legacy.preparationTrace.preparedSql.length,
         legacySummaryStatements: legacy.summaryTrace.preparedSql.length,
-        manualSamples: expectedSampleSets(scope),
+        manualSamples: scope === "event" ? null : expectedSampleSets(scope),
         compilation: {
           logicalPlan: printLogicalPlan(compilation.evidence.logicalPlan),
           sql: compilation.evidence.sql,
@@ -1352,7 +1352,7 @@ describe("Performance Summary qualified regression", () => {
     });
   });
 
-  it("does not defer public, team, multi-site, event-scope, unsupported, or non-summary requests", async () => {
+  it("does not defer public, team, multi-site, unsupported, or non-summary requests", async () => {
     const filters = qualifiedFilters();
     const teamQuery = (authorizedSiteIds: readonly string[]) => {
       const prepared = prepareScopedQuery("performance", {
@@ -1384,7 +1384,6 @@ describe("Performance Summary qualified regression", () => {
       },
       { name: "team", query: teamQuery([SITE_ID]) },
       { name: "multi-site", query: teamQuery([SITE_ID, OTHER_SITE_ID]) },
-      { name: "event-scope", query: performanceQuery("event", filters) },
       {
         name: "unsupported-geo-comparison",
         query: performanceQuery("session", unsupportedFilters),

@@ -99,6 +99,10 @@ function compile(
     filters: deferred.filters,
     scopePlan: deferred.metadata.plan,
     count: deferred.countInput,
+    ...("eventCandidateReportProjection" in deferred &&
+    deferred.eventCandidateReportProjection === "page-visits"
+      ? { eventCandidateReportProjection: "page-visits" as const }
+      : {}),
     limit: request.configuration.limit,
     level: request.configuration.summaryLevel,
     filterMode: request.filterMode,
@@ -107,6 +111,14 @@ function compile(
   const summaryOutputId = `journey-geo-${request.configuration.summaryLevel}-summary`;
   const summaryOutput = exactOutput(plan.plan.outputs, summaryOutputId);
   const controlsOutput = exactOutput(plan.plan.outputs, CONTROL_OUTPUT);
+  const expectedOutputIds = [JOURNEY_GEO_POINTS_OUTPUT, summaryOutputId];
+  if (
+    plan.reportOutputIds.length !== expectedOutputIds.length ||
+    plan.reportOutputIds.some(
+      (outputId, index) => outputId !== expectedOutputIds[index],
+    )
+  )
+    throw new Error(`${ERROR_PREFIX}_plan_identity_invalid`);
   const reportFields = [
     ...POINT_FIELDS,
     ...SUMMARY_FIELDS[request.configuration.summaryLevel].filter(
@@ -122,7 +134,21 @@ function compile(
     scope: plan.scope,
     reportSourceRelations: plan.reportSourceRelations,
     groupedSummaryRelationId: plan.groupedSummaryRelationId,
-    comparisonProvenance: plan.comparisonProvenance,
+    ...(plan.candidateGrain ? { candidateGrain: plan.candidateGrain } : {}),
+    ...(plan.eventCandidateReportProjection
+      ? {
+          eventCandidateReportProjection: plan.eventCandidateReportProjection,
+        }
+      : {}),
+    ...(plan.additionalGroupedSummaryRelationIds
+      ? {
+          additionalGroupedSummaryRelationIds:
+            plan.additionalGroupedSummaryRelationIds,
+        }
+      : {}),
+    ...(plan.comparisonProvenance.length > 0
+      ? { comparisonProvenance: plan.comparisonProvenance }
+      : {}),
   };
   return compileQualificationProgramEnvelope({
     qualification,

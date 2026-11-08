@@ -72,7 +72,7 @@ function writeEvidence(filename: string, contents: string): void {
   writeFileSync(join(EVIDENCE_DIRECTORY, filename), contents, "utf8");
 }
 
-type Scope = "session" | "visitor";
+type Scope = "session" | "visitor" | "event";
 type Variant =
   | "browser"
   | "browser-engine"
@@ -846,7 +846,7 @@ describe("share-trend qualified provider regression", () => {
     const runtimeEvidence: Record<string, unknown>[] = [];
     const budgets = new Map<string, string>();
     try {
-      for (const scope of ["session", "visitor"] as const) {
+      for (const scope of ["session", "visitor", "event"] as const) {
         for (const scenario of scenarios) {
           const query = queryFor(scope, scenario);
           const candidate = await compileCandidate(query);

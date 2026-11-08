@@ -5,7 +5,10 @@ import {
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
 import type { JourneyGeoSummaryLevel } from "@/lib/edge/analytics/engine/journey-geo-report-plan";
 import { journeyGeoSummaryLevelFromFilter } from "@/lib/edge/analytics/engine/journey-geo-report-plan";
-import type { DeferredEventQualification } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import type {
+  DeferredEventCandidatePageProjectionFor,
+  DeferredEventQualification,
+} from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { readOwnDataProperty } from "@/lib/edge/analytics/providers/d1/internal/overview-previous-time";
 import {
   pagesDashboardOwnDataSnapshotsEqual,
@@ -22,10 +25,12 @@ export interface GeoPointsQualificationConfiguration {
   readonly summaryLevel: JourneyGeoSummaryLevel;
 }
 
-export type DeferredGeoPointsQualificationInput = DeferredEventQualification & {
-  readonly operation: "geo-points";
-  readonly requestTime: QueryTime;
-};
+export type DeferredGeoPointsQualificationInput =
+  | (DeferredEventQualification & {
+      readonly operation: "geo-points";
+      readonly requestTime: QueryTime;
+    })
+  | DeferredEventCandidatePageProjectionFor<"geo-points">;
 
 export interface DeferredGeoPointsQualification {
   readonly operation: "geo-points";

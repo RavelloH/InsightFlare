@@ -88,7 +88,16 @@ function compileProgram(input: PerformanceSummaryProgramInput) {
       : {}),
     scopePlan: deferred.qualification.metadata.plan,
     count: deferred.qualification.countInput,
+    ...("eventCandidateReportProjection" in deferred.qualification &&
+    deferred.qualification.eventCandidateReportProjection === "page-visits"
+      ? { eventCandidateReportProjection: "page-visits" as const }
+      : {}),
   });
+  if (
+    qualification.reportOutputIds.length !== 1 ||
+    qualification.reportOutputIds[0] !== PERFORMANCE_SUMMARY_OUTPUT_ID
+  )
+    throw new Error("performance_summary_qualification_plan_identity_invalid");
   const report = exactOutput(
     qualification.plan.outputs,
     PERFORMANCE_SUMMARY_OUTPUT_ID,
@@ -194,7 +203,12 @@ export async function executePerformanceSummaryQualificationProgram(
   },
 ): Promise<PerformanceSummaryQualificationExecution> {
   const { deferred, compilation } = compileProgram(input);
-  if (compilation.kind === "unavailable") return compilation;
+  if (compilation.kind === "unavailable") {
+    if (input.diagnostics)
+      input.diagnostics.advancedCountSqlFallbackReason =
+        compilation.fallbackReason;
+    return compilation;
+  }
   const rows = await executeQualificationQuery(
     deferred.qualification.signal,
     () =>
@@ -204,7 +218,10 @@ export async function executePerformanceSummaryQualificationProgram(
         input.diagnostics,
       ),
   );
-  return decodeRows(rows, deferred, compilation.evidence);
+  const execution = decodeRows(rows, deferred, compilation.evidence);
+  if (execution.kind === "fallback" && input.diagnostics)
+    input.diagnostics.advancedCountSqlFallbackReason = execution.fallbackReason;
+  return execution;
 }
 
 export type PerformanceSummaryQualificationPlanEvidence =

@@ -11,6 +11,7 @@ import {
 import {
   type DeferredShareTrendQualification,
   deferredShareTrendQualificationFromQuery,
+  isDeferredEventCandidatePageProjection,
   isDeferredEventQualification,
   isDeferredShareTrendQualificationRequest,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
@@ -209,7 +210,7 @@ function sameConfiguration(left: unknown, right: unknown): boolean {
 }
 
 function verifyPlan(
-  qualification: AnalyticsQualificationPlan,
+  qualification: AnalyticsQualificationPlan<"session" | "visitor" | "event">,
   deferred: DeferredShareTrendQualification,
   descriptors: readonly ShareTrendOutputDescriptor[],
 ): {
@@ -221,9 +222,23 @@ function verifyPlan(
   readonly controlsOutput: LogicalOutput;
   readonly controlFields: readonly string[];
 } {
+  const pageVisitsProjection =
+    deferred.qualification.countInput.scope === "event" &&
+    "eventCandidateReportProjection" in deferred.qualification &&
+    deferred.qualification.eventCandidateReportProjection === "page-visits";
   if (
     qualification.scope !== deferred.qualification.countInput.scope ||
-    (qualification.scope !== "session" && qualification.scope !== "visitor") ||
+    (qualification.scope === "event"
+      ? !pageVisitsProjection
+      : qualification.scope !== "session" &&
+        qualification.scope !== "visitor") ||
+    qualification.candidateGrain !==
+      (pageVisitsProjection ? "event-candidate" : undefined) ||
+    qualification.eventCandidateReportProjection !==
+      (pageVisitsProjection ? "page-visits" : undefined) ||
+    (pageVisitsProjection
+      ? qualification.additionalGroupedSummaryRelationIds?.length !== 1
+      : qualification.additionalGroupedSummaryRelationIds !== undefined) ||
     qualification.controlOutputId !==
       TECHNOLOGY_SHARE_TREND_QUALIFICATION_CONTROL_OUTPUT ||
     qualification.reportOutputIds.length !== descriptors.length ||
@@ -283,7 +298,8 @@ function compileProgram(input: {
     !Object.isFrozen(input.deferred) ||
     !Object.isFrozen(input.deferred.configuration) ||
     !sameConfiguration(input.configuration, input.deferred.configuration) ||
-    !isDeferredEventQualification(input.deferred.qualification) ||
+    (!isDeferredEventQualification(input.deferred.qualification) &&
+      !isDeferredEventCandidatePageProjection(input.deferred.qualification)) ||
     input.deferred.operation !== "share-trend" ||
     input.deferred.qualification.operation !== "share-trend"
   )
@@ -299,6 +315,10 @@ function compileProgram(input: {
       : {}),
     scopePlan: deferred.qualification.metadata.plan,
     count: deferred.qualification.countInput,
+    ...("eventCandidateReportProjection" in deferred.qualification &&
+    deferred.qualification.eventCandidateReportProjection === "page-visits"
+      ? { eventCandidateReportProjection: "page-visits" as const }
+      : {}),
   });
   const descriptors = outputDescriptors(configuration);
   const verified = verifyPlan(qualification, deferred, descriptors);

@@ -78,7 +78,7 @@ const REPORTING_TIME = createQueryTime(
   REPORTING_BASE + 3 * 60 * 60 * 1000,
 );
 
-type ReportingScope = "session" | "visitor";
+type ReportingScope = "session" | "visitor" | "event";
 type RadarQuery = CanonicalQuery<"radar"> & {
   readonly browserLimit?: number;
   readonly versionLimit?: number;
@@ -804,6 +804,8 @@ describe("Radar qualified provider regression", () => {
     { scope: "session", dimension: "referrer" },
     { scope: "visitor", dimension: "browser" },
     { scope: "visitor", dimension: "referrer" },
+    { scope: "event", dimension: "browser" },
+    { scope: "event", dimension: "referrer" },
   ] as const;
   const radarReferrerLimitCases = (["session", "visitor"] as const).flatMap(
     (scope) =>
@@ -917,21 +919,21 @@ describe("Radar qualified provider regression", () => {
     }
   });
 
-  const browserVersionLimitCases = (["session", "visitor"] as const).flatMap(
-    (scope) => [
-      { id: `${scope}-default-limits`, scope, limits: {} },
-      {
-        id: `${scope}-fractional-limits`,
-        scope,
-        limits: { browserLimit: 0.25, versionLimit: 2.5 },
-      },
-      {
-        id: `${scope}-decimal-limits`,
-        scope,
-        limits: { browserLimit: 1.2, versionLimit: 8 },
-      },
-    ],
-  );
+  const browserVersionLimitCases = (
+    ["session", "visitor", "event"] as const
+  ).flatMap((scope) => [
+    { id: `${scope}-default-limits`, scope, limits: {} },
+    {
+      id: `${scope}-fractional-limits`,
+      scope,
+      limits: { browserLimit: 0.25, versionLimit: 2.5 },
+    },
+    {
+      id: `${scope}-decimal-limits`,
+      scope,
+      limits: { browserLimit: 1.2, versionLimit: 8 },
+    },
+  ]);
   const browserVersionCaseIds = [
     ...browserVersionLimitCases.map(({ id }) => id),
     "explicit-null-default-limits",
@@ -1572,7 +1574,7 @@ describe("Radar qualified provider regression", () => {
 
   afterAll(() => {
     if (radarRegistryComparisons.length === radarReportCases.length) {
-      expect(radarRegistryComparisons).toHaveLength(4);
+      expect(radarRegistryComparisons).toHaveLength(radarReportCases.length);
       writeEvidence(
         "radar-qualified-registry-comparisons.json",
         JSON.stringify({ comparisons: radarRegistryComparisons }, null, 2),

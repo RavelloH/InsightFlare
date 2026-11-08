@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -33,7 +33,10 @@ import {
   buildVisitSourceCte,
   visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
-import { classifyAdvancedCountFilter } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
+import {
+  classifyAdvancedCountFilter,
+  classifyAdvancedEventCandidateCountFilter,
+} from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import {
   d1AdvancedFilterMiddleware,
   prepareDeferredEventQualificationFallback,
@@ -97,6 +100,7 @@ interface GeoFixture {
   readonly region?: string | null;
   readonly regionCode?: string | null;
   readonly city?: string | null;
+  readonly pathname?: string;
 }
 
 interface CapturedSqlStatement {
@@ -218,7 +222,7 @@ function addVisit(database: DatabaseSync, fixture: GeoFixture): void {
         visit_id, site_id, site_pk, visitor_id, session_id, status,
         started_at, last_activity_at, pathname, hostname, latitude, longitude,
         country, region, region_code, city
-      ) VALUES (?, ?, ?, ?, ?, 'closed', ?, ?, '/geo', 'wave52.test', ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, 'closed', ?, ?, ?, 'wave52.test', ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       fixture.id,
@@ -228,6 +232,7 @@ function addVisit(database: DatabaseSync, fixture: GeoFixture): void {
       fixture.session,
       fixture.time,
       fixture.time,
+      fixture.pathname ?? "/geo",
       fixture.latitude ?? null,
       fixture.longitude ?? null,
       fixture.country === undefined ? "" : fixture.country,
@@ -2176,6 +2181,282 @@ describe("Journey Geo Page report D1 migration", () => {
   );
 
   itWithGeoQualificationEvent(
+    "matches registered Event-candidate Geo points and country summary against Core without widening an owner sibling",
+    async () => {
+      const siblingId = "wave97eq-geo-unmatched-sibling";
+      try {
+        db.prepare("UPDATE visits SET pathname = ? WHERE visit_id = ?").run(
+          "/native-only",
+          "geo-sf-2",
+        );
+        addVisit(db, {
+          id: siblingId,
+          site,
+          session: "s1",
+          visitor: "v1",
+          time: 130,
+          latitude: 1.2345,
+          longitude: -2.3455,
+          country: "US",
+          region: "California",
+          regionCode: "CA",
+          city: "San Francisco",
+          pathname: "/unmatched-sibling",
+        });
+        const filterDsl =
+          'page.path neq "/unmatched-sibling" and ((count(event { event.name eq "wave97i-geo-qualifier" }) gt 0 and event.name eq "wave97i-geo-qualifier") or page.path eq "/native-only")';
+        const document = parseFilterDsl(filterDsl, analyticsFilterRegistry);
+        const time = createQueryTime(
+          WINDOW.startMs,
+          WINDOW.endExclusiveMs,
+          WINDOW.timeZone,
+          WINDOW.nowMs,
+        );
+        const prepared = prepareScopedQuery("geo-points", {
+          context: siteQueryContext(SITE, "private-dashboard"),
+          time,
+          filters: document,
+          scopePreference: "event",
+        } as QueryInput & { readonly time: QueryTime });
+        const query = {
+          ...prepared,
+          filters: prepared.filters ?? document,
+          limit: 50,
+        } as QueryInput & Record<string, unknown>;
+        const actualTrace: SqliteD1Trace = {
+          preparedSql: [],
+          bindings: [],
+        };
+        const reads: CapturedD1AllResult[] = [];
+        const env = sqliteEnv(db, actualTrace, (read) => reads.push(read));
+        const forwarded = await d1AdvancedFilterMiddleware(
+          env,
+          undefined,
+          SITE,
+        )("geo-points", query, async (value) => value);
+        const deferred = deferredGeoPointsQualificationFromQuery(forwarded);
+        if (!deferred) throw new Error("wave97eq_geo_event_candidate_missing");
+        expect(deferred.qualification.countInput.scope).toBe("event");
+        expect(
+          "eventCandidateReportProjection" in deferred.qualification
+            ? deferred.qualification.eventCandidateReportProjection
+            : undefined,
+        ).toBe("page-visits");
+
+        const provider = createD1SiteProviderRegistry({
+          env,
+          siteId: SITE,
+          diagnostics: createD1ReadDiagnostics(),
+        }).resolve("geo-points");
+        if (!provider) throw new Error("wave97eq_geo_points_provider_missing");
+        const actual = await provider.execute(geoProviderQuery(query));
+        const fallbackFilters = await prepareDeferredEventQualificationFallback(
+          deferred.qualification,
+        );
+        const coreTrace: SqliteD1Trace = {
+          preparedSql: [],
+          bindings: [],
+        };
+        const expected = await queryGeoPointsFromD1(
+          sqliteEnv(db, coreTrace),
+          SITE,
+          WINDOW,
+          fallbackFilters,
+          50,
+        );
+
+        expect(actual.value).toEqual(expected);
+        expect(
+          actual.value.points.reduce(
+            (total, point) => total + point.pointCount,
+            0,
+          ),
+        ).toBe(2);
+        expect(actual.value.countryCounts.length).toBeGreaterThan(0);
+        expect(actual.value.regionCounts).toEqual([]);
+        expect(actual.value.cityCounts).toEqual([]);
+        expect(
+          actualTrace.preparedSql.filter((sql) =>
+            sql.trimStart().startsWith("WITH "),
+          ),
+        ).toHaveLength(1);
+        await writeGeoEvidence("97eq-event-country-native.json", {
+          actual: actual.value,
+          core: expected,
+          actualTrace,
+          coreTrace,
+          reads,
+        });
+      } finally {
+        db.prepare("DELETE FROM visits WHERE visit_id = ?").run(siblingId);
+        db.prepare("UPDATE visits SET pathname = ? WHERE visit_id = ?").run(
+          "/geo",
+          "geo-sf-2",
+        );
+      }
+    },
+  );
+
+  itWithGeoQualificationEvent(
+    "keeps unregistered Event Geo predicates on complete Core fallback",
+    async () => {
+      const filters = parseFilterDsl(
+        'geo.country eq "US" and (count(event { event.name eq "wave97i-geo-qualifier" }) gt 0 or page.path eq "/geo")',
+        analyticsFilterRegistry,
+      );
+      expect(classifyAdvancedEventCandidateCountFilter(filters)).toMatchObject({
+        kind: "unsupported",
+        code: "count_sql_bare_field_requires_registered_string",
+      });
+      const time = createQueryTime(
+        WINDOW.startMs,
+        WINDOW.endExclusiveMs,
+        WINDOW.timeZone,
+        WINDOW.nowMs,
+      );
+      const query = {
+        ...prepareScopedQuery("geo-points", {
+          context: siteQueryContext(SITE, "private-dashboard"),
+          time,
+          filters,
+          scopePreference: "event",
+        } as QueryInput & { readonly time: QueryTime }),
+        limit: 50,
+      };
+      const actualTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const env = sqliteEnv(db, actualTrace);
+      const forwarded = (await d1AdvancedFilterMiddleware(env, undefined, SITE)(
+        "geo-points",
+        query,
+        async (value) => value,
+      )) as QueryInput & Record<string, unknown>;
+      expect(
+        deferredGeoPointsQualificationFromQuery(forwarded),
+      ).toBeUndefined();
+      expect(
+        scopedFilterMetadata(forwarded.filters!)?.plan.advancedMatches,
+      ).toBeDefined();
+      expect(
+        normalizeFilterDocument(forwarded.filters!, analyticsFilterRegistry),
+      ).toEqual(normalizeFilterDocument(filters, analyticsFilterRegistry));
+      const provider = createD1SiteProviderRegistry({
+        env,
+        siteId: SITE,
+      }).resolve("geo-points");
+      if (!provider)
+        throw new Error("wave97eq_geo_compatibility_provider_missing");
+      const actual = await provider.execute(geoProviderQuery(forwarded));
+      const coreTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const expected = await queryGeoPointsFromD1(
+        sqliteEnv(db, coreTrace),
+        SITE,
+        WINDOW,
+        forwarded.filters!,
+        50,
+      );
+      expect(actual.value).toEqual(expected);
+      await writeGeoEvidence("97eq-event-geo-complete-compatibility.json", {
+        actual: actual.value,
+        core: expected,
+        actualTrace,
+        coreTrace,
+        capability: classifyAdvancedEventCandidateCountFilter(filters),
+      });
+    },
+  );
+
+  itWithGeoQualificationEvent(
+    "suppresses both Event Geo roots before complete numeric fallback",
+    async () => {
+      const original = db
+        .prepare("SELECT duration_ms FROM visits WHERE visit_id = ?")
+        .get("geo-sf-1") as { readonly duration_ms: SQLInputValue };
+      db.prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?").run(
+        "invalid-duration",
+        "geo-sf-1",
+      );
+      try {
+        const filters = parseFilterDsl(
+          'count(page { page.durationMs gt 5 }) gt 0 and event.name eq "wave97i-geo-qualifier"',
+          analyticsFilterRegistry,
+        );
+        const time = createQueryTime(
+          WINDOW.startMs,
+          WINDOW.endExclusiveMs,
+          WINDOW.timeZone,
+          WINDOW.nowMs,
+        );
+        const query = {
+          ...prepareScopedQuery("geo-points", {
+            context: siteQueryContext(SITE, "private-dashboard"),
+            time,
+            filters,
+            scopePreference: "event",
+          } as QueryInput & { readonly time: QueryTime }),
+          limit: 50,
+        };
+        const actualTrace: SqliteD1Trace = { preparedSql: [], bindings: [] },
+          reads: CapturedD1AllResult[] = [];
+        const env = sqliteEnv(db, actualTrace, (read) => reads.push(read)),
+          diagnostics = createD1ReadDiagnostics();
+        const forwarded = await d1AdvancedFilterMiddleware(
+          env,
+          undefined,
+          SITE,
+        )("geo-points", query, async (value) => value);
+        const deferred = deferredGeoPointsQualificationFromQuery(forwarded);
+        if (!deferred) throw new Error("wave97eq_geo_numeric_deferred_missing");
+        const provider = createD1SiteProviderRegistry({
+          env,
+          siteId: SITE,
+          diagnostics,
+        }).resolve("geo-points");
+        if (!provider) throw new Error("wave97eq_geo_numeric_provider_missing");
+        const actual = await provider.execute(geoProviderQuery(query));
+        const coreTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+        const coreFilters = await prepareDeferredEventQualificationFallback(
+          deferred.qualification,
+        );
+        const expected = await queryGeoPointsFromD1(
+          sqliteEnv(db, coreTrace),
+          SITE,
+          WINDOW,
+          coreFilters,
+          50,
+        );
+        expect(actual.value).toEqual(expected);
+        expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+          kind: "numeric-data-domain",
+          fieldIds: ["page.durationMs"],
+        });
+        const envelopes = reads
+          .map(capturedRows)
+          .filter((rows) => rows.some((row) => row.rowKind === "control"));
+        expect(envelopes).toHaveLength(1);
+        expect(
+          envelopes[0]!.filter((row) => row.rowKind === "report"),
+        ).toHaveLength(0);
+        expect(
+          envelopes[0]!.filter((row) => row.rowKind === "control"),
+        ).toHaveLength(1);
+        await writeGeoEvidence("97eq-event-geo-numeric-fallback.json", {
+          actual: actual.value,
+          core: expected,
+          diagnostics,
+          actualTrace,
+          coreTrace,
+          reads,
+        });
+      } finally {
+        db.prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?").run(
+          original.duration_ms,
+          "geo-sf-1",
+        );
+      }
+    },
+  );
+
+  itWithGeoQualificationEvent(
     "accepts rounded Geo coordinates across Node binary floating point edges",
     async () => {
       const values = [1.001, 1.003, 4.001, -4.001];
@@ -3853,6 +4134,8 @@ describe("97DR private Geo whole-Boolean qualification", () => {
           const witness = provenance[0]?.rawCountEligibilityWitness;
           expect(witness).toBeDefined();
           if (!witness) throw new Error("wave97du_geo_witness_missing");
+          if (semanticPlan.scope === "event")
+            throw new Error("wave97du_geo_comparison_requires_owner_scope");
           const bindingInput = {
             plan: semanticPlan.plan,
             provenance,

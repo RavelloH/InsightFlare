@@ -1,11 +1,12 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { AdvancedCountQualificationPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import {
   appendBrowserVersionBreakdownReport,
   BROWSER_VERSION_BREAKDOWN_OUTPUT,
 } from "@/lib/edge/analytics/engine/browser-version-breakdown-report-plan";
 import { appendPageDimensionQualificationSource } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
+import { qualificationPlanMetadata } from "@/lib/edge/analytics/engine/qualification-plan-metadata";
 import type { QualifiedSourceFilterMode } from "@/lib/edge/analytics/engine/qualified-page-source";
 import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
 import {
@@ -29,7 +30,8 @@ export function buildBrowserVersionQualificationPlan(input: {
   readonly filters: FilterDocument;
   readonly filterMode?: QualifiedSourceFilterMode;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: AdvancedCountQualificationPlanInput;
+  readonly eventCandidateReportProjection?: "page-visits";
 }): TechnologyRadarQualificationPlan {
   const source = appendPageDimensionQualificationSource({
     semanticOperation: "radar",
@@ -37,9 +39,14 @@ export function buildBrowserVersionQualificationPlan(input: {
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
-    filterMode: input.filterMode,
+    filterMode: input.eventCandidateReportProjection
+      ? "allow-whole-filter"
+      : input.filterMode,
     scopePlan: input.scopePlan,
     count: input.count,
+    ...(input.eventCandidateReportProjection
+      ? { eventCandidateReportProjection: input.eventCandidateReportProjection }
+      : {}),
     selections: [],
     additionalAttributes: BROWSER_VERSION_ATTRIBUTES,
   });
@@ -67,5 +74,9 @@ export function buildBrowserVersionQualificationPlan(input: {
     numericCompatibilityFields: source.qualification.numericCompatibilityFields,
     scope: source.qualification.scope,
     reportSourceRelations: source.reportSourceRelations,
+    ...qualificationPlanMetadata(
+      source.qualification,
+      source.eventCandidateReportProjection,
+    ),
   };
 }

@@ -1752,6 +1752,13 @@ function compileProgram(request: EventQualificationCompileRequest):
                       scopePlan:
                         request.query.scopePlan ?? deferred.metadata.plan,
                       count: request.deferred.countInput,
+                      ...("eventCandidateReportProjection" in deferred &&
+                      deferred.eventCandidateReportProjection === "page-visits"
+                        ? {
+                            eventCandidateReportProjection:
+                              "page-visits" as const,
+                          }
+                        : {}),
                       limit: request.query.limit,
                       includeDetails: request.query.includeDetails,
                       cursor: request.query.cursor,
@@ -2043,8 +2050,19 @@ function compileProgram(request: EventQualificationCompileRequest):
     deferred.countInput.scope === "event" &&
     deferred.countInput.candidateAnchor.kind === "event-candidate" &&
     deferred.pagesAggregatePageRequest !== undefined;
+  const eventCandidatePagesTabsQuery =
+    request.kind === "pages-tabs" &&
+    deferred.operation === "pages-tabs" &&
+    "eventCandidateReportProjection" in deferred &&
+    deferred.eventCandidateReportProjection === "page-visits" &&
+    deferred.metadata.plan.scope === "event" &&
+    deferred.countInput.scope === "event" &&
+    deferred.countInput.candidateAnchor.kind === "event-candidate" &&
+    deferred.pagesTabsRequest !== undefined;
   const eventCandidatePageProjectionQuery =
-    eventCandidatePageDimensionQuery || eventCandidatePagesAggregateQuery;
+    eventCandidatePageDimensionQuery ||
+    eventCandidatePagesAggregateQuery ||
+    eventCandidatePagesTabsQuery;
   const eventCandidateContextDetailQuery =
     eventCandidateEventContextQuery || eventCandidateEventTypeDetailQuery;
   const eventCandidateContextKeys =

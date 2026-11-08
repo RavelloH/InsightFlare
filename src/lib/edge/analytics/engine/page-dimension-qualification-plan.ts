@@ -31,6 +31,7 @@ import {
   appendPagesWithTabsOutputs,
   PAGES_WITH_TABS_OUTPUT_IDS,
 } from "@/lib/edge/analytics/engine/pages-with-tabs-report-plan";
+import { qualificationPlanMetadata } from "@/lib/edge/analytics/engine/qualification-plan-metadata";
 import {
   appendQualifiedPageSource,
   type QualifiedPageSemanticOperation,
@@ -50,7 +51,9 @@ export const PAGES_TABS_QUALIFICATION_CONTROL_OUTPUT =
 export type PagesTabsQualificationConfiguration =
   "tabs-only" | "pages-with-tabs";
 
-export type PagesTabsQualificationPlan = AnalyticsQualificationPlan & {
+export type PagesTabsQualificationPlan = AnalyticsQualificationPlan<
+  "session" | "visitor" | "event"
+> & {
   readonly reportOutputIds: readonly string[];
 };
 
@@ -262,7 +265,8 @@ export function buildPagesTabsQualificationPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: AdvancedCountQualificationPlanInput;
+  readonly eventCandidateReportProjection?: "page-visits";
   readonly limit: number;
   readonly includeDetails: boolean;
   readonly cursor?: PageAggregateCursor | null;
@@ -275,6 +279,9 @@ export function buildPagesTabsQualificationPlan(input: {
     filters: input.filters,
     scopePlan: input.scopePlan,
     count: input.count,
+    ...(input.eventCandidateReportProjection
+      ? { eventCandidateReportProjection: input.eventCandidateReportProjection }
+      : {}),
     selections: PAGE_TAB_CARDS.map(({ selection }) => selection),
     additionalAttributes: [
       "page.report.pathname",
@@ -329,6 +336,10 @@ export function buildPagesTabsQualificationPlan(input: {
     numericCompatibilityFields: qualification.numericCompatibilityFields,
     scope: qualification.scope,
     reportSourceRelations: source.reportSourceRelations,
+    ...qualificationPlanMetadata(
+      qualification,
+      source.eventCandidateReportProjection,
+    ),
   };
 }
 

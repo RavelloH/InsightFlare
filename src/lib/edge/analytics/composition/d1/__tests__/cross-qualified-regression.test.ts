@@ -49,9 +49,11 @@ const WINDOW = {
 };
 const FILTER_DSL =
   'page.path neq "/excluded" and count(event { event.name eq "qualifier" }) gte 1';
+const EVENT_SCOPE_FILTER_DSL =
+  'page.path neq "/excluded" and (count(event { event.name eq "qualifier" }) gte 1 or not (page.path neq "/unmatched"))';
 const EVIDENCE_DIRECTORY = process.env.INSIGHTFLARE_QUERY_EVIDENCE_DIR?.trim();
 
-type Scope = "session" | "visitor";
+type Scope = "session" | "visitor" | "event";
 type CrossRequest = QueryInput & {
   readonly time: QueryTime;
   readonly primaryDimension: string;
@@ -708,8 +710,14 @@ describe("Cross qualified provider regression", () => {
         database.exec(
           `PRAGMA reverse_unordered_selects = ${reverseUnordered ? "ON" : "OFF"}`,
         );
-        for (const scope of ["session", "visitor"] as const) {
-          const query = crossQuery(scope);
+        for (const scope of ["session", "visitor", "event"] as const) {
+          const query = crossQuery(
+            scope,
+            ["browser", "operatingSystem"],
+            undefined,
+            {},
+            scope === "event" ? EVENT_SCOPE_FILTER_DSL : FILTER_DSL,
+          );
           const { deferred, compilation } = await compileCandidate(query);
           expect(compilation.kind).toBe("compiled");
           if (compilation.kind !== "compiled") continue;
@@ -1180,70 +1188,90 @@ describe("Cross qualified provider regression", () => {
     );
   });
 
-  it("uses the existing numeric fallback and rejects malformed output without retry", async () => {
-    const numericQuery = crossQuery(
-      "session",
-      ["browser", "operatingSystem"],
-      undefined,
-      {},
-      'page.path neq "/excluded" and count(event { event.name eq "qualifier" }) eq 1 and count(page { page.durationMs gt 5 }) eq 1',
-    );
-    const numericCandidate = await compileCandidate(numericQuery);
-    expect(numericCandidate.compilation.kind).toBe("compiled");
-    if (numericCandidate.compilation.kind !== "compiled") return;
-    const numericSql = numericCandidate.compilation.evidence.sql;
+  it.each(["session", "event"] as const)(
+    "uses the complete numeric fallback for %s Count",
+    async (scope) => {
+      const numericQuery = crossQuery(
+        scope,
+        ["browser", "operatingSystem"],
+        undefined,
+        {},
+        scope === "event"
+          ? 'count(page { page.durationMs gt 5 }) gt 0 and event.name eq "qualifier"'
+          : 'page.path neq "/excluded" and count(event { event.name eq "qualifier" }) eq 1 and count(page { page.durationMs gt 5 }) eq 1',
+      );
+      const numericCandidate = await compileCandidate(numericQuery);
+      expect(numericCandidate.compilation.kind).toBe("compiled");
+      if (numericCandidate.compilation.kind !== "compiled") return;
+      const numericSql = numericCandidate.compilation.evidence.sql;
 
-    database
-      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
-      .run("invalid-duration", "edge-tie");
-    try {
-      const diagnostics = createD1ReadDiagnostics();
-      const actualTrace = trace();
-      const actual = await productionCrossQuery(
-        numericQuery,
-        actualTrace,
-        envFor(database, actualTrace),
-        diagnostics,
-      );
-      const fallbackFilters = await prepareDeferredEventQualificationFallback(
-        numericCandidate.deferred.qualification,
-      );
-      const primary = resolveCrossBreakdownPageDimension("browser");
-      const secondary = resolveCrossBreakdownPageDimension("operatingSystem");
-      if (!primary || !secondary)
-        throw new Error("cross_numeric_fallback_fixture_invalid");
-      const expected = await queryCrossDimensionFromD1(
-        envFor(database, trace()),
-        SITE,
-        WINDOW,
-        fallbackFilters,
-        numericQuery.primaryLimit,
-        numericQuery.secondaryLimit,
-        primary,
-        secondary,
-      );
-      expect(actual.value).toEqual(expected);
-      expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
-        kind: "numeric-data-domain",
-        fieldIds: ["page.durationMs"],
-      });
-      expect(
-        actualTrace.preparedSql.filter((sql) => sql === numericSql),
-      ).toHaveLength(1);
-      expect(actualTrace.preparedSql.length).toBeGreaterThan(2);
-      writeEvidence("cross-qualified-numeric-fallback.json", {
-        fallbackReason: diagnostics.advancedCountSqlFallbackReason,
-        compiledSql: numericSql,
-        actualSql: actualTrace.preparedSql,
-        actual: actual.value,
-        expected,
-      });
-    } finally {
       database
-        .prepare("UPDATE visits SET duration_ms = NULL WHERE visit_id = ?")
-        .run("edge-tie");
-    }
+        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+        .run("invalid-duration", "edge-tie");
+      try {
+        const diagnostics = createD1ReadDiagnostics();
+        const actualTrace = trace();
+        let envelopeRows: readonly Record<string, unknown>[] = [];
+        const actual = await productionCrossQuery(
+          numericQuery,
+          actualTrace,
+          envWithHooks(database, actualTrace, {
+            transformRows(sql, rows) {
+              if (sql === numericSql) envelopeRows = rows;
+              return rows;
+            },
+          }),
+          diagnostics,
+        );
+        const fallbackFilters = await prepareDeferredEventQualificationFallback(
+          numericCandidate.deferred.qualification,
+        );
+        const primary = resolveCrossBreakdownPageDimension("browser");
+        const secondary = resolveCrossBreakdownPageDimension("operatingSystem");
+        if (!primary || !secondary)
+          throw new Error("cross_numeric_fallback_fixture_invalid");
+        const expected = await queryCrossDimensionFromD1(
+          envFor(database, trace()),
+          SITE,
+          WINDOW,
+          fallbackFilters,
+          numericQuery.primaryLimit,
+          numericQuery.secondaryLimit,
+          primary,
+          secondary,
+        );
+        expect(actual.value).toEqual(expected);
+        expect(
+          envelopeRows.filter((row) => row.rowKind === "report"),
+        ).toHaveLength(0);
+        expect(
+          envelopeRows.filter((row) => row.rowKind === "control"),
+        ).toHaveLength(1);
+        expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+          kind: "numeric-data-domain",
+          fieldIds: ["page.durationMs"],
+        });
+        expect(
+          actualTrace.preparedSql.filter((sql) => sql === numericSql),
+        ).toHaveLength(1);
+        expect(actualTrace.preparedSql.length).toBeGreaterThan(2);
+        writeEvidence(`cross-qualified-numeric-fallback-${scope}.json`, {
+          envelopeRows,
+          fallbackReason: diagnostics.advancedCountSqlFallbackReason,
+          compiledSql: numericSql,
+          actualSql: actualTrace.preparedSql,
+          actual: actual.value,
+          expected,
+        });
+      } finally {
+        database
+          .prepare("UPDATE visits SET duration_ms = NULL WHERE visit_id = ?")
+          .run("edge-tie");
+      }
+    },
+  );
 
+  it("rejects malformed Cross output without retry", async () => {
     const ordinaryQuery = crossQuery("session");
     const ordinaryCandidate = await compileCandidate(ordinaryQuery);
     expect(ordinaryCandidate.compilation.kind).toBe("compiled");

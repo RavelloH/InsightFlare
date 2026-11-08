@@ -8,8 +8,11 @@ import {
   type PerformanceBreakdownDashboardQualificationMode,
 } from "@/lib/edge/analytics/engine/performance-breakdown-dashboard-qualification-plan";
 import {
+  PERFORMANCE_COUNTRIES_OUTPUT_IDS,
+  PERFORMANCE_DASHBOARD_OUTPUT_IDS,
   PERFORMANCE_METRICS,
   PERFORMANCE_REPORT_OUTPUT_FIELDS,
+  PERFORMANCE_ROUTES_OUTPUT_IDS,
 } from "@/lib/edge/analytics/engine/performance-sample-statistics-report-plan";
 import {
   type DeferredPerformanceSummaryQualification,
@@ -164,8 +167,25 @@ function compileProgram(input: PerformanceBreakdownDashboardProgramInput) {
     scopePlan: deferred.qualification.metadata.plan,
     count: deferred.qualification.countInput,
     mode,
+    ...("eventCandidateReportProjection" in deferred.qualification &&
+    deferred.qualification.eventCandidateReportProjection === "page-visits"
+      ? { eventCandidateReportProjection: "page-visits" as const }
+      : {}),
   });
   const outputIds = qualification.reportOutputIds;
+  const expectedOutputIds =
+    mode.mode === "dashboard"
+      ? PERFORMANCE_DASHBOARD_OUTPUT_IDS
+      : mode.dimension === "page.path"
+        ? PERFORMANCE_ROUTES_OUTPUT_IDS
+        : PERFORMANCE_COUNTRIES_OUTPUT_IDS;
+  if (
+    outputIds.length !== expectedOutputIds.length ||
+    outputIds.some((outputId, index) => outputId !== expectedOutputIds[index])
+  )
+    throw new Error(
+      "performance_breakdown_dashboard_qualification_plan_identity_invalid",
+    );
   const reports = outputIds.map((outputId) => {
     const output = exactOutput(qualification.plan.outputs, outputId);
     const rowType = /^performance-(summary|trend|route|country)-/u.exec(
@@ -525,7 +545,12 @@ export async function executePerformanceBreakdownDashboardQualificationProgram(
   },
 ): Promise<PerformanceBreakdownDashboardQualificationExecution> {
   const { deferred, mode, compilation } = compileProgram(input);
-  if (compilation.kind === "unavailable") return compilation;
+  if (compilation.kind === "unavailable") {
+    if (input.diagnostics)
+      input.diagnostics.advancedCountSqlFallbackReason =
+        compilation.fallbackReason;
+    return compilation;
+  }
   const rows = await executeQualificationQuery(
     deferred.qualification.signal,
     () =>
@@ -535,5 +560,8 @@ export async function executePerformanceBreakdownDashboardQualificationProgram(
         input.diagnostics,
       ),
   );
-  return decodeRows(rows, deferred, mode, compilation.evidence);
+  const execution = decodeRows(rows, deferred, mode, compilation.evidence);
+  if (execution.kind === "fallback" && input.diagnostics)
+    input.diagnostics.advancedCountSqlFallbackReason = execution.fallbackReason;
+  return execution;
 }

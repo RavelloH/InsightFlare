@@ -310,19 +310,52 @@ export function compileQualificationProgramEnvelope(input: {
   if (
     input.controlsOutput.id !== qualification.controlOutputId ||
     qualification.reportSourceRelations.length === 0 ||
+    input.reports.length === 0 ||
     new Set(input.reports.map(({ output }) => output.id)).size !==
       input.reports.length ||
+    new Set(input.reports.map(({ output }) => output.relation)).size !==
+      input.reports.length ||
+    input.reports.some(
+      ({ output }) => output.relation === input.controlsOutput.relation,
+    ) ||
+    input.reports.some(({ output }) => {
+      const planOutputs = qualification.plan.outputs.filter(
+        (candidate) => candidate.id === output.id,
+      );
+      return (
+        planOutputs.length !== 1 ||
+        planOutputs[0]!.relation !== output.relation ||
+        planOutputs[0]!.fields.length !== output.fields.length ||
+        planOutputs[0]!.fields.some(
+          (field, index) =>
+            field.name !== output.fields[index]?.name ||
+            field.slot !== output.fields[index]?.slot,
+        )
+      );
+    }) ||
+    (qualification.eventCandidateReportProjection === "page-visits" &&
+      (qualification.plan.outputs.length !== input.reports.length + 1 ||
+        qualification.plan.outputs.some(
+          (output) =>
+            output.id !== qualification.controlOutputId &&
+            !input.reports.some(
+              ({ output: report }) => report.id === output.id,
+            ),
+        ))) ||
     (qualification.candidateGrain === "event-candidate" &&
       (qualification.scope !== "event" ||
-        input.reports.length !== 1 ||
-        qualification.reportSourceRelations.length !== 1 ||
         qualification.comparisonProvenance !== undefined ||
         (qualification.eventCandidateReportProjection === undefined
-          ? qualification.reportSourceRelations[0]!.entity !== "event"
+          ? input.reports.length !== 1 ||
+            qualification.reportSourceRelations.length !== 1 ||
+            qualification.reportSourceRelations[0]!.entity !== "event" ||
+            qualification.reportSourceRelations[0]!.relationId !==
+              qualification.primaryReportSourceRelationId
           : qualification.eventCandidateReportProjection !== "page-visits" ||
-            qualification.reportSourceRelations[0]!.entity !== "page") ||
-        qualification.reportSourceRelations[0]!.relationId !==
-          qualification.primaryReportSourceRelationId)) ||
+            qualification.reportSourceRelations.length !== 1 ||
+            qualification.reportSourceRelations[0]!.entity !== "page" ||
+            qualification.reportSourceRelations[0]!.relationId !==
+              qualification.primaryReportSourceRelationId))) ||
     (qualification.eventCandidateReportProjection !== undefined &&
       qualification.candidateGrain !== "event-candidate") ||
     (qualification.candidateGrain === undefined &&

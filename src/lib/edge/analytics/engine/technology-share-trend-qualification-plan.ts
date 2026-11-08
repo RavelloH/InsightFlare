@@ -1,8 +1,9 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { AdvancedCountQualificationPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import type { AnalyticsQualificationPlan } from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import { appendPageDimensionQualificationSource } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
+import { qualificationPlanMetadata } from "@/lib/edge/analytics/engine/qualification-plan-metadata";
 import type { QualifiedSourceFilterMode } from "@/lib/edge/analytics/engine/qualified-page-source";
 import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
 import {
@@ -17,10 +18,11 @@ import type { FilterDocument } from "@/lib/filter-contract/filters";
 export const TECHNOLOGY_SHARE_TREND_QUALIFICATION_CONTROL_OUTPUT =
   "technology-share-trend-qualification-controls";
 
-export type TechnologyShareTrendQualificationPlan =
-  AnalyticsQualificationPlan & {
-    readonly reportOutputIds: readonly string[];
-  };
+export type TechnologyShareTrendQualificationPlan = AnalyticsQualificationPlan<
+  "session" | "visitor" | "event"
+> & {
+  readonly reportOutputIds: readonly string[];
+};
 
 const READER_ATTRIBUTES = [
   "page.report.startedAt",
@@ -55,7 +57,8 @@ export function buildTechnologyShareTrendQualificationPlan(input: {
   readonly filters: FilterDocument;
   readonly filterMode?: QualifiedSourceFilterMode;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: AdvancedCountQualificationPlanInput;
+  readonly eventCandidateReportProjection?: "page-visits";
 }): TechnologyShareTrendQualificationPlan {
   const dimensions = selectedDimensions(input.configuration);
   const source = appendPageDimensionQualificationSource({
@@ -64,9 +67,14 @@ export function buildTechnologyShareTrendQualificationPlan(input: {
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
-    filterMode: input.filterMode,
+    filterMode: input.eventCandidateReportProjection
+      ? "allow-whole-filter"
+      : input.filterMode,
     scopePlan: input.scopePlan,
     count: input.count,
+    ...(input.eventCandidateReportProjection
+      ? { eventCandidateReportProjection: input.eventCandidateReportProjection }
+      : {}),
     selections: dimensions.map(
       ({ dimension }) => TECHNOLOGY_SHARE_TREND_DIMENSIONS[dimension],
     ),
@@ -98,5 +106,9 @@ export function buildTechnologyShareTrendQualificationPlan(input: {
     numericCompatibilityFields: source.qualification.numericCompatibilityFields,
     scope: source.qualification.scope,
     reportSourceRelations: source.reportSourceRelations,
+    ...qualificationPlanMetadata(
+      source.qualification,
+      source.eventCandidateReportProjection,
+    ),
   };
 }

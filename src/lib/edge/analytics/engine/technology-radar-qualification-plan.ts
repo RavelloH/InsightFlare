@@ -1,8 +1,9 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { AdvancedCountQualificationPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import type { AnalyticsQualificationPlan } from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import { appendPageDimensionQualificationSource } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
+import { qualificationPlanMetadata } from "@/lib/edge/analytics/engine/qualification-plan-metadata";
 import type { QualifiedSourceFilterMode } from "@/lib/edge/analytics/engine/qualified-page-source";
 import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
 import {
@@ -15,7 +16,9 @@ import type { FilterDocument } from "@/lib/filter-contract/filters";
 export const TECHNOLOGY_RADAR_QUALIFICATION_CONTROL_OUTPUT =
   "technology-radar-qualification-controls";
 
-export type TechnologyRadarQualificationPlan = AnalyticsQualificationPlan & {
+export type TechnologyRadarQualificationPlan = AnalyticsQualificationPlan<
+  "session" | "visitor" | "event"
+> & {
   readonly reportOutputIds: readonly [string];
 };
 
@@ -35,7 +38,8 @@ export function buildTechnologyRadarQualificationPlan(input: {
   readonly filters: FilterDocument;
   readonly filterMode?: QualifiedSourceFilterMode;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: AdvancedCountQualificationPlanInput;
+  readonly eventCandidateReportProjection?: "page-visits";
 }): TechnologyRadarQualificationPlan {
   const source = appendPageDimensionQualificationSource({
     semanticOperation: "radar",
@@ -43,9 +47,14 @@ export function buildTechnologyRadarQualificationPlan(input: {
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
-    filterMode: input.filterMode,
+    filterMode: input.eventCandidateReportProjection
+      ? "allow-whole-filter"
+      : input.filterMode,
     scopePlan: input.scopePlan,
     count: input.count,
+    ...(input.eventCandidateReportProjection
+      ? { eventCandidateReportProjection: input.eventCandidateReportProjection }
+      : {}),
     selections: [],
     additionalAttributes: RADAR_ATTRIBUTES,
   });
@@ -76,5 +85,9 @@ export function buildTechnologyRadarQualificationPlan(input: {
     numericCompatibilityFields: source.qualification.numericCompatibilityFields,
     scope: source.qualification.scope,
     reportSourceRelations: source.reportSourceRelations,
+    ...qualificationPlanMetadata(
+      source.qualification,
+      source.eventCandidateReportProjection,
+    ),
   };
 }

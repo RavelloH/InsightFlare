@@ -26,6 +26,7 @@ import type { RelationId } from "@/lib/edge/analytics/engine/logical/ids";
 import {
   buildPageDimensionQualificationPlan,
   buildPagesAggregateQualificationPlan,
+  buildPagesTabsQualificationPlan,
   PAGE_DIMENSION_QUALIFICATION_CONTROL_OUTPUT,
   type PageDimensionQualificationPlan,
 } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
@@ -35,8 +36,11 @@ import {
   deferredOverviewPageTableQualificationFromQuery,
   deferredPageDimensionQualificationFromQuery,
   deferredPagesAggregatePageQualificationFromQuery,
+  deferredPagesTabsQualificationFromQuery,
+  isDeferredEventCandidatePageProjection,
   prepareDeferredEventQualificationFallback,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import { compilePagesTabsQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/analytics-qualification-program";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { mapDimensionRows } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
@@ -49,7 +53,10 @@ import type { AnalyticsQualificationAdmissionPolicy } from "@/lib/edge/analytics
 import {
   decodePagesCursor,
   queryPagesPageFromD1,
+  queryPagesWithTabsFromD1,
+  queryPageTabsAggregate,
 } from "@/lib/edge/analytics/providers/d1/internal/pages";
+import { compileQualificationProgramEnvelope } from "@/lib/edge/analytics/providers/d1/internal/qualification-program-envelope";
 import type { Env } from "@/lib/edge/types";
 import {
   analyticsFilterRegistry,
@@ -1142,6 +1149,389 @@ describe("Event candidate Page report projections", () => {
         "duplicate-report-source",
       ],
     });
+  });
+
+  it("admits multi-output Page tab envelopes for both Event candidate variants", async () => {
+    const { database } = createFixture();
+    const trace = traceFor();
+    const env = testEnv(database, trace);
+
+    for (const variant of [
+      {
+        configuration: "tabs-only" as const,
+        variant: "tabs",
+        includeTabs: undefined,
+        includeDetails: false,
+      },
+      {
+        configuration: "pages-with-tabs" as const,
+        variant: undefined,
+        includeTabs: true,
+        includeDetails: true,
+      },
+    ]) {
+      const prepared = prepareScopedQuery("pages", {
+        context: siteQueryContext(SITE, "private-dashboard"),
+        time: TIME,
+        filters: parseFilterDsl(BOOLEAN_FILTERS.orNot, analyticsFilterRegistry),
+        scopePreference: "event",
+      } as QueryInput & { readonly time: QueryTime });
+      const query = {
+        ...prepared,
+        variant: variant.variant,
+        includeTabs: variant.includeTabs,
+        includeDetails: variant.includeDetails,
+        limit: 10,
+        page: { limit: 10, cursor: null },
+      } as CandidateQuery;
+      const forwarded = (await d1AdvancedFilterMiddleware(env, undefined, SITE)(
+        "pages",
+        query,
+        async (value) => value,
+      )) as CandidateQuery;
+      const deferred = deferredPagesTabsQualificationFromQuery(forwarded);
+      if (
+        !deferred ||
+        !isDeferredEventCandidatePageProjection(deferred) ||
+        deferred.operation !== "pages-tabs" ||
+        !deferred.requestTime
+      )
+        throw new Error("wave97eq_pages_tabs_candidate_deferred_missing");
+      expect(deferred.eventCandidateReportProjection).toBe("page-visits");
+      expect(deferred.countInput.scope).toBe("event");
+      expect(deferred.countInput.candidateAnchor.kind).toBe("event-candidate");
+
+      const compilation = compilePagesTabsQualificationProgram({
+        deferred,
+        query: {
+          env,
+          siteId: SITE,
+          queryTime: deferred.requestTime,
+          filters: deferred.filters,
+          scopePlan: deferred.metadata.plan,
+          configuration: variant.configuration,
+          limit: deferred.pagesTabsRequest.limit,
+          includeDetails: deferred.pagesTabsRequest.includeDetails,
+          cursor: null,
+          cursorToken: null,
+          audience: "private-dashboard",
+          variant: variant.variant,
+          includeTabs: variant.includeTabs,
+        },
+      });
+
+      expect(compilation.kind).toBe("compiled");
+      if (compilation.kind !== "compiled")
+        throw new Error("wave97eq_pages_tabs_candidate_compile_unavailable");
+      expect(compilation.evidence.groupedSummaryMaterializations).toHaveLength(
+        2,
+      );
+    }
+  });
+
+  it("matches both Event-candidate Pages tab configurations against Core, including a signed continuation", async () => {
+    const { database } = createFixture();
+    const filterDsl =
+      'page.path neq "/excluded" and ((count(event { event.name eq "qualifier" }) gt 0 and event.name eq "qualifier") or page.path eq "/page-only")';
+
+    const runPage = async (
+      configuration: "tabs-only" | "pages-with-tabs",
+      cursor: string | null,
+    ) => {
+      const trace = traceFor();
+      const env = testEnv(database, trace);
+      const prepared = prepareScopedQuery("pages", {
+        context: siteQueryContext(SITE, "private-dashboard"),
+        time: TIME,
+        filters: parseFilterDsl(filterDsl, analyticsFilterRegistry),
+        scopePreference: "event",
+      } as QueryInput & { readonly time: QueryTime });
+      const query = {
+        ...prepared,
+        ...(configuration === "tabs-only" ? { variant: "tabs" } : {}),
+        ...(configuration === "pages-with-tabs" ? { includeTabs: true } : {}),
+        includeDetails: configuration === "pages-with-tabs",
+        limit: 1,
+        page: { limit: 1, cursor },
+      } as CandidateQuery;
+      const forwarded = (await d1AdvancedFilterMiddleware(env, undefined, SITE)(
+        "pages",
+        query,
+        async (value) => value,
+      )) as CandidateQuery;
+      const deferred = deferredPagesTabsQualificationFromQuery(forwarded);
+      if (
+        !deferred ||
+        !isDeferredEventCandidatePageProjection(deferred) ||
+        deferred.operation !== "pages-tabs"
+      )
+        throw new Error("wave97eq_pages_tabs_runtime_candidate_missing");
+
+      const provider = createD1SiteProviderRegistry({
+        env,
+        siteId: SITE,
+        diagnostics: createD1ReadDiagnostics(),
+      }).resolve("pages");
+      if (!provider) throw new Error("wave97eq_pages_provider_missing");
+      const actual = await provider.execute(forwarded as never);
+      const coreTrace = traceFor();
+      const coreEnv = testEnv(database, coreTrace);
+      const filters = await prepareDeferredEventQualificationFallback(deferred);
+      let expected: unknown;
+      if (configuration === "tabs-only") {
+        expected = await queryPageTabsAggregate(
+          coreEnv,
+          SITE,
+          WINDOW,
+          filters,
+          1,
+        );
+      } else {
+        const cursorToken = cursor;
+        const decodedCursor = await decodePagesCursor(
+          coreEnv,
+          SITE,
+          WINDOW,
+          filters,
+          true,
+          cursorToken,
+          "private-dashboard",
+        );
+        if (cursorToken && !decodedCursor)
+          throw new Error("wave97eq_pages_cursor_signature_invalid");
+        expected = await queryPagesWithTabsFromD1(
+          coreEnv,
+          SITE,
+          WINDOW,
+          filters,
+          1,
+          true,
+          decodedCursor,
+          "private-dashboard",
+        );
+      }
+
+      expect(actual.value).toEqual(expected);
+      expect(deferred.eventCandidateReportProjection).toBe("page-visits");
+      expect(deferred.countInput.scope).toBe("event");
+      expect(deferred.countInput.candidateAnchor.kind).toBe("event-candidate");
+      return { value: actual.value, trace, coreTrace };
+    };
+
+    const tabsOnly = await runPage("tabs-only", null);
+    expect(
+      tabsOnly.trace.preparedSql.some((sql) => sql.includes('"outputId"')),
+    ).toBe(true);
+    const first = await runPage("pages-with-tabs", null);
+    if (!("pages" in first.value))
+      throw new Error("wave97eq_pages_first_dto_missing");
+    const firstValue = first.value;
+    expect(firstValue.pages.items).toHaveLength(1);
+    expect(firstValue.pages.pagination.hasMore).toBe(true);
+    expect(firstValue.pages.pagination.nextCursor).toEqual(expect.any(String));
+    const continuation = firstValue.pages.pagination.nextCursor;
+    if (!continuation)
+      throw new Error("wave97eq_pages_signed_continuation_missing");
+    const second = await runPage("pages-with-tabs", continuation);
+    if (!("pages" in second.value))
+      throw new Error("wave97eq_pages_next_dto_missing");
+    const secondValue = second.value;
+    expect(secondValue.pages.items).toHaveLength(1);
+    const firstItems = firstValue.pages.items;
+    expect(
+      [...firstItems, ...secondValue.pages.items]
+        .map(({ pathname }) => pathname)
+        .sort(),
+    ).toEqual(["/event-only", "/page-only"]);
+  });
+
+  it.each(["tabs-only", "pages-with-tabs"] as const)(
+    "falls back for all Event Page outputs in numeric %s",
+    async (configuration) => {
+      const { database } = createFixture();
+      database
+        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+        .run("invalid-duration", "visit-neither");
+      const trace = traceFor(),
+        statements: CapturedSql[] = [];
+      const env = testEnv(database, trace, statements);
+      const diagnostics = createD1ReadDiagnostics();
+      const query = {
+        ...prepareScopedQuery("pages", {
+          context: siteQueryContext(SITE, "private-dashboard"),
+          time: TIME,
+          filters: parseFilterDsl(
+            NUMERIC_FALLBACK_FILTER,
+            analyticsFilterRegistry,
+          ),
+          scopePreference: "event",
+        } as QueryInput & { readonly time: QueryTime }),
+        ...(configuration === "tabs-only"
+          ? { variant: "tabs" }
+          : { includeTabs: true }),
+        includeDetails: configuration === "pages-with-tabs",
+        page: { limit: 10, cursor: null },
+        limit: 10,
+      };
+      const forwarded = await d1AdvancedFilterMiddleware(env, undefined, SITE)(
+        "pages",
+        query,
+        async (value) => value,
+      );
+      const deferred = deferredPagesTabsQualificationFromQuery(forwarded);
+      if (!deferred || !isDeferredEventCandidatePageProjection(deferred))
+        throw new Error("wave97eq_numeric_tabs_deferred_missing");
+      const provider = createD1SiteProviderRegistry({
+        env,
+        siteId: SITE,
+        diagnostics,
+      }).resolve("pages");
+      if (!provider) throw new Error("wave97eq_numeric_tabs_provider_missing");
+      const actual = await provider.execute(forwarded as never);
+      const coreTrace = traceFor(),
+        coreEnv = testEnv(database, coreTrace);
+      const filters = await prepareDeferredEventQualificationFallback(deferred);
+      const expected =
+        configuration === "tabs-only"
+          ? await queryPageTabsAggregate(coreEnv, SITE, WINDOW, filters, 10)
+          : await queryPagesWithTabsFromD1(
+              coreEnv,
+              SITE,
+              WINDOW,
+              filters,
+              10,
+              true,
+              null,
+              "private-dashboard",
+            );
+      expect(actual.value).toEqual(expected);
+      expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+        kind: "numeric-data-domain",
+        fieldIds: ["page.durationMs"],
+      });
+      const evidence = executionEvidence(trace, statements);
+      expect(evidence.envelopeCount).toBe(1);
+      expect(Object.keys(evidence.reportsByOutputId)).toHaveLength(0);
+      expect(evidence.controls).toHaveLength(1);
+      runtimeEvidence.push({
+        title: `${configuration} Event numeric complete-operation fallback`,
+        actualDto: actual.value,
+        coreDto: expected,
+        fallbackReason: diagnostics.advancedCountSqlFallbackReason,
+        attemptedEnvelope: evidence,
+        actualPrepareAndFallback: sqlEvidence(trace),
+        corePrepareAndReport: sqlEvidence(coreTrace),
+      });
+    },
+  );
+
+  it("rejects missing and extra roots in the current multi-output Event Page plan", async () => {
+    const { database } = createFixture();
+    const trace = traceFor();
+    const env = testEnv(database, trace);
+    const prepared = prepareScopedQuery("pages", {
+      context: siteQueryContext(SITE, "private-dashboard"),
+      time: TIME,
+      filters: parseFilterDsl(
+        'count(event { event.name eq "qualifier" }) gt 0',
+        analyticsFilterRegistry,
+      ),
+      scopePreference: "event",
+    } as QueryInput & { readonly time: QueryTime });
+    const query = {
+      ...prepared,
+      includeTabs: true,
+      includeDetails: true,
+      limit: 1,
+      page: { limit: 1, cursor: null },
+    } as CandidateQuery;
+    const forwarded = (await d1AdvancedFilterMiddleware(env, undefined, SITE)(
+      "pages",
+      query,
+      async (value) => value,
+    )) as CandidateQuery;
+    const deferred = deferredPagesTabsQualificationFromQuery(forwarded);
+    if (
+      !deferred ||
+      !isDeferredEventCandidatePageProjection(deferred) ||
+      !deferred.requestTime
+    )
+      throw new Error("wave97eq_multi_output_page_candidate_missing");
+
+    const qualification = buildPagesTabsQualificationPlan({
+      configuration: "pages-with-tabs",
+      siteId: SITE,
+      queryTime: deferred.requestTime,
+      filters: deferred.filters,
+      scopePlan: deferred.metadata.plan,
+      count: deferred.countInput,
+      eventCandidateReportProjection: "page-visits",
+      limit: 1,
+      includeDetails: true,
+      cursor: null,
+    });
+    const reports = qualification.reportOutputIds.map((outputId) => {
+      const output = qualification.plan.outputs.find(
+        (candidate) => candidate.id === outputId,
+      );
+      if (!output)
+        throw new Error(`wave97eq_current_page_root_missing:${outputId}`);
+      return {
+        output,
+        fields: output.fields.map(({ name }) => name),
+        rowType: "report",
+      };
+    });
+    const controlsOutput = qualification.plan.outputs.find(
+      (output) => output.id === qualification.controlOutputId,
+    );
+    if (!controlsOutput)
+      throw new Error("wave97eq_current_page_control_root_missing");
+    const baseInput = {
+      qualification,
+      siteId: SITE,
+      reports,
+      controlsOutput,
+      reportFields: [...new Set(reports.flatMap(({ fields }) => fields))],
+      controlFields: controlsOutput.fields.map(({ name }) => name),
+      errorPrefix: "wave97eq_page_tabs_envelope",
+      fallbackTag: "analytics.wave97eq.page_tabs_envelope",
+    };
+    expect(qualification.plan.outputs).toHaveLength(reports.length + 1);
+
+    const missingRootPlan = {
+      ...qualification,
+      plan: {
+        ...qualification.plan,
+        outputs: qualification.plan.outputs.filter(
+          (output) => output.id !== reports[0]!.output.id,
+        ),
+      },
+    };
+    expect(() =>
+      compileQualificationProgramEnvelope({
+        ...baseInput,
+        qualification: missingRootPlan,
+      }),
+    ).toThrow("wave97eq_page_tabs_envelope_plan_identity_invalid");
+
+    const extraRoot = {
+      ...reports[0]!.output,
+      id: "unexpected-page-tabs-root",
+    };
+    const extraRootPlan = {
+      ...qualification,
+      plan: {
+        ...qualification.plan,
+        outputs: [...qualification.plan.outputs, extraRoot],
+      },
+    };
+    expect(() =>
+      compileQualificationProgramEnvelope({
+        ...baseInput,
+        qualification: extraRootPlan,
+      }),
+    ).toThrow("wave97eq_page_tabs_envelope_plan_identity_invalid");
   });
 
   it("preserves whitespace visit IDs and excludes empty or orphan Event membership", async () => {

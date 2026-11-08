@@ -1,6 +1,6 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { AdvancedCountQualificationPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import type { AnalyticsQualificationPlan } from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import type {
   LogicalExpressionHandle,
@@ -10,6 +10,7 @@ import type {
 import { snapshotLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { validateLogicalPlan } from "@/lib/edge/analytics/engine/logical/validator";
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
+import { qualificationPlanMetadata } from "@/lib/edge/analytics/engine/qualification-plan-metadata";
 import {
   appendQualifiedPageSource,
   type QualifiedSourceFilterMode,
@@ -43,7 +44,9 @@ export const JOURNEY_GEO_SUMMARY_ATTRIBUTES = [
   "page.report.visitorId",
 ] as const;
 
-export type JourneyGeoQualificationPlan = AnalyticsQualificationPlan & {
+export type JourneyGeoQualificationPlan = AnalyticsQualificationPlan<
+  "session" | "visitor" | "event"
+> & {
   readonly reportOutputIds: readonly [string, string];
   readonly comparisonProvenance: readonly QualifiedGeoComparisonProvenance[];
 };
@@ -365,19 +368,25 @@ export function buildJourneyGeoPointsQualificationPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: AdvancedCountQualificationPlanInput;
   readonly limit: number;
   readonly level: JourneyGeoSummaryLevel;
   readonly filterMode?: QualifiedSourceFilterMode;
+  readonly eventCandidateReportProjection?: "page-visits";
 }): JourneyGeoQualificationPlan {
   const source = appendQualifiedPageSource({
     semanticOperation: "geo-points",
-    filterMode: input.filterMode ?? "split-only",
+    filterMode: input.eventCandidateReportProjection
+      ? "allow-whole-filter"
+      : (input.filterMode ?? "split-only"),
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
     scopePlan: input.scopePlan,
     count: input.count,
+    ...(input.eventCandidateReportProjection
+      ? { eventCandidateReportProjection: input.eventCandidateReportProjection }
+      : {}),
     selections: [],
     additionalAttributes: [
       ...JOURNEY_GEO_POINT_ATTRIBUTES,
@@ -419,5 +428,9 @@ export function buildJourneyGeoPointsQualificationPlan(input: {
     comparisonProvenance: source.qualification.comparisonProvenance,
     scope: source.qualification.scope,
     reportSourceRelations: source.reportSourceRelations,
+    ...qualificationPlanMetadata(
+      source.qualification,
+      source.eventCandidateReportProjection,
+    ),
   };
 }

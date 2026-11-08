@@ -15,6 +15,7 @@ import {
   type DeferredCrossDimensionQualification,
   deferredCrossDimensionQualificationFromQuery,
   isDeferredCrossDimensionQualificationRequest,
+  isDeferredEventCandidatePageProjection,
   isDeferredEventQualification,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { queryD1CompiledAll } from "@/lib/edge/analytics/providers/d1/internal/core";
@@ -101,7 +102,7 @@ function exactOutput(
 }
 
 function verifyPlan(
-  qualification: AnalyticsQualificationPlan,
+  qualification: AnalyticsQualificationPlan<"session" | "visitor" | "event">,
   deferred: DeferredCrossDimensionQualification,
   descriptors: readonly OutputDescriptor[],
   controlOutputId: string,
@@ -110,9 +111,23 @@ function verifyPlan(
   readonly controlsOutput: LogicalOutput;
   readonly controlFields: readonly string[];
 } {
+  const pageVisitsProjection =
+    deferred.qualification.countInput.scope === "event" &&
+    "eventCandidateReportProjection" in deferred.qualification &&
+    deferred.qualification.eventCandidateReportProjection === "page-visits";
   if (
     qualification.scope !== deferred.qualification.countInput.scope ||
-    (qualification.scope !== "session" && qualification.scope !== "visitor") ||
+    (qualification.scope === "event"
+      ? !pageVisitsProjection
+      : qualification.scope !== "session" &&
+        qualification.scope !== "visitor") ||
+    qualification.candidateGrain !==
+      (pageVisitsProjection ? "event-candidate" : undefined) ||
+    qualification.eventCandidateReportProjection !==
+      (pageVisitsProjection ? "page-visits" : undefined) ||
+    (pageVisitsProjection
+      ? qualification.additionalGroupedSummaryRelationIds?.length !== 1
+      : qualification.additionalGroupedSummaryRelationIds !== undefined) ||
     qualification.controlOutputId !== controlOutputId ||
     qualification.reportOutputIds.length !== descriptors.length ||
     qualification.reportOutputIds.some(
@@ -229,7 +244,8 @@ function compileProgram(input: {
       input.configuration,
       input.deferred.configuration,
     ) ||
-    !isDeferredEventQualification(input.deferred.qualification) ||
+    (!isDeferredEventQualification(input.deferred.qualification) &&
+      !isDeferredEventCandidatePageProjection(input.deferred.qualification)) ||
     input.deferred.operation !== "cross-dimension" ||
     input.deferred.qualification.operation !== "cross-dimension"
   )
@@ -257,6 +273,10 @@ function compileProgram(input: {
           : {}),
         scopePlan: deferred.qualification.metadata.plan,
         count: deferred.qualification.countInput,
+        ...("eventCandidateReportProjection" in deferred.qualification &&
+        deferred.qualification.eventCandidateReportProjection === "page-visits"
+          ? { eventCandidateReportProjection: "page-visits" as const }
+          : {}),
       })
     : buildTechnologyCrossQualificationPlan({
         configuration:
@@ -269,6 +289,10 @@ function compileProgram(input: {
           : {}),
         scopePlan: deferred.qualification.metadata.plan,
         count: deferred.qualification.countInput,
+        ...("eventCandidateReportProjection" in deferred.qualification &&
+        deferred.qualification.eventCandidateReportProjection === "page-visits"
+          ? { eventCandidateReportProjection: "page-visits" as const }
+          : {}),
       });
   const verified = verifyPlan(
     qualification,

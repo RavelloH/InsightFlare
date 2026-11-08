@@ -1,6 +1,6 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { AdvancedCountQualificationPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import type { AnalyticsQualificationPlan } from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import { appendPageDimensionQualificationSource } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
 import {
@@ -8,6 +8,7 @@ import {
   PERFORMANCE_METRICS,
   PERFORMANCE_SUMMARY_OUTPUT_ID,
 } from "@/lib/edge/analytics/engine/performance-sample-statistics-report-plan";
+import { qualificationPlanMetadata } from "@/lib/edge/analytics/engine/qualification-plan-metadata";
 import type { QualifiedSourceFilterMode } from "@/lib/edge/analytics/engine/qualified-page-source";
 import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
@@ -15,7 +16,9 @@ import type { FilterDocument } from "@/lib/filter-contract/filters";
 export const PERFORMANCE_SUMMARY_QUALIFICATION_CONTROL_OUTPUT =
   "performance-summary-qualification-controls";
 
-export type PerformanceSummaryQualificationPlan = AnalyticsQualificationPlan & {
+export type PerformanceSummaryQualificationPlan = AnalyticsQualificationPlan<
+  "session" | "visitor" | "event"
+> & {
   readonly reportOutputIds: readonly [typeof PERFORMANCE_SUMMARY_OUTPUT_ID];
 };
 
@@ -33,7 +36,8 @@ export function buildPerformanceSummaryQualificationPlan(input: {
   readonly filters: FilterDocument;
   readonly filterMode?: QualifiedSourceFilterMode;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: AdvancedCountQualificationPlanInput;
+  readonly eventCandidateReportProjection?: "page-visits";
 }): PerformanceSummaryQualificationPlan {
   const source = appendPageDimensionQualificationSource({
     semanticOperation: "performance",
@@ -41,9 +45,14 @@ export function buildPerformanceSummaryQualificationPlan(input: {
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
-    filterMode: input.filterMode ?? "split-only",
+    filterMode: input.eventCandidateReportProjection
+      ? "allow-whole-filter"
+      : (input.filterMode ?? "split-only"),
     scopePlan: input.scopePlan,
     count: input.count,
+    ...(input.eventCandidateReportProjection
+      ? { eventCandidateReportProjection: input.eventCandidateReportProjection }
+      : {}),
     selections: [],
     additionalAttributes: PERFORMANCE_PAGE_ATTRIBUTES,
   });
@@ -69,5 +78,9 @@ export function buildPerformanceSummaryQualificationPlan(input: {
     numericCompatibilityFields: qualification.numericCompatibilityFields,
     scope: qualification.scope,
     reportSourceRelations: source.reportSourceRelations,
+    ...qualificationPlanMetadata(
+      qualification,
+      source.eventCandidateReportProjection,
+    ),
   };
 }

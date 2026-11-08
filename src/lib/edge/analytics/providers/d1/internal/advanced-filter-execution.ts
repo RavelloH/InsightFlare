@@ -426,10 +426,12 @@ export type PerformanceSummaryQualificationConfiguration =
 export interface DeferredPerformanceSummaryQualification {
   readonly operation: "performance";
   readonly configuration: PerformanceSummaryQualificationConfiguration;
-  readonly qualification: DeferredEventQualification & {
-    readonly operation: "performance";
-    readonly requestTime: QueryTime;
-  };
+  readonly qualification:
+    | (DeferredEventQualification & {
+        readonly operation: "performance";
+        readonly requestTime: QueryTime;
+      })
+    | DeferredEventCandidatePageProjectionFor<"performance">;
   readonly requestSnapshot: string;
 }
 
@@ -446,30 +448,36 @@ export interface DeferredOverviewTrendQualification {
 export interface DeferredShareTrendQualification {
   readonly operation: "share-trend";
   readonly configuration: TechnologyShareTrendQualificationConfiguration;
-  readonly qualification: DeferredEventQualification & {
-    readonly operation: "share-trend";
-    readonly requestTime: QueryTime;
-  };
+  readonly qualification:
+    | (DeferredEventQualification & {
+        readonly operation: "share-trend";
+        readonly requestTime: QueryTime;
+      })
+    | DeferredEventCandidatePageProjectionFor<"share-trend">;
   readonly requestSnapshot: string;
 }
 
 export interface DeferredRadarQualification {
   readonly operation: "radar";
   readonly configuration: TechnologyRadarQualificationConfiguration;
-  readonly qualification: DeferredEventQualification & {
-    readonly operation: "radar";
-    readonly requestTime: QueryTime;
-  };
+  readonly qualification:
+    | (DeferredEventQualification & {
+        readonly operation: "radar";
+        readonly requestTime: QueryTime;
+      })
+    | DeferredEventCandidatePageProjectionFor<"radar">;
   readonly requestSnapshot: string;
 }
 
 export interface DeferredCrossDimensionQualification {
   readonly operation: "cross-dimension";
   readonly configuration: TechnologyCrossQualificationConfiguration;
-  readonly qualification: DeferredEventQualification & {
-    readonly operation: "cross-dimension";
-    readonly requestTime: QueryTime;
-  };
+  readonly qualification:
+    | (DeferredEventQualification & {
+        readonly operation: "cross-dimension";
+        readonly requestTime: QueryTime;
+      })
+    | DeferredEventCandidatePageProjectionFor<"cross-dimension">;
   readonly requestSnapshot: string;
 }
 
@@ -605,13 +613,25 @@ export type DeferredEventFieldValuesQualification =
       readonly eventFieldValuesRequest: DeferredEventFieldValuesRequest;
     });
 
-type DeferredEventCandidatePageProjection = Omit<
+export type DeferredEventCandidatePageProjection = Omit<
   DeferredEventQualification,
   "operation" | "countInput"
 > & {
   readonly countInput: AdvancedEventCandidateCountPlanInput;
   readonly eventCandidateReportProjection: "page-visits";
 };
+
+export type DeferredEventCandidatePageProjectionFor<
+  Operation extends DeferredEventQualificationOperation,
+> = Operation extends DeferredEventQualificationOperation
+  ? DeferredEventCandidatePageProjection & {
+      readonly operation: Operation;
+      readonly requestTime: QueryTime;
+    }
+  : never;
+
+type EventCandidatePageReportOperation =
+  "cross-dimension" | "radar" | "share-trend" | "performance" | "geo-points";
 
 export type DeferredPageDimensionQualification =
   | (DeferredEventQualification & {
@@ -638,10 +658,14 @@ export type DeferredPagesAggregatePageQualification =
       readonly pagesAggregatePageRequest: DeferredPagesAggregatePageRequest;
     });
 
-export type DeferredPagesTabsQualification = DeferredEventQualification & {
-  readonly operation: "pages-tabs";
-  readonly pagesTabsRequest: DeferredPagesTabsRequest;
-};
+export type DeferredPagesTabsQualification =
+  | (DeferredEventQualification & {
+      readonly operation: "pages-tabs";
+      readonly pagesTabsRequest: DeferredPagesTabsRequest;
+    })
+  | (DeferredEventCandidatePageProjectionFor<"pages-tabs"> & {
+      readonly pagesTabsRequest: DeferredPagesTabsRequest;
+    });
 
 export type DeferredOverviewPageTableQualification =
   | (DeferredEventQualification & {
@@ -2759,8 +2783,10 @@ const SHARE_TREND_QUERY_FIELDS = new Set([
 const shareTrendQualificationStamps = new WeakMap<
   object,
   {
-    readonly qualification: DeferredEventQualification;
-    readonly countInput: AdvancedCountFilterMatchPlanInput;
+    readonly qualification:
+      | DeferredEventQualification
+      | DeferredEventCandidatePageProjectionFor<"share-trend">;
+    readonly countInput: AdvancedCountQualificationPlanInput;
     readonly analysis: object;
   }
 >();
@@ -2842,7 +2868,9 @@ function sameShareTrendScopePlan(
 
 function shareTrendRequestSnapshot(
   query: QueryInput & Record<string, unknown>,
-  qualification: DeferredEventQualification,
+  qualification:
+    | DeferredEventQualification
+    | DeferredEventCandidatePageProjectionFor<"share-trend">,
   configuration: TechnologyShareTrendQualificationConfiguration,
   expectedBrand?: DeferredShareTrendQualification,
 ): string | undefined {
@@ -3037,7 +3065,8 @@ export function deferredShareTrendQualificationFromQuery(
     !Object.isFrozen(deferred.configuration) ||
     !configuration ||
     JSON.stringify(configuration) !== JSON.stringify(deferred.configuration) ||
-    !isDeferredEventQualification(deferred.qualification) ||
+    (!isDeferredEventQualification(deferred.qualification) &&
+      !isDeferredEventCandidatePageProjection(deferred.qualification)) ||
     deferred.qualification.operation !== "share-trend" ||
     stamp.qualification !== deferred.qualification ||
     stamp.countInput !== deferred.qualification.countInput ||
@@ -3084,8 +3113,10 @@ const BROWSER_CROSS_DIMENSION_QUERY_FIELDS = new Set([
 const crossDimensionQualificationStamps = new WeakMap<
   object,
   {
-    readonly qualification: DeferredEventQualification;
-    readonly countInput: AdvancedCountFilterMatchPlanInput;
+    readonly qualification:
+      | DeferredEventQualification
+      | DeferredEventCandidatePageProjectionFor<"cross-dimension">;
+    readonly countInput: AdvancedCountQualificationPlanInput;
     readonly analysis: object;
   }
 >();
@@ -3240,7 +3271,9 @@ function sameCrossDimensionConfiguration(
 
 function crossDimensionRequestSnapshot(
   query: QueryInput & Record<string, unknown>,
-  qualification: DeferredEventQualification,
+  qualification:
+    | DeferredEventQualification
+    | DeferredEventCandidatePageProjectionFor<"cross-dimension">,
   configuration: TechnologyCrossQualificationConfiguration,
   expectedBrand?: DeferredCrossDimensionQualification,
 ): string | undefined {
@@ -3390,7 +3423,8 @@ export function deferredCrossDimensionQualificationFromQuery(
     !Object.isFrozen(deferred.configuration) ||
     !configuration ||
     !sameCrossDimensionConfiguration(configuration, deferred.configuration) ||
-    !isDeferredEventQualification(deferred.qualification) ||
+    (!isDeferredEventQualification(deferred.qualification) &&
+      !isDeferredEventCandidatePageProjection(deferred.qualification)) ||
     deferred.qualification.operation !== "cross-dimension" ||
     stamp.qualification !== deferred.qualification ||
     stamp.countInput !== deferred.qualification.countInput ||
@@ -3424,8 +3458,10 @@ const RADAR_QUERY_FIELDS = new Set([
 const radarQualificationStamps = new WeakMap<
   object,
   {
-    readonly qualification: DeferredEventQualification;
-    readonly countInput: AdvancedCountFilterMatchPlanInput;
+    readonly qualification:
+      | DeferredEventQualification
+      | DeferredEventCandidatePageProjectionFor<"radar">;
+    readonly countInput: AdvancedCountQualificationPlanInput;
     readonly analysis: object;
   }
 >();
@@ -3581,7 +3617,9 @@ function isDeferredRadarQualification(
 
 function radarRequestSnapshot(
   query: QueryInput & Record<string, unknown>,
-  qualification: DeferredEventQualification,
+  qualification:
+    | DeferredEventQualification
+    | DeferredEventCandidatePageProjectionFor<"radar">,
   configuration: TechnologyRadarQualificationConfiguration,
   expectedBrand?: DeferredRadarQualification,
 ): string | undefined {
@@ -3728,7 +3766,8 @@ export function deferredRadarQualificationFromQuery(
     !Object.isFrozen(deferred.configuration) ||
     !configuration ||
     JSON.stringify(configuration) !== JSON.stringify(deferred.configuration) ||
-    !isDeferredEventQualification(deferred.qualification) ||
+    (!isDeferredEventQualification(deferred.qualification) &&
+      !isDeferredEventCandidatePageProjection(deferred.qualification)) ||
     deferred.qualification.operation !== "radar" ||
     stamp.qualification !== deferred.qualification ||
     stamp.countInput !== deferred.qualification.countInput ||
@@ -4664,6 +4703,15 @@ async function prepareDeferredEventQualification(input: {
   | DeferredEventTypeDetailQualification
   | DeferredPageQualification
   | DeferredPagesAggregatePageQualification
+  | DeferredPagesTabsQualification
+  | DeferredEventCandidatePageProjectionFor<
+      | "cross-dimension"
+      | "radar"
+      | "share-trend"
+      | "performance"
+      | "geo-points"
+      | "pages-tabs"
+    >
   | DeferredFilterValuesQualificationInput
   | null
 > {
@@ -4707,6 +4755,34 @@ async function prepareDeferredEventQualification(input: {
   const rawOverviewPageDescriptor = rawOverviewPageTableRequest
     ? overviewPageTableDescriptor(rawOverviewPageTableRequest.tab)
     : null;
+  const eventCandidatePageReportOperation =
+    (input.operation === "cross-dimension" &&
+      input.allowPrivateTechnologyWholeFilterOptIn === true &&
+      technologyCrossDimensionQualificationConfigurationFromQuery(query) !==
+        undefined) ||
+    (input.operation === "radar" &&
+      input.allowPrivateTechnologyWholeFilterOptIn === true &&
+      hasSafeRadarQueryShape(query) &&
+      technologyRadarQualificationConfigurationFromQuery(query) !==
+        undefined) ||
+    (input.operation === "share-trend" &&
+      input.allowPrivateTechnologyWholeFilterOptIn === true &&
+      hasSafeShareTrendQueryShape(query) &&
+      normalizedShareTrendConfigurationFromQuery(query) !== undefined) ||
+    (input.operation === "performance" &&
+      input.allowPrivatePerformanceWholeFilterOptIn === true &&
+      performanceQualificationConfigurationFromQuery(query) !== undefined) ||
+    (input.operation === "geo-points" &&
+      input.allowPrivateGeoPointsWholeFilterOptIn === true &&
+      geoPointsQualificationConfigurationFromQuery(query) !== undefined) ||
+    (input.operation === "pages-tabs" &&
+      ownDataValue(query, "mode") === undefined &&
+      ownDataValue(
+        ownDataValue(ownDataValue(query, "context"), "policy"),
+        "audience",
+      ) === "private-dashboard" &&
+      (ownDataValue(query, "variant") === "tabs" ||
+        ownDataValue(query, "includeTabs") === true));
   const eventCandidateConsumerOperation =
     input.operation === "event-summary" ||
     input.operation === "event-context" ||
@@ -4720,6 +4796,7 @@ async function prepareDeferredEventQualification(input: {
     (input.operation === "page-dimension" &&
       input.allowPageFieldWholeFilterOptIn === true) ||
     input.operation === "pages-aggregate-page" ||
+    eventCandidatePageReportOperation ||
     (input.operation === "filter-values" &&
       (filterValuesRequest?.reportKind === "event" ||
         (input.allowPrivateFilterValuesWholeFilterOptIn === true &&
@@ -4757,7 +4834,19 @@ async function prepareDeferredEventQualification(input: {
                           ? "page_dimension_request_context_mismatch"
                           : input.operation === "pages-aggregate-page"
                             ? "pages_aggregate_page_request_context_mismatch"
-                            : "event_name_dimension_request_context_mismatch",
+                            : input.operation === "pages-tabs"
+                              ? "pages_tabs_request_context_mismatch"
+                              : input.operation === "geo-points"
+                                ? "geo_points_request_context_mismatch"
+                                : input.operation === "performance"
+                                  ? "performance_qualification_request_context_mismatch"
+                                  : input.operation === "cross-dimension"
+                                    ? "cross_dimension_qualification_request_changed"
+                                    : input.operation === "radar"
+                                      ? "radar_qualification_request_changed"
+                                      : input.operation === "share-trend"
+                                        ? "share_trend_qualification_request_changed"
+                                        : "event_name_dimension_request_context_mismatch",
     );
   const eventCandidateFilters = eventCandidateConsumerOperation
     ? (ownDataValue(query, "filters") as FilterDocument | undefined)
@@ -4812,7 +4901,19 @@ async function prepareDeferredEventQualification(input: {
                           ? "page_dimension_request_context_mismatch"
                           : input.operation === "pages-aggregate-page"
                             ? "pages_aggregate_page_request_context_mismatch"
-                            : "event_name_dimension_request_context_mismatch",
+                            : input.operation === "pages-tabs"
+                              ? "pages_tabs_request_context_mismatch"
+                              : input.operation === "geo-points"
+                                ? "geo_points_request_context_mismatch"
+                                : input.operation === "performance"
+                                  ? "performance_qualification_request_context_mismatch"
+                                  : input.operation === "cross-dimension"
+                                    ? "cross_dimension_qualification_request_changed"
+                                    : input.operation === "radar"
+                                      ? "radar_qualification_request_changed"
+                                      : input.operation === "share-trend"
+                                        ? "share_trend_qualification_request_changed"
+                                        : "event_name_dimension_request_context_mismatch",
     );
   const eventCandidateBaseRequest =
     eventCandidateMetadata?.plan.scope === "event" &&
@@ -4831,6 +4932,29 @@ async function prepareDeferredEventQualification(input: {
     sameEventFieldsQueryTime(
       rawCandidateRequestTime as QueryTime,
       eventCandidateMetadata.time,
+    );
+  const eventCandidatePageReportRequest =
+    eventCandidatePageReportOperation &&
+    eventCandidateBaseRequest &&
+    eventCandidateRequestTimeMatches;
+  if (
+    eventCandidatePageReportOperation &&
+    eventCandidateMetadata?.plan.scope === "event" &&
+    !eventCandidateRequestTimeMatches
+  )
+    throw invalidInput(
+      "time",
+      input.operation === "geo-points"
+        ? "geo_points_request_context_mismatch"
+        : input.operation === "pages-tabs"
+          ? "pages_tabs_request_context_mismatch"
+          : input.operation === "performance"
+            ? "performance_qualification_request_context_mismatch"
+            : input.operation === "cross-dimension"
+              ? "cross_dimension_qualification_request_changed"
+              : input.operation === "radar"
+                ? "radar_qualification_request_changed"
+                : "share_trend_qualification_request_changed",
     );
   if (
     eventCandidateMetadata?.plan.scope === "event" &&
@@ -4986,7 +5110,8 @@ async function prepareDeferredEventQualification(input: {
     eventCandidateRecordsRequest ||
     eventCandidateEventTrendRequest ||
     eventCandidateFieldsRequest ||
-    eventCandidateFieldValuesRequest;
+    eventCandidateFieldValuesRequest ||
+    eventCandidatePageReportRequest;
   const overviewTrendConfiguration =
     input.operation === "overview" || input.operation === "trend"
       ? overviewTrendConfigurationForQuery(input.operation, query)
@@ -5636,32 +5761,39 @@ async function prepareDeferredEventQualification(input: {
               ? "event_records_qualification_request_context_mismatch"
               : input.operation === "radar"
                 ? "radar_request_context_mismatch"
-                : input.operation === "event-name-dimension"
-                  ? "event_name_dimension_request_context_mismatch"
-                  : input.operation === "channel-overview"
-                    ? "channel_overview_request_context_mismatch"
-                    : input.operation === "channel-list"
-                      ? "channel_list_request_context_mismatch"
-                      : input.operation === "session-boundary-dimension"
-                        ? "session_boundary_dimension_request_context_mismatch"
-                        : input.operation === "session-boundary-overview-page"
-                          ? "session_boundary_overview_page_request_context_mismatch"
-                          : input.operation === "pages-aggregate-page"
-                            ? "pages_aggregate_page_request_context_mismatch"
-                            : input.operation === "pages-tabs"
-                              ? "pages_tabs_request_context_mismatch"
-                              : input.operation === "pages-dashboard"
-                                ? "pages_dashboard_request_context_mismatch"
-                                : input.operation === "geo-points"
-                                  ? "geo_points_request_context_mismatch"
-                                  : input.operation === "filter-values"
-                                    ? "filter_values_request_context_mismatch"
-                                    : input.operation === "referrers"
-                                      ? "referrers_request_context_mismatch"
-                                      : input.operation === "visitor-events" ||
-                                          input.operation === "session-events"
-                                        ? "journey_event_page_qualification_request_context_mismatch"
-                                        : "page_dimension_request_context_mismatch",
+                : input.operation === "cross-dimension"
+                  ? "cross_dimension_request_context_mismatch"
+                  : input.operation === "performance"
+                    ? `performance_${performanceQualificationConfiguration?.mode ?? "qualification"}_request_context_mismatch`
+                    : input.operation === "event-name-dimension"
+                      ? "event_name_dimension_request_context_mismatch"
+                      : input.operation === "channel-overview"
+                        ? "channel_overview_request_context_mismatch"
+                        : input.operation === "channel-list"
+                          ? "channel_list_request_context_mismatch"
+                          : input.operation === "session-boundary-dimension"
+                            ? "session_boundary_dimension_request_context_mismatch"
+                            : input.operation ===
+                                "session-boundary-overview-page"
+                              ? "session_boundary_overview_page_request_context_mismatch"
+                              : input.operation === "pages-aggregate-page"
+                                ? "pages_aggregate_page_request_context_mismatch"
+                                : input.operation === "pages-tabs"
+                                  ? "pages_tabs_request_context_mismatch"
+                                  : input.operation === "pages-dashboard"
+                                    ? "pages_dashboard_request_context_mismatch"
+                                    : input.operation === "geo-points"
+                                      ? "geo_points_request_context_mismatch"
+                                      : input.operation === "filter-values"
+                                        ? "filter_values_request_context_mismatch"
+                                        : input.operation === "referrers"
+                                          ? "referrers_request_context_mismatch"
+                                          : input.operation ===
+                                                "visitor-events" ||
+                                              input.operation ===
+                                                "session-events"
+                                            ? "journey_event_page_qualification_request_context_mismatch"
+                                            : "page_dimension_request_context_mismatch",
     );
   const requestContextMismatchCode =
     input.operation === "share-trend"
@@ -5674,45 +5806,50 @@ async function prepareDeferredEventQualification(input: {
             ? "event_records_qualification_request_context_mismatch"
             : input.operation === "radar"
               ? "radar_request_context_mismatch"
-              : input.operation === "event-field-values"
-                ? "event_field_values_request_context_mismatch"
-                : input.operation === "channel-overview"
-                  ? "channel_overview_request_context_mismatch"
-                  : input.operation === "channel-list"
-                    ? "channel_list_request_context_mismatch"
-                    : input.operation === "page-dimension"
-                      ? "page_dimension_request_context_mismatch"
-                      : input.operation === "referrers"
-                        ? "referrers_request_context_mismatch"
-                        : input.operation === "pages-aggregate-page"
-                          ? "pages_aggregate_page_request_context_mismatch"
-                          : input.operation === "pages-tabs"
-                            ? "pages_tabs_request_context_mismatch"
-                            : input.operation === "event-name-dimension"
-                              ? "event_name_dimension_request_context_mismatch"
-                              : input.operation === "geo-points"
-                                ? "geo_points_request_context_mismatch"
-                                : input.operation ===
-                                    "session-boundary-dimension"
-                                  ? "session_boundary_dimension_request_context_mismatch"
-                                  : input.operation ===
-                                      "session-boundary-overview-page"
-                                    ? "session_boundary_overview_page_request_context_mismatch"
-                                    : input.operation === "pages-dashboard"
-                                      ? "pages_dashboard_request_context_mismatch"
-                                      : input.operation === "filter-values"
-                                        ? "filter_values_request_context_mismatch"
-                                        : input.operation === "visitors"
-                                          ? "visitor_list_qualification_request_context_mismatch"
-                                          : input.operation ===
-                                                "visitor-events" ||
-                                              input.operation ===
-                                                "session-events"
-                                            ? "journey_event_page_qualification_request_context_mismatch"
-                                            : input.operation === "overview" ||
-                                                input.operation === "trend"
-                                              ? "overview_trend_request_context_mismatch"
-                                              : "event_fields_request_context_mismatch";
+              : input.operation === "cross-dimension"
+                ? "cross_dimension_qualification_request_changed"
+                : input.operation === "performance"
+                  ? "performance_qualification_request_context_mismatch"
+                  : input.operation === "event-field-values"
+                    ? "event_field_values_request_context_mismatch"
+                    : input.operation === "channel-overview"
+                      ? "channel_overview_request_context_mismatch"
+                      : input.operation === "channel-list"
+                        ? "channel_list_request_context_mismatch"
+                        : input.operation === "page-dimension"
+                          ? "page_dimension_request_context_mismatch"
+                          : input.operation === "referrers"
+                            ? "referrers_request_context_mismatch"
+                            : input.operation === "pages-aggregate-page"
+                              ? "pages_aggregate_page_request_context_mismatch"
+                              : input.operation === "pages-tabs"
+                                ? "pages_tabs_request_context_mismatch"
+                                : input.operation === "event-name-dimension"
+                                  ? "event_name_dimension_request_context_mismatch"
+                                  : input.operation === "geo-points"
+                                    ? "geo_points_request_context_mismatch"
+                                    : input.operation ===
+                                        "session-boundary-dimension"
+                                      ? "session_boundary_dimension_request_context_mismatch"
+                                      : input.operation ===
+                                          "session-boundary-overview-page"
+                                        ? "session_boundary_overview_page_request_context_mismatch"
+                                        : input.operation === "pages-dashboard"
+                                          ? "pages_dashboard_request_context_mismatch"
+                                          : input.operation === "filter-values"
+                                            ? "filter_values_request_context_mismatch"
+                                            : input.operation === "visitors"
+                                              ? "visitor_list_qualification_request_context_mismatch"
+                                              : input.operation ===
+                                                    "visitor-events" ||
+                                                  input.operation ===
+                                                    "session-events"
+                                                ? "journey_event_page_qualification_request_context_mismatch"
+                                                : input.operation ===
+                                                      "overview" ||
+                                                    input.operation === "trend"
+                                                  ? "overview_trend_request_context_mismatch"
+                                                  : "event_fields_request_context_mismatch";
   if (
     (input.operation === "event-fields" ||
       input.operation === "event-field-values" ||
@@ -6215,7 +6352,6 @@ async function prepareDeferredEventQualification(input: {
       ? { requestScopePlan: query.scopePlan as ScopedFilterPlan }
       : {}),
     subject: input.subject,
-    countInput: countInput as AdvancedCountFilterMatchPlanInput,
     coverage,
     ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
@@ -6305,109 +6441,137 @@ async function prepareDeferredEventQualification(input: {
     | DeferredEventTypeDetailQualification
     | DeferredPageQualification
     | DeferredPagesAggregatePageQualification
-    | DeferredFilterValuesQualificationInput = eventCandidateSummaryRequest
+    | DeferredPagesTabsQualification
+    | DeferredEventCandidatePageProjectionFor<
+        | "cross-dimension"
+        | "radar"
+        | "share-trend"
+        | "performance"
+        | "geo-points"
+        | "pages-tabs"
+      >
+    | DeferredFilterValuesQualificationInput
+    | null = eventCandidatePageReportRequest
     ? (Object.freeze({
         ...deferredBase,
-        operation: "event-summary" as const,
         countInput: countInput as AdvancedEventCandidateCountPlanInput,
-      }) as DeferredEventSummaryQualification)
-    : eventCandidateRecordsRequest
+        eventCandidateReportProjection: "page-visits" as const,
+      }) as DeferredEventCandidatePageProjectionFor<
+        | "cross-dimension"
+        | "radar"
+        | "share-trend"
+        | "performance"
+        | "geo-points"
+        | "pages-tabs"
+      >)
+    : eventCandidateSummaryRequest
       ? (Object.freeze({
           ...deferredBase,
-          operation: "event-records" as const,
+          operation: "event-summary" as const,
           countInput: countInput as AdvancedEventCandidateCountPlanInput,
-          eventRecordsRequest: eventRecordsRequest!,
-        }) as DeferredEventRecordsQualification)
-      : eventCandidateFieldsRequest
+        }) as DeferredEventSummaryQualification)
+      : eventCandidateRecordsRequest
         ? (Object.freeze({
             ...deferredBase,
-            operation: "event-fields" as const,
+            operation: "event-records" as const,
             countInput: countInput as AdvancedEventCandidateCountPlanInput,
-            eventFieldsRequest: eventFieldsRequest!,
-          }) as DeferredEventFieldsQualification)
-        : eventCandidateFieldValuesRequest
+            eventRecordsRequest: eventRecordsRequest!,
+          }) as DeferredEventRecordsQualification)
+        : eventCandidateFieldsRequest
           ? (Object.freeze({
               ...deferredBase,
-              operation: "event-field-values" as const,
+              operation: "event-fields" as const,
               countInput: countInput as AdvancedEventCandidateCountPlanInput,
-              eventFieldValuesRequest: eventFieldValuesRequest!,
-            }) as DeferredEventFieldValuesQualification)
-          : eventCandidateEventTrendRequest
+              eventFieldsRequest: eventFieldsRequest!,
+            }) as DeferredEventFieldsQualification)
+          : eventCandidateFieldValuesRequest
             ? (Object.freeze({
                 ...deferredBase,
-                operation: "event-trend" as const,
+                operation: "event-field-values" as const,
                 countInput: countInput as AdvancedEventCandidateCountPlanInput,
-              }) as DeferredEventTrendQualification)
-            : eventCandidateContextRequest
+                eventFieldValuesRequest: eventFieldValuesRequest!,
+              }) as DeferredEventFieldValuesQualification)
+            : eventCandidateEventTrendRequest
               ? (Object.freeze({
                   ...deferredBase,
-                  operation: "event-context" as const,
+                  operation: "event-trend" as const,
                   countInput:
                     countInput as AdvancedEventCandidateCountPlanInput,
-                  eventContextRequest: eventContextRequest!,
-                }) as DeferredEventContextQualification)
-              : eventCandidateTypeDetailRequest
+                }) as DeferredEventTrendQualification)
+              : eventCandidateContextRequest
                 ? (Object.freeze({
                     ...deferredBase,
-                    operation: "event-type-detail" as const,
+                    operation: "event-context" as const,
                     countInput:
                       countInput as AdvancedEventCandidateCountPlanInput,
-                    eventTypeDetailRequest: eventTypeDetailRequest!,
-                  }) as DeferredEventTypeDetailQualification)
-                : eventCandidatePageRequest
+                    eventContextRequest: eventContextRequest!,
+                  }) as DeferredEventContextQualification)
+                : eventCandidateTypeDetailRequest
                   ? (Object.freeze({
                       ...deferredBase,
-                      operation: "event-types" as const,
+                      operation: "event-type-detail" as const,
                       countInput:
                         countInput as AdvancedEventCandidateCountPlanInput,
-                    }) as DeferredEventTypesQualification)
-                  : eventCandidateDimensionListRequest
+                      eventTypeDetailRequest: eventTypeDetailRequest!,
+                    }) as DeferredEventTypeDetailQualification)
+                  : eventCandidatePageRequest
                     ? (Object.freeze({
                         ...deferredBase,
-                        operation: "event-name-dimension" as const,
+                        operation: "event-types" as const,
                         countInput:
                           countInput as AdvancedEventCandidateCountPlanInput,
-                      }) as DeferredEventNameDimensionQualification)
-                    : eventCandidateFilterValuesRequest
+                      }) as DeferredEventTypesQualification)
+                    : eventCandidateDimensionListRequest
                       ? (Object.freeze({
                           ...deferredBase,
-                          operation: "filter-values" as const,
+                          operation: "event-name-dimension" as const,
                           countInput:
                             countInput as AdvancedEventCandidateCountPlanInput,
-                        }) as DeferredFilterValuesQualificationInput)
-                      : eventCandidatePageFilterValuesRequest
+                        }) as DeferredEventNameDimensionQualification)
+                      : eventCandidateFilterValuesRequest
                         ? (Object.freeze({
                             ...deferredBase,
                             operation: "filter-values" as const,
                             countInput:
                               countInput as AdvancedEventCandidateCountPlanInput,
-                            eventCandidateReportProjection:
-                              "page-visits" as const,
-                            filterValuesFilterMode:
-                              "allow-whole-filter" as const,
                           }) as DeferredFilterValuesQualificationInput)
-                        : eventCandidatePageDimensionProjectionRequest
+                        : eventCandidatePageFilterValuesRequest
                           ? (Object.freeze({
                               ...deferredBase,
-                              operation: "page-dimension" as const,
+                              operation: "filter-values" as const,
                               countInput:
                                 countInput as AdvancedEventCandidateCountPlanInput,
                               eventCandidateReportProjection:
                                 "page-visits" as const,
-                            }) as DeferredPageQualification)
-                          : eventCandidatePagesAggregateRequest &&
-                              pagesAggregatePageRequest !== undefined
+                              filterValuesFilterMode:
+                                "allow-whole-filter" as const,
+                            }) as DeferredFilterValuesQualificationInput)
+                          : eventCandidatePageDimensionProjectionRequest
                             ? (Object.freeze({
                                 ...deferredBase,
-                                operation: "pages-aggregate-page" as const,
+                                operation: "page-dimension" as const,
                                 countInput:
                                   countInput as AdvancedEventCandidateCountPlanInput,
                                 eventCandidateReportProjection:
                                   "page-visits" as const,
-                              }) as DeferredPagesAggregatePageQualification)
-                            : (Object.freeze(
-                                deferredBase,
-                              ) as DeferredEventQualification);
+                              }) as DeferredPageQualification)
+                            : eventCandidatePagesAggregateRequest &&
+                                pagesAggregatePageRequest !== undefined
+                              ? (Object.freeze({
+                                  ...deferredBase,
+                                  operation: "pages-aggregate-page" as const,
+                                  countInput:
+                                    countInput as AdvancedEventCandidateCountPlanInput,
+                                  eventCandidateReportProjection:
+                                    "page-visits" as const,
+                                }) as DeferredPagesAggregatePageQualification)
+                              : countInput.scope !== "event"
+                                ? (Object.freeze({
+                                    ...deferredBase,
+                                    countInput,
+                                  }) as DeferredEventQualification)
+                                : null;
+  if (!deferred) return null;
   deferredEventQualifications.add(deferred);
   return deferred;
 }
@@ -6475,6 +6639,19 @@ export function deferredEventQualificationFromQuery(
 ): DeferredPagesAggregatePageQualification | undefined;
 export function deferredEventQualificationFromQuery(
   input: unknown,
+  operation: "pages-tabs",
+): DeferredPagesTabsQualification | undefined;
+export function deferredEventQualificationFromQuery<
+  Operation extends EventCandidatePageReportOperation,
+>(
+  input: unknown,
+  operation: Operation,
+):
+  | (DeferredEventQualification & { readonly operation: Operation })
+  | DeferredEventCandidatePageProjectionFor<Operation>
+  | undefined;
+export function deferredEventQualificationFromQuery(
+  input: unknown,
   operation: Exclude<
     DeferredEventQualificationOperation,
     | "event-summary"
@@ -6488,6 +6665,8 @@ export function deferredEventQualificationFromQuery(
     | "event-type-detail"
     | "page-dimension"
     | "pages-aggregate-page"
+    | "pages-tabs"
+    | EventCandidatePageReportOperation
   >,
 ): DeferredEventQualification | undefined;
 export function deferredEventQualificationFromQuery(
@@ -6506,6 +6685,8 @@ export function deferredEventQualificationFromQuery(
   | DeferredEventTypeDetailQualification
   | DeferredPageQualification
   | DeferredPagesAggregatePageQualification
+  | DeferredPagesTabsQualification
+  | DeferredEventCandidatePageProjectionFor<EventCandidatePageReportOperation>
   | DeferredFilterValuesQualificationInput
   | undefined;
 export function deferredEventQualificationFromQuery(
@@ -6524,6 +6705,8 @@ export function deferredEventQualificationFromQuery(
   | DeferredEventTypeDetailQualification
   | DeferredPageQualification
   | DeferredPagesAggregatePageQualification
+  | DeferredPagesTabsQualification
+  | DeferredEventCandidatePageProjectionFor<EventCandidatePageReportOperation>
   | DeferredFilterValuesQualificationInput
   | undefined {
   if (!input || typeof input !== "object") return undefined;
@@ -6548,6 +6731,8 @@ export function deferredEventQualificationFromQuery(
         | DeferredEventTypeDetailQualification
         | DeferredPageQualification
         | DeferredPagesAggregatePageQualification
+        | DeferredPagesTabsQualification
+        | DeferredEventCandidatePageProjectionFor<EventCandidatePageReportOperation>
         | DeferredFilterValuesQualificationInput)
     : undefined;
 }
@@ -6969,11 +7154,46 @@ export function isDeferredEventQualification(
   | DeferredEventTypeDetailQualification
   | DeferredPageQualification
   | DeferredPagesAggregatePageQualification
+  | DeferredPagesTabsQualification
+  | DeferredEventCandidatePageProjectionFor<EventCandidatePageReportOperation>
   | DeferredFilterValuesQualificationInput {
   return (
     typeof value === "object" &&
     value !== null &&
     deferredEventQualifications.has(value)
+  );
+}
+
+export function isDeferredEventCandidatePageProjection(
+  value: unknown,
+): value is DeferredEventCandidatePageProjection {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !deferredEventQualifications.has(value)
+  )
+    return false;
+  const candidate = value as {
+    readonly operation?: unknown;
+    readonly countInput?: {
+      readonly scope?: unknown;
+      readonly candidateAnchor?: { readonly kind?: unknown };
+    };
+    readonly eventCandidateReportProjection?: unknown;
+  };
+  return (
+    (candidate.operation === "page-dimension" ||
+      candidate.operation === "pages-aggregate-page" ||
+      candidate.operation === "filter-values" ||
+      candidate.operation === "pages-tabs" ||
+      candidate.operation === "cross-dimension" ||
+      candidate.operation === "radar" ||
+      candidate.operation === "share-trend" ||
+      candidate.operation === "performance" ||
+      candidate.operation === "geo-points") &&
+    candidate.countInput?.scope === "event" &&
+    candidate.countInput.candidateAnchor?.kind === "event-candidate" &&
+    candidate.eventCandidateReportProjection === "page-visits"
   );
 }
 
@@ -7002,9 +7222,14 @@ export async function prepareDeferredEventQualificationFallback(
     | DeferredEventTypeDetailQualification
     | DeferredPageQualification
     | DeferredPagesAggregatePageQualification
+    | DeferredPagesTabsQualification
+    | DeferredEventCandidatePageProjection
     | DeferredFilterValuesQualificationInput,
 ): Promise<FilterDocument> {
-  if (!isDeferredEventQualification(deferred))
+  if (
+    !isDeferredEventQualification(deferred) &&
+    !isDeferredEventCandidatePageProjection(deferred)
+  )
     throw new Error("deferred_event_qualification_untrusted");
   if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
   const advancedMatches = await evaluateForSites({
@@ -7342,6 +7567,18 @@ export function d1AdvancedFilterMiddleware(
       ownDataValue(input, "variant") !== "tabs" &&
       ownDataValue(input, "includeTabs") !== true &&
       queryHasNoComparisonState(input);
+    const rawPrivateMultiOutputPageCandidate =
+      rawAudience === "private-dashboard" &&
+      queryHasNoComparisonState(input) &&
+      (operation === "cross-dimension" ||
+        operation === "radar" ||
+        operation === "share-trend" ||
+        operation === "performance" ||
+        operation === "geo-points" ||
+        (operation === "pages" &&
+          ownDataValue(input, "mode") === undefined &&
+          (ownDataValue(input, "variant") === "tabs" ||
+            ownDataValue(input, "includeTabs") === true)));
     const rawCandidateFiltersDescriptor = ownDescriptor(input, "filters");
     const rawCandidateFiltersMetadata =
       rawCandidateFiltersDescriptor && "value" in rawCandidateFiltersDescriptor
@@ -7356,14 +7593,16 @@ export function d1AdvancedFilterMiddleware(
     const rawPageCandidateRequestSnapshot =
       (rawPrivatePageDimensionCandidate ||
         rawPrivateOverviewPageCandidate ||
-        rawPrivatePagesAggregateCandidate) &&
+        rawPrivatePagesAggregateCandidate ||
+        rawPrivateMultiOutputPageCandidate) &&
       rawCandidateMayUseEventProjection
         ? qualificationRequestOwnDataSnapshot(input)
         : undefined;
     if (
       (rawPrivatePageDimensionCandidate ||
         rawPrivateOverviewPageCandidate ||
-        rawPrivatePagesAggregateCandidate) &&
+        rawPrivatePagesAggregateCandidate ||
+        rawPrivateMultiOutputPageCandidate) &&
       rawCandidateMayUseEventProjection &&
       rawPageCandidateRequestSnapshot === undefined
     )
@@ -7947,10 +8186,8 @@ export function d1AdvancedFilterMiddleware(
             Object.freeze({
               operation: "performance",
               configuration,
-              qualification: deferred as DeferredEventQualification & {
-                readonly operation: "performance";
-                readonly requestTime: QueryTime;
-              },
+              qualification:
+                deferred as DeferredPerformanceSummaryQualification["qualification"],
               requestSnapshot,
             });
           deferredPerformanceSummaryQualifications.add(qualifiedRequest);
@@ -7975,10 +8212,8 @@ export function d1AdvancedFilterMiddleware(
           const qualifiedRequest: DeferredRadarQualification = Object.freeze({
             operation: "radar",
             configuration,
-            qualification: deferred as DeferredEventQualification & {
-              readonly operation: "radar";
-              readonly requestTime: QueryTime;
-            },
+            qualification:
+              deferred as DeferredRadarQualification["qualification"],
             requestSnapshot,
           });
           deferredRadarQualifications.add(qualifiedRequest);
@@ -8013,10 +8248,8 @@ export function d1AdvancedFilterMiddleware(
             Object.freeze({
               operation: "share-trend",
               configuration,
-              qualification: deferred as DeferredEventQualification & {
-                readonly operation: "share-trend";
-                readonly requestTime: QueryTime;
-              },
+              qualification:
+                deferred as DeferredShareTrendQualification["qualification"],
               requestSnapshot,
             });
           deferredShareTrendQualifications.add(qualifiedRequest);
@@ -8096,10 +8329,8 @@ export function d1AdvancedFilterMiddleware(
             Object.freeze({
               operation: "cross-dimension",
               configuration,
-              qualification: deferred as DeferredEventQualification & {
-                readonly operation: "cross-dimension";
-                readonly requestTime: QueryTime;
-              },
+              qualification:
+                deferred as DeferredCrossDimensionQualification["qualification"],
               requestSnapshot,
             });
           deferredCrossDimensionQualifications.add(qualifiedRequest);
