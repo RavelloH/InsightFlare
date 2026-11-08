@@ -1771,6 +1771,14 @@ function compileProgram(request: EventQualificationCompileRequest):
                         scopePlan:
                           request.query.scopePlan ?? deferred.metadata.plan,
                         count: request.deferred.countInput,
+                        ...("eventCandidateReportProjection" in deferred &&
+                        deferred.eventCandidateReportProjection ===
+                          "page-visits"
+                          ? {
+                              eventCandidateReportProjection:
+                                "page-visits" as const,
+                            }
+                          : {}),
                         configuration: request.query.configuration,
                       })
                     : request.kind === "page-dimension"
@@ -1784,9 +1792,22 @@ function compileProgram(request: EventQualificationCompileRequest):
                             filters: request.query.filters,
                             scopePlan:
                               request.query.scopePlan ?? deferred.metadata.plan,
-                            count: requireOwnerPageCountInput(
-                              request.deferred.countInput,
-                            ),
+                            count:
+                              "eventCandidateReportProjection" in deferred &&
+                              deferred.eventCandidateReportProjection ===
+                                "page-visits"
+                                ? request.deferred.countInput
+                                : requireOwnerPageCountInput(
+                                    request.deferred.countInput,
+                                  ),
+                            ...("eventCandidateReportProjection" in deferred &&
+                            deferred.eventCandidateReportProjection ===
+                              "page-visits"
+                              ? {
+                                  eventCandidateReportProjection:
+                                    "page-visits" as const,
+                                }
+                              : {}),
                             options: {
                               limit: request.query.limit,
                               includeFullUrl: request.query.includeFullUrl,
@@ -1847,6 +1868,14 @@ function compileProgram(request: EventQualificationCompileRequest):
                             scopePlan:
                               request.query.scopePlan ?? deferred.metadata.plan,
                             count: request.deferred.countInput,
+                            ...("eventCandidateReportProjection" in deferred &&
+                            deferred.eventCandidateReportProjection ===
+                              "page-visits"
+                              ? {
+                                  eventCandidateReportProjection:
+                                    "page-visits" as const,
+                                }
+                              : {}),
                             kind: request.query.kind,
                             limit: request.query.limit,
                             ...(request.query.search !== undefined
@@ -1871,6 +1900,15 @@ function compileProgram(request: EventQualificationCompileRequest):
                                 request.query.scopePlan ??
                                 deferred.metadata.plan,
                               count: request.deferred.countInput,
+                              ...("eventCandidateReportProjection" in
+                                deferred &&
+                              deferred.eventCandidateReportProjection ===
+                                "page-visits"
+                                ? {
+                                    eventCandidateReportProjection:
+                                      "page-visits" as const,
+                                  }
+                                : {}),
                               kind: request.query.kind,
                               limit: request.query.limit,
                               ...(request.query.search !== undefined
@@ -1895,6 +1933,15 @@ function compileProgram(request: EventQualificationCompileRequest):
                                   request.query.scopePlan ??
                                   deferred.metadata.plan,
                                 count: request.deferred.countInput,
+                                ...("eventCandidateReportProjection" in
+                                  deferred &&
+                                deferred.eventCandidateReportProjection ===
+                                  "page-visits"
+                                  ? {
+                                      eventCandidateReportProjection:
+                                        "page-visits" as const,
+                                    }
+                                  : {}),
                                 limit: request.query.limit,
                               })
                             : buildPayloadQualificationPlan(request);
@@ -2026,21 +2073,70 @@ function compileProgram(request: EventQualificationCompileRequest):
     deferred.metadata.plan.scope === "event" &&
     deferred.countInput.scope === "event" &&
     deferred.countInput.candidateAnchor.kind === "event-candidate";
+  const eventCandidateReferrersQuery =
+    request.kind === "referrers" &&
+    deferred.operation === "referrers" &&
+    "eventCandidateReportProjection" in deferred &&
+    deferred.eventCandidateReportProjection === "page-visits" &&
+    "referrersRequest" in deferred &&
+    deferred.referrersRequest !== undefined &&
+    deferred.metadata.plan.scope === "event" &&
+    deferred.countInput.scope === "event" &&
+    deferred.countInput.candidateAnchor.kind === "event-candidate";
+  const eventCandidateChannelListQuery =
+    request.kind === "channel-list" &&
+    deferred.operation === "channel-list" &&
+    "eventCandidateReportProjection" in deferred &&
+    deferred.eventCandidateReportProjection === "page-visits" &&
+    "channelListRequest" in deferred &&
+    deferred.channelListRequest !== undefined &&
+    deferred.metadata.plan.scope === "event" &&
+    deferred.countInput.scope === "event" &&
+    deferred.countInput.candidateAnchor.kind === "event-candidate";
   const eventCandidatePageDimensionQuery =
     request.kind === "page-dimension" &&
-    deferred.operation === "page-dimension" &&
     "eventCandidateReportProjection" in deferred &&
     deferred.eventCandidateReportProjection === "page-visits" &&
     deferred.metadata.plan.scope === "event" &&
     deferred.countInput.scope === "event" &&
     deferred.countInput.candidateAnchor.kind === "event-candidate" &&
-    ((request.query.family === "breakdown" &&
+    ((deferred.operation === "page-dimension" &&
+      request.query.family === "breakdown" &&
       "pageDimensionRequest" in deferred &&
       deferred.pageDimensionRequest !== undefined) ||
-      (request.query.family === "overview-tab" &&
+      (deferred.operation === "page-dimension" &&
+        request.query.family === "overview-tab" &&
         overviewPageTableDescriptor(request.query.tab)?.family === "page" &&
         "overviewPageTableRequest" in deferred &&
-        deferred.overviewPageTableRequest !== undefined));
+        deferred.overviewPageTableRequest !== undefined) ||
+      (deferred.operation === "page-dimension" &&
+        request.query.family === "referrer-overview" &&
+        "referrerOverviewRequest" in deferred &&
+        deferred.referrerOverviewRequest !== undefined) ||
+      (deferred.operation === "channel-overview" &&
+        request.query.family === "overview-tab" &&
+        "overviewPageTableRequest" in deferred &&
+        deferred.overviewPageTableRequest.family === "channel"));
+  const eventCandidateSessionBoundaryDimensionQuery =
+    request.kind === "session-boundary-dimension" &&
+    deferred.operation === "session-boundary-dimension" &&
+    "eventCandidateReportProjection" in deferred &&
+    deferred.eventCandidateReportProjection === "page-visits" &&
+    "sessionBoundaryDimensionRequest" in deferred &&
+    deferred.sessionBoundaryDimensionRequest !== undefined &&
+    deferred.metadata.plan.scope === "event" &&
+    deferred.countInput.scope === "event" &&
+    deferred.countInput.candidateAnchor.kind === "event-candidate";
+  const eventCandidateSessionBoundaryOverviewPageQuery =
+    request.kind === "session-boundary-overview-page" &&
+    deferred.operation === "session-boundary-overview-page" &&
+    "eventCandidateReportProjection" in deferred &&
+    deferred.eventCandidateReportProjection === "page-visits" &&
+    "sessionBoundaryOverviewPageRequest" in deferred &&
+    deferred.sessionBoundaryOverviewPageRequest !== undefined &&
+    deferred.metadata.plan.scope === "event" &&
+    deferred.countInput.scope === "event" &&
+    deferred.countInput.candidateAnchor.kind === "event-candidate";
   const eventCandidatePagesAggregateQuery =
     request.kind === "pages-aggregate-page" &&
     deferred.operation === "pages-aggregate-page" &&
@@ -2060,7 +2156,11 @@ function compileProgram(request: EventQualificationCompileRequest):
     deferred.countInput.candidateAnchor.kind === "event-candidate" &&
     deferred.pagesTabsRequest !== undefined;
   const eventCandidatePageProjectionQuery =
+    eventCandidateReferrersQuery ||
+    eventCandidateChannelListQuery ||
     eventCandidatePageDimensionQuery ||
+    eventCandidateSessionBoundaryDimensionQuery ||
+    eventCandidateSessionBoundaryOverviewPageQuery ||
     eventCandidatePagesAggregateQuery ||
     eventCandidatePagesTabsQuery;
   const eventCandidateContextDetailQuery =

@@ -89,7 +89,7 @@ type ReferrersQuery = QueryInput & {
 
 interface QueryOptions {
   readonly variant?: "summary";
-  readonly scope?: "session" | "visitor";
+  readonly scope?: "session" | "visitor" | "event";
   readonly audience?: "private-dashboard" | "api-v1" | "public-share";
   readonly filterDsl?: string;
   readonly topN?: number;
@@ -787,6 +787,8 @@ describe("qualified flat Referrers pages and summary", () => {
   });
 
   const defaults = [
+    { scope: "event", kind: "summary" },
+    { scope: "event", kind: "page", includeFullUrl: false },
     { scope: "session", kind: "summary" },
     { scope: "visitor", kind: "summary" },
     { scope: "session", kind: "page", includeFullUrl: false },
@@ -794,6 +796,107 @@ describe("qualified flat Referrers pages and summary", () => {
     { scope: "visitor", kind: "page", includeFullUrl: false },
     { scope: "visitor", kind: "page", includeFullUrl: true },
   ] as const;
+
+  it("matches Event candidate summary and a real Referrers cursor continuation", async () => {
+    const { database } = createFixture();
+    const readActual = async (query: ReferrersQuery) => {
+      const trace = traceFor();
+      const diagnostics = createD1ReadDiagnostics();
+      const provider = createD1SiteProviderRegistry({
+        env: testEnv(database, trace),
+        siteId: SITE,
+        diagnostics,
+      }).resolve("referrers");
+      if (!provider)
+        throw new Error("wave97ep_event_referrers_provider_missing");
+      const result = await provider.execute(query as never);
+      return { value: result.value, trace, diagnostics };
+    };
+
+    const summaryQuery = queryFor({
+      scope: "event",
+      variant: "summary",
+      topN: 5,
+    });
+    const summaryLegacy = await legacyRead(database, summaryQuery, traceFor());
+    const summaryActual = await readActual(summaryQuery);
+    expect(summaryActual.value).toEqual(summaryLegacy.value);
+    expect(summaryLegacy.deferred).toBeDefined();
+    expect(
+      summaryActual.diagnostics.advancedCountSqlFallbackReason,
+    ).toBeUndefined();
+
+    const firstQuery = queryFor({
+      scope: "event",
+      limit: 1,
+      includeFullUrl: true,
+    });
+    const firstLegacy = await legacyRead(database, firstQuery, traceFor());
+    const firstPage = firstLegacy.value as {
+      readonly items: readonly unknown[];
+      readonly pagination: { readonly nextCursor: string | null };
+    };
+    expect(firstPage.items).toHaveLength(1);
+    expect(firstPage.pagination.nextCursor).toBeTruthy();
+    const secondQuery = queryFor({
+      scope: "event",
+      limit: 1,
+      includeFullUrl: true,
+      cursor: firstPage.pagination.nextCursor,
+    });
+    const secondLegacy = await legacyRead(database, secondQuery, traceFor());
+    const secondActual = await readActual(secondQuery);
+    expect(secondActual.value).toEqual(secondLegacy.value);
+    expect(secondLegacy.deferred).toBeDefined();
+    expect(
+      secondActual.diagnostics.advancedCountSqlFallbackReason,
+    ).toBeUndefined();
+    expect(secondActual.trace.preparedSql).toHaveLength(2);
+    expect(
+      (secondActual.value as { readonly items: readonly unknown[] }).items,
+    ).not.toEqual(firstPage.items);
+  });
+
+  it("suppresses every Event candidate summary root and keeps controls for numeric fallback", async () => {
+    const { database } = createFixture();
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "a-source");
+    const query = queryFor({
+      scope: "event",
+      variant: "summary",
+      topN: 5,
+      filterDsl: `${BASE_FILTER} and count(page { page.durationMs gt 5 }) gte 1`,
+    });
+    const oldTrace = traceFor();
+    const legacy = await legacyRead(database, query, oldTrace);
+    if (!legacy.deferred)
+      throw new Error("wave97ep_event_referrers_numeric_deferred_missing");
+    const trace = traceFor();
+    const diagnostics = createD1ReadDiagnostics();
+    const provider = createD1SiteProviderRegistry({
+      env: testEnv(database, trace),
+      siteId: SITE,
+      diagnostics,
+    }).resolve("referrers");
+    if (!provider)
+      throw new Error("wave97ep_event_referrers_numeric_provider_missing");
+    const actual = await provider.execute(query as never);
+    const envelopeRows = readEnvelopeRows(database, trace);
+
+    expect(actual.value).toEqual(legacy.value);
+    expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+      kind: "numeric-data-domain",
+      fieldIds: ["page.durationMs"],
+    });
+    expect(
+      envelopeRows.filter((row) => row.rowKind === "control"),
+    ).toHaveLength(1);
+    expect(envelopeRows.filter((row) => row.rowKind === "report")).toHaveLength(
+      0,
+    );
+    expect(trace.preparedSql.length).toBe(oldTrace.preparedSql.length + 1);
+  });
 
   it.each(defaults)(
     "admits and matches the old complete reader for $scope/$kind/$includeFullUrl",
@@ -830,6 +933,10 @@ describe("qualified flat Referrers pages and summary", () => {
         filters: query.filters!,
         scopePlan: query.scopePlan ?? deferred.metadata.plan,
         count: deferred.countInput,
+        ...("eventCandidateReportProjection" in deferred &&
+        deferred.eventCandidateReportProjection === "page-visits"
+          ? { eventCandidateReportProjection: "page-visits" as const }
+          : {}),
         configuration,
       });
       const controlOutput = qualificationPlan.plan.outputs.find(
@@ -1201,10 +1308,6 @@ describe("qualified flat Referrers pages and summary", () => {
         variant: "summary",
         audience: "public-share",
         filterDsl: 'count(event { event.name eq "qualifier" }) gte 1',
-      }),
-      queryFor({
-        scope: "event" as never,
-        variant: "summary",
       }),
       queryFor({ variant: "summary", topN: -1 }),
       queryFor({ limit: 1.5 }),

@@ -143,6 +143,18 @@ function compile(
   let reportFields: readonly string[];
   let valueNulls: "first" | "last";
   let outputs: readonly LogicalOutput[];
+  const eventCandidatePageProjection =
+    "eventCandidateReportProjection" in deferred &&
+    deferred.eventCandidateReportProjection === "page-visits";
+  if (
+    eventCandidatePageProjection &&
+    (request.filterMode !== "allow-whole-filter" ||
+      deferred.filterValuesFilterMode !== "allow-whole-filter" ||
+      deferred.countInput.scope !== "event" ||
+      deferred.countInput.candidateAnchor.kind !== "event-candidate" ||
+      deferred.filterValuesRequest.reportKind !== configuration.reportKind)
+  )
+    throw new Error(`${ERROR_PREFIX}_page_candidate_projection_invalid`);
   if (configuration.reportKind === "event") {
     const reportFilters = deferred.filterValuesReportFilters;
     const eventCandidate =
@@ -212,15 +224,20 @@ function compile(
     valueNulls = "last";
     outputs = plan.plan.outputs;
   } else if (configuration.reportKind === "referrer") {
-    const ownerCountInput = requireOwnerCountInput(deferred.countInput);
+    const pageReportCountInput = eventCandidatePageProjection
+      ? deferred.countInput
+      : requireOwnerCountInput(deferred.countInput);
     const plan = buildReferrerPageQualificationPlan({
       semanticOperation: "filter-values",
       siteId: deferred.siteId,
       queryTime: deferred.requestTime,
       filters: deferred.filters,
       scopePlan: deferred.metadata.plan,
-      count: ownerCountInput,
+      count: pageReportCountInput,
       filterMode: request.filterMode,
+      ...(eventCandidatePageProjection
+        ? { eventCandidateReportProjection: "page-visits" as const }
+        : {}),
       options: {
         limit: configuration.limit,
         includeFullUrl: configuration.field === "referrer.url",
@@ -240,15 +257,20 @@ function compile(
     valueNulls = "first";
     outputs = plan.plan.outputs;
   } else if (configuration.reportKind === "session-boundary") {
-    const ownerCountInput = requireOwnerCountInput(deferred.countInput);
+    const pageReportCountInput = eventCandidatePageProjection
+      ? deferred.countInput
+      : requireOwnerCountInput(deferred.countInput);
     const plan = buildSessionBoundaryOverviewPageQualificationPlan({
       semanticOperation: "filter-values",
       siteId: deferred.siteId,
       queryTime: deferred.requestTime,
       filters: deferred.filters,
       scopePlan: deferred.metadata.plan,
-      count: ownerCountInput,
+      count: pageReportCountInput,
       filterMode: request.filterMode,
+      ...(eventCandidatePageProjection
+        ? { eventCandidateReportProjection: "page-visits" as const }
+        : {}),
       kind: configuration.field === "session.entryPath" ? "entry" : "exit",
       limit: configuration.limit,
       ...(configuration.search !== undefined
@@ -266,19 +288,10 @@ function compile(
     valueNulls = "first";
     outputs = plan.plan.outputs;
   } else {
-    const pageCandidate =
-      configuration.reportKind === "page" &&
-      "eventCandidateReportProjection" in deferred &&
-      deferred.eventCandidateReportProjection === "page-visits";
-    if (
-      pageCandidate &&
-      (request.filterMode !== "allow-whole-filter" ||
-        deferred.countInput.scope !== "event" ||
-        deferred.countInput.candidateAnchor.kind !== "event-candidate" ||
-        deferred.filterValuesRequest.reportKind !== "page")
-    )
+    const pageCandidate = eventCandidatePageProjection;
+    if (pageCandidate && configuration.reportKind !== "page")
       throw new Error(`${ERROR_PREFIX}_page_candidate_projection_invalid`);
-    const countInput = pageCandidate
+    const pageReportCountInput = pageCandidate
       ? deferred.countInput
       : requireOwnerCountInput(deferred.countInput);
     const plan = buildPageDimensionQualificationPlan({
@@ -287,7 +300,7 @@ function compile(
       queryTime: deferred.requestTime,
       filters: deferred.filters,
       scopePlan: deferred.metadata.plan,
-      count: countInput,
+      count: pageReportCountInput,
       filterMode: request.filterMode,
       ...(pageCandidate
         ? { eventCandidateReportProjection: "page-visits" as const }

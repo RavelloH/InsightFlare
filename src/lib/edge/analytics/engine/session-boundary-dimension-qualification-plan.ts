@@ -1,6 +1,9 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type {
+  AdvancedCountFilterMatchPlanInput,
+  AdvancedCountQualificationPlanInput,
+} from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import type {
   AnalyticsQualificationPlan,
   EventQualificationReportSource,
@@ -9,6 +12,7 @@ import {
   appendPageDimensionQualificationSource,
   PAGE_DIMENSION_QUALIFICATION_CONTROL_OUTPUT,
 } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
+import { qualificationPlanMetadata } from "@/lib/edge/analytics/engine/qualification-plan-metadata";
 import type { QualifiedSourceFilterMode } from "@/lib/edge/analytics/engine/qualified-page-source";
 import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
 import {
@@ -31,39 +35,52 @@ const SESSION_BOUNDARY_PAGE_ATTRIBUTES = [
   "page.report.pathname",
 ] as const satisfies readonly SemanticAttributeId[];
 
-export type SessionBoundaryDimensionQualificationPlan =
-  AnalyticsQualificationPlan & {
-    readonly reportOutputIds: readonly [typeof SESSION_PATH_TOP_REPORT_OUTPUT];
-  };
+export type SessionBoundaryDimensionQualificationPlan<
+  Scope extends "session" | "visitor" | "event" = "session" | "visitor",
+> = AnalyticsQualificationPlan<Scope> & {
+  readonly reportOutputIds: readonly [typeof SESSION_PATH_TOP_REPORT_OUTPUT];
+};
 
-export type SessionBoundaryOverviewPageQualificationPlan =
-  AnalyticsQualificationPlan & {
-    readonly reportOutputIds: readonly [typeof SESSION_PATH_PAGE_REPORT_OUTPUT];
-  };
+export type SessionBoundaryOverviewPageQualificationPlan<
+  Scope extends "session" | "visitor" | "event" = "session" | "visitor",
+> = AnalyticsQualificationPlan<Scope> & {
+  readonly reportOutputIds: readonly [typeof SESSION_PATH_PAGE_REPORT_OUTPUT];
+};
 
 export type SessionBoundaryComparisonQualificationPlan =
   AnalyticsQualificationPlan;
 
-export function buildSessionBoundaryDimensionQualificationPlan(input: {
+export function buildSessionBoundaryDimensionQualificationPlan<
+  Count extends AdvancedCountQualificationPlanInput,
+>(input: {
   readonly filterMode?: QualifiedSourceFilterMode;
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: Count;
+  readonly eventCandidateReportProjection?: "page-visits";
   readonly kind: SessionPathKind;
   readonly limit: number;
   readonly search?: string;
   readonly sortBy: SessionPathSortKey;
   readonly sortDirection: "asc" | "desc";
-}): SessionBoundaryDimensionQualificationPlan {
+}): SessionBoundaryDimensionQualificationPlan<Count["scope"]> {
   const source = appendPageDimensionQualificationSource({
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
-    filterMode: input.filterMode ?? "split-only",
+    filterMode:
+      input.eventCandidateReportProjection === "page-visits"
+        ? "allow-whole-filter"
+        : (input.filterMode ?? "split-only"),
     scopePlan: input.scopePlan,
     count: input.count,
+    ...(input.eventCandidateReportProjection
+      ? {
+          eventCandidateReportProjection: input.eventCandidateReportProjection,
+        }
+      : {}),
     selections: [],
     additionalAttributes: SESSION_BOUNDARY_PAGE_ATTRIBUTES,
   });
@@ -91,16 +108,23 @@ export function buildSessionBoundaryDimensionQualificationPlan(input: {
     numericCompatibilityFields: qualification.numericCompatibilityFields,
     scope: qualification.scope,
     reportSourceRelations,
+    ...qualificationPlanMetadata(
+      qualification,
+      source.eventCandidateReportProjection,
+    ),
   };
 }
 
-export function buildSessionBoundaryOverviewPageQualificationPlan(input: {
+export function buildSessionBoundaryOverviewPageQualificationPlan<
+  Count extends AdvancedCountQualificationPlanInput,
+>(input: {
   readonly filterMode?: QualifiedSourceFilterMode;
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: Count;
+  readonly eventCandidateReportProjection?: "page-visits";
   readonly kind: SessionPathKind;
   readonly limit: number;
   readonly search?: string;
@@ -108,7 +132,7 @@ export function buildSessionBoundaryOverviewPageQualificationPlan(input: {
   readonly sortDirection: "asc" | "desc";
   readonly cursor?: SessionPathCursor | null;
   readonly semanticOperation?: "dimension" | "filter-values";
-}): SessionBoundaryOverviewPageQualificationPlan {
+}): SessionBoundaryOverviewPageQualificationPlan<Count["scope"]> {
   const source = appendPageDimensionQualificationSource({
     ...(input.semanticOperation
       ? { semanticOperation: input.semanticOperation }
@@ -116,9 +140,17 @@ export function buildSessionBoundaryOverviewPageQualificationPlan(input: {
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
-    filterMode: input.filterMode ?? "split-only",
+    filterMode:
+      input.eventCandidateReportProjection === "page-visits"
+        ? "allow-whole-filter"
+        : (input.filterMode ?? "split-only"),
     scopePlan: input.scopePlan,
     count: input.count,
+    ...(input.eventCandidateReportProjection
+      ? {
+          eventCandidateReportProjection: input.eventCandidateReportProjection,
+        }
+      : {}),
     selections: [],
     additionalAttributes: SESSION_BOUNDARY_PAGE_ATTRIBUTES,
   });
@@ -146,6 +178,10 @@ export function buildSessionBoundaryOverviewPageQualificationPlan(input: {
     numericCompatibilityFields: qualification.numericCompatibilityFields,
     scope: qualification.scope,
     reportSourceRelations,
+    ...qualificationPlanMetadata(
+      qualification,
+      source.eventCandidateReportProjection,
+    ),
   };
 }
 

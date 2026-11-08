@@ -63,6 +63,7 @@ interface QueryOptions {
   readonly cursor?: string | null;
   readonly search?: string;
   readonly filterDsl?: string;
+  readonly scopePreference?: "session" | "visitor" | "event";
 }
 
 interface FilterValuesResponse {
@@ -317,7 +318,7 @@ function queryFor(
       options.filterDsl ?? FILTER_DSL,
       analyticsFilterRegistry,
     ),
-    scopePreference: scope,
+    scopePreference: options.scopePreference ?? scope,
   } as QueryInput & { readonly time: QueryTime });
   return {
     ...prepared,
@@ -546,6 +547,60 @@ async function runActual(
 }
 
 describe("Filter Values Session boundary Count qualification", () => {
+  it.each(["session.entryPath", "session.exitPath"] as const)(
+    "matches the Core fallback across Event candidate cursor pages for %s",
+    async (field) => {
+      const database = createFixture();
+      const options = { limit: 1, scopePreference: "event" } as const;
+      const oracle = await legacyPage(database, "session", field, options);
+      const deferred = deferredEventQualificationFromQuery(
+        oracle.prepared,
+        "filter-values",
+      );
+      expect(deferred?.countInput.scope).toBe("event");
+      expect(
+        deferred && "eventCandidateReportProjection" in deferred
+          ? deferred.eventCandidateReportProjection
+          : undefined,
+      ).toBe("page-visits");
+
+      let cursor: string | null = null;
+      let finished = false;
+      let pageCount = 0;
+      for (let pageIndex = 0; pageIndex < 20; pageIndex += 1) {
+        const expected = await oracle.page(cursor);
+        const trace = traceFor();
+        const actual = await runActual(
+          database,
+          "session",
+          field,
+          { ...options, cursor },
+          trace,
+        );
+        expect(actual.value).toEqual({
+          field,
+          data: {
+            items: expected.items.map((row) => ({
+              value: row.value,
+              label: row.value,
+              occurrences: row.occurrences,
+            })),
+            pagination: expected.pagination,
+          },
+        });
+        expect(trace.preparedSql).toHaveLength(2);
+        pageCount += 1;
+        if (expected.pagination.nextCursor === null) {
+          finished = true;
+          break;
+        }
+        cursor = expected.pagination.nextCursor;
+      }
+      expect(finished).toBe(true);
+      expect(pageCount).toBeGreaterThan(1);
+    },
+  );
+
   it("97DV preserves whole OR/NOT ownership for the session-boundary report", async () => {
     const filterDsl =
       'page.path eq "/no-count" or not (count(event { event.name eq "qualifier" }) eq 0)';

@@ -1,11 +1,12 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { AdvancedCountQualificationPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import type { AnalyticsQualificationPlan } from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import {
   appendPageDimensionQualificationSource,
   PAGE_DIMENSION_QUALIFICATION_CONTROL_OUTPUT,
 } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
+import { qualificationPlanMetadata } from "@/lib/edge/analytics/engine/qualification-plan-metadata";
 import type { QualifiedSourceFilterMode } from "@/lib/edge/analytics/engine/qualified-page-source";
 import {
   appendReferrersPageReport,
@@ -14,19 +15,24 @@ import {
 } from "@/lib/edge/analytics/engine/referrer-report-plan";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
-export type ReferrerPageQualificationPlan = AnalyticsQualificationPlan & {
+export type ReferrerPageQualificationPlan<
+  Scope extends "session" | "visitor" | "event" = "session" | "visitor",
+> = AnalyticsQualificationPlan<Scope> & {
   readonly reportOutputIds: readonly ["referrers-page"];
 };
 
 /** Combines Count qualification with the original Referrer page report. */
-export function buildReferrerPageQualificationPlan(input: {
+export function buildReferrerPageQualificationPlan<
+  Count extends AdvancedCountQualificationPlanInput,
+>(input: {
   readonly semanticOperation?: "dimension" | "filter-values";
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly filterMode?: QualifiedSourceFilterMode;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: Count;
+  readonly eventCandidateReportProjection?: "page-visits";
   readonly options: {
     readonly limit: number;
     readonly includeFullUrl: boolean;
@@ -35,7 +41,7 @@ export function buildReferrerPageQualificationPlan(input: {
     readonly sortDirection: "asc" | "desc";
     readonly cursor: ReferrerAggregateCursor | null;
   };
-}): ReferrerPageQualificationPlan {
+}): ReferrerPageQualificationPlan<Count["scope"]> {
   const source = appendPageDimensionQualificationSource({
     ...(input.semanticOperation
       ? { semanticOperation: input.semanticOperation }
@@ -43,9 +49,17 @@ export function buildReferrerPageQualificationPlan(input: {
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
-    filterMode: input.filterMode ?? "split-only",
+    filterMode:
+      input.eventCandidateReportProjection === "page-visits"
+        ? "allow-whole-filter"
+        : (input.filterMode ?? "split-only"),
     scopePlan: input.scopePlan,
     count: input.count,
+    ...(input.eventCandidateReportProjection
+      ? {
+          eventCandidateReportProjection: input.eventCandidateReportProjection,
+        }
+      : {}),
     selections: [],
     additionalAttributes: [
       "page.report.referrerHost",
@@ -76,5 +90,9 @@ export function buildReferrerPageQualificationPlan(input: {
     numericCompatibilityFields: source.qualification.numericCompatibilityFields,
     scope: source.qualification.scope,
     reportSourceRelations: source.reportSourceRelations,
+    ...qualificationPlanMetadata(
+      source.qualification,
+      source.eventCandidateReportProjection,
+    ),
   };
 }

@@ -1363,7 +1363,7 @@ export function registerSiteContractProviders(
               filters,
               limit,
               dimension === "session.entryPath" ? "entry" : "exit",
-              undefined,
+              options.diagnostics,
               search,
               sortBy,
               sortDirection,
@@ -2172,6 +2172,9 @@ export function registerSiteContractProviders(
             });
             if (execution.kind === "executed")
               return { value: execution.summary, source: "raw" };
+            if (options.diagnostics)
+              options.diagnostics.advancedCountSqlFallbackReason =
+                execution.fallbackReason;
             const fallbackFilters =
               await prepareDeferredEventQualificationFallback(deferred);
             return {

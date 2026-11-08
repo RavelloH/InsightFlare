@@ -291,7 +291,7 @@ function testEnv(database: DatabaseSync, trace: SqliteD1Trace): Env {
 }
 
 function queryFor(
-  scope: "session" | "visitor",
+  scope: "session" | "visitor" | "event",
   options: QueryOptions = {},
 ): ReferrerOverviewQuery {
   const prepared = prepareScopedQuery("dimension", {
@@ -528,11 +528,15 @@ afterAll(async () => {
 
 describe("qualified source.domain and source.link Referrer tables", () => {
   const defaultCases = (["source.domain", "source.link"] as const).flatMap(
-    (tab) => (["session", "visitor"] as const).map((scope) => ({ tab, scope })),
+    (tab) =>
+      (["session", "visitor", "event"] as const).map((scope) => ({
+        tab,
+        scope,
+      })),
   );
   const cursorCases = (["source.domain", "source.link"] as const).flatMap(
     (tab) =>
-      (["session", "visitor"] as const).flatMap((scope) =>
+      (["session", "visitor", "event"] as const).flatMap((scope) =>
         (["views", "visitors"] as const).flatMap((sort) =>
           (["asc", "desc"] as const).map((direction) => ({
             tab,
@@ -872,11 +876,18 @@ describe("qualified source.domain and source.link Referrer tables", () => {
       if (!legacy.deferred || !legacy.normalized)
         throw new Error("wave95m_referrer_deferred_missing");
       const qualification = buildReferrerPageQualificationPlan({
+        ...(scope === "event"
+          ? { filterMode: "allow-whole-filter" as const }
+          : {}),
         siteId: SITE,
         queryTime: query.time,
         filters: query.filters!,
         scopePlan: query.scopePlan!,
         count: legacy.deferred.countInput,
+        ...("eventCandidateReportProjection" in legacy.deferred &&
+        legacy.deferred.eventCandidateReportProjection === "page-visits"
+          ? { eventCandidateReportProjection: "page-visits" as const }
+          : {}),
         options: {
           limit: legacy.normalized.limit,
           includeFullUrl: legacy.normalized.includeFullUrl,
@@ -1438,6 +1449,13 @@ describe("qualified source.domain and source.link Referrer tables", () => {
       const forwarded = await forward(query);
       expect(
         deferredReferrerOverviewQualificationFromQuery(forwarded),
+        JSON.stringify({
+          tab: query.tab,
+          limit: query.limit,
+          hasComparison: "comparison" in query,
+          hasCurrent: "current" in query,
+          hasReference: "reference" in query,
+        }),
       ).toBeUndefined();
     }
     const publicNativeOnly = queryFor("session", {

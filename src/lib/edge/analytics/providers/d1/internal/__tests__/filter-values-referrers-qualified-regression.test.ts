@@ -60,7 +60,7 @@ interface QueryOptions {
   readonly limit?: number;
   readonly cursor?: string | null;
   readonly search?: string;
-  readonly scopePreference?: "session" | "visitor";
+  readonly scopePreference?: "session" | "visitor" | "event";
   readonly filterDsl?: string;
 }
 
@@ -585,6 +585,72 @@ function response(value: unknown): FilterValuesResponse {
 }
 
 describe("filter-values referrer qualification baseline", () => {
+  it.each(["referrer.domain", "referrer.url"] as const)(
+    "matches the Core fallback across Event candidate cursor pages for %s",
+    async (field) => {
+      const database = createFixture();
+      const options = { limit: 1, scopePreference: "event" } as const;
+      const oracle = await legacyPage(database, "session", field, options);
+      const deferred = deferredEventQualificationFromQuery(
+        oracle.prepared,
+        "filter-values",
+      );
+      expect(deferred?.countInput.scope).toBe("event");
+      expect(
+        deferred && "eventCandidateReportProjection" in deferred
+          ? deferred.eventCandidateReportProjection
+          : undefined,
+      ).toBe("page-visits");
+
+      const actualTrace = traceFor();
+      const provider = createD1SiteProviderRegistry({
+        env: envFor(database, actualTrace),
+        siteId: SITE,
+      }).resolve("filter-values");
+      if (!provider)
+        throw new Error(
+          "wave97ep_event_referrer_filter_values_provider_missing",
+        );
+      let cursor: string | null = null;
+      let finished = false;
+      let pageCount = 0;
+      for (let pageIndex = 0; pageIndex < 20; pageIndex += 1) {
+        const expected = await oracle.page(cursor);
+        const actual = response(
+          (
+            await provider.execute(
+              queryFor("session", field, {
+                ...options,
+                cursor,
+              }),
+            )
+          ).value,
+        );
+        expect(actual).toEqual({
+          field,
+          data: {
+            items: expected.items.map((row) => ({
+              value: row.value,
+              label: row.value,
+              occurrences: row.occurrences,
+            })),
+            pagination: expected.pagination,
+          },
+        });
+        pageCount += 1;
+        if (expected.pagination.nextCursor === null) {
+          finished = true;
+          break;
+        }
+        cursor = expected.pagination.nextCursor;
+      }
+      expect(finished).toBe(true);
+      expect(pageCount).toBeGreaterThan(1);
+      expect(actualTrace.preparedSql.length).toBe(pageCount * 2);
+      expect(actualTrace.bindings.length).toBe(pageCount * 2);
+    },
+  );
+
   it("97DV preserves whole OR/NOT ownership for the Referrer report", async () => {
     const filterDsl =
       'page.path eq "/unqualified" or not (count(event { event.name eq "qualifier" }) eq 0)';

@@ -22,6 +22,7 @@ import {
   d1AdvancedFilterMiddleware,
   deferredChannelListQualificationFromQuery,
   deferredChannelOverviewQualificationFromQuery,
+  prepareDeferredEventQualificationFallback,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { compileChannelListQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/analytics-qualification-program";
 import { queryChannelsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/channels";
@@ -301,7 +302,7 @@ function testEnv(database: DatabaseSync, trace: SqliteD1Trace): Env {
 }
 
 function queryFor(
-  scope: "session" | "visitor",
+  scope: "session" | "visitor" | "event",
   options: {
     readonly audience?: "private-dashboard" | "api-v1" | "public-share";
     readonly filter?: string;
@@ -332,14 +333,20 @@ async function oldListDto(
   const middleware = d1AdvancedFilterMiddleware(env, undefined, SITE);
   // The old channels-list route used generic Count preparation before its
   // existing channel reader. "pages" selects that same generic middleware.
+  const eventCandidate = query.scopePlan?.scope === "event";
   const forwarded = (await middleware(
-    "pages",
+    eventCandidate ? "channels" : "pages",
     query,
     async (value) => value,
   )) as ChannelQuery;
-  if (!forwarded.filters)
-    throw new Error("wave95u_legacy_channel_list_filters_missing");
-  const metadata = scopedFilterMetadata(forwarded.filters);
+  const deferred = eventCandidate
+    ? deferredChannelListQualificationFromQuery(forwarded)
+    : undefined;
+  const filters = deferred
+    ? await prepareDeferredEventQualificationFallback(deferred)
+    : forwarded.filters;
+  if (!filters) throw new Error("wave95u_legacy_channel_list_filters_missing");
+  const metadata = scopedFilterMetadata(filters);
   const matches = metadata?.plan.advancedMatches;
   const entityIds = matches?.entityIds?.map(({ id }) => id) ?? [];
   const serializedFilters = JSON.stringify(query.filters);
@@ -363,14 +370,14 @@ async function oldListDto(
             : "session-no-owner",
         )
       : null,
-    nativeFilter: forwarded.filters.root,
+    nativeFilter: filters.root,
     sql: trace.preparedSql,
   });
   const rows = await queryChannelsFromD1(
     env,
     SITE,
     WINDOW,
-    forwarded.filters,
+    filters,
     query.limit ?? 100,
   );
   return {
@@ -440,6 +447,10 @@ async function compileListEvidence(
     scopePlan: query.scopePlan ?? deferred.metadata.plan,
     count: deferred.countInput,
     limit,
+    ...("eventCandidateReportProjection" in deferred &&
+    deferred.eventCandidateReportProjection === "page-visits"
+      ? { eventCandidateReportProjection: "page-visits" as const }
+      : {}),
     ...(deferred.channelListFilterMode === "allow-whole-filter"
       ? { filterMode: "allow-whole-filter" as const }
       : {}),
@@ -582,6 +593,48 @@ afterAll(async () => {
 });
 
 describe("qualified ordinary channels list", () => {
+  it("matches the Core fallback for a private Event candidate list request", async () => {
+    const { database, site } = createFixture();
+    seedWholeBooleanChannelCases(database, site);
+    const query = queryFor("event", {
+      filter: WHOLE_BOOLEAN_OR_FILTER,
+      limit: 100,
+    });
+    const deferred = await compileListEvidence(database, query);
+    const legacyTrace = traceFor();
+    const legacy = await oldListDto(database, query, legacyTrace);
+    const actualTrace = traceFor();
+    const diagnostics = createD1ReadDiagnostics();
+    const actual = await actualListDto(
+      database,
+      query,
+      actualTrace,
+      diagnostics,
+    );
+
+    expect(deferred.logicalPlan.scope).toBe("event");
+    expect(deferred.logicalPlan.eventCandidateReportProjection).toBe(
+      "page-visits",
+    );
+    if (!("items" in actual.value))
+      throw new Error("wave95u_event_candidate_channel_list_dto_missing");
+    expect(actual.value).toEqual(legacy);
+    expect(actual.value.items.length).toBeGreaterThan(0);
+    expect(actualTrace.preparedSql).toHaveLength(2);
+    expect(actualTrace.preparedSql[1]).toBe(deferred.compiled.sql);
+    expect(actualTrace.bindings[1]).toEqual(deferred.compiled.bindings);
+    expect(diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
+    recordEvidence("event-candidate-core-fallback", {
+      countScope: deferred.logicalPlan.scope,
+      candidateGrain: deferred.logicalPlan.candidateGrain,
+      reportProjection: deferred.logicalPlan.eventCandidateReportProjection,
+      legacyDto: legacy,
+      actualDto: actual.value,
+      legacyStatements: legacyTrace.preparedSql.length,
+      actualStatements: actualTrace.preparedSql.length,
+    });
+  });
+
   it.each([
     { scope: "session", branch: "or", filter: WHOLE_BOOLEAN_OR_FILTER },
     { scope: "visitor", branch: "or", filter: WHOLE_BOOLEAN_OR_FILTER },

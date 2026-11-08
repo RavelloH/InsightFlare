@@ -71,6 +71,10 @@ type DeferredFilterValuesPageConfiguration = Extract<
   FilterValuesQualificationConfiguration,
   { readonly reportKind: "page" }
 >;
+type DeferredFilterValuesPageReportConfiguration = Exclude<
+  FilterValuesQualificationConfiguration,
+  { readonly reportKind: "event" }
+>;
 
 export type DeferredFilterValuesQualificationInput =
   | (DeferredFilterValuesQualificationBase & {
@@ -89,7 +93,7 @@ export type DeferredFilterValuesQualificationInput =
       readonly countInput: AdvancedEventCandidateCountPlanInput;
       readonly eventCandidateReportProjection: "page-visits";
       readonly filterValuesFilterMode: "allow-whole-filter";
-      readonly filterValuesRequest: DeferredFilterValuesPageConfiguration;
+      readonly filterValuesRequest: DeferredFilterValuesPageReportConfiguration;
     });
 
 export type DeferredFilterValuesQualification =
@@ -117,7 +121,7 @@ export type DeferredFilterValuesQualification =
     }
   | {
       readonly operation: "filter-values";
-      readonly configuration: DeferredFilterValuesPageConfiguration;
+      readonly configuration: DeferredFilterValuesPageReportConfiguration;
       readonly filterMode: "allow-whole-filter";
       readonly qualification: Extract<
         DeferredFilterValuesQualificationInput,
@@ -340,8 +344,7 @@ export function attachFilterValuesQualificationToQuery(
           >,
           requestSnapshot: snapshot,
         })
-      : configuration.reportKind === "page" &&
-          "eventCandidateReportProjection" in qualification &&
+      : "eventCandidateReportProjection" in qualification &&
           qualification.eventCandidateReportProjection === "page-visits"
         ? Object.freeze({
             operation: "filter-values",

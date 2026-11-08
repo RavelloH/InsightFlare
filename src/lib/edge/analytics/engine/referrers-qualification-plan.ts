@@ -1,8 +1,9 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type { AdvancedCountQualificationPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import type { AnalyticsQualificationPlan } from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import { appendPageDimensionQualificationSource } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
+import { qualificationPlanMetadata } from "@/lib/edge/analytics/engine/qualification-plan-metadata";
 import {
   appendReferrersPageReport,
   appendReferrerSummaryReport,
@@ -30,24 +31,31 @@ export type ReferrersQualificationConfiguration =
       readonly cursor: ReferrerAggregateCursor | null;
     };
 
-export type ReferrersQualificationPlan = AnalyticsQualificationPlan & {
+export type ReferrersQualificationPlan<
+  Scope extends "session" | "visitor" | "event" = "session" | "visitor",
+> = AnalyticsQualificationPlan<Scope> & {
   readonly reportOutputIds: readonly string[];
 };
 
-interface ReferrersQualificationPlanBase {
+interface ReferrersQualificationPlanBase<
+  Count extends AdvancedCountQualificationPlanInput,
+> {
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: Count;
+  readonly eventCandidateReportProjection?: "page-visits";
 }
 
 /** Composes Count controls with the qualified Page bag and the real report. */
-export function buildReferrersQualificationPlan(
-  input: ReferrersQualificationPlanBase & {
+export function buildReferrersQualificationPlan<
+  Count extends AdvancedCountQualificationPlanInput,
+>(
+  input: ReferrersQualificationPlanBase<Count> & {
     readonly configuration: ReferrersQualificationConfiguration;
   },
-): ReferrersQualificationPlan {
+): ReferrersQualificationPlan<Count["scope"]> {
   const summary = input.configuration.kind === "summary";
   const source = appendPageDimensionQualificationSource({
     semanticOperation: "referrers",
@@ -57,6 +65,9 @@ export function buildReferrersQualificationPlan(
     filterMode: "allow-whole-filter",
     scopePlan: input.scopePlan,
     count: input.count,
+    ...(input.eventCandidateReportProjection
+      ? { eventCandidateReportProjection: input.eventCandidateReportProjection }
+      : {}),
     selections: [],
     additionalAttributes: summary
       ? ["page.report.referrerHost", "page.report.referrerUrl"]
@@ -107,5 +118,9 @@ export function buildReferrersQualificationPlan(
     numericCompatibilityFields: qualification.numericCompatibilityFields,
     scope: qualification.scope,
     reportSourceRelations: source.reportSourceRelations,
+    ...qualificationPlanMetadata(
+      qualification,
+      input.eventCandidateReportProjection,
+    ),
   };
 }

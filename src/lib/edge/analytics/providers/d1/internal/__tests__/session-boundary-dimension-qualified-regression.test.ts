@@ -102,6 +102,7 @@ interface BoundaryQueryOptions {
   readonly search?: string;
   readonly filterDsl?: string;
   readonly audience?: QueryAudience;
+  readonly scopePreference?: "session" | "visitor" | "event";
 }
 
 interface TestSite {
@@ -283,6 +284,49 @@ function createFixture(): {
   addEvent(database, site, {
     id: "event-attrib-y",
     visitId: "attrib-y-entry",
+    at: 124,
+  });
+  return { database, site };
+}
+
+function createEventCandidateBoundaryFixture(options?: {
+  readonly invalidateX1Duration?: boolean;
+}): {
+  readonly database: DatabaseSync;
+  readonly site: TestSite;
+} {
+  const database = createMigratedDatabase();
+  DATABASES.add(database);
+  database.exec("PRAGMA foreign_keys = OFF");
+  const site = addSite(database);
+  const visits = [
+    ["candidate-x0", "/x0", 121, 0],
+    [
+      "candidate-x1",
+      "/x1",
+      122,
+      options?.invalidateX1Duration ? "invalid-duration" : 10,
+    ],
+    ["candidate-x2", "/x2", 124, "invalid-duration"],
+    ["candidate-x3", "/x3", 128, 0],
+  ] as const;
+  for (const [id, path, startedAt, durationMs] of visits)
+    addVisit(database, site, {
+      id,
+      sessionId: "candidate-session",
+      visitorId: "candidate-visitor",
+      path,
+      startedAt,
+      durationMs,
+    });
+  addEvent(database, site, {
+    id: "candidate-x1-event",
+    visitId: "candidate-x1",
+    at: 122,
+  });
+  addEvent(database, site, {
+    id: "candidate-x2-event",
+    visitId: "candidate-x2",
     at: 124,
   });
   return { database, site };
@@ -537,7 +581,7 @@ function queryFor(
     context: siteQueryContext(SITE, options.audience ?? "private-dashboard"),
     time: TIME,
     filters,
-    scopePreference: scope,
+    scopePreference: options.scopePreference ?? scope,
   } as QueryInput & { readonly time: typeof TIME });
   const shared = {
     ...prepared,
@@ -994,6 +1038,79 @@ afterAll(async () => {
 });
 
 describe("qualified Session boundary dimension", () => {
+  it("selects Event-matched visits before applying session entry and exit boundaries", async () => {
+    const { database } = createEventCandidateBoundaryFixture();
+    const filterDsl =
+      '(page.path eq "/x1" or page.path eq "/x2") and count(event { event.name eq "qualifier" }) gte 1';
+
+    for (const kind of ["entry", "exit"] as const) {
+      const dimension =
+        kind === "entry" ? "session.entryPath" : "session.exitPath";
+      const query = queryFor("session", {
+        dimension,
+        filterDsl,
+        scopePreference: "event",
+      });
+      const legacy = await legacyBoundaryFor(database, query, traceFor());
+      const deferred = legacy.deferred;
+      expect(deferred?.countInput.scope).toBe("event");
+      expect(
+        deferred && "eventCandidateReportProjection" in deferred
+          ? deferred.eventCandidateReportProjection
+          : undefined,
+      ).toBe("page-visits");
+      const actual = await runActual(database, query, traceFor());
+      expect(actual.result.value).toEqual(legacy.dto);
+      expect(actual.result.value.items.map((row) => row.key)).toEqual([
+        kind === "entry" ? "/x1" : "/x2",
+      ]);
+    }
+
+    for (const kind of ["entry", "exit"] as const) {
+      const query = queryFor("session", {
+        mode: "overview-tab",
+        tab: kind === "entry" ? "page.entry" : "page.exit",
+        limit: 20,
+        filterDsl,
+        scopePreference: "event",
+      }) as OverviewTestQuery;
+      const legacy = await legacyOverviewPageFor(database, query, traceFor());
+      expect(legacy.deferred?.countInput.scope).toBe("event");
+      const actual = await runOverviewActual(database, query, traceFor());
+      expect(actual.result).toEqual(legacy.dto);
+      expect(actual.result.data.items.map((row) => row.label)).toEqual([
+        kind === "entry" ? "/x1" : "/x2",
+      ]);
+    }
+  });
+
+  it("falls back the complete Event candidate boundary report on numeric incompatibility", async () => {
+    const { database } = createEventCandidateBoundaryFixture({
+      invalidateX1Duration: true,
+    });
+    const query = queryFor("session", {
+      dimension: "session.entryPath",
+      scopePreference: "event",
+      filterDsl:
+        '(page.path eq "/x1" or page.path eq "/x2") and count(event { event.name eq "qualifier" }) gte 1 and count(page { page.durationMs gt 5 }) eq 1',
+    });
+    const legacyTrace = traceFor();
+    const legacy = await legacyBoundaryFor(database, query, legacyTrace);
+    expect(
+      legacy.deferred?.countInput.numericCompatibilityRequirements,
+    ).not.toHaveLength(0);
+    const diagnostics = createD1ReadDiagnostics();
+    const runtimeTrace = traceFor();
+    const actual = await runActual(database, query, runtimeTrace, diagnostics);
+
+    expect(actual.result.value).toEqual(legacy.dto);
+    expect(actual.result.value.items.map((row) => row.key)).toEqual([]);
+    expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+      kind: "numeric-data-domain",
+    });
+    expect(runtimeTrace.preparedSql.length).toBeGreaterThan(2);
+  });
+
   it.each(
     (["entry", "exit"] as const).flatMap((kind) =>
       (["session", "visitor"] as const).map((scope) => ({ kind, scope })),

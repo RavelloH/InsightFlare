@@ -631,7 +631,17 @@ export type DeferredEventCandidatePageProjectionFor<
   : never;
 
 type EventCandidatePageReportOperation =
-  "cross-dimension" | "radar" | "share-trend" | "performance" | "geo-points";
+  | "cross-dimension"
+  | "radar"
+  | "share-trend"
+  | "performance"
+  | "geo-points"
+  | "page-dimension"
+  | "referrers"
+  | "channel-overview"
+  | "channel-list"
+  | "session-boundary-dimension"
+  | "session-boundary-overview-page";
 
 export type DeferredPageDimensionQualification =
   | (DeferredEventQualification & {
@@ -643,10 +653,14 @@ export type DeferredPageDimensionQualification =
       readonly pageDimensionRequest: DeferredPageDimensionRequest;
     });
 
-export type DeferredReferrersQualification = DeferredEventQualification & {
-  readonly operation: "referrers";
-  readonly referrersRequest: DeferredReferrersRequest;
-};
+export type DeferredReferrersQualification =
+  | (DeferredEventQualification & {
+      readonly operation: "referrers";
+      readonly referrersRequest: DeferredReferrersRequest;
+    })
+  | (DeferredEventCandidatePageProjectionFor<"referrers"> & {
+      readonly referrersRequest: DeferredReferrersRequest;
+    });
 
 export type DeferredPagesAggregatePageQualification =
   | (DeferredEventQualification & {
@@ -678,21 +692,31 @@ export type DeferredOverviewPageTableQualification =
     });
 
 export type DeferredChannelOverviewQualification =
-  DeferredEventQualification & {
-    readonly operation: "channel-overview";
-    readonly overviewPageTableRequest: DeferredOverviewPageTableRequest;
-  };
+  | (DeferredEventQualification & {
+      readonly operation: "channel-overview";
+      readonly overviewPageTableRequest: DeferredOverviewPageTableRequest;
+    })
+  | (DeferredEventCandidatePageProjectionFor<"channel-overview"> & {
+      readonly overviewPageTableRequest: DeferredOverviewPageTableRequest;
+    });
 
-export type DeferredChannelListQualification = DeferredEventQualification & {
-  readonly operation: "channel-list";
-  readonly channelListRequest: DeferredChannelListRequest;
-};
+export type DeferredChannelListQualification =
+  | (DeferredEventQualification & {
+      readonly operation: "channel-list";
+      readonly channelListRequest: DeferredChannelListRequest;
+    })
+  | (DeferredEventCandidatePageProjectionFor<"channel-list"> & {
+      readonly channelListRequest: DeferredChannelListRequest;
+    });
 
 export type DeferredReferrerOverviewQualification =
-  DeferredEventQualification & {
-    readonly operation: "page-dimension";
-    readonly referrerOverviewRequest: DeferredReferrerOverviewTableRequest;
-  };
+  | (DeferredEventQualification & {
+      readonly operation: "page-dimension";
+      readonly referrerOverviewRequest: DeferredReferrerOverviewTableRequest;
+    })
+  | (DeferredEventCandidatePageProjectionFor<"page-dimension"> & {
+      readonly referrerOverviewRequest: DeferredReferrerOverviewTableRequest;
+    });
 
 export type DeferredPageQualification =
   | DeferredPageDimensionQualification
@@ -701,16 +725,22 @@ export type DeferredPageQualification =
   | DeferredReferrerOverviewQualification;
 
 export type DeferredSessionBoundaryDimensionQualification =
-  DeferredEventQualification & {
-    readonly operation: "session-boundary-dimension";
-    readonly sessionBoundaryDimensionRequest: NormalizedSessionBoundaryDimensionRequest;
-  };
+  | (DeferredEventQualification & {
+      readonly operation: "session-boundary-dimension";
+      readonly sessionBoundaryDimensionRequest: NormalizedSessionBoundaryDimensionRequest;
+    })
+  | (DeferredEventCandidatePageProjectionFor<"session-boundary-dimension"> & {
+      readonly sessionBoundaryDimensionRequest: NormalizedSessionBoundaryDimensionRequest;
+    });
 
 export type DeferredSessionBoundaryOverviewPageQualification =
-  DeferredEventQualification & {
-    readonly operation: "session-boundary-overview-page";
-    readonly sessionBoundaryOverviewPageRequest: DeferredSessionBoundaryOverviewPageRequest;
-  };
+  | (DeferredEventQualification & {
+      readonly operation: "session-boundary-overview-page";
+      readonly sessionBoundaryOverviewPageRequest: DeferredSessionBoundaryOverviewPageRequest;
+    })
+  | (DeferredEventCandidatePageProjectionFor<"session-boundary-overview-page"> & {
+      readonly sessionBoundaryOverviewPageRequest: DeferredSessionBoundaryOverviewPageRequest;
+    });
 
 function invalidInput(
   path: string,
@@ -4711,6 +4741,11 @@ async function prepareDeferredEventQualification(input: {
       | "performance"
       | "geo-points"
       | "pages-tabs"
+      | "referrers"
+      | "channel-overview"
+      | "channel-list"
+      | "session-boundary-dimension"
+      | "session-boundary-overview-page"
     >
   | DeferredFilterValuesQualificationInput
   | null
@@ -4739,10 +4774,12 @@ async function prepareDeferredEventQualification(input: {
         })
       : null;
   const rawOverviewPageTableRequest =
-    input.operation === "page-dimension" &&
+    (input.operation === "page-dimension" ||
+      input.operation === "channel-overview") &&
     ownDataValue(query, "mode") === "overview-tab"
       ? normalizeOverviewPageTableRequest({
-          operation: "dimension",
+          operation:
+            input.operation === "channel-overview" ? "channels" : "dimension",
           mode: "overview-tab",
           tab: ownDataValue(query, "tab"),
           limit: ownDataValue(query, "limit"),
@@ -4755,6 +4792,19 @@ async function prepareDeferredEventQualification(input: {
   const rawOverviewPageDescriptor = rawOverviewPageTableRequest
     ? overviewPageTableDescriptor(rawOverviewPageTableRequest.tab)
     : null;
+  const rawReferrerOverviewRequest =
+    input.operation === "page-dimension" &&
+    ownDataValue(query, "mode") === "overview-tab"
+      ? normalizeReferrerOverviewTableRequest({
+          mode: ownDataValue(query, "mode"),
+          tab: ownDataValue(query, "tab"),
+          limit: ownDataValue(query, "limit"),
+          cursor: ownDataValue(query, "cursor"),
+          sort: ownDataValue(query, "sort"),
+          direction: ownDataValue(query, "direction"),
+          search: ownDataValue(query, "search"),
+        })
+      : null;
   const eventCandidatePageReportOperation =
     (input.operation === "cross-dimension" &&
       input.allowPrivateTechnologyWholeFilterOptIn === true &&
@@ -4775,6 +4825,41 @@ async function prepareDeferredEventQualification(input: {
     (input.operation === "geo-points" &&
       input.allowPrivateGeoPointsWholeFilterOptIn === true &&
       geoPointsQualificationConfigurationFromQuery(query) !== undefined) ||
+    (input.operation === "channel-list" &&
+      input.allowPrivateChannelListWholeFilterOptIn === true &&
+      isCanonicalPrivateChannelListWholeFilterRequest({
+        mode: ownDataValue(query, "mode"),
+        audience: rawRequestAudience,
+      }) &&
+      queryHasNoComparisonState(query)) ||
+    (input.operation === "channel-overview" &&
+      input.allowPrivateChannelOverviewWholeFilterOptIn === true &&
+      rawOverviewPageTableRequest !== null &&
+      isCanonicalPrivateChannelOverviewWholeFilterRequest({
+        mode: ownDataValue(query, "mode"),
+        audience: rawRequestAudience,
+        tab: rawOverviewPageTableRequest.tab,
+        family: rawOverviewPageTableRequest.family,
+        selection: rawOverviewPageTableRequest.selection,
+        excludeEmpty: rawOverviewPageTableRequest.excludeEmpty,
+      }) &&
+      queryHasNoComparisonState(query)) ||
+    (input.operation === "referrers" &&
+      rawRequestAudience === "private-dashboard" &&
+      queryHasNoComparisonState(query)) ||
+    ((input.operation === "session-boundary-dimension" ||
+      input.operation === "session-boundary-overview-page") &&
+      input.allowPrivateSessionBoundaryWholeFilterOptIn === true &&
+      rawRequestAudience === "private-dashboard" &&
+      queryHasNoComparisonState(query) &&
+      ((input.operation === "session-boundary-dimension" &&
+        ownDataValue(query, "mode") === "breakdown" &&
+        (ownDataValue(query, "dimension") === "session.entryPath" ||
+          ownDataValue(query, "dimension") === "session.exitPath")) ||
+        (input.operation === "session-boundary-overview-page" &&
+          ownDataValue(query, "mode") === "overview-tab" &&
+          (ownDataValue(query, "tab") === "page.entry" ||
+            ownDataValue(query, "tab") === "page.exit")))) ||
     (input.operation === "pages-tabs" &&
       ownDataValue(query, "mode") === undefined &&
       ownDataValue(
@@ -4800,7 +4885,9 @@ async function prepareDeferredEventQualification(input: {
     (input.operation === "filter-values" &&
       (filterValuesRequest?.reportKind === "event" ||
         (input.allowPrivateFilterValuesWholeFilterOptIn === true &&
-          filterValuesRequest?.reportKind === "page")));
+          (filterValuesRequest?.reportKind === "page" ||
+            filterValuesRequest?.reportKind === "referrer" ||
+            filterValuesRequest?.reportKind === "session-boundary"))));
   const eventCandidateFiltersDescriptor = eventCandidateConsumerOperation
     ? ownDescriptor(query, "filters")
     : undefined;
@@ -4838,15 +4925,29 @@ async function prepareDeferredEventQualification(input: {
                               ? "pages_tabs_request_context_mismatch"
                               : input.operation === "geo-points"
                                 ? "geo_points_request_context_mismatch"
-                                : input.operation === "performance"
-                                  ? "performance_qualification_request_context_mismatch"
-                                  : input.operation === "cross-dimension"
-                                    ? "cross_dimension_qualification_request_changed"
-                                    : input.operation === "radar"
-                                      ? "radar_qualification_request_changed"
-                                      : input.operation === "share-trend"
-                                        ? "share_trend_qualification_request_changed"
-                                        : "event_name_dimension_request_context_mismatch",
+                                : input.operation === "channel-overview"
+                                  ? "channel_overview_request_context_mismatch"
+                                  : input.operation === "channel-list"
+                                    ? "channel_list_request_context_mismatch"
+                                    : input.operation === "referrers"
+                                      ? "referrers_request_context_mismatch"
+                                      : input.operation ===
+                                          "session-boundary-dimension"
+                                        ? "session_boundary_dimension_request_context_mismatch"
+                                        : input.operation ===
+                                            "session-boundary-overview-page"
+                                          ? "session_boundary_overview_page_request_context_mismatch"
+                                          : input.operation === "performance"
+                                            ? "performance_qualification_request_context_mismatch"
+                                            : input.operation ===
+                                                "cross-dimension"
+                                              ? "cross_dimension_qualification_request_changed"
+                                              : input.operation === "radar"
+                                                ? "radar_qualification_request_changed"
+                                                : input.operation ===
+                                                    "share-trend"
+                                                  ? "share_trend_qualification_request_changed"
+                                                  : "event_name_dimension_request_context_mismatch",
     );
   const eventCandidateFilters = eventCandidateConsumerOperation
     ? (ownDataValue(query, "filters") as FilterDocument | undefined)
@@ -4905,15 +5006,29 @@ async function prepareDeferredEventQualification(input: {
                               ? "pages_tabs_request_context_mismatch"
                               : input.operation === "geo-points"
                                 ? "geo_points_request_context_mismatch"
-                                : input.operation === "performance"
-                                  ? "performance_qualification_request_context_mismatch"
-                                  : input.operation === "cross-dimension"
-                                    ? "cross_dimension_qualification_request_changed"
-                                    : input.operation === "radar"
-                                      ? "radar_qualification_request_changed"
-                                      : input.operation === "share-trend"
-                                        ? "share_trend_qualification_request_changed"
-                                        : "event_name_dimension_request_context_mismatch",
+                                : input.operation === "channel-overview"
+                                  ? "channel_overview_request_context_mismatch"
+                                  : input.operation === "channel-list"
+                                    ? "channel_list_request_context_mismatch"
+                                    : input.operation === "referrers"
+                                      ? "referrers_request_context_mismatch"
+                                      : input.operation ===
+                                          "session-boundary-dimension"
+                                        ? "session_boundary_dimension_request_context_mismatch"
+                                        : input.operation ===
+                                            "session-boundary-overview-page"
+                                          ? "session_boundary_overview_page_request_context_mismatch"
+                                          : input.operation === "performance"
+                                            ? "performance_qualification_request_context_mismatch"
+                                            : input.operation ===
+                                                "cross-dimension"
+                                              ? "cross_dimension_qualification_request_changed"
+                                              : input.operation === "radar"
+                                                ? "radar_qualification_request_changed"
+                                                : input.operation ===
+                                                    "share-trend"
+                                                  ? "share_trend_qualification_request_changed"
+                                                  : "event_name_dimension_request_context_mismatch",
     );
   const eventCandidateBaseRequest =
     eventCandidateMetadata?.plan.scope === "event" &&
@@ -4948,13 +5063,23 @@ async function prepareDeferredEventQualification(input: {
         ? "geo_points_request_context_mismatch"
         : input.operation === "pages-tabs"
           ? "pages_tabs_request_context_mismatch"
-          : input.operation === "performance"
-            ? "performance_qualification_request_context_mismatch"
-            : input.operation === "cross-dimension"
-              ? "cross_dimension_qualification_request_changed"
-              : input.operation === "radar"
-                ? "radar_qualification_request_changed"
-                : "share_trend_qualification_request_changed",
+          : input.operation === "channel-list"
+            ? "channel_list_request_context_mismatch"
+            : input.operation === "channel-overview"
+              ? "channel_overview_request_context_mismatch"
+              : input.operation === "referrers"
+                ? "referrers_request_context_mismatch"
+                : input.operation === "session-boundary-dimension"
+                  ? "session_boundary_dimension_request_context_mismatch"
+                  : input.operation === "session-boundary-overview-page"
+                    ? "session_boundary_overview_page_request_context_mismatch"
+                    : input.operation === "performance"
+                      ? "performance_qualification_request_context_mismatch"
+                      : input.operation === "cross-dimension"
+                        ? "cross_dimension_qualification_request_changed"
+                        : input.operation === "radar"
+                          ? "radar_qualification_request_changed"
+                          : "share_trend_qualification_request_changed",
     );
   if (
     eventCandidateMetadata?.plan.scope === "event" &&
@@ -4963,7 +5088,9 @@ async function prepareDeferredEventQualification(input: {
       input.allowPageFieldWholeFilterOptIn === true) ||
       input.operation === "pages-aggregate-page" ||
       (input.operation === "filter-values" &&
-        filterValuesRequest?.reportKind === "page"))
+        (filterValuesRequest?.reportKind === "page" ||
+          filterValuesRequest?.reportKind === "referrer" ||
+          filterValuesRequest?.reportKind === "session-boundary")))
   )
     throw invalidInput(
       "time",
@@ -4990,7 +5117,9 @@ async function prepareDeferredEventQualification(input: {
   const eventCandidatePageFilterValuesRequest =
     input.operation === "filter-values" &&
     input.allowPrivateFilterValuesWholeFilterOptIn === true &&
-    filterValuesRequest?.reportKind === "page" &&
+    (filterValuesRequest?.reportKind === "page" ||
+      filterValuesRequest?.reportKind === "referrer" ||
+      filterValuesRequest?.reportKind === "session-boundary") &&
     eventCandidateBaseRequest &&
     eventCandidateRequestTimeMatches;
   const eventCandidatePageDimensionRequest =
@@ -5015,7 +5144,10 @@ async function prepareDeferredEventQualification(input: {
           overviewFamily: rawOverviewPageTableRequest.family,
           selection: rawOverviewPageTableRequest.selection,
           excludeEmpty: rawOverviewPageTableRequest.excludeEmpty,
-        })));
+        })) ||
+      (rawReferrerOverviewRequest !== null &&
+        rawRequestAudience === "private-dashboard" &&
+        queryHasNoComparisonState(query)));
   const rawAggregateTime = ownDataValue(query, "time");
   const eventCandidatePagesAggregateRequest =
     input.operation === "pages-aggregate-page" &&
@@ -5553,21 +5685,11 @@ async function prepareDeferredEventQualification(input: {
     input.operation === "channel-overview" &&
     privateChannelOverviewWholeFilterOptIn(query, overviewPageTableRequest);
   const referrerOverviewRequestCandidate =
-    input.operation === "page-dimension" &&
-    query.mode === "overview-tab" &&
-    query.comparison === undefined &&
-    query.current === undefined &&
-    query.reference === undefined
-      ? normalizeReferrerOverviewTableRequest({
-          mode: query.mode,
-          tab: query.tab,
-          limit: query.limit,
-          cursor: query.cursor,
-          sort: query.sort,
-          direction: query.direction,
-          search: query.search,
-        })
-      : null;
+    rawReferrerOverviewRequest &&
+    input.allowPageFieldWholeFilterOptIn === true &&
+    queryHasNoComparisonState(query)
+      ? rawReferrerOverviewRequest
+      : undefined;
   const referrerOverviewRequest = referrerOverviewRequestCandidate
     ? Object.freeze({
         ...referrerOverviewRequestCandidate,
@@ -5987,7 +6109,9 @@ async function prepareDeferredEventQualification(input: {
     ((pageDimensionRequest !== undefined && pageDimensionWholeFilterOptIn) ||
       (overviewPageTableRequest !== undefined &&
         overviewPageTableRequest.family === "page" &&
-        overviewPageWholeFilterOptIn));
+        overviewPageWholeFilterOptIn) ||
+      (referrerOverviewRequest !== undefined &&
+        referrerOverviewRequest.audience === "private-dashboard"));
   if (
     eventCandidatePageDimensionRequest &&
     !eventCandidatePageDimensionProjectionRequest
@@ -6449,6 +6573,11 @@ async function prepareDeferredEventQualification(input: {
         | "performance"
         | "geo-points"
         | "pages-tabs"
+        | "referrers"
+        | "channel-overview"
+        | "channel-list"
+        | "session-boundary-dimension"
+        | "session-boundary-overview-page"
       >
     | DeferredFilterValuesQualificationInput
     | null = eventCandidatePageReportRequest
@@ -6463,6 +6592,11 @@ async function prepareDeferredEventQualification(input: {
         | "performance"
         | "geo-points"
         | "pages-tabs"
+        | "referrers"
+        | "channel-overview"
+        | "channel-list"
+        | "session-boundary-dimension"
+        | "session-boundary-overview-page"
       >)
     : eventCandidateSummaryRequest
       ? (Object.freeze({
@@ -7190,7 +7324,12 @@ export function isDeferredEventCandidatePageProjection(
       candidate.operation === "radar" ||
       candidate.operation === "share-trend" ||
       candidate.operation === "performance" ||
-      candidate.operation === "geo-points") &&
+      candidate.operation === "geo-points" ||
+      candidate.operation === "referrers" ||
+      candidate.operation === "channel-overview" ||
+      candidate.operation === "channel-list" ||
+      candidate.operation === "session-boundary-dimension" ||
+      candidate.operation === "session-boundary-overview-page") &&
     candidate.countInput?.scope === "event" &&
     candidate.countInput.candidateAnchor?.kind === "event-candidate" &&
     candidate.eventCandidateReportProjection === "page-visits"

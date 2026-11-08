@@ -16,11 +16,13 @@ import {
 } from "@/lib/edge/analytics/contract";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
+import { DIMENSION_PAGE_REPORT_OUTPUT } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import { EVENT_QUALIFICATION_CONTROL_OUTPUT } from "@/lib/edge/analytics/engine/event-qualified-source-plan";
 import {
   buildEventTypeSummaryQualificationPlan,
   EVENT_TYPE_SUMMARY_OUTPUTS,
 } from "@/lib/edge/analytics/engine/event-type-summary-plan";
+import { PAGE_DIMENSION_QUALIFICATION_CONTROL_OUTPUT } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
 import {
   d1AdvancedFilterMiddleware,
   deferredEventNameDimensionQualificationFromQuery,
@@ -163,6 +165,15 @@ function isFusedEventFilterValuesReport(sql: string): boolean {
     sql.includes("outputId") &&
     sql.includes(EVENT_TYPE_SUMMARY_OUTPUTS.page) &&
     sql.includes(EVENT_QUALIFICATION_CONTROL_OUTPUT)
+  );
+}
+
+function isFusedEventPageFilterValuesReport(sql: string): boolean {
+  return (
+    sql.includes("rowKind") &&
+    sql.includes("outputId") &&
+    sql.includes(DIMENSION_PAGE_REPORT_OUTPUT) &&
+    sql.includes(PAGE_DIMENSION_QUALIFICATION_CONTROL_OUTPUT)
   );
 }
 
@@ -1509,7 +1520,7 @@ describe("filter-values event.name qualification baseline", () => {
     });
   });
 
-  it("rejects unsafe FilterValues inputs and keeps other Event report families on Core", async () => {
+  it("rejects unsafe inputs and projects Event candidate Page FilterValues with the approved source", async () => {
     const unsafeQuery = queryFor("event", "event.name") as Record<
       string,
       unknown
@@ -1533,28 +1544,86 @@ describe("filter-values event.name qualification baseline", () => {
     expect(fieldGetterReads).toBe(0);
     expect(unsafeTrace.preparedSql).toHaveLength(0);
 
-    const wrongFamilyQuery = queryFor("event", "page.path", {
+    const pageCandidateQuery = queryFor("event", "page.path", {
       limit: 2,
       filterDsl: EVENT_WHOLE_BOOLEAN_DSL,
     });
-    const wrongFamilyTrace = traceFor();
-    const wrongFamilyForwarded = await d1AdvancedFilterMiddleware(
-      envFor(createFixture(), wrongFamilyTrace),
+    const candidateSetupTrace = traceFor();
+    const forwarded = await d1AdvancedFilterMiddleware(
+      envFor(createFixture(), candidateSetupTrace),
       undefined,
       SITE,
-    )("filter-values", wrongFamilyQuery, async (value) => value);
+    )("filter-values", pageCandidateQuery, async (value) => value);
+    const request = deferredFilterValuesQualificationFromQuery(forwarded);
+    if (!request)
+      throw new Error("wave97eb_event_page_filter_values_candidate_missing");
+    expect(request.configuration.reportKind).toBe("page");
+    expect(request.filterMode).toBe("allow-whole-filter");
+    expect(request.qualification.countInput.scope).toBe("event");
     expect(
-      deferredFilterValuesQualificationFromQuery(wrongFamilyForwarded),
-    ).toBeUndefined();
+      "eventCandidateReportProjection" in request.qualification
+        ? request.qualification.eventCandidateReportProjection
+        : undefined,
+    ).toBe("page-visits");
+
+    const actualDatabase = createFixture();
+    const actualTrace = traceFor();
+    const actualEnvelopes: Record<string, unknown>[][] = [];
+    const diagnostics = createD1ReadDiagnostics();
+    const actualProvider = createD1SiteProviderRegistry({
+      env: envFor(actualDatabase, actualTrace, (sql, rows) => {
+        if (isFusedEventPageFilterValuesReport(sql)) actualEnvelopes.push(rows);
+        return rows;
+      }),
+      siteId: SITE,
+      diagnostics,
+    }).resolve("filter-values");
+    if (!actualProvider)
+      throw new Error("wave97eb_event_page_filter_values_provider_missing");
+    const actual = sitePage(
+      (await actualProvider.execute(pageCandidateQuery)).value,
+    );
+    const oracle = await legacyPage(createFixture(), "event", "page.path", {
+      limit: 2,
+      filterDsl: EVENT_WHOLE_BOOLEAN_DSL,
+    });
+    const expected = await oracle.page(null);
+    expect(actual).toEqual({
+      field: "page.path",
+      data: {
+        items: expected.items.map((row) => ({
+          value: row.value,
+          label: row.value,
+          occurrences: row.occurrences,
+        })),
+        pagination: expected.pagination,
+      },
+    });
+    expect(diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
+    expect(actualEnvelopes).toHaveLength(1);
+    expect(
+      actualEnvelopes[0]!.filter((row) => row.rowKind === "control"),
+    ).toHaveLength(1);
+    expect(
+      actualEnvelopes[0]!.filter((row) => row.rowKind === "report"),
+    ).not.toHaveLength(0);
     wave97ebEvidence.push({
-      case: "event-candidate-unsafe-and-wrong-family",
+      case: "event-candidate-page-filter-values-and-unsafe-input",
       unsafeFieldGetterReads: fieldGetterReads,
       unsafeStatements: traceEvidence(unsafeTrace),
-      wrongFamilyReportKind:
-        filterValuesQualificationConfigurationFromQuery(wrongFamilyQuery)
+      pageReportKind:
+        filterValuesQualificationConfigurationFromQuery(pageCandidateQuery)
           ?.reportKind,
-      wrongFamilyDeferred: false,
-      wrongFamilyStatements: traceEvidence(wrongFamilyTrace),
+      candidateAnchor: request.qualification.countInput.candidateAnchor,
+      eventCandidateReportProjection:
+        "eventCandidateReportProjection" in request.qualification
+          ? request.qualification.eventCandidateReportProjection
+          : undefined,
+      actual,
+      core: expected,
+      envelope: actualEnvelopes[0],
+      actualStatements: traceEvidence(actualTrace),
+      coreStatements: traceEvidence(oracle.trace),
     });
   });
 

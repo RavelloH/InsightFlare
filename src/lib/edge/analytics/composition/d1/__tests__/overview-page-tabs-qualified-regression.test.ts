@@ -545,7 +545,7 @@ function testEnv(database: DatabaseSync, trace: SqliteD1Trace): Env {
 }
 
 function queryFor(
-  scope: "session" | "visitor",
+  scope: "session" | "visitor" | "event",
   options: OverviewQueryOptions = {},
 ): OverviewTestQuery {
   const prepared = prepareScopedQuery(options.operation ?? "dimension", {
@@ -658,19 +658,24 @@ async function legacyChannelOverviewTableFor(
   trace: SqliteD1Trace,
 ) {
   const env = testEnv(database, trace);
-  const legacyChannelsQuery = {
-    ...query,
-    mode: "list",
-  } as unknown as OverviewTestQuery;
+  const eventCandidate = query.scopePlan?.scope === "event";
+  const legacyChannelsQuery = eventCandidate
+    ? query
+    : ({ ...query, mode: "list" } as unknown as OverviewTestQuery);
   // "channels" + "list" now defers channel-list qualification and leaves
   // Count matches unprepared for queryDimensionPageFromD1. Keep this legacy
   // oracle on the generic middleware preparation path via "pages".
   const forwarded = await d1AdvancedFilterMiddleware(env, undefined, SITE)(
-    "pages",
+    eventCandidate ? "channels" : "pages",
     legacyChannelsQuery,
     async (prepared) => prepared,
   );
-  const filters = (forwarded as OverviewTestQuery).filters ?? query.filters;
+  const deferred = eventCandidate
+    ? deferredChannelOverviewQualificationFromQuery(forwarded)
+    : undefined;
+  const filters = deferred
+    ? await prepareDeferredEventQualificationFallback(deferred)
+    : ((forwarded as OverviewTestQuery).filters ?? query.filters);
   const normalized = normalizeOverviewPageTableRequest({
     operation: "channels",
     mode: query.mode,
@@ -712,7 +717,7 @@ async function legacyChannelOverviewTableFor(
     undefined,
     query.context.policy.audience,
   );
-  return { dto: overviewDto(query.tab, page), filters, normalized };
+  return { dto: overviewDto(query.tab, page), filters, normalized, deferred };
 }
 
 async function legacyDimensionChannelOverviewTableFor(
@@ -1869,6 +1874,55 @@ describe("qualified channels source.channel overview", () => {
       channelDirections.map((direction) => ({ scope, sort, direction })),
     ),
   );
+
+  it("matches the Core fallback for a private Event candidate channel overview", async () => {
+    const { database, site } = createFixture();
+    seedChannelAttribution(database);
+    seedWholeBooleanChannelCases(database, site);
+    const query = queryFor("event", {
+      operation: "channels",
+      tab: "source.channel",
+      filterDsl: WHOLE_BOOLEAN_OR_FILTER,
+      limit: 2,
+    });
+    const legacyTrace = traceFor();
+    const legacy = await legacyChannelOverviewTableFor(
+      database,
+      query,
+      legacyTrace,
+    );
+    expect(legacy.deferred?.countInput.scope).toBe("event");
+    expect(legacy.deferred?.countInput.candidateAnchor?.kind).toBe(
+      "event-candidate",
+    );
+    expect(
+      legacy.deferred && "eventCandidateReportProjection" in legacy.deferred
+        ? legacy.deferred.eventCandidateReportProjection
+        : undefined,
+    ).toBe("page-visits");
+
+    const runtimeTrace = traceFor();
+    const diagnostics = createD1ReadDiagnostics();
+    const provider = createD1SiteProviderRegistry({
+      env: testEnv(database, runtimeTrace),
+      siteId: SITE,
+      diagnostics,
+    }).resolve("channels");
+    if (!provider)
+      throw new Error("wave97ep_event_channel_overview_provider_missing");
+    const actual = await provider.execute(query as never);
+    expect(actual.value).toEqual(legacy.dto);
+    expect((actual.value as CursorOverviewDto).data.items).toHaveLength(2);
+    expect(runtimeTrace.preparedSql).toHaveLength(2);
+    expect(diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
+    recordChannelEvidence("event-candidate-core-fallback", {
+      legacyDto: legacy.dto,
+      actualDto: actual.value,
+      legacyStatements: legacyTrace.preparedSql.length,
+      actualStatements: runtimeTrace.preparedSql.length,
+      candidateProjection: "page-visits",
+    });
+  });
 
   it.each(channelScopes)(
     "compiles the actual channels operation and preserves the legacy DTO for %s scope",
