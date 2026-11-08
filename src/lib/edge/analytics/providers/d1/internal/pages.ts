@@ -321,7 +321,12 @@ export async function queryQualifiedPagesAggregatePageFromD1(input: {
     },
     ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
   });
-  if (execution.kind !== "executed") return execution;
+  if (execution.kind !== "executed") {
+    if (input.diagnostics)
+      input.diagnostics.advancedCountSqlFallbackReason =
+        execution.fallbackReason;
+    return execution;
+  }
   if (invalidCursor) throw new InvalidCursorError("pages");
   const rows = execution.rows
     .filter(

@@ -6,9 +6,13 @@ import {
   scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type {
+  AdvancedCountQualificationFragment,
+  AdvancedCountQualificationPlanInput,
+} from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import {
   appendAdvancedCountQualification,
+  appendAdvancedEventCandidateCountQualification,
   createAdvancedCountQualificationBuilder,
 } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import type { PageDimensionSelection } from "@/lib/edge/analytics/engine/dimension-report-plan";
@@ -241,7 +245,9 @@ export function splitPageDimensionNativeFilters(
  * families can append any Page projections to `qualifiedPages` while sharing
  * the same Count and source admission checks.
  */
-export function appendQualifiedPageSource(input: {
+export function appendQualifiedPageSource<
+  Count extends AdvancedCountQualificationPlanInput,
+>(input: {
   readonly semanticOperation?: QualifiedPageSemanticOperation;
   readonly preparedTimePolicy?: "reader-window-v1";
   readonly siteId: string;
@@ -249,16 +255,32 @@ export function appendQualifiedPageSource(input: {
   readonly filters: FilterDocument;
   readonly filterMode?: QualifiedSourceFilterMode;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: Count;
+  readonly eventCandidateReportProjection?: "page-visits";
   readonly selections: readonly PageDimensionSelection[];
   readonly additionalAttributes?: readonly SemanticAttributeId[];
 }): {
   readonly builder: ReturnType<typeof createAdvancedCountQualificationBuilder>;
-  readonly qualification: ReturnType<typeof appendAdvancedCountQualification>;
+  readonly qualification: AdvancedCountQualificationFragment<Count["scope"]>;
   readonly pageSource: ReturnType<typeof appendPageDimensionReportSource>;
   readonly qualifiedPages: LogicalRelationHandle;
   readonly reportSourceRelations: readonly EventQualificationReportSource[];
+  readonly eventCandidateReportProjection?: "page-visits";
 } {
+  const eventCandidatePageVisits =
+    input.eventCandidateReportProjection === "page-visits";
+  if (
+    (input.count.scope === "event") !== eventCandidatePageVisits ||
+    (input.count.scope === "event" &&
+      input.count.candidateAnchor.kind !== "event-candidate") ||
+    (eventCandidatePageVisits &&
+      (input.filterMode !== "allow-whole-filter" ||
+        input.scopePlan.scope !== "event"))
+  )
+    throw new Error(
+      "page_dimension_qualification_candidate_projection_invalid",
+    );
+
   const queryReadRange = input.queryTime.readRange ?? input.queryTime.range;
   if (
     input.count.subject.siteIds.length !== 1 ||
@@ -283,10 +305,17 @@ export function appendQualifiedPageSource(input: {
         `page_dimension_qualification_attribute_invalid:${attribute}`,
       );
 
-  const filterResolution = resolveQualifiedSourceFilters(
-    input.filters,
-    input.filterMode ?? "split-only",
-  );
+  const filterResolution = eventCandidatePageVisits
+    ? {
+        kind: "supported" as const,
+        mode: "whole-filter" as const,
+        nativeFilters: EMPTY_FILTER_DOCUMENT,
+        countFilters: input.filters,
+      }
+    : resolveQualifiedSourceFilters(
+        input.filters,
+        input.filterMode ?? "split-only",
+      );
   if (filterResolution.kind === "unsupported")
     throw new Error(
       "page_dimension_qualification_native_filter_split_unsupported",
@@ -326,7 +355,11 @@ export function appendQualifiedPageSource(input: {
     throw new Error("page_dimension_qualification_native_scope_plan_missing");
 
   const builder = createAdvancedCountQualificationBuilder(input.count);
-  const qualification = appendAdvancedCountQualification(builder, input.count);
+  const qualification = (
+    input.count.scope === "event"
+      ? appendAdvancedEventCandidateCountQualification(builder, input.count)
+      : appendAdvancedCountQualification(builder, input.count)
+  ) as AdvancedCountQualificationFragment<Count["scope"]>;
   const nativeScopedFilters = attachScopedFilterMetadata(
     filterResolution.nativeFilters,
     {
@@ -350,8 +383,13 @@ export function appendQualifiedPageSource(input: {
   const pageSource = appendPageDimensionReportSource(builder, {
     selections: input.selections,
     sourceSelection: pageSelection,
-    ...(input.additionalAttributes
-      ? { additionalAttributes: input.additionalAttributes }
+    ...(input.additionalAttributes || eventCandidatePageVisits
+      ? {
+          additionalAttributes: [
+            ...(input.additionalAttributes ?? []),
+            ...(eventCandidatePageVisits ? ["page.report.localId"] : []),
+          ],
+        }
       : {}),
   });
   const matchesForSite = builder.filter(
@@ -362,19 +400,38 @@ export function appendQualifiedPageSource(input: {
       builder.literal(input.siteId, STRING),
     ),
   );
-  const ownerAttribute =
-    input.count.scope === "session"
-      ? "page.report.sessionId"
-      : "page.report.visitorId";
-  const qualifiedPages = builder.semiJoin(pageSource.pages, matchesForSite, [
-    { left: `attribute:${ownerAttribute}`, right: "entityId" },
-  ]);
+  const qualifiedPages = eventCandidatePageVisits
+    ? builder.semiJoin(
+        pageSource.pages,
+        builder.filter(
+          matchesForSite,
+          builder.compare(
+            "neq",
+            builder.slot(matchesForSite, "visitId"),
+            builder.literal("", STRING),
+          ),
+        ),
+        [{ left: "attribute:page.report.localId", right: "visitId" }],
+      )
+    : builder.semiJoin(pageSource.pages, matchesForSite, [
+        {
+          left: `attribute:${
+            input.count.scope === "session"
+              ? "page.report.sessionId"
+              : "page.report.visitorId"
+          }`,
+          right: "entityId",
+        },
+      ]);
 
   return {
     builder,
     qualification,
     pageSource,
     qualifiedPages,
+    ...(eventCandidatePageVisits
+      ? { eventCandidateReportProjection: "page-visits" as const }
+      : {}),
     reportSourceRelations: [
       { relationId: pageSource.pages.id, entity: "page" },
     ],

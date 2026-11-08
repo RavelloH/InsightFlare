@@ -747,18 +747,29 @@ export class AnalyticsLogicalToDbLowerer {
       const qualifiedScopeValid =
         ((qualificationPolicy.scope === "session" ||
           qualificationPolicy.scope === "visitor") &&
-          qualificationPolicy.candidateGrain === undefined) ||
+          qualificationPolicy.candidateGrain === undefined &&
+          qualificationPolicy.eventCandidateReportProjection === undefined) ||
         (qualificationPolicy.scope === "event" &&
           qualificationPolicy.candidateGrain === "event-candidate" &&
-          primaryReportSource?.kind === "source" &&
-          primaryReportSource.entity === "event" &&
-          qualificationPolicy.reportSourceRelations.length >= 1 &&
-          qualificationPolicy.reportSourceRelations.length <= 2 &&
-          qualificationPolicy.reportSourceRelations[0]?.relationId ===
-            qualificationPolicy.primaryReportSourceRelationId &&
-          qualificationPolicy.reportSourceRelations[0]?.entity === "event" &&
-          (qualificationPolicy.reportSourceRelations.length === 1 ||
-            qualificationPolicy.reportSourceRelations[1]?.entity === "page"));
+          (qualificationPolicy.eventCandidateReportProjection === undefined
+            ? primaryReportSource?.kind === "source" &&
+              primaryReportSource.entity === "event" &&
+              qualificationPolicy.reportSourceRelations.length >= 1 &&
+              qualificationPolicy.reportSourceRelations.length <= 2 &&
+              qualificationPolicy.reportSourceRelations[0]?.relationId ===
+                qualificationPolicy.primaryReportSourceRelationId &&
+              qualificationPolicy.reportSourceRelations[0]?.entity ===
+                "event" &&
+              (qualificationPolicy.reportSourceRelations.length === 1 ||
+                qualificationPolicy.reportSourceRelations[1]?.entity === "page")
+            : qualificationPolicy.eventCandidateReportProjection ===
+                "page-visits" &&
+              primaryReportSource?.kind === "source" &&
+              primaryReportSource.entity === "page" &&
+              qualificationPolicy.reportSourceRelations.length === 1 &&
+              qualificationPolicy.reportSourceRelations[0]?.relationId ===
+                qualificationPolicy.primaryReportSourceRelationId &&
+              qualificationPolicy.reportSourceRelations[0]?.entity === "page"));
       if (
         primaryReportSource?.kind !== "source" ||
         (primaryReportSource.entity !== "event" &&

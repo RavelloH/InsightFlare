@@ -110,6 +110,7 @@ export interface QualificationEnvelopeQualification {
   readonly groupedSummaryRelationId?: AnalyticsQualificationPlan["groupedSummaryRelationId"];
   readonly additionalGroupedSummaryRelationIds?: readonly RelationId[];
   readonly candidateGrain?: "event-candidate";
+  readonly eventCandidateReportProjection?: "page-visits";
   readonly controlOutputId: string;
   readonly numericCompatibilityFields: AnalyticsQualificationPlan["numericCompatibilityFields"];
   readonly scope: "session" | "visitor" | "event";
@@ -316,9 +317,14 @@ export function compileQualificationProgramEnvelope(input: {
         input.reports.length !== 1 ||
         qualification.reportSourceRelations.length !== 1 ||
         qualification.comparisonProvenance !== undefined ||
-        qualification.reportSourceRelations[0]!.entity !== "event" ||
+        (qualification.eventCandidateReportProjection === undefined
+          ? qualification.reportSourceRelations[0]!.entity !== "event"
+          : qualification.eventCandidateReportProjection !== "page-visits" ||
+            qualification.reportSourceRelations[0]!.entity !== "page") ||
         qualification.reportSourceRelations[0]!.relationId !==
           qualification.primaryReportSourceRelationId)) ||
+    (qualification.eventCandidateReportProjection !== undefined &&
+      qualification.candidateGrain !== "event-candidate") ||
     (qualification.candidateGrain === undefined &&
       qualification.additionalGroupedSummaryRelationIds !== undefined)
   )
@@ -366,6 +372,12 @@ export function compileQualificationProgramEnvelope(input: {
     scope: qualification.scope,
     ...(qualification.candidateGrain
       ? { candidateGrain: qualification.candidateGrain }
+      : {}),
+    ...(qualification.eventCandidateReportProjection
+      ? {
+          eventCandidateReportProjection:
+            qualification.eventCandidateReportProjection,
+        }
       : {}),
     maximumActivities: ADVANCED_FILTER_MAX_ACTIVITIES,
     numericCompatibilityControlNames: compatibilityControlFields,

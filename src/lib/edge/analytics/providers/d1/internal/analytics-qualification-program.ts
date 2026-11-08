@@ -133,7 +133,6 @@ import {
   type DeferredEventFieldsQualification,
   type DeferredEventFieldValuesQualification,
   type DeferredEventNameDimensionQualification,
-  type DeferredEventQualification,
   type DeferredEventSummaryQualification,
   type DeferredEventTrendQualification,
   type DeferredEventTypeDetailQualification,
@@ -465,16 +464,7 @@ function sessionBoundaryDimensionReportOrder(
 interface EventQualificationProgram {
   readonly query: CompiledQuery<Record<string, unknown>>;
   readonly evidence: EventSummaryQualificationCompilationEvidence;
-  readonly deferred:
-    | DeferredEventQualification
-    | DeferredEventSummaryQualification
-    | DeferredEventTypesQualification
-    | DeferredEventFieldsQualification
-    | DeferredEventFieldValuesQualification
-    | DeferredEventNameDimensionQualification
-    | DeferredEventTrendQualification
-    | DeferredEventContextQualification
-    | DeferredEventTypeDetailQualification;
+  readonly deferred: EventQualificationCompileRequest["deferred"];
   readonly reportKind: QualifiedReportKind;
   readonly reportOutputIds: readonly string[];
   readonly controlOutputId: string;
@@ -1124,8 +1114,16 @@ function validatePayloadRequest(request: EventPayloadQualificationRequest) {
     throw invalidInput("query", "event_field_values_request_context_mismatch");
 }
 
+function requireOwnerPageCountInput(
+  count: DeferredPageQualification["countInput"],
+) {
+  if (count.scope === "event")
+    throw invalidInput("scopePlan", "referrer_page_requires_owner_scope");
+  return count;
+}
+
 function pageDimensionWholeFilterModeMatchesRequest(
-  deferred: DeferredEventQualification,
+  deferred: DeferredPageQualification,
   query: PageDimensionQualificationReportQuery,
 ): boolean {
   if (deferred.pageDimensionFilterMode !== "allow-whole-filter") return true;
@@ -1734,6 +1732,13 @@ function compileProgram(request: EventQualificationCompileRequest):
                     scopePlan:
                       request.query.scopePlan ?? deferred.metadata.plan,
                     count: request.deferred.countInput,
+                    ...("eventCandidateReportProjection" in deferred &&
+                    deferred.eventCandidateReportProjection === "page-visits"
+                      ? {
+                          eventCandidateReportProjection:
+                            "page-visits" as const,
+                        }
+                      : {}),
                     limit: request.query.limit,
                     includeDetails: request.query.includeDetails,
                     cursor: request.query.cursor,
@@ -1772,7 +1777,9 @@ function compileProgram(request: EventQualificationCompileRequest):
                             filters: request.query.filters,
                             scopePlan:
                               request.query.scopePlan ?? deferred.metadata.plan,
-                            count: request.deferred.countInput,
+                            count: requireOwnerPageCountInput(
+                              request.deferred.countInput,
+                            ),
                             options: {
                               limit: request.query.limit,
                               includeFullUrl: request.query.includeFullUrl,
@@ -1798,6 +1805,14 @@ function compileProgram(request: EventQualificationCompileRequest):
                             scopePlan:
                               request.query.scopePlan ?? deferred.metadata.plan,
                             count: request.deferred.countInput,
+                            ...("eventCandidateReportProjection" in deferred &&
+                            deferred.eventCandidateReportProjection ===
+                              "page-visits"
+                              ? {
+                                  eventCandidateReportProjection:
+                                    "page-visits" as const,
+                                }
+                              : {}),
                             options: {
                               selection: request.query.selection,
                               limit: request.query.limit,
@@ -2004,6 +2019,32 @@ function compileProgram(request: EventQualificationCompileRequest):
     deferred.metadata.plan.scope === "event" &&
     deferred.countInput.scope === "event" &&
     deferred.countInput.candidateAnchor.kind === "event-candidate";
+  const eventCandidatePageDimensionQuery =
+    request.kind === "page-dimension" &&
+    deferred.operation === "page-dimension" &&
+    "eventCandidateReportProjection" in deferred &&
+    deferred.eventCandidateReportProjection === "page-visits" &&
+    deferred.metadata.plan.scope === "event" &&
+    deferred.countInput.scope === "event" &&
+    deferred.countInput.candidateAnchor.kind === "event-candidate" &&
+    ((request.query.family === "breakdown" &&
+      "pageDimensionRequest" in deferred &&
+      deferred.pageDimensionRequest !== undefined) ||
+      (request.query.family === "overview-tab" &&
+        overviewPageTableDescriptor(request.query.tab)?.family === "page" &&
+        "overviewPageTableRequest" in deferred &&
+        deferred.overviewPageTableRequest !== undefined));
+  const eventCandidatePagesAggregateQuery =
+    request.kind === "pages-aggregate-page" &&
+    deferred.operation === "pages-aggregate-page" &&
+    "eventCandidateReportProjection" in deferred &&
+    deferred.eventCandidateReportProjection === "page-visits" &&
+    deferred.metadata.plan.scope === "event" &&
+    deferred.countInput.scope === "event" &&
+    deferred.countInput.candidateAnchor.kind === "event-candidate" &&
+    deferred.pagesAggregatePageRequest !== undefined;
+  const eventCandidatePageProjectionQuery =
+    eventCandidatePageDimensionQuery || eventCandidatePagesAggregateQuery;
   const eventCandidateContextDetailQuery =
     eventCandidateEventContextQuery || eventCandidateEventTypeDetailQuery;
   const eventCandidateContextKeys =
@@ -2015,34 +2056,49 @@ function compileProgram(request: EventQualificationCompileRequest):
   const eventCandidateRequiresPageSource = eventCandidateContextKeys.some(
     (key) => key === "entry" || key === "exit",
   );
-  const eventCandidateSourcesMatch =
-    !eventCandidateContextDetailQuery ||
-    (qualification.reportSourceRelations.length ===
-      (eventCandidateRequiresPageSource ? 2 : 1) &&
-      qualification.reportSourceRelations[0]?.entity === "event" &&
+  const eventCandidateSourcesMatch = eventCandidatePageProjectionQuery
+    ? qualification.eventCandidateReportProjection === "page-visits" &&
+      qualification.reportSourceRelations.length === 1 &&
+      qualification.reportSourceRelations[0]?.entity === "page" &&
       qualification.reportSourceRelations[0]?.relationId ===
-        qualification.primaryReportSourceRelationId &&
-      (eventCandidateRequiresPageSource
-        ? qualification.reportSourceRelations[1]?.entity === "page"
-        : qualification.reportSourceRelations[1] === undefined));
+        qualification.primaryReportSourceRelationId
+    : !eventCandidateContextDetailQuery ||
+      (qualification.reportSourceRelations.length ===
+        (eventCandidateRequiresPageSource ? 2 : 1) &&
+        qualification.reportSourceRelations[0]?.entity === "event" &&
+        qualification.reportSourceRelations[0]?.relationId ===
+          qualification.primaryReportSourceRelationId &&
+        (eventCandidateRequiresPageSource
+          ? qualification.reportSourceRelations[1]?.entity === "page"
+          : qualification.reportSourceRelations[1] === undefined));
   const qualificationScopeValid =
     ((qualification.scope === "session" || qualification.scope === "visitor") &&
-      qualification.candidateGrain === undefined) ||
+      qualification.candidateGrain === undefined &&
+      qualification.eventCandidateReportProjection === undefined) ||
+    (eventCandidatePageProjectionQuery &&
+      qualification.scope === "event" &&
+      qualification.candidateGrain === "event-candidate" &&
+      qualification.eventCandidateReportProjection === "page-visits") ||
     (eventCandidateEventTypeQuery &&
       qualification.scope === "event" &&
-      qualification.candidateGrain === "event-candidate") ||
+      qualification.candidateGrain === "event-candidate" &&
+      qualification.eventCandidateReportProjection === undefined) ||
     (eventCandidateEventTrendQuery &&
       qualification.scope === "event" &&
-      qualification.candidateGrain === "event-candidate") ||
+      qualification.candidateGrain === "event-candidate" &&
+      qualification.eventCandidateReportProjection === undefined) ||
     (eventCandidateEventSummaryQuery &&
       qualification.scope === "event" &&
-      qualification.candidateGrain === "event-candidate") ||
+      qualification.candidateGrain === "event-candidate" &&
+      qualification.eventCandidateReportProjection === undefined) ||
     (eventCandidateContextDetailQuery &&
       qualification.scope === "event" &&
-      qualification.candidateGrain === "event-candidate") ||
+      qualification.candidateGrain === "event-candidate" &&
+      qualification.eventCandidateReportProjection === undefined) ||
     ((eventCandidateEventFieldsQuery || eventCandidateEventFieldValuesQuery) &&
       qualification.scope === "event" &&
-      qualification.candidateGrain === "event-candidate");
+      qualification.candidateGrain === "event-candidate" &&
+      qualification.eventCandidateReportProjection === undefined);
   if (
     qualification.scope !== deferred.countInput.scope ||
     !qualificationScopeValid ||
@@ -2113,6 +2169,12 @@ function compileProgram(request: EventQualificationCompileRequest):
     scope: qualification.scope,
     ...(qualification.candidateGrain
       ? { candidateGrain: qualification.candidateGrain }
+      : {}),
+    ...(qualification.eventCandidateReportProjection
+      ? {
+          eventCandidateReportProjection:
+            qualification.eventCandidateReportProjection,
+        }
       : {}),
     maximumActivities: ADVANCED_FILTER_MAX_ACTIVITIES,
     numericCompatibilityControlNames: compatibilityFields.map(

@@ -22,7 +22,7 @@ import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import { PAGES_DASHBOARD_QUALIFICATION_OUTPUTS } from "@/lib/edge/analytics/engine/pages-dashboard-qualification-plan";
 import {
   d1AdvancedFilterMiddleware,
-  deferredPageDimensionQualificationFromQuery,
+  deferredPageDimensionQualificationFromQuery as readPageDimensionQualification,
   prepareDeferredEventQualificationFallback,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import {
@@ -49,6 +49,20 @@ const FILTERS = parseFilterDsl(
   analyticsFilterRegistry,
 );
 const ARTIFACT_DIR = process.env.WAVE97D_ARTIFACT_DIR;
+
+function deferredPageDimensionQualificationFromQuery(
+  query: Parameters<typeof readPageDimensionQualification>[0],
+) {
+  const deferred = readPageDimensionQualification(query);
+  if (deferred?.countInput.scope === "event")
+    throw new Error("wave97d_dashboard_requires_owner_count");
+  return deferred as
+    | Exclude<
+        NonNullable<typeof deferred>,
+        { readonly countInput: { readonly scope: "event" } }
+      >
+    | undefined;
+}
 
 const CASES = [
   { scope: "session", sort: "views", direction: "desc" },

@@ -1,6 +1,10 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
-import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import type {
+  AdvancedCountFilterMatchPlanInput,
+  AdvancedCountQualificationFragment,
+  AdvancedCountQualificationPlanInput,
+} from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import { appendComparisonDimensionRollup } from "@/lib/edge/analytics/engine/comparison-report-plan";
 import type { PageDimensionSelection } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import {
@@ -50,17 +54,23 @@ export type PagesTabsQualificationPlan = AnalyticsQualificationPlan & {
   readonly reportOutputIds: readonly string[];
 };
 
-export type PageDimensionQualificationPlan = AnalyticsQualificationPlan & {
+export type PageDimensionQualificationPlan<
+  Scope extends "session" | "visitor" | "event" = "session" | "visitor",
+> = AnalyticsQualificationPlan<Scope> & {
   readonly reportOutputIds: readonly [typeof DIMENSION_PAGE_REPORT_OUTPUT];
 };
 
-export type PagesAggregateQualificationPlan = AnalyticsQualificationPlan & {
+export type PagesAggregateQualificationPlan<
+  Scope extends "session" | "visitor" | "event" = "session" | "visitor",
+> = AnalyticsQualificationPlan<Scope> & {
   readonly reportOutputIds: readonly [typeof PAGES_AGGREGATE_REPORT_OUTPUT];
 };
 
 export { splitPageDimensionNativeFilters } from "@/lib/edge/analytics/engine/qualified-page-source";
 
-export function appendPageDimensionQualificationSource(input: {
+export function appendPageDimensionQualificationSource<
+  Count extends AdvancedCountQualificationPlanInput,
+>(input: {
   readonly semanticOperation?: QualifiedPageSemanticOperation;
   readonly preparedTimePolicy?: "reader-window-v1";
   readonly siteId: string;
@@ -68,14 +78,13 @@ export function appendPageDimensionQualificationSource(input: {
   readonly filters: FilterDocument;
   readonly filterMode?: QualifiedSourceFilterMode;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: Count;
+  readonly eventCandidateReportProjection?: "page-visits";
   readonly selections: readonly PageDimensionSelection[];
   readonly additionalAttributes?: readonly SemanticAttributeId[];
 }): {
   readonly builder: ReturnType<typeof appendQualifiedPageSource>["builder"];
-  readonly qualification: ReturnType<
-    typeof appendQualifiedPageSource
-  >["qualification"];
+  readonly qualification: AdvancedCountQualificationFragment<Count["scope"]>;
   readonly pageSource: ReturnType<
     typeof appendQualifiedPageSource
   >["pageSource"];
@@ -83,12 +92,15 @@ export function appendPageDimensionQualificationSource(input: {
   readonly reportSourceRelations: ReturnType<
     typeof appendQualifiedPageSource
   >["reportSourceRelations"];
+  readonly eventCandidateReportProjection?: "page-visits";
 } {
   return appendQualifiedPageSource(input);
 }
 
 /** Combines Count controls with the real Page report Source and its page. */
-export function buildPageDimensionQualificationPlan(input: {
+export function buildPageDimensionQualificationPlan<
+  Count extends AdvancedCountQualificationPlanInput,
+>(input: {
   readonly semanticOperation?:
     "dimension" | "filter-values" | "channels" | "pages";
   readonly filterMode?: QualifiedSourceFilterMode;
@@ -96,11 +108,12 @@ export function buildPageDimensionQualificationPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: Count;
+  readonly eventCandidateReportProjection?: "page-visits";
   readonly options: DimensionPageReportOptions & {
     readonly selection: PageDimensionSelection;
   };
-}): PageDimensionQualificationPlan {
+}): PageDimensionQualificationPlan<Count["scope"]> {
   const source = appendPageDimensionQualificationSource({
     ...(input.semanticOperation
       ? { semanticOperation: input.semanticOperation }
@@ -108,9 +121,15 @@ export function buildPageDimensionQualificationPlan(input: {
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
-    filterMode: input.filterMode ?? "split-only",
+    filterMode:
+      input.eventCandidateReportProjection === "page-visits"
+        ? "allow-whole-filter"
+        : (input.filterMode ?? "split-only"),
     scopePlan: input.scopePlan,
     count: input.count,
+    ...(input.eventCandidateReportProjection
+      ? { eventCandidateReportProjection: input.eventCandidateReportProjection }
+      : {}),
     selections: [input.options.selection],
   });
   const { builder, qualification, qualifiedPages } = source;
@@ -135,20 +154,37 @@ export function buildPageDimensionQualificationPlan(input: {
     numericCompatibilityFields: qualification.numericCompatibilityFields,
     scope: qualification.scope,
     reportSourceRelations: source.reportSourceRelations,
+    ...(qualification.candidateGrain
+      ? { candidateGrain: qualification.candidateGrain }
+      : {}),
+    ...(qualification.additionalGroupedSummaries
+      ? {
+          additionalGroupedSummaryRelationIds:
+            qualification.additionalGroupedSummaries.map(({ id }) => id),
+        }
+      : {}),
+    ...(source.eventCandidateReportProjection
+      ? {
+          eventCandidateReportProjection: source.eventCandidateReportProjection,
+        }
+      : {}),
   };
 }
 
 /** Builds the ordinary Pages aggregate page from the common qualified Page source. */
-export function buildPagesAggregateQualificationPlan(input: {
+export function buildPagesAggregateQualificationPlan<
+  Count extends AdvancedCountQualificationPlanInput,
+>(input: {
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan: ScopedFilterPlan;
-  readonly count: AdvancedCountFilterMatchPlanInput;
+  readonly count: Count;
+  readonly eventCandidateReportProjection?: "page-visits";
   readonly limit: number;
   readonly includeDetails: boolean;
   readonly cursor?: PageAggregateCursor | null;
-}): PagesAggregateQualificationPlan {
+}): PagesAggregateQualificationPlan<Count["scope"]> {
   const source = appendPageDimensionQualificationSource({
     semanticOperation: "pages",
     filterMode: "allow-whole-filter",
@@ -157,6 +193,9 @@ export function buildPagesAggregateQualificationPlan(input: {
     filters: input.filters,
     scopePlan: input.scopePlan,
     count: input.count,
+    ...(input.eventCandidateReportProjection
+      ? { eventCandidateReportProjection: input.eventCandidateReportProjection }
+      : {}),
     selections: [],
     additionalAttributes: [
       "page.report.pathname",
@@ -199,6 +238,20 @@ export function buildPagesAggregateQualificationPlan(input: {
     numericCompatibilityFields: qualification.numericCompatibilityFields,
     scope: qualification.scope,
     reportSourceRelations: source.reportSourceRelations,
+    ...(qualification.candidateGrain
+      ? { candidateGrain: qualification.candidateGrain }
+      : {}),
+    ...(qualification.additionalGroupedSummaries
+      ? {
+          additionalGroupedSummaryRelationIds:
+            qualification.additionalGroupedSummaries.map(({ id }) => id),
+        }
+      : {}),
+    ...(source.eventCandidateReportProjection
+      ? {
+          eventCandidateReportProjection: source.eventCandidateReportProjection,
+        }
+      : {}),
   };
 }
 

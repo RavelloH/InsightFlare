@@ -7,6 +7,7 @@ import {
 import type {
   AdvancedCountFilterMatchPlanInput,
   AdvancedCountQualificationPlanInput,
+  AdvancedEventCandidateCountPlanInput,
 } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import type { PageDimensionSelection } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import {
@@ -60,11 +61,15 @@ type DeferredFilterValuesQualificationBase = Omit<
 
 type DeferredFilterValuesOwnerConfiguration = Exclude<
   FilterValuesQualificationConfiguration,
-  { readonly reportKind: "event" }
+  { readonly reportKind: "event" | "page" }
 >;
 type DeferredFilterValuesEventConfiguration = Extract<
   FilterValuesQualificationConfiguration,
   { readonly reportKind: "event" }
+>;
+type DeferredFilterValuesPageConfiguration = Extract<
+  FilterValuesQualificationConfiguration,
+  { readonly reportKind: "page" }
 >;
 
 export type DeferredFilterValuesQualificationInput =
@@ -75,16 +80,28 @@ export type DeferredFilterValuesQualificationInput =
   | (DeferredFilterValuesQualificationBase & {
       readonly countInput: AdvancedCountQualificationPlanInput;
       readonly filterValuesRequest: DeferredFilterValuesEventConfiguration;
+    })
+  | (DeferredFilterValuesQualificationBase & {
+      readonly countInput: AdvancedCountFilterMatchPlanInput;
+      readonly filterValuesRequest: DeferredFilterValuesPageConfiguration;
+    })
+  | (DeferredFilterValuesQualificationBase & {
+      readonly countInput: AdvancedEventCandidateCountPlanInput;
+      readonly eventCandidateReportProjection: "page-visits";
+      readonly filterValuesFilterMode: "allow-whole-filter";
+      readonly filterValuesRequest: DeferredFilterValuesPageConfiguration;
     });
 
 export type DeferredFilterValuesQualification =
   | {
       readonly operation: "filter-values";
-      readonly configuration: DeferredFilterValuesOwnerConfiguration;
+      readonly configuration:
+        | DeferredFilterValuesOwnerConfiguration
+        | DeferredFilterValuesPageConfiguration;
       readonly filterMode: "split-only" | "allow-whole-filter";
       readonly qualification: Extract<
         DeferredFilterValuesQualificationInput,
-        { readonly filterValuesRequest: DeferredFilterValuesOwnerConfiguration }
+        { readonly countInput: AdvancedCountFilterMatchPlanInput }
       >;
       readonly requestSnapshot: string;
     }
@@ -95,6 +112,16 @@ export type DeferredFilterValuesQualification =
       readonly qualification: Extract<
         DeferredFilterValuesQualificationInput,
         { readonly filterValuesRequest: DeferredFilterValuesEventConfiguration }
+      >;
+      readonly requestSnapshot: string;
+    }
+  | {
+      readonly operation: "filter-values";
+      readonly configuration: DeferredFilterValuesPageConfiguration;
+      readonly filterMode: "allow-whole-filter";
+      readonly qualification: Extract<
+        DeferredFilterValuesQualificationInput,
+        { readonly eventCandidateReportProjection: "page-visits" }
       >;
       readonly requestSnapshot: string;
     };
@@ -313,18 +340,29 @@ export function attachFilterValuesQualificationToQuery(
           >,
           requestSnapshot: snapshot,
         })
-      : Object.freeze({
-          operation: "filter-values",
-          configuration,
-          filterMode: qualification.filterValuesFilterMode ?? "split-only",
-          qualification: qualification as Extract<
-            DeferredFilterValuesQualificationInput,
-            {
-              readonly filterValuesRequest: DeferredFilterValuesOwnerConfiguration;
-            }
-          >,
-          requestSnapshot: snapshot,
-        });
+      : configuration.reportKind === "page" &&
+          "eventCandidateReportProjection" in qualification &&
+          qualification.eventCandidateReportProjection === "page-visits"
+        ? Object.freeze({
+            operation: "filter-values",
+            configuration,
+            filterMode: "allow-whole-filter" as const,
+            qualification: qualification as Extract<
+              DeferredFilterValuesQualificationInput,
+              { readonly eventCandidateReportProjection: "page-visits" }
+            >,
+            requestSnapshot: snapshot,
+          })
+        : Object.freeze({
+            operation: "filter-values",
+            configuration,
+            filterMode: qualification.filterValuesFilterMode ?? "split-only",
+            qualification: qualification as Extract<
+              DeferredFilterValuesQualificationInput,
+              { readonly countInput: AdvancedCountFilterMatchPlanInput }
+            >,
+            requestSnapshot: snapshot,
+          });
   brandedRequests.add(request);
   requestOrigins.set(request, query);
   Object.defineProperty(query, REQUEST_BRAND, {

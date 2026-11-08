@@ -65,6 +65,7 @@ export interface AnalyticsQualificationPlan<
   }[];
   readonly scope: Scope;
   readonly candidateGrain?: "event-candidate";
+  readonly eventCandidateReportProjection?: "page-visits";
   readonly additionalGroupedSummaryRelationIds?: readonly RelationId[];
   readonly reportSourceRelations: readonly EventQualificationReportSource[];
 }

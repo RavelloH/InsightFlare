@@ -605,10 +605,23 @@ export type DeferredEventFieldValuesQualification =
       readonly eventFieldValuesRequest: DeferredEventFieldValuesRequest;
     });
 
-export type DeferredPageDimensionQualification = DeferredEventQualification & {
-  readonly operation: "page-dimension";
-  readonly pageDimensionRequest: DeferredPageDimensionRequest;
+type DeferredEventCandidatePageProjection = Omit<
+  DeferredEventQualification,
+  "operation" | "countInput"
+> & {
+  readonly countInput: AdvancedEventCandidateCountPlanInput;
+  readonly eventCandidateReportProjection: "page-visits";
 };
+
+export type DeferredPageDimensionQualification =
+  | (DeferredEventQualification & {
+      readonly operation: "page-dimension";
+      readonly pageDimensionRequest: DeferredPageDimensionRequest;
+    })
+  | (DeferredEventCandidatePageProjection & {
+      readonly operation: "page-dimension";
+      readonly pageDimensionRequest: DeferredPageDimensionRequest;
+    });
 
 export type DeferredReferrersQualification = DeferredEventQualification & {
   readonly operation: "referrers";
@@ -616,10 +629,14 @@ export type DeferredReferrersQualification = DeferredEventQualification & {
 };
 
 export type DeferredPagesAggregatePageQualification =
-  DeferredEventQualification & {
-    readonly operation: "pages-aggregate-page";
-    readonly pagesAggregatePageRequest: DeferredPagesAggregatePageRequest;
-  };
+  | (DeferredEventQualification & {
+      readonly operation: "pages-aggregate-page";
+      readonly pagesAggregatePageRequest: DeferredPagesAggregatePageRequest;
+    })
+  | (DeferredEventCandidatePageProjection & {
+      readonly operation: "pages-aggregate-page";
+      readonly pagesAggregatePageRequest: DeferredPagesAggregatePageRequest;
+    });
 
 export type DeferredPagesTabsQualification = DeferredEventQualification & {
   readonly operation: "pages-tabs";
@@ -627,10 +644,14 @@ export type DeferredPagesTabsQualification = DeferredEventQualification & {
 };
 
 export type DeferredOverviewPageTableQualification =
-  DeferredEventQualification & {
-    readonly operation: "page-dimension";
-    readonly overviewPageTableRequest: DeferredOverviewPageTableRequest;
-  };
+  | (DeferredEventQualification & {
+      readonly operation: "page-dimension";
+      readonly overviewPageTableRequest: DeferredOverviewPageTableRequest;
+    })
+  | (DeferredEventCandidatePageProjection & {
+      readonly operation: "page-dimension";
+      readonly overviewPageTableRequest: DeferredOverviewPageTableRequest;
+    });
 
 export type DeferredChannelOverviewQualification =
   DeferredEventQualification & {
@@ -4641,6 +4662,8 @@ async function prepareDeferredEventQualification(input: {
   | DeferredEventTrendQualification
   | DeferredEventContextQualification
   | DeferredEventTypeDetailQualification
+  | DeferredPageQualification
+  | DeferredPagesAggregatePageQualification
   | DeferredFilterValuesQualificationInput
   | null
 > {
@@ -4649,6 +4672,41 @@ async function prepareDeferredEventQualification(input: {
     input.operation === "filter-values"
       ? filterValuesQualificationConfigurationFromQuery(query)
       : undefined;
+  const rawRequestAudience = ownDataValue(
+    ownDataValue(ownDataValue(query, "context"), "policy"),
+    "audience",
+  );
+  const rawPageDimensionRequest =
+    input.operation === "page-dimension" &&
+    ownDataValue(query, "mode") === "breakdown"
+      ? normalizeDimensionPageRequest({
+          dimension:
+            typeof ownDataValue(query, "dimension") === "string"
+              ? (ownDataValue(query, "dimension") as string)
+              : "",
+          page: ownDataValue(query, "page"),
+          limit: ownDataValue(query, "limit"),
+          sort: ownDataValue(query, "sort"),
+          search: ownDataValue(query, "search"),
+        })
+      : null;
+  const rawOverviewPageTableRequest =
+    input.operation === "page-dimension" &&
+    ownDataValue(query, "mode") === "overview-tab"
+      ? normalizeOverviewPageTableRequest({
+          operation: "dimension",
+          mode: "overview-tab",
+          tab: ownDataValue(query, "tab"),
+          limit: ownDataValue(query, "limit"),
+          cursor: ownDataValue(query, "cursor"),
+          sort: ownDataValue(query, "sort"),
+          direction: ownDataValue(query, "direction"),
+          search: ownDataValue(query, "search"),
+        })
+      : null;
+  const rawOverviewPageDescriptor = rawOverviewPageTableRequest
+    ? overviewPageTableDescriptor(rawOverviewPageTableRequest.tab)
+    : null;
   const eventCandidateConsumerOperation =
     input.operation === "event-summary" ||
     input.operation === "event-context" ||
@@ -4659,8 +4717,13 @@ async function prepareDeferredEventQualification(input: {
     input.operation === "event-trend" ||
     input.operation === "event-fields" ||
     input.operation === "event-field-values" ||
+    (input.operation === "page-dimension" &&
+      input.allowPageFieldWholeFilterOptIn === true) ||
+    input.operation === "pages-aggregate-page" ||
     (input.operation === "filter-values" &&
-      filterValuesRequest?.reportKind === "event");
+      (filterValuesRequest?.reportKind === "event" ||
+        (input.allowPrivateFilterValuesWholeFilterOptIn === true &&
+          filterValuesRequest?.reportKind === "page")));
   const eventCandidateFiltersDescriptor = eventCandidateConsumerOperation
     ? ownDescriptor(query, "filters")
     : undefined;
@@ -4690,7 +4753,11 @@ async function prepareDeferredEventQualification(input: {
                       ? "event_fields_qualification_request_context_mismatch"
                       : input.operation === "event-field-values"
                         ? "event_field_values_qualification_request_context_mismatch"
-                        : "event_name_dimension_request_context_mismatch",
+                        : input.operation === "page-dimension"
+                          ? "page_dimension_request_context_mismatch"
+                          : input.operation === "pages-aggregate-page"
+                            ? "pages_aggregate_page_request_context_mismatch"
+                            : "event_name_dimension_request_context_mismatch",
     );
   const eventCandidateFilters = eventCandidateConsumerOperation
     ? (ownDataValue(query, "filters") as FilterDocument | undefined)
@@ -4741,7 +4808,11 @@ async function prepareDeferredEventQualification(input: {
                       ? "event_fields_qualification_request_context_mismatch"
                       : input.operation === "event-field-values"
                         ? "event_field_values_qualification_request_context_mismatch"
-                        : "event_name_dimension_request_context_mismatch",
+                        : input.operation === "page-dimension"
+                          ? "page_dimension_request_context_mismatch"
+                          : input.operation === "pages-aggregate-page"
+                            ? "pages_aggregate_page_request_context_mismatch"
+                            : "event_name_dimension_request_context_mismatch",
     );
   const eventCandidateBaseRequest =
     eventCandidateMetadata?.plan.scope === "event" &&
@@ -4752,6 +4823,32 @@ async function prepareDeferredEventQualification(input: {
     ) === "private-dashboard" &&
     queryHasNoComparisonState(query) &&
     eventCandidateScopePlanMatches;
+  const rawCandidateRequestTime = ownDataValue(query, "time");
+  const eventCandidateRequestTimeMatches =
+    rawCandidateRequestTime !== null &&
+    typeof rawCandidateRequestTime === "object" &&
+    eventCandidateMetadata?.time !== undefined &&
+    sameEventFieldsQueryTime(
+      rawCandidateRequestTime as QueryTime,
+      eventCandidateMetadata.time,
+    );
+  if (
+    eventCandidateMetadata?.plan.scope === "event" &&
+    !eventCandidateRequestTimeMatches &&
+    ((input.operation === "page-dimension" &&
+      input.allowPageFieldWholeFilterOptIn === true) ||
+      input.operation === "pages-aggregate-page" ||
+      (input.operation === "filter-values" &&
+        filterValuesRequest?.reportKind === "page"))
+  )
+    throw invalidInput(
+      "time",
+      input.operation === "page-dimension"
+        ? "page_dimension_request_context_mismatch"
+        : input.operation === "pages-aggregate-page"
+          ? "pages_aggregate_page_request_context_mismatch"
+          : "filter_values_request_context_mismatch",
+    );
   const eventCandidatePageRequest =
     input.operation === "event-types" &&
     eventCandidateBaseRequest &&
@@ -4766,6 +4863,51 @@ async function prepareDeferredEventQualification(input: {
     input.allowPrivateFilterValuesWholeFilterOptIn === true &&
     filterValuesRequest?.reportKind === "event" &&
     eventCandidateBaseRequest;
+  const eventCandidatePageFilterValuesRequest =
+    input.operation === "filter-values" &&
+    input.allowPrivateFilterValuesWholeFilterOptIn === true &&
+    filterValuesRequest?.reportKind === "page" &&
+    eventCandidateBaseRequest &&
+    eventCandidateRequestTimeMatches;
+  const eventCandidatePageDimensionRequest =
+    input.operation === "page-dimension" &&
+    input.allowPageFieldWholeFilterOptIn === true &&
+    eventCandidateBaseRequest &&
+    eventCandidateRequestTimeMatches &&
+    ((rawPageDimensionRequest !== null &&
+      isCanonicalPrivatePageDimensionWholeFilterRequest({
+        mode: "breakdown",
+        audience: rawRequestAudience,
+        dimension: rawPageDimensionRequest.dimension,
+        selection: rawPageDimensionRequest.selection,
+        excludeEmpty: rawPageDimensionRequest.excludeEmpty,
+      })) ||
+      (rawOverviewPageTableRequest !== null &&
+        rawOverviewPageDescriptor?.family === "page" &&
+        isCanonicalPrivatePageDimensionWholeFilterRequest({
+          mode: "overview-tab",
+          audience: rawRequestAudience,
+          tab: rawOverviewPageTableRequest.tab,
+          overviewFamily: rawOverviewPageTableRequest.family,
+          selection: rawOverviewPageTableRequest.selection,
+          excludeEmpty: rawOverviewPageTableRequest.excludeEmpty,
+        })));
+  const rawAggregateTime = ownDataValue(query, "time");
+  const eventCandidatePagesAggregateRequest =
+    input.operation === "pages-aggregate-page" &&
+    eventCandidateBaseRequest &&
+    eventCandidateRequestTimeMatches &&
+    rawRequestAudience === "private-dashboard" &&
+    ownDataValue(query, "mode") === undefined &&
+    ownDataValue(query, "variant") !== "tabs" &&
+    ownDataValue(query, "includeTabs") !== true &&
+    rawAggregateTime !== null &&
+    typeof rawAggregateTime === "object" &&
+    eventCandidateMetadata?.time !== undefined &&
+    sameEventFieldsQueryTime(
+      rawAggregateTime as QueryTime,
+      eventCandidateMetadata.time,
+    );
   const eventCandidateEventTrendRequest =
     input.operation === "event-trend" &&
     eventCandidateBaseRequest &&
@@ -4833,8 +4975,11 @@ async function prepareDeferredEventQualification(input: {
     })();
   const eventCandidateRequest =
     eventCandidatePageRequest ||
+    eventCandidatePageDimensionRequest ||
+    eventCandidatePagesAggregateRequest ||
     eventCandidateDimensionListRequest ||
     eventCandidateFilterValuesRequest ||
+    eventCandidatePageFilterValuesRequest ||
     eventCandidateSummaryRequest ||
     eventCandidateContextRequest ||
     eventCandidateTypeDetailRequest ||
@@ -5700,6 +5845,17 @@ async function prepareDeferredEventQualification(input: {
     overviewPageFilterResolution?.kind !== "supported"
   )
     return null;
+  const eventCandidatePageDimensionProjectionRequest =
+    eventCandidatePageDimensionRequest &&
+    ((pageDimensionRequest !== undefined && pageDimensionWholeFilterOptIn) ||
+      (overviewPageTableRequest !== undefined &&
+        overviewPageTableRequest.family === "page" &&
+        overviewPageWholeFilterOptIn));
+  if (
+    eventCandidatePageDimensionRequest &&
+    !eventCandidatePageDimensionProjectionRequest
+  )
+    return null;
   const channelListFilterResolution = channelListRequest
     ? resolveQualifiedSourceFilters(
         filters,
@@ -6125,6 +6281,7 @@ async function prepareDeferredEventQualification(input: {
       ? {
           filterValuesFilterMode:
             eventCandidateFilterValuesRequest ||
+            eventCandidatePageFilterValuesRequest ||
             filterValuesFilterResolution.mode === "whole-filter"
               ? ("allow-whole-filter" as const)
               : ("split-only" as const),
@@ -6146,6 +6303,8 @@ async function prepareDeferredEventQualification(input: {
     | DeferredEventTrendQualification
     | DeferredEventContextQualification
     | DeferredEventTypeDetailQualification
+    | DeferredPageQualification
+    | DeferredPagesAggregatePageQualification
     | DeferredFilterValuesQualificationInput = eventCandidateSummaryRequest
     ? (Object.freeze({
         ...deferredBase,
@@ -6216,9 +6375,39 @@ async function prepareDeferredEventQualification(input: {
                           countInput:
                             countInput as AdvancedEventCandidateCountPlanInput,
                         }) as DeferredFilterValuesQualificationInput)
-                      : (Object.freeze(
-                          deferredBase,
-                        ) as DeferredEventQualification);
+                      : eventCandidatePageFilterValuesRequest
+                        ? (Object.freeze({
+                            ...deferredBase,
+                            operation: "filter-values" as const,
+                            countInput:
+                              countInput as AdvancedEventCandidateCountPlanInput,
+                            eventCandidateReportProjection:
+                              "page-visits" as const,
+                            filterValuesFilterMode:
+                              "allow-whole-filter" as const,
+                          }) as DeferredFilterValuesQualificationInput)
+                        : eventCandidatePageDimensionProjectionRequest
+                          ? (Object.freeze({
+                              ...deferredBase,
+                              operation: "page-dimension" as const,
+                              countInput:
+                                countInput as AdvancedEventCandidateCountPlanInput,
+                              eventCandidateReportProjection:
+                                "page-visits" as const,
+                            }) as DeferredPageQualification)
+                          : eventCandidatePagesAggregateRequest &&
+                              pagesAggregatePageRequest !== undefined
+                            ? (Object.freeze({
+                                ...deferredBase,
+                                operation: "pages-aggregate-page" as const,
+                                countInput:
+                                  countInput as AdvancedEventCandidateCountPlanInput,
+                                eventCandidateReportProjection:
+                                  "page-visits" as const,
+                              }) as DeferredPagesAggregatePageQualification)
+                            : (Object.freeze(
+                                deferredBase,
+                              ) as DeferredEventQualification);
   deferredEventQualifications.add(deferred);
   return deferred;
 }
@@ -6278,6 +6467,14 @@ export function deferredEventQualificationFromQuery(
 ): DeferredEventTypeDetailQualification | undefined;
 export function deferredEventQualificationFromQuery(
   input: unknown,
+  operation: "page-dimension",
+): DeferredPageQualification | undefined;
+export function deferredEventQualificationFromQuery(
+  input: unknown,
+  operation: "pages-aggregate-page",
+): DeferredPagesAggregatePageQualification | undefined;
+export function deferredEventQualificationFromQuery(
+  input: unknown,
   operation: Exclude<
     DeferredEventQualificationOperation,
     | "event-summary"
@@ -6289,6 +6486,8 @@ export function deferredEventQualificationFromQuery(
     | "event-trend"
     | "event-context"
     | "event-type-detail"
+    | "page-dimension"
+    | "pages-aggregate-page"
   >,
 ): DeferredEventQualification | undefined;
 export function deferredEventQualificationFromQuery(
@@ -6305,6 +6504,8 @@ export function deferredEventQualificationFromQuery(
   | DeferredEventTrendQualification
   | DeferredEventContextQualification
   | DeferredEventTypeDetailQualification
+  | DeferredPageQualification
+  | DeferredPagesAggregatePageQualification
   | DeferredFilterValuesQualificationInput
   | undefined;
 export function deferredEventQualificationFromQuery(
@@ -6321,6 +6522,8 @@ export function deferredEventQualificationFromQuery(
   | DeferredEventTrendQualification
   | DeferredEventContextQualification
   | DeferredEventTypeDetailQualification
+  | DeferredPageQualification
+  | DeferredPagesAggregatePageQualification
   | DeferredFilterValuesQualificationInput
   | undefined {
   if (!input || typeof input !== "object") return undefined;
@@ -6343,6 +6546,8 @@ export function deferredEventQualificationFromQuery(
         | DeferredEventTrendQualification
         | DeferredEventContextQualification
         | DeferredEventTypeDetailQualification
+        | DeferredPageQualification
+        | DeferredPagesAggregatePageQualification
         | DeferredFilterValuesQualificationInput)
     : undefined;
 }
@@ -6508,7 +6713,9 @@ export function deferredPageDimensionQualificationFromQuery(
   input: unknown,
 ): DeferredPageDimensionQualification | undefined {
   const deferred = deferredEventQualificationFromQuery(input, "page-dimension");
-  return deferred?.pageDimensionRequest
+  return deferred &&
+    "pageDimensionRequest" in deferred &&
+    deferred.pageDimensionRequest
     ? (deferred as DeferredPageDimensionQualification)
     : undefined;
 }
@@ -6621,7 +6828,9 @@ export function deferredOverviewPageTableQualificationFromQuery(
   input: unknown,
 ): DeferredOverviewPageTableQualification | undefined {
   const deferred = deferredEventQualificationFromQuery(input, "page-dimension");
-  return deferred?.overviewPageTableRequest
+  return deferred &&
+    "overviewPageTableRequest" in deferred &&
+    deferred.overviewPageTableRequest
     ? (deferred as DeferredOverviewPageTableQualification)
     : undefined;
 }
@@ -6651,7 +6860,9 @@ export function deferredReferrerOverviewQualificationFromQuery(
   input: unknown,
 ): DeferredReferrerOverviewQualification | undefined {
   const deferred = deferredEventQualificationFromQuery(input, "page-dimension");
-  return deferred?.referrerOverviewRequest
+  return deferred &&
+    "referrerOverviewRequest" in deferred &&
+    deferred.referrerOverviewRequest
     ? (deferred as DeferredReferrerOverviewQualification)
     : undefined;
 }
@@ -6756,6 +6967,8 @@ export function isDeferredEventQualification(
   | DeferredEventTrendQualification
   | DeferredEventContextQualification
   | DeferredEventTypeDetailQualification
+  | DeferredPageQualification
+  | DeferredPagesAggregatePageQualification
   | DeferredFilterValuesQualificationInput {
   return (
     typeof value === "object" &&
@@ -6787,6 +7000,8 @@ export async function prepareDeferredEventQualificationFallback(
     | DeferredEventTrendQualification
     | DeferredEventContextQualification
     | DeferredEventTypeDetailQualification
+    | DeferredPageQualification
+    | DeferredPagesAggregatePageQualification
     | DeferredFilterValuesQualificationInput,
 ): Promise<FilterDocument> {
   if (!isDeferredEventQualification(deferred))
@@ -7080,6 +7295,82 @@ export function d1AdvancedFilterMiddleware(
     );
     if (comparisonRequestProof.kind === "unsafe")
       throw invalidInput("comparison", "comparison_request_own_data_required");
+    const rawAudience = ownDataValue(
+      ownDataValue(input, "context") &&
+        ownDataValue(ownDataValue(input, "context"), "policy"),
+      "audience",
+    );
+    const rawPageDimension = ownDataValue(input, "dimension");
+    const rawPageDimensionSelection =
+      typeof rawPageDimension === "string"
+        ? dimensionPageSelection(rawPageDimension)
+        : null;
+    const rawOverviewTab = ownDataValue(input, "tab");
+    const rawOverviewPageDescriptor =
+      typeof rawOverviewTab === "string"
+        ? overviewPageTableDescriptor(rawOverviewTab)
+        : null;
+    const rawPrivatePageDimensionCandidate =
+      operation === "dimension" &&
+      ownDataValue(input, "mode") === "breakdown" &&
+      queryHasNoComparisonState(input) &&
+      rawPageDimensionSelection !== null &&
+      isCanonicalPrivatePageDimensionWholeFilterRequest({
+        mode: "breakdown",
+        audience: rawAudience,
+        dimension: rawPageDimension,
+        selection: rawPageDimensionSelection,
+        excludeEmpty: false,
+      });
+    const rawPrivateOverviewPageCandidate =
+      operation === "dimension" &&
+      ownDataValue(input, "mode") === "overview-tab" &&
+      queryHasNoComparisonState(input) &&
+      rawOverviewPageDescriptor?.family === "page" &&
+      isCanonicalPrivatePageDimensionWholeFilterRequest({
+        mode: "overview-tab",
+        audience: rawAudience,
+        tab: rawOverviewTab,
+        overviewFamily: rawOverviewPageDescriptor.family,
+        selection: rawOverviewPageDescriptor.selection,
+        excludeEmpty: rawOverviewPageDescriptor.excludeEmpty,
+      });
+    const rawPrivatePagesAggregateCandidate =
+      operation === "pages" &&
+      rawAudience === "private-dashboard" &&
+      ownDataValue(input, "mode") === undefined &&
+      ownDataValue(input, "variant") !== "tabs" &&
+      ownDataValue(input, "includeTabs") !== true &&
+      queryHasNoComparisonState(input);
+    const rawCandidateFiltersDescriptor = ownDescriptor(input, "filters");
+    const rawCandidateFiltersMetadata =
+      rawCandidateFiltersDescriptor && "value" in rawCandidateFiltersDescriptor
+        ? scopedFilterMetadata(
+            rawCandidateFiltersDescriptor.value as FilterDocument | undefined,
+          )
+        : undefined;
+    const rawCandidateMayUseEventProjection =
+      rawCandidateFiltersMetadata?.plan.scope === "event" ||
+      (rawCandidateFiltersDescriptor !== undefined &&
+        !("value" in rawCandidateFiltersDescriptor));
+    const rawPageCandidateRequestSnapshot =
+      (rawPrivatePageDimensionCandidate ||
+        rawPrivateOverviewPageCandidate ||
+        rawPrivatePagesAggregateCandidate) &&
+      rawCandidateMayUseEventProjection
+        ? qualificationRequestOwnDataSnapshot(input)
+        : undefined;
+    if (
+      (rawPrivatePageDimensionCandidate ||
+        rawPrivateOverviewPageCandidate ||
+        rawPrivatePagesAggregateCandidate) &&
+      rawCandidateMayUseEventProjection &&
+      rawPageCandidateRequestSnapshot === undefined
+    )
+      throw invalidInput(
+        "query",
+        "page_qualification_request_own_data_required",
+      );
     const rawFilterValuesRequestSnapshot =
       operation === "filter-values"
         ? qualificationRequestOwnDataSnapshot(input)
@@ -7219,6 +7510,15 @@ export function d1AdvancedFilterMiddleware(
       ownDataValue(input, "mode") === "overview-tab" &&
       ownDataValue(input, "tab") === "source.channel";
     const output = { ...query } as Record<string, unknown>;
+    if (
+      rawPageCandidateRequestSnapshot !== undefined &&
+      qualificationRequestOwnDataSnapshot(output) !==
+        rawPageCandidateRequestSnapshot
+    )
+      throw invalidInput(
+        "query",
+        "page_qualification_request_context_mismatch",
+      );
     if (
       operation === "event-trend" &&
       qualificationRequestOwnDataSnapshot(output) !==

@@ -266,15 +266,32 @@ function compile(
     valueNulls = "first";
     outputs = plan.plan.outputs;
   } else {
-    const ownerCountInput = requireOwnerCountInput(deferred.countInput);
+    const pageCandidate =
+      configuration.reportKind === "page" &&
+      "eventCandidateReportProjection" in deferred &&
+      deferred.eventCandidateReportProjection === "page-visits";
+    if (
+      pageCandidate &&
+      (request.filterMode !== "allow-whole-filter" ||
+        deferred.countInput.scope !== "event" ||
+        deferred.countInput.candidateAnchor.kind !== "event-candidate" ||
+        deferred.filterValuesRequest.reportKind !== "page")
+    )
+      throw new Error(`${ERROR_PREFIX}_page_candidate_projection_invalid`);
+    const countInput = pageCandidate
+      ? deferred.countInput
+      : requireOwnerCountInput(deferred.countInput);
     const plan = buildPageDimensionQualificationPlan({
       semanticOperation: "filter-values",
       siteId: deferred.siteId,
       queryTime: deferred.requestTime,
       filters: deferred.filters,
       scopePlan: deferred.metadata.plan,
-      count: ownerCountInput,
+      count: countInput,
       filterMode: request.filterMode,
+      ...(pageCandidate
+        ? { eventCandidateReportProjection: "page-visits" as const }
+        : {}),
       options: {
         limit: configuration.limit,
         selection: configuration.selection,
@@ -295,8 +312,20 @@ function compile(
       numericCompatibilityFields: plan.numericCompatibilityFields,
       scope: plan.scope,
       reportSourceRelations: plan.reportSourceRelations,
+      ...(plan.candidateGrain ? { candidateGrain: plan.candidateGrain } : {}),
       ...(plan.groupedSummaryRelationId
         ? { groupedSummaryRelationId: plan.groupedSummaryRelationId }
+        : {}),
+      ...(plan.additionalGroupedSummaryRelationIds
+        ? {
+            additionalGroupedSummaryRelationIds:
+              plan.additionalGroupedSummaryRelationIds,
+          }
+        : {}),
+      ...(plan.eventCandidateReportProjection
+        ? {
+            eventCandidateReportProjection: plan.eventCandidateReportProjection,
+          }
         : {}),
     };
     reportOutputId = DIMENSION_PAGE_REPORT_OUTPUT;

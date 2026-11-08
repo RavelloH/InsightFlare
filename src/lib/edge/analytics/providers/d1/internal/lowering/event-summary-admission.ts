@@ -24,6 +24,7 @@ export interface AnalyticsQualificationAdmissionPolicy {
   }[];
   readonly scope: "session" | "visitor" | "event";
   readonly candidateGrain?: "event-candidate";
+  readonly eventCandidateReportProjection?: "page-visits";
   readonly maximumActivities: number;
   readonly numericCompatibilityControlNames: readonly string[];
 }
@@ -36,7 +37,7 @@ export type AnalyticsQualificationAdmissionControlPolicy = Pick<
 /** Compatibility shape for the existing Event qualification call sites. */
 export interface EventQualificationAdmissionPolicy extends Omit<
   AnalyticsQualificationAdmissionPolicy,
-  "primaryReportSourceRelationId"
+  "primaryReportSourceRelationId" | "eventCandidateReportProjection"
 > {
   readonly eventSourceRelationId: RelationId;
 }
