@@ -469,10 +469,8 @@ describe("event-type-detail runtime qualification", () => {
         expected,
       });
       if (eventName === "") {
-        expect(diagnostics.advancedCountSqlFallbackReason?.kind).toBe(
-          "compile-budget",
-        );
-        expect(trace.preparedSql.length).toBeGreaterThan(2);
+        expect(diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
+        expect(trace.preparedSql.length).toBeLessThanOrEqual(2);
       } else {
         expect(diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
         expect(trace.preparedSql.length).toBeLessThanOrEqual(2);
