@@ -26,7 +26,10 @@ import { queryD1CompiledAll } from "@/lib/edge/analytics/providers/d1/internal/c
 import type { Env } from "@/lib/edge/types";
 import { InvalidCursorError } from "@/lib/pagination";
 
-import { prepareDeferredEventQualificationFallback } from "./advanced-filter-execution";
+import {
+  prepareDeferredEventQualificationFallback,
+  prepareDeferredPageVisitQualification,
+} from "./advanced-filter-execution";
 import { DIRECT_REFERRER_FILTER_VALUE } from "./core";
 import type {
   AdvancedCountSqlFallbackReason,
@@ -47,6 +50,7 @@ import {
 } from "./events-summary";
 import {
   type FilterValuePage,
+  filterValuesPageQualificationConsumerKey,
   mapFilterValueRows,
   queryFilterValuesPageFromD1,
 } from "./filter-values";
@@ -717,8 +721,21 @@ async function legacyFallback(input: {
   readonly diagnostics?: D1ReadDiagnostics;
 }): Promise<FilterValuePage> {
   const { qualification, configuration } = input.request;
-  const filters =
-    await prepareDeferredEventQualificationFallback(qualification);
+  const consumerKey = filterValuesPageQualificationConsumerKey({
+    field: configuration.field,
+    limit: configuration.limit,
+    cursorToken: configuration.cursorToken,
+    search: configuration.search,
+    audience: configuration.audience,
+  });
+  const preparation =
+    configuration.reportKind === "referrer" ||
+    configuration.reportKind === "session-boundary"
+      ? await prepareDeferredPageVisitQualification(qualification, consumerKey)
+      : undefined;
+  const filters = preparation
+    ? qualification.filters
+    : await prepareDeferredEventQualificationFallback(qualification);
   return queryFilterValuesPageFromD1(
     input.env,
     qualification.siteId,
@@ -729,6 +746,13 @@ async function legacyFallback(input: {
     configuration.cursorToken,
     configuration.search,
     configuration.audience,
+    preparation
+      ? {
+          preparation,
+          queryTime: qualification.requestTime,
+          scopePlan: qualification.metadata.plan,
+        }
+      : undefined,
   );
 }
 

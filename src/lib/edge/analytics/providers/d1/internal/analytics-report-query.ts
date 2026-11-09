@@ -185,10 +185,15 @@ export async function queryAnalyticsReportOutputRowsFromD1(
   outputId: string,
   outputMissingMessage = `analytics_report_output_missing:${outputId}`,
   diagnostics?: D1ReadDiagnostics,
+  qualificationExecutionInputs?: QualificationExecutionInputs,
 ): Promise<Record<string, unknown>[]> {
   const output = plan.outputs.find((candidate) => candidate.id === outputId);
   if (!output) throw new Error(outputMissingMessage);
-  const lowerer = createReportLowerer(plan, "analytics_report");
+  const lowerer = createReportLowerer(
+    plan,
+    "analytics_report",
+    qualificationExecutionInputs,
+  );
   return executeReportRelation(
     env,
     outputRelation(

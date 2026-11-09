@@ -14,6 +14,7 @@ import type {
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
@@ -100,6 +101,7 @@ function sessionPathSource(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
 }) {
   const metadata = scopedFilterMetadata(input.filters);
@@ -275,6 +277,7 @@ export function buildSessionPathTopPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly limit: number;
   readonly kind: SessionPathKind;
@@ -338,6 +341,7 @@ export function buildSessionPathPagePlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly limit: number;
   readonly kind: SessionPathKind;

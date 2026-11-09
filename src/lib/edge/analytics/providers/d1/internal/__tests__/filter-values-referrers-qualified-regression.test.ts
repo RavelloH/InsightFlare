@@ -25,11 +25,15 @@ import {
   deferredEventQualificationFromQuery,
   deferredFilterValuesQualificationFromQuery,
   prepareDeferredEventQualificationFallback,
+  prepareDeferredPageVisitQualification,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { queryD1CompiledAll } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { DIRECT_REFERRER_FILTER_VALUE } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
-import { queryFilterValuesPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/filter-values";
+import {
+  filterValuesPageQualificationConsumerKey,
+  queryFilterValuesPageFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/filter-values";
 import { queryFilterValuesPageWithQualification } from "@/lib/edge/analytics/providers/d1/internal/filter-values-qualification-program";
 import { filterValuesQualificationConfigurationFromQuery } from "@/lib/edge/analytics/providers/d1/internal/filter-values-qualification-request";
 import { compileQualificationProgramEnvelope } from "@/lib/edge/analytics/providers/d1/internal/qualification-program-envelope";
@@ -100,6 +104,16 @@ function isFusedReferrerFilterValuesReport(sql: string): boolean {
   );
 }
 
+function isReferrerCompatibilityPageReport(sql: string): boolean {
+  return (
+    !sql.includes("rowKind") &&
+    sql.includes('AS "referrer"') &&
+    sql.includes('AS "views"') &&
+    sql.includes('AS "sessions"') &&
+    sql.includes('AS "visitors"')
+  );
+}
+
 function wave97dvStatementClass(sql: string): string {
   if (isFusedReferrerFilterValuesReport(sql)) return "fact-envelope";
   if (/\bfrom\s+(?:["`]sites["`]|sites)(?:\s|$)/i.test(sql))
@@ -114,6 +128,52 @@ function setDurationFixture(database: DatabaseSync): void {
   database
     .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
     .run("invalid-duration", "b-source");
+}
+
+function addNumericCursorReferrer(database: DatabaseSync): void {
+  const sitePk = Number(
+    (
+      database
+        .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+        .get(SITE) as { readonly site_pk: number }
+    ).site_pk,
+  );
+  database
+    .prepare(
+      `INSERT INTO visits (
+         visit_id, site_id, site_pk, visitor_id, session_id, status,
+         started_at, last_activity_at, pathname, hostname, referrer_host,
+         referrer_url, duration_ms
+       ) VALUES (?, ?, ?, ?, ?, 'closed', ?, ?, ?, 'wave97l.test', ?, ?, ?)`,
+    )
+    .run(
+      "numeric-cursor-source",
+      SITE,
+      sitePk,
+      "numeric-cursor-visitor",
+      "numeric-cursor-session",
+      123,
+      123,
+      "/qualifier",
+      "third.example",
+      "https://third.example/path",
+      10,
+    );
+  database
+    .prepare(
+      `INSERT INTO custom_events (
+         event_id, site_id, site_pk, visit_id, event_name_id, occurred_at,
+         received_at, sequence, node_count, value_count
+       ) VALUES (?, ?, ?, ?, 1, ?, ?, 1, 0, 0)`,
+    )
+    .run(
+      "event-numeric-cursor-source",
+      SITE,
+      sitePk,
+      "numeric-cursor-source",
+      123,
+      123,
+    );
 }
 
 function createFixture(): DatabaseSync {
@@ -365,7 +425,7 @@ function envFor(
 }
 
 function queryFor(
-  scope: "session" | "visitor",
+  scope: "session" | "visitor" | "event",
   field: string,
   options: QueryOptions = {},
 ) {
@@ -401,7 +461,7 @@ function outputById(
 
 async function legacyPage(
   database: DatabaseSync,
-  scope: "session" | "visitor",
+  scope: "session" | "visitor" | "event",
   field: "referrer.domain" | "referrer.url",
   options: QueryOptions = {},
   trace = traceFor(),
@@ -988,6 +1048,7 @@ describe("filter-values referrer qualification baseline", () => {
   it("falls back once for an actual TEXT numeric Count guard", async () => {
     const database = createFixture();
     setDurationFixture(database);
+    addNumericCursorReferrer(database);
     const trace = traceFor();
     const fusedRows: Record<string, unknown>[][] = [];
     const diagnostics = createD1ReadDiagnostics();
@@ -1004,18 +1065,19 @@ describe("filter-values referrer qualification baseline", () => {
 
     const oracleDatabase = createFixture();
     setDurationFixture(oracleDatabase);
+    addNumericCursorReferrer(oracleDatabase);
     const oracle = await legacyPage(
       oracleDatabase,
       "session",
       "referrer.domain",
-      { limit: 2, filterDsl: NUMERIC_COUNT_DSL },
+      { limit: 1, filterDsl: NUMERIC_COUNT_DSL },
     );
     const expected = await oracle.page(null);
     const actual = response(
       (
         await provider.execute(
           queryFor("session", "referrer.domain", {
-            limit: 2,
+            limit: 1,
             filterDsl: NUMERIC_COUNT_DSL,
           }),
         )
@@ -1029,17 +1091,228 @@ describe("filter-values referrer qualification baseline", () => {
       })),
     );
     expect(actual.data.pagination).toEqual(expected.pagination);
+    expect(actual.data.pagination.nextCursor).not.toBeNull();
+    const cursor = actual.data.pagination.nextCursor;
+    const expectedNext = await oracle.page(cursor);
+    const actualNext = response(
+      (
+        await provider.execute(
+          queryFor("session", "referrer.domain", {
+            limit: 1,
+            cursor,
+            filterDsl: NUMERIC_COUNT_DSL,
+          }),
+        )
+      ).value,
+    );
+    expect(actualNext.data.items).toEqual(
+      expectedNext.items.map((row) => ({
+        value: row.value,
+        label: row.value,
+        occurrences: row.occurrences,
+      })),
+    );
+    expect(actualNext.data.pagination).toEqual(expectedNext.pagination);
     expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
       kind: "numeric-data-domain",
     });
-    expect(fusedRows).toHaveLength(1);
-    expect(
-      fusedRows[0]!.filter((row) => row.rowKind === "report"),
-    ).toHaveLength(0);
+    expect(fusedRows).toHaveLength(2);
+    for (const rows of fusedRows)
+      expect(rows.filter((row) => row.rowKind === "report")).toHaveLength(0);
     expect(
       trace.preparedSql.filter(isFusedReferrerFilterValuesReport),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
   });
+
+  it("uses the new Event-scope visit binding for numeric fallback cursor pages", async () => {
+    const database = createFixture();
+    setDurationFixture(database);
+    addNumericCursorReferrer(database);
+    const trace = traceFor();
+    const guardRowsByExecution: Record<string, unknown>[][] = [];
+    const diagnostics = createD1ReadDiagnostics();
+    const env = envFor(database, trace, (sql, rows) => {
+      if (isFusedReferrerFilterValuesReport(sql))
+        guardRowsByExecution.push(rows);
+      return rows;
+    });
+    const provider = createD1SiteProviderRegistry({
+      env,
+      siteId: SITE,
+      diagnostics,
+    }).resolve("filter-values");
+    if (!provider)
+      throw new Error("wave97l_event_numeric_filter_values_provider_missing");
+
+    const oracleDatabase = createFixture();
+    setDurationFixture(oracleDatabase);
+    addNumericCursorReferrer(oracleDatabase);
+    const options = {
+      limit: 1,
+      scopePreference: "event",
+      filterDsl: NUMERIC_COUNT_DSL,
+    } as const;
+    const oracle = await legacyPage(
+      oracleDatabase,
+      "event",
+      "referrer.domain",
+      options,
+    );
+    const deferred = deferredEventQualificationFromQuery(
+      oracle.prepared,
+      "filter-values",
+    );
+    expect(deferred?.countInput.scope).toBe("event");
+    expect(deferred?.metadata.plan.scope).toBe("event");
+
+    const firstExpected = await oracle.page(null);
+    const firstExecutionSqlOffset = trace.preparedSql.length;
+    const firstActual = response(
+      (await provider.execute(queryFor("event", "referrer.domain", options)))
+        .value,
+    );
+    const firstExecutionSql = trace.preparedSql.slice(firstExecutionSqlOffset);
+    const firstReportSql = firstExecutionSql.find(
+      isReferrerCompatibilityPageReport,
+    );
+    expect(firstReportSql).toBeDefined();
+    expect(firstActual.data.items).toEqual(
+      firstExpected.items.map((row) => ({
+        value: row.value,
+        label: row.value,
+        occurrences: row.occurrences,
+      })),
+    );
+    expect(firstActual.data.pagination).toEqual(firstExpected.pagination);
+    const cursor = firstActual.data.pagination.nextCursor;
+    expect(cursor).not.toBeNull();
+
+    const nextExpected = await oracle.page(cursor);
+    const nextExecutionSqlOffset = trace.preparedSql.length;
+    const nextActual = response(
+      (
+        await provider.execute(
+          queryFor("event", "referrer.domain", { ...options, cursor }),
+        )
+      ).value,
+    );
+    const nextExecutionSql = trace.preparedSql.slice(nextExecutionSqlOffset);
+    const nextReportSql = nextExecutionSql.find(
+      isReferrerCompatibilityPageReport,
+    );
+    expect(nextReportSql).toBeDefined();
+    expect(nextActual.data.items).toEqual(
+      nextExpected.items.map((row) => ({
+        value: row.value,
+        label: row.value,
+        occurrences: row.occurrences,
+      })),
+    );
+    expect(nextActual.data.pagination).toEqual(nextExpected.pagination);
+    expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+      kind: "numeric-data-domain",
+    });
+    expect(guardRowsByExecution).toHaveLength(2);
+    for (const rows of guardRowsByExecution) {
+      expect(rows.filter((row) => row.rowKind === "control")).not.toHaveLength(
+        0,
+      );
+      expect(rows.filter((row) => row.rowKind === "report")).toHaveLength(0);
+    }
+    for (const sql of [firstReportSql, nextReportSql]) {
+      expect(sql).toMatch(/\bvisit_id\b/i);
+      expect(sql).not.toMatch(/\bentity_id\b/i);
+    }
+  });
+
+  it.each([
+    { changed: "limit", field: "referrer.domain", limit: 2 },
+    { changed: "field", field: "referrer.url", limit: 1 },
+    {
+      changed: "search",
+      field: "referrer.domain",
+      limit: 1,
+      search: "third",
+    },
+    { changed: "cursor", field: "referrer.domain", limit: 1 },
+  ] as const)(
+    "rejects a changed FilterValues $changed projection even with its old key",
+    async ({ changed, field, limit, search }) => {
+      const database = createFixture();
+      setDurationFixture(database);
+      addNumericCursorReferrer(database);
+      const trace = traceFor();
+      const env = envFor(database, trace);
+      const originalOptions = {
+        limit: 1,
+        scopePreference: "event",
+        filterDsl: NUMERIC_COUNT_DSL,
+      } as const;
+      const originalQuery = queryFor(
+        "event",
+        "referrer.domain",
+        originalOptions,
+      );
+      let cursor: string | null = null;
+      if (changed === "cursor") {
+        const provider = createD1SiteProviderRegistry({
+          env,
+          siteId: SITE,
+        }).resolve("filter-values");
+        if (!provider)
+          throw new Error("wave97l_changed_cursor_provider_missing");
+        cursor = response((await provider.execute(originalQuery)).value).data
+          .pagination.nextCursor;
+        expect(cursor).not.toBeNull();
+      }
+      const prepared = await d1AdvancedFilterMiddleware(env, undefined, SITE)(
+        "filter-values",
+        originalQuery,
+        async (value) => value,
+      );
+      const deferred = deferredEventQualificationFromQuery(
+        prepared,
+        "filter-values",
+      );
+      if (!deferred?.requestTime)
+        throw new Error("wave97l_changed_projection_deferred_missing");
+      const oldKey = filterValuesPageQualificationConsumerKey({
+        field: "referrer.domain",
+        limit: 1,
+        cursorToken: null,
+        search: undefined,
+        audience: "private-dashboard",
+      });
+      const preparation = await prepareDeferredPageVisitQualification(
+        deferred,
+        oldKey,
+      );
+      if (!preparation)
+        throw new Error("wave97l_changed_projection_preparation_missing");
+      const statementsBefore = trace.preparedSql.length;
+      const qualification = {
+        preparation,
+        queryTime: deferred.requestTime,
+        scopePlan: deferred.metadata.plan,
+        consumerKey: oldKey,
+      } as never;
+      await expect(
+        queryFilterValuesPageFromD1(
+          env,
+          SITE,
+          WINDOW,
+          deferred.filters,
+          field,
+          limit,
+          changed === "cursor" ? cursor : null,
+          search,
+          "private-dashboard",
+          qualification,
+        ),
+      ).rejects.toThrow("qualification_execution_plan_snapshot_mismatch");
+      expect(trace.preparedSql).toHaveLength(statementsBefore);
+    },
+  );
 
   it.each([
     {

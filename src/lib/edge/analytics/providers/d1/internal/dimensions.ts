@@ -32,6 +32,7 @@ import {
   PAGE_TAB_OUTPUT_ORDER_BY,
 } from "@/lib/edge/analytics/engine/page-tabs-report-plan";
 import { buildTopReferrersPlan } from "@/lib/edge/analytics/engine/referrer-report-plan";
+import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import {
   buildSessionPathPagePlan,
   buildSessionPathTopPlan,
@@ -51,6 +52,7 @@ import {
   type DeferredSessionBoundaryOverviewPageQualification,
   type DeferredSessionBoundaryOverviewPageRequest,
   prepareDeferredEventQualificationFallback,
+  prepareDeferredPageVisitQualification,
 } from "./advanced-filter-execution";
 import {
   type EventSummaryQualificationCompilationEvidence,
@@ -82,6 +84,14 @@ import {
 } from "./core-dimensions";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import type { AdvancedCountSqlFallbackReason } from "./diagnostics";
+import {
+  assertFilterValuesPageQualificationProjection,
+  bindPageVisitQualificationPreparation,
+  type FilterValuesPageQualificationProjection,
+  pageVisitQualificationConsumerKey,
+  type PageVisitQualificationPreparation,
+  snapshotPageVisitQualificationPlan,
+} from "./page-visit-qualification-execution";
 import {
   decodePageCursor,
   encodePageCursor,
@@ -309,16 +319,30 @@ export async function queryDimensionPageFromD1(
   cursor?: DimensionAggregateCursor | null,
   diagnostics?: D1ReadDiagnostics,
   audience: QueryAudience = "private-dashboard",
+  qualification?: {
+    readonly preparation: PageVisitQualificationPreparation;
+    readonly queryTime: QueryTime;
+    readonly scopePlan: ScopedFilterPlan;
+    readonly consumer: string;
+  },
 ): Promise<PageResult<DimensionRow>> {
   const selection = validatePageDimensionSelection(selectionInput);
   const sortBy = dimensionSortKey(options?.sortBy);
   const sortDirection = dimensionSortDirection(options?.sortDirection);
   const metadata = scopedFilterMetadata(filters);
-  const plan = buildDimensionPagePlan({
+  const queryTime =
+    qualification?.queryTime ?? metadata?.time ?? queryWindowToTime(window);
+  const scopePlan = qualification?.scopePlan ?? metadata?.plan;
+  const builtPlan = buildDimensionPagePlan({
     siteId,
-    queryTime: metadata?.time ?? queryWindowToTime(window),
+    queryTime,
     filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(scopePlan ? { scopePlan } : {}),
+    ...(qualification
+      ? {
+          qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+        }
+      : {}),
     limit,
     selection,
     excludeEmpty: options?.excludeEmpty,
@@ -327,12 +351,39 @@ export async function queryDimensionPageFromD1(
     sortDirection,
     cursor,
   });
+  const plan = qualification
+    ? snapshotPageVisitQualificationPlan(builtPlan)
+    : builtPlan;
+  const qualificationExecutionInputs = qualification
+    ? bindPageVisitQualificationPreparation({
+        preparation: qualification.preparation,
+        siteId,
+        filters,
+        queryTime,
+        scopePlan: qualification.scopePlan,
+        consumerKey: dimensionPageQualificationConsumerKey(
+          qualification.consumer,
+          {
+            limit,
+            selection,
+            excludeEmpty: options?.excludeEmpty,
+            search: options?.search,
+            sortBy,
+            sortDirection,
+            cursor,
+            audience,
+          },
+        ),
+        plan,
+      })
+    : undefined;
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
     plan,
     "dimension-page",
     undefined,
     diagnostics,
+    qualificationExecutionInputs,
   );
   const mapped = rows.map((row) => ({
     value: String(row.value ?? ""),
@@ -351,6 +402,22 @@ export async function queryDimensionPageFromD1(
     audience,
     rows: mapped,
   });
+}
+
+export function dimensionPageQualificationConsumerKey(
+  consumer: string,
+  configuration: {
+    readonly limit: number;
+    readonly selection: PageDimensionSelection;
+    readonly excludeEmpty?: boolean;
+    readonly search?: string;
+    readonly sortBy: DimensionPageSortKey;
+    readonly sortDirection: "asc" | "desc";
+    readonly cursor?: DimensionAggregateCursor | null;
+    readonly audience: QueryAudience;
+  },
+) {
+  return pageVisitQualificationConsumerKey(consumer, configuration);
 }
 
 export async function dimensionPageResultFromRows(input: {
@@ -535,9 +602,28 @@ export async function preflightQualifiedDimensionPageCursorFromD1(
 ): Promise<void> {
   const execution = await executeQualifiedDimensionPage(input);
   if (execution.kind === "executed") return;
-  const fallbackFilters = await prepareDeferredEventQualificationFallback(
-    input.deferred,
-  );
+  const consumer =
+    input.family === "overview-tab" && input.tab === "source.channel"
+      ? "channel-overview"
+      : undefined;
+  const preparation = consumer
+    ? await prepareDeferredPageVisitQualification(
+        input.deferred,
+        dimensionPageQualificationConsumerKey(consumer, {
+          limit: input.limit,
+          selection: input.selection,
+          excludeEmpty: input.options.excludeEmpty,
+          search: input.options.search,
+          sortBy: input.options.sortBy,
+          sortDirection: input.options.sortDirection,
+          cursor: null,
+          audience: input.audience,
+        }),
+      )
+    : undefined;
+  const fallbackFilters = preparation
+    ? input.filters
+    : await prepareDeferredEventQualificationFallback(input.deferred);
   await queryDimensionPageFromD1(
     input.env,
     input.siteId,
@@ -549,6 +635,14 @@ export async function preflightQualifiedDimensionPageCursorFromD1(
     null,
     input.diagnostics,
     input.audience,
+    preparation
+      ? {
+          preparation,
+          queryTime: input.queryTime,
+          scopePlan: input.scopePlan ?? input.deferred.metadata.plan,
+          consumer: consumer!,
+        }
+      : undefined,
   );
 }
 
@@ -595,19 +689,54 @@ export async function querySessionPathDimensionFromD1(
   search?: string,
   sortBy: DimensionPageSortKey = "views",
   sortDirection: "asc" | "desc" = "desc",
+  qualification?: {
+    readonly preparation: PageVisitQualificationPreparation;
+    readonly queryTime: QueryTime;
+    readonly scopePlan: ScopedFilterPlan;
+    readonly audience: QueryAudience;
+  },
 ): Promise<DimensionRow[]> {
   const metadata = scopedFilterMetadata(filters);
-  const plan = buildSessionPathTopPlan({
+  const queryTime =
+    qualification?.queryTime ?? metadata?.time ?? queryWindowToTime(window);
+  const scopePlan = qualification?.scopePlan ?? metadata?.plan;
+  const builtPlan = buildSessionPathTopPlan({
     siteId,
-    queryTime: metadata?.time ?? queryWindowToTime(window),
+    queryTime,
     filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(scopePlan ? { scopePlan } : {}),
+    ...(qualification
+      ? {
+          qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+        }
+      : {}),
     limit,
     kind,
     search,
     sortBy: dimensionSortKey(sortBy),
     sortDirection: dimensionSortDirection(sortDirection),
   });
+  const plan = qualification
+    ? snapshotPageVisitQualificationPlan(builtPlan)
+    : builtPlan;
+  const qualificationExecutionInputs = qualification
+    ? bindPageVisitQualificationPreparation({
+        preparation: qualification.preparation,
+        siteId,
+        filters,
+        queryTime,
+        scopePlan: qualification.scopePlan,
+        consumerKey: sessionPathTopQualificationConsumerKey({
+          kind,
+          limit,
+          search,
+          sortBy: dimensionSortKey(sortBy),
+          sortDirection: dimensionSortDirection(sortDirection),
+          audience: qualification.audience,
+        }),
+        plan,
+      })
+    : undefined;
   return (
     await queryAnalyticsReportOutputRowsFromD1(
       env,
@@ -615,6 +744,7 @@ export async function querySessionPathDimensionFromD1(
       "session-path-top",
       undefined,
       diagnostics,
+      qualificationExecutionInputs,
     )
   ).map((row) => ({
     value: String(row.value ?? ""),
@@ -622,6 +752,32 @@ export async function querySessionPathDimensionFromD1(
     sessions: Number(row.sessions ?? 0),
     visitors: Number(row.visitors ?? 0),
   }));
+}
+
+export function sessionPathTopQualificationConsumerKey(input: {
+  readonly kind: SessionPathKind;
+  readonly limit: number;
+  readonly search?: string;
+  readonly sortBy: DimensionPageSortKey;
+  readonly sortDirection: "asc" | "desc";
+  readonly audience: QueryAudience;
+}) {
+  return pageVisitQualificationConsumerKey("session-boundary-dimension", input);
+}
+
+export function sessionPathPageQualificationConsumerKey(
+  consumer: "session-boundary-overview-page" | "filter-values",
+  input: {
+    readonly limit: number;
+    readonly kind: SessionPathKind;
+    readonly search?: string;
+    readonly cursor?: SessionPathDimensionCursor | null;
+    readonly audience: QueryAudience;
+    readonly sortBy: DimensionPageSortKey;
+    readonly sortDirection: "asc" | "desc";
+  },
+) {
+  return pageVisitQualificationConsumerKey(consumer, input);
 }
 
 export async function querySessionPathDimensionPageFromD1(
@@ -637,15 +793,31 @@ export async function querySessionPathDimensionPageFromD1(
   audience: QueryAudience = "private-dashboard",
   sortBy: DimensionPageSortKey = "views",
   sortDirection: "asc" | "desc" = "desc",
+  qualification?: {
+    readonly preparation: PageVisitQualificationPreparation;
+    readonly queryTime: QueryTime;
+    readonly scopePlan: ScopedFilterPlan;
+    readonly audience: QueryAudience;
+    readonly consumer: "session-boundary-overview-page" | "filter-values";
+    readonly filterValuesProjection?: FilterValuesPageQualificationProjection;
+  },
 ): Promise<PageResult<DimensionRow>> {
   const effectiveSortBy = dimensionSortKey(sortBy);
   const effectiveSortDirection = sortDirection === "asc" ? "asc" : "desc";
   const metadata = scopedFilterMetadata(filters);
-  const plan = buildSessionPathPagePlan({
+  const queryTime =
+    qualification?.queryTime ?? metadata?.time ?? queryWindowToTime(window);
+  const scopePlan = qualification?.scopePlan ?? metadata?.plan;
+  const builtPlan = buildSessionPathPagePlan({
     siteId,
-    queryTime: metadata?.time ?? queryWindowToTime(window),
+    queryTime,
     filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(scopePlan ? { scopePlan } : {}),
+    ...(qualification
+      ? {
+          qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+        }
+      : {}),
     limit,
     kind,
     search,
@@ -653,12 +825,47 @@ export async function querySessionPathDimensionPageFromD1(
     sortDirection: effectiveSortDirection,
     cursor,
   });
+  const plan = qualification
+    ? snapshotPageVisitQualificationPlan(builtPlan)
+    : builtPlan;
+  const qualificationExecutionInputs = qualification
+    ? bindPageVisitQualificationPreparation({
+        preparation: qualification.preparation,
+        siteId,
+        filters,
+        queryTime,
+        scopePlan: qualification.scopePlan,
+        consumerKey:
+          qualification.consumer === "filter-values"
+            ? assertFilterValuesPageQualificationProjection({
+                projection: qualification.filterValuesProjection!,
+                field:
+                  kind === "entry" ? "session.entryPath" : "session.exitPath",
+                limit,
+                hasCursor: cursor !== undefined && cursor !== null,
+                cursor,
+                search,
+                audience: qualification.audience,
+              })
+            : sessionPathPageQualificationConsumerKey(qualification.consumer, {
+                limit,
+                kind,
+                search,
+                cursor,
+                audience: qualification.audience,
+                sortBy: effectiveSortBy,
+                sortDirection: effectiveSortDirection,
+              }),
+        plan,
+      })
+    : undefined;
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
     plan,
     "session-path-page",
     undefined,
     diagnostics,
+    qualificationExecutionInputs,
   );
   return finalizeSessionPathDimensionPage({
     env,
@@ -865,8 +1072,21 @@ export async function querySessionBoundaryOverviewPageFromD1(
     );
   if (diagnostics)
     diagnostics.advancedCountSqlFallbackReason = execution.fallbackReason;
-  const fallbackFilters =
-    await prepareDeferredEventQualificationFallback(deferred);
+  const preparation = await prepareDeferredPageVisitQualification(
+    deferred,
+    sessionPathPageQualificationConsumerKey("session-boundary-overview-page", {
+      limit,
+      kind,
+      search,
+      cursor,
+      audience,
+      sortBy: dimensionSortKey(sortBy),
+      sortDirection: dimensionSortDirection(sortDirection),
+    }),
+  );
+  const fallbackFilters = preparation
+    ? filters
+    : await prepareDeferredEventQualificationFallback(deferred);
   if (cursorToken !== null && cursor === null)
     throw new InvalidCursorError("overview-tab");
   return querySessionPathDimensionPageFromD1(
@@ -882,6 +1102,15 @@ export async function querySessionBoundaryOverviewPageFromD1(
     audience,
     sortBy,
     sortDirection,
+    preparation
+      ? {
+          preparation,
+          queryTime: options.queryTime,
+          scopePlan: options.scopePlan ?? deferred.metadata.plan,
+          audience,
+          consumer: "session-boundary-overview-page",
+        }
+      : undefined,
   );
 }
 
@@ -1045,8 +1274,20 @@ export async function querySessionBoundaryDimensionFromD1(
       throw new Error("session_boundary_dimension_qualification_proof_invalid");
     if (diagnostics)
       diagnostics.advancedCountSqlFallbackReason = execution.fallbackReason;
-    const fallbackFilters =
-      await prepareDeferredEventQualificationFallback(deferred);
+    const preparation = await prepareDeferredPageVisitQualification(
+      deferred,
+      sessionPathTopQualificationConsumerKey({
+        kind,
+        limit,
+        search,
+        sortBy: dimensionSortKey(sortBy),
+        sortDirection: dimensionSortDirection(sortDirection),
+        audience: request.audience,
+      }),
+    );
+    const fallbackFilters = preparation
+      ? filters
+      : await prepareDeferredEventQualificationFallback(deferred);
     return querySessionPathDimensionFromD1(
       env,
       siteId,
@@ -1058,6 +1299,14 @@ export async function querySessionBoundaryDimensionFromD1(
       search,
       sortBy,
       sortDirection,
+      preparation
+        ? {
+            preparation,
+            queryTime: queryTime!,
+            scopePlan: options.scopePlan ?? deferred.metadata.plan,
+            audience: request.audience,
+          }
+        : undefined,
     );
   }
   return querySessionPathDimensionFromD1(

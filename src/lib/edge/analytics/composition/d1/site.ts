@@ -43,6 +43,7 @@ import {
   deferredSessionBoundaryOverviewPageQualificationFromQuery,
   prepareDeferredComparisonPageQualificationFallback,
   prepareDeferredEventQualificationFallback,
+  prepareDeferredPageVisitQualification,
   prepareDeferredReferrersSummaryQualification,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import {
@@ -72,6 +73,7 @@ import {
 import {
   decodeDimensionCursor,
   decodeSessionPathDimensionCursor,
+  dimensionPageQualificationConsumerKey,
   preflightQualifiedDimensionPageCursorFromD1,
   queryDimensionPageFromD1,
   queryQualifiedDimensionPageFromD1,
@@ -121,6 +123,7 @@ import {
   queryReferrersPageFromD1,
   queryReferrerSummaryFromD1,
   type ReferrerAggregateCursor,
+  referrersPageQualificationConsumerKey,
 } from "@/lib/edge/analytics/providers/d1/internal/referrers";
 import { executeRetentionQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/retention-qualification-program";
 import { deferredRetentionQualificationFromQuery } from "@/lib/edge/analytics/providers/d1/internal/retention-qualification-request";
@@ -302,6 +305,59 @@ async function overviewPageTablePage(
         ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
       }
     : undefined;
+  const fallbackDimensionPage = async (
+    fallbackCursor: Awaited<ReturnType<typeof decodeDimensionCursor>>,
+  ) => {
+    const consumer =
+      operation === "channels" && deferred ? "channel-overview" : undefined;
+    const preparation = consumer
+      ? await prepareDeferredPageVisitQualification(
+          deferred!,
+          dimensionPageQualificationConsumerKey(consumer, {
+            limit: normalized.limit,
+            selection: normalized.selection,
+            excludeEmpty: normalized.excludeEmpty,
+            search: normalized.search,
+            sortBy: normalized.sortBy,
+            sortDirection: normalized.sortDirection,
+            cursor: fallbackCursor,
+            audience,
+          }),
+        )
+      : undefined;
+    const fallbackFilters = preparation
+      ? filters
+      : deferred
+        ? await prepareDeferredEventQualificationFallback(deferred)
+        : filters;
+    return queryDimensionPageFromD1(
+      options.env,
+      options.siteId,
+      window,
+      fallbackFilters,
+      normalized.limit,
+      normalized.selection,
+      {
+        excludeEmpty: normalized.excludeEmpty,
+        ...(normalized.search !== undefined
+          ? { search: normalized.search }
+          : {}),
+        sortBy: normalized.sortBy,
+        sortDirection: normalized.sortDirection,
+      },
+      fallbackCursor,
+      options.diagnostics,
+      audience,
+      preparation && deferred && consumer
+        ? {
+            preparation,
+            queryTime: deferred.requestTime ?? deferred.time,
+            scopePlan: request.scopePlan ?? deferred.metadata.plan,
+            consumer,
+          }
+        : undefined,
+    );
+  };
   let cursor: Awaited<ReturnType<typeof decodeDimensionCursor>>;
   try {
     cursor = await decodeDimensionCursor(
@@ -338,28 +394,7 @@ async function overviewPageTablePage(
       cursor,
     });
     if (qualified.kind === "executed") return qualified.page;
-    const fallbackFilters = await prepareDeferredEventQualificationFallback(
-      deferred!,
-    );
-    return queryDimensionPageFromD1(
-      options.env,
-      options.siteId,
-      window,
-      fallbackFilters,
-      normalized.limit,
-      normalized.selection,
-      {
-        excludeEmpty: normalized.excludeEmpty,
-        ...(normalized.search !== undefined
-          ? { search: normalized.search }
-          : {}),
-        sortBy: normalized.sortBy,
-        sortDirection: normalized.sortDirection,
-      },
-      cursor,
-      options.diagnostics,
-      audience,
-    );
+    return fallbackDimensionPage(cursor);
   }
   return queryDimensionPageFromD1(
     options.env,
@@ -425,6 +460,50 @@ async function referrerOverviewPage(
         ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
       }
     : undefined;
+  const fallbackReferrersPage = async (
+    fallbackCursor: ReferrerAggregateCursor | null,
+  ) => {
+    const preparation = deferred
+      ? await prepareDeferredPageVisitQualification(
+          deferred,
+          referrersPageQualificationConsumerKey({
+            limit: normalized.limit,
+            includeFullUrl: normalized.includeFullUrl,
+            search: normalized.search,
+            cursor: fallbackCursor,
+            audience,
+            sortBy: normalized.sortBy,
+            sortDirection: normalized.sortDirection,
+          }),
+        )
+      : undefined;
+    const fallbackFilters = preparation
+      ? filters
+      : deferred
+        ? await prepareDeferredEventQualificationFallback(deferred)
+        : filters;
+    return queryReferrersPageFromD1(
+      options.env,
+      options.siteId,
+      window,
+      fallbackFilters,
+      normalized.limit,
+      normalized.includeFullUrl,
+      normalized.search,
+      fallbackCursor,
+      options.diagnostics,
+      audience,
+      normalized.sortBy,
+      normalized.sortDirection,
+      preparation && deferred
+        ? {
+            preparation,
+            queryTime: deferred.requestTime ?? deferred.time,
+            scopePlan: deferred.metadata.plan,
+          }
+        : undefined,
+    );
+  };
   let cursor: Awaited<ReturnType<typeof decodeReferrersCursor>>;
   try {
     cursor = await decodeReferrersCursor(
@@ -450,23 +529,7 @@ async function referrerOverviewPage(
         cursor: null,
       });
       if (execution.kind !== "executed") {
-        const fallbackFilters = await prepareDeferredEventQualificationFallback(
-          deferred!,
-        );
-        await queryReferrersPageFromD1(
-          options.env,
-          options.siteId,
-          window,
-          fallbackFilters,
-          normalized.limit,
-          normalized.includeFullUrl,
-          normalized.search,
-          null,
-          options.diagnostics,
-          audience,
-          normalized.sortBy,
-          normalized.sortDirection,
-        );
+        await fallbackReferrersPage(null);
       }
       throw new InvalidCursorError("overview-tab");
     }
@@ -479,23 +542,7 @@ async function referrerOverviewPage(
         cursor: null,
       });
       if (execution.kind !== "executed") {
-        const fallbackFilters = await prepareDeferredEventQualificationFallback(
-          deferred!,
-        );
-        await queryReferrersPageFromD1(
-          options.env,
-          options.siteId,
-          window,
-          fallbackFilters,
-          normalized.limit,
-          normalized.includeFullUrl,
-          normalized.search,
-          null,
-          options.diagnostics,
-          audience,
-          normalized.sortBy,
-          normalized.sortDirection,
-        );
+        await fallbackReferrersPage(null);
       }
     }
     throw new InvalidCursorError("overview-tab");
@@ -509,23 +556,7 @@ async function referrerOverviewPage(
     if (execution.kind === "executed") {
       page = execution.page;
     } else {
-      const fallbackFilters = await prepareDeferredEventQualificationFallback(
-        deferred!,
-      );
-      page = await queryReferrersPageFromD1(
-        options.env,
-        options.siteId,
-        window,
-        fallbackFilters,
-        normalized.limit,
-        normalized.includeFullUrl,
-        normalized.search,
-        cursor,
-        options.diagnostics,
-        audience,
-        normalized.sortBy,
-        normalized.sortDirection,
-      );
+      page = await fallbackReferrersPage(cursor);
     }
   } else {
     page = await queryReferrersPageFromD1(
@@ -2249,6 +2280,51 @@ export function registerSiteContractProviders(
           const search =
             typeof request.search === "string" ? request.search : undefined;
           const deferred = deferredReferrersQualificationFromQuery(input);
+          const fallbackReferrersPage = async (
+            fallbackCursor: ReferrerAggregateCursor | null,
+          ) => {
+            const preparation =
+              deferred?.referrersRequest.kind === "page"
+                ? await prepareDeferredPageVisitQualification(
+                    deferred,
+                    referrersPageQualificationConsumerKey({
+                      limit,
+                      includeFullUrl,
+                      search,
+                      cursor: fallbackCursor,
+                      audience: request.context.policy.audience,
+                      sortBy,
+                      sortDirection,
+                    }),
+                  )
+                : undefined;
+            const fallbackFilters = preparation
+              ? filters
+              : deferred
+                ? await prepareDeferredEventQualificationFallback(deferred)
+                : filters;
+            return queryReferrersPageFromD1(
+              options.env,
+              options.siteId,
+              window,
+              fallbackFilters,
+              limit,
+              includeFullUrl,
+              search,
+              fallbackCursor,
+              options.diagnostics,
+              request.context.policy.audience,
+              sortBy,
+              sortDirection,
+              preparation && deferred
+                ? {
+                    preparation,
+                    queryTime: deferred.requestTime ?? deferred.time,
+                    scopePlan: deferred.metadata.plan,
+                  }
+                : undefined,
+            );
+          };
           let cursor: ReferrerAggregateCursor | null = null;
           let cursorError: InvalidCursorError | undefined;
           try {
@@ -2288,7 +2364,20 @@ export function registerSiteContractProviders(
                 diagnostics: options.diagnostics,
               });
               if (execution.kind !== "executed") {
-                await prepareDeferredEventQualificationFallback(deferred);
+                const preparation = await prepareDeferredPageVisitQualification(
+                  deferred,
+                  referrersPageQualificationConsumerKey({
+                    limit,
+                    includeFullUrl,
+                    search,
+                    cursor: null,
+                    audience: request.context.policy.audience,
+                    sortBy,
+                    sortDirection,
+                  }),
+                );
+                if (!preparation)
+                  await prepareDeferredEventQualificationFallback(deferred);
               }
             }
             throw cursorError ?? new InvalidCursorError("referrers");
@@ -2312,23 +2401,8 @@ export function registerSiteContractProviders(
             });
             if (execution.kind === "executed")
               return { value: execution.page, source: "raw" };
-            const fallbackFilters =
-              await prepareDeferredEventQualificationFallback(deferred);
             return {
-              value: await queryReferrersPageFromD1(
-                options.env,
-                options.siteId,
-                window,
-                fallbackFilters,
-                limit,
-                includeFullUrl,
-                search,
-                cursor,
-                options.diagnostics,
-                request.context.policy.audience,
-                sortBy,
-                sortDirection,
-              ),
+              value: await fallbackReferrersPage(cursor),
               source: "raw",
             };
           }

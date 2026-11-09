@@ -18,17 +18,31 @@ import {
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import { ADVANCED_FILTER_MAX_ACTIVITIES } from "@/lib/edge/analytics/engine/advanced-filter-activity-plan";
 import { PAGE_DIMENSION_SELECTIONS } from "@/lib/edge/analytics/engine/dimension-report-plan";
+import {
+  snapshotLogicalPlan,
+  type ValidatedLogicalPlan,
+} from "@/lib/edge/analytics/engine/logical/plan";
 import { buildReferrerPageQualificationPlan } from "@/lib/edge/analytics/engine/referrer-page-qualification-plan";
-import { normalizeReferrerOverviewTableRequest } from "@/lib/edge/analytics/engine/referrer-report-plan";
+import {
+  buildReferrersPagePlan,
+  normalizeReferrerOverviewTableRequest,
+} from "@/lib/edge/analytics/engine/referrer-report-plan";
+import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import {
   d1AdvancedFilterMiddleware,
   deferredReferrerOverviewQualificationFromQuery,
   prepareDeferredEventQualificationFallback,
+  prepareDeferredPageVisitQualification,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { compilePageDimensionQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/analytics-qualification-program";
 import { mapTabs } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import { queryDimensionPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/dimensions";
+import {
+  bindPageVisitQualificationPreparation,
+  pageVisitQualificationConsumerKey,
+  snapshotPageVisitQualificationPlan,
+} from "@/lib/edge/analytics/providers/d1/internal/page-visit-qualification-execution";
 import {
   decodeReferrersCursor,
   queryReferrersPageFromD1,
@@ -1621,6 +1635,148 @@ describe("qualified source.domain and source.link Referrer tables", () => {
     });
     expect(trace.preparedSql.length).toBe(oldTrace.preparedSql.length + 1);
     expect(trace.preparedSql.slice(2)).toEqual(oldTrace.preparedSql.slice(1));
+  });
+
+  it("binds the Event Page Source after numeric refusal for Referrer overview", async () => {
+    const { database } = createFixture();
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "visit-host-a2");
+    const query = queryFor("event", {
+      tab: "source.domain",
+      filterDsl: `${BASE_FILTER} and count(page { page.durationMs gt 5 }) eq 1`,
+    });
+    const legacyTrace = traceFor();
+    const legacy = await legacyReferrerFor(database, query, legacyTrace);
+    expect(legacy.deferred?.countInput.scope).toBe("event");
+    expect(
+      legacy.deferred?.countInput.numericCompatibilityRequirements,
+    ).not.toHaveLength(0);
+    const trace = traceFor();
+    const diagnostics = createD1ReadDiagnostics();
+    const provider = createD1SiteProviderRegistry({
+      env: testEnv(database, trace),
+      siteId: SITE,
+      diagnostics,
+    }).resolve("dimension");
+    if (!provider)
+      throw new Error("wave95m_event_numeric_referrer_provider_missing");
+    const actual = await provider.execute(query);
+
+    expect(actual.value).toEqual(legacy.dto);
+    expect((actual.value as ReferrerDto).data.items).not.toHaveLength(0);
+    const guardStatementIndex = trace.preparedSql.findIndex((sql) =>
+      sql.includes("invalidContextPageDurationMsCount"),
+    );
+    expect(guardStatementIndex).toBeGreaterThanOrEqual(0);
+    const guardRows = database
+      .prepare(trace.preparedSql[guardStatementIndex]!)
+      .all(...(trace.bindings[guardStatementIndex] ?? [])) as Array<
+      Record<string, unknown>
+    >;
+    expect(guardRows).toHaveLength(1);
+    expect(guardRows[0]).toMatchObject({
+      rowKind: "control",
+      invalidContextPageDurationMsCount: 1,
+    });
+    expect(guardRows.some((row) => row.rowKind === "report")).toBe(false);
+    const reportSql = trace.preparedSql.at(-1);
+    expect(reportSql).toMatch(/\bvisit_id\b/i);
+    expect(reportSql).not.toMatch(/\bentity_id\b/i);
+  });
+
+  it("rejects a canonical plan whose qualified Page Source differs from its preparation", async () => {
+    const { database } = createFixture();
+    const trace = traceFor();
+    const env = testEnv(database, trace);
+    const query = queryFor("event", { limit: 1 });
+    const forwarded = await d1AdvancedFilterMiddleware(env, undefined, SITE)(
+      "dimension",
+      query,
+      async (value) => value,
+    );
+    const deferred = deferredReferrerOverviewQualificationFromQuery(forwarded);
+    if (!deferred?.requestTime)
+      throw new Error("wave95m_page_visit_binding_deferred_missing");
+    const consumerKey = pageVisitQualificationConsumerKey(
+      "source-binding-regression",
+      { limit: 1 },
+    );
+    const preparation = await prepareDeferredPageVisitQualification(
+      deferred,
+      consumerKey,
+    );
+    if (!preparation)
+      throw new Error("wave95m_page_visit_binding_preparation_missing");
+
+    const planFor = (
+      siteId: string,
+      queryTime: QueryTime,
+      filterDsl = BASE_FILTER,
+    ) => {
+      const prepared = prepareScopedQuery("dimension", {
+        context: siteQueryContext(siteId, "private-dashboard"),
+        time: queryTime,
+        filters: parseFilterDsl(filterDsl, analyticsFilterRegistry),
+        scopePreference: "event",
+      } as QueryInput & { readonly time: QueryTime });
+      if (!prepared.filters || !prepared.scopePlan)
+        throw new Error("wave95m_page_visit_binding_plan_setup_invalid");
+      return snapshotPageVisitQualificationPlan(
+        buildReferrersPagePlan({
+          siteId,
+          queryTime: prepared.time as QueryTime,
+          filters: prepared.filters,
+          scopePlan: prepared.scopePlan,
+          qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+          limit: 1,
+          includeFullUrl: false,
+          sortBy: "views",
+          sortDirection: "desc",
+        }),
+      );
+    };
+    const expectedInput = {
+      preparation,
+      siteId: SITE,
+      filters: deferred.filters,
+      queryTime: deferred.requestTime,
+      scopePlan: deferred.metadata.plan,
+      consumerKey,
+    };
+    const wrongFilterPlan = planFor(
+      SITE,
+      deferred.requestTime,
+      `${BASE_FILTER} and page.path neq "/other"`,
+    );
+    const basePlan = planFor(SITE, deferred.requestTime);
+    const wrongRolePlan = snapshotLogicalPlan({
+      ...basePlan,
+      nodes: basePlan.nodes.map((node) =>
+        node.kind === "source" &&
+        node.selection?.qualificationDependencyRefs?.length
+          ? { ...node, entity: "event" as const }
+          : node,
+      ),
+    }) as ValidatedLogicalPlan;
+    const wrongSitePlan = planFor(`${SITE}-other`, deferred.requestTime);
+    const wrongTimePlan = planFor(
+      SITE,
+      createQueryTime(121, 141, "UTC", TIME.capturedAtMs),
+    );
+    const statementsBefore = trace.preparedSql.length;
+
+    for (const plan of [
+      wrongFilterPlan,
+      wrongRolePlan,
+      wrongSitePlan,
+      wrongTimePlan,
+    ]) {
+      expect(() =>
+        bindPageVisitQualificationPreparation({ ...expectedInput, plan }),
+      ).toThrow("qualification_execution_plan_context_mismatch");
+    }
+    expect(trace.preparedSql).toHaveLength(statementsBefore);
   });
 
   it("preserves Count cap precedence over malformed cursors and numeric data", async () => {

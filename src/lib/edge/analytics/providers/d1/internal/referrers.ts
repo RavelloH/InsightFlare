@@ -10,6 +10,7 @@ import {
   buildReferrerSummaryPlan,
   type ReferrerPageSortKey,
 } from "@/lib/edge/analytics/engine/referrer-report-plan";
+import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type {
   DeferredReferrerOverviewQualification,
   DeferredReferrersQualification,
@@ -32,6 +33,14 @@ import type {
 } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import { queryReferrersFromD1 } from "./dimensions";
+import {
+  assertFilterValuesPageQualificationProjection,
+  bindPageVisitQualificationPreparation,
+  type FilterValuesPageQualificationProjection,
+  pageVisitQualificationConsumerKey,
+  type PageVisitQualificationPreparation,
+  snapshotPageVisitQualificationPlan,
+} from "./page-visit-qualification-execution";
 import { pageCursorBinding } from "./pages";
 import {
   decodePageCursor,
@@ -260,13 +269,27 @@ export async function queryReferrersPageFromD1(
   audience: QueryAudience = "private-dashboard",
   sortBy: ReferrerPageSortKey = "views",
   sortDirection: "asc" | "desc" = "desc",
+  qualification?: {
+    readonly preparation: PageVisitQualificationPreparation;
+    readonly queryTime: QueryTime;
+    readonly scopePlan: ScopedFilterPlan;
+    readonly filterValuesProjection?: FilterValuesPageQualificationProjection;
+  },
 ): Promise<PageResult<ReferrerRow>> {
   const metadata = scopedFilterMetadata(filters);
-  const plan = buildReferrersPagePlan({
+  const queryTime =
+    qualification?.queryTime ?? metadata?.time ?? queryWindowToTime(window);
+  const scopePlan = qualification?.scopePlan ?? metadata?.plan;
+  const builtPlan = buildReferrersPagePlan({
     siteId,
-    queryTime: metadata?.time ?? queryWindowToTime(window),
+    queryTime,
     filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(scopePlan ? { scopePlan } : {}),
+    ...(qualification
+      ? {
+          qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+        }
+      : {}),
     limit,
     includeFullUrl,
     ...(search !== undefined ? { search } : {}),
@@ -274,12 +297,45 @@ export async function queryReferrersPageFromD1(
     sortDirection,
     ...(cursor ? { cursor } : {}),
   });
+  const plan = qualification
+    ? snapshotPageVisitQualificationPlan(builtPlan)
+    : builtPlan;
+  const qualificationExecutionInputs = qualification
+    ? bindPageVisitQualificationPreparation({
+        preparation: qualification.preparation,
+        siteId,
+        filters,
+        queryTime,
+        scopePlan: qualification.scopePlan,
+        consumerKey: qualification.filterValuesProjection
+          ? assertFilterValuesPageQualificationProjection({
+              projection: qualification.filterValuesProjection,
+              field: includeFullUrl ? "referrer.url" : "referrer.domain",
+              limit,
+              hasCursor: cursor !== undefined && cursor !== null,
+              cursor,
+              search,
+              audience,
+            })
+          : referrersPageQualificationConsumerKey({
+              limit,
+              includeFullUrl,
+              search,
+              cursor,
+              audience,
+              sortBy,
+              sortDirection,
+            }),
+        plan,
+      })
+    : undefined;
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
     plan,
     "referrers-page",
     undefined,
     diagnostics,
+    qualificationExecutionInputs,
   );
   return referrerPageFromRows({
     env,
@@ -294,6 +350,18 @@ export async function queryReferrersPageFromD1(
     sortDirection,
     rows,
   });
+}
+
+export function referrersPageQualificationConsumerKey(input: {
+  readonly limit: number;
+  readonly includeFullUrl: boolean;
+  readonly search?: string;
+  readonly cursor?: ReferrerAggregateCursor | null;
+  readonly audience: QueryAudience;
+  readonly sortBy: ReferrerPageSortKey;
+  readonly sortDirection: "asc" | "desc";
+}) {
+  return pageVisitQualificationConsumerKey("referrers-page", input);
 }
 
 type ReferrerPageQualificationExecution = Awaited<

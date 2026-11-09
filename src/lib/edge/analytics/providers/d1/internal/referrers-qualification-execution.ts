@@ -28,28 +28,15 @@ import {
 
 import type { AnalyticsDbRelation } from "./analytics-relational-storage";
 import {
-  createQualificationExecutionInputsForTrustedPlan,
-  type QualificationExecutionInputs,
-} from "./qualification-execution-inputs";
-
-interface QualificationPreparationState {
-  readonly siteId: string;
-  readonly filters: FilterDocument;
-  readonly queryTime: QueryTime;
-  readonly time: SemanticTemporalDomains;
-  readonly metadata: ScopedFilterMetadata;
-  readonly topN: number;
-  readonly relation: AnalyticsDbRelation;
-  bound: boolean;
-}
-
-declare const referrersQualificationPreparationBrand: unique symbol;
-
-export type ReferrersSummaryQualificationPreparation = Readonly<{
-  readonly [referrersQualificationPreparationBrand]: true;
-}>;
-
-const preparationStates = new WeakMap<object, QualificationPreparationState>();
+  assertPageVisitQualificationPreparationContext,
+  bindPageVisitQualificationPreparation,
+  createPageVisitQualificationPreparation,
+  type PageVisitQualificationPreparation,
+  pageVisitQualificationPreparationScopePlan,
+} from "./page-visit-qualification-execution";
+import { type QualificationExecutionInputs } from "./qualification-execution-inputs";
+export type ReferrersSummaryQualificationPreparation =
+  PageVisitQualificationPreparation;
 
 function sameJsonValue(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) return true;
@@ -79,19 +66,6 @@ function sameJsonValue(left: unknown, right: unknown): boolean {
         sameJsonValue(leftRecord[key], rightRecord[key]),
     )
   );
-}
-
-function deepFreeze<T>(value: T): T {
-  if (value && typeof value === "object" && !Object.isFrozen(value)) {
-    for (const child of Object.values(value as Record<string, unknown>))
-      deepFreeze(child);
-    Object.freeze(value);
-  }
-  return value;
-}
-
-function snapshotQueryTime(time: QueryTime): QueryTime {
-  return deepFreeze(JSON.parse(JSON.stringify(time)) as QueryTime);
 }
 
 function logicalNodeInputs(node: LogicalNode): readonly RelationId[] {
@@ -259,10 +233,11 @@ export function createReferrersSummaryQualificationPreparation(input: {
     input.topN < 0
   )
     throw new Error("qualification_execution_preparation_invalid");
-  const filters = deepFreeze(
-    normalizeFilterDocument(input.filters, analyticsFilterRegistry),
+  const filters = normalizeFilterDocument(
+    input.filters,
+    analyticsFilterRegistry,
   );
-  const queryTime = snapshotQueryTime(input.queryTime);
+  const queryTime = input.queryTime;
   const time = semanticTemporalDomainsFromQueryTime(queryTime);
   const scopePlan = createScopedFilterPlan(
     "referrers",
@@ -286,27 +261,14 @@ export function createReferrersSummaryQualificationPreparation(input: {
   )
     throw new Error("qualification_execution_metadata_mismatch");
 
-  const state: QualificationPreparationState = {
+  return createPageVisitQualificationPreparation({
     siteId: input.siteId,
     filters,
     queryTime,
-    time,
-    metadata: Object.freeze({
-      requestedScope: input.metadata.requestedScope,
-      resolvedScope: scopePlan.scope,
-      plan: scopePlan,
-      time: queryTime,
-      siteIds: Object.freeze([input.siteId]),
-    }),
-    topN: input.topN,
+    scopePlan,
+    consumerKey: { operation: "referrers-summary", topN: input.topN },
     relation: input.relation,
-    bound: false,
-  };
-  const preparation = Object.freeze(
-    Object.create(null),
-  ) as ReferrersSummaryQualificationPreparation;
-  preparationStates.set(preparation as object, state);
-  return preparation;
+  });
 }
 
 /** Build the Referrers plan once, then bind that exact frozen snapshot. */
@@ -321,13 +283,6 @@ export function bindReferrersSummaryQualification(input: {
   readonly plan: ValidatedLogicalPlan;
   readonly executionInputs: QualificationExecutionInputs;
 } {
-  const state =
-    typeof input.preparation === "object" && input.preparation !== null
-      ? preparationStates.get(input.preparation)
-      : undefined;
-  if (!state) throw new Error("qualification_execution_preparation_untrusted");
-  if (state.bound)
-    throw new Error("qualification_execution_preparation_replayed");
   let normalizedFilters: FilterDocument;
   try {
     normalizedFilters = normalizeFilterDocument(
@@ -337,36 +292,57 @@ export function bindReferrersSummaryQualification(input: {
   } catch {
     throw new Error("qualification_execution_plan_snapshot_mismatch");
   }
-  if (
-    input.siteId !== state.siteId ||
-    input.topN !== state.topN ||
-    !sameJsonValue(normalizedFilters, state.filters) ||
-    !sameJsonValue(input.queryTime, state.queryTime) ||
-    !sameJsonValue(input.scopePlan, state.metadata.plan)
-  )
-    throw new Error("qualification_execution_plan_snapshot_mismatch");
-
+  const consumerKey = {
+    operation: "referrers-summary",
+    topN: input.topN,
+  };
+  assertPageVisitQualificationPreparationContext({
+    preparation: input.preparation,
+    siteId: input.siteId,
+    filters: normalizedFilters,
+    scopePlan: input.scopePlan,
+    queryTime: input.queryTime,
+    consumerKey,
+  });
+  const canonicalScopePlan = pageVisitQualificationPreparationScopePlan({
+    preparation: input.preparation,
+    siteId: input.siteId,
+    filters: normalizedFilters,
+    scopePlan: input.scopePlan,
+    queryTime: input.queryTime,
+    consumerKey,
+  });
   const plan = validateLogicalPlan(
     snapshotLogicalPlan(
       buildReferrerSummaryPlan({
-        siteId: state.siteId,
-        queryTime: state.queryTime,
-        filters: attachScopedFilterMetadata(state.filters, state.metadata),
-        scopePlan: state.metadata.plan,
+        siteId: input.siteId,
+        queryTime: input.queryTime,
+        filters: attachScopedFilterMetadata(normalizedFilters, {
+          requestedScope: "event",
+          resolvedScope: canonicalScopePlan.scope,
+          plan: canonicalScopePlan,
+          time: input.queryTime,
+          siteIds: [input.siteId],
+        }),
+        scopePlan: canonicalScopePlan,
         qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
-        topN: state.topN,
+        topN: input.topN,
       }),
     ),
   );
   assertReferrerSummaryPlan(plan, {
-    siteId: state.siteId,
-    filters: state.filters,
-    time: state.time,
+    siteId: input.siteId,
+    filters: normalizedFilters,
+    time: semanticTemporalDomainsFromQueryTime(input.queryTime),
   });
-  const executionInputs = createQualificationExecutionInputsForTrustedPlan(
-    state.relation,
+  const executionInputs = bindPageVisitQualificationPreparation({
+    preparation: input.preparation,
+    siteId: input.siteId,
+    filters: normalizedFilters,
+    scopePlan: canonicalScopePlan,
+    queryTime: input.queryTime,
+    consumerKey,
     plan,
-  );
-  state.bound = true;
+  });
   return Object.freeze({ plan, executionInputs });
 }

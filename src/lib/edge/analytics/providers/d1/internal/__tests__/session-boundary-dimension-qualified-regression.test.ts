@@ -1111,6 +1111,29 @@ describe("qualified Session boundary dimension", () => {
     expect(runtimeTrace.preparedSql.length).toBeGreaterThan(2);
   });
 
+  it("binds the Event Page Source for a non-empty boundary DTO after numeric refusal", async () => {
+    const { database } = createEventCandidateBoundaryFixture();
+    const query = queryFor("session", {
+      dimension: "session.entryPath",
+      scopePreference: "event",
+      filterDsl:
+        '(page.path eq "/x1" or page.path eq "/x2") and count(event { event.name eq "qualifier" }) gte 1 and count(page { page.durationMs gt 5 }) eq 1',
+    });
+    const legacy = await legacyBoundaryFor(database, query, traceFor());
+    expect(legacy.dto.items.map((row) => row.key)).toEqual(["/x1"]);
+    const diagnostics = createD1ReadDiagnostics();
+    const runtimeTrace = traceFor();
+    const actual = await runActual(database, query, runtimeTrace, diagnostics);
+
+    expect(actual.result.value).toEqual(legacy.dto);
+    expect(actual.result.value.items.map((row) => row.key)).toEqual(["/x1"]);
+    expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+      kind: "numeric-data-domain",
+    });
+    expect(runtimeTrace.preparedSql.at(-1)).toMatch(/\bvisit_id\b/i);
+    expect(runtimeTrace.preparedSql.at(-1)).not.toMatch(/\bentity_id\b/i);
+  });
+
   it.each(
     (["entry", "exit"] as const).flatMap((kind) =>
       (["session", "visitor"] as const).map((scope) => ({ kind, scope })),

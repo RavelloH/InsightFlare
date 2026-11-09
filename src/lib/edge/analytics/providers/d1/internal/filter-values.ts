@@ -2,7 +2,9 @@ import {
   analyticsFilterDefinition,
   type FilterDocument,
   type QueryAudience,
+  type QueryTime,
 } from "@/lib/edge/analytics/contract";
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import {
   crossBreakdownPageDimensionSelection,
   PAGE_DIMENSION_SELECTIONS,
@@ -25,6 +27,11 @@ import {
   queryEventTypeAggregate,
   queryEventTypePageFromD1,
 } from "./events-summary";
+import {
+  createFilterValuesPageQualificationProjection,
+  filterValuesPageQualificationConsumerKey,
+  type PageVisitQualificationPreparation,
+} from "./page-visit-qualification-execution";
 import type { PageResult } from "./pagination";
 import {
   decodeReferrersCursor,
@@ -158,6 +165,11 @@ export async function queryFilterValuesPageFromD1(
   cursor?: string | null,
   search?: string,
   audience: QueryAudience = "private-dashboard",
+  qualification?: {
+    readonly preparation: PageVisitQualificationPreparation;
+    readonly queryTime: QueryTime;
+    readonly scopePlan: ScopedFilterPlan;
+  },
 ): Promise<FilterValuePage> {
   const definition = analyticsFilterDefinition(field);
   if (
@@ -229,6 +241,16 @@ export async function queryFilterValuesPageFromD1(
     );
     if (cursor && !referrerCursor)
       throw new InvalidCursorError("filter-values");
+    const consumerProjection = qualification
+      ? createFilterValuesPageQualificationProjection({
+          field,
+          limit,
+          cursorToken: cursor ?? null,
+          search,
+          audience,
+          cursor: referrerCursor,
+        })
+      : undefined;
     const page = await queryReferrersPageFromD1(
       env,
       siteId,
@@ -240,6 +262,14 @@ export async function queryFilterValuesPageFromD1(
       referrerCursor,
       undefined,
       audience,
+      "views",
+      "desc",
+      qualification
+        ? {
+            ...qualification,
+            filterValuesProjection: consumerProjection!,
+          }
+        : undefined,
     );
     return {
       items: page.items
@@ -266,6 +296,16 @@ export async function queryFilterValuesPageFromD1(
     );
     if (cursor && !boundaryCursor)
       throw new InvalidCursorError("filter-values");
+    const consumerProjection = qualification
+      ? createFilterValuesPageQualificationProjection({
+          field,
+          limit,
+          cursorToken: cursor ?? null,
+          search,
+          audience,
+          cursor: boundaryCursor,
+        })
+      : undefined;
     const page = await querySessionPathDimensionPageFromD1(
       env,
       siteId,
@@ -277,6 +317,16 @@ export async function queryFilterValuesPageFromD1(
       search,
       boundaryCursor,
       audience,
+      "views",
+      "desc",
+      qualification
+        ? {
+            ...qualification,
+            audience,
+            consumer: "filter-values",
+            filterValuesProjection: consumerProjection!,
+          }
+        : undefined,
     );
     const items = mapFilterValueRows(page.items, search);
     return {
@@ -328,3 +378,5 @@ export async function queryFilterValuesPageFromD1(
     pagination: page.pagination,
   };
 }
+
+export { filterValuesPageQualificationConsumerKey };

@@ -290,6 +290,7 @@ export function buildReferrersPagePlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly limit: number;
   readonly includeFullUrl: boolean;
   readonly search?: string;

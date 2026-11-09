@@ -1157,6 +1157,53 @@ describe("qualified ordinary channels list", () => {
     });
   });
 
+  it("binds the Event Page Source after a real numeric fallback for channel list", async () => {
+    const { database } = createFixture();
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "paid");
+    const query = queryFor("event", {
+      filter: `${FILTER} and count(page { page.durationMs gt 5 }) eq 1`,
+    });
+    const inspected = await d1AdvancedFilterMiddleware(
+      testEnv(database, traceFor()),
+      undefined,
+      SITE,
+    )("channels", query, async (value) => value);
+    const deferred = deferredChannelListQualificationFromQuery(inspected);
+    expect(deferred?.countInput.scope).toBe("event");
+    expect(
+      deferred?.countInput.numericCompatibilityRequirements,
+    ).not.toHaveLength(0);
+    const legacy = await oldListDto(database, query, traceFor());
+    const trace = traceFor();
+    const diagnostics = createD1ReadDiagnostics();
+    const actual = await actualListDto(database, query, trace, diagnostics);
+
+    expect(actual.value).toEqual(legacy);
+    if (!("items" in actual.value))
+      throw new Error("wave95u_channel_list_result_expected");
+    expect(actual.value.items).not.toHaveLength(0);
+    const guardStatementIndex = trace.preparedSql.findIndex((sql) =>
+      sql.includes("invalidContextPageDurationMsCount"),
+    );
+    expect(guardStatementIndex).toBeGreaterThanOrEqual(0);
+    const guardRows = database
+      .prepare(trace.preparedSql[guardStatementIndex]!)
+      .all(...(trace.bindings[guardStatementIndex] ?? [])) as Array<
+      Record<string, unknown>
+    >;
+    expect(guardRows).toHaveLength(1);
+    expect(guardRows[0]).toMatchObject({
+      rowKind: "control",
+      invalidContextPageDurationMsCount: 1,
+    });
+    expect(guardRows.some((row) => row.rowKind === "report")).toBe(false);
+    const reportSql = trace.preparedSql.at(-1);
+    expect(reportSql).toMatch(/\bvisit_id\b/i);
+    expect(reportSql).not.toMatch(/\bentity_id\b/i);
+  });
+
   it("enforces the activity cap before numeric fallback and emits no report rows", async () => {
     const { database, site } = createFixture();
     const insert = database.prepare(

@@ -84,6 +84,7 @@ import {
 import { eventPayloadValueTypeCode } from "@/lib/edge/analytics/engine/semantic/event-payload-value-type";
 import type { SemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticSubjectFromQuerySubject } from "@/lib/edge/analytics/engine/semantic/subject";
+import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
 import {
   type NormalizedSessionBoundaryDimensionRequest,
   normalizeSessionBoundaryDimensionRequest,
@@ -97,6 +98,10 @@ import {
   type TechnologyShareTrendQualificationConfiguration,
   technologyShareTrendQualificationConfiguration,
 } from "@/lib/edge/analytics/engine/technology-share-trend-report-plan";
+import {
+  createPageVisitQualificationPreparation,
+  type PageVisitQualificationPreparation,
+} from "@/lib/edge/analytics/providers/d1/internal/page-visit-qualification-execution";
 import {
   createReferrersSummaryQualificationPreparation,
   type ReferrersSummaryQualificationPreparation,
@@ -631,7 +636,7 @@ export type DeferredEventFieldValuesQualification =
 
 export type DeferredEventCandidatePageProjection = Omit<
   DeferredEventQualification,
-  "operation" | "countInput"
+  "countInput"
 > & {
   readonly countInput: AdvancedEventCandidateCountPlanInput;
   readonly eventCandidateReportProjection: "page-visits";
@@ -7449,6 +7454,100 @@ function sameCandidateReadAndFilterWindow(time: QueryTime): boolean {
     (time.filterRange.startMs === candidate.startMs &&
       time.filterRange.endExclusiveMs === candidate.endExclusiveMs)
   );
+}
+
+function isPrivatePageVisitConsumer(
+  deferred: DeferredEventCandidatePageProjection,
+): boolean {
+  const request = deferred as DeferredEventCandidatePageProjection & {
+    readonly referrersRequest?: { readonly audience?: unknown };
+    readonly referrerOverviewRequest?: { readonly audience?: unknown };
+    readonly overviewPageTableRequest?: { readonly audience?: unknown };
+    readonly channelListRequest?: { readonly audience?: unknown };
+    readonly sessionBoundaryDimensionRequest?: {
+      readonly audience?: unknown;
+    };
+    readonly sessionBoundaryOverviewPageRequest?: {
+      readonly audience?: unknown;
+    };
+    readonly filterValuesRequest?: { readonly audience?: unknown };
+  };
+  switch (deferred.operation) {
+    case "referrers":
+      return request.referrersRequest?.audience === "private-dashboard";
+    case "page-dimension":
+      return request.referrerOverviewRequest?.audience === "private-dashboard";
+    case "channel-overview":
+      return request.overviewPageTableRequest?.audience === "private-dashboard";
+    case "channel-list":
+      return request.channelListRequest?.audience === "private-dashboard";
+    case "session-boundary-dimension":
+      return (
+        request.sessionBoundaryDimensionRequest?.audience ===
+        "private-dashboard"
+      );
+    case "session-boundary-overview-page":
+      return (
+        request.sessionBoundaryOverviewPageRequest?.audience ===
+        "private-dashboard"
+      );
+    case "filter-values":
+      return request.filterValuesRequest?.audience === "private-dashboard";
+    default:
+      return false;
+  }
+}
+
+/**
+ * Evaluates the existing Core fallback into a request-local Page visit
+ * relation for the already-supported private single-site report consumers.
+ */
+export async function prepareDeferredPageVisitQualification(
+  deferredInput: unknown,
+  consumerKey: unknown,
+): Promise<PageVisitQualificationPreparation | undefined> {
+  if (!isDeferredEventCandidatePageProjection(deferredInput)) return undefined;
+  const deferred = deferredInput;
+  if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  const queryTime = deferred.requestTime ?? deferred.time;
+  if (
+    !isPrivatePageVisitConsumer(deferred) ||
+    deferred.subject.origin !== "site" ||
+    deferred.subject.siteIds.length !== 1 ||
+    deferred.subject.siteIds[0] !== deferred.siteId ||
+    deferred.countInput.scope !== "event" ||
+    deferred.metadata.plan.scope !== "event" ||
+    deferred.metadata.plan.mode !== "observation" ||
+    deferred.metadata.plan.membership.kind === "entity" ||
+    deferred.metadata.plan.advancedMatches !== undefined ||
+    !sameCandidateReadAndFilterWindow(deferred.time) ||
+    !sameCandidateReadAndFilterWindow(queryTime) ||
+    JSON.stringify(semanticTemporalDomainsFromQueryTime(deferred.time)) !==
+      JSON.stringify(semanticTemporalDomainsFromQueryTime(queryTime)) ||
+    filtersUseSequenceSemantics(deferred.filters)
+  )
+    return undefined;
+
+  const matches = await evaluateForSitesCore({
+    env: deferred.env,
+    subject: deferred.subject,
+    siteIds: [deferred.siteId],
+    filters: deferred.filters,
+    plan: deferred.metadata.plan,
+    time: deferred.time,
+    diagnostics: deferred.diagnostics,
+    signal: deferred.signal,
+    coverage: deferred.coverage,
+  });
+  if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  return createPageVisitQualificationPreparation({
+    siteId: deferred.siteId,
+    filters: deferred.filters,
+    queryTime,
+    scopePlan: deferred.metadata.plan,
+    consumerKey,
+    relation: createReferrersVisitRelation(deferred.siteId, matches),
+  });
 }
 
 /** Prepare only the private, one-site, same-window Referrers summary slice. */

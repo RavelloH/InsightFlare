@@ -15,6 +15,7 @@ import {
   semanticPageDimension,
   type SemanticPageDimensionId,
 } from "@/lib/edge/analytics/engine/semantic/page-dimensions";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { SemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
@@ -648,6 +649,7 @@ export function pageDimensionReportSource(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly selections: readonly PageDimensionSelection[];
   readonly includeVisitors?: boolean;
@@ -705,6 +707,7 @@ function pageDimensionSource(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly selection: PageDimensionSelection;
 }) {
@@ -933,6 +936,7 @@ export function buildDimensionTopPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly limit: number;
   readonly selection: PageDimensionSelection;
@@ -951,6 +955,7 @@ export function buildDimensionPagePlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly limit: number;
   readonly selection: PageDimensionSelection;

@@ -2756,6 +2756,56 @@ describe("qualified channels source.channel overview", () => {
       actualBindings: numericTrace.bindings,
       fallbackDidNotChangeDto: true,
     });
+
+    const eventNumericQuery = queryFor("event", {
+      operation: "channels",
+      tab: "source.channel",
+      filterDsl: `${BASE_FILTER} and count(page { page.durationMs gt 5 }) eq 1`,
+    });
+    const eventLegacy = await legacyChannelOverviewTableFor(
+      database,
+      eventNumericQuery,
+      traceFor(),
+    );
+    expect(eventLegacy.deferred?.countInput.scope).toBe("event");
+    expect(
+      eventLegacy.deferred?.countInput.numericCompatibilityRequirements,
+    ).not.toHaveLength(0);
+    const eventTrace = traceFor();
+    const eventDiagnostics = createD1ReadDiagnostics();
+    const eventProvider = createD1SiteProviderRegistry({
+      env: testEnv(database, eventTrace),
+      siteId: SITE,
+      diagnostics: eventDiagnostics,
+    }).resolve("channels");
+    if (!eventProvider)
+      throw new Error("wave95s_event_channel_numeric_provider_missing");
+    const eventActual = await eventProvider.execute(eventNumericQuery as never);
+    expect(eventActual.value).toEqual(eventLegacy.dto);
+    expect(
+      (
+        eventActual.value as {
+          readonly data: { readonly items: readonly unknown[] };
+        }
+      ).data.items,
+    ).not.toHaveLength(0);
+    const guardStatementIndex = eventTrace.preparedSql.findIndex((sql) =>
+      sql.includes("invalidContextPageDurationMsCount"),
+    );
+    expect(guardStatementIndex).toBeGreaterThanOrEqual(0);
+    const guardRows = database
+      .prepare(eventTrace.preparedSql[guardStatementIndex]!)
+      .all(...(eventTrace.bindings[guardStatementIndex] ?? [])) as Array<
+      Record<string, unknown>
+    >;
+    expect(guardRows).toHaveLength(1);
+    expect(guardRows[0]).toMatchObject({
+      rowKind: "control",
+      invalidContextPageDurationMsCount: 1,
+    });
+    expect(guardRows.some((row) => row.rowKind === "report")).toBe(false);
+    expect(eventTrace.preparedSql.at(-1)).toMatch(/\bvisit_id\b/i);
+    expect(eventTrace.preparedSql.at(-1)).not.toMatch(/\bentity_id\b/i);
   });
 
   it("keeps Count cap errors ahead of a malformed channel cursor", async () => {
