@@ -10,6 +10,7 @@ import {
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { SemanticRelationshipId } from "@/lib/edge/analytics/engine/semantic/relationships";
 import {
   createSemanticScopedSourceSelection,
@@ -66,6 +67,7 @@ export function createPageReportSource(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly sourceSelection?: SemanticScopedSourceSelection;
   readonly relationships?: readonly SemanticRelationshipId[];
@@ -108,6 +110,7 @@ function createPageReportSourceForDomain(
     readonly queryTime: QueryTime;
     readonly filters: FilterDocument;
     readonly scopePlan?: ScopedFilterPlan;
+    readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
     readonly preparedTimePolicy?:
       "reader-window-v1" | "scoped-reader-window-v1";
     readonly sourceSelection?: SemanticScopedSourceSelection;
@@ -125,6 +128,10 @@ function createPageReportSourceForDomain(
     throw new Error(
       "invalid_page_report_source_selection:reader_window_disallows_selection_override",
     );
+  if (input.sourceSelection && input.qualificationDependencyRefs)
+    throw new Error(
+      "invalid_page_report_source_selection:override_disallows_qualification_dependency",
+    );
   const selection =
     input.sourceSelection ??
     createSemanticScopedSourceSelection({
@@ -139,6 +146,9 @@ function createPageReportSourceForDomain(
       subject,
       time,
       ...(input.scopePlan ? { expectedPlan: input.scopePlan } : {}),
+      ...(input.qualificationDependencyRefs
+        ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+        : {}),
     });
   if (input.sourceSelection) {
     if (input.scopePlan)

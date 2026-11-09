@@ -8,6 +8,7 @@ import type {
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
@@ -343,6 +344,7 @@ export function buildReferrerSummaryPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly topN: number;
 }): ValidatedLogicalPlan {
   const { builder, pages } = createPageReportSource({

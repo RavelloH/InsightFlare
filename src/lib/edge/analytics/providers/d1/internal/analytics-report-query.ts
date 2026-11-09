@@ -23,6 +23,7 @@ import type { Env } from "@/lib/edge/types";
 
 import { queryD1CompiledAll } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
+import type { QualificationExecutionInputs } from "./qualification-execution-inputs";
 
 export interface AnalyticsReportOutputOrderKey {
   readonly field: string;
@@ -138,6 +139,7 @@ function selectedOutputFields(
 function createReportLowerer(
   plan: ValidatedLogicalPlan,
   errorPrefix: string,
+  qualificationExecutionInputs?: QualificationExecutionInputs,
 ): AnalyticsLogicalToDbLowerer {
   const siteIds = plan.context.subject.siteIds;
   const siteCount = Array.isArray(siteIds) ? siteIds.length : "invalid";
@@ -152,6 +154,7 @@ function createReportLowerer(
     siteIds.length === 1
       ? { siteId: siteIds[0]!, time: plan.context.time }
       : { siteIds, time: plan.context.time },
+    qualificationExecutionInputs ? { qualificationExecutionInputs } : {},
   );
 }
 
@@ -203,6 +206,7 @@ export async function queryAnalyticsReportOutputSetRowsFromD1(
   plan: ValidatedLogicalPlan,
   selection: AnalyticsReportMultiOutputSelection,
   diagnostics?: D1ReadDiagnostics,
+  qualificationExecutionInputs?: QualificationExecutionInputs,
 ): Promise<Record<string, unknown>[]> {
   validateMultiOutputSelection(selection);
   const outputs = selection.outputIds.map((outputId) => {
@@ -230,7 +234,11 @@ export async function queryAnalyticsReportOutputSetRowsFromD1(
     }
   }
 
-  const lowerer = createReportLowerer(plan, "analytics_report_multi_output");
+  const lowerer = createReportLowerer(
+    plan,
+    "analytics_report_multi_output",
+    qualificationExecutionInputs,
+  );
   const loweredOutputs = lowerer.lowerMany(outputs);
   const branches = outputs.map((output, index) =>
     outputRelation(

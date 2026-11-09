@@ -1,6 +1,8 @@
 import type { SourceNode } from "@/lib/edge/analytics/engine/logical/nodes";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import { requiredLegacyVisitColumnNames } from "@/lib/edge/analytics/providers/d1/internal/analytics-legacy-scoped-dataset";
 import type { AnalyticsRelationalStorageContext } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-storage";
+import type { QualificationDependencyRelationBinding } from "@/lib/edge/analytics/providers/d1/internal/qualification-execution-inputs";
 
 import {
   type PostObservationBaseRequirements,
@@ -18,6 +20,10 @@ export class AnalyticsScopedSourceContext {
   readonly entityQualifications = new Map<string, IdentityRelation>();
   readonly rowLocalEventMatches = new Map<string, IdentityRelation>();
   readonly pageEventOwnerPairs = new Map<string, IdentityRelation>();
+  readonly qualificationRelations = new Map<
+    QualificationDependencyRef,
+    QualificationDependencyRelationBinding["relation"]
+  >();
   readonly postObservationBaseRequirements = new Map<
     string,
     PostObservationBaseRequirements
@@ -25,8 +31,14 @@ export class AnalyticsScopedSourceContext {
   constructor(
     storage: AnalyticsRelationalStorageContext,
     sources: readonly SourceNode[] = [],
+    qualificationBindings: readonly QualificationDependencyRelationBinding[] = [],
   ) {
     this.storage = storage;
+    for (const binding of qualificationBindings) {
+      if (this.qualificationRelations.has(binding.dependencyRef))
+        throw new Error("qualification_execution_dependency_duplicate");
+      this.qualificationRelations.set(binding.dependencyRef, binding.relation);
+    }
     for (const source of sources) {
       if (!source.selection) continue;
       const key = entityQualificationCacheKey(

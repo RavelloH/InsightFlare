@@ -14,6 +14,7 @@ import type {
   QueryTime,
 } from "@/lib/edge/analytics/contract/types";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
+import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import {
   createSemanticPostObservationFilter,
   createSemanticScopedSourceSelection,
@@ -874,6 +875,104 @@ describe("semantic scoped source selection", () => {
       }),
     ).toThrow(
       "invalid_semantic_scoped_source_selection:subject_outside_prepared_authorization",
+    );
+  });
+
+  it("snapshots qualification dependency refs without reading getters and rejects legacy matches conflicts", () => {
+    const advancedFilters = normalizeFilterDocument(
+      parseFilterDsl(
+        'count(event { event.name eq "signup" }) gte 1',
+        analyticsFilterRegistry,
+      ),
+      analyticsFilterRegistry,
+    );
+    const prepared = preparedSelectionInput("event", advancedFilters);
+    const input = {
+      profile: "prepared-scoped-v1" as const,
+      filters: prepared.filters,
+      subject: SUBJECT,
+      time: TIME,
+      expectedPlan: prepared.plan,
+    };
+    let inputGetterReads = 0;
+    Object.defineProperty(input, "qualificationDependencyRefs", {
+      get() {
+        inputGetterReads += 1;
+        return [EVENT_FILTER_PAGE_VISIT_DEPENDENCY];
+      },
+    });
+    expect(() => createSemanticScopedSourceSelection(input as never)).toThrow(
+      "invalid_semantic_scoped_source_selection:qualification_dependency_accessor_rejected",
+    );
+    expect(inputGetterReads).toBe(0);
+
+    const selection = createSemanticScopedSourceSelection({
+      profile: "prepared-scoped-v1",
+      filters: prepared.filters,
+      subject: SUBJECT,
+      time: TIME,
+      expectedPlan: prepared.plan,
+      qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+    });
+    expect(selection.qualificationDependencyRefs).toEqual([
+      EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
+    ]);
+    let selectionGetterReads = 0;
+    const accessorSelection = Object.defineProperty(
+      { ...selection },
+      "qualificationDependencyRefs",
+      {
+        get() {
+          selectionGetterReads += 1;
+          return [EVENT_FILTER_PAGE_VISIT_DEPENDENCY];
+        },
+      },
+    );
+    expect(() =>
+      validateSemanticScopedSourceSelection(accessorSelection, {
+        subject: SUBJECT,
+        time: TIME,
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:qualification_dependency_accessor_rejected",
+    );
+    expect(selectionGetterReads).toBe(0);
+
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "prepared-scoped-v1",
+        filters: prepared.filters,
+        subject: SUBJECT,
+        time: TIME,
+        expectedPlan: prepared.plan,
+        qualificationDependencyRefs: [
+          EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
+          EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
+        ],
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:qualification_dependency_refs_invalid",
+    );
+
+    const legacyPlan = {
+      ...prepared.plan,
+      advancedMatches: { eventIds: [] },
+    };
+    const legacyFilters = attachScopedFilterMetadata(prepared.filters, {
+      ...prepared.metadata,
+      plan: legacyPlan,
+    });
+    expect(() =>
+      createSemanticScopedSourceSelection({
+        profile: "prepared-scoped-v1",
+        filters: legacyFilters,
+        subject: SUBJECT,
+        time: TIME,
+        expectedPlan: legacyPlan,
+        qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+      }),
+    ).toThrow(
+      "invalid_semantic_scoped_source_selection:prepared_matches_and_qualification_dependency_conflict",
     );
   });
 

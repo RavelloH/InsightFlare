@@ -3,6 +3,7 @@ import type {
   AnalyticsRelationalStorageContext,
   LoweredAnalyticsSource,
 } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-storage";
+import type { QualificationDependencyRelationBinding } from "@/lib/edge/analytics/providers/d1/internal/qualification-execution-inputs";
 
 import { AnalyticsScopedSourceContext } from "./context";
 import { ScopedEventSourceLowerer } from "./event-source";
@@ -16,8 +17,13 @@ export class ScopedSourceLoweringPass {
   constructor(
     storage: AnalyticsRelationalStorageContext,
     sources: readonly SourceNode[] = [],
+    qualificationBindings: readonly QualificationDependencyRelationBinding[] = [],
   ) {
-    const context = new AnalyticsScopedSourceContext(storage, sources);
+    const context = new AnalyticsScopedSourceContext(
+      storage,
+      sources,
+      qualificationBindings,
+    );
     const membership = new ScopedSourceMembership(context);
     const postObservation = new ScopedPostObservationLowerer(
       context,

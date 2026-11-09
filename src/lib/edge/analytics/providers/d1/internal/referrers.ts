@@ -3,6 +3,8 @@ import {
   scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
+import type { QueryTime } from "@/lib/edge/analytics/contract/types";
 import {
   buildReferrersPagePlan,
   buildReferrerSummaryPlan,
@@ -38,6 +40,10 @@ import {
   type PageResult,
   pageResult,
 } from "./pagination";
+import {
+  bindReferrersSummaryQualification,
+  type ReferrersSummaryQualificationPreparation,
+} from "./referrers-qualification-execution";
 export interface ReferrerAggregateCursor {
   /** The first two values are the concrete ORDER BY metrics. */
   readonly primary: number;
@@ -111,15 +117,33 @@ export async function queryReferrerSummaryFromD1(
   filters: FilterDocument,
   topN: number,
   diagnostics?: D1ReadDiagnostics,
+  qualification?: {
+    readonly preparation: ReferrersSummaryQualificationPreparation;
+    readonly scopePlan: ScopedFilterPlan;
+    readonly queryTime: QueryTime;
+  },
 ): Promise<ReferrerSummaryRow> {
   const metadata = scopedFilterMetadata(filters);
-  const plan = buildReferrerSummaryPlan({
-    siteId,
-    queryTime: metadata?.time ?? queryWindowToTime(window),
-    filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
-    topN,
-  });
+  const qualificationBinding = qualification
+    ? bindReferrersSummaryQualification({
+        preparation: qualification.preparation,
+        siteId,
+        filters,
+        scopePlan: qualification.scopePlan,
+        queryTime: qualification.queryTime,
+        topN,
+      })
+    : undefined;
+  const plan =
+    qualificationBinding?.plan ??
+    buildReferrerSummaryPlan({
+      siteId,
+      queryTime: metadata?.time ?? queryWindowToTime(window),
+      filters,
+      ...(metadata ? { scopePlan: metadata.plan } : {}),
+      topN,
+    });
+  const qualificationExecutionInputs = qualificationBinding?.executionInputs;
   const rows = await queryAnalyticsReportOutputSetRowsFromD1(
     env,
     plan,
@@ -142,6 +166,7 @@ export async function queryReferrerSummaryFromD1(
       ],
     },
     diagnostics,
+    qualificationExecutionInputs,
   );
   const summary = rows.find((row) => row.rowType === "summary") ?? {};
   const topRows = rows.filter((row) => row.rowType === "top");

@@ -11,6 +11,7 @@ import type {
   QueryTime,
 } from "@/lib/edge/analytics/contract";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import { attachScopedFilterMetadata } from "@/lib/edge/analytics/contract/scoped-filter";
 import { comparisonPageTab } from "@/lib/edge/analytics/engine/comparison-page-tabs";
 import {
   analyticsPageDimensionSelection,
@@ -42,6 +43,7 @@ import {
   deferredSessionBoundaryOverviewPageQualificationFromQuery,
   prepareDeferredComparisonPageQualificationFallback,
   prepareDeferredEventQualificationFallback,
+  prepareDeferredReferrersSummaryQualification,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import {
   queryChannelAggregate,
@@ -2175,6 +2177,30 @@ export function registerSiteContractProviders(
             if (options.diagnostics)
               options.diagnostics.advancedCountSqlFallbackReason =
                 execution.fallbackReason;
+            const qualification =
+              execution.kind === "legacy"
+                ? await prepareDeferredReferrersSummaryQualification(deferred)
+                : undefined;
+            if (qualification)
+              return {
+                value: await queryReferrerSummaryFromD1(
+                  options.env,
+                  options.siteId,
+                  timeWindow(request.time),
+                  attachScopedFilterMetadata(
+                    deferred.filters,
+                    deferred.metadata,
+                  ),
+                  topN,
+                  options.diagnostics,
+                  {
+                    preparation: qualification,
+                    scopePlan: deferred.metadata.plan,
+                    queryTime: deferred.time,
+                  },
+                ),
+                source: "raw",
+              };
             const fallbackFilters =
               await prepareDeferredEventQualificationFallback(deferred);
             return {

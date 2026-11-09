@@ -3,23 +3,26 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
   compileD1Query,
   D1_MAX_BOUND_PARAMETERS,
   D1_MAX_SQL_UTF8_BYTES,
+  D1StatementBudgetError,
   lowerLogicalPlan,
   sort,
   union,
 } from "@/lib/db";
+import * as db from "@/lib/db";
 import {
   createSqliteD1Database,
   type SqliteD1Trace,
 } from "@/lib/db/__tests__/sqlite-d1";
 import { createD1SiteProviderRegistry } from "@/lib/edge/analytics/composition/d1/create-site-runtime";
 import {
+  attachScopedFilterMetadata,
   EMPTY_FILTER_DOCUMENT,
   prepareScopedQuery,
   type QueryInput,
@@ -28,12 +31,19 @@ import {
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import { ADVANCED_FILTER_MAX_ACTIVITIES } from "@/lib/edge/analytics/engine/advanced-filter-activity-plan";
+import {
+  snapshotLogicalPlan,
+  type ValidatedLogicalPlan,
+} from "@/lib/edge/analytics/engine/logical/plan";
+import { validateLogicalPlan } from "@/lib/edge/analytics/engine/logical/validator";
 import { buildReferrerSummaryPlan } from "@/lib/edge/analytics/engine/referrer-report-plan";
 import { buildReferrersQualificationPlan } from "@/lib/edge/analytics/engine/referrers-qualification-plan";
+import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import {
   d1AdvancedFilterMiddleware,
   deferredReferrersQualificationFromQuery,
   prepareDeferredEventQualificationFallback,
+  prepareDeferredReferrersSummaryQualification,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import {
   compilePageDimensionQualificationProgram,
@@ -42,12 +52,14 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/analytics-qualification-program";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
+import { attachQualificationExecutionInputs } from "@/lib/edge/analytics/providers/d1/internal/qualification-execution-inputs";
 import {
   decodeReferrersCursor,
   queryReferrersPageFromD1,
   queryReferrerSummaryFromD1,
   type ReferrerAggregateCursor,
 } from "@/lib/edge/analytics/providers/d1/internal/referrers";
+import { bindReferrersSummaryQualification } from "@/lib/edge/analytics/providers/d1/internal/referrers-qualification-execution";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
@@ -502,12 +514,17 @@ async function legacyRead(
   };
 }
 
-async function deferredFor(database: DatabaseSync, query: ReferrersQuery) {
+async function deferredFor(
+  database: DatabaseSync,
+  query: ReferrersQuery,
+  trace = traceFor(),
+  signal?: AbortSignal,
+) {
   const forwarded = await d1AdvancedFilterMiddleware(
-    testEnv(database, traceFor()),
+    testEnv(database, trace),
     undefined,
     SITE,
-  )("referrers", query, async (prepared) => prepared);
+  )("referrers", query, async (prepared) => prepared, { signal });
   const deferred = deferredReferrersQualificationFromQuery(forwarded);
   if (!deferred) throw new Error("wave96e_referrers_deferred_missing");
   return deferred;
@@ -896,6 +913,282 @@ describe("qualified flat Referrers pages and summary", () => {
       0,
     );
     expect(trace.preparedSql.length).toBe(oldTrace.preparedSql.length + 1);
+    const statementBudgets = trace.preparedSql.map((sql, index) => ({
+      utf8Bytes: Buffer.byteLength(sql, "utf8"),
+      bindingCount: trace.bindings[index]?.length ?? 0,
+    }));
+    expect(trace.bindings).toHaveLength(trace.preparedSql.length);
+    expect(
+      statementBudgets.every(
+        ({ utf8Bytes, bindingCount }) =>
+          utf8Bytes <= D1_MAX_SQL_UTF8_BYTES &&
+          bindingCount <= D1_MAX_BOUND_PARAMETERS,
+      ),
+    ).toBe(true);
+    const reportSql = trace.preparedSql.at(-1)!;
+    expect(reportSql).not.toBe(oldTrace.preparedSql.at(-1));
+    expect(reportSql).toMatch(/\bvisit_id\b/i);
+    expect(reportSql).not.toMatch(/\bentity_id\b/i);
+    recordEvidence("numeric-referrers-new-execution-route", {
+      actual: actual.value,
+      legacy: legacy.value,
+      statementCount: trace.preparedSql.length,
+      legacyStatementCount: oldTrace.preparedSql.length,
+      reportSqlBytes: statementBudgets.at(-1)?.utf8Bytes,
+      reportBindingCount: statementBudgets.at(-1)?.bindingCount,
+      statementBudgets,
+      reportUsesVisitRelationColumn: /\bvisit_id\b/i.test(reportSql),
+      reportUsesLegacyIdentityRelationColumn: /\bentity_id\b/i.test(reportSql),
+    });
+  });
+
+  it("fault-injects an evaluator compile-budget refusal and completes the new Referrers route", async () => {
+    const { database } = createFixture();
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "a-source");
+    const query = queryFor({
+      scope: "event",
+      variant: "summary",
+      topN: 5,
+      filterDsl: `${BASE_FILTER} and count(page { page.durationMs gt 5 }) gte 1`,
+    });
+    const legacy = await legacyRead(database, query, traceFor());
+    const trace = traceFor();
+    const diagnostics = createD1ReadDiagnostics();
+    const provider = createD1SiteProviderRegistry({
+      env: testEnv(database, trace),
+      siteId: SITE,
+      diagnostics,
+    }).resolve("referrers");
+    if (!provider) throw new Error("wave97ep_budget_fallback_provider_missing");
+
+    const originalCompile = db.compileD1Query;
+    let compileCalls = 0;
+    const compileSpy = vi.spyOn(db, "compileD1Query").mockImplementation(((
+      ...args: Parameters<typeof db.compileD1Query>
+    ) => {
+      compileCalls += 1;
+      if (compileCalls === 2)
+        throw new D1StatementBudgetError(
+          "bindings",
+          D1_MAX_BOUND_PARAMETERS + 1,
+          D1_MAX_BOUND_PARAMETERS,
+          "test.injected.advanced_count",
+        );
+      return originalCompile(...args);
+    }) as typeof db.compileD1Query);
+    let actual: Awaited<ReturnType<typeof provider.execute>>;
+    try {
+      actual = await provider.execute(query as never);
+    } finally {
+      compileSpy.mockRestore();
+    }
+
+    expect(compileCalls).toBeGreaterThan(2);
+    expect(actual.value).toEqual(legacy.value);
+    expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+      kind: "compile-budget",
+      item: "bindings",
+      actual: D1_MAX_BOUND_PARAMETERS + 1,
+      limit: D1_MAX_BOUND_PARAMETERS,
+    });
+    expect(trace.preparedSql.length).toBeGreaterThan(2);
+    const statementBudgets = trace.preparedSql.map((sql, index) => ({
+      utf8Bytes: Buffer.byteLength(sql, "utf8"),
+      bindingCount: trace.bindings[index]?.length ?? 0,
+    }));
+    expect(
+      statementBudgets.every(
+        ({ utf8Bytes, bindingCount }) =>
+          utf8Bytes <= D1_MAX_SQL_UTF8_BYTES &&
+          bindingCount <= D1_MAX_BOUND_PARAMETERS,
+      ),
+    ).toBe(true);
+    const reportSql = trace.preparedSql.at(-1)!;
+    expect(reportSql).toMatch(/\bvisit_id\b/i);
+    expect(reportSql).not.toMatch(/\bentity_id\b/i);
+    recordEvidence("fault-injected-evaluator-compile-budget-fallback", {
+      faultInjected: true,
+      compileCalls,
+      fallbackReason: diagnostics.advancedCountSqlFallbackReason,
+      actual: actual.value,
+      legacy: legacy.value,
+      statementCount: trace.preparedSql.length,
+      reportSqlBytes: statementBudgets.at(-1)?.utf8Bytes,
+      reportBindingCount: statementBudgets.at(-1)?.bindingCount,
+      reportUsesVisitRelationColumn: /\bvisit_id\b/i.test(reportSql),
+      reportUsesLegacyIdentityRelationColumn: /\bentity_id\b/i.test(reportSql),
+      statementBudgets,
+    });
+  });
+
+  it("binds the private Page visit qualification to one exact frozen summary plan", async () => {
+    const { database } = createFixture();
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "a-source");
+    const query = queryFor({
+      scope: "event",
+      variant: "summary",
+      topN: 5,
+      filterDsl: `${BASE_FILTER} and count(page { page.durationMs gt 5 }) gte 1`,
+    });
+    const trace = traceFor();
+    const deferred = await deferredFor(database, query, trace);
+    const preparation =
+      await prepareDeferredReferrersSummaryQualification(deferred);
+    if (!preparation)
+      throw new Error("wave97ep_event_referrers_preparation_missing");
+
+    const filters = attachScopedFilterMetadata(
+      deferred.filters,
+      deferred.metadata,
+    );
+    const makePlan = (topN: number): ValidatedLogicalPlan =>
+      validateLogicalPlan(
+        snapshotLogicalPlan(
+          buildReferrerSummaryPlan({
+            siteId: SITE,
+            queryTime: deferred.time,
+            filters,
+            scopePlan: deferred.metadata.plan,
+            qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+            topN,
+          }),
+        ),
+      );
+    const plan = makePlan(5);
+    const source = plan.nodes.find(
+      (node) =>
+        node.kind === "source" &&
+        node.selection?.qualificationDependencyRefs !== undefined,
+    );
+    expect(source?.kind).toBe("source");
+    if (source?.kind !== "source")
+      throw new Error("wave97ep_event_referrers_qualification_source_missing");
+    expect(source.selection?.preparedMatches).toBeUndefined();
+    expect(source.selection?.qualificationDependencyRefs).toEqual([
+      EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
+    ]);
+
+    const statementsAfterPreparation = trace.preparedSql.length;
+    const bindPreparation = (
+      overrides: {
+        readonly preparation?: unknown;
+        readonly siteId?: string;
+        readonly filters?: FilterDocument;
+        readonly scopePlan?: typeof deferred.metadata.plan;
+        readonly queryTime?: QueryTime;
+        readonly topN?: number;
+      } = {},
+    ) =>
+      bindReferrersSummaryQualification({
+        preparation: overrides.preparation ?? preparation,
+        siteId: overrides.siteId ?? SITE,
+        filters: overrides.filters ?? filters,
+        scopePlan: overrides.scopePlan ?? deferred.metadata.plan,
+        queryTime: overrides.queryTime ?? deferred.time,
+        topN: overrides.topN ?? 5,
+      });
+
+    expect(() => bindPreparation({ topN: 4 })).toThrow(
+      "qualification_execution_plan_snapshot_mismatch",
+    );
+    expect(() => bindPreparation({ siteId: "other-site" })).toThrow(
+      "qualification_execution_plan_snapshot_mismatch",
+    );
+    expect(() =>
+      bindPreparation({
+        queryTime: createQueryTime(101, 200, "UTC", 300),
+      }),
+    ).toThrow("qualification_execution_plan_snapshot_mismatch");
+    expect(() =>
+      bindPreparation({
+        scopePlan: { ...deferred.metadata.plan, scope: "session" } as never,
+      }),
+    ).toThrow("qualification_execution_plan_snapshot_mismatch");
+    const clonedPreparation = Object.assign(
+      Object.create(Object.getPrototypeOf(preparation)) as typeof preparation,
+      preparation,
+    );
+    expect(() => bindPreparation({ preparation: clonedPreparation })).toThrow(
+      "qualification_execution_preparation_untrusted",
+    );
+
+    const { plan: boundPlan, executionInputs } = bindPreparation();
+    expect(boundPlan).not.toBe(plan);
+    expect(() => bindPreparation()).toThrow(
+      "qualification_execution_preparation_replayed",
+    );
+    let fakeMethodCalls = 0;
+    let fakeGetterReads = 0;
+    const fakeMethod = {
+      attach() {
+        fakeMethodCalls += 1;
+        return [];
+      },
+    };
+    const fakeGetter = Object.defineProperty({}, "attach", {
+      get() {
+        fakeGetterReads += 1;
+        return () => [];
+      },
+    });
+    expect(() =>
+      attachQualificationExecutionInputs(fakeMethod, {}, boundPlan),
+    ).toThrow("qualification_execution_input_untrusted");
+    expect(() =>
+      attachQualificationExecutionInputs(fakeGetter, {}, boundPlan),
+    ).toThrow("qualification_execution_input_untrusted");
+    expect(fakeMethodCalls).toBe(0);
+    expect(fakeGetterReads).toBe(0);
+
+    expect(() =>
+      attachQualificationExecutionInputs(executionInputs, {}, makePlan(5)),
+    ).toThrow("qualification_execution_input_plan_mismatch");
+    expect(() =>
+      attachQualificationExecutionInputs(undefined, {}, boundPlan),
+    ).toThrow("qualification_execution_dependency_unbound");
+    const lowerer = {};
+    const bindings = attachQualificationExecutionInputs(
+      executionInputs,
+      lowerer,
+      boundPlan,
+    );
+    expect(Object.keys(bindings[0]!.relation.columns).sort()).toEqual([
+      "site_id",
+      "visit_id",
+    ]);
+    expect(() =>
+      attachQualificationExecutionInputs(executionInputs, {}, boundPlan),
+    ).toThrow("qualification_execution_input_plan_mismatch");
+    expect(trace.preparedSql).toHaveLength(statementsAfterPreparation);
+  });
+
+  it("keeps a pre-aborted Referrers qualification ahead of evaluator reads", async () => {
+    const { database } = createFixture();
+    const query = queryFor({
+      scope: "event",
+      variant: "summary",
+      topN: 5,
+      filterDsl: `${BASE_FILTER} and count(page { page.durationMs gt 5 }) gte 1`,
+    });
+    const trace = traceFor();
+    const controller = new AbortController();
+    const deferred = await deferredFor(
+      database,
+      query,
+      trace,
+      controller.signal,
+    );
+    const statementsBeforePreparation = trace.preparedSql.length;
+    controller.abort();
+
+    await expect(
+      prepareDeferredReferrersSummaryQualification(deferred),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(trace.preparedSql).toHaveLength(statementsBeforePreparation);
   });
 
   it.each(defaults)(

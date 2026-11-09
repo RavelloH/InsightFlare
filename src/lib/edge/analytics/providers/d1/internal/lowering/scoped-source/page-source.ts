@@ -89,6 +89,7 @@ export class ScopedPageSourceLowerer {
         selection,
         this.#membership.matchingPageEventOwnerPairs(dataset, selection),
         qualifiedEntities,
+        this.#context.qualificationRelations,
       ).relation;
     }
     return {

@@ -94,6 +94,10 @@ import {
   type LoweredAnalyticsSource,
   normalizeAnalyticsRelationalSiteIds,
 } from "./analytics-relational-storage";
+import {
+  attachQualificationExecutionInputs,
+  type QualificationExecutionInputs,
+} from "./qualification-execution-inputs";
 export { AnalyticsRelationalLoweringError } from "./lowering/errors";
 import type {
   AnalysisResultQualificationBinding,
@@ -342,10 +346,16 @@ export class AnalyticsLogicalToDbLowerer {
       readonly analysisResultQualificationBindings?: readonly AnalysisResultQualificationBinding[];
       readonly comparisonPageQualificationGate?: ComparisonPageQualificationGate;
       readonly comparisonDomainAdmissionBinding?: RegisteredComparisonAdmissionBinding;
+      readonly qualificationExecutionInputs?: QualificationExecutionInputs;
     } = {},
   ) {
     this.#plan = plan;
     this.#storageContext = storageContext;
+    const qualificationBindings = attachQualificationExecutionInputs(
+      options.qualificationExecutionInputs,
+      this,
+      plan,
+    );
     this.#comparisonAdmissionBinding = options.comparisonDomainAdmissionBinding;
     if (
       this.#comparisonAdmissionBinding &&
@@ -489,6 +499,7 @@ export class AnalyticsLogicalToDbLowerer {
     this.#scopedSourceLowering = new ScopedSourceLoweringPass(
       storageContext,
       plan.nodes.filter((node): node is SourceNode => node.kind === "source"),
+      qualificationBindings,
     );
   }
 

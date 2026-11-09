@@ -1,6 +1,10 @@
 import { classifyTrafficChannel } from "@/lib/analytics/traffic-channel-rules";
 import { browserEngineLabel } from "@/lib/browser-engine";
-import { type CompiledQuery, D1StatementBudgetError } from "@/lib/db";
+import {
+  type CompiledQuery,
+  D1StatementBudgetError,
+  valuesRelation,
+} from "@/lib/db";
 import { AnalyticsProviderDomainError } from "@/lib/edge/analytics/application/errors";
 import type { TypedQueryProviderMiddleware } from "@/lib/edge/analytics/application/provider-registry";
 import type {
@@ -93,6 +97,10 @@ import {
   type TechnologyShareTrendQualificationConfiguration,
   technologyShareTrendQualificationConfiguration,
 } from "@/lib/edge/analytics/engine/technology-share-trend-report-plan";
+import {
+  createReferrersSummaryQualificationPreparation,
+  type ReferrersSummaryQualificationPreparation,
+} from "@/lib/edge/analytics/providers/d1/internal/referrers-qualification-execution";
 import type { Env } from "@/lib/edge/types";
 import type {
   FilterEvaluationDataset,
@@ -108,6 +116,7 @@ import type {
   FilterTargetExpression,
 } from "@/lib/filter-contract/filters";
 
+import { sqliteBoundText } from "./lowering/scoped-source/selection-compatibility";
 import type { AdvancedFilterActivityRow } from "./advanced-filter-activity-query";
 import { queryAdvancedFilterActivityRange } from "./advanced-filter-activity-query";
 import {
@@ -131,6 +140,7 @@ import {
 import type { AdvancedFilterPayloadNode } from "./advanced-filter-payload-query";
 import { queryAdvancedFilterPayloadNodes } from "./advanced-filter-payload-query";
 import { siteCoverage } from "./advanced-filter-site-coverage";
+import type { AnalyticsDbRelation } from "./analytics-relational-storage";
 import { semanticSubjectForAuthorizedSubset } from "./authorized-site-subject";
 import { comparisonReportFamilyForTab } from "./comparison-report-family";
 import { resolveCrossBreakdownPageDimension } from "./core-dimensions";
@@ -198,6 +208,12 @@ const SITE_CHUNK_SIZE = 90;
 type RawEvaluationRow = AdvancedFilterActivityRow;
 
 type RawPayloadNode = AdvancedFilterPayloadNode;
+
+interface QualificationMatchRow {
+  readonly siteId: string;
+  readonly kind: "entity" | "visit" | "event";
+  readonly id: string;
+}
 
 const DEFERRED_EVENT_QUALIFICATION = Symbol(
   "insightflare.deferred-event-qualification",
@@ -1576,7 +1592,7 @@ async function evaluateAdvancedCountSql(input: {
   return { kind: "evaluated", matches: { entityIds } };
 }
 
-async function evaluateForSites(input: {
+async function evaluateForSitesCore(input: {
   readonly env: Env;
   readonly subject: SemanticSubjectDomain;
   readonly siteIds: readonly string[];
@@ -1586,11 +1602,8 @@ async function evaluateForSites(input: {
   readonly diagnostics?: D1ReadDiagnostics;
   readonly signal?: AbortSignal;
   readonly coverage?: ReadonlyMap<string, number>;
-}): Promise<ScopedAdvancedFilterMatches> {
-  if (input.time.filterRangeEmpty)
-    return input.plan.scope === "event"
-      ? { visitIds: [], eventIds: [] }
-      : { entityIds: [] };
+}): Promise<QualificationMatchRow[]> {
+  if (input.time.filterRangeEmpty) return [];
   const countSqlSupport = classifyAdvancedCountFilter(
     input.filters,
     input.plan.scope,
@@ -1639,7 +1652,12 @@ async function evaluateForSites(input: {
       coverage,
       readRange,
     });
-    if (countSql.kind === "evaluated") return countSql.matches;
+    if (countSql.kind === "evaluated")
+      return (countSql.matches.entityIds ?? []).map((identity) => ({
+        siteId: identity.siteId,
+        kind: "entity" as const,
+        id: identity.id,
+      }));
     if (input.diagnostics)
       input.diagnostics.advancedCountSqlFallbackReason =
         countSql.fallbackReason;
@@ -1667,9 +1685,7 @@ async function evaluateForSites(input: {
         )
       : Promise.resolve(new Map<string, unknown>()),
   ]);
-  const entityIds: AdvancedFilterIdentity[] = [];
-  const visitIds: AdvancedFilterIdentity[] = [];
-  const eventIds: AdvancedFilterIdentity[] = [];
+  const matches: QualificationMatchRow[] = [];
   const rowsBySite = new Map<unknown, RawEvaluationRow[]>();
   for (const row of rows) {
     const siteRows = rowsBySite.get(row.site_id) ?? [];
@@ -1741,23 +1757,55 @@ async function evaluateForSites(input: {
       throw error;
     }
     if (input.plan.scope === "event") {
-      for (const id of result.matchingVisitIds) visitIds.push({ siteId, id });
-      for (const id of result.matchingEventIds) eventIds.push({ siteId, id });
+      for (const id of result.matchingVisitIds)
+        matches.push({ siteId, kind: "visit", id });
+      for (const id of result.matchingEventIds)
+        matches.push({ siteId, kind: "event", id });
     } else {
       for (const id of result.matchingScopeEntityIds)
-        entityIds.push({ siteId, id });
+        matches.push({ siteId, kind: "entity", id });
     }
   }
-  const stable = (
-    left: AdvancedFilterIdentity,
-    right: AdvancedFilterIdentity,
-  ) =>
-    left.siteId.localeCompare(right.siteId) || left.id.localeCompare(right.id);
-  return {
-    ...(input.plan.scope === "event"
-      ? { visitIds: visitIds.sort(stable), eventIds: eventIds.sort(stable) }
-      : { entityIds: entityIds.sort(stable) }),
-  };
+  return matches.sort(
+    (left, right) =>
+      left.siteId.localeCompare(right.siteId) ||
+      left.kind.localeCompare(right.kind) ||
+      left.id.localeCompare(right.id),
+  );
+}
+
+async function evaluateForSites(input: {
+  readonly env: Env;
+  readonly subject: SemanticSubjectDomain;
+  readonly siteIds: readonly string[];
+  readonly filters: FilterDocument;
+  readonly plan: ScopedFilterPlan;
+  readonly time: QueryTime;
+  readonly diagnostics?: D1ReadDiagnostics;
+  readonly signal?: AbortSignal;
+  readonly coverage?: ReadonlyMap<string, number>;
+}): Promise<ScopedAdvancedFilterMatches> {
+  const matches = await evaluateForSitesCore(input);
+  const asIdentity = (
+    match: QualificationMatchRow,
+  ): AdvancedFilterIdentity => ({
+    siteId: match.siteId,
+    id: match.id,
+  });
+  return input.plan.scope === "event"
+    ? {
+        visitIds: matches
+          .filter((match) => match.kind === "visit")
+          .map(asIdentity),
+        eventIds: matches
+          .filter((match) => match.kind === "event")
+          .map(asIdentity),
+      }
+    : {
+        entityIds: matches
+          .filter((match) => match.kind === "entity")
+          .map(asIdentity),
+      };
 }
 
 function sameRange(
@@ -7334,6 +7382,153 @@ export function isDeferredEventCandidatePageProjection(
     candidate.countInput.candidateAnchor?.kind === "event-candidate" &&
     candidate.eventCandidateReportProjection === "page-visits"
   );
+}
+
+function filtersUseSequenceSemantics(filters: FilterDocument): boolean {
+  let found = false;
+  const visit = (expression: FilterExpression | null): void => {
+    if (!expression || found) return;
+    if (expression.kind === "condition") {
+      target(expression.target);
+      if (
+        expression.value &&
+        typeof expression.value === "object" &&
+        !Array.isArray(expression.value) &&
+        "kind" in expression.value
+      )
+        target(expression.value as FilterTargetExpression);
+    } else if (expression.kind === "not") visit(expression.child);
+    else expression.children.forEach(visit);
+  };
+  const target = (value: FilterTargetExpression): void => {
+    if (found) return;
+    if (
+      value.kind === "sequence" ||
+      value.kind === "adjacent" ||
+      value.kind === "without" ||
+      (value.kind === "context-root" && value.context === "sequence") ||
+      (value.kind === "context-intrinsic" && value.context === "sequence")
+    ) {
+      found = true;
+      return;
+    }
+    if (value.kind === "member") target(value.object);
+    else if (value.kind === "occurrence-time") target(value.input);
+    else if (value.kind === "selector") {
+      target(value.collection);
+      visit(value.predicate);
+    } else if (value.kind === "projection") target(value.collection);
+    else if (value.kind === "reducer") target(value.input);
+    else if (value.kind === "arithmetic") {
+      target(value.left);
+      target(value.right);
+    } else if (value.kind === "bucket") target(value.input);
+    else if (value.kind === "window") {
+      target(value.collection);
+      target(value.anchor);
+    } else if (value.kind === "periods") target(value.collection);
+  };
+  visit(filters.root);
+  return found;
+}
+
+function sameCandidateReadAndFilterWindow(time: QueryTime): boolean {
+  const candidate = time.range;
+  if (
+    time.fullHistory === true ||
+    time.filterRangeEmpty === true ||
+    !Number.isFinite(candidate.startMs) ||
+    !Number.isFinite(candidate.endExclusiveMs) ||
+    candidate.startMs >= candidate.endExclusiveMs
+  )
+    return false;
+  const read = time.readRange ?? candidate;
+  if (!sameRange(candidate, read)) return false;
+  return (
+    time.filterRange === undefined ||
+    (time.filterRange.startMs === candidate.startMs &&
+      time.filterRange.endExclusiveMs === candidate.endExclusiveMs)
+  );
+}
+
+/** Prepare only the private, one-site, same-window Referrers summary slice. */
+export async function prepareDeferredReferrersSummaryQualification(
+  deferred: DeferredReferrersQualification,
+): Promise<ReferrersSummaryQualificationPreparation | undefined> {
+  if (!isDeferredEventCandidatePageProjection(deferred)) return undefined;
+  if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  if (
+    deferred.operation !== "referrers" ||
+    deferred.referrersRequest?.kind !== "summary" ||
+    deferred.referrersRequest.audience !== "private-dashboard" ||
+    deferred.subject.origin !== "site" ||
+    deferred.subject.siteIds.length !== 1 ||
+    deferred.subject.siteIds[0] !== deferred.siteId ||
+    deferred.countInput.scope !== "event" ||
+    deferred.metadata.plan.scope !== "event" ||
+    deferred.metadata.plan.mode !== "observation" ||
+    deferred.metadata.plan.membership.kind === "entity" ||
+    deferred.metadata.plan.advancedMatches !== undefined ||
+    !sameCandidateReadAndFilterWindow(deferred.time) ||
+    filtersUseSequenceSemantics(deferred.filters)
+  )
+    return undefined;
+
+  const matches = await evaluateForSitesCore({
+    env: deferred.env,
+    subject: deferred.subject,
+    siteIds: [deferred.siteId],
+    filters: deferred.filters,
+    plan: deferred.metadata.plan,
+    time: deferred.time,
+    diagnostics: deferred.diagnostics,
+    signal: deferred.signal,
+    coverage: deferred.coverage,
+  });
+  if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  return createReferrersSummaryQualificationPreparation({
+    siteId: deferred.siteId,
+    filters: deferred.filters,
+    queryTime: deferred.time,
+    metadata: deferred.metadata,
+    topN: deferred.referrersRequest.topN,
+    relation: createReferrersVisitRelation(deferred.siteId, matches),
+  });
+}
+
+function createReferrersVisitRelation(
+  siteId: string,
+  matches: readonly QualificationMatchRow[],
+): AnalyticsDbRelation {
+  const unique = new Map<
+    string,
+    { readonly siteId: string; readonly id: string }
+  >();
+  for (const match of matches) {
+    if (!match) throw new Error("qualification_execution_match_invalid");
+    if (match.kind !== "visit") continue;
+    if (match.siteId !== siteId || typeof match.id !== "string")
+      throw new Error("qualification_execution_visit_identity_invalid");
+    unique.set(JSON.stringify([match.siteId, "page", match.id]), {
+      siteId: match.siteId,
+      id: match.id,
+    });
+  }
+  const rows = [...unique.values()].sort(
+    (left, right) =>
+      left.siteId.localeCompare(right.siteId) ||
+      left.id.localeCompare(right.id),
+  );
+  return valuesRelation(
+    {
+      site_id: { affinity: "text", nullable: false },
+      visit_id: { affinity: "text", nullable: false },
+    },
+    rows.map((row) => ({
+      site_id: sqliteBoundText(row.siteId),
+      visit_id: sqliteBoundText(row.id),
+    })),
+  ) as AnalyticsDbRelation;
 }
 
 export function isDeferredComparisonPageQualification(

@@ -735,6 +735,7 @@ export function eventOwnerPairsForObservationFilter(
 export function observationPagePairMatches(
   dataset: AnalyticsLegacyScopedDataset,
   selection: SemanticScopedSourceSelection,
+  qualificationRelations?: ReadonlyMap<string, AnalyticsDbRelation>,
 ): IdentityRelation {
   if (selection.preparedMatches) {
     const explicit = explicitIdentityRelation(
@@ -746,6 +747,29 @@ export function observationPagePairMatches(
       site_pk: explicit.columns.site_pk!,
       visit_id: explicit.columns.entity_id!,
     });
+  }
+  if (selection.qualificationDependencyRefs) {
+    if (selection.qualificationDependencyRefs.length !== 1)
+      throw new Error(
+        "qualification_execution_dependency_cardinality_mismatch",
+      );
+    const dependencyRef = selection.qualificationDependencyRefs[0]!;
+    const relation = qualificationRelations?.get(dependencyRef);
+    if (!relation)
+      throw new Error("qualification_execution_dependency_unbound");
+    if (!relation.columns.site_id || !relation.columns.visit_id)
+      throw new Error("qualification_execution_relation_schema_mismatch");
+    const scoped = join(
+      relation,
+      dataset.sites,
+      eq(relation.columns.site_id, dataset.sites.columns.site_id),
+    );
+    return distinct(
+      project(scoped, {
+        site_pk: scoped.columns.right_site_pk!,
+        visit_id: scoped.columns.left_visit_id!,
+      }),
+    );
   }
   const observation = planObservationFilter(selection.filter.root);
   const pageUniverse = pagePairIdentityRows(dataset.readPages);
@@ -1053,6 +1077,7 @@ export function selectedPageRows(
   selection: SemanticScopedSourceSelection,
   matchingEventOwnerPairs?: IdentityRelation,
   qualifiedEntities?: IdentityRelation,
+  qualificationRelations?: ReadonlyMap<string, AnalyticsDbRelation>,
 ): AnalyticsLegacyPageRow {
   const relation =
     selection.profile === "direct-page-analytics-v1"
@@ -1075,7 +1100,11 @@ export function selectedPageRows(
           : selection.mode === "observation"
             ? pageRowsForVisitIds(
                 dataset.candidatePages,
-                observationPagePairMatches(dataset, selection),
+                observationPagePairMatches(
+                  dataset,
+                  selection,
+                  qualificationRelations,
+                ),
               )
             : entityPageRows(dataset, selection, qualifiedEntities);
   return pageRowWithRelation(dataset.candidatePages, relation);

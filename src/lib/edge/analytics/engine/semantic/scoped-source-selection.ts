@@ -11,6 +11,10 @@ import type {
 } from "@/lib/edge/analytics/contract/types";
 import type { LogicalPlanContext } from "@/lib/edge/analytics/engine/logical/plan";
 import {
+  isQualificationDependencyRef,
+  type QualificationDependencyRef,
+} from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
+import {
   createSemanticSubjectDomain,
   type SemanticSubjectDomain,
 } from "@/lib/edge/analytics/engine/semantic/subject";
@@ -79,6 +83,7 @@ export interface SemanticScopedSourceSelection {
   readonly mode: "observation" | "entity";
   readonly entityKind?: "session" | "visitor";
   readonly preparedMatches?: SemanticPreparedMatches;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly eventNameGate?: SemanticEventNameGate;
   readonly postObservationFilter?: SemanticPostObservationFilter;
   readonly subject: SemanticSubjectDomain;
@@ -100,6 +105,8 @@ export interface CreateSemanticScopedSourceSelectionInput {
   readonly preparedPlanOperation?: QueryOperation;
   /** Required by direct-page-entity-only-compat-v1. */
   readonly compatibilityScope?: "session" | "visitor";
+  /** Semantic dependencies whose physical results are bound by the Provider at execution. */
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly eventName?: string;
   /** Event analytics preserves the legacy truthy raw value; record detail trims. */
   readonly eventNameInputSemantics?:
@@ -136,6 +143,40 @@ function snapshotTime(time: SemanticTemporalDomains): SemanticTemporalDomains {
 
 function snapshotQueryTime(time: QueryTime): SemanticTemporalDomains {
   return semanticTemporalDomainsFromQueryTime(time);
+}
+
+function snapshotQualificationDependencyRefs(
+  refs: unknown,
+): readonly QualificationDependencyRef[] | undefined {
+  if (refs === undefined) return undefined;
+  if (!Array.isArray(refs)) fail("qualification_dependency_refs_invalid");
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(refs, "length");
+  const length = lengthDescriptor?.value;
+  if (!Number.isSafeInteger(length) || length < 1)
+    fail("qualification_dependency_refs_invalid");
+  const snapshot: QualificationDependencyRef[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(refs, String(index));
+    if (!descriptor || !("value" in descriptor))
+      fail("qualification_dependency_refs_invalid");
+    if (!isQualificationDependencyRef(descriptor.value))
+      fail("qualification_dependency_refs_invalid");
+    snapshot.push(descriptor.value);
+  }
+  if (new Set(snapshot).size !== snapshot.length)
+    fail("qualification_dependency_refs_invalid");
+  return Object.freeze(snapshot);
+}
+
+function ownDataProperty(
+  value: object,
+  property: string,
+): { readonly present: boolean; readonly value: unknown } {
+  const descriptor = Object.getOwnPropertyDescriptor(value, property);
+  if (!descriptor) return { present: false, value: undefined };
+  if (!("value" in descriptor))
+    fail("qualification_dependency_accessor_rejected");
+  return { present: true, value: descriptor.value };
 }
 
 function isEmptyAndFilter(filters: FilterDocument): boolean {
@@ -347,6 +388,13 @@ export function createSemanticScopedSourceSelection(
   const subject = snapshotSubject(input.subject);
   const time = snapshotTime(input.time);
   const metadata = scopedFilterMetadata(input.filters);
+  const dependencyProperty = ownDataProperty(
+    input,
+    "qualificationDependencyRefs",
+  );
+  const qualificationDependencyRefs = snapshotQualificationDependencyRefs(
+    dependencyProperty.value,
+  );
   let scope: FilterScope;
   let mode: "observation" | "entity";
   let entityKind: "session" | "visitor" | undefined;
@@ -410,9 +458,25 @@ export function createSemanticScopedSourceSelection(
     if (
       filters.root &&
       filterDocumentUsesAdvancedExpressions(filters) &&
-      input.expectedPlan.advancedMatches === undefined
+      input.expectedPlan.advancedMatches === undefined &&
+      qualificationDependencyRefs === undefined
     )
       return fail("prepared_advanced_matches_missing");
+    if (
+      input.expectedPlan.advancedMatches !== undefined &&
+      qualificationDependencyRefs !== undefined
+    )
+      return fail("prepared_matches_and_qualification_dependency_conflict");
+    if (
+      qualificationDependencyRefs !== undefined &&
+      (input.profile !== "prepared-scoped-v1" ||
+        input.expectedPlan.scope !== "event" ||
+        input.expectedPlan.mode !== "observation" ||
+        input.expectedPlan.membership.kind === "entity" ||
+        !filters.root ||
+        !filterDocumentUsesAdvancedExpressions(filters))
+    )
+      return fail("qualification_dependency_semantics_mismatch");
     preparedMatches = snapshotMatches(
       input.expectedPlan,
       authorized,
@@ -551,6 +615,7 @@ export function createSemanticScopedSourceSelection(
     mode,
     ...(entityKind ? { entityKind } : {}),
     ...(preparedMatches ? { preparedMatches } : {}),
+    ...(qualificationDependencyRefs ? { qualificationDependencyRefs } : {}),
     ...(eventNameGate ? { eventNameGate } : {}),
     ...(postObservationFilter ? { postObservationFilter } : {}),
     subject,
@@ -602,6 +667,24 @@ export function validateSemanticScopedSourceSelection(
     !sameJsonValue(snapshotTime(selection.time), context.time)
   )
     fail("logical_context_mismatch");
+  const dependencyProperty = ownDataProperty(
+    selection,
+    "qualificationDependencyRefs",
+  );
+  const qualificationDependencyRefs = snapshotQualificationDependencyRefs(
+    dependencyProperty.value,
+  );
+  if (
+    dependencyProperty.value !== undefined &&
+    (selection.profile !== "prepared-scoped-v1" ||
+      selection.scope !== "event" ||
+      selection.mode !== "observation" ||
+      selection.preparedMatches !== undefined ||
+      !selection.filter.root ||
+      !filterDocumentUsesAdvancedExpressions(selection.filter) ||
+      Object.prototype.hasOwnProperty.call(selection, "postObservationFilter"))
+  )
+    fail("qualification_dependency_semantics_mismatch");
   const authorized = canonicalSiteIds(selection.authorizedSiteIds);
   if (!sameJsonValue(authorized, selection.authorizedSiteIds))
     fail("authorization_snapshot_not_canonical");
@@ -622,7 +705,8 @@ export function validateSemanticScopedSourceSelection(
     if (
       selection.filter.root &&
       filterDocumentUsesAdvancedExpressions(selection.filter) &&
-      selection.preparedMatches === undefined
+      selection.preparedMatches === undefined &&
+      qualificationDependencyRefs === undefined
     )
       fail("prepared_advanced_matches_missing");
   }
@@ -649,7 +733,8 @@ export function validateSemanticScopedSourceSelection(
     if (
       selection.filter.root &&
       filterDocumentUsesAdvancedExpressions(selection.filter) &&
-      selection.preparedMatches === undefined
+      selection.preparedMatches === undefined &&
+      qualificationDependencyRefs === undefined
     )
       fail("prepared_advanced_matches_missing");
     if (selection.eventNameGate !== undefined)
