@@ -27,6 +27,7 @@ import {
   type EventContextOwnerAttribute,
 } from "@/lib/edge/analytics/engine/semantic/event-context-cards";
 import { semanticPageDimension } from "@/lib/edge/analytics/engine/semantic/page-dimensions";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
@@ -251,6 +252,7 @@ function boundaryPages(
     readonly queryTime: QueryTime;
     readonly filters: FilterDocument;
     readonly scopePlan?: ScopedFilterPlan;
+    readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
     readonly subject: ReturnType<
       typeof createEventReportSourceContext
     >["subject"];
@@ -259,11 +261,16 @@ function boundaryPages(
 ): LogicalRelationHandle {
   const selection = input.scopePlan
     ? createSemanticScopedSourceSelection({
-        profile: "prepared-scoped-reader-window-v1",
+        profile: input.qualificationDependencyRefs
+          ? "prepared-scoped-v1"
+          : "prepared-scoped-reader-window-v1",
         filters: input.filters,
         subject: input.subject,
         time: input.time,
         expectedPlan: input.scopePlan,
+        ...(input.qualificationDependencyRefs
+          ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+          : {}),
       })
     : createSemanticScopedSourceSelection({
         profile: "direct-page-analytics-v1",
@@ -486,6 +493,13 @@ export function buildEventContextReportPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  /**
+   * Request-private Event membership. Its owner proved the reader window equals
+   * the prepared domains, so the canonical prepared Source is used directly.
+   */
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
+  /** Page visit membership for the session-boundary Page Source. */
+  readonly pageVisitDependencyRefs?: readonly QualificationDependencyRef[];
   readonly eventName?: string;
   readonly limit: number;
   readonly selectedKeys?: readonly EventContextCardKey[];
@@ -499,8 +513,11 @@ export function buildEventContextReportPlan(input: {
     queryTime: input.queryTime,
     filters: input.filters,
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
-    ...(input.scopePlan
+    ...(input.scopePlan && !input.qualificationDependencyRefs
       ? { preparedTimePolicy: "reader-window" as const }
+      : {}),
+    ...(input.qualificationDependencyRefs
+      ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
       : {}),
   });
   const attributes = requiredOwnerAttributes(selected);
@@ -522,6 +539,9 @@ export function buildEventContextReportPlan(input: {
         queryTime: input.queryTime,
         filters: input.filters,
         ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+        ...(input.pageVisitDependencyRefs
+          ? { qualificationDependencyRefs: input.pageVisitDependencyRefs }
+          : {}),
         subject: context.subject,
         time: context.time,
       })

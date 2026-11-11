@@ -20,9 +20,8 @@ export type QualificationExecutionInputs = Readonly<{
 }>;
 
 interface QualificationExecutionState {
-  readonly dependencyRef: QualificationDependencyRef;
+  readonly bindings: readonly QualificationDependencyRelationBinding[];
   readonly plan: ValidatedLogicalPlan;
-  readonly relation: AnalyticsDbRelation;
   attached: boolean;
 }
 
@@ -60,27 +59,47 @@ function assertRelationSchema(
 }
 
 /**
- * Trusted report preparation passes an already-built physical relation and
- * its final frozen plan. Raw match IDs are deliberately not accepted here.
+ * The plan's Sources may share one dependency ref, but the distinct refs the
+ * plan names must be exactly the refs of the supplied relations.
+ */
+function assertBindingsMatchPlan(
+  bindings: readonly QualificationDependencyRelationBinding[],
+  plan: ValidatedLogicalPlan,
+): void {
+  const dependencies = new Set(planDependencies(plan));
+  const bound = new Set(bindings.map(({ dependencyRef }) => dependencyRef));
+  if (
+    dependencies.size === 0 ||
+    bound.size !== bindings.length ||
+    dependencies.size !== bound.size ||
+    [...dependencies].some((ref) => !bound.has(ref))
+  )
+    throw new Error("qualification_execution_dependency_unexpected");
+  for (const binding of bindings)
+    assertRelationSchema(binding.relation, binding.dependencyRef);
+}
+
+/**
+ * Trusted report preparation passes already-built physical relations and its
+ * final frozen plan. Raw match IDs are deliberately not accepted here.
  */
 export function createQualificationExecutionInputsForTrustedPlan(
-  relation: AnalyticsDbRelation,
+  relations: readonly QualificationDependencyRelationBinding[],
   plan: ValidatedLogicalPlan,
-  dependencyRef: QualificationDependencyRef = EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
 ): QualificationExecutionInputs {
   if (!Object.isFrozen(plan))
     throw new Error("qualification_execution_plan_not_frozen");
-  const dependencies = planDependencies(plan);
-  if (dependencies.length !== 1 || dependencies[0] !== dependencyRef)
-    throw new Error("qualification_execution_dependency_unexpected");
-  assertRelationSchema(relation, dependencyRef);
+  assertBindingsMatchPlan(relations, plan);
   const handle = Object.freeze(
     Object.create(null),
   ) as QualificationExecutionInputs;
   qualificationExecutionStates.set(handle as object, {
-    dependencyRef,
+    bindings: Object.freeze(
+      relations.map(({ dependencyRef, relation }) =>
+        Object.freeze({ dependencyRef, relation }),
+      ),
+    ),
     plan,
-    relation,
     attached: false,
   });
   return handle;
@@ -110,14 +129,7 @@ export function attachQualificationExecutionInputs(
     !Object.isFrozen(plan)
   )
     throw new Error("qualification_execution_input_plan_mismatch");
-  if (dependencies.length !== 1 || dependencies[0] !== state.dependencyRef)
-    throw new Error("qualification_execution_dependency_unexpected");
-  assertRelationSchema(state.relation, state.dependencyRef);
+  assertBindingsMatchPlan(state.bindings, plan);
   state.attached = true;
-  return Object.freeze([
-    Object.freeze({
-      dependencyRef: state.dependencyRef,
-      relation: state.relation,
-    }),
-  ]);
+  return state.bindings;
 }

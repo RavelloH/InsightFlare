@@ -27,6 +27,10 @@ import type {
   QueryWindow,
 } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
+import {
+  type EventMembershipFallbackPlan,
+  prepareEventMembershipFallbackPlan,
+} from "./event-membership-fallback";
 
 export { EVENT_CONTEXT_CARD_KEYS };
 export type { EventContextCardKey };
@@ -180,6 +184,7 @@ export async function queryEventAnalyticsContextCardsFromD1(
   if (selected.length === 0) return emptyCards();
   let reportFilters = filters;
   let rows: Record<string, unknown>[] | undefined;
+  let membership: EventMembershipFallbackPlan | undefined;
   const deferred = options?.deferredQualification;
   if (deferred) {
     const request: EventContextQualificationQuery = {
@@ -229,9 +234,47 @@ export async function queryEventAnalyticsContextCardsFromD1(
       if (options?.diagnostics)
         options.diagnostics.advancedCountSqlFallbackReason =
           result.fallbackReason;
-      reportFilters = await prepareDeferredEventQualificationFallback(deferred);
+      membership = await prepareEventMembershipFallbackPlan({
+        deferred,
+        operation: "event-context",
+        operations: ["event-context"],
+        configuration: {
+          limit,
+          eventName: eventName ?? null,
+          selectedKeys: selected,
+        },
+        withPageVisits: selected.some(
+          (key) => EVENT_CONTEXT_CARDS[key].kind === "session-boundary",
+        ),
+        buildPlan: (context) =>
+          buildEventContextReportPlan({
+            siteId,
+            queryTime: context.queryTime,
+            filters,
+            scopePlan: context.scopePlan,
+            qualificationDependencyRefs: context.qualificationDependencyRefs,
+            ...(context.pageVisitDependencyRefs.length > 0
+              ? { pageVisitDependencyRefs: context.pageVisitDependencyRefs }
+              : {}),
+            ...(eventName !== undefined ? { eventName } : {}),
+            limit,
+            selectedKeys: selected,
+          }),
+      });
+      if (!membership)
+        reportFilters =
+          await prepareDeferredEventQualificationFallback(deferred);
     }
   }
+  if (!rows && membership)
+    rows = await queryAnalyticsReportOutputRowsFromD1(
+      env,
+      membership.plan,
+      EVENT_CONTEXT_REPORT_OUTPUT,
+      undefined,
+      options?.diagnostics,
+      membership.executionInputs,
+    );
   if (!rows)
     rows = await queryLegacyEventContextRowsFromD1(
       env,

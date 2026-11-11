@@ -23,8 +23,12 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
-import { buildEventContextQualificationPlan } from "@/lib/edge/analytics/engine/event-context-report-plan";
+import {
+  buildEventContextQualificationPlan,
+  buildEventContextReportPlan,
+} from "@/lib/edge/analytics/engine/event-context-report-plan";
 import { EVENT_CONTEXT_CARD_KEYS } from "@/lib/edge/analytics/engine/semantic/event-context-cards";
+import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import { queryEventAnalyticsContextCardsParentOracleFromD1 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/event-context-parent-oracle";
 import {
   d1AdvancedFilterMiddleware,
@@ -43,6 +47,7 @@ import {
   type QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
+import { prepareEventMembershipFallback } from "@/lib/edge/analytics/providers/d1/internal/event-membership-fallback";
 import {
   type EventContextCardKey,
   queryEventAnalyticsContextCardsFromD1,
@@ -1359,6 +1364,75 @@ describe("Wave94E qualified Event Context", () => {
       kind: "wave97em-event-context-numeric-fallback-evidence-v1",
       scenario: result,
     });
+  });
+
+  it("binds non-empty Event and Page memberships for the Event-candidate numeric fallback", async () => {
+    const database = createCandidateFixture();
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "visit-a-qualifying");
+    const result = await runEventCandidateScenario(database, {
+      label: "event-candidate-numeric-membership-fallback",
+      scope: "event",
+      limit: 5,
+      eventName: "signup",
+      selectedKeys: ["entry", "path"],
+      countDsl:
+        'count(page { page.durationMs gt 5 }) eq 0 AND event.name eq " signup "',
+    });
+    expect(result.actual.executionKind).toBe("legacy");
+    expect(
+      (result.actual.diagnosticsFallback as { readonly kind?: string } | null)
+        ?.kind,
+    ).toBe("numeric-data-domain");
+    expect(result.actual.dto).toEqual(result.baseline.dto);
+    // The report statement binds the request-private Event and Page
+    // memberships as (site, id) pairs: matched IDs appear, kind tokens do not.
+    const reportBindings = result.actual.statements.at(-1)?.bindings ?? [];
+    expect(reportBindings).toContain("event-a-qualifying-2");
+    expect(reportBindings).toContain("visit-a-later");
+    expect(reportBindings).not.toContain("event");
+    expect(reportBindings).not.toContain("page");
+  });
+
+  it("refuses a plan that names a membership the evaluation did not produce", async () => {
+    const database = createCandidateFixture();
+    const prepared = prepareContextQuery({
+      scope: "event",
+      limit: 5,
+      eventName: "signup",
+      selectedKeys: ["entry", "path"],
+      countDsl:
+        'count(page { page.durationMs gt 5 }) eq 0 AND event.name eq " signup "',
+    });
+    const { deferred } = await prepareDeferred(database, prepared);
+    const fallback = await prepareEventMembershipFallback({
+      deferred,
+      operation: "event-context",
+      operations: ["event-context"],
+      configuration: {
+        limit: 5,
+        eventName: "signup",
+        selectedKeys: ["entry", "path"],
+      },
+    });
+    if (!fallback) throw new Error("event_context_membership_unavailable");
+    // Only the Event membership was evaluated; a Page Source cannot borrow it.
+    expect(() =>
+      fallback.bindPlan((context) =>
+        buildEventContextReportPlan({
+          siteId: SITE_ID,
+          queryTime: context.queryTime,
+          filters: deferred.filters,
+          scopePlan: context.scopePlan,
+          qualificationDependencyRefs: context.qualificationDependencyRefs,
+          pageVisitDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+          eventName: "signup",
+          limit: 5,
+          selectedKeys: ["entry", "path"],
+        }),
+      ),
+    ).toThrow("qualification_execution_plan_context_mismatch");
   });
 
   it("keeps activity-cap errors, aborts, and database failures observable without report leakage", async () => {

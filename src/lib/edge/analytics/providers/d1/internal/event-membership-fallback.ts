@@ -3,6 +3,7 @@ import type { QueryTime } from "@/lib/edge/analytics/contract/types";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import {
   EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
+  EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
   type QualificationDependencyRef,
 } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
@@ -22,6 +23,8 @@ export interface EventMembershipReportContext {
   readonly queryTime: QueryTime;
   readonly scopePlan: ScopedFilterPlan;
   readonly qualificationDependencyRefs: readonly QualificationDependencyRef[];
+  /** For Page Sources of the same plan; present only when requested. */
+  readonly pageVisitDependencyRefs: readonly QualificationDependencyRef[];
 }
 
 export interface EventMembershipFallbackPlan {
@@ -48,6 +51,8 @@ interface EventMembershipFallbackInput {
   readonly operation: string;
   /** Exact request configuration: limit, search, cursor, audience, ... */
   readonly configuration: unknown;
+  /** The plan also reads Page visits (for example session-boundary cards). */
+  readonly withPageVisits?: boolean;
 }
 
 /**
@@ -72,7 +77,10 @@ export async function prepareEventMembershipFallback(
     deferred,
     consumerKey,
     input.operations,
-    input.maxPlans ?? 1,
+    {
+      maxBindings: input.maxPlans ?? 1,
+      ...(input.withPageVisits ? { withPageVisits: true } : {}),
+    },
   );
   if (!preparation) return undefined;
   return {
@@ -84,6 +92,9 @@ export async function prepareEventMembershipFallback(
           qualificationDependencyRefs: [
             EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
           ],
+          pageVisitDependencyRefs: input.withPageVisits
+            ? [EVENT_FILTER_PAGE_VISIT_DEPENDENCY]
+            : [],
         }),
       );
       const executionInputs = bindPageVisitQualificationPreparation({

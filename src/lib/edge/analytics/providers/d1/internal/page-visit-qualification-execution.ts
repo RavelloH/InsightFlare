@@ -23,6 +23,7 @@ import {
 import type { AnalyticsDbRelation } from "./analytics-relational-storage";
 import {
   createQualificationExecutionInputsForTrustedPlan,
+  type QualificationDependencyRelationBinding,
   type QualificationExecutionInputs,
 } from "./qualification-execution-inputs";
 
@@ -33,7 +34,8 @@ interface PreparationState {
   readonly queryTime: QueryTime;
   readonly scopePlan: ScopedFilterPlan;
   readonly consumerKey: unknown;
-  readonly relation: AnalyticsDbRelation;
+  /** The primary relation first, then optional relations from the same evaluation. */
+  readonly relations: readonly QualificationDependencyRelationBinding[];
   /** Number of distinct frozen plans the report owner declared at preparation. */
   readonly maxBindings: number;
   readonly boundPlans: WeakSet<object>;
@@ -117,6 +119,24 @@ function snapshot<T>(value: T): T {
   return Object.freeze(copied) as T;
 }
 
+const DEPENDENCY_SOURCE_ENTITY: Readonly<
+  Record<QualificationDependencyRef, "event" | "page">
+> = {
+  [EVENT_FILTER_PAGE_VISIT_DEPENDENCY]: "page",
+  [EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY]: "event",
+};
+
+/** Dependency refs a canonical plan names, in Source order. */
+function planDependencyRefs(
+  plan: ValidatedLogicalPlan,
+): readonly QualificationDependencyRef[] {
+  return plan.nodes.flatMap((node) =>
+    node.kind === "source" && node.selection
+      ? (node.selection.qualificationDependencyRefs ?? [])
+      : [],
+  );
+}
+
 function assertPlanContext(
   plan: ValidatedLogicalPlan,
   state: PreparationState,
@@ -129,7 +149,12 @@ function assertPlanContext(
       ref,
     }));
   });
-  const dependency = dependencySources[0];
+  const available = new Set(
+    state.relations.map((binding) => binding.dependencyRef),
+  );
+  const counts = new Map<QualificationDependencyRef, number>();
+  for (const { ref } of dependencySources)
+    counts.set(ref, (counts.get(ref) ?? 0) + 1);
   if (
     !Object.isFrozen(plan) ||
     context.scope.requested !== "event" ||
@@ -142,25 +167,31 @@ function assertPlanContext(
       context.time,
       semanticTemporalDomainsFromQueryTime(state.queryTime),
     ) ||
-    dependencySources.length !== 1 ||
-    dependency?.ref !== state.dependencyRef ||
-    dependency?.node.entity !==
-      (state.dependencyRef === EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY
-        ? "event"
-        : "page") ||
-    dependency?.node.selection?.profile !== "prepared-scoped-v1" ||
-    dependency?.node.selection?.scope !== state.scopePlan.scope ||
-    dependency?.node.selection?.mode !== state.scopePlan.mode ||
-    dependency?.node.selection?.entityKind !== undefined ||
-    !sameValue(dependency?.node.selection?.filter, state.filters) ||
-    !sameValue(dependency?.node.selection?.subject, context.subject) ||
-    !sameValue(dependency?.node.selection?.authorizedSiteIds, [state.siteId]) ||
-    !sameValue(
-      dependency?.node.selection?.time,
-      semanticTemporalDomainsFromQueryTime(state.queryTime),
-    )
+    // The primary role is always present, every named role has a relation
+    // from this evaluation, and each role backs exactly one Source.
+    counts.get(state.dependencyRef) !== 1 ||
+    [...counts].some(([ref, count]) => !available.has(ref) || count !== 1)
   )
     throw new Error("qualification_execution_plan_context_mismatch");
+  for (const { node, ref } of dependencySources) {
+    const selection = node.selection;
+    if (
+      node.kind !== "source" ||
+      node.entity !== DEPENDENCY_SOURCE_ENTITY[ref] ||
+      selection?.profile !== "prepared-scoped-v1" ||
+      selection.scope !== state.scopePlan.scope ||
+      selection.mode !== state.scopePlan.mode ||
+      selection.entityKind !== undefined ||
+      !sameValue(selection.filter, state.filters) ||
+      !sameValue(selection.subject, context.subject) ||
+      !sameValue(selection.authorizedSiteIds, [state.siteId]) ||
+      !sameValue(
+        selection.time,
+        semanticTemporalDomainsFromQueryTime(state.queryTime),
+      )
+    )
+      throw new Error("qualification_execution_plan_context_mismatch");
+  }
 }
 
 declare const filterValuesProjectionBrand: unique symbol;
@@ -261,6 +292,8 @@ export function createPageVisitQualificationPreparation(input: {
   readonly relation: AnalyticsDbRelation;
   /** Defaults to the Page visit role; Event consumers pass the Event membership ref. */
   readonly dependencyRef?: QualificationDependencyRef;
+  /** Further relations from the same Core evaluation (other roles of the plan). */
+  readonly additionalRelations?: readonly QualificationDependencyRelationBinding[];
   /**
    * Distinct frozen plans one report owner may bind to this single Core
    * evaluation (for example dependent series/points/other reads). A plan can
@@ -283,17 +316,35 @@ export function createPageVisitQualificationPreparation(input: {
   )
     throw new Error("qualification_execution_preparation_context_mismatch");
 
+  const dependencyRef =
+    input.dependencyRef ?? EVENT_FILTER_PAGE_VISIT_DEPENDENCY;
+  const relations: readonly QualificationDependencyRelationBinding[] =
+    Object.freeze([
+      Object.freeze({ dependencyRef, relation: input.relation }),
+      ...(input.additionalRelations ?? []).map((binding) =>
+        Object.freeze({
+          dependencyRef: binding.dependencyRef,
+          relation: binding.relation,
+        }),
+      ),
+    ]);
+  if (
+    new Set(relations.map((binding) => binding.dependencyRef)).size !==
+    relations.length
+  )
+    throw new Error("qualification_execution_preparation_context_mismatch");
+
   const preparation = Object.freeze(
     Object.create(null),
   ) as PageVisitQualificationPreparation;
   states.set(preparation as object, {
-    dependencyRef: input.dependencyRef ?? EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
+    dependencyRef,
     siteId: input.siteId,
     filters,
     queryTime,
     scopePlan,
     consumerKey,
-    relation: input.relation,
+    relations,
     maxBindings: input.maxBindings ?? 1,
     boundPlans: new WeakSet(),
     bindings: 0,
@@ -372,10 +423,10 @@ export function bindPageVisitQualificationPreparation(input: {
   if (state.boundPlans.has(input.plan))
     throw new Error("qualification_execution_preparation_replayed");
   assertPlanContext(input.plan, state);
+  const used = new Set(planDependencyRefs(input.plan));
   const executionInputs = createQualificationExecutionInputsForTrustedPlan(
-    state.relation,
+    state.relations.filter((binding) => used.has(binding.dependencyRef)),
     input.plan,
-    state.dependencyRef,
   );
   state.boundPlans.add(input.plan);
   state.bindings += 1;

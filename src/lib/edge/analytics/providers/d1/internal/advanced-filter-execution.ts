@@ -82,7 +82,10 @@ import {
   type EventContextCardKey,
 } from "@/lib/edge/analytics/engine/semantic/event-context-cards";
 import { eventPayloadValueTypeCode } from "@/lib/edge/analytics/engine/semantic/event-payload-value-type";
-import { EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
+import {
+  EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
+  EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
+} from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { SemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticSubjectFromQuerySubject } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
@@ -7650,7 +7653,11 @@ export async function prepareDeferredEventMembershipQualification(
   deferredInput: unknown,
   consumerKey: unknown,
   operations: readonly DeferredEventQualificationOperation[],
-  maxBindings = 1,
+  options: {
+    readonly maxBindings?: number;
+    /** Also expose the Page visits of the same evaluation (session-boundary reads). */
+    readonly withPageVisits?: boolean;
+  } = {},
 ): Promise<PageVisitQualificationPreparation | undefined> {
   if (!isDeferredEventQualification(deferredInput)) return undefined;
   const deferred = deferredInput;
@@ -7690,7 +7697,17 @@ export async function prepareDeferredEventMembershipQualification(
     consumerKey,
     relation: createEventMembershipRelation(deferred.siteId, matches),
     dependencyRef: EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
-    maxBindings,
+    ...(options.withPageVisits
+      ? {
+          additionalRelations: [
+            {
+              dependencyRef: EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
+              relation: createReferrersVisitRelation(deferred.siteId, matches),
+            },
+          ],
+        }
+      : {}),
+    maxBindings: options.maxBindings ?? 1,
   });
 }
 
