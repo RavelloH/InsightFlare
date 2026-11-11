@@ -1,5 +1,6 @@
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import {
+  EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
   EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
   type QualificationDependencyRef,
 } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
@@ -19,6 +20,7 @@ export type QualificationExecutionInputs = Readonly<{
 }>;
 
 interface QualificationExecutionState {
+  readonly dependencyRef: QualificationDependencyRef;
   readonly plan: ValidatedLogicalPlan;
   readonly relation: AnalyticsDbRelation;
   attached: boolean;
@@ -39,35 +41,44 @@ function planDependencies(
   );
 }
 
-function assertVisitRelationSchema(relation: AnalyticsDbRelation): void {
+const RELATION_IDENTITY_COLUMN: Readonly<
+  Record<QualificationDependencyRef, string>
+> = {
+  [EVENT_FILTER_PAGE_VISIT_DEPENDENCY]: "visit_id",
+  [EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY]: "event_id",
+};
+
+function assertRelationSchema(
+  relation: AnalyticsDbRelation,
+  dependencyRef: QualificationDependencyRef,
+): void {
   if (
     Object.keys(relation.columns).sort().join("\u0000") !==
-    ["site_id", "visit_id"].join("\u0000")
+    ["site_id", RELATION_IDENTITY_COLUMN[dependencyRef]].sort().join("\u0000")
   )
     throw new Error("qualification_execution_relation_schema_mismatch");
 }
 
 /**
- * Trusted Referrers preparation passes an already-built physical relation and
+ * Trusted report preparation passes an already-built physical relation and
  * its final frozen plan. Raw match IDs are deliberately not accepted here.
  */
 export function createQualificationExecutionInputsForTrustedPlan(
   relation: AnalyticsDbRelation,
   plan: ValidatedLogicalPlan,
+  dependencyRef: QualificationDependencyRef = EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
 ): QualificationExecutionInputs {
   if (!Object.isFrozen(plan))
     throw new Error("qualification_execution_plan_not_frozen");
   const dependencies = planDependencies(plan);
-  if (
-    dependencies.length !== 1 ||
-    dependencies[0] !== EVENT_FILTER_PAGE_VISIT_DEPENDENCY
-  )
+  if (dependencies.length !== 1 || dependencies[0] !== dependencyRef)
     throw new Error("qualification_execution_dependency_unexpected");
-  assertVisitRelationSchema(relation);
+  assertRelationSchema(relation, dependencyRef);
   const handle = Object.freeze(
     Object.create(null),
   ) as QualificationExecutionInputs;
   qualificationExecutionStates.set(handle as object, {
+    dependencyRef,
     plan,
     relation,
     attached: false,
@@ -99,16 +110,13 @@ export function attachQualificationExecutionInputs(
     !Object.isFrozen(plan)
   )
     throw new Error("qualification_execution_input_plan_mismatch");
-  if (
-    dependencies.length !== 1 ||
-    dependencies[0] !== EVENT_FILTER_PAGE_VISIT_DEPENDENCY
-  )
+  if (dependencies.length !== 1 || dependencies[0] !== state.dependencyRef)
     throw new Error("qualification_execution_dependency_unexpected");
-  assertVisitRelationSchema(state.relation);
+  assertRelationSchema(state.relation, state.dependencyRef);
   state.attached = true;
   return Object.freeze([
     Object.freeze({
-      dependencyRef: EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
+      dependencyRef: state.dependencyRef,
       relation: state.relation,
     }),
   ]);

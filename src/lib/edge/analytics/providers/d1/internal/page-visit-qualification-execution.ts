@@ -8,7 +8,11 @@ import {
   type ValidatedLogicalPlan,
 } from "@/lib/edge/analytics/engine/logical/plan";
 import { validateLogicalPlan } from "@/lib/edge/analytics/engine/logical/validator";
-import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
+import {
+  EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
+  EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
+  type QualificationDependencyRef,
+} from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 import {
@@ -23,6 +27,7 @@ import {
 } from "./qualification-execution-inputs";
 
 interface PreparationState {
+  readonly dependencyRef: QualificationDependencyRef;
   readonly siteId: string;
   readonly filters: FilterDocument;
   readonly queryTime: QueryTime;
@@ -135,8 +140,11 @@ function assertPlanContext(
       semanticTemporalDomainsFromQueryTime(state.queryTime),
     ) ||
     dependencySources.length !== 1 ||
-    dependency?.ref !== EVENT_FILTER_PAGE_VISIT_DEPENDENCY ||
-    dependency?.node.entity !== "page" ||
+    dependency?.ref !== state.dependencyRef ||
+    dependency?.node.entity !==
+      (state.dependencyRef === EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY
+        ? "event"
+        : "page") ||
     dependency?.node.selection?.profile !== "prepared-scoped-v1" ||
     dependency?.node.selection?.scope !== state.scopePlan.scope ||
     dependency?.node.selection?.mode !== state.scopePlan.mode ||
@@ -248,6 +256,8 @@ export function createPageVisitQualificationPreparation(input: {
   readonly scopePlan: ScopedFilterPlan;
   readonly consumerKey: unknown;
   readonly relation: AnalyticsDbRelation;
+  /** Defaults to the Page visit role; Event consumers pass the Event membership ref. */
+  readonly dependencyRef?: QualificationDependencyRef;
 }): PageVisitQualificationPreparation {
   if (!input.siteId || !input.filters.root)
     throw new Error("qualification_execution_preparation_invalid");
@@ -268,6 +278,7 @@ export function createPageVisitQualificationPreparation(input: {
     Object.create(null),
   ) as PageVisitQualificationPreparation;
   states.set(preparation as object, {
+    dependencyRef: input.dependencyRef ?? EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
     siteId: input.siteId,
     filters,
     queryTime,
@@ -351,6 +362,7 @@ export function bindPageVisitQualificationPreparation(input: {
   const executionInputs = createQualificationExecutionInputsForTrustedPlan(
     state.relation,
     input.plan,
+    state.dependencyRef,
   );
   state.bound = true;
   return executionInputs;

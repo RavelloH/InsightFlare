@@ -17,6 +17,7 @@ import {
   EVENT_TYPE_SUMMARY_OUTPUTS,
   type EventNameDimensionListRequest,
 } from "@/lib/edge/analytics/engine/event-type-summary-plan";
+import { EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -27,6 +28,7 @@ import type {
 import {
   prepareDeferredEventQualificationFallback,
   prepareDeferredEventSummaryFallback,
+  prepareDeferredEventTypesMembershipQualification,
 } from "./advanced-filter-execution";
 import {
   executeEventNameDimensionQualificationProgram,
@@ -45,6 +47,12 @@ import type {
   QueryWindow,
 } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
+import {
+  bindPageVisitQualificationPreparation,
+  pageVisitQualificationConsumerKey,
+  type PageVisitQualificationPreparation,
+  snapshotPageVisitQualificationPlan,
+} from "./page-visit-qualification-execution";
 import {
   decodePageCursor,
   encodePageCursor,
@@ -244,7 +252,15 @@ export async function queryEventTypePageFromD1(
 ): Promise<PageResult<DimensionRow>> {
   let reportFilters = filters;
   let rows: Record<string, unknown>[] | undefined;
+  let membership: PageVisitQualificationPreparation | undefined;
   const deferred = options?.deferredQualification;
+  const consumerKey = pageVisitQualificationConsumerKey("event-types", {
+    kind: "page",
+    limit,
+    search: search ?? null,
+    cursor: cursor ?? null,
+    audience,
+  });
   if (deferred) {
     if (
       deferred.operation !== "event-types" ||
@@ -270,8 +286,48 @@ export async function queryEventTypePageFromD1(
       if (options?.diagnostics)
         options.diagnostics.advancedCountSqlFallbackReason =
           result.fallbackReason;
-      reportFilters = await prepareDeferredEventQualificationFallback(deferred);
+      membership = await prepareDeferredEventTypesMembershipQualification(
+        deferred,
+        consumerKey,
+      );
+      if (!membership)
+        reportFilters =
+          await prepareDeferredEventQualificationFallback(deferred);
     }
+  }
+  if (!rows && membership && deferred) {
+    const plan = snapshotPageVisitQualificationPlan(
+      buildEventTypeSummaryPlan({
+        siteId,
+        queryTime: deferred.time,
+        filters,
+        scopePlan: deferred.metadata.plan,
+        qualificationDependencyRefs: [EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY],
+        query: {
+          kind: "page",
+          limit,
+          ...(search !== undefined ? { search } : {}),
+          ...(cursor ? { cursor } : {}),
+        },
+      }),
+    );
+    const executionInputs = bindPageVisitQualificationPreparation({
+      preparation: membership,
+      siteId,
+      filters,
+      queryTime: deferred.time,
+      scopePlan: deferred.metadata.plan,
+      consumerKey,
+      plan,
+    });
+    rows = await queryAnalyticsReportOutputRowsFromD1(
+      env,
+      plan,
+      EVENT_TYPE_SUMMARY_OUTPUTS.page,
+      undefined,
+      options?.diagnostics,
+      executionInputs,
+    );
   }
   if (!rows) {
     const metadata = scopedFilterMetadata(reportFilters);

@@ -6,6 +6,7 @@ import {
   type LogicalRelationHandle,
 } from "@/lib/edge/analytics/engine/logical/builder";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import type { SemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
@@ -32,6 +33,8 @@ export interface EventReportSourceContext {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly preparedTimePolicy?: "reader-window";
+  /** Request-private Event membership bound by the Provider at execution. */
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly subject: SemanticSubjectDomain;
   readonly time: SemanticTemporalDomains;
 }
@@ -67,9 +70,12 @@ export function createEventReportSourceContext(input: {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly preparedTimePolicy?: "reader-window";
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
 }): EventReportSourceContext {
   if (input.preparedTimePolicy && !input.scopePlan)
     throw new Error("event_source_reader_window_requires_prepared_scope");
+  if (input.qualificationDependencyRefs && !input.scopePlan)
+    throw new Error("event_source_dependency_requires_prepared_scope");
   const time = semanticTemporalDomainsFromQueryTime(input.queryTime);
   const subject = createSemanticSubjectDomain({
     origin: "site",
@@ -87,6 +93,9 @@ export function createEventReportSourceContext(input: {
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
     ...(input.preparedTimePolicy
       ? { preparedTimePolicy: input.preparedTimePolicy }
+      : {}),
+    ...(input.qualificationDependencyRefs
+      ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
       : {}),
     subject,
     time,
@@ -123,6 +132,11 @@ export function addEventReportSource(
     subject: context.subject,
     time: context.time,
     ...(context.scopePlan ? { expectedPlan: context.scopePlan } : {}),
+    ...(context.qualificationDependencyRefs
+      ? {
+          qualificationDependencyRefs: context.qualificationDependencyRefs,
+        }
+      : {}),
     ...(!readerWindow && input.eventName !== undefined
       ? {
           eventName: input.eventName,
@@ -160,6 +174,7 @@ export function buildEventReportSource(input: {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly preparedTimePolicy?: "reader-window";
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly attributes: readonly string[];
   readonly eventName?: string;
   readonly eventNameInputSemantics?: EventNameInputSemantics;
@@ -174,6 +189,9 @@ export function buildEventReportSource(input: {
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
     ...(input.preparedTimePolicy
       ? { preparedTimePolicy: input.preparedTimePolicy }
+      : {}),
+    ...(input.qualificationDependencyRefs
+      ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
       : {}),
   });
   return {

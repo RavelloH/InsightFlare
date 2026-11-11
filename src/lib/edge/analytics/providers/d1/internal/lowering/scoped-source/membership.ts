@@ -23,6 +23,7 @@ import {
 import { factEntityKindsForFilter } from "@/lib/edge/analytics/contract";
 import { planObservationFilter } from "@/lib/edge/analytics/contract/observation-planner";
 import type { SourceNode } from "@/lib/edge/analytics/engine/logical/nodes";
+import { EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import { type SemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import { lowerLegacyRelationalPredicate } from "@/lib/edge/analytics/providers/d1/internal/analytics-legacy-relational-predicates";
 import {
@@ -523,9 +524,38 @@ export function applyNameGate(
   return { ...rows, relation };
 }
 
+/** Bind the request-private Event membership relation to this dataset's site keys. */
+function boundEventMembershipRelation(
+  dataset: AnalyticsLegacyScopedDataset,
+  refs: readonly string[],
+  qualificationRelations: ReadonlyMap<string, AnalyticsDbRelation> | undefined,
+): IdentityRelation {
+  if (refs.length !== 1)
+    throw new Error("qualification_execution_dependency_cardinality_mismatch");
+  const dependencyRef = refs[0]!;
+  if (dependencyRef !== EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY)
+    throw new Error("qualification_execution_dependency_unexpected");
+  const relation = qualificationRelations?.get(dependencyRef);
+  if (!relation) throw new Error("qualification_execution_dependency_unbound");
+  if (!relation.columns.site_id || !relation.columns.event_id)
+    throw new Error("qualification_execution_relation_schema_mismatch");
+  const scoped = join(
+    relation,
+    dataset.sites,
+    eq(relation.columns.site_id, dataset.sites.columns.site_id),
+  );
+  return distinct(
+    project(scoped, {
+      site_pk: scoped.columns.right_site_pk!,
+      event_id: scoped.columns.left_event_id!,
+    }),
+  );
+}
+
 export function observationEventMatches(
   dataset: AnalyticsLegacyScopedDataset,
   selection: SemanticScopedSourceSelection,
+  qualificationRelations?: ReadonlyMap<string, AnalyticsDbRelation>,
 ): IdentityRelation {
   const context: AnalyticsLegacyScopedPredicateContext = {
     selection,
@@ -550,6 +580,23 @@ export function observationEventMatches(
       and(
         eq(gatedIds.columns.site_pk!, explicit.columns.site_pk!),
         eq(gatedIds.columns.event_id!, explicit.columns.entity_id!),
+      ),
+    );
+  } else if (selection.qualificationDependencyRefs) {
+    const explicit = boundEventMembershipRelation(
+      dataset,
+      selection.qualificationDependencyRefs,
+      qualificationRelations,
+    );
+    const gatedIds = eventIdentityRows(
+      applyNameGate(dataset.readEvents, dataset, selection),
+    );
+    return joinMembership(
+      gatedIds,
+      explicit,
+      and(
+        eq(gatedIds.columns.site_pk!, explicit.columns.site_pk!),
+        eq(gatedIds.columns.event_id!, explicit.columns.event_id!),
       ),
     );
   } else {
@@ -1316,6 +1363,10 @@ export class ScopedSourceMembership {
     }
     return selection.mode === "entity"
       ? entityEventMatches(dataset, selection, qualifiedEntities)
-      : observationEventMatches(dataset, selection);
+      : observationEventMatches(
+          dataset,
+          selection,
+          this.#context.qualificationRelations,
+        );
   }
 }

@@ -82,6 +82,7 @@ import {
   type EventContextCardKey,
 } from "@/lib/edge/analytics/engine/semantic/event-context-cards";
 import { eventPayloadValueTypeCode } from "@/lib/edge/analytics/engine/semantic/event-payload-value-type";
+import { EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { SemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticSubjectFromQuerySubject } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
@@ -7609,6 +7610,84 @@ export async function prepareDeferredPageVisitQualification(
     scopePlan: deferred.metadata.plan,
     consumerKey,
     relation: createReferrersVisitRelation(deferred.siteId, matches),
+  });
+}
+
+function createEventMembershipRelation(
+  siteId: string,
+  matches: readonly QualificationMatchRow[],
+): AnalyticsDbRelation {
+  const unique = new Map<string, string>();
+  for (const match of matches) {
+    if (!match) throw new Error("qualification_execution_match_invalid");
+    if (match.kind !== "event") continue;
+    if (match.siteId !== siteId || typeof match.id !== "string")
+      throw new Error("qualification_execution_event_identity_invalid");
+    unique.set(match.id, match.id);
+  }
+  const rows = [...unique.values()].sort((left, right) =>
+    left.localeCompare(right),
+  );
+  return valuesRelation(
+    {
+      site_id: { affinity: "text", nullable: false },
+      event_id: { affinity: "text", nullable: false },
+    },
+    rows.map((id) => ({
+      site_id: sqliteBoundText(siteId),
+      event_id: sqliteBoundText(id),
+    })),
+  ) as AnalyticsDbRelation;
+}
+
+/**
+ * Evaluate the existing Core fallback into a request-local Event membership
+ * relation for the private, one-site, same-window event-types consumer. Any
+ * other shape returns undefined before Core evaluation so the caller keeps its
+ * complete existing fallback.
+ */
+export async function prepareDeferredEventTypesMembershipQualification(
+  deferredInput: unknown,
+  consumerKey: unknown,
+): Promise<PageVisitQualificationPreparation | undefined> {
+  if (!isDeferredEventQualification(deferredInput)) return undefined;
+  const deferred = deferredInput;
+  if (deferred.operation !== "event-types") return undefined;
+  if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  if (
+    deferred.subject.origin !== "site" ||
+    deferred.subject.siteIds.length !== 1 ||
+    deferred.subject.siteIds[0] !== deferred.siteId ||
+    deferred.countInput.scope !== "event" ||
+    deferred.metadata.plan.scope !== "event" ||
+    deferred.metadata.plan.mode !== "observation" ||
+    deferred.metadata.plan.membership.kind === "entity" ||
+    deferred.metadata.plan.advancedMatches !== undefined ||
+    !sameCandidateReadAndFilterWindow(deferred.time) ||
+    filtersUseSequenceSemantics(deferred.filters)
+  )
+    return undefined;
+
+  const matches = await evaluateForSitesCore({
+    env: deferred.env,
+    subject: deferred.subject,
+    siteIds: [deferred.siteId],
+    filters: deferred.filters,
+    plan: deferred.metadata.plan,
+    time: deferred.time,
+    diagnostics: deferred.diagnostics,
+    signal: deferred.signal,
+    coverage: deferred.coverage,
+  });
+  if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  return createPageVisitQualificationPreparation({
+    siteId: deferred.siteId,
+    filters: deferred.filters,
+    queryTime: deferred.time,
+    scopePlan: deferred.metadata.plan,
+    consumerKey,
+    relation: createEventMembershipRelation(deferred.siteId, matches),
+    dependencyRef: EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
   });
 }
 

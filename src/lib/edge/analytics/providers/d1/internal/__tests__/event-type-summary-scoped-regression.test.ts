@@ -2350,6 +2350,66 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
     },
   );
 
+  it("runs the event-scope numeric fallback through the request-private Event membership relation", async () => {
+    const database = createFixture();
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "visit-alpha-1");
+    const prepared = prepareEventTypesQuery(
+      "count(page { page.durationMs gt 5 }) eq 0",
+      "event",
+      { limit: 20 },
+    );
+    const baselineTrace = newTrace();
+    const baseline = await executeLegacyEventTypesRequest({
+      env: testEnv(database, baselineTrace),
+      prepared,
+    });
+    expect(baseline.items.length).toBeGreaterThan(0);
+
+    const trace = newTrace();
+    const diagnostics = createD1ReadDiagnostics();
+    const env = testEnv(database, trace);
+    const forwarded = await d1AdvancedFilterMiddleware(env)(
+      "event-types",
+      prepared,
+      async (value) => value,
+    );
+    const deferred = deferredEventTypesQualificationFromQuery(forwarded);
+    if (!deferred) throw new Error("event_types_membership_deferred_missing");
+    const actual = await queryEventTypePageFromD1(
+      env,
+      SITE_ID,
+      WINDOW,
+      deferred.filters,
+      prepared.limit,
+      prepared.search,
+      null,
+      "private-dashboard",
+      { deferredQualification: deferred, diagnostics },
+    );
+    expect({
+      items: mapTabs(actual.items),
+      pagination: actual.pagination,
+    }).toEqual({
+      items: mapTabs(baseline.items),
+      pagination: baseline.pagination,
+    });
+    expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
+      kind: "numeric-data-domain",
+      fieldIds: ["page.durationMs"],
+    });
+    // The relation is request-private: the trusted scope plan never carries IDs.
+    expect(deferred.metadata.plan.advancedMatches).toBeUndefined();
+    // The legacy ID bridge binds (site, "event", id) triples; the Event
+    // membership relation binds only (site, id) pairs.
+    const reportBindings = trace.bindings.at(-1) ?? [];
+    const legacyBindings = baselineTrace.bindings.at(-1) ?? [];
+    expect(legacyBindings).toContain("event");
+    expect(reportBindings).not.toContain("event");
+    expect(reportBindings).toContain("event-alpha-1");
+  });
+
   it.each(["session", "visitor"] as const)(
     "falls back to the complete legacy request for numeric compatibility in %s scope",
     async (scope) => {
