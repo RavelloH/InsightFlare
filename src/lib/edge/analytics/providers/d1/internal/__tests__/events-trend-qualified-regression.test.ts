@@ -24,7 +24,10 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
-import { EVENT_TREND_OUTPUTS } from "@/lib/edge/analytics/engine/event-trend-plan";
+import {
+  buildEventTrendSeriesPlan,
+  EVENT_TREND_OUTPUTS,
+} from "@/lib/edge/analytics/engine/event-trend-plan";
 import {
   d1AdvancedFilterMiddleware,
   deferredEventTrendQualificationFromQuery,
@@ -43,6 +46,7 @@ import {
   SHARE_TREND_OTHER_TOKEN,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
+import { prepareEventMembershipFallback } from "@/lib/edge/analytics/providers/d1/internal/event-membership-fallback";
 import { queryEventsTrendFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-trend";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
@@ -1023,6 +1027,129 @@ describe("Wave94D qualified Event trend", () => {
       throw new Error("wave94d_event_trend_provider_missing");
     await expect(brokenProvider.execute(prepared as never)).rejects.toThrow(
       "wave94d-database-read-failed",
+    );
+  });
+
+  it("runs the event-scope numeric fallback through one request-private Event membership across all trend reads", async () => {
+    const database = createFixture();
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "visit-wave94d-scoped");
+    const prepared = prepareTrendQuery({
+      scope: "event",
+      limit: 5,
+      interval: "day",
+      countDsl: "count(page { page.durationMs gt 5 }) eq 0",
+    });
+    const legacyTrace = newTrace();
+    const legacyEnv = testEnv(database, legacyTrace);
+    const legacyDeferred = deferredEventTrendQualificationFromQuery(
+      await d1AdvancedFilterMiddleware(legacyEnv)(
+        "event-trend",
+        prepared,
+        async (value) => value,
+      ),
+    );
+    if (!legacyDeferred) throw new Error("event_trend_legacy_deferred_missing");
+    const baseline = await queryEventsTrendFromD1(
+      legacyEnv,
+      SITE_ID,
+      WINDOW,
+      "day",
+      await prepareDeferredEventQualificationFallback(legacyDeferred),
+      5,
+    );
+    expect(baseline.data.some((point) => point.totalEvents > 0)).toBe(true);
+
+    const trace = newTrace();
+    const diagnostics = createD1ReadDiagnostics();
+    const env = testEnv(database, trace);
+    const deferred = deferredEventTrendQualificationFromQuery(
+      await d1AdvancedFilterMiddleware(env)(
+        "event-trend",
+        prepared,
+        async (value) => value,
+      ),
+    );
+    if (!deferred) throw new Error("event_trend_deferred_missing");
+    const actual = await queryEventsTrendFromD1(
+      env,
+      SITE_ID,
+      WINDOW,
+      "day",
+      deferred.filters,
+      5,
+      undefined,
+      { deferredQualification: deferred, diagnostics },
+    );
+    expect(actual).toEqual(baseline);
+    expect(diagnostics.advancedCountSqlFallbackReason?.kind).toBe(
+      "numeric-data-domain",
+    );
+    expect(deferred.metadata.plan.advancedMatches).toBeUndefined();
+    // The series, points and other reads are the last three statements. The
+    // legacy ID bridge binds a (site, "event", id) kind column in each of them;
+    // the Event membership relation binds only (site, id) pairs.
+    const reportReads = (bindings: readonly (readonly unknown[])[]) =>
+      bindings.slice(-3).map((values) => values.includes("event"));
+    expect(reportReads(legacyTrace.bindings)).toEqual([true, true, true]);
+    expect(reportReads(trace.bindings)).toEqual([false, false, false]);
+  });
+
+  it("limits one Event membership to its declared plans and never rebinds a plan", async () => {
+    const database = createFixture();
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "visit-wave94d-scoped");
+    const prepared = prepareTrendQuery({
+      scope: "event",
+      limit: 5,
+      interval: "day",
+      countDsl: "count(page { page.durationMs gt 5 }) eq 0",
+    });
+    const env = testEnv(database, newTrace());
+    const deferred = deferredEventTrendQualificationFromQuery(
+      await d1AdvancedFilterMiddleware(env)(
+        "event-trend",
+        prepared,
+        async (value) => value,
+      ),
+    );
+    if (!deferred) throw new Error("event_trend_deferred_missing");
+    const configuration = { interval: "day", limit: 5, eventName: null };
+    // Another operation's consumer can never reuse this request's evaluation.
+    expect(
+      await prepareEventMembershipFallback({
+        deferred,
+        operation: "event-trend",
+        operations: ["event-types"],
+        configuration,
+      }),
+    ).toBeUndefined();
+
+    const fallback = await prepareEventMembershipFallback({
+      deferred,
+      operation: "event-trend",
+      operations: ["event-trend"],
+      configuration,
+      maxPlans: 2,
+    });
+    if (!fallback) throw new Error("event_trend_membership_unavailable");
+    const build = (
+      context: Parameters<Parameters<typeof fallback.bindPlan>[0]>[0],
+    ) =>
+      buildEventTrendSeriesPlan({
+        siteId: SITE_ID,
+        queryTime: context.queryTime,
+        filters: deferred.filters,
+        scopePlan: context.scopePlan,
+        qualificationDependencyRefs: context.qualificationDependencyRefs,
+        limit: 5,
+      });
+    fallback.bindPlan(build);
+    fallback.bindPlan(build);
+    expect(() => fallback.bindPlan(build)).toThrow(
+      "qualification_execution_preparation_replayed",
     );
   });
 

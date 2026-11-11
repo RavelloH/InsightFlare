@@ -21,6 +21,7 @@ import {
 import type { LogicalPlanBuilder } from "@/lib/edge/analytics/engine/logical/builder";
 import { type LogicalRelationHandle } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
@@ -38,6 +39,7 @@ export interface EventTrendPlanInput {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly eventName?: string;
 }
 
@@ -55,6 +57,9 @@ function eventTrendSource(input: EventTrendPlanInput) {
     queryTime: input.queryTime,
     filters: input.filters,
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    ...(input.qualificationDependencyRefs
+      ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+      : {}),
     attributes: EVENT_REPORT_TREND_ATTRIBUTES,
     ...(input.eventName !== undefined
       ? {

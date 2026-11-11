@@ -7,6 +7,7 @@ import {
   buildEventTypeTrendPlan,
   EVENT_TREND_OUTPUTS,
 } from "@/lib/edge/analytics/engine/event-trend-plan";
+import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import type { DeferredEventTrendQualification } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import type { Env } from "@/lib/edge/types";
 
@@ -30,6 +31,10 @@ import {
   shareTrendSeriesKey,
 } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
+import {
+  type EventMembershipFallback,
+  prepareEventMembershipFallback,
+} from "./event-membership-fallback";
 
 function trendPlanInput(
   siteId: string,
@@ -154,6 +159,31 @@ export async function queryEventsTrendFromD1(
     if (options?.diagnostics)
       options.diagnostics.advancedCountSqlFallbackReason =
         result.fallbackReason;
+    const membership = await prepareEventMembershipFallback({
+      deferred,
+      operation: "event-trend",
+      operations: ["event-trend"],
+      configuration: {
+        interval,
+        limit,
+        eventName: eventName ?? null,
+      },
+      // series, points and the optional other-series read are dependent
+      // reports over the same Core evaluation.
+      maxPlans: 3,
+    });
+    if (membership)
+      return queryLegacyEventsTrendFromD1(
+        env,
+        siteId,
+        window,
+        interval,
+        filters,
+        limit,
+        eventName,
+        options?.diagnostics,
+        membership,
+      );
     const reportFilters =
       await prepareDeferredEventQualificationFallback(deferred);
     return queryLegacyEventsTrendFromD1(
@@ -188,23 +218,42 @@ async function queryLegacyEventsTrendFromD1(
   limit: number,
   eventName?: string,
   diagnostics?: D1ReadDiagnostics,
+  membership?: EventMembershipFallback,
 ) {
-  const source = trendPlanInput(siteId, window, filters);
+  const baseSource = trendPlanInput(siteId, window, filters);
   const eventFilter = eventName !== undefined ? { eventName } : {};
-  const seriesRows = (
-    await queryAnalyticsReportOutputRowsFromD1(
+  /** Build, freeze/bind (when membership-backed) and run one dependent report. */
+  const runReport = async (
+    outputId: string,
+    build: (source: typeof baseSource) => ValidatedLogicalPlan,
+  ) => {
+    const bound = membership?.bindPlan((context) =>
+      build({
+        siteId,
+        queryTime: context.queryTime,
+        filters,
+        scopePlan: context.scopePlan,
+        qualificationDependencyRefs: context.qualificationDependencyRefs,
+      } as typeof baseSource),
+    );
+    return queryAnalyticsReportOutputRowsFromD1(
       env,
-      buildEventTrendSeriesPlan({ ...source, ...eventFilter, limit }),
-      EVENT_TREND_OUTPUTS.series,
+      bound?.plan ?? build(baseSource),
+      outputId,
       undefined,
       diagnostics,
+      bound?.executionInputs,
+    );
+  };
+  const seriesRows = (
+    await runReport(EVENT_TREND_OUTPUTS.series, (source) =>
+      buildEventTrendSeriesPlan({ ...source, ...eventFilter, limit }),
     )
   ).map(seriesRow);
   const mappedSeries = mapEventTrendSeries(seriesRows);
   const seriesNames = seriesRows.map((row) => row.eventName);
   const trendRows = (
-    await queryAnalyticsReportOutputRowsFromD1(
-      env,
+    await runReport(EVENT_TREND_OUTPUTS.points, (source) =>
       buildEventTrendPointsPlan({
         ...source,
         ...eventFilter,
@@ -212,9 +261,6 @@ async function queryLegacyEventsTrendFromD1(
         seriesNames,
         otherToken: SHARE_TREND_OTHER_TOKEN,
       }),
-      EVENT_TREND_OUTPUTS.points,
-      undefined,
-      diagnostics,
     )
   ).map((row): EventTrendPointRow => ({
     bucket: Number(row.bucket ?? -1),
@@ -226,17 +272,13 @@ async function queryLegacyEventsTrendFromD1(
   );
   const [otherRow] = hasOther
     ? (
-        await queryAnalyticsReportOutputRowsFromD1(
-          env,
+        await runReport(EVENT_TREND_OUTPUTS.other, (source) =>
           buildEventTrendOtherPlan({
             ...source,
             ...eventFilter,
             seriesNames,
             otherLabel: SHARE_TREND_OTHER_LABEL,
           }),
-          EVENT_TREND_OUTPUTS.other,
-          undefined,
-          diagnostics,
         )
       ).map(seriesRow)
     : [];

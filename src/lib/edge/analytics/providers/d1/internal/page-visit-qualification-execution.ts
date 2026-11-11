@@ -34,7 +34,10 @@ interface PreparationState {
   readonly scopePlan: ScopedFilterPlan;
   readonly consumerKey: unknown;
   readonly relation: AnalyticsDbRelation;
-  bound: boolean;
+  /** Number of distinct frozen plans the report owner declared at preparation. */
+  readonly maxBindings: number;
+  readonly boundPlans: WeakSet<object>;
+  bindings: number;
 }
 
 declare const pageVisitPreparationBrand: unique symbol;
@@ -258,6 +261,12 @@ export function createPageVisitQualificationPreparation(input: {
   readonly relation: AnalyticsDbRelation;
   /** Defaults to the Page visit role; Event consumers pass the Event membership ref. */
   readonly dependencyRef?: QualificationDependencyRef;
+  /**
+   * Distinct frozen plans one report owner may bind to this single Core
+   * evaluation (for example dependent series/points/other reads). A plan can
+   * never be bound twice and the default remains a single plan.
+   */
+  readonly maxBindings?: number;
 }): PageVisitQualificationPreparation {
   if (!input.siteId || !input.filters.root)
     throw new Error("qualification_execution_preparation_invalid");
@@ -285,7 +294,9 @@ export function createPageVisitQualificationPreparation(input: {
     scopePlan,
     consumerKey,
     relation: input.relation,
-    bound: false,
+    maxBindings: input.maxBindings ?? 1,
+    boundPlans: new WeakSet(),
+    bindings: 0,
   });
   return preparation;
 }
@@ -303,7 +314,7 @@ function validatePreparationContext(input: {
       ? states.get(input.preparation)
       : undefined;
   if (!state) throw new Error("qualification_execution_preparation_untrusted");
-  if (state.bound)
+  if (state.bindings >= state.maxBindings)
     throw new Error("qualification_execution_preparation_replayed");
 
   let filters: FilterDocument;
@@ -358,12 +369,15 @@ export function bindPageVisitQualificationPreparation(input: {
   readonly plan: ValidatedLogicalPlan;
 }): QualificationExecutionInputs {
   const state = validatePreparationContext(input);
+  if (state.boundPlans.has(input.plan))
+    throw new Error("qualification_execution_preparation_replayed");
   assertPlanContext(input.plan, state);
   const executionInputs = createQualificationExecutionInputsForTrustedPlan(
     state.relation,
     input.plan,
     state.dependencyRef,
   );
-  state.bound = true;
+  state.boundPlans.add(input.plan);
+  state.bindings += 1;
   return executionInputs;
 }

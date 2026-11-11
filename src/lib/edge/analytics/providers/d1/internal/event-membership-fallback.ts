@@ -29,16 +29,15 @@ export interface EventMembershipFallbackPlan {
   readonly executionInputs: QualificationExecutionInputs;
 }
 
-/**
- * Event report owners call this after native SQL refused a request. It
- * evaluates the existing Core filter once into a request-private Event
- * membership relation, lets the owner build its complete canonical plan with
- * the semantic dependency, freezes that exact plan and binds the relation to
- * it once. It returns undefined (before any Core evaluation) for any request
- * outside the private, single-site, same-window slice so that caller keeps its
- * complete existing fallback.
- */
-export async function prepareEventMembershipFallbackPlan(input: {
+/** One Core evaluation whose Event membership may be bound to the owner's plans. */
+export interface EventMembershipFallback {
+  /** Freeze and bind one more canonical plan the owner built for this request. */
+  readonly bindPlan: (
+    buildPlan: (context: EventMembershipReportContext) => ValidatedLogicalPlan,
+  ) => EventMembershipFallbackPlan;
+}
+
+interface EventMembershipFallbackInput {
   readonly deferred: unknown & {
     readonly siteId: string;
     readonly filters: FilterDocument;
@@ -49,10 +48,21 @@ export async function prepareEventMembershipFallbackPlan(input: {
   readonly operation: string;
   /** Exact request configuration: limit, search, cursor, audience, ... */
   readonly configuration: unknown;
-  readonly buildPlan: (
-    context: EventMembershipReportContext,
-  ) => ValidatedLogicalPlan;
-}): Promise<EventMembershipFallbackPlan | undefined> {
+}
+
+/**
+ * Event report owners call this after native SQL refused a request. It
+ * evaluates the existing Core filter once into a request-private Event
+ * membership relation. The owner then binds each complete canonical plan it
+ * needs (usually one; dependent multi-read reports declare `maxPlans`), and
+ * every plan is frozen and validated against the same request context. It
+ * returns undefined (before any Core evaluation) for any request outside the
+ * private, single-site, same-window slice so that caller keeps its complete
+ * existing fallback.
+ */
+export async function prepareEventMembershipFallback(
+  input: EventMembershipFallbackInput & { readonly maxPlans?: number },
+): Promise<EventMembershipFallback | undefined> {
   const { deferred } = input;
   const consumerKey = pageVisitQualificationConsumerKey(
     input.operation,
@@ -62,23 +72,42 @@ export async function prepareEventMembershipFallbackPlan(input: {
     deferred,
     consumerKey,
     input.operations,
+    input.maxPlans ?? 1,
   );
   if (!preparation) return undefined;
-  const plan = snapshotPageVisitQualificationPlan(
-    input.buildPlan({
-      queryTime: deferred.time,
-      scopePlan: deferred.metadata.plan,
-      qualificationDependencyRefs: [EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY],
-    }),
-  );
-  const executionInputs = bindPageVisitQualificationPreparation({
-    preparation,
-    siteId: deferred.siteId,
-    filters: deferred.filters,
-    queryTime: deferred.time,
-    scopePlan: deferred.metadata.plan,
-    consumerKey,
-    plan,
-  });
-  return { plan, executionInputs };
+  return {
+    bindPlan: (buildPlan) => {
+      const plan = snapshotPageVisitQualificationPlan(
+        buildPlan({
+          queryTime: deferred.time,
+          scopePlan: deferred.metadata.plan,
+          qualificationDependencyRefs: [
+            EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
+          ],
+        }),
+      );
+      const executionInputs = bindPageVisitQualificationPreparation({
+        preparation,
+        siteId: deferred.siteId,
+        filters: deferred.filters,
+        queryTime: deferred.time,
+        scopePlan: deferred.metadata.plan,
+        consumerKey,
+        plan,
+      });
+      return { plan, executionInputs };
+    },
+  };
+}
+
+/** Single-plan convenience for owners whose fallback is one report plan. */
+export async function prepareEventMembershipFallbackPlan(
+  input: EventMembershipFallbackInput & {
+    readonly buildPlan: (
+      context: EventMembershipReportContext,
+    ) => ValidatedLogicalPlan;
+  },
+): Promise<EventMembershipFallbackPlan | undefined> {
+  const fallback = await prepareEventMembershipFallback(input);
+  return fallback?.bindPlan(input.buildPlan);
 }

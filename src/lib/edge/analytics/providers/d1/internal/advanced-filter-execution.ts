@@ -7650,6 +7650,7 @@ export async function prepareDeferredEventMembershipQualification(
   deferredInput: unknown,
   consumerKey: unknown,
   operations: readonly DeferredEventQualificationOperation[],
+  maxBindings = 1,
 ): Promise<PageVisitQualificationPreparation | undefined> {
   if (!isDeferredEventQualification(deferredInput)) return undefined;
   const deferred = deferredInput;
@@ -7689,6 +7690,7 @@ export async function prepareDeferredEventMembershipQualification(
     consumerKey,
     relation: createEventMembershipRelation(deferred.siteId, matches),
     dependencyRef: EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
+    maxBindings,
   });
 }
 
