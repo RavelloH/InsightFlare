@@ -2350,6 +2350,57 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
     },
   );
 
+  it("runs the event-scope summary numeric fallback through the request-private Event membership relation", async () => {
+    const database = createFixture();
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "visit-alpha-1");
+    const prepared = prepareEventSummaryQuery(
+      "count(page { page.durationMs gt 5 }) eq 0",
+      "event",
+    );
+    const baselineTrace = newTrace();
+    const baseline = await executeLegacyEventSummaryRequest({
+      env: testEnv(database, baselineTrace),
+      prepared,
+    });
+    expect(baseline.summary.events).toBeGreaterThan(0);
+
+    const trace = newTrace();
+    const diagnostics = createD1ReadDiagnostics();
+    const env = testEnv(database, trace);
+    const forwarded = await d1AdvancedFilterMiddleware(env)(
+      "event-summary",
+      prepared,
+      async (value) => value,
+    );
+    const deferred = deferredEventSummaryQualificationFromQuery(forwarded);
+    if (!deferred) throw new Error("event_summary_membership_deferred_missing");
+    const actual = await queryEventsSummaryFromD1(
+      env,
+      SITE_ID,
+      WINDOW,
+      deferred.filters,
+      { deferredQualification: deferred, diagnostics },
+    );
+    expect(eventSummaryDto(actual)).toEqual(eventSummaryDto(baseline));
+    expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
+      kind: "numeric-data-domain",
+      fieldIds: ["page.durationMs"],
+    });
+    expect(deferred.metadata.plan.advancedMatches).toBeUndefined();
+    // The legacy ID bridge binds (site, "event", id) triples.
+    const hasKindTriple = (bindings: readonly unknown[]) =>
+      bindings.some(
+        (value, index) =>
+          value === "event" &&
+          typeof bindings[index + 1] === "string" &&
+          (bindings[index + 1] as string).startsWith("event-"),
+      );
+    expect(hasKindTriple(baselineTrace.bindings.at(-1) ?? [])).toBe(true);
+    expect(hasKindTriple(trace.bindings.at(-1) ?? [])).toBe(false);
+  });
+
   it("runs the event-scope numeric fallback through the request-private Event membership relation", async () => {
     const database = createFixture();
     database

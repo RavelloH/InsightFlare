@@ -7642,17 +7642,18 @@ function createEventMembershipRelation(
 
 /**
  * Evaluate the existing Core fallback into a request-local Event membership
- * relation for the private, one-site, same-window event-types consumer. Any
+ * relation for a private, one-site, same-window Event report consumer. Any
  * other shape returns undefined before Core evaluation so the caller keeps its
  * complete existing fallback.
  */
-export async function prepareDeferredEventTypesMembershipQualification(
+export async function prepareDeferredEventMembershipQualification(
   deferredInput: unknown,
   consumerKey: unknown,
+  operations: readonly DeferredEventQualificationOperation[],
 ): Promise<PageVisitQualificationPreparation | undefined> {
   if (!isDeferredEventQualification(deferredInput)) return undefined;
   const deferred = deferredInput;
-  if (deferred.operation !== "event-types") return undefined;
+  if (!operations.includes(deferred.operation)) return undefined;
   if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
   if (
     deferred.subject.origin !== "site" ||

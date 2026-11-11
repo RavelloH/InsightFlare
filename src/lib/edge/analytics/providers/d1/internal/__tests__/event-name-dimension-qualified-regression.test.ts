@@ -1131,6 +1131,47 @@ describe("event.name dimension Count qualification", () => {
     }
   });
 
+  it("runs the event-candidate numeric fallback through the request-private Event membership relation", async () => {
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "visit-two");
+    try {
+      const query = queryFor("event", {
+        dsl: "count(page { page.durationMs gt 5 }) eq 0",
+      });
+      const legacyTrace = traceFor();
+      const legacy = await runLegacyList(query, legacyTrace);
+      expect(legacy.items.length).toBeGreaterThan(0);
+
+      const actualTrace = traceFor();
+      const diagnostics = createD1ReadDiagnostics();
+      let observedDeferred:
+        | ReturnType<typeof deferredEventNameDimensionQualificationFromQuery>
+        | undefined;
+      const actual = await runPublicProviderQuery(query, actualTrace, {
+        diagnostics,
+        onPrepared: (input) => {
+          observedDeferred =
+            deferredEventNameDimensionQualificationFromQuery(input);
+        },
+      });
+      expect(actual).toEqual(legacy);
+      expect(observedDeferred?.countInput.scope).toBe("event");
+      expect(observedDeferred?.metadata.plan.advancedMatches).toBeUndefined();
+      expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
+        kind: "numeric-data-domain",
+        fieldIds: ["page.durationMs"],
+      });
+      // The legacy ID bridge binds a (site, "event", id) kind column.
+      expect(legacyTrace.bindings.at(-1) ?? []).toContain("event");
+      expect(actualTrace.bindings.at(-1) ?? []).not.toContain("event");
+    } finally {
+      database
+        .prepare("UPDATE visits SET duration_ms = NULL WHERE visit_id = ?")
+        .run("visit-two");
+    }
+  });
+
   it("enforces the activity cap before a simultaneous numeric fallback on the public list", async () => {
     const fixture = createIsolatedEventFixture({
       durationMs: "invalid-duration",

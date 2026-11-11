@@ -17,7 +17,6 @@ import {
   EVENT_TYPE_SUMMARY_OUTPUTS,
   type EventNameDimensionListRequest,
 } from "@/lib/edge/analytics/engine/event-type-summary-plan";
-import { EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -28,7 +27,6 @@ import type {
 import {
   prepareDeferredEventQualificationFallback,
   prepareDeferredEventSummaryFallback,
-  prepareDeferredEventTypesMembershipQualification,
 } from "./advanced-filter-execution";
 import {
   executeEventNameDimensionQualificationProgram,
@@ -48,11 +46,9 @@ import type {
 } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import {
-  bindPageVisitQualificationPreparation,
-  pageVisitQualificationConsumerKey,
-  type PageVisitQualificationPreparation,
-  snapshotPageVisitQualificationPlan,
-} from "./page-visit-qualification-execution";
+  type EventMembershipFallbackPlan,
+  prepareEventMembershipFallbackPlan,
+} from "./event-membership-fallback";
 import {
   decodePageCursor,
   encodePageCursor,
@@ -182,6 +178,7 @@ export async function queryEventNameDimensionFromD1(
 ): Promise<DimensionRow[]> {
   let reportFilters = filters;
   let rows: Record<string, unknown>[] | undefined;
+  let membership: EventMembershipFallbackPlan | undefined;
   const deferred = options?.deferredQualification;
   if (deferred) {
     const prepared = deferred.eventNameDimensionRequest;
@@ -216,9 +213,47 @@ export async function queryEventNameDimensionFromD1(
       if (options?.diagnostics)
         options.diagnostics.advancedCountSqlFallbackReason =
           result.fallbackReason;
-      reportFilters = await prepareDeferredEventQualificationFallback(deferred);
+      membership = await prepareEventMembershipFallbackPlan({
+        deferred,
+        operation: "event-name-dimension",
+        operations: ["event-name-dimension"],
+        configuration: {
+          mode: request.mode,
+          dimension: request.dimension,
+          limit: request.limit,
+          search: request.search ?? null,
+          audience: request.audience,
+        },
+        buildPlan: (context) =>
+          buildEventTypeSummaryPlan({
+            siteId,
+            queryTime: context.queryTime,
+            filters,
+            scopePlan: context.scopePlan,
+            qualificationDependencyRefs: context.qualificationDependencyRefs,
+            query: {
+              kind: "list",
+              limit: request.limit,
+              ...(request.search !== undefined
+                ? { search: request.search }
+                : {}),
+            },
+          }),
+      });
+      if (!membership)
+        reportFilters =
+          await prepareDeferredEventQualificationFallback(deferred);
     }
   }
+  if (!rows && membership)
+    rows = await queryAnalyticsReportOutputRowsFromD1(
+      env,
+      membership.plan,
+      EVENT_TYPE_SUMMARY_OUTPUTS.list,
+      undefined,
+      undefined,
+      membership.executionInputs,
+    );
   if (!rows)
     return queryEventTypeAggregate(
       env,
@@ -252,15 +287,8 @@ export async function queryEventTypePageFromD1(
 ): Promise<PageResult<DimensionRow>> {
   let reportFilters = filters;
   let rows: Record<string, unknown>[] | undefined;
-  let membership: PageVisitQualificationPreparation | undefined;
+  let membership: EventMembershipFallbackPlan | undefined;
   const deferred = options?.deferredQualification;
-  const consumerKey = pageVisitQualificationConsumerKey("event-types", {
-    kind: "page",
-    limit,
-    search: search ?? null,
-    cursor: cursor ?? null,
-    audience,
-  });
   if (deferred) {
     if (
       deferred.operation !== "event-types" ||
@@ -286,47 +314,45 @@ export async function queryEventTypePageFromD1(
       if (options?.diagnostics)
         options.diagnostics.advancedCountSqlFallbackReason =
           result.fallbackReason;
-      membership = await prepareDeferredEventTypesMembershipQualification(
+      membership = await prepareEventMembershipFallbackPlan({
         deferred,
-        consumerKey,
-      );
+        operation: "event-types",
+        operations: ["event-types"],
+        configuration: {
+          kind: "page",
+          limit,
+          search: search ?? null,
+          cursor: cursor ?? null,
+          audience,
+        },
+        buildPlan: (context) =>
+          buildEventTypeSummaryPlan({
+            siteId,
+            queryTime: context.queryTime,
+            filters,
+            scopePlan: context.scopePlan,
+            qualificationDependencyRefs: context.qualificationDependencyRefs,
+            query: {
+              kind: "page",
+              limit,
+              ...(search !== undefined ? { search } : {}),
+              ...(cursor ? { cursor } : {}),
+            },
+          }),
+      });
       if (!membership)
         reportFilters =
           await prepareDeferredEventQualificationFallback(deferred);
     }
   }
-  if (!rows && membership && deferred) {
-    const plan = snapshotPageVisitQualificationPlan(
-      buildEventTypeSummaryPlan({
-        siteId,
-        queryTime: deferred.time,
-        filters,
-        scopePlan: deferred.metadata.plan,
-        qualificationDependencyRefs: [EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY],
-        query: {
-          kind: "page",
-          limit,
-          ...(search !== undefined ? { search } : {}),
-          ...(cursor ? { cursor } : {}),
-        },
-      }),
-    );
-    const executionInputs = bindPageVisitQualificationPreparation({
-      preparation: membership,
-      siteId,
-      filters,
-      queryTime: deferred.time,
-      scopePlan: deferred.metadata.plan,
-      consumerKey,
-      plan,
-    });
+  if (!rows && membership) {
     rows = await queryAnalyticsReportOutputRowsFromD1(
       env,
-      plan,
+      membership.plan,
       EVENT_TYPE_SUMMARY_OUTPUTS.page,
       undefined,
       options?.diagnostics,
-      executionInputs,
+      membership.executionInputs,
     );
   }
   if (!rows) {
@@ -483,6 +509,7 @@ export async function queryEventsSummaryFromD1(
   cards: EventSummaryCards;
 }> {
   let reportFilters = filters;
+  let membership: EventMembershipFallbackPlan | undefined;
   const deferred = options?.deferredQualification;
   if (deferred) {
     if (deferred.siteId !== siteId || deferred.filters !== filters)
@@ -496,15 +523,32 @@ export async function queryEventsSummaryFromD1(
     if (options?.diagnostics)
       options.diagnostics.advancedCountSqlFallbackReason =
         result.fallbackReason;
-    reportFilters = await prepareDeferredEventSummaryFallback(deferred);
+    membership = await prepareEventMembershipFallbackPlan({
+      deferred,
+      operation: "event-summary",
+      operations: ["event-summary"],
+      configuration: {},
+      buildPlan: (context) =>
+        buildEventSummaryCardsPlan({
+          siteId,
+          queryTime: context.queryTime,
+          filters,
+          scopePlan: context.scopePlan,
+          qualificationDependencyRefs: context.qualificationDependencyRefs,
+        }),
+    });
+    if (!membership)
+      reportFilters = await prepareDeferredEventSummaryFallback(deferred);
   }
   const metadata = scopedFilterMetadata(reportFilters);
-  const plan = buildEventSummaryCardsPlan({
-    siteId,
-    queryTime: metadata?.time ?? queryWindowToTime(window),
-    filters: reportFilters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
-  });
+  const plan =
+    membership?.plan ??
+    buildEventSummaryCardsPlan({
+      siteId,
+      queryTime: metadata?.time ?? queryWindowToTime(window),
+      filters: reportFilters,
+      ...(metadata ? { scopePlan: metadata.plan } : {}),
+    });
   const rows =
     (await queryAnalyticsReportOutputSetRowsFromD1(
       env,
@@ -534,6 +578,7 @@ export async function queryEventsSummaryFromD1(
         ],
       },
       options?.diagnostics,
+      membership?.executionInputs,
     )) ?? [];
   return eventSummaryFromRows(rows);
 }
