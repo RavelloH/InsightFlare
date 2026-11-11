@@ -965,65 +965,91 @@ describe("Performance Timeseries qualified regression", () => {
     });
   });
 
-  it("uses the legacy route once when numeric qualification data is invalid", async () => {
-    database
-      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
-      .run("invalid-duration", "a1");
-    try {
-      const filters = filtersFor(
-        'page.path eq "/qualified" and count(page { page.durationMs gt 5 }) eq 1',
-      );
-      const queryTrace = trace();
-      const diagnostics: D1ReadDiagnostics = {
-        rowsRead: 0,
-        rowsReadAvailable: true,
-      };
-      const result = await executePerformance(
-        performanceQuery("session", filters, { time: TIME, interval: "hour" }),
-        queryTrace,
-        { diagnostics },
-      );
-      const legacyReadTrace = trace();
-      const prepared = await prepareQualifiedQuery(
-        "session",
-        filters,
-        TIME,
-        "hour",
-      );
-      const legacy = await legacyTimeseries(
-        prepared.deferred,
-        "hour",
-        TIME,
-        legacyReadTrace,
-      );
-      expect(result.value).toEqual(legacy.value);
-      expect(legacyReadTrace.preparedSql).toHaveLength(1);
-      expect(
-        queryTrace.preparedSql.filter(
-          (sql) => sql === legacyReadTrace.preparedSql[0],
-        ),
-      ).toHaveLength(1);
-      expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
-        kind: "numeric-data-domain",
-        fieldIds: ["page.durationMs"],
-      });
-      writeEvidence("numeric-data-fallback.json", {
-        diagnostics: diagnostics.advancedCountSqlFallbackReason,
-        request: { scope: "session", interval: "hour" },
-        statementCount: queryTrace.preparedSql.length,
-        sql: queryTrace.preparedSql,
-        bindings: queryTrace.bindings,
-        exactlyOneLegacyAllTrendsRead: true,
-        legacyAllTrendsSql: legacyReadTrace.preparedSql[0],
-        output: result.value,
-        legacyOutput: legacy.value,
-      });
-    } finally {
+  it.each(["session", "event"] as const)(
+    "uses the complete Page visit fallback when numeric qualification data is invalid for %s scope",
+    async (scope) => {
       database
         .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
-        .run(10, "a1");
-    }
-  });
+        .run("invalid-duration", "a1");
+      try {
+        const filters = filtersFor(
+          'page.path eq "/qualified" and count(page { page.durationMs gt 5 }) eq 1',
+        );
+        const queryTrace = trace();
+        const diagnostics: D1ReadDiagnostics = {
+          rowsRead: 0,
+          rowsReadAvailable: true,
+        };
+        const prepared = await prepareQualifiedQuery(
+          scope,
+          filters,
+          TIME,
+          "hour",
+        );
+        const compilation = compilePerformanceTimeseriesQualificationProgram({
+          query: prepared.query,
+          deferred: prepared.deferred,
+        });
+        expect(compilation.kind).toBe("compiled");
+        if (compilation.kind !== "compiled")
+          throw new Error("performance_timeseries_numeric_guard_unavailable");
+        const result = await executePerformance(
+          performanceQuery(scope, filters, { time: TIME, interval: "hour" }),
+          queryTrace,
+          { diagnostics },
+        );
+        const legacyReadTrace = trace();
+        const legacy = await legacyTimeseries(
+          prepared.deferred,
+          "hour",
+          TIME,
+          legacyReadTrace,
+        );
+        expect(result.value).toEqual(legacy.value);
+        expect(legacyReadTrace.preparedSql).toHaveLength(1);
+        expect(queryTrace.preparedSql).toContain(compilation.evidence.sql);
+        const guardRows = database
+          .prepare(compilation.evidence.sql)
+          .all(...(compilation.evidence.bindings as SQLInputValue[])) as Record<
+          string,
+          unknown
+        >[];
+        expect(
+          guardRows.filter((row) => row.rowKind === "control"),
+        ).toHaveLength(1);
+        expect(
+          guardRows.filter((row) => row.rowKind === "report"),
+        ).toHaveLength(0);
+        expect(compilation.evidence.outputDescriptors).toHaveLength(5);
+        const compatibilitySql = queryTrace.preparedSql.at(-1);
+        expect(compatibilitySql).toContain("visit_id");
+        expect(compatibilitySql).not.toContain("entity_id");
+        expect(compatibilitySql).not.toBe(compilation.evidence.sql);
+        expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
+          kind: "numeric-data-domain",
+          fieldIds: ["page.durationMs"],
+        });
+        writeEvidence(`numeric-data-fallback-${scope}.json`, {
+          diagnostics: diagnostics.advancedCountSqlFallbackReason,
+          request: { scope, interval: "hour" },
+          statementCount: queryTrace.preparedSql.length,
+          sql: queryTrace.preparedSql,
+          bindings: queryTrace.bindings,
+          exactlyOneLegacyAllTrendsRead: true,
+          nativeGuardSql: compilation.evidence.sql,
+          nativeGuardRows: guardRows,
+          finalCompatibilitySql: compatibilitySql,
+          legacyAllTrendsSql: legacyReadTrace.preparedSql[0],
+          output: result.value,
+          legacyOutput: legacy.value,
+        });
+      } finally {
+        database
+          .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+          .run(10, "a1");
+      }
+    },
+  );
 
   it("rejects cloned, mismatched, and mutated deferred requests before report SQL", async () => {
     const firstTrace = trace();

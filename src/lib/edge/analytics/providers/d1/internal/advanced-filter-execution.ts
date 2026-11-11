@@ -224,6 +224,15 @@ const DEFERRED_EVENT_QUALIFICATION = Symbol(
   "insightflare.deferred-event-qualification",
 );
 const deferredEventQualifications = new WeakSet<object>();
+const deferredPageVisitEligibility = new WeakMap<
+  object,
+  {
+    readonly audience: QueryAudience;
+    readonly performancePrivateOptIn: boolean;
+    readonly geoPointsPrivateOptIn: boolean;
+    readonly technologyPrivateOptIn: boolean;
+  }
+>();
 const DEFERRED_COMPARISON_PAGE_QUALIFICATION = Symbol(
   "insightflare.deferred-comparison-page-qualification",
 );
@@ -6760,6 +6769,18 @@ async function prepareDeferredEventQualification(input: {
                                 : null;
   if (!deferred) return null;
   deferredEventQualifications.add(deferred);
+  deferredPageVisitEligibility.set(
+    deferred,
+    Object.freeze({
+      audience: query.context.policy.audience,
+      performancePrivateOptIn:
+        input.allowPrivatePerformanceWholeFilterOptIn === true,
+      geoPointsPrivateOptIn:
+        input.allowPrivateGeoPointsWholeFilterOptIn === true,
+      technologyPrivateOptIn:
+        input.allowPrivateTechnologyWholeFilterOptIn === true,
+    }),
+  );
   return deferred;
 }
 
@@ -7458,7 +7479,14 @@ function sameCandidateReadAndFilterWindow(time: QueryTime): boolean {
 
 function isPrivatePageVisitConsumer(
   deferred: DeferredEventCandidatePageProjection,
+  readerAudience?: QueryAudience,
 ): boolean {
+  const eligibility = deferredPageVisitEligibility.get(deferred);
+  if (
+    eligibility?.audience !== "private-dashboard" ||
+    (readerAudience !== undefined && readerAudience !== eligibility.audience)
+  )
+    return false;
   const request = deferred as DeferredEventCandidatePageProjection & {
     readonly referrersRequest?: { readonly audience?: unknown };
     readonly referrerOverviewRequest?: { readonly audience?: unknown };
@@ -7473,6 +7501,29 @@ function isPrivatePageVisitConsumer(
     readonly filterValuesRequest?: { readonly audience?: unknown };
   };
   switch (deferred.operation) {
+    case "pages-aggregate-page":
+      return (
+        request.pagesAggregatePageRequest?.audience === "private-dashboard"
+      );
+    case "pages-tabs":
+      return request.pagesTabsRequest?.audience === "private-dashboard";
+    case "performance":
+      return (
+        readerAudience === "private-dashboard" &&
+        eligibility.performancePrivateOptIn
+      );
+    case "geo-points":
+      return (
+        readerAudience === "private-dashboard" &&
+        eligibility.geoPointsPrivateOptIn
+      );
+    case "cross-dimension":
+    case "radar":
+    case "share-trend":
+      return (
+        readerAudience === "private-dashboard" &&
+        eligibility.technologyPrivateOptIn
+      );
     case "referrers":
       return request.referrersRequest?.audience === "private-dashboard";
     case "page-dimension":
@@ -7501,17 +7552,24 @@ function isPrivatePageVisitConsumer(
 /**
  * Evaluates the existing Core fallback into a request-local Page visit
  * relation for the already-supported private single-site report consumers.
+ * A reader-window caller may supply its exact QueryTime; when any semantic
+ * temporal domain differs from the preparation, this returns undefined before
+ * Core evaluation so the caller can keep its complete existing fallback.
  */
 export async function prepareDeferredPageVisitQualification(
   deferredInput: unknown,
   consumerKey: unknown,
+  options?: {
+    readonly readerQueryTime?: QueryTime;
+    readonly readerAudience?: QueryAudience;
+  },
 ): Promise<PageVisitQualificationPreparation | undefined> {
   if (!isDeferredEventCandidatePageProjection(deferredInput)) return undefined;
   const deferred = deferredInput;
   if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
   const queryTime = deferred.requestTime ?? deferred.time;
   if (
-    !isPrivatePageVisitConsumer(deferred) ||
+    !isPrivatePageVisitConsumer(deferred, options?.readerAudience) ||
     deferred.subject.origin !== "site" ||
     deferred.subject.siteIds.length !== 1 ||
     deferred.subject.siteIds[0] !== deferred.siteId ||
@@ -7524,6 +7582,10 @@ export async function prepareDeferredPageVisitQualification(
     !sameCandidateReadAndFilterWindow(queryTime) ||
     JSON.stringify(semanticTemporalDomainsFromQueryTime(deferred.time)) !==
       JSON.stringify(semanticTemporalDomainsFromQueryTime(queryTime)) ||
+    (options?.readerQueryTime !== undefined &&
+      JSON.stringify(
+        semanticTemporalDomainsFromQueryTime(options.readerQueryTime),
+      ) !== JSON.stringify(semanticTemporalDomainsFromQueryTime(queryTime))) ||
     filtersUseSequenceSemantics(deferred.filters)
   )
     return undefined;

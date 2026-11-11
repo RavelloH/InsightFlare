@@ -11,6 +11,7 @@ import type {
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import type { LogicalValueType } from "@/lib/edge/analytics/engine/logical/slots";
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 export const PERFORMANCE_SUMMARY_OUTPUT_ID = "performance-summaries";
@@ -103,6 +104,7 @@ function createSource(input: {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly preparedTimePolicy?: "reader-window-v1";
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly attributes: readonly string[];
 }) {
   return createPageReportSource(input);
@@ -157,6 +159,7 @@ export function buildPerformanceSummariesPlan(input: {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly preparedTimePolicy?: "reader-window-v1";
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
 }): ValidatedLogicalPlan {
   const source = createSource({
     ...input,
@@ -172,6 +175,7 @@ export function buildPerformanceTrendPlan(input: {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly preparedTimePolicy?: "reader-window-v1";
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly interval: Interval;
   readonly metric: PerformanceMetricKey;
 }): ValidatedLogicalPlan {
@@ -226,6 +230,7 @@ type PerformanceReportInput = {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly preparedTimePolicy?: "reader-window-v1";
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
 };
 
 function metricType(
@@ -532,6 +537,7 @@ export function buildPerformanceAllTrendsPlan(input: {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly preparedTimePolicy?: "reader-window-v1";
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly interval: Interval;
 }): ValidatedLogicalPlan {
   const source = createMultiReportSource(input, [
@@ -579,6 +585,7 @@ export function buildPerformanceDashboardPlan(input: {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly preparedTimePolicy?: "reader-window-v1";
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly interval: Interval;
   readonly routeLimit: number;
 }): ValidatedLogicalPlan {

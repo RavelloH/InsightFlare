@@ -31,6 +31,11 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { Env } from "@/lib/edge/types";
 
+import {
+  bindTechnologyPageVisitQualification,
+  type TechnologyPageVisitQualification,
+} from "./page-visit-qualification";
+
 export interface ShareTrendResult {
   series: BrowserTrendSeriesRow[];
   data: BrowserTrendPointRow[];
@@ -234,6 +239,9 @@ async function executeTrendOutputs(
   env: Env,
   plan: ReturnType<typeof buildTechnologyShareTrendPlan>,
   outputKinds: readonly ShareTrendOutputKind[],
+  qualificationExecutionInputs?: ReturnType<
+    typeof bindTechnologyPageVisitQualification
+  >["executionInputs"],
 ): Promise<ShareTrendQueryRow[]> {
   const selection = {
     outputIds: outputKinds.flatMap(trendOutputIds),
@@ -255,7 +263,13 @@ async function executeTrendOutputs(
       { field: "label", direction: "asc", nulls: "first" },
     ],
   } as const;
-  return queryAnalyticsReportOutputSetRowsFromD1(env, plan, selection);
+  return queryAnalyticsReportOutputSetRowsFromD1(
+    env,
+    plan,
+    selection,
+    undefined,
+    qualificationExecutionInputs,
+  );
 }
 
 export async function queryShareTrendFromD1(
@@ -266,20 +280,39 @@ export async function queryShareTrendFromD1(
   filters: FilterDocument,
   limit: number,
   dimension: TechnologyShareTrendDimension,
+  qualification?: TechnologyPageVisitQualification,
 ): Promise<ShareTrendResult> {
   const buckets = buildTimeBuckets(window, interval);
   const metadata = scopedFilterMetadata(filters);
   const normalizedLimit = Math.min(Math.max(1, limit), 12);
   const plan = buildTechnologyShareTrendPlan({
     siteId,
-    queryTime: queryWindowToTime(window),
+    queryTime: qualification?.queryTime ?? queryWindowToTime(window),
     filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(qualification
+      ? {
+          scopePlan: qualification.scopePlan,
+          pageVisitQualification: true as const,
+        }
+      : metadata
+        ? { scopePlan: metadata.plan }
+        : {}),
     interval,
     limit: normalizedLimit,
     dimension,
   });
-  const rows = await executeTrendOutputs(env, plan, ["single"]);
+  const bound = bindTechnologyPageVisitQualification({
+    siteId,
+    filters,
+    qualification,
+    plan,
+  });
+  const rows = await executeTrendOutputs(
+    env,
+    bound.plan as ReturnType<typeof buildTechnologyShareTrendPlan>,
+    ["single"],
+    bound.executionInputs,
+  );
   return mapShareTrendRows(
     rows,
     buckets,
@@ -296,19 +329,38 @@ export async function queryReferrerAndChannelTrendFromD1(
   interval: Interval,
   filters: FilterDocument,
   limit: number,
+  qualification?: TechnologyPageVisitQualification,
 ): Promise<ReferrerAndChannelTrendResult> {
   const buckets = buildTimeBuckets(window, interval);
   const metadata = scopedFilterMetadata(filters);
   const normalizedLimit = Math.min(Math.max(1, limit), 12);
   const plan = buildTechnologyReferrerChannelTrendPlan({
     siteId,
-    queryTime: queryWindowToTime(window),
+    queryTime: qualification?.queryTime ?? queryWindowToTime(window),
     filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(qualification
+      ? {
+          scopePlan: qualification.scopePlan,
+          pageVisitQualification: true as const,
+        }
+      : metadata
+        ? { scopePlan: metadata.plan }
+        : {}),
     interval,
     limit: normalizedLimit,
   });
-  const rows = await executeTrendOutputs(env, plan, ["source", "channel"]);
+  const bound = bindTechnologyPageVisitQualification({
+    siteId,
+    filters,
+    qualification,
+    plan,
+  });
+  const rows = await executeTrendOutputs(
+    env,
+    bound.plan as ReturnType<typeof buildTechnologyShareTrendPlan>,
+    ["source", "channel"],
+    bound.executionInputs,
+  );
   return {
     source: mapShareTrendRows(
       rows,
@@ -333,6 +385,7 @@ export async function queryClientDimensionTrendFromD1(
   filters: FilterDocument,
   dimension: ClientDimensionKey,
   limit: number,
+  qualification?: TechnologyPageVisitQualification,
 ): Promise<ShareTrendResult> {
   return queryShareTrendFromD1(
     env,
@@ -342,6 +395,7 @@ export async function queryClientDimensionTrendFromD1(
     filters,
     limit,
     CLIENT_DIMENSIONS[dimension],
+    qualification,
   );
 }
 
@@ -353,6 +407,7 @@ export async function queryUtmDimensionTrendFromD1(
   filters: FilterDocument,
   dimension: UtmDimensionKey,
   limit: number,
+  qualification?: TechnologyPageVisitQualification,
 ): Promise<ShareTrendResult> {
   return queryShareTrendFromD1(
     env,
@@ -362,6 +417,7 @@ export async function queryUtmDimensionTrendFromD1(
     filters,
     limit,
     UTM_DIMENSIONS[dimension],
+    qualification,
   );
 }
 
@@ -372,6 +428,7 @@ export async function queryReferrerTrendFromD1(
   interval: Interval,
   filters: FilterDocument,
   limit: number,
+  qualification?: TechnologyPageVisitQualification,
 ): Promise<ShareTrendResult> {
   return queryShareTrendFromD1(
     env,
@@ -381,5 +438,6 @@ export async function queryReferrerTrendFromD1(
     filters,
     limit,
     "referrerDomain",
+    qualification,
   );
 }

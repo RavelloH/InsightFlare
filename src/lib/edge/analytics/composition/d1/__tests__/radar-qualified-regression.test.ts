@@ -2056,6 +2056,71 @@ describe("Radar qualified provider regression", () => {
     }
   });
 
+  it.each(["browser", "version"] as const)(
+    "uses the prepared Page visit relation for Event Count %s numeric fallback",
+    async (dimension) => {
+      const filterDsl =
+        'page.path neq "/excluded" and count(event { event.name eq "qualifier" }) eq 1 and count(page { page.durationMs gt 5 }) eq 1';
+      const query =
+        dimension === "version"
+          ? browserVersionQuery("event", { filterDsl })
+          : radarQuery("event", "browser", undefined, filterDsl);
+      const candidate = await qualifiedRadarCandidate(query);
+      expect(candidate.kind).toBe("compiled");
+      if (candidate.kind !== "compiled") return;
+      expect(candidate.deferred.qualification.countInput.scope).toBe("event");
+      expect(
+        "eventCandidateReportProjection" in candidate.deferred.qualification
+          ? candidate.deferred.qualification.eventCandidateReportProjection
+          : undefined,
+      ).toBe("page-visits");
+
+      const originalDuration = reportingDatabase
+        .prepare("SELECT duration_ms FROM visits WHERE visit_id = ?")
+        .get("alpha-second-page") as {
+        readonly duration_ms: number | string | null;
+      };
+      reportingDatabase
+        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+        .run("invalid-duration", "alpha-second-page");
+      try {
+        const oracle = await legacyRadarReader(query, reportingTrace());
+        const actualTrace = reportingTrace();
+        let envelopeRows: readonly Record<string, unknown>[] = [];
+        const diagnostics = createD1ReadDiagnostics();
+        const actual = await productionRadarProvider(
+          query,
+          actualTrace,
+          diagnostics,
+          reportingEnvWithHooks(reportingDatabase, actualTrace, {
+            transformRows(sql, rows) {
+              if (sql === candidate.evidence.sql) envelopeRows = rows;
+              return rows;
+            },
+          }),
+        );
+        expect(actual.value).toEqual(oracle);
+        expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+          kind: "numeric-data-domain",
+          fieldIds: ["page.durationMs"],
+        });
+        expect(
+          envelopeRows.filter((row) => row.rowKind === "report"),
+        ).toHaveLength(0);
+        expect(
+          envelopeRows.filter((row) => row.rowKind === "control"),
+        ).toHaveLength(1);
+        const compatibilitySql = actualTrace.preparedSql.at(-1);
+        expect(compatibilitySql).toContain("visit_id");
+        expect(compatibilitySql).not.toContain("entity_id");
+      } finally {
+        reportingDatabase
+          .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+          .run(originalDuration.duration_ms, "alpha-second-page");
+      }
+    },
+  );
+
   it("judges the raw activity cap before empty reports and numeric fallback", async () => {
     const query = radarQuery(
       "session",

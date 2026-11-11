@@ -12,6 +12,7 @@ import type { QualifiedSourceFilterMode } from "@/lib/edge/analytics/engine/qual
 import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
 import {
   appendTechnologyCrossBreakdownReport,
+  TECHNOLOGY_BROWSER_CROSS_BREAKDOWN_OUTPUTS,
   TECHNOLOGY_CROSS_BREAKDOWN_OUTPUTS,
   TECHNOLOGY_CROSS_BROWSER_OTHER_PRIMARY_TOKEN,
   TECHNOLOGY_CROSS_BROWSER_OTHER_SECONDARY_TOKEN,
@@ -19,7 +20,6 @@ import {
   TECHNOLOGY_CROSS_CLIENT_OTHER_PRIMARY_TOKEN,
   TECHNOLOGY_CROSS_CLIENT_OTHER_SECONDARY_TOKEN,
   TECHNOLOGY_CROSS_CLIENT_UNKNOWN_TOKEN,
-  type TechnologyCrossBreakdownOutputIds,
   type TechnologyCrossBreakdownTokens,
 } from "@/lib/edge/analytics/engine/technology-cross-breakdown-report-plan";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
@@ -29,20 +29,7 @@ export const TECHNOLOGY_CROSS_QUALIFICATION_CONTROL_OUTPUT =
 export const TECHNOLOGY_BROWSER_CROSS_QUALIFICATION_CONTROL_OUTPUT =
   "technology-browser-cross-qualification-controls";
 
-export const TECHNOLOGY_BROWSER_CROSS_BREAKDOWN_OUTPUTS = {
-  operatingSystem: {
-    primary: "technology-browser-cross-os-primary",
-    secondary: "technology-browser-cross-os-dimension",
-    pairs: "technology-browser-cross-os-pairs",
-  },
-  deviceType: {
-    primary: "technology-browser-cross-device-primary",
-    secondary: "technology-browser-cross-device-dimension",
-    pairs: "technology-browser-cross-device-pairs",
-  },
-} as const satisfies Readonly<
-  Record<"operatingSystem" | "deviceType", TechnologyCrossBreakdownOutputIds>
->;
+export { TECHNOLOGY_BROWSER_CROSS_BREAKDOWN_OUTPUTS };
 
 export const TECHNOLOGY_BROWSER_CROSS_REPORT_OUTPUT_IDS = [
   TECHNOLOGY_BROWSER_CROSS_BREAKDOWN_OUTPUTS.operatingSystem.primary,

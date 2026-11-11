@@ -1,6 +1,7 @@
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
 import {
+  PAGE_DIMENSION_SELECTIONS,
   pageDimensionReportSource,
   type PageDimensionSelection,
   selectedPageDimension,
@@ -12,6 +13,7 @@ import type {
   LogicalRelationHandle,
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
+import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
@@ -35,11 +37,28 @@ export const TECHNOLOGY_CROSS_BREAKDOWN_OUTPUTS = {
   pairs: "technology-cross-pairs",
 } as const;
 
+export const TECHNOLOGY_BROWSER_CROSS_BREAKDOWN_OUTPUTS = {
+  operatingSystem: {
+    primary: "technology-browser-cross-os-primary",
+    secondary: "technology-browser-cross-os-dimension",
+    pairs: "technology-browser-cross-os-pairs",
+  },
+  deviceType: {
+    primary: "technology-browser-cross-device-primary",
+    secondary: "technology-browser-cross-device-dimension",
+    pairs: "technology-browser-cross-device-pairs",
+  },
+} as const;
+
 export interface TechnologyCrossBreakdownOutputIds {
   readonly primary: string;
   readonly secondary: string;
   readonly pairs: string;
 }
+
+export type TechnologyBrowserCrossBreakdownOutputIds = Readonly<
+  Record<"operatingSystem" | "deviceType", TechnologyCrossBreakdownOutputIds>
+>;
 
 export type TechnologyCrossBreakdownFamily = "browser" | "client";
 
@@ -54,6 +73,8 @@ export interface TechnologyCrossBreakdownPlanInput {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  /** Select the canonical prepared-scoped Page Source for an already prepared visit relation. */
+  readonly pageVisitQualification?: true;
   readonly family: TechnologyCrossBreakdownFamily;
   readonly primarySelection: PageDimensionSelection;
   readonly secondarySelection: PageDimensionSelection;
@@ -63,12 +84,24 @@ export interface TechnologyCrossBreakdownPlanInput {
   readonly outputIds?: TechnologyCrossBreakdownOutputIds;
 }
 
+export interface TechnologyBrowserCrossBreakdownPlanInput {
+  readonly siteId: string;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly pageVisitQualification?: true;
+  readonly browserLimit: number;
+  readonly operatingSystemLimit: number;
+  readonly deviceTypeLimit: number;
+}
+
 export type TechnologyCrossBreakdownReportInput = Omit<
   TechnologyCrossBreakdownPlanInput,
   "siteId" | "queryTime" | "filters" | "scopePlan"
 > & {
   readonly builder: LogicalPlanBuilder;
   readonly pages: LogicalRelationHandle;
+  readonly outputFamily?: "operatingSystem" | "deviceType";
 };
 
 function pageAttribute(
@@ -191,10 +224,17 @@ export function buildTechnologyCrossBreakdownPlan(
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
+    ...(input.pageVisitQualification
+      ? {
+          qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+        }
+      : {}),
     ...(input.scopePlan
       ? {
           scopePlan: input.scopePlan,
-          preparedTimePolicy: "reader-window-v1" as const,
+          ...(!input.pageVisitQualification
+            ? { preparedTimePolicy: "reader-window-v1" as const }
+            : {}),
         }
       : {}),
     selections: [primarySelection, secondarySelection],
@@ -209,6 +249,77 @@ export function buildTechnologyCrossBreakdownPlan(
     secondaryLimit,
     tokens: input.tokens,
     ...(input.outputIds ? { outputIds: input.outputIds } : {}),
+  });
+  return builder.finish();
+}
+
+/** Builds both Browser Cross families over one canonical Page Source. */
+export function buildTechnologyBrowserCrossBreakdownPlan(
+  input: TechnologyBrowserCrossBreakdownPlanInput,
+): ValidatedLogicalPlan {
+  const browserSelection = validatePageDimensionSelection(
+    PAGE_DIMENSION_SELECTIONS.browser,
+  );
+  const operatingSystemSelection = validatePageDimensionSelection(
+    PAGE_DIMENSION_SELECTIONS.operatingSystem,
+  );
+  const deviceTypeSelection = validatePageDimensionSelection(
+    PAGE_DIMENSION_SELECTIONS.deviceType,
+  );
+  const { builder, pages } = pageDimensionReportSource({
+    siteId: input.siteId,
+    queryTime: input.queryTime,
+    filters: input.filters,
+    ...(input.pageVisitQualification
+      ? {
+          qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+        }
+      : {}),
+    ...(input.scopePlan
+      ? {
+          scopePlan: input.scopePlan,
+          ...(!input.pageVisitQualification
+            ? { preparedTimePolicy: "reader-window-v1" as const }
+            : {}),
+        }
+      : {}),
+    selections: [
+      browserSelection,
+      operatingSystemSelection,
+      deviceTypeSelection,
+    ],
+  });
+  appendTechnologyCrossBreakdownReport({
+    builder,
+    pages,
+    family: "browser",
+    primarySelection: browserSelection,
+    secondarySelection: operatingSystemSelection,
+    primaryLimit: input.browserLimit,
+    secondaryLimit: input.operatingSystemLimit,
+    tokens: {
+      unknown: TECHNOLOGY_CROSS_BROWSER_UNKNOWN_TOKEN,
+      otherPrimary: TECHNOLOGY_CROSS_BROWSER_OTHER_PRIMARY_TOKEN,
+      otherSecondary: TECHNOLOGY_CROSS_BROWSER_OTHER_SECONDARY_TOKEN,
+    },
+    outputFamily: "operatingSystem",
+    outputIds: TECHNOLOGY_BROWSER_CROSS_BREAKDOWN_OUTPUTS.operatingSystem,
+  });
+  appendTechnologyCrossBreakdownReport({
+    builder,
+    pages,
+    family: "browser",
+    primarySelection: browserSelection,
+    secondarySelection: deviceTypeSelection,
+    primaryLimit: input.browserLimit,
+    secondaryLimit: input.deviceTypeLimit,
+    tokens: {
+      unknown: TECHNOLOGY_CROSS_BROWSER_UNKNOWN_TOKEN,
+      otherPrimary: TECHNOLOGY_CROSS_BROWSER_OTHER_PRIMARY_TOKEN,
+      otherSecondary: TECHNOLOGY_CROSS_BROWSER_OTHER_SECONDARY_TOKEN,
+    },
+    outputFamily: "deviceType",
+    outputIds: TECHNOLOGY_BROWSER_CROSS_BREAKDOWN_OUTPUTS.deviceType,
   });
   return builder.finish();
 }
@@ -347,6 +458,7 @@ export function appendTechnologyCrossBreakdownReport(
     "rowType",
     schema.primary,
     schema.secondary,
+    ...(input.outputFamily ? ["crossFamily"] : []),
     "views",
     "visitors",
     "sessions",
@@ -356,6 +468,9 @@ export function appendTechnologyCrossBreakdownReport(
     rowType: builder.literal(schema.rowTypes.primary, STRING),
     [schema.primary]: builder.slot(primaryTop, "primaryValue"),
     [schema.secondary]: builder.literal(null, STRING),
+    ...(input.outputFamily
+      ? { crossFamily: builder.literal(input.outputFamily, STRING) }
+      : {}),
     views: builder.slot(primaryTop, "views"),
     visitors: builder.slot(primaryTop, "visitors"),
     sessions: builder.slot(primaryTop, "sessions"),
@@ -365,6 +480,9 @@ export function appendTechnologyCrossBreakdownReport(
     rowType: builder.literal(schema.rowTypes.secondary, STRING),
     [schema.primary]: builder.literal(null, STRING),
     [schema.secondary]: builder.slot(secondaryTop, "secondaryValue"),
+    ...(input.outputFamily
+      ? { crossFamily: builder.literal(input.outputFamily, STRING) }
+      : {}),
     views: builder.slot(secondaryTop, "views"),
     visitors: builder.slot(secondaryTop, "visitors"),
     sessions: builder.slot(secondaryTop, "sessions"),
@@ -374,6 +492,9 @@ export function appendTechnologyCrossBreakdownReport(
     rowType: builder.literal(schema.rowTypes.pairs, STRING),
     [schema.primary]: builder.slot(pairRows, "primaryBucket"),
     [schema.secondary]: builder.slot(pairRows, "secondaryBucket"),
+    ...(input.outputFamily
+      ? { crossFamily: builder.literal(input.outputFamily, STRING) }
+      : {}),
     views: builder.slot(pairRows, "views"),
     visitors: builder.slot(pairRows, "visitors"),
     sessions: builder.slot(pairRows, "sessions"),

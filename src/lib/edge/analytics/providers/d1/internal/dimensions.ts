@@ -1348,6 +1348,12 @@ export async function queryPageTabsFromD1(
   window: QueryWindow,
   filters: FilterDocument,
   limit: number,
+  qualification?: {
+    readonly preparation: PageVisitQualificationPreparation;
+    readonly queryTime: QueryTime;
+    readonly scopePlan: ScopedFilterPlan;
+    readonly consumerKey: unknown;
+  },
 ): Promise<{
   path: DimensionRow[];
   title: DimensionRow[];
@@ -1356,18 +1362,44 @@ export async function queryPageTabsFromD1(
   exit: DimensionRow[];
 }> {
   const metadata = scopedFilterMetadata(filters);
-  const plan = buildPageTabsPlan({
+  const queryTime =
+    qualification?.queryTime ?? metadata?.time ?? queryWindowToTime(window);
+  const scopePlan = qualification?.scopePlan ?? metadata?.plan;
+  const builtPlan = buildPageTabsPlan({
     siteId,
-    queryTime: metadata?.time ?? queryWindowToTime(window),
+    queryTime,
     filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(scopePlan ? { scopePlan } : {}),
+    ...(qualification
+      ? { qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY] }
+      : {}),
     limit,
   });
-  const rows = await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
-    outputIds: PAGE_TAB_OUTPUT_IDS,
-    fields: PAGE_TAB_OUTPUT_FIELDS,
-    orderBy: PAGE_TAB_OUTPUT_ORDER_BY,
-  });
+  const plan = qualification
+    ? snapshotPageVisitQualificationPlan(builtPlan)
+    : builtPlan;
+  const qualificationExecutionInputs = qualification
+    ? bindPageVisitQualificationPreparation({
+        preparation: qualification.preparation,
+        siteId,
+        filters,
+        queryTime,
+        scopePlan: qualification.scopePlan,
+        consumerKey: qualification.consumerKey,
+        plan,
+      })
+    : undefined;
+  const rows = await queryAnalyticsReportOutputSetRowsFromD1(
+    env,
+    plan,
+    {
+      outputIds: PAGE_TAB_OUTPUT_IDS,
+      fields: PAGE_TAB_OUTPUT_FIELDS,
+      orderBy: PAGE_TAB_OUTPUT_ORDER_BY,
+    },
+    undefined,
+    qualificationExecutionInputs,
+  );
   const byCard = new Map<string, DimensionRow[]>();
   for (const row of rows) {
     const card = String(row.cardType ?? "");

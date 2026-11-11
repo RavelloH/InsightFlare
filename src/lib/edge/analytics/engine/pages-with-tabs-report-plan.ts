@@ -14,6 +14,7 @@ import {
   createPageTabsReportSources,
   PAGE_TAB_CARDS,
 } from "@/lib/edge/analytics/engine/page-tabs-report-plan";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
@@ -129,6 +130,7 @@ export function buildPagesWithTabsPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly limit: number;
   readonly includeDetails: boolean;
   readonly cursor?: PageAggregateCursor | null;
@@ -138,6 +140,9 @@ export function buildPagesWithTabsPlan(input: {
     queryTime: input.queryTime,
     filters: input.filters,
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    ...(input.qualificationDependencyRefs
+      ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+      : {}),
     additionalAttributes: [
       "page.report.pathname",
       "page.report.title",

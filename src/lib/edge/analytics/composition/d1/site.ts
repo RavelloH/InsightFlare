@@ -11,6 +11,7 @@ import type {
   QueryTime,
 } from "@/lib/edge/analytics/contract";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
 import { attachScopedFilterMetadata } from "@/lib/edge/analytics/contract/scoped-filter";
 import { comparisonPageTab } from "@/lib/edge/analytics/engine/comparison-page-tabs";
 import {
@@ -92,12 +93,15 @@ import {
   deferredGeoPointsQualificationFromQuery,
   geoPointsLimitFromQuery,
 } from "@/lib/edge/analytics/providers/d1/internal/geo-points-qualification-request";
+import { geoPointsPageVisitQualificationConsumerKey } from "@/lib/edge/analytics/providers/d1/internal/journey-geo-queries";
 import {
   parseRetentionGranularity,
   queryRetentionFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-retention";
 import { queryGeoPointAggregate } from "@/lib/edge/analytics/providers/d1/internal/journeys";
 import {
+  pagesAggregatePageQualificationConsumerKey,
+  pagesTabsQualificationConsumerKey,
   queryPagesPageFromD1,
   queryPagesWithTabsFromD1,
   queryPageTabsAggregate,
@@ -110,6 +114,7 @@ import { executePagesDashboardQualificationProgram } from "@/lib/edge/analytics/
 import { deferredPagesDashboardQualificationFromQuery } from "@/lib/edge/analytics/providers/d1/internal/pages-dashboard-qualification-request";
 import {
   mapPerformanceSummaries,
+  performancePageVisitQualificationConsumerKey,
   queryPerformanceDashboardFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/performance";
 import { executePerformanceBreakdownDashboardQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/performance-breakdown-dashboard-qualification-program";
@@ -1556,6 +1561,36 @@ export function registerSiteContractProviders(
           if (options.diagnostics)
             options.diagnostics.advancedCountSqlFallbackReason =
               execution.fallbackReason;
+          const window = timeWindow(request.time);
+          const readerQueryTime = queryWindowToTime(window);
+          const consumerKey = geoPointsPageVisitQualificationConsumerKey(
+            deferred.configuration,
+          );
+          const preparation = await prepareDeferredPageVisitQualification(
+            deferred.qualification,
+            consumerKey,
+            {
+              readerQueryTime,
+              readerAudience: request.context.policy.audience,
+            },
+          );
+          if (preparation)
+            return {
+              value: await queryGeoPointAggregate(
+                options.env,
+                options.siteId,
+                window,
+                filters,
+                deferred.configuration.limit,
+                options.diagnostics,
+                {
+                  preparation,
+                  queryTime: readerQueryTime,
+                  scopePlan: deferred.qualification.metadata.plan,
+                  configuration: deferred.configuration,
+                },
+              ),
+            };
           filters = await prepareDeferredEventQualificationFallback(
             deferred.qualification,
           );
@@ -1760,7 +1795,29 @@ export function registerSiteContractProviders(
           request as unknown as QueryInput & Record<string, unknown>,
         );
         const window = timeWindow(request.time);
+        const readerQueryTime = queryWindowToTime(window);
         const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
+        const preparePageVisitFallback = async () => {
+          if (!deferred) return undefined;
+          const preparation = await prepareDeferredPageVisitQualification(
+            deferred.qualification,
+            performancePageVisitQualificationConsumerKey(
+              deferred.configuration,
+            ),
+            {
+              readerQueryTime,
+              readerAudience: request.context.policy.audience,
+            },
+          );
+          return preparation
+            ? {
+                preparation,
+                queryTime: readerQueryTime,
+                scopePlan: deferred.qualification.metadata.plan,
+                configuration: deferred.configuration,
+              }
+            : undefined;
+        };
         switch (request.mode) {
           case "summary": {
             if (deferred) {
@@ -1781,6 +1838,17 @@ export function registerSiteContractProviders(
                       qualified.row as Record<string, unknown>,
                     ]),
                   },
+                };
+              const qualification = await preparePageVisitFallback();
+              if (qualification)
+                return {
+                  value: await readSitePerformanceSummary({
+                    env: options.env,
+                    siteId: options.siteId,
+                    window,
+                    filters,
+                    qualification,
+                  }),
                 };
               const fallbackFilters =
                 await prepareDeferredEventQualificationFallback(
@@ -1822,6 +1890,18 @@ export function registerSiteContractProviders(
                     request.interval,
                     qualified.trends,
                   ),
+                };
+              const qualification = await preparePageVisitFallback();
+              if (qualification)
+                return {
+                  value: await readSitePerformanceTimeseries({
+                    env: options.env,
+                    siteId: options.siteId,
+                    window,
+                    filters,
+                    interval: request.interval,
+                    qualification,
+                  }),
                 };
               const fallbackFilters =
                 await prepareDeferredEventQualificationFallback(
@@ -1870,6 +1950,20 @@ export function registerSiteContractProviders(
                     qualified.value.rows,
                   ),
                 };
+              const qualification = await preparePageVisitFallback();
+              if (qualification)
+                return {
+                  value: await readSitePerformanceBreakdown({
+                    env: options.env,
+                    siteId: options.siteId,
+                    window,
+                    filters,
+                    dimension: request.dimension,
+                    metric: request.metric,
+                    limit: request.limit ?? 20,
+                    qualification,
+                  }),
+                };
               const fallbackFilters =
                 await prepareDeferredEventQualificationFallback(
                   deferred.qualification,
@@ -1915,6 +2009,19 @@ export function registerSiteContractProviders(
                 qualified.value.mode === "dashboard"
               )
                 return { value: qualified.value.value };
+              const qualification = await preparePageVisitFallback();
+              if (qualification)
+                return {
+                  value: await queryPerformanceDashboardFromD1(
+                    options.env,
+                    options.siteId,
+                    window,
+                    request.interval,
+                    filters,
+                    request.limit ?? 18,
+                    qualification,
+                  ),
+                };
               const fallbackFilters =
                 await prepareDeferredEventQualificationFallback(
                   deferred.qualification,
@@ -1980,13 +2087,42 @@ export function registerSiteContractProviders(
               throw new Error(
                 "pages_tabs_qualification_configuration_mismatch",
               );
+            const window = timeWindow(request.time);
+            const readerQueryTime = queryWindowToTime(window);
+            const consumerKey = pagesTabsQualificationConsumerKey(
+              deferred.pagesTabsRequest,
+            );
+            const preparation = await prepareDeferredPageVisitQualification(
+              deferred,
+              consumerKey,
+              {
+                readerQueryTime,
+                readerAudience: request.context.policy.audience,
+              },
+            );
+            if (preparation)
+              return {
+                value: await queryPageTabsAggregate(
+                  options.env,
+                  options.siteId,
+                  window,
+                  filters,
+                  limit,
+                  {
+                    preparation,
+                    queryTime: readerQueryTime,
+                    scopePlan: deferred.metadata.plan,
+                    consumerKey,
+                  },
+                ),
+              };
             const fallbackFilters =
               await prepareDeferredEventQualificationFallback(deferred);
             return {
               value: await queryPageTabsAggregate(
                 options.env,
                 options.siteId,
-                timeWindow(request.time),
+                window,
                 fallbackFilters,
                 limit,
               ),
@@ -2045,12 +2181,56 @@ export function registerSiteContractProviders(
               throw new Error(
                 "pages_tabs_qualification_configuration_mismatch",
               );
+            const window = timeWindow(request.time);
+            const readerQueryTime = queryWindowToTime(window);
+            const consumerKey = pagesTabsQualificationConsumerKey(
+              deferred.pagesTabsRequest,
+            );
+            const preparation = await prepareDeferredPageVisitQualification(
+              deferred,
+              consumerKey,
+              {
+                readerQueryTime,
+                readerAudience: request.context.policy.audience,
+              },
+            );
+            if (preparation) {
+              const cursor = await decodePagesCursor(
+                options.env,
+                options.siteId,
+                window,
+                filters,
+                request.includeDetails === true,
+                cursorText,
+                request.context.policy.audience,
+              );
+              if (cursorText && !cursor) throw new InvalidCursorError("pages");
+              return {
+                value: await queryPagesWithTabsFromD1(
+                  options.env,
+                  options.siteId,
+                  window,
+                  filters,
+                  limit,
+                  request.includeDetails === true,
+                  cursor,
+                  request.context.policy.audience,
+                  {
+                    preparation,
+                    queryTime: readerQueryTime,
+                    scopePlan: deferred.metadata.plan,
+                    consumerKey,
+                  },
+                ),
+                source: "raw",
+              };
+            }
             const fallbackFilters =
               await prepareDeferredEventQualificationFallback(deferred);
             const fallbackCursor = await decodePagesCursor(
               options.env,
               options.siteId,
-              timeWindow(request.time),
+              window,
               fallbackFilters,
               request.includeDetails === true,
               cursorText,
@@ -2062,7 +2242,7 @@ export function registerSiteContractProviders(
               value: await queryPagesWithTabsFromD1(
                 options.env,
                 options.siteId,
-                timeWindow(request.time),
+                window,
                 fallbackFilters,
                 limit,
                 request.includeDetails === true,
@@ -2132,12 +2312,56 @@ export function registerSiteContractProviders(
             });
             if (qualified.kind === "executed")
               return { value: qualified.page, source: "raw" };
+            const window = timeWindow(request.time);
+            const readerQueryTime = queryWindowToTime(window);
+            const consumerKey = pagesAggregatePageQualificationConsumerKey(
+              deferred.pagesAggregatePageRequest,
+            );
+            const preparation = await prepareDeferredPageVisitQualification(
+              deferred,
+              consumerKey,
+              {
+                readerQueryTime,
+                readerAudience: request.context.policy.audience,
+              },
+            );
+            if (preparation) {
+              const cursor = await decodePagesCursor(
+                options.env,
+                options.siteId,
+                window,
+                filters,
+                includeDetails,
+                cursorText,
+                request.context.policy.audience,
+              );
+              if (cursorText && !cursor) throw new InvalidCursorError("pages");
+              return {
+                value: await queryPagesPageFromD1(
+                  options.env,
+                  options.siteId,
+                  window,
+                  filters,
+                  limit,
+                  includeDetails,
+                  cursor,
+                  request.context.policy.audience,
+                  {
+                    preparation,
+                    queryTime: readerQueryTime,
+                    scopePlan: deferred.metadata.plan,
+                    consumerKey,
+                  },
+                ),
+                source: "raw",
+              };
+            }
             const fallbackFilters =
               await prepareDeferredEventQualificationFallback(deferred);
             const cursor = await decodePagesCursor(
               options.env,
               options.siteId,
-              timeWindow(request.time),
+              window,
               fallbackFilters,
               includeDetails,
               cursorText,
@@ -2148,7 +2372,7 @@ export function registerSiteContractProviders(
               value: await queryPagesPageFromD1(
                 options.env,
                 options.siteId,
-                timeWindow(request.time),
+                window,
                 fallbackFilters,
                 limit,
                 includeDetails,

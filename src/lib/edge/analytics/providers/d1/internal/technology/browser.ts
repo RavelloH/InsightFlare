@@ -10,7 +10,9 @@ import {
   type PageDimensionSelection,
 } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import {
+  buildTechnologyBrowserCrossBreakdownPlan,
   buildTechnologyCrossBreakdownPlan,
+  TECHNOLOGY_BROWSER_CROSS_BREAKDOWN_OUTPUTS,
   TECHNOLOGY_CROSS_BREAKDOWN_OUTPUTS,
 } from "@/lib/edge/analytics/engine/technology-cross-breakdown-report-plan";
 import {
@@ -39,6 +41,10 @@ import {
 import type { Env } from "@/lib/edge/types";
 
 import { mapBrowserCrossDimensionRows } from "./browser-cross";
+import {
+  bindTechnologyPageVisitQualification,
+  type TechnologyPageVisitQualification,
+} from "./page-visit-qualification";
 import { queryShareTrendFromD1 } from "./share-trend";
 
 export { mapBrowserCrossDimensionRows } from "./browser-cross";
@@ -50,6 +56,7 @@ export async function queryBrowserTrendFromD1(
   interval: Interval,
   filters: FilterDocument,
   limit: number,
+  qualification?: TechnologyPageVisitQualification,
 ): Promise<{
   series: BrowserTrendSeriesRow[];
   data: BrowserTrendPointRow[];
@@ -62,6 +69,7 @@ export async function queryBrowserTrendFromD1(
     filters,
     limit,
     "browser",
+    qualification,
   );
 }
 
@@ -72,6 +80,7 @@ export async function queryBrowserEngineTrendFromD1(
   interval: Interval,
   filters: FilterDocument,
   limit: number,
+  qualification?: TechnologyPageVisitQualification,
 ): Promise<{
   series: BrowserTrendSeriesRow[];
   data: BrowserTrendPointRow[];
@@ -84,6 +93,7 @@ export async function queryBrowserEngineTrendFromD1(
     filters,
     limit,
     "browserEngine",
+    qualification,
   );
 }
 
@@ -94,18 +104,37 @@ export async function queryBrowserVersionBreakdownFromD1(
   filters: FilterDocument,
   browserLimit: number,
   versionLimit: number,
+  qualification?: TechnologyPageVisitQualification,
 ): Promise<BrowserVersionBreakdownRow[]> {
   const metadata = scopedFilterMetadata(filters);
+  const queryTime = qualification?.queryTime ?? queryWindowToTime(window);
+  const plan = buildBrowserVersionBreakdownPlan({
+    siteId,
+    queryTime,
+    filters,
+    ...(qualification
+      ? {
+          scopePlan: qualification.scopePlan,
+          pageVisitQualification: true as const,
+        }
+      : metadata
+        ? { scopePlan: metadata.plan }
+        : {}),
+    browserLimit,
+  });
+  const bound = bindTechnologyPageVisitQualification({
+    siteId,
+    filters,
+    qualification,
+    plan,
+  });
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
-    buildBrowserVersionBreakdownPlan({
-      siteId,
-      queryTime: queryWindowToTime(window),
-      filters,
-      ...(metadata ? { scopePlan: metadata.plan } : {}),
-      browserLimit,
-    }),
+    bound.plan,
     BROWSER_VERSION_BREAKDOWN_OUTPUT,
+    undefined,
+    undefined,
+    bound.executionInputs,
   );
   return mapBrowserVersionBreakdownRows(rows, versionLimit);
 }
@@ -268,10 +297,91 @@ export async function queryBrowserCrossBreakdownFromD1(
   browserLimit: number,
   osLimit: number,
   deviceTypeLimit: number,
+  qualification?: TechnologyPageVisitQualification,
 ): Promise<{
   operatingSystem: BrowserCrossBreakdownDimensionDataRow;
   deviceType: BrowserCrossBreakdownDimensionDataRow;
 }> {
+  if (qualification) {
+    const plan = buildTechnologyBrowserCrossBreakdownPlan({
+      siteId,
+      queryTime: qualification.queryTime,
+      filters,
+      scopePlan: qualification.scopePlan,
+      pageVisitQualification: true,
+      browserLimit,
+      operatingSystemLimit: osLimit,
+      deviceTypeLimit,
+    });
+    const bound = bindTechnologyPageVisitQualification({
+      siteId,
+      filters,
+      qualification,
+      plan,
+    });
+    const outputIds = [
+      ...Object.values(
+        TECHNOLOGY_BROWSER_CROSS_BREAKDOWN_OUTPUTS.operatingSystem,
+      ),
+      ...Object.values(TECHNOLOGY_BROWSER_CROSS_BREAKDOWN_OUTPUTS.deviceType),
+    ];
+    const queryRows = await queryAnalyticsReportOutputSetRowsFromD1(
+      env,
+      bound.plan,
+      {
+        outputIds,
+        fields: [
+          "rowType",
+          "browser",
+          "dimension",
+          "crossFamily",
+          "views",
+          "visitors",
+          "sessions",
+          "rowOrder",
+        ],
+        orderBy: [
+          {
+            field: "crossFamily",
+            direction: "asc",
+            nulls: "first",
+          },
+          {
+            field: "rowType",
+            direction: "asc",
+            nulls: "first",
+          },
+          {
+            field: "rowOrder",
+            direction: "asc",
+            nulls: "first",
+          },
+          {
+            field: "browser",
+            direction: "asc",
+            nulls: "first",
+          },
+          {
+            field: "dimension",
+            direction: "asc",
+            nulls: "first",
+          },
+        ],
+      },
+      undefined,
+      bound.executionInputs,
+    );
+    return {
+      operatingSystem: mapBrowserCrossDimensionRows(
+        queryRows.filter((row) => row.crossFamily === "operatingSystem"),
+        "os",
+      ),
+      deviceType: mapBrowserCrossDimensionRows(
+        queryRows.filter((row) => row.crossFamily === "deviceType"),
+        "device",
+      ),
+    };
+  }
   const [operatingSystem, deviceType] = await Promise.all([
     queryBrowserCrossDimensionFromD1(
       env,

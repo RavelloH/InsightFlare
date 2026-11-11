@@ -20,6 +20,7 @@ import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/p
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
 import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
 import { semanticPageDimension } from "@/lib/edge/analytics/engine/semantic/page-dimensions";
+import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
@@ -182,6 +183,8 @@ interface TechnologyShareTrendPlanInput {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  /** Select the canonical prepared-scoped Page Source for an already prepared visit relation. */
+  readonly pageVisitQualification?: true;
   readonly interval: CalendarGranularity;
   readonly limit: number;
 }
@@ -563,10 +566,17 @@ function buildPlan(
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
+    ...(input.pageVisitQualification
+      ? {
+          qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+        }
+      : {}),
     ...(input.scopePlan
       ? {
           scopePlan: input.scopePlan,
-          preparedTimePolicy: "reader-window-v1" as const,
+          ...(!input.pageVisitQualification
+            ? { preparedTimePolicy: "reader-window-v1" as const }
+            : {}),
         }
       : {}),
     attributes: requiredAttributes(dimensions),

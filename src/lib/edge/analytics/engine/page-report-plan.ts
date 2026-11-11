@@ -372,6 +372,7 @@ export function buildPagesPagePlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly limit: number;
   readonly includeDetails: boolean;
   readonly cursor?: PageAggregateCursor | null;

@@ -2,7 +2,10 @@ import type { Env } from "@/lib/edge/types";
 
 import type { FilterDocument, GeoPointAggregate, QueryWindow } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
-import { queryGeoPointsFromD1 } from "./journey-geo-queries";
+import {
+  type GeoPointsPageVisitQualification,
+  queryGeoPointsFromD1,
+} from "./journey-geo-queries";
 
 export {
   queryJourneyEventDetailFromD1,
@@ -58,6 +61,15 @@ export async function queryGeoPointAggregate(
   filters: FilterDocument,
   limit: number,
   diagnostics?: D1ReadDiagnostics,
+  qualification?: GeoPointsPageVisitQualification,
 ): Promise<GeoPointAggregate> {
-  return queryGeoPointsFromD1(env, siteId, window, filters, limit, diagnostics);
+  return queryGeoPointsFromD1(
+    env,
+    siteId,
+    window,
+    filters,
+    limit,
+    diagnostics,
+    qualification,
+  );
 }

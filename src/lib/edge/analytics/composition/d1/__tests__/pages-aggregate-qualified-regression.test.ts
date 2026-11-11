@@ -277,7 +277,7 @@ function testEnv(database: DatabaseSync, trace: SqliteD1Trace): Env {
 }
 
 function queryFor(
-  scope: "session" | "visitor",
+  scope: "session" | "visitor" | "event",
   input: {
     readonly limit?: number;
     readonly cursor?: string | null;
@@ -725,37 +725,65 @@ describe("Wave96B qualified ordinary Pages aggregate pagination", () => {
     },
   );
 
-  it("runs the complete legacy operation after real numeric-domain fallback", async () => {
-    const database = createFixture();
-    database
-      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
-      .run("invalid-duration", "visitor-0-qualifier-source");
-    const query = queryFor("session", {
-      filterDsl: "count(page { page.durationMs gt 5 }) eq 2",
-      limit: 4,
-    });
-    const expected = await independentLegacyOracle(database, query);
-    const trace = traceFor();
-    const diagnostics = createD1ReadDiagnostics();
-    const provider = createD1SiteProviderRegistry({
-      env: testEnv(database, trace),
-      siteId: SITE,
-      diagnostics,
-    }).resolve("pages");
-    if (!provider) throw new Error("wave96b_pages_provider_missing");
-    const actual = await provider.execute(query);
-    expect(actual.value).toEqual(expected);
-    expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
-      kind: "numeric-data-domain",
-      fieldIds: ["page.durationMs"],
-    });
-    expect(trace.preparedSql.length).toBeGreaterThan(2);
-    sqlEvidence.push({
-      scenario: "numeric-data-domain-fallback",
-      statementCount: trace.preparedSql.length,
-      fallbackReason: diagnostics.advancedCountSqlFallbackReason,
-    });
-  });
+  it.each(["session", "event"] as const)(
+    "runs the complete legacy operation after numeric-domain fallback for %s scope",
+    async (scope) => {
+      const database = createFixture();
+      database
+        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+        .run("invalid-duration", "visitor-0-qualifier-source");
+      const query = queryFor(scope, {
+        filterDsl: "count(page { page.durationMs gt 5 }) eq 2",
+        limit: 4,
+      });
+      const expected = await independentLegacyOracle(database, query);
+      const compilation = await compilePagesProgram(database, query);
+      expect(compilation.kind).toBe("compiled");
+      if (compilation.kind !== "compiled")
+        throw new Error("wave96b_pages_numeric_compatibility_unavailable");
+      const trace = traceFor();
+      const diagnostics = createD1ReadDiagnostics();
+      const provider = createD1SiteProviderRegistry({
+        env: testEnv(database, trace),
+        siteId: SITE,
+        diagnostics,
+      }).resolve("pages");
+      if (!provider) throw new Error("wave96b_pages_provider_missing");
+      const actual = await provider.execute(query);
+      expect(actual.value).toEqual(expected);
+      expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
+        kind: "numeric-data-domain",
+        fieldIds: ["page.durationMs"],
+      });
+      expect(trace.preparedSql).toContain(compilation.evidence.sql);
+      const guardRows = database
+        .prepare(compilation.evidence.sql)
+        .all(...(compilation.evidence.bindings as SQLInputValue[])) as Record<
+        string,
+        unknown
+      >[];
+      expect(guardRows.filter((row) => row.rowKind === "control")).toHaveLength(
+        1,
+      );
+      expect(guardRows.filter((row) => row.rowKind === "report")).toHaveLength(
+        0,
+      );
+      const compatibilitySql = trace.preparedSql.at(-1);
+      expect(compatibilitySql).toContain("visit_id");
+      expect(compatibilitySql).not.toContain("entity_id");
+      expect(compatibilitySql).not.toBe(compilation.evidence.sql);
+      sqlEvidence.push({
+        scenario: "numeric-data-domain-fallback",
+        scope,
+        statementCount: trace.preparedSql.length,
+        sql: trace.preparedSql,
+        bindings: trace.bindings,
+        nativeGuardRows: guardRows,
+        finalCompatibilitySql: compatibilitySql,
+        fallbackReason: diagnostics.advancedCountSqlFallbackReason,
+      });
+    },
+  );
 
   it("falls back before fused D1 when the complete 24-Count summary exceeds the shared width bound", async () => {
     const conditions = Array.from(

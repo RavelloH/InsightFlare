@@ -23,6 +23,11 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { Env } from "@/lib/edge/types";
 
+import {
+  bindTechnologyPageVisitQualification,
+  type TechnologyPageVisitQualification,
+} from "./page-visit-qualification";
+
 export interface CrossDimensionDefinition {
   selection: PageDimensionSelection;
   fallbackKeyBase: string;
@@ -37,13 +42,22 @@ export async function queryCrossDimensionFromD1(
   secondaryLimit: number,
   primaryDimension: CrossDimensionDefinition,
   secondaryDimension: CrossDimensionDefinition,
+  qualification?: TechnologyPageVisitQualification,
 ): Promise<BrowserCrossBreakdownDimensionDataRow> {
   const metadata = scopedFilterMetadata(filters);
+  const queryTime = qualification?.queryTime ?? queryWindowToTime(window);
   const plan = buildTechnologyCrossBreakdownPlan({
     siteId,
-    queryTime: queryWindowToTime(window),
+    queryTime,
     filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(qualification
+      ? {
+          scopePlan: qualification.scopePlan,
+          pageVisitQualification: true as const,
+        }
+      : metadata
+        ? { scopePlan: metadata.plan }
+        : {}),
     family: "client",
     primarySelection: primaryDimension.selection,
     secondarySelection: secondaryDimension.selection,
@@ -55,24 +69,36 @@ export async function queryCrossDimensionFromD1(
       otherSecondary: CLIENT_CROSS_OTHER_SECONDARY_TOKEN,
     },
   });
-  const queryRows = await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
-    outputIds: Object.values(TECHNOLOGY_CROSS_BREAKDOWN_OUTPUTS),
-    fields: [
-      "rowType",
-      "primaryValue",
-      "secondaryValue",
-      "views",
-      "visitors",
-      "sessions",
-      "rowOrder",
-    ],
-    orderBy: [
-      { field: "rowType", direction: "asc", nulls: "first" },
-      { field: "rowOrder", direction: "asc", nulls: "first" },
-      { field: "primaryValue", direction: "asc", nulls: "first" },
-      { field: "secondaryValue", direction: "asc", nulls: "first" },
-    ],
+  const bound = bindTechnologyPageVisitQualification({
+    siteId,
+    filters,
+    qualification,
+    plan,
   });
+  const queryRows = await queryAnalyticsReportOutputSetRowsFromD1(
+    env,
+    bound.plan,
+    {
+      outputIds: Object.values(TECHNOLOGY_CROSS_BREAKDOWN_OUTPUTS),
+      fields: [
+        "rowType",
+        "primaryValue",
+        "secondaryValue",
+        "views",
+        "visitors",
+        "sessions",
+        "rowOrder",
+      ],
+      orderBy: [
+        { field: "rowType", direction: "asc", nulls: "first" },
+        { field: "rowOrder", direction: "asc", nulls: "first" },
+        { field: "primaryValue", direction: "asc", nulls: "first" },
+        { field: "secondaryValue", direction: "asc", nulls: "first" },
+      ],
+    },
+    undefined,
+    bound.executionInputs,
+  );
   return mapCrossDimensionRows(queryRows, primaryDimension, secondaryDimension);
 }
 

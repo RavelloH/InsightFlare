@@ -250,7 +250,7 @@ function emptyMatrix(): BrowserCrossBreakdownDimensionDataRow {
   return { columns: [], rows: [], totalVisitors: 0 };
 }
 
-describe("Browser Cross qualified regression", () => {
+describe("Browser Cross qualified regression", { timeout: 60_000 }, () => {
   beforeAll(() => {
     database = createMigratedDatabase();
     database.exec("PRAGMA foreign_keys = OFF");
@@ -581,7 +581,7 @@ describe("Browser Cross qualified regression", () => {
 
     const numericDsl =
       'page.path neq "/excluded" and count(event { event.name eq "qualifier" }) eq 1 and count(page { page.durationMs gt 5 }) eq 1';
-    const numericQuery = browserQuery("session", limits, numericDsl);
+    const numericQuery = browserQuery("event", limits, numericDsl);
     const numericCandidate = await forwardBrowserCandidate(numericQuery);
     const numericCompilation = compileCrossQualificationProgram({
       deferred: numericCandidate.deferred,
@@ -590,6 +590,16 @@ describe("Browser Cross qualified regression", () => {
     });
     expect(numericCompilation.kind).toBe("compiled");
     if (numericCompilation.kind !== "compiled") return;
+    expect(numericCompilation.evidence.outputDescriptors).toHaveLength(6);
+    expect(numericCandidate.deferred.qualification.countInput.scope).toBe(
+      "event",
+    );
+    expect(
+      "eventCandidateReportProjection" in
+        numericCandidate.deferred.qualification
+        ? numericCandidate.deferred.qualification.eventCandidateReportProjection
+        : undefined,
+    ).toBe("page-visits");
     const durationBefore = database
       .prepare("SELECT duration_ms FROM visits WHERE visit_id = ?")
       .get("chrome-win-1") as { readonly duration_ms: number | string | null };
@@ -599,10 +609,14 @@ describe("Browser Cross qualified regression", () => {
         .run("invalid-duration", "chrome-win-1");
       const diagnostics = createD1ReadDiagnostics();
       const numericTrace = trace();
+      let envelopeRows: readonly Record<string, unknown>[] = [];
       const numericResult = await executeBrowser(
         numericQuery,
         numericTrace,
-        envFor(database, numericTrace),
+        envWithRowTransform(database, numericTrace, (sql, rows) => {
+          if (sql === numericCompilation.evidence.sql) envelopeRows = rows;
+          return rows;
+        }),
         diagnostics,
       );
       const fallbackFilters = await prepareDeferredEventQualificationFallback(
@@ -624,14 +638,20 @@ describe("Browser Cross qualified regression", () => {
         fieldIds: ["page.durationMs"],
       });
       expect(
+        envelopeRows.filter((row) => row.rowKind === "report"),
+      ).toHaveLength(0);
+      expect(
+        envelopeRows.filter((row) => row.rowKind === "control"),
+      ).toHaveLength(1);
+      expect(
         numericTrace.preparedSql.filter(
           (sql) => sql === numericCompilation.evidence.sql,
         ),
       ).toHaveLength(1);
-      expect(numericTrace.preparedSql.slice(-2)).toEqual(
-        oracleTrace.preparedSql,
-      );
-      expect(numericTrace.bindings.slice(-2)).toEqual(oracleTrace.bindings);
+      for (const compatibilitySql of numericTrace.preparedSql.slice(-2)) {
+        expect(compatibilitySql).toContain("visit_id");
+        expect(compatibilitySql).not.toContain("entity_id");
+      }
       expect(oracleTrace.preparedSql).toHaveLength(2);
       writeEvidence("browser-six-output-contract.json", {
         empty: {

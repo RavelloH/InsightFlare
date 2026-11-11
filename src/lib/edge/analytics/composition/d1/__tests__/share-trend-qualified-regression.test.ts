@@ -663,9 +663,10 @@ async function productionTechnologyProvider(
   query: ShareQuery,
   queryTrace: SqliteD1Trace,
   diagnostics = createD1ReadDiagnostics(),
+  env = sqliteEnv(database, queryTrace),
 ): Promise<{ readonly value: unknown }> {
   const registry = createD1SiteProviderRegistry({
-    env: sqliteEnv(database, queryTrace),
+    env,
     siteId: SITE,
     diagnostics,
   });
@@ -1418,23 +1419,38 @@ describe("share-trend qualified provider regression", () => {
     );
   }, 30_000);
 
-  it("falls back once to the legacy reader for incompatible numeric Count data", async () => {
+  it("uses the prepared Page visit relation for Event Count numeric fallback", async () => {
     database
       .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
       .run("invalid-duration", "alpha-tie-z");
     const query = queryFor(
-      "session",
-      { name: "numeric-domain-fallback", variant: "browser" },
+      "event",
+      { name: "numeric-domain-fallback", variant: "browser-engine" },
       5,
-      'page.path neq "/excluded" and count(page { page.durationMs gt 5 }) eq 1',
+      'page.path neq "/excluded" and count(event { event.name eq "qualifier" }) eq 1 and count(page { page.durationMs gt 5 }) eq 1',
     );
+    const candidate = await compileCandidate(query);
+    expect(candidate.kind).toBe("compiled");
+    if (candidate.kind !== "compiled") return;
+    expect(candidate.deferred.qualification.countInput.scope).toBe("event");
+    expect(candidate.evidence.outputDescriptors).toHaveLength(3);
     const actualTrace = trace();
     const diagnostics = createD1ReadDiagnostics();
+    let envelopeRows: readonly Record<string, unknown>[] = [];
     try {
       const actual = await productionTechnologyProvider(
         query,
         actualTrace,
         diagnostics,
+        sqliteEnvWithResultTransform(database, actualTrace, (rows) => {
+          if (
+            rows.some(
+              (row) => row.rowKind === "report" || row.rowKind === "control",
+            )
+          )
+            envelopeRows = rows;
+          return rows;
+        }),
       );
       const oracleTrace = trace();
       const oracle = await oldTechnologyReader(query, oracleTrace);
@@ -1444,8 +1460,17 @@ describe("share-trend qualified provider regression", () => {
         fieldIds: ["page.durationMs"],
       });
       expect(
+        envelopeRows.filter((row) => row.rowKind === "report"),
+      ).toHaveLength(0);
+      expect(
+        envelopeRows.filter((row) => row.rowKind === "control"),
+      ).toHaveLength(1);
+      expect(
         actualTrace.preparedSql.filter((sql) => sql.includes('AS "outputId"')),
       ).toHaveLength(1);
+      const compatibilitySql = actualTrace.preparedSql.at(-1);
+      expect(compatibilitySql).toContain("visit_id");
+      expect(compatibilitySql).not.toContain("entity_id");
       writeEvidence(
         "wave96i-share-trend-numeric-fallback.json",
         JSON.stringify(

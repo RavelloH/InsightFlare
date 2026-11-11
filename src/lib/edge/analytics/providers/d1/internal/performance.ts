@@ -1,5 +1,8 @@
 import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
+import type { QueryTime } from "@/lib/edge/analytics/contract/types";
+import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import {
   buildPerformanceAllTrendsPlan,
   buildPerformanceCountriesPlan,
@@ -16,6 +19,9 @@ import {
   PERFORMANCE_SUMMARY_OUTPUT_ID,
   PERFORMANCE_TREND_OUTPUT_ID,
 } from "@/lib/edge/analytics/engine/performance-sample-statistics-report-plan";
+import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
+import type { DeferredPerformanceSummaryQualification } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import type { PageVisitQualificationPreparation } from "@/lib/edge/analytics/providers/d1/internal/page-visit-qualification-execution";
 import type { Env } from "@/lib/edge/types";
 
 import {
@@ -42,6 +48,12 @@ import {
   roundPerformanceValue,
   timeBucketTimestamp,
 } from "./core";
+import {
+  bindPageVisitQualificationPreparation,
+  pageVisitQualificationConsumerKey,
+  snapshotPageVisitQualificationPlan,
+} from "./page-visit-qualification-execution";
+import type { QualificationExecutionInputs } from "./qualification-execution-inputs";
 function emptyPerformanceSummaries(): Record<
   PerformanceMetricKey,
   PerformanceSummaryRow
@@ -118,19 +130,63 @@ function performancePlanInput(
   siteId: string,
   window: QueryWindow,
   filters: FilterDocument,
+  qualification?: PerformancePageVisitQualification,
 ) {
   const metadata = scopedFilterMetadata(filters);
   return {
     siteId,
-    queryTime: queryWindowToTime(window),
+    queryTime: qualification?.queryTime ?? queryWindowToTime(window),
     filters,
-    ...(metadata
+    ...(qualification
       ? {
-          scopePlan: metadata.plan,
-          preparedTimePolicy: "reader-window-v1" as const,
+          scopePlan: qualification.scopePlan,
+          qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
         }
-      : {}),
+      : metadata
+        ? {
+            scopePlan: metadata.plan,
+            preparedTimePolicy: "reader-window-v1" as const,
+          }
+        : {}),
   };
+}
+
+export interface PerformancePageVisitQualification {
+  readonly preparation: PageVisitQualificationPreparation;
+  readonly queryTime: QueryTime;
+  readonly scopePlan: ScopedFilterPlan;
+  readonly configuration: DeferredPerformanceSummaryQualification["configuration"];
+}
+
+export function performancePageVisitQualificationConsumerKey(
+  configuration: PerformancePageVisitQualification["configuration"],
+) {
+  return pageVisitQualificationConsumerKey("performance-report", configuration);
+}
+
+function bindPerformanceQualification(input: {
+  readonly plan: ValidatedLogicalPlan;
+  readonly siteId: string;
+  readonly filters: FilterDocument;
+  readonly qualification?: PerformancePageVisitQualification;
+}): {
+  readonly plan: ValidatedLogicalPlan;
+  readonly executionInputs?: QualificationExecutionInputs;
+} {
+  if (!input.qualification) return { plan: input.plan };
+  const plan = snapshotPageVisitQualificationPlan(input.plan);
+  const executionInputs = bindPageVisitQualificationPreparation({
+    preparation: input.qualification.preparation,
+    siteId: input.siteId,
+    filters: input.filters,
+    queryTime: input.qualification.queryTime,
+    scopePlan: input.qualification.scopePlan,
+    consumerKey: performancePageVisitQualificationConsumerKey(
+      input.qualification.configuration,
+    ),
+    plan,
+  });
+  return { plan, executionInputs };
 }
 function emptyPerformanceTrends(): Record<
   PerformanceMetricKey,
@@ -259,14 +315,27 @@ export async function queryPerformanceSummariesFromD1(
   siteId: string,
   window: QueryWindow,
   filters: FilterDocument,
+  qualification?: PerformancePageVisitQualification,
 ): Promise<Record<PerformanceMetricKey, PerformanceSummaryRow>> {
-  const plan = buildPerformanceSummariesPlan(
-    performancePlanInput(siteId, window, filters),
+  const planInput = performancePlanInput(
+    siteId,
+    window,
+    filters,
+    qualification,
   );
+  const bound = bindPerformanceQualification({
+    plan: buildPerformanceSummariesPlan(planInput),
+    siteId,
+    filters,
+    qualification,
+  });
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
-    plan,
+    bound.plan,
     PERFORMANCE_SUMMARY_OUTPUT_ID,
+    undefined,
+    undefined,
+    bound.executionInputs,
   );
   return mapPerformanceSummaries(rows);
 }
@@ -277,17 +346,32 @@ export async function queryPerformanceTrendFromD1(
   interval: Interval,
   filters: FilterDocument,
   metric: PerformanceMetricKey,
+  qualification?: PerformancePageVisitQualification,
 ): Promise<PerformanceTrendPointRow[]> {
-  const plan = buildPerformanceTrendPlan({
-    ...performancePlanInput(siteId, window, filters),
-    interval,
-    metric,
+  const planInput = performancePlanInput(
+    siteId,
+    window,
+    filters,
+    qualification,
+  );
+  const bound = bindPerformanceQualification({
+    plan: buildPerformanceTrendPlan({
+      ...planInput,
+      interval,
+      metric,
+    }),
+    siteId,
+    filters,
+    qualification,
   });
   const buckets = buildTimeBuckets(window, interval);
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
-    plan,
+    bound.plan,
     PERFORMANCE_TREND_OUTPUT_ID,
+    undefined,
+    undefined,
+    bound.executionInputs,
   );
   return rows.flatMap((row) => {
     if (row.bucket === null || row.bucket === undefined) return [];
@@ -312,19 +396,37 @@ export async function queryAllPerformanceTrendsFromD1(
   window: QueryWindow,
   interval: Interval,
   filters: FilterDocument,
+  qualification?: PerformancePageVisitQualification,
 ): Promise<Record<PerformanceMetricKey, PerformanceTrendPointRow[]>> {
-  const plan = buildPerformanceAllTrendsPlan({
-    ...performancePlanInput(siteId, window, filters),
-    interval,
+  const planInput = performancePlanInput(
+    siteId,
+    window,
+    filters,
+    qualification,
+  );
+  const bound = bindPerformanceQualification({
+    plan: buildPerformanceAllTrendsPlan({
+      ...planInput,
+      interval,
+    }),
+    siteId,
+    filters,
+    qualification,
   });
-  const rows = await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
-    outputIds: PERFORMANCE_ALL_TRENDS_OUTPUT_IDS,
-    fields: PERFORMANCE_REPORT_OUTPUT_FIELDS,
-    orderBy: [
-      { field: "metric", direction: "asc", nulls: "first" },
-      { field: "bucket", direction: "asc", nulls: "first" },
-    ],
-  });
+  const rows = await queryAnalyticsReportOutputSetRowsFromD1(
+    env,
+    bound.plan,
+    {
+      outputIds: PERFORMANCE_ALL_TRENDS_OUTPUT_IDS,
+      fields: PERFORMANCE_REPORT_OUTPUT_FIELDS,
+      orderBy: [
+        { field: "metric", direction: "asc", nulls: "first" },
+        { field: "bucket", direction: "asc", nulls: "first" },
+      ],
+    },
+    undefined,
+    bound.executionInputs,
+  );
   return mapPerformanceTrendReportRows(rows, window, interval);
 }
 
@@ -334,20 +436,35 @@ export async function queryPerformanceRoutesFromD1(
   window: QueryWindow,
   filters: FilterDocument,
   limit: number,
+  qualification?: PerformancePageVisitQualification,
 ): Promise<PerformanceRouteRow[]> {
-  const plan = buildPerformanceRoutesPlan({
-    ...performancePlanInput(siteId, window, filters),
-    limit,
+  const planInput = performancePlanInput(
+    siteId,
+    window,
+    filters,
+    qualification,
+  );
+  const bound = bindPerformanceQualification({
+    plan: buildPerformanceRoutesPlan({ ...planInput, limit }),
+    siteId,
+    filters,
+    qualification,
   });
-  const rows = await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
-    outputIds: PERFORMANCE_ROUTES_OUTPUT_IDS,
-    fields: PERFORMANCE_REPORT_OUTPUT_FIELDS,
-    orderBy: [
-      { field: "views", direction: "desc", nulls: "last" },
-      { field: "pathname", direction: "asc", nulls: "first" },
-      { field: "metric", direction: "asc", nulls: "first" },
-    ],
-  });
+  const rows = await queryAnalyticsReportOutputSetRowsFromD1(
+    env,
+    bound.plan,
+    {
+      outputIds: PERFORMANCE_ROUTES_OUTPUT_IDS,
+      fields: PERFORMANCE_REPORT_OUTPUT_FIELDS,
+      orderBy: [
+        { field: "views", direction: "desc", nulls: "last" },
+        { field: "pathname", direction: "asc", nulls: "first" },
+        { field: "metric", direction: "asc", nulls: "first" },
+      ],
+    },
+    undefined,
+    bound.executionInputs,
+  );
   return mapPerformanceRouteReportRows(rows);
 }
 
@@ -356,19 +473,35 @@ export async function queryPerformanceCountriesFromD1(
   siteId: string,
   window: QueryWindow,
   filters: FilterDocument,
+  qualification?: PerformancePageVisitQualification,
 ): Promise<PerformanceCountryRow[]> {
-  const plan = buildPerformanceCountriesPlan(
-    performancePlanInput(siteId, window, filters),
+  const planInput = performancePlanInput(
+    siteId,
+    window,
+    filters,
+    qualification,
   );
-  const rows = await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
-    outputIds: PERFORMANCE_COUNTRIES_OUTPUT_IDS,
-    fields: PERFORMANCE_REPORT_OUTPUT_FIELDS,
-    orderBy: [
-      { field: "views", direction: "desc", nulls: "last" },
-      { field: "country", direction: "asc", nulls: "first" },
-      { field: "metric", direction: "asc", nulls: "first" },
-    ],
+  const bound = bindPerformanceQualification({
+    plan: buildPerformanceCountriesPlan(planInput),
+    siteId,
+    filters,
+    qualification,
   });
+  const rows = await queryAnalyticsReportOutputSetRowsFromD1(
+    env,
+    bound.plan,
+    {
+      outputIds: PERFORMANCE_COUNTRIES_OUTPUT_IDS,
+      fields: PERFORMANCE_REPORT_OUTPUT_FIELDS,
+      orderBy: [
+        { field: "views", direction: "desc", nulls: "last" },
+        { field: "country", direction: "asc", nulls: "first" },
+        { field: "metric", direction: "asc", nulls: "first" },
+      ],
+    },
+    undefined,
+    bound.executionInputs,
+  );
   return mapPerformanceCountryReportRows(rows);
 }
 
@@ -379,22 +512,40 @@ export async function queryPerformanceDashboardFromD1(
   interval: Interval,
   filters: FilterDocument,
   routeLimit: number,
+  qualification?: PerformancePageVisitQualification,
 ): Promise<PerformanceDashboardResult> {
-  const plan = buildPerformanceDashboardPlan({
-    ...performancePlanInput(siteId, window, filters),
-    interval,
-    routeLimit,
+  const planInput = performancePlanInput(
+    siteId,
+    window,
+    filters,
+    qualification,
+  );
+  const bound = bindPerformanceQualification({
+    plan: buildPerformanceDashboardPlan({
+      ...planInput,
+      interval,
+      routeLimit,
+    }),
+    siteId,
+    filters,
+    qualification,
   });
-  const rows = await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
-    outputIds: PERFORMANCE_DASHBOARD_OUTPUT_IDS,
-    fields: PERFORMANCE_REPORT_OUTPUT_FIELDS,
-    orderBy: [
-      { field: "rowType", direction: "asc", nulls: "first" },
-      { field: "metric", direction: "asc", nulls: "first" },
-      { field: "bucket", direction: "asc", nulls: "first" },
-      { field: "pathname", direction: "asc", nulls: "first" },
-      { field: "country", direction: "asc", nulls: "first" },
-    ],
-  });
+  const rows = await queryAnalyticsReportOutputSetRowsFromD1(
+    env,
+    bound.plan,
+    {
+      outputIds: PERFORMANCE_DASHBOARD_OUTPUT_IDS,
+      fields: PERFORMANCE_REPORT_OUTPUT_FIELDS,
+      orderBy: [
+        { field: "rowType", direction: "asc", nulls: "first" },
+        { field: "metric", direction: "asc", nulls: "first" },
+        { field: "bucket", direction: "asc", nulls: "first" },
+        { field: "pathname", direction: "asc", nulls: "first" },
+        { field: "country", direction: "asc", nulls: "first" },
+      ],
+    },
+    undefined,
+    bound.executionInputs,
+  );
   return mapPerformanceDashboardReportRows(rows, window, interval);
 }

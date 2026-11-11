@@ -1,11 +1,18 @@
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { typedQueryProviderFor } from "@/lib/edge/analytics/application/provider-registry";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
+import type {
+  QueryAudience,
+  QueryTime,
+} from "@/lib/edge/analytics/contract/types";
 import {
   deferredCrossDimensionQualificationFromQuery,
   deferredRadarQualificationFromQuery,
   deferredShareTrendQualificationFromQuery,
   prepareDeferredEventQualificationFallback,
+  prepareDeferredPageVisitQualification,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { resolveCrossBreakdownPageDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
 import {
@@ -21,6 +28,11 @@ import {
   queryCrossDimensionFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/technology/client-cross";
 import { executeCrossQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/technology/cross-qualification-program";
+import {
+  type TechnologyPageVisitConsumer,
+  type TechnologyPageVisitQualification,
+  technologyPageVisitQualificationConsumerKey,
+} from "@/lib/edge/analytics/providers/d1/internal/technology/page-visit-qualification";
 import {
   mapTechnologyRadarRows,
   queryBrowserRadarFromD1,
@@ -38,6 +50,42 @@ import { executeShareTrendQualificationProgram } from "@/lib/edge/analytics/prov
 
 import { type D1SiteRuntimeBindings, timeWindow } from "./shared";
 
+async function prepareTechnologyPageVisitQualification(input: {
+  readonly deferred: unknown;
+  readonly qualification: {
+    readonly metadata: { readonly plan: ScopedFilterPlan };
+    readonly requestTime?: QueryTime;
+    readonly time: QueryTime;
+  };
+  readonly consumer: TechnologyPageVisitConsumer;
+  readonly configuration: unknown;
+  readonly readerQueryTime: QueryTime;
+  readonly readerAudience: QueryAudience;
+}): Promise<TechnologyPageVisitQualification | undefined> {
+  const consumerKey = technologyPageVisitQualificationConsumerKey(
+    input.consumer,
+    input.configuration,
+  );
+  const preparation = await prepareDeferredPageVisitQualification(
+    input.deferred,
+    consumerKey,
+    {
+      readerQueryTime: input.readerQueryTime,
+      readerAudience: input.readerAudience,
+    },
+  );
+  return preparation
+    ? {
+        preparation,
+        queryTime: input.readerQueryTime,
+        preparationQueryTime:
+          input.qualification.requestTime ?? input.qualification.time,
+        scopePlan: input.qualification.metadata.plan,
+        consumerKey,
+      }
+    : undefined;
+}
+
 export function registerTechnologyProviders(
   registry: AnalyticsProviderRegistry,
   options: D1SiteRuntimeBindings,
@@ -52,7 +100,10 @@ export function registerTechnologyProviders(
         const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
         const limit = request.limit ?? 5;
         const variant = request.variant;
-        const readLegacy = async (legacyFilters: typeof filters) =>
+        const readLegacy = async (
+          legacyFilters: typeof filters,
+          qualification?: TechnologyPageVisitQualification,
+        ) =>
           variant === "browser"
             ? await queryBrowserTrendFromD1(
                 options.env,
@@ -61,6 +112,7 @@ export function registerTechnologyProviders(
                 interval,
                 legacyFilters,
                 limit,
+                qualification,
               )
             : variant === "browser-engine"
               ? await queryBrowserEngineTrendFromD1(
@@ -70,6 +122,7 @@ export function registerTechnologyProviders(
                   interval,
                   legacyFilters,
                   limit,
+                  qualification,
                 )
               : variant === "client"
                 ? await queryClientDimensionTrendFromD1(
@@ -80,6 +133,7 @@ export function registerTechnologyProviders(
                     legacyFilters,
                     request.dimension,
                     limit,
+                    qualification,
                   )
                 : variant === "utm"
                   ? await queryUtmDimensionTrendFromD1(
@@ -90,6 +144,7 @@ export function registerTechnologyProviders(
                       legacyFilters,
                       request.dimension,
                       limit,
+                      qualification,
                     )
                   : variant === "referrer-channel"
                     ? await queryReferrerAndChannelTrendFromD1(
@@ -99,6 +154,7 @@ export function registerTechnologyProviders(
                         interval,
                         legacyFilters,
                         limit,
+                        qualification,
                       )
                     : await queryReferrerTrendFromD1(
                         options.env,
@@ -107,6 +163,7 @@ export function registerTechnologyProviders(
                         interval,
                         legacyFilters,
                         limit,
+                        qualification,
                       );
         const deferred = deferredShareTrendQualificationFromQuery(request);
         if (deferred) {
@@ -128,6 +185,18 @@ export function registerTechnologyProviders(
                 deferred.configuration,
               ),
             };
+          const readerQueryTime = queryWindowToTime(window);
+          const pageVisitQualification =
+            await prepareTechnologyPageVisitQualification({
+              deferred: deferred.qualification,
+              qualification: deferred.qualification,
+              consumer: "share-trend",
+              configuration: deferred.configuration,
+              readerQueryTime,
+              readerAudience: request.context.policy.audience,
+            });
+          if (pageVisitQualification)
+            return { value: await readLegacy(filters, pageVisitQualification) };
           const fallbackFilters =
             await prepareDeferredEventQualificationFallback(
               deferred.qualification,
@@ -144,7 +213,10 @@ export function registerTechnologyProviders(
         const request = input;
         const window = timeWindow(request.time);
         const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
-        const readLegacy = async (legacyFilters: typeof filters) =>
+        const readLegacy = async (
+          legacyFilters: typeof filters,
+          qualification?: TechnologyPageVisitQualification,
+        ) =>
           request.variant === "version"
             ? await queryBrowserVersionBreakdownFromD1(
                 options.env,
@@ -153,6 +225,7 @@ export function registerTechnologyProviders(
                 legacyFilters,
                 request.browserLimit ?? 0,
                 request.versionLimit ?? 5,
+                qualification,
               )
             : request.variant === "referrer"
               ? await queryReferrerRadarFromD1(
@@ -161,12 +234,14 @@ export function registerTechnologyProviders(
                   window,
                   legacyFilters,
                   request.limit ?? 24,
+                  qualification,
                 )
               : await queryBrowserRadarFromD1(
                   options.env,
                   options.siteId,
                   window,
                   legacyFilters,
+                  qualification,
                 );
         const deferred = deferredRadarQualificationFromQuery(request);
         if (deferred) {
@@ -197,6 +272,18 @@ export function registerTechnologyProviders(
                   );
             return { value: rows };
           }
+          const readerQueryTime = queryWindowToTime(window);
+          const pageVisitQualification =
+            await prepareTechnologyPageVisitQualification({
+              deferred: deferred.qualification,
+              qualification: deferred.qualification,
+              consumer: "radar",
+              configuration: deferred.configuration,
+              readerQueryTime,
+              readerAudience: request.context.policy.audience,
+            });
+          if (pageVisitQualification)
+            return { value: await readLegacy(filters, pageVisitQualification) };
           const fallbackFilters =
             await prepareDeferredEventQualificationFallback(
               deferred.qualification,
@@ -241,6 +328,29 @@ export function registerTechnologyProviders(
                     "device",
                   ),
                 },
+              };
+            const readerQueryTime = queryWindowToTime(window);
+            const pageVisitQualification =
+              await prepareTechnologyPageVisitQualification({
+                deferred: deferred.qualification,
+                qualification: deferred.qualification,
+                consumer: "browser-cross",
+                configuration: deferred.configuration,
+                readerQueryTime,
+                readerAudience: request.context.policy.audience,
+              });
+            if (pageVisitQualification)
+              return {
+                value: await queryBrowserCrossBreakdownFromD1(
+                  options.env,
+                  options.siteId,
+                  window,
+                  filters,
+                  request.browserLimit ?? 8,
+                  request.osLimit ?? 6,
+                  request.deviceTypeLimit ?? 5,
+                  pageVisitQualification,
+                ),
               };
             const fallbackFilters =
               await prepareDeferredEventQualificationFallback(
@@ -310,6 +420,30 @@ export function registerTechnologyProviders(
                   selection: configuration.secondarySelection,
                   fallbackKeyBase: configuration.secondaryFallbackKeyBase,
                 },
+              ),
+            };
+          const readerQueryTime = queryWindowToTime(window);
+          const pageVisitQualification =
+            await prepareTechnologyPageVisitQualification({
+              deferred: deferred.qualification,
+              qualification: deferred.qualification,
+              consumer: "cross",
+              configuration,
+              readerQueryTime,
+              readerAudience: request.context.policy.audience,
+            });
+          if (pageVisitQualification)
+            return {
+              value: await queryCrossDimensionFromD1(
+                options.env,
+                options.siteId,
+                window,
+                filters,
+                request.primaryLimit,
+                request.secondaryLimit,
+                primaryDimension,
+                secondaryDimension,
+                pageVisitQualification,
               ),
             };
           const fallbackFilters =

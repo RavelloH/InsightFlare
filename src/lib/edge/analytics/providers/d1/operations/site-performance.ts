@@ -14,6 +14,7 @@ import type {
   PerformanceSummaryRow,
   PerformanceTrendPointRow,
 } from "@/lib/edge/analytics/providers/d1/internal/core-types";
+import type { PerformancePageVisitQualification } from "@/lib/edge/analytics/providers/d1/internal/performance";
 import {
   queryAllPerformanceTrendsFromD1,
   queryPerformanceCountriesFromD1,
@@ -38,6 +39,7 @@ export interface ReadSitePerformanceInput {
   readonly siteId: string;
   readonly window: QueryWindow;
   readonly filters: FilterDocument;
+  readonly qualification?: PerformancePageVisitQualification;
 }
 export interface ReadSitePerformanceTimeseriesInput extends ReadSitePerformanceInput {
   readonly interval: "minute" | "hour" | "day" | "week" | "month";
@@ -89,6 +91,7 @@ export async function readSitePerformanceSummary(
       input.siteId,
       input.window,
       input.filters,
+      input.qualification,
     ),
   };
 }
@@ -132,6 +135,7 @@ export async function readSitePerformanceTimeseries(
     input.window,
     input.interval,
     input.filters,
+    input.qualification,
   );
   return serializePerformanceTimeseries(input.interval, result);
 }
@@ -163,12 +167,14 @@ export async function readSitePerformanceBreakdown(
           input.window,
           input.filters,
           input.limit,
+          input.qualification,
         )
       : await queryPerformanceCountriesFromD1(
           input.env,
           input.siteId,
           input.window,
           input.filters,
+          input.qualification,
         );
   return serializePerformanceBreakdown(dimension.data, input.metric, result);
 }

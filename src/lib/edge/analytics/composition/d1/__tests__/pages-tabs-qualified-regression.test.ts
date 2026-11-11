@@ -392,7 +392,7 @@ function testEnvWithBehavior(
 }
 
 function queryFor(
-  scope: "session" | "visitor",
+  scope: "session" | "visitor" | "event",
   input: {
     readonly configuration?: "tabs-only" | "pages-with-tabs";
     readonly limit?: number;
@@ -958,48 +958,86 @@ describe("Wave96C qualified Page tabs and Pages-with-tabs", () => {
     },
   );
 
-  it("falls back once for numeric Page data and returns the complete native DTO", async () => {
-    const database = createFixture();
-    database
-      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
-      .run("invalid-duration", "a-source");
-    const query = queryFor("session", {
-      configuration: "pages-with-tabs",
-      filterDsl: "count(page { page.durationMs gt 5 }) eq 2",
-      limit: 4,
-    });
-    const legacyTrace = traceFor();
-    const expected = await legacyOracle(database, query, legacyTrace);
-    const trace = traceFor();
-    const diagnostics = createD1ReadDiagnostics();
-    const provider = createD1SiteProviderRegistry({
-      env: testEnv(database, trace),
-      siteId: SITE,
-      diagnostics,
-    }).resolve("pages");
-    if (!provider) throw new Error("wave96c_pages_provider_missing");
-    const actual = await provider.execute(query);
-    expect(actual.value).toEqual(expected.value);
-    expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
-      kind: "numeric-data-domain",
-      fieldIds: ["page.durationMs"],
-    });
-    const nativeReportSql = legacyTrace.preparedSql.at(-1);
-    expect(nativeReportSql).toBeDefined();
-    expect(
-      trace.preparedSql.filter((sql) => sql === nativeReportSql),
-    ).toHaveLength(1);
-    evidence.push({
-      scenario: "numeric-data-domain-full-pages-tabs-fallback",
-      statementCount: trace.preparedSql.length,
-      sql: trace.preparedSql,
-      bindings: trace.bindings,
-      nativeFallbackSql: legacyTrace.preparedSql,
-      nativeFallbackBindings: legacyTrace.bindings,
-      nativeFallbackStatementCount: legacyTrace.preparedSql.length,
-      fallbackReason: diagnostics.advancedCountSqlFallbackReason,
-    });
-  });
+  it.each(["session", "event"] as const)(
+    "uses Page compatibility for numeric Page data on a signed %s-scope continuation",
+    async (scope) => {
+      const database = createFixture();
+      database
+        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+        .run("invalid-duration", "a-source");
+      const firstQuery = queryFor(scope, {
+        configuration: "pages-with-tabs",
+        filterDsl: "count(page { page.durationMs gt 5 }) eq 2",
+        limit: 2,
+      });
+      const firstExpected = await legacyOracle(database, firstQuery);
+      const firstActual = await providerValue(database, firstQuery);
+      expect(firstActual.value).toEqual(firstExpected.value);
+      const firstPages = firstActual.value as {
+        readonly pages: {
+          readonly pagination: { readonly nextCursor: string | null };
+        };
+      };
+      const signedCursor = firstPages.pages.pagination.nextCursor;
+      expect(signedCursor).toEqual(expect.any(String));
+      expect(signedCursor).not.toBe("");
+
+      const continuationQuery = queryFor(scope, {
+        configuration: "pages-with-tabs",
+        filterDsl: "count(page { page.durationMs gt 5 }) eq 2",
+        limit: 2,
+        cursor: signedCursor,
+      });
+      const legacyTrace = traceFor();
+      const expected = await legacyOracle(
+        database,
+        continuationQuery,
+        legacyTrace,
+      );
+      const actual = await providerValue(database, continuationQuery);
+      expect(actual.value).toEqual(expected.value);
+      expect(actual.diagnostics.advancedCountSqlFallbackReason).toEqual({
+        kind: "numeric-data-domain",
+        fieldIds: ["page.durationMs"],
+      });
+      const guardIndex = actual.trace.preparedSql.findIndex((sql) =>
+        sql.includes('AS "outputId"'),
+      );
+      expect(guardIndex).toBeGreaterThanOrEqual(0);
+      const guardSql = actual.trace.preparedSql[guardIndex]!;
+      const guardRows = database
+        .prepare(guardSql)
+        .all(...(actual.trace.bindings[guardIndex] ?? [])) as Record<
+        string,
+        unknown
+      >[];
+      expect(guardRows.filter((row) => row.rowKind === "control")).toHaveLength(
+        1,
+      );
+      expect(guardRows.filter((row) => row.rowKind === "report")).toHaveLength(
+        0,
+      );
+      const compatibilitySql = actual.trace.preparedSql.at(-1);
+      expect(compatibilitySql).toContain("visit_id");
+      expect(compatibilitySql).not.toContain("entity_id");
+      expect(compatibilitySql).not.toBe(guardSql);
+      evidence.push({
+        scenario: "numeric-data-domain-full-pages-tabs-fallback",
+        scope,
+        signedCursorContinuation: signedCursor,
+        statementCount: actual.trace.preparedSql.length,
+        sql: actual.trace.preparedSql,
+        bindings: actual.trace.bindings,
+        nativeGuardSql: guardSql,
+        nativeGuardRows: guardRows,
+        finalCompatibilitySql: compatibilitySql,
+        nativeFallbackSql: legacyTrace.preparedSql,
+        nativeFallbackBindings: legacyTrace.bindings,
+        nativeFallbackStatementCount: legacyTrace.preparedSql.length,
+        fallbackReason: actual.diagnostics.advancedCountSqlFallbackReason,
+      });
+    },
+  );
 
   it("checks the activity cap before reporting a malformed cursor", async () => {
     const database = createMigratedDatabase();

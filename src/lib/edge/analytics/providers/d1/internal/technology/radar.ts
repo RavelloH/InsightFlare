@@ -13,6 +13,11 @@ import type {
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { Env } from "@/lib/edge/types";
 
+import {
+  bindTechnologyPageVisitQualification,
+  type TechnologyPageVisitQualification,
+} from "./page-visit-qualification";
+
 interface TechnologyRadarMetrics {
   readonly sessions: number;
   readonly bounces: number;
@@ -68,20 +73,38 @@ async function queryTechnologyRadarFromD1(
   filters: FilterDocument,
   dimension: TechnologyRadarDimension,
   limit?: number,
+  qualification?: TechnologyPageVisitQualification,
 ): Promise<TechnologyRadarRow[]> {
   const metadata = scopedFilterMetadata(filters);
+  const queryTime = qualification?.queryTime ?? queryWindowToTime(window);
+  const plan = buildTechnologyRadarPlan({
+    siteId,
+    queryTime,
+    filters,
+    ...(qualification
+      ? {
+          scopePlan: qualification.scopePlan,
+          pageVisitQualification: true as const,
+        }
+      : metadata
+        ? { scopePlan: metadata.plan }
+        : {}),
+    dimension,
+    ...(limit === undefined ? {} : { limit }),
+  });
+  const bound = bindTechnologyPageVisitQualification({
+    siteId,
+    filters,
+    qualification,
+    plan,
+  });
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
-    buildTechnologyRadarPlan({
-      siteId,
-      // Prepared Page reads honor the current reader window.
-      queryTime: queryWindowToTime(window),
-      filters,
-      ...(metadata ? { scopePlan: metadata.plan } : {}),
-      dimension,
-      ...(limit === undefined ? {} : { limit }),
-    }),
+    bound.plan,
     TECHNOLOGY_RADAR_OUTPUTS[dimension],
+    undefined,
+    undefined,
+    bound.executionInputs,
   );
   return mapTechnologyRadarRows(rows, dimension);
 }
@@ -91,6 +114,7 @@ export async function queryBrowserRadarFromD1(
   siteId: string,
   window: QueryWindow,
   filters: FilterDocument,
+  qualification?: TechnologyPageVisitQualification,
 ): Promise<
   Array<{
     browser: string;
@@ -105,7 +129,15 @@ export async function queryBrowserRadarFromD1(
   }>
 > {
   return (
-    await queryTechnologyRadarFromD1(env, siteId, window, filters, "browser")
+    await queryTechnologyRadarFromD1(
+      env,
+      siteId,
+      window,
+      filters,
+      "browser",
+      undefined,
+      qualification,
+    )
   )
     .filter((row) => row.browser!.length > 0 && row.visitors > 0)
     .map((row) => ({
@@ -127,6 +159,7 @@ export async function queryReferrerRadarFromD1(
   window: QueryWindow,
   filters: FilterDocument,
   limit: number,
+  qualification?: TechnologyPageVisitQualification,
 ): Promise<ReferrerRadarRow[]> {
   return (
     await queryTechnologyRadarFromD1(
@@ -136,6 +169,7 @@ export async function queryReferrerRadarFromD1(
       filters,
       "referrer",
       limit,
+      qualification,
     )
   )
     .filter((row) => row.visitors > 0)

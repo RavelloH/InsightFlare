@@ -612,340 +612,761 @@ function createBadReportOutputEnv(queryTrace: SqliteD1Trace): Env {
   return { DB } as unknown as Env;
 }
 
-describe("Performance breakdown and dashboard qualified regression", () => {
-  beforeAll(() => {
-    database = createMigratedDatabase();
-    database.exec("PRAGMA foreign_keys = OFF");
-    database
-      .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
-      .run(SITE_ID);
-    database
-      .prepare(
-        "INSERT INTO sites (id, team_id, name, domain, created_at) VALUES (?, ?, ?, ?, 0)",
-      )
-      .run(SITE_ID, "wave96u-team", "Performance breakdown", "wave96u.test");
-    sitePk = Number(
-      (
-        database
-          .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
-          .get(SITE_ID) as { readonly site_pk: number }
-      ).site_pk,
-    );
-    FIXTURE.forEach(seedPage);
-  });
+describe(
+  "Performance breakdown and dashboard qualified regression",
+  { timeout: 60_000 },
+  () => {
+    beforeAll(() => {
+      database = createMigratedDatabase();
+      database.exec("PRAGMA foreign_keys = OFF");
+      database
+        .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
+        .run(SITE_ID);
+      database
+        .prepare(
+          "INSERT INTO sites (id, team_id, name, domain, created_at) VALUES (?, ?, ?, ?, 0)",
+        )
+        .run(SITE_ID, "wave96u-team", "Performance breakdown", "wave96u.test");
+      sitePk = Number(
+        (
+          database
+            .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+            .get(SITE_ID) as { readonly site_pk: number }
+        ).site_pk,
+      );
+      FIXTURE.forEach(seedPage);
+    });
 
-  afterAll(() => database.close());
+    afterAll(() => database.close());
 
-  it("matches SQLite BINARY ordering for tied routes in breakdown and dashboard", async () => {
-    const pageIds = seedBinaryOrderPages();
-    try {
-      const directOrderSql = `SELECT pathname, COUNT(*) AS views
+    it("matches SQLite BINARY ordering for tied routes in breakdown and dashboard", async () => {
+      const pageIds = seedBinaryOrderPages();
+      try {
+        const directOrderSql = `SELECT pathname, COUNT(*) AS views
 FROM visits
 WHERE site_id = ? AND session_id = ?
 GROUP BY pathname
 ORDER BY views DESC, pathname COLLATE BINARY ASC`;
-      const directOrderRows = database
-        .prepare(directOrderSql)
-        .all(SITE_ID, "binary-order-session") as {
-        readonly pathname: string;
-        readonly views: number;
-      }[];
-      const sqliteBinaryOrder = directOrderRows.map(({ pathname }) => pathname);
-      const modes: readonly ModeRequest[] = [
-        {
+        const directOrderRows = database
+          .prepare(directOrderSql)
+          .all(SITE_ID, "binary-order-session") as {
+          readonly pathname: string;
+          readonly views: number;
+        }[];
+        const sqliteBinaryOrder = directOrderRows.map(
+          ({ pathname }) => pathname,
+        );
+        const modes: readonly ModeRequest[] = [
+          {
+            mode: "breakdown",
+            dimension: "page.path",
+            metric: "lcp",
+            limit: 20,
+          },
+          { mode: "dashboard", interval: "hour" },
+        ];
+        const runs: {
+          readonly mode: ModeRequest;
+          readonly actualValue: unknown;
+          readonly legacyValue: unknown;
+          readonly actualKeys: readonly string[];
+          readonly legacyKeys: readonly string[];
+          readonly actualSql: readonly string[];
+          readonly legacySql: readonly string[];
+        }[] = [];
+        for (const mode of modes) {
+          const prepared = await prepareQualifiedQuery(
+            "session",
+            mode,
+            eventCountFilters("binary-order"),
+          );
+          const actualTrace = trace();
+          const actual = await executePerformance(prepared.query, actualTrace);
+          const legacyTrace = trace();
+          const legacy = await legacyPerformance(
+            prepared.deferred,
+            mode,
+            legacyTrace,
+          );
+          runs.push({
+            mode,
+            actualValue: actual.value,
+            legacyValue: legacy.value,
+            actualKeys: routeKeys(actual.value),
+            legacyKeys: routeKeys(legacy.value),
+            actualSql: actualTrace.preparedSql,
+            legacySql: legacyTrace.preparedSql,
+          });
+        }
+        writeEvidence("sqlite-binary-order.json", {
+          fixture: {
+            sessionId: "binary-order-session",
+            pathKeys: BINARY_ORDER_PATHS,
+            pagesPerPath: 2,
+          },
+          directOrderOracle: {
+            sql: directOrderSql,
+            bindings: [SITE_ID, "binary-order-session"],
+            rows: directOrderRows,
+            pathnameOrder: sqliteBinaryOrder,
+          },
+          qualifiedAndLegacy: runs,
+        });
+
+        expect(sqliteBinaryOrder).toEqual(BINARY_ORDER_PATHS);
+        expect(runs.map(({ legacyKeys }) => legacyKeys)).toEqual([
+          sqliteBinaryOrder,
+          sqliteBinaryOrder,
+        ]);
+        for (const run of runs)
+          expect(run.actualValue).toEqual(run.legacyValue);
+      } finally {
+        deleteSeededPages(pageIds);
+      }
+    });
+
+    it("preserves legacy handling of a finite SQLite AVG overflow", async () => {
+      const pathname = "/avg-overflow";
+      const pageIds = ["average-overflow-a", "average-overflow-b"];
+      try {
+        seedPage({
+          id: pageIds[0]!,
+          visitor: "average-overflow-visitor",
+          session: "average-overflow-session",
+          startedAt: BASE + 40_000,
+          pathname,
+          country: "US",
+          ttfb: 100,
+          fcp: 120,
+          lcp: 1.7e308,
+          cls: 0.1,
+          inp: 150,
+          events: ["average-overflow"],
+        });
+        seedPage({
+          id: pageIds[1]!,
+          visitor: "average-overflow-visitor",
+          session: "average-overflow-session",
+          startedAt: BASE + 41_000,
+          pathname,
+          country: "US",
+          ttfb: 100,
+          fcp: 120,
+          lcp: 1.7e308,
+          cls: 0.1,
+          inp: 150,
+        });
+        const mode: ModeRequest = {
           mode: "breakdown",
           dimension: "page.path",
           metric: "lcp",
           limit: 20,
-        },
-        { mode: "dashboard", interval: "hour" },
-      ];
-      const runs: {
-        readonly mode: ModeRequest;
-        readonly actualValue: unknown;
-        readonly legacyValue: unknown;
-        readonly actualKeys: readonly string[];
-        readonly legacyKeys: readonly string[];
-        readonly actualSql: readonly string[];
-        readonly legacySql: readonly string[];
-      }[] = [];
-      for (const mode of modes) {
+        };
         const prepared = await prepareQualifiedQuery(
           "session",
           mode,
-          eventCountFilters("binary-order"),
+          eventCountFilters("average-overflow"),
         );
-        const actualTrace = trace();
-        const actual = await executePerformance(prepared.query, actualTrace);
+        const evidence = compileEvidence(prepared);
+        const rawRows = database
+          .prepare(evidence.sql)
+          .all(...(evidence.bindings as SQLInputValue[])) as Record<
+          string,
+          unknown
+        >[];
+        const rawLcpRow = rawRows.find(
+          (row) =>
+            row.rowKind === "report" &&
+            row.rowType === "route" &&
+            row.pathname === pathname &&
+            row.metric === "lcp",
+        );
+        const storedSamples = database
+          .prepare(
+            `SELECT typeof(perf_lcp_ms) AS storageClass, perf_lcp_ms AS value
+FROM visits WHERE visit_id IN (?, ?) ORDER BY visit_id`,
+          )
+          .all(...pageIds) as {
+          readonly storageClass: string;
+          readonly value: number;
+        }[];
         const legacyTrace = trace();
         const legacy = await legacyPerformance(
           prepared.deferred,
           mode,
           legacyTrace,
         );
-        runs.push({
-          mode,
-          actualValue: actual.value,
-          legacyValue: legacy.value,
-          actualKeys: routeKeys(actual.value),
-          legacyKeys: routeKeys(legacy.value),
-          actualSql: actualTrace.preparedSql,
-          legacySql: legacyTrace.preparedSql,
+        const actualTrace = trace();
+        let actualValue: unknown;
+        let actualError: string | null = null;
+        try {
+          actualValue = (await executePerformance(prepared.query, actualTrace))
+            .value;
+        } catch (error) {
+          actualError = error instanceof Error ? error.message : String(error);
+        }
+        const rawAverage = rawLcpRow?.lcpAvgValue;
+        writeEvidenceWithNonFiniteNumbers("numeric-avg-compatibility.json", {
+          fixture: {
+            pageIds,
+            pathname,
+            lcpValues: [1.7e308, 1.7e308],
+          },
+          storedSamples,
+          compiledReport: {
+            sql: evidence.sql,
+            bindings: evidence.bindings,
+            sqlBytes: evidence.sqlBytes,
+            rawLcpRow,
+            rawAverage,
+            actualAverageIsNonFinite:
+              typeof rawAverage === "number" && !Number.isFinite(rawAverage),
+          },
+          legacyReader: {
+            sql: legacyTrace.preparedSql,
+            bindings: legacyTrace.bindings,
+            value: legacy.value,
+          },
+          qualifiedRegistry: {
+            sql: actualTrace.preparedSql,
+            bindings: actualTrace.bindings,
+            value: actualValue,
+            error: actualError,
+          },
+        });
+
+        expect(storedSamples).toHaveLength(2);
+        expect(
+          storedSamples.every(({ storageClass }) => storageClass === "real"),
+        ).toBe(true);
+        expect(storedSamples.every(({ value }) => value === 1.7e308)).toBe(
+          true,
+        );
+        expect(rawLcpRow).toBeDefined();
+        expect(typeof rawAverage).toBe("number");
+        expect(Number.isFinite(rawAverage)).toBe(false);
+        expect(actualError).toBeNull();
+        expect(actualValue).toEqual(legacy.value);
+      } finally {
+        deleteSeededPages(pageIds);
+      }
+    });
+
+    it("keeps ordinary path, country, and dashboard plans, SQL, binds, and DTOs unchanged", async () => {
+      const input = {
+        siteId: SITE_ID,
+        queryTime: queryWindowToTime(WINDOW),
+        filters: EMPTY_FILTER_DOCUMENT,
+      };
+      const cases = [
+        {
+          name: "path",
+          plan: buildPerformanceRoutesPlan({ ...input, limit: 20 }),
+          run: (queryTrace: SqliteD1Trace) =>
+            readSitePerformanceBreakdown({
+              env: envFor(queryTrace),
+              siteId: SITE_ID,
+              window: WINDOW,
+              filters: EMPTY_FILTER_DOCUMENT,
+              dimension: "page.path",
+              metric: "lcp",
+              limit: 20,
+            }),
+        },
+        {
+          name: "country",
+          plan: buildPerformanceCountriesPlan(input),
+          run: (queryTrace: SqliteD1Trace) =>
+            readSitePerformanceBreakdown({
+              env: envFor(queryTrace),
+              siteId: SITE_ID,
+              window: WINDOW,
+              filters: EMPTY_FILTER_DOCUMENT,
+              dimension: "geo.country",
+              metric: "lcp",
+              limit: 20,
+            }),
+        },
+        {
+          name: "dashboard-default-hour",
+          plan: buildPerformanceDashboardPlan({
+            ...input,
+            interval: "hour",
+            routeLimit: 18,
+          }),
+          run: (queryTrace: SqliteD1Trace) =>
+            queryPerformanceDashboardFromD1(
+              envFor(queryTrace),
+              SITE_ID,
+              WINDOW,
+              "hour",
+              EMPTY_FILTER_DOCUMENT,
+              18,
+            ),
+        },
+      ];
+      const results = [];
+      for (const item of cases) {
+        const queryTrace = trace();
+        const dto = await item.run(queryTrace);
+        expect(queryTrace.preparedSql).toHaveLength(1);
+        results.push({
+          name: item.name,
+          logicalPlan: printLogicalPlan(item.plan),
+          sql: queryTrace.preparedSql[0],
+          bindings: queryTrace.bindings[0],
+          statementCount: queryTrace.preparedSql.length,
+          dto,
         });
       }
-      writeEvidence("sqlite-binary-order.json", {
-        fixture: {
-          sessionId: "binary-order-session",
-          pathKeys: BINARY_ORDER_PATHS,
-          pagesPerPath: 2,
-        },
-        directOrderOracle: {
-          sql: directOrderSql,
-          bindings: [SITE_ID, "binary-order-session"],
-          rows: directOrderRows,
-          pathnameOrder: sqliteBinaryOrder,
-        },
-        qualifiedAndLegacy: runs,
-      });
+      const after = {
+        fixture: FIXTURE.map(({ id }) => id),
+        siteId: SITE_ID,
+        window: WINDOW,
+        filters: EMPTY_FILTER_DOCUMENT,
+        results,
+      };
+      if (BEFORE_BASELINE) {
+        const before = JSON.parse(
+          readFileSync(BEFORE_BASELINE, "utf8"),
+        ) as typeof after;
+        expect(after).toEqual(before);
+      }
+      writeEvidence("ordinary-after.json", after);
+    });
 
-      expect(sqliteBinaryOrder).toEqual(BINARY_ORDER_PATHS);
-      expect(runs.map(({ legacyKeys }) => legacyKeys)).toEqual([
-        sqliteBinaryOrder,
-        sqliteBinaryOrder,
-      ]);
-      for (const run of runs) expect(run.actualValue).toEqual(run.legacyValue);
-    } finally {
-      deleteSeededPages(pageIds);
-    }
-  });
+    it.each(["session", "visitor"] as const)(
+      "matches the prepared legacy DTO and independent route/country oracle for %s Count scope",
+      async (scope) => {
+        const modes: readonly ModeRequest[] = [
+          {
+            mode: "breakdown",
+            dimension: "page.path",
+            metric: "lcp",
+            limit: 2,
+          },
+          {
+            mode: "breakdown",
+            dimension: "geo.country",
+            metric: "lcp",
+            limit: 1,
+          },
+          { mode: "dashboard", interval: "hour" },
+        ];
+        for (const mode of modes) {
+          const prepared = await prepareQualifiedQuery(scope, mode);
+          const evidence = compileEvidence(prepared);
+          const actualTrace = trace();
+          const actual = await executePerformance(
+            performanceQuery(scope, mode),
+            actualTrace,
+          );
+          const legacyTrace = trace();
+          const legacy = await legacyPerformance(
+            prepared.deferred,
+            mode,
+            legacyTrace,
+          );
+          expect(actual.value, `${scope}:${mode.mode}`).toEqual(legacy.value);
+          expect(actualTrace.preparedSql).toHaveLength(2);
+          expect(actualTrace.preparedSql[1]).toBe(evidence.sql);
+          expect(actualTrace.bindings[1]).toEqual(evidence.bindings);
+          expect(evidence.sqlBytes).toBe(
+            new TextEncoder().encode(evidence.sql).byteLength,
+          );
+          expect(evidence.sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
+          expect(evidence.bindingCount).toBe(evidence.bindings.length);
+          expect(evidence.bindingCount).toBeLessThanOrEqual(
+            D1_MAX_BOUND_PARAMETERS,
+          );
+          expect(evidence.controlOutputId).toBe(
+            PERFORMANCE_BREAKDOWN_DASHBOARD_QUALIFICATION_CONTROL_OUTPUT,
+          );
+          const expectedIds =
+            mode.mode === "dashboard"
+              ? PERFORMANCE_DASHBOARD_OUTPUT_IDS
+              : mode.dimension === "page.path"
+                ? PERFORMANCE_ROUTES_OUTPUT_IDS
+                : PERFORMANCE_COUNTRIES_OUTPUT_IDS;
+          expect(
+            evidence.outputDescriptors.map(({ outputId }) => outputId),
+          ).toEqual(expectedIds);
+          expect(evidence.outputDescriptors).toHaveLength(
+            mode.mode === "dashboard" ? 20 : 5,
+          );
+          expect(
+            evidence.outputDescriptors.every(
+              ({ fields }) =>
+                JSON.stringify(fields) ===
+                JSON.stringify(PERFORMANCE_REPORT_OUTPUT_FIELDS),
+            ),
+          ).toBe(true);
+          if (mode.mode === "breakdown")
+            expect(actual.value).toEqual(expectedBreakdown(scope, mode));
+          writeEvidence(
+            `qualified-${scope}-${mode.mode}-${mode.mode === "breakdown" ? mode.dimension : mode.interval}.json`,
+            {
+              request: { scope, ...mode },
+              ordinarySql: legacyTrace.preparedSql,
+              ordinaryBindings: legacyTrace.bindings,
+              qualifiedSql: actualTrace.preparedSql,
+              qualifiedBindings: actualTrace.bindings,
+              statementCount: actualTrace.preparedSql.length,
+              groupWidth: evidence.groupWidth,
+              sharedRelationCount: evidence.sharedRelationCount,
+              outputDescriptors: evidence.outputDescriptors,
+              controlOutputId: evidence.controlOutputId,
+              controlFields: evidence.controlFields,
+              sql: evidence.sql,
+              bindings: evidence.bindings,
+              sqlBytes: evidence.sqlBytes,
+              bindingCount: evidence.bindingCount,
+              output: actual.value,
+              legacyOutput: legacy.value,
+              oracle:
+                mode.mode === "breakdown"
+                  ? expectedBreakdown(scope, mode)
+                  : undefined,
+            },
+          );
+        }
+      },
+    );
 
-  it("preserves legacy handling of a finite SQLite AVG overflow", async () => {
-    const pathname = "/avg-overflow";
-    const pageIds = ["average-overflow-a", "average-overflow-b"];
-    try {
-      seedPage({
-        id: pageIds[0]!,
-        visitor: "average-overflow-visitor",
-        session: "average-overflow-session",
-        startedAt: BASE + 40_000,
-        pathname,
-        country: "US",
-        ttfb: 100,
-        fcp: 120,
-        lcp: 1.7e308,
-        cls: 0.1,
-        inp: 150,
-        events: ["average-overflow"],
-      });
-      seedPage({
-        id: pageIds[1]!,
-        visitor: "average-overflow-visitor",
-        session: "average-overflow-session",
-        startedAt: BASE + 41_000,
-        pathname,
-        country: "US",
-        ttfb: 100,
-        fcp: 120,
-        lcp: 1.7e308,
-        cls: 0.1,
-        inp: 150,
-      });
-      const mode: ModeRequest = {
+    it("qualifies the complete mixed OR tree for private performance breakdown", async () => {
+      const mode = {
         mode: "breakdown",
         dimension: "page.path",
-        metric: "lcp",
+        metric: "ttfb",
         limit: 20,
-      };
-      const prepared = await prepareQualifiedQuery(
-        "session",
-        mode,
-        eventCountFilters("average-overflow"),
+      } as const;
+      const filters = parseFilterDsl(
+        MIXED_OR_FILTER_DSL,
+        analyticsFilterRegistry,
       );
-      const evidence = compileEvidence(prepared);
-      const rawRows = database
-        .prepare(evidence.sql)
-        .all(...(evidence.bindings as SQLInputValue[])) as Record<
-        string,
-        unknown
-      >[];
-      const rawLcpRow = rawRows.find(
-        (row) =>
-          row.rowKind === "report" &&
-          row.rowType === "route" &&
-          row.pathname === pathname &&
-          row.metric === "lcp",
+      const prepared = await prepareQualifiedQuery("visitor", mode, filters);
+      expect(prepared.deferred.qualification.performanceFilterMode).toBe(
+        "allow-whole-filter",
       );
-      const storedSamples = database
-        .prepare(
-          `SELECT typeof(perf_lcp_ms) AS storageClass, perf_lcp_ms AS value
-FROM visits WHERE visit_id IN (?, ?) ORDER BY visit_id`,
-        )
-        .all(...pageIds) as {
-        readonly storageClass: string;
-        readonly value: number;
-      }[];
+      expect(
+        prepared.deferred.qualification.requestScopePlan?.advancedMatches,
+      ).toBeUndefined();
+      expect(
+        prepared.deferred.qualification.metadata.plan.advancedMatches,
+      ).toBe(undefined);
+
+      const diagnostics = createD1ReadDiagnostics();
+      const actualTrace = trace();
+      const actual = await executePerformance(
+        performanceQuery("visitor", mode, filters),
+        actualTrace,
+        { diagnostics },
+      );
       const legacyTrace = trace();
       const legacy = await legacyPerformance(
         prepared.deferred,
         mode,
         legacyTrace,
       );
-      const actualTrace = trace();
-      let actualValue: unknown;
-      let actualError: string | null = null;
-      try {
-        actualValue = (await executePerformance(prepared.query, actualTrace))
-          .value;
-      } catch (error) {
-        actualError = error instanceof Error ? error.message : String(error);
-      }
-      const rawAverage = rawLcpRow?.lcpAvgValue;
-      writeEvidenceWithNonFiniteNumbers("numeric-avg-compatibility.json", {
-        fixture: {
-          pageIds,
-          pathname,
-          lcpValues: [1.7e308, 1.7e308],
-        },
-        storedSamples,
-        compiledReport: {
-          sql: evidence.sql,
-          bindings: evidence.bindings,
-          sqlBytes: evidence.sqlBytes,
-          rawLcpRow,
-          rawAverage,
-          actualAverageIsNonFinite:
-            typeof rawAverage === "number" && !Number.isFinite(rawAverage),
-        },
-        legacyReader: {
-          sql: legacyTrace.preparedSql,
-          bindings: legacyTrace.bindings,
-          value: legacy.value,
-        },
-        qualifiedRegistry: {
-          sql: actualTrace.preparedSql,
-          bindings: actualTrace.bindings,
-          value: actualValue,
-          error: actualError,
-        },
-      });
+      expect(actual.value).toEqual(legacy.value);
+      expect(routeKeys(actual.value)).toEqual(
+        expect.arrayContaining(["/beta", "/delta"]),
+      );
+      expect(diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
 
-      expect(storedSamples).toHaveLength(2);
+      const statements = performanceStatementEvidence(actualTrace);
+      const envelopes = statements.filter(({ envelope }) => envelope);
+      expect(envelopes).toHaveLength(1);
+      expect(envelopes[0]!.utf8Bytes).toBeLessThanOrEqual(
+        D1_MAX_SQL_UTF8_BYTES,
+      );
+      expect(envelopes[0]!.slotCount).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+      writeEvidence("whole-or-breakdown.json", {
+        request: {
+          siteId: SITE_ID,
+          scope: "visitor",
+          ...mode,
+          filters: MIXED_OR_FILTER_DSL,
+        },
+        filterMode: prepared.deferred.qualification.performanceFilterMode,
+        advancedMatchesPresent: false,
+        nativeOnlyOwner: {
+          visitorId: "whole-native-only-visitor",
+          path: "/beta",
+        },
+        countOnlyOwner: {
+          visitorId: "whole-count-only-visitor",
+          path: "/delta",
+        },
+        statementCount: statements.length,
+        envelopeCount: envelopes.length,
+        factQueryCount: statements.filter(
+          ({ queryKind }) => queryKind === "fact",
+        ).length,
+        metadataQueryCount: statements.filter(
+          ({ queryKind }) => queryKind === "metadata",
+        ).length,
+        otherQueryCount: statements.filter(
+          ({ queryKind }) => queryKind === "other",
+        ).length,
+        sql: statements,
+        output: actual.value,
+        legacyOutput: legacy.value,
+        legacySql: legacyTrace.preparedSql,
+        legacyBindings: legacyTrace.bindings,
+      });
+    });
+
+    it("qualifies the complete mixed NOT tree for private performance dashboard", async () => {
+      const mode = { mode: "dashboard", interval: "hour", limit: 3 } as const;
+      const filters = parseFilterDsl(
+        MIXED_NOT_FILTER_DSL,
+        analyticsFilterRegistry,
+      );
+      const prepared = await prepareQualifiedQuery("visitor", mode, filters);
+      expect(prepared.deferred.configuration).toMatchObject({
+        mode: "dashboard",
+        interval: "hour",
+        routeLimitPresent: true,
+        routeLimitValue: 3,
+      });
+      expect(prepared.deferred.qualification.performanceFilterMode).toBe(
+        "allow-whole-filter",
+      );
       expect(
-        storedSamples.every(({ storageClass }) => storageClass === "real"),
-      ).toBe(true);
-      expect(storedSamples.every(({ value }) => value === 1.7e308)).toBe(true);
-      expect(rawLcpRow).toBeDefined();
-      expect(typeof rawAverage).toBe("number");
-      expect(Number.isFinite(rawAverage)).toBe(false);
-      expect(actualError).toBeNull();
-      expect(actualValue).toEqual(legacy.value);
-    } finally {
-      deleteSeededPages(pageIds);
-    }
-  });
+        prepared.deferred.qualification.requestScopePlan?.advancedMatches,
+      ).toBeUndefined();
+      expect(
+        prepared.deferred.qualification.metadata.plan.advancedMatches,
+      ).toBe(undefined);
 
-  it("keeps ordinary path, country, and dashboard plans, SQL, binds, and DTOs unchanged", async () => {
-    const input = {
-      siteId: SITE_ID,
-      queryTime: queryWindowToTime(WINDOW),
-      filters: EMPTY_FILTER_DOCUMENT,
-    };
-    const cases = [
-      {
-        name: "path",
-        plan: buildPerformanceRoutesPlan({ ...input, limit: 20 }),
-        run: (queryTrace: SqliteD1Trace) =>
-          readSitePerformanceBreakdown({
-            env: envFor(queryTrace),
-            siteId: SITE_ID,
-            window: WINDOW,
-            filters: EMPTY_FILTER_DOCUMENT,
-            dimension: "page.path",
-            metric: "lcp",
-            limit: 20,
-          }),
-      },
-      {
-        name: "country",
-        plan: buildPerformanceCountriesPlan(input),
-        run: (queryTrace: SqliteD1Trace) =>
-          readSitePerformanceBreakdown({
-            env: envFor(queryTrace),
-            siteId: SITE_ID,
-            window: WINDOW,
-            filters: EMPTY_FILTER_DOCUMENT,
-            dimension: "geo.country",
-            metric: "lcp",
-            limit: 20,
-          }),
-      },
-      {
-        name: "dashboard-default-hour",
-        plan: buildPerformanceDashboardPlan({
-          ...input,
-          interval: "hour",
-          routeLimit: 18,
-        }),
-        run: (queryTrace: SqliteD1Trace) =>
-          queryPerformanceDashboardFromD1(
-            envFor(queryTrace),
-            SITE_ID,
-            WINDOW,
-            "hour",
-            EMPTY_FILTER_DOCUMENT,
-            18,
-          ),
-      },
-    ];
-    const results = [];
-    for (const item of cases) {
-      const queryTrace = trace();
-      const dto = await item.run(queryTrace);
-      expect(queryTrace.preparedSql).toHaveLength(1);
-      results.push({
-        name: item.name,
-        logicalPlan: printLogicalPlan(item.plan),
-        sql: queryTrace.preparedSql[0],
-        bindings: queryTrace.bindings[0],
-        statementCount: queryTrace.preparedSql.length,
-        dto,
-      });
-    }
-    const after = {
-      fixture: FIXTURE.map(({ id }) => id),
-      siteId: SITE_ID,
-      window: WINDOW,
-      filters: EMPTY_FILTER_DOCUMENT,
-      results,
-    };
-    if (BEFORE_BASELINE) {
-      const before = JSON.parse(
-        readFileSync(BEFORE_BASELINE, "utf8"),
-      ) as typeof after;
-      expect(after).toEqual(before);
-    }
-    writeEvidence("ordinary-after.json", after);
-  });
+      const diagnostics = createD1ReadDiagnostics();
+      const actualTrace = trace();
+      const actual = await executePerformance(
+        performanceQuery("visitor", mode, filters),
+        actualTrace,
+        { diagnostics },
+      );
+      const legacyTrace = trace();
+      const legacy = await legacyPerformance(
+        prepared.deferred,
+        mode,
+        legacyTrace,
+      );
+      expect(actual.value).toEqual(legacy.value);
+      expect(routeKeys(actual.value)).toEqual(
+        expect.arrayContaining(["/beta", "/delta"]),
+      );
+      expect(diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
 
-  it.each(["session", "visitor"] as const)(
-    "matches the prepared legacy DTO and independent route/country oracle for %s Count scope",
-    async (scope) => {
-      const modes: readonly ModeRequest[] = [
-        { mode: "breakdown", dimension: "page.path", metric: "lcp", limit: 2 },
-        {
-          mode: "breakdown",
-          dimension: "geo.country",
-          metric: "lcp",
-          limit: 1,
+      const statements = performanceStatementEvidence(actualTrace);
+      const envelopes = statements.filter(({ envelope }) => envelope);
+      expect(envelopes).toHaveLength(1);
+      expect(envelopes[0]!.utf8Bytes).toBeLessThanOrEqual(
+        D1_MAX_SQL_UTF8_BYTES,
+      );
+      expect(envelopes[0]!.slotCount).toBeLessThanOrEqual(
+        D1_MAX_BOUND_PARAMETERS,
+      );
+      writeEvidence("whole-not-dashboard.json", {
+        request: {
+          siteId: SITE_ID,
+          scope: "visitor",
+          ...mode,
+          filters: MIXED_NOT_FILTER_DSL,
         },
-        { mode: "dashboard", interval: "hour" },
-      ];
-      for (const mode of modes) {
-        const prepared = await prepareQualifiedQuery(scope, mode);
+        configuration: prepared.deferred.configuration,
+        filterMode: prepared.deferred.qualification.performanceFilterMode,
+        advancedMatchesPresent: false,
+        nativeOnlyOwner: {
+          visitorId: "whole-native-only-visitor",
+          path: "/beta",
+        },
+        countOnlyOwner: {
+          visitorId: "whole-count-only-visitor",
+          path: "/delta",
+        },
+        statementCount: statements.length,
+        envelopeCount: envelopes.length,
+        factQueryCount: statements.filter(
+          ({ queryKind }) => queryKind === "fact",
+        ).length,
+        metadataQueryCount: statements.filter(
+          ({ queryKind }) => queryKind === "metadata",
+        ).length,
+        otherQueryCount: statements.filter(
+          ({ queryKind }) => queryKind === "other",
+        ).length,
+        sql: statements,
+        output: actual.value,
+        legacyOutput: legacy.value,
+        legacySql: legacyTrace.preparedSql,
+        legacyBindings: legacyTrace.bindings,
+      });
+    });
+
+    it("retains country-limit ignored behavior, empty controls, and exact ordering under reverse_unordered_selects", async () => {
+      const countryLimited = {
+        mode: "breakdown",
+        dimension: "geo.country",
+        metric: "lcp",
+        limit: 1,
+      } as const;
+      const countryWide = { ...countryLimited, limit: 20 };
+      const limitedTrace = trace();
+      const wideTrace = trace();
+      const limited = await executePerformance(
+        performanceQuery("visitor", countryLimited),
+        limitedTrace,
+      );
+      const wide = await executePerformance(
+        performanceQuery("visitor", countryWide),
+        wideTrace,
+      );
+      expect(limited.value).toEqual(wide.value);
+      // The qualifier on a1 admits visitor va, so a2 and b1 are in the visitor
+      // sample bag too. c1 has no LCP, d1 has no country, and only the added
+      // whole-count-only Page contributes the third non-empty country group.
+      const expectedLcpSamples = [
+        {
+          pageId: "a1",
+          owner: "va",
+          startedAtMs: BASE + 10_000,
+          country: "US",
+          lcp: 300,
+        },
+        {
+          pageId: "a2",
+          owner: "va",
+          startedAtMs: BASE + 20_000,
+          country: "US",
+          lcp: 320,
+        },
+        {
+          pageId: "b1",
+          owner: "va",
+          startedAtMs: BASE + 65 * 60_000,
+          country: "CA",
+          lcp: 500,
+        },
+        {
+          pageId: "whole-count-only",
+          owner: "whole-count-only-visitor",
+          startedAtMs: BASE + 100 * 60_000,
+          country: "NZ",
+          lcp: 941,
+        },
+      ] as const;
+      expect(
+        expectedLcpSamples.every(
+          ({ startedAtMs }) =>
+            startedAtMs >= TIME.range.startMs &&
+            startedAtMs < TIME.range.endExclusiveMs,
+        ),
+      ).toBe(true);
+      expect(
+        expectedLcpSamples.map(({ country, lcp }) => ({ country, lcp })),
+      ).toEqual([
+        { country: "US", lcp: 300 },
+        { country: "US", lcp: 320 },
+        { country: "CA", lcp: 500 },
+        { country: "NZ", lcp: 941 },
+      ]);
+      const expectedCountryGroups = new Set(
+        expectedLcpSamples.map(({ country }) => country),
+      );
+      expect(
+        (limited.value as { readonly items: readonly unknown[] }).items,
+      ).toHaveLength(expectedCountryGroups.size);
+
+      const missingTrace = trace();
+      const missing = await executePerformance(
+        performanceQuery(
+          "session",
+          { mode: "dashboard", interval: "hour" },
+          filtersWithoutMatches(),
+        ),
+        missingTrace,
+      );
+      const missingValue = missing.value as {
+        readonly summaries: Record<
+          PerformanceMetricKey,
+          { readonly samples: number }
+        >;
+        readonly trends: Record<PerformanceMetricKey, readonly unknown[]>;
+        readonly routes: readonly unknown[];
+        readonly countries: readonly unknown[];
+      };
+      expect(missingTrace.preparedSql).toHaveLength(2);
+      expect(missingValue.routes).toEqual([]);
+      expect(missingValue.countries).toEqual([]);
+      expect(
+        Object.values(missingValue.trends).every(
+          (points) => points.length === 0,
+        ),
+      ).toBe(true);
+      expect(
+        Object.values(missingValue.summaries).every(
+          (summary) => summary.samples === 0,
+        ),
+      ).toBe(true);
+
+      database.exec("PRAGMA reverse_unordered_selects = ON");
+      try {
+        const reverseTrace = trace();
+        const reverse = await executePerformance(
+          performanceQuery("visitor", { mode: "dashboard", interval: "hour" }),
+          reverseTrace,
+        );
+        const prepared = await prepareQualifiedQuery("visitor", {
+          mode: "dashboard",
+          interval: "hour",
+        });
+        const legacy = await legacyPerformance(
+          prepared.deferred,
+          { mode: "dashboard", interval: "hour" },
+          trace(),
+        );
+        expect(reverse.value).toEqual(legacy.value);
+        expect(reverseTrace.preparedSql).toHaveLength(2);
+        writeEvidence("reverse-unordered-selects.json", {
+          enabled: true,
+          sql: reverseTrace.preparedSql,
+          bindings: reverseTrace.bindings,
+          output: reverse.value,
+          legacyOutput: legacy.value,
+        });
+      } finally {
+        database.exec("PRAGMA reverse_unordered_selects = OFF");
+      }
+    });
+
+    it.each([
+      ...(["ttfb", "fcp", "lcp", "cls", "inp"] as const).flatMap((metric) => [
+        {
+          mode: "breakdown" as const,
+          dimension: "page.path" as const,
+          metric,
+          limit: 2,
+        },
+        {
+          mode: "breakdown" as const,
+          dimension: "geo.country" as const,
+          metric,
+          limit: 2,
+        },
+      ]),
+      { mode: "dashboard" as const, interval: "hour" as const },
+    ])(
+      "matches complete Event-candidate Performance mode %j against Core",
+      async (mode) => {
+        const prepared = await prepareQualifiedQuery("event", mode);
         const evidence = compileEvidence(prepared);
         const actualTrace = trace();
         const actual = await executePerformance(
-          performanceQuery(scope, mode),
+          performanceQuery("event", mode),
           actualTrace,
         );
         const legacyTrace = trace();
@@ -954,30 +1375,14 @@ FROM visits WHERE visit_id IN (?, ?) ORDER BY visit_id`,
           mode,
           legacyTrace,
         );
-        expect(actual.value, `${scope}:${mode.mode}`).toEqual(legacy.value);
+
+        expect(
+          actual.value,
+          `${mode.mode}:${"metric" in mode ? mode.metric : mode.interval}`,
+        ).toEqual(legacy.value);
         expect(actualTrace.preparedSql).toHaveLength(2);
         expect(actualTrace.preparedSql[1]).toBe(evidence.sql);
         expect(actualTrace.bindings[1]).toEqual(evidence.bindings);
-        expect(evidence.sqlBytes).toBe(
-          new TextEncoder().encode(evidence.sql).byteLength,
-        );
-        expect(evidence.sqlBytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
-        expect(evidence.bindingCount).toBe(evidence.bindings.length);
-        expect(evidence.bindingCount).toBeLessThanOrEqual(
-          D1_MAX_BOUND_PARAMETERS,
-        );
-        expect(evidence.controlOutputId).toBe(
-          PERFORMANCE_BREAKDOWN_DASHBOARD_QUALIFICATION_CONTROL_OUTPUT,
-        );
-        const expectedIds =
-          mode.mode === "dashboard"
-            ? PERFORMANCE_DASHBOARD_OUTPUT_IDS
-            : mode.dimension === "page.path"
-              ? PERFORMANCE_ROUTES_OUTPUT_IDS
-              : PERFORMANCE_COUNTRIES_OUTPUT_IDS;
-        expect(
-          evidence.outputDescriptors.map(({ outputId }) => outputId),
-        ).toEqual(expectedIds);
         expect(evidence.outputDescriptors).toHaveLength(
           mode.mode === "dashboard" ? 20 : 5,
         );
@@ -988,575 +1393,217 @@ FROM visits WHERE visit_id IN (?, ?) ORDER BY visit_id`,
               JSON.stringify(PERFORMANCE_REPORT_OUTPUT_FIELDS),
           ),
         ).toBe(true);
-        if (mode.mode === "breakdown")
-          expect(actual.value).toEqual(expectedBreakdown(scope, mode));
         writeEvidence(
-          `qualified-${scope}-${mode.mode}-${mode.mode === "breakdown" ? mode.dimension : mode.interval}.json`,
+          `qualified-event-${mode.mode}-${"metric" in mode ? mode.dimension + "-" + mode.metric : mode.interval}.json`,
           {
-            request: { scope, ...mode },
-            ordinarySql: legacyTrace.preparedSql,
-            ordinaryBindings: legacyTrace.bindings,
-            qualifiedSql: actualTrace.preparedSql,
-            qualifiedBindings: actualTrace.bindings,
-            statementCount: actualTrace.preparedSql.length,
-            groupWidth: evidence.groupWidth,
-            sharedRelationCount: evidence.sharedRelationCount,
-            outputDescriptors: evidence.outputDescriptors,
-            controlOutputId: evidence.controlOutputId,
-            controlFields: evidence.controlFields,
-            sql: evidence.sql,
-            bindings: evidence.bindings,
-            sqlBytes: evidence.sqlBytes,
-            bindingCount: evidence.bindingCount,
+            mode,
             output: actual.value,
-            legacyOutput: legacy.value,
-            oracle:
-              mode.mode === "breakdown"
-                ? expectedBreakdown(scope, mode)
-                : undefined,
+            coreOutput: legacy.value,
+            outputDescriptors: evidence.outputDescriptors,
+            sql: actualTrace.preparedSql,
+            bindings: actualTrace.bindings,
           },
         );
-      }
-    },
-  );
-
-  it("qualifies the complete mixed OR tree for private performance breakdown", async () => {
-    const mode = {
-      mode: "breakdown",
-      dimension: "page.path",
-      metric: "ttfb",
-      limit: 20,
-    } as const;
-    const filters = parseFilterDsl(
-      MIXED_OR_FILTER_DSL,
-      analyticsFilterRegistry,
-    );
-    const prepared = await prepareQualifiedQuery("visitor", mode, filters);
-    expect(prepared.deferred.qualification.performanceFilterMode).toBe(
-      "allow-whole-filter",
-    );
-    expect(
-      prepared.deferred.qualification.requestScopePlan?.advancedMatches,
-    ).toBeUndefined();
-    expect(prepared.deferred.qualification.metadata.plan.advancedMatches).toBe(
-      undefined,
-    );
-
-    const diagnostics = createD1ReadDiagnostics();
-    const actualTrace = trace();
-    const actual = await executePerformance(
-      performanceQuery("visitor", mode, filters),
-      actualTrace,
-      { diagnostics },
-    );
-    const legacyTrace = trace();
-    const legacy = await legacyPerformance(
-      prepared.deferred,
-      mode,
-      legacyTrace,
-    );
-    expect(actual.value).toEqual(legacy.value);
-    expect(routeKeys(actual.value)).toEqual(
-      expect.arrayContaining(["/beta", "/delta"]),
-    );
-    expect(diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
-
-    const statements = performanceStatementEvidence(actualTrace);
-    const envelopes = statements.filter(({ envelope }) => envelope);
-    expect(envelopes).toHaveLength(1);
-    expect(envelopes[0]!.utf8Bytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
-    expect(envelopes[0]!.slotCount).toBeLessThanOrEqual(
-      D1_MAX_BOUND_PARAMETERS,
-    );
-    writeEvidence("whole-or-breakdown.json", {
-      request: {
-        siteId: SITE_ID,
-        scope: "visitor",
-        ...mode,
-        filters: MIXED_OR_FILTER_DSL,
       },
-      filterMode: prepared.deferred.qualification.performanceFilterMode,
-      advancedMatchesPresent: false,
-      nativeOnlyOwner: {
-        visitorId: "whole-native-only-visitor",
-        path: "/beta",
-      },
-      countOnlyOwner: { visitorId: "whole-count-only-visitor", path: "/delta" },
-      statementCount: statements.length,
-      envelopeCount: envelopes.length,
-      factQueryCount: statements.filter(({ queryKind }) => queryKind === "fact")
-        .length,
-      metadataQueryCount: statements.filter(
-        ({ queryKind }) => queryKind === "metadata",
-      ).length,
-      otherQueryCount: statements.filter(
-        ({ queryKind }) => queryKind === "other",
-      ).length,
-      sql: statements,
-      output: actual.value,
-      legacyOutput: legacy.value,
-      legacySql: legacyTrace.preparedSql,
-      legacyBindings: legacyTrace.bindings,
-    });
-  });
-
-  it("qualifies the complete mixed NOT tree for private performance dashboard", async () => {
-    const mode = { mode: "dashboard", interval: "hour", limit: 3 } as const;
-    const filters = parseFilterDsl(
-      MIXED_NOT_FILTER_DSL,
-      analyticsFilterRegistry,
-    );
-    const prepared = await prepareQualifiedQuery("visitor", mode, filters);
-    expect(prepared.deferred.configuration).toMatchObject({
-      mode: "dashboard",
-      interval: "hour",
-      routeLimitPresent: true,
-      routeLimitValue: 3,
-    });
-    expect(prepared.deferred.qualification.performanceFilterMode).toBe(
-      "allow-whole-filter",
-    );
-    expect(
-      prepared.deferred.qualification.requestScopePlan?.advancedMatches,
-    ).toBeUndefined();
-    expect(prepared.deferred.qualification.metadata.plan.advancedMatches).toBe(
-      undefined,
     );
 
-    const diagnostics = createD1ReadDiagnostics();
-    const actualTrace = trace();
-    const actual = await executePerformance(
-      performanceQuery("visitor", mode, filters),
-      actualTrace,
-      { diagnostics },
-    );
-    const legacyTrace = trace();
-    const legacy = await legacyPerformance(
-      prepared.deferred,
-      mode,
-      legacyTrace,
-    );
-    expect(actual.value).toEqual(legacy.value);
-    expect(routeKeys(actual.value)).toEqual(
-      expect.arrayContaining(["/beta", "/delta"]),
-    );
-    expect(diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
+    it.each(["session", "event"] as const)(
+      "falls back completely for numeric %s Count and rejects malformed dashboard output",
+      async (scope) => {
+        database
+          .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+          .run("invalid-duration", "a1");
+        try {
+          const prepared = await prepareQualifiedQuery(
+            scope,
+            {
+              mode: "dashboard",
+              interval: "hour",
+            },
+            numericCountFilters(),
+          );
+          const compilation = compileEvidence(prepared);
+          const diagnostics = createD1ReadDiagnostics();
+          const fallbackTrace = trace();
+          const fallback = await executePerformance(
+            performanceQuery(
+              scope,
+              { mode: "dashboard", interval: "hour" },
+              numericCountFilters(),
+            ),
+            fallbackTrace,
+            { env: envFor(fallbackTrace), diagnostics },
+          );
+          const legacy = await legacyPerformance(
+            prepared.deferred,
+            { mode: "dashboard", interval: "hour" },
+            trace(),
+          );
+          expect(fallback.value).toEqual(legacy.value);
+          expect(fallbackTrace.preparedSql).toContain(compilation.sql);
+          const guardRows = database
+            .prepare(compilation.sql)
+            .all(...(compilation.bindings as SQLInputValue[])) as Record<
+            string,
+            unknown
+          >[];
+          expect(
+            guardRows.filter((row) => row.rowKind === "control"),
+          ).toHaveLength(1);
+          expect(
+            guardRows.filter((row) => row.rowKind === "report"),
+          ).toHaveLength(0);
+          expect(compilation.outputDescriptors).toHaveLength(20);
+          const compatibilitySql = fallbackTrace.preparedSql.at(-1);
+          expect(compatibilitySql).toContain("visit_id");
+          expect(compatibilitySql).not.toContain("entity_id");
+          expect(compatibilitySql).not.toBe(compilation.sql);
+          expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+            kind: "numeric-data-domain",
+            fieldIds: ["page.durationMs"],
+          });
+          writeEvidence(`numeric-domain-fallback-${scope}.json`, {
+            fallbackReason: diagnostics.advancedCountSqlFallbackReason,
+            statementCount: fallbackTrace.preparedSql.length,
+            sql: fallbackTrace.preparedSql,
+            bindings: fallbackTrace.bindings,
+            nativeGuardSql: compilation.sql,
+            nativeGuardRows: guardRows,
+            finalCompatibilitySql: compatibilitySql,
+            output: fallback.value,
+            legacyOutput: legacy.value,
+          });
 
-    const statements = performanceStatementEvidence(actualTrace);
-    const envelopes = statements.filter(({ envelope }) => envelope);
-    expect(envelopes).toHaveLength(1);
-    expect(envelopes[0]!.utf8Bytes).toBeLessThanOrEqual(D1_MAX_SQL_UTF8_BYTES);
-    expect(envelopes[0]!.slotCount).toBeLessThanOrEqual(
-      D1_MAX_BOUND_PARAMETERS,
+          if (scope === "session") {
+            const badTrace = trace();
+            const badEnv = createBadReportOutputEnv(badTrace);
+            const badProvider = createD1SiteProviderRegistry({
+              env: badEnv,
+              siteId: SITE_ID,
+            }).resolve("performance");
+            if (!badProvider)
+              throw new Error("wave96u_performance_provider_missing");
+            await expect(
+              badProvider.execute(
+                performanceQuery("session", {
+                  mode: "dashboard",
+                  interval: "hour",
+                }) as never,
+              ),
+            ).rejects.toThrow(
+              "performance_breakdown_dashboard_qualification_report_row_invalid",
+            );
+            expect(badTrace.preparedSql).toHaveLength(2);
+          }
+        } finally {
+          database
+            .prepare("UPDATE visits SET duration_ms = NULL WHERE visit_id = ?")
+            .run("a1");
+        }
+      },
     );
-    writeEvidence("whole-not-dashboard.json", {
-      request: {
-        siteId: SITE_ID,
-        scope: "visitor",
-        ...mode,
-        filters: MIXED_NOT_FILTER_DSL,
-      },
-      configuration: prepared.deferred.configuration,
-      filterMode: prepared.deferred.qualification.performanceFilterMode,
-      advancedMatchesPresent: false,
-      nativeOnlyOwner: {
-        visitorId: "whole-native-only-visitor",
-        path: "/beta",
-      },
-      countOnlyOwner: { visitorId: "whole-count-only-visitor", path: "/delta" },
-      statementCount: statements.length,
-      envelopeCount: envelopes.length,
-      factQueryCount: statements.filter(({ queryKind }) => queryKind === "fact")
-        .length,
-      metadataQueryCount: statements.filter(
-        ({ queryKind }) => queryKind === "metadata",
-      ).length,
-      otherQueryCount: statements.filter(
-        ({ queryKind }) => queryKind === "other",
-      ).length,
-      sql: statements,
-      output: actual.value,
-      legacyOutput: legacy.value,
-      legacySql: legacyTrace.preparedSql,
-      legacyBindings: legacyTrace.bindings,
-    });
-  });
 
-  it("retains country-limit ignored behavior, empty controls, and exact ordering under reverse_unordered_selects", async () => {
-    const countryLimited = {
-      mode: "breakdown",
-      dimension: "geo.country",
-      metric: "lcp",
-      limit: 1,
-    } as const;
-    const countryWide = { ...countryLimited, limit: 20 };
-    const limitedTrace = trace();
-    const wideTrace = trace();
-    const limited = await executePerformance(
-      performanceQuery("visitor", countryLimited),
-      limitedTrace,
-    );
-    const wide = await executePerformance(
-      performanceQuery("visitor", countryWide),
-      wideTrace,
-    );
-    expect(limited.value).toEqual(wide.value);
-    // The qualifier on a1 admits visitor va, so a2 and b1 are in the visitor
-    // sample bag too. c1 has no LCP, d1 has no country, and only the added
-    // whole-count-only Page contributes the third non-empty country group.
-    const expectedLcpSamples = [
-      {
-        pageId: "a1",
-        owner: "va",
-        startedAtMs: BASE + 10_000,
-        country: "US",
-        lcp: 300,
-      },
-      {
-        pageId: "a2",
-        owner: "va",
-        startedAtMs: BASE + 20_000,
-        country: "US",
-        lcp: 320,
-      },
-      {
-        pageId: "b1",
-        owner: "va",
-        startedAtMs: BASE + 65 * 60_000,
-        country: "CA",
-        lcp: 500,
-      },
-      {
-        pageId: "whole-count-only",
-        owner: "whole-count-only-visitor",
-        startedAtMs: BASE + 100 * 60_000,
-        country: "NZ",
-        lcp: 941,
-      },
-    ] as const;
-    expect(
-      expectedLcpSamples.every(
-        ({ startedAtMs }) =>
-          startedAtMs >= TIME.range.startMs &&
-          startedAtMs < TIME.range.endExclusiveMs,
-      ),
-    ).toBe(true);
-    expect(
-      expectedLcpSamples.map(({ country, lcp }) => ({ country, lcp })),
-    ).toEqual([
-      { country: "US", lcp: 300 },
-      { country: "US", lcp: 320 },
-      { country: "CA", lcp: 500 },
-      { country: "NZ", lcp: 941 },
-    ]);
-    const expectedCountryGroups = new Set(
-      expectedLcpSamples.map(({ country }) => country),
-    );
-    expect(
-      (limited.value as { readonly items: readonly unknown[] }).items,
-    ).toHaveLength(expectedCountryGroups.size);
-
-    const missingTrace = trace();
-    const missing = await executePerformance(
-      performanceQuery(
-        "session",
-        { mode: "dashboard", interval: "hour" },
-        filtersWithoutMatches(),
-      ),
-      missingTrace,
-    );
-    const missingValue = missing.value as {
-      readonly summaries: Record<
-        PerformanceMetricKey,
-        { readonly samples: number }
-      >;
-      readonly trends: Record<PerformanceMetricKey, readonly unknown[]>;
-      readonly routes: readonly unknown[];
-      readonly countries: readonly unknown[];
-    };
-    expect(missingTrace.preparedSql).toHaveLength(2);
-    expect(missingValue.routes).toEqual([]);
-    expect(missingValue.countries).toEqual([]);
-    expect(
-      Object.values(missingValue.trends).every((points) => points.length === 0),
-    ).toBe(true);
-    expect(
-      Object.values(missingValue.summaries).every(
-        (summary) => summary.samples === 0,
-      ),
-    ).toBe(true);
-
-    database.exec("PRAGMA reverse_unordered_selects = ON");
-    try {
-      const reverseTrace = trace();
-      const reverse = await executePerformance(
-        performanceQuery("visitor", { mode: "dashboard", interval: "hour" }),
-        reverseTrace,
+    it("binds every public request field to its trusted performance qualification", async () => {
+      const pathMode = {
+        mode: "breakdown",
+        dimension: "page.path",
+        metric: "lcp",
+        limit: 2,
+      } as const;
+      const pathPrepared = await prepareQualifiedQuery("session", pathMode);
+      expect(compileEvidence(pathPrepared).outputDescriptors).toHaveLength(5);
+      const pathClone = { ...pathPrepared.query } as PerformanceRequest;
+      expect(() =>
+        compilePerformanceBreakdownDashboardQualificationProgram({
+          query: pathClone,
+          deferred: pathPrepared.deferred,
+        }),
+      ).toThrow(
+        "performance_breakdown_dashboard_qualification_request_changed",
       );
-      const prepared = await prepareQualifiedQuery("visitor", {
+      pathPrepared.query.limit = 1;
+      expect(() =>
+        deferredPerformanceSummaryQualificationFromQuery(pathPrepared.query),
+      ).toThrow("performance_summary_qualification_request_changed");
+      pathPrepared.query.dimension = "geo.country";
+      expect(() =>
+        deferredPerformanceSummaryQualificationFromQuery(pathPrepared.query),
+      ).toThrow("performance_summary_qualification_request_changed");
+      pathPrepared.query.dimension = "page.path";
+      pathPrepared.query.metric = "ttfb";
+      expect(() =>
+        deferredPerformanceSummaryQualificationFromQuery(pathPrepared.query),
+      ).toThrow("performance_summary_qualification_request_changed");
+      pathPrepared.query.metric = "lcp";
+      pathPrepared.query.limit = 2;
+      expect(() =>
+        deferredPerformanceSummaryQualificationFromQuery(pathPrepared.query),
+      ).not.toThrow();
+
+      const dashboard = await prepareQualifiedQuery("session", {
         mode: "dashboard",
         interval: "hour",
       });
-      const legacy = await legacyPerformance(
-        prepared.deferred,
-        { mode: "dashboard", interval: "hour" },
-        trace(),
-      );
-      expect(reverse.value).toEqual(legacy.value);
-      expect(reverseTrace.preparedSql).toHaveLength(2);
-      writeEvidence("reverse-unordered-selects.json", {
-        enabled: true,
-        sql: reverseTrace.preparedSql,
-        bindings: reverseTrace.bindings,
-        output: reverse.value,
-        legacyOutput: legacy.value,
-      });
-    } finally {
-      database.exec("PRAGMA reverse_unordered_selects = OFF");
-    }
-  });
+      expect(compileEvidence(dashboard).outputDescriptors).toHaveLength(20);
+      dashboard.query.interval = "day";
+      expect(() =>
+        deferredPerformanceSummaryQualificationFromQuery(dashboard.query),
+      ).toThrow("performance_summary_qualification_request_changed");
+      dashboard.query.interval = "hour";
+      dashboard.query.limit = 18;
+      expect(() =>
+        deferredPerformanceSummaryQualificationFromQuery(dashboard.query),
+      ).toThrow("performance_summary_qualification_request_changed");
 
-  it.each([
-    ...(["ttfb", "fcp", "lcp", "cls", "inp"] as const).flatMap((metric) => [
-      {
-        mode: "breakdown" as const,
-        dimension: "page.path" as const,
-        metric,
-        limit: 2,
-      },
-      {
-        mode: "breakdown" as const,
-        dimension: "geo.country" as const,
-        metric,
-        limit: 2,
-      },
-    ]),
-    { mode: "dashboard" as const, interval: "hour" as const },
-  ])(
-    "matches complete Event-candidate Performance mode %j against Core",
-    async (mode) => {
-      const prepared = await prepareQualifiedQuery("event", mode);
-      const evidence = compileEvidence(prepared);
-      const actualTrace = trace();
-      const actual = await executePerformance(
-        performanceQuery("event", mode),
-        actualTrace,
-      );
-      const legacyTrace = trace();
-      const legacy = await legacyPerformance(
-        prepared.deferred,
-        mode,
-        legacyTrace,
-      );
-
-      expect(
-        actual.value,
-        `${mode.mode}:${"metric" in mode ? mode.metric : mode.interval}`,
-      ).toEqual(legacy.value);
-      expect(actualTrace.preparedSql).toHaveLength(2);
-      expect(actualTrace.preparedSql[1]).toBe(evidence.sql);
-      expect(actualTrace.bindings[1]).toEqual(evidence.bindings);
-      expect(evidence.outputDescriptors).toHaveLength(
-        mode.mode === "dashboard" ? 20 : 5,
-      );
-      expect(
-        evidence.outputDescriptors.every(
-          ({ fields }) =>
-            JSON.stringify(fields) ===
-            JSON.stringify(PERFORMANCE_REPORT_OUTPUT_FIELDS),
-        ),
-      ).toBe(true);
-      writeEvidence(
-        `qualified-event-${mode.mode}-${"metric" in mode ? mode.dimension + "-" + mode.metric : mode.interval}.json`,
-        {
-          mode,
-          output: actual.value,
-          coreOutput: legacy.value,
-          outputDescriptors: evidence.outputDescriptors,
-          sql: actualTrace.preparedSql,
-          bindings: actualTrace.bindings,
+      let getterCalls = 0;
+      const accessorRequest = performanceQuery("session", pathMode);
+      Object.defineProperty(accessorRequest, "metric", {
+        enumerable: true,
+        configurable: true,
+        get() {
+          getterCalls += 1;
+          return "lcp";
         },
+      });
+      const accessorTrace = trace();
+      const middleware = d1AdvancedFilterMiddleware(
+        envFor(accessorTrace),
+        undefined,
+        SITE_ID,
       );
-    },
-  );
-
-  it.each(["session", "event"] as const)(
-    "falls back completely for numeric %s Count and rejects malformed dashboard output",
-    async (scope) => {
-      database
-        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
-        .run("invalid-duration", "a1");
-      try {
-        const prepared = await prepareQualifiedQuery(
-          scope,
-          {
-            mode: "dashboard",
-            interval: "hour",
-          },
-          numericCountFilters(),
-        );
-        const diagnostics = createD1ReadDiagnostics();
-        const fallbackTrace = trace();
-        const fallback = await executePerformance(
-          performanceQuery(
-            scope,
-            { mode: "dashboard", interval: "hour" },
-            numericCountFilters(),
-          ),
-          fallbackTrace,
-          { env: envFor(fallbackTrace), diagnostics },
-        );
-        const legacy = await legacyPerformance(
-          prepared.deferred,
-          { mode: "dashboard", interval: "hour" },
-          trace(),
-        );
-        expect(fallback.value).toEqual(legacy.value);
-        expect(
-          fallbackTrace.preparedSql.filter(
-            (sql) => sql === legacy.queryTrace.preparedSql[0],
-          ),
-        ).toHaveLength(1);
-        expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
-          kind: "numeric-data-domain",
-          fieldIds: ["page.durationMs"],
-        });
-        writeEvidence(`numeric-domain-fallback-${scope}.json`, {
-          fallbackReason: diagnostics.advancedCountSqlFallbackReason,
-          statementCount: fallbackTrace.preparedSql.length,
-          sql: fallbackTrace.preparedSql,
-          bindings: fallbackTrace.bindings,
-          output: fallback.value,
-          legacyOutput: legacy.value,
-        });
-
-        if (scope === "session") {
-          const badTrace = trace();
-          const badEnv = createBadReportOutputEnv(badTrace);
-          const badProvider = createD1SiteProviderRegistry({
-            env: badEnv,
-            siteId: SITE_ID,
-          }).resolve("performance");
-          if (!badProvider)
-            throw new Error("wave96u_performance_provider_missing");
-          await expect(
-            badProvider.execute(
-              performanceQuery("session", {
-                mode: "dashboard",
-                interval: "hour",
-              }) as never,
-            ),
-          ).rejects.toThrow(
-            "performance_breakdown_dashboard_qualification_report_row_invalid",
-          );
-          expect(badTrace.preparedSql).toHaveLength(2);
-        }
-      } finally {
-        database
-          .prepare("UPDATE visits SET duration_ms = NULL WHERE visit_id = ?")
-          .run("a1");
-      }
-    },
-  );
-
-  it("binds every public request field to its trusted performance qualification", async () => {
-    const pathMode = {
-      mode: "breakdown",
-      dimension: "page.path",
-      metric: "lcp",
-      limit: 2,
-    } as const;
-    const pathPrepared = await prepareQualifiedQuery("session", pathMode);
-    expect(compileEvidence(pathPrepared).outputDescriptors).toHaveLength(5);
-    const pathClone = { ...pathPrepared.query } as PerformanceRequest;
-    expect(() =>
-      compilePerformanceBreakdownDashboardQualificationProgram({
-        query: pathClone,
-        deferred: pathPrepared.deferred,
-      }),
-    ).toThrow("performance_breakdown_dashboard_qualification_request_changed");
-    pathPrepared.query.limit = 1;
-    expect(() =>
-      deferredPerformanceSummaryQualificationFromQuery(pathPrepared.query),
-    ).toThrow("performance_summary_qualification_request_changed");
-    pathPrepared.query.dimension = "geo.country";
-    expect(() =>
-      deferredPerformanceSummaryQualificationFromQuery(pathPrepared.query),
-    ).toThrow("performance_summary_qualification_request_changed");
-    pathPrepared.query.dimension = "page.path";
-    pathPrepared.query.metric = "ttfb";
-    expect(() =>
-      deferredPerformanceSummaryQualificationFromQuery(pathPrepared.query),
-    ).toThrow("performance_summary_qualification_request_changed");
-    pathPrepared.query.metric = "lcp";
-    pathPrepared.query.limit = 2;
-    expect(() =>
-      deferredPerformanceSummaryQualificationFromQuery(pathPrepared.query),
-    ).not.toThrow();
-
-    const dashboard = await prepareQualifiedQuery("session", {
-      mode: "dashboard",
-      interval: "hour",
+      const accessorOutput = (await middleware(
+        "performance",
+        accessorRequest,
+        async (value) => value,
+      )) as PerformanceRequest;
+      expect(getterCalls).toBe(0);
+      expect(accessorTrace.preparedSql).toHaveLength(2);
+      expect(
+        deferredPerformanceSummaryQualificationFromQuery(accessorOutput),
+      ).toBeUndefined();
+      let toJSONCalls = 0;
+      const toJSONRequest = performanceQuery("session", pathMode);
+      Object.defineProperty(toJSONRequest, "metric", {
+        enumerable: true,
+        configurable: true,
+        value: { toJSON: () => ((toJSONCalls += 1), "lcp") },
+      });
+      const toJSONTrace = trace();
+      const toJSONMiddleware = d1AdvancedFilterMiddleware(
+        envFor(toJSONTrace),
+        undefined,
+        SITE_ID,
+      );
+      const toJSONOutput = (await toJSONMiddleware(
+        "performance",
+        toJSONRequest,
+        async (value) => value,
+      )) as PerformanceRequest;
+      expect(toJSONCalls).toBe(0);
+      expect(toJSONTrace.preparedSql).toHaveLength(2);
+      expect(
+        deferredPerformanceSummaryQualificationFromQuery(toJSONOutput),
+      ).toBeUndefined();
     });
-    expect(compileEvidence(dashboard).outputDescriptors).toHaveLength(20);
-    dashboard.query.interval = "day";
-    expect(() =>
-      deferredPerformanceSummaryQualificationFromQuery(dashboard.query),
-    ).toThrow("performance_summary_qualification_request_changed");
-    dashboard.query.interval = "hour";
-    dashboard.query.limit = 18;
-    expect(() =>
-      deferredPerformanceSummaryQualificationFromQuery(dashboard.query),
-    ).toThrow("performance_summary_qualification_request_changed");
-
-    let getterCalls = 0;
-    const accessorRequest = performanceQuery("session", pathMode);
-    Object.defineProperty(accessorRequest, "metric", {
-      enumerable: true,
-      configurable: true,
-      get() {
-        getterCalls += 1;
-        return "lcp";
-      },
-    });
-    const accessorTrace = trace();
-    const middleware = d1AdvancedFilterMiddleware(
-      envFor(accessorTrace),
-      undefined,
-      SITE_ID,
-    );
-    const accessorOutput = (await middleware(
-      "performance",
-      accessorRequest,
-      async (value) => value,
-    )) as PerformanceRequest;
-    expect(getterCalls).toBe(0);
-    expect(accessorTrace.preparedSql).toHaveLength(2);
-    expect(
-      deferredPerformanceSummaryQualificationFromQuery(accessorOutput),
-    ).toBeUndefined();
-    let toJSONCalls = 0;
-    const toJSONRequest = performanceQuery("session", pathMode);
-    Object.defineProperty(toJSONRequest, "metric", {
-      enumerable: true,
-      configurable: true,
-      value: { toJSON: () => ((toJSONCalls += 1), "lcp") },
-    });
-    const toJSONTrace = trace();
-    const toJSONMiddleware = d1AdvancedFilterMiddleware(
-      envFor(toJSONTrace),
-      undefined,
-      SITE_ID,
-    );
-    const toJSONOutput = (await toJSONMiddleware(
-      "performance",
-      toJSONRequest,
-      async (value) => value,
-    )) as PerformanceRequest;
-    expect(toJSONCalls).toBe(0);
-    expect(toJSONTrace.preparedSql).toHaveLength(2);
-    expect(
-      deferredPerformanceSummaryQualificationFromQuery(toJSONOutput),
-    ).toBeUndefined();
-  });
-});
+  },
+);

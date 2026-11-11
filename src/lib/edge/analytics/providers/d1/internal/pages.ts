@@ -8,6 +8,8 @@ import {
   type SortDirection,
 } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
+import type { QueryTime } from "@/lib/edge/analytics/contract/types";
 import type { PageDimensionSelection } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import {
   buildPageCardDetailsPlan,
@@ -32,6 +34,7 @@ import {
   PAGES_WITH_TABS_OUTPUT_FIELDS,
   PAGES_WITH_TABS_OUTPUT_IDS,
 } from "@/lib/edge/analytics/engine/pages-with-tabs-report-plan";
+import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { Env } from "@/lib/edge/types";
 import { InvalidCursorError } from "@/lib/pagination";
 
@@ -62,6 +65,12 @@ import type {
 import { buildTimeBuckets, timeBucketTimestamp } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import { queryPageTabsFromD1, queryVisitDimensionFromD1 } from "./dimensions";
+import {
+  bindPageVisitQualificationPreparation,
+  pageVisitQualificationConsumerKey,
+  type PageVisitQualificationPreparation,
+  snapshotPageVisitQualificationPlan,
+} from "./page-visit-qualification-execution";
 import { type PageDashboardCursor } from "./pages-dashboard";
 import {
   decodePageCursor,
@@ -71,6 +80,53 @@ import {
   pageResult,
   paginationBindingForWindow,
 } from "./pagination";
+import type { QualificationExecutionInputs } from "./qualification-execution-inputs";
+
+export interface PagesPageVisitQualification {
+  readonly preparation: PageVisitQualificationPreparation;
+  readonly queryTime: QueryTime;
+  readonly scopePlan: ScopedFilterPlan;
+  readonly consumerKey: unknown;
+}
+
+export function pagesAggregatePageQualificationConsumerKey(
+  configuration: DeferredPagesAggregatePageQualification["pagesAggregatePageRequest"],
+) {
+  return pageVisitQualificationConsumerKey(
+    "pages-aggregate-page",
+    configuration,
+  );
+}
+
+export function pagesTabsQualificationConsumerKey(
+  configuration: DeferredPagesTabsQualification["pagesTabsRequest"],
+) {
+  return pageVisitQualificationConsumerKey("pages-tabs", configuration);
+}
+
+function bindPagesReportQualification(input: {
+  readonly plan: Parameters<typeof snapshotPageVisitQualificationPlan>[0];
+  readonly siteId: string;
+  readonly filters: FilterDocument;
+  readonly qualification?: PagesPageVisitQualification;
+}): {
+  readonly plan: Parameters<typeof snapshotPageVisitQualificationPlan>[0];
+  readonly executionInputs?: QualificationExecutionInputs;
+} {
+  if (!input.qualification) return { plan: input.plan };
+  const plan = snapshotPageVisitQualificationPlan(input.plan);
+  const executionInputs = bindPageVisitQualificationPreparation({
+    preparation: input.qualification.preparation,
+    siteId: input.siteId,
+    filters: input.filters,
+    queryTime: input.qualification.queryTime,
+    scopePlan: input.qualification.scopePlan,
+    consumerKey: input.qualification.consumerKey,
+    plan,
+  });
+  return { plan, executionInputs };
+}
+
 function pageAggregateCursor(value: unknown): PageAggregateCursor | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const candidate = value as Record<string, unknown>;
@@ -179,21 +235,37 @@ export async function queryPagesPageFromD1(
   includeDetails: boolean,
   cursor?: PageAggregateCursor | null,
   audience: QueryAudience = "private-dashboard",
+  qualification?: PagesPageVisitQualification,
 ): Promise<PageResult<PageRow>> {
   const metadata = scopedFilterMetadata(filters);
-  const plan = buildPagesPagePlan({
+  const queryTime =
+    qualification?.queryTime ?? metadata?.time ?? queryWindowToTime(window);
+  const scopePlan = qualification?.scopePlan ?? metadata?.plan;
+  const builtPlan = buildPagesPagePlan({
     siteId,
-    queryTime: metadata?.time ?? queryWindowToTime(window),
+    queryTime,
     filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(scopePlan ? { scopePlan } : {}),
+    ...(qualification
+      ? { qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY] }
+      : {}),
     limit,
     includeDetails,
     ...(cursor ? { cursor } : {}),
   });
+  const bound = bindPagesReportQualification({
+    plan: builtPlan,
+    siteId,
+    filters,
+    qualification,
+  });
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
-    plan,
+    bound.plan,
     "pages-page",
+    undefined,
+    undefined,
+    bound.executionInputs,
   );
   const mapped = rows.map((row) => ({
     pathname: String(row.pathname ?? ""),
@@ -377,6 +449,7 @@ export async function queryPageTabsAggregate(
   window: QueryWindow,
   filters: FilterDocument,
   limit: number,
+  qualification?: PagesPageVisitQualification,
 ): Promise<{
   path: DimensionRow[];
   title: DimensionRow[];
@@ -384,7 +457,14 @@ export async function queryPageTabsAggregate(
   entry: DimensionRow[];
   exit: DimensionRow[];
 }> {
-  return queryPageTabsFromD1(env, siteId, window, filters, limit);
+  return queryPageTabsFromD1(
+    env,
+    siteId,
+    window,
+    filters,
+    limit,
+    qualification,
+  );
 }
 export interface PagesWithTabsResult {
   readonly pages: PageResult<PageRow>;
@@ -435,31 +515,50 @@ export async function queryPagesWithTabsFromD1(
   includeDetails: boolean,
   cursor?: PageAggregateCursor | null,
   audience: QueryAudience = "private-dashboard",
+  qualification?: PagesPageVisitQualification,
 ): Promise<PagesWithTabsResult> {
   const metadata = scopedFilterMetadata(filters);
-  const plan = buildPagesWithTabsPlan({
+  const queryTime =
+    qualification?.queryTime ?? metadata?.time ?? queryWindowToTime(window);
+  const scopePlan = qualification?.scopePlan ?? metadata?.plan;
+  const builtPlan = buildPagesWithTabsPlan({
     siteId,
-    queryTime: metadata?.time ?? queryWindowToTime(window),
+    queryTime,
     filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(scopePlan ? { scopePlan } : {}),
+    ...(qualification
+      ? { qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY] }
+      : {}),
     limit,
     includeDetails,
     ...(cursor ? { cursor } : {}),
   });
-  const rows = await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
-    outputIds: PAGES_WITH_TABS_OUTPUT_IDS,
-    fields: PAGES_WITH_TABS_OUTPUT_FIELDS,
-    orderBy: [
-      { field: "rowType", direction: "asc", nulls: "first" },
-      { field: "cardType", direction: "asc", nulls: "first" },
-      { field: "views", direction: "desc", nulls: "last" },
-      { field: "sessions", direction: "desc", nulls: "last" },
-      { field: "pathname", direction: "asc", nulls: "first" },
-      { field: "queryValue", direction: "asc", nulls: "first" },
-      { field: "hashValue", direction: "asc", nulls: "first" },
-      { field: "value", direction: "asc", nulls: "first" },
-    ],
+  const bound = bindPagesReportQualification({
+    plan: builtPlan,
+    siteId,
+    filters,
+    qualification,
   });
+  const rows = await queryAnalyticsReportOutputSetRowsFromD1(
+    env,
+    bound.plan,
+    {
+      outputIds: PAGES_WITH_TABS_OUTPUT_IDS,
+      fields: PAGES_WITH_TABS_OUTPUT_FIELDS,
+      orderBy: [
+        { field: "rowType", direction: "asc", nulls: "first" },
+        { field: "cardType", direction: "asc", nulls: "first" },
+        { field: "views", direction: "desc", nulls: "last" },
+        { field: "sessions", direction: "desc", nulls: "last" },
+        { field: "pathname", direction: "asc", nulls: "first" },
+        { field: "queryValue", direction: "asc", nulls: "first" },
+        { field: "hashValue", direction: "asc", nulls: "first" },
+        { field: "value", direction: "asc", nulls: "first" },
+      ],
+    },
+    undefined,
+    bound.executionInputs,
+  );
   const pageRows = rows
     .filter((row) => row.rowType === "page")
     .map((row) => ({

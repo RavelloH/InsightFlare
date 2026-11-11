@@ -1424,62 +1424,81 @@ describe("Performance Summary qualified regression", () => {
     });
   });
 
-  it("falls back to the legacy reader for invalid numeric Count data", async () => {
-    const filters = parseFilterDsl(
-      'page.path neq "/excluded" and count(page { page.durationMs gt 5 }) eq 1',
-      analyticsFilterRegistry,
-    );
-    database
-      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
-      .run("invalid-duration", "visitor-a-session-2-page-1");
-    try {
-      const actualTrace = trace();
-      const diagnostics = createD1ReadDiagnostics();
-      const actual = await executePerformance(
-        performanceQuery("session", filters),
-        actualTrace,
-        { diagnostics },
+  it.each(["session", "event"] as const)(
+    "uses the complete Page visit fallback for invalid numeric Count data in %s scope",
+    async (scope) => {
+      const filters = parseFilterDsl(
+        'page.path neq "/excluded" and count(page { page.durationMs gt 5 }) eq 1',
+        analyticsFilterRegistry,
       );
-      const legacy = await legacyPreparedSummary("session", filters);
-      expect(actual.value).toEqual(legacy.value);
-      expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
-        kind: "numeric-data-domain",
-        fieldIds: ["page.durationMs"],
-      });
-      const compiledStatements = actualTrace.preparedSql.filter((sql) =>
-        sql.includes('AS "outputId"'),
-      );
-      const legacySummaryStatements = actualTrace.preparedSql.filter(
-        (sql) =>
-          sql.includes('AS "ttfbSamples"') && !sql.includes('AS "outputId"'),
-      );
-      expect(compiledStatements).toHaveLength(1);
-      expect(legacySummaryStatements).toHaveLength(1);
-      writeEvidence("performance-summary-numeric-fallback.json", {
-        request: {
-          siteId: SITE_ID,
-          mode: "summary",
-          scope: "session",
-          time: TIME,
-          filters:
-            'page.path neq "/excluded" and count(page { page.durationMs gt 5 }) eq 1',
-        },
-        invalidStoredValue: "invalid-duration",
-        fallbackReason: diagnostics.advancedCountSqlFallbackReason,
-        value: actual.value,
-        legacyValue: legacy.value,
-        preparedStatementCount: actualTrace.preparedSql.length,
-        compiledQualificationStatements: compiledStatements.length,
-        legacySummaryStatements: legacySummaryStatements.length,
-        sql: actualTrace.preparedSql,
-        bindings: actualTrace.bindings,
-      });
-    } finally {
       database
-        .prepare("UPDATE visits SET duration_ms = NULL WHERE visit_id = ?")
-        .run("visitor-a-session-2-page-1");
-    }
-  });
+        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+        .run("invalid-duration", "visitor-a-session-2-page-1");
+      try {
+        const compilation = await compilePerformanceSummaryEvidence(
+          scope,
+          filters,
+        );
+        const actualTrace = trace();
+        const diagnostics = createD1ReadDiagnostics();
+        const actual = await executePerformance(
+          performanceQuery(scope, filters),
+          actualTrace,
+          { diagnostics },
+        );
+        const legacy = await legacyPreparedSummary(scope, filters);
+        expect(actual.value).toEqual(legacy.value);
+        expect(
+          Object.keys((actual.value as { metrics: object }).metrics),
+        ).toEqual(["ttfb", "fcp", "lcp", "cls", "inp"]);
+        expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+          kind: "numeric-data-domain",
+          fieldIds: ["page.durationMs"],
+        });
+        expect(actualTrace.preparedSql).toContain(compilation.evidence.sql);
+        const guardRows = database
+          .prepare(compilation.evidence.sql)
+          .all(...(compilation.evidence.bindings as SQLInputValue[])) as Record<
+          string,
+          unknown
+        >[];
+        expect(
+          guardRows.filter((row) => row.rowKind === "control"),
+        ).toHaveLength(1);
+        expect(
+          guardRows.filter((row) => row.rowKind === "report"),
+        ).toHaveLength(0);
+        const compatibilitySql = actualTrace.preparedSql.at(-1);
+        expect(compatibilitySql).toContain("visit_id");
+        expect(compatibilitySql).not.toContain("entity_id");
+        expect(compatibilitySql).not.toBe(compilation.evidence.sql);
+        writeEvidence(`performance-summary-numeric-fallback-${scope}.json`, {
+          request: {
+            siteId: SITE_ID,
+            mode: "summary",
+            scope,
+            time: TIME,
+            filters:
+              'page.path neq "/excluded" and count(page { page.durationMs gt 5 }) eq 1',
+          },
+          invalidStoredValue: "invalid-duration",
+          fallbackReason: diagnostics.advancedCountSqlFallbackReason,
+          value: actual.value,
+          legacyValue: legacy.value,
+          preparedStatementCount: actualTrace.preparedSql.length,
+          nativeGuardSql: compilation.evidence.sql,
+          nativeGuardRows: guardRows,
+          finalCompatibilitySql: compatibilitySql,
+          sql: actualTrace.preparedSql,
+          bindings: actualTrace.bindings,
+        });
+      } finally {
+        database
+          .prepare("UPDATE visits SET duration_ms = NULL WHERE visit_id = ?")
+          .run("visitor-a-session-2-page-1");
+      }
+    },
+  );
 
   it.each([
     [

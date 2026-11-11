@@ -16,14 +16,34 @@ import {
   type QualifiedSourceFilterMode,
 } from "@/lib/edge/analytics/engine/qualified-page-source";
 import type { QualifiedGeoComparisonProvenance } from "@/lib/edge/analytics/engine/semantic/count-bare-fields";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
 const NUMBER = { kind: "scalar", scalar: "number" } as const;
+const DATETIME = { kind: "scalar", scalar: "datetime" } as const;
 
 export type JourneyGeoSummaryLevel = "country" | "region" | "city";
 
 export const JOURNEY_GEO_POINTS_OUTPUT = "journey-geo-points";
+export const JOURNEY_GEO_PAGE_COMPATIBILITY_POINTS_OUTPUT =
+  "journey-geo-page-compatibility-points";
+export const JOURNEY_GEO_PAGE_COMPATIBILITY_SUMMARY_OUTPUT =
+  "journey-geo-page-compatibility-summary";
+export const JOURNEY_GEO_PAGE_COMPATIBILITY_OUTPUT_FIELDS = [
+  "rowType",
+  "latitude",
+  "longitude",
+  "timestampMs",
+  "country",
+  "region",
+  "regionCode",
+  "city",
+  "pointCount",
+  "views",
+  "sessions",
+  "visitors",
+] as const;
 
 export const JOURNEY_GEO_POINT_ATTRIBUTES = [
   "page.report.latitude",
@@ -360,6 +380,94 @@ export function journeyGeoSummaryLevelFromFilter(
   const country = valueFor("geo.country");
   const regionCode = valueFor("geo.region");
   return !country ? "country" : !regionCode ? "region" : "city";
+}
+
+/**
+ * Builds both legacy Core Geo roots over one Page Source for Page-visit
+ * compatibility. The points and summary appenders retain their separate
+ * filters, groupings, and limits; only their output rows are normalized so a
+ * single D1 output-set execution can return the complete Geo DTO.
+ */
+export function buildJourneyGeoPageVisitCompatibilityPlan(input: {
+  readonly siteId: string;
+  readonly queryTime: QueryTime;
+  readonly filters: FilterDocument;
+  readonly scopePlan: ScopedFilterPlan;
+  readonly qualificationDependencyRefs: readonly QualificationDependencyRef[];
+  readonly limit: number;
+  readonly level: JourneyGeoSummaryLevel;
+}) {
+  const source = createPageReportSource({
+    siteId: input.siteId,
+    queryTime: input.queryTime,
+    filters: input.filters,
+    scopePlan: input.scopePlan,
+    qualificationDependencyRefs: input.qualificationDependencyRefs,
+    attributes: [
+      ...new Set([
+        ...JOURNEY_GEO_POINT_ATTRIBUTES,
+        ...JOURNEY_GEO_SUMMARY_ATTRIBUTES,
+      ]),
+    ],
+  });
+  const points = appendJourneyGeoPointsReport(
+    source.builder,
+    source.pages,
+    input.limit,
+  );
+  const summary = appendJourneyGeoSummaryReport(
+    source.builder,
+    source.pages,
+    input.level,
+  );
+  const nullString = () => source.builder.literal(null, STRING);
+  const nullNumber = () => source.builder.literal(null, NUMBER);
+  const nullTimestamp = () => source.builder.literal(null, DATETIME);
+  const pointRows = source.builder.project(points, {
+    rowType: source.builder.literal("points", STRING),
+    latitude: source.builder.slot(points, "latitude"),
+    longitude: source.builder.slot(points, "longitude"),
+    timestampMs: source.builder.slot(points, "timestampMs"),
+    country: source.builder.slot(points, "country"),
+    region: source.builder.slot(points, "region"),
+    regionCode: source.builder.slot(points, "regionCode"),
+    city: source.builder.slot(points, "city"),
+    pointCount: source.builder.slot(points, "pointCount"),
+    views: nullNumber(),
+    sessions: nullNumber(),
+    visitors: nullNumber(),
+  });
+  const hasRegion = input.level !== "country";
+  const hasCity = input.level === "city";
+  const summaryRows = source.builder.project(summary, {
+    rowType: source.builder.literal("summary", STRING),
+    latitude: nullNumber(),
+    longitude: nullNumber(),
+    timestampMs: nullTimestamp(),
+    country: source.builder.slot(summary, "country"),
+    region: hasRegion ? source.builder.slot(summary, "region") : nullString(),
+    regionCode: hasRegion
+      ? source.builder.slot(summary, "regionCode")
+      : nullString(),
+    city: hasCity ? source.builder.slot(summary, "city") : nullString(),
+    pointCount: nullNumber(),
+    views: source.builder.slot(summary, "views"),
+    sessions: source.builder.slot(summary, "sessions"),
+    visitors: source.builder.slot(summary, "visitors"),
+  });
+  for (const [outputId, rows] of [
+    [JOURNEY_GEO_PAGE_COMPATIBILITY_POINTS_OUTPUT, pointRows],
+    [JOURNEY_GEO_PAGE_COMPATIBILITY_SUMMARY_OUTPUT, summaryRows],
+  ] as const)
+    source.builder.output(
+      outputId,
+      rows,
+      JOURNEY_GEO_PAGE_COMPATIBILITY_OUTPUT_FIELDS.map((name) => ({
+        name,
+        slot: name,
+      })),
+    );
+  return source.builder.finish();
 }
 
 /** Builds points and exactly one selected summary from one qualified Page bag. */

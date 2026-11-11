@@ -2439,6 +2439,26 @@ describe("Journey Geo Page report D1 migration", () => {
         expect(
           envelopes[0]!.filter((row) => row.rowKind === "control"),
         ).toHaveLength(1);
+        const nativeGuardRead = reads.find(({ sql }) =>
+          sql.includes('AS "outputId"'),
+        );
+        expect(nativeGuardRead).toBeDefined();
+        const nativeGuardSql = nativeGuardRead!.sql;
+        expect(actualTrace.preparedSql).toContain(nativeGuardSql);
+        const compatibilitySql = actualTrace.preparedSql.filter(
+          (sql) =>
+            sql !== nativeGuardSql &&
+            sql.includes('AS "rowType"') &&
+            sql.includes("UNION ALL"),
+        );
+        expect(compatibilitySql).toHaveLength(1);
+        expect(compatibilitySql[0]).toContain("visit_id");
+        expect(compatibilitySql[0]).not.toContain("entity_id");
+        const compatibilityRead = reads.find(
+          ({ sql }) => sql === compatibilitySql[0],
+        );
+        expect(compatibilityRead).toBeDefined();
+        const compatibilityRows = capturedRows(compatibilityRead!);
         await writeGeoEvidence("97eq-event-geo-numeric-fallback.json", {
           actual: actual.value,
           core: expected,
@@ -2446,6 +2466,21 @@ describe("Journey Geo Page report D1 migration", () => {
           actualTrace,
           coreTrace,
           reads,
+          nativeGuardRows: envelopes[0],
+          finalCompatibilityRows: compatibilityRows,
+          finalCompatibilitySql: compatibilitySql[0],
+          statementCost: {
+            finalCompatibilityStatements: compatibilitySql.length,
+            oldCoreStatements: coreTrace.preparedSql.length,
+            finalCompatibilitySqlUtf8Bytes: new TextEncoder().encode(
+              compatibilitySql[0]!,
+            ).byteLength,
+            oldCoreSqlUtf8Bytes: coreTrace.preparedSql.reduce(
+              (total, sql) => total + new TextEncoder().encode(sql).byteLength,
+              0,
+            ),
+            rowScanCountsAvailable: false,
+          },
         });
       } finally {
         db.prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?").run(

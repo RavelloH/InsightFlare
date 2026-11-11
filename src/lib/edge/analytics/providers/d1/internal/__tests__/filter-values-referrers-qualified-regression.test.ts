@@ -1124,6 +1124,107 @@ describe("filter-values referrer qualification baseline", () => {
     ).toHaveLength(2);
   });
 
+  it("requires exact reader temporal domains before preparing Page visits", async () => {
+    const database = createFixture();
+    setDurationFixture(database);
+    const trace = traceFor();
+    const env = envFor(database, trace);
+    const query = queryFor("event", "referrer.domain", {
+      limit: 1,
+      filterDsl: NUMERIC_COUNT_DSL,
+    });
+    const prepared = await d1AdvancedFilterMiddleware(env, undefined, SITE)(
+      "filter-values",
+      query,
+      async (value) => value,
+    );
+    const deferred = deferredEventQualificationFromQuery(
+      prepared,
+      "filter-values",
+    );
+    if (!deferred?.requestTime)
+      throw new Error("wave97l_reader_time_deferred_missing");
+    const readerQueryTime = deferred.requestTime;
+    const shiftMs = (
+      value: typeof readerQueryTime.range.startMs,
+      delta: number,
+    ) => (value + delta) as typeof readerQueryTime.range.startMs;
+    const consumerKey = filterValuesPageQualificationConsumerKey({
+      field: "referrer.domain",
+      limit: 1,
+      cursorToken: null,
+      search: undefined,
+      audience: "private-dashboard",
+    });
+    const mismatchedReaderTimes = [
+      {
+        domain: "candidate",
+        queryTime: {
+          ...readerQueryTime,
+          range: {
+            ...readerQueryTime.range,
+            startMs: shiftMs(readerQueryTime.range.startMs, 1),
+          },
+        },
+      },
+      {
+        domain: "filter",
+        queryTime: {
+          ...readerQueryTime,
+          filterRange: {
+            startMs: shiftMs(readerQueryTime.range.startMs, 1),
+            endExclusiveMs: readerQueryTime.range.endExclusiveMs,
+          },
+        },
+      },
+      {
+        domain: "read",
+        queryTime: {
+          ...readerQueryTime,
+          readRange: {
+            startMs: readerQueryTime.range.startMs,
+            endExclusiveMs: shiftMs(readerQueryTime.range.endExclusiveMs, -1),
+          },
+        },
+      },
+      {
+        domain: "timezone",
+        queryTime: {
+          ...readerQueryTime,
+          reportingTimeZone:
+            "America/Los_Angeles" as typeof readerQueryTime.reportingTimeZone,
+        },
+      },
+      {
+        domain: "capture",
+        queryTime: {
+          ...readerQueryTime,
+          capturedAtMs: shiftMs(readerQueryTime.capturedAtMs, 1),
+        },
+      },
+    ];
+    const statementCountBeforePreparation = trace.preparedSql.length;
+
+    for (const mismatch of mismatchedReaderTimes)
+      await expect(
+        prepareDeferredPageVisitQualification(deferred, consumerKey, {
+          readerQueryTime: mismatch.queryTime,
+        }),
+        mismatch.domain,
+      ).resolves.toBeUndefined();
+    expect(trace.preparedSql).toHaveLength(statementCountBeforePreparation);
+
+    const preparation = await prepareDeferredPageVisitQualification(
+      deferred,
+      consumerKey,
+      { readerQueryTime },
+    );
+    expect(preparation).toBeDefined();
+    expect(trace.preparedSql.length).toBeGreaterThan(
+      statementCountBeforePreparation,
+    );
+  });
+
   it("uses the new Event-scope visit binding for numeric fallback cursor pages", async () => {
     const database = createFixture();
     setDurationFixture(database);

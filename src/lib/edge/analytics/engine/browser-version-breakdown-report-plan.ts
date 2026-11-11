@@ -7,6 +7,7 @@ import type {
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
+import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
@@ -35,6 +36,8 @@ interface BrowserVersionBreakdownPlanInput {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  /** Select the canonical prepared-scoped Page Source for an already prepared visit relation. */
+  readonly pageVisitQualification?: true;
   readonly browserLimit: number;
 }
 
@@ -244,10 +247,17 @@ export function buildBrowserVersionBreakdownPlan(
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
+    ...(input.pageVisitQualification
+      ? {
+          qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+        }
+      : {}),
     ...(input.scopePlan
       ? {
           scopePlan: input.scopePlan,
-          preparedTimePolicy: "reader-window-v1" as const,
+          ...(!input.pageVisitQualification
+            ? { preparedTimePolicy: "reader-window-v1" as const }
+            : {}),
         }
       : {}),
     attributes: [

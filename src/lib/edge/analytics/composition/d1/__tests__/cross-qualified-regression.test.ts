@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
@@ -22,6 +22,7 @@ import {
   deferredCrossDimensionQualificationFromQuery,
   prepareDeferredEventQualificationFallback,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import * as advancedFilterExecution from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { resolveCrossBreakdownPageDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
 import {
   createD1ReadDiagnostics,
@@ -224,6 +225,16 @@ function crossQuery(
     primaryLimit: limits.primaryLimit ?? 12,
     secondaryLimit: limits.secondaryLimit ?? 8,
   } as CrossRequest;
+}
+
+function eventCrossQueryWithReaderWindowMismatch(): CrossRequest {
+  return crossQuery(
+    "event",
+    ["browser", "operatingSystem"],
+    undefined,
+    {},
+    'page.path neq "/excluded" and count(event { event.name eq "qualifier" }) eq 1 and count(page { page.durationMs gt 5 }) eq 1',
+  );
 }
 
 async function forwardCandidate(query: CrossRequest) {
@@ -1197,12 +1208,26 @@ describe("Cross qualified provider regression", () => {
         undefined,
         {},
         scope === "event"
-          ? 'count(page { page.durationMs gt 5 }) gt 0 and event.name eq "qualifier"'
+          ? 'page.path neq "/excluded" and count(event { event.name eq "qualifier" }) eq 1 and count(page { page.durationMs gt 5 }) eq 1'
           : 'page.path neq "/excluded" and count(event { event.name eq "qualifier" }) eq 1 and count(page { page.durationMs gt 5 }) eq 1',
       );
       const numericCandidate = await compileCandidate(numericQuery);
       expect(numericCandidate.compilation.kind).toBe("compiled");
       if (numericCandidate.compilation.kind !== "compiled") return;
+      expect(
+        numericCandidate.compilation.evidence.outputDescriptors,
+      ).toHaveLength(3);
+      expect(numericCandidate.deferred.qualification.countInput.scope).toBe(
+        scope,
+      );
+      if (scope === "event")
+        expect(
+          "eventCandidateReportProjection" in
+            numericCandidate.deferred.qualification
+            ? numericCandidate.deferred.qualification
+                .eventCandidateReportProjection
+            : undefined,
+        ).toBe("page-visits");
       const numericSql = numericCandidate.compilation.evidence.sql;
 
       database
@@ -1247,6 +1272,11 @@ describe("Cross qualified provider regression", () => {
         expect(
           envelopeRows.filter((row) => row.rowKind === "control"),
         ).toHaveLength(1);
+        if (scope === "event") {
+          const compatibilitySql = actualTrace.preparedSql.at(-1);
+          expect(compatibilitySql).toContain("visit_id");
+          expect(compatibilitySql).not.toContain("entity_id");
+        }
         expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
           kind: "numeric-data-domain",
           fieldIds: ["page.durationMs"],
@@ -1270,6 +1300,83 @@ describe("Cross qualified provider regression", () => {
       }
     },
   );
+
+  it("keeps the reader-window fallback when the reader domains differ", async () => {
+    const query = eventCrossQueryWithReaderWindowMismatch();
+    const candidate = await compileCandidate(query);
+    expect(candidate.compilation.kind).toBe("compiled");
+    if (candidate.compilation.kind !== "compiled") return;
+    const originalDuration = database
+      .prepare("SELECT duration_ms FROM visits WHERE visit_id = ?")
+      .get("edge-tie") as { readonly duration_ms: number | string | null };
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "edge-tie");
+    const preparePageVisit =
+      advancedFilterExecution.prepareDeferredPageVisitQualification;
+    const pagePreparationSpy = vi.spyOn(
+      advancedFilterExecution,
+      "prepareDeferredPageVisitQualification",
+    );
+    pagePreparationSpy.mockImplementation((deferred, consumerKey, options) =>
+      preparePageVisit(deferred, consumerKey, {
+        ...options,
+        readerQueryTime: {
+          ...query.time,
+          filterRange: {
+            startMs: query.time.range.startMs,
+            endExclusiveMs: query.time.range.endExclusiveMs,
+          },
+        },
+      }),
+    );
+    const fallbackSpy = vi.spyOn(
+      advancedFilterExecution,
+      "prepareDeferredEventQualificationFallback",
+    );
+    try {
+      const diagnostics = createD1ReadDiagnostics();
+      const actualTrace = trace();
+      const actual = await productionCrossQuery(
+        query,
+        actualTrace,
+        envFor(database, actualTrace),
+        diagnostics,
+      );
+      expect(pagePreparationSpy).toHaveBeenCalledTimes(1);
+      await expect(
+        pagePreparationSpy.mock.results[0]?.value,
+      ).resolves.toBeUndefined();
+      expect(fallbackSpy).toHaveBeenCalledTimes(1);
+      const fallbackFilters = await prepareDeferredEventQualificationFallback(
+        candidate.deferred.qualification,
+      );
+      const primary = resolveCrossBreakdownPageDimension("browser");
+      const secondary = resolveCrossBreakdownPageDimension("operatingSystem");
+      if (!primary || !secondary)
+        throw new Error("cross_reader_window_mismatch_fixture_invalid");
+      const expected = await queryCrossDimensionFromD1(
+        envFor(database, trace()),
+        SITE,
+        WINDOW,
+        fallbackFilters,
+        query.primaryLimit,
+        query.secondaryLimit,
+        primary,
+        secondary,
+      );
+      expect(actual.value).toEqual(expected);
+      expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+        kind: "numeric-data-domain",
+      });
+    } finally {
+      pagePreparationSpy.mockRestore();
+      fallbackSpy.mockRestore();
+      database
+        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+        .run(originalDuration.duration_ms, "edge-tie");
+    }
+  });
 
   it("rejects malformed Cross output without retry", async () => {
     const ordinaryQuery = crossQuery("session");

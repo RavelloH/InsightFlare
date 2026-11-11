@@ -3,16 +3,24 @@ import {
   buildRegionLocationValue,
 } from "@/lib/analytics/geo-location";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import { scopedFilterMetadata } from "@/lib/edge/analytics/contract/scoped-filter";
+import type { QueryTime } from "@/lib/edge/analytics/contract/types";
 import {
+  buildJourneyGeoPageVisitCompatibilityPlan,
   buildJourneyGeoPointsPlan,
   buildJourneyGeoSummaryPlan,
+  JOURNEY_GEO_PAGE_COMPATIBILITY_OUTPUT_FIELDS,
+  JOURNEY_GEO_PAGE_COMPATIBILITY_POINTS_OUTPUT,
+  JOURNEY_GEO_PAGE_COMPATIBILITY_SUMMARY_OUTPUT,
   type JourneyGeoSummaryLevel,
   journeyGeoSummaryLevelFromFilter,
 } from "@/lib/edge/analytics/engine/journey-geo-report-plan";
 import { buildJourneySessionLocationPlan } from "@/lib/edge/analytics/engine/journey-page-report-plan";
+import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { Env } from "@/lib/edge/types";
 
+import { queryAnalyticsReportOutputSetRowsFromD1 } from "./analytics-report-query";
 import type {
   FilterDocument,
   GeoCountryCountRow,
@@ -22,8 +30,28 @@ import type {
   QueryWindow,
 } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
+import type { DeferredGeoPointsQualification } from "./geo-points-qualification-request";
 import { mapGeoPointRow } from "./journey-helpers";
 import { queryJourneyPageReportRowsFromD1 } from "./journey-page-report-query";
+import {
+  bindPageVisitQualificationPreparation,
+  pageVisitQualificationConsumerKey,
+  type PageVisitQualificationPreparation,
+  snapshotPageVisitQualificationPlan,
+} from "./page-visit-qualification-execution";
+
+export interface GeoPointsPageVisitQualification {
+  readonly preparation: PageVisitQualificationPreparation;
+  readonly queryTime: QueryTime;
+  readonly scopePlan: ScopedFilterPlan;
+  readonly configuration: DeferredGeoPointsQualification["configuration"];
+}
+
+export function geoPointsPageVisitQualificationConsumerKey(
+  configuration: GeoPointsPageVisitQualification["configuration"],
+) {
+  return pageVisitQualificationConsumerKey("geo-points", configuration);
+}
 
 export async function querySessionLocationPointsFromD1(
   env: Env,
@@ -46,7 +74,66 @@ export async function queryGeoPointsFromD1(
   filters: FilterDocument,
   limit: number,
   diagnostics?: D1ReadDiagnostics,
+  qualification?: GeoPointsPageVisitQualification,
 ): Promise<GeoPointAggregate> {
+  if (qualification) {
+    const plan = snapshotPageVisitQualificationPlan(
+      buildJourneyGeoPageVisitCompatibilityPlan({
+        siteId,
+        queryTime: qualification.queryTime,
+        filters,
+        scopePlan: qualification.scopePlan,
+        qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+        limit,
+        level: qualification.configuration.summaryLevel,
+      }),
+    );
+    const executionInputs = bindPageVisitQualificationPreparation({
+      preparation: qualification.preparation,
+      siteId,
+      filters,
+      queryTime: qualification.queryTime,
+      scopePlan: qualification.scopePlan,
+      consumerKey: geoPointsPageVisitQualificationConsumerKey(
+        qualification.configuration,
+      ),
+      plan,
+    });
+    const rows = await queryAnalyticsReportOutputSetRowsFromD1(
+      env,
+      plan,
+      {
+        outputIds: [
+          JOURNEY_GEO_PAGE_COMPATIBILITY_POINTS_OUTPUT,
+          JOURNEY_GEO_PAGE_COMPATIBILITY_SUMMARY_OUTPUT,
+        ],
+        fields: JOURNEY_GEO_PAGE_COMPATIBILITY_OUTPUT_FIELDS,
+        orderBy: [
+          { field: "rowType", direction: "asc", nulls: "first" },
+          { field: "timestampMs", direction: "desc", nulls: "last" },
+          { field: "views", direction: "desc", nulls: "last" },
+          { field: "sessions", direction: "desc", nulls: "last" },
+          { field: "country", direction: "asc", nulls: "first" },
+          { field: "region", direction: "asc", nulls: "first" },
+          { field: "regionCode", direction: "asc", nulls: "first" },
+          { field: "city", direction: "asc", nulls: "first" },
+        ],
+      },
+      diagnostics,
+      executionInputs,
+    );
+    const points = rows
+      .filter((row) => row.rowType === "points")
+      .map(mapGeoPointRow);
+    const summaryRows = rows.filter((row) => row.rowType === "summary");
+    return {
+      points,
+      ...mapJourneyGeoSummaryRowsToDto(
+        qualification.configuration.summaryLevel,
+        summaryRows,
+      ),
+    };
+  }
   const metadata = scopedFilterMetadata(filters);
   const planInput = {
     siteId,
