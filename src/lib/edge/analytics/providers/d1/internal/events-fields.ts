@@ -44,6 +44,7 @@ import type {
   FilterDocument,
   QueryWindow,
 } from "./core";
+import { prepareEventMembershipFallbackPlan } from "./event-membership-fallback";
 import {
   decodePageCursor,
   encodePageCursor,
@@ -316,6 +317,48 @@ export async function queryQualifiedEventFieldsPageFromD1(
       rows,
     );
   }
+  const membership = await prepareEventMembershipFallbackPlan({
+    deferred: input.deferred,
+    operation: "event-fields",
+    operations: ["event-fields"],
+    configuration: {
+      eventName: input.eventName ?? null,
+      limit: input.limit,
+      cursor: input.cursor ?? null,
+      audience: input.audience,
+    },
+    buildPlan: (context) =>
+      buildEventFieldsPagePlan({
+        siteId: input.siteId,
+        queryTime: context.queryTime,
+        filters: input.filters,
+        scopePlan: context.scopePlan,
+        qualificationDependencyRefs: context.qualificationDependencyRefs,
+        ...(input.eventName !== undefined
+          ? { eventName: input.eventName }
+          : {}),
+        limit: input.limit,
+        ...(input.cursor ? { cursor: input.cursor } : {}),
+      }),
+  });
+  if (membership)
+    return eventFieldsPageFromRows(
+      input.env,
+      input.siteId,
+      input.window,
+      input.filters,
+      input.eventName,
+      input.limit,
+      input.audience,
+      (await queryAnalyticsReportOutputRowsFromD1(
+        input.env,
+        membership.plan,
+        EVENT_FIELDS_PAGE_OUTPUT,
+        undefined,
+        undefined,
+        membership.executionInputs,
+      )) as unknown as EventFieldRow[],
+    );
   const fallbackFilters = await prepareDeferredEventQualificationFallback(
     input.deferred,
   );
@@ -590,6 +633,64 @@ export async function queryQualifiedEventFieldValuesPageFromD1(
       rows,
     );
   }
+  const valueTypeCode = customEventJsonTypeCode(input.fieldValueType);
+  const membership =
+    valueTypeCode === null
+      ? undefined
+      : await prepareEventMembershipFallbackPlan({
+          deferred: input.deferred,
+          operation: "event-field-values",
+          operations: ["event-field-values"],
+          configuration: {
+            eventName: input.eventName ?? null,
+            fieldPath: input.fieldPath,
+            fieldValueType: input.fieldValueType,
+            limit: input.limit,
+            search: input.search ?? null,
+            cursor: input.cursor ?? null,
+            audience: input.audience,
+          },
+          buildPlan: (context) =>
+            buildEventFieldValuesPagePlan({
+              source: buildEventPayloadReportSource({
+                siteId: input.siteId,
+                queryTime: context.queryTime,
+                filters: input.filters,
+                scopePlan: context.scopePlan,
+                qualificationDependencyRefs:
+                  context.qualificationDependencyRefs,
+                ...(input.eventName !== undefined
+                  ? { eventName: input.eventName }
+                  : {}),
+              }),
+              fieldPath: input.fieldPath,
+              valueTypeCode,
+              limit: input.limit,
+              ...(input.search !== undefined ? { search: input.search } : {}),
+              ...(input.cursor ? { cursor: input.cursor } : {}),
+            }),
+        });
+  if (membership)
+    return eventFieldValuesPageFromRows(
+      input.env,
+      input.siteId,
+      input.window,
+      input.filters,
+      input.eventName,
+      input.fieldPath,
+      input.fieldValueType,
+      input.limit,
+      input.search,
+      input.audience,
+      (await queryAnalyticsReportOutputRowsFromD1(
+        input.env,
+        membership.plan,
+        EVENT_FIELD_VALUES_PAGE_OUTPUT,
+        undefined,
+        undefined,
+        membership.executionInputs,
+      )) as unknown as EventFieldValueRow[],
+    );
   const fallbackFilters = await prepareDeferredEventQualificationFallback(
     input.deferred,
   );

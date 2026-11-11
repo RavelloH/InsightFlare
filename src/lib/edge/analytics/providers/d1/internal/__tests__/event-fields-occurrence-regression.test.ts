@@ -1241,6 +1241,77 @@ describe("Event field occurrence report migration", () => {
     });
   });
 
+  it("runs the event-scope numeric fallback through the request-private Event membership", async () => {
+    const { database, site } = createDatabase();
+    database
+      .prepare(
+        `INSERT INTO sites (id, team_id, name, domain, created_at)
+         VALUES (?, 'wave95b-team', 'Event fields numeric', 'numeric.test', 0)`,
+      )
+      .run(SITE);
+    database
+      .prepare(
+        "UPDATE visits SET started_at = ?, last_activity_at = ?, duration_ms = ? WHERE visit_id = ?",
+      )
+      .run(125, 125, 10, "visit-one");
+    database
+      .prepare(
+        "UPDATE visits SET started_at = ?, last_activity_at = ?, duration_ms = ? WHERE visit_id = ?",
+      )
+      .run(126, 126, "invalid-duration", "visit-two");
+    void site;
+
+    const query = qualifiedEventFieldsQuery(
+      "event",
+      null,
+      "count(page { page.durationMs gt 5 }) eq 0",
+    );
+    const expectedTrace = traceFor();
+    const expectedEnv = testEnv(database, expectedTrace);
+    const deferred = deferredEventFieldsQualificationFromQuery(
+      await d1AdvancedFilterMiddleware(expectedEnv)(
+        "event-fields",
+        query,
+        async (prepared) => prepared,
+      ),
+    );
+    if (!deferred) throw new Error("event_fields_membership_deferred_missing");
+    const expectedPage = await queryEventFieldsPageFromD1(
+      expectedEnv,
+      SITE,
+      WINDOW,
+      await prepareDeferredEventQualificationFallback(deferred),
+      "signup",
+      1,
+      null,
+      "private-dashboard",
+    );
+    expect(expectedPage.items.length).toBeGreaterThan(0);
+
+    const trace = traceFor();
+    const diagnostics = createD1ReadDiagnostics();
+    const provider = createD1SiteProviderRegistry({
+      env: testEnv(database, trace),
+      siteId: SITE,
+      diagnostics,
+    }).resolve("event-fields");
+    if (!provider) throw new Error("event_fields_provider_missing");
+    const actual = await provider.execute(query);
+    expect(actual.value).toEqual({
+      eventName: "signup",
+      data: {
+        ...expectedPage,
+        items: expectedPage.items.map(mapEventField),
+      },
+    });
+    expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+      kind: "numeric-data-domain",
+    });
+    // The legacy ID bridge binds a (site, "event", id) kind column.
+    expect(expectedTrace.bindings.at(-1) ?? []).toContain("event");
+    expect(trace.bindings.at(-1) ?? []).not.toContain("event");
+  });
+
   it.each(["session", "visitor"] as const)(
     "matches the legacy public page for %s qualification with one query and signed cursor",
     async (scope) => {
@@ -3504,6 +3575,80 @@ describe("Event field occurrence report migration", () => {
         code: "filter_activity_limit_exceeded",
       },
     });
+  });
+
+  it("runs the event-scope field-value numeric fallback through the request-private Event membership", async () => {
+    const { database } = createDatabase();
+    database
+      .prepare(
+        `INSERT INTO sites (id, team_id, name, domain, created_at)
+         VALUES (?, 'wave95c-team', 'Event field values numeric', 'values-numeric.test', 0)`,
+      )
+      .run(SITE);
+    database
+      .prepare(
+        "UPDATE visits SET started_at = ?, last_activity_at = ?, duration_ms = ? WHERE visit_id = ?",
+      )
+      .run(125, 125, 10, "visit-one");
+    database
+      .prepare(
+        "UPDATE visits SET started_at = ?, last_activity_at = ?, duration_ms = ? WHERE visit_id = ?",
+      )
+      .run(126, 126, "invalid-duration", "visit-two");
+
+    const query = qualifiedEventFieldValuesQuery("event", {
+      filterDsl: "count(page { page.durationMs gt 5 }) eq 0",
+      limit: 5,
+    });
+    const expectedTrace = traceFor();
+    const expectedEnv = testEnv(database, expectedTrace);
+    const deferred = deferredEventFieldValuesQualificationFromQuery(
+      await d1AdvancedFilterMiddleware(expectedEnv)(
+        "event-field-values",
+        query,
+        async (prepared) => prepared,
+      ),
+    );
+    if (!deferred) throw new Error("event_field_values_deferred_missing");
+    const expectedPage = await queryEventFieldValuesPageFromD1(
+      expectedEnv,
+      SITE,
+      WINDOW,
+      await prepareDeferredEventQualificationFallback(deferred),
+      query.eventName,
+      query.fieldPath,
+      query.fieldValueType,
+      query.limit,
+      query.search,
+      null,
+      "private-dashboard",
+    );
+    expect(expectedPage.items.length).toBeGreaterThan(0);
+
+    const trace = traceFor();
+    const diagnostics = createD1ReadDiagnostics();
+    const provider = createD1SiteProviderRegistry({
+      env: testEnv(database, trace),
+      siteId: SITE,
+      diagnostics,
+    }).resolve("event-field-values");
+    if (!provider) throw new Error("event_field_values_provider_missing");
+    const actual = await provider.execute(query);
+    expect(actual.value).toEqual({
+      eventName: query.eventName,
+      fieldPath: query.fieldPath,
+      fieldValueType: query.fieldValueType,
+      data: {
+        ...expectedPage,
+        items: expectedPage.items.map(mapEventFieldValue),
+      },
+    });
+    expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+      kind: "numeric-data-domain",
+    });
+    // The legacy ID bridge binds a (site, "event", id) kind column.
+    expect(expectedTrace.bindings.at(-1) ?? []).toContain("event");
+    expect(trace.bindings.at(-1) ?? []).not.toContain("event");
   });
 
   it("falls back once for field-value numeric incompatibility and keeps the legacy DTO", async () => {

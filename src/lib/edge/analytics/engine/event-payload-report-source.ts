@@ -5,6 +5,7 @@ import type {
   LogicalPlanBuilder,
   LogicalRelationHandle,
 } from "@/lib/edge/analytics/engine/logical/builder";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 export interface EventPayloadReportSourceInput {
@@ -12,6 +13,8 @@ export interface EventPayloadReportSourceInput {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  /** Request-private Event membership; the canonical prepared Source is used. */
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly eventName?: string;
 }
 
@@ -37,8 +40,11 @@ export function buildEventPayloadReportSource(
     queryTime: input.queryTime,
     filters: input.filters,
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
-    ...(input.scopePlan
+    ...(input.scopePlan && !input.qualificationDependencyRefs
       ? { preparedTimePolicy: "reader-window" as const }
+      : {}),
+    ...(input.qualificationDependencyRefs
+      ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
       : {}),
     attributes: ["event.report.eventName"],
     ...(input.eventName !== undefined
