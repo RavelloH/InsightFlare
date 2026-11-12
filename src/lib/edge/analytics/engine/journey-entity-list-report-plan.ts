@@ -20,6 +20,7 @@ import {
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import {
   createSemanticPostObservationFilter,
   createSemanticScopedSourceSelection,
@@ -134,6 +135,8 @@ interface CommonListInput {
   readonly filters: FilterDocument;
   readonly limit: number;
   readonly search?: string;
+  /** Request-private entity membership; never combined with an analysis. */
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly analysis?: JourneyListAnalysis;
   readonly sessionTarget?: {
     readonly type: "visitor" | "session";
@@ -176,6 +179,9 @@ function createJourneyListSources(
       filters: input.filters,
       entityScope: entity,
       ...(preparedPlanOperation ? { preparedPlanOperation } : {}),
+      ...(input.qualificationDependencyRefs && !input.analysis
+        ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+        : {}),
     });
     const pageSelection = selections.page;
     const eventSelection = selections.event;

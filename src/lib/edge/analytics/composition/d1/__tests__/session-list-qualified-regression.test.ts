@@ -1084,6 +1084,56 @@ describe("Sessions qualified guards and request admission", () => {
     }
   });
 
+  it("reads the entity membership instead of the legacy ID bridge for a numeric fallback", async () => {
+    const database = createMigratedDatabase();
+    const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+    const legacyTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+    const env = {
+      DB: createSqliteD1Database(database, trace),
+      MAIN_SECRET: "wave97q-session-list-baseline-secret",
+    } as unknown as Env;
+    const legacyEnv = {
+      DB: createSqliteD1Database(database, legacyTrace),
+      MAIN_SECRET: "wave97q-session-list-baseline-secret",
+    } as unknown as Env;
+    try {
+      seedFixture(database);
+      database
+        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+        .run("invalid-duration", "a-match-1");
+      const request = queryInput({
+        scope: "session",
+        sortKey: "startedAt",
+        direction: "desc",
+        advanced: true,
+        limit: 10,
+        filterDsl:
+          'page.path eq "/match" and count(page { page.durationMs gt 5 }) eq 0',
+      });
+      const diagnostics = createD1ReadDiagnostics();
+      const result = await createD1SiteQueryRuntime({
+        env,
+        siteId: SITE_ID,
+        diagnostics,
+      }).execute("sessions", request);
+      expect(result.ok, JSON.stringify(result)).toBe(true);
+      if (!result.ok) throw new Error("session_list_membership_failed");
+      expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
+        kind: "numeric-data-domain",
+        fieldIds: ["page.durationMs"],
+      });
+      const legacy = await legacySessionPage(legacyEnv, request);
+      expect(legacy.items.length).toBeGreaterThan(0);
+      expect(result.data).toEqual(legacy);
+      // The legacy ID bridge binds the entity kind next to every identity;
+      // the request-private entity membership binds only (site, id) pairs.
+      expect(legacyTrace.bindings.at(-1) ?? []).toContain("session");
+      expect(trace.bindings.at(-1) ?? []).not.toContain("session");
+    } finally {
+      database.close();
+    }
+  });
+
   it("does not invoke getters and admits exact Sessions Goal or Funnel analysis", () => {
     const request = prepareScopedQuery(
       "sessions",

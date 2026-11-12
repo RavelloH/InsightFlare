@@ -12,6 +12,7 @@ import {
 } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { mapVisitors } from "@/lib/edge/analytics/providers/d1/internal/core-mappers";
+import type { EventMembershipFallback } from "@/lib/edge/analytics/providers/d1/internal/event-membership-fallback";
 import { queryFunnelDefinition } from "@/lib/edge/analytics/providers/d1/internal/funnels";
 import { queryGoalDefinition } from "@/lib/edge/analytics/providers/d1/internal/goals";
 import {
@@ -50,6 +51,8 @@ export interface JourneySearchInput extends JourneyDetailInput {
   readonly page: { readonly limit: number; readonly cursor?: string | null };
   readonly audience?: QueryAudience;
   readonly analysisContext?: JourneyAnalysisContext;
+  /** Request-private entity membership for a qualified visitor/session list. */
+  readonly membership?: EventMembershipFallback;
 }
 
 export type VisitorSort = {
@@ -333,6 +336,7 @@ export async function readSiteVisitorsWithResolvedAnalysis(
       search: input.search,
       cursor,
       analysis,
+      ...(input.membership ? { membership: input.membership } : {}),
     },
   );
   return {
@@ -387,6 +391,7 @@ export async function readSiteSessionsWithResolvedAnalysis(
       search: input.search,
       cursor,
       analysis,
+      ...(input.membership ? { membership: input.membership } : {}),
     },
   );
   return {

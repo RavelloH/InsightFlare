@@ -1809,6 +1809,59 @@ describe("Visitors Goal direct program errors before route wiring", () => {
     }
   });
 
+  it.each(["session", "visitor"] as const)(
+    "reads the %s entity membership instead of the legacy ID bridge for a numeric fallback",
+    async (scope) => {
+      const database = createMigratedDatabase();
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const legacyTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const secret = "wave97r-visitor-list-baseline-secret";
+      const env = {
+        DB: createSqliteD1Database(database, trace),
+        MAIN_SECRET: secret,
+      } as unknown as Env;
+      const legacyEnv = {
+        DB: createSqliteD1Database(database, legacyTrace),
+        MAIN_SECRET: secret,
+      } as unknown as Env;
+      try {
+        seedFixture(database);
+        database
+          .prepare("UPDATE visits SET duration_ms = ?")
+          .run("invalid-duration");
+        const request = visitorQuery({
+          scope,
+          sortKey: "lastSeenAt",
+          direction: "desc",
+          advanced: true,
+          limit: 10,
+          filterDsl: "count(page { page.durationMs gt 5 }) eq 0",
+        });
+        const diagnostics = createD1ReadDiagnostics();
+        const result = await createD1SiteQueryRuntime({
+          env,
+          siteId: SITE_ID,
+          diagnostics,
+        }).execute("visitors", request);
+        expect(result.ok, JSON.stringify(result)).toBe(true);
+        if (!result.ok) throw new Error("visitor_list_membership_failed");
+        expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
+          kind: "numeric-data-domain",
+          fieldIds: ["page.durationMs"],
+        });
+        const legacy = await legacyVisitorPage(legacyEnv, request);
+        expect(legacy.items.length).toBeGreaterThan(0);
+        expect(result.data).toEqual(legacy);
+        // The legacy ID bridge binds the entity kind next to every identity;
+        // the request-private entity membership binds only (site, id) pairs.
+        expect(legacyTrace.bindings.at(-1) ?? []).toContain(scope);
+        expect(trace.bindings.at(-1) ?? []).not.toContain(scope);
+      } finally {
+        database.close();
+      }
+    },
+  );
+
   it("keeps the original missing Goal error through numeric Count fallback", async () => {
     const database = createMigratedDatabase();
     const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };

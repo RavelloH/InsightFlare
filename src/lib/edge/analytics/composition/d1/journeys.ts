@@ -9,6 +9,7 @@ import {
   deferredEventQualificationFromQuery,
   prepareDeferredEventQualificationFallback,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import { prepareEventMembershipFallback } from "@/lib/edge/analytics/providers/d1/internal/event-membership-fallback";
 import { executeJourneyEventPageQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/journey-event-page-qualification-program";
 import { deferredJourneyEventPageQualificationFromQuery } from "@/lib/edge/analytics/providers/d1/internal/journey-event-page-qualification-request";
 import {
@@ -73,6 +74,41 @@ function listSortFromRequest(
   return { field, direction };
 }
 
+/** Entity-mode list requests without an analysis read the entity membership. */
+async function prepareJourneyListMembership(input: {
+  readonly request: { readonly analysisContext?: unknown };
+  readonly deferred: {
+    readonly qualification: Parameters<
+      typeof prepareDeferredEventQualificationFallback
+    >[0];
+  };
+  readonly operation: "visitors" | "sessions";
+  readonly sort: unknown;
+  readonly search: string | undefined;
+  readonly page: unknown;
+}) {
+  const qualification = input.deferred.qualification;
+  if (
+    input.request.analysisContext ||
+    !("metadata" in qualification) ||
+    qualification.metadata.plan.mode !== "entity"
+  )
+    return undefined;
+  return prepareEventMembershipFallback({
+    deferred: qualification as never,
+    operation: input.operation,
+    operations: [input.operation],
+    configuration: {
+      sort: input.sort,
+      search: input.search ?? null,
+      page: input.page,
+    },
+    maxPlans: 1,
+    // the list reads a Page and an Event Source of the same entity membership
+    maxSourcesPerRole: 2,
+  });
+}
+
 export function registerJourneyProviders(
   registry: AnalyticsProviderRegistry,
   options: D1SiteRuntimeBindings,
@@ -103,10 +139,21 @@ export function registerJourneyProviders(
           if (options.diagnostics)
             options.diagnostics.advancedCountSqlFallbackReason =
               qualified.fallbackReason;
-          const fallbackFilters =
-            await prepareDeferredEventQualificationFallback(
-              deferred.qualification,
-            );
+          // Session and visitor filters without a goal/funnel analysis read one
+          // request-private entity membership instead of the legacy ID bridge.
+          const membership = await prepareJourneyListMembership({
+            request,
+            deferred,
+            operation: "visitors",
+            sort,
+            search,
+            page: pageRequest,
+          });
+          const fallbackFilters = membership
+            ? deferred.qualification.filters
+            : await prepareDeferredEventQualificationFallback(
+                deferred.qualification,
+              );
           if (qualified.postFallbackError)
             throw qualified.postFallbackError.error;
           const fallbackInput = {
@@ -119,6 +166,7 @@ export function registerJourneyProviders(
             page: pageRequest,
             audience: request.context.policy.audience,
             analysisContext: request.analysisContext,
+            ...(membership ? { membership } : {}),
           };
           const page = qualified.resolvedAnalysis
             ? await readSiteVisitorsWithResolvedAnalysis(
@@ -177,10 +225,21 @@ export function registerJourneyProviders(
           if (options.diagnostics)
             options.diagnostics.advancedCountSqlFallbackReason =
               qualified.fallbackReason;
-          const fallbackFilters =
-            await prepareDeferredEventQualificationFallback(
-              deferred.qualification,
-            );
+          // Session and visitor filters without a goal/funnel analysis read one
+          // request-private entity membership instead of the legacy ID bridge.
+          const membership = await prepareJourneyListMembership({
+            request,
+            deferred,
+            operation: "sessions",
+            sort,
+            search,
+            page: pageRequest,
+          });
+          const fallbackFilters = membership
+            ? deferred.qualification.filters
+            : await prepareDeferredEventQualificationFallback(
+                deferred.qualification,
+              );
           if (qualified.postFallbackError)
             throw qualified.postFallbackError.error;
           const fallbackInput = {
@@ -193,6 +252,7 @@ export function registerJourneyProviders(
             page: pageRequest,
             audience: request.context.policy.audience,
             analysisContext: request.analysisContext,
+            ...(membership ? { membership } : {}),
           };
           const page = qualified.resolvedAnalysis
             ? await readSiteSessionsWithResolvedAnalysis(

@@ -22,6 +22,7 @@ import {
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { appendQualifiedObservationMembership } from "@/lib/edge/analytics/engine/qualified-page-source";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { SemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import {
   createSemanticPostObservationFilter,
@@ -69,6 +70,8 @@ export function createFunnelProgressionSourceSelections(input: {
   readonly window: QueryWindow;
   readonly filters: FilterDocument;
   readonly preparedPlanOperation?: "visitors" | "sessions" | "visitor-sessions";
+  /** Request-private entity membership that replaces the legacy ID set. */
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
 }): FunnelProgressionSourceSelections {
   const metadata = scopedFilterMetadata(input.filters);
   const queryTime = createQueryTime(
@@ -88,6 +91,9 @@ export function createFunnelProgressionSourceSelections(input: {
     subject,
     time,
     ...(metadata ? { expectedPlan: metadata.plan } : {}),
+    ...(metadata && input.qualificationDependencyRefs
+      ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+      : {}),
     ...(input.preparedPlanOperation
       ? { preparedPlanOperation: input.preparedPlanOperation }
       : {}),
@@ -750,6 +756,7 @@ export function createJourneyFunnelProgressionSourceSelections(input: {
   readonly filters: FilterDocument;
   readonly entityScope: "session" | "visitor";
   readonly preparedPlanOperation?: "visitors" | "sessions" | "visitor-sessions";
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
 }): FunnelProgressionSourceSelections {
   const metadata = scopedFilterMetadata(input.filters);
   const preparedPlanOperation =
