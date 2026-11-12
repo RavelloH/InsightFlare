@@ -10,7 +10,7 @@ import {
   buildReferrerSummaryPlan,
   type ReferrerPageSortKey,
 } from "@/lib/edge/analytics/engine/referrer-report-plan";
-import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
+import { pageRoleDependencyRefs } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type {
   DeferredReferrerOverviewQualification,
   DeferredReferrersQualification,
@@ -287,7 +287,7 @@ export async function queryReferrersPageFromD1(
     ...(scopePlan ? { scopePlan } : {}),
     ...(qualification
       ? {
-          qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+          qualificationDependencyRefs: pageRoleDependencyRefs(scopePlan),
         }
       : {}),
     limit,

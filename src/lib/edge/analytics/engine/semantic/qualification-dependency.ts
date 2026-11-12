@@ -28,6 +28,19 @@ export function qualificationDependencyRefsMatchScope(
     : refs.every((ref) => ref !== EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY);
 }
 
+/**
+ * Page-role report plans read their Page Source through the Page visit
+ * membership for event-scope filters and through the entity membership for
+ * session/visitor filters.
+ */
+export function pageRoleDependencyRefs(
+  scopePlan: { readonly mode: "observation" | "entity" } | undefined,
+): readonly QualificationDependencyRef[] {
+  return scopePlan?.mode === "entity"
+    ? [EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY]
+    : [EVENT_FILTER_PAGE_VISIT_DEPENDENCY];
+}
+
 export function isQualificationDependencyRef(
   value: unknown,
 ): value is QualificationDependencyRef {

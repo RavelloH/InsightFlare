@@ -17,7 +17,10 @@ import {
 import { assertNever } from "@/lib/edge/analytics/engine/logical/plan";
 import { validateLogicalPlan } from "@/lib/edge/analytics/engine/logical/validator";
 import { buildReferrerSummaryPlan } from "@/lib/edge/analytics/engine/referrer-report-plan";
-import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
+import {
+  EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
+  pageRoleDependencyRefs,
+} from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { SemanticTemporalDomains } from "@/lib/edge/analytics/engine/semantic/time";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
@@ -325,7 +328,7 @@ export function bindReferrersSummaryQualification(input: {
           siteIds: [input.siteId],
         }),
         scopePlan: canonicalScopePlan,
-        qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+        qualificationDependencyRefs: pageRoleDependencyRefs(canonicalScopePlan),
         topN: input.topN,
       }),
     ),

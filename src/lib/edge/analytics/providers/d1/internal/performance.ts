@@ -19,7 +19,7 @@ import {
   PERFORMANCE_SUMMARY_OUTPUT_ID,
   PERFORMANCE_TREND_OUTPUT_ID,
 } from "@/lib/edge/analytics/engine/performance-sample-statistics-report-plan";
-import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
+import { pageRoleDependencyRefs } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { DeferredPerformanceSummaryQualification } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import type { PageVisitQualificationPreparation } from "@/lib/edge/analytics/providers/d1/internal/page-visit-qualification-execution";
 import type { Env } from "@/lib/edge/types";
@@ -140,7 +140,9 @@ function performancePlanInput(
     ...(qualification
       ? {
           scopePlan: qualification.scopePlan,
-          qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+          qualificationDependencyRefs: pageRoleDependencyRefs(
+            qualification.scopePlan,
+          ),
         }
       : metadata
         ? {

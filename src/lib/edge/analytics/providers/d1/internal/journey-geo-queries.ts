@@ -17,7 +17,7 @@ import {
   journeyGeoSummaryLevelFromFilter,
 } from "@/lib/edge/analytics/engine/journey-geo-report-plan";
 import { buildJourneySessionLocationPlan } from "@/lib/edge/analytics/engine/journey-page-report-plan";
-import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
+import { pageRoleDependencyRefs } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { Env } from "@/lib/edge/types";
 
 import { queryAnalyticsReportOutputSetRowsFromD1 } from "./analytics-report-query";
@@ -83,7 +83,9 @@ export async function queryGeoPointsFromD1(
         queryTime: qualification.queryTime,
         filters,
         scopePlan: qualification.scopePlan,
-        qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+        qualificationDependencyRefs: pageRoleDependencyRefs(
+          qualification.scopePlan,
+        ),
         limit,
         level: qualification.configuration.summaryLevel,
       }),

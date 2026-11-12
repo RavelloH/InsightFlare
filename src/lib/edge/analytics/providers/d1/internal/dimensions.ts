@@ -32,7 +32,7 @@ import {
   PAGE_TAB_OUTPUT_ORDER_BY,
 } from "@/lib/edge/analytics/engine/page-tabs-report-plan";
 import { buildTopReferrersPlan } from "@/lib/edge/analytics/engine/referrer-report-plan";
-import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
+import { pageRoleDependencyRefs } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import {
   buildSessionPathPagePlan,
   buildSessionPathTopPlan,
@@ -340,7 +340,7 @@ export async function queryDimensionPageFromD1(
     ...(scopePlan ? { scopePlan } : {}),
     ...(qualification
       ? {
-          qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+          qualificationDependencyRefs: pageRoleDependencyRefs(scopePlan),
         }
       : {}),
     limit,
@@ -707,7 +707,7 @@ export async function querySessionPathDimensionFromD1(
     ...(scopePlan ? { scopePlan } : {}),
     ...(qualification
       ? {
-          qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+          qualificationDependencyRefs: pageRoleDependencyRefs(scopePlan),
         }
       : {}),
     limit,
@@ -815,7 +815,7 @@ export async function querySessionPathDimensionPageFromD1(
     ...(scopePlan ? { scopePlan } : {}),
     ...(qualification
       ? {
-          qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+          qualificationDependencyRefs: pageRoleDependencyRefs(scopePlan),
         }
       : {}),
     limit,
@@ -1371,7 +1371,7 @@ export async function queryPageTabsFromD1(
     filters,
     ...(scopePlan ? { scopePlan } : {}),
     ...(qualification
-      ? { qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY] }
+      ? { qualificationDependencyRefs: pageRoleDependencyRefs(scopePlan) }
       : {}),
     limit,
   });

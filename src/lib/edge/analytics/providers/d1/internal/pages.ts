@@ -34,7 +34,7 @@ import {
   PAGES_WITH_TABS_OUTPUT_FIELDS,
   PAGES_WITH_TABS_OUTPUT_IDS,
 } from "@/lib/edge/analytics/engine/pages-with-tabs-report-plan";
-import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
+import { pageRoleDependencyRefs } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { Env } from "@/lib/edge/types";
 import { InvalidCursorError } from "@/lib/pagination";
 
@@ -247,7 +247,7 @@ export async function queryPagesPageFromD1(
     filters,
     ...(scopePlan ? { scopePlan } : {}),
     ...(qualification
-      ? { qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY] }
+      ? { qualificationDependencyRefs: pageRoleDependencyRefs(scopePlan) }
       : {}),
     limit,
     includeDetails,
@@ -527,7 +527,7 @@ export async function queryPagesWithTabsFromD1(
     filters,
     ...(scopePlan ? { scopePlan } : {}),
     ...(qualification
-      ? { qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY] }
+      ? { qualificationDependencyRefs: pageRoleDependencyRefs(scopePlan) }
       : {}),
     limit,
     includeDetails,

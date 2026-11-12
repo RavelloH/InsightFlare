@@ -8,7 +8,7 @@ import type {
 } from "@/lib/edge/analytics/contract/types";
 import { OVERVIEW_CHANNELS_REPORT_OUTPUT } from "@/lib/edge/analytics/engine/channel-client-geo-report-plan";
 import { buildOverviewChannelsPlan } from "@/lib/edge/analytics/engine/channel-client-geo-report-plan";
-import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
+import { pageRoleDependencyRefs } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import {
   type DeferredChannelListQualification,
   prepareDeferredEventQualificationFallback,
@@ -80,7 +80,7 @@ export async function queryChannelsFromD1(
     ...(scopePlan ? { scopePlan } : {}),
     ...(qualification
       ? {
-          qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+          qualificationDependencyRefs: pageRoleDependencyRefs(scopePlan),
         }
       : {}),
     limit,
