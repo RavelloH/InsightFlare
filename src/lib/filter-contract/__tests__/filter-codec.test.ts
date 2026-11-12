@@ -205,6 +205,7 @@ describe("filter URL codec", () => {
       'nth(event { event.name eq "purchase" }.payload("/amount"), 3) gt 0',
       'sub(first(event { event.name eq "purchase" }), first(event { event.name eq "refund" })) gt 0',
       'window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }), [0d, 7d]) notExists',
+      'count(window(event { event.name eq "refund" }, first(event { event.name eq "purchase" }), [0d, 7d]) { event.name eq "refund" }) gte 1',
       'adjacent(sequence([page { page.path eq "/pricing" }, event { event.name eq "purchase" }])) exists',
       'without(sequence([event { event.name eq "signup" }, event { event.name eq "purchase" }]), event { event.name eq "cancellation" }) { $span lte 7d } exists',
       'NOT (count(event { event.name eq "purchase" }) gte 2 OR page.path eq "/private")',
