@@ -18,8 +18,10 @@ import {
   timeBucketTimestamp,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { D1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
+import { prepareEventMembershipFallback } from "@/lib/edge/analytics/providers/d1/internal/event-membership-fallback";
 import { executeOverviewPreviousQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/overview-previous-qualification-program";
 import { executeOverviewTrendQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/overview-trend-qualification-program";
+import { createOverviewReader } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import type { Env } from "@/lib/edge/types";
 
 interface D1OverviewTrendQualificationOptions {
@@ -133,6 +135,53 @@ async function legacyTrend(
   };
 }
 
+/**
+ * Session and visitor filters read one request-private entity membership for
+ * every read of an Overview/Trend request, including a previous-period read
+ * of a different window. Anything else keeps the legacy ID bridge.
+ */
+async function prepareOverviewMembershipFallback(
+  d1: D1OverviewTrendQualificationOptions,
+  deferred: {
+    readonly qualification: Parameters<
+      typeof prepareDeferredEventQualificationFallback
+    >[0] & { readonly filters: FilterDocument };
+    readonly operation: "overview" | "trend";
+    readonly configuration: unknown;
+  },
+): Promise<
+  | { readonly reader: OverviewReader; readonly filters: FilterDocument }
+  | undefined
+> {
+  const qualification = deferred.qualification;
+  if (
+    !("metadata" in qualification) ||
+    qualification.metadata.plan.mode !== "entity"
+  )
+    return undefined;
+  const membership = await prepareEventMembershipFallback({
+    deferred: qualification as never,
+    operation: deferred.operation,
+    operations: [deferred.operation],
+    configuration: deferred.configuration,
+    // current, previous-period and detail reads; each Page and Event Source
+    // of a read shares the one entity membership.
+    maxPlans: 3,
+    maxSourcesPerRole: 2,
+  });
+  return membership
+    ? {
+        reader: createOverviewReader(
+          d1.env,
+          d1.siteId,
+          d1.diagnostics,
+          membership,
+        ),
+        filters: qualification.filters,
+      }
+    : undefined;
+}
+
 export function overviewProvider(
   reader: OverviewReader,
   d1?: D1OverviewTrendQualificationOptions,
@@ -181,6 +230,12 @@ export function overviewProvider(
             approximateVisitors: false,
           };
         }
+        const membership = await prepareOverviewMembershipFallback(
+          d1,
+          deferred,
+        );
+        if (membership)
+          return legacyOverview(membership.reader, query, membership.filters);
         const filters = await prepareDeferredEventQualificationFallback(
           deferred.qualification,
         );
@@ -211,6 +266,9 @@ export function overviewProvider(
           approximateVisitors: false,
         };
       }
+      const membership = await prepareOverviewMembershipFallback(d1, deferred);
+      if (membership)
+        return legacyOverview(membership.reader, query, membership.filters);
       const filters = await prepareDeferredEventQualificationFallback(
         deferred.qualification,
       );
@@ -251,6 +309,9 @@ export function trendProvider(
           source: "raw" as const,
           approximateVisitors: false,
         };
+      const membership = await prepareOverviewMembershipFallback(d1, deferred);
+      if (membership)
+        return legacyTrend(membership.reader, query, membership.filters);
       const filters = await prepareDeferredEventQualificationFallback(
         deferred.qualification,
       );

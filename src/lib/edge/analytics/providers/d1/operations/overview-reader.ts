@@ -16,6 +16,7 @@ import {
   createD1ReadDiagnostics,
   type D1ReadDiagnostics,
 } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
+import type { EventMembershipFallback } from "@/lib/edge/analytics/providers/d1/internal/event-membership-fallback";
 import {
   queryLatestSiteActivity,
   queryOverviewAggregate,
@@ -32,6 +33,11 @@ export function createOverviewReader(
   env: Env,
   siteId: string,
   diagnostics: D1ReadDiagnostics = createD1ReadDiagnostics(),
+  /**
+   * Request-private entity membership for the fallback of one qualified
+   * Overview request. Every read of this reader binds its own plan to it.
+   */
+  membership?: EventMembershipFallback,
 ): OverviewReader {
   return {
     async readOverview(input: OverviewReaderInput) {
@@ -46,6 +52,7 @@ export function createOverviewReader(
         },
         input.filters,
         diagnostics,
+        ...(membership ? [membership] : []),
       );
       return {
         value: {
@@ -73,6 +80,7 @@ export function createOverviewReader(
         input.interval,
         input.filters,
         diagnostics,
+        ...(membership ? [membership] : []),
       );
       return {
         value: result.value.map((row: TrendAggregateRow) => ({

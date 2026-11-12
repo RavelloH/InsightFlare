@@ -1,4 +1,5 @@
 import type { QueryTime } from "@/lib/edge/analytics/contract";
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type {
   LogicalExpressionHandle,
   LogicalPlanBuilder,
@@ -6,6 +7,7 @@ import type {
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { createOverviewReportSource } from "@/lib/edge/analytics/engine/overview-report-source";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
@@ -214,6 +216,8 @@ export function buildOverviewAggregatePlan(input: {
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
 }): ValidatedLogicalPlan {
   const source = createOverviewReportSource({
     ...input,

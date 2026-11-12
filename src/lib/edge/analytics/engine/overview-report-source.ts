@@ -22,6 +22,7 @@ import type {
 import { splitPageDimensionNativeFilters } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
 import { addPageReportSourceToBuilder } from "@/lib/edge/analytics/engine/page-report-plan";
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { SemanticRelationshipId } from "@/lib/edge/analytics/engine/semantic/relationships";
 import {
   createSemanticScopedSourceSelection,
@@ -70,6 +71,12 @@ export function createOverviewReportSource(input: {
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
+  /**
+   * Prepared scope plan and request-private membership that replace the
+   * legacy ID set carried by the filters' scoped metadata.
+   */
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly pageAttributes: readonly string[];
   readonly pageRelationships?: readonly SemanticRelationshipId[];
   readonly eventAttributes: readonly string[];
@@ -81,7 +88,9 @@ export function createOverviewReportSource(input: {
   readonly selection: SemanticScopedSourceSelection;
   readonly scoped: boolean;
 } {
-  const metadata = scopedFilterMetadata(input.filters);
+  const metadata = input.scopePlan
+    ? { plan: input.scopePlan }
+    : scopedFilterMetadata(input.filters);
   const directCompatibilitySelection =
     !metadata && input.filters.root !== null
       ? createSemanticScopedSourceSelection({
@@ -108,6 +117,11 @@ export function createOverviewReportSource(input: {
       ? {
           scopePlan: metadata.plan,
           preparedTimePolicy: "scoped-reader-window-v1" as const,
+          ...(input.qualificationDependencyRefs
+            ? {
+                qualificationDependencyRefs: input.qualificationDependencyRefs,
+              }
+            : {}),
         }
       : {}),
     ...(directCompatibilitySelection

@@ -31,18 +31,34 @@ import {
   queryOverviewClientDimensionsFromD1,
   queryOverviewGeoDimensionsFromD1,
 } from "./dimensions";
+import type { EventMembershipFallback } from "./event-membership-fallback";
 export async function queryOverviewFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
+  membership?: EventMembershipFallback,
 ): Promise<OverviewAggregateRow> {
-  const plan = buildOverviewAggregatePlan({
-    siteId,
-    queryTime: queryWindowToTime(window),
-    filters,
-  });
+  const readerTime = queryWindowToTime(window);
+  const bound = membership?.bindPlan(
+    (context) =>
+      buildOverviewAggregatePlan({
+        siteId,
+        queryTime: readerTime,
+        filters,
+        scopePlan: context.scopePlan,
+        qualificationDependencyRefs: context.qualificationDependencyRefs,
+      }),
+    readerTime,
+  );
+  const plan =
+    bound?.plan ??
+    buildOverviewAggregatePlan({
+      siteId,
+      queryTime: readerTime,
+      filters,
+    });
   recordScopedFilterDiagnostics(diagnostics, scopedFilterMetadata(filters));
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
@@ -50,6 +66,7 @@ export async function queryOverviewFromD1(
     "overview-aggregate",
     undefined,
     diagnostics,
+    bound?.executionInputs,
   );
   const row = rows[0] ?? {};
   return {
@@ -68,14 +85,30 @@ export async function queryTrendFromD1(
   interval: Interval,
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
+  membership?: EventMembershipFallback,
 ): Promise<TrendAggregateRow[]> {
   const buckets = buildTimeBuckets(window, interval);
-  const plan = buildOverviewTrendPlan({
-    siteId,
-    queryTime: queryWindowToTime(window),
-    filters,
-    interval,
-  });
+  const readerTime = queryWindowToTime(window);
+  const bound = membership?.bindPlan(
+    (context) =>
+      buildOverviewTrendPlan({
+        siteId,
+        queryTime: readerTime,
+        filters,
+        interval,
+        scopePlan: context.scopePlan,
+        qualificationDependencyRefs: context.qualificationDependencyRefs,
+      }),
+    readerTime,
+  );
+  const plan =
+    bound?.plan ??
+    buildOverviewTrendPlan({
+      siteId,
+      queryTime: readerTime,
+      filters,
+      interval,
+    });
   recordScopedFilterDiagnostics(diagnostics, scopedFilterMetadata(filters));
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
@@ -83,6 +116,7 @@ export async function queryTrendFromD1(
     "overview-trend",
     undefined,
     diagnostics,
+    bound?.executionInputs,
   );
   return rows.map((row) => ({
     bucket: Number(row.bucket ?? 0),
@@ -131,6 +165,7 @@ export async function queryOverviewAggregate(
   window: QueryWindow,
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
+  membership?: EventMembershipFallback,
 ): Promise<PreferredSourceResult<OverviewAggregateRow>> {
   const scopedMetadata = scopedFilterMetadata(filters);
   if (!hasFilterDocument(filters) && !scopedMetadata) {
@@ -151,7 +186,14 @@ export async function queryOverviewAggregate(
     }
   }
   return {
-    value: await queryOverviewFromD1(env, siteId, window, filters, diagnostics),
+    value: await queryOverviewFromD1(
+      env,
+      siteId,
+      window,
+      filters,
+      diagnostics,
+      membership,
+    ),
     source: "d1",
     diagnosticSource: "raw",
     approximateVisitors: false,
@@ -164,6 +206,7 @@ export async function queryTrendAggregate(
   interval: Interval,
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
+  membership?: EventMembershipFallback,
 ): Promise<PreferredSourceResult<TrendAggregateRow[]>> {
   const scopedMetadata = scopedFilterMetadata(filters);
   if (!hasFilterDocument(filters) && !scopedMetadata) {
@@ -192,6 +235,7 @@ export async function queryTrendAggregate(
       interval,
       filters,
       diagnostics,
+      membership,
     ),
     source: "d1",
     diagnosticSource: "raw",

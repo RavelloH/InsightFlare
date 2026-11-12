@@ -1,3 +1,4 @@
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type {
   CalendarGranularity,
   QueryTime,
@@ -9,6 +10,7 @@ import {
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { createOverviewReportSource } from "@/lib/edge/analytics/engine/overview-report-source";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
@@ -359,12 +361,18 @@ export function buildOverviewTrendPlan(input: {
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly interval: CalendarGranularity;
 }): ValidatedLogicalPlan {
   const source = createOverviewReportSource({
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
+    ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    ...(input.qualificationDependencyRefs
+      ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+      : {}),
     pageAttributes: [
       "page.report.sessionId",
       "page.report.visitorId",

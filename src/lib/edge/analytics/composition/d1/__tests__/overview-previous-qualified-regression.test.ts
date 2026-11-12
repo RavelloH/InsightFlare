@@ -1371,8 +1371,9 @@ describe("Overview previous qualified regression", () => {
       const filters = await prepareDeferredEventQualificationFallback(
         deferred.qualification,
       );
+      const legacyTrace = trace();
       const legacyReader = createOverviewReader(
-        testEnv(database, trace()),
+        testEnv(database, legacyTrace),
         SITE_ID,
         createD1ReadDiagnostics(),
       );
@@ -1394,6 +1395,17 @@ describe("Overview previous qualified regression", () => {
         previous: previous.value,
         detail: { interval: "week", points: detail.value },
       });
+      // The legacy ID bridge binds the entity kind next to every identity;
+      // the request-private entity membership binds only (site, id) pairs
+      // for the current, previous-period and detail reads.
+      const kindTokens = (bindings: readonly (readonly unknown[])[]) =>
+        bindings.map((values) => values.includes("session"));
+      expect(kindTokens(legacyTrace.bindings).some(Boolean)).toBe(true);
+      expect(kindTokens(queryTrace.bindings.slice(-3))).toEqual([
+        false,
+        false,
+        false,
+      ]);
       expect(queryTrace.preparedSql.length).toBeGreaterThan(1);
       expect(
         queryTrace.preparedSql.filter((sql) =>
