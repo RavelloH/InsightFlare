@@ -22,6 +22,7 @@ import {
   type EventRecordCursor,
   queryEventRecordDetailFromD1,
   queryEventRecordPageFromD1,
+  queryEventRecordPageWithMembershipFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
 import { queryQualifiedEventRecordPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
 import type { Env } from "@/lib/edge/types";
@@ -184,23 +185,33 @@ export async function readSiteEventRecords(input: ReadSiteEventRecordsInput) {
       if (input.diagnostics)
         input.diagnostics.advancedCountSqlFallbackReason =
           execution.fallbackReason;
-      const fallbackFilters =
-        await prepareDeferredEventQualificationFallback(deferred);
-      page = await queryEventRecordPageFromD1(
-        input.env,
-        input.siteId,
-        input.window,
-        fallbackFilters,
-        {
-          limit: input.page.limit,
-          sort,
-          search,
-          eventName,
-          cursor,
-          scopePlan: scopedFilterMetadata(fallbackFilters)?.plan,
-          queryTime: input.queryTime ?? deferred.time,
-        },
-      );
+      page = await queryEventRecordPageWithMembershipFromD1({
+        env: input.env,
+        siteId: input.siteId,
+        deferred,
+        options: { limit: input.page.limit, sort, search, eventName, cursor },
+        cursorToken: input.page.cursor ?? null,
+        audience: input.audience ?? "private-dashboard",
+      });
+      if (!page) {
+        const fallbackFilters =
+          await prepareDeferredEventQualificationFallback(deferred);
+        page = await queryEventRecordPageFromD1(
+          input.env,
+          input.siteId,
+          input.window,
+          fallbackFilters,
+          {
+            limit: input.page.limit,
+            sort,
+            search,
+            eventName,
+            cursor,
+            scopePlan: scopedFilterMetadata(fallbackFilters)?.plan,
+            queryTime: input.queryTime ?? deferred.time,
+          },
+        );
+      }
     }
   } else {
     page = await queryEventRecordPageFromD1(

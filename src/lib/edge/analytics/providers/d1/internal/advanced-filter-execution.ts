@@ -7655,6 +7655,7 @@ export async function prepareDeferredEventMembershipQualification(
   operations: readonly DeferredEventQualificationOperation[],
   options: {
     readonly maxBindings?: number;
+    readonly maxSourcesPerRole?: number;
     /** Also expose the Page visits of the same evaluation (session-boundary reads). */
     readonly withPageVisits?: boolean;
   } = {},
@@ -7708,6 +7709,9 @@ export async function prepareDeferredEventMembershipQualification(
         }
       : {}),
     maxBindings: options.maxBindings ?? 1,
+    ...(options.maxSourcesPerRole
+      ? { maxSourcesPerRole: options.maxSourcesPerRole }
+      : {}),
   });
 }
 

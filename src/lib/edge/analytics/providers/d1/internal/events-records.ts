@@ -31,6 +31,7 @@ import type {
   AdvancedCountSqlFallbackReason,
   D1ReadDiagnostics,
 } from "./diagnostics";
+import { prepareEventMembershipFallbackPlan } from "./event-membership-fallback";
 import {
   type EventRecordDetailOutputRow,
   type EventRecordDetailRow,
@@ -133,6 +134,51 @@ export async function queryEventRecordPageFromD1(
     options,
   });
   const rawRows = await queryEventRecordPageOutputRowsFromD1(env, plan);
+  return eventRecordPageFromOutputRows(rawRows, options);
+}
+
+/**
+ * Runs the private single-site numeric fallback of the Event records page
+ * through a request-private Event membership. Returns undefined, before any
+ * Core evaluation, when the request is outside that slice.
+ */
+export async function queryEventRecordPageWithMembershipFromD1(input: {
+  readonly env: Env;
+  readonly siteId: string;
+  readonly deferred: DeferredEventRecordsQualification;
+  readonly options: EventRecordPageOptions;
+  readonly cursorToken: string | null;
+  readonly audience: string;
+}): Promise<EventRecordPage | undefined> {
+  const { deferred, options } = input;
+  const membership = await prepareEventMembershipFallbackPlan({
+    deferred,
+    operation: "event-records",
+    operations: ["event-records"],
+    configuration: {
+      limit: options.limit,
+      sort: options.sort,
+      search: options.search ?? null,
+      eventName: options.eventName ?? null,
+      cursor: input.cursorToken,
+      audience: input.audience,
+    },
+    buildPlan: (context) =>
+      buildEventRecordPagePlan({
+        siteId: input.siteId,
+        queryTime: context.queryTime,
+        filters: deferred.filters,
+        scopePlan: context.scopePlan,
+        qualificationDependencyRefs: context.qualificationDependencyRefs,
+        options,
+      }),
+  });
+  if (!membership) return undefined;
+  const rawRows = await queryEventRecordPageOutputRowsFromD1(
+    input.env,
+    membership.plan,
+    membership.executionInputs,
+  );
   return eventRecordPageFromOutputRows(rawRows, options);
 }
 

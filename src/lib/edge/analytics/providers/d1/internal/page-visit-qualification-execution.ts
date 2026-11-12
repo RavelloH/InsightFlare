@@ -38,6 +38,8 @@ interface PreparationState {
   readonly relations: readonly QualificationDependencyRelationBinding[];
   /** Number of distinct frozen plans the report owner declared at preparation. */
   readonly maxBindings: number;
+  /** Sources of one role a single plan may read (for example summary + denominator). */
+  readonly maxSourcesPerRole: number;
   readonly boundPlans: WeakSet<object>;
   bindings: number;
 }
@@ -168,9 +170,12 @@ function assertPlanContext(
       semanticTemporalDomainsFromQueryTime(state.queryTime),
     ) ||
     // The primary role is always present, every named role has a relation
-    // from this evaluation, and each role backs exactly one Source.
-    counts.get(state.dependencyRef) !== 1 ||
-    [...counts].some(([ref, count]) => !available.has(ref) || count !== 1)
+    // from this evaluation, and each role backs no more Sources than declared.
+    !counts.has(state.dependencyRef) ||
+    [...counts].some(
+      ([ref, count]) =>
+        !available.has(ref) || count < 1 || count > state.maxSourcesPerRole,
+    )
   )
     throw new Error("qualification_execution_plan_context_mismatch");
   for (const { node, ref } of dependencySources) {
@@ -300,6 +305,8 @@ export function createPageVisitQualificationPreparation(input: {
    * never be bound twice and the default remains a single plan.
    */
   readonly maxBindings?: number;
+  /** Sources of one role a plan may read from the shared relation; defaults to 1. */
+  readonly maxSourcesPerRole?: number;
 }): PageVisitQualificationPreparation {
   if (!input.siteId || !input.filters.root)
     throw new Error("qualification_execution_preparation_invalid");
@@ -346,6 +353,7 @@ export function createPageVisitQualificationPreparation(input: {
     consumerKey,
     relations,
     maxBindings: input.maxBindings ?? 1,
+    maxSourcesPerRole: input.maxSourcesPerRole ?? 1,
     boundPlans: new WeakSet(),
     bindings: 0,
   });

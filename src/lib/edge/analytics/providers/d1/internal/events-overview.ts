@@ -12,6 +12,7 @@ import type { Env } from "@/lib/edge/types";
 
 import { queryAnalyticsReportOutputSetRowsFromD1 } from "./analytics-report-query";
 import type { DimensionRow, FilterDocument, QueryWindow } from "./core";
+import type { EventMembershipFallback } from "./event-membership-fallback";
 
 interface EventTypeOverviewRow extends Record<string, unknown> {
   readonly cardType?: unknown;
@@ -29,24 +30,43 @@ export async function queryEventTypeOverviewFromD1(
   window: QueryWindow,
   filters: FilterDocument,
   eventName: string,
-  options?: { includeBreakdowns?: boolean },
+  options?: {
+    includeBreakdowns?: boolean;
+    /** Request-private Event membership shared by the type-detail reports. */
+    membership?: EventMembershipFallback;
+  },
 ) {
   const metadata = scopedFilterMetadata(filters);
   const includeBreakdowns = options?.includeBreakdowns !== false;
-  const denominatorSource = metadata
-    ? "event-report"
-    : planObservationFilter(filters.root).event.kind === "all"
-      ? "raw-event-domain"
-      : "event-report";
-  const plan = buildEventTypeOverviewPlan({
-    siteId,
-    queryTime: metadata?.time ?? queryWindowToTime(window),
-    filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
-    eventName,
-    includeBreakdowns,
-    denominatorSource,
-  });
+  const denominatorSource =
+    metadata || options?.membership
+      ? "event-report"
+      : planObservationFilter(filters.root).event.kind === "all"
+        ? "raw-event-domain"
+        : "event-report";
+  const bound = options?.membership?.bindPlan((context) =>
+    buildEventTypeOverviewPlan({
+      siteId,
+      queryTime: context.queryTime,
+      filters,
+      scopePlan: context.scopePlan,
+      qualificationDependencyRefs: context.qualificationDependencyRefs,
+      eventName,
+      includeBreakdowns,
+      denominatorSource,
+    }),
+  );
+  const plan =
+    bound?.plan ??
+    buildEventTypeOverviewPlan({
+      siteId,
+      queryTime: metadata?.time ?? queryWindowToTime(window),
+      filters,
+      ...(metadata ? { scopePlan: metadata.plan } : {}),
+      eventName,
+      includeBreakdowns,
+      denominatorSource,
+    });
   const outputIds = [
     EVENT_TYPE_OVERVIEW_OUTPUTS.summary,
     ...(includeBreakdowns
@@ -58,16 +78,22 @@ export async function queryEventTypeOverviewFromD1(
         ]
       : []),
   ];
-  const rows = (await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
-    outputIds,
-    fields: EVENT_TYPE_OVERVIEW_FIELDS.map(({ name }) => name),
-    orderBy: [
-      { field: "cardType", direction: "asc", nulls: "first" },
-      { field: "events", direction: "desc", nulls: "last" },
-      { field: "sessions", direction: "desc", nulls: "last" },
-      { field: "value", direction: "asc", nulls: "first" },
-    ],
-  })) as EventTypeOverviewRow[];
+  const rows = (await queryAnalyticsReportOutputSetRowsFromD1(
+    env,
+    plan,
+    {
+      outputIds,
+      fields: EVENT_TYPE_OVERVIEW_FIELDS.map(({ name }) => name),
+      orderBy: [
+        { field: "cardType", direction: "asc", nulls: "first" },
+        { field: "events", direction: "desc", nulls: "last" },
+        { field: "sessions", direction: "desc", nulls: "last" },
+        { field: "value", direction: "asc", nulls: "first" },
+      ],
+    },
+    undefined,
+    bound?.executionInputs,
+  )) as EventTypeOverviewRow[];
   const summaryRow = rows.find((row) => row.cardType === "summary");
   const readDimension = (cardType: string): DimensionRow[] =>
     rows

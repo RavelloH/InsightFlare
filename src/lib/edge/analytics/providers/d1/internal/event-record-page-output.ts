@@ -6,6 +6,7 @@ import { queryAnalyticsReportOutputRowsFromD1 } from "@/lib/edge/analytics/provi
 import type { Env } from "@/lib/edge/types";
 
 import type { EventRecordRow } from "./core";
+import type { QualificationExecutionInputs } from "./qualification-execution-inputs";
 
 export interface EventRecordPageCursorRow extends EventRecordRow {
   eventPk: number;
@@ -102,6 +103,7 @@ export function assertEventRecordPageOutputContract(
 export async function queryEventRecordPageOutputRowsFromD1(
   env: Env,
   plan: ValidatedLogicalPlan,
+  qualificationExecutionInputs?: QualificationExecutionInputs,
 ): Promise<EventRecordPageOutputRow[]> {
   assertEventRecordPageOutputContract(plan);
   const rows = await queryAnalyticsReportOutputRowsFromD1(
@@ -109,6 +111,8 @@ export async function queryEventRecordPageOutputRowsFromD1(
     plan,
     EVENT_RECORD_PAGE_OUTPUT_ID,
     "event_record_page_output_missing",
+    undefined,
+    qualificationExecutionInputs,
   );
   return rows.map((row) => row as EventRecordPageOutputRow);
 }

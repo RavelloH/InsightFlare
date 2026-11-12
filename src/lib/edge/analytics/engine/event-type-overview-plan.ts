@@ -9,6 +9,7 @@ import {
 import type { LogicalPlanBuilder } from "@/lib/edge/analytics/engine/logical/builder";
 import type { LogicalRelationHandle } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
@@ -195,6 +196,7 @@ export function buildEventTypeOverviewPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly eventName: string;
   readonly includeBreakdowns?: boolean;
   readonly denominatorSource: "event-report" | "raw-event-domain";
@@ -205,6 +207,9 @@ export function buildEventTypeOverviewPlan(input: {
     queryTime: input.queryTime,
     filters: input.filters,
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    ...(input.qualificationDependencyRefs
+      ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+      : {}),
   });
   const builder = context.builder;
   const summaryEvents = addEventReportSource(context, {

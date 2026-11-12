@@ -347,13 +347,29 @@ export async function queryEventTypeTrendFromD1(
   interval: Interval,
   filters: FilterDocument,
   eventName: string,
+  membership?: EventMembershipFallback,
 ) {
   const source = trendPlanInput(siteId, window, filters);
+  const bound = membership?.bindPlan((context) =>
+    buildEventTypeTrendPlan({
+      siteId,
+      queryTime: context.queryTime,
+      filters,
+      scopePlan: context.scopePlan,
+      qualificationDependencyRefs: context.qualificationDependencyRefs,
+      eventName,
+      interval,
+    }),
+  );
   const rows = (
     await queryAnalyticsReportOutputRowsFromD1(
       env,
-      buildEventTypeTrendPlan({ ...source, eventName, interval }),
+      bound?.plan ??
+        buildEventTypeTrendPlan({ ...source, eventName, interval }),
       EVENT_TREND_OUTPUTS.typePoints,
+      undefined,
+      undefined,
+      bound?.executionInputs,
     )
   ).map((row): EventTypeTrendPointRow => ({
     bucket: Number(row.bucket ?? -1),

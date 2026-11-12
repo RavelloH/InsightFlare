@@ -766,6 +766,45 @@ describe("event records runtime qualification", () => {
     });
   });
 
+  it("runs the Event candidate numeric fallback through the request-private Event membership", async () => {
+    const filterDsl = "count(page { page.durationMs gt 5 }) eq 0";
+    const actualDatabase = createFixture();
+    actualDatabase
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "visit-scoped");
+    const legacyDatabase = createFixture();
+    legacyDatabase
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "visit-scoped");
+    const query = prepareQuery("event", "desc", {
+      filterDsl,
+      page: { limit: 10, cursor: null },
+    });
+    const actualTrace = newTrace();
+    const diagnostics = createD1ReadDiagnostics();
+    const provider = createD1SiteProviderRegistry({
+      env: testEnv(actualDatabase, actualTrace),
+      siteId: SITE_ID,
+      diagnostics,
+    }).resolve("event-records");
+    if (!provider) throw new Error("event_records_membership_provider_missing");
+    const legacyTrace = newTrace();
+    const expected = await legacyPage(
+      testEnv(legacyDatabase, legacyTrace),
+      query,
+    );
+    expect(expected.items.length).toBeGreaterThan(0);
+    const actual = (await provider.execute(query)).value;
+    expect(actual).toEqual(expected);
+    expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
+      kind: "numeric-data-domain",
+      fieldIds: ["page.durationMs"],
+    });
+    // The legacy ID bridge binds a (site, "event", id) kind column.
+    expect(legacyTrace.bindings.at(-1) ?? []).toContain("event");
+    expect(actualTrace.bindings.at(-1) ?? []).not.toContain("event");
+  });
+
   it("rejects accessor and context-mismatched Event requests before reads", async () => {
     const query = prepareQuery("event", "asc");
     const accessorTrace = newTrace();

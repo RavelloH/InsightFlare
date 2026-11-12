@@ -19,6 +19,7 @@ import {
   mapEventSummaryCards,
   mapTabs,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { prepareEventMembershipFallback } from "@/lib/edge/analytics/providers/d1/internal/event-membership-fallback";
 import {
   EVENT_CONTEXT_CARD_KEYS,
   queryEventAnalyticsContextCardsFromD1,
@@ -528,11 +529,29 @@ export function registerEventProviders(
           qualified?.kind === "executed"
             ? qualified.reports
             : await (async () => {
-                const reportFilters = deferredQualification
-                  ? await prepareDeferredEventQualificationFallback(
-                      deferredQualification,
-                    )
-                  : filters;
+                // One Core evaluation backs the overview, trend and context reads.
+                const membership = deferredQualification
+                  ? await prepareEventMembershipFallback({
+                      deferred: deferredQualification,
+                      operation: "event-type-detail",
+                      operations: ["event-type-detail"],
+                      configuration: {
+                        eventName,
+                        interval,
+                        includeBreakdowns,
+                        includeContext,
+                      },
+                      maxPlans: 3,
+                      maxSourcesPerRole: 2,
+                      withPageVisits: includeContext,
+                    })
+                  : undefined;
+                const reportFilters =
+                  deferredQualification && !membership
+                    ? await prepareDeferredEventQualificationFallback(
+                        deferredQualification,
+                      )
+                    : filters;
                 const [overview, trend, cards] = await Promise.all([
                   measured("event_type_detail.overview", () =>
                     queryEventTypeOverviewFromD1(
@@ -541,7 +560,10 @@ export function registerEventProviders(
                       window,
                       reportFilters,
                       eventName,
-                      { includeBreakdowns },
+                      {
+                        includeBreakdowns,
+                        ...(membership ? { membership } : {}),
+                      },
                     ),
                   ),
                   measured("event_type_detail.trend", () =>
@@ -552,6 +574,7 @@ export function registerEventProviders(
                       interval,
                       reportFilters,
                       eventName,
+                      membership,
                     ),
                   ),
                   includeContext
@@ -563,6 +586,8 @@ export function registerEventProviders(
                           reportFilters,
                           100,
                           eventName,
+                          undefined,
+                          membership ? { membership } : undefined,
                         ),
                       )
                     : Promise.resolve(null),

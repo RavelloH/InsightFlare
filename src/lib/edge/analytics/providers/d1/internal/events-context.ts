@@ -28,6 +28,7 @@ import type {
 } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import {
+  type EventMembershipFallback,
   type EventMembershipFallbackPlan,
   prepareEventMembershipFallbackPlan,
 } from "./event-membership-fallback";
@@ -37,6 +38,8 @@ export type { EventContextCardKey };
 
 export interface EventContextQueryOptions {
   readonly deferredQualification?: DeferredEventContextQualification;
+  /** Request-private Event membership shared with the other type-detail reports. */
+  readonly membership?: EventMembershipFallback;
   readonly diagnostics?: D1ReadDiagnostics;
 }
 
@@ -265,6 +268,31 @@ export async function queryEventAnalyticsContextCardsFromD1(
         reportFilters =
           await prepareDeferredEventQualificationFallback(deferred);
     }
+  }
+  if (!rows && options?.membership) {
+    const bound = options.membership.bindPlan((context) =>
+      buildEventContextReportPlan({
+        siteId,
+        queryTime: context.queryTime,
+        filters,
+        scopePlan: context.scopePlan,
+        qualificationDependencyRefs: context.qualificationDependencyRefs,
+        ...(context.pageVisitDependencyRefs.length > 0
+          ? { pageVisitDependencyRefs: context.pageVisitDependencyRefs }
+          : {}),
+        ...(eventName !== undefined ? { eventName } : {}),
+        limit,
+        selectedKeys: selected,
+      }),
+    );
+    rows = await queryAnalyticsReportOutputRowsFromD1(
+      env,
+      bound.plan,
+      EVENT_CONTEXT_REPORT_OUTPUT,
+      undefined,
+      options.diagnostics,
+      bound.executionInputs,
+    );
   }
   if (!rows && membership)
     rows = await queryAnalyticsReportOutputRowsFromD1(

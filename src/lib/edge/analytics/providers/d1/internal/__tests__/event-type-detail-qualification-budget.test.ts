@@ -829,6 +829,37 @@ describe("Wave94H event type detail compilation budget", () => {
     });
   });
 
+  it("shares one request-private Event membership across the overview, trend and context reads", async () => {
+    const database = createCandidateFixture();
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "detail-match");
+    const result = await runCandidateScenario(database, {
+      label: "event-detail-numeric-membership",
+      countDsl:
+        'count(page { page.durationMs gt 5 }) eq 0 AND event.name eq "purchase"',
+    });
+    expect(result.executionKind).toBe("legacy");
+    expect(
+      (result.diagnosticsFallback as { readonly kind?: string } | null)?.kind,
+    ).toBe("numeric-data-domain");
+    expect(result.dto).toEqual(result.coreDto);
+    expect(
+      Number((result.dto as { summary: { events: number } }).summary.events),
+    ).toBeGreaterThan(0);
+    // The legacy ID bridge binds (site, kind, id) rows in every report read;
+    // the shared memberships bind only (site, id) pairs.
+    const hasKindToken = (
+      statements: readonly { readonly bindings?: readonly unknown[] }[],
+    ) => statements.map((st) => st.bindings?.includes("event") ?? false);
+    expect(hasKindToken(result.coreReportTrace)).toEqual([true, true, true]);
+    expect(hasKindToken(result.actualTrace.slice(-3))).toEqual([
+      false,
+      false,
+      false,
+    ]);
+  });
+
   it("rejects Event-candidate getters and context mismatches before SQL", async () => {
     const database = createCandidateFixture();
     const prepared = prepareQuery({

@@ -11,6 +11,7 @@ import {
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
@@ -285,6 +286,8 @@ export function buildEventRecordPagePlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  /** Request-private Event membership bound by the Provider at execution. */
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly options: EventRecordPageOptions;
 }): ValidatedLogicalPlan {
   const time = semanticTemporalDomainsFromQueryTime(input.queryTime);
@@ -298,6 +301,9 @@ export function buildEventRecordPagePlan(input: {
     subject,
     time,
     ...(input.scopePlan ? { expectedPlan: input.scopePlan } : {}),
+    ...(input.qualificationDependencyRefs
+      ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+      : {}),
     ...(input.options.eventName !== undefined
       ? { eventName: input.options.eventName }
       : {}),

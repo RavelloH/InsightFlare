@@ -66,7 +66,10 @@ interface EventMembershipFallbackInput {
  * existing fallback.
  */
 export async function prepareEventMembershipFallback(
-  input: EventMembershipFallbackInput & { readonly maxPlans?: number },
+  input: EventMembershipFallbackInput & {
+    readonly maxPlans?: number;
+    readonly maxSourcesPerRole?: number;
+  },
 ): Promise<EventMembershipFallback | undefined> {
   const { deferred } = input;
   const consumerKey = pageVisitQualificationConsumerKey(
@@ -79,6 +82,9 @@ export async function prepareEventMembershipFallback(
     input.operations,
     {
       maxBindings: input.maxPlans ?? 1,
+      ...(input.maxSourcesPerRole
+        ? { maxSourcesPerRole: input.maxSourcesPerRole }
+        : {}),
       ...(input.withPageVisits ? { withPageVisits: true } : {}),
     },
   );
