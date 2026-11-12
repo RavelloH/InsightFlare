@@ -115,6 +115,21 @@ export interface CreateSemanticScopedSourceSelectionInput {
   readonly postObservationFilter?: SemanticPostObservationFilter;
 }
 
+/**
+ * Request-private memberships replace the legacy ID set under the canonical
+ * prepared profile and under the reader-window profiles that keep the
+ * prepared time as proof while the report reads a different window.
+ */
+function isDependencyCapableProfile(
+  profile: SemanticScopedSourceProfile,
+): boolean {
+  return (
+    profile === "prepared-scoped-v1" ||
+    profile === "prepared-page-reader-window-v1" ||
+    profile === "prepared-scoped-reader-window-v1"
+  );
+}
+
 function fail(reason: string): never {
   throw new Error("invalid_semantic_scoped_source_selection:" + reason);
 }
@@ -470,7 +485,7 @@ export function createSemanticScopedSourceSelection(
       return fail("prepared_matches_and_qualification_dependency_conflict");
     if (
       qualificationDependencyRefs !== undefined &&
-      (input.profile !== "prepared-scoped-v1" ||
+      (!isDependencyCapableProfile(input.profile) ||
         (input.expectedPlan.mode === "entity"
           ? input.expectedPlan.membership.kind !== "entity" ||
             input.expectedPlan.scope === "event"
@@ -684,7 +699,7 @@ export function validateSemanticScopedSourceSelection(
   );
   if (
     dependencyProperty.value !== undefined &&
-    (selection.profile !== "prepared-scoped-v1" ||
+    (!isDependencyCapableProfile(selection.profile) ||
       (selection.mode === "entity"
         ? selection.scope === "event" || selection.entityKind === undefined
         : selection.scope !== "event") ||

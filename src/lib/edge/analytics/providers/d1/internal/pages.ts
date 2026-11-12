@@ -65,6 +65,7 @@ import type {
 import { buildTimeBuckets, timeBucketTimestamp } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import { queryPageTabsFromD1, queryVisitDimensionFromD1 } from "./dimensions";
+import type { EventMembershipFallback } from "./event-membership-fallback";
 import {
   bindPageVisitQualificationPreparation,
   pageVisitQualificationConsumerKey,
@@ -723,6 +724,8 @@ export async function queryPageCardMetricsFromD1(
     search?: string;
     sort?: PagesDashboardMetric;
     direction?: SortDirection;
+    /** Request-private entity membership shared by the dashboard reads. */
+    membership?: EventMembershipFallback;
   },
 ): Promise<PageCardAggregateRow[]> {
   const metadata = scopedFilterMetadata(filters);
@@ -734,23 +737,42 @@ export async function queryPageCardMetricsFromD1(
     ),
   );
   const search = options?.search?.trim();
-  const plan = buildPageCardMetricsPlan({
+  const readerTime = queryWindowToTime(window);
+  const metricsInput = {
     siteId,
-    queryTime: queryWindowToTime(window),
+    queryTime: readerTime,
     filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
-    ...(metadata ? { preparedTimePolicy: "reader-window-v1" as const } : {}),
     ...(requestedPathnames.length > 0 ? { pathnames: requestedPathnames } : {}),
     ...(typeof options?.limit === "number" ? { limit: options.limit } : {}),
     ...(options?.cursor ? { cursor: options.cursor } : {}),
     ...(search ? { search: search.toLowerCase() } : {}),
     sort: options?.sort ?? "views",
     direction: options?.direction ?? "desc",
-  });
+  };
+  const bound = options?.membership?.bindPlan(
+    (context) =>
+      buildPageCardMetricsPlan({
+        ...metricsInput,
+        scopePlan: context.scopePlan,
+        qualificationDependencyRefs: context.qualificationDependencyRefs,
+        preparedTimePolicy: "reader-window-v1" as const,
+      }),
+    readerTime,
+  );
+  const plan =
+    bound?.plan ??
+    buildPageCardMetricsPlan({
+      ...metricsInput,
+      ...(metadata ? { scopePlan: metadata.plan } : {}),
+      ...(metadata ? { preparedTimePolicy: "reader-window-v1" as const } : {}),
+    });
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
     plan,
     PAGE_CARD_METRICS_OUTPUT_ID,
+    undefined,
+    undefined,
+    bound?.executionInputs,
   );
   return rows.map((row) => ({
     pathname: String(row.pathname ?? ""),
@@ -835,30 +857,52 @@ export async function queryPageCardDetailsFromD1(
   filters: FilterDocument,
   pathnames: string[],
   titleLimit: number,
+  membership?: EventMembershipFallback,
 ): Promise<{ titles: PageCardTitleRow[]; trend: PageCardTrendRow[] }> {
   const requestedPathnames = normalizePageCardPathnames(pathnames);
   if (requestedPathnames.length === 0) return { titles: [], trend: [] };
 
   const metadata = scopedFilterMetadata(filters);
   const buckets = buildTimeBuckets(window, interval);
-  const plan = buildPageCardDetailsPlan({
+  const readerTime = queryWindowToTime(window);
+  const detailsInput = {
     siteId,
-    queryTime: queryWindowToTime(window),
+    queryTime: readerTime,
     interval,
     filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
     pathnames: requestedPathnames,
     titleLimit,
-  });
-  const rows = await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
-    outputIds: PAGE_CARD_DETAILS_MULTI_OUTPUT_IDS,
-    fields: PAGE_CARD_DETAILS_MULTI_OUTPUT_FIELDS,
-    orderBy: [
-      { field: "rowKind", direction: "asc", nulls: "first" },
-      { field: "pathname", direction: "asc", nulls: "first" },
-      { field: "rowOrder", direction: "asc", nulls: "first" },
-    ],
-  });
+  };
+  const bound = membership?.bindPlan(
+    (context) =>
+      buildPageCardDetailsPlan({
+        ...detailsInput,
+        scopePlan: context.scopePlan,
+        qualificationDependencyRefs: context.qualificationDependencyRefs,
+      }),
+    readerTime,
+  );
+  const plan =
+    bound?.plan ??
+    buildPageCardDetailsPlan({
+      ...detailsInput,
+      ...(metadata ? { scopePlan: metadata.plan } : {}),
+    });
+  const rows = await queryAnalyticsReportOutputSetRowsFromD1(
+    env,
+    plan,
+    {
+      outputIds: PAGE_CARD_DETAILS_MULTI_OUTPUT_IDS,
+      fields: PAGE_CARD_DETAILS_MULTI_OUTPUT_FIELDS,
+      orderBy: [
+        { field: "rowKind", direction: "asc", nulls: "first" },
+        { field: "pathname", direction: "asc", nulls: "first" },
+        { field: "rowOrder", direction: "asc", nulls: "first" },
+      ],
+    },
+    undefined,
+    bound?.executionInputs,
+  );
   const titles: PageCardTitleRow[] = [];
   const trend: PageCardTrendRow[] = [];
   for (const row of rows) {

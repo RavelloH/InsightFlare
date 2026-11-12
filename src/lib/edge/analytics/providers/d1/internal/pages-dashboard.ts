@@ -33,6 +33,7 @@ import {
   normalizePathname,
   percentChange,
 } from "./core";
+import type { EventMembershipFallback } from "./event-membership-fallback";
 import {
   pageCursorBinding,
   queryPageCardDetailsFromD1,
@@ -374,6 +375,14 @@ async function queryPageDashboardComparisonPageFromD1(
     hasMore: mapped.length > limit,
   };
 }
+/** A membership only backs the non-comparison reads; comparison keeps its own windows. */
+function comparisonMembershipGuard(
+  input: PagesDashboardReaderInput,
+  membership: EventMembershipFallback | undefined,
+): EventMembershipFallback | undefined {
+  return input.comparison ? undefined : membership;
+}
+
 /**
  * Pure dashboard-page reader. Pagination parsing and HTTP serialization stay
  * in its protocol adapter.
@@ -382,8 +391,16 @@ export async function queryPagesDashboard(
   env: Env,
   siteId: string,
   input: PagesDashboardReaderInput,
+  options?: {
+    /**
+     * Request-private entity membership for the non-comparison reads. The
+     * current rows, previous-period rows and details bind their own plans.
+     */
+    readonly membership?: EventMembershipFallback;
+  },
 ): Promise<PagesDashboardResult> {
   const { filters, interval, page, window } = input;
+  const membership = comparisonMembershipGuard(input, options?.membership);
   const comparison = input.comparison;
   const comparisonReference = comparison
     ? {
@@ -496,6 +513,7 @@ export async function queryPagesDashboard(
         search: input.search,
         sort: input.sort?.key,
         direction: input.sort?.direction,
+        ...(membership ? { membership } : {}),
       },
     );
     hasMore = requestedRows.length > page.limit;
@@ -564,6 +582,7 @@ export async function queryPagesDashboard(
       ? Promise.resolve([] as PageCardAggregateRow[])
       : queryPageCardMetricsFromD1(env, siteId, previousWindow, filters, {
           pathnames,
+          ...(membership ? { membership } : {}),
         }),
     queryPageCardDetailsFromD1(
       env,
@@ -573,6 +592,7 @@ export async function queryPagesDashboard(
       filters,
       pathnames,
       3,
+      membership,
     ),
     comparisonReference
       ? queryPageCardDetailsFromD1(

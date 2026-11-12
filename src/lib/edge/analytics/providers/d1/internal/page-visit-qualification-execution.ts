@@ -146,7 +146,15 @@ function planDependencyRefs(
 function assertPlanContext(
   plan: ValidatedLogicalPlan,
   state: PreparationState,
+  readerQueryTime?: QueryTime,
 ): void {
+  // Without a reader window the plan reads exactly the prepared domains under
+  // the canonical profile. With one, the plan reads that window while every
+  // Source keeps the prepared domains as its preparation proof.
+  const preparedDomains = semanticTemporalDomainsFromQueryTime(state.queryTime);
+  const planDomains = readerQueryTime
+    ? semanticTemporalDomainsFromQueryTime(readerQueryTime)
+    : preparedDomains;
   const context = plan.context;
   const dependencySources = plan.nodes.flatMap((node) => {
     if (node.kind !== "source" || !node.selection) return [];
@@ -175,10 +183,7 @@ function assertPlanContext(
     context.subject.origin !== "site" ||
     context.subject.siteIds.length !== 1 ||
     context.subject.siteIds[0] !== state.siteId ||
-    !sameValue(
-      context.time,
-      semanticTemporalDomainsFromQueryTime(state.queryTime),
-    ) ||
+    !sameValue(context.time, planDomains) ||
     // The primary role is always present, every named role has a relation
     // from this evaluation, and each role backs no more Sources than declared.
     !counts.has(state.dependencyRef) ||
@@ -195,17 +200,19 @@ function assertPlanContext(
       !(DEPENDENCY_SOURCE_ENTITY[ref] as readonly string[]).includes(
         node.entity,
       ) ||
-      selection?.profile !== "prepared-scoped-v1" ||
+      !selection ||
+      (readerQueryTime
+        ? (selection.profile !== "prepared-page-reader-window-v1" &&
+            selection.profile !== "prepared-scoped-reader-window-v1") ||
+          !sameValue(selection.preparationTime, preparedDomains)
+        : selection.profile !== "prepared-scoped-v1") ||
       selection.scope !== state.scopePlan.scope ||
       selection.mode !== state.scopePlan.mode ||
       selection.entityKind !== expectedEntityKind ||
       !sameValue(selection.filter, state.filters) ||
       !sameValue(selection.subject, context.subject) ||
       !sameValue(selection.authorizedSiteIds, [state.siteId]) ||
-      !sameValue(
-        selection.time,
-        semanticTemporalDomainsFromQueryTime(state.queryTime),
-      )
+      !sameValue(selection.time, planDomains)
     )
       throw new Error("qualification_execution_plan_context_mismatch");
   }
@@ -444,11 +451,13 @@ export function bindPageVisitQualificationPreparation(input: {
   readonly scopePlan: ScopedFilterPlan;
   readonly consumerKey: unknown;
   readonly plan: ValidatedLogicalPlan;
+  /** The window the report reads when it differs from the prepared domains. */
+  readonly readerQueryTime?: QueryTime;
 }): QualificationExecutionInputs {
   const state = validatePreparationContext(input);
   if (state.boundPlans.has(input.plan))
     throw new Error("qualification_execution_preparation_replayed");
-  assertPlanContext(input.plan, state);
+  assertPlanContext(input.plan, state, input.readerQueryTime);
   const used = new Set(planDependencyRefs(input.plan));
   const executionInputs = createQualificationExecutionInputsForTrustedPlan(
     state.relations.filter((binding) => used.has(binding.dependencyRef)),

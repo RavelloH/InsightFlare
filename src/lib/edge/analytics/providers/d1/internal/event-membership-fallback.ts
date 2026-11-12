@@ -38,6 +38,8 @@ export interface EventMembershipFallback {
   /** Freeze and bind one more canonical plan the owner built for this request. */
   readonly bindPlan: (
     buildPlan: (context: EventMembershipReportContext) => ValidatedLogicalPlan,
+    /** The window the plan reads when it is not the prepared window. */
+    readerQueryTime?: QueryTime,
   ) => EventMembershipFallbackPlan;
 }
 
@@ -93,7 +95,7 @@ export async function prepareEventMembershipFallback(
   if (!preparation) return undefined;
   const entityMode = deferred.metadata.plan.mode === "entity";
   return {
-    bindPlan: (buildPlan) => {
+    bindPlan: (buildPlan, readerQueryTime) => {
       const plan = snapshotPageVisitQualificationPlan(
         buildPlan({
           queryTime: deferred.time,
@@ -118,6 +120,7 @@ export async function prepareEventMembershipFallback(
         scopePlan: deferred.metadata.plan,
         consumerKey,
         plan,
+        ...(readerQueryTime ? { readerQueryTime } : {}),
       });
       return { plan, executionInputs };
     },

@@ -82,6 +82,7 @@ import {
   querySessionBoundaryOverviewPageFromD1,
   querySessionPathDimensionPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/dimensions";
+import { prepareEventMembershipFallback } from "@/lib/edge/analytics/providers/d1/internal/event-membership-fallback";
 import {
   queryEventNameDimensionFromD1,
   queryEventTypeAggregate,
@@ -2669,6 +2670,40 @@ export function registerSiteContractProviders(
           });
           if (qualified.kind === "executed" || qualified.kind === "empty")
             return { value: qualified.value, source: "raw" };
+          // Session and visitor filters read one request-private entity
+          // membership for the current, previous-period and detail reads.
+          const membership =
+            deferred.qualification.metadata.plan.mode === "entity" &&
+            !request.comparison
+              ? await prepareEventMembershipFallback({
+                  deferred: deferred.qualification,
+                  operation: "pages-dashboard",
+                  operations: ["pages-dashboard"],
+                  configuration: deferred.configuration,
+                  maxPlans: 3,
+                })
+              : undefined;
+          if (membership)
+            return {
+              value: await queryPagesDashboard(
+                options.env,
+                options.siteId,
+                {
+                  window: timeWindow(request.time),
+                  filters: deferred.qualification.filters,
+                  interval: deferred.configuration.interval,
+                  search: deferred.configuration.search,
+                  sort: request.sort,
+                  page: {
+                    limit: deferred.configuration.limit,
+                    cursor: deferred.configuration.cursorText,
+                  },
+                  audience: deferred.configuration.audience,
+                },
+                { membership },
+              ),
+              source: "raw",
+            };
           const fallbackFilters =
             await prepareDeferredEventQualificationFallback(
               deferred.qualification,

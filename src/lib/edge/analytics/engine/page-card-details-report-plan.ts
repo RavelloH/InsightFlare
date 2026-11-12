@@ -8,6 +8,7 @@ import type {
   LogicalRelationHandle,
 } from "@/lib/edge/analytics/engine/logical/builder";
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const STRING = { kind: "scalar", scalar: "string" } as const;
@@ -40,6 +41,7 @@ interface PageCardSourceInput {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly pathnames: readonly string[];
 }
 
@@ -60,6 +62,9 @@ function createPageCardSource(
     queryTime: input.queryTime,
     filters: input.filters,
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    ...(input.qualificationDependencyRefs
+      ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+      : {}),
     ...(input.scopePlan
       ? { preparedTimePolicy: "reader-window-v1" as const }
       : {}),
@@ -300,6 +305,7 @@ export function buildPageCardDetailsPlan(input: {
   readonly interval: CalendarGranularity;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly pathnames: readonly string[];
   readonly titleLimit: number;
 }) {
