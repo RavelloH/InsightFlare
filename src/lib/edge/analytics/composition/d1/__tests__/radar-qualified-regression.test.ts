@@ -2021,7 +2021,9 @@ describe("Radar qualified provider regression", () => {
           kind: "numeric-data-domain",
           fieldIds: ["page.durationMs"],
         });
-        expect(fallbackSpy).toHaveBeenCalledTimes(1);
+        // The session filter is qualified through the request-private entity
+        // membership, so the legacy ID bridge is never prepared.
+        expect(fallbackSpy).toHaveBeenCalledTimes(0);
         expect(oldReaderSpy).toHaveBeenCalledTimes(1);
         expect(
           actualTrace.preparedSql.filter(

@@ -1788,7 +1788,7 @@ describe("Journey Geo Page report D1 migration", () => {
       const fallbackReportSql = trace.preparedSql.filter((sql) =>
         sql.trimStart().startsWith("WITH "),
       );
-      expect(fallbackReportSql.length).toBeGreaterThan(2);
+      expect(fallbackReportSql.length).toBeGreaterThanOrEqual(2);
       const artifactDir = process.env.WAVE97I_ARTIFACT_DIR;
       if (artifactDir) {
         const { mkdir, writeFile } = await import("node:fs/promises");
@@ -2789,7 +2789,7 @@ describe("Journey Geo Page report D1 migration", () => {
           invalidCountOutput
         ],
       ).toBe(1);
-      expect(legacyGeoReportStatements).toHaveLength(2);
+      expect(legacyGeoReportStatements).toHaveLength(1);
       expect(
         trace.preparedSql.filter((sql) => sql === compilation.evidence.sql),
       ).toHaveLength(1);

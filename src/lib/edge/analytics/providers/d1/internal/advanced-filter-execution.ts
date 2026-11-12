@@ -7569,7 +7569,12 @@ export async function prepareDeferredPageVisitQualification(
     readonly readerAudience?: QueryAudience;
   },
 ): Promise<PageVisitQualificationPreparation | undefined> {
-  if (!isDeferredEventCandidatePageProjection(deferredInput)) return undefined;
+  if (!isDeferredEventCandidatePageProjection(deferredInput))
+    return prepareDeferredEntityPageQualification(
+      deferredInput,
+      consumerKey,
+      options,
+    );
   const deferred = deferredInput;
   if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
   const queryTime = deferred.requestTime ?? deferred.time;
@@ -7614,6 +7619,92 @@ export async function prepareDeferredPageVisitQualification(
     scopePlan: deferred.metadata.plan,
     consumerKey,
     relation: createReferrersVisitRelation(deferred.siteId, matches),
+  });
+}
+
+const ENTITY_PAGE_ROLE_OPERATIONS: readonly DeferredEventQualificationOperation[] =
+  [
+    "share-trend",
+    "radar",
+    "cross-dimension",
+    "performance",
+    "geo-points",
+    "pages-aggregate-page",
+    "pages-tabs",
+    "referrers",
+    "page-dimension",
+    "channel-overview",
+    "channel-list",
+    "session-boundary-dimension",
+    "session-boundary-overview-page",
+  ];
+
+/**
+ * Page-role consumers of a session or visitor filter: evaluate the existing
+ * Core fallback into a request-private entity membership. The entity relation
+ * is only a set of IDs for one authorized site, so unlike the event-scope
+ * Page projections it does not depend on a private-audience opt-in. Anything
+ * outside one site, one window or the Count slice returns undefined before
+ * Core evaluation so the caller keeps its complete existing fallback.
+ */
+async function prepareDeferredEntityPageQualification(
+  deferredInput: unknown,
+  consumerKey: unknown,
+  options?: {
+    readonly readerQueryTime?: QueryTime;
+    readonly readerAudience?: QueryAudience;
+  },
+): Promise<PageVisitQualificationPreparation | undefined> {
+  if (!isDeferredEventQualification(deferredInput)) return undefined;
+  const deferred = deferredInput;
+  const plan = deferred.metadata.plan;
+  if (
+    !ENTITY_PAGE_ROLE_OPERATIONS.includes(deferred.operation) ||
+    plan.mode !== "entity" ||
+    plan.scope === "event" ||
+    plan.membership.kind !== "entity" ||
+    plan.advancedMatches !== undefined ||
+    deferred.countInput.scope !== plan.scope ||
+    deferred.subject.origin !== "site" ||
+    deferred.subject.siteIds.length !== 1 ||
+    deferred.subject.siteIds[0] !== deferred.siteId
+  )
+    return undefined;
+  if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  const queryTime = deferred.requestTime ?? deferred.time;
+  if (
+    !sameCandidateReadAndFilterWindow(deferred.time) ||
+    !sameCandidateReadAndFilterWindow(queryTime) ||
+    JSON.stringify(semanticTemporalDomainsFromQueryTime(deferred.time)) !==
+      JSON.stringify(semanticTemporalDomainsFromQueryTime(queryTime)) ||
+    options?.readerQueryTime === undefined ||
+    JSON.stringify(
+      semanticTemporalDomainsFromQueryTime(options.readerQueryTime),
+    ) !== JSON.stringify(semanticTemporalDomainsFromQueryTime(queryTime)) ||
+    filtersUseSequenceSemantics(deferred.filters)
+  )
+    return undefined;
+
+  const matches = await evaluateForSitesCore({
+    env: deferred.env,
+    subject: deferred.subject,
+    siteIds: [deferred.siteId],
+    filters: deferred.filters,
+    plan,
+    time: deferred.time,
+    diagnostics: deferred.diagnostics,
+    signal: deferred.signal,
+    coverage: deferred.coverage,
+  });
+  if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  return createPageVisitQualificationPreparation({
+    siteId: deferred.siteId,
+    filters: deferred.filters,
+    queryTime,
+    scopePlan: plan,
+    consumerKey,
+    relation: createEntityMembershipRelation(deferred.siteId, matches),
+    dependencyRef: EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY,
   });
 }
 
