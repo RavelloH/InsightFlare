@@ -140,8 +140,11 @@ export function isMaterializationSafeExpression(
         safe = false;
         break;
       default: {
+        // Fail closed: an expression kind this analysis does not know about
+        // must never be treated as safe to materialize.
         const exhaustive: never = current;
-        safe = exhaustive;
+        void exhaustive;
+        safe = false;
       }
     }
     active.delete(current);
