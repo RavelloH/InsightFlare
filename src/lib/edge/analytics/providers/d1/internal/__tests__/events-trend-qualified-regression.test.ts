@@ -1153,6 +1153,59 @@ describe("Wave94D qualified Event trend", () => {
     );
   });
 
+  it("refuses a plan that reads another window under the canonical profile", async () => {
+    const database = createFixture();
+    database
+      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+      .run("invalid-duration", "visit-wave94d-scoped");
+    const prepared = prepareTrendQuery({
+      scope: "session",
+      limit: 5,
+      interval: "day",
+      countDsl: "count(page { page.durationMs gt 5 }) eq 0",
+    });
+    const deferred = deferredEventTrendQualificationFromQuery(
+      await d1AdvancedFilterMiddleware(testEnv(database, newTrace()))(
+        "event-trend",
+        prepared,
+        async (value) => value,
+      ),
+    );
+    if (!deferred) throw new Error("event_trend_deferred_missing");
+    const fallback = await prepareEventMembershipFallback({
+      deferred,
+      operation: "event-trend",
+      operations: ["event-trend"],
+      configuration: { interval: "day", limit: 5, eventName: null },
+      maxPlans: 3,
+    });
+    if (!fallback) throw new Error("event_trend_entity_membership_unavailable");
+    const build = (
+      context: Parameters<Parameters<typeof fallback.bindPlan>[0]>[0],
+    ) =>
+      buildEventTrendSeriesPlan({
+        siteId: SITE_ID,
+        queryTime: context.queryTime,
+        filters: deferred.filters,
+        scopePlan: context.scopePlan,
+        qualificationDependencyRefs: context.qualificationDependencyRefs,
+        limit: 5,
+      });
+    // A plan on the prepared window under the canonical profile is accepted...
+    fallback.bindPlan(build);
+    // ...but declaring a different reader window requires reader-window
+    // Sources whose preparation proof is the prepared window.
+    const otherWindow = createQueryTime(
+      deferred.time.range.startMs + 1,
+      deferred.time.range.endExclusiveMs + 1,
+      "UTC",
+      deferred.time.capturedAtMs,
+    );
+    expect(() => fallback.bindPlan(build, otherWindow)).toThrow(
+      "qualification_execution_plan_context_mismatch",
+    );
+  });
+
   it("falls back as a whole report for numeric compatibility and compile refusal", async () => {
     const numericDatabase = createFixture();
     numericDatabase
