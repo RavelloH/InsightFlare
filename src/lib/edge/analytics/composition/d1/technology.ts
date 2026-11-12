@@ -112,7 +112,7 @@ export function registerTechnologyProviders(
                 interval,
                 legacyFilters,
                 limit,
-                qualification,
+                ...(qualification ? [qualification] : []),
               )
             : variant === "browser-engine"
               ? await queryBrowserEngineTrendFromD1(
@@ -122,7 +122,7 @@ export function registerTechnologyProviders(
                   interval,
                   legacyFilters,
                   limit,
-                  qualification,
+                  ...(qualification ? [qualification] : []),
                 )
               : variant === "client"
                 ? await queryClientDimensionTrendFromD1(
@@ -133,7 +133,7 @@ export function registerTechnologyProviders(
                     legacyFilters,
                     request.dimension,
                     limit,
-                    qualification,
+                    ...(qualification ? [qualification] : []),
                   )
                 : variant === "utm"
                   ? await queryUtmDimensionTrendFromD1(
@@ -144,7 +144,7 @@ export function registerTechnologyProviders(
                       legacyFilters,
                       request.dimension,
                       limit,
-                      qualification,
+                      ...(qualification ? [qualification] : []),
                     )
                   : variant === "referrer-channel"
                     ? await queryReferrerAndChannelTrendFromD1(
@@ -154,7 +154,7 @@ export function registerTechnologyProviders(
                         interval,
                         legacyFilters,
                         limit,
-                        qualification,
+                        ...(qualification ? [qualification] : []),
                       )
                     : await queryReferrerTrendFromD1(
                         options.env,
@@ -163,7 +163,7 @@ export function registerTechnologyProviders(
                         interval,
                         legacyFilters,
                         limit,
-                        qualification,
+                        ...(qualification ? [qualification] : []),
                       );
         const deferred = deferredShareTrendQualificationFromQuery(request);
         if (deferred) {
@@ -225,7 +225,7 @@ export function registerTechnologyProviders(
                 legacyFilters,
                 request.browserLimit ?? 0,
                 request.versionLimit ?? 5,
-                qualification,
+                ...(qualification ? [qualification] : []),
               )
             : request.variant === "referrer"
               ? await queryReferrerRadarFromD1(
@@ -234,14 +234,14 @@ export function registerTechnologyProviders(
                   window,
                   legacyFilters,
                   request.limit ?? 24,
-                  qualification,
+                  ...(qualification ? [qualification] : []),
                 )
               : await queryBrowserRadarFromD1(
                   options.env,
                   options.siteId,
                   window,
                   legacyFilters,
-                  qualification,
+                  ...(qualification ? [qualification] : []),
                 );
         const deferred = deferredRadarQualificationFromQuery(request);
         if (deferred) {

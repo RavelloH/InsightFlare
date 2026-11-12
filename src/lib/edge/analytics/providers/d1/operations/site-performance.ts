@@ -91,7 +91,7 @@ export async function readSitePerformanceSummary(
       input.siteId,
       input.window,
       input.filters,
-      input.qualification,
+      ...(input.qualification ? [input.qualification] : []),
     ),
   };
 }
@@ -135,7 +135,7 @@ export async function readSitePerformanceTimeseries(
     input.window,
     input.interval,
     input.filters,
-    input.qualification,
+    ...(input.qualification ? [input.qualification] : []),
   );
   return serializePerformanceTimeseries(input.interval, result);
 }
@@ -167,14 +167,14 @@ export async function readSitePerformanceBreakdown(
           input.window,
           input.filters,
           input.limit,
-          input.qualification,
+          ...(input.qualification ? [input.qualification] : []),
         )
       : await queryPerformanceCountriesFromD1(
           input.env,
           input.siteId,
           input.window,
           input.filters,
-          input.qualification,
+          ...(input.qualification ? [input.qualification] : []),
         );
   return serializePerformanceBreakdown(dimension.data, input.metric, result);
 }
