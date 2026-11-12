@@ -19,6 +19,7 @@ import {
   scopedFilterMetadata,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
+import type { PreparedMembership } from "@/lib/edge/analytics/contract/prepared-membership";
 import {
   analyticsPageDimensionSelection,
   PAGE_DIMENSION_SELECTIONS,
@@ -44,6 +45,12 @@ import {
   buildVisitSourceCte,
   visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import {
+  type PreparedMembershipFixture,
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+  toPreparedMembership,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import { queryChannelsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/channels";
 import {
   geoTabLabel,
@@ -2445,9 +2452,9 @@ describe("edge Session Path D1 reports", () => {
       ...preparedMetadata,
       plan: {
         ...preparedMetadata.plan,
-        advancedMatches: {
+        preparedMembership: preparedMembershipFromIds({
           entityIds: [{ siteId, id: "path-session-a" }],
-        },
+        }),
       },
     });
     const preparedEventMetadata = scopedFilterMetadata(preparedEvent.filters!);
@@ -2459,9 +2466,9 @@ describe("edge Session Path D1 reports", () => {
         ...preparedEventMetadata,
         plan: {
           ...preparedEventMetadata.plan,
-          advancedMatches: {
+          preparedMembership: preparedMembershipFromIds({
             visitIds: [{ siteId, id: "path-session-a-first" }],
-          },
+          }),
         },
       },
     );
@@ -2471,7 +2478,7 @@ describe("edge Session Path D1 reports", () => {
         ...preparedEventMetadata,
         plan: {
           ...preparedEventMetadata.plan,
-          advancedMatches: { visitIds: [] },
+          preparedMembership: preparedMembershipFromIds({ visitIds: [] }),
         },
       },
     );
@@ -2961,12 +2968,12 @@ describe("edge Session Path D1 reports", () => {
       ...preparedMetadata,
       plan: {
         ...preparedMetadata.plan,
-        advancedMatches: {
+        preparedMembership: preparedMembershipFromIds({
           entityIds: Array.from({ length: 128 }, (_, index) => ({
             siteId,
             id: `budget-session-${index}`,
           })),
-        },
+        }),
       },
     });
     const payloadForty = normalizedFilters({
@@ -3405,10 +3412,10 @@ describe("edge pages D1 queries", () => {
         ...observationMetadata,
         plan: {
           ...observationMetadata.plan,
-          advancedMatches: {
+          preparedMembership: preparedMembershipFromIds({
             visitIds: [{ siteId, id: "page-id-selected" }],
             eventIds: [{ siteId, id: "advanced-event-id" }],
-          },
+          }),
         },
       },
     );
@@ -3430,9 +3437,9 @@ describe("edge pages D1 queries", () => {
             ...metadata,
             plan: {
               ...metadata.plan,
-              advancedMatches: {
+              preparedMembership: preparedMembershipFromIds({
                 entityIds: [{ siteId, id: entityId }],
-              },
+              }),
             },
           })
         : preparedEntity.filters;
@@ -4029,10 +4036,10 @@ describe("edge pages D1 queries", () => {
         ...preparedObservation.metadata,
         plan: {
           ...preparedObservation.metadata.plan,
-          advancedMatches: {
+          preparedMembership: preparedMembershipFromIds({
             visitIds: [{ siteId, id: "budget-a-1" }],
             eventIds: [],
-          },
+          }),
         },
       },
     );
@@ -4043,12 +4050,12 @@ describe("edge pages D1 queries", () => {
         ...preparedSession.metadata,
         plan: {
           ...preparedSession.metadata.plan,
-          advancedMatches: {
+          preparedMembership: preparedMembershipFromIds({
             entityIds: Array.from({ length: 128 }, (_, index) => ({
               siteId,
               id: index === 0 ? "session-a" : `wave49-budget-${index}`,
             })),
-          },
+          }),
         },
       },
     );
@@ -4058,7 +4065,7 @@ describe("edge pages D1 queries", () => {
         ...preparedSession.metadata,
         plan: {
           ...preparedSession.metadata.plan,
-          advancedMatches: { entityIds: [] },
+          preparedMembership: preparedMembershipFromIds({ entityIds: [] }),
         },
       },
     );
@@ -4239,33 +4246,33 @@ describe("edge pages D1 queries", () => {
           name: "prepared-observation",
           legacy: { sqlBytes: 7446, bindings: 10 },
           logical: {
-            sqlBytes: 7171,
-            bindings: 25,
+            sqlBytes: 7092,
+            bindings: 23,
             statements: 1,
             sha256:
-              "0285eb603427f1f9f6fcc11552b39b940fc2f2f604699703a4ddd9845945396d",
+              "2aea3eeeb65b64288e4fd2e2440a785242d85e00a74b01fbf0d7c4a202efea86",
           },
         },
         {
           name: "prepared-session-128",
           legacy: { sqlBytes: 18372, bindings: 264 },
           logical: {
-            sqlBytes: 7423,
-            bindings: 23,
+            sqlBytes: 7334,
+            bindings: 22,
             statements: 1,
             sha256:
-              "09a2a6b2a48feff06b93defb8a9ad48cf819d7c67069de3d174c5764c80430bd",
+              "6c7c3b0acaf0f98223e893413827bf628b7eb1975e9805e055a46d0e9dd6366f",
           },
         },
         {
           name: "prepared-session-empty",
           legacy: { sqlBytes: 7558, bindings: 8 },
           logical: {
-            sqlBytes: 7138,
-            bindings: 22,
+            sqlBytes: 7077,
+            bindings: 21,
             statements: 1,
             sha256:
-              "31860e1e41fcea73ffa2b3933566eb5ba404ff0eb45c019a0f7b3e7d2708ffd9",
+              "451c8f42f23e02a3261af138d3352145421067c295265a76f1e1d8e3f3a1ab81",
           },
         },
         {
@@ -4470,12 +4477,12 @@ describe("edge pages D1 queries", () => {
         ...metadata,
         plan: {
           ...metadata.plan,
-          advancedMatches: {
+          preparedMembership: preparedMembershipFromIds({
             visitIds: Array.from({ length: count }, (_, index) => ({
               siteId,
               id: index < 6 ? `dimension-${index + 1}` : `missing-${index}`,
             })),
-          },
+          }),
         },
       });
     const payloadForty = normalizedFilters({
@@ -4587,12 +4594,12 @@ describe("edge pages D1 queries", () => {
       ...metadata,
       plan: {
         ...metadata.plan,
-        advancedMatches: {
+        preparedMembership: preparedMembershipFromIds({
           visitIds: Array.from({ length: 128 }, (_, index) => ({
             siteId,
             id: `overview-budget-visit-${index}`,
           })),
-        },
+        }),
       },
     });
     const readers = [
@@ -4888,12 +4895,12 @@ describe("edge pages D1 queries", () => {
         ...metadata,
         plan: {
           ...metadata.plan,
-          advancedMatches: {
+          preparedMembership: preparedMembershipFromIds({
             visitIds: Array.from({ length: count }, (_, index) => ({
               siteId,
               id: `dimension-budget-visit-${index}`,
             })),
-          },
+          }),
         },
       });
     const requests = [
@@ -5044,12 +5051,12 @@ describe("edge pages D1 queries", () => {
         ...metadata,
         plan: {
           ...metadata.plan,
-          advancedMatches: {
+          preparedMembership: preparedMembershipFromIds({
             visitIds: Array.from({ length: count }, (_, index) => ({
               siteId,
               id: `budget-visit-${index}`,
             })),
-          },
+          }),
         },
       });
     const requests = [
@@ -5643,7 +5650,7 @@ describe("edge pages D1 queries", () => {
         ...preparedSessionMetadata,
         plan: {
           ...preparedSessionMetadata.plan,
-          advancedMatches: {
+          preparedMembership: preparedMembershipFromIds({
             entityIds: Array.from({ length: 128 }, (_, index) => ({
               siteId,
               id:
@@ -5651,7 +5658,7 @@ describe("edge pages D1 queries", () => {
                   ? "wave50-budget-session"
                   : `wave50-budget-${index}`,
             })),
-          },
+          }),
         },
       },
     );
@@ -5804,10 +5811,10 @@ describe("edge pages D1 queries", () => {
         },
         {
           name: "prepared-session-128",
-          sqlBytes: 2_991,
-          bindings: 11,
+          sqlBytes: 2_900,
+          bindings: 10,
           sha256:
-            "ec39c77bfcc239a7c67b0ae9b159519229fc4525bb3170600e939a8bcf5118d7",
+            "8046041ba780f7d8b6684202c332195fea31e2cafde6571e581c0762d7b3fed6",
         },
         {
           name: "long-requested-paths-128",
@@ -5853,12 +5860,12 @@ describe("edge pages D1 queries", () => {
       ...metadata,
       plan: {
         ...metadata.plan,
-        advancedMatches: {
+        preparedMembership: preparedMembershipFromIds({
           entityIds: Array.from({ length: 128 }, (_, index) => ({
             siteId,
             id: index === 0 ? "wave51-budget-session" : `wave51-${index}`,
           })),
-        },
+        }),
       },
     });
     const longPaths = Array.from(
@@ -6013,11 +6020,11 @@ describe("edge pages D1 queries", () => {
         },
         {
           name: "prepared-session-128-details",
-          sqlBytes: 3_295,
-          bindings: 9,
+          sqlBytes: 3_206,
+          bindings: 8,
           statements: 1,
           sha256:
-            "8ea55da02fd6fc2cee165ed12bc1e0431943451ebfdadf1f21bbf52ff6ed587b",
+            "3f64025c8f8f39845c562d40e77660fa6d0ace6e3ce77b1c943ed8fe68201460",
         },
         {
           name: "long-requested-paths-128-details",
@@ -6289,11 +6296,7 @@ describe("edge pages D1 queries", () => {
 
       const preparedWithMatches = (
         scopePreference: "event" | "session" | "visitor",
-        matches: NonNullable<
-          NonNullable<
-            ReturnType<typeof scopedFilterMetadata>
-          >["plan"]["advancedMatches"]
-        >,
+        matches: PreparedMembershipFixture | PreparedMembership,
       ) => {
         const base = prepare(
           window,
@@ -6305,7 +6308,10 @@ describe("edge pages D1 queries", () => {
           throw new Error("wave50_reader_window_prepared_matches_missing");
         return attachScopedFilterMetadata(base.filters, {
           ...metadata,
-          plan: { ...metadata.plan, advancedMatches: matches },
+          plan: {
+            ...metadata.plan,
+            preparedMembership: toPreparedMembership(matches),
+          },
         });
       };
       const observationMatchFilters = preparedWithMatches("event", {

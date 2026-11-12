@@ -204,7 +204,7 @@ export function journeyEventPageQualificationConfigurationFromQuery(
   if (
     !metadata ||
     !filterDocumentUsesAdvancedExpressions(filterDocument) ||
-    metadata.plan.advancedMatches !== undefined ||
+    metadata.plan.preparedMembership !== undefined ||
     (metadata.resolvedScope !== "visitor" &&
       metadata.resolvedScope !== "session") ||
     metadata.siteIds.length !== 1 ||

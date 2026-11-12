@@ -352,7 +352,7 @@ async function independentLegacyOracleWithTrace(
   );
   const filters =
     (forwarded as PagesTestQuery).filters ?? query.filters ?? EMPTY_FILTERS;
-  if (!scopedFilterMetadata(filters)?.plan.advancedMatches)
+  if (!scopedFilterMetadata(filters)?.plan.preparedMembership)
     throw new Error("wave96b_legacy_oracle_did_not_prepare_selected_matches");
   if (deferredPagesAggregatePageQualificationFromQuery(forwarded))
     throw new Error("wave96b_legacy_oracle_used_deferred_pages_path");

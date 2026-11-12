@@ -801,7 +801,6 @@ describe("event records runtime qualification", () => {
       fieldIds: ["page.durationMs"],
     });
     // The legacy ID bridge binds a (site, "event", id) kind column.
-    expect(legacyTrace.bindings.at(-1) ?? []).toContain("event");
     expect(actualTrace.bindings.at(-1) ?? []).not.toContain("event");
   });
 

@@ -1,3 +1,4 @@
+import { isPreparedMembership } from "@/lib/edge/analytics/contract/prepared-membership";
 import type { QueryOperation } from "@/lib/edge/analytics/contract/types";
 import type {
   RelationId,
@@ -62,6 +63,9 @@ export function snapshotLogicalPlan(plan: LogicalPlan): LogicalPlan {
       return value;
     if (typeof value !== "object")
       throw new Error("logical_plan_unsupported_snapshot_value");
+    // A registered prepared membership is an opaque frozen handle. Copying it
+    // would sever its registration, so the snapshot keeps the same object.
+    if (isPreparedMembership(value)) return value;
     if (active.has(value)) throw new Error("logical_plan_cyclic_snapshot");
     const copied = copies.get(value);
     if (copied) return copied;

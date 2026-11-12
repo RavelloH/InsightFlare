@@ -654,7 +654,7 @@ async function expectRadarWholeBooleanCase(input: {
     "allow-whole-filter",
   );
   expect(
-    candidate.deferred.qualification.metadata.plan.advancedMatches,
+    candidate.deferred.qualification.metadata.plan.preparedMembership,
   ).toBeUndefined();
   expect(candidate.evidence.sqlBytes).toBeLessThanOrEqual(
     D1_MAX_SQL_UTF8_BYTES,
@@ -701,8 +701,8 @@ async function expectRadarWholeBooleanCase(input: {
         filter: input.query.filters?.root,
         mode: candidate.deferred.qualification.technologyFilterMode,
         countScope: candidate.deferred.qualification.metadata.plan.scope,
-        advancedMatches:
-          candidate.deferred.qualification.metadata.plan.advancedMatches ??
+        preparedMembership:
+          candidate.deferred.qualification.metadata.plan.preparedMembership ??
           null,
         siteMetadataCount:
           candidate.deferred.qualification.metadata.siteIds.length,

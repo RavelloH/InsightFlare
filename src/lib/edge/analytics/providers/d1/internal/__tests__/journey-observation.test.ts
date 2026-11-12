@@ -43,6 +43,8 @@ import {
   targetVisitSourceBindings,
   visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import type { PreparedMembershipFixture } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
+import { preparedMembershipFromIds } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { AnalyticsRelationalStorage } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-storage";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
@@ -435,13 +437,16 @@ function withAdvancedMatches(
     readonly filters: FilterDocument;
     readonly scopePlan: ScopedFilterPlan;
   },
-  advancedMatches: NonNullable<ScopedFilterPlan["advancedMatches"]>,
+  matches: PreparedMembershipFixture,
 ): FilterDocument {
   const metadata = scopedFilterMetadata(prepared.filters);
   if (!metadata) throw new Error("journey_event_page_metadata_missing");
   return attachScopedFilterMetadata(prepared.filters, {
     ...metadata,
-    plan: { ...prepared.scopePlan, advancedMatches },
+    plan: {
+      ...prepared.scopePlan,
+      preparedMembership: preparedMembershipFromIds(matches),
+    },
   });
 }
 

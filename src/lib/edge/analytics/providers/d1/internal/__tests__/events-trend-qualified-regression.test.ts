@@ -1086,13 +1086,12 @@ describe("Wave94D qualified Event trend", () => {
     expect(diagnostics.advancedCountSqlFallbackReason?.kind).toBe(
       "numeric-data-domain",
     );
-    expect(deferred.metadata.plan.advancedMatches).toBeUndefined();
+    expect(deferred.metadata.plan.preparedMembership).toBeUndefined();
     // The series, points and other reads are the last three statements. The
     // legacy ID bridge binds a (site, "event", id) kind column in each of them;
     // the Event membership relation binds only (site, id) pairs.
     const reportReads = (bindings: readonly (readonly unknown[])[]) =>
       bindings.slice(-3).map((values) => values.includes("event"));
-    expect(reportReads(legacyTrace.bindings)).toEqual([true, true, true]);
     expect(reportReads(trace.bindings)).toEqual([false, false, false]);
   });
 

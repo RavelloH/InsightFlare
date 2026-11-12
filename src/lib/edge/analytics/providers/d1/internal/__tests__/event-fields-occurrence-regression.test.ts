@@ -31,6 +31,10 @@ import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semanti
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
 import { buildEventFilteredSourceCte } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import {
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
+import {
   d1AdvancedFilterMiddleware,
   deferredEventFieldsQualificationFromQuery,
   deferredEventFieldValuesQualificationFromQuery,
@@ -477,14 +481,14 @@ function preparedFilters(
     ...metadata,
     plan: {
       ...prepared.scopePlan,
-      advancedMatches: {
+      preparedMembership: preparedMembershipFromIds({
         ...(scopePreference === "event"
           ? {
               eventIds,
               visitIds,
             }
           : { entityIds: identityIds }),
-      },
+      }),
     },
   });
 }
@@ -1309,8 +1313,7 @@ describe("Event field occurrence report migration", () => {
     expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
       kind: "numeric-data-domain",
     });
-    // The legacy ID bridge binds a (site, "event", id) kind column.
-    expect(expectedTrace.bindings.at(-1) ?? []).toContain("event");
+    // The prepared membership binds only (site, id) pairs, never a kind.
     expect(trace.bindings.at(-1) ?? []).not.toContain("event");
   });
 
@@ -3328,8 +3331,8 @@ describe("Event field occurrence report migration", () => {
       runtimeEvidence.push({
         scope,
         case: "qualified-values-fallback-match-identities",
-        advancedMatches:
-          scopedFilterMetadata(fallbackFilters)?.plan.advancedMatches,
+        preparedMembership:
+          scopedFilterMetadata(fallbackFilters)?.plan.preparedMembership,
       });
       const valuesQualification = buildEventFieldValuesQualificationPlan({
         siteId: SITE,
@@ -3648,8 +3651,7 @@ describe("Event field occurrence report migration", () => {
     expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
       kind: "numeric-data-domain",
     });
-    // The legacy ID bridge binds a (site, "event", id) kind column.
-    expect(expectedTrace.bindings.at(-1) ?? []).toContain("event");
+    // The prepared membership binds only (site, id) pairs, never a kind.
     expect(trace.bindings.at(-1) ?? []).not.toContain("event");
   });
 

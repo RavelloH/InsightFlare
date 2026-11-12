@@ -36,6 +36,8 @@ import {
   buildVisitSourceCteForSites,
   visitSourceBindingsForSites,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import type { PreparedMembershipFixture } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
+import { preparedMembershipFromIds } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { analyticsPageReportStorageColumn } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-storage";
 import { queryAnalyticsReportOutputSetRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
@@ -384,11 +386,14 @@ function withAdvancedMatches(
     readonly filters: FilterDocument;
     readonly scopePlan: ScopedFilterPlan;
   },
-  advancedMatches: NonNullable<ScopedFilterPlan["advancedMatches"]>,
+  matches: PreparedMembershipFixture,
 ): FilterDocument {
   const metadata = scopedFilterMetadata(prepared.filters);
   if (!metadata) throw new Error("wave58_team_prepared_metadata_missing");
-  const plan = { ...prepared.scopePlan, advancedMatches };
+  const plan = {
+    ...prepared.scopePlan,
+    preparedMembership: preparedMembershipFromIds(matches),
+  };
   return attachScopedFilterMetadata(prepared.filters, { ...metadata, plan });
 }
 

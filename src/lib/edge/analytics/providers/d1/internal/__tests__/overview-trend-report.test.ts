@@ -31,6 +31,10 @@ import {
   visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import {
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
+import {
   buildTimeBuckets,
   timeBucketCase,
   timeBucketTimestamp,
@@ -260,7 +264,9 @@ function queryTime(window: QueryWindow): QueryTime {
 
 function preparedFilter(input: {
   readonly filters: FilterDocument;
-  readonly advancedMatches: NonNullable<ScopedFilterPlan["advancedMatches"]>;
+  readonly preparedMembership: NonNullable<
+    ScopedFilterPlan["preparedMembership"]
+  >;
   readonly scopePreference?: FilterScopePreference;
 }): FilterDocument {
   const prepared = prepareScopedQuery("overview", {
@@ -282,7 +288,10 @@ function preparedFilter(input: {
   if (!metadata) throw new Error("wave63_trend_prepared_metadata_missing");
   return attachScopedFilterMetadata(prepared.filters, {
     ...metadata,
-    plan: { ...prepared.scopePlan, advancedMatches: input.advancedMatches },
+    plan: {
+      ...prepared.scopePlan,
+      preparedMembership: input.preparedMembership,
+    },
   });
 }
 
@@ -654,17 +663,19 @@ describe("Overview Trend Logical report", () => {
       ].map((id) => ({ siteId: SITE_ID, id }));
       const prepared = preparedFilter({
         filters: fieldFilter("page.path", "/selected"),
-        advancedMatches: { entityIds: allSessions },
+        preparedMembership: preparedMembershipFromIds({
+          entityIds: allSessions,
+        }),
       });
       const emptyPrepared = preparedFilter({
         filters: fieldFilter("page.path", "/selected"),
-        advancedMatches: { entityIds: [] },
+        preparedMembership: preparedMembershipFromIds({ entityIds: [] }),
       });
       const directSessionFact = fieldFilter("session.views", 2);
       const prepared128 = preparedFilter({
         filters: fieldFilter("page.path", "/selected"),
         scopePreference: "event",
-        advancedMatches: {
+        preparedMembership: preparedMembershipFromIds({
           visitIds: Array.from({ length: 128 }, (_unused, index) => ({
             siteId: SITE_ID,
             id: index === 0 ? "cross" : `wave63-missing-visit-${index}`,
@@ -673,7 +684,7 @@ describe("Overview Trend Logical report", () => {
             siteId: SITE_ID,
             id: index === 0 ? "e-cross-early" : `wave63-missing-event-${index}`,
           })),
-        },
+        }),
       });
       const filters = [
         EMPTY_FILTER_DOCUMENT,
@@ -872,7 +883,9 @@ describe("Overview Trend Logical report", () => {
       queryTime: queryTime(WINDOW),
       filters: preparedFilter({
         filters: fieldFilter("page.path", "/selected"),
-        advancedMatches: { entityIds: [{ siteId: SITE_ID, id: "prepared" }] },
+        preparedMembership: preparedMembershipFromIds({
+          entityIds: [{ siteId: SITE_ID, id: "prepared" }],
+        }),
       }),
       interval: "minute",
     });
@@ -1114,7 +1127,7 @@ describe("Overview Trend Logical report", () => {
       coreFixture(database, site);
       const prepared = preparedFilter({
         filters: fieldFilter("page.path", "/selected"),
-        advancedMatches: {
+        preparedMembership: preparedMembershipFromIds({
           entityIds: [
             "duplicate",
             "single",
@@ -1124,7 +1137,7 @@ describe("Overview Trend Logical report", () => {
             "cross",
             "event-only",
           ].map((id) => ({ siteId: SITE_ID, id })),
-        },
+        }),
       });
       const scenarios = [
         { name: "plain", filters: EMPTY_FILTER_DOCUMENT },

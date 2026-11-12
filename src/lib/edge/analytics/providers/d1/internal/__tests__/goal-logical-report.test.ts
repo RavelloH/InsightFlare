@@ -20,12 +20,17 @@ import {
   GOAL_FILTER_DSL_VERSION,
   parseGoalFilter,
 } from "@/lib/edge/analytics/contract/goal-config";
+import type { PreparedMembership } from "@/lib/edge/analytics/contract/prepared-membership";
 import {
   compileGoalSummaryParentOracleStatement,
   mapGoalSummaryParentOracleRow,
   queryGoalSummaryParentOracle,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/goal-summary-parent-oracle";
 import { queryGoalTimeseriesParentOracle } from "@/lib/edge/analytics/providers/d1/internal/__tests__/goal-timeseries-parent-oracle";
+import {
+  type PreparedMembershipFixture,
+  toPreparedMembership,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core-types";
 import { queryGoalSummaryFromD1 } from "@/lib/edge/analytics/providers/d1/internal/goal-summary";
 import { queryGoalTimeseriesFromD1 } from "@/lib/edge/analytics/providers/d1/internal/goal-timeseries";
@@ -208,7 +213,7 @@ function prepared(
   operation: "goal-summary" | "goal-timeseries",
   filters: FilterDocument,
   scope: "event" | "session" | "visitor" = "event",
-  advancedMatches?: NonNullable<ScopedFilterPlan["advancedMatches"]>,
+  preparedMembership?: PreparedMembershipFixture | PreparedMembership,
   preparationWindow: QueryWindow = WINDOW,
   preparationSiteId: string = SITE_ID,
 ): FilterDocument {
@@ -216,7 +221,12 @@ function prepared(
   return attachScopedFilterMetadata(filters, {
     requestedScope: scope,
     resolvedScope: plan.scope,
-    plan: advancedMatches ? { ...plan, advancedMatches } : plan,
+    plan: preparedMembership
+      ? {
+          ...plan,
+          preparedMembership: toPreparedMembership(preparedMembership),
+        }
+      : plan,
     time: createQueryTime(
       preparationWindow.startMs,
       preparationWindow.endExclusiveMs,

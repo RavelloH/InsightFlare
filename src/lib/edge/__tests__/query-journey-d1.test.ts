@@ -41,6 +41,10 @@ import {
   querySessionListPageFromD1 as querySessionListPageFromParentOracle,
   queryVisitorListPageFromD1 as queryVisitorListPageFromParentOracle,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-oracle";
+import {
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
@@ -305,7 +309,7 @@ function preparedSessionIdentityFilters(
     siteIds: [siteId, secondSiteId],
     plan: {
       ...metadata.plan,
-      advancedMatches: { entityIds },
+      preparedMembership: preparedMembershipFromIds({ entityIds }),
     },
   });
 }
@@ -3097,7 +3101,7 @@ describe("edge journey detail D1 queries", () => {
       persistWave70CostEvidence({
         prepared128: {
           semantics:
-            "Offline prepared identity snapshot: 128 distinct identities in metadata (129 source rows including one duplicate and 123 missing IDs), manually attached advancedMatches; preparation window differs from actual read window. This is not end-to-end advanced-filter evaluation.",
+            "Offline prepared identity snapshot: 128 distinct identities in metadata (129 source rows including one duplicate and 123 missing IDs), manually attached preparedMembership; preparation window differs from actual read window. This is not end-to-end advanced-filter evaluation.",
           preparationWindow,
           actualReadWindow: previousWindow,
           distinctPreparedIdentities: 128,

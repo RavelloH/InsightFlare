@@ -33,6 +33,10 @@ import {
   buildVisitSourceCte,
   visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import {
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import { type QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { queryPageTabsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/dimensions";
 import type { Env } from "@/lib/edge/types";
@@ -628,18 +632,18 @@ describe("Logical Page tabs report", () => {
         ...observationMetadata,
         plan: {
           ...observationMetadata.plan,
-          advancedMatches: {
+          preparedMembership: preparedMembershipFromIds({
             visitIds: [{ siteId: SITE_ID, id: "a-hit" }],
-          },
+          }),
         },
       });
       const selectedSessions = attachScopedFilterMetadata(session, {
         ...sessionMetadata,
         plan: {
           ...sessionMetadata.plan,
-          advancedMatches: {
+          preparedMembership: preparedMembershipFromIds({
             entityIds: [{ siteId: SITE_ID, id: "session-a" }],
-          },
+          }),
         },
       });
 
@@ -791,12 +795,12 @@ describe("Logical Page tabs report", () => {
         ...metadata,
         plan: {
           ...metadata.plan,
-          advancedMatches: {
+          preparedMembership: preparedMembershipFromIds({
             entityIds: Array.from({ length: 128 }, (_, index) => ({
               siteId: SITE_ID,
               id: index === 0 ? "session-a" : `page-tabs-budget-${index}`,
             })),
-          },
+          }),
         },
       });
       const payload40 = makeUnpreparedPayloadFilters(40);
@@ -872,11 +876,11 @@ describe("Logical Page tabs report", () => {
         },
         {
           name: "prepared-session-128",
-          sqlBytes: 5861,
-          bindings: 15,
+          sqlBytes: 5772,
+          bindings: 14,
           statements: 1,
           sha256:
-            "d386a36ab10df100ca367a102bad3f1fcadee8460818895170bd28cb5fed97d5",
+            "19bec5f7f990d1fdfef671824e765375d507121e1bcd5677fc081fdc08dd855a",
         },
         {
           name: "event-payload-40",

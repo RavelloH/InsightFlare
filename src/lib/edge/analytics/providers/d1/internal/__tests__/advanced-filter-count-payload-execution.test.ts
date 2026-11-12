@@ -17,6 +17,7 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import type { SiteId } from "@/lib/edge/analytics/contract/types";
+import { preparedMembershipIdentities } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import * as countSupport from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
@@ -569,9 +570,9 @@ function filterInput(
 function entityIds(output: unknown): string[] {
   const plan = (output as { readonly scopePlan?: Record<string, unknown> })
     .scopePlan;
-  const matches = plan?.advancedMatches as
-    { readonly entityIds?: readonly { readonly id: string }[] } | undefined;
-  return matches?.entityIds?.map(({ id }) => id).sort() ?? [];
+  return preparedMembershipIdentities(plan?.preparedMembership)
+    .entityIds.map(({ id }) => id)
+    .sort();
 }
 
 function hasPayloadSelector(value: unknown): boolean {

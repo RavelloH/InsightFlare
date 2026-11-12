@@ -36,6 +36,7 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import type { PreparedMembership } from "@/lib/edge/analytics/contract/prepared-membership";
 import {
   buildPagesDashboardComparisonPlan,
   PAGES_DASHBOARD_COMPARISON_OUTPUT_ID,
@@ -48,6 +49,7 @@ import {
   visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
 import { VISIT_SOURCE_COLUMNS } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import { toPreparedMembership } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { queryAnalyticsReportOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import {
@@ -1124,8 +1126,9 @@ function createPreparedIdentityFilters(
     ...metadata,
     plan: {
       ...metadata.plan,
-      advancedMatches:
+      preparedMembership: toPreparedMembership(
         scope === "event" ? { visitIds: matches } : { entityIds: matches },
+      ),
     },
   });
 }
@@ -1697,10 +1700,11 @@ describe("Pages dashboard comparison Logical plan", () => {
             ...metadata,
             plan: {
               ...metadata.plan,
-              advancedMatches:
+              preparedMembership: toPreparedMembership(
                 scope === "event"
                   ? { visitIds: identities128 }
                   : { entityIds: identities128 },
+              ),
             },
           });
         };

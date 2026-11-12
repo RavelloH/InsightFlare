@@ -29,6 +29,7 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import type { SiteId } from "@/lib/edge/analytics/contract/types";
+import { preparedMembershipIdentities } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import * as countSupport from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
@@ -1036,9 +1037,9 @@ function payloadTarget(value: unknown): boolean {
 function outputIds(output: unknown): string[] {
   const scopePlan = (output as { readonly scopePlan?: Record<string, unknown> })
     .scopePlan;
-  const matches = scopePlan?.advancedMatches as
-    { readonly entityIds?: readonly { readonly id: string }[] } | undefined;
-  return matches?.entityIds?.map(({ id }) => id).sort() ?? [];
+  return preparedMembershipIdentities(scopePlan?.preparedMembership)
+    .entityIds.map(({ id }) => id)
+    .sort();
 }
 
 function statementObservations(

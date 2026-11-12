@@ -13,6 +13,7 @@ import {
 } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
+import { preparedMembershipFromIds } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import {
   AnalyticsLegacyScopedStorage,
   entityQualificationCacheKey,
@@ -231,9 +232,9 @@ describe("legacy scoped Event storage guards", () => {
     expect(
       pageEventOwnerPairCacheKey({
         ...direct,
-        preparedMatches: {
-          identities: [{ siteId: SITE_ID, kind: "page", id: "prepared" }],
-        },
+        preparedMembership: preparedMembershipFromIds({
+          visitIds: [{ siteId: SITE_ID, id: "prepared" }],
+        }),
       }),
     ).toBeNull();
     expect(
@@ -340,9 +341,9 @@ describe("legacy scoped Event storage guards", () => {
       entityQualificationCacheKey(
         {
           ...direct,
-          preparedMatches: {
-            identities: [{ siteId: SITE_ID, kind: "session", id: "one" }],
-          },
+          preparedMembership: preparedMembershipFromIds({
+            entityIds: [{ siteId: SITE_ID, id: "one" }],
+          }),
         },
         "candidate",
       ),
@@ -351,12 +352,12 @@ describe("legacy scoped Event storage guards", () => {
       entityQualificationCacheKey(
         {
           ...direct,
-          preparedMatches: {
-            identities: [
-              { siteId: SITE_ID, kind: "session", id: "one" },
-              { siteId: SITE_ID, kind: "session", id: "two" },
+          preparedMembership: preparedMembershipFromIds({
+            entityIds: [
+              { siteId: SITE_ID, id: "one" },
+              { siteId: SITE_ID, id: "two" },
             ],
-          },
+          }),
         },
         "candidate",
       ),
@@ -364,9 +365,9 @@ describe("legacy scoped Event storage guards", () => {
       entityQualificationCacheKey(
         {
           ...direct,
-          preparedMatches: {
-            identities: [{ siteId: SITE_ID, kind: "session", id: "one" }],
-          },
+          preparedMembership: preparedMembershipFromIds({
+            entityIds: [{ siteId: SITE_ID, id: "one" }],
+          }),
         },
         "candidate",
       ),

@@ -207,7 +207,7 @@ function assertReferrerSummaryPlan(
     selection.profile !== "prepared-scoped-v1" ||
     selection.scope !== "event" ||
     selection.mode !== "observation" ||
-    selection.preparedMatches !== undefined ||
+    selection.preparedMembership !== undefined ||
     !sameJsonValue(selection.filter, input.filters) ||
     !sameJsonValue(selection.time, input.time) ||
     !sameJsonValue(selection.subject.siteIds, [input.siteId]) ||
@@ -251,7 +251,7 @@ export function createReferrersSummaryQualificationPreparation(input: {
     !scopePlan ||
     scopePlan.scope !== "event" ||
     scopePlan.mode !== "observation" ||
-    scopePlan.advancedMatches !== undefined ||
+    scopePlan.preparedMembership !== undefined ||
     input.metadata.plan.scope !== scopePlan.scope ||
     input.metadata.plan.mode !== scopePlan.mode ||
     input.metadata.resolvedScope !== scopePlan.scope ||

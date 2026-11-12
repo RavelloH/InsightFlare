@@ -827,7 +827,7 @@ describe("Cross qualified provider regression", () => {
       "allow-whole-filter",
     );
     expect(
-      deferred.qualification.metadata.plan.advancedMatches,
+      deferred.qualification.metadata.plan.preparedMembership,
     ).toBeUndefined();
     expect(compilation.evidence.outputDescriptors).toHaveLength(3);
     expect(compilation.evidence.sqlBytes).toBeLessThanOrEqual(100_000);
@@ -888,7 +888,8 @@ describe("Cross qualified provider regression", () => {
       filterDsl,
       mode: deferred.qualification.technologyFilterMode,
       countScope: deferred.qualification.metadata.plan.scope,
-      advancedMatches: deferred.qualification.metadata.plan.advancedMatches,
+      preparedMembership:
+        deferred.qualification.metadata.plan.preparedMembership,
       siteMetadataCount: deferred.qualification.metadata.siteIds.length,
       compilation: {
         statementTag: compilation.evidence.statementTag,

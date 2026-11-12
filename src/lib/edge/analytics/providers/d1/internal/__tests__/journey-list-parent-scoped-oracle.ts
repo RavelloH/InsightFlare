@@ -1,6 +1,5 @@
 // Test-only Wave69 parent snapshot: preserve the complete legacy list/scoped assembly as an oracle.
 import {
-  type AdvancedFilterMatches,
   analyticsFilterDefinition,
   attachScopedFilterMetadata,
   createQueryTime,
@@ -44,6 +43,8 @@ export interface ScopedDatasetSql {
   readonly visitorRelation: string;
   readonly scope: FilterScope;
 }
+import { preparedMembershipIdentities } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
+
 import {
   buildScopedFactsCtes,
   type ScopedFactKind,
@@ -67,9 +68,20 @@ interface AdvancedIdentitySql {
   readonly bindings: Array<string>;
 }
 
+interface OracleIdentity {
+  readonly siteId: string;
+  readonly id: string;
+}
+
+interface OracleMatches {
+  readonly entityIds?: readonly OracleIdentity[];
+  readonly visitIds?: readonly OracleIdentity[];
+  readonly eventIds?: readonly OracleIdentity[];
+}
+
 function advancedIdentityRelation(
   name: string,
-  identities: AdvancedFilterMatches["entityIds"] | undefined,
+  identities: readonly OracleIdentity[] | undefined,
 ): AdvancedIdentitySql {
   if (!identities?.length) {
     return {
@@ -87,7 +99,7 @@ function advancedIdentityRelation(
   };
 }
 
-function advancedMatchesRelations(matches: AdvancedFilterMatches): {
+function advancedMatchesRelations(matches: OracleMatches): {
   readonly ctes: string;
   readonly bindings: Array<string>;
 } {
@@ -900,17 +912,17 @@ export function compileScopedDatasetSql(
     throw new Error("scoped_dataset_metadata_required");
   }
 
-  const advancedMatches = input.plan.advancedMatches;
+  const preparedMembership = input.plan.preparedMembership;
   if (
     input.filters.root &&
     filterDocumentUsesAdvancedExpressions(input.filters) &&
-    !advancedMatches
+    !preparedMembership
   ) {
     throw new Error("advanced_filter_execution_context_required");
   }
 
   const entityMembership =
-    !advancedMatches &&
+    !preparedMembership &&
     input.plan.mode === "entity" &&
     input.plan.membership.kind === "entity"
       ? compileEntityMembership(
@@ -920,11 +932,11 @@ export function compileScopedDatasetSql(
         )
       : null;
   const observationPlan =
-    !advancedMatches && input.plan.mode === "observation"
+    !preparedMembership && input.plan.mode === "observation"
       ? planObservationFilter(input.filters.root)
       : null;
-  const advancedRelations = advancedMatches
-    ? advancedMatchesRelations(advancedMatches)
+  const advancedRelations = preparedMembership
+    ? advancedMatchesRelations(preparedMembershipIdentities(preparedMembership))
     : null;
   const matchingVisits = observationPlan
     ? compileObservationRelation(
@@ -947,7 +959,7 @@ export function compileScopedDatasetSql(
       ? entityColumn(input.plan.membership.entityKind)
       : null;
   const finalVisitRelation =
-    advancedMatches && input.plan.mode === "entity"
+    preparedMembership && input.plan.mode === "entity"
       ? `
 scope_final_visits AS (
   SELECT rv.*
@@ -957,7 +969,7 @@ scope_final_visits AS (
    AND matching_entities.entity_id = rv.${entityColumnName}
   WHERE TRIM(COALESCE(rv.${entityColumnName}, '')) != ''
 )`
-      : advancedMatches
+      : preparedMembership
         ? `
 scope_final_visits AS (
   SELECT rv.*
@@ -992,7 +1004,7 @@ scope_final_visits AS (
    AND matching_visits.visit_id = rv.visit_id
 )`;
   const finalEventRelation =
-    advancedMatches && input.plan.mode === "entity"
+    preparedMembership && input.plan.mode === "entity"
       ? `
 scope_final_events AS (
   SELECT re.*
@@ -1002,7 +1014,7 @@ scope_final_events AS (
    AND matching_entities.entity_id = re.${entityColumnName}
   WHERE TRIM(COALESCE(re.${entityColumnName}, '')) != ''
 )`
-      : advancedMatches
+      : preparedMembership
         ? `
 scope_final_events AS (
   SELECT re.*

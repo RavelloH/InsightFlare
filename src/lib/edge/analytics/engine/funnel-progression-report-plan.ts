@@ -502,8 +502,7 @@ function assertProgressionBuilderContext(
     JSON.stringify(page.subject) === JSON.stringify(event.subject) &&
     JSON.stringify(page.time) === JSON.stringify(event.time) &&
     JSON.stringify(page.filter) === JSON.stringify(event.filter) &&
-    JSON.stringify(page.preparedMatches) ===
-      JSON.stringify(event.preparedMatches) &&
+    page.preparedMembership === event.preparedMembership &&
     JSON.stringify(page.eventNameGate) ===
       JSON.stringify(event.eventNameGate) &&
     JSON.stringify(page.preparationTime) ===

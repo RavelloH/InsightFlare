@@ -36,6 +36,10 @@ import {
 } from "@/lib/edge/analytics/engine/semantic/count-selector-fields";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import {
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
+import {
   compileAdvancedFilterCountCombinedQuery,
   compileAdvancedFilterCountGuardQuery,
   compileAdvancedFilterCountMatchesQuery,
@@ -498,7 +502,8 @@ describe("advanced count combined production path on Miniflare D1", () => {
           runtimeTrace.observations,
         );
         const combinedMatches = (
-          prepared.scopePlan?.advancedMatches?.entityIds ?? []
+          preparedMembershipIdentities(prepared.scopePlan?.preparedMembership)
+            .entityIds ?? []
         )
           .map(({ id }) => id)
           .sort();

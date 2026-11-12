@@ -339,7 +339,7 @@ export function createPageVisitQualificationPreparation(input: {
     (input.dependencyRef ?? EVENT_FILTER_PAGE_VISIT_DEPENDENCY) ===
     EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY;
   if (
-    scopePlan.advancedMatches !== undefined ||
+    scopePlan.preparedMembership !== undefined ||
     (entityRole
       ? scopePlan.mode !== "entity" ||
         scopePlan.scope === "event" ||

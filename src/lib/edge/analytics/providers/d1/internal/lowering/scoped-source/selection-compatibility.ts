@@ -1,21 +1,8 @@
-import {
-  distinct,
-  eq,
-  filter,
-  join,
-  param,
-  project,
-  valuesRelation,
-} from "@/lib/db";
 import { factEntityKindsForFilter } from "@/lib/edge/analytics/contract";
 import { planObservationFilter } from "@/lib/edge/analytics/contract/observation-planner";
 import { type SourceNode } from "@/lib/edge/analytics/engine/logical/nodes";
 import { type SemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
-import {
-  type AnalyticsLegacyScopedDataset,
-  LEGACY_DIRECT_EVENT_RECORD_VISIT_COLUMNS,
-} from "@/lib/edge/analytics/providers/d1/internal/analytics-legacy-scoped-dataset";
-import { type AnalyticsDbRelation } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-storage";
+import { LEGACY_DIRECT_EVENT_RECORD_VISIT_COLUMNS } from "@/lib/edge/analytics/providers/d1/internal/analytics-legacy-scoped-dataset";
 import { analyticsFilterDefinition } from "@/lib/filter-contract/filter-registry";
 import { type FilterExpression } from "@/lib/filter-contract/filters";
 
@@ -69,7 +56,7 @@ export function canReuseRowLocalEventMatches(
     selection.profile === "direct-event-analytics-v1" &&
     selection.mode === "observation" &&
     selection.scope === "event" &&
-    selection.preparedMatches === undefined &&
+    selection.preparedMembership === undefined &&
     selection.subject.siteIds.length === 1 &&
     selection.filter.root !== null &&
     isRowLocalFilter(selection.filter.root) &&
@@ -94,7 +81,7 @@ export function pageEventOwnerPairCacheKey(
   const root = selection.filter.root;
   if (
     !compatibleProfile ||
-    selection.preparedMatches !== undefined ||
+    selection.preparedMembership !== undefined ||
     selection.eventNameGate !== undefined ||
     !root ||
     selection.subject.siteIds.length !== 1 ||
@@ -143,43 +130,6 @@ export function withoutEventNameGate(
   return baseSelection;
 }
 
-export function explicitIdentityRelation(
-  dataset: AnalyticsLegacyScopedDataset,
-  identities: readonly {
-    readonly siteId: string;
-    readonly kind: string;
-    readonly id: string;
-  }[],
-  kind: string,
-): AnalyticsDbRelation {
-  const input = valuesRelation(
-    {
-      site_id: { affinity: "text", nullable: false },
-      kind: { affinity: "text", nullable: false },
-      entity_id: { affinity: "text", nullable: false },
-    },
-    identities.map((identity) => ({
-      site_id: sqliteBoundText(identity.siteId),
-      kind: sqliteBoundText(identity.kind),
-      entity_id: sqliteBoundText(identity.id),
-    })),
-  );
-  const selected = filter(input, eq(input.columns.kind, param(kind)));
-  const scoped = join(
-    selected,
-    dataset.sites,
-    eq(selected.columns.site_id, dataset.sites.columns.site_id),
-  );
-  // Prepared identities form a complete (site, entity) set before they are
-  // used as a membership RHS, so duplicates cannot multiply source rows.
-  return distinct(
-    project(scoped, {
-      site_pk: scoped.columns.right_site_pk,
-      entity_id: scoped.columns.left_entity_id,
-    }),
-  );
-}
-
 /** Match SQLite's text binding replacement for isolated UTF-16 surrogates. */
 export function sqliteBoundText(value: string): string {
   let result: string | undefined;
@@ -220,7 +170,7 @@ export function selectionForPostObservationFilter(
   const stage = selection.postObservationFilter;
   if (!stage) throw new Error("legacy_post_observation_filter_missing");
   const {
-    preparedMatches: _preparedMatches,
+    preparedMembership: _preparedMembership,
     eventNameGate: _eventNameGate,
     postObservationFilter: _postObservationFilter,
     ...baseSelection
@@ -242,7 +192,7 @@ export function postObservationBaseSelectionKey(
     baseSelection.subject.siteIds.length === 1 &&
     baseSelection.authorizedSiteIds.length === 1 &&
     baseSelection.authorizedSiteIds[0] === baseSelection.subject.siteIds[0] &&
-    !baseSelection.preparedMatches &&
+    !baseSelection.preparedMembership &&
     !baseSelection.eventNameGate &&
     (baseSelection.profile === "direct-page-analytics-v1" ||
       baseSelection.profile === "direct-event-analytics-v1")

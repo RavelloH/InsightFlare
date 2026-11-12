@@ -590,7 +590,7 @@ async function oldTechnologyReader(
   const metadata = (
     await import("@/lib/edge/analytics/contract")
   ).scopedFilterMetadata(oldFilters);
-  expect(metadata?.plan.advancedMatches).toBeDefined();
+  expect(metadata?.plan.preparedMembership).toBeDefined();
   const time = query.time;
   const window = queryWindow(time);
   const interval: Interval = query.interval;
@@ -742,7 +742,7 @@ describe("share-trend qualified provider regression", () => {
         "allow-whole-filter",
       );
       expect(
-        candidate.deferred.qualification.metadata.plan.advancedMatches,
+        candidate.deferred.qualification.metadata.plan.preparedMembership,
       ).toBeUndefined();
       expect(candidate.evidence.sqlBytes).toBeLessThanOrEqual(100_000);
       expect(candidate.evidence.bindingCount).toBeLessThanOrEqual(100);
@@ -776,9 +776,9 @@ describe("share-trend qualified provider regression", () => {
             filterDsl,
             mode: candidate.deferred.qualification.technologyFilterMode,
             countScope: candidate.deferred.qualification.metadata.plan.scope,
-            advancedMatches:
-              candidate.deferred.qualification.metadata.plan.advancedMatches ??
-              null,
+            preparedMembership:
+              candidate.deferred.qualification.metadata.plan
+                .preparedMembership ?? null,
             siteMetadataCount:
               candidate.deferred.qualification.metadata.siteIds.length,
             compilation: {

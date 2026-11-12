@@ -32,6 +32,10 @@ import {
   buildVisitSourceCte,
   visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import {
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import * as hourlyRollupQueries from "@/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries";
 import {
   buildOverviewClientDimensionTabs,
@@ -223,7 +227,9 @@ function queryTime(window: QueryWindow): QueryTime {
 function preparedFilter(input: {
   readonly filters: FilterDocument;
   readonly scopePreference: FilterScopePreference;
-  readonly advancedMatches: NonNullable<ScopedFilterPlan["advancedMatches"]>;
+  readonly preparedMembership: NonNullable<
+    ScopedFilterPlan["preparedMembership"]
+  >;
   readonly preparationWindow?: QueryWindow;
 }): FilterDocument {
   const prepared = prepareScopedQuery("overview", {
@@ -245,7 +251,10 @@ function preparedFilter(input: {
   if (!metadata) throw new Error("wave62_overview_prepared_metadata_missing");
   return attachScopedFilterMetadata(prepared.filters, {
     ...metadata,
-    plan: { ...prepared.scopePlan, advancedMatches: input.advancedMatches },
+    plan: {
+      ...prepared.scopePlan,
+      preparedMembership: input.preparedMembership,
+    },
   });
 }
 
@@ -610,7 +619,7 @@ describe("Overview six-metric Logical report", () => {
       const preparedEmpty = preparedFilter({
         filters: EMPTY_FILTER_DOCUMENT,
         scopePreference: "session",
-        advancedMatches: { entityIds: [] },
+        preparedMembership: preparedMembershipFromIds({ entityIds: [] }),
       });
       expect(scopedFilterMetadata(preparedEmpty)).toBeDefined();
       const overviewCallsBeforePrepared = overviewRollup.mock.calls.length;
@@ -790,7 +799,7 @@ describe("Overview six-metric Logical report", () => {
       const observationFilter = preparedFilter({
         filters: directFilter,
         scopePreference: "event",
-        advancedMatches: {
+        preparedMembership: preparedMembershipFromIds({
           visitIds: [
             "p-shared-a",
             "p-space",
@@ -801,40 +810,43 @@ describe("Overview six-metric Logical report", () => {
           eventIds: ["e-shared", "e-event-only", "e-tab", "e-previous"].map(
             (id) => ({ siteId: SITE_ID, id }),
           ),
-        },
+        }),
       });
       const sessionFilter = preparedFilter({
         filters: directFilter,
         scopePreference: "session",
-        advancedMatches: {
+        preparedMembership: preparedMembershipFromIds({
           entityIds: ["shared", "event-only"].map((id) => ({
             siteId: SITE_ID,
             id,
           })),
-        },
+        }),
       });
       const visitorFilter = preparedFilter({
         filters: directFilter,
         scopePreference: "visitor",
-        advancedMatches: {
+        preparedMembership: preparedMembershipFromIds({
           entityIds: ["v-shared", "v-event-only"].map((id) => ({
             siteId: SITE_ID,
             id,
           })),
-        },
+        }),
       });
       const emptyPrepared = preparedFilter({
         filters: directFilter,
         scopePreference: "event",
-        advancedMatches: { visitIds: [], eventIds: [] },
+        preparedMembership: preparedMembershipFromIds({
+          visitIds: [],
+          eventIds: [],
+        }),
       });
       const previousPrepared = preparedFilter({
         filters: directFilter,
         scopePreference: "event",
-        advancedMatches: {
+        preparedMembership: preparedMembershipFromIds({
           visitIds: [{ siteId: SITE_ID, id: "p-previous" }],
           eventIds: [{ siteId: SITE_ID, id: "e-previous" }],
-        },
+        }),
       });
       const cases = [
         { name: "plain", window: WINDOW, filters: EMPTY_FILTER_DOCUMENT },
@@ -937,18 +949,21 @@ describe("Overview six-metric Logical report", () => {
     const currentPrepared = preparedFilter({
       filters: pageFilter,
       scopePreference: "event",
-      advancedMatches: {
+      preparedMembership: preparedMembershipFromIds({
         visitIds: Array.from({ length: 128 }, (_unused, index) => ({
           siteId: SITE_ID,
           id: `wave62-current-${index}`,
         })),
         eventIds: [],
-      },
+      }),
     });
     const emptyPrepared = preparedFilter({
       filters: pageFilter,
       scopePreference: "event",
-      advancedMatches: { visitIds: [], eventIds: [] },
+      preparedMembership: preparedMembershipFromIds({
+        visitIds: [],
+        eventIds: [],
+      }),
     });
     const previousIds = Array.from({ length: 128 }, (_unused, index) => ({
       siteId: SITE_ID,
@@ -957,7 +972,10 @@ describe("Overview six-metric Logical report", () => {
     const previousPrepared = preparedFilter({
       filters: pageFilter,
       scopePreference: "event",
-      advancedMatches: { visitIds: previousIds, eventIds: [] },
+      preparedMembership: preparedMembershipFromIds({
+        visitIds: previousIds,
+        eventIds: [],
+      }),
     });
     const profiles = [
       { name: "plain", window: WINDOW, filters: EMPTY_FILTER_DOCUMENT },
@@ -1030,10 +1048,10 @@ describe("Overview six-metric Logical report", () => {
     const filters = preparedFilter({
       filters: fieldFilter("page.path", "/prepared"),
       scopePreference: "event",
-      advancedMatches: {
+      preparedMembership: preparedMembershipFromIds({
         visitIds: [{ siteId: SITE_ID, id: "p-prepared" }],
         eventIds: [{ siteId: SITE_ID, id: "e-prepared" }],
-      },
+      }),
     });
     const plan = buildOverviewAggregatePlan({
       siteId: SITE_ID,

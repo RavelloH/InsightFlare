@@ -926,7 +926,8 @@ describe("qualified flat Referrers pages and summary", () => {
       ),
     ).toBe(true);
     const reportSql = trace.preparedSql.at(-1)!;
-    expect(reportSql).not.toBe(oldTrace.preparedSql.at(-1));
+    // The old route now reads the same prepared membership relation.
+    expect(reportSql).toBe(oldTrace.preparedSql.at(-1));
     expect(reportSql).toMatch(/\bvisit_id\b/i);
     expect(reportSql).not.toMatch(/\bentity_id\b/i);
     recordEvidence("numeric-referrers-new-execution-route", {
@@ -1067,7 +1068,7 @@ describe("qualified flat Referrers pages and summary", () => {
     expect(source?.kind).toBe("source");
     if (source?.kind !== "source")
       throw new Error("wave97ep_event_referrers_qualification_source_missing");
-    expect(source.selection?.preparedMatches).toBeUndefined();
+    expect(source.selection?.preparedMembership).toBeUndefined();
     expect(source.selection?.qualificationDependencyRefs).toEqual([
       EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
     ]);

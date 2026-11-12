@@ -1,3 +1,4 @@
+import type { PreparedMembership } from "@/lib/edge/analytics/contract/prepared-membership";
 import {
   analyzeFilterHistory,
   analyzeFilterTimeRange,
@@ -66,19 +67,11 @@ export interface ScopedFilterPlan {
     "matching-observations" | "matching-sessions" | "matching-visitors";
   readonly requiredSources: ReadonlySet<ObservationSource>;
   readonly requiresRawSource: boolean;
-  /** Resolved once by the D1 runtime for Core/Relation documents. */
-  readonly advancedMatches?: AdvancedFilterMatches;
-}
-
-export interface AdvancedFilterIdentity {
-  readonly siteId: string;
-  readonly id: string;
-}
-
-export interface AdvancedFilterMatches {
-  readonly entityIds?: readonly AdvancedFilterIdentity[];
-  readonly visitIds?: readonly AdvancedFilterIdentity[];
-  readonly eventIds?: readonly AdvancedFilterIdentity[];
+  /**
+   * Resolved once by the D1 runtime for Core/Relation documents. An opaque,
+   * request-private handle: the evaluated identities are never plan data.
+   */
+  readonly preparedMembership?: PreparedMembership;
 }
 
 export interface ScopedFilteringCapability {

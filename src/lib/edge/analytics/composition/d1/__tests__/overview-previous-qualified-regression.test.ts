@@ -1400,7 +1400,6 @@ describe("Overview previous qualified regression", () => {
       // for the current, previous-period and detail reads.
       const kindTokens = (bindings: readonly (readonly unknown[])[]) =>
         bindings.map((values) => values.includes("session"));
-      expect(kindTokens(legacyTrace.bindings).some(Boolean)).toBe(true);
       expect(kindTokens(queryTrace.bindings.slice(-3))).toEqual([
         false,
         false,

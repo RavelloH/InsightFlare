@@ -458,7 +458,7 @@ async function legacyOracle(
   );
   const filters =
     (forwarded as PagesTabsQuery).filters ?? query.filters ?? EMPTY_FILTERS;
-  if (!scopedFilterMetadata(filters)?.plan.advancedMatches)
+  if (!scopedFilterMetadata(filters)?.plan.preparedMembership)
     throw new Error("wave96c_legacy_path_did_not_prepare_selected_matches");
   if (
     deferredPagesTabsQualificationFromQuery(forwarded) ||
@@ -1194,7 +1194,7 @@ describe("Wave96C qualified Page tabs and Pages-with-tabs", () => {
     ).toBeUndefined();
     expect(
       scopedFilterMetadata((nativeRoute as PagesTabsQuery).filters)?.plan
-        .advancedMatches,
+        .preparedMembership,
     ).toBeDefined();
 
     const preAbortTrace = traceFor();

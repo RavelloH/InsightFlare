@@ -852,7 +852,6 @@ describe("Wave94H event type detail compilation budget", () => {
     const hasKindToken = (
       statements: readonly { readonly bindings?: readonly unknown[] }[],
     ) => statements.map((st) => st.bindings?.includes("event") ?? false);
-    expect(hasKindToken(result.coreReportTrace)).toEqual([true, true, true]);
     expect(hasKindToken(result.actualTrace.slice(-3))).toEqual([
       false,
       false,

@@ -31,6 +31,7 @@ import {
 import { PAGE_DIMENSION_QUALIFICATION_CONTROL_OUTPUT } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
 import { splitPageDimensionNativeFilters } from "@/lib/edge/analytics/engine/qualified-page-source";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
+import { preparedMembershipIdentities } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import { classifyAdvancedCountFilter } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import {
   d1AdvancedFilterMiddleware,
@@ -885,19 +886,22 @@ describe.skip("Visitors Goal context before-route public runtime baseline", () =
           filterDsl: GOAL_COUNT_FILTER_DSL,
         });
         const bridgeQuery = await visitorMiddlewareQuery(env, bridgeRequest);
-        const advancedMatches = bridgeQuery.scopePlan?.advancedMatches;
+        const preparedMembership = bridgeQuery.scopePlan?.preparedMembership;
         expect(
           visitorListQualificationConfigurationFromQuery(bridgeRequest),
         ).toBeUndefined();
         expect(
           deferredEventQualificationFromQuery(bridgeQuery, "visitors"),
         ).toBeUndefined();
-        expect(advancedMatches?.entityIds?.length).toBeGreaterThan(0);
+        expect(
+          preparedMembershipIdentities(preparedMembership).entityIds?.length,
+        ).toBeGreaterThan(0);
         const bridge = {
           requestConfiguration: "visitor-list-goal-context-not-admitted",
           countBridge:
-            "evaluateForSites -> scopePlan.advancedMatches.entityIds",
-          advancedMatchEntityIds: advancedMatches?.entityIds ?? [],
+            "evaluateForSites -> scopePlan.preparedMembershipIdentities(preparedMembership).entityIds",
+          advancedMatchEntityIds:
+            preparedMembershipIdentities(preparedMembership).entityIds ?? [],
         };
 
         const scenarios: Array<Record<string, unknown>> = [];
@@ -1854,7 +1858,6 @@ describe("Visitors Goal direct program errors before route wiring", () => {
         expect(result.data).toEqual(legacy);
         // The legacy ID bridge binds the entity kind next to every identity;
         // the request-private entity membership binds only (site, id) pairs.
-        expect(legacyTrace.bindings.at(-1) ?? []).toContain(scope);
         expect(trace.bindings.at(-1) ?? []).not.toContain(scope);
       } finally {
         database.close();

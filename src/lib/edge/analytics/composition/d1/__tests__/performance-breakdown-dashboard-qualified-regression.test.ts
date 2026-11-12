@@ -1049,10 +1049,10 @@ FROM visits WHERE visit_id IN (?, ?) ORDER BY visit_id`,
         "allow-whole-filter",
       );
       expect(
-        prepared.deferred.qualification.requestScopePlan?.advancedMatches,
+        prepared.deferred.qualification.requestScopePlan?.preparedMembership,
       ).toBeUndefined();
       expect(
-        prepared.deferred.qualification.metadata.plan.advancedMatches,
+        prepared.deferred.qualification.metadata.plan.preparedMembership,
       ).toBe(undefined);
 
       const diagnostics = createD1ReadDiagnostics();
@@ -1136,10 +1136,10 @@ FROM visits WHERE visit_id IN (?, ?) ORDER BY visit_id`,
         "allow-whole-filter",
       );
       expect(
-        prepared.deferred.qualification.requestScopePlan?.advancedMatches,
+        prepared.deferred.qualification.requestScopePlan?.preparedMembership,
       ).toBeUndefined();
       expect(
-        prepared.deferred.qualification.metadata.plan.advancedMatches,
+        prepared.deferred.qualification.metadata.plan.preparedMembership,
       ).toBe(undefined);
 
       const diagnostics = createD1ReadDiagnostics();

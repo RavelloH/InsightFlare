@@ -690,7 +690,7 @@ describe("Browser Cross qualified regression", { timeout: 60_000 }, () => {
       "allow-whole-filter",
     );
     expect(
-      deferred.qualification.metadata.plan.advancedMatches,
+      deferred.qualification.metadata.plan.preparedMembership,
     ).toBeUndefined();
     const compilation = compileCrossQualificationProgram({
       deferred,
@@ -750,7 +750,8 @@ describe("Browser Cross qualified regression", { timeout: 60_000 }, () => {
       filterDsl,
       mode: deferred.qualification.technologyFilterMode,
       countScope: deferred.qualification.metadata.plan.scope,
-      advancedMatches: deferred.qualification.metadata.plan.advancedMatches,
+      preparedMembership:
+        deferred.qualification.metadata.plan.preparedMembership,
       siteMetadataCount: deferred.qualification.metadata.siteIds.length,
       compilation: {
         statementTag: compilation.evidence.statementTag,

@@ -1,5 +1,9 @@
 import { assertObservationFilterCompatible } from "@/lib/edge/analytics/contract/observation-planner";
 import {
+  type PreparedMembership,
+  preparedMembershipSiteIds,
+} from "@/lib/edge/analytics/contract/prepared-membership";
+import {
   createScopedFilterPlan,
   factEntityKindsForFilter,
   scopedFilterMetadata,
@@ -42,19 +46,6 @@ export type SemanticScopedSourceProfile =
   | "direct-page-session-compat-v1"
   | "direct-page-entity-only-compat-v1";
 
-export type SemanticScopedIdentityKind =
-  "page" | "event" | "session" | "visitor";
-
-export interface SemanticScopedIdentity {
-  readonly siteId: string;
-  readonly kind: SemanticScopedIdentityKind;
-  readonly id: string;
-}
-
-export interface SemanticPreparedMatches {
-  readonly identities: readonly SemanticScopedIdentity[];
-}
-
 export interface SemanticEventNameGate {
   readonly value: string;
   readonly semantics:
@@ -83,7 +74,8 @@ export interface SemanticScopedSourceSelection {
   readonly scope: FilterScope;
   readonly mode: "observation" | "entity";
   readonly entityKind?: "session" | "visitor";
-  readonly preparedMatches?: SemanticPreparedMatches;
+  /** Opaque, request-private evaluation result; never identity data. */
+  readonly preparedMembership?: PreparedMembership;
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly eventNameGate?: SemanticEventNameGate;
   readonly postObservationFilter?: SemanticPostObservationFilter;
@@ -306,55 +298,19 @@ function canonicalSiteIds(siteIds: readonly string[]): readonly string[] {
   return Object.freeze([...new Set(siteIds)].sort());
 }
 
-function snapshotMatches(
+function snapshotMembership(
   plan: ScopedFilterPlan,
   authorizedSiteIds: ReadonlySet<string>,
-  subjectSiteIds: ReadonlySet<string>,
-): SemanticPreparedMatches | undefined {
-  if (plan.advancedMatches === undefined) return undefined;
-  const identities: SemanticScopedIdentity[] = [];
-  const append = (
-    kind: SemanticScopedIdentityKind,
-    values: readonly { readonly siteId: string; readonly id: string }[] = [],
-  ) => {
-    for (const item of values) {
-      if (
-        !item ||
-        typeof item.siteId !== "string" ||
-        typeof item.id !== "string" ||
-        item.siteId.length === 0
-      )
-        fail("invalid_prepared_identity");
-      if (!authorizedSiteIds.has(item.siteId))
-        fail("prepared_identity_outside_authorization");
-      if (subjectSiteIds.has(item.siteId))
-        identities.push({ siteId: item.siteId, kind, id: item.id });
-    }
-  };
-  const matches = plan.advancedMatches;
-  if (plan.mode === "observation") {
-    append("page", matches.visitIds);
-    append("event", matches.eventIds);
-  } else {
-    if (plan.membership.kind !== "entity")
-      return fail("entity_matches_without_entity_membership");
-    append(plan.membership.entityKind, matches.entityIds);
-  }
-  const unique = new Map<string, SemanticScopedIdentity>();
-  for (const identity of identities) {
-    const key = JSON.stringify([identity.siteId, identity.kind, identity.id]);
-    unique.set(key, identity);
-  }
-  return {
-    identities: Object.freeze(
-      [...unique.values()].sort(
-        (left, right) =>
-          left.siteId.localeCompare(right.siteId) ||
-          left.kind.localeCompare(right.kind) ||
-          left.id.localeCompare(right.id),
-      ),
-    ),
-  };
+): PreparedMembership | undefined {
+  const handle = plan.preparedMembership;
+  if (handle === undefined) return undefined;
+  const siteIds = preparedMembershipSiteIds(handle);
+  if (!siteIds) return fail("invalid_prepared_membership");
+  if (siteIds.some((siteId) => !authorizedSiteIds.has(siteId)))
+    fail("prepared_identity_outside_authorization");
+  if (plan.mode === "entity" && plan.membership.kind !== "entity")
+    return fail("entity_matches_without_entity_membership");
+  return handle;
 }
 
 function sameResolvedPlan(
@@ -415,7 +371,7 @@ export function createSemanticScopedSourceSelection(
   let mode: "observation" | "entity";
   let entityKind: "session" | "visitor" | undefined;
   let authorizedSiteIds: readonly string[];
-  let preparedMatches: SemanticPreparedMatches | undefined;
+  let preparedMembership: PreparedMembership | undefined;
   let preparationTime: SemanticTemporalDomains | undefined;
 
   if (
@@ -474,12 +430,12 @@ export function createSemanticScopedSourceSelection(
     if (
       filters.root &&
       filterDocumentUsesAdvancedExpressions(filters) &&
-      input.expectedPlan.advancedMatches === undefined &&
+      input.expectedPlan.preparedMembership === undefined &&
       qualificationDependencyRefs === undefined
     )
       return fail("prepared_advanced_matches_missing");
     if (
-      input.expectedPlan.advancedMatches !== undefined &&
+      input.expectedPlan.preparedMembership !== undefined &&
       qualificationDependencyRefs !== undefined
     )
       return fail("prepared_matches_and_qualification_dependency_conflict");
@@ -500,11 +456,7 @@ export function createSemanticScopedSourceSelection(
         !filterDocumentUsesAdvancedExpressions(filters))
     )
       return fail("qualification_dependency_semantics_mismatch");
-    preparedMatches = snapshotMatches(
-      input.expectedPlan,
-      authorized,
-      subjectSites,
-    );
+    preparedMembership = snapshotMembership(input.expectedPlan, authorized);
   } else if (
     input.profile === "direct-event-records-v1" ||
     input.profile === "direct-event-analytics-v1"
@@ -637,7 +589,7 @@ export function createSemanticScopedSourceSelection(
     scope,
     mode,
     ...(entityKind ? { entityKind } : {}),
-    ...(preparedMatches ? { preparedMatches } : {}),
+    ...(preparedMembership ? { preparedMembership } : {}),
     ...(qualificationDependencyRefs ? { qualificationDependencyRefs } : {}),
     ...(eventNameGate ? { eventNameGate } : {}),
     ...(postObservationFilter ? { postObservationFilter } : {}),
@@ -707,7 +659,7 @@ export function validateSemanticScopedSourceSelection(
         selection.qualificationDependencyRefs ?? [],
         selection.mode,
       ) ||
-      selection.preparedMatches !== undefined ||
+      selection.preparedMembership !== undefined ||
       !selection.filter.root ||
       !filterDocumentUsesAdvancedExpressions(selection.filter) ||
       Object.prototype.hasOwnProperty.call(selection, "postObservationFilter"))
@@ -717,7 +669,6 @@ export function validateSemanticScopedSourceSelection(
   if (!sameJsonValue(authorized, selection.authorizedSiteIds))
     fail("authorization_snapshot_not_canonical");
   const authorizedSet = new Set(authorized);
-  const subjectSiteIds = new Set<string>(context.subject.siteIds);
   if (context.subject.siteIds.some((siteId) => !authorizedSet.has(siteId)))
     fail("subject_outside_prepared_authorization");
   if (selection.profile === "prepared-scoped-v1") {
@@ -733,7 +684,7 @@ export function validateSemanticScopedSourceSelection(
     if (
       selection.filter.root &&
       filterDocumentUsesAdvancedExpressions(selection.filter) &&
-      selection.preparedMatches === undefined &&
+      selection.preparedMembership === undefined &&
       qualificationDependencyRefs === undefined
     )
       fail("prepared_advanced_matches_missing");
@@ -761,7 +712,7 @@ export function validateSemanticScopedSourceSelection(
     if (
       selection.filter.root &&
       filterDocumentUsesAdvancedExpressions(selection.filter) &&
-      selection.preparedMatches === undefined &&
+      selection.preparedMembership === undefined &&
       qualificationDependencyRefs === undefined
     )
       fail("prepared_advanced_matches_missing");
@@ -783,7 +734,7 @@ export function validateSemanticScopedSourceSelection(
     (selection.scope !== "event" ||
       selection.mode !== "observation" ||
       selection.entityKind !== undefined ||
-      selection.preparedMatches !== undefined ||
+      selection.preparedMembership !== undefined ||
       filterDocumentUsesAdvancedExpressions(selection.filter))
   )
     fail("invalid_direct_profile");
@@ -799,7 +750,7 @@ export function validateSemanticScopedSourceSelection(
       selection.scope !== "session" ||
       selection.mode !== "entity" ||
       selection.entityKind !== "session" ||
-      selection.preparedMatches !== undefined ||
+      selection.preparedMembership !== undefined ||
       selection.eventNameGate !== undefined ||
       selection.subject.siteIds.length !== 1 ||
       !sameJsonValue(selection.authorizedSiteIds, selection.subject.siteIds) ||
@@ -820,7 +771,7 @@ export function validateSemanticScopedSourceSelection(
       (selection.scope !== "session" && selection.scope !== "visitor") ||
       selection.mode !== "entity" ||
       selection.entityKind !== selection.scope ||
-      selection.preparedMatches !== undefined ||
+      selection.preparedMembership !== undefined ||
       selection.eventNameGate !== undefined ||
       selection.subject.siteIds.length !== 1 ||
       !sameJsonValue(selection.authorizedSiteIds, selection.subject.siteIds) ||
@@ -854,24 +805,10 @@ export function validateSemanticScopedSourceSelection(
     )
       fail("event_name_profile_mismatch");
   }
-  for (const identity of selection.preparedMatches?.identities ?? []) {
-    if (
-      !identity ||
-      typeof identity.siteId !== "string" ||
-      typeof identity.id !== "string" ||
-      !["page", "event", "session", "visitor"].includes(identity.kind) ||
-      !authorizedSet.has(identity.siteId) ||
-      !subjectSiteIds.has(identity.siteId)
-    )
-      fail("invalid_prepared_identity_snapshot");
-    if (
-      selection.mode === "observation" &&
-      identity.kind !== "page" &&
-      identity.kind !== "event"
-    )
-      fail("invalid_observation_identity_kind");
-    if (selection.mode === "entity" && identity.kind !== selection.entityKind)
-      fail("invalid_entity_identity_kind");
+  if (selection.preparedMembership !== undefined) {
+    const siteIds = preparedMembershipSiteIds(selection.preparedMembership);
+    if (!siteIds || siteIds.some((siteId) => !authorizedSet.has(siteId)))
+      fail("invalid_prepared_membership_snapshot");
   }
 }
 
@@ -896,16 +833,10 @@ export function snapshotSemanticScopedSourceSelection(
     ...(selection.preparationTime
       ? { preparationTime: snapshotTime(selection.preparationTime) }
       : {}),
-    ...(selection.preparedMatches
-      ? {
-          preparedMatches: {
-            identities: Object.freeze(
-              selection.preparedMatches.identities.map((identity) =>
-                Object.freeze({ ...identity }),
-              ),
-            ),
-          },
-        }
+    // The handle is opaque and already frozen; copying it would sever its
+    // registration, so the selection keeps the very same object.
+    ...(selection.preparedMembership
+      ? { preparedMembership: selection.preparedMembership }
       : {}),
     ...(selection.eventNameGate
       ? { eventNameGate: Object.freeze({ ...selection.eventNameGate }) }

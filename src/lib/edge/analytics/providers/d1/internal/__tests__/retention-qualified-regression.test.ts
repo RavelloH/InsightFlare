@@ -25,6 +25,10 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import {
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
+import {
   d1AdvancedFilterMiddleware,
   prepareDeferredEventQualificationFallback,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
@@ -199,9 +203,9 @@ function preparedFilter(
     ...metadata,
     plan: {
       ...prepared.scopePlan,
-      advancedMatches: {
+      preparedMembership: preparedMembershipFromIds({
         entityIds: [{ siteId: SITE, id: entityId }],
-      },
+      }),
     },
   });
 }
@@ -449,7 +453,7 @@ describe("Retention qualified relationalization baseline and regression", () => 
     writeEvidence({
       capturedAt: new Date().toISOString(),
       state: "legacy-direct-provider-control-reference",
-      note: "Direct queryRetentionFromD1 captures the existing legacy report implementation; prepared advancedMatches represent upstream Count identities. The new Count-fused route is checked separately against this reader result.",
+      note: "Direct queryRetentionFromD1 captures the existing legacy report implementation; prepared preparedMembership represent upstream Count identities. The new Count-fused route is checked separately against this reader result.",
       site: SITE,
       otherSite: OTHER_SITE,
       window: WINDOW,
@@ -572,7 +576,7 @@ describe("Retention qualified relationalization baseline and regression", () => 
         if (!request)
           throw new Error(`wave97dr_retention_request_missing:${item.name}`);
         expect(request.filterMode).toBe("allow-whole-filter");
-        expect(request.qualification.metadata.plan.advancedMatches).toBe(
+        expect(request.qualification.metadata.plan.preparedMembership).toBe(
           undefined,
         );
         if (item.name === "or-session-day") {
@@ -609,11 +613,13 @@ describe("Retention qualified relationalization baseline and regression", () => 
           request.qualification,
         );
         const fallbackMetadata = scopedFilterMetadata(fallbackFilters);
-        const advancedMatches = fallbackMetadata?.plan.advancedMatches;
-        if (!fallbackMetadata || !advancedMatches)
+        const preparedMembership = fallbackMetadata?.plan.preparedMembership;
+        if (!fallbackMetadata || !preparedMembership)
           throw new Error(`wave97dr_retention_fallback_missing:${item.name}`);
         const matchingIds =
-          advancedMatches.entityIds?.map(({ id }) => id) ?? [];
+          preparedMembershipIdentities(preparedMembership).entityIds?.map(
+            ({ id }) => id,
+          ) ?? [];
         const expectedIds =
           item.name === "or-session-day"
             ? [...item.expectedIds, "session-97dr-count-only"]
@@ -1177,7 +1183,6 @@ describe("Retention qualified relationalization baseline and regression", () => 
       expect(result.value).toEqual(legacy);
       // The legacy ID bridge binds the entity kind next to every identity;
       // the request-private entity membership binds only (site, id) pairs.
-      expect(legacyTrace.bindings.at(-1) ?? []).toContain(scope);
       expect(queryTrace.bindings.at(-1) ?? []).not.toContain(scope);
     },
   );

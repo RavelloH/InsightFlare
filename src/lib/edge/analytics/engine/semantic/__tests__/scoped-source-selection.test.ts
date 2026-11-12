@@ -9,6 +9,7 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
+import { isPreparedMembership } from "@/lib/edge/analytics/contract/prepared-membership";
 import type {
   QueryInput,
   QueryTime,
@@ -28,6 +29,11 @@ import {
   semanticSubjectFromQuerySubject,
 } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
+import {
+  type PreparedMembershipFixture,
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import { parseFilterDsl } from "@/lib/filter-contract/filter-dsl";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 import { normalizeFilterDocument } from "@/lib/filter-contract/filters";
@@ -107,12 +113,13 @@ function simpleSessionFilter(country: string) {
 
 function withPreparedMatches(
   scope: "event" | "session",
-  advancedMatches: NonNullable<
-    ReturnType<typeof preparedSelectionInput>["plan"]["advancedMatches"]
-  >,
+  matches: PreparedMembershipFixture,
 ) {
   const prepared = preparedSelectionInput(scope);
-  const plan = { ...prepared.plan, advancedMatches };
+  const plan = {
+    ...prepared.plan,
+    preparedMembership: preparedMembershipFromIds(matches),
+  };
   const filters = attachScopedFilterMetadata(prepared.filters, {
     ...prepared.metadata,
     plan,
@@ -253,30 +260,35 @@ describe("semantic scoped source selection", () => {
     );
   });
 
-  it("snapshots and sorts prepared observation and entity matches", () => {
+  it("keeps the registered prepared membership as the same opaque handle", () => {
     const observations = withPreparedMatches("event", {
       visitIds: [
         { siteId: SITE_ID, id: "visit-z" },
         { siteId: SITE_ID, id: "visit-a" },
+      ],
+      eventIds: [{ siteId: SITE_ID, id: "event-1" }],
+    });
+    expect(isPreparedMembership(observations.preparedMembership)).toBe(true);
+    expect(Object.isFrozen(observations.preparedMembership)).toBe(true);
+    // The selection never carries identities; only the registry can read them.
+    expect(JSON.stringify(observations)).not.toContain("visit-a");
+    expect(
+      preparedMembershipIdentities(observations.preparedMembership),
+    ).toEqual({
+      entityIds: [],
+      visitIds: [
+        { siteId: SITE_ID, id: "visit-z" },
         { siteId: SITE_ID, id: "visit-a" },
       ],
       eventIds: [{ siteId: SITE_ID, id: "event-1" }],
     });
-    expect(observations.preparedMatches?.identities).toEqual([
-      { siteId: SITE_ID, kind: "event", id: "event-1" },
-      { siteId: SITE_ID, kind: "page", id: "visit-a" },
-      { siteId: SITE_ID, kind: "page", id: "visit-z" },
-    ]);
-    expect(Object.isFrozen(observations.preparedMatches?.identities)).toBe(
-      true,
-    );
 
     const entities = withPreparedMatches("session", {
       entityIds: [{ siteId: SITE_ID, id: "session-1" }],
     });
-    expect(entities.preparedMatches?.identities).toEqual([
-      { siteId: SITE_ID, kind: "session", id: "session-1" },
-    ]);
+    expect(
+      preparedMembershipIdentities(entities.preparedMembership).entityIds,
+    ).toEqual([{ siteId: SITE_ID, id: "session-1" }]);
   });
 
   it("preserves prepared proof while validating the actual Page reader window", () => {
@@ -389,9 +401,9 @@ describe("semantic scoped source selection", () => {
     );
     const advancedPlan = {
       ...advancedPrepared.plan,
-      advancedMatches: {
+      preparedMembership: preparedMembershipFromIds({
         entityIds: [{ siteId: SITE_ID, id: "session-1" }],
-      },
+      }),
     };
     const advancedWithMatches = attachScopedFilterMetadata(
       advancedPrepared.filters,
@@ -399,9 +411,9 @@ describe("semantic scoped source selection", () => {
     );
     const invalidAdvancedPlan = {
       ...advancedPrepared.plan,
-      advancedMatches: {
+      preparedMembership: preparedMembershipFromIds({
         entityIds: [{ siteId: "other-site", id: "session-1" }],
-      },
+      }),
     };
     expect(() =>
       createSemanticScopedSourceSelection({
@@ -428,19 +440,13 @@ describe("semantic scoped source selection", () => {
       validateSemanticScopedSourceSelection(
         {
           ...advancedSelection,
-          preparedMatches: {
-            identities: [
-              {
-                ...advancedSelection.preparedMatches!.identities[0]!,
-                kind: "visitor",
-              },
-            ],
-          },
+          // A look-alike object that was never registered is not a handle.
+          preparedMembership: { id: "forged-membership" } as never,
         },
         { subject: SUBJECT, time: readerDomains },
       ),
     ).toThrow(
-      "invalid_semantic_scoped_source_selection:invalid_entity_identity_kind",
+      "invalid_semantic_scoped_source_selection:invalid_prepared_membership_snapshot",
     );
 
     expect(() =>
@@ -812,7 +818,7 @@ describe("semantic scoped source selection", () => {
     const advancedPrepared = preparedSelectionInput("session", advancedFilters);
     const advancedPlan = {
       ...advancedPrepared.plan,
-      advancedMatches: { entityIds: [] },
+      preparedMembership: preparedMembershipFromIds({ entityIds: [] }),
     };
     const advancedMetadata = attachScopedFilterMetadata(
       advancedPrepared.filters,
@@ -827,7 +833,7 @@ describe("semantic scoped source selection", () => {
     });
     expect(() =>
       validateSemanticScopedSourceSelection(
-        { ...completeAdvanced, preparedMatches: undefined },
+        { ...completeAdvanced, preparedMembership: undefined },
         context,
       ),
     ).toThrow(
@@ -956,7 +962,7 @@ describe("semantic scoped source selection", () => {
 
     const legacyPlan = {
       ...prepared.plan,
-      advancedMatches: { eventIds: [] },
+      preparedMembership: preparedMembershipFromIds({ eventIds: [] }),
     };
     const legacyFilters = attachScopedFilterMetadata(prepared.filters, {
       ...prepared.metadata,
@@ -1049,26 +1055,20 @@ describe("semantic scoped source selection", () => {
         originOperation: "event-records",
       },
     );
-    expect(observationSnapshot.preparedMatches?.identities[0]).not.toBe(
-      observations.preparedMatches?.identities[0],
+    // The handle is opaque and already frozen: a snapshot must not copy it.
+    expect(observationSnapshot.preparedMembership).toBe(
+      observations.preparedMembership,
     );
     expect(() =>
       validateSemanticScopedSourceSelection(
         {
           ...observations,
-          preparedMatches: {
-            identities: [
-              {
-                ...observations.preparedMatches!.identities[0]!,
-                kind: "session",
-              },
-            ],
-          },
+          preparedMembership: { id: "forged-membership" } as never,
         },
         context,
       ),
     ).toThrow(
-      "invalid_semantic_scoped_source_selection:invalid_observation_identity_kind",
+      "invalid_semantic_scoped_source_selection:invalid_prepared_membership_snapshot",
     );
 
     const entities = withPreparedMatches("session", {
@@ -1078,40 +1078,18 @@ describe("semantic scoped source selection", () => {
       validateSemanticScopedSourceSelection(
         {
           ...entities,
-          preparedMatches: {
-            identities: [
-              { ...entities.preparedMatches!.identities[0]!, kind: "visitor" },
-            ],
-          },
+          preparedMembership: { id: "forged-membership" } as never,
         },
         context,
       ),
     ).toThrow(
-      "invalid_semantic_scoped_source_selection:invalid_entity_identity_kind",
+      "invalid_semantic_scoped_source_selection:invalid_prepared_membership_snapshot",
     );
 
-    const invalidIdentityPlan = {
-      ...prepared.plan,
-      advancedMatches: { visitIds: [{ siteId: "", id: "visit-1" }] },
-    };
-    const invalidIdentityFilters = attachScopedFilterMetadata(
-      prepared.filters,
-      {
-        ...prepared.metadata,
-        plan: invalidIdentityPlan,
-      },
-    );
+    // An evaluation that names no valid site cannot even be registered.
     expect(() =>
-      createSemanticScopedSourceSelection({
-        profile: "prepared-scoped-v1",
-        filters: invalidIdentityFilters,
-        subject: SUBJECT,
-        time: TIME,
-        expectedPlan: invalidIdentityPlan,
-      }),
-    ).toThrow(
-      "invalid_semantic_scoped_source_selection:invalid_prepared_identity",
-    );
+      preparedMembershipFromIds({ visitIds: [{ siteId: "", id: "visit-1" }] }),
+    ).toThrow("prepared_membership_sites_invalid");
 
     expect(() =>
       createSemanticScopedSourceSelection({
@@ -1161,20 +1139,14 @@ describe("semantic scoped source selection", () => {
       validateSemanticScopedSourceSelection(
         {
           ...validObservation,
-          preparedMatches: {
-            identities: [
-              {
-                siteId: "unauthorized-site",
-                kind: "event",
-                id: "event-1",
-              },
-            ],
-          },
+          preparedMembership: preparedMembershipFromIds({
+            eventIds: [{ siteId: "unauthorized-site", id: "event-1" }],
+          }),
         },
         { subject: SUBJECT, time: TIME },
       ),
     ).toThrow(
-      "invalid_semantic_scoped_source_selection:invalid_prepared_identity_snapshot",
+      "invalid_semantic_scoped_source_selection:invalid_prepared_membership_snapshot",
     );
   });
 

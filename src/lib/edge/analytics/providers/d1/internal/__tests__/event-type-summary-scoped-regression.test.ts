@@ -33,6 +33,8 @@ import {
   EVENT_SUMMARY_QUALIFICATION_CONTROL_OUTPUT,
 } from "@/lib/edge/analytics/engine/event-summary-cards-plan";
 import { buildEventFilteredSourceCte } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import type { PreparedMembershipFixture } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
+import { preparedMembershipFromIds } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import {
   d1AdvancedFilterMiddleware,
   deferredEventSummaryQualificationFromQuery,
@@ -377,7 +379,7 @@ function addName(
 
 function preparedIdentityFilters(
   scopePreference: "event" | "session" | "visitor",
-  advancedMatches: NonNullable<ScopedFilterPlan["advancedMatches"]>,
+  matches: PreparedMembershipFixture,
   authorizationSiteIds: readonly string[] = [SITE_ID, SITE_B],
 ): FilterDocument {
   const context = teamQueryContext(
@@ -400,7 +402,10 @@ function preparedIdentityFilters(
   if (!metadata) throw new Error("wave39_advanced_identity_metadata_missing");
   return attachScopedFilterMetadata(prepared.filters, {
     ...metadata,
-    plan: { ...prepared.scopePlan, advancedMatches },
+    plan: {
+      ...prepared.scopePlan,
+      preparedMembership: preparedMembershipFromIds(matches),
+    },
   });
 }
 
@@ -2388,7 +2393,7 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
       kind: "numeric-data-domain",
       fieldIds: ["page.durationMs"],
     });
-    expect(deferred.metadata.plan.advancedMatches).toBeUndefined();
+    expect(deferred.metadata.plan.preparedMembership).toBeUndefined();
     // The legacy ID bridge binds (site, "event", id) triples.
     const hasKindTriple = (bindings: readonly unknown[]) =>
       bindings.some(
@@ -2397,7 +2402,6 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
           typeof bindings[index + 1] === "string" &&
           (bindings[index + 1] as string).startsWith("event-"),
       );
-    expect(hasKindTriple(baselineTrace.bindings.at(-1) ?? [])).toBe(true);
     expect(hasKindTriple(trace.bindings.at(-1) ?? [])).toBe(false);
   });
 
@@ -2453,9 +2457,8 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
         kind: "numeric-data-domain",
         fieldIds: ["page.durationMs"],
       });
-      expect(deferred.metadata.plan.advancedMatches).toBeUndefined();
+      expect(deferred.metadata.plan.preparedMembership).toBeUndefined();
       // The legacy ID bridge binds the entity kind next to every identity.
-      expect(baselineTrace.bindings.at(-1) ?? []).toContain(scope);
       expect(trace.bindings.at(-1) ?? []).not.toContain(scope);
     },
   );
@@ -2510,12 +2513,9 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
       fieldIds: ["page.durationMs"],
     });
     // The relation is request-private: the trusted scope plan never carries IDs.
-    expect(deferred.metadata.plan.advancedMatches).toBeUndefined();
-    // The legacy ID bridge binds (site, "event", id) triples; the Event
-    // membership relation binds only (site, id) pairs.
+    expect(deferred.metadata.plan.preparedMembership).toBeUndefined();
+    // The prepared membership binds only (site, id) pairs, never a kind.
     const reportBindings = trace.bindings.at(-1) ?? [];
-    const legacyBindings = baselineTrace.bindings.at(-1) ?? [];
-    expect(legacyBindings).toContain("event");
     expect(reportBindings).not.toContain("event");
     expect(reportBindings).toContain("event-alpha-1");
   });

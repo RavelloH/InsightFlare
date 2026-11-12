@@ -1148,7 +1148,7 @@ describe("shared AnalysisResult qualification outputs", () => {
         ).filters;
         if (!legacyFilters)
           throw new Error("wave97a_legacy_prepared_filters_missing");
-        if (!scopedFilterMetadata(legacyFilters)?.plan.advancedMatches)
+        if (!scopedFilterMetadata(legacyFilters)?.plan.preparedMembership)
           throw new Error("wave97a_legacy_prepared_matches_missing");
         const legacyReader = createOverviewReader(
           testEnv(database, legacyTrace),

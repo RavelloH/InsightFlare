@@ -22,6 +22,7 @@ import {
   teamQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
+import type { PreparedMembership } from "@/lib/edge/analytics/contract/prepared-membership";
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type {
   QueryInput,
@@ -33,6 +34,12 @@ import {
   buildVisitSourceCte,
   visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import {
+  type PreparedMembershipFixture,
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+  toPreparedMembership,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import {
   classifyAdvancedCountFilter,
   classifyAdvancedEventCandidateCountFilter,
@@ -1054,11 +1061,14 @@ function attachAdvancedMatches(
     readonly filters: FilterDocument;
     readonly scopePlan: ScopedFilterPlan;
   },
-  advancedMatches: NonNullable<ScopedFilterPlan["advancedMatches"]>,
+  matches: PreparedMembershipFixture | PreparedMembership,
 ): FilterDocument {
   const metadata = scopedFilterMetadata(prepared.filters);
   if (!metadata) throw new Error("wave52_prepared_metadata_missing");
-  const plan = { ...prepared.scopePlan, advancedMatches };
+  const plan = {
+    ...prepared.scopePlan,
+    preparedMembership: toPreparedMembership(matches),
+  };
   return attachScopedFilterMetadata(prepared.filters, { ...metadata, plan });
 }
 
@@ -2334,7 +2344,7 @@ describe("Journey Geo Page report D1 migration", () => {
         deferredGeoPointsQualificationFromQuery(forwarded),
       ).toBeUndefined();
       expect(
-        scopedFilterMetadata(forwarded.filters!)?.plan.advancedMatches,
+        scopedFilterMetadata(forwarded.filters!)?.plan.preparedMembership,
       ).toBeDefined();
       expect(
         normalizeFilterDocument(forwarded.filters!, analyticsFilterRegistry),
@@ -3711,7 +3721,7 @@ describe("97DR private Geo whole-Boolean qualification", () => {
         if (!deferred) throw new Error("wave97dr_geo_deferred_missing");
         expect(deferred.filterMode).toBe("allow-whole-filter");
         expect(deferred.configuration.summaryLevel).toBe("country");
-        expect(deferred.qualification.metadata.plan.advancedMatches).toBe(
+        expect(deferred.qualification.metadata.plan.preparedMembership).toBe(
           undefined,
         );
 
@@ -3729,18 +3739,20 @@ describe("97DR private Geo whole-Boolean qualification", () => {
         const fallbackFilters = await prepareDeferredEventQualificationFallback(
           deferred.qualification,
         );
-        const advancedMatches =
-          scopedFilterMetadata(fallbackFilters)?.plan.advancedMatches;
-        if (!advancedMatches)
+        const preparedMembership =
+          scopedFilterMetadata(fallbackFilters)?.plan.preparedMembership;
+        if (!preparedMembership)
           throw new Error("wave97dr_geo_fallback_matches_missing");
         const matchingIds =
-          advancedMatches.entityIds?.map(({ id }) => id) ?? [];
+          preparedMembershipIdentities(preparedMembership).entityIds?.map(
+            ({ id }) => id,
+          ) ?? [];
         expect(matchingIds).toContain("s1");
         expect(matchingIds).toContain(nativeId);
 
         const legacyFilters = attachAdvancedMatches(
           prepareFilters(EMPTY_FILTER_DOCUMENT, "session"),
-          advancedMatches,
+          preparedMembership,
         );
         const legacyTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
         const legacy = await queryGeoPointsFromD1(
@@ -4245,12 +4257,14 @@ describe("97DR private Geo whole-Boolean qualification", () => {
               deferred.qualification,
             );
           const fallbackMatches =
-            scopedFilterMetadata(fallbackFilters)?.plan.advancedMatches;
+            scopedFilterMetadata(fallbackFilters)?.plan.preparedMembership;
           expect(fallbackMatches).toBeDefined();
           if (!fallbackMatches)
             throw new Error("wave97du_geo_fallback_matches_missing");
           const matchingIds =
-            fallbackMatches.entityIds?.map(({ id }) => id) ?? [];
+            preparedMembershipIdentities(fallbackMatches).entityIds?.map(
+              ({ id }) => id,
+            ) ?? [];
           expect(matchingIds).toEqual(
             expect.arrayContaining(["s1", nativeSessionId]),
           );

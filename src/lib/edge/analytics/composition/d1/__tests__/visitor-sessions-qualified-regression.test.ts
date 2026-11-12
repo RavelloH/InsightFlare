@@ -790,7 +790,6 @@ describe("visitor sessions qualification migration", () => {
       expect(result.data).toEqual(legacy);
       // The legacy ID bridge binds the entity kind next to every identity;
       // the request-private entity membership binds only (site, id) pairs.
-      expect(legacyTrace.bindings.at(-1) ?? []).toContain("session");
       expect(trace.bindings.at(-1) ?? []).not.toContain("session");
     } finally {
       database.close();

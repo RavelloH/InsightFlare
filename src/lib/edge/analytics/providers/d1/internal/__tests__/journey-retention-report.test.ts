@@ -32,6 +32,8 @@ import {
   buildVisitSourceCte,
   visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import type { PreparedMembershipFixture } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
+import { preparedMembershipFromIds } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import type {
   FilterDocument,
   Interval,
@@ -170,13 +172,16 @@ function withAdvancedMatches(
     readonly filters: FilterDocument;
     readonly scopePlan: ScopedFilterPlan;
   },
-  advancedMatches: NonNullable<ScopedFilterPlan["advancedMatches"]>,
+  matches: PreparedMembershipFixture,
 ): FilterDocument {
   const metadata = scopedFilterMetadata(prepared.filters);
   if (!metadata) throw new Error("journey_retention_prepared_metadata_missing");
   return attachScopedFilterMetadata(prepared.filters, {
     ...metadata,
-    plan: { ...prepared.scopePlan, advancedMatches },
+    plan: {
+      ...prepared.scopePlan,
+      preparedMembership: preparedMembershipFromIds(matches),
+    },
   });
 }
 

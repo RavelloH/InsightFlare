@@ -475,7 +475,7 @@ function createHarness(
       operation === "visitor-sessions"
     ) {
       const query = input as QueryInput & {
-        readonly scopePlan?: { readonly advancedMatches?: unknown };
+        readonly scopePlan?: { readonly preparedMembership?: unknown };
       };
       const deferred =
         operation === "visitors"
@@ -488,7 +488,7 @@ function createHarness(
           ? { qualificationAudience: deferred.configuration.audience }
           : {}),
         hasQualification: deferred !== undefined,
-        hasAdvancedMatches: query.scopePlan?.advancedMatches !== undefined,
+        hasAdvancedMatches: query.scopePlan?.preparedMembership !== undefined,
       });
     }
     return next(input);

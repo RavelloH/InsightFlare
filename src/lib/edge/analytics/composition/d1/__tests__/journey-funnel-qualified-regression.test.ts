@@ -80,6 +80,10 @@ import {
   splitPageDimensionNativeFilters,
 } from "@/lib/edge/analytics/engine/qualified-page-source";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
+import {
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import { classifyAdvancedCountFilter } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
@@ -1175,9 +1179,9 @@ async function legacyListPageWithCountMatches(input: {
     ...metadata,
     plan: {
       ...prepared.scopePlan,
-      advancedMatches: {
+      preparedMembership: preparedMembershipFromIds({
         entityIds: input.countEntityIds.map((id) => ({ siteId: SITE_ID, id })),
-      },
+      }),
     },
   });
   const time = input.request.time;
@@ -3055,8 +3059,8 @@ describe("Journey Funnel safe composition diagnostics", () => {
             : deferredVisitorListQualificationFromQuery(forwarded),
         ).toBeDefined();
         expect(
-          (forwarded.scopePlan as { readonly advancedMatches?: unknown })
-            .advancedMatches,
+          (forwarded.scopePlan as { readonly preparedMembership?: unknown })
+            .preparedMembership,
         ).toBeUndefined();
         const nativeCallStart = trace.preparedSql.length;
         const result = await runtime.execute(operation, request as never);
@@ -3371,14 +3375,16 @@ describe("Journey Funnel safe composition diagnostics", () => {
             () => forwardedQuery(countProducerEnv, operation, request),
           );
           const countPlan = countForwarded.scopePlan as {
-            readonly advancedMatches?: {
+            readonly preparedMembership?: {
               readonly entityIds?: readonly {
                 readonly id: string;
                 readonly siteId: string;
               }[];
             };
           };
-          const countRows = countPlan.advancedMatches?.entityIds;
+          const countRows = preparedMembershipIdentities(
+            countPlan.preparedMembership,
+          ).entityIds;
           expect(countRows).toBeDefined();
           if (!countRows)
             throw new Error("journey_funnel_legacy_count_ids_missing");
@@ -3444,9 +3450,9 @@ describe("Journey Funnel safe composition diagnostics", () => {
           expect(
             (
               nativeForwarded.scopePlan as {
-                readonly advancedMatches?: unknown;
+                readonly preparedMembership?: unknown;
               }
-            ).advancedMatches,
+            ).preparedMembership,
           ).toBeUndefined();
           const configuration =
             operation === "visitors"
@@ -3662,8 +3668,8 @@ describe("Journey Funnel safe composition diagnostics", () => {
             ...(outcome === "converted" ? { outcome } : {}),
           });
           expect(
-            (forwarded.scopePlan as { readonly advancedMatches?: unknown })
-              .advancedMatches,
+            (forwarded.scopePlan as { readonly preparedMembership?: unknown })
+              .preparedMembership,
           ).toBeUndefined();
           const nativeCallStart = trace.preparedSql.length;
 
@@ -3820,16 +3826,9 @@ describe("Journey Funnel safe composition diagnostics", () => {
               operation,
               () => forwardedQuery(countProducerEnv, operation, middleRequest),
             );
-            const countRows = (
-              countForwarded.scopePlan as {
-                readonly advancedMatches?: {
-                  readonly entityIds?: readonly {
-                    readonly id: string;
-                    readonly siteId: string;
-                  }[];
-                };
-              }
-            ).advancedMatches?.entityIds;
+            const countRows = preparedMembershipIdentities(
+              (countForwarded.scopePlan as ScopedFilterPlan).preparedMembership,
+            ).entityIds;
             expect(countRows).toBeDefined();
             if (!countRows) throw new Error("dropoff_legacy_count_ids_missing");
             expect(countRows.every(({ siteId }) => siteId === SITE_ID)).toBe(
@@ -3967,9 +3966,9 @@ describe("Journey Funnel safe composition diagnostics", () => {
               expect(
                 (
                   forwarded.scopePlan as {
-                    readonly advancedMatches?: unknown;
+                    readonly preparedMembership?: unknown;
                   }
-                ).advancedMatches,
+                ).preparedMembership,
               ).toBeUndefined();
               expect(readConfiguration(forwarded)?.analysisContext).toEqual(
                 request.analysisContext,

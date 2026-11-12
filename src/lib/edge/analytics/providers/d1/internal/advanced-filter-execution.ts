@@ -26,8 +26,10 @@ import {
   SitePerformanceBreakdownDimensionSchema,
 } from "@/lib/edge/analytics/contract/performance-dimensions";
 import {
-  type AdvancedFilterIdentity,
-  type AdvancedFilterMatches as ScopedAdvancedFilterMatches,
+  isPreparedMembership,
+  type PreparedMembership,
+} from "@/lib/edge/analytics/contract/prepared-membership";
+import {
   attachScopedFilterMetadata,
   createScopedFilterPlan,
   type ScopedFilterMetadata,
@@ -166,6 +168,7 @@ import {
   filterValuesQualificationConfigurationFromQuery,
   filterValuesQualificationConfigurationsEqual,
 } from "./filter-values-qualification-request";
+import { registerPreparedMembership } from "./prepared-membership-relations";
 export { deferredFilterValuesQualificationFromQuery } from "./filter-values-qualification-request";
 import {
   attachGeoPointsQualificationToQuery,
@@ -1159,10 +1162,20 @@ function intersectEvaluationRanges(
   return startMs < endExclusiveMs ? { startMs, endExclusiveMs } : null;
 }
 
+/** Entity identities produced by the Count SQL slice; never part of a plan. */
+interface CountSqlIdentity {
+  readonly siteId: string;
+  readonly id: string;
+}
+
+interface CountSqlMatches {
+  readonly entityIds?: readonly CountSqlIdentity[];
+}
+
 type CountSqlEvaluation =
   | {
       readonly kind: "evaluated";
-      readonly matches: ScopedAdvancedFilterMatches;
+      readonly matches: CountSqlMatches;
     }
   | {
       readonly kind: "legacy";
@@ -1365,7 +1378,7 @@ async function evaluateAdvancedCountSql(input: {
             controls: Object.freeze(payloadControls),
           },
         };
-      const entityIds: AdvancedFilterIdentity[] =
+      const entityIds: CountSqlIdentity[] =
         validateAdvancedFilterCountPayloadCombinedMatches(
           payload.matches,
           combinedSite.siteId,
@@ -1421,7 +1434,7 @@ async function evaluateAdvancedCountSql(input: {
             fieldIds: combined.numericCompatibilityFieldIds,
           },
         };
-      const entityIds: AdvancedFilterIdentity[] =
+      const entityIds: CountSqlIdentity[] =
         validateAdvancedFilterCountCombinedMatches(
           combined.matches,
           combinedSite.siteId,
@@ -1582,7 +1595,7 @@ async function evaluateAdvancedCountSql(input: {
   if (activeSites.length === 0)
     return { kind: "evaluated", matches: { entityIds: [] } };
 
-  const entityIds: AdvancedFilterIdentity[] = [];
+  const entityIds: CountSqlIdentity[] = [];
   for (const group of preparedGroups) {
     if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
     const result = await queryAdvancedFilterCountMatches({
@@ -1803,28 +1816,15 @@ async function evaluateForSites(input: {
   readonly diagnostics?: D1ReadDiagnostics;
   readonly signal?: AbortSignal;
   readonly coverage?: ReadonlyMap<string, number>;
-}): Promise<ScopedAdvancedFilterMatches> {
+}): Promise<PreparedMembership> {
   const matches = await evaluateForSitesCore(input);
-  const asIdentity = (
-    match: QualificationMatchRow,
-  ): AdvancedFilterIdentity => ({
-    siteId: match.siteId,
-    id: match.id,
+  // The evaluated identities become physical relations registered behind an
+  // opaque handle; the plan only ever carries that handle.
+  return registerPreparedMembership({
+    siteIds: input.siteIds,
+    mode: input.plan.mode,
+    matches,
   });
-  return input.plan.scope === "event"
-    ? {
-        visitIds: matches
-          .filter((match) => match.kind === "visit")
-          .map(asIdentity),
-        eventIds: matches
-          .filter((match) => match.kind === "event")
-          .map(asIdentity),
-      }
-    : {
-        entityIds: matches
-          .filter((match) => match.kind === "entity")
-          .map(asIdentity),
-      };
 }
 
 function sameRange(
@@ -2269,7 +2269,7 @@ function comparisonSideCanBeQualified(
   const metadata = scopedFilterMetadata(filters);
   if (
     !metadata ||
-    metadata.plan.advancedMatches !== undefined ||
+    metadata.plan.preparedMembership !== undefined ||
     (metadata.plan.scope !== "session" && metadata.plan.scope !== "visitor") ||
     metadata.siteIds.length !== 1 ||
     metadata.siteIds[0] !== siteId ||
@@ -2531,7 +2531,9 @@ function scopePlanRequestSnapshot(plan: ScopedFilterPlan | undefined) {
     expansion: plan.expansion,
     requiredSources: [...plan.requiredSources].sort(),
     requiresRawSource: plan.requiresRawSource,
-    ...(plan.advancedMatches ? { advancedMatches: plan.advancedMatches } : {}),
+    ...(plan.preparedMembership
+      ? { preparedMembership: plan.preparedMembership.id }
+      : {}),
   };
 }
 
@@ -2544,7 +2546,7 @@ function safeScopePlanRequestSnapshot(value: unknown): unknown {
   const expansion = readOwnDataProperty(value, "expansion");
   const requiredSources = readOwnDataProperty(value, "requiredSources");
   const requiresRawSource = readOwnDataProperty(value, "requiresRawSource");
-  const advancedMatches = readOwnDataProperty(value, "advancedMatches");
+  const preparedMembership = readOwnDataProperty(value, "preparedMembership");
   if (
     !scope.valid ||
     !mode.valid ||
@@ -2552,7 +2554,7 @@ function safeScopePlanRequestSnapshot(value: unknown): unknown {
     !expansion.valid ||
     !requiredSources.valid ||
     !requiresRawSource.valid ||
-    !advancedMatches.valid ||
+    !preparedMembership.valid ||
     !(requiredSources.value instanceof Set)
   )
     return undefined;
@@ -2566,14 +2568,16 @@ function safeScopePlanRequestSnapshot(value: unknown): unknown {
   }
   if (required.some((entry) => typeof entry !== "string")) return undefined;
   required.sort((left, right) => String(left).localeCompare(String(right)));
-  const advancedSnapshot = advancedMatches.present
-    ? snapshotOwnDataValue(advancedMatches.value)
-    : undefined;
+  // Only the handle's label enters a request snapshot; a foreign object that
+  // merely looks like a handle makes the whole snapshot invalid.
   if (
-    advancedSnapshot !== undefined &&
-    isInvalidOverviewSnapshot(advancedSnapshot)
+    preparedMembership.present &&
+    !isPreparedMembership(preparedMembership.value)
   )
     return undefined;
+  const preparedSnapshot = preparedMembership.present
+    ? (preparedMembership.value as PreparedMembership).id
+    : undefined;
   const snapshot = snapshotOwnDataValue({
     scope: scope.value,
     mode: mode.value,
@@ -2581,7 +2585,9 @@ function safeScopePlanRequestSnapshot(value: unknown): unknown {
     expansion: expansion.value,
     requiredSources: required.sort(),
     requiresRawSource: requiresRawSource.value,
-    ...(advancedMatches.present ? { advancedMatches: advancedSnapshot } : {}),
+    ...(preparedMembership.present
+      ? { preparedMembership: preparedSnapshot }
+      : {}),
   });
   return isInvalidOverviewSnapshot(snapshot) ? undefined : snapshot;
 }
@@ -5534,7 +5540,7 @@ async function prepareDeferredEventQualification(input: {
   const metadata = scopedFilterMetadata(filters);
   if (
     !metadata ||
-    metadata.plan.advancedMatches !== undefined ||
+    metadata.plan.preparedMembership !== undefined ||
     (metadata.plan.scope !== "session" &&
       metadata.plan.scope !== "visitor" &&
       !(metadata.plan.scope === "event" && eventCandidateRequest)) ||
@@ -7587,7 +7593,7 @@ export async function prepareDeferredPageVisitQualification(
     deferred.metadata.plan.scope !== "event" ||
     deferred.metadata.plan.mode !== "observation" ||
     deferred.metadata.plan.membership.kind === "entity" ||
-    deferred.metadata.plan.advancedMatches !== undefined ||
+    deferred.metadata.plan.preparedMembership !== undefined ||
     !sameCandidateReadAndFilterWindow(deferred.time) ||
     !sameCandidateReadAndFilterWindow(queryTime) ||
     JSON.stringify(semanticTemporalDomainsFromQueryTime(deferred.time)) !==
@@ -7663,7 +7669,7 @@ async function prepareDeferredEntityPageQualification(
     plan.mode !== "entity" ||
     plan.scope === "event" ||
     plan.membership.kind !== "entity" ||
-    plan.advancedMatches !== undefined ||
+    plan.preparedMembership !== undefined ||
     deferred.countInput.scope !== plan.scope ||
     deferred.subject.origin !== "site" ||
     deferred.subject.siteIds.length !== 1 ||
@@ -7794,7 +7800,7 @@ export async function prepareDeferredEventMembershipQualification(
         deferred.metadata.plan.scope !== "event" ||
         deferred.metadata.plan.mode !== "observation" ||
         deferred.metadata.plan.membership.kind === "entity") ||
-    deferred.metadata.plan.advancedMatches !== undefined ||
+    deferred.metadata.plan.preparedMembership !== undefined ||
     !sameCandidateReadAndFilterWindow(deferred.time) ||
     filtersUseSequenceSemantics(deferred.filters)
   )
@@ -7858,7 +7864,7 @@ export async function prepareDeferredReferrersSummaryQualification(
     deferred.metadata.plan.scope !== "event" ||
     deferred.metadata.plan.mode !== "observation" ||
     deferred.metadata.plan.membership.kind === "entity" ||
-    deferred.metadata.plan.advancedMatches !== undefined ||
+    deferred.metadata.plan.preparedMembership !== undefined ||
     !sameCandidateReadAndFilterWindow(deferred.time) ||
     filtersUseSequenceSemantics(deferred.filters)
   )
@@ -7956,7 +7962,7 @@ export async function prepareDeferredEventQualificationFallback(
   )
     throw new Error("deferred_event_qualification_untrusted");
   if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-  const advancedMatches = await evaluateForSites({
+  const preparedMembership = await evaluateForSites({
     env: deferred.env,
     subject: deferred.subject,
     siteIds: [deferred.siteId],
@@ -7970,7 +7976,7 @@ export async function prepareDeferredEventQualificationFallback(
   if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
   return attachScopedFilterMetadata(deferred.filters, {
     ...deferred.metadata,
-    plan: { ...deferred.metadata.plan, advancedMatches },
+    plan: { ...deferred.metadata.plan, preparedMembership },
   });
 }
 
@@ -8046,8 +8052,8 @@ function prepareSide(
     time,
     diagnostics,
     signal,
-  }).then((advancedMatches: ScopedAdvancedFilterMatches) => {
-    const plan = { ...metadata.plan, advancedMatches };
+  }).then((preparedMembership: PreparedMembership) => {
+    const plan = { ...metadata.plan, preparedMembership };
     return {
       side: {
         ...side,

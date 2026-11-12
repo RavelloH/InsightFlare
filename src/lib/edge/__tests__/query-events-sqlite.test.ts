@@ -42,6 +42,10 @@ import {
 import { queryEventAnalyticsContextCardsParentOracleFromD1 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/event-context-parent-oracle";
 import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
 import { buildEventFilteredSourceCte } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import {
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import {
   buildTimeBuckets,
@@ -1483,9 +1487,9 @@ describe("event detail D1 SQL", () => {
       )!;
       const observationPlan = {
         ...observationMetadata.plan,
-        advancedMatches: {
+        preparedMembership: preparedMembershipFromIds({
           eventIds: [{ siteId, id: "event-1" }],
-        },
+        }),
       };
       const observationFilters = attachScopedFilterMetadata(
         observationPrepared.filters!,
@@ -1513,9 +1517,9 @@ describe("event detail D1 SQL", () => {
       const entityMetadata = scopedFilterMetadata(entityPrepared.filters)!;
       const entityPlan = {
         ...entityMetadata.plan,
-        advancedMatches: {
+        preparedMembership: preparedMembershipFromIds({
           entityIds: [{ siteId, id: "session-1" }],
-        },
+        }),
       };
       const entityFilters = attachScopedFilterMetadata(
         entityPrepared.filters!,
@@ -1653,14 +1657,14 @@ describe("event detail D1 SQL", () => {
         ...metadata,
         plan: {
           ...prepared.scopePlan,
-          advancedMatches: {
+          preparedMembership: preparedMembershipFromIds({
             visitIds: [{ siteId, id: "visit-1" }],
             eventIds: [
               { siteId, id: "event-1" },
               { siteId, id: "event-other-name" },
               { siteId, id: "event-1" },
             ],
-          },
+          }),
         },
       });
       d1.calls.length = 0;
@@ -2627,7 +2631,7 @@ describe("event detail D1 SQL", () => {
         ...metadata,
         plan: {
           ...prepared.scopePlan!,
-          advancedMatches: {
+          preparedMembership: preparedMembershipFromIds({
             eventIds: [
               { siteId, id: "event-1" },
               { siteId, id: "event-1" },
@@ -2637,7 +2641,7 @@ describe("event detail D1 SQL", () => {
                 id: `event-unmatched-${index}`,
               })),
             ],
-          },
+          }),
         },
       });
       const emptyIdentityFilters = attachScopedFilterMetadata(
@@ -2646,7 +2650,7 @@ describe("event detail D1 SQL", () => {
           ...metadata,
           plan: {
             ...prepared.scopePlan!,
-            advancedMatches: { eventIds: [] },
+            preparedMembership: preparedMembershipFromIds({ eventIds: [] }),
           },
         },
       );
@@ -4258,9 +4262,9 @@ describe("event detail D1 SQL", () => {
         ...metadata,
         plan: {
           ...prepared.scopePlan!,
-          advancedMatches: {
+          preparedMembership: preparedMembershipFromIds({
             eventIds: [...overviewIdentityIds.map((id) => ({ siteId, id }))],
-          },
+          }),
         },
       });
       const identityStart = d1.calls.length;
@@ -4313,7 +4317,7 @@ describe("event detail D1 SQL", () => {
         ...metadata,
         plan: {
           ...prepared.scopePlan!,
-          advancedMatches: { eventIds: [] },
+          preparedMembership: preparedMembershipFromIds({ eventIds: [] }),
         },
       });
       const emptyStart = d1.calls.length;

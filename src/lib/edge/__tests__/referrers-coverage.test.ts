@@ -14,12 +14,18 @@ import {
   scopedFilterMetadata,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
+import type { PreparedMembership } from "@/lib/edge/analytics/contract/prepared-membership";
 import { scopedDatasetFor } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
 import { buildVisitFilterSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-filters";
 import {
   buildVisitSourceCte,
   visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import {
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+  toPreparedMembership,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
   createD1ReadDiagnostics,
@@ -534,7 +540,7 @@ function eventNameFilter(): FilterDocument {
 
 function preparedFilters(
   scopePreference: "event" | "session" | "visitor",
-  advancedMatches?: {
+  preparedMembership?: {
     readonly visitIds?: readonly { siteId: string; id: string }[];
     readonly entityIds?: readonly { siteId: string; id: string }[];
   },
@@ -555,10 +561,13 @@ function preparedFilters(
   const metadata = scopedFilterMetadata(prepared.filters);
   if (!prepared.filters || !metadata)
     throw new Error(`wave44_prepared_${scopePreference}_incomplete`);
-  return advancedMatches
+  return preparedMembership
     ? attachScopedFilterMetadata(prepared.filters, {
         ...metadata,
-        plan: { ...metadata.plan, advancedMatches },
+        plan: {
+          ...metadata.plan,
+          preparedMembership: toPreparedMembership(preparedMembership),
+        },
       })
     : prepared.filters;
 }
@@ -977,12 +986,12 @@ describe("Wave44 referrer report migration", () => {
       ...metadata,
       plan: {
         ...metadata.plan,
-        advancedMatches: {
+        preparedMembership: preparedMembershipFromIds({
           visitIds: Array.from({ length: 128 }, (_, index) => ({
             siteId,
             id: `wide-referrer-visit-${index}`,
           })),
-        },
+        }),
       },
     });
 

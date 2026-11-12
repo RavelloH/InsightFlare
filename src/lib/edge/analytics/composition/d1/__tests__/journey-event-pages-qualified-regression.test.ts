@@ -646,7 +646,7 @@ async function captureLegacyReaderPages(input: {
       paginationScope: effectiveScopeForPagination(filters),
       resolvedScope: scopedFilterMetadata(filters)?.resolvedScope,
     };
-    if (!scopedFilterMetadata(filters)?.plan.advancedMatches)
+    if (!scopedFilterMetadata(filters)?.plan.preparedMembership)
       throw new Error("journey_event_page_legacy_matches_missing");
     const producerCalls = callsSince(trace, producerOffset);
 
@@ -1325,10 +1325,10 @@ describe("Journey visitor/session Events qualified runtime", () => {
         expect(request).toBeDefined();
         requestConfiguration = request?.configuration;
         advancedMatchesPresent =
-          request?.qualification.requestScopePlan?.advancedMatches !==
+          request?.qualification.requestScopePlan?.preparedMembership !==
             undefined ||
           scopedFilterMetadata(request?.qualification.filters)?.plan
-            .advancedMatches !== undefined;
+            .preparedMembership !== undefined;
         expect(request?.configuration.filterMode).toBe("allow-whole-filter");
         expect(advancedMatchesPresent).toBe(false);
       } finally {
@@ -2011,7 +2011,6 @@ describe("Journey visitor/session Events qualified runtime", () => {
             (values) =>
               values.includes("visitor") || values.includes("session"),
           );
-        expect(tokens(legacyTrace.bindings.slice(-1))).toBe(true);
         expect(tokens(trace.bindings.slice(-1))).toBe(false);
       } finally {
         database.close();

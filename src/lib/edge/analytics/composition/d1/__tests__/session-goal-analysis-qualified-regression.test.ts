@@ -38,6 +38,10 @@ import {
 } from "@/lib/edge/analytics/engine/journey-session-list-qualification-plan";
 import { PAGE_DIMENSION_QUALIFICATION_CONTROL_OUTPUT } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
+import {
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { queryD1CompiledAll } from "@/lib/edge/analytics/providers/d1/internal/core";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
@@ -596,8 +600,8 @@ async function readLegacyPage(input: {
   if (!forwarded?.filters)
     throw new Error("session_goal_legacy_count_bridge_missing");
   const metadata = scopedFilterMetadata(forwarded.filters);
-  const advancedMatches = metadata?.plan.advancedMatches;
-  const entityIds = advancedMatches?.entityIds;
+  const preparedMembership = metadata?.plan.preparedMembership;
+  const entityIds = preparedMembershipIdentities(preparedMembership).entityIds;
   expect(
     sessionListQualificationRequest.deferredSessionListQualificationFromQuery(
       forwarded,
@@ -651,7 +655,7 @@ async function readLegacyPage(input: {
           requestedScope: metadata?.requestedScope,
           resolvedScope: metadata?.resolvedScope,
           siteIds: metadata?.siteIds,
-          advancedMatches: { entityIds },
+          preparedMembership: preparedMembershipFromIds({ entityIds }),
         },
       },
       request: {

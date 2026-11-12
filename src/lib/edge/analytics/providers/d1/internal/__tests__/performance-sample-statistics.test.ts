@@ -56,6 +56,10 @@ import {
   queryPerformanceDashboardFromD1 as queryParentDashboard,
   queryPerformanceRoutesFromD1 as queryParentRoutes,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/performance-parent-oracle";
+import {
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import { queryAnalyticsReportOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import type {
   PerformanceMetricKey,
@@ -767,12 +771,12 @@ function preparedPageMatches(visitCount = 128): FilterDocument {
     ...metadata,
     plan: {
       ...prepared.scopePlan,
-      advancedMatches: {
+      preparedMembership: preparedMembershipFromIds({
         visitIds: Array.from({ length: visitCount }, (_unused, index) => ({
           siteId: SITE_ID,
           id: `wave59-prepared-page-${index}`,
         })),
-      },
+      }),
     },
   });
 }

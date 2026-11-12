@@ -65,8 +65,8 @@ const sqlEvidence: Array<Record<string, unknown>> = [];
 const nativeEvidence: Array<Record<string, unknown>> = [];
 const evidenceDirectory = process.env.INSIGHTFLARE_QUERY_EVIDENCE_DIR?.trim();
 const nativePreimageSha256 = {
-  aggregate: "7ab168b84310d60ccd4868c8c9e2964fd712c5876d0d433b51509cbab95edbd3",
-  trend: "f18d5c979a8cfdeb09f2d524d543e3e9d0efcda3bcd325714973a45a0bc5eaa2",
+  aggregate: "de0910f7bd3dddefa489519ce0df4a723152264581b02e0c4d51ca0d08534885",
+  trend: "1238efa70557ac4dc6187a93af98aba7a67eb6bea74c4af2ff1853e7aa203a38",
 } as const;
 
 interface TestSite {
@@ -385,7 +385,12 @@ function nativePlanSnapshot(
     sql: query.sql,
     bindings: [...(query.bindings ?? [])],
   };
-  const serialized = JSON.stringify(snapshot);
+  // Prepared memberships carry a process-local label; normalize it so the
+  // pinned preimage does not depend on how many memberships ran before.
+  const serialized = JSON.stringify(snapshot).replace(
+    /prepared-membership-d+/g,
+    "prepared-membership",
+  );
   return {
     sha256: createHash("sha256").update(serialized).digest("hex"),
     snapshot,
@@ -437,7 +442,7 @@ async function legacyOracle(
     FilterDocument | undefined;
   if (!filters) throw new Error("wave96f_legacy_oracle_filters_missing");
   const metadata = scopedFilterMetadata(filters);
-  if (!metadata?.plan.advancedMatches)
+  if (!metadata?.plan.preparedMembership)
     throw new Error("wave96f_legacy_oracle_advanced_matches_missing");
   const reader = createOverviewReader(env, SITE, diagnostics);
   const result =
@@ -547,7 +552,7 @@ describe("qualified D1 Overview and Trend", () => {
       expect(actualTrace.preparedSql).toHaveLength(2);
       expect(actualDiagnostics.advancedCountSqlFallbackReason).toBeUndefined();
       expect(
-        scopedFilterMetadata(legacy.filters)?.plan.advancedMatches,
+        scopedFilterMetadata(legacy.filters)?.plan.preparedMembership,
       ).toBeDefined();
       expect(
         deferredOverviewTrendQualificationFromQuery(
@@ -614,7 +619,7 @@ describe("qualified D1 Overview and Trend", () => {
           }),
         ),
         legacyAdvancedMatches: scopedFilterMetadata(legacy.filters)?.plan
-          .advancedMatches,
+          .preparedMembership,
         reportTime: query.time,
         controlMetadata: {
           reportSources: ["page", "event"],
@@ -738,7 +743,7 @@ describe("qualified D1 Overview and Trend", () => {
         controlOutput: "overview-trend-qualification-controls",
       },
       legacyAdvancedMatches: scopedFilterMetadata(legacy.filters)?.plan
-        .advancedMatches,
+        .preparedMembership,
     });
     sqlEvidence.push({
       operation: "trend",
@@ -769,7 +774,7 @@ describe("qualified D1 Overview and Trend", () => {
         controlOutput: "overview-trend-qualification-controls",
       },
       legacyAdvancedMatches: scopedFilterMetadata(legacyTrend.filters)?.plan
-        .advancedMatches,
+        .preparedMembership,
     });
   });
 
@@ -849,7 +854,7 @@ describe("qualified D1 Overview and Trend", () => {
           }),
         ),
         legacyAdvancedMatches: scopedFilterMetadata(aggregateLegacy.filters)
-          ?.plan.advancedMatches,
+          ?.plan.preparedMembership,
       },
       {
         operation: "trend",
@@ -877,7 +882,7 @@ describe("qualified D1 Overview and Trend", () => {
           }),
         ),
         legacyAdvancedMatches: scopedFilterMetadata(trendLegacy.filters)?.plan
-          .advancedMatches,
+          .preparedMembership,
       },
     );
   });
@@ -938,7 +943,7 @@ describe("qualified D1 Overview and Trend", () => {
         }),
       ),
       legacyAdvancedMatches: scopedFilterMetadata(legacy.filters)?.plan
-        .advancedMatches,
+        .preparedMembership,
     });
   });
 

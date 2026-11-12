@@ -26,6 +26,7 @@ import {
   siteQueryContext,
   teamQueryContext,
 } from "@/lib/edge/analytics/contract";
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { SiteId, TeamId } from "@/lib/edge/analytics/contract/types";
 import {
   buildAdvancedCountFilterGuardPlan,
@@ -35,6 +36,10 @@ import { ADVANCED_FILTER_EXACT_AGGREGATE_VALUE_LIMIT } from "@/lib/edge/analytic
 import { advancedCountSelectorField } from "@/lib/edge/analytics/engine/semantic/count-selector-fields";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import {
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import { queryAdvancedFilterActivityRange } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-activity-query";
 import {
   compileAdvancedFilterCountGuardQuery,
@@ -900,7 +905,10 @@ async function evaluateAdvancedCountFixture(
       input,
       async (value) => value,
     )) as typeof input;
-    const d1 = (prepared.scopePlan?.advancedMatches?.entityIds ?? [])
+    const d1 = (
+      preparedMembershipIdentities(prepared.scopePlan?.preparedMembership)
+        .entityIds ?? []
+    )
       .map((identity) => identity.id)
       .sort();
 
@@ -1154,7 +1162,10 @@ async function evaluateSharedFixture(request: SharedFilterRequest): Promise<{
       async (prepared) => prepared,
     );
     const prepared = output as typeof input;
-    const d1Ids = (prepared.scopePlan?.advancedMatches?.entityIds ?? [])
+    const d1Ids = (
+      preparedMembershipIdentities(prepared.scopePlan?.preparedMembership)
+        .entityIds ?? []
+    )
       .map((item) => item.id)
       .sort();
 
@@ -1277,7 +1288,10 @@ describe("D1 advanced filter execution", () => {
           async (input) => input,
         )) as ReturnType<typeof advancedFilterInput>;
 
-        expect(output.scopePlan?.advancedMatches?.entityIds).toEqual([]);
+        expect(
+          preparedMembershipIdentities(output.scopePlan?.preparedMembership)
+            .entityIds,
+        ).toEqual([]);
         expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
           kind: "site-identity-mismatch",
         });
@@ -1338,7 +1352,10 @@ describe("D1 advanced filter execution", () => {
         async (input) => input,
       )) as ReturnType<typeof advancedFilterInput>;
 
-      expect(output.scopePlan?.advancedMatches?.entityIds).toEqual([]);
+      expect(
+        preparedMembershipIdentities(output.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([]);
       expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
         kind: "site-identity-mismatch",
       });
@@ -1396,9 +1413,10 @@ describe("D1 advanced filter execution", () => {
         request(),
         async (input) => input,
       )) as ReturnType<typeof advancedFilterInput>;
-      expect(first.scopePlan?.advancedMatches?.entityIds).toEqual([
-        { siteId: SITE_ID, id: "combined-snapshot-session" },
-      ]);
+      expect(
+        preparedMembershipIdentities(first.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([{ siteId: SITE_ID, id: "combined-snapshot-session" }]);
       expect(mutated).toBe(true);
       expect(firstDiagnostics.advancedCountSqlFallbackReason).toBeUndefined();
       expect(
@@ -1411,7 +1429,10 @@ describe("D1 advanced filter execution", () => {
         request(),
         async (input) => input,
       )) as ReturnType<typeof advancedFilterInput>;
-      expect(second.scopePlan?.advancedMatches?.entityIds).toEqual([]);
+      expect(
+        preparedMembershipIdentities(second.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([]);
       expect(secondDiagnostics.advancedCountSqlFallbackReason).toEqual({
         kind: "numeric-data-domain",
         fieldIds: ["page.durationMs"],
@@ -1465,7 +1486,10 @@ describe("D1 advanced filter execution", () => {
         async (input) => input,
       )) as ReturnType<typeof advancedFilterInput>;
 
-      expect(output.scopePlan?.advancedMatches?.entityIds).toEqual([]);
+      expect(
+        preparedMembershipIdentities(output.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([]);
       expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
         kind: "numeric-data-domain",
         fieldIds: ["page.durationMs"],
@@ -1523,7 +1547,10 @@ describe("D1 advanced filter execution", () => {
         async (input) => input,
       )) as ReturnType<typeof advancedFilterInput>;
 
-      expect(output.scopePlan?.advancedMatches?.entityIds).toEqual([]);
+      expect(
+        preparedMembershipIdentities(output.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([]);
       expect(diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
       expect(evaluatorSpy).not.toHaveBeenCalled();
       const guard = capturedQueries.find(({ rows }) =>
@@ -1625,7 +1652,10 @@ describe("D1 advanced filter execution", () => {
         async (input) => input,
       )) as ReturnType<typeof advancedFilterTeamInput>;
 
-      expect(output.scopePlan?.advancedMatches?.entityIds).toEqual([]);
+      expect(
+        preparedMembershipIdentities(output.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([]);
       expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
         kind: "site-identity-mismatch",
       });
@@ -1664,9 +1694,10 @@ describe("D1 advanced filter execution", () => {
         advancedFilterTeamInput(time, siteIds),
         async (input) => input,
       )) as ReturnType<typeof advancedFilterTeamInput>;
-      expect(first.scopePlan?.advancedMatches?.entityIds).toEqual([
-        { siteId: tailSiteId, id: "same-raw-session-id" },
-      ]);
+      expect(
+        preparedMembershipIdentities(first.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([{ siteId: tailSiteId, id: "same-raw-session-id" }]);
       expect(evaluatorSpy).not.toHaveBeenCalled();
       const firstQueries = [...queries];
       expect(firstQueries.filter((sql) => /rawCount/iu.test(sql))).toHaveLength(
@@ -1689,7 +1720,10 @@ describe("D1 advanced filter execution", () => {
         advancedFilterTeamInput(time, siteIds, "count(page) gte 2"),
         async (input) => input,
       )) as ReturnType<typeof advancedFilterTeamInput>;
-      expect(second.scopePlan?.advancedMatches?.entityIds).toEqual([]);
+      expect(
+        preparedMembershipIdentities(second.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([]);
       expect(evaluatorSpy).not.toHaveBeenCalled();
     } finally {
       evaluatorSpy.mockRestore();
@@ -1731,7 +1765,10 @@ describe("D1 advanced filter execution", () => {
         advancedFilterTeamInput(time, siteIds, filterDsl),
         async (input) => input,
       )) as ReturnType<typeof advancedFilterTeamInput>;
-      expect(supported.scopePlan?.advancedMatches?.entityIds).toEqual([]);
+      expect(
+        preparedMembershipIdentities(supported.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([]);
       expect(evaluatorSpy).not.toHaveBeenCalled();
       expect(
         queries.some(
@@ -1749,7 +1786,11 @@ describe("D1 advanced filter execution", () => {
         ),
         async (input) => input,
       )) as ReturnType<typeof advancedFilterTeamInput>;
-      expect(compatibility.scopePlan?.advancedMatches?.entityIds).toEqual([]);
+      expect(
+        preparedMembershipIdentities(
+          compatibility.scopePlan?.preparedMembership,
+        ).entityIds,
+      ).toEqual([]);
       expect(evaluatorSpy).toHaveBeenCalled();
     } finally {
       evaluatorSpy.mockRestore();
@@ -2049,9 +2090,10 @@ describe("D1 advanced filter execution", () => {
         input,
         async (prepared) => prepared,
       )) as typeof input;
-      expect(output.scopePlan.advancedMatches?.entityIds).toEqual([
-        { siteId: SITE_ID, id: "session-limit" },
-      ]);
+      expect(
+        preparedMembershipIdentities(output.scopePlan.preparedMembership)
+          .entityIds,
+      ).toEqual([{ siteId: SITE_ID, id: "session-limit" }]);
       expect(
         queries.filter((sql) => /custom_event_names/iu.test(sql)),
       ).toHaveLength(3);
@@ -4711,7 +4753,10 @@ ${result.queries.join("\n")}`,
         kind: "numeric-data-domain",
         fieldIds: ["page.durationMs"],
       });
-      expect(output.scopePlan?.advancedMatches?.entityIds).toEqual([]);
+      expect(
+        preparedMembershipIdentities(output.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([]);
       expect(evaluatorSpy).toHaveBeenCalledTimes(1);
     } finally {
       evaluatorSpy.mockRestore();
@@ -5295,7 +5340,10 @@ ${result.queries.join("\n")}`,
         kind: "numeric-data-domain",
         fieldIds: ["page.durationMs"],
       });
-      expect(output.scopePlan?.advancedMatches?.entityIds).toEqual([]);
+      expect(
+        preparedMembershipIdentities(output.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([]);
       expect(evaluatorSpy).toHaveBeenCalledTimes(1);
       const guard = capturedQueries.find(({ rows }) =>
         rows.some((row) => "rawCount" in row),
@@ -5381,7 +5429,10 @@ ${result.queries.join("\n")}`,
         kind: "numeric-data-domain",
         fieldIds: ["page.durationMs"],
       });
-      expect(output.scopePlan?.advancedMatches?.entityIds).toEqual([]);
+      expect(
+        preparedMembershipIdentities(output.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([]);
       expect(evaluatorSpy).toHaveBeenCalledTimes(1);
       const guard = capturedQueries.find(({ rows }) =>
         rows.some((row) => "rawCount" in row),
@@ -5492,7 +5543,10 @@ ${result.queries.join("\n")}`,
         kind: "numeric-data-domain",
         fieldIds: ["page.durationMs"],
       });
-      expect(output.scopePlan?.advancedMatches?.entityIds).toEqual([]);
+      expect(
+        preparedMembershipIdentities(output.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([]);
       expect(evaluatorSpy).toHaveBeenCalledTimes(1);
     } finally {
       evaluatorSpy.mockRestore();
@@ -5727,7 +5781,8 @@ ${result.queries.join("\n")}`,
         rows.some((row) => row.rowKind === "numeric-domain"),
       );
       const outputIdentities =
-        output.scopePlan?.advancedMatches?.entityIds ?? [];
+        preparedMembershipIdentities(output.scopePlan?.preparedMembership)
+          .entityIds ?? [];
 
       expect(changedAfterGuards).toBe(true);
       expect(guardResponses).toHaveLength(2);
@@ -5901,7 +5956,10 @@ ${result.queries.join("\n")}`,
         expect(matcher?.rows.filter((row) => row.rowKind === "match")).toEqual(
           [],
         );
-        expect(output.scopePlan?.advancedMatches?.entityIds).toEqual([]);
+        expect(
+          preparedMembershipIdentities(output.scopePlan?.preparedMembership)
+            .entityIds,
+        ).toEqual([]);
         expect(evaluatorSpy).toHaveBeenCalledTimes(1);
       } finally {
         evaluatorSpy.mockRestore();
@@ -6042,7 +6100,10 @@ ${result.queries.join("\n")}`,
         expect(matcher?.rows.filter((row) => row.rowKind === "match")).toEqual(
           [],
         );
-        expect(output.scopePlan?.advancedMatches?.entityIds).toEqual([]);
+        expect(
+          preparedMembershipIdentities(output.scopePlan?.preparedMembership)
+            .entityIds,
+        ).toEqual([]);
         expect(evaluatorSpy).toHaveBeenCalledTimes(1);
       } finally {
         evaluatorSpy.mockRestore();
@@ -6543,9 +6604,10 @@ ${result.queries.join("\n")}`,
         async (input) => input,
       )) as ReturnType<typeof advancedFilterTeamInput>;
 
-      expect(output.scopePlan?.advancedMatches?.entityIds).toEqual([
-        { siteId: siteIds[1], id: "single-bag-candidate-session" },
-      ]);
+      expect(
+        preparedMembershipIdentities(output.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([{ siteId: siteIds[1], id: "single-bag-candidate-session" }]);
       expect(evaluatorSpy).not.toHaveBeenCalled();
       const matcher = queries.find(
         (sql) => /\bGROUP BY\b/iu.test(sql) && /\bSUM\s*\(/iu.test(sql),
@@ -6581,9 +6643,10 @@ ${result.queries.join("\n")}`,
         async (input) => input,
       )) as ReturnType<typeof advancedFilterTeamInput>;
 
-      expect(output.scopePlan?.advancedMatches?.entityIds).toEqual([
-        { siteId: siteIds[1], id: "late-created-candidate-session" },
-      ]);
+      expect(
+        preparedMembershipIdentities(output.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([{ siteId: siteIds[1], id: "late-created-candidate-session" }]);
       expect(evaluatorSpy).not.toHaveBeenCalled();
       const matcher = queries.find(
         (sql) => /\bGROUP BY\b/iu.test(sql) && /\bSUM\s*\(/iu.test(sql),
@@ -6697,9 +6760,10 @@ ${result.queries.join("\n")}`,
 
         expect(evaluatorSpy).not.toHaveBeenCalled();
         expect(diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
-        expect(prepared.scopePlan?.advancedMatches?.entityIds).toEqual([
-          { siteId: SITE_ID, id: "binary64-session" },
-        ]);
+        expect(
+          preparedMembershipIdentities(prepared.scopePlan?.preparedMembership)
+            .entityIds,
+        ).toEqual([{ siteId: SITE_ID, id: "binary64-session" }]);
         const matcherStatements = queries.slice(queryOffset);
         expect(matcherStatements).toHaveLength(2);
         const matcher = matcherStatements.find(
@@ -6835,11 +6899,12 @@ ${result.queries.join("\n")}`,
         rawCount: 2,
         nullActivityIdCount: 1,
       });
-      expect(middlewareResult).toMatchObject({
-        scopePlan: {
-          advancedMatches: { entityIds: [{ id: "null-id-session" }] },
-        },
-      });
+      expect(
+        preparedMembershipIdentities(
+          (middlewareResult as { scopePlan?: ScopedFilterPlan }).scopePlan
+            ?.preparedMembership,
+        ).entityIds,
+      ).toEqual([expect.objectContaining({ id: "null-id-session" })]);
 
       const subject = createSemanticSubjectDomain({
         origin: "team",
@@ -6961,9 +7026,10 @@ ${result.queries.join("\n")}`,
         async (input) => input,
       )) as ReturnType<typeof advancedFilterInput>;
 
-      expect(output.scopePlan?.advancedMatches?.entityIds).toEqual([
-        { siteId: SITE_ID, id: "null-numeric-session" },
-      ]);
+      expect(
+        preparedMembershipIdentities(output.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([{ siteId: SITE_ID, id: "null-numeric-session" }]);
       expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
         kind: "null-activity-id",
       });
@@ -7026,9 +7092,10 @@ ${result.queries.join("\n")}`,
         async (input) => input,
       )) as ReturnType<typeof advancedFilterInput>;
 
-      expect(prepared.scopePlan?.advancedMatches?.entityIds).toEqual([
-        { siteId: SITE_ID, id: "large-count-pass-session" },
-      ]);
+      expect(
+        preparedMembershipIdentities(prepared.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([{ siteId: SITE_ID, id: "large-count-pass-session" }]);
       expect(evaluatorSpy).toHaveBeenCalledTimes(1);
       expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
         kind: "compile-budget",
@@ -7096,9 +7163,10 @@ ${result.queries.join("\n")}`,
         ),
         async (input) => input,
       )) as ReturnType<typeof advancedFilterInput>;
-      expect(prepared.scopePlan?.advancedMatches?.entityIds).toEqual([
-        { siteId: SITE_ID, id: "near-budget-session" },
-      ]);
+      expect(
+        preparedMembershipIdentities(prepared.scopePlan?.preparedMembership)
+          .entityIds,
+      ).toEqual([{ siteId: SITE_ID, id: "near-budget-session" }]);
       expect(evaluatorSpy).not.toHaveBeenCalled();
       expect(diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
       const matcher = capturedQueries.find(({ sql }) => /GROUP BY/iu.test(sql));
@@ -7241,9 +7309,9 @@ ${result.queries.join("\n")}`,
       );
       const prepared = output as typeof input;
       const resolvedPlan = prepared.scopePlan!;
-      expect(resolvedPlan.advancedMatches?.entityIds).toEqual([
-        { siteId: SITE_ID, id: "session-a" },
-      ]);
+      expect(
+        preparedMembershipIdentities(resolvedPlan.preparedMembership).entityIds,
+      ).toEqual([{ siteId: SITE_ID, id: "session-a" }]);
 
       const compiled = compileScopedDatasetSql({
         filters: prepared.filters!,
@@ -7273,7 +7341,10 @@ ${result.queries.join("\n")}`,
         capturedAtMs: 25_000,
       });
       expect([...mockResult.sessions]).toEqual(
-        (resolvedPlan.advancedMatches?.entityIds ?? []).map((item) => item.id),
+        (
+          preparedMembershipIdentities(resolvedPlan.preparedMembership)
+            .entityIds ?? []
+        ).map((item) => item.id),
       );
       expect([...mockResult.sessions]).toEqual(["session-a"]);
     } finally {
@@ -7409,16 +7480,20 @@ ${result.queries.join("\n")}`,
       };
 
       expect(
-        scopedFilterMetadata(prepared.current.filters)?.plan.advancedMatches,
-      ).toEqual({
-        entityIds: [
-          { siteId: SITE_ID, id: "session-a" },
-          { siteId: SITE_ID, id: "session-b" },
-        ],
-      });
+        preparedMembershipIdentities(
+          scopedFilterMetadata(prepared.current.filters)?.plan
+            .preparedMembership,
+        ).entityIds,
+      ).toEqual([
+        { siteId: SITE_ID, id: "session-a" },
+        { siteId: SITE_ID, id: "session-b" },
+      ]);
       expect(
-        scopedFilterMetadata(prepared.reference.filters)?.plan.advancedMatches,
-      ).toEqual({ entityIds: [{ siteId: SITE_ID, id: "session-a" }] });
+        preparedMembershipIdentities(
+          scopedFilterMetadata(prepared.reference.filters)?.plan
+            .preparedMembership,
+        ).entityIds,
+      ).toEqual([{ siteId: SITE_ID, id: "session-a" }]);
 
       const unscoped = parseFilterDsl(
         "count(page) gte 1",
@@ -8178,7 +8253,9 @@ ${result.queries.join("\n")}`,
         async (prepared) => prepared,
       );
       expect(
-        (output as typeof input).scopePlan?.advancedMatches?.entityIds,
+        preparedMembershipIdentities(
+          (output as typeof input).scopePlan?.preparedMembership,
+        ).entityIds,
       ).toEqual([]);
       expect(diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
       expect(evaluatorSpy).not.toHaveBeenCalled();
@@ -8555,7 +8632,7 @@ ${result.queries.join("\n")}`,
       expect(output).toBe(nextInput);
       expect((output as typeof input).filters).toBe(input.filters);
       expect(
-        (output as typeof input).scopePlan.advancedMatches,
+        (output as typeof input).scopePlan.preparedMembership,
       ).toBeUndefined();
       expect(queries).toEqual([]);
     } finally {
@@ -8853,12 +8930,9 @@ ${result.queries.join("\n")}`,
               fullDataset && evaluationOptions
                 ? originalEvaluator(document, fullDataset, evaluationOptions)
                 : undefined;
-            const actualIds =
-              (
-                output.scopePlan.advancedMatches as
-                  | { readonly entityIds?: readonly { readonly id: string }[] }
-                  | undefined
-              )?.entityIds?.map(({ id }) => id) ?? [];
+            const actualIds = preparedMembershipIdentities(
+              output.scopePlan.preparedMembership,
+            ).entityIds.map(({ id }) => id);
             const toIds = (labels: readonly string[]) =>
               labels.map((label) => "wave91-" + scope + "-" + label).sort();
             const formalExpected =
@@ -9115,12 +9189,9 @@ ${result.queries.join("\n")}`,
               invocation[2],
             )
           : undefined;
-        const actualIds =
-          (
-            output.scopePlan.advancedMatches as
-              | { readonly entityIds?: readonly { readonly id: string }[] }
-              | undefined
-          )?.entityIds?.map(({ id }) => id) ?? [];
+        const actualIds = preparedMembershipIdentities(
+          output.scopePlan.preparedMembership,
+        ).entityIds.map(({ id }) => id);
         results.push({
           scope: testCase.scope,
           filterDsl,
@@ -9285,12 +9356,9 @@ ${result.queries.join("\n")}`,
           fullDataset,
           evaluationOptions,
         );
-        const actualIds =
-          (
-            output.scopePlan.advancedMatches as
-              | { readonly entityIds?: readonly { readonly id: string }[] }
-              | undefined
-          )?.entityIds?.map(({ id }) => id) ?? [];
+        const actualIds = preparedMembershipIdentities(
+          output.scopePlan.preparedMembership,
+        ).entityIds.map(({ id }) => id);
         results.push({
           name: testCase.name,
           filterDsl,

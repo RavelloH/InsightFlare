@@ -18,6 +18,7 @@ import {
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import { ADVANCED_FILTER_MAX_ACTIVITIES } from "@/lib/edge/analytics/engine/advanced-filter-activity-plan";
 import { buildChannelListQualificationPlan } from "@/lib/edge/analytics/engine/channel-list-qualification-plan";
+import { preparedMembershipIdentities } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import {
   d1AdvancedFilterMiddleware,
   deferredChannelListQualificationFromQuery,
@@ -347,8 +348,9 @@ async function oldListDto(
     : forwarded.filters;
   if (!filters) throw new Error("wave95u_legacy_channel_list_filters_missing");
   const metadata = scopedFilterMetadata(filters);
-  const matches = metadata?.plan.advancedMatches;
-  const entityIds = matches?.entityIds?.map(({ id }) => id) ?? [];
+  const matches = metadata?.plan.preparedMembership;
+  const entityIds =
+    preparedMembershipIdentities(matches).entityIds?.map(({ id }) => id) ?? [];
   const serializedFilters = JSON.stringify(query.filters);
   const checksEventOwner =
     serializedFilters.includes("event.name") &&

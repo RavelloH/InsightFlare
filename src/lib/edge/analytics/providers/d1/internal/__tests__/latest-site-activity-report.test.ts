@@ -20,6 +20,7 @@ import {
   scopedFilterMetadata,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
+import type { PreparedMembership } from "@/lib/edge/analytics/contract/prepared-membership";
 import type { QueryWindow } from "@/lib/edge/analytics/contract/types";
 import { buildLatestSiteActivityPlan } from "@/lib/edge/analytics/engine/latest-site-activity-report-plan";
 import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
@@ -34,6 +35,12 @@ import {
   buildVisitSourceCte,
   visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import {
+  type PreparedMembershipFixture,
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+  toPreparedMembership,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import { queryLatestSiteActivity } from "@/lib/edge/analytics/providers/d1/internal/overview";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";
@@ -168,11 +175,7 @@ function preparedFilter(input: {
   readonly filters: FilterDocument;
   readonly scopePreference: FilterScopePreference;
   readonly preparationWindow?: QueryWindow;
-  readonly advancedMatches: NonNullable<
-    NonNullable<
-      ReturnType<typeof scopedFilterMetadata>
-    >["plan"]["advancedMatches"]
-  >;
+  readonly preparedMembership: PreparedMembershipFixture | PreparedMembership;
 }): FilterDocument {
   const time = queryTime(input.preparationWindow ?? WINDOW);
   const prepared = prepareScopedQuery("overview", {
@@ -196,7 +199,10 @@ function preparedFilter(input: {
   if (!metadata) throw new Error("wave61_prepared_metadata_missing");
   return attachScopedFilterMetadata(prepared.filters, {
     ...metadata,
-    plan: { ...prepared.scopePlan, advancedMatches: input.advancedMatches },
+    plan: {
+      ...prepared.scopePlan,
+      preparedMembership: toPreparedMembership(input.preparedMembership),
+    },
   });
 }
 
@@ -906,7 +912,7 @@ describe("Latest site activity Logical report", () => {
           filters: item.filter,
           scopePreference: item.scopePreference,
           preparationWindow: item.preparationWindow ?? WINDOW,
-          advancedMatches: item.matches,
+          preparedMembership: item.matches,
         });
         const plan = buildLatestSiteActivityPlan({
           siteId: SITE_ID,
@@ -951,7 +957,7 @@ describe("Latest site activity Logical report", () => {
         filters: fieldFilter("page.path", "/prepared-previous"),
         scopePreference: "event",
         preparationWindow: WINDOW,
-        advancedMatches: { visitIds: [] },
+        preparedMembership: preparedMembershipFromIds({ visitIds: [] }),
       });
       expect(
         await queryLatestSiteActivity(
@@ -1057,23 +1063,23 @@ describe("Latest site activity Logical report", () => {
       filters: fieldFilter("page.path", "/prepared-budget"),
       scopePreference: "event",
       preparationWindow: WINDOW,
-      advancedMatches: {
+      preparedMembership: preparedMembershipFromIds({
         visitIds: Array.from({ length: 128 }, (_unused, index) => ({
           siteId: SITE_ID,
           id: `wave61-prepared-current-${index}`,
         })),
-      },
+      }),
     });
     const previousPrepared = preparedFilter({
       filters: fieldFilter("page.path", "/prepared-budget"),
       scopePreference: "event",
       preparationWindow: WINDOW,
-      advancedMatches: {
+      preparedMembership: preparedMembershipFromIds({
         visitIds: Array.from({ length: 128 }, (_unused, index) => ({
           siteId: SITE_ID,
           id: `wave61-prepared-previous-${index}`,
         })),
-      },
+      }),
     });
     const profiles = [
       { name: "plain", window: WINDOW, filters: EMPTY_FILTER_DOCUMENT },

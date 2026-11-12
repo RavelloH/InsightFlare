@@ -805,11 +805,11 @@ describe("Performance Summary qualified regression", () => {
       "allow-whole-filter",
     );
     expect(
-      prepared.deferred.qualification.requestScopePlan?.advancedMatches,
+      prepared.deferred.qualification.requestScopePlan?.preparedMembership,
     ).toBeUndefined();
-    expect(prepared.deferred.qualification.metadata.plan.advancedMatches).toBe(
-      undefined,
-    );
+    expect(
+      prepared.deferred.qualification.metadata.plan.preparedMembership,
+    ).toBe(undefined);
 
     const diagnostics = createD1ReadDiagnostics();
     const actualTrace = trace();

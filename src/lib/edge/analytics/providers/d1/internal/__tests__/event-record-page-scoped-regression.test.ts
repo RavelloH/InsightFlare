@@ -24,6 +24,7 @@ import {
   teamQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
+import type { PreparedMembership } from "@/lib/edge/analytics/contract/prepared-membership";
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import { buildEventRecordPagePlan } from "@/lib/edge/analytics/engine/event-record-page-plan";
 import { LogicalPlanBuilder } from "@/lib/edge/analytics/engine/logical/builder";
@@ -37,6 +38,12 @@ import {
 } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
 import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import {
+  type PreparedMembershipFixture,
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+  toPreparedMembership,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { queryAnalyticsReportOutputRowsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/analytics-report-query";
 import { queryEventRecordPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
@@ -325,7 +332,7 @@ function makePreparedSelection(input: {
   readonly filters: FilterDocument;
   readonly scopePreference: "event" | "session" | "visitor";
   readonly eventName?: string;
-  readonly advancedMatches?: ScopedFilterPlan["advancedMatches"];
+  readonly preparedMembership?: PreparedMembership | PreparedMembershipFixture;
 }): PreparedSelection & { readonly mutablePlan: ScopedFilterPlan } {
   const authorizationSites = input.authorizationSites.map((site) => site.id);
   const context =
@@ -348,9 +355,9 @@ function makePreparedSelection(input: {
   if (!metadata) throw new Error("wave37a_prepared_metadata_missing");
   const mutablePlan = {
     ...prepared.scopePlan,
-    ...(input.advancedMatches === undefined
+    ...(input.preparedMembership === undefined
       ? {}
-      : { advancedMatches: input.advancedMatches }),
+      : { preparedMembership: toPreparedMembership(input.preparedMembership) }),
   } satisfies ScopedFilterPlan;
   const filters = attachScopedFilterMetadata(prepared.filters, {
     ...metadata,
@@ -1630,7 +1637,7 @@ describe("Wave37A event record scoped Source regressions", () => {
       filters: filtersFor(fieldCondition("session.events", "gte", 1)),
       scopePreference: "session",
       eventName: "target_event",
-      advancedMatches: { entityIds: identities },
+      preparedMembership: preparedMembershipFromIds({ entityIds: identities }),
     });
     const expected = ["event-a-target", "event-b-target"];
     const modes: readonly ProbeMode[] = [
@@ -1731,12 +1738,14 @@ describe("Wave37A event record scoped Source regressions", () => {
       filters: filtersFor(fieldCondition("session.events", "gte", 1)),
       scopePreference: "session",
       eventName: "target_event",
-      advancedMatches: {
+      preparedMembership: preparedMembershipFromIds({
         entityIds: identities.map(({ id }) => ({ siteId: SITE_A, id })),
-      },
+      }),
     });
     expect(
-      prepared.selection.preparedMatches?.identities.map(({ id }) => id),
+      preparedMembershipIdentities(
+        prepared.selection.preparedMembership,
+      ).entityIds.map(({ id }) => id),
     ).toEqual(identities.map(({ id }) => id));
 
     const builder = new LogicalPlanBuilder(createDomainContext(prepared));
@@ -1785,9 +1794,9 @@ describe("Wave37A event record scoped Source regressions", () => {
       authorizationSites: [fixture.sites.a],
       filters: filterA,
       scopePreference: "event",
-      advancedMatches: {
+      preparedMembership: preparedMembershipFromIds({
         eventIds: [{ siteId: SITE_A, id: "event-cache-a" }],
-      },
+      }),
     });
     const selectionB = makePreparedSelection({
       authorizationSites: [fixture.sites.a],
@@ -1833,10 +1842,11 @@ describe("Wave37A event record scoped Source regressions", () => {
       };
     };
     externalFilter.root.value = "/mutated-after-selection";
-    const callerMatches = selectionA.mutablePlan.advancedMatches as {
-      eventIds: Array<{ siteId: string; id: string }>;
-    };
-    callerMatches.eventIds[0]!.id = "event-cache-b";
+    // The prepared membership is an opaque, frozen handle: there is no
+    // caller-owned identity list left to mutate after registration.
+    expect(Object.isFrozen(selectionA.mutablePlan.preparedMembership)).toBe(
+      true,
+    );
 
     const plan = builder.finish();
     const lowerer = new AnalyticsLogicalToDbLowerer(plan, {
@@ -2877,14 +2887,14 @@ describe("Wave37A event record scoped Source regressions", () => {
     const subjectSites = [a, b] as const;
     const makeSelection = (
       scopePreference: "event" | "session" | "visitor",
-      advancedMatches: NonNullable<ScopedFilterPlan["advancedMatches"]>,
+      preparedMembership: PreparedMembershipFixture | PreparedMembership,
     ) =>
       makePreparedSelection({
         authorizationSites,
         subjectSites,
         filters: filtersFor(null),
         scopePreference,
-        advancedMatches,
+        preparedMembership,
       });
     const allEventIdentities = [
       ...eventIds.a.map((id) => ({ siteId: a.id, id })),
@@ -2948,13 +2958,13 @@ describe("Wave37A event record scoped Source regressions", () => {
         empty ? { sql: "0", bindings: [] } : identityPredicate,
         51,
       ).map((row) => row.eventId);
-      const advancedMatches =
+      const preparedMembership =
         kind === "event"
           ? { eventIds: identities }
           : kind === "visit"
             ? { visitIds: identities, eventIds: eventObservationIds }
             : { entityIds: identities };
-      const selection = makeSelection(scopePreference, advancedMatches);
+      const selection = makeSelection(scopePreference, preparedMembership);
       const trace: SqliteD1Trace | undefined = evidenceLabel
         ? { preparedSql: [], bindings: [] }
         : undefined;
@@ -3352,11 +3362,22 @@ describe("Wave37A event record scoped Source regressions", () => {
         filters: filtersFor(fieldCondition("session.events", "gte", 1)),
         scopePreference: "session",
         eventName: "target_event",
-        advancedMatches: matches,
+        preparedMembership: toPreparedMembership(matches),
       });
       expect(matches.entityIds).toHaveLength(20_002);
-      const countIdentitySnapshot =
-        selection.selection.preparedMatches?.identities ?? [];
+      // Duplicates collapse when the relation is built and identities of sites
+      // outside the Source subject are dropped by the site join; mirror both.
+      const subjectSiteIds = new Set<string>([a.id, b.id]);
+      const countIdentitySnapshot = [
+        ...new Map(
+          preparedMembershipIdentities(selection.selection.preparedMembership)
+            .entityIds.filter((identity) => subjectSiteIds.has(identity.siteId))
+            .map((identity) => [
+              JSON.stringify([identity.siteId, identity.id]),
+              identity,
+            ]),
+        ).values(),
+      ];
       expect(countIdentitySnapshot).toHaveLength(20_000);
       const countPlan = buildSourceDomainProbe(selection, "count");
       let countQuery: ReturnType<typeof compileOutput> | undefined;
@@ -3414,7 +3435,7 @@ describe("Wave37A event record scoped Source regressions", () => {
         filters: filtersFor(fieldCondition("session.events", "gte", 1)),
         scopePreference: "session",
         eventName: "target_event",
-        advancedMatches: { entityIds: [] },
+        preparedMembership: preparedMembershipFromIds({ entityIds: [] }),
       });
       const emptyCountPlan = buildSourceDomainProbe(emptySelection, "count");
       const emptyCountQuery = compileOutput(emptyCountPlan, "count");
@@ -3478,8 +3499,16 @@ describe("Wave37A event record scoped Source regressions", () => {
         time: semanticTemporalDomainsFromQueryTime(selection.queryTime),
         expectedPlan: selection.scopePlan,
       });
-      const pageIdentitySnapshot =
-        pageSelectionSnapshot.preparedMatches?.identities ?? [];
+      const pageIdentitySnapshot = [
+        ...new Map(
+          preparedMembershipIdentities(pageSelectionSnapshot.preparedMembership)
+            .entityIds.filter((identity) => identity.siteId === a.id)
+            .map((identity) => [
+              JSON.stringify([identity.siteId, identity.id]),
+              identity,
+            ]),
+        ).values(),
+      ];
       expect(pageIdentitySnapshot).toHaveLength(10_000);
       expect(
         pageIdentitySnapshot.every((identity) => identity.siteId === a.id),
@@ -3566,29 +3595,41 @@ describe("Wave37A event record scoped Source regressions", () => {
       };
       const countPackedIdentityRows = decodePackedIdentityRows(countQuery);
       const pagePackedIdentityRows = decodePackedIdentityRows(pageQuery);
+      // The prepared membership relation packs sorted (site_id, entity_id) rows.
       const packedRowsFor = (
-        identities: readonly {
-          readonly siteId: string;
-          readonly kind: string;
-          readonly id: string;
-        }[],
-      ) => identities.map(({ siteId, kind, id }) => [siteId, kind, id]);
-      expect(countPackedIdentityRows).toHaveLength(20_000);
-      expect(pagePackedIdentityRows).toHaveLength(10_000);
-      expect(countPackedIdentityRows).toEqual(
-        packedRowsFor(countIdentitySnapshot),
-      );
-      expect(pagePackedIdentityRows).toEqual(
-        packedRowsFor(pageIdentitySnapshot),
-      );
+        identities: readonly { readonly siteId: string; readonly id: string }[],
+      ) =>
+        [...identities]
+          .sort(
+            (left, right) =>
+              left.siteId.localeCompare(right.siteId) ||
+              left.id.localeCompare(right.id),
+          )
+          .map(({ siteId, id }) => [siteId, id]);
+      // The relation carries every unique registered identity of the
+      // authorized sites (the foreign one included); the Source subject is
+      // applied by the site join in SQL, so both reads pack the same rows.
+      const registeredRows = packedRowsFor([
+        ...new Map(
+          preparedMembershipIdentities(
+            selection.selection.preparedMembership,
+          ).entityIds.map((identity) => [
+            JSON.stringify([identity.siteId, identity.id]),
+            identity,
+          ]),
+        ).values(),
+      ]);
+      expect(registeredRows).toHaveLength(20_001);
+      expect(countPackedIdentityRows).toEqual(registeredRows);
+      expect(pagePackedIdentityRows).toEqual(registeredRows);
+      // The subject-restricted sets the SQL join keeps are still 20K and 10K.
+      expect(countIdentitySnapshot).toHaveLength(20_000);
+      expect(pageIdentitySnapshot).toHaveLength(10_000);
       expect(
         [...countPackedIdentityRows, ...pagePackedIdentityRows].every(
-          (tuple) => tuple.length === 3 && tuple[1] === "session",
+          (tuple) => tuple.length === 2,
         ),
       ).toBe(true);
-      expect(pagePackedIdentityRows.every((tuple) => tuple[0] === a.id)).toBe(
-        true,
-      );
       console.info(
         `[wave37a 20K] ${JSON.stringify({
           coreCount: countMetrics

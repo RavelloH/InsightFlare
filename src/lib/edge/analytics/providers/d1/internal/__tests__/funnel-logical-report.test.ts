@@ -38,6 +38,10 @@ import {
   buildFunnelSqlPlan,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-funnel-oracle";
 import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
+import {
+  preparedMembershipFromIds,
+  preparedMembershipIdentities,
+} from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core-types";
 import { queryFunnelAnalysis } from "@/lib/edge/analytics/providers/d1/internal/funnels";
@@ -377,7 +381,7 @@ function oldRowsWithOfflinePreparedIdentityLiterals(
   window: QueryWindow,
 ): Record<string, unknown>[] {
   const metadata = scopedFilterMetadata(filters);
-  const matches = metadata?.plan.advancedMatches;
+  const matches = metadata?.plan.preparedMembership;
   if (!metadata || !matches)
     throw new Error("funnel_test_prepared_matches_missing");
   const basePlan = createScopedFilterPlan(
@@ -404,8 +408,9 @@ function oldRowsWithOfflinePreparedIdentityLiterals(
       ? "SELECT CAST(NULL AS TEXT) WHERE 0"
       : unique.map((id) => `'${id.replaceAll("'", "''")}'`).join(", ");
   };
-  const visitIds = inList(matches.visitIds ?? []);
-  const eventIds = inList(matches.eventIds ?? []);
+  const identities = preparedMembershipIdentities(matches);
+  const visitIds = inList(identities.visitIds);
+  const eventIds = inList(identities.eventIds);
   const visitRelation = "funnel_test_prepared_visits";
   const eventRelation = "funnel_test_prepared_events";
   const sessionRelation = "funnel_test_prepared_sessions";
@@ -1546,7 +1551,7 @@ describe("Logical Funnel analysis report", () => {
         resolvedScope: plan.scope,
         plan: {
           ...plan,
-          advancedMatches: { visitIds, eventIds },
+          preparedMembership: preparedMembershipFromIds({ visitIds, eventIds }),
         },
         time: createQueryTime(
           previousWindow.startMs,

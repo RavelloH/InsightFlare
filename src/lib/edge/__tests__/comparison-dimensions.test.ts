@@ -23,6 +23,7 @@ import {
   type ScopedFilterPlan,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
+import type { PreparedMembership } from "@/lib/edge/analytics/contract/prepared-membership";
 import { PAGE_DIMENSION_SELECTIONS } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import { scopedDatasetFor } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
 import { buildVisitFilterSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-filters";
@@ -30,6 +31,7 @@ import {
   buildVisitSourceCte,
   visitSourceBindings,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-sources";
+import { toPreparedMembership } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import {
   decodeComparisonDimensionCursor,
   queryComparisonDimensionPageFromD1,
@@ -182,7 +184,7 @@ function preparedPagePathFilter(input: {
     ...metadata,
     plan: {
       ...prepared.scopePlan,
-      advancedMatches:
+      preparedMembership: toPreparedMembership(
         scope === "event"
           ? {
               visitIds: Array.from(
@@ -223,6 +225,7 @@ function preparedPagePathFilter(input: {
                 }),
               ),
             },
+      ),
     },
   });
 }

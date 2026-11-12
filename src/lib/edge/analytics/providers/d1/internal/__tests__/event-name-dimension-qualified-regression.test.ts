@@ -1093,9 +1093,9 @@ describe("event.name dimension Count qualification", () => {
       const fusedOnlyStatements = actualTrace.preparedSql.filter(
         (sql) => !legacyTrace.preparedSql.includes(sql),
       );
-      // The fused attempt, plus the report that reads the request-private
-      // entity membership instead of the legacy ID bridge.
-      expect(fusedOnlyStatements).toHaveLength(2);
+      // Both routes read the same prepared membership relation, so only the
+      // fused attempt differs from the legacy statements.
+      expect(fusedOnlyStatements).toHaveLength(1);
       const legacyPreparationStatementCount =
         legacyTrace.preparedSql.length - 2;
       expect(legacyPreparationStatementCount).toBeGreaterThanOrEqual(1);
@@ -1159,13 +1159,14 @@ describe("event.name dimension Count qualification", () => {
       });
       expect(actual).toEqual(legacy);
       expect(observedDeferred?.countInput.scope).toBe("event");
-      expect(observedDeferred?.metadata.plan.advancedMatches).toBeUndefined();
+      expect(
+        observedDeferred?.metadata.plan.preparedMembership,
+      ).toBeUndefined();
       expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
         kind: "numeric-data-domain",
         fieldIds: ["page.durationMs"],
       });
       // The legacy ID bridge binds a (site, "event", id) kind column.
-      expect(legacyTrace.bindings.at(-1) ?? []).toContain("event");
       expect(actualTrace.bindings.at(-1) ?? []).not.toContain("event");
     } finally {
       database
