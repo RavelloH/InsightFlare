@@ -1132,6 +1132,56 @@ describe("Retention qualified relationalization baseline and regression", () => 
     ).toHaveLength(0);
   });
 
+  it.each(["session", "visitor"] as const)(
+    "reads the %s entity membership instead of the legacy ID bridge for a numeric fallback",
+    async (scope) => {
+      database
+        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+        .run("invalid-duration", "a-match-0");
+      const query = countQualifiedQuery(
+        scope,
+        "day",
+        "count(page { page.durationMs gt 5 }) eq 0",
+      );
+      const queryTrace = trace();
+      const diagnostics = createD1ReadDiagnostics();
+      const provider = createD1SiteProviderRegistry({
+        env: env(database, queryTrace),
+        siteId: SITE,
+        diagnostics,
+      }).resolve("retention");
+      if (!provider) throw new Error("retention_provider_missing");
+      const result = await provider.execute(query as never);
+      expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
+        kind: "numeric-data-domain",
+        fieldIds: ["page.durationMs"],
+      });
+
+      const legacyTrace = trace();
+      const legacyEnv = env(database, legacyTrace);
+      const forwarded = await d1AdvancedFilterMiddleware(
+        legacyEnv,
+        undefined,
+        SITE,
+      )("retention", query, async (next) => next);
+      const deferred = deferredRetentionQualificationFromQuery(forwarded);
+      if (!deferred) throw new Error("retention_legacy_deferred_missing");
+      const legacy = await queryRetentionFromD1(
+        legacyEnv,
+        SITE,
+        WINDOW,
+        await prepareDeferredEventQualificationFallback(deferred.qualification),
+        "day",
+      );
+      expect(legacy.cohorts.length).toBeGreaterThan(0);
+      expect(result.value).toEqual(legacy);
+      // The legacy ID bridge binds the entity kind next to every identity;
+      // the request-private entity membership binds only (site, id) pairs.
+      expect(legacyTrace.bindings.at(-1) ?? []).toContain(scope);
+      expect(queryTrace.bindings.at(-1) ?? []).not.toContain(scope);
+    },
+  );
+
   it("falls back once for real text numeric duration data", async () => {
     database
       .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")

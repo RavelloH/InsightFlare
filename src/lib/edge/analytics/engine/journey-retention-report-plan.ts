@@ -8,6 +8,7 @@ import type {
   LogicalRelationHandle,
 } from "@/lib/edge/analytics/engine/logical/builder";
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
@@ -23,6 +24,8 @@ interface JourneyRetentionPlanInput {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  /** Request-private entity membership that replaces the legacy ID set. */
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly granularity: Interval;
 }
 
@@ -133,6 +136,9 @@ function retentionSource(input: JourneyRetentionPlanInput) {
       ? {
           scopePlan: input.scopePlan,
           preparedTimePolicy: "reader-window-v1" as const,
+          ...(input.qualificationDependencyRefs
+            ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+            : {}),
         }
       : {}),
     attributes: RETENTION_PAGE_ATTRIBUTES,

@@ -1757,6 +1757,9 @@ export function registerSiteContractProviders(
           stringField(request, "granularity", "week"),
         );
         let filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
+        let membership:
+          | Awaited<ReturnType<typeof prepareEventMembershipFallback>>
+          | undefined;
         if (deferred) {
           const qualified = await executeRetentionQualificationProgram({
             env: options.env,
@@ -1770,9 +1773,22 @@ export function registerSiteContractProviders(
           if (options.diagnostics)
             options.diagnostics.advancedCountSqlFallbackReason =
               qualified.fallbackReason;
-          filters = await prepareDeferredEventQualificationFallback(
-            deferred.qualification,
-          );
+          // Session and visitor filters read one request-private entity
+          // membership instead of the legacy ID bridge.
+          membership =
+            deferred.qualification.metadata.plan.mode === "entity"
+              ? await prepareEventMembershipFallback({
+                  deferred: deferred.qualification,
+                  operation: "retention",
+                  operations: ["retention"],
+                  configuration: { granularity },
+                })
+              : undefined;
+          filters = membership
+            ? deferred.qualification.filters
+            : await prepareDeferredEventQualificationFallback(
+                deferred.qualification,
+              );
         }
         return {
           value: await queryRetentionFromD1(
@@ -1781,6 +1797,7 @@ export function registerSiteContractProviders(
             window,
             filters,
             granularity,
+            membership,
           ),
         };
       }),

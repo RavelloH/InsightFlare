@@ -9,6 +9,7 @@ import type { Env } from "@/lib/edge/types";
 
 import type { FilterDocument, Interval, QueryWindow } from "./core";
 import { buildTimeBuckets, timeBucketTimestamp } from "./core";
+import type { EventMembershipFallback } from "./event-membership-fallback";
 
 export function parseRetentionGranularity(value: string | null): Interval {
   return value === "minute" ||
@@ -68,19 +69,39 @@ export async function queryRetentionFromD1(
   window: QueryWindow,
   filters: FilterDocument,
   granularity: Interval,
+  /** Request-private entity membership for a qualified filter. */
+  membership?: EventMembershipFallback,
 ): Promise<RetentionResult> {
   const metadata = scopedFilterMetadata(filters);
-  const plan = buildJourneyRetentionPlan({
-    siteId,
-    queryTime: queryWindowToTime(window),
-    filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
-    granularity,
-  });
+  const readerTime = queryWindowToTime(window);
+  const bound = membership?.bindPlan(
+    (context) =>
+      buildJourneyRetentionPlan({
+        siteId,
+        queryTime: readerTime,
+        filters,
+        scopePlan: context.scopePlan,
+        qualificationDependencyRefs: context.qualificationDependencyRefs,
+        granularity,
+      }),
+    readerTime,
+  );
+  const plan =
+    bound?.plan ??
+    buildJourneyRetentionPlan({
+      siteId,
+      queryTime: readerTime,
+      filters,
+      ...(metadata ? { scopePlan: metadata.plan } : {}),
+      granularity,
+    });
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
     plan,
     "journey-retention",
+    undefined,
+    undefined,
+    bound?.executionInputs,
   );
 
   return retentionResultFromRows(window, granularity, rows);
