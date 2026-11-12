@@ -2,6 +2,7 @@ import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application
 import { typedQueryProviderFor } from "@/lib/edge/analytics/application/provider-registry";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import {
+  assertDeferredEventQualificationEvaluates,
   deferredEventContextQualificationFromQuery,
   deferredEventFieldsQualificationFromQuery,
   deferredEventFieldValuesQualificationFromQuery,
@@ -94,14 +95,14 @@ export function registerEventProviders(
             deferredQualification &&
             error instanceof InvalidCursorError
           )
-            await prepareDeferredEventQualificationFallback(
+            await assertDeferredEventQualificationEvaluates(
               deferredQualification,
             );
           throw error;
         }
         if (cursorText && !cursor) {
           if (deferredQualification)
-            await prepareDeferredEventQualificationFallback(
+            await assertDeferredEventQualificationEvaluates(
               deferredQualification,
             );
           throw new InvalidCursorError("event-types");

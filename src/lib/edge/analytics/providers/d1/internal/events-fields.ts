@@ -24,6 +24,7 @@ import {
 } from "@/lib/edge/analytics/engine/event-fields-plan";
 import { buildEventPayloadReportSource } from "@/lib/edge/analytics/engine/event-payload-report-source";
 import {
+  assertDeferredEventQualificationEvaluates,
   type DeferredEventFieldsQualification,
   type DeferredEventFieldValuesQualification,
   prepareDeferredEventQualificationFallback,
@@ -381,7 +382,7 @@ export async function preflightQualifiedEventFieldsCursorFromD1(
   const result = await executeQualifiedEventFields(input, null);
   recordEventFieldsFallbackReason(input, result);
   if (result.kind !== "executed")
-    await prepareDeferredEventQualificationFallback(input.deferred);
+    await assertDeferredEventQualificationEvaluates(input.deferred);
 }
 
 export async function decodeEventFieldCursor(
@@ -716,7 +717,7 @@ export async function preflightQualifiedEventFieldValuesCursorFromD1(
   const result = await executeQualifiedEventFieldValues(input, null);
   recordEventFieldValuesFallbackReason(input, result);
   if (result.kind !== "executed")
-    await prepareDeferredEventQualificationFallback(input.deferred);
+    await assertDeferredEventQualificationEvaluates(input.deferred);
 }
 
 export async function decodeEventFieldValueCursor(

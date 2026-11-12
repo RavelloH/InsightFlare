@@ -11,6 +11,7 @@ import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filt
 import { scopedFilterMetadata } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
 import {
+  assertDeferredEventQualificationEvaluates,
   type DeferredEventRecordsQualification,
   isDeferredEventQualification,
   prepareDeferredEventQualificationFallback,
@@ -158,8 +159,7 @@ export async function readSiteEventRecords(input: ReadSiteEventRecordsInput) {
   } catch (error) {
     if (deferred && error instanceof InvalidCursorError) {
       // Keep legacy cap-before-cursor precedence for malformed or stale cursors.
-      // SEM088 remains open for this invalid-cursor-only preparation bridge.
-      await prepareDeferredEventQualificationFallback(deferred);
+      await assertDeferredEventQualificationEvaluates(deferred);
     }
     throw error;
   }

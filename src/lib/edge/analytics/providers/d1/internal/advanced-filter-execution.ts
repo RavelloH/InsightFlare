@@ -7883,6 +7883,35 @@ export async function prepareDeferredEventQualificationFallback(
   });
 }
 
+/**
+ * Runs the deferred Count evaluation only for its observable effects (the
+ * activity cap, aborts and database errors) so that they keep their legacy
+ * precedence over a later invalid-cursor error. Nothing is attached to any
+ * plan and the result is discarded.
+ */
+export async function assertDeferredEventQualificationEvaluates(
+  deferred: Parameters<typeof prepareDeferredEventQualificationFallback>[0],
+): Promise<void> {
+  if (
+    !isDeferredEventQualification(deferred) &&
+    !isDeferredEventCandidatePageProjection(deferred)
+  )
+    throw new Error("deferred_event_qualification_untrusted");
+  if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  await evaluateForSitesCore({
+    env: deferred.env,
+    subject: deferred.subject,
+    siteIds: [deferred.siteId],
+    filters: deferred.filters,
+    plan: deferred.metadata.plan,
+    time: deferred.time,
+    diagnostics: deferred.diagnostics,
+    signal: deferred.signal,
+    coverage: deferred.coverage,
+  });
+  if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+}
+
 export async function prepareDeferredEventSummaryFallback(
   deferred: DeferredEventSummaryQualification,
 ): Promise<FilterDocument> {
