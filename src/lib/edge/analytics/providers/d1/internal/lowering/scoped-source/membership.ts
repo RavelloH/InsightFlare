@@ -23,7 +23,10 @@ import {
 import { factEntityKindsForFilter } from "@/lib/edge/analytics/contract";
 import { planObservationFilter } from "@/lib/edge/analytics/contract/observation-planner";
 import type { SourceNode } from "@/lib/edge/analytics/engine/logical/nodes";
-import { EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
+import {
+  EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY,
+  EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
+} from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import { type SemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import { lowerLegacyRelationalPredicate } from "@/lib/edge/analytics/providers/d1/internal/analytics-legacy-relational-predicates";
 import {
@@ -524,6 +527,47 @@ export function applyNameGate(
   return { ...rows, relation };
 }
 
+/**
+ * Prepared entity qualification for a session/visitor Source: the legacy
+ * explicit identities, or the request-private entity membership relation
+ * bound to this dataset's site keys. Undefined when neither is present.
+ */
+function preparedEntityRelation(
+  dataset: AnalyticsLegacyScopedDataset,
+  selection: SemanticScopedSourceSelection,
+  kind: "session" | "visitor",
+  qualificationRelations: ReadonlyMap<string, AnalyticsDbRelation> | undefined,
+): IdentityRelation | undefined {
+  if (selection.preparedMatches)
+    return explicitIdentityRelation(
+      dataset,
+      selection.preparedMatches.identities,
+      kind,
+    );
+  const refs = selection.qualificationDependencyRefs;
+  if (!refs) return undefined;
+  if (refs.length !== 1)
+    throw new Error("qualification_execution_dependency_cardinality_mismatch");
+  const dependencyRef = refs[0]!;
+  if (dependencyRef !== EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY)
+    throw new Error("qualification_execution_dependency_unexpected");
+  const relation = qualificationRelations?.get(dependencyRef);
+  if (!relation) throw new Error("qualification_execution_dependency_unbound");
+  if (!relation.columns.site_id || !relation.columns.entity_id)
+    throw new Error("qualification_execution_relation_schema_mismatch");
+  const scoped = join(
+    relation,
+    dataset.sites,
+    eq(relation.columns.site_id, dataset.sites.columns.site_id),
+  );
+  return distinct(
+    project(scoped, {
+      site_pk: scoped.columns.right_site_pk!,
+      entity_id: scoped.columns.left_entity_id!,
+    }),
+  );
+}
+
 /** Bind the request-private Event membership relation to this dataset's site keys. */
 function boundEventMembershipRelation(
   dataset: AnalyticsLegacyScopedDataset,
@@ -648,15 +692,18 @@ export function entityEventMatches(
   dataset: AnalyticsLegacyScopedDataset,
   selection: SemanticScopedSourceSelection,
   qualifiedEntities?: IdentityRelation,
+  qualificationRelations?: ReadonlyMap<string, AnalyticsDbRelation>,
 ): IdentityRelation {
   const kind = selection.entityKind;
   if (!kind) throw new TypeError("Scoped entity mode requires an entity kind.");
-  if (selection.preparedMatches && !qualifiedEntities) {
-    const explicit = explicitIdentityRelation(
-      dataset,
-      selection.preparedMatches.identities,
-      kind,
-    );
+  const hasPreparedEntities =
+    selection.preparedMatches !== undefined ||
+    selection.qualificationDependencyRefs !== undefined;
+  const explicit =
+    hasPreparedEntities && !qualifiedEntities
+      ? preparedEntityRelation(dataset, selection, kind, qualificationRelations)
+      : undefined;
+  if (explicit) {
     const gatedEvents = applyNameGate(dataset.readEvents, dataset, selection);
     const entityColumn = entityColumnName(dataset.readEvents, kind);
     const eligibleEvents = filter(
@@ -694,7 +741,7 @@ export function entityEventMatches(
       : universe!);
   const events = dataset.readEvents;
   const eventRows =
-    selection.preparedMatches && qualifiedEntities
+    hasPreparedEntities && qualifiedEntities
       ? {
           ...events,
           relation: filter(events.relation, nonBlank(entityId(events, kind))),
@@ -864,6 +911,7 @@ export function entityPageRows(
   dataset: AnalyticsLegacyScopedDataset,
   selection: SemanticScopedSourceSelection,
   qualifiedEntities?: IdentityRelation,
+  qualificationRelations?: ReadonlyMap<string, AnalyticsDbRelation>,
 ): AnalyticsDbRelation {
   const kind = selection.entityKind;
   if (!kind) throw new TypeError("Scoped entity mode requires an entity kind.");
@@ -871,21 +919,16 @@ export function entityPageRows(
     qualifiedEntities === undefined ? entityUniverse(dataset, kind) : undefined;
   const selected =
     qualifiedEntities ??
-    (selection.preparedMatches
-      ? explicitIdentityRelation(
+    preparedEntityRelation(dataset, selection, kind, qualificationRelations) ??
+    (selection.filter.root
+      ? lowerEntityExpression(
+          selection.filter.root,
           dataset,
-          selection.preparedMatches.identities,
+          selection,
           kind,
+          universe!,
         )
-      : selection.filter.root
-        ? lowerEntityExpression(
-            selection.filter.root,
-            dataset,
-            selection,
-            kind,
-            universe!,
-          )
-        : universe!);
+      : universe!);
   const pageValue = entityId(dataset.candidatePages, kind);
   const nonblankPages = filter(
     dataset.candidatePages.relation,
@@ -1143,7 +1186,12 @@ export function selectedPageRows(
                 selection,
                 matchingEventOwnerPairs,
               )
-            : entityPageRows(dataset, selection, qualifiedEntities)
+            : entityPageRows(
+                dataset,
+                selection,
+                qualifiedEntities,
+                qualificationRelations,
+              )
           : selection.mode === "observation"
             ? pageRowsForVisitIds(
                 dataset.candidatePages,
@@ -1153,7 +1201,12 @@ export function selectedPageRows(
                   qualificationRelations,
                 ),
               )
-            : entityPageRows(dataset, selection, qualifiedEntities);
+            : entityPageRows(
+                dataset,
+                selection,
+                qualifiedEntities,
+                qualificationRelations,
+              );
   return pageRowWithRelation(dataset.candidatePages, relation);
 }
 
@@ -1309,13 +1362,14 @@ export class ScopedSourceMembership {
       storage: this.#context.storage,
     });
     const universe = entityUniverse(dataset, kind);
-    const identities = selection.preparedMatches
-      ? explicitIdentityRelation(
-          dataset,
-          selection.preparedMatches.identities,
-          kind,
-        )
-      : selection.filter.root
+    const identities =
+      preparedEntityRelation(
+        dataset,
+        selection,
+        kind,
+        this.#context.qualificationRelations,
+      ) ??
+      (selection.filter.root
         ? lowerEntityExpression(
             selection.filter.root,
             dataset,
@@ -1323,7 +1377,7 @@ export class ScopedSourceMembership {
             kind,
             universe,
           )
-        : universe;
+        : universe);
     this.#context.entityQualifications.set(key, identities);
     return identities;
   }
@@ -1362,7 +1416,12 @@ export class ScopedSourceMembership {
       return baseMatches;
     }
     return selection.mode === "entity"
-      ? entityEventMatches(dataset, selection, qualifiedEntities)
+      ? entityEventMatches(
+          dataset,
+          selection,
+          qualifiedEntities,
+          this.#context.qualificationRelations,
+        )
       : observationEventMatches(
           dataset,
           selection,

@@ -1,5 +1,6 @@
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import {
+  EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY,
   EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
   EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
   type QualificationDependencyRef,
@@ -45,6 +46,7 @@ const RELATION_IDENTITY_COLUMN: Readonly<
 > = {
   [EVENT_FILTER_PAGE_VISIT_DEPENDENCY]: "visit_id",
   [EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY]: "event_id",
+  [EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY]: "entity_id",
 };
 
 function assertRelationSchema(

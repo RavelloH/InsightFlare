@@ -9,6 +9,7 @@ import {
 } from "@/lib/edge/analytics/engine/logical/plan";
 import { validateLogicalPlan } from "@/lib/edge/analytics/engine/logical/validator";
 import {
+  EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY,
   EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
   EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
   type QualificationDependencyRef,
@@ -122,10 +123,13 @@ function snapshot<T>(value: T): T {
 }
 
 const DEPENDENCY_SOURCE_ENTITY: Readonly<
-  Record<QualificationDependencyRef, "event" | "page">
+  Record<QualificationDependencyRef, readonly ("event" | "page")[]>
 > = {
-  [EVENT_FILTER_PAGE_VISIT_DEPENDENCY]: "page",
-  [EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY]: "event",
+  [EVENT_FILTER_PAGE_VISIT_DEPENDENCY]: ["page"],
+  [EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY]: ["event"],
+  // Entity membership qualifies both the Event and the Page rows of a
+  // session or visitor.
+  [EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY]: ["event", "page"],
 };
 
 /** Dependency refs a canonical plan names, in Source order. */
@@ -157,11 +161,17 @@ function assertPlanContext(
   const counts = new Map<QualificationDependencyRef, number>();
   for (const { ref } of dependencySources)
     counts.set(ref, (counts.get(ref) ?? 0) + 1);
+  const entityScope = state.scopePlan.mode === "entity";
+  const expectedEntityKind =
+    state.scopePlan.membership.kind === "entity"
+      ? state.scopePlan.membership.entityKind
+      : undefined;
   if (
     !Object.isFrozen(plan) ||
-    context.scope.requested !== "event" ||
-    context.scope.contractScope !== "event" ||
-    context.scope.logicalScope !== "observation" ||
+    context.scope.requested !== state.scopePlan.scope ||
+    context.scope.contractScope !== state.scopePlan.scope ||
+    context.scope.logicalScope !==
+      (entityScope ? state.scopePlan.scope : "observation") ||
     context.subject.origin !== "site" ||
     context.subject.siteIds.length !== 1 ||
     context.subject.siteIds[0] !== state.siteId ||
@@ -182,11 +192,13 @@ function assertPlanContext(
     const selection = node.selection;
     if (
       node.kind !== "source" ||
-      node.entity !== DEPENDENCY_SOURCE_ENTITY[ref] ||
+      !(DEPENDENCY_SOURCE_ENTITY[ref] as readonly string[]).includes(
+        node.entity,
+      ) ||
       selection?.profile !== "prepared-scoped-v1" ||
       selection.scope !== state.scopePlan.scope ||
       selection.mode !== state.scopePlan.mode ||
-      selection.entityKind !== undefined ||
+      selection.entityKind !== expectedEntityKind ||
       !sameValue(selection.filter, state.filters) ||
       !sameValue(selection.subject, context.subject) ||
       !sameValue(selection.authorizedSiteIds, [state.siteId]) ||
@@ -316,10 +328,16 @@ export function createPageVisitQualificationPreparation(input: {
   const queryTime = snapshot(input.queryTime);
   const scopePlan = snapshot(input.scopePlan);
   const consumerKey = snapshot(input.consumerKey);
+  const entityRole =
+    (input.dependencyRef ?? EVENT_FILTER_PAGE_VISIT_DEPENDENCY) ===
+    EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY;
   if (
-    scopePlan.scope !== "event" ||
-    scopePlan.mode !== "observation" ||
-    scopePlan.advancedMatches !== undefined
+    scopePlan.advancedMatches !== undefined ||
+    (entityRole
+      ? scopePlan.mode !== "entity" ||
+        scopePlan.scope === "event" ||
+        scopePlan.membership.kind !== "entity"
+      : scopePlan.scope !== "event" || scopePlan.mode !== "observation")
   )
     throw new Error("qualification_execution_preparation_context_mismatch");
 

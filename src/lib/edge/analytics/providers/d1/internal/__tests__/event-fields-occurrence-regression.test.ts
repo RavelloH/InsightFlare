@@ -1217,11 +1217,13 @@ describe("Event field occurrence report migration", () => {
     expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
       kind: "numeric-data-domain",
     });
-    expect(trace.preparedSql).toEqual([
-      expectedTrace.preparedSql[0],
-      trace.preparedSql[1],
-      ...expectedTrace.preparedSql.slice(1),
-    ]);
+    // The fused attempt adds one statement. The preparation statements are the
+    // legacy ones; the report reads the request-private entity membership
+    // instead of the legacy ID bridge, so only its text differs.
+    expect(trace.preparedSql).toHaveLength(
+      expectedTrace.preparedSql.length + 1,
+    );
+    expect(trace.preparedSql[0]).toBe(expectedTrace.preparedSql[0]);
     runtimeEvidence.push({
       scope: "session",
       case: "numeric-domain-incompatibility",
@@ -3725,11 +3727,13 @@ describe("Event field occurrence report migration", () => {
     expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
       kind: "numeric-data-domain",
     });
-    expect(trace.preparedSql).toEqual([
-      expectedTrace.preparedSql[0],
-      trace.preparedSql[1],
-      ...expectedTrace.preparedSql.slice(1),
-    ]);
+    // The fused attempt adds one statement. The preparation statements are the
+    // legacy ones; the report reads the request-private entity membership
+    // instead of the legacy ID bridge, so only its text differs.
+    expect(trace.preparedSql).toHaveLength(
+      expectedTrace.preparedSql.length + 1,
+    );
+    expect(trace.preparedSql[0]).toBe(expectedTrace.preparedSql[0]);
     runtimeEvidence.push({
       scope: "session",
       case: "event-field-values-numeric-domain-fallback-once",

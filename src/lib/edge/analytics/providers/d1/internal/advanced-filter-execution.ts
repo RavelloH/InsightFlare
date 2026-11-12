@@ -83,6 +83,7 @@ import {
 } from "@/lib/edge/analytics/engine/semantic/event-context-cards";
 import { eventPayloadValueTypeCode } from "@/lib/edge/analytics/engine/semantic/event-payload-value-type";
 import {
+  EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY,
   EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
   EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
 } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
@@ -7643,6 +7644,31 @@ function createEventMembershipRelation(
   ) as AnalyticsDbRelation;
 }
 
+function createEntityMembershipRelation(
+  siteId: string,
+  matches: readonly QualificationMatchRow[],
+): AnalyticsDbRelation {
+  const unique = new Set<string>();
+  for (const match of matches) {
+    if (!match) throw new Error("qualification_execution_match_invalid");
+    if (match.kind !== "entity") continue;
+    if (match.siteId !== siteId || typeof match.id !== "string")
+      throw new Error("qualification_execution_entity_identity_invalid");
+    unique.add(match.id);
+  }
+  const rows = [...unique].sort((left, right) => left.localeCompare(right));
+  return valuesRelation(
+    {
+      site_id: { affinity: "text", nullable: false },
+      entity_id: { affinity: "text", nullable: false },
+    },
+    rows.map((id) => ({
+      site_id: sqliteBoundText(siteId),
+      entity_id: sqliteBoundText(id),
+    })),
+  ) as AnalyticsDbRelation;
+}
+
 /**
  * Evaluate the existing Core fallback into a request-local Event membership
  * relation for a private, one-site, same-window Event report consumer. Any
@@ -7664,14 +7690,19 @@ export async function prepareDeferredEventMembershipQualification(
   const deferred = deferredInput;
   if (!operations.includes(deferred.operation)) return undefined;
   if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  const entityMode = deferred.metadata.plan.mode === "entity";
   if (
     deferred.subject.origin !== "site" ||
     deferred.subject.siteIds.length !== 1 ||
     deferred.subject.siteIds[0] !== deferred.siteId ||
-    deferred.countInput.scope !== "event" ||
-    deferred.metadata.plan.scope !== "event" ||
-    deferred.metadata.plan.mode !== "observation" ||
-    deferred.metadata.plan.membership.kind === "entity" ||
+    (entityMode
+      ? deferred.metadata.plan.scope === "event" ||
+        deferred.metadata.plan.membership.kind !== "entity" ||
+        deferred.countInput.scope !== deferred.metadata.plan.scope
+      : deferred.countInput.scope !== "event" ||
+        deferred.metadata.plan.scope !== "event" ||
+        deferred.metadata.plan.mode !== "observation" ||
+        deferred.metadata.plan.membership.kind === "entity") ||
     deferred.metadata.plan.advancedMatches !== undefined ||
     !sameCandidateReadAndFilterWindow(deferred.time) ||
     filtersUseSequenceSemantics(deferred.filters)
@@ -7696,9 +7727,13 @@ export async function prepareDeferredEventMembershipQualification(
     queryTime: deferred.time,
     scopePlan: deferred.metadata.plan,
     consumerKey,
-    relation: createEventMembershipRelation(deferred.siteId, matches),
-    dependencyRef: EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
-    ...(options.withPageVisits
+    relation: entityMode
+      ? createEntityMembershipRelation(deferred.siteId, matches)
+      : createEventMembershipRelation(deferred.siteId, matches),
+    dependencyRef: entityMode
+      ? EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY
+      : EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
+    ...(options.withPageVisits && !entityMode
       ? {
           additionalRelations: [
             {

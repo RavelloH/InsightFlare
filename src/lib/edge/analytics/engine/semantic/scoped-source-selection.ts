@@ -13,6 +13,7 @@ import type { LogicalPlanContext } from "@/lib/edge/analytics/engine/logical/pla
 import {
   isQualificationDependencyRef,
   type QualificationDependencyRef,
+  qualificationDependencyRefsMatchScope,
 } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import {
   createSemanticSubjectDomain,
@@ -470,9 +471,16 @@ export function createSemanticScopedSourceSelection(
     if (
       qualificationDependencyRefs !== undefined &&
       (input.profile !== "prepared-scoped-v1" ||
-        input.expectedPlan.scope !== "event" ||
-        input.expectedPlan.mode !== "observation" ||
-        input.expectedPlan.membership.kind === "entity" ||
+        (input.expectedPlan.mode === "entity"
+          ? input.expectedPlan.membership.kind !== "entity" ||
+            input.expectedPlan.scope === "event"
+          : input.expectedPlan.scope !== "event" ||
+            input.expectedPlan.mode !== "observation" ||
+            input.expectedPlan.membership.kind === "entity") ||
+        !qualificationDependencyRefsMatchScope(
+          qualificationDependencyRefs,
+          input.expectedPlan.mode,
+        ) ||
         !filters.root ||
         !filterDocumentUsesAdvancedExpressions(filters))
     )
@@ -677,8 +685,13 @@ export function validateSemanticScopedSourceSelection(
   if (
     dependencyProperty.value !== undefined &&
     (selection.profile !== "prepared-scoped-v1" ||
-      selection.scope !== "event" ||
-      selection.mode !== "observation" ||
+      (selection.mode === "entity"
+        ? selection.scope === "event" || selection.entityKind === undefined
+        : selection.scope !== "event") ||
+      !qualificationDependencyRefsMatchScope(
+        selection.qualificationDependencyRefs ?? [],
+        selection.mode,
+      ) ||
       selection.preparedMatches !== undefined ||
       !selection.filter.root ||
       !filterDocumentUsesAdvancedExpressions(selection.filter) ||

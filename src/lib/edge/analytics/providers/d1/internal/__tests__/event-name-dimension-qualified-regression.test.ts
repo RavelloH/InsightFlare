@@ -1093,7 +1093,9 @@ describe("event.name dimension Count qualification", () => {
       const fusedOnlyStatements = actualTrace.preparedSql.filter(
         (sql) => !legacyTrace.preparedSql.includes(sql),
       );
-      expect(fusedOnlyStatements).toHaveLength(1);
+      // The fused attempt, plus the report that reads the request-private
+      // entity membership instead of the legacy ID bridge.
+      expect(fusedOnlyStatements).toHaveLength(2);
       const legacyPreparationStatementCount =
         legacyTrace.preparedSql.length - 2;
       expect(legacyPreparationStatementCount).toBeGreaterThanOrEqual(1);

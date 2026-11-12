@@ -2,6 +2,7 @@ import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filt
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import {
+  EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY,
   EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
   EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
   type QualificationDependencyRef,
@@ -53,6 +54,10 @@ interface EventMembershipFallbackInput {
   readonly configuration: unknown;
   /** The plan also reads Page visits (for example session-boundary cards). */
   readonly withPageVisits?: boolean;
+  /** Distinct frozen plans that may bind to this one Core evaluation. */
+  readonly maxPlans?: number;
+  /** Sources of one role a plan may read (for example Event + Page of an entity). */
+  readonly maxSourcesPerRole?: number;
 }
 
 /**
@@ -66,10 +71,7 @@ interface EventMembershipFallbackInput {
  * existing fallback.
  */
 export async function prepareEventMembershipFallback(
-  input: EventMembershipFallbackInput & {
-    readonly maxPlans?: number;
-    readonly maxSourcesPerRole?: number;
-  },
+  input: EventMembershipFallbackInput,
 ): Promise<EventMembershipFallback | undefined> {
   const { deferred } = input;
   const consumerKey = pageVisitQualificationConsumerKey(
@@ -89,18 +91,23 @@ export async function prepareEventMembershipFallback(
     },
   );
   if (!preparation) return undefined;
+  const entityMode = deferred.metadata.plan.mode === "entity";
   return {
     bindPlan: (buildPlan) => {
       const plan = snapshotPageVisitQualificationPlan(
         buildPlan({
           queryTime: deferred.time,
           scopePlan: deferred.metadata.plan,
-          qualificationDependencyRefs: [
-            EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
-          ],
-          pageVisitDependencyRefs: input.withPageVisits
-            ? [EVENT_FILTER_PAGE_VISIT_DEPENDENCY]
-            : [],
+          // Session/visitor requests qualify Event and Page Sources through one
+          // entity membership; observation requests use one role per Source.
+          qualificationDependencyRefs: entityMode
+            ? [EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY]
+            : [EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY],
+          pageVisitDependencyRefs: entityMode
+            ? [EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY]
+            : input.withPageVisits
+              ? [EVENT_FILTER_PAGE_VISIT_DEPENDENCY]
+              : [],
         }),
       );
       const executionInputs = bindPageVisitQualificationPreparation({

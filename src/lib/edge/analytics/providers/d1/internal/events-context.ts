@@ -246,6 +246,7 @@ export async function queryEventAnalyticsContextCardsFromD1(
           eventName: eventName ?? null,
           selectedKeys: selected,
         },
+        maxSourcesPerRole: 2,
         withPageVisits: selected.some(
           (key) => EVENT_CONTEXT_CARDS[key].kind === "session-boundary",
         ),

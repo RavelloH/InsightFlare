@@ -2401,6 +2401,65 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
     expect(hasKindTriple(trace.bindings.at(-1) ?? [])).toBe(false);
   });
 
+  it.each(["session", "visitor"] as const)(
+    "runs the %s-scope numeric fallback through the request-private entity membership relation",
+    async (scope) => {
+      const database = createFixture();
+      database
+        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+        .run("invalid-duration", "visit-alpha-1");
+      const prepared = prepareEventTypesQuery(
+        "count(page { page.durationMs gt 5 }) eq 0",
+        scope,
+        { limit: 20 },
+      );
+      const baselineTrace = newTrace();
+      const baseline = await executeLegacyEventTypesRequest({
+        env: testEnv(database, baselineTrace),
+        prepared,
+      });
+      expect(baseline.items.length).toBeGreaterThan(0);
+
+      const trace = newTrace();
+      const diagnostics = createD1ReadDiagnostics();
+      const env = testEnv(database, trace);
+      const deferred = deferredEventTypesQualificationFromQuery(
+        await d1AdvancedFilterMiddleware(env)(
+          "event-types",
+          prepared,
+          async (value) => value,
+        ),
+      );
+      if (!deferred) throw new Error("entity_membership_deferred_missing");
+      const actual = await queryEventTypePageFromD1(
+        env,
+        SITE_ID,
+        WINDOW,
+        deferred.filters,
+        prepared.limit,
+        prepared.search,
+        null,
+        "private-dashboard",
+        { deferredQualification: deferred, diagnostics },
+      );
+      expect({
+        items: mapTabs(actual.items),
+        pagination: actual.pagination,
+      }).toEqual({
+        items: mapTabs(baseline.items),
+        pagination: baseline.pagination,
+      });
+      expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
+        kind: "numeric-data-domain",
+        fieldIds: ["page.durationMs"],
+      });
+      expect(deferred.metadata.plan.advancedMatches).toBeUndefined();
+      // The legacy ID bridge binds the entity kind next to every identity.
+      expect(baselineTrace.bindings.at(-1) ?? []).toContain(scope);
+      expect(trace.bindings.at(-1) ?? []).not.toContain(scope);
+    },
+  );
+
   it("runs the event-scope numeric fallback through the request-private Event membership relation", async () => {
     const database = createFixture();
     database
