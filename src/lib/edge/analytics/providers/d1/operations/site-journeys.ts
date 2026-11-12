@@ -557,6 +557,7 @@ async function readJourneyEvents(
     target,
     input.page.limit,
     cursor,
+    input.membership,
   );
   return {
     items: page.items,

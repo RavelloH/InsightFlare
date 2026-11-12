@@ -12,6 +12,7 @@ import {
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
@@ -136,6 +137,8 @@ export interface BuildJourneyEventPageReportPlanInput {
   };
   readonly limit: number;
   readonly cursor?: JourneyEventPageCursor | null;
+  /** Request-private entity membership that replaces the legacy ID set. */
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
 }
 
 type JourneyEventPagePreparedPlanOperation =
@@ -174,6 +177,7 @@ function createSelection(input: {
   readonly subject: ReturnType<typeof createSemanticSubjectDomain>;
   readonly time: ReturnType<typeof semanticTemporalDomainsFromQueryTime>;
   readonly preparedPlanOperation?: JourneyEventPagePreparedPlanOperation;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
 }) {
   return createSemanticScopedSourceSelection({
     profile: input.scopePlan
@@ -183,6 +187,9 @@ function createSelection(input: {
     subject: input.subject,
     time: input.time,
     ...(input.scopePlan ? { expectedPlan: input.scopePlan } : {}),
+    ...(input.scopePlan && input.qualificationDependencyRefs
+      ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+      : {}),
     ...(input.preparedPlanOperation
       ? { preparedPlanOperation: input.preparedPlanOperation }
       : {}),
@@ -404,6 +411,9 @@ export function buildJourneyEventPageReportPlan(
         time,
         preparedPlanOperation:
           input.target.type === "visitor" ? "visitor-events" : "session-events",
+        ...(input.qualificationDependencyRefs
+          ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+          : {}),
       })
     : undefined;
   const pageSelection =

@@ -334,19 +334,25 @@ export async function queryJourneyEventsPageFromD1(
   target: { type: "visitor" | "session"; value: string },
   limit: number,
   cursor?: JourneyEventCursor | null,
+  /** Request-private entity membership for a qualified filter. */
+  membership?: EventMembershipFallback,
 ): Promise<JourneyEventPage> {
-  const plan = buildJourneyEventPageReportPlan({
-    siteId,
-    window,
-    filters,
-    target,
-    limit,
-    cursor,
-  });
+  const planInput = { siteId, window, filters, target, limit, cursor };
+  const bound = membership?.bindPlan(
+    (context) =>
+      buildJourneyEventPageReportPlan({
+        ...planInput,
+        qualificationDependencyRefs: context.qualificationDependencyRefs,
+      }),
+    queryWindowToTime(window),
+  );
+  const plan = bound?.plan ?? buildJourneyEventPageReportPlan(planInput);
   const rows = await queryJourneyPageReportRowsFromD1(
     env,
     plan,
     JOURNEY_EVENT_PAGE_REPORT_OUTPUT,
+    undefined,
+    bound?.executionInputs,
   );
   const mapped = rows.map(mapJourneyEventRow);
   const page = pageResult(mapped, limit);

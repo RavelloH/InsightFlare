@@ -76,20 +76,25 @@ function listSortFromRequest(
 
 /** Entity-mode list requests without an analysis read the entity membership. */
 async function prepareJourneyListMembership(input: {
-  readonly request: { readonly analysisContext?: unknown };
+  readonly request: object;
   readonly deferred: {
     readonly qualification: Parameters<
       typeof prepareDeferredEventQualificationFallback
     >[0];
   };
-  readonly operation: "visitors" | "sessions" | "visitor-sessions";
+  readonly operation:
+    | "visitors"
+    | "sessions"
+    | "visitor-sessions"
+    | "visitor-events"
+    | "session-events";
   readonly sort: unknown;
   readonly search: string | undefined;
   readonly page: unknown;
 }) {
   const qualification = input.deferred.qualification;
   if (
-    input.request.analysisContext ||
+    (input.request as { readonly analysisContext?: unknown }).analysisContext ||
     !("metadata" in qualification) ||
     qualification.metadata.plan.mode !== "entity"
   )
@@ -320,10 +325,21 @@ export function registerJourneyProviders(
           );
           if (genericQualification !== deferred.qualification)
             throw new Error("journey_event_page_qualification_request_invalid");
-          const fallbackFilters =
-            await prepareDeferredEventQualificationFallback(
-              deferred.qualification,
-            );
+          // Session and visitor filters read one request-private entity
+          // membership instead of the legacy ID bridge.
+          const membership = await prepareJourneyListMembership({
+            request,
+            deferred,
+            operation: "visitor-events",
+            sort: null,
+            search: undefined,
+            page: deferred.configuration.page,
+          });
+          const fallbackFilters = membership
+            ? deferred.qualification.filters
+            : await prepareDeferredEventQualificationFallback(
+                deferred.qualification,
+              );
           return {
             value: await readSiteVisitorEvents({
               env: options.env,
@@ -331,6 +347,7 @@ export function registerJourneyProviders(
               visitorId: deferred.configuration.target,
               window: timeWindow(request.time),
               filters: fallbackFilters,
+              ...(membership ? { membership } : {}),
               audience: deferred.configuration.audience,
               page: deferred.configuration.page,
             }),
@@ -455,10 +472,21 @@ export function registerJourneyProviders(
           );
           if (genericQualification !== deferred.qualification)
             throw new Error("journey_event_page_qualification_request_invalid");
-          const fallbackFilters =
-            await prepareDeferredEventQualificationFallback(
-              deferred.qualification,
-            );
+          // Session and visitor filters read one request-private entity
+          // membership instead of the legacy ID bridge.
+          const membership = await prepareJourneyListMembership({
+            request,
+            deferred,
+            operation: "session-events",
+            sort: null,
+            search: undefined,
+            page: deferred.configuration.page,
+          });
+          const fallbackFilters = membership
+            ? deferred.qualification.filters
+            : await prepareDeferredEventQualificationFallback(
+                deferred.qualification,
+              );
           return {
             value: await readSiteSessionEvents({
               env: options.env,
@@ -466,6 +494,7 @@ export function registerJourneyProviders(
               sessionId: deferred.configuration.target,
               window: timeWindow(request.time),
               filters: fallbackFilters,
+              ...(membership ? { membership } : {}),
               audience: deferred.configuration.audience,
               page: deferred.configuration.page,
             }),

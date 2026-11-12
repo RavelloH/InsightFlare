@@ -1914,6 +1914,112 @@ describe("Journey visitor/session Events qualified runtime", () => {
   );
 
   it.each(["visitor-events", "session-events"] as const)(
+    "reads the entity membership instead of the legacy ID bridge in %s",
+    async (operation) => {
+      const database = createMigratedDatabase();
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const legacyTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const secret = "wave97s-event-pages-membership-secret";
+      const env = {
+        DB: createSqliteD1Database(database, trace),
+        MAIN_SECRET: secret,
+      } as unknown as Env;
+      const legacyEnv = {
+        DB: createSqliteD1Database(database, legacyTrace),
+        MAIN_SECRET: secret,
+      } as unknown as Env;
+      const diagnostics = createD1ReadDiagnostics();
+      try {
+        seedFixture(database);
+        database
+          .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+          .run("invalid-duration", "page-1");
+        const query = eventQuery(operation, {
+          scope: "visitor",
+          advanced: true,
+          limit: 10,
+          filterDsl:
+            'page.path eq "/native" and count(page { page.path eq "/qualify" }) gte 1 and count(page { page.durationMs gt 5 }) gte 0',
+        });
+        const result = await createD1SiteQueryRuntime({
+          env,
+          siteId: SITE_ID,
+          diagnostics,
+        }).execute(operation, query);
+        expect(result.ok, JSON.stringify(result)).toBe(true);
+        if (!result.ok) throw new Error("event_page_membership_failed");
+        expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
+          kind: "numeric-data-domain",
+          fieldIds: ["page.durationMs"],
+        });
+
+        const prepared = prepareScopedQuery(
+          operation,
+          query,
+        ) as unknown as JourneyEventQuery &
+          QueryInput &
+          Record<string, unknown>;
+        let forwarded: unknown;
+        await d1AdvancedFilterMiddleware(legacyEnv, undefined, SITE_ID)(
+          operation,
+          prepared,
+          async (value) => {
+            forwarded = value;
+            return value;
+          },
+        );
+        const qualification = deferredEventQualificationFromQuery(
+          forwarded as QueryInput & Record<string, unknown>,
+          operation,
+        );
+        if (!qualification) throw new Error("event_page_legacy_missing");
+        const legacyFilters =
+          await prepareDeferredEventQualificationFallback(qualification);
+        const window = {
+          startMs: prepared.time.range.startMs,
+          endExclusiveMs: prepared.time.range.endExclusiveMs,
+          nowMs: prepared.time.capturedAtMs,
+          timeZone: prepared.time.reportingTimeZone,
+        };
+        const page = { limit: 10, cursor: null };
+        const legacy =
+          operation === "visitor-events"
+            ? await readSiteVisitorEvents({
+                env: legacyEnv,
+                siteId: SITE_ID,
+                visitorId: TARGET_VISITOR_ID,
+                window,
+                filters: legacyFilters,
+                audience: "private-dashboard",
+                page,
+              })
+            : await readSiteSessionEvents({
+                env: legacyEnv,
+                siteId: SITE_ID,
+                sessionId: TARGET_SESSION_ID,
+                window,
+                filters: legacyFilters,
+                audience: "private-dashboard",
+                page,
+              });
+        expect(legacy.items.length).toBeGreaterThan(0);
+        expect(result.data).toEqual(legacy);
+        // The legacy ID bridge binds the entity kind next to every identity;
+        // the request-private entity membership binds only (site, id) pairs.
+        const tokens = (bindings: readonly (readonly unknown[])[]) =>
+          bindings.some(
+            (values) =>
+              values.includes("visitor") || values.includes("session"),
+          );
+        expect(tokens(legacyTrace.bindings.slice(-1))).toBe(true);
+        expect(tokens(trace.bindings.slice(-1))).toBe(false);
+      } finally {
+        database.close();
+      }
+    },
+  );
+
+  it.each(["visitor-events", "session-events"] as const)(
     "uses the original whole-reader fallback for actual TEXT numeric Count data in $operation",
     async (operation) => {
       const database = createMigratedDatabase();
