@@ -720,6 +720,83 @@ describe("visitor sessions qualification migration", () => {
     }
   });
 
+  it("reads the entity membership instead of the legacy ID bridge for a numeric fallback", async () => {
+    const database = createMigratedDatabase();
+    const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+    const legacyTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+    const secret = "wave97w-visitor-sessions-cursor-secret";
+    const env = {
+      DB: createVisitorSessionsTestDatabase({
+        database,
+        trace,
+        captures: [],
+      }),
+      MAIN_SECRET: secret,
+    } as unknown as Env;
+    const legacyEnv = {
+      DB: createVisitorSessionsTestDatabase({
+        database,
+        trace: legacyTrace,
+        captures: [],
+      }),
+      MAIN_SECRET: secret,
+    } as unknown as Env;
+    try {
+      seedDatabase(database);
+      database
+        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+        .run("invalid-duration", "session-a-tie-1");
+      const filters = parseFilterDsl(
+        'page.path eq "/match" and count(page { page.durationMs gt 5 }) eq 0',
+        analyticsFilterRegistry,
+      );
+      const request = {
+        ...queryInput({ scope: "session", filterKind: "count" }),
+        filters,
+      } as VisitorSessionsQuery;
+      const diagnostics = createD1ReadDiagnostics();
+      const result: VisitorSessionsResult = await createD1SiteQueryRuntime({
+        env,
+        siteId: SITE_ID,
+        diagnostics,
+      }).execute("visitor-sessions", request);
+      expect(result.ok, JSON.stringify(result)).toBe(true);
+      if (!result.ok) throw new Error("visitor_sessions_membership_failed");
+      expect(diagnostics.advancedCountSqlFallbackReason).toEqual({
+        kind: "numeric-data-domain",
+        fieldIds: ["page.durationMs"],
+      });
+      const deferred = deferredSessionListQualificationFromQuery(
+        await visitorSessionsMiddlewareQuery(legacyEnv, request),
+      );
+      if (!deferred) throw new Error("visitor_sessions_deferred_missing");
+      const legacy = await readSiteVisitorSessions({
+        env: legacyEnv,
+        siteId: SITE_ID,
+        visitorId: VISITOR_ID,
+        window: {
+          startMs: BASE,
+          endExclusiveMs: END,
+          nowMs: END,
+          timeZone: "UTC",
+        },
+        filters: await prepareDeferredEventQualificationFallback(
+          deferred.qualification,
+        ),
+        page: { limit: 1, cursor: null },
+        audience: "private-dashboard",
+      });
+      expect(legacy.items.length).toBeGreaterThan(0);
+      expect(result.data).toEqual(legacy);
+      // The legacy ID bridge binds the entity kind next to every identity;
+      // the request-private entity membership binds only (site, id) pairs.
+      expect(legacyTrace.bindings.at(-1) ?? []).toContain("session");
+      expect(trace.bindings.at(-1) ?? []).not.toContain("session");
+    } finally {
+      database.close();
+    }
+  });
+
   it("checks a mutated Count cap before missing-target presence and bad cursor", async () => {
     const database = createMigratedDatabase();
     const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };

@@ -585,7 +585,11 @@ export function readSiteSessionEvents(
 }
 
 export async function readSiteVisitorSessions(
-  input: JourneyTrajectoryInput & { readonly visitorId: string },
+  input: JourneyTrajectoryInput & {
+    readonly visitorId: string;
+    /** Request-private entity membership for a qualified filter. */
+    readonly membership?: EventMembershipFallback;
+  },
 ) {
   const target = { type: "visitor" as const, value: input.visitorId };
   await assertJourneyTargetInWindow(input, target);
@@ -602,6 +606,7 @@ export async function readSiteVisitorSessions(
       cursor,
       target,
       preparedPlanOperation: "visitor-sessions",
+      ...(input.membership ? { membership: input.membership } : {}),
     },
   );
   return {

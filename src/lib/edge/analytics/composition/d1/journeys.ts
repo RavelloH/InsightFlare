@@ -82,7 +82,7 @@ async function prepareJourneyListMembership(input: {
       typeof prepareDeferredEventQualificationFallback
     >[0];
   };
-  readonly operation: "visitors" | "sessions";
+  readonly operation: "visitors" | "sessions" | "visitor-sessions";
   readonly sort: unknown;
   readonly search: string | undefined;
   readonly page: unknown;
@@ -370,6 +370,8 @@ export function registerJourneyProviders(
               })
             : {};
         let filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
+        let membership:
+          Awaited<ReturnType<typeof prepareJourneyListMembership>> | undefined;
         if (deferred) {
           if (deferred.operation !== "visitor-sessions")
             throw new Error("session_list_qualification_request_invalid");
@@ -385,9 +387,19 @@ export function registerJourneyProviders(
           if (options.diagnostics)
             options.diagnostics.advancedCountSqlFallbackReason =
               qualified.fallbackReason;
-          filters = await prepareDeferredEventQualificationFallback(
-            deferred.qualification,
-          );
+          membership = await prepareJourneyListMembership({
+            request,
+            deferred,
+            operation: "visitor-sessions",
+            sort: null,
+            search: undefined,
+            page,
+          });
+          filters = membership
+            ? deferred.qualification.filters
+            : await prepareDeferredEventQualificationFallback(
+                deferred.qualification,
+              );
         }
         return {
           value: await readSiteVisitorSessions({
@@ -396,6 +408,7 @@ export function registerJourneyProviders(
             visitorId: stringField(request, "visitorId"),
             window: timeWindow(request.time),
             filters,
+            ...(membership ? { membership } : {}),
             audience: request.context.policy.audience,
             page: {
               limit:
