@@ -566,3 +566,25 @@ export function analyzeFilterTimeRange(
     },
   };
 }
+
+/**
+ * Resolves one top-level `time` endpoint to epoch milliseconds exactly as the
+ * Core evaluator does: a safe integer or a time anchor with an elapsed offset.
+ * Text endpoints and calendar offsets stay with the compatibility evaluator.
+ */
+export function resolveFilterTimeEndpointMs(
+  value: unknown,
+  candidate: FilterHistoryRange,
+  capturedAtMs: number,
+): number | null {
+  // The evaluator turns canonical RFC3339 literals into epoch milliseconds
+  // before comparing; any other text compares as a string and is not a bound.
+  if (typeof value === "string" && !/^\d{4}-\d\d-\d\dT/u.test(value))
+    return null;
+  return resolveEndpoint(value, candidate, capturedAtMs);
+}
+
+/** Whether the condition is the context `time` target of a top-level leaf. */
+export function isFilterTimeLeaf(condition: FilterCondition): boolean {
+  return isTimeTarget(condition.target);
+}

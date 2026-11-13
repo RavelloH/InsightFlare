@@ -37,6 +37,12 @@ import {
   advancedCountSelectorNeedsStringClass,
   advancedCountSelectorRequiresSafeRange,
 } from "@/lib/edge/analytics/engine/semantic/count-selector-fields";
+import {
+  type CountTimeLeaf,
+  countTimeLeaf,
+  countTimeLeafConditions,
+  isCountTimeLeafCondition,
+} from "@/lib/edge/analytics/engine/semantic/count-time-leaf";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
 import { snapshotEventPayloadTopLevelPaths } from "@/lib/edge/analytics/engine/semantic/event-payload-logical";
 import {
@@ -588,6 +594,50 @@ function scalarCollectionContributions(
   return result;
 }
 
+interface TimeLeafContribution {
+  readonly condition: FilterCondition;
+  readonly leaf: CountTimeLeaf;
+  readonly name: string;
+}
+
+const NO_TIME_LEAVES: ReadonlyMap<string, TimeLeafContribution> = new Map();
+
+/**
+ * Top-level `time` leaves count the loaded activities inside their bounds. The
+ * Core evaluator resolves them over the activities of the Filter window, so the
+ * plan only admits them together with an explicit expression range.
+ */
+function timeLeafContributions(
+  root: FilterExpression,
+  input: {
+    readonly candidateRange: {
+      readonly startMs: number;
+      readonly endExclusiveMs: number;
+    };
+    readonly capturedAtMs: number;
+    readonly expressionUsesExplicitRange: boolean;
+  },
+): ReadonlyMap<string, TimeLeafContribution> {
+  const conditions = countTimeLeafConditions(root);
+  if (conditions.length === 0) return NO_TIME_LEAVES;
+  if (!input.expressionUsesExplicitRange)
+    throw new Error("advanced_count_time_leaf_requires_explicit_range");
+  const result = new Map<string, TimeLeafContribution>();
+  for (const condition of conditions) {
+    const key = bareStringConditionKey(condition);
+    if (result.has(key)) continue;
+    const leaf = countTimeLeaf(condition, input);
+    if (!leaf)
+      throw new Error("advanced_count_plan_received_unchecked_time_leaf");
+    result.set(key, {
+      condition,
+      leaf,
+      name: `timeLeafContribution${result.size}`,
+    });
+  }
+  return result;
+}
+
 function bareStringConditionKey(condition: FilterCondition): string {
   return JSON.stringify(condition);
 }
@@ -938,6 +988,7 @@ function predicateExpression(
   scalarCollections: ReadonlyMap<string, ScalarCollectionContribution>,
   bareStringFields: ReadonlyMap<string, BareFieldContribution>,
   bareFieldMode: "contribution" | "candidate" = "contribution",
+  timeLeaves: ReadonlyMap<string, TimeLeafContribution> = NO_TIME_LEAVES,
 ): ReturnType<LogicalPlanBuilder["slot"]> {
   if (expression.kind === "not")
     return builder.not(
@@ -949,6 +1000,7 @@ function predicateExpression(
         scalarCollections,
         bareStringFields,
         bareFieldMode,
+        timeLeaves,
       ),
     );
   if (expression.kind === "and" || expression.kind === "or") {
@@ -961,6 +1013,7 @@ function predicateExpression(
         scalarCollections,
         bareStringFields,
         bareFieldMode,
+        timeLeaves,
       ),
     );
     return expression.kind === "and"
@@ -969,6 +1022,17 @@ function predicateExpression(
   }
   if (expression.kind !== "condition")
     throw new Error("advanced_count_plan_received_unchecked_expression");
+
+  if (isCountTimeLeafCondition(expression)) {
+    const contribution = timeLeaves.get(bareStringConditionKey(expression));
+    if (!contribution)
+      throw new Error("advanced_count_plan_missing_time_leaf_contribution");
+    return builder.compare(
+      "gt",
+      builder.slot(relation, contribution.name),
+      builder.literal(0, { kind: "scalar", scalar: "number" }),
+    );
+  }
 
   if (expression.target.kind === "field") {
     const contribution = bareStringFields.get(
@@ -1464,6 +1528,12 @@ function appendAdvancedCountFilterPlan(
     input.analysis.document.root!,
     input.allowPrivateQualifiedGeoBareFields === true,
   );
+  const timeLeaves = timeLeafContributions(
+    input.analysis.document.root!,
+    input,
+  );
+  if (timeLeaves.size > 0 && (combined || singleBagMode !== "same-range"))
+    throw new Error("advanced_count_time_leaf_plan_not_applicable");
   const qualifiedGeoRawCountWitness =
     input.allowPrivateQualifiedGeoBareFields === true
       ? (() => {
@@ -1815,6 +1885,23 @@ function appendAdvancedCountFilterPlan(
       zero,
     );
   };
+  const timeLeafContribution = (
+    relation: Parameters<LogicalPlanBuilder["slot"]>[0],
+    contribution: TimeLeafContribution,
+  ) => {
+    const time = builder.slot(relation, "time");
+    const bound = (milliseconds: number) =>
+      builder.literal(milliseconds, { kind: "scalar", scalar: "datetime" });
+    const { operator, values } = contribution.leaf;
+    const predicate =
+      operator === "between"
+        ? builder.and(
+            builder.compare("gte", time, bound(values[0]!)),
+            builder.compare("lte", time, bound(values[1]!)),
+          )
+        : builder.compare(operator, time, bound(values[0]!));
+    return builder.caseWhen([{ when: predicate, then: one }], zero);
+  };
   const selectorContribution = (contribution: CountSelectorContribution) => {
     if (contribution.input.collection.kind !== "entity-root")
       throw new Error("advanced_count_plan_received_unchecked_selector");
@@ -1998,6 +2085,11 @@ function appendAdvancedCountFilterPlan(
         zero,
       );
   }
+  for (const contribution of timeLeaves.values())
+    observationProjection[contribution.name] = timeLeafContribution(
+      predicateRows,
+      contribution,
+    );
   for (const contribution of bareStringFields.values())
     observationProjection[contribution.name] = usesCandidateContributionBag
       ? zero
@@ -2028,6 +2120,7 @@ function appendAdvancedCountFilterPlan(
     ...[...selectorCounts.values()].map((contribution) => contribution.name),
     ...numericCompatibilityFields.map((field) => field.invalidCountOutput),
     ...[...bareStringFields.values()].map((contribution) => contribution.name),
+    ...[...timeLeaves.values()].map((contribution) => contribution.name),
     ...[...scalarCollections.values()].flatMap((contribution) =>
       contribution.nullMarkerName ? [contribution.nullMarkerName] : [],
     ),
@@ -2070,6 +2163,9 @@ function appendAdvancedCountFilterPlan(
           ]),
         ),
         ...Object.fromEntries(
+          [...timeLeaves.values()].map(({ name }) => [name, zero]),
+        ),
+        ...Object.fromEntries(
           [...scalarCollections.values()].flatMap((contribution) => [
             [
               contribution.valueName,
@@ -2099,6 +2195,9 @@ function appendAdvancedCountFilterPlan(
           ),
           ...Object.fromEntries(
             [...bareStringFields.values()].map(({ name }) => [name, zero]),
+          ),
+          ...Object.fromEntries(
+            [...timeLeaves.values()].map(({ name }) => [name, zero]),
           ),
           ...Object.fromEntries(
             [...scalarCollections.values()].flatMap((contribution) => [
@@ -2293,6 +2392,11 @@ function appendAdvancedCountFilterPlan(
       builder.slot(anchored, contribution.name),
       zero,
     );
+  for (const contribution of timeLeaves.values())
+    countsProjection[contribution.name] = builder.coalesce(
+      builder.slot(anchored, contribution.name),
+      zero,
+    );
   for (const field of numericCompatibilityFields) {
     const invalidCount = builder.coalesce(
       builder.slot(anchored, field.invalidCountOutput),
@@ -2374,6 +2478,8 @@ function appendAdvancedCountFilterPlan(
     selectorCounts,
     scalarCollections,
     bareStringFields,
+    "contribution",
+    timeLeaves,
   );
   if (payloadCombined) {
     if (!payloadFacts || numericCompatibilityFields.length > 0)

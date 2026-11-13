@@ -17,6 +17,11 @@ import {
   resolveAdvancedCountFiniteCollection,
   resolveAdvancedCountScalarField,
 } from "@/lib/edge/analytics/engine/semantic/count-scalar-fields";
+import {
+  countTimeLeaf,
+  type CountTimeLeafContext,
+  isCountTimeLeafCondition,
+} from "@/lib/edge/analytics/engine/semantic/count-time-leaf";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 import {
   analyzeFilterDocument,
@@ -501,6 +506,7 @@ function visitExpression(
   analysis: ReturnType<typeof analyzeFilterDocument>,
   path: string,
   allowQualifiedGeoBareFields = false,
+  timeLeafContext?: CountTimeLeafContext,
 ): AdvancedCountFilterSupport | undefined {
   if (expression.kind === "not")
     return visitExpression(
@@ -508,6 +514,7 @@ function visitExpression(
       analysis,
       `${path}.child`,
       allowQualifiedGeoBareFields,
+      timeLeafContext,
     );
   if (expression.kind === "and" || expression.kind === "or") {
     for (const [index, child] of expression.children.entries()) {
@@ -516,6 +523,7 @@ function visitExpression(
         analysis,
         `${path}.children[${index}]`,
         allowQualifiedGeoBareFields,
+        timeLeafContext,
       );
       if (result) return result;
     }
@@ -537,6 +545,18 @@ function visitExpression(
       "count_sql_condition_not_analyzed",
       "The condition is missing from the validated Filter analysis.",
     );
+  if (isCountTimeLeafCondition(condition)) {
+    // A top-level time leaf is existential over loaded activities and only
+    // exists with an explicit Filter window, so its endpoints must resolve
+    // against the request's own query time.
+    if (!timeLeafContext || !countTimeLeaf(condition, timeLeafContext))
+      return unsupported(
+        conditionPath,
+        "count_sql_time_leaf_unsupported",
+        "Top-level time leaves need an explicit Filter window and ordered numeric or elapsed-offset endpoints.",
+      );
+    return undefined;
+  }
   if (condition.target.kind === "field") {
     if (conditionSemantics.valueType.kind !== "scalar")
       return unsupported(
@@ -673,7 +693,11 @@ function visitExpression(
 export function classifyAdvancedCountFilter(
   input: FilterDocument,
   scope: FilterRelationScope,
-  options: { readonly allowPrivateQualifiedGeoBareFields?: true } = {},
+  options: {
+    readonly allowPrivateQualifiedGeoBareFields?: true;
+    /** Present only for a request whose Filter owns an explicit time window. */
+    readonly timeLeafContext?: CountTimeLeafContext;
+  } = {},
 ): AdvancedCountFilterSupport {
   if (scope !== "session" && scope !== "visitor")
     return unsupported(
@@ -710,6 +734,7 @@ export function classifyAdvancedCountFilter(
     analysis,
     "root",
     options.allowPrivateQualifiedGeoBareFields === true,
+    options.timeLeafContext,
   );
   if (result) return result;
   const payloadPaths = advancedCountPayloadPaths(document.root);

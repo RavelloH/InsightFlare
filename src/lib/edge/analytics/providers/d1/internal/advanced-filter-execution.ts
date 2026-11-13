@@ -1639,6 +1639,14 @@ async function evaluateForSitesCore(input: {
   const countSqlSupport = classifyAdvancedCountFilter(
     input.filters,
     input.plan.scope,
+    input.time.filterRange !== undefined
+      ? {
+          timeLeafContext: {
+            candidateRange: input.time.range,
+            capturedAtMs: input.time.capturedAtMs,
+          },
+        }
+      : {},
   );
   const authorizedSiteIds = new Set<string>(input.subject.siteIds);
   if (input.siteIds.some((siteId) => !authorizedSiteIds.has(siteId)))
