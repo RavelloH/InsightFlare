@@ -21,6 +21,15 @@ export interface ReadTeamTimeseriesInput {
   readonly interval: TrendResult["interval"];
   readonly filters: FilterDocument;
   readonly allowedSiteIds?: readonly string[];
+  /**
+   * Reads one site. Advanced filters are qualified per site by the site
+   * pipeline instead of one joint evaluation across the whole team.
+   */
+  readonly readSite?: (siteId: string) => Promise<{
+    readonly value: readonly TrendPoint[];
+    readonly source: QuerySource;
+    readonly approximateVisitors: boolean;
+  }>;
 }
 function source(values: readonly QuerySource[]): QuerySource {
   if (values.length === 0) return "raw";
@@ -57,11 +66,13 @@ export async function readTeamTimeseries(
   const time = toQueryTime(input.window);
   const results = await Promise.all(
     sites.map((site) =>
-      createOverviewReader(input.env, site.id).readTrend({
-        time,
-        filters: input.filters,
-        interval: input.interval,
-      }),
+      input.readSite
+        ? input.readSite(site.id)
+        : createOverviewReader(input.env, site.id).readTrend({
+            time,
+            filters: input.filters,
+            interval: input.interval,
+          }),
     ),
   );
   return {

@@ -2,17 +2,22 @@ import {
   AnalyticsProviderRegistry,
   typedQueryProviderFor,
 } from "@/lib/edge/analytics/application/provider-registry";
+import { createD1SiteProviderRegistry } from "@/lib/edge/analytics/composition/d1/create-site-runtime";
 import { createAnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
 import {
   EMPTY_FILTER_DOCUMENT,
+  type FilterDocument,
   type QueryTime,
+  siteQueryContext,
 } from "@/lib/edge/analytics/contract";
+import { prepareScopedQuery } from "@/lib/edge/analytics/contract/scoped-filter";
 import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { readTeamBreakdown } from "@/lib/edge/analytics/providers/d1/operations/team-breakdown";
 import { readTeamOverview } from "@/lib/edge/analytics/providers/d1/operations/team-overview";
 import { readTeamSites } from "@/lib/edge/analytics/providers/d1/operations/team-sites";
 import { readTeamTimeseries } from "@/lib/edge/analytics/providers/d1/operations/team-timeseries";
 import type { Env } from "@/lib/edge/types";
+import { filterDocumentUsesAdvancedExpressions } from "@/lib/filter-contract/filter-types";
 interface D1TeamRuntimeBindings {
   readonly env: Env;
 }
@@ -24,6 +29,53 @@ function timeWindow(time: QueryTime) {
     timeZone: time.reportingTimeZone,
   };
 }
+/** Team operations whose advanced filters are qualified one site at a time. */
+const SITE_DELEGATED_OPERATIONS = new Set(["overview", "trend"]);
+
+function usesAdvancedFilters(filters: FilterDocument | undefined): boolean {
+  return (
+    filters !== undefined && filterDocumentUsesAdvancedExpressions(filters)
+  );
+}
+
+/**
+ * Session and visitor identities are site-local, so a team filter qualifies
+ * each site independently. Delegating to the site pipeline gives every site
+ * the same bounded SQL qualification as a single-site request, under the
+ * team request's own audience and authorized sites, without one joint
+ * evaluation or a membership packed for the whole team.
+ */
+function siteDelegate(
+  options: D1TeamRuntimeBindings,
+  operation: "overview" | "trend",
+  request: {
+    readonly context: { readonly policy: { readonly audience: never } };
+    readonly time: QueryTime;
+    readonly filters?: FilterDocument;
+    readonly scopePreference?: unknown;
+    readonly interval?: unknown;
+  },
+) {
+  return async (siteId: string) => {
+    const registry = createD1SiteProviderRegistry({
+      env: options.env,
+      siteId,
+    });
+    const siteQuery = prepareScopedQuery(operation, {
+      context: siteQueryContext(siteId, request.context.policy.audience),
+      time: request.time,
+      filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
+      ...(request.scopePreference !== undefined
+        ? { scopePreference: request.scopePreference }
+        : {}),
+      ...(request.interval !== undefined ? { interval: request.interval } : {}),
+    } as never);
+    const provider = registry.resolve(operation);
+    if (!provider) throw new Error("team_site_delegate_provider_missing");
+    return (await provider.execute(siteQuery as never)) as never;
+  };
+}
+
 export function createD1TeamProviderRegistry(options: D1TeamRuntimeBindings) {
   const registry = new AnalyticsProviderRegistry()
     .register(
@@ -35,6 +87,26 @@ export function createD1TeamProviderRegistry(options: D1TeamRuntimeBindings) {
           allowedSiteIds: request.allowedSiteIds,
           window: timeWindow(request.time),
           filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
+          ...(usesAdvancedFilters(request.filters)
+            ? {
+                readSite: async (siteId: string) => {
+                  const site = (await siteDelegate(
+                    options,
+                    "overview",
+                    request as never,
+                  )(siteId)) as {
+                    value: { current: never };
+                    source: never;
+                    approximateVisitors: boolean;
+                  };
+                  return {
+                    value: site.value.current,
+                    source: site.source,
+                    approximateVisitors: site.approximateVisitors,
+                  };
+                },
+              }
+            : {}),
         });
         return {
           value: { current: result.data },
@@ -53,6 +125,26 @@ export function createD1TeamProviderRegistry(options: D1TeamRuntimeBindings) {
           interval: request.interval,
           window: timeWindow(request.time),
           filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
+          ...(usesAdvancedFilters(request.filters)
+            ? {
+                readSite: async (siteId: string) => {
+                  const site = (await siteDelegate(
+                    options,
+                    "trend",
+                    request as never,
+                  )(siteId)) as {
+                    value: { points: never };
+                    source: never;
+                    approximateVisitors: boolean;
+                  };
+                  return {
+                    value: site.value.points,
+                    source: site.source,
+                    approximateVisitors: site.approximateVisitors,
+                  };
+                },
+              }
+            : {}),
         });
         return {
           value: result.data,
@@ -112,7 +204,17 @@ export function createD1TeamProviderRegistry(options: D1TeamRuntimeBindings) {
       }),
     );
 
-  registry.useMiddleware(d1AdvancedFilterMiddleware(options.env));
+  const jointQualification = d1AdvancedFilterMiddleware(options.env);
+  registry.useMiddleware(async (operation, input, next, execution) => {
+    const filters = (input as { readonly filters?: FilterDocument }).filters;
+    // Delegated operations qualify each site in its own pipeline.
+    if (
+      SITE_DELEGATED_OPERATIONS.has(operation) &&
+      usesAdvancedFilters(filters)
+    )
+      return next(input);
+    return jointQualification(operation, input, next, execution);
+  });
   return registry;
 }
 
