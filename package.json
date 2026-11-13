@@ -60,6 +60,7 @@
     "check:i18n": "tsx scripts/check-i18n.ts",
     "watch:i18n": "tsx scripts/watch-i18n.ts",
     "test": "vitest run",
+    "test:cost": "tsx scripts/test-cost.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage --coverage.reporter=text --coverage.reporter=html --coverage.reportsDirectory=coverage/core",
     "test:coverage:tracker": "vitest run --config vitest.tracker.config.ts --coverage --coverage.reporter=text --coverage.reporter=html --coverage.reportsDirectory=coverage/tracker",
