@@ -10,6 +10,7 @@ import {
 import {
   prepareScopedQuery,
   type QueryInput,
+  type QueryOperation,
   type QueryTime,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
@@ -20,6 +21,7 @@ import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/in
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
+import * as filterEvaluator from "@/lib/filter-contract/filter-evaluator";
 
 const SITE = "time-leaf-site";
 // Candidate window [100, 200); the capture instant leaves room for later data.
@@ -85,6 +87,17 @@ const ACTIVITIES: readonly Activity[] = [
     path: "/e",
     events: [{ at: 205, name: "other" }],
   },
+  // The only qualifier event sits before the lifted window while a page sits
+  // inside it: selector counts must follow the same loaded window.
+  {
+    visit: "v-pre",
+    session: "s-pre",
+    visitor: "u-pre",
+    at: 110,
+    path: "/h",
+    events: [{ at: 111, name: "qualifier" }],
+  },
+  { visit: "v-pre-2", session: "s-pre", visitor: "u-pre", at: 170, path: "/i" },
   // A visitor that spans two sessions across the boundary.
   {
     visit: "v-span-1",
@@ -177,13 +190,19 @@ interface Evaluation {
   readonly ids: readonly string[];
   readonly diagnostics: ReturnType<typeof createD1ReadDiagnostics>;
   readonly classifications: readonly string[];
+  /** How often the Core JavaScript evaluator actually ran. */
+  readonly coreEvaluations: number;
   readonly trace: SqliteD1Trace;
 }
 
 async function evaluate(
   dsl: string,
   scope: "session" | "visitor",
-  options: { readonly forceCore?: boolean; readonly time?: QueryTime } = {},
+  options: {
+    readonly forceCore?: boolean;
+    readonly time?: QueryTime;
+    readonly operation?: QueryOperation;
+  } = {},
 ): Promise<Evaluation> {
   const database = createFixture();
   const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
@@ -191,6 +210,7 @@ async function evaluate(
     DB: createSqliteD1Database(database, trace),
   } as unknown as Env;
   const diagnostics = createD1ReadDiagnostics();
+  const coreEvaluator = vi.spyOn(filterEvaluator, "evaluateFilterDocument");
   const classify = vi.spyOn(countSupport, "classifyAdvancedCountFilter");
   if (options.forceCore)
     classify.mockReturnValue({
@@ -206,7 +226,7 @@ async function evaluate(
     scopePreference: scope,
   } as QueryInput & { readonly time: QueryTime });
   const prepared = (await d1AdvancedFilterMiddleware(env, diagnostics)(
-    "performance",
+    options.operation ?? "performance",
     input,
     async (value) => value,
   )) as typeof input;
@@ -221,8 +241,10 @@ async function evaluate(
       ? (result.value as { readonly kind: string }).kind
       : "throw",
   );
+  const coreEvaluations = coreEvaluator.mock.calls.length;
   classify.mockRestore();
-  return { ids, diagnostics, classifications, trace };
+  coreEvaluator.mockRestore();
+  return { ids, diagnostics, classifications, coreEvaluations, trace };
 }
 
 const CASES = [
@@ -243,6 +265,14 @@ const CASES = [
     "a time leaf with a bare Page field leaf",
     'time gte @range.start+30ms and page.path neq "/a"',
   ],
+  [
+    "an event count that only holds before the lifted window",
+    'time gte @range.start+30ms and count(event { event.name eq "qualifier" }) eq 1',
+  ],
+  [
+    "an event-presence leaf next to a time leaf",
+    'time gte @range.start+30ms and count(event { event.name eq "qualifier" }) eq 0',
+  ],
   ["an absolute RFC3339 bound", 'time gte "1970-01-01T00:00:00.140Z"'],
   [
     "an absolute closed interval",
@@ -251,7 +281,47 @@ const CASES = [
   ["a bound relative to the capture instant", "time gte @now-100ms"],
 ] as const;
 
+// Windows the SQL slice must treat exactly like the Core evaluator even though
+// they are empty, still open at the capture instant or reach into history.
+const WINDOW_EDGE_CASES = [
+  ["a window after the capture instant", "time gte @now+1ms"],
+  [
+    "a window that closes before it opens",
+    "time gt @range.end+90ms and time lt @range.start",
+  ],
+  ["a window ending exactly at the capture instant", "time lte @now"],
+  ["a window as wide as the whole fixture", 'time gte "1970-01-01T00:00:00Z"'],
+  [
+    "a time leaf next to a history window selector",
+    "time gte @range.start+30ms and count(window(event, @range.start, [-20ms, 0ms])) gte 0",
+  ],
+  [
+    "a time leaf next to a selector window inside the Filter window",
+    "time gte @range.start+30ms and count(window(page, @range.start, [0ms, 60ms])) gte 1",
+  ],
+] as const;
+
 describe("SQL Count top-level time leaves", () => {
+  it.each(
+    WINDOW_EDGE_CASES.flatMap(([name, dsl]) =>
+      (["session", "visitor"] as const).map((scope) => ({ name, dsl, scope })),
+    ),
+  )(
+    "matches the Core evaluator for $name at $scope scope",
+    async ({ dsl, scope }) => {
+      const sql = await evaluate(dsl, scope).catch((error: unknown) => error);
+      const core = await evaluate(dsl, scope, { forceCore: true }).catch(
+        (error: unknown) => error,
+      );
+      // Same answer, or the same failure, whichever evaluator runs.
+      if (sql instanceof Error || core instanceof Error) {
+        expect(String(sql)).toEqual(String(core));
+        return;
+      }
+      expect((sql as Evaluation).ids).toEqual((core as Evaluation).ids);
+    },
+  );
+
   it.each(
     CASES.flatMap(([name, dsl]) =>
       (["session", "visitor"] as const).map((scope) => ({ name, dsl, scope })),
@@ -266,6 +336,51 @@ describe("SQL Count top-level time leaves", () => {
       expect(sql.classifications).toContain("supported");
       expect(sql.diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
       expect(core.classifications).not.toContain("supported");
+      // The Core evaluator never ran for the SQL answer, and it does run when
+      // the same request is forced onto it, so the spy is meaningful.
+      expect(sql.coreEvaluations).toBe(0);
+      expect(core.coreEvaluations).toBeGreaterThan(0);
+      expect(sql.ids).toEqual(core.ids);
+    },
+  );
+
+  // The middleware prepares one scoped membership per request whatever the
+  // consumer, so every operation that carries a Filter takes the SQL slice.
+  it.each([
+    "overview",
+    "trend",
+    "pages",
+    "referrers",
+    "channels",
+    "dimension",
+    "cross-dimension",
+    "share-trend",
+    "radar",
+    "geo-points",
+    "performance",
+    "retention",
+    "filter-values",
+    "visitors",
+    "sessions",
+    "visitor-sessions",
+    "visitor-events",
+    "session-events",
+    "event-summary",
+    "event-types",
+    "event-records",
+    "goal-summary",
+    "funnel-analysis",
+  ] as const)(
+    "evaluates a time leaf in SQL for the %s operation",
+    async (operation) => {
+      const dsl = 'time gte @range.start+30ms and page.path neq "/a"';
+      const sql = await evaluate(dsl, "session", { operation });
+      const core = await evaluate(dsl, "session", {
+        operation,
+        forceCore: true,
+      });
+      expect(sql.coreEvaluations).toBe(0);
+      expect(sql.diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
       expect(sql.ids).toEqual(core.ids);
     },
   );

@@ -39,6 +39,7 @@ import { validateLogicalPlan } from "@/lib/edge/analytics/engine/logical/validat
 import { buildReferrerSummaryPlan } from "@/lib/edge/analytics/engine/referrer-report-plan";
 import { buildReferrersQualificationPlan } from "@/lib/edge/analytics/engine/referrers-qualification-plan";
 import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
+import * as countSupport from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import {
   d1AdvancedFilterMiddleware,
   deferredReferrersQualificationFromQuery,
@@ -62,6 +63,7 @@ import {
 import { bindReferrersSummaryQualification } from "@/lib/edge/analytics/providers/d1/internal/referrers-qualification-execution";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
+import * as filterEvaluator from "@/lib/filter-contract/filter-evaluator";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 import { InvalidCursorError } from "@/lib/pagination";
 
@@ -873,6 +875,55 @@ describe("qualified flat Referrers pages and summary", () => {
       (secondActual.value as { readonly items: readonly unknown[] }).items,
     ).not.toEqual(firstPage.items);
   });
+
+  it.each(
+    (["session", "visitor"] as const).flatMap((scope) =>
+      (["summary", "page"] as const).map((kind) => ({ scope, kind })),
+    ),
+  )(
+    "answers a $scope $kind Referrers read with a top-level time leaf in SQL like the Core evaluator",
+    async ({ scope, kind }) => {
+      const { database } = createFixture();
+      const timeDsl = `${BASE_FILTER} and time gte @range.start+13ms`;
+      const build = (filterDsl?: string) =>
+        queryFor({
+          scope,
+          ...(kind === "summary"
+            ? { variant: "summary" as const, topN: 10 }
+            : { limit: 10, includeFullUrl: true }),
+          ...(filterDsl ? { filterDsl } : {}),
+        });
+      // Oracle: the same request on the Core JavaScript evaluator.
+      const classify = vi
+        .spyOn(countSupport, "classifyAdvancedCountFilter")
+        .mockReturnValue({
+          kind: "unsupported",
+          path: "root",
+          code: "forced_core_oracle",
+          reason: "The test forces the Core evaluator as the oracle.",
+        });
+      const oracle = await legacyRead(database, build(timeDsl), traceFor());
+      const baseline = await legacyRead(database, build(), traceFor());
+      classify.mockRestore();
+      // The time leaf must change the answer, otherwise parity proves nothing.
+      expect(oracle.value).not.toEqual(baseline.value);
+
+      const evaluator = vi.spyOn(filterEvaluator, "evaluateFilterDocument");
+      const trace = traceFor();
+      const diagnostics = createD1ReadDiagnostics();
+      const provider = createD1SiteProviderRegistry({
+        env: testEnv(database, trace),
+        siteId: SITE,
+        diagnostics,
+      }).resolve("referrers");
+      if (!provider) throw new Error("time_leaf_referrers_provider_missing");
+      const actual = await provider.execute(build(timeDsl) as never);
+      expect(actual.value).toEqual(oracle.value);
+      expect(evaluator).not.toHaveBeenCalled();
+      expect(diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
+      evaluator.mockRestore();
+    },
+  );
 
   it("suppresses every Event candidate summary root and keeps controls for numeric fallback", async () => {
     const { database } = createFixture();

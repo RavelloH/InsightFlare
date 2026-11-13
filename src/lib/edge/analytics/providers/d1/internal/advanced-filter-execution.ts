@@ -6269,6 +6269,11 @@ async function prepareDeferredEventQualification(input: {
     geoPointsWholeFilterOptIn &&
     geoPointsFilterResolution?.kind === "supported" &&
     geoPointsFilterResolution.mode === "whole-filter";
+  // Deliberately classified without a time-leaf context: a top-level `time`
+  // leaf needs an explicit expression window, which the fused single-statement
+  // Count plans cannot carry (they require the exact candidate window). Such
+  // requests stay undeferred, and the middleware evaluates their membership in
+  // SQL through `evaluateForSitesCore`, which does pass the context.
   const support =
     metadata.plan.scope === "event"
       ? classifyAdvancedEventCandidateCountFilter(supportFilters)

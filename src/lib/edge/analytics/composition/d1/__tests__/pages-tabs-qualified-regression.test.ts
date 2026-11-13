@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
@@ -19,6 +19,7 @@ import {
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import { buildPagesTabsQualificationPlan } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
+import * as countSupport from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import {
   d1AdvancedFilterMiddleware,
   deferredPagesAggregatePageQualificationFromQuery,
@@ -37,6 +38,7 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/pages";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
+import * as filterEvaluator from "@/lib/filter-contract/filter-evaluator";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 import { InvalidCursorError } from "@/lib/pagination";
 
@@ -675,6 +677,49 @@ afterAll(() => {
 });
 
 describe("Pages whole Boolean qualification", () => {
+  it.each(
+    (["session", "visitor"] as const).flatMap((scope) =>
+      (["pages-with-tabs", "tabs-only"] as const).map((configuration) => ({
+        scope,
+        configuration,
+      })),
+    ),
+  )(
+    "answers a $scope $configuration read with a top-level time leaf in SQL like the Core evaluator",
+    async ({ scope, configuration }) => {
+      const database = createFixture();
+      const timeDsl = `${BASE_FILTER} and time gte @range.start+43ms`;
+      const build = (filterDsl?: string) =>
+        queryFor(scope, {
+          configuration,
+          limit: 10,
+          ...(filterDsl ? { filterDsl } : {}),
+        });
+      // Oracle: the same request on the Core JavaScript evaluator.
+      const classify = vi
+        .spyOn(countSupport, "classifyAdvancedCountFilter")
+        .mockReturnValue({
+          kind: "unsupported",
+          path: "root",
+          code: "forced_core_oracle",
+          reason: "The test forces the Core evaluator as the oracle.",
+        });
+      const oracleDatabase = createFixture();
+      const oracle = await legacyOracle(oracleDatabase, build(timeDsl));
+      const baseline = await legacyOracle(createFixture(), build());
+      classify.mockRestore();
+      // The time leaf must change the answer, otherwise parity proves nothing.
+      expect(oracle.value).not.toEqual(baseline.value);
+
+      const evaluator = vi.spyOn(filterEvaluator, "evaluateFilterDocument");
+      const actual = await providerValue(database, build(timeDsl));
+      expect(actual.value).toEqual(oracle.value);
+      expect(evaluator).not.toHaveBeenCalled();
+      expect(actual.diagnostics.advancedCountSqlFallbackReason).toBeUndefined();
+      evaluator.mockRestore();
+    },
+  );
+
   it("qualifies all five tabs from the mixed OR visitor cohort", async () => {
     const database = createWholeBooleanFixture();
     const filterDsl =
