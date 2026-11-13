@@ -2,15 +2,14 @@ import {
   AnalyticsProviderRegistry,
   typedQueryProviderFor,
 } from "@/lib/edge/analytics/application/provider-registry";
+import { prepareSiteQueryForTeamRequest } from "@/lib/edge/analytics/application/team-site-delegation";
 import { createD1SiteProviderRegistry } from "@/lib/edge/analytics/composition/d1/create-site-runtime";
 import { createAnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
 import {
   EMPTY_FILTER_DOCUMENT,
   type FilterDocument,
   type QueryTime,
-  siteQueryContext,
 } from "@/lib/edge/analytics/contract";
-import { prepareScopedQuery } from "@/lib/edge/analytics/contract/scoped-filter";
 import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { readTeamBreakdown } from "@/lib/edge/analytics/providers/d1/operations/team-breakdown";
 import { readTeamOverview } from "@/lib/edge/analytics/providers/d1/operations/team-overview";
@@ -61,15 +60,15 @@ function siteDelegate(
       env: options.env,
       siteId,
     });
-    const siteQuery = prepareScopedQuery(operation, {
-      context: siteQueryContext(siteId, request.context.policy.audience),
+    const siteQuery = prepareSiteQueryForTeamRequest(operation, siteId, {
+      audience: request.context.policy.audience,
       time: request.time,
-      filters: request.filters ?? EMPTY_FILTER_DOCUMENT,
+      ...(request.filters !== undefined ? { filters: request.filters } : {}),
       ...(request.scopePreference !== undefined
         ? { scopePreference: request.scopePreference }
         : {}),
       ...(request.interval !== undefined ? { interval: request.interval } : {}),
-    } as never);
+    });
     const provider = registry.resolve(operation);
     if (!provider) throw new Error("team_site_delegate_provider_missing");
     return (await provider.execute(siteQuery as never)) as never;
