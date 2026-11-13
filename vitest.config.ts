@@ -56,11 +56,15 @@ export default defineConfig({
       "**/.cache/**",
       "**/.tmp/**",
       "**/e2e/**",
-      // Miniflare D1 cost measurements take over a minute and gauge SQL cost
+      // Miniflare and real-D1 cost measurements take long and gauge SQL cost
       // instead of guarding correctness; run them with `pnpm run test:cost`.
       ...(process.env.INSIGHTFLARE_COST_TESTS === "1"
         ? []
-        : ["**/*-miniflare.test.ts", "**/*-miniflare-cost.test.ts"]),
+        : [
+            "**/*-miniflare.test.ts",
+            "**/*-miniflare-cost.test.ts",
+            "**/*-remote-d1-cost.test.ts",
+          ]),
     ],
     coverage: {
       thresholds: {

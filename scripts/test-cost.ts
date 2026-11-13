@@ -11,6 +11,7 @@ const result = spawnSync(
     "vitest",
     "run",
     "miniflare",
+    "remote-d1-cost",
     "--testTimeout=600000",
     ...process.argv.slice(2),
   ],
