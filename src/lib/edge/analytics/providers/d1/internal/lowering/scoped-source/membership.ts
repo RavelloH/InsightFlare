@@ -154,7 +154,7 @@ export function scalarContext(
         );
     },
     ...("eventPk" in row ? { eventName: row.eventName } : {}),
-    resolveTypedCondition: (condition) => {
+    resolveTypedCondition: (condition, location) => {
       if (condition.target.kind === "event-payload") {
         if (!("eventPk" in row))
           throw new TypeError(
