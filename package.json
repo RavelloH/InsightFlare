@@ -142,6 +142,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "6.1.2",
     "@vitest/coverage-v8": "^4.1.12",
+    "cf": "1.0.0-beta.32",
     "esbuild": "^0.28.2",
     "eslint": "~9.39.4",
     "eslint-config-prettier": "^10.1.8",

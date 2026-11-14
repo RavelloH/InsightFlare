@@ -2,12 +2,16 @@ import { randomBytes } from "node:crypto";
 
 import { argon2id } from "@noble/hashes/argon2.js";
 
-export interface ResetPasswordOptions {
+interface PasswordResetTarget {
   user: string;
   database: string;
-  config: string;
-  env?: string;
 }
+
+export type ResetPasswordOptions = PasswordResetTarget &
+  (
+    | { cli: "wrangler"; config: string; env?: string }
+    | { cli: "cf"; profile?: string }
+  );
 
 export interface PasswordResetUser {
   id: string;
@@ -28,7 +32,14 @@ export function parseResetPasswordOptions(
   argv: readonly string[],
 ): ResetPasswordOptions {
   const options = new Map<string, string>();
-  const allowed = new Set(["user", "database", "config", "env"]);
+  const allowed = new Set([
+    "user",
+    "database",
+    "config",
+    "env",
+    "cli",
+    "profile",
+  ]);
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (!arg.startsWith("--")) {
@@ -54,6 +65,29 @@ export function parseResetPasswordOptions(
   if (!/^[a-z0-9._@-]{3,80}$/i.test(user)) {
     throw new Error("Invalid username (3-80 letters, digits, . _ @ -).");
   }
+  const cli = options.get("cli") ?? "wrangler";
+  if (cli !== "wrangler" && cli !== "cf") {
+    throw new Error("Invalid --cli; choose wrangler or cf.");
+  }
+  if (cli === "cf") {
+    if (options.has("config") || options.has("env")) {
+      throw new Error(
+        "--config and --env are Wrangler-only; cf uses --profile.",
+      );
+    }
+    const database = requiredOption("database", options.get("database"));
+    if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(database)) {
+      throw new Error("cf requires a D1 database UUID, not a binding or name.");
+    }
+    const profile = options.get("profile");
+    if (profile && !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(profile)) {
+      throw new Error("Invalid cf auth profile name.");
+    }
+    return { cli, user, database, ...(profile ? { profile } : {}) };
+  }
+  if (options.has("profile")) {
+    throw new Error("--profile is only supported with --cli cf.");
+  }
   const database = options.get("database") ?? "DB";
   if (!/^[a-zA-Z0-9_-]+$/.test(database)) {
     throw new Error("Invalid D1 binding or database name.");
@@ -63,7 +97,7 @@ export function parseResetPasswordOptions(
   if (env && !/^[a-zA-Z0-9_-]+$/.test(env)) {
     throw new Error("Invalid Wrangler environment name.");
   }
-  return { user, database, config, ...(env ? { env } : {}) };
+  return { cli, user, database, config, ...(env ? { env } : {}) };
 }
 
 function sqlLiteral(value: string): string {
@@ -113,16 +147,19 @@ export function resetUserSql(
   );
 }
 
-export function parseWranglerRows<T extends object>(stdout: string): T[] {
+export function parseD1Rows<T extends object>(
+  stdout: string,
+  cli: ResetPasswordOptions["cli"] = "wrangler",
+): T[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stdout.trim()) as unknown;
   } catch {
-    throw new Error("Wrangler did not return valid JSON.");
+    throw new Error(cli + " did not return valid JSON.");
   }
   const statements = Array.isArray(parsed) ? parsed : [parsed];
   if (statements.length !== 1) {
-    throw new Error("Unexpected number of Wrangler statement results.");
+    throw new Error("Unexpected number of " + cli + " statement results.");
   }
   const statement = statements[0];
   if (
@@ -132,7 +169,7 @@ export function parseWranglerRows<T extends object>(stdout: string): T[] {
     !Array.isArray(statement.results) ||
     ("success" in statement && statement.success !== true)
   ) {
-    throw new Error("Wrangler reported an invalid or unsuccessful D1 result.");
+    throw new Error(cli + " reported an invalid or unsuccessful D1 result.");
   }
   return statement.results as T[];
 }

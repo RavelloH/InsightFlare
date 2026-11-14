@@ -5,19 +5,25 @@ import { verifyPassword } from "@/lib/edge/admin/auth";
 import {
   hashResetPassword,
   lookupUserSql,
+  parseD1Rows,
   parseResetPasswordOptions,
-  parseWranglerRows,
   resetUserSql,
   verifyUserSql,
 } from "./password-reset-core";
 
-describe("Wrangler-only password reset helpers", () => {
-  it("requires an existing username and uses the D1 binding by default", () => {
+const CF_DATABASE_ID = "12345678-1234-1234-1234-1234567890ab";
+
+describe("password reset CLI options", () => {
+  it("defaults to Wrangler and its configured D1 binding", () => {
     expect(parseResetPasswordOptions(["--user", "admin"])).toEqual({
+      cli: "wrangler",
       user: "admin",
       database: "DB",
       config: "wrangler.toml",
     });
+  });
+
+  it("accepts Wrangler config, environment and database overrides", () => {
     expect(
       parseResetPasswordOptions([
         "--user=member-1",
@@ -29,6 +35,7 @@ describe("Wrangler-only password reset helpers", () => {
         "custom.toml",
       ]),
     ).toEqual({
+      cli: "wrangler",
       user: "member-1",
       env: "production",
       database: "ACCOUNTS",
@@ -36,7 +43,100 @@ describe("Wrangler-only password reset helpers", () => {
     });
   });
 
-  it("rejects unknown, ambiguous and password-bearing CLI flags", () => {
+  it("requires a D1 UUID for cf and accepts a named auth profile", () => {
+    expect(
+      parseResetPasswordOptions([
+        "--cli",
+        "cf",
+        "--user",
+        "admin",
+        "--database",
+        CF_DATABASE_ID,
+        "--profile",
+        "self-hosted-prod",
+      ]),
+    ).toEqual({
+      cli: "cf",
+      user: "admin",
+      database: CF_DATABASE_ID,
+      profile: "self-hosted-prod",
+    });
+  });
+
+  it("rejects invalid CLI selections and cf database or profile values", () => {
+    expect(() =>
+      parseResetPasswordOptions(["--user", "admin", "--cli", "cloudflare"]),
+    ).toThrow("Invalid --cli");
+    expect(() =>
+      parseResetPasswordOptions(["--user", "admin", "--cli", "cf"]),
+    ).toThrow("Missing value for --database");
+    expect(() =>
+      parseResetPasswordOptions([
+        "--user",
+        "admin",
+        "--cli",
+        "cf",
+        "--database",
+        "insightflare",
+      ]),
+    ).toThrow("D1 database UUID");
+    expect(() =>
+      parseResetPasswordOptions([
+        "--user",
+        "admin",
+        "--cli",
+        "cf",
+        "--database",
+        CF_DATABASE_ID,
+        "--profile",
+        "prod profile",
+      ]),
+    ).toThrow("Invalid cf auth profile");
+    expect(() =>
+      parseResetPasswordOptions([
+        "--user",
+        "admin",
+        "--cli",
+        "cf",
+        "--database",
+        CF_DATABASE_ID,
+        "--profile",
+        "-q",
+      ]),
+    ).toThrow("Invalid cf auth profile");
+  });
+
+  it("rejects CLI-specific flags used with the wrong provider", () => {
+    expect(() =>
+      parseResetPasswordOptions([
+        "--user",
+        "admin",
+        "--cli",
+        "cf",
+        "--database",
+        CF_DATABASE_ID,
+        "--config",
+        "custom.toml",
+      ]),
+    ).toThrow("Wrangler-only");
+    expect(() =>
+      parseResetPasswordOptions([
+        "--user",
+        "admin",
+        "--cli",
+        "cf",
+        "--database",
+        CF_DATABASE_ID,
+        "--env",
+        "production",
+      ]),
+    ).toThrow("Wrangler-only");
+    expect(() =>
+      parseResetPasswordOptions(["--user", "admin", "--profile", "production"]),
+    ).toThrow("only supported with --cli cf");
+  });
+
+  it("rejects unknown, duplicated, missing and password-bearing options", () => {
     expect(() => parseResetPasswordOptions([])).toThrow("Missing value");
     expect(() => parseResetPasswordOptions(["--user", "--env"])).toThrow();
     expect(() =>
@@ -46,11 +146,23 @@ describe("Wrangler-only password reset helpers", () => {
       parseResetPasswordOptions(["--user", "admin", "--user", "bob"]),
     ).toThrow("Unknown or duplicated");
     expect(() =>
+      parseResetPasswordOptions([
+        "--user",
+        "admin",
+        "--cli",
+        "wrangler",
+        "--cli",
+        "cf",
+      ]),
+    ).toThrow("Unknown or duplicated");
+    expect(() =>
       parseResetPasswordOptions(["--user", "admin' OR 1=1 --"]),
     ).toThrow("Invalid username");
   });
+});
 
-  it("quotes every SQL value and restricts the guarded mutation", () => {
+describe("password reset SQL", () => {
+  it("quotes every value and restricts the guarded mutation", () => {
     expect(lookupUserSql("a' OR 1=1 --")).toContain(
       "lower('a'' OR 1=1 --') LIMIT 2",
     );
@@ -64,21 +176,44 @@ describe("Wrangler-only password reset helpers", () => {
     );
     expect(() => verifyUserSql("bad\nid")).toThrow("control character");
   });
+});
 
-  it("parses structured Wrangler JSON and rejects failed responses", () => {
-    expect(
-      parseWranglerRows<{ id: string }>(
-        JSON.stringify([{ results: [{ id: "u1" }], success: true }]),
-      ),
-    ).toEqual([{ id: "u1" }]);
-    expect(() => parseWranglerRows("not json")).toThrow("valid JSON");
-    expect(() =>
-      parseWranglerRows(JSON.stringify([{ results: [], success: false }])),
-    ).toThrow("unsuccessful");
-    expect(() => parseWranglerRows("[]")).toThrow("number");
+describe("D1 response parsing", () => {
+  it.each(["wrangler", "cf"] as const)(
+    "parses a successful %s JSON response",
+    (cli) => {
+      expect(
+        parseD1Rows<{ id: string }>(
+          JSON.stringify([{ results: [{ id: "u1" }], success: true }]),
+          cli,
+        ),
+      ).toEqual([{ id: "u1" }]);
+    },
+  );
+
+  it.each(["wrangler", "cf"] as const)(
+    "rejects malformed, multi-statement and failed %s responses",
+    (cli) => {
+      expect(() => parseD1Rows("not json", cli)).toThrow("valid JSON");
+      expect(() =>
+        parseD1Rows(JSON.stringify([{ results: [] }, { results: [] }]), cli),
+      ).toThrow("number");
+      expect(() =>
+        parseD1Rows(JSON.stringify([{ results: [], success: false }]), cli),
+      ).toThrow("unsuccessful");
+    },
+  );
+
+  it("rejects a response without a single result object", () => {
+    expect(() => parseD1Rows("[]")).toThrow("number");
+    expect(() => parseD1Rows(JSON.stringify({ success: true }))).toThrow(
+      "invalid or unsuccessful",
+    );
   });
+});
 
-  it("produces random salted hashes compatible with live account verification", async () => {
+describe("password hashing", () => {
+  it("produces salted hashes compatible with live account verification", async () => {
     const password = "Test-密码-Reset-2026";
     const first = hashResetPassword(password);
     const second = hashResetPassword(password);

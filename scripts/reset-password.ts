@@ -1,9 +1,6 @@
 #!/usr/bin/env tsx
 
-import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import readline from "node:readline";
@@ -14,137 +11,37 @@ import {
   hashResetPassword,
   lookupUserSql,
   parseResetPasswordOptions,
-  parseWranglerRows,
   type PasswordResetUser,
-  type ResetPasswordOptions,
   resetUserSql,
   verifyUserSql,
 } from "./shared/password-reset-core";
+import {
+  executePrivateResetSql,
+  readResetD1,
+  resetD1Entrypoint,
+} from "./shared/password-reset-d1";
 
 const ROOT_DIR = fileURLToPath(new URL("../", import.meta.url));
-const WRANGLER_CLI = path.join(
-  ROOT_DIR,
-  "node_modules",
-  "wrangler",
-  "bin",
-  "wrangler.js",
-);
-const MAX_WRANGLER_OUTPUT = 2 * 1024 * 1024;
 
 const HELP = [
-  "Reset an InsightFlare user's password using Wrangler and remote D1.",
+  "Reset an InsightFlare user's password using Wrangler or cf and remote D1.",
   "",
   "Usage:",
   "  pnpm run ops:admin:reset-password -- --user admin [--env name]",
+  "  pnpm run ops:admin:reset-password -- --user admin --cli cf --database <D1_UUID>",
   "",
   "Options:",
   "  --user      Existing username (required)",
-  "  --env       Wrangler environment (optional)",
-  "  --config    Wrangler config path (default: wrangler.toml)",
-  "  --database  D1 binding/name (default: DB)",
+  "  --cli       wrangler (default) or cf",
+  "  --env       Wrangler environment (Wrangler only)",
+  "  --config    Wrangler config path (default: wrangler.toml; Wrangler only)",
+  "  --database  Wrangler binding/name (default: DB) or required cf D1 UUID",
+  "  --profile   cf auth profile (cf only; otherwise uses cf default account)",
   "  --help      Show this help",
   "",
-  "Requires an interactive terminal and an authenticated Wrangler session.",
+  "Requires an interactive terminal and authenticated CLI access to remote D1.",
   "Only the selected user's password hash is updated; old sessions remain valid.",
 ].join("\n");
-
-async function runWrangler(
-  options: ResetPasswordOptions,
-  sql: { command: string } | { file: string },
-): Promise<string> {
-  const args = [
-    WRANGLER_CLI,
-    "d1",
-    "execute",
-    options.database,
-    "--remote",
-    "--yes",
-    "--json",
-    "--config",
-    path.resolve(ROOT_DIR, options.config),
-    ...(options.env ? ["--env", options.env] : []),
-    ...("file" in sql ? ["--file", sql.file] : ["--command", sql.command]),
-  ];
-  return new Promise((resolve, reject) => {
-    let stdout = "";
-    let combinedBytes = 0;
-    let settled = false;
-    const finish = (error?: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      if (error) reject(error);
-      else resolve(stdout);
-    };
-    // No shell; passwords/hashes are never present in argv.
-    const child = spawn(process.execPath, args, {
-      cwd: ROOT_DIR,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    const timeout = setTimeout(() => {
-      child.kill();
-      finish(new Error("Wrangler timed out; check connectivity."));
-    }, 120_000);
-    const capture = (chunk: Buffer, fromStdout: boolean) => {
-      combinedBytes += chunk.byteLength;
-      if (combinedBytes > MAX_WRANGLER_OUTPUT) {
-        child.kill();
-        finish(new Error("Wrangler output exceeded the safety limit."));
-      } else if (fromStdout) {
-        stdout += Buffer.from(chunk).toString("utf8");
-      }
-      // Do not print stderr: Wrangler may include portions of an SQL query.
-    };
-    child.stdout.on("data", (chunk: Buffer) => capture(chunk, true));
-    child.stderr.on("data", (chunk: Buffer) => capture(chunk, false));
-    child.once("error", () => {
-      finish(new Error("Unable to start Wrangler. Check local dependencies."));
-    });
-    child.once("close", (code) => {
-      if (code !== 0) {
-        finish(
-          new Error(
-            "Wrangler D1 command failed (exit " +
-              (code ?? "unknown") +
-              "). Check authentication, --config, --env and D1 access.",
-          ),
-        );
-      } else {
-        finish();
-      }
-    });
-  });
-}
-
-async function readD1<T extends object>(
-  options: ResetPasswordOptions,
-  query: string,
-): Promise<T[]> {
-  return parseWranglerRows<T>(await runWrangler(options, { command: query }));
-}
-
-async function executePrivateSql(
-  options: ResetPasswordOptions,
-  sql: string,
-): Promise<void> {
-  // Wrangler requires --command or --file; only a file keeps password hashes
-  // out of process command lines. Store it under a private, random temp path.
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "insightflare-reset-"));
-  const filePath = path.join(tempDir, "reset.sql");
-  try {
-    await fs.promises.chmod(tempDir, 0o700);
-    await writeFile(filePath, sql + "\n", {
-      encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
-    });
-    await runWrangler(options, { file: filePath });
-  } finally {
-    // Never leave hashes in the repo or in its normal operation logs.
-    await rm(tempDir, { recursive: true, force: true, maxRetries: 3 });
-  }
-}
 
 async function askConfirmation(expected: string): Promise<void> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -213,6 +110,7 @@ async function readHiddenPassword(prompt: string): Promise<string> {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+  if (args[0] === "--") args.shift();
   if (args.includes("--help") || args.includes("-h")) {
     console.log(HELP);
     return;
@@ -221,21 +119,30 @@ async function main(): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error("Run this command in an interactive terminal.");
   }
-  if (!fs.existsSync(WRANGLER_CLI)) {
-    throw new Error("Wrangler is not installed; run pnpm install.");
+  if (!fs.existsSync(resetD1Entrypoint(ROOT_DIR, options.cli))) {
+    throw new Error(options.cli + " is not installed; run pnpm install.");
   }
-  const configPath = path.resolve(ROOT_DIR, options.config);
-  if (!fs.existsSync(configPath)) {
-    throw new Error("Wrangler config file not found: " + configPath);
-  }
-
   console.log("InsightFlare password recovery (REMOTE D1)");
-  console.log("Wrangler config:", configPath);
-  console.log("Wrangler environment:", options.env ?? "(default)");
-  console.log("D1 binding/name:", options.database);
+  console.log("CLI:", options.cli);
+  if (options.cli === "wrangler") {
+    const configPath = path.resolve(ROOT_DIR, options.config);
+    if (!fs.existsSync(configPath)) {
+      throw new Error("Wrangler config file not found: " + configPath);
+    }
+    console.log("Wrangler config:", configPath);
+    console.log("Wrangler environment:", options.env ?? "(default)");
+  } else {
+    console.log("cf auth profile:", options.profile ?? "(default)");
+    console.log(
+      "cf account:",
+      process.env.CLOUDFLARE_ACCOUNT_ID ?? "(cf account context)",
+    );
+  }
+  console.log("Remote D1 database:", options.database);
   console.log("Looking up user...\n");
 
-  const matches = await readD1<PasswordResetUser>(
+  const matches = await readResetD1<PasswordResetUser>(
+    ROOT_DIR,
     options,
     lookupUserSql(options.user),
   );
@@ -272,11 +179,13 @@ async function main(): Promise<void> {
 
   // Optimistic guard: if the password changed after our lookup, don't
   // overwrite another administrator's concurrent reset.
-  await executePrivateSql(
+  await executePrivateResetSql(
+    ROOT_DIR,
     options,
     resetUserSql(user.id, user.password_hash, hash),
   );
-  const verified = await readD1<{ password_hash: string | null }>(
+  const verified = await readResetD1<{ password_hash: string | null }>(
+    ROOT_DIR,
     options,
     verifyUserSql(user.id),
   );
@@ -290,7 +199,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  // Do not include SQL or Wrangler output in errors.
+  // Do not include SQL or CLI output in errors.
   console.error(
     "Password reset failed:",
     error instanceof Error ? error.message : "Unknown error",

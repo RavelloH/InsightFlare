@@ -209,6 +209,8 @@ Cloudflare will automatically clone this repository and create and bind the requ
 
 After filling in the variables, wait about 3 minutes for the deployment to finish. You can then sign in to the dashboard and start tracking traffic data. You can also customize the domain name on the project settings page. The default URL is `https://insightflare.<your-cloudflare-username>.workers.dev`.
 
+If you lose access to an existing administrator account, changing `BOOTSTRAP_ADMIN_PASSWORD` will not reset it. Follow the [self-hosted administrator password recovery guide](../../docs/password-recovery.md) to securely reset the account through remote D1.
+
 ---
 
 ## Advanced Configuration
