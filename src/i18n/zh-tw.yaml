@@ -793,6 +793,18 @@ referrers:
   longTail: 長尾來源
   channelLongTail: 其他管道
 campaigns:
+  linkBuilder:
+    title: UTM 連結產生器
+    description: 為推廣連結加入 UTM 參數，衡量下一次活動的成效。
+    destination: 目標連結
+    optional: 選填參數
+    result: 產生的連結
+    resultPlaceholder: 填寫目標連結、來源、媒介和活動名稱後，即可產生連結。
+    hint: 保留原連結的其他參數和錨點。既有的 UTM 參數會替換為上方填寫的內容，留空的選填參數會移除。
+    invalidUrl: 請輸入完整的 HTTP 或 HTTPS 連結，且不包含使用者名稱或密碼。
+    copy: 複製連結
+    copied: 連結已複製
+    copyFailed: 複製失敗，請選取產生的連結手動複製。
   title: 推廣活動
   subtitle: UTM 推廣活動表現與流量歸因。
   tabSource: 來源

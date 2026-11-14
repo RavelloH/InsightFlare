@@ -12,6 +12,7 @@ import {
   type CampaignSortKey,
   type CampaignTab,
 } from "@/components/dashboard/campaigns/campaign-utils";
+import { UtmLinkBuilder } from "@/components/dashboard/campaigns/utm-link-builder";
 import type { TabbedDataTableLoader } from "@/components/dashboard/common/tabbed-data-table-card";
 import type { ComparisonTableMetric } from "@/components/dashboard/comparison/comparison-table";
 import {
@@ -168,6 +169,7 @@ export function CampaignsClientPage({
       <PageHeading
         title={messages.campaigns.title}
         subtitle={messages.campaigns.subtitle}
+        actions={<UtmLinkBuilder messages={messages} />}
       />
 
       <CampaignShareTrendCard

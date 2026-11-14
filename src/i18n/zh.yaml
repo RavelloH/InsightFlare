@@ -791,6 +791,18 @@ referrers:
   longTail: 长尾来源
   channelLongTail: 其他渠道
 campaigns:
+  linkBuilder:
+    title: UTM 链接生成器
+    description: 为推广链接添加 UTM 参数，衡量下一次活动的效果。
+    destination: 目标链接
+    optional: 可选参数
+    result: 生成的链接
+    resultPlaceholder: 填写目标链接、来源、媒介和活动名称后，即可生成链接。
+    hint: 保留原链接的其他参数和锚点。已有的 UTM 参数会替换为上方填写的内容，留空的可选参数会移除。
+    invalidUrl: 请输入完整的 HTTP 或 HTTPS 链接，且不包含用户名或密码。
+    copy: 复制链接
+    copied: 链接已复制
+    copyFailed: 复制失败，请选中生成的链接手动复制。
   title: 推广活动
   subtitle: UTM 推广活动表现与流量归因。
   tabSource: 来源

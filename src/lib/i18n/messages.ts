@@ -747,6 +747,19 @@ export interface AppMessages {
     channelLongTail: string;
   };
   campaigns: {
+    linkBuilder: {
+      title: string;
+      description: string;
+      destination: string;
+      optional: string;
+      result: string;
+      resultPlaceholder: string;
+      hint: string;
+      invalidUrl: string;
+      copy: string;
+      copied: string;
+      copyFailed: string;
+    };
     title: string;
     subtitle: string;
     tabSource: string;
@@ -3753,6 +3766,23 @@ const enMessages = {
     channelLongTail: "Other channels",
   },
   campaigns: {
+    linkBuilder: {
+      title: "UTM Link Builder",
+      description:
+        "Tag your links to measure the impact of your next campaign.",
+      destination: "Destination URL",
+      optional: "Optional parameters",
+      result: "Generated link",
+      resultPlaceholder:
+        "Enter a URL, source, medium and campaign to generate your link.",
+      hint: "Other URL parameters and anchors are preserved. Existing UTM parameters are replaced by these fields; empty optional fields remove them.",
+      invalidUrl:
+        "Enter a complete HTTP or HTTPS URL without a username or password.",
+      copy: "Copy link",
+      copied: "Link copied",
+      copyFailed:
+        "Could not copy. Select and copy the generated link manually.",
+    },
     title: "Campaigns",
     subtitle: "UTM campaign performance and traffic attribution.",
     tabSource: "Source",
@@ -6951,6 +6981,19 @@ const zhMessages = {
     channelLongTail: "其他渠道",
   },
   campaigns: {
+    linkBuilder: {
+      title: "UTM 链接生成器",
+      description: "为推广链接添加 UTM 参数，衡量下一次活动的效果。",
+      destination: "目标链接",
+      optional: "可选参数",
+      result: "生成的链接",
+      resultPlaceholder: "填写目标链接、来源、媒介和活动名称后，即可生成链接。",
+      hint: "保留原链接的其他参数和锚点。已有的 UTM 参数会替换为上方填写的内容，留空的可选参数会移除。",
+      invalidUrl: "请输入完整的 HTTP 或 HTTPS 链接，且不包含用户名或密码。",
+      copy: "复制链接",
+      copied: "链接已复制",
+      copyFailed: "复制失败，请选中生成的链接手动复制。",
+    },
     title: "推广活动",
     subtitle: "UTM 推广活动表现与流量归因。",
     tabSource: "来源",
@@ -10072,6 +10115,19 @@ const zhTwMessages = {
     channelLongTail: "其他管道",
   },
   campaigns: {
+    linkBuilder: {
+      title: "UTM 連結產生器",
+      description: "為推廣連結加入 UTM 參數，衡量下一次活動的成效。",
+      destination: "目標連結",
+      optional: "選填參數",
+      result: "產生的連結",
+      resultPlaceholder: "填寫目標連結、來源、媒介和活動名稱後，即可產生連結。",
+      hint: "保留原連結的其他參數和錨點。既有的 UTM 參數會替換為上方填寫的內容，留空的選填參數會移除。",
+      invalidUrl: "請輸入完整的 HTTP 或 HTTPS 連結，且不包含使用者名稱或密碼。",
+      copy: "複製連結",
+      copied: "連結已複製",
+      copyFailed: "複製失敗，請選取產生的連結手動複製。",
+    },
     title: "推廣活動",
     subtitle: "UTM 推廣活動表現與流量歸因。",
     tabSource: "來源",
@@ -13212,6 +13268,23 @@ const jaMessages = {
     channelLongTail: "その他のチャネル",
   },
   campaigns: {
+    linkBuilder: {
+      title: "UTM リンク生成ツール",
+      description:
+        "リンクに UTM パラメーターを追加して、次のキャンペーンの効果を測定します。",
+      destination: "リンク先 URL",
+      optional: "任意のパラメーター",
+      result: "生成されたリンク",
+      resultPlaceholder:
+        "URL、参照元、メディア、キャンペーン名を入力すると、リンクが生成されます。",
+      hint: "元の URL の他のパラメーターとアンカーは保持されます。既存の UTM パラメーターは入力内容で置き換えられ、空欄の任意パラメーターは削除されます。",
+      invalidUrl:
+        "ユーザー名やパスワードを含まない、完全な HTTP または HTTPS URL を入力してください。",
+      copy: "リンクをコピー",
+      copied: "リンクをコピーしました",
+      copyFailed:
+        "コピーできませんでした。生成されたリンクを選択して手動でコピーしてください。",
+    },
     title: "キャンペーン",
     subtitle:
       "UTM キャンペーンのパフォーマンスとトラフィック属性を確認します。",

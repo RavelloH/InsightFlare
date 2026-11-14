@@ -792,6 +792,18 @@ referrers:
   longTail: ロングテール
   channelLongTail: その他のチャネル
 campaigns:
+  linkBuilder:
+    title: UTM リンク生成ツール
+    description: リンクに UTM パラメーターを追加して、次のキャンペーンの効果を測定します。
+    destination: リンク先 URL
+    optional: 任意のパラメーター
+    result: 生成されたリンク
+    resultPlaceholder: URL、参照元、メディア、キャンペーン名を入力すると、リンクが生成されます。
+    hint: 元の URL の他のパラメーターとアンカーは保持されます。既存の UTM パラメーターは入力内容で置き換えられ、空欄の任意パラメーターは削除されます。
+    invalidUrl: ユーザー名やパスワードを含まない、完全な HTTP または HTTPS URL を入力してください。
+    copy: リンクをコピー
+    copied: リンクをコピーしました
+    copyFailed: コピーできませんでした。生成されたリンクを選択して手動でコピーしてください。
   title: キャンペーン
   subtitle: UTM キャンペーンのパフォーマンスとトラフィック属性を確認します。
   tabSource: ソース

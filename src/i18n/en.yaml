@@ -795,6 +795,18 @@ referrers:
   longTail: Long Tail
   channelLongTail: Other channels
 campaigns:
+  linkBuilder:
+    title: UTM Link Builder
+    description: Tag your links to measure the impact of your next campaign.
+    destination: Destination URL
+    optional: Optional parameters
+    result: Generated link
+    resultPlaceholder: Enter a URL, source, medium and campaign to generate your link.
+    hint: Other URL parameters and anchors are preserved. Existing UTM parameters are replaced by these fields; empty optional fields remove them.
+    invalidUrl: Enter a complete HTTP or HTTPS URL without a username or password.
+    copy: Copy link
+    copied: Link copied
+    copyFailed: Could not copy. Select and copy the generated link manually.
   title: Campaigns
   subtitle: UTM campaign performance and traffic attribution.
   tabSource: Source
