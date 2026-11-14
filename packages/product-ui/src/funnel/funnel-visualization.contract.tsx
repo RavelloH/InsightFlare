@@ -3,6 +3,7 @@ import {
   defineComponentContract,
 } from "@insightflare/ui/contracts";
 
+import { currentTotals } from "../showcase/site-profile";
 import {
   FunnelVisualization,
   type FunnelVisualizationProps,
@@ -51,6 +52,31 @@ const summary = {
   convertedProgressions: 343,
   totalProgressions: 2400,
 } as const;
+
+// Sessions that reach each step of the docs-to-deploy journey. dropOffRate is
+// the loss relative to the previous step, as the analytics API reports it.
+const SHOWCASE_FUNNEL_TOTAL = Math.round(currentTotals.sessions * 0.12);
+const SHOWCASE_FUNNEL_RATES = [1, 0.412, 0.127, 0.0624] as const;
+const SHOWCASE_FUNNEL_LABELS = [
+  ["visit", "Visited the docs"],
+  ["guide", "Opened the deployment guide"],
+  ["deploy", "Clicked Deploy to Cloudflare"],
+  ["setup", "Viewed the setup checklist"],
+] as const;
+const SHOWCASE_FUNNEL_STEPS = SHOWCASE_FUNNEL_LABELS.map(
+  ([id, label], index) => {
+    const rate = SHOWCASE_FUNNEL_RATES[index] ?? 0;
+    const previous = SHOWCASE_FUNNEL_RATES[index - 1];
+    return {
+      id,
+      label,
+      metrics: {
+        conversionRate: rate,
+        dropOffRate: previous ? 1 - rate / previous : 0,
+      },
+    };
+  },
+);
 
 export const funnelVisualizationFixtures = [
   {
@@ -109,6 +135,28 @@ export const funnelVisualizationFixtures = [
       labels,
       steps: steps.map(({ id, label }) => ({ id, label })),
       comparison: { state: "loading" },
+    } satisfies FunnelVisualizationProps,
+  },
+  {
+    id: "funnel.showcase",
+    title: "Showcase",
+    description: "Realistic data for marketing and documentation pages.",
+    presentation: { kind: "scenario", scenario: "showcase" },
+    props: {
+      state: "ready",
+      locale: "en-US",
+      labels: {
+        overallConversion: "Overall conversion",
+        converted: "converted sessions",
+      },
+      steps: SHOWCASE_FUNNEL_STEPS,
+      summary: {
+        overallConversionRate: SHOWCASE_FUNNEL_RATES.at(-1) ?? 0,
+        convertedProgressions: Math.round(
+          SHOWCASE_FUNNEL_TOTAL * (SHOWCASE_FUNNEL_RATES.at(-1) ?? 0),
+        ),
+        totalProgressions: SHOWCASE_FUNNEL_TOTAL,
+      },
     } satisfies FunnelVisualizationProps,
   },
 ] as const satisfies readonly FunnelVisualizationFixture[];

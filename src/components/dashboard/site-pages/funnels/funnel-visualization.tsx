@@ -23,6 +23,7 @@ import {
 } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { buildFunnelVisualizationLabels } from "@/lib/product-ui-labels/funnel";
 
 export { FunnelChangeRateInline, funnelComparisonChange };
 
@@ -151,10 +152,8 @@ export function FunnelVisualization({
   const metric = funnelMetricKey(
     analysis?.progressionScope ?? funnel.progressionScope,
   );
-  const viewLabels: FunnelVisualizationLabels = {
-    overallConversion: labels.overallConversion,
-    converted: funnelConvertedLabel(labels, metric),
-  };
+  const viewLabels: FunnelVisualizationLabels =
+    buildFunnelVisualizationLabels(labels)[metric];
   const definitions: FunnelVisualizationStepDefinition[] = funnel.steps.map(
     (step) => ({
       id: step.id,

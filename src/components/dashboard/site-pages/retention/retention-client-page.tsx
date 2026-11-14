@@ -1,4 +1,9 @@
 import { useMemo } from "react";
+import {
+  createRetentionMetricItems,
+  RetentionMatrix,
+  RetentionStateCard,
+} from "@insightflare/product-ui/retention";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { MetricSummaryGrid } from "@insightflare/ui/metric-summary-grid";
 import { PageHeading } from "@insightflare/ui/page-heading";
@@ -17,12 +22,8 @@ import type { RetentionData } from "@/lib/dashboard-api/client/edge";
 import type { FilterDocument } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { buildRetentionLabels } from "@/lib/product-ui-labels/retention";
 
-import {
-  createRetentionMetricItems,
-  RetentionMatrix,
-  RetentionStateCard,
-} from "./components";
 import {
   buildRetentionComparisonViewModel,
   buildRetentionViewModel,
@@ -44,6 +45,7 @@ export function RetentionClientPage({
   siteId,
 }: RetentionClientPageProps) {
   const labels = messages.retention;
+  const viewLabels = useMemo(() => buildRetentionLabels(messages), [messages]);
   const { filters, window: timeWindow } = useDashboardQuery() as {
     filters: FilterDocument;
     window: TimeWindow;
@@ -177,7 +179,7 @@ export function RetentionClientPage({
         <MetricSummaryGrid
           items={createRetentionMetricItems({
             locale,
-            labels,
+            labels: viewLabels,
             viewModel,
             comparisonViewModel: comparisonViewModel?.comparison ?? null,
             comparisonLabel,
@@ -190,8 +192,7 @@ export function RetentionClientPage({
         <div className="space-y-4">
           <RetentionMatrix
             locale={locale}
-            messages={messages}
-            labels={labels}
+            labels={viewLabels}
             viewModel={viewModel}
             comparisonViewModel={comparisonViewModel}
             comparisonLabel={comparisonLabel}

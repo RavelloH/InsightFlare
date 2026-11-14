@@ -1,4 +1,4 @@
-import { readFile, rm } from "node:fs/promises";
+import { cp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,7 +23,11 @@ if (configFile.error) {
     ts.flattenDiagnosticMessageText(configFile.error.messageText, "\n"),
   );
 }
-const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, packageRoot);
+const parsed = ts.parseJsonConfigFileContent(
+  configFile.config,
+  ts.sys,
+  packageRoot,
+);
 const program = ts.createProgram(parsed.fileNames, parsed.options);
 const diagnostics = ts.getPreEmitDiagnostics(program);
 if (diagnostics.length > 0) {
@@ -32,7 +36,9 @@ if (diagnostics.length > 0) {
     getCurrentDirectory: () => packageRoot,
     getNewLine: () => "\n",
   };
-  process.stderr.write(ts.formatDiagnosticsWithColorAndContext(diagnostics, host));
+  process.stderr.write(
+    ts.formatDiagnosticsWithColorAndContext(diagnostics, host),
+  );
   process.exitCode = 1;
   process.exit();
 }
@@ -53,6 +59,13 @@ await build({
   target: "es2022",
   packages: "external",
   jsx: "automatic",
+  loader: { ".svg": "dataurl" },
   entryNames: "[dir]/[name]",
   chunkNames: "chunks/[name]-[hash]",
 });
+
+await cp(
+  path.join(packageRoot, "src", "assets"),
+  path.join(packageRoot, "dist", "assets"),
+  { recursive: true },
+);

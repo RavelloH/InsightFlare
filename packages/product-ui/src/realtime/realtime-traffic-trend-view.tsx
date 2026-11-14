@@ -41,6 +41,11 @@ interface RealtimeTrafficTrendViewBaseProps {
   readonly visitorsLabel: string;
 }
 
+export type RealtimeTrafficTrendLabels = Pick<
+  RealtimeTrafficTrendViewBaseProps,
+  "title" | "viewsLabel" | "visitorsLabel"
+>;
+
 export type RealtimeTrafficTrendViewProps = RealtimeTrafficTrendViewBaseProps &
   ({ readonly state: "loading" } | { readonly state: "ready" });
 

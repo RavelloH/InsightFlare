@@ -6,27 +6,55 @@ import {
   type ReactNode,
   useState,
 } from "react";
+import { analyticsTooltipContract } from "@insightflare/product-ui/analytics-tooltip";
 import {
-  AnalyticsTooltipProvider,
-  AnalyticsTooltipTarget,
-} from "@insightflare/product-ui/analytics-tooltip";
-import {
-  DonutChart,
-  TrafficPairBarChart,
+  donutChartContract,
+  eventTrendBarChartContract,
+  latencyPercentileChartContract,
+  metricAreaChartContract,
+  performanceRadarChartContract,
+  performanceTrendChartContract,
+  shareTrendAreaChartContract,
+  siteTrafficStackChartContract,
+  stackedBreakdownBarChartContract,
+  trafficPairBarChartContract,
 } from "@insightflare/product-ui/charts";
-import { DetailDrawer } from "@insightflare/product-ui/detail-drawer";
-import { funnelVisualizationContract } from "@insightflare/product-ui/funnel";
-import { goalVisualizationContract } from "@insightflare/product-ui/goals";
-import { realtimeTrafficTrendContract } from "@insightflare/product-ui/realtime";
-import { shareBreakdownContract } from "@insightflare/product-ui/sharing";
-import type { SiteScopeSelectorProps } from "@insightflare/product-ui/site-scope-selector";
-import { SiteScopeSelector } from "@insightflare/product-ui/site-scope-selector";
 import {
-  AnalyticsDataTable,
-  type AnalyticsTableColumnDefinition,
-  AnalyticsTableColumnSettings,
+  DetailDrawer,
+  detailDrawerContract,
+} from "@insightflare/product-ui/detail-drawer";
+import {
+  eventMetricsContract,
+  eventTrendCardContract,
+} from "@insightflare/product-ui/events";
+import { funnelVisualizationContract } from "@insightflare/product-ui/funnel";
+import {
+  goalTimeseriesContract,
+  goalVisualizationContract,
+} from "@insightflare/product-ui/goals";
+import { overviewMetricsContract } from "@insightflare/product-ui/overview";
+import {
+  realtimeLogStreamContract,
+  realtimeStatusDotContract,
+  realtimeTrafficTrendContract,
+} from "@insightflare/product-ui/realtime";
+import { retentionMatrixContract } from "@insightflare/product-ui/retention";
+import { shareBreakdownContract } from "@insightflare/product-ui/sharing";
+import {
+  SiteScopeSelector,
+  siteScopeSelectorContract,
+} from "@insightflare/product-ui/site-scope-selector";
+import {
+  analyticsDataTableContract,
+  analyticsTableColumnSettingsContract,
 } from "@insightflare/product-ui/tables";
-import { Button } from "@insightflare/ui/button";
+import {
+  browserCrossBreakdownCardContract,
+  browserRadarContract,
+  browserVersionBreakdownContract,
+  deviceCrossBreakdownCardContract,
+  technologyShareOverviewContract,
+} from "@insightflare/product-ui/technology";
 import { ClickableTableCell } from "@insightflare/ui/clickable-table-cell";
 import type { ComponentContract } from "@insightflare/ui/contracts";
 import {
@@ -272,131 +300,6 @@ function propValue(
   };
 }
 
-function SiteScopeSelectorGalleryPreview({
-  selectedSiteIds: initialSelectedSiteIds,
-  ...props
-}: Omit<SiteScopeSelectorProps, "onChange">) {
-  const [selectedSiteIds, setSelectedSiteIds] = useState<string[]>(() => [
-    ...initialSelectedSiteIds,
-  ]);
-
-  return createElement(SiteScopeSelector, {
-    ...props,
-    selectedSiteIds,
-    onChange: setSelectedSiteIds,
-  });
-}
-
-function DetailDrawerGalleryPreview({ ariaLabel }: { ariaLabel: string }) {
-  const [openDepth, setOpenDepth] = useState(0);
-  const [layerCount, setLayerCount] = useState(0);
-
-  const renderLayer = (depth: number): ReactNode => {
-    if (depth >= layerCount) return null;
-
-    const layerNumber = depth + 1;
-    return createElement(DetailDrawer, {
-      ariaLabel: `${ariaLabel} · layer ${layerNumber}`,
-      drawerKey: `ui-gallery-detail-drawer-${layerNumber}`,
-      open: depth < openDepth,
-      onOpenChange: (nextOpen: boolean) => {
-        if (!nextOpen) {
-          setOpenDepth((currentDepth) => Math.min(currentDepth, depth));
-        }
-      },
-      children: createElement(
-        "div",
-        { className: "min-h-[112vh] p-6 sm:p-10" },
-        createElement(
-          "div",
-          { className: "mx-auto max-w-3xl space-y-6" },
-          createElement(
-            "div",
-            { className: "flex flex-wrap items-start justify-between gap-4" },
-            createElement(
-              "div",
-              { className: "space-y-2" },
-              createElement(
-                "p",
-                { className: "font-mono text-xs text-primary" },
-                `LAYER ${layerNumber}`,
-              ),
-              createElement(
-                "h2",
-                { className: "text-xl font-semibold" },
-                `${ariaLabel} · layer ${layerNumber}`,
-              ),
-              createElement(
-                "p",
-                { className: "text-sm text-muted-foreground" },
-                "Open another detail drawer to continue the nested stack.",
-              ),
-            ),
-            createElement(
-              Button,
-              {
-                variant: "outline",
-                onClick: () => setOpenDepth(depth),
-              },
-              "Close this layer",
-            ),
-          ),
-          createElement(
-            "div",
-            { className: "border bg-card p-4 sm:p-5" },
-            createElement(
-              "p",
-              { className: "text-xs text-muted-foreground" },
-              "Current stack depth",
-            ),
-            createElement(
-              "p",
-              { className: "mt-2 font-mono text-2xl tabular-nums" },
-              String(layerNumber),
-            ),
-          ),
-          createElement(
-            Button,
-            {
-              onClick: () => {
-                const nextDepth = depth + 2;
-                setLayerCount((currentCount) =>
-                  Math.max(currentCount, nextDepth),
-                );
-                setOpenDepth(nextDepth);
-              },
-            },
-            createElement(RiAddLine, { className: "size-4" }),
-            `Open nested layer ${layerNumber + 1}`,
-          ),
-          renderLayer(depth + 1),
-        ),
-      ),
-    });
-  };
-
-  return createElement(
-    "div",
-    { className: "grid w-full justify-items-start gap-3" },
-    createElement(
-      Button,
-      {
-        onClick: () => {
-          setLayerCount((currentCount) => Math.max(currentCount, 1));
-          setOpenDepth(1);
-        },
-      },
-      "Open first detail drawer",
-    ),
-    createElement(
-      "p",
-      { className: "text-sm text-muted-foreground" },
-      "Keep opening nested layers to build an unbounded stack. Close the top layer to return to the one below it.",
-    ),
-    renderLayer(0),
-  );
-}
-
 function scrollbarItems(labels: readonly string[], className: string) {
   return createElement(
     "div",
@@ -445,127 +348,6 @@ const ClickableTableCellGalleryPreview = Object.assign(
     });
   },
   { displayName: "ClickableTableCell" },
-);
-
-const COLUMN_SETTINGS_BASE_COLUMNS: readonly AnalyticsTableColumnDefinition[] =
-  [
-    { id: "page", label: "Page", required: true },
-    { id: "views", label: "Views" },
-    { id: "visitors", label: "Visitors" },
-    { id: "conversions", label: "Conversions", defaultVisible: false },
-  ] as const satisfies readonly AnalyticsTableColumnDefinition[];
-
-const COLUMN_SETTINGS_LABELS = {
-  action: "Configure columns",
-  title: "Table columns",
-  description: "Choose which columns to show and drag to change their order.",
-  visible: "Visible columns",
-  required: "Required",
-  reset: "Reset",
-  dragHint: "Drag to reorder",
-  close: "Done",
-};
-
-const AnalyticsTableColumnSettingsGalleryPreview = Object.assign(
-  function AnalyticsTableColumnSettingsGalleryPreview({
-    columns,
-    orderedIds: initialOrderedIds,
-    visibleIds: initialVisibleIds,
-    onOrderChange,
-    onVisibilityChange,
-    onReset,
-    labels,
-  }: {
-    columns: readonly AnalyticsTableColumnDefinition[];
-    orderedIds: readonly string[];
-    visibleIds: readonly string[];
-    onOrderChange: (nextOrder: readonly string[]) => void;
-    onVisibilityChange: (nextVisible: readonly string[]) => void;
-    onReset: () => void;
-    labels: typeof COLUMN_SETTINGS_LABELS;
-  }) {
-    const [orderedIds, setOrderedIds] = useState([...initialOrderedIds]);
-    const [visibleIds, setVisibleIds] = useState([...initialVisibleIds]);
-    const visibleColumnIds = orderedIds.filter((id) => visibleIds.includes(id));
-    const columnsById = new Map(
-      columns.map((column) => [column.id, column] as const),
-    );
-    const handleOrderChange = (nextOrder: readonly string[]) => {
-      setOrderedIds([...nextOrder]);
-      onOrderChange(nextOrder);
-    };
-    const handleVisibilityChange = (nextVisible: readonly string[]) => {
-      setVisibleIds([...nextVisible]);
-      onVisibilityChange(nextVisible);
-    };
-    const handleReset = () => {
-      setOrderedIds(columns.map((column) => column.id));
-      setVisibleIds(
-        columns
-          .filter(
-            (column) => column.required || column.defaultVisible !== false,
-          )
-          .map((column) => column.id),
-      );
-      onReset();
-    };
-
-    return createElement(
-      "div",
-      { className: "grid w-full gap-3" },
-      createElement(
-        "div",
-        { className: "flex items-center justify-between gap-3" },
-        createElement("p", { className: "text-sm font-medium" }, "Page report"),
-        createElement(AnalyticsTableColumnSettings, {
-          columns,
-          orderedIds,
-          visibleIds,
-          onOrderChange: handleOrderChange,
-          onVisibilityChange: handleVisibilityChange,
-          onReset: handleReset,
-          labels,
-        }),
-      ),
-      createElement(
-        Table,
-        null,
-        createElement(
-          "thead",
-          null,
-          createElement(
-            TableRow,
-            null,
-            ...visibleColumnIds.map((id) =>
-              createElement(
-                TableHead,
-                { key: id },
-                columnsById.get(id)?.label ?? id,
-              ),
-            ),
-          ),
-        ),
-        createElement(
-          TableBody,
-          null,
-          ...[
-            ["/pricing", "1,284", "842", "126"],
-            ["/docs/getting-started", "946", "731", "84"],
-          ].map((row) =>
-            createElement(
-              TableRow,
-              { key: row[0]! },
-              ...visibleColumnIds.map((id) => {
-                const index = columns.findIndex((column) => column.id === id);
-                return createElement(TableCell, { key: id }, row[index] ?? "—");
-              }),
-            ),
-          ),
-        ),
-      ),
-    );
-  },
-  { displayName: "AnalyticsTableColumnSettings" },
 );
 
 const galleryContracts = {
@@ -1911,6 +1693,288 @@ const galleryContracts = {
       propValue("Unique visitors"),
     ]),
   ]),
+  overviewMetrics: registerPropCards(overviewMetricsContract, [
+    propCard("loading", [propValue(false), propValue(true)]),
+    propCard("comparisonLabel", [
+      propValue(
+        "none",
+        "No comparison",
+        {
+          comparisonLabel: undefined,
+          items: overviewMetricsContract.fixtures[0].props.items,
+        },
+        false,
+      ),
+      propValue(
+        "previous-period",
+        "Previous period",
+        {
+          comparisonLabel: "Previous period",
+          items: overviewMetricsContract.fixtures[2].props.items,
+        },
+        false,
+      ),
+    ]),
+  ]),
+  realtimeStatusDot: registerPropCards(realtimeStatusDotContract, [
+    propCard("status", [
+      propValue("connected"),
+      propValue("connecting"),
+      propValue("disconnected", "Reconnecting"),
+      propValue("failed"),
+    ]),
+  ]),
+  realtimeLogStream: registerPropCards(realtimeLogStreamContract, [
+    propCard("state", [
+      propValue(
+        "ready",
+        "Ready",
+        { items: realtimeLogStreamContract.fixtures[0].props.items },
+        true,
+      ),
+      propValue("loading", "Loading", { items: [] }, true),
+      propValue("empty", "Empty", { items: [] }, true),
+    ]),
+    propCard("labels.title", [
+      propValue("Recent events"),
+      propValue("Live activity"),
+    ]),
+  ]),
+  eventMetrics: registerPropCards(eventMetricsContract, [
+    propCard("loading", [propValue(false), propValue(true)]),
+    propCard("includeShare", [propValue(false), propValue(true)]),
+    propCard("comparisonLabel", [
+      propValue(
+        "none",
+        "No comparison",
+        { comparisonSummary: undefined, comparisonLabel: undefined },
+        false,
+      ),
+      propValue(
+        "previous-period",
+        "Previous period",
+        {
+          comparisonSummary:
+            eventMetricsContract.fixtures[3].props.comparisonSummary,
+          comparisonLabel: "Previous period",
+        },
+        false,
+      ),
+    ]),
+  ]),
+  eventTrendCard: registerPropCards(eventTrendCardContract, [
+    propCard("loading", [propValue(false), propValue(true)]),
+    propCard("trend", [
+      propValue(
+        "with-data",
+        "With data",
+        { trend: eventTrendCardContract.fixtures[0].props.trend },
+        false,
+      ),
+      propValue("empty", "Empty", { trend: { series: [], data: [] } }, false),
+    ]),
+    propCard("comparisonLabel", [
+      propValue(
+        "none",
+        "No comparison",
+        {
+          comparisonTrend: undefined,
+          comparisonWindow: undefined,
+          comparisonLabel: undefined,
+        },
+        false,
+      ),
+      propValue(
+        "previous-period",
+        "Previous period",
+        {
+          comparisonTrend:
+            eventTrendCardContract.fixtures[3].props.comparisonTrend,
+          comparisonWindow:
+            eventTrendCardContract.fixtures[3].props.comparisonWindow,
+          comparisonLabel: "Previous period",
+        },
+        false,
+      ),
+    ]),
+  ]),
+  technologyShareOverview: registerPropCards(technologyShareOverviewContract, [
+    propCard("loading", [propValue(false), propValue(true)]),
+    propCard("refreshing", [propValue(false), propValue(true)]),
+    propCard("comparisonLabel", [
+      propValue(
+        "none",
+        "No comparison",
+        {
+          comparisonLabel: undefined,
+          primary: technologyShareOverviewContract.fixtures[0].props.primary,
+          secondary:
+            technologyShareOverviewContract.fixtures[0].props.secondary,
+        },
+        false,
+      ),
+      propValue(
+        "previous-period",
+        "Previous period",
+        {
+          comparisonLabel: "Previous period",
+          primary: technologyShareOverviewContract.fixtures[4].props.primary,
+          secondary:
+            technologyShareOverviewContract.fixtures[4].props.secondary,
+        },
+        false,
+      ),
+    ]),
+  ]),
+  browserRadar: registerPropCards(browserRadarContract, [
+    propCard("loading", [propValue(false), propValue(true)]),
+    propCard("comparisonItems", [
+      propValue("none", "No comparison", { comparisonItems: [] }, false),
+      propValue(
+        "previous-period",
+        "Previous period",
+        {
+          comparisonItems:
+            browserRadarContract.fixtures[3].props.comparisonItems,
+        },
+        false,
+      ),
+    ]),
+  ]),
+  browserCrossBreakdownCard: registerPropCards(
+    browserCrossBreakdownCardContract,
+    [
+      propCard("loading", [propValue(false), propValue(true)]),
+      propCard("hydrated", [propValue(true), propValue(false)]),
+      propCard("comparisonDimension", [
+        propValue(
+          "none",
+          "No comparison",
+          { comparisonDimension: undefined },
+          false,
+        ),
+        propValue(
+          "previous-period",
+          "Previous period",
+          {
+            dimension:
+              browserCrossBreakdownCardContract.fixtures[5].props.dimension,
+            comparisonDimension:
+              browserCrossBreakdownCardContract.fixtures[5].props
+                .comparisonDimension,
+          },
+          false,
+        ),
+      ]),
+    ],
+  ),
+  deviceCrossBreakdownCard: registerPropCards(
+    deviceCrossBreakdownCardContract,
+    [
+      propCard("loading", [propValue(false), propValue(true)]),
+      propCard("comparisonDimension", [
+        propValue(
+          "none",
+          "No comparison",
+          { comparisonDimension: undefined },
+          false,
+        ),
+        propValue(
+          "previous-period",
+          "Previous period",
+          {
+            dimension:
+              deviceCrossBreakdownCardContract.fixtures[4].props.dimension,
+            comparisonDimension:
+              deviceCrossBreakdownCardContract.fixtures[4].props
+                .comparisonDimension,
+          },
+          false,
+        ),
+      ]),
+    ],
+  ),
+  browserVersionBreakdown: registerPropCards(browserVersionBreakdownContract, [
+    propCard("loading", [propValue(false), propValue(true)]),
+    propCard("refreshing", [propValue(false), propValue(true)]),
+    propCard("comparisonLabel", [
+      propValue(
+        "none",
+        "No comparison",
+        { comparisonLabel: undefined, comparisonBrowsers: undefined },
+        false,
+      ),
+      propValue(
+        "previous-period",
+        "Previous period",
+        {
+          comparisonLabel: "Previous period",
+          comparisonBrowsers:
+            browserVersionBreakdownContract.fixtures[4].props
+              .comparisonBrowsers,
+        },
+        false,
+      ),
+    ]),
+  ]),
+  goalTimeseries: registerPropCards(goalTimeseriesContract, [
+    propCard("loading", [
+      propValue(false, "Ready", {
+        data: goalTimeseriesContract.fixtures[0].props.data,
+      }),
+      propValue(true, "Loading", {
+        data: goalTimeseriesContract.fixtures[1].props.data,
+      }),
+    ]),
+    propCard("comparisonLabel", [
+      propValue(
+        "none",
+        "No comparison",
+        {
+          hasComparison: false,
+          comparisonLabel: undefined,
+          data: goalTimeseriesContract.fixtures[0].props.data,
+        },
+        false,
+      ),
+      propValue(
+        "previous-period",
+        "Previous period",
+        {
+          hasComparison: true,
+          comparisonLabel: "Previous period",
+          data: goalTimeseriesContract.fixtures[2].props.data,
+        },
+        false,
+      ),
+    ]),
+  ]),
+  retention: registerPropCards(retentionMatrixContract, [
+    propCard("loading", [propValue(false), propValue(true)]),
+    propCard("comparisonLabel", [
+      propValue(
+        "none",
+        "No comparison",
+        {
+          comparisonViewModel: undefined,
+          comparisonLabel: undefined,
+          viewModel: retentionMatrixContract.fixtures[0].props.viewModel,
+        },
+        false,
+      ),
+      propValue(
+        "previous-period",
+        "Previous period",
+        {
+          comparisonViewModel:
+            retentionMatrixContract.fixtures[2].props.comparisonViewModel,
+          comparisonLabel: "Previous period",
+          viewModel: retentionMatrixContract.fixtures[2].props.viewModel,
+        },
+        false,
+      ),
+    ]),
+  ]),
   sharing: registerPropCards(
     shareBreakdownContract,
     [
@@ -1976,135 +2040,14 @@ const galleryContracts = {
     ],
     { comparisonItems: undefined },
   ),
-  trafficPairBarChart: registerPropCards(
-    defineComponentContract<{
-      locale: string;
-      comparison: boolean;
-    }>({
-      id: "traffic-pair-bar-chart",
-      title: "Traffic pair bar chart",
-      category: "Product UI / Analytics",
-      categoryId: "product-analytics",
-      fixtures: [
-        {
-          id: "default",
-          title: "Traffic pair bar chart",
-          props: { locale: "en-US", comparison: false },
-        },
-      ],
-      render: ({ locale, comparison }) => {
-        const traffic = [
-          { timestampMs: 1_728_000_000_000, views: 128, visitors: 84 },
-          { timestampMs: 1_728_086_400_000, views: 176, visitors: 112 },
-          { timestampMs: 1_728_172_800_000, views: 142, visitors: 96 },
-          { timestampMs: 1_728_259_200_000, views: 214, visitors: 151 },
-          { timestampMs: 1_728_345_600_000, views: 189, visitors: 130 },
-        ];
-
-        return createElement(
-          "div",
-          { className: "w-full" },
-          createElement(TrafficPairBarChart, {
-            data: traffic,
-            ...(comparison
-              ? {
-                  comparisonData: traffic.map((point) => ({
-                    ...point,
-                    views: point.views * 0.8,
-                    visitors: point.visitors * 0.85,
-                  })),
-                }
-              : {}),
-            locale,
-            timeZone: "UTC",
-            interval: "day",
-            viewsLabel: "Views",
-            visitorsLabel: "Visitors",
-            dataIsComplete: true,
-            range: {
-              from: traffic[0]!.timestampMs,
-              to: traffic.at(-1)!.timestampMs,
-            },
-          }),
-        );
-      },
-    }),
-    [
-      propCard("locale", [propValue("en-US"), propValue("zh-CN")]),
-      propCard("comparison", [propValue(false), propValue(true)]),
-    ],
-  ),
-  donutChart: registerPropCards(
-    defineComponentContract<{
-      locale: string;
-      comparison: boolean;
-    }>({
-      id: "donut-chart",
-      title: "Donut chart",
-      category: "Product UI / Analytics",
-      categoryId: "product-analytics",
-      fixtures: [
-        {
-          id: "default",
-          title: "Donut chart",
-          props: { locale: "en-US", comparison: false },
-        },
-      ],
-      render: ({ locale, comparison }) => {
-        const sources = [
-          {
-            key: "search",
-            label: "Search",
-            value: 420,
-            share: 42,
-            color: "var(--color-chart-1)",
-          },
-          {
-            key: "direct",
-            label: "Direct",
-            value: 310,
-            share: 31,
-            color: "var(--color-chart-2)",
-          },
-          {
-            key: "social",
-            label: "Social",
-            value: 270,
-            share: 27,
-            color: "var(--color-chart-3)",
-          },
-        ];
-        const comparisonColors = [
-          "var(--color-chart-secondary-1)",
-          "var(--color-chart-secondary-2)",
-          "var(--color-chart-secondary-3)",
-        ];
-
-        return createElement(
-          "div",
-          { className: "mx-auto w-full max-w-sm" },
-          createElement(DonutChart, {
-            data: sources,
-            ...(comparison
-              ? {
-                  comparisonData: sources.map((point, index) => ({
-                    ...point,
-                    value: Math.round(point.value * 0.82),
-                    color: comparisonColors[index % comparisonColors.length]!,
-                  })),
-                }
-              : {}),
-            locale,
-            valueLabel: "visitors",
-          }),
-        );
-      },
-    }),
-    [
-      propCard("locale", [propValue("en-US"), propValue("zh-CN")]),
-      propCard("comparison", [propValue(false), propValue(true)]),
-    ],
-  ),
+  trafficPairBarChart: registerPropCards(trafficPairBarChartContract, [
+    propCard("locale", [propValue("en-US"), propValue("zh-CN")]),
+    propCard("comparison", [propValue(false), propValue(true)]),
+  ]),
+  donutChart: registerPropCards(donutChartContract, [
+    propCard("locale", [propValue("en-US"), propValue("zh-CN")]),
+    propCard("comparison", [propValue(false), propValue(true)]),
+  ]),
   tableActionButton: registerPropCards(
     defineComponentContract<{
       tone: "default" | "destructive";
@@ -2260,43 +2203,7 @@ const galleryContracts = {
     ],
   ),
   analyticsTableColumnSettings: registerPropCards(
-    defineComponentContract<{ preset: "default" | "all-columns" }>({
-      id: "analytics-table-column-settings",
-      title: "Analytics table column settings",
-      category: "Product UI / Analytics",
-      categoryId: "product-analytics",
-      fixtures: [
-        {
-          id: "default",
-          title: "Analytics table column settings",
-          props: { preset: "default" },
-        },
-      ],
-      render: ({ preset }) => {
-        const columns = COLUMN_SETTINGS_BASE_COLUMNS.map((column) => ({
-          ...column,
-          defaultVisible:
-            preset === "all-columns" || column.defaultVisible !== false,
-        }));
-        const orderedIds = columns.map((column) => column.id);
-        const visibleIds = columns
-          .filter(
-            (column) => column.required || column.defaultVisible !== false,
-          )
-          .map((column) => column.id);
-
-        return createElement(AnalyticsTableColumnSettingsGalleryPreview, {
-          key: preset,
-          columns,
-          orderedIds,
-          visibleIds,
-          onOrderChange: () => {},
-          onVisibilityChange: () => {},
-          onReset: () => {},
-          labels: COLUMN_SETTINGS_LABELS,
-        });
-      },
-    }),
+    analyticsTableColumnSettingsContract,
     [
       propCard("preset", [
         propValue("default"),
@@ -2304,103 +2211,11 @@ const galleryContracts = {
       ]),
     ],
   ),
-  analyticsDataTable: registerPropCards(
-    defineComponentContract<{
-      loading: boolean;
-      rows: readonly { id: string; page: string; views: string }[];
-    }>({
-      id: "analytics-data-table",
-      title: "Analytics data table",
-      category: "Product UI / Analytics",
-      categoryId: "product-analytics",
-      fixtures: [
-        {
-          id: "default",
-          title: "Analytics table",
-          props: {
-            loading: false,
-            rows: [
-              { id: "pricing", page: "/pricing", views: "1,284" },
-              { id: "docs", page: "/docs/getting-started", views: "946" },
-              { id: "blog", page: "/blog/launch", views: "721" },
-            ],
-          },
-        },
-      ],
-      render: ({ loading, rows }) =>
-        createElement(
-          AnalyticsDataTable<{ id: string; page: string; views: string }>,
-          {
-            loading,
-            rows,
-            header: createElement(
-              "tr",
-              null,
-              createElement("th", { className: "px-4 py-3 text-left" }, "Page"),
-              createElement(
-                "th",
-                { className: "px-4 py-3 text-right" },
-                "Views",
-              ),
-            ),
-            columnCount: 2,
-            skeletonRows: 3,
-            getRowKey: (row) => row.id,
-            renderRow: (row) => ({
-              children: createElement(
-                Fragment,
-                null,
-                createElement("td", { className: "px-4 py-3" }, row.page),
-                createElement(
-                  "td",
-                  { className: "px-4 py-3 text-right tabular-nums" },
-                  row.views,
-                ),
-              ),
-            }),
-            renderSkeletonRow: () =>
-              createElement(
-                Fragment,
-                null,
-                createElement(
-                  "td",
-                  { className: "px-4 py-3" },
-                  createElement("div", {
-                    className: "h-4 w-40 animate-pulse bg-muted",
-                  }),
-                ),
-                createElement(
-                  "td",
-                  { className: "px-4 py-3" },
-                  createElement("div", {
-                    className: "ml-auto h-4 w-16 animate-pulse bg-muted",
-                  }),
-                ),
-              ),
-            errorContent: "Unable to load pages.",
-            emptyContent: "No pages found.",
-            minTableWidth: "32rem",
-          },
-        ),
-    }),
-    [propCard("loading", [propValue(false), propValue(true)])],
-  ),
+  analyticsDataTable: registerPropCards(analyticsDataTableContract, [
+    propCard("loading", [propValue(false), propValue(true)]),
+  ]),
   detailDrawer: registerPropCards(
-    defineComponentContract<{ ariaLabel: string }>({
-      id: "detail-drawer",
-      title: "Detail drawer",
-      category: "Product UI / Analytics",
-      categoryId: "product-analytics",
-      fixtures: [
-        {
-          id: "default",
-          title: "Interactive detail drawer",
-          props: { ariaLabel: "Session details" },
-        },
-      ],
-      render: ({ ariaLabel }) =>
-        createElement(DetailDrawerGalleryPreview, { ariaLabel }),
-    }),
+    detailDrawerContract,
     [
       propCard("ariaLabel", [
         propValue("Session details"),
@@ -2431,46 +2246,7 @@ const galleryContracts = {
       }),
   ),
   siteScopeSelector: registerPropCards(
-    defineComponentContract<Omit<SiteScopeSelectorProps, "onChange">>({
-      id: "site-scope-selector",
-      title: "Site scope selector",
-      category: "Product UI / Management",
-      categoryId: "product-management",
-      fixtures: [
-        {
-          id: "default",
-          title: "All sites selected",
-          props: {
-            ariaLabel: "Site scope",
-            allSitesLabel: "All sites",
-            selectedSiteIds: [],
-            sites: [
-              {
-                id: "site-news",
-                name: "News Portal",
-                domain: "news.example.com",
-              },
-              {
-                id: "site-store",
-                name: "E-Commerce Store",
-                domain: "store.example.com",
-              },
-              {
-                id: "site-docs",
-                name: "Developer Docs",
-                domain: "docs.example.com",
-              },
-            ],
-            emptySitesLabel: "No sites available.",
-          },
-        },
-      ],
-      render: (props) =>
-        createElement(SiteScopeSelectorGalleryPreview, {
-          ...props,
-          key: props.selectedSiteIds.join(",") || "all-sites",
-        }),
-    }),
+    siteScopeSelectorContract,
     [
       propCard("selectedSiteIds", [
         propValue("all", "All sites", { selectedSiteIds: [] }, false),
@@ -2490,92 +2266,87 @@ const galleryContracts = {
         onChange: () => {},
       }),
   ),
-  analyticsTooltip: registerPropCards(
-    defineComponentContract<{
-      retentionMode: "table-column" | "target";
-    }>({
-      id: "analytics-tooltip",
-      title: "Analytics tooltip",
-      category: "Product UI / Analytics",
-      categoryId: "product-analytics",
-      fixtures: [
+  analyticsTooltip: registerPropCards(analyticsTooltipContract, [
+    propCard("retentionMode", [propValue("target"), propValue("table-column")]),
+  ]),
+  metricAreaChart: registerPropCards(metricAreaChartContract, [
+    propCard("label", [propValue("Visitors"), propValue("Views")]),
+    propCard("comparisonPoints", [
+      propValue(
+        "none",
+        "No comparison",
+        { comparisonPoints: undefined },
+        false,
+      ),
+      propValue(
+        "previous-period",
+        "Previous period",
         {
-          id: "default",
-          title: "Single moving tooltip",
-          props: { retentionMode: "target" },
+          comparisonPoints:
+            metricAreaChartContract.fixtures[1].props.comparisonPoints,
         },
-      ],
-      render: ({ retentionMode }) => {
-        const examples = [
-          { key: "timestamp", target: "14:32:08.221", title: "Timestamp" },
-          { key: "request", target: "GET /pricing", title: "Request" },
-          { key: "visitor", target: "visitor-1042", title: "Visitor" },
-          { key: "duration", target: "184 ms", title: "Duration" },
-        ];
-
-        return createElement(AnalyticsTooltipProvider, {
-          retentionMode,
-          children: createElement(
-            "div",
-            { className: "grid w-full max-w-sm gap-4" },
-            createElement(
-              "p",
-              { className: "text-sm text-muted-foreground" },
-              "Move down the vertical trigger stack. One tooltip follows each row and updates with its content.",
-            ),
-            createElement(
-              "div",
-              { className: "grid gap-2" },
-              ...examples.map(({ key, target, title }) =>
-                createElement(
-                  "div",
-                  {
-                    key,
-                    className:
-                      "flex items-center justify-between gap-4 border bg-card px-4 py-3",
-                  },
-                  createElement(
-                    "span",
-                    { className: "text-xs text-muted-foreground" },
-                    title,
-                  ),
-                  createElement(AnalyticsTooltipTarget, {
-                    contentKey: key,
-                    className:
-                      "shrink-0 cursor-help border-b border-dashed border-muted-foreground/60 py-1 font-mono text-sm",
-                    content: createElement(
-                      "div",
-                      { className: "grid gap-1 whitespace-nowrap" },
-                      createElement(
-                        "span",
-                        {
-                          className:
-                            "text-[10px] uppercase tracking-wide text-background/60",
-                        },
-                        title,
-                      ),
-                      createElement(
-                        "span",
-                        { className: "text-xs" },
-                        `${target} · sample analytics detail`,
-                      ),
-                    ),
-                    children: target,
-                  }),
-                ),
-              ),
-            ),
-          ),
-        });
-      },
-    }),
+        false,
+      ),
+    ]),
+  ]),
+  siteTrafficStackChart: registerPropCards(siteTrafficStackChartContract, [
+    propCard("loading", [propValue(false), propValue(true)]),
+  ]),
+  eventTrendBarChart: registerPropCards(eventTrendBarChartContract, [
+    propCard("loading", [propValue(false), propValue(true)]),
+    propCard("comparison", [
+      propValue("none", "No comparison", {}, false),
+      propValue(
+        "previous-period",
+        "Previous period",
+        { ...eventTrendBarChartContract.fixtures[3].props },
+        false,
+      ),
+    ]),
+  ]),
+  stackedBreakdownBarChart: registerPropCards(
+    stackedBreakdownBarChartContract,
     [
-      propCard("retentionMode", [
-        propValue("target"),
-        propValue("table-column"),
+      propCard("comparison", [
+        propValue("none", "No comparison", {}, false),
+        propValue(
+          "previous-period",
+          "Previous period",
+          { ...stackedBreakdownBarChartContract.fixtures[2].props },
+          false,
+        ),
       ]),
     ],
   ),
+  shareTrendAreaChart: registerPropCards(shareTrendAreaChartContract, [
+    propCard("loading", [propValue(false), propValue(true)]),
+    propCard("showLegend", [propValue(true), propValue(false)]),
+  ]),
+  performanceTrendChart: registerPropCards(performanceTrendChartContract, [
+    propCard("comparison", [
+      propValue("none", "No comparison", {}, false),
+      propValue(
+        "previous-period",
+        "Previous period",
+        { ...performanceTrendChartContract.fixtures[2].props },
+        false,
+      ),
+    ]),
+  ]),
+  performanceRadarChart: registerPropCards(performanceRadarChartContract, [
+    propCard("comparison", [
+      propValue("none", "No comparison", {}, false),
+      propValue(
+        "previous-period",
+        "Previous period",
+        { ...performanceRadarChartContract.fixtures[1].props },
+        false,
+      ),
+    ]),
+  ]),
+  latencyPercentileChart: registerPropCards(latencyPercentileChartContract, [
+    propCard("loading", [propValue(false), propValue(true)]),
+  ]),
   tabbedTable: registerPropCards(tabbedTableContract, [
     propCard("state", [
       propValue("ready"),
@@ -2879,6 +2650,20 @@ export const uiGalleryRegistry: readonly UiGalleryEntry[] = [
     contract: galleryContracts.goalVisualization,
   },
   {
+    slug: "goal-timeseries",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/goals",
+    previewAlignment: "start",
+    contract: galleryContracts.goalTimeseries,
+  },
+  {
+    slug: "retention",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/retention",
+    previewAlignment: "start",
+    contract: galleryContracts.retention,
+  },
+  {
     slug: "funnel",
     packageType: "product-ui",
     apiEntry: "@insightflare/product-ui/funnel",
@@ -2890,6 +2675,68 @@ export const uiGalleryRegistry: readonly UiGalleryEntry[] = [
     packageType: "product-ui",
     apiEntry: "@insightflare/product-ui/realtime",
     contract: galleryContracts.realtimeTrafficTrend,
+  },
+  {
+    slug: "realtime-status-dot",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/realtime",
+    contract: galleryContracts.realtimeStatusDot,
+  },
+  {
+    slug: "realtime-log-stream",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/realtime",
+    previewAlignment: "start",
+    contract: galleryContracts.realtimeLogStream,
+  },
+  {
+    slug: "event-metrics",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/events",
+    contract: galleryContracts.eventMetrics,
+  },
+  {
+    slug: "event-trend-card",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/events",
+    previewAlignment: "start",
+    contract: galleryContracts.eventTrendCard,
+  },
+  {
+    slug: "overview-metrics",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/overview",
+    contract: galleryContracts.overviewMetrics,
+  },
+  {
+    slug: "technology-share-overview",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/technology",
+    contract: galleryContracts.technologyShareOverview,
+  },
+  {
+    slug: "browser-radar",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/technology",
+    contract: galleryContracts.browserRadar,
+  },
+  {
+    slug: "browser-cross-breakdown-card",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/technology",
+    contract: galleryContracts.browserCrossBreakdownCard,
+  },
+  {
+    slug: "device-cross-breakdown-card",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/technology",
+    contract: galleryContracts.deviceCrossBreakdownCard,
+  },
+  {
+    slug: "browser-version-breakdown",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/technology",
+    contract: galleryContracts.browserVersionBreakdown,
   },
   {
     slug: "sharing",
@@ -2911,6 +2758,70 @@ export const uiGalleryRegistry: readonly UiGalleryEntry[] = [
     apiEntry: "@insightflare/product-ui/charts",
     maxValuesPerRow: 2,
     contract: galleryContracts.donutChart,
+  },
+  {
+    slug: "metric-area-chart",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/charts",
+    maxValuesPerRow: 2,
+    previewAlignment: "start",
+    contract: galleryContracts.metricAreaChart,
+  },
+  {
+    slug: "site-traffic-stack-chart",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/charts",
+    maxValuesPerRow: 2,
+    previewAlignment: "start",
+    contract: galleryContracts.siteTrafficStackChart,
+  },
+  {
+    slug: "event-trend-bar-chart",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/charts",
+    maxValuesPerRow: 2,
+    previewAlignment: "start",
+    contract: galleryContracts.eventTrendBarChart,
+  },
+  {
+    slug: "stacked-breakdown-bar-chart",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/charts",
+    maxValuesPerRow: 2,
+    previewAlignment: "start",
+    contract: galleryContracts.stackedBreakdownBarChart,
+  },
+  {
+    slug: "share-trend-area-chart",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/charts",
+    maxValuesPerRow: 2,
+    previewAlignment: "start",
+    contract: galleryContracts.shareTrendAreaChart,
+  },
+  {
+    slug: "performance-trend-chart",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/charts",
+    maxValuesPerRow: 2,
+    previewAlignment: "start",
+    contract: galleryContracts.performanceTrendChart,
+  },
+  {
+    slug: "performance-radar-chart",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/charts",
+    maxValuesPerRow: 2,
+    previewAlignment: "start",
+    contract: galleryContracts.performanceRadarChart,
+  },
+  {
+    slug: "latency-percentile-chart",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/charts",
+    maxValuesPerRow: 2,
+    previewAlignment: "start",
+    contract: galleryContracts.latencyPercentileChart,
   },
   {
     slug: "analytics-data-table",

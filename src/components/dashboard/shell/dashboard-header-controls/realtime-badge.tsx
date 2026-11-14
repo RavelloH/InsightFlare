@@ -1,3 +1,4 @@
+import { RealtimeStatusDot } from "@insightflare/product-ui/realtime";
 import { AnimatedNumber } from "@insightflare/ui/animated-number";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
@@ -6,10 +7,7 @@ import {
   TooltipTrigger,
 } from "@insightflare/ui/tooltip";
 
-import {
-  RealtimeStatusDot,
-  realtimeStatusText,
-} from "@/components/dashboard/realtime/realtime-status-indicator";
+import { realtimeStatusText } from "@/components/dashboard/realtime/realtime-status-indicator";
 import type { AppMessages } from "@/lib/i18n/messages";
 import type {
   RealtimeChannelState,

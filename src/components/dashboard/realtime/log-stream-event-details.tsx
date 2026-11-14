@@ -1,5 +1,16 @@
 import { type ReactNode, useMemo } from "react";
 import { Icon } from "@iconify/react";
+import {
+  BROWSER_APPLE_ICON_KEYS,
+  BROWSER_ICON_DIR,
+  DomainOrUrlIcon,
+  formatRelativeTime,
+  LogoIcon,
+  OS_APPLE_ICON_KEYS,
+  OS_ICON_DIR,
+  UNKNOWN_ICON_KEY,
+  useRealtimeClock,
+} from "@insightflare/product-ui/realtime";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Button } from "@insightflare/ui/button";
@@ -29,7 +40,7 @@ import {
   formatPathWithHash,
   resolveDeviceTypeMeta,
 } from "@/components/dashboard/journeys/journey-display";
-import { shortDateTime } from "@/lib/dashboard/format";
+import { intlLocale, shortDateTime } from "@/lib/dashboard/format";
 import {
   formatLocalizedGeoValue,
   resolveLocalizedCityName,
@@ -45,10 +56,7 @@ import type { RealtimeEvent } from "@/lib/realtime/types";
 import { cn } from "@/lib/utils";
 
 import {
-  BROWSER_APPLE_ICON_KEYS,
-  BROWSER_ICON_DIR,
   classifyRealtimeLogEvent,
-  DomainOrUrlIcon,
   formatCoordinateValue,
   formatDetailBoolean,
   formatDetailDateTime,
@@ -56,19 +64,13 @@ import {
   formatLogTitle,
   formatOptionalDetailDateTime,
   formatRealtimePerformanceMetric,
-  formatRelativeTime,
   formatTimelineTime,
   getRealtimeEventIntegrationRemainingSeconds,
   hasValidCoordinate,
-  LogoIcon,
-  OS_APPLE_ICON_KEYS,
-  OS_ICON_DIR,
   resolveLocalizedDetailValue,
   resolveRealtimeCityLabel,
   resolveRealtimeEventDisplayData,
   resolveRealtimeRegionLabel,
-  UNKNOWN_ICON_KEY,
-  useRealtimeClock,
 } from "./model";
 function RealtimeEventDetailValue({
   icon,
@@ -202,7 +204,11 @@ function RealtimeVisitorHistorySection({
                         )}
                       </p>
                       <p className="font-mono text-[10px] text-muted-foreground">
-                        {formatRelativeTime(locale, timelineEvent.eventAt, now)}
+                        {formatRelativeTime(
+                          intlLocale(locale),
+                          timelineEvent.eventAt,
+                          now,
+                        )}
                       </p>
                     </div>
                     <div className="relative flex h-full justify-center">

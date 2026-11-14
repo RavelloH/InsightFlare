@@ -6,3 +6,4 @@ export {
   useDetailModalClose,
   useDetailModalReady,
 } from "./detail-drawer";
+export { detailDrawerContract } from "./detail-drawer.contract";

@@ -49,7 +49,7 @@ function run(command: string, args: string[], cwd: string): string {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
-    shell: process.platform === "win32",
+    shell: process.platform === "win32" && /\.(?:cmd|bat)$/iu.test(command),
     stdio: ["ignore", "pipe", "pipe"],
   });
   if (result.status !== 0) {
@@ -248,6 +248,10 @@ try {
             "dist/funnel/index.d.ts",
             "dist/sharing/index.js",
             "dist/sharing/index.d.ts",
+            "dist/assets/browser/chrome.svg",
+            "dist/assets/browser/unknown.svg",
+            "dist/assets/os/windows-11.svg",
+            "dist/assets/os/unknown.svg",
           ];
     for (const requiredFile of requiredFiles) {
       if (!archiveFiles.has(requiredFile)) {
@@ -320,7 +324,7 @@ try {
       'import { LayerManagerProvider } from "@insightflare/ui/layer-manager";',
       'import { TooltipProvider } from "@insightflare/ui/tooltip";',
       'import { GoalVisualization, goalVisualizationContract } from "@insightflare/product-ui/goals";',
-      'import { RealtimeTrafficTrendView, realtimeTrafficTrendContract } from "@insightflare/product-ui/realtime";',
+      'import { RealtimeLogStreamView, realtimeLogStreamContract, RealtimeTrafficTrendView, realtimeTrafficTrendContract } from "@insightflare/product-ui/realtime";',
       'import { FunnelVisualization, funnelVisualizationContract } from "@insightflare/product-ui/funnel";',
       'import { ShareBreakdownView, shareBreakdownContract } from "@insightflare/product-ui/sharing";',
       'import "@insightflare/ui/styles.css";',
@@ -328,6 +332,11 @@ try {
       "",
       "const goalFixture = goalVisualizationContract.fixtures[0];",
       "const realtimeFixture = realtimeTrafficTrendContract.fixtures[0];",
+      "const logStreamFixture = realtimeLogStreamContract.fixtures[0];",
+      "const logStreamItems = [",
+      '  { ...logStreamFixture.props.items[0], id: "packaged-known", browserIconKey: "chrome", osIconKey: "windows-11", countryFlagCode: null, sourceLabel: "Direct" },',
+      '  { ...logStreamFixture.props.items[0], id: "packaged-unknown", browserIconKey: "not-a-browser", osIconKey: "not-an-os", countryFlagCode: null, sourceLabel: "Direct" },',
+      "];",
       "const funnelFixture = funnelVisualizationContract.fixtures[0];",
       "const shareFixture = shareBreakdownContract.fixtures[0];",
       'const root = createRoot(document.getElementById("root")!);',
@@ -354,6 +363,9 @@ try {
       "          <RealtimeTrafficTrendView {...realtimeFixture.props} />",
       "          <FunnelVisualization {...funnelFixture.props} />",
       "          <ShareBreakdownView {...shareFixture.props} />",
+      "          <section data-packaged-log-stream>",
+      '            <RealtimeLogStreamView {...logStreamFixture.props} items={logStreamItems} state="ready" reduceMotion />',
+      "          </section>",
       "        </div>",
       "      </main>",
       "      </TooltipProvider>",
@@ -369,6 +381,24 @@ try {
     ["install", "--ignore-scripts", "--no-audit", "--no-fund"],
     consumerDirectory,
   );
+  await write(
+    "ssr.mjs",
+    [
+      'import { createElement } from "react";',
+      'import { renderToStaticMarkup } from "react-dom/server";',
+      'import { LayerManagerProvider } from "@insightflare/ui/layer-manager";',
+      'import { TooltipProvider } from "@insightflare/ui/tooltip";',
+      'import { RealtimeLogStreamView, realtimeLogStreamContract } from "@insightflare/product-ui/realtime";',
+      "const fixture = realtimeLogStreamContract.fixtures[0].props;",
+      'const props = { ...fixture, items: [{ ...fixture.items[0], countryFlagCode: null, sourceLabel: "Direct" }] };',
+      "const html = renderToStaticMarkup(createElement(LayerManagerProvider, null, createElement(TooltipProvider, null, createElement(RealtimeLogStreamView, props))));",
+      'const sources = [...html.matchAll(/<img[^>]*src="([^"]+)"/gu)].map(match => match[1]);',
+      'if (sources.length !== 2 || sources.some(source => !source.startsWith("data:image/svg+xml"))) {',
+      '  throw new Error("The packed log stream must render self-contained icons on the server: " + JSON.stringify(sources));',
+      "}",
+    ].join("\n"),
+  );
+  run(process.execPath, ["ssr.mjs"], consumerDirectory);
   run(
     npmCommand,
     ["exec", "--", "tsc", "--noEmit", "-p", "tsconfig.json"],
@@ -489,6 +519,29 @@ try {
     );
   }
 
+  await page.locator("[data-packaged-log-stream]").scrollIntoViewIfNeeded();
+  await page.waitForFunction(() => {
+    const icons = Array.from(
+      document.querySelectorAll<HTMLImageElement>(
+        "[data-packaged-log-stream] img",
+      ),
+    );
+    return (
+      icons.length === 4 &&
+      icons.every((icon) => icon.complete && icon.naturalWidth > 0)
+    );
+  });
+  const iconPaths = await page
+    .locator("[data-packaged-log-stream] img")
+    .evaluateAll((icons) =>
+      icons.map((icon) => icon.getAttribute("src") ?? ""),
+    );
+  if (iconPaths.some((source) => source.startsWith("/images/"))) {
+    throw new Error(
+      "The packed log stream depends on application image paths.",
+    );
+  }
+
   await page.getByRole("button", { name: "Open dialog" }).click();
   await page.getByRole("dialog").waitFor({ state: "visible" });
   const dialogStyles = await page.getByRole("dialog").evaluate((element) => {
@@ -589,7 +642,7 @@ try {
   }
 
   console.log(
-    "Package smoke passed: npm pack, clean npm install, TypeScript, Vite build, browser styles and Product UI, and React dedupe.",
+    "Package smoke passed: npm pack, clean npm install, TypeScript, Vite build, browser styles and Product UI, server-rendered icons, bundled log stream icons and unknown fallbacks, and React dedupe.",
   );
 } finally {
   await browser?.close();

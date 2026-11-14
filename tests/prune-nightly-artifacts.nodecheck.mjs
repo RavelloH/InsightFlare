@@ -1,5 +1,6 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
 import { planPruneNightlyAssets } from "../scripts/prune-nightly-artifacts.mjs";
 
 const now = "f".repeat(40);

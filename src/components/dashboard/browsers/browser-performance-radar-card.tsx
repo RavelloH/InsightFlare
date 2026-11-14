@@ -1,17 +1,5 @@
 import { memo, useMemo } from "react";
-import {
-  buildPerformanceRadarMaxByMetric,
-  PerformanceRadarChart,
-  type PerformanceRadarMetricKey,
-} from "@insightflare/product-ui/charts";
-import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@insightflare/ui/card";
-import { RiPulseLine } from "@remixicon/react";
+import { BrowserRadarView } from "@insightflare/product-ui/technology";
 import { useQuery } from "@tanstack/react-query";
 
 import {
@@ -25,69 +13,10 @@ import type { BrowserRadarItem } from "@/lib/dashboard-api/client/edge";
 import type { FilterDocument } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
-const CHART_COLORS = [
-  "var(--color-chart-1)",
-  "var(--color-chart-2)",
-  "var(--color-chart-3)",
-  "var(--color-chart-4)",
-] as const;
-const COMPARISON_CHART_COLOR = "var(--color-chart-secondary)";
+import { buildBrowserRadarLabels } from "@/lib/product-ui-labels/technology";
 function emptyRadarUnlessAborted(error: unknown): BrowserRadarItem[] {
   if (error instanceof Error && error.name === "AbortError") throw error;
   return [];
-}
-/* ---------- single browser radar ---------- */
-
-function SingleBrowserRadar({
-  item,
-  comparisonItem,
-  comparisonLabel,
-  color,
-  locale,
-  maxByMetric,
-  metricLabels,
-}: {
-  item: BrowserRadarItem;
-  comparisonItem?: BrowserRadarItem;
-  comparisonLabel: string;
-  color: string;
-  locale: Locale;
-  maxByMetric: Record<PerformanceRadarMetricKey, number>;
-  metricLabels: Record<PerformanceRadarMetricKey, string>;
-}) {
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <PerformanceRadarChart
-        itemLabel={item.browser}
-        metrics={item.metrics}
-        maxByMetric={maxByMetric}
-        metricLabels={metricLabels}
-        color={color}
-        locale={locale}
-        comparisonMetrics={comparisonItem?.metrics}
-        comparisonColor={COMPARISON_CHART_COLOR}
-        comparisonLabel={comparisonLabel}
-      />
-      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs">
-        <div className="flex items-center gap-1.5">
-          <span
-            className="size-2.5 shrink-0 rounded-none"
-            style={{ backgroundColor: color }}
-          />
-          <span className="font-medium">{item.browser}</span>
-        </div>
-        {comparisonItem ? (
-          <div className="flex items-center gap-1.5">
-            <span
-              className="size-2.5 shrink-0 rounded-none"
-              style={{ backgroundColor: COMPARISON_CHART_COLOR }}
-            />
-            <span className="font-medium">{comparisonLabel}</span>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
 }
 /* ---------- main component ---------- */
 
@@ -157,76 +86,17 @@ export const BrowserPerformanceRadarCard = memo(
     const data = response?.current ?? [];
     const comparisonData = response?.comparison ?? [];
     const comparisonLabel = dashboardComparisonLabel(messages, comparisonQuery);
-    const comparisonByBrowser = useMemo(
-      () => new Map(comparisonData.map((item) => [item.browser, item])),
-      [comparisonData],
-    );
-
-    const metricLabels = useMemo(
-      () => ({
-        duration: messages.browsers.radarDuration,
-        engagement: messages.browsers.radarEngagement,
-        depth: messages.browsers.radarDepth,
-        loyalty: messages.browsers.radarLoyalty,
-        frequency: messages.browsers.radarFrequency,
-        traffic: messages.browsers.radarTraffic,
-      }),
-      [messages],
-    );
-
-    const maxByMetric = useMemo(() => {
-      const metrics = data.flatMap((item) => [
-        item.metrics,
-        comparisonByBrowser.get(item.browser)?.metrics,
-      ]);
-      return buildPerformanceRadarMaxByMetric(
-        metrics.filter((item): item is BrowserRadarItem["metrics"] =>
-          Boolean(item),
-        ),
-      );
-    }, [comparisonByBrowser, data]);
-
-    const hasContent = data.length > 0;
+    const labels = useMemo(() => buildBrowserRadarLabels(messages), [messages]);
 
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="inline-flex items-center gap-2">
-            <RiPulseLine className="size-4" />
-            {messages.browsers.radarTitle}
-          </CardTitle>
-          <p className="text-sm text-muted-foreground">
-            {messages.browsers.radarSubtitle}
-          </p>
-        </CardHeader>
-        <CardContent>
-          <ContentSwitch
-            loading={loading}
-            hasContent={hasContent}
-            loadingLabel={messages.common.loading}
-            emptyContent={<p>{messages.common.noData}</p>}
-            minHeightClassName="min-h-[200px]"
-          >
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-              {data.map((item, i) => {
-                const color = CHART_COLORS[i % CHART_COLORS.length];
-                return (
-                  <SingleBrowserRadar
-                    key={item.browser}
-                    item={item}
-                    comparisonItem={comparisonByBrowser.get(item.browser)}
-                    comparisonLabel={comparisonLabel}
-                    color={color}
-                    locale={locale}
-                    maxByMetric={maxByMetric}
-                    metricLabels={metricLabels}
-                  />
-                );
-              })}
-            </div>
-          </ContentSwitch>
-        </CardContent>
-      </Card>
+      <BrowserRadarView
+        labels={labels}
+        locale={locale}
+        loading={loading}
+        items={data}
+        comparisonItems={comparisonData}
+        comparisonLabel={comparisonLabel}
+      />
     );
   },
 );

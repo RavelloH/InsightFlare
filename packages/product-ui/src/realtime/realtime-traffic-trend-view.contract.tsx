@@ -3,6 +3,7 @@ import {
   defineComponentContract,
 } from "@insightflare/ui/contracts";
 
+import { createShowcaseRng, gaussian, poisson } from "../showcase/site-profile";
 import {
   RealtimeTrafficTrendView,
   type RealtimeTrafficTrendViewProps,
@@ -35,6 +36,33 @@ const realtimeTrafficTrendData = [
   },
 ] as const;
 
+function showcaseMinute(index: number) {
+  const minutes = 12 * 60 + index;
+  const hours = String(Math.floor(minutes / 60)).padStart(2, "0");
+  const mins = String(minutes % 60).padStart(2, "0");
+  return `${hours}:${mins}`;
+}
+
+function showcaseRealtimeData() {
+  // A slowly drifting arrival rate, sampled as Poisson counts per minute.
+  const rng = createShowcaseRng(130712);
+  let rate = 11;
+  return Array.from({ length: 30 }, (_, index) => {
+    rate = Math.max(4, rate + gaussian(rng) * 1.1 + (13 - rate) * 0.12);
+    const visitors = Math.max(1, poisson(rng, rate));
+    const views = visitors + poisson(rng, visitors * 0.85);
+    const time = showcaseMinute(index);
+    return {
+      label: time,
+      tooltipLabel: `2026-07-13 ${time}`,
+      views,
+      visitors,
+    };
+  });
+}
+
+const realtimeTrafficTrendShowcaseData = showcaseRealtimeData();
+
 export const realtimeTrafficTrendFixtures = [
   {
     id: "realtime-traffic-trend.state.ready",
@@ -56,6 +84,21 @@ export const realtimeTrafficTrendFixtures = [
     props: {
       state: "loading",
       data: realtimeTrafficTrendData,
+      locale: "en-US",
+      title: "Realtime traffic",
+      viewsLabel: "Views",
+      visitorsLabel: "Visitors",
+    } satisfies RealtimeTrafficTrendViewProps,
+  },
+  {
+    id: "realtime-traffic-trend.showcase",
+    title: "Showcase",
+    description:
+      "Thirty minutes of realistic live traffic for marketing and documentation pages.",
+    presentation: { kind: "scenario", scenario: "showcase" },
+    props: {
+      state: "ready",
+      data: realtimeTrafficTrendShowcaseData,
       locale: "en-US",
       title: "Realtime traffic",
       viewsLabel: "Views",

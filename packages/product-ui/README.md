@@ -31,4 +31,6 @@ Additional exports include charts, tables, sharing, detail drawers, scope select
 
 The product components are props-only: callers supply the analytics data and actions. They do not connect to a particular InsightFlare deployment or API by themselves.
 
+The realtime log stream includes its browser and operating system SVG icons in the package; consumers do not need to copy those assets into their public directory.
+
 The source of both packages lives in the [InsightFlare monorepo](https://github.com/RavelloH/InsightFlare). MIT licensed.

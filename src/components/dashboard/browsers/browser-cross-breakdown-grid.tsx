@@ -1,19 +1,5 @@
 import { memo, useMemo } from "react";
-import {
-  StackedBreakdownBarChart,
-  type StackedBreakdownBarRow,
-  type StackedBreakdownBarSeries,
-} from "@insightflare/product-ui/charts";
-import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
-import { AutoTransition } from "@insightflare/ui/auto-transition";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@insightflare/ui/card";
-import { Spinner } from "@insightflare/ui/spinner";
-import { RiBarChartBoxLine } from "@remixicon/react";
+import { BrowserCrossBreakdownCardView } from "@insightflare/product-ui/technology";
 import { useQuery } from "@tanstack/react-query";
 
 import {
@@ -32,6 +18,7 @@ import type {
 import type { FilterDocument } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { buildBrowserCrossBreakdownLabels } from "@/lib/product-ui-labels/technology";
 const STACK_COLORS = [
   "var(--color-chart-1)",
   "var(--color-chart-2)",
@@ -136,129 +123,6 @@ function buildCrossDisplayDimension(
     })),
   };
 }
-const BrowserCrossStackedBarCard = memo(function BrowserCrossStackedBarCard({
-  locale,
-  messages,
-  title,
-  dimension,
-  comparisonDimension,
-  loading,
-  hydrated,
-}: {
-  locale: Locale;
-  messages: AppMessages;
-  title: string;
-  dimension: BrowserCrossDisplayDimension;
-  comparisonDimension?: BrowserCrossDisplayDimension;
-  loading: boolean;
-  hydrated: boolean;
-}) {
-  const hasContent =
-    (dimension.rows.length > 0 && dimension.columns.length > 0) ||
-    ((comparisonDimension?.rows.length ?? 0) > 0 &&
-      (comparisonDimension?.columns.length ?? 0) > 0);
-  const showOverlayLoading = loading && hydrated;
-
-  const chartSeries = useMemo<StackedBreakdownBarSeries[]>(
-    () =>
-      dimension.columns.map((column) => ({
-        key: column.key,
-        label: column.displayLabel,
-        color: column.color,
-        icon: column.Icon,
-      })),
-    [dimension.columns],
-  );
-
-  const chartRows = useMemo<StackedBreakdownBarRow[]>(
-    () =>
-      dimension.rows.map((row) => ({
-        key: row.key,
-        label: row.displayLabel,
-        values: Object.fromEntries(
-          row.cells.map((cell) => [cell.key, cell.visitors]),
-        ),
-      })),
-    [dimension.rows],
-  );
-  const comparisonChartSeries = useMemo<
-    StackedBreakdownBarSeries[] | undefined
-  >(
-    () =>
-      comparisonDimension?.columns.map((column) => ({
-        key: column.key,
-        label: column.displayLabel,
-        color: column.color,
-        icon: column.Icon,
-      })),
-    [comparisonDimension?.columns],
-  );
-  const comparisonChartRows = useMemo<StackedBreakdownBarRow[] | undefined>(
-    () =>
-      comparisonDimension?.rows.map((row) => ({
-        key: row.key,
-        label: row.displayLabel,
-        values: Object.fromEntries(
-          row.cells.map((cell) => [cell.key, cell.visitors]),
-        ),
-      })),
-    [comparisonDimension?.rows],
-  );
-
-  return (
-    <Card className="h-full overflow-hidden">
-      <CardHeader>
-        <CardTitle className="inline-flex items-center gap-2">
-          <RiBarChartBoxLine className="size-4" />
-          {title}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col">
-        <ContentSwitch
-          loading={loading && !hydrated}
-          hasContent={hasContent}
-          loadingLabel={messages.common.loading}
-          emptyContent={<p>{messages.common.noData}</p>}
-          minHeightClassName="min-h-[320px]"
-        >
-          <div className="relative">
-            <StackedBreakdownBarChart
-              rows={chartRows}
-              series={chartSeries}
-              comparisonRows={comparisonChartRows}
-              comparisonSeries={comparisonChartSeries}
-              locale={locale}
-              maxCategoryLabelLength={18}
-              stackId="browser-cross"
-              className="w-full aspect-auto"
-            />
-
-            <AutoTransition
-              type="fade"
-              duration={0.22}
-              className="pointer-events-none absolute top-2 right-2"
-            >
-              {showOverlayLoading ? (
-                <span
-                  key={`browser-cross-${title}-loading`}
-                  className="inline-flex items-center gap-2 rounded-none border border-border/50 bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm"
-                >
-                  <Spinner className="size-3.5" />
-                  {messages.common.loading}
-                </span>
-              ) : (
-                <div
-                  key={`browser-cross-${title}-idle`}
-                  className="h-0 w-0 overflow-hidden"
-                />
-              )}
-            </AutoTransition>
-          </div>
-        </ContentSwitch>
-      </CardContent>
-    </Card>
-  );
-});
 function emptyBreakdownUnlessAborted(
   error: unknown,
 ): BrowserCrossBreakdownData {
@@ -386,22 +250,26 @@ export const BrowserCrossBreakdownGrid = memo(
           : undefined,
       [comparisonBreakdownData?.deviceType, messages],
     );
+    const labels = useMemo(
+      () => buildBrowserCrossBreakdownLabels(messages),
+      [messages],
+    );
 
     return (
       <section className="grid items-stretch gap-4 2xl:grid-cols-2">
-        <BrowserCrossStackedBarCard
+        <BrowserCrossBreakdownCardView
           locale={locale}
-          messages={messages}
-          title={messages.browsers.osBreakdownTitle}
+          labels={labels}
+          title={labels.firstTitle}
           dimension={operatingSystem}
           comparisonDimension={comparisonOperatingSystem}
           loading={loading}
           hydrated={hydrated}
         />
-        <BrowserCrossStackedBarCard
+        <BrowserCrossBreakdownCardView
           locale={locale}
-          messages={messages}
-          title={messages.browsers.deviceTypeBreakdownTitle}
+          labels={labels}
+          title={labels.secondTitle}
           dimension={deviceType}
           comparisonDimension={comparisonDeviceType}
           loading={loading}

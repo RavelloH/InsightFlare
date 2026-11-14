@@ -1,7 +1,5 @@
 import { memo, useMemo } from "react";
-import { ShareBreakdownView } from "@insightflare/product-ui/sharing";
-import { AutoTransition } from "@insightflare/ui/auto-transition";
-import { Spinner } from "@insightflare/ui/spinner";
+import { TechnologyShareOverviewView } from "@insightflare/product-ui/technology";
 import { useQuery } from "@tanstack/react-query";
 
 import {
@@ -15,6 +13,7 @@ import type { BrowserTrendData } from "@/lib/dashboard-api/client/edge";
 import type { FilterDocument } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { buildBrowserShareOverviewLabels } from "@/lib/product-ui-labels/technology";
 function emptyTrend(): BrowserTrendData {
   return { ok: true, interval: "day", series: [], data: [] };
 }
@@ -141,54 +140,29 @@ export const BrowserShareOverview = memo(function BrowserShareOverview({
   );
   const showOverlayLoading = isFetching && data !== undefined;
   const showInitialLoading = isPending;
+  const labels = useMemo(
+    () => buildBrowserShareOverviewLabels(messages),
+    [messages],
+  );
+  const primary = useMemo(
+    () => ({ items: browserItems, comparisonItems: comparisonBrowserItems }),
+    [browserItems, comparisonBrowserItems],
+  );
+  const secondary = useMemo(
+    () => ({ items: engineItems, comparisonItems: comparisonEngineItems }),
+    [engineItems, comparisonEngineItems],
+  );
 
   return (
-    <div className="relative">
-      <div className="grid gap-4">
-        <ShareBreakdownView
-          title={messages.browsers.browserShareTitle}
-          items={browserItems}
-          comparisonItems={comparisonBrowserItems}
-          comparisonLabel={comparisonLabel}
-          maxItems={6}
-          locale={locale}
-          valueLabel={messages.common.visitors}
-          loading={showInitialLoading}
-          emptyLabel={messages.common.noData}
-        />
-        <ShareBreakdownView
-          title={messages.browsers.engineShareTitle}
-          items={engineItems}
-          comparisonItems={comparisonEngineItems}
-          comparisonLabel={comparisonLabel}
-          maxItems={6}
-          locale={locale}
-          valueLabel={messages.common.visitors}
-          loading={showInitialLoading}
-          emptyLabel={messages.common.noData}
-        />
-      </div>
-
-      <AutoTransition
-        type="fade"
-        duration={0.22}
-        className="pointer-events-none absolute top-2 right-2"
-      >
-        {showOverlayLoading ? (
-          <span
-            key="browser-share-overlay-loading"
-            className="inline-flex items-center gap-2 rounded-none border border-border/50 bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm"
-          >
-            <Spinner className="size-3.5" />
-            {messages.common.loading}
-          </span>
-        ) : (
-          <div
-            key="browser-share-overlay-idle"
-            className="h-0 w-0 overflow-hidden"
-          />
-        )}
-      </AutoTransition>
-    </div>
+    <TechnologyShareOverviewView
+      variant="browser"
+      locale={locale}
+      labels={labels}
+      primary={primary}
+      secondary={secondary}
+      comparisonLabel={comparisonLabel}
+      loading={showInitialLoading}
+      refreshing={showOverlayLoading}
+    />
   );
 });

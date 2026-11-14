@@ -40,6 +40,36 @@
       "development": "./src/realtime/index.ts",
       "import": "./dist/realtime/index.js"
     },
+    "./showcase": {
+      "types": "./dist/showcase/index.d.ts",
+      "development": "./src/showcase/index.ts",
+      "import": "./dist/showcase/index.js"
+    },
+    "./labels": {
+      "types": "./dist/labels/index.d.ts",
+      "development": "./src/labels/index.ts",
+      "import": "./dist/labels/index.js"
+    },
+    "./overview": {
+      "types": "./dist/overview/index.d.ts",
+      "development": "./src/overview/index.ts",
+      "import": "./dist/overview/index.js"
+    },
+    "./retention": {
+      "types": "./dist/retention/index.d.ts",
+      "development": "./src/retention/index.ts",
+      "import": "./dist/retention/index.js"
+    },
+    "./events": {
+      "types": "./dist/events/index.d.ts",
+      "development": "./src/events/index.ts",
+      "import": "./dist/events/index.js"
+    },
+    "./technology": {
+      "types": "./dist/technology/index.d.ts",
+      "development": "./src/technology/index.ts",
+      "import": "./dist/technology/index.js"
+    },
     "./funnel": {
       "types": "./dist/funnel/index.d.ts",
       "development": "./src/funnel/index.ts",
@@ -93,7 +123,9 @@
     "tailwindcss": "^4.0.0"
   },
   "dependencies": {
+    "@iconify/react": "^6.0.3",
     "@remixicon/react": "^4.9.0",
+    "boring-avatars": "^2.0.4",
     "clsx": "^2.1.1",
     "motion": "^12.43.0",
     "overlayscrollbars": "^2.17.0",

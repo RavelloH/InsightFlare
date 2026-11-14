@@ -1,34 +1,27 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DetailDrawer } from "@insightflare/product-ui/detail-drawer";
-import { AutoResizer } from "@insightflare/ui/auto-resizer";
-import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@insightflare/ui/card";
-import { Spinner } from "@insightflare/ui/spinner";
-import { RiPulseLine } from "@remixicon/react";
-import { AnimatePresence, useReducedMotion } from "motion/react";
+  RealtimeLogStreamView,
+  type RealtimeLogStreamViewItem,
+} from "@insightflare/product-ui/realtime";
+import { useReducedMotion } from "motion/react";
 
 import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/sessions/session-detail-client-page";
 import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitors/visitor-detail-client-page";
+import { intlLocale, shortDateTime } from "@/lib/dashboard/format";
+import { buildRealtimeLogStreamLabels } from "@/lib/product-ui-labels/realtime";
 import type { RealtimeEvent } from "@/lib/realtime/types";
 
-import {
-  RealtimeLogEventDetailsDrawer,
-  RealtimeLogStreamItem,
-} from "./log-stream-items";
+import { RealtimeLogEventDetailsDrawer } from "./log-stream-event-details";
 import {
   INITIAL_VISIBLE_EVENTS,
   LOAD_MORE_STEP,
-  LogStreamScrollbar,
   NESTED_DRAWER_EXIT_DURATION_MS,
   type RealtimeLogStreamCardProps,
   type RealtimeNestedEventDetail,
   type RealtimeNestedJourneyDetail,
+  resolveRealtimeEventDisplayData,
 } from "./model";
 export const RealtimeLogStreamCard = memo(function RealtimeLogStreamCard({
   locale,
@@ -64,11 +57,45 @@ export const RealtimeLogStreamCard = memo(function RealtimeLogStreamCard({
   );
   const hasMoreEvents = visibleCount < events.length;
   const isInitialLoading = !hasConnected && visibleEvents.length === 0;
-  const logStateKey = isInitialLoading
+  const viewState = isInitialLoading
     ? "loading"
     : visibleEvents.length === 0
       ? "empty"
-      : "events";
+      : "ready";
+  const labels = useMemo(
+    () => buildRealtimeLogStreamLabels(messages),
+    [messages],
+  );
+  const intlLocaleTag = intlLocale(locale);
+  const items = useMemo<RealtimeLogStreamViewItem[]>(
+    () =>
+      visibleEvents.map((event) => {
+        const display = resolveRealtimeEventDisplayData(
+          locale,
+          messages,
+          event,
+        );
+        return {
+          id: event.id,
+          eventAt: event.eventAt,
+          eventDateTime: shortDateTime(locale, event.eventAt, timeZone),
+          title: display.title,
+          avatarSeed: display.avatarSeed,
+          browserLabel: display.browserLabel,
+          browserIconKey: display.browserIconKey,
+          osLabel: display.osLabel,
+          osIconKey: display.osIconKey,
+          countryLabel: display.countryLabel,
+          countryFlagCode: display.countryFlagCode,
+          sourceLabel: display.sourceLabel,
+        };
+      }),
+    [locale, messages, timeZone, visibleEvents],
+  );
+  const eventsRef = useRef(events);
+  useEffect(() => {
+    eventsRef.current = events;
+  }, [events]);
 
   useEffect(() => {
     setVisibleCount((previous) => {
@@ -98,6 +125,13 @@ export const RealtimeLogStreamCard = memo(function RealtimeLogStreamCard({
       setIsEventDetailsOpen(true);
     },
     [clearSelectedEventTimer],
+  );
+  const handleItemSelect = useCallback(
+    (id: string) => {
+      const event = eventsRef.current.find((candidate) => candidate.id === id);
+      if (event) handleEventSelect(event);
+    },
+    [handleEventSelect],
   );
   const openNestedEventDetail = useCallback((event: RealtimeEvent) => {
     nestedEventDetailKeyRef.current += 1;
@@ -227,61 +261,16 @@ export const RealtimeLogStreamCard = memo(function RealtimeLogStreamCard({
 
   return (
     <>
-      <Card>
-        <CardHeader>
-          <CardTitle className="inline-flex items-center gap-2">
-            <RiPulseLine className="size-4" />
-            {messages.realtime.recentEvents}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <AutoResizer initial duration={0.22}>
-            <AutoTransition
-              initial={false}
-              duration={0.2}
-              transitionKey={logStateKey}
-            >
-              {isInitialLoading ? (
-                <div className="flex min-h-56 items-center justify-center text-muted-foreground">
-                  <span className="inline-flex items-center gap-2">
-                    <Spinner className="size-3.5" />
-                    {messages.common.loading}
-                  </span>
-                </div>
-              ) : visibleEvents.length === 0 ? (
-                <div className="flex min-h-56 items-center justify-center text-muted-foreground">
-                  {messages.common.noData}
-                </div>
-              ) : (
-                <LogStreamScrollbar
-                  className="max-h-[30rem]"
-                  maskClassName="from-card via-card/80 to-transparent"
-                  syncKey={`${visibleEvents.length}:${events.length}`}
-                  onReachEnd={hasMoreEvents ? loadMoreEvents : null}
-                >
-                  <div className="p-1">
-                    <ul className="m-0 list-none space-y-2 p-0">
-                      <AnimatePresence initial={false} mode="popLayout">
-                        {visibleEvents.map((event) => (
-                          <RealtimeLogStreamItem
-                            key={event.id}
-                            event={event}
-                            locale={locale}
-                            messages={messages}
-                            timeZone={timeZone}
-                            onSelect={handleEventSelect}
-                            reduceMotion={reduceLogItemMotion}
-                          />
-                        ))}
-                      </AnimatePresence>
-                    </ul>
-                  </div>
-                </LogStreamScrollbar>
-              )}
-            </AutoTransition>
-          </AutoResizer>
-        </CardContent>
-      </Card>
+      <RealtimeLogStreamView
+        items={items}
+        state={viewState}
+        labels={labels}
+        locale={intlLocaleTag}
+        reduceMotion={reduceLogItemMotion}
+        syncKey={`${visibleEvents.length}:${events.length}`}
+        onReachEnd={hasMoreEvents ? loadMoreEvents : null}
+        onSelect={handleItemSelect}
+      />
       <RealtimeLogEventDetailsDrawer
         event={selectedEvent}
         locale={locale}

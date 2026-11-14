@@ -9,6 +9,7 @@ import {
 } from "@/lib/dashboard/chart-time";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { buildRealtimeTrafficTrendLabels } from "@/lib/product-ui-labels/realtime";
 import type { RealtimeEvent } from "@/lib/realtime/types";
 interface RealtimeTrafficTrendCardProps {
   locale: Locale;
@@ -96,6 +97,10 @@ export const RealtimeTrafficTrendCard = memo(function RealtimeTrafficTrendCard({
     [events, now],
   );
   const isInitialLoading = !hasConnected && events.length === 0;
+  const labels = useMemo(
+    () => buildRealtimeTrafficTrendLabels(messages),
+    [messages],
+  );
   const axisFormatter = useMemo(
     () => createChartAxisDateFormatter(locale, "minute", timeZone, "time"),
     [locale, timeZone],
@@ -122,9 +127,7 @@ export const RealtimeTrafficTrendCard = memo(function RealtimeTrafficTrendCard({
     <RealtimeRollingTrendChartIsland
       locale={locale}
       data={chartData}
-      viewsLabel={messages.common.views}
-      visitorsLabel={messages.common.visitors}
-      title={messages.overview.trendTitle}
+      {...labels}
       state={isInitialLoading ? "loading" : "ready"}
     />
   );

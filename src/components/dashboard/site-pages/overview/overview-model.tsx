@@ -1,13 +1,9 @@
-import { memo } from "react";
-import { RiArrowDownLine, RiArrowUpLine } from "@remixicon/react";
-
 import {
   addZonedInterval,
   startOfZonedInterval,
 } from "@/lib/analytics/time-zone";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { OverviewData, TrendData } from "@/lib/dashboard-api/client/edge";
-import { cn } from "@/lib/utils";
 export function toDeltaPercent(
   current: number,
   previous: number,
@@ -43,8 +39,6 @@ export function fallbackUnlessAborted<T>(error: unknown, fallback: () => T): T {
   if (error instanceof Error && error.name === "AbortError") throw error;
   return fallback();
 }
-export const METRIC_AREA_COLOR = "var(--color-chart-1)";
-export const COMPARISON_AREA_COLOR = "var(--color-chart-secondary-1)";
 const MAX_TREND_PLACEHOLDER_POINTS = 120;
 function trendStepMs(interval: TimeWindow["interval"]): number {
   if (interval === "minute") return 60 * 1000;
@@ -172,26 +166,6 @@ export function normalizeTrendData(
 
   return normalized;
 }
-export function metricCellBorderClasses(index: number): string {
-  // Mobile (1-col): top border for all except first
-  const mobileHasTop = index >= 1;
-  // md (2-col): left border on odd indices, top border for row 2+
-  const mdHasLeft = index % 2 !== 0;
-  const mdHasTop = index >= 2;
-  // lg (3-col): left border on col 2/3, top border for row 2+
-  const lgHasLeft = index % 3 !== 0;
-  const lgHasTop = index >= 3;
-
-  return cn(
-    mobileHasTop ? "border-t" : "",
-    // md (2-col): reset mobile top for row 2+, apply left + top
-    mdHasTop ? "md:border-t" : "md:border-t-0",
-    mdHasLeft ? "md:border-l" : "md:border-l-0",
-    // lg (3-col): override md borders
-    lgHasTop ? "lg:border-t" : "lg:border-t-0",
-    lgHasLeft ? "lg:border-l" : "lg:border-l-0",
-  );
-}
 export function formatChangeRate(value: number | null): string | null {
   if (value === null) return null;
   return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
@@ -204,21 +178,3 @@ export function changeRateClass(
   const isImprovement = lowerIsBetter ? value <= 0 : value >= 0;
   return isImprovement ? "text-emerald-600" : "text-rose-600";
 }
-export const ChangeRateInline = memo(function ChangeRateInline({
-  value,
-  lowerIsBetter = false,
-}: {
-  value: number | null;
-  lowerIsBetter?: boolean;
-}) {
-  if (value === null) return null;
-  const Icon = value >= 0 ? RiArrowUpLine : RiArrowDownLine;
-  return (
-    <span
-      className={`inline-flex items-end gap-0.5 font-mono text-xs leading-none ${changeRateClass(value, lowerIsBetter)}`}
-    >
-      <Icon className="size-3.5" />
-      {formatChangeRate(value)}
-    </span>
-  );
-});

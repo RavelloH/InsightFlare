@@ -8,9 +8,9 @@
  * contain the exact commit SHA. Consumers must additionally verify the
  * GitHub Release asset's SHA256 digest before trusting this manifest.
  */
-import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
-import { copyFile, mkdir, readFile, readdir, rm, writeFile, lstat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { copyFile, lstat, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 

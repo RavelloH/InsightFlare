@@ -9,6 +9,7 @@ import {
   runWithInvocationLogger,
 } from "@/lib/edge/observability/logger";
 import { initializeE2eClock } from "@/lib/edge/runtime/e2e-clock";
+import { framePolicy } from "@/lib/edge/runtime/frame-policy";
 import { dispatchInternalScheduledTasks } from "@/lib/edge/scheduled-tasks/dispatcher";
 import type { Env } from "@/lib/edge/types";
 import apiApp from "@/lib/hono/app";
@@ -40,7 +41,9 @@ function withPageHeaders(
     "Strict-Transport-Security",
     "max-age=31536000; includeSubDomains",
   );
-  headers.set("X-Frame-Options", demoMode ? "SAMEORIGIN" : "DENY");
+  const frame = framePolicy(demoMode);
+  if (frame.frameOptions) headers.set("X-Frame-Options", frame.frameOptions);
+  else headers.delete("X-Frame-Options");
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   headers.set(
@@ -67,7 +70,7 @@ function withPageHeaders(
       `connect-src ${connectSources.join(" ")}`,
       "worker-src 'self' blob:",
       "frame-src 'self' https:",
-      "frame-ancestors 'none'",
+      `frame-ancestors ${frame.frameAncestors}`,
       "base-uri 'self'",
       "form-action 'self'",
       "object-src 'none'",

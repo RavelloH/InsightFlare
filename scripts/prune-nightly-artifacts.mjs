@@ -4,8 +4,8 @@
  * checked, and published as the release-notes SHA pointer.
  * No formal releases or unrelated assets are ever touched.
  */
-import { pathToFileURL } from "node:url";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const REPO = "RavelloH/InsightFlare";
 const SHA = /^[a-f0-9]{40}$/;

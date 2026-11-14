@@ -8,6 +8,7 @@ import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import type { GoalSummary } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { buildGoalVisualizationLabels } from "@/lib/product-ui-labels/goals";
 
 function formatChangeRate(value: number | null): string | null {
   if (value === null) return null;
@@ -98,6 +99,7 @@ export function GoalVisualizationAdapter({
   readonly loading?: boolean;
   readonly comparisonLoading?: boolean;
 }) {
+  const viewLabels = buildGoalVisualizationLabels(labels);
   const visitorSummary = summary?.visitors;
   const comparisonVisitorSummary = comparisonSummary?.visitors;
   const visitorProgress = normalizedProgress(visitorSummary);
@@ -106,14 +108,14 @@ export function GoalVisualizationAdapter({
     comparisonLoading || Boolean(comparisonVisitorSummary);
 
   const visitorConversion: GoalConversionProgressDisplay = {
-    label: `${labels.visitors} ${labels.conversion}`,
+    label: viewLabels.visitorConversion,
     value: visitorProgress.value,
     valueText: percentFormat(locale, visitorProgress.valueTextRate),
     loading,
     transitionKey: transitionKey(visitorSummary, loading),
     comparison: progressComparisonVisible
       ? {
-          label: `${labels.visitors} ${labels.conversion} comparison`,
+          label: viewLabels.visitorConversionComparison,
           value: comparisonProgress.value,
           valueText: percentFormat(locale, comparisonProgress.valueTextRate),
           loading: comparisonLoading,
@@ -130,7 +132,7 @@ export function GoalVisualizationAdapter({
         summary?.visitors,
         comparisonSummary?.visitors,
         locale,
-        labels.visitors,
+        viewLabels.visitors,
         loading,
         comparisonLoading,
       )}
@@ -138,7 +140,7 @@ export function GoalVisualizationAdapter({
         summary?.sessions,
         comparisonSummary?.sessions,
         locale,
-        labels.sessions,
+        viewLabels.sessions,
         loading,
         comparisonLoading,
       )}

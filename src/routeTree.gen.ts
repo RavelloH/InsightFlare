@@ -39,7 +39,6 @@ import { Route as LocaleAppManageSystemSettingsRouteImport } from './routes/$loc
 import { Route as LocaleAppManageTeamsRouteImport } from './routes/$locale.app.manage.teams'
 import { Route as LocaleAppManageUsersRouteImport } from './routes/$locale.app.manage.users'
 import { Route as LocaleAppManageVersionUpdatesRouteImport } from './routes/$locale.app.manage.version-updates'
-import { Route as LocaleEmbedsLandingViewRouteImport } from './routes/$locale.embeds.landing.$view'
 import { Route as LocaleShareSlugIndexRouteImport } from './routes/$locale.share.$slug.index'
 import { Route as LocaleShareSlugBrowsersRouteImport } from './routes/$locale.share.$slug.browsers'
 import { Route as LocaleShareSlugCampaignsRouteImport } from './routes/$locale.share.$slug.campaigns'
@@ -235,11 +234,6 @@ const LocaleAppManageVersionUpdatesRoute =
     path: '/manage/version-updates',
     getParentRoute: () => LocaleAppRoute,
   } as any)
-const LocaleEmbedsLandingViewRoute = LocaleEmbedsLandingViewRouteImport.update({
-  id: '/embeds/landing/$view',
-  path: '/embeds/landing/$view',
-  getParentRoute: () => LocaleRoute,
-} as any)
 const LocaleShareSlugIndexRoute = LocaleShareSlugIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -452,7 +446,6 @@ export interface FileRoutesByFullPath {
   '/$locale/app/manage/teams': typeof LocaleAppManageTeamsRoute
   '/$locale/app/manage/users': typeof LocaleAppManageUsersRoute
   '/$locale/app/manage/version-updates': typeof LocaleAppManageVersionUpdatesRoute
-  '/$locale/embeds/landing/$view': typeof LocaleEmbedsLandingViewRoute
   '/$locale/share/$slug/browsers': typeof LocaleShareSlugBrowsersRoute
   '/$locale/share/$slug/campaigns': typeof LocaleShareSlugCampaignsRoute
   '/$locale/share/$slug/devices': typeof LocaleShareSlugDevicesRoute
@@ -511,7 +504,6 @@ export interface FileRoutesByTo {
   '/$locale/app/manage/teams': typeof LocaleAppManageTeamsRoute
   '/$locale/app/manage/users': typeof LocaleAppManageUsersRoute
   '/$locale/app/manage/version-updates': typeof LocaleAppManageVersionUpdatesRoute
-  '/$locale/embeds/landing/$view': typeof LocaleEmbedsLandingViewRoute
   '/$locale/share/$slug/browsers': typeof LocaleShareSlugBrowsersRoute
   '/$locale/share/$slug/campaigns': typeof LocaleShareSlugCampaignsRoute
   '/$locale/share/$slug/devices': typeof LocaleShareSlugDevicesRoute
@@ -576,7 +568,6 @@ export interface FileRoutesById {
   '/$locale/app/manage/teams': typeof LocaleAppManageTeamsRoute
   '/$locale/app/manage/users': typeof LocaleAppManageUsersRoute
   '/$locale/app/manage/version-updates': typeof LocaleAppManageVersionUpdatesRoute
-  '/$locale/embeds/landing/$view': typeof LocaleEmbedsLandingViewRoute
   '/$locale/share/$slug/browsers': typeof LocaleShareSlugBrowsersRoute
   '/$locale/share/$slug/campaigns': typeof LocaleShareSlugCampaignsRoute
   '/$locale/share/$slug/devices': typeof LocaleShareSlugDevicesRoute
@@ -642,7 +633,6 @@ export interface FileRouteTypes {
     | '/$locale/app/manage/teams'
     | '/$locale/app/manage/users'
     | '/$locale/app/manage/version-updates'
-    | '/$locale/embeds/landing/$view'
     | '/$locale/share/$slug/browsers'
     | '/$locale/share/$slug/campaigns'
     | '/$locale/share/$slug/devices'
@@ -701,7 +691,6 @@ export interface FileRouteTypes {
     | '/$locale/app/manage/teams'
     | '/$locale/app/manage/users'
     | '/$locale/app/manage/version-updates'
-    | '/$locale/embeds/landing/$view'
     | '/$locale/share/$slug/browsers'
     | '/$locale/share/$slug/campaigns'
     | '/$locale/share/$slug/devices'
@@ -765,7 +754,6 @@ export interface FileRouteTypes {
     | '/$locale/app/manage/teams'
     | '/$locale/app/manage/users'
     | '/$locale/app/manage/version-updates'
-    | '/$locale/embeds/landing/$view'
     | '/$locale/share/$slug/browsers'
     | '/$locale/share/$slug/campaigns'
     | '/$locale/share/$slug/devices'
@@ -1016,13 +1004,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/$locale/app/manage/version-updates'
       preLoaderRoute: typeof LocaleAppManageVersionUpdatesRouteImport
       parentRoute: typeof LocaleAppRoute
-    }
-    '/$locale/embeds/landing/$view': {
-      id: '/$locale/embeds/landing/$view'
-      path: '/embeds/landing/$view'
-      fullPath: '/$locale/embeds/landing/$view'
-      preLoaderRoute: typeof LocaleEmbedsLandingViewRouteImport
-      parentRoute: typeof LocaleRoute
     }
     '/$locale/share/$slug/': {
       id: '/$locale/share/$slug/'
@@ -1424,7 +1405,6 @@ interface LocaleRouteChildren {
   LocaleRuntimeConfigErrorRoute: typeof LocaleRuntimeConfigErrorRoute
   LocaleUiRoute: typeof LocaleUiRouteWithChildren
   LocaleShareSlugRoute: typeof LocaleShareSlugRouteWithChildren
-  LocaleEmbedsLandingViewRoute: typeof LocaleEmbedsLandingViewRoute
 }
 
 const LocaleRouteChildren: LocaleRouteChildren = {
@@ -1435,7 +1415,6 @@ const LocaleRouteChildren: LocaleRouteChildren = {
   LocaleRuntimeConfigErrorRoute: LocaleRuntimeConfigErrorRoute,
   LocaleUiRoute: LocaleUiRouteWithChildren,
   LocaleShareSlugRoute: LocaleShareSlugRouteWithChildren,
-  LocaleEmbedsLandingViewRoute: LocaleEmbedsLandingViewRoute,
 }
 
 const LocaleRouteWithChildren =

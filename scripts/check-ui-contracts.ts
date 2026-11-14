@@ -182,7 +182,13 @@ const publicComponentSubpaths = Object.keys(uiPackage.exports)
 const productComponentSubpaths = Object.keys(productPackage.exports)
   .filter((entry) => entry.startsWith("./"))
   .map((entry) => entry.slice(2))
-  .filter((entry) => entry !== "styles.css" && entry !== "tabbed-table");
+  .filter(
+    (entry) =>
+      entry !== "styles.css" &&
+      entry !== "tabbed-table" &&
+      entry !== "labels" &&
+      entry !== "showcase",
+  );
 
 const registrySource = ts.createSourceFile(
   registryPath,

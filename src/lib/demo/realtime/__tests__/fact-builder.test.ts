@@ -179,7 +179,8 @@ describe("mock/fact-builder", () => {
 
     it("adapts long-window sampling while preserving weighted metrics", () => {
       DEMO_FACT_DATASET_CACHE.clear();
-      const to = Date.now();
+      // Keep the window and sampling seed stable across test runs.
+      const to = Date.UTC(2026, 6, 1, 12);
       const thirtyDayFrom = to - 30 * DAY_MS;
       const ninetyDayFrom = to - 90 * DAY_MS;
       const thirtyDayMetrics = computeMetrics(SITE_ID, thirtyDayFrom, to);

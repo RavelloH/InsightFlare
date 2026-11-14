@@ -1,17 +1,5 @@
 import { memo, useMemo } from "react";
-import {
-  StackedBreakdownBarChart,
-  type StackedBreakdownBarRow,
-  type StackedBreakdownBarSeries,
-} from "@insightflare/product-ui/charts";
-import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@insightflare/ui/card";
-import { RiBarChartBoxLine } from "@remixicon/react";
+import { DeviceCrossBreakdownCardView } from "@insightflare/product-ui/technology";
 import { useQuery } from "@tanstack/react-query";
 
 import { resolveDeviceTypeMeta } from "@/components/dashboard/journeys/journey-display";
@@ -26,6 +14,7 @@ import type {
 import type { FilterDocument } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { buildDeviceCrossBreakdownLabels } from "@/lib/product-ui-labels/technology";
 const STACK_COLORS = [
   "var(--color-chart-1)",
   "var(--color-chart-2)",
@@ -122,102 +111,6 @@ function buildDisplayDimension(
     })),
   };
 }
-const CrossBreakdownCard = memo(function CrossBreakdownCard({
-  locale,
-  messages,
-  title,
-  dimension,
-  comparisonDimension,
-  loading,
-}: {
-  locale: Locale;
-  messages: AppMessages;
-  title: string;
-  dimension: CrossDisplayDimension;
-  comparisonDimension?: CrossDisplayDimension;
-  loading: boolean;
-}) {
-  const chartRows = useMemo<StackedBreakdownBarRow[]>(
-    () =>
-      dimension.rows.map((row) => {
-        const values = row.cells.reduce<Record<string, number>>(
-          (result, cell) => {
-            result[cell.key] = cell.visitors;
-            return result;
-          },
-          {},
-        );
-        return { key: row.key, label: row.displayLabel, values };
-      }),
-    [dimension.rows],
-  );
-  const chartSeries = useMemo<StackedBreakdownBarSeries[]>(
-    () =>
-      dimension.columns.map((column) => ({
-        key: column.key,
-        label: column.displayLabel,
-        color: column.color,
-      })),
-    [dimension.columns],
-  );
-  const comparisonChartRows = useMemo<StackedBreakdownBarRow[] | undefined>(
-    () =>
-      comparisonDimension?.rows.map((row) => ({
-        key: row.key,
-        label: row.displayLabel,
-        values: row.cells.reduce<Record<string, number>>((result, cell) => {
-          result[cell.key] = cell.visitors;
-          return result;
-        }, {}),
-      })),
-    [comparisonDimension?.rows],
-  );
-  const comparisonChartSeries = useMemo<
-    StackedBreakdownBarSeries[] | undefined
-  >(
-    () =>
-      comparisonDimension?.columns.map((column) => ({
-        key: column.key,
-        label: column.displayLabel,
-        color: column.color,
-      })),
-    [comparisonDimension?.columns],
-  );
-  const hasContent =
-    (dimension.rows.length > 0 && dimension.columns.length > 0) ||
-    ((comparisonDimension?.rows.length ?? 0) > 0 &&
-      (comparisonDimension?.columns.length ?? 0) > 0);
-
-  return (
-    <Card className="h-full overflow-hidden">
-      <CardHeader>
-        <CardTitle className="inline-flex items-center gap-2">
-          <RiBarChartBoxLine className="size-4" />
-          {title}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col">
-        <ContentSwitch
-          loading={loading}
-          hasContent={hasContent}
-          loadingLabel={messages.common.loading}
-          emptyContent={<p>{messages.common.noData}</p>}
-          minHeightClassName="min-h-[320px]"
-        >
-          <StackedBreakdownBarChart
-            rows={chartRows}
-            series={chartSeries}
-            comparisonRows={comparisonChartRows}
-            comparisonSeries={comparisonChartSeries}
-            locale={locale}
-            stackId={title}
-            className="w-full aspect-auto"
-          />
-        </ContentSwitch>
-      </CardContent>
-    </Card>
-  );
-});
 export const DeviceCrossBreakdownGrid = memo(function DeviceCrossBreakdownGrid({
   locale,
   messages,
@@ -357,21 +250,25 @@ export const DeviceCrossBreakdownGrid = memo(function DeviceCrossBreakdownGrid({
         : undefined,
     [comparisonOsData, messages],
   );
+  const labels = useMemo(
+    () => buildDeviceCrossBreakdownLabels(messages),
+    [messages],
+  );
 
   return (
     <div className="grid items-stretch gap-4 xl:grid-cols-2">
-      <CrossBreakdownCard
+      <DeviceCrossBreakdownCardView
         locale={locale}
-        messages={messages}
-        title={messages.devices.browserByDeviceTitle}
+        labels={labels}
+        title={labels.firstTitle}
         dimension={browserDimension}
         comparisonDimension={comparisonBrowserDimension}
         loading={loading}
       />
-      <CrossBreakdownCard
+      <DeviceCrossBreakdownCardView
         locale={locale}
-        messages={messages}
-        title={messages.devices.osByDeviceTitle}
+        labels={labels}
+        title={labels.secondTitle}
         dimension={osDimension}
         comparisonDimension={comparisonOsDimension}
         loading={loading}

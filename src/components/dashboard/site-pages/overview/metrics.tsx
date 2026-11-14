@@ -1,15 +1,16 @@
 import { useMemo } from "react";
-import { MetricAreaChart } from "@insightflare/product-ui/charts";
 import { TrafficPairBarChart } from "@insightflare/product-ui/charts";
-import { AutoResizer } from "@insightflare/ui/auto-resizer";
-import { AutoTransition } from "@insightflare/ui/auto-transition";
+import {
+  type OverviewMetricKey,
+  OverviewMetricsView,
+  type OverviewMetricsViewItem,
+} from "@insightflare/product-ui/overview";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
-import { Spinner } from "@insightflare/ui/spinner";
 import { RiLineChartLine } from "@remixicon/react";
 
 import {
@@ -19,6 +20,7 @@ import {
   percentFormat,
   shortDateTime,
 } from "@/lib/dashboard/format";
+import { buildOverviewMetricsLabels } from "@/lib/product-ui-labels/overview";
 
 import {
   buildOverviewMetricSeries,
@@ -28,13 +30,9 @@ import {
 } from "./metrics-data";
 import {
   buildEmptyTrendData,
-  ChangeRateInline,
-  COMPARISON_AREA_COLOR,
   EMPTY_TREND_POINTS,
   emptyOverviewData,
   emptyTrendData,
-  METRIC_AREA_COLOR,
-  metricCellBorderClasses,
   normalizeTrendData,
   toDeltaPercent,
 } from "./overview-model";
@@ -113,165 +111,101 @@ export function OverviewMetricsSection({
     ? comparisonPagesPerSession
     : previousPagesPerSession;
 
-  const metrics = useMemo(
-    () => [
+  const labels = useMemo(
+    () => buildOverviewMetricsLabels(messages),
+    [messages],
+  );
+  const items = useMemo<OverviewMetricsViewItem[]>(() => {
+    const comparisonTrend = (key: OverviewMetricKey) =>
+      hasComparisonData ? comparisonMetricSeries[key] : undefined;
+    const formatCount = (value: number) =>
+      numberFormat(locale, Math.round(value));
+    return [
       {
-        key: "views" as const,
-        label: messages.common.views,
+        key: "views",
         value: numberFormat(locale, overview.data.views),
         delta: toDeltaPercent(overview.data.views, reference.views),
         trend: metricSeries.views,
-        comparisonTrend: comparisonMetricSeries.views,
-        formatTrendValue: (value: number) =>
-          numberFormat(locale, Math.round(value)),
+        comparisonTrend: comparisonTrend("views"),
+        formatTrendValue: formatCount,
       },
       {
-        key: "visitors" as const,
-        label: messages.common.visitors,
+        key: "visitors",
         value: numberFormat(locale, overview.data.visitors),
         delta: toDeltaPercent(overview.data.visitors, reference.visitors),
         trend: metricSeries.visitors,
-        comparisonTrend: comparisonMetricSeries.visitors,
-        formatTrendValue: (value: number) =>
-          numberFormat(locale, Math.round(value)),
+        comparisonTrend: comparisonTrend("visitors"),
+        formatTrendValue: formatCount,
       },
       {
-        key: "sessions" as const,
-        label: messages.common.sessions,
+        key: "sessions",
         value: numberFormat(locale, overview.data.sessions),
         delta: toDeltaPercent(overview.data.sessions, reference.sessions),
         trend: metricSeries.sessions,
-        comparisonTrend: comparisonMetricSeries.sessions,
-        formatTrendValue: (value: number) =>
-          numberFormat(locale, Math.round(value)),
+        comparisonTrend: comparisonTrend("sessions"),
+        formatTrendValue: formatCount,
       },
       {
-        key: "bounceRate" as const,
-        label: messages.common.bounceRate,
+        key: "bounceRate",
         value: percentFormat(locale, overview.data.bounceRate),
         delta: toDeltaPercent(overview.data.bounceRate, reference.bounceRate),
         lowerIsBetter: true,
         trend: metricSeries.bounceRate,
-        comparisonTrend: comparisonMetricSeries.bounceRate,
-        formatTrendValue: (value: number) => percentFormat(locale, value),
+        comparisonTrend: comparisonTrend("bounceRate"),
+        formatTrendValue: (value) => percentFormat(locale, value),
       },
       {
-        key: "pagesPerSession" as const,
-        label: messages.teamManagement.sites.pagesPerSession,
+        key: "pagesPerSession",
         value: pagesPerSessionFormatter.format(currentPagesPerSession),
         delta: toDeltaPercent(currentPagesPerSession, referencePagesPerSession),
         trend: metricSeries.pagesPerSession,
-        comparisonTrend: comparisonMetricSeries.pagesPerSession,
-        formatTrendValue: (value: number) =>
-          pagesPerSessionFormatter.format(value),
+        comparisonTrend: comparisonTrend("pagesPerSession"),
+        formatTrendValue: (value) => pagesPerSessionFormatter.format(value),
       },
       {
-        key: "avgDuration" as const,
-        label: messages.common.avgDuration,
+        key: "avgDuration",
         value: durationFormat(locale, overview.data.avgDurationMs),
         delta: toDeltaPercent(
           overview.data.avgDurationMs,
           reference.avgDurationMs,
         ),
         trend: metricSeries.avgDuration,
-        comparisonTrend: comparisonMetricSeries.avgDuration,
-        formatTrendValue: (value: number) =>
+        comparisonTrend: comparisonTrend("avgDuration"),
+        formatTrendValue: (value) =>
           durationFormat(locale, Math.max(0, Math.round(value))),
       },
-    ],
-    [
-      currentPagesPerSession,
-      comparisonMetricSeries,
-      locale,
-      messages.common.avgDuration,
-      messages.common.bounceRate,
-      messages.common.sessions,
-      messages.common.views,
-      messages.common.visitors,
-      messages.teamManagement.sites.pagesPerSession,
-      metricSeries,
-      overview.data.avgDurationMs,
-      overview.data.bounceRate,
-      overview.data.sessions,
-      overview.data.visitors,
-      overview.data.views,
-      pagesPerSessionFormatter,
-      reference.avgDurationMs,
-      reference.bounceRate,
-      reference.sessions,
-      reference.visitors,
-      reference.views,
-      referencePagesPerSession,
-    ],
-  );
+    ];
+  }, [
+    comparisonMetricSeries,
+    currentPagesPerSession,
+    hasComparisonData,
+    locale,
+    metricSeries,
+    overview.data.avgDurationMs,
+    overview.data.bounceRate,
+    overview.data.sessions,
+    overview.data.visitors,
+    overview.data.views,
+    pagesPerSessionFormatter,
+    reference.avgDurationMs,
+    reference.bounceRate,
+    reference.sessions,
+    reference.visitors,
+    reference.views,
+    referencePagesPerSession,
+  ]);
 
   return (
-    <Card className="gap-0 py-0">
-      <CardContent className="px-0">
-        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-          {metrics.map((item, index) => {
-            const hasDelta =
-              typeof item.delta === "number" && Number.isFinite(item.delta);
-            const effectiveDelta = hasDelta ? (item.delta ?? 0) : null;
-            const comparisonPoints = hasComparisonData
-              ? item.comparisonTrend
-              : undefined;
-
-            return (
-              <div key={item.label} className={metricCellBorderClasses(index)}>
-                <div className="relative min-h-[74px]">
-                  <div className="absolute inset-y-0 right-0 w-1/2 min-w-0">
-                    <MetricAreaChart
-                      points={item.trend}
-                      color={METRIC_AREA_COLOR}
-                      locale={locale}
-                      timeZone={window.timeZone}
-                      interval={window.interval}
-                      label={item.label}
-                      formatValue={item.formatTrendValue}
-                      animationKey={metricChartAnimationKey}
-                      comparisonPoints={comparisonPoints}
-                      comparisonColor={COMPARISON_AREA_COLOR}
-                      comparisonLabel={comparisonLabel}
-                    />
-                  </div>
-                  <div className="pointer-events-none relative z-10 flex min-h-[74px] min-w-0 flex-col justify-between px-3 py-2.5">
-                    <p className="truncate text-xs text-muted-foreground mb-4">
-                      {item.label}
-                    </p>
-                    <div>
-                      <AutoResizer initial>
-                        <AutoTransition initial>
-                          {loading ? (
-                            <div
-                              key="loading"
-                              className="inline-flex h-6 items-center"
-                            >
-                              <Spinner className="size-5" />
-                            </div>
-                          ) : (
-                            <p
-                              key="value"
-                              className="inline-flex h-6 items-end gap-1.5 font-mono text-2xl font-semibold leading-none tracking-tight"
-                            >
-                              <span>{item.value}</span>
-                              <ChangeRateInline
-                                value={effectiveDelta}
-                                lowerIsBetter={item.lowerIsBetter}
-                              />
-                            </p>
-                          )}
-                        </AutoTransition>
-                      </AutoResizer>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </section>
-      </CardContent>
-    </Card>
+    <OverviewMetricsView
+      items={items}
+      labels={labels}
+      loading={loading}
+      locale={locale}
+      timeZone={window.timeZone}
+      interval={window.interval}
+      animationKey={metricChartAnimationKey}
+      comparisonLabel={comparisonLabel}
+    />
   );
 }
 export function OverviewTrendSection({

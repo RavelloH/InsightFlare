@@ -2,12 +2,16 @@ import type { ElementType } from "react";
 import * as productAnalyticsTooltip from "@insightflare/product-ui/analytics-tooltip";
 import * as productCharts from "@insightflare/product-ui/charts";
 import * as productDetailDrawer from "@insightflare/product-ui/detail-drawer";
+import * as productEvents from "@insightflare/product-ui/events";
 import * as productFunnel from "@insightflare/product-ui/funnel";
 import * as productGoals from "@insightflare/product-ui/goals";
+import * as productOverview from "@insightflare/product-ui/overview";
 import * as productRealtime from "@insightflare/product-ui/realtime";
+import * as productRetention from "@insightflare/product-ui/retention";
 import * as productSharing from "@insightflare/product-ui/sharing";
 import * as productSiteScopeSelector from "@insightflare/product-ui/site-scope-selector";
 import * as productTables from "@insightflare/product-ui/tables";
+import * as productTechnology from "@insightflare/product-ui/technology";
 import * as uiAlertDialog from "@insightflare/ui/alert-dialog";
 import * as uiAnimatedNumber from "@insightflare/ui/animated-number";
 import * as uiAppOverlay from "@insightflare/ui/app-overlay";
@@ -54,7 +58,14 @@ import * as uiTableActionButton from "@insightflare/ui/table-action-button";
 import * as uiTabs from "@insightflare/ui/tabs";
 import * as uiTooltip from "@insightflare/ui/tooltip";
 import * as uiVerticalScrollMask from "@insightflare/ui/vertical-scroll-mask";
-import { RiAddLine, RiMore2Line } from "@remixicon/react";
+import {
+  RiAddLine,
+  RiCalendarLine,
+  RiGroupLine,
+  RiMore2Line,
+  RiPercentLine,
+  RiPulseLine,
+} from "@remixicon/react";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 
 export interface ComponentSourceImport {
@@ -131,6 +142,13 @@ const sourceModules: readonly {
   { source: "@insightflare/product-ui/goals", exports: productGoals },
   { source: "@insightflare/product-ui/funnel", exports: productFunnel },
   { source: "@insightflare/product-ui/realtime", exports: productRealtime },
+  { source: "@insightflare/product-ui/overview", exports: productOverview },
+  { source: "@insightflare/product-ui/events", exports: productEvents },
+  {
+    source: "@insightflare/product-ui/technology",
+    exports: productTechnology,
+  },
+  { source: "@insightflare/product-ui/retention", exports: productRetention },
   { source: "@insightflare/product-ui/sharing", exports: productSharing },
   { source: "@insightflare/product-ui/charts", exports: productCharts },
   { source: "@insightflare/product-ui/tables", exports: productTables },
@@ -152,7 +170,14 @@ const sourceModules: readonly {
   },
   {
     source: "@remixicon/react",
-    exports: { RiAddLine, RiMore2Line },
+    exports: {
+      RiAddLine,
+      RiCalendarLine,
+      RiGroupLine,
+      RiMore2Line,
+      RiPercentLine,
+      RiPulseLine,
+    },
   },
 ];
 

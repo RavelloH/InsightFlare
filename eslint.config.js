@@ -113,6 +113,8 @@ export default [
           allowDefaultProject: [
             "packages/ui/tests/*.ts",
             "packages/ui/tests/*.tsx",
+            "packages/product-ui/src/*/*.test.ts",
+            "packages/product-ui/src/*/*.test.tsx",
           ],
           defaultProject: "packages/ui/tsconfig.json",
         },

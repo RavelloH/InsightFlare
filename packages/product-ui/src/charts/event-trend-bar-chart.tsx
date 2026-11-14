@@ -83,10 +83,13 @@ export interface EventTrendBarChartProps {
 export function createEventTrendChartSeries(
   series: ReadonlyArray<EventTrendSeries>,
   otherLabel: string,
+  colors?: ReadonlyArray<string>,
 ): EventTrendChartSeries[] {
-  const palette = buildComplementaryOklchPalette(
-    series.filter((item) => !item.isOther).length,
-  );
+  const palette =
+    colors ??
+    buildComplementaryOklchPalette(
+      series.filter((item) => !item.isOther).length,
+    );
   let paletteIndex = 0;
 
   return series.map((item) => {
@@ -113,6 +116,7 @@ export function createEventTrendComparisonChartSeries(
   currentSeries: ReadonlyArray<EventTrendSeries>,
   comparisonSeries: ReadonlyArray<EventTrendSeries>,
   otherLabel: string,
+  colors?: ReadonlyArray<string>,
 ): { current: EventTrendChartSeries[]; comparison: EventTrendChartSeries[] } {
   const currentByKey = new Map(currentSeries.map((item) => [item.key, item]));
   const comparisonByKey = new Map(
@@ -135,9 +139,11 @@ export function createEventTrendComparisonChartSeries(
       isOther: Boolean(current?.isOther || comparison?.isOther),
     };
   });
-  const currentPalette = buildComplementaryOklchPalette(
-    entries.filter((item) => !item.isOther).length,
-  );
+  const currentPalette =
+    colors ??
+    buildComplementaryOklchPalette(
+      entries.filter((item) => !item.isOther).length,
+    );
   let currentPaletteIndex = 0;
 
   const current = entries.map((item) => {

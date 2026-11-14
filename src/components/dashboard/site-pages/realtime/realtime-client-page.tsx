@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import { RealtimeStatusDot } from "@insightflare/product-ui/realtime";
 import { AnimatedNumber } from "@insightflare/ui/animated-number";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 
 import { RealtimeLogStreamCard } from "@/components/dashboard/realtime/realtime-log-stream-card";
-import {
-  RealtimeStatusDot,
-  realtimeStatusText,
-} from "@/components/dashboard/realtime/realtime-status-indicator";
+import { realtimeStatusText } from "@/components/dashboard/realtime/realtime-status-indicator";
 import { RealtimeTrafficTrendCard } from "@/components/dashboard/realtime/realtime-traffic-trend-card";
 import type { RealtimeMapStageProps } from "@/components/dashboard/site-pages/realtime/realtime-map-stage";
 import {

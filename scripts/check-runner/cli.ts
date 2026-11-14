@@ -156,6 +156,10 @@ function createTasks(fix: boolean): CheckTask[] {
           name: "Schema spec",
           args: ["run", fix ? "check:schema:fix" : "check:schema"],
         },
+        {
+          name: "Product UI labels",
+          args: ["run", fix ? "check:labels:fix" : "check:labels"],
+        },
       ],
     },
     {

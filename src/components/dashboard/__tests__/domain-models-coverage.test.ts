@@ -1,3 +1,11 @@
+import {
+  formatRetentionChange,
+  retentionAverageAt,
+  retentionCellAt,
+  retentionCellStyle,
+  retentionComparisonChange,
+  retentionPeriodLabel,
+} from "@insightflare/product-ui/retention";
 import { describe, expect, it } from "vitest";
 
 import type { BotEvent } from "@/components/dashboard/admin/request-observation/model";
@@ -74,19 +82,13 @@ import {
   buildRetentionViewModel,
   cohortMaxPeriodIndex,
   formatCohortDate,
-  formatRetentionChange,
   normalizeGranularity,
-  periodLabel,
   retentionActiveFilterCount,
-  retentionAverageAt,
   retentionBucketCount,
-  retentionCellAt,
-  retentionCellStyle,
   retentionChangeClass,
   retentionCohortPosition,
   retentionCohortRowKey,
   retentionCohortRowSortKey,
-  retentionComparisonChange,
   retentionIntervalFallbackMs,
   retentionLoadingShape,
 } from "@/components/dashboard/site-pages/retention/model";
@@ -329,8 +331,9 @@ describe("dashboard domain model helpers", () => {
     expect(formatCohortDate("en", "day", Number.NaN, "UTC")).toBe("--");
     expect(formatCohortDate("en", "month", start, "UTC")).toContain("2024");
     expect(formatCohortDate("en", "minute", start, "UTC")).toContain("1");
-    expect(periodLabel(messages, retentionLabels, 0)).toBe("cohort");
-    expect(periodLabel(messages, retentionLabels, 2)).toBe("Period 2");
+    const periodLabels = { periodZero: "cohort", periodLabel: "Period {n}" };
+    expect(retentionPeriodLabel(periodLabels, 0)).toBe("cohort");
+    expect(retentionPeriodLabel(periodLabels, 2)).toBe("Period 2");
     expect(retentionIntervalFallbackMs("minute")).toBe(60_000);
     expect(retentionIntervalFallbackMs("hour")).toBe(3_600_000);
     expect(retentionIntervalFallbackMs("day")).toBe(86_400_000);
