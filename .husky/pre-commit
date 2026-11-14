@@ -1,2 +1,3 @@
 #!/bin/sh
+node scripts/check-new-markdown.mjs || exit $?
 npx lint-staged

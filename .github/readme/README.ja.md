@@ -209,7 +209,7 @@ Cloudflare がこのリポジトリを複製し、必要なリソースを作成
 
 変数を設定してから約 3 分待つとデプロイが完了します。デフォルト URL は `https://insightflare.<your-cloudflare-username>.workers.dev` です。
 
-既存の管理者アカウントにサインインできない場合、`BOOTSTRAP_ADMIN_PASSWORD` を変更してもそのアカウントのパスワードはリセットされません。[セルフホスト版の管理者パスワード復旧ガイド](../../docs/password-recovery.md)に従って、リモート D1 を使用して安全にリセットしてください。
+既存の管理者アカウントにサインインできない場合、`BOOTSTRAP_ADMIN_PASSWORD` を変更してもそのアカウントのパスワードはリセットされません。リポジトリの依存関係をインストールし、Cloudflare の認証を設定した対話型ターミナルで `pnpm run ops:admin:reset-password -- --user <username>` を実行してください。`cf` CLI を含む各オプションは `pnpm run ops:admin:reset-password -- --help` で確認できます。
 
 ---
 

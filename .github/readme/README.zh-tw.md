@@ -209,7 +209,7 @@ Cloudflare 會自動複製此儲存庫、建立並綁定所需要的資源。其
 
 填寫完畢後，等待 3 分鐘讓專案部署完畢，你就可以登入到儀表盤並開始追蹤造訪資料了。此外，你可以在專案的設定頁面自訂其網域。預設網址為 `https://insightflare.<your-cloudflare-username>.workers.dev`
 
-如果無法登入現有的管理員帳號，修改 `BOOTSTRAP_ADMIN_PASSWORD` 不會重設該帳號。請參閱[自架管理員密碼復原指南](../../docs/password-recovery.md)，透過遠端 D1 安全地重設密碼。
+如果無法登入現有的管理員帳號，修改 `BOOTSTRAP_ADMIN_PASSWORD` 不會重設該帳號。在已安裝儲存庫相依套件並設定 Cloudflare 身分驗證的互動式終端中執行 `pnpm run ops:admin:reset-password -- --user <username>`。包括 `cf` CLI 在內的更多參數可透過 `pnpm run ops:admin:reset-password -- --help` 查看。
 
 ---
 
