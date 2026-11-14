@@ -38,10 +38,11 @@ jobs:
           package-manager-cache: false
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Typecheck UI packages
-        run: pnpm run typecheck:packages
+      # Product UI resolves @insightflare/ui types from dist on a fresh checkout.
       - name: Build UI packages
         run: pnpm run build:packages
+      - name: Typecheck UI packages
+        run: pnpm run typecheck:packages
       - name: Audit npm archives and published versions
         run: node scripts/publish-ui-packages.mjs --check
       - name: Enable modern npm OIDC support
