@@ -306,7 +306,14 @@ it.each([
         "definition context",
       ].includes(name);
       expect(current.wholeBindCalls).toBe(wholeFallback ? 1 : 0);
-      expect(current.bindCalls).toBe(wholeFallback ? 1 : 0);
+      // Only an empty filter window still prepares the old Page visit
+      // preparation; every other whole fallback runs in the actual Program and
+      // neither prepares it nor registers an old membership (the old route does).
+      expect(current.bindCalls).toBe(name === "empty filter range" ? 1 : 0);
+      if (wholeFallback) {
+        expect(old.registerCalls).toBe(1);
+        expect(current.registerCalls).toBe(0);
+      }
     } finally {
       database.close();
     }

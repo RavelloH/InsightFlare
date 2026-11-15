@@ -16,6 +16,7 @@ import * as sequenceSupport from "@/lib/edge/analytics/engine/advanced-filter-se
 import * as sequenceSql from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-sequence-query";
 import * as stagedRuntime from "@/lib/edge/analytics/providers/d1/internal/analytics-logical-staged-runtime";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
+import { D1LogicalProgramExecution } from "@/lib/edge/analytics/providers/d1/internal/logical-program-execution";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 import * as core from "@/lib/filter-contract/filter-evaluator";
@@ -72,15 +73,20 @@ describe("Seq strategy through the authorized provider", () => {
         };
         const evaluate = vi.spyOn(core, "evaluateFilterDocument");
         const sql = vi.spyOn(sequenceSql, "tryEvaluateSequenceSql");
+        // The actual single-site Session/Visitor invocation now runs inside
+        // the D1-owned Program; the direct stage runtime is only the route of
+        // invocations that have no Program.
         const stage = vi.spyOn(stagedRuntime, "executeAnalyticsLogicalStage");
+        const whole = vi.spyOn(
+          D1LogicalProgramExecution.prototype,
+          "executeWholeAtOriginalCheckpoint",
+        );
         const actual = await execute();
         expect(sql).not.toHaveBeenCalled();
-        expect(stage).toHaveBeenCalledTimes(1);
-        const input = stage.mock.calls[0]![0];
-        expect(input.kind).toBe(
-          "whole-original-completion-at-original-checkpoint",
-        );
-        const commands = input.invocation.observedSqlCommands();
+        expect(whole).toHaveBeenCalledTimes(1);
+        expect(stage).not.toHaveBeenCalled();
+        const invocation = whole.mock.calls[0]![0];
+        const commands = invocation.observedSqlCommands();
         expect(commands).toHaveLength(2);
         expect(
           commands.map((command) => {
@@ -142,7 +148,8 @@ describe("Seq strategy through the authorized provider", () => {
         fallbackProof.mockRestore();
         expect(evaluate).toHaveBeenCalledTimes(3);
         expect(fallback.value).toEqual(fallbackReference.value);
-        expect(stage).toHaveBeenCalledTimes(4);
+        expect(whole).toHaveBeenCalledTimes(4);
+        expect(stage).not.toHaveBeenCalled();
         expect(sql).not.toHaveBeenCalled();
         expect(
           fallback.diagnostics.advancedFilterExecutionHistory?.map(
