@@ -8,6 +8,12 @@ import type {
   TrendPoint,
 } from "@/lib/edge/analytics/contract";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
+import { EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
+import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
+import {
+  independentOverviewMembershipDependencyFromQuery,
+  prepareDeferredOverviewMembershipRecipe,
+} from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import {
   deferredOverviewTrendQualificationFromQuery,
   prepareDeferredEventQualificationFallback,
@@ -18,9 +24,18 @@ import {
   timeBucketTimestamp,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import type { D1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
+import type { EventMembershipFallback } from "@/lib/edge/analytics/providers/d1/internal/event-membership-fallback";
 import { prepareEventMembershipFallback } from "@/lib/edge/analytics/providers/d1/internal/event-membership-fallback";
 import { executeOverviewPreviousQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/overview-previous-qualification-program";
 import { executeOverviewTrendQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/overview-trend-qualification-program";
+import {
+  bindPageVisitQualificationPreparation,
+  snapshotPageVisitQualificationPlan,
+} from "@/lib/edge/analytics/providers/d1/internal/page-visit-qualification-execution";
+import {
+  finishWholeOriginalOverview,
+  hasWholeOriginalCompletion,
+} from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import { createOverviewReader } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import type { Env } from "@/lib/edge/types";
 
@@ -91,31 +106,37 @@ async function legacyOverview(
   query: CanonicalQuery<"overview">,
   filters: FilterDocument,
 ) {
-  const current = await reader.readOverview({ time: query.time, filters });
-  const previous = query.previousTime
-    ? await reader.readOverview({ time: query.previousTime, filters })
-    : undefined;
-  const detailInterval = query.detailInterval;
-  const detail = detailInterval
-    ? await reader.readTrend({
-        time: query.time,
-        filters,
-        interval: detailInterval,
-      })
-    : undefined;
-  return {
-    value: {
-      current: current.value,
-      ...(previous ? { previous: previous.value } : {}),
-      ...(detail && detailInterval
-        ? { detail: { interval: detailInterval, points: detail.value } }
-        : {}),
-    },
-    source:
-      previous && previous.source !== current.source ? "mixed" : current.source,
-    approximateVisitors:
-      current.approximateVisitors || Boolean(previous?.approximateVisitors),
-  };
+  try {
+    const current = await reader.readOverview({ time: query.time, filters });
+    const previous = query.previousTime
+      ? await reader.readOverview({ time: query.previousTime, filters })
+      : undefined;
+    const detailInterval = query.detailInterval;
+    const detail = detailInterval
+      ? await reader.readTrend({
+          time: query.time,
+          filters,
+          interval: detailInterval,
+        })
+      : undefined;
+    return {
+      value: {
+        current: current.value,
+        ...(previous ? { previous: previous.value } : {}),
+        ...(detail && detailInterval
+          ? { detail: { interval: detailInterval, points: detail.value } }
+          : {}),
+      },
+      source:
+        previous && previous.source !== current.source
+          ? "mixed"
+          : current.source,
+      approximateVisitors:
+        current.approximateVisitors || Boolean(previous?.approximateVisitors),
+    };
+  } finally {
+    finishWholeOriginalOverview(query);
+  }
 }
 
 async function legacyTrend(
@@ -123,16 +144,20 @@ async function legacyTrend(
   query: CanonicalQuery<"trend">,
   filters: FilterDocument,
 ) {
-  const result = await reader.readTrend({
-    time: query.time,
-    filters,
-    interval: query.interval,
-  });
-  return {
-    value: { interval: query.interval, points: result.value },
-    source: result.source,
-    approximateVisitors: result.approximateVisitors,
-  };
+  try {
+    const result = await reader.readTrend({
+      time: query.time,
+      filters,
+      interval: query.interval,
+    });
+    return {
+      value: { interval: query.interval, points: result.value },
+      source: result.source,
+      approximateVisitors: result.approximateVisitors,
+    };
+  } finally {
+    finishWholeOriginalOverview(query);
+  }
 }
 
 /**
@@ -159,6 +184,12 @@ async function prepareOverviewMembershipFallback(
     qualification.metadata.plan.mode !== "entity"
   )
     return undefined;
+  const recipe = await prepareDeferredOverviewMembershipRecipe(
+    deferred as never,
+  );
+  if (recipe) {
+    return overviewMembershipRecipeReader(d1, recipe);
+  }
   const membership = await prepareEventMembershipFallback({
     deferred: qualification as never,
     operation: deferred.operation,
@@ -180,6 +211,66 @@ async function prepareOverviewMembershipFallback(
         filters: qualification.filters,
       }
     : undefined;
+}
+
+function overviewMembershipRecipeReader(
+  d1: D1OverviewTrendQualificationOptions,
+  recipe: NonNullable<
+    Awaited<ReturnType<typeof prepareDeferredOverviewMembershipRecipe>>
+  >,
+): { readonly reader: OverviewReader; readonly filters: FilterDocument } {
+  let childIndex = 1;
+  const membership: EventMembershipFallback = {
+    bindPlan(buildPlan, readerQueryTime) {
+      const child = recipe.enginePlan.steps[childIndex];
+      if (
+        !child ||
+        child.kind !== "read-report" ||
+        !readerQueryTime ||
+        JSON.stringify(
+          semanticTemporalDomainsFromQueryTime(readerQueryTime),
+        ) !==
+          JSON.stringify(semanticTemporalDomainsFromQueryTime(child.queryTime))
+      )
+        throw new Error("overview_membership_reader_step_mismatch");
+      const plan = snapshotPageVisitQualificationPlan(
+        buildPlan({
+          queryTime: recipe.queryTime,
+          scopePlan: recipe.scopePlan,
+          qualificationDependencyRefs: [
+            EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY,
+          ],
+          pageVisitDependencyRefs: [EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY],
+        }),
+      );
+      const sources = plan.nodes.filter((node) => node.kind === "source");
+      if (
+        plan.outputs.length !== 1 ||
+        plan.outputs[0]?.id !== child.localOutputId ||
+        sources.length !== child.maxSources ||
+        child.sourceRoles.some(
+          (role) => sources.filter((node) => node.entity === role).length !== 1,
+        )
+      )
+        throw new Error("overview_membership_reader_shape_mismatch");
+      const executionInputs = bindPageVisitQualificationPreparation({
+        preparation: recipe.preparation,
+        siteId: recipe.siteId,
+        filters: recipe.filters,
+        queryTime: recipe.queryTime,
+        scopePlan: recipe.scopePlan,
+        consumerKey: recipe.consumerKey,
+        plan,
+        readerQueryTime,
+      });
+      childIndex += 1;
+      return { plan, executionInputs };
+    },
+  };
+  return {
+    reader: createOverviewReader(d1.env, d1.siteId, d1.diagnostics, membership),
+    filters: recipe.filters,
+  };
 }
 
 export function overviewProvider(
@@ -274,7 +365,23 @@ export function overviewProvider(
       );
       return legacyOverview(reader, query, filters);
     }
+    const dependency = d1
+      ? independentOverviewMembershipDependencyFromQuery(query, "overview")
+      : undefined;
+    if (dependency && d1) {
+      const membership = overviewMembershipRecipeReader(d1, dependency);
+      return legacyOverview(membership.reader, query, membership.filters);
+    }
     const filters = query.filters ?? EMPTY_FILTER_DOCUMENT;
+    if (d1 && hasWholeOriginalCompletion(query, "overview"))
+      return legacyOverview(
+        createOverviewReader(d1.env, d1.siteId, d1.diagnostics, {
+          kind: "whole-original-overview",
+          owner: query,
+        }),
+        query,
+        filters,
+      );
     return legacyOverview(reader, query, filters);
   });
 }
@@ -317,6 +424,23 @@ export function trendProvider(
       );
       return legacyTrend(reader, query, filters);
     }
-    return legacyTrend(reader, query, query.filters ?? EMPTY_FILTER_DOCUMENT);
+    const dependency = d1
+      ? independentOverviewMembershipDependencyFromQuery(query, "trend")
+      : undefined;
+    if (dependency && d1) {
+      const membership = overviewMembershipRecipeReader(d1, dependency);
+      return legacyTrend(membership.reader, query, membership.filters);
+    }
+    const filters = query.filters ?? EMPTY_FILTER_DOCUMENT;
+    if (d1 && hasWholeOriginalCompletion(query, "trend"))
+      return legacyTrend(
+        createOverviewReader(d1.env, d1.siteId, d1.diagnostics, {
+          kind: "whole-original-overview",
+          owner: query,
+        }),
+        query,
+        filters,
+      );
+    return legacyTrend(reader, query, filters);
   });
 }

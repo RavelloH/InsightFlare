@@ -79,6 +79,7 @@ import {
   isAnalyticsScopeFactId,
 } from "./analytics-scope-fact-storage";
 import { selectEventPayloadNodeFacts } from "./event-payload-node-selection";
+import { canonicalOrderedActivityStorage } from "./ordered-activity-storage";
 
 export type AnalyticsDbRelation = Relation<
   object,
@@ -3384,6 +3385,16 @@ export class AnalyticsRelationalStorage {
     if (existing) return existing;
 
     const pageColumns = new Set<string>();
+    for (const [name, scopeColumn] of [
+      ["sessionOrderCanonical", "session_id"],
+      ["visitorOrderCanonical", "visitor_id"],
+    ] as const) {
+      if (attributes.includes(`observation.${name}`)) {
+        pageColumns.add("visit_id");
+        pageColumns.add("started_at");
+        pageColumns.add(scopeColumn);
+      }
+    }
     const includeSiteIdentityConsistency = attributes.includes(
       "observation.siteIdentityConsistent",
     );
@@ -3502,6 +3513,10 @@ export class AnalyticsRelationalStorage {
     includeVisitor: boolean,
   ): string[] {
     const columns = new Set<string>();
+    if (attributes.includes("observation.sessionOrderCanonical"))
+      columns.add("session_id");
+    if (attributes.includes("observation.visitorOrderCanonical"))
+      columns.add("visitor_id");
     if (includeSession) columns.add("session_id");
     if (includeVisitor) columns.add("visitor_id");
     for (const attribute of attributes) {
@@ -3540,6 +3555,20 @@ export class AnalyticsRelationalStorage {
     pages: AnalyticsDbRelation,
     attribute: string,
   ): AnyExpression {
+    if (
+      attribute === "observation.sessionOrderCanonical" ||
+      attribute === "observation.visitorOrderCanonical"
+    )
+      return canonicalOrderedActivityStorage(
+        column(pages, "visit_id"),
+        column(
+          pages,
+          attribute === "observation.sessionOrderCanonical"
+            ? "session_id"
+            : "visitor_id",
+        ),
+        column(pages, "started_at"),
+      );
     if (attribute === "observation.kind") return param("page");
     if (attribute === "observation.id") return column(pages, "visit_id");
     const selectorBooleanField = advancedCountSelectorBooleanField(attribute);
@@ -3582,6 +3611,20 @@ export class AnalyticsRelationalStorage {
     events: AnalyticsDbRelation,
     attribute: string,
   ): AnyExpression {
+    if (
+      attribute === "observation.sessionOrderCanonical" ||
+      attribute === "observation.visitorOrderCanonical"
+    )
+      return canonicalOrderedActivityStorage(
+        column(events, "event_id"),
+        column(
+          events,
+          attribute === "observation.sessionOrderCanonical"
+            ? "owner_session_id"
+            : "owner_visitor_id",
+        ),
+        column(events, "occurred_at"),
+      );
     if (attribute === "observation.kind") return param("event");
     if (attribute === "observation.id" || attribute === "observation.eventId")
       return column(events, "event_id");

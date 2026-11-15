@@ -102,6 +102,8 @@ export interface ComparisonPagePlanInput {
   readonly cursor: ComparisonDimensionCursor | null;
   readonly limit: number;
   readonly childOutputId: string;
+  readonly currentChildOutputId?: string;
+  readonly referenceChildOutputId?: string;
 }
 
 function appendComparisonPageCompositionFromImports(
@@ -351,8 +353,8 @@ export function appendComparisonPageComposition(
   builder: LogicalPlanBuilder,
   input: ComparisonPagePlanInput,
 ): LogicalRelationHandle {
-  const importSide = (plan: ValidatedLogicalPlan) =>
-    builder.importAnalysisResult(plan, input.childOutputId, [
+  const importSide = (plan: ValidatedLogicalPlan, outputId: string) =>
+    builder.importAnalysisResult(plan, outputId, [
       { field: "value", as: "key" },
       { field: "views" },
       { field: "sessions" },
@@ -361,8 +363,14 @@ export function appendComparisonPageComposition(
   return appendComparisonPageCompositionFromImports(
     builder,
     input,
-    importSide(input.current),
-    importSide(input.reference),
+    importSide(
+      input.current,
+      input.currentChildOutputId ?? input.childOutputId,
+    ),
+    importSide(
+      input.reference,
+      input.referenceChildOutputId ?? input.childOutputId,
+    ),
   );
 }
 

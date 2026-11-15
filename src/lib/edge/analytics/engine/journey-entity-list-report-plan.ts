@@ -120,7 +120,7 @@ export const JOURNEY_LIST_EVENT_ATTRIBUTES = [
 ] as const;
 
 type ListEntity = "visitor" | "session";
-type JourneyListAnalysis =
+export type JourneyListAnalysis =
   | { readonly type: "goal"; readonly filter: FilterDocument }
   | {
       readonly type: "funnel";
@@ -135,7 +135,7 @@ interface CommonListInput {
   readonly filters: FilterDocument;
   readonly limit: number;
   readonly search?: string;
-  /** Request-private entity membership; never combined with an analysis. */
+  /** Request-private entity membership shared by the report and analysis stages. */
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly analysis?: JourneyListAnalysis;
   readonly sessionTarget?: {
@@ -179,7 +179,7 @@ function createJourneyListSources(
       filters: input.filters,
       entityScope: entity,
       ...(preparedPlanOperation ? { preparedPlanOperation } : {}),
-      ...(input.qualificationDependencyRefs && !input.analysis
+      ...(input.qualificationDependencyRefs
         ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
         : {}),
     });
@@ -431,6 +431,9 @@ export function createJourneyListAnalysisStageSelection(
     time: selection.time,
     ...(preparedPlanOperation ? { preparedPlanOperation } : {}),
     ...(expectedPlan ? { expectedPlan } : {}),
+    ...(selection.qualificationDependencyRefs
+      ? { qualificationDependencyRefs: selection.qualificationDependencyRefs }
+      : {}),
     ...(selection.profile === "direct-page-entity-only-compat-v1"
       ? { compatibilityScope: selection.entityKind! }
       : {}),
@@ -764,6 +767,9 @@ function restrictAnalysis(
     filters: input.filters,
     entityScope: entity,
     preparedPlanOperation: entity === "visitor" ? "visitors" : "sessions",
+    ...(input.qualificationDependencyRefs
+      ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+      : {}),
   });
   const throughStepIndex = analysis.stepIndex;
   const progression = appendFunnelProgressionRelations({

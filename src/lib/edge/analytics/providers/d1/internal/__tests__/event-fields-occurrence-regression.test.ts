@@ -62,6 +62,7 @@ import {
   queryEventFieldValuesFromD1,
   queryEventFieldValuesPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-fields";
+import { hasWholeOriginalCompletion } from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 import {
@@ -574,6 +575,32 @@ function qualifiedEventFieldValuesQuery(
     limit: input.limit ?? 1,
     cursor: input.cursor ?? undefined,
   } as QualifiedEventFieldValuesTestQuery;
+}
+
+// Each expected report read receives its own real request preparation. A consumed
+// single-reader completion cannot be reused for another cursor or configuration.
+async function prepareExpectedPayloadReader(
+  env: Env,
+  operation: "event-fields" | "event-field-values",
+  query: QualifiedEventFieldsTestQuery | QualifiedEventFieldValuesTestQuery,
+) {
+  const prepared = await d1AdvancedFilterMiddleware(env)(
+    operation,
+    query,
+    async (value) => value,
+  );
+  const deferred =
+    operation === "event-fields"
+      ? deferredEventFieldsQualificationFromQuery(prepared)
+      : deferredEventFieldValuesQualificationFromQuery(prepared);
+  if (!deferred) throw new Error("expected_payload_reader_deferred_missing");
+  const filters = await prepareDeferredEventQualificationFallback(deferred);
+  return {
+    filters,
+    owner: hasWholeOriginalCompletion(deferred, operation)
+      ? deferred
+      : undefined,
+  };
 }
 
 function frozenSql(input: {
@@ -1199,6 +1226,9 @@ describe("Event field occurrence report migration", () => {
       1,
       null,
       "private-dashboard",
+      hasWholeOriginalCompletion(deferred, "event-fields")
+        ? deferred
+        : undefined,
     );
 
     const trace = traceFor();
@@ -1291,6 +1321,9 @@ describe("Event field occurrence report migration", () => {
       1,
       null,
       "private-dashboard",
+      hasWholeOriginalCompletion(deferred, "event-fields")
+        ? deferred
+        : undefined,
     );
     expect(expectedPage.items.length).toBeGreaterThan(0);
 
@@ -1404,6 +1437,9 @@ describe("Event field occurrence report migration", () => {
         1,
         null,
         "private-dashboard",
+        hasWholeOriginalCompletion(deferred, "event-fields")
+          ? deferred
+          : undefined,
       );
       trace.preparedSql.length = 0;
       trace.bindings.length = 0;
@@ -1441,6 +1477,11 @@ describe("Event field occurrence report migration", () => {
       const cursor = actualFirstPage.value.data.pagination.nextCursor;
       if (!cursor) throw new Error("wave95b_event_fields_cursor_missing");
       const cursorQuery = qualifiedEventFieldsQuery(scope, cursor);
+      const cursorExpected = await prepareExpectedPayloadReader(
+        env,
+        "event-fields",
+        cursorQuery,
+      );
       const expectedCursor = await decodeEventFieldCursor(
         env,
         SITE,
@@ -1456,11 +1497,12 @@ describe("Event field occurrence report migration", () => {
         env,
         SITE,
         WINDOW,
-        fallbackFilters,
+        cursorExpected.filters,
         "signup",
         1,
         expectedCursor,
         "private-dashboard",
+        cursorExpected.owner,
       );
       trace.preparedSql.length = 0;
       trace.bindings.length = 0;
@@ -1491,15 +1533,21 @@ describe("Event field occurrence report migration", () => {
         undefined,
         " signup ",
       );
+      const paddedExpected = await prepareExpectedPayloadReader(
+        env,
+        "event-fields",
+        paddedRequestQuery,
+      );
       const expectedPaddedPage = await queryEventFieldsPageFromD1(
         env,
         SITE,
         WINDOW,
-        fallbackFilters,
+        paddedExpected.filters,
         " signup ",
         1,
         null,
         "private-dashboard",
+        paddedExpected.owner,
       );
       trace.preparedSql.length = 0;
       trace.bindings.length = 0;
@@ -1532,15 +1580,21 @@ describe("Event field occurrence report migration", () => {
         undefined,
         "   ",
       );
+      const whitespaceExpected = await prepareExpectedPayloadReader(
+        env,
+        "event-fields",
+        whitespaceNameQuery,
+      );
       const expectedWhitespacePage = await queryEventFieldsPageFromD1(
         env,
         SITE,
         WINDOW,
-        fallbackFilters,
+        whitespaceExpected.filters,
         "   ",
         1,
         null,
         "private-dashboard",
+        whitespaceExpected.owner,
       );
       trace.preparedSql.length = 0;
       trace.bindings.length = 0;
@@ -1574,15 +1628,21 @@ describe("Event field occurrence report migration", () => {
         "",
         100,
       );
+      const blankExpected = await prepareExpectedPayloadReader(
+        env,
+        "event-fields",
+        blankNameQuery,
+      );
       const expectedBlankNamePage = await queryEventFieldsPageFromD1(
         env,
         SITE,
         WINDOW,
-        fallbackFilters,
+        blankExpected.filters,
         undefined,
         100,
         null,
         "private-dashboard",
+        blankExpected.owner,
       );
       trace.preparedSql.length = 0;
       trace.bindings.length = 0;
@@ -3355,6 +3415,11 @@ describe("Event field occurrence report migration", () => {
         throw new Error("wave95c_event_field_values_provider_missing");
 
       const comparePage = async (query: QualifiedEventFieldValuesTestQuery) => {
+        const pageExpected = await prepareExpectedPayloadReader(
+          env,
+          "event-field-values",
+          query,
+        );
         const cursor = await decodeEventFieldValueCursor(
           env,
           SITE,
@@ -3373,7 +3438,7 @@ describe("Event field occurrence report migration", () => {
           env,
           SITE,
           WINDOW,
-          fallbackFilters,
+          pageExpected.filters,
           query.eventName,
           query.fieldPath,
           query.fieldValueType,
@@ -3381,6 +3446,7 @@ describe("Event field occurrence report migration", () => {
           query.search,
           cursor,
           "private-dashboard",
+          pageExpected.owner,
         );
         const expected = {
           eventName: query.eventName,
@@ -3627,6 +3693,9 @@ describe("Event field occurrence report migration", () => {
       query.search,
       null,
       "private-dashboard",
+      hasWholeOriginalCompletion(deferred, "event-field-values")
+        ? deferred
+        : undefined,
     );
     expect(expectedPage.items.length).toBeGreaterThan(0);
 
@@ -3703,6 +3772,9 @@ describe("Event field occurrence report migration", () => {
       query.search,
       null,
       "private-dashboard",
+      hasWholeOriginalCompletion(deferred, "event-field-values")
+        ? deferred
+        : undefined,
     );
 
     const trace = traceFor();
@@ -3798,6 +3870,9 @@ describe("Event field occurrence report migration", () => {
         pageLimit,
         null,
         "private-dashboard",
+        hasWholeOriginalCompletion(deferred, "event-fields")
+          ? deferred
+          : undefined,
       );
       const firstCoreTrace = {
         preparedSql: [...oracleTrace.preparedSql],
@@ -3863,6 +3938,11 @@ describe("Event field occurrence report migration", () => {
         }
       ).data.pagination.nextCursor;
       expect(firstCursor).toEqual(expect.any(String));
+      const nextExpected = await prepareExpectedPayloadReader(
+        oracleEnv,
+        "event-fields",
+        { ...query, cursor: firstCursor ?? undefined },
+      );
       const decodedCursor = await decodeEventFieldCursor(
         oracleEnv,
         SITE,
@@ -3879,11 +3959,12 @@ describe("Event field occurrence report migration", () => {
         oracleEnv,
         SITE,
         WINDOW,
-        fallbackFilters,
+        nextExpected.filters,
         reportEventName ?? undefined,
         pageLimit,
         decodedCursor,
         "private-dashboard",
+        nextExpected.owner,
       );
       const nextCoreTrace = {
         preparedSql: [...oracleTrace.preparedSql],
@@ -4015,6 +4096,9 @@ describe("Event field occurrence report migration", () => {
         undefined,
         null,
         "private-dashboard",
+        hasWholeOriginalCompletion(deferred, "event-field-values")
+          ? deferred
+          : undefined,
       );
       const firstCoreTrace = {
         preparedSql: [...oracleTrace.preparedSql],
@@ -4083,6 +4167,11 @@ describe("Event field occurrence report migration", () => {
         }
       ).data.pagination.nextCursor;
       expect(firstCursor).toEqual(expect.any(String));
+      const nextExpected = await prepareExpectedPayloadReader(
+        oracleEnv,
+        "event-field-values",
+        { ...query, cursor: firstCursor ?? undefined },
+      );
       const decodedCursor = await decodeEventFieldValueCursor(
         oracleEnv,
         SITE,
@@ -4102,7 +4191,7 @@ describe("Event field occurrence report migration", () => {
         oracleEnv,
         SITE,
         WINDOW,
-        fallbackFilters,
+        nextExpected.filters,
         reportEventName ?? undefined,
         "/a",
         "string",
@@ -4110,6 +4199,7 @@ describe("Event field occurrence report migration", () => {
         undefined,
         decodedCursor,
         "private-dashboard",
+        nextExpected.owner,
       );
       const nextCoreTrace = {
         preparedSql: [...oracleTrace.preparedSql],
@@ -4199,13 +4289,18 @@ describe("Event field occurrence report migration", () => {
           search: "a",
           limit: 5,
         });
+        const searchExpected = await prepareExpectedPayloadReader(
+          oracleEnv,
+          "event-field-values",
+          searchQuery,
+        );
         oracleTrace.preparedSql.length = 0;
         oracleTrace.bindings.length = 0;
         const expectedSearchPage = await queryEventFieldValuesPageFromD1(
           oracleEnv,
           SITE,
           WINDOW,
-          fallbackFilters,
+          searchExpected.filters,
           "signup",
           "/a",
           "string",
@@ -4213,6 +4308,7 @@ describe("Event field occurrence report migration", () => {
           "a",
           null,
           "private-dashboard",
+          searchExpected.owner,
         );
         searchCoreTrace = {
           preparedSql: [...oracleTrace.preparedSql],
@@ -4381,6 +4477,9 @@ describe("Event field occurrence report migration", () => {
       10,
       null,
       "private-dashboard",
+      hasWholeOriginalCompletion(deferred, "event-fields")
+        ? deferred
+        : undefined,
     );
     expect(expectedPage.items).toEqual([]);
     const legacyDto = {
@@ -4496,6 +4595,9 @@ describe("Event field occurrence report migration", () => {
           10,
           null,
           "private-dashboard",
+          hasWholeOriginalCompletion(deferred, "event-fields")
+            ? deferred
+            : undefined,
         );
         const provider = registry.resolve("event-fields");
         if (!provider)
@@ -4524,6 +4626,9 @@ describe("Event field occurrence report migration", () => {
           valuesQuery.search,
           null,
           "private-dashboard",
+          hasWholeOriginalCompletion(deferred, "event-field-values")
+            ? deferred
+            : undefined,
         );
         const provider = registry.resolve("event-field-values");
         if (!provider)
@@ -4717,6 +4822,16 @@ describe("Event field occurrence report migration", () => {
     const legacyFilters = (prepared as QueryInput).filters;
     if (!legacyFilters)
       throw new Error("wave97ej_api_v1_legacy_filters_missing");
+    // Exercise the current Core handoff, including its actual middleware owner.
+    // Dropping that owner reconstructs an unsupported filters-only reader call;
+    // it is not an independent legacy oracle once the ID bridge is removed.
+    const wholeOriginalOwner = hasWholeOriginalCompletion(
+      prepared as QueryInput,
+      "event-fields",
+    )
+      ? prepared
+      : undefined;
+    expect(wholeOriginalOwner).toBeDefined();
 
     const expectedTrace = traceFor();
     const expectedPage = await queryEventFieldsPageFromD1(
@@ -4728,6 +4843,7 @@ describe("Event field occurrence report migration", () => {
       10,
       null,
       "api-v1",
+      ...(wholeOriginalOwner ? ([wholeOriginalOwner] as const) : []),
     );
     const actualTrace = traceFor();
     const provider = createD1SiteProviderRegistry({

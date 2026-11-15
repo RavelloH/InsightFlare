@@ -30,6 +30,7 @@ import type {
   QueryWindow,
 } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
+import type { D1ExecutionOptions } from "./execution-options";
 import type { DeferredGeoPointsQualification } from "./geo-points-qualification-request";
 import { mapGeoPointRow } from "./journey-helpers";
 import { queryJourneyPageReportRowsFromD1 } from "./journey-page-report-query";
@@ -75,6 +76,7 @@ export async function queryGeoPointsFromD1(
   limit: number,
   diagnostics?: D1ReadDiagnostics,
   qualification?: GeoPointsPageVisitQualification,
+  execution?: D1ExecutionOptions,
 ): Promise<GeoPointAggregate> {
   if (qualification) {
     const plan = snapshotPageVisitQualificationPlan(
@@ -137,6 +139,10 @@ export async function queryGeoPointsFromD1(
     };
   }
   const metadata = scopedFilterMetadata(filters);
+  // This first reader has one real whole producer and two sequential reports.
+  // A declaration alone cannot appear here: the program exposes frame outputs.
+  const membershipOutputs = execution?.program?.completedWholeOutputs ?? [];
+  const membershipOutput = membershipOutputs[0];
   const planInput = {
     siteId,
     // Page reports consume the reader window for prepared scopes so time
@@ -144,13 +150,19 @@ export async function queryGeoPointsFromD1(
     queryTime: queryWindowToTime(window),
     filters,
     ...(metadata ? { scopePlan: metadata.plan } : {}),
+    ...(membershipOutput ? { membershipOutput } : {}),
   };
+  const pointsPlan = buildJourneyGeoPointsPlan({ ...planInput, limit });
+  if (membershipOutputs.length > 1)
+    throw new Error("geo_program_membership_producer_ambiguous");
   const points = (
     await queryJourneyPageReportRowsFromD1(
       env,
-      buildJourneyGeoPointsPlan({ ...planInput, limit }),
+      pointsPlan,
       "journey-geo-points",
       diagnostics,
+      undefined,
+      membershipOutput ? execution : undefined,
     )
   ).map(mapGeoPointRow);
 
@@ -160,6 +172,8 @@ export async function queryGeoPointsFromD1(
     buildJourneyGeoSummaryPlan({ ...planInput, level: summaryLevel }),
     `journey-geo-${summaryLevel}-summary`,
     diagnostics,
+    undefined,
+    membershipOutput ? execution : undefined,
   );
 
   return {

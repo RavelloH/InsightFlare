@@ -282,6 +282,9 @@ function logicalNodeInputs(node: LogicalNode): readonly RelationId[] {
   switch (node.kind) {
     case "source":
     case "analysis-result":
+    case "whole-filter-membership":
+    case "whole-filter-core":
+    case "membership-read":
       return [];
     case "relationship-lookup":
     case "filter":

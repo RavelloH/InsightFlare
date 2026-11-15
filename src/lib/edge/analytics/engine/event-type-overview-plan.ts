@@ -197,6 +197,7 @@ export function buildEventTypeOverviewPlan(input: {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
+  readonly qualificationSemantics?: "whole-original";
   readonly eventName: string;
   readonly includeBreakdowns?: boolean;
   readonly denominatorSource: "event-report" | "raw-event-domain";
@@ -209,6 +210,12 @@ export function buildEventTypeOverviewPlan(input: {
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
     ...(input.qualificationDependencyRefs
       ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+      : {}),
+    ...(input.qualificationSemantics === "whole-original"
+      ? {
+          qualificationSemantics: "whole-original" as const,
+          wholeOriginalSourcePolicy: "prepared-scoped-v1" as const,
+        }
       : {}),
   });
   const builder = context.builder;

@@ -29,8 +29,8 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import type { SiteId } from "@/lib/edge/analytics/contract/types";
+import * as countSupport from "@/lib/edge/analytics/engine/advanced-filter-count-support";
 import { preparedMembershipIdentities } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
-import * as countSupport from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 import { expandCustomEventDataJson } from "@/lib/edge/ingest/custom-event-json";

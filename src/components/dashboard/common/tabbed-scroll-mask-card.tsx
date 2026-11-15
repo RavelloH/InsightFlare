@@ -225,7 +225,9 @@ export function TabbedScrollMaskCard<T extends string = string>({
           )}
           data-overlayscrollbars-initialize={nativeScrollbars ? undefined : ""}
         >
-          {children}
+          {/* OverlayScrollbars reparents host children into its viewport. Keep
+              React's changing content under one stable parent during refresh. */}
+          <div>{children}</div>
         </div>
       </div>
     </Card>

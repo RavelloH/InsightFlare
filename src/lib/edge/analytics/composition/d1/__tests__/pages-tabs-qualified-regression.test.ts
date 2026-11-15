@@ -18,8 +18,8 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
+import * as countSupport from "@/lib/edge/analytics/engine/advanced-filter-count-support";
 import { buildPagesTabsQualificationPlan } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
-import * as countSupport from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import {
   d1AdvancedFilterMiddleware,
   deferredPagesAggregatePageQualificationFromQuery,

@@ -22,6 +22,7 @@ import {
 import { pageRoleDependencyRefs } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { DeferredPerformanceSummaryQualification } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import type { PageVisitQualificationPreparation } from "@/lib/edge/analytics/providers/d1/internal/page-visit-qualification-execution";
+import { bindWholeOriginalReader } from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import type { Env } from "@/lib/edge/types";
 
 import {
@@ -48,6 +49,7 @@ import {
   roundPerformanceValue,
   timeBucketTimestamp,
 } from "./core";
+import type { D1ExecutionOptions } from "./execution-options";
 import {
   bindPageVisitQualificationPreparation,
   pageVisitQualificationConsumerKey,
@@ -318,6 +320,8 @@ export async function queryPerformanceSummariesFromD1(
   window: QueryWindow,
   filters: FilterDocument,
   qualification?: PerformancePageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<Record<PerformanceMetricKey, PerformanceSummaryRow>> {
   const planInput = performancePlanInput(
     siteId,
@@ -325,12 +329,31 @@ export async function queryPerformanceSummariesFromD1(
     filters,
     qualification,
   );
-  const bound = bindPerformanceQualification({
-    plan: buildPerformanceSummariesPlan(planInput),
-    siteId,
-    filters,
-    qualification,
-  });
+  const wholeOriginal =
+    !qualification && wholeOriginalOwner
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalOwner,
+          consumer: {
+            kind: "page",
+            family: "performance",
+            reader: { kind: "performance-summary", configuration: {} },
+          },
+          siteId,
+          filters,
+          queryTime: scopedFilterMetadata(filters)?.time ?? planInput.queryTime,
+          scopePlan: "scopePlan" in planInput ? planInput.scopePlan : undefined,
+          readerQueryTime: planInput.queryTime,
+          ...(execution ? { execution } : {}),
+        })
+      : undefined;
+  const bound =
+    wholeOriginal ??
+    bindPerformanceQualification({
+      plan: buildPerformanceSummariesPlan(planInput),
+      siteId,
+      filters,
+      qualification,
+    });
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
     bound.plan,
@@ -338,6 +361,9 @@ export async function queryPerformanceSummariesFromD1(
     undefined,
     undefined,
     bound.executionInputs,
+    ...((wholeOriginal?.execution ? [wholeOriginal.execution] : []) as [
+      D1ExecutionOptions?,
+    ]),
   );
   return mapPerformanceSummaries(rows);
 }
@@ -399,6 +425,8 @@ export async function queryAllPerformanceTrendsFromD1(
   interval: Interval,
   filters: FilterDocument,
   qualification?: PerformancePageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<Record<PerformanceMetricKey, PerformanceTrendPointRow[]>> {
   const planInput = performancePlanInput(
     siteId,
@@ -406,15 +434,37 @@ export async function queryAllPerformanceTrendsFromD1(
     filters,
     qualification,
   );
-  const bound = bindPerformanceQualification({
-    plan: buildPerformanceAllTrendsPlan({
-      ...planInput,
-      interval,
-    }),
-    siteId,
-    filters,
-    qualification,
-  });
+  const wholeOriginal =
+    !qualification && wholeOriginalOwner
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalOwner,
+          consumer: {
+            kind: "page",
+            family: "performance",
+            reader: {
+              kind: "performance-all-trends",
+              configuration: { interval },
+            },
+          },
+          siteId,
+          filters,
+          queryTime: scopedFilterMetadata(filters)?.time ?? planInput.queryTime,
+          scopePlan: "scopePlan" in planInput ? planInput.scopePlan : undefined,
+          readerQueryTime: planInput.queryTime,
+          ...(execution ? { execution } : {}),
+        })
+      : undefined;
+  const bound =
+    wholeOriginal ??
+    bindPerformanceQualification({
+      plan: buildPerformanceAllTrendsPlan({
+        ...planInput,
+        interval,
+      }),
+      siteId,
+      filters,
+      qualification,
+    });
   const rows = await queryAnalyticsReportOutputSetRowsFromD1(
     env,
     bound.plan,
@@ -428,6 +478,9 @@ export async function queryAllPerformanceTrendsFromD1(
     },
     undefined,
     bound.executionInputs,
+    ...((wholeOriginal?.execution ? [wholeOriginal.execution] : []) as [
+      D1ExecutionOptions?,
+    ]),
   );
   return mapPerformanceTrendReportRows(rows, window, interval);
 }
@@ -439,6 +492,8 @@ export async function queryPerformanceRoutesFromD1(
   filters: FilterDocument,
   limit: number,
   qualification?: PerformancePageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<PerformanceRouteRow[]> {
   const planInput = performancePlanInput(
     siteId,
@@ -446,12 +501,31 @@ export async function queryPerformanceRoutesFromD1(
     filters,
     qualification,
   );
-  const bound = bindPerformanceQualification({
-    plan: buildPerformanceRoutesPlan({ ...planInput, limit }),
-    siteId,
-    filters,
-    qualification,
-  });
+  const wholeOriginal =
+    !qualification && wholeOriginalOwner
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalOwner,
+          consumer: {
+            kind: "page",
+            family: "performance",
+            reader: { kind: "performance-routes", configuration: { limit } },
+          },
+          siteId,
+          filters,
+          queryTime: scopedFilterMetadata(filters)?.time ?? planInput.queryTime,
+          scopePlan: "scopePlan" in planInput ? planInput.scopePlan : undefined,
+          readerQueryTime: planInput.queryTime,
+          ...(execution ? { execution } : {}),
+        })
+      : undefined;
+  const bound =
+    wholeOriginal ??
+    bindPerformanceQualification({
+      plan: buildPerformanceRoutesPlan({ ...planInput, limit }),
+      siteId,
+      filters,
+      qualification,
+    });
   const rows = await queryAnalyticsReportOutputSetRowsFromD1(
     env,
     bound.plan,
@@ -466,6 +540,9 @@ export async function queryPerformanceRoutesFromD1(
     },
     undefined,
     bound.executionInputs,
+    ...((wholeOriginal?.execution ? [wholeOriginal.execution] : []) as [
+      D1ExecutionOptions?,
+    ]),
   );
   return mapPerformanceRouteReportRows(rows);
 }
@@ -476,6 +553,8 @@ export async function queryPerformanceCountriesFromD1(
   window: QueryWindow,
   filters: FilterDocument,
   qualification?: PerformancePageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<PerformanceCountryRow[]> {
   const planInput = performancePlanInput(
     siteId,
@@ -483,12 +562,31 @@ export async function queryPerformanceCountriesFromD1(
     filters,
     qualification,
   );
-  const bound = bindPerformanceQualification({
-    plan: buildPerformanceCountriesPlan(planInput),
-    siteId,
-    filters,
-    qualification,
-  });
+  const wholeOriginal =
+    !qualification && wholeOriginalOwner
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalOwner,
+          consumer: {
+            kind: "page",
+            family: "performance",
+            reader: { kind: "performance-countries", configuration: {} },
+          },
+          siteId,
+          filters,
+          queryTime: scopedFilterMetadata(filters)?.time ?? planInput.queryTime,
+          scopePlan: "scopePlan" in planInput ? planInput.scopePlan : undefined,
+          readerQueryTime: planInput.queryTime,
+          ...(execution ? { execution } : {}),
+        })
+      : undefined;
+  const bound =
+    wholeOriginal ??
+    bindPerformanceQualification({
+      plan: buildPerformanceCountriesPlan(planInput),
+      siteId,
+      filters,
+      qualification,
+    });
   const rows = await queryAnalyticsReportOutputSetRowsFromD1(
     env,
     bound.plan,
@@ -503,6 +601,9 @@ export async function queryPerformanceCountriesFromD1(
     },
     undefined,
     bound.executionInputs,
+    ...((wholeOriginal?.execution ? [wholeOriginal.execution] : []) as [
+      D1ExecutionOptions?,
+    ]),
   );
   return mapPerformanceCountryReportRows(rows);
 }
@@ -515,6 +616,8 @@ export async function queryPerformanceDashboardFromD1(
   filters: FilterDocument,
   routeLimit: number,
   qualification?: PerformancePageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<PerformanceDashboardResult> {
   const planInput = performancePlanInput(
     siteId,
@@ -522,16 +625,38 @@ export async function queryPerformanceDashboardFromD1(
     filters,
     qualification,
   );
-  const bound = bindPerformanceQualification({
-    plan: buildPerformanceDashboardPlan({
-      ...planInput,
-      interval,
-      routeLimit,
-    }),
-    siteId,
-    filters,
-    qualification,
-  });
+  const wholeOriginal =
+    !qualification && wholeOriginalOwner
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalOwner,
+          consumer: {
+            kind: "page",
+            family: "performance",
+            reader: {
+              kind: "performance-dashboard",
+              configuration: { interval, routeLimit },
+            },
+          },
+          siteId,
+          filters,
+          queryTime: scopedFilterMetadata(filters)?.time ?? planInput.queryTime,
+          scopePlan: "scopePlan" in planInput ? planInput.scopePlan : undefined,
+          readerQueryTime: planInput.queryTime,
+          ...(execution ? { execution } : {}),
+        })
+      : undefined;
+  const bound =
+    wholeOriginal ??
+    bindPerformanceQualification({
+      plan: buildPerformanceDashboardPlan({
+        ...planInput,
+        interval,
+        routeLimit,
+      }),
+      siteId,
+      filters,
+      qualification,
+    });
   const rows = await queryAnalyticsReportOutputSetRowsFromD1(
     env,
     bound.plan,
@@ -548,6 +673,9 @@ export async function queryPerformanceDashboardFromD1(
     },
     undefined,
     bound.executionInputs,
+    ...((wholeOriginal?.execution ? [wholeOriginal.execution] : []) as [
+      D1ExecutionOptions?,
+    ]),
   );
   return mapPerformanceDashboardReportRows(rows, window, interval);
 }

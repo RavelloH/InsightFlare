@@ -101,6 +101,7 @@ function sessionPathSource(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
 }) {
@@ -277,6 +278,7 @@ export function buildSessionPathTopPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly limit: number;
@@ -341,6 +343,7 @@ export function buildSessionPathPagePlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly limit: number;

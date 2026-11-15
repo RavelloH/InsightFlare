@@ -15,7 +15,10 @@ import type {
   QueryTime,
 } from "@/lib/edge/analytics/contract/types";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
-import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
+import {
+  EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY,
+  EVENT_FILTER_PAGE_VISIT_DEPENDENCY,
+} from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import {
   createSemanticPostObservationFilter,
   createSemanticScopedSourceSelection,
@@ -28,7 +31,10 @@ import {
   createSemanticSubjectDomain,
   semanticSubjectFromQuerySubject,
 } from "@/lib/edge/analytics/engine/semantic/subject";
-import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
+import {
+  createSemanticTemporalDomains,
+  semanticTemporalDomainsFromQueryTime,
+} from "@/lib/edge/analytics/engine/semantic/time";
 import {
   type PreparedMembershipFixture,
   preparedMembershipFromIds,
@@ -981,6 +987,84 @@ describe("semantic scoped source selection", () => {
       "invalid_semantic_scoped_source_selection:prepared_matches_and_qualification_dependency_conflict",
     );
   });
+
+  it.each(["session", "visitor"] as const)(
+    "admits a bounded same-site %s dependency before an analysis observation stage",
+    (scope) => {
+      const prepared = preparedSelectionInput(
+        scope,
+        parseFilterDsl("count(page) gte 1", analyticsFilterRegistry),
+      );
+      const selection = createSemanticScopedSourceSelection({
+        profile: "prepared-scoped-reader-window-v1",
+        filters: prepared.filters,
+        subject: SUBJECT,
+        time: TIME,
+        expectedPlan: prepared.plan,
+        qualificationDependencyRefs: [
+          EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY,
+        ],
+        postObservationFilter: createSemanticPostObservationFilter({
+          filter: simpleSessionFilter("US"),
+        }),
+      });
+      expect(
+        snapshotSemanticScopedSourceSelection(selection, {
+          subject: SUBJECT,
+          time: TIME,
+          scope: resolveAnalyticsScope(scope),
+        }),
+      ).toEqual(selection);
+      const invalid = [
+        { entityKind: scope === "session" ? "visitor" : "session" },
+        { authorizedSiteIds: [SITE_ID, "another-site"] },
+        { authorizedSiteIds: ["another-site"] },
+        { subject: { ...SUBJECT, origin: "team", teamId: "another-team" } },
+        { preparationTime: { ...TIME, capturedAtMs: 101 } },
+        { time: { ...TIME, read: { kind: "retained-history" } } },
+        {
+          time: {
+            ...TIME,
+            read: { kind: "bounded", range: { ...TIME.candidate, startMs: 1 } },
+          },
+        },
+        { time: { ...TIME, filter: { ...TIME.candidate, startMs: 1 } } },
+      ];
+      for (const mutation of invalid) {
+        const altered = {
+          ...selection,
+          ...mutation,
+        } as SemanticScopedSourceSelection;
+        expect(() =>
+          validateSemanticScopedSourceSelection(altered, {
+            subject: createSemanticSubjectDomain(altered.subject),
+            time: createSemanticTemporalDomains(altered.time),
+          }),
+        ).toThrow(
+          "invalid_semantic_scoped_source_selection:qualification_dependency_semantics_mismatch",
+        );
+      }
+      const observation = preparedSelectionInput(
+        "event",
+        parseFilterDsl("count(page) gte 1", analyticsFilterRegistry),
+      );
+      const eventStage = createSemanticScopedSourceSelection({
+        profile: "prepared-scoped-reader-window-v1",
+        filters: observation.filters,
+        subject: SUBJECT,
+        time: TIME,
+        expectedPlan: observation.plan,
+        qualificationDependencyRefs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY],
+        postObservationFilter: selection.postObservationFilter,
+      });
+      expect(() =>
+        validateSemanticScopedSourceSelection(eventStage, {
+          subject: SUBJECT,
+          time: TIME,
+        }),
+      ).toThrow("qualification_dependency_semantics_mismatch");
+    },
+  );
 
   it("rejects invalid prepared plan snapshots and identity kinds", () => {
     const prepared = preparedSelectionInput();

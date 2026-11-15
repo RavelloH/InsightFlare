@@ -15,6 +15,7 @@ import {
   buildAdvancedCountFilterMatchPlan,
   buildAdvancedCountFilterPayloadCombinedPlan,
 } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import { classifyAdvancedCountFilter } from "@/lib/edge/analytics/engine/advanced-filter-count-support";
 import { advancedCountSelectorField } from "@/lib/edge/analytics/engine/semantic/count-selector-fields";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import {
@@ -30,7 +31,6 @@ import {
   validateAdvancedFilterCountPayloadCombinedMatches,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-query";
 import { ADVANCED_FILTER_MAX_PAYLOAD_NODES } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-resource-policy";
-import { classifyAdvancedCountFilter } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import type { Env } from "@/lib/edge/types";
 import {

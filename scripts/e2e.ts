@@ -14,6 +14,12 @@ import net from "node:net";
 import path from "node:path";
 import process from "node:process";
 
+import {
+  createE2ePersistenceDirectory,
+  type E2ePersistenceDirectory,
+  removeE2ePersistenceDirectory,
+  removeE2eRunDirectory,
+} from "./e2e/persistence";
 import { createScriptLogger } from "./shared/logger";
 import { ROOT_DIR } from "./shared/paths";
 
@@ -44,6 +50,7 @@ interface Environment {
   mockControlToken: string;
   nowMs: number;
   persistencePath: string;
+  persistenceOwnership: E2ePersistenceDirectory;
   port: number;
   testSitePort: number;
   testSiteURL: string;
@@ -257,6 +264,7 @@ async function writeRunManifest(
         headed: options.headed,
         keep: options.keep,
         phase: 3,
+        persistencePath: environment.persistencePath,
         port: environment.port,
         runId: environment.id,
         testSiteURL: environment.testSiteURL,
@@ -273,13 +281,13 @@ async function createEnvironment(options: Options): Promise<Environment> {
   const id = runId();
   const directory = path.resolve(".tmp", "e2e", id);
   const configDirectory = path.join(directory, "config");
-  const persistencePath = path.join(directory, "state");
+  const persistenceOwnership = await createE2ePersistenceDirectory(id);
+  const persistencePath = persistenceOwnership.statePath;
   await Promise.all([
     fs.mkdir(path.join(directory, "artifacts"), { recursive: true }),
     fs.mkdir(configDirectory, { recursive: true }),
     fs.mkdir(path.join(directory, "logs"), { recursive: true }),
     fs.mkdir(path.join(directory, "manifest"), { recursive: true }),
-    fs.mkdir(persistencePath, { recursive: true }),
   ]);
 
   const environment: Environment = {
@@ -294,6 +302,7 @@ async function createEnvironment(options: Options): Promise<Environment> {
     mockControlToken: Buffer.from(randomBytes(32)).toString("hex"),
     nowMs: E2E_INITIAL_NOW_MS,
     persistencePath,
+    persistenceOwnership,
     port: await findOpenPort(),
     testSitePort: await findOpenPort(),
     testSiteURL: "",
@@ -1329,12 +1338,15 @@ async function main(): Promise<void> {
     await stopProcess(worker);
     if (environment) {
       if (succeeded && !options.keep && !options.serve) {
-        await fs.rm(environment.directory, { force: true, recursive: true });
+        await removeE2ePersistenceDirectory(environment.persistenceOwnership);
+        await removeE2eRunDirectory(environment.directory, environment.id);
       } else if (failure) {
         await writeFailureSummary(environment, failure);
         rlog.info(`E2E run directory retained: ${environment.directory}`);
+        rlog.info(`E2E state retained: ${environment.persistencePath}`);
       } else {
         rlog.info(`E2E run directory retained: ${environment.directory}`);
+        rlog.info(`E2E state retained: ${environment.persistencePath}`);
       }
     }
   }

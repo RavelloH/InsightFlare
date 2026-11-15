@@ -77,6 +77,8 @@ export function createOverviewReportSource(input: {
    */
   readonly scopePlan?: ScopedFilterPlan;
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
+  readonly pageVisitDependencyRefs?: readonly QualificationDependencyRef[];
+  readonly qualificationSemantics?: "whole-original";
   readonly pageAttributes: readonly string[];
   readonly pageRelationships?: readonly SemanticRelationshipId[];
   readonly eventAttributes: readonly string[];
@@ -91,6 +93,8 @@ export function createOverviewReportSource(input: {
   const metadata = input.scopePlan
     ? { plan: input.scopePlan }
     : scopedFilterMetadata(input.filters);
+  if (input.qualificationSemantics && !metadata)
+    throw new Error("overview_source_whole_original_requires_prepared_scope");
   const directCompatibilitySelection =
     !metadata && input.filters.root !== null
       ? createSemanticScopedSourceSelection({
@@ -117,9 +121,15 @@ export function createOverviewReportSource(input: {
       ? {
           scopePlan: metadata.plan,
           preparedTimePolicy: "scoped-reader-window-v1" as const,
-          ...(input.qualificationDependencyRefs
+          ...(input.qualificationSemantics
+            ? { qualificationSemantics: input.qualificationSemantics }
+            : {}),
+          ...((input.pageVisitDependencyRefs ??
+          input.qualificationDependencyRefs)
             ? {
-                qualificationDependencyRefs: input.qualificationDependencyRefs,
+                qualificationDependencyRefs:
+                  input.pageVisitDependencyRefs ??
+                  input.qualificationDependencyRefs,
               }
             : {}),
         }
@@ -138,7 +148,25 @@ export function createOverviewReportSource(input: {
         ...(input.eventRelationships
           ? { relationships: input.eventRelationships }
           : {}),
-        selection: source.selection,
+        selection:
+          metadata && input.pageVisitDependencyRefs
+            ? createSemanticScopedSourceSelection({
+                profile:
+                  input.qualificationSemantics === "whole-original"
+                    ? "prepared-whole-filter-reader-window-v1"
+                    : "prepared-scoped-reader-window-v1",
+                filters: input.filters,
+                subject: source.builder.context.subject,
+                time: source.builder.context.time,
+                expectedPlan: metadata.plan,
+                ...(input.qualificationDependencyRefs
+                  ? {
+                      qualificationDependencyRefs:
+                        input.qualificationDependencyRefs,
+                    }
+                  : {}),
+              })
+            : source.selection,
       })
     : undefined;
   return { ...source, ...(events ? { events } : {}), scoped };

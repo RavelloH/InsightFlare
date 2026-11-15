@@ -23,6 +23,7 @@ import type { LogicalOutput } from "@/lib/edge/analytics/engine/logical/plan";
 import type { LogicalValueType } from "@/lib/edge/analytics/engine/logical/slots";
 import type { LogicalSlot } from "@/lib/edge/analytics/engine/logical/slots";
 import { isSameLogicalValueType } from "@/lib/edge/analytics/engine/logical/slots";
+import { wholeMembershipNodeProblem } from "@/lib/edge/analytics/engine/logical/whole-membership";
 import { semanticAttribute } from "@/lib/edge/analytics/engine/semantic/attributes";
 import { semanticDimension } from "@/lib/edge/analytics/engine/semantic/dimensions";
 import {
@@ -1340,7 +1341,109 @@ function validateNode(
   let expectedOutput: readonly SlotId[];
   let expectedGrain: LogicalGrain;
   switch (node.kind) {
+    case "whole-filter-membership":
+    case "whole-filter-core":
+    case "membership-read": {
+      let problem: string | undefined;
+      try {
+        problem = wholeMembershipNodeProblem(node, plan, slots);
+      } catch (error) {
+        problem =
+          error instanceof Error
+            ? error.message
+            : "Invalid membership node data.";
+      }
+      if (problem) fail("invalid-source", path, problem);
+      expectedOutput = node.output;
+      expectedGrain =
+        node.kind !== "membership-read"
+          ? { kind: "keyed", keys: node.output }
+          : { kind: "bag" };
+      break;
+    }
     case "source": {
+      if (node.membershipInputs !== undefined) {
+        if (
+          !Array.isArray(node.membershipInputs) ||
+          node.membershipInputs.length === 0 ||
+          node.membershipInputs.length > 2 ||
+          (node.entity !== "page" && node.entity !== "event") ||
+          !node.selection
+        )
+          fail(
+            "invalid-source",
+            `${path}.membershipInputs`,
+            "Membership inputs require a scoped Page or Event Source.",
+          );
+        if (
+          node.selection.preparedMembership !== undefined ||
+          node.selection.qualificationDependencyRefs !== undefined
+        )
+          fail(
+            "invalid-source",
+            `${path}.membershipInputs`,
+            "A Source cannot combine relation inputs with prepared membership carriers.",
+          );
+        const roles = new Set<string>();
+        node.membershipInputs.forEach((membership, index) => {
+          const inputPath = `${path}.membershipInputs[${index}]`;
+          if (
+            !membership ||
+            !["entity", "visit", "event"].includes(membership.role) ||
+            roles.has(membership.role) ||
+            (node.selection!.mode === "entity"
+              ? membership.role !== "entity"
+              : membership.role === "entity")
+          )
+            fail(
+              "invalid-source",
+              inputPath,
+              "Membership input roles must be unique and match the Source mode.",
+            );
+          roles.add(membership.role);
+          const input = assertRelation(
+            membership.input,
+            states,
+            `${inputPath}.input`,
+          );
+          const keys = [membership.siteId, membership.memberId];
+          const grain = input.grain;
+          if (
+            new Set(keys).size !== 2 ||
+            input.node.output.length !== 2 ||
+            grain.kind !== "keyed" ||
+            grain.keys.length !== 2 ||
+            keys.some((key) => !grain.keys.includes(key))
+          )
+            fail(
+              "invalid-grain",
+              inputPath,
+              "Membership inputs must expose exactly the deduplicated site and member keys.",
+            );
+          for (const key of keys) {
+            const slot = resolveVisibleSlot(input, key, inputPath);
+            if (
+              slot.nullable ||
+              slot.type.kind !== "scalar" ||
+              slot.type.scalar !== "string"
+            )
+              fail(
+                "invalid-source",
+                inputPath,
+                "Membership keys must be visible non-null strings.",
+              );
+          }
+        });
+        if (
+          node.selection.mode === "observation" &&
+          !roles.has(node.entity === "page" ? "visit" : "event")
+        )
+          fail(
+            "invalid-source",
+            `${path}.membershipInputs`,
+            "An observation Source requires its matching identity role.",
+          );
+      }
       if (node.selection) {
         if (node.entity !== "event" && node.entity !== "page")
           fail(
@@ -1353,6 +1456,8 @@ function validateNode(
             node.selection.profile !== "prepared-scoped-v1" &&
             node.selection.profile !== "prepared-page-reader-window-v1" &&
             node.selection.profile !== "prepared-scoped-reader-window-v1" &&
+            node.selection.profile !==
+              "prepared-whole-filter-reader-window-v1" &&
             node.selection.profile !== "direct-page-analytics-v1" &&
             node.selection.profile !== "direct-page-session-compat-v1" &&
             node.selection.profile !== "direct-page-entity-only-compat-v1") ||
@@ -1369,7 +1474,9 @@ function validateNode(
           node.entity === "page" &&
           (node.selection.profile === "prepared-scoped-v1" ||
             node.selection.profile === "prepared-page-reader-window-v1" ||
-            node.selection.profile === "prepared-scoped-reader-window-v1") &&
+            node.selection.profile === "prepared-scoped-reader-window-v1" ||
+            node.selection.profile ===
+              "prepared-whole-filter-reader-window-v1") &&
           node.selection.eventNameGate !== undefined
         )
           fail(
@@ -1378,7 +1485,11 @@ function validateNode(
             "page_selection_event_name_unsupported",
           );
         try {
-          validateSemanticScopedSourceSelection(node.selection, plan.context);
+          validateSemanticScopedSourceSelection(
+            node.selection,
+            plan.context,
+            node.membershipInputs,
+          );
         } catch (error) {
           fail(
             "invalid-source",
@@ -2485,6 +2596,12 @@ function validateNode(
       break;
     }
     case "analysis-result": {
+      if (node.execution !== undefined && node.execution !== "program")
+        fail(
+          "invalid-topology",
+          `${path}.execution`,
+          "Analysis result execution mode is invalid.",
+        );
       if (!node.childPlan || typeof node.childPlan !== "object")
         fail(
           "invalid-topology",
@@ -2492,6 +2609,7 @@ function validateNode(
           "Analysis result child plan is missing.",
         );
       if (
+        node.execution !== "program" &&
         Array.isArray(node.childPlan.nodes) &&
         node.childPlan.nodes.some((child) => child?.kind === "analysis-result")
       )
@@ -2798,6 +2916,10 @@ export function validateLogicalPlan(plan: LogicalPlan): ValidatedLogicalPlan {
     relationIds.add(node.id);
     const newlyProduced: readonly SlotId[] = (() => {
       switch (node.kind) {
+        case "whole-filter-membership":
+        case "whole-filter-core":
+        case "membership-read":
+          return node.output;
         case "source":
           return node.values.map((binding) => binding.slot);
         case "event-payload-occurrences":

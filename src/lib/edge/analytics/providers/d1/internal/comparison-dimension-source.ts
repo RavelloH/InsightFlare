@@ -10,6 +10,7 @@ import {
   validatePageDimensionSelection,
 } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
+import { EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 
 import type { QueryWindow } from "./core-types";
 
@@ -21,6 +22,9 @@ export function buildComparisonDimensionRollupPlan(input: {
   readonly window: QueryWindow;
   readonly filters: FilterDocument;
   readonly selection: PageDimensionSelection;
+  readonly entityDependency?: boolean;
+  readonly qualificationSemantics?: "whole-original";
+  readonly outputId?: string;
 }): ValidatedLogicalPlan {
   const metadata = scopedFilterMetadata(input.filters);
   const selection = validatePageDimensionSelection(input.selection);
@@ -35,9 +39,19 @@ export function buildComparisonDimensionRollupPlan(input: {
         }
       : {}),
     selections: [selection],
+    ...(input.qualificationSemantics !== undefined
+      ? { qualificationSemantics: input.qualificationSemantics }
+      : {}),
+    ...(input.entityDependency
+      ? {
+          qualificationDependencyRefs: [
+            EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY,
+          ],
+        }
+      : {}),
   });
   const rows = appendComparisonDimensionRollup(builder, pages, selection);
-  builder.output(COMPARISON_DIMENSION_ROLLUP_OUTPUT, rows, [
+  builder.output(input.outputId ?? COMPARISON_DIMENSION_ROLLUP_OUTPUT, rows, [
     { name: "value", slot: "value" },
     { name: "views", slot: "views" },
     { name: "sessions", slot: "sessions" },

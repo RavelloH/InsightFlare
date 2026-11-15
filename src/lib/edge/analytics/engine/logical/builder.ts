@@ -28,6 +28,8 @@ import {
   type SampleStatisticsPercentile,
   setOperationResultNullable,
   type SortKey,
+  type SourceMembershipInput,
+  type SourceNode,
 } from "@/lib/edge/analytics/engine/logical/nodes";
 import type {
   LogicalOutputField,
@@ -106,6 +108,12 @@ export interface LogicalSourceOptions {
   readonly relationships?: readonly SemanticRelationshipId[];
   readonly includeOccurrenceTime?: boolean;
   readonly selection?: SemanticScopedSourceSelection;
+  readonly membershipInputs?: readonly {
+    readonly relation: LogicalRelationHandle;
+    readonly role: SourceMembershipInput["role"];
+    readonly siteId: string;
+    readonly memberId: string;
+  }[];
 }
 
 export interface LogicalAggregateInput {
@@ -139,6 +147,103 @@ export class LogicalPlanBuilder {
   readonly #analysisPlanSnapshots = new WeakMap<object, ValidatedLogicalPlan>();
   #nextRelationId = 0;
   #nextSlotId = 0;
+  #sourceRewriteBase?: ValidatedLogicalPlan;
+  readonly #sourceRewrites: {
+    readonly source: SourceNode;
+    readonly replacement: SourceNode;
+  }[] = [];
+
+  /** Reserve the original namespaces without replaying or renumbering operators.
+   * Only the newly built fragment owns handles; old nodes remain data records. */
+  static forSourceMembershipRewrite(
+    canonical: ValidatedLogicalPlan,
+  ): LogicalPlanBuilder {
+    validateLogicalPlan(canonical);
+    const builder = new LogicalPlanBuilder(canonical.context);
+    const nextId = (ids: readonly number[]): number => {
+      let maximum = -1;
+      for (const id of ids) {
+        if (
+          !Number.isSafeInteger(id) ||
+          id < 0 ||
+          id >= Number.MAX_SAFE_INTEGER
+        )
+          throw new Error("logical_builder_source_rewrite_invalid_namespace");
+        maximum = Math.max(maximum, id);
+      }
+      return maximum + 1;
+    };
+    builder.#nextRelationId = nextId(canonical.nodes.map((node) => node.id));
+    builder.#nextSlotId = nextId(canonical.slots.map((slot) => slot.id));
+    builder.#sourceRewriteBase = canonical;
+    return builder;
+  }
+
+  /** Replace only a base Source's carrier with actual owned relation edges. */
+  replaceSourceMembershipInputs(
+    source: SourceNode,
+    inputs: NonNullable<LogicalSourceOptions["membershipInputs"]>,
+  ): void {
+    const base = this.#sourceRewriteBase;
+    if (
+      !base ||
+      !base.nodes.includes(source) ||
+      this.#sourceRewrites.some((entry) => entry.source === source)
+    )
+      throw new Error("logical_builder_source_rewrite_foreign_or_repeated");
+    if (
+      !source.selection ||
+      source.membershipInputs !== undefined ||
+      source.selection.preparedMembership !== undefined ||
+      source.selection.qualificationDependencyRefs === undefined
+    )
+      throw new Error("logical_builder_source_rewrite_carrier_mismatch");
+    const membershipInputs = Object.freeze(
+      inputs.map((input) => {
+        this.#owned(input.relation);
+        const siteId = input.relation.slots[input.siteId];
+        const memberId = input.relation.slots[input.memberId];
+        if (siteId === undefined || memberId === undefined)
+          throw new Error("logical_source_membership_key_missing");
+        return Object.freeze({
+          input: input.relation.id,
+          role: input.role,
+          siteId,
+          memberId,
+        });
+      }),
+    );
+    const { qualificationDependencyRefs, ...selectionValues } =
+      source.selection;
+    if (qualificationDependencyRefs.length === 0)
+      throw new Error("logical_builder_source_rewrite_carrier_mismatch");
+    // Preserve all other own data, including non-enumerable fields. No filter,
+    // temporal domain, authorization value or semantic policy is reconstructed.
+    const selection = Object.freeze(
+      Object.defineProperties(
+        selectionValues,
+        Object.fromEntries(
+          Reflect.ownKeys(source.selection)
+            .filter((key) => key !== "qualificationDependencyRefs")
+            .map((key) => [
+              key,
+              Object.getOwnPropertyDescriptor(source.selection!, key)!,
+            ]),
+        ),
+      ),
+    );
+    const replacement = Object.freeze(
+      Object.defineProperties(
+        { ...source, selection, membershipInputs },
+        Object.fromEntries(
+          Reflect.ownKeys(source)
+            .filter((key) => key !== "selection" && key !== "membershipInputs")
+            .map((key) => [key, Object.getOwnPropertyDescriptor(source, key)!]),
+        ),
+      ),
+    );
+    this.#sourceRewrites.push({ source, replacement });
+  }
 
   get context(): LogicalPlanContext {
     return this.#context;
@@ -161,8 +266,21 @@ export class LogicalPlanBuilder {
     entity: AnalyticsEntityKind,
     options: LogicalSourceOptions = {},
   ): LogicalRelationHandle {
+    const membershipInputs = options.membershipInputs?.map((input) => {
+      this.#owned(input.relation);
+      const siteId = input.relation.slots[input.siteId];
+      const memberId = input.relation.slots[input.memberId];
+      if (siteId === undefined || memberId === undefined)
+        throw new Error("logical_source_membership_key_missing");
+      return Object.freeze({
+        input: input.relation.id,
+        role: input.role,
+        siteId,
+        memberId,
+      });
+    });
     const selection = options.selection
-      ? this.#snapshotSelection(options.selection)
+      ? this.#snapshotSelection(options.selection, membershipInputs)
       : undefined;
     const temporalDomain = options.temporalDomain ?? "candidate";
     if (!temporalDomainExists(this.#context.time, temporalDomain)) {
@@ -250,6 +368,9 @@ export class LogicalPlanBuilder {
       entity,
       temporalDomain,
       ...(selection ? { selection } : {}),
+      ...(membershipInputs
+        ? { membershipInputs: Object.freeze(membershipInputs) }
+        : {}),
       values,
       output: values.map((value) => value.slot),
       grain: { kind: "entity", entity, key: self.id },
@@ -405,7 +526,14 @@ export class LogicalPlanBuilder {
 
   #snapshotSelection(
     selection: SemanticScopedSourceSelection,
+    membershipInputs?: readonly SourceMembershipInput[],
   ): SemanticScopedSourceSelection {
+    if (membershipInputs)
+      return snapshotSemanticScopedSourceSelection(
+        selection,
+        this.#context,
+        membershipInputs,
+      );
     const cached = this.#selectionSnapshots.get(selection);
     if (cached) return cached;
     const snapshot = snapshotSemanticScopedSourceSelection(
@@ -1572,11 +1700,14 @@ export class LogicalPlanBuilder {
     child: ValidatedLogicalPlan,
     outputId: string,
     mappings: readonly { readonly field: string; readonly as?: string }[],
+    execution?: "program",
   ): LogicalRelationHandle {
     if (typeof child !== "object" || child === null)
       throw new Error("logical_builder_invalid_analysis_result_plan");
     let snapshot = this.#analysisPlanSnapshots.get(child);
-    if (!snapshot) {
+    if (execution === "program") {
+      snapshot = validateLogicalPlan(child);
+    } else if (!snapshot) {
       const copy = snapshotLogicalPlan(child);
       snapshot = validateLogicalPlan(copy);
       this.#analysisPlanSnapshots.set(child, snapshot);
@@ -1590,7 +1721,10 @@ export class LogicalPlanBuilder {
       )
     )
       throw new Error("logical_builder_analysis_result_subject_mismatch");
-    if (snapshot.nodes.some((node) => node.kind === "analysis-result"))
+    if (
+      execution !== "program" &&
+      snapshot.nodes.some((node) => node.kind === "analysis-result")
+    )
       throw new Error("logical_builder_nested_analysis_result_unsupported");
 
     const declaredOutput = snapshot.outputs.find(
@@ -1701,6 +1835,7 @@ export class LogicalPlanBuilder {
     const node = {
       kind: "analysis-result",
       id: relationIdValue,
+      ...(execution ? { execution } : {}),
       childPlan: snapshot,
       outputId,
       mappings: Object.freeze(resolvedMappings),
@@ -1710,7 +1845,49 @@ export class LogicalPlanBuilder {
     return this.#addNode(node, parentSlots, node.grain, []);
   }
 
+  /** Keeps the actual producer plan; execution must supply its completed output. */
+  importProgramAnalysisResult(
+    child: ValidatedLogicalPlan,
+    outputId: string,
+    mappings: readonly { readonly field: string; readonly as?: string }[],
+  ): LogicalRelationHandle {
+    return this.importAnalysisResult(child, outputId, mappings, "program");
+  }
+
   finish(): ValidatedLogicalPlan {
+    const base = this.#sourceRewriteBase;
+    if (base) {
+      const sources = base.nodes.filter((node) => node.kind === "source");
+      if (
+        sources.length !== this.#sourceRewrites.length ||
+        this.#outputs.length !== 0 ||
+        this.#nodes.some(
+          (node) =>
+            node.kind !== "analysis-result" &&
+            node.kind !== "filter" &&
+            node.kind !== "project" &&
+            node.kind !== "distinct",
+        )
+      )
+        throw new Error(
+          "logical_builder_source_rewrite_incomplete_or_unsupported",
+        );
+      const nodes = [
+        ...this.#nodes,
+        ...base.nodes.map(
+          (node) =>
+            this.#sourceRewrites.find((entry) => entry.source === node)
+              ?.replacement ?? node,
+        ),
+      ];
+      return validateLogicalPlan({
+        ...base,
+        context: base.context,
+        slots: [...base.slots, ...this.#slots],
+        nodes,
+        outputs: base.outputs,
+      });
+    }
     const plan: LogicalPlan = {
       version: 1,
       context: this.#context,
@@ -1933,6 +2110,8 @@ export class LogicalPlanBuilder {
     nullable: boolean,
     lineage: SlotLineage,
   ): LogicalSlot {
+    if (this.#sourceRewriteBase && !Number.isSafeInteger(this.#nextSlotId))
+      throw new Error("logical_builder_source_rewrite_invalid_namespace");
     const frozenType = Object.freeze({ ...type }) as LogicalValueType;
     const slot = Object.freeze({
       id: slotId(this.#nextSlotId++),
@@ -1946,6 +2125,8 @@ export class LogicalPlanBuilder {
   }
 
   #newRelationId(): RelationId {
+    if (this.#sourceRewriteBase && !Number.isSafeInteger(this.#nextRelationId))
+      throw new Error("logical_builder_source_rewrite_invalid_namespace");
     return relationId(this.#nextRelationId++);
   }
 

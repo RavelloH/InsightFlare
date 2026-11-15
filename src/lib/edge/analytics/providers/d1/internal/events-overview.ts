@@ -13,6 +13,10 @@ import type { Env } from "@/lib/edge/types";
 import { queryAnalyticsReportOutputSetRowsFromD1 } from "./analytics-report-query";
 import type { DimensionRow, FilterDocument, QueryWindow } from "./core";
 import type { EventMembershipFallback } from "./event-membership-fallback";
+import {
+  bindWholeOriginalEventDetailReader,
+  type WholeOriginalEventDetailMembership,
+} from "./whole-filter-reader-preparation";
 
 interface EventTypeOverviewRow extends Record<string, unknown> {
   readonly cardType?: unknown;
@@ -34,6 +38,7 @@ export async function queryEventTypeOverviewFromD1(
     includeBreakdowns?: boolean;
     /** Request-private Event membership shared by the type-detail reports. */
     membership?: EventMembershipFallback;
+    wholeOriginalDetail?: WholeOriginalEventDetailMembership;
   },
 ) {
   const metadata = scopedFilterMetadata(filters);
@@ -56,8 +61,21 @@ export async function queryEventTypeOverviewFromD1(
       denominatorSource,
     }),
   );
+  const wholeDetail =
+    !bound && options?.wholeOriginalDetail
+      ? bindWholeOriginalEventDetailReader({
+          membership: options.wholeOriginalDetail,
+          child: "overview",
+          siteId,
+          filters,
+          queryTime: metadata?.time ?? queryWindowToTime(window),
+          readerQueryTime: metadata?.time ?? queryWindowToTime(window),
+          scopePlan: metadata?.plan,
+        })
+      : undefined;
   const plan =
     bound?.plan ??
+    wholeDetail?.plan ??
     buildEventTypeOverviewPlan({
       siteId,
       queryTime: metadata?.time ?? queryWindowToTime(window),
@@ -92,7 +110,7 @@ export async function queryEventTypeOverviewFromD1(
       ],
     },
     undefined,
-    bound?.executionInputs,
+    bound?.executionInputs ?? wholeDetail?.executionInputs,
   )) as EventTypeOverviewRow[];
   const summaryRow = rows.find((row) => row.cardType === "summary");
   const readDimension = (cardType: string): DimensionRow[] =>

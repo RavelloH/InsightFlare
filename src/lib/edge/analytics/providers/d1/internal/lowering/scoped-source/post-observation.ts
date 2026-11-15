@@ -167,6 +167,8 @@ export class ScopedPostObservationLowerer {
         rawDataset,
         baseSelection,
         this.#membership.matchingPageEventOwnerPairs(rawDataset, baseSelection),
+        undefined,
+        this.#context.qualificationRelations,
       );
       const events = selectedEventRows(
         rawDataset,

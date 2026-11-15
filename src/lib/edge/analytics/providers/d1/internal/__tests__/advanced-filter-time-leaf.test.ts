@@ -15,8 +15,10 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
+import * as countSupport from "@/lib/edge/analytics/engine/advanced-filter-count-support";
+import * as overviewRecipe from "@/lib/edge/analytics/engine/overview-membership-dependency-plan";
+import * as referrersPageRecipe from "@/lib/edge/analytics/engine/referrers-page-membership-dependency-plan";
 import { preparedMembershipIdentities } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
-import * as countSupport from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import type { Env } from "@/lib/edge/types";
@@ -210,41 +212,56 @@ async function evaluate(
     DB: createSqliteD1Database(database, trace),
   } as unknown as Env;
   const diagnostics = createD1ReadDiagnostics();
+  // This middleware-only fixture observes the legacy handle to isolate Count
+  // time-leaf SQL. Actual request-owned reader binding and DTOs have separate
+  // coverage in overview-independent-time-membership.test.ts and
+  // referrers-page-independent-membership-regression.test.ts.
+  const legacyRoute = vi
+    .spyOn(overviewRecipe, "planOverviewMembershipDependencies")
+    .mockReturnValue(undefined);
+  const legacyReferrersRoute = vi
+    .spyOn(referrersPageRecipe, "planReferrersPageMembershipDependencies")
+    .mockReturnValue(undefined);
   const coreEvaluator = vi.spyOn(filterEvaluator, "evaluateFilterDocument");
   const classify = vi.spyOn(countSupport, "classifyAdvancedCountFilter");
-  if (options.forceCore)
-    classify.mockReturnValue({
-      kind: "unsupported",
-      path: "root",
-      code: "forced_core_oracle",
-      reason: "The test forces the Core evaluator as the oracle.",
-    });
-  const input = prepareScopedQuery("overview", {
-    context: siteQueryContext(SITE, "private-dashboard"),
-    time: options.time ?? TIME,
-    filters: parseFilterDsl(dsl, analyticsFilterRegistry),
-    scopePreference: scope,
-  } as QueryInput & { readonly time: QueryTime });
-  const prepared = (await d1AdvancedFilterMiddleware(env, diagnostics)(
-    options.operation ?? "performance",
-    input,
-    async (value) => value,
-  )) as typeof input;
-  const ids = (
-    preparedMembershipIdentities(prepared.scopePlan?.preparedMembership)
-      .entityIds ?? []
-  )
-    .map((identity) => identity.id)
-    .sort();
-  const classifications = classify.mock.results.map((result) =>
-    result.type === "return"
-      ? (result.value as { readonly kind: string }).kind
-      : "throw",
-  );
-  const coreEvaluations = coreEvaluator.mock.calls.length;
-  classify.mockRestore();
-  coreEvaluator.mockRestore();
-  return { ids, diagnostics, classifications, coreEvaluations, trace };
+  try {
+    if (options.forceCore)
+      classify.mockReturnValue({
+        kind: "unsupported",
+        path: "root",
+        code: "forced_core_oracle",
+        reason: "The test forces the Core evaluator as the oracle.",
+      });
+    const input = prepareScopedQuery("overview", {
+      context: siteQueryContext(SITE, "private-dashboard"),
+      time: options.time ?? TIME,
+      filters: parseFilterDsl(dsl, analyticsFilterRegistry),
+      scopePreference: scope,
+    } as QueryInput & { readonly time: QueryTime });
+    const prepared = (await d1AdvancedFilterMiddleware(env, diagnostics)(
+      options.operation ?? "performance",
+      input,
+      async (value) => value,
+    )) as typeof input;
+    const ids = (
+      preparedMembershipIdentities(prepared.scopePlan?.preparedMembership)
+        .entityIds ?? []
+    )
+      .map((identity) => identity.id)
+      .sort();
+    const classifications = classify.mock.results.map((result) =>
+      result.type === "return"
+        ? (result.value as { readonly kind: string }).kind
+        : "throw",
+    );
+    const coreEvaluations = coreEvaluator.mock.calls.length;
+    return { ids, diagnostics, classifications, coreEvaluations, trace };
+  } finally {
+    classify.mockRestore();
+    coreEvaluator.mockRestore();
+    legacyReferrersRoute.mockRestore();
+    legacyRoute.mockRestore();
+  }
 }
 
 const CASES = [

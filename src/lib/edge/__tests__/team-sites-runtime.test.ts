@@ -106,12 +106,19 @@ describe("team sites runtime", () => {
       source: "rollup",
       approximateVisitors: false,
     });
-    expect(createOverviewReader).toHaveBeenCalledWith(input.env, "site-1");
+    expect(createOverviewReader).toHaveBeenCalledWith(
+      input.env,
+      "site-1",
+      undefined,
+      undefined,
+    );
     expect(readLatestSiteActivity).toHaveBeenCalledWith(
       input.env,
       "site-1",
       input.window,
       input.filters,
+      undefined,
+      undefined,
     );
   });
 

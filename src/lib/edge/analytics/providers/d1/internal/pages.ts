@@ -66,6 +66,7 @@ import { buildTimeBuckets, timeBucketTimestamp } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import { queryPageTabsFromD1, queryVisitDimensionFromD1 } from "./dimensions";
 import type { EventMembershipFallback } from "./event-membership-fallback";
+import type { D1ExecutionOptions } from "./execution-options";
 import {
   bindPageVisitQualificationPreparation,
   pageVisitQualificationConsumerKey,
@@ -82,6 +83,7 @@ import {
   paginationBindingForWindow,
 } from "./pagination";
 import type { QualificationExecutionInputs } from "./qualification-execution-inputs";
+import { bindWholeOriginalReader } from "./whole-filter-reader-preparation";
 
 export interface PagesPageVisitQualification {
   readonly preparation: PageVisitQualificationPreparation;
@@ -237,12 +239,14 @@ export async function queryPagesPageFromD1(
   cursor?: PageAggregateCursor | null,
   audience: QueryAudience = "private-dashboard",
   qualification?: PagesPageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<PageResult<PageRow>> {
   const metadata = scopedFilterMetadata(filters);
   const queryTime =
     qualification?.queryTime ?? metadata?.time ?? queryWindowToTime(window);
   const scopePlan = qualification?.scopePlan ?? metadata?.plan;
-  const builtPlan = buildPagesPagePlan({
+  const readerConfiguration = {
     siteId,
     queryTime,
     filters,
@@ -253,21 +257,70 @@ export async function queryPagesPageFromD1(
     limit,
     includeDetails,
     ...(cursor ? { cursor } : {}),
-  });
-  const bound = bindPagesReportQualification({
-    plan: builtPlan,
-    siteId,
-    filters,
-    qualification,
-  });
-  const rows = await queryAnalyticsReportOutputRowsFromD1(
-    env,
-    bound.plan,
-    "pages-page",
-    undefined,
-    undefined,
-    bound.executionInputs,
-  );
+  };
+  const membershipOutputs =
+    !qualification && !wholeOriginalOwner
+      ? (execution?.program?.completedWholeOutputs ?? [])
+      : [];
+  const membershipOutput = membershipOutputs[0];
+  const wholeOriginal = wholeOriginalOwner
+    ? bindWholeOriginalReader({
+        owner: wholeOriginalOwner,
+        consumer: {
+          kind: "page",
+          family: "pages",
+          reader: {
+            kind: "pages-page",
+            configuration: {
+              limit,
+              includeDetails,
+              ...(cursor ? { cursor } : {}),
+            },
+          },
+        },
+        siteId,
+        filters,
+        queryTime: metadata?.time ?? queryTime,
+        scopePlan: metadata?.plan,
+        readerQueryTime: queryTime,
+        ...(execution ? { execution } : {}),
+      })
+    : undefined;
+  const builtPlan =
+    wholeOriginal?.plan ??
+    buildPagesPagePlan({
+      ...readerConfiguration,
+      ...(membershipOutput ? { membershipOutput } : {}),
+    });
+  // Preserve the canonical semantic/builder error before new graph ambiguity.
+  if (membershipOutputs.length > 1)
+    throw new Error("pages_program_membership_producer_ambiguous");
+  const bound =
+    wholeOriginal ??
+    bindPagesReportQualification({
+      plan: builtPlan,
+      siteId,
+      filters,
+      qualification,
+    });
+  const rows = await (membershipOutput || wholeOriginal?.execution
+    ? queryAnalyticsReportOutputRowsFromD1(
+        env,
+        bound.plan,
+        "pages-page",
+        undefined,
+        undefined,
+        bound.executionInputs,
+        wholeOriginal?.execution ?? execution,
+      )
+    : queryAnalyticsReportOutputRowsFromD1(
+        env,
+        bound.plan,
+        "pages-page",
+        undefined,
+        undefined,
+        bound.executionInputs,
+      ));
   const mapped = rows.map((row) => ({
     pathname: String(row.pathname ?? ""),
     query: String(row.queryValue ?? ""),
@@ -451,6 +504,8 @@ export async function queryPageTabsAggregate(
   filters: FilterDocument,
   limit: number,
   qualification?: PagesPageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<{
   path: DimensionRow[];
   title: DimensionRow[];
@@ -465,6 +520,11 @@ export async function queryPageTabsAggregate(
     filters,
     limit,
     qualification,
+    ...((wholeOriginalOwner
+      ? execution
+        ? [wholeOriginalOwner, execution]
+        : [wholeOriginalOwner]
+      : []) as [object?, D1ExecutionOptions?]),
   );
 }
 export interface PagesWithTabsResult {
@@ -517,12 +577,14 @@ export async function queryPagesWithTabsFromD1(
   cursor?: PageAggregateCursor | null,
   audience: QueryAudience = "private-dashboard",
   qualification?: PagesPageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<PagesWithTabsResult> {
   const metadata = scopedFilterMetadata(filters);
   const queryTime =
     qualification?.queryTime ?? metadata?.time ?? queryWindowToTime(window);
   const scopePlan = qualification?.scopePlan ?? metadata?.plan;
-  const builtPlan = buildPagesWithTabsPlan({
+  const readerConfiguration = {
     siteId,
     queryTime,
     filters,
@@ -533,13 +595,40 @@ export async function queryPagesWithTabsFromD1(
     limit,
     includeDetails,
     ...(cursor ? { cursor } : {}),
-  });
-  const bound = bindPagesReportQualification({
-    plan: builtPlan,
-    siteId,
-    filters,
-    qualification,
-  });
+  };
+  const wholeOriginal = wholeOriginalOwner
+    ? bindWholeOriginalReader({
+        owner: wholeOriginalOwner,
+        consumer: {
+          kind: "page",
+          family: "pages",
+          reader: {
+            kind: "pages-with-tabs",
+            configuration: {
+              limit,
+              includeDetails,
+              ...(cursor ? { cursor } : {}),
+            },
+          },
+        },
+        siteId,
+        filters,
+        queryTime: metadata?.time ?? queryTime,
+        scopePlan: metadata?.plan,
+        readerQueryTime: queryTime,
+        ...(execution ? { execution } : {}),
+      })
+    : undefined;
+  const builtPlan =
+    wholeOriginal?.plan ?? buildPagesWithTabsPlan(readerConfiguration);
+  const bound =
+    wholeOriginal ??
+    bindPagesReportQualification({
+      plan: builtPlan,
+      siteId,
+      filters,
+      qualification,
+    });
   const rows = await queryAnalyticsReportOutputSetRowsFromD1(
     env,
     bound.plan,
@@ -559,6 +648,9 @@ export async function queryPagesWithTabsFromD1(
     },
     undefined,
     bound.executionInputs,
+    ...((wholeOriginal?.execution ? [wholeOriginal.execution] : []) as [
+      D1ExecutionOptions?,
+    ]),
   );
   const pageRows = rows
     .filter((row) => row.rowType === "page")

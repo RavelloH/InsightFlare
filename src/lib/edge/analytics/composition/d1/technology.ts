@@ -1,5 +1,5 @@
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
-import { typedQueryProviderFor } from "@/lib/edge/analytics/application/provider-registry";
+import { typedD1QueryProviderFor } from "@/lib/edge/analytics/composition/d1/program-provider-registry";
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
@@ -15,6 +15,7 @@ import {
   prepareDeferredPageVisitQualification,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { resolveCrossBreakdownPageDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
+import type { D1ExecutionOptions } from "@/lib/edge/analytics/providers/d1/internal/execution-options";
 import {
   mapBrowserCrossDimensionRows,
   mapBrowserVersionBreakdownRows,
@@ -47,6 +48,7 @@ import {
   queryUtmDimensionTrendFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/technology/share-trend";
 import { executeShareTrendQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/technology/share-trend-qualification-program";
+import { hasWholeOriginalCompletion } from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 
 import { type D1SiteRuntimeBindings, timeWindow } from "./shared";
 
@@ -93,8 +95,11 @@ export function registerTechnologyProviders(
   registry
     .register(
       "share-trend",
-      typedQueryProviderFor("share-trend", async (input) => {
+      typedD1QueryProviderFor("share-trend", async (input, d1Execution) => {
         const request = input;
+        const wholeOriginalOwner = hasWholeOriginalCompletion(input, "page")
+          ? input
+          : undefined;
         const window = timeWindow(request.time);
         const interval = request.interval;
         const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
@@ -103,6 +108,7 @@ export function registerTechnologyProviders(
         const readLegacy = async (
           legacyFilters: typeof filters,
           qualification?: TechnologyPageVisitQualification,
+          execution?: D1ExecutionOptions,
         ) =>
           variant === "browser"
             ? await queryBrowserTrendFromD1(
@@ -112,7 +118,17 @@ export function registerTechnologyProviders(
                 interval,
                 legacyFilters,
                 limit,
-                ...(qualification ? [qualification] : []),
+                ...((wholeOriginalOwner && execution
+                  ? [qualification, wholeOriginalOwner, execution]
+                  : wholeOriginalOwner
+                    ? [qualification, wholeOriginalOwner]
+                    : qualification
+                      ? [qualification]
+                      : []) as [
+                  TechnologyPageVisitQualification?,
+                  object?,
+                  D1ExecutionOptions?,
+                ]),
               )
             : variant === "browser-engine"
               ? await queryBrowserEngineTrendFromD1(
@@ -122,7 +138,17 @@ export function registerTechnologyProviders(
                   interval,
                   legacyFilters,
                   limit,
-                  ...(qualification ? [qualification] : []),
+                  ...((wholeOriginalOwner && execution
+                    ? [qualification, wholeOriginalOwner, execution]
+                    : wholeOriginalOwner
+                      ? [qualification, wholeOriginalOwner]
+                      : qualification
+                        ? [qualification]
+                        : []) as [
+                    TechnologyPageVisitQualification?,
+                    object?,
+                    D1ExecutionOptions?,
+                  ]),
                 )
               : variant === "client"
                 ? await queryClientDimensionTrendFromD1(
@@ -133,7 +159,17 @@ export function registerTechnologyProviders(
                     legacyFilters,
                     request.dimension,
                     limit,
-                    ...(qualification ? [qualification] : []),
+                    ...((wholeOriginalOwner && execution
+                      ? [qualification, wholeOriginalOwner, execution]
+                      : wholeOriginalOwner
+                        ? [qualification, wholeOriginalOwner]
+                        : qualification
+                          ? [qualification]
+                          : []) as [
+                      TechnologyPageVisitQualification?,
+                      object?,
+                      D1ExecutionOptions?,
+                    ]),
                   )
                 : variant === "utm"
                   ? await queryUtmDimensionTrendFromD1(
@@ -144,7 +180,17 @@ export function registerTechnologyProviders(
                       legacyFilters,
                       request.dimension,
                       limit,
-                      ...(qualification ? [qualification] : []),
+                      ...((wholeOriginalOwner && execution
+                        ? [qualification, wholeOriginalOwner, execution]
+                        : wholeOriginalOwner
+                          ? [qualification, wholeOriginalOwner]
+                          : qualification
+                            ? [qualification]
+                            : []) as [
+                        TechnologyPageVisitQualification?,
+                        object?,
+                        D1ExecutionOptions?,
+                      ]),
                     )
                   : variant === "referrer-channel"
                     ? await queryReferrerAndChannelTrendFromD1(
@@ -154,7 +200,17 @@ export function registerTechnologyProviders(
                         interval,
                         legacyFilters,
                         limit,
-                        ...(qualification ? [qualification] : []),
+                        ...((wholeOriginalOwner && execution
+                          ? [qualification, wholeOriginalOwner, execution]
+                          : wholeOriginalOwner
+                            ? [qualification, wholeOriginalOwner]
+                            : qualification
+                              ? [qualification]
+                              : []) as [
+                          TechnologyPageVisitQualification?,
+                          object?,
+                          D1ExecutionOptions?,
+                        ]),
                       )
                     : await queryReferrerTrendFromD1(
                         options.env,
@@ -163,7 +219,17 @@ export function registerTechnologyProviders(
                         interval,
                         legacyFilters,
                         limit,
-                        ...(qualification ? [qualification] : []),
+                        ...((wholeOriginalOwner && execution
+                          ? [qualification, wholeOriginalOwner, execution]
+                          : wholeOriginalOwner
+                            ? [qualification, wholeOriginalOwner]
+                            : qualification
+                              ? [qualification]
+                              : []) as [
+                          TechnologyPageVisitQualification?,
+                          object?,
+                          D1ExecutionOptions?,
+                        ]),
                       );
         const deferred = deferredShareTrendQualificationFromQuery(request);
         if (deferred) {
@@ -203,19 +269,31 @@ export function registerTechnologyProviders(
             );
           return { value: await readLegacy(fallbackFilters) };
         }
-        const value = await readLegacy(filters);
+        const value = await readLegacy(
+          filters,
+          ...((wholeOriginalOwner &&
+          request.context.policy.audience === "private-dashboard" &&
+          d1Execution?.program &&
+          d1Execution.program.completedWholeOutputs.length > 0
+            ? [undefined, d1Execution]
+            : []) as [undefined?, D1ExecutionOptions?]),
+        );
         return { value };
       }),
     )
     .register(
       "radar",
-      typedQueryProviderFor("radar", async (input) => {
+      typedD1QueryProviderFor("radar", async (input, d1Execution) => {
         const request = input;
+        const wholeOriginalOwner = hasWholeOriginalCompletion(input, "page")
+          ? input
+          : undefined;
         const window = timeWindow(request.time);
         const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
         const readLegacy = async (
           legacyFilters: typeof filters,
           qualification?: TechnologyPageVisitQualification,
+          execution?: D1ExecutionOptions,
         ) =>
           request.variant === "version"
             ? await queryBrowserVersionBreakdownFromD1(
@@ -225,7 +303,17 @@ export function registerTechnologyProviders(
                 legacyFilters,
                 request.browserLimit ?? 0,
                 request.versionLimit ?? 5,
-                ...(qualification ? [qualification] : []),
+                ...((wholeOriginalOwner && execution
+                  ? [qualification, wholeOriginalOwner, execution]
+                  : wholeOriginalOwner
+                    ? [qualification, wholeOriginalOwner]
+                    : qualification
+                      ? [qualification]
+                      : []) as [
+                  TechnologyPageVisitQualification?,
+                  object?,
+                  D1ExecutionOptions?,
+                ]),
               )
             : request.variant === "referrer"
               ? await queryReferrerRadarFromD1(
@@ -234,14 +322,34 @@ export function registerTechnologyProviders(
                   window,
                   legacyFilters,
                   request.limit ?? 24,
-                  ...(qualification ? [qualification] : []),
+                  ...((wholeOriginalOwner && execution
+                    ? [qualification, wholeOriginalOwner, execution]
+                    : wholeOriginalOwner
+                      ? [qualification, wholeOriginalOwner]
+                      : qualification
+                        ? [qualification]
+                        : []) as [
+                    TechnologyPageVisitQualification?,
+                    object?,
+                    D1ExecutionOptions?,
+                  ]),
                 )
               : await queryBrowserRadarFromD1(
                   options.env,
                   options.siteId,
                   window,
                   legacyFilters,
-                  ...(qualification ? [qualification] : []),
+                  ...((wholeOriginalOwner && execution
+                    ? [qualification, wholeOriginalOwner, execution]
+                    : wholeOriginalOwner
+                      ? [qualification, wholeOriginalOwner]
+                      : qualification
+                        ? [qualification]
+                        : []) as [
+                    TechnologyPageVisitQualification?,
+                    object?,
+                    D1ExecutionOptions?,
+                  ]),
                 );
         const deferred = deferredRadarQualificationFromQuery(request);
         if (deferred) {
@@ -290,13 +398,26 @@ export function registerTechnologyProviders(
             );
           return { value: await readLegacy(fallbackFilters) };
         }
-        return { value: await readLegacy(filters) };
+        return {
+          value: await readLegacy(
+            filters,
+            ...((wholeOriginalOwner &&
+            request.context.policy.audience === "private-dashboard" &&
+            d1Execution?.program &&
+            d1Execution.program.completedWholeOutputs.length > 0
+              ? [undefined, d1Execution]
+              : []) as [undefined?, D1ExecutionOptions?]),
+          ),
+        };
       }),
     )
     .register(
       "cross-dimension",
-      typedQueryProviderFor("cross-dimension", async (input) => {
+      typedD1QueryProviderFor("cross-dimension", async (input, d1Execution) => {
         const request = input;
+        const wholeOriginalOwner = hasWholeOriginalCompletion(input, "page")
+          ? input
+          : undefined;
         const window = timeWindow(request.time);
         const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
         if (request.variant === "browser") {
@@ -376,6 +497,10 @@ export function registerTechnologyProviders(
             request.browserLimit ?? 8,
             request.osLimit ?? 6,
             request.deviceTypeLimit ?? 5,
+            ...((wholeOriginalOwner ? [undefined, wholeOriginalOwner] : []) as [
+              undefined?,
+              object?,
+            ]),
           );
           return { value };
         }
@@ -444,6 +569,9 @@ export function registerTechnologyProviders(
                 primaryDimension,
                 secondaryDimension,
                 pageVisitQualification,
+                ...((wholeOriginalOwner ? [wholeOriginalOwner] : []) as [
+                  object?,
+                ]),
               ),
             };
           const fallbackFilters =
@@ -460,6 +588,9 @@ export function registerTechnologyProviders(
               request.secondaryLimit,
               primaryDimension,
               secondaryDimension,
+              ...((wholeOriginalOwner
+                ? [undefined, wholeOriginalOwner]
+                : []) as [undefined?, object?]),
             ),
           };
         }
@@ -472,6 +603,14 @@ export function registerTechnologyProviders(
           request.secondaryLimit,
           primaryDimension,
           secondaryDimension,
+          ...((wholeOriginalOwner &&
+          request.context.policy.audience === "private-dashboard" &&
+          d1Execution?.program &&
+          d1Execution.program.completedWholeOutputs.length > 0
+            ? [undefined, wholeOriginalOwner, d1Execution]
+            : wholeOriginalOwner
+              ? [undefined, wholeOriginalOwner]
+              : []) as [undefined?, object?, D1ExecutionOptions?]),
         );
         return { value };
       }),

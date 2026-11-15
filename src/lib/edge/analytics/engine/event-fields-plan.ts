@@ -35,6 +35,7 @@ export interface EventFieldsPlanInput {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
+  readonly qualificationSemantics?: "whole-original";
   readonly eventName?: string;
 }
 

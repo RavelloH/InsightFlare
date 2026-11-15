@@ -19,6 +19,7 @@ import type { DatabaseBinding } from "@/lib/db/types";
 import type { PhysicalConditionalLookupChoice } from "./conditional-lookup";
 import type { PhysicalLexicographicComparisonChoice } from "./lexicographic-comparison";
 import type { PhysicalRowPipelineChoice } from "./row-pipeline";
+import type { PhysicalRuntimeAdaptiveCandidate } from "./runtime-adaptive-selection";
 import type { PhysicalSelfMembershipChoice } from "./self-membership";
 import type { PhysicalSemiMembershipChoice } from "./semi-membership";
 import type { PhysicalSemiMembershipCostSelection } from "./semi-membership-cost";
@@ -233,8 +234,14 @@ export interface ConstantFilterJoinProjection {
   readonly referencedOutputColumns: readonly number[];
 }
 
-/** A canonical inner-Join input order selected from typed relational evidence. */
+/** A freshly validated inner-Join access path or input-order strategy. */
 export type PhysicalJoinOrderStrategy =
+  | {
+      readonly kind: "computed-key-lookup";
+      readonly join: JoinNode;
+      readonly driver: "preserve";
+      readonly uniqueKey?: never;
+    }
   | {
       readonly kind: "right-anchor" | "unique-lookup";
       readonly join: JoinNode;
@@ -259,6 +266,8 @@ export type PhysicalJoinOrderStrategy =
 export interface PhysicalQueryPlan<
   Row extends object = Record<string, unknown>,
 > {
+  /** Optional current-graph attempt; no runtime truth or unconditional license. */
+  readonly runtimeAdaptiveCandidate?: PhysicalRuntimeAdaptiveCandidate;
   readonly kind: "physical-query";
   readonly root: LogicalQueryNode;
   readonly scope: QuerySource["scope"];

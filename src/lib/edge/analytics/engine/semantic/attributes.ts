@@ -228,6 +228,10 @@ const semanticObservationBaseAttributeCatalog: readonly SemanticAttributeDefinit
     { name: "sameSiteEventName", scalar: "string", nullable: true },
     { name: "rawSiteId", scalar: "string", nullable: false },
     { name: "siteIdentityConsistent", scalar: "boolean", nullable: false },
+    // Actual identity/time storage proof for ordered activity summaries.
+    // These internal facts are independent of declared column affinity.
+    { name: "sessionOrderCanonical", scalar: "boolean", nullable: false },
+    { name: "visitorOrderCanonical", scalar: "boolean", nullable: false },
     { name: "visitId", scalar: "string", nullable: true },
     { name: "userId", scalar: "string", nullable: true },
     { name: "userName", scalar: "string", nullable: true },
@@ -914,6 +918,8 @@ export function assertSemanticObservationAttributeContracts(
 ): void {
   const nonNullBooleanAttributes = new Set([
     "observation.siteIdentityConsistent",
+    "observation.sessionOrderCanonical",
+    "observation.visitorOrderCanonical",
     ...semanticObservationStorageClassAttributes.map(({ id }) => id),
   ]);
   for (const attribute of attributes) {

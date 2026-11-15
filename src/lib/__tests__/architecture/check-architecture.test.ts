@@ -31,6 +31,46 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true });
 });
 describe("architecture checker", () => {
+  it("resolves URL assets while retaining missing-module and subsystem checks", () => {
+    const root = fixture();
+    mkdirSync(path.join(root, "src/app"), { recursive: true });
+    mkdirSync(path.join(root, "src/routes"), { recursive: true });
+    writeFileSync(path.join(root, "src/app/globals.css"), "body {}\n");
+    writeFileSync(
+      path.join(root, "src/routes/root.tsx"),
+      [
+        'import stylesheet from "@/app/globals.css?url";',
+        'import sameStylesheet from "../app/globals.css?url";',
+        'import missing from "@/app/missing.css?url";',
+        "export { stylesheet, sameStylesheet, missing };",
+      ].join("\n"),
+    );
+    writeFileSync(
+      path.join(root, "src/lib/edge/analytics/contract/query.ts"),
+      'import runtimeUrl from "@/lib/dashboard/runtime?url";\nexport { runtimeUrl };\n',
+    );
+    expect(
+      collectArchitectureViolations(root).map(
+        ({ rule, specifier, target }) => ({
+          rule,
+          specifier,
+          target,
+        }),
+      ),
+    ).toEqual([
+      {
+        rule: "analytics-contract-direction",
+        specifier: "@/lib/dashboard/runtime?url",
+        target: "src/lib/dashboard/runtime.ts",
+      },
+      {
+        rule: "unresolved-internal-import",
+        specifier: "@/app/missing.css?url",
+        target: "__unresolved__/app/missing.css?url",
+      },
+    ]);
+  });
+
   it("keeps the Analytics engine independent from physical storage", () => {
     const root = fixture();
     mkdirSync(path.join(root, "src/lib/edge/analytics/engine"), {

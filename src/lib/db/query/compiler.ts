@@ -4,6 +4,10 @@ import {
   D1StatementBudgetError,
 } from "@/lib/db/d1-budget";
 import {
+  MAXIMUM_OWNER_ROWS,
+  MAXIMUM_SUM_MAGNITUDE,
+} from "@/lib/db/query/physical/owner-aggregate-obligations";
+import {
   getParameterPlaceholderOffsets,
   parameter,
   type SqlFragment,
@@ -1347,6 +1351,28 @@ function compileNode(
       ]);
       const sparseOutputs = context.sparseJoinOutputs.get(node);
       const joinOrder = context.joinOrderStrategies.get(node);
+      const ordinaryRight = renderSourceFrom(
+        node.right,
+        rightSql,
+        rightAlias,
+        context,
+      );
+      const renderedRight =
+        joinOrder?.kind === "computed-key-lookup"
+          ? concat(
+              text("(SELECT "),
+              text(rightAlias + ".* FROM "),
+              ordinaryRight,
+              text(" GROUP BY "),
+              join(
+                node.right.fields.map((_field, index) =>
+                  generatedColumn(index, rightAlias),
+                ),
+              ),
+              text(") AS " + rightAlias),
+            )
+          : ordinaryRight;
+
       const conditionalLookup = context.conditionalLookupChoices.get(node);
       const joinCondition = conditionalLookup
         ? compileConditionalLookupCondition(conditionalLookup)
@@ -1383,7 +1409,7 @@ function compileNode(
         text(" FROM "),
         joinOrder?.driver === "right"
           ? concat(
-              renderSourceFrom(node.right, rightSql, rightAlias, context),
+              renderedRight,
               text(" CROSS JOIN "),
               renderSourceFrom(node.left, leftSql, leftAlias, context),
               text(" WHERE "),
@@ -1393,14 +1419,14 @@ function compileNode(
             ? concat(
                 renderSourceFrom(node.left, leftSql, leftAlias, context),
                 text(" CROSS JOIN "),
-                renderSourceFrom(node.right, rightSql, rightAlias, context),
+                renderedRight,
                 text(" WHERE "),
                 compileD1Expression(joinCondition, scopes, context),
               )
             : concat(
                 renderSourceFrom(node.left, leftSql, leftAlias, context),
                 text(node.joinType === "left" ? " LEFT JOIN " : " INNER JOIN "),
-                renderSourceFrom(node.right, rightSql, rightAlias, context),
+                renderedRight,
                 text(" ON "),
                 compileD1Expression(joinCondition, scopes, context),
               ),
@@ -1412,10 +1438,7 @@ function compileNode(
       const rightSql = compileNode(node.right.node, context, outerScopes);
       const leftAlias = nextAlias(context, "l");
       const rightAlias = nextAlias(context, "r");
-      const semiMembership =
-        node.kind === "semi-join"
-          ? context.semiMemberships.get(node)
-          : undefined;
+      const semiMembership = context.semiMemberships.get(node);
       if (semiMembership && canRenderSemiMembership(semiMembership, context)) {
         const leftKeys = semiMembership.leftKeyIndexes.map((index) =>
           generatedColumn(index, leftAlias),
@@ -1436,12 +1459,16 @@ function compileNode(
             text(" FROM "),
             renderSourceFrom(node.left, leftSql, leftAlias, context),
             text(" WHERE "),
+            ...(node.kind === "anti-join" ? [text("(")] : []),
             parenthesize(join(leftKeys)),
             text(" IN (SELECT "),
             join(rightKeys),
             text(" FROM "),
             renderSourceFrom(node.right, rightSql, rightAlias, context),
             text(")"),
+            // IN is true exactly when strict equality finds a matching row.
+            // False and unknown both mean NOT EXISTS, including NULL tuples.
+            ...(node.kind === "anti-join" ? [text(") IS NOT TRUE")] : []),
           ),
           { kind: "semi-membership", choice: semiMembership },
         );
@@ -2144,7 +2171,14 @@ export function compileD1Query(
     | PhysicalQueryPlan<object>,
   options: D1CompileOptions = {},
 ): CompiledQuery<object> {
-  return compileD1QueryInternal(plan, options, true);
+  const physical = (
+    "kind" in plan && plan.kind === "physical-query"
+      ? plan
+      : lowerLogicalPlan(plan)
+  ) as PhysicalQueryPlan<object>;
+  const original = compileD1QueryInternal(physical, options, true);
+  if (!physical.runtimeAdaptiveCandidate) return original;
+  return compilePrivateAdaptiveWithBudget(physical, options, original).original;
 }
 
 /** @internal Exposes the exact final render frame to focused compiler tests. */
@@ -2449,6 +2483,7 @@ function compileD1QueryInternal(
             enableSingletonRankFusion,
             finalRenderCapture,
             disableCompileOrderForTest,
+            forceTupleMembershipFallbackForTest,
           ),
         );
       }
@@ -2472,6 +2507,7 @@ function compileD1QueryInternal(
         enableSingletonRankFusion,
         finalRenderCapture,
         disableCompileOrderForTest,
+        forceTupleMembershipFallbackForTest,
       ),
     );
   }
@@ -2495,6 +2531,7 @@ function compileD1QueryInternal(
       enableSingletonRankFusion,
       finalRenderCapture,
       disableCompileOrderForTest,
+      forceTupleMembershipFallbackForTest,
     ),
   );
 }
@@ -2600,9 +2637,13 @@ function optimizeForFinalShape(
       ),
       true,
       new Map(
-        physical.joinOrderStrategies.map(
-          (strategy) => [strategy.join, strategy] as const,
-        ),
+        physical.joinOrderStrategies
+          .filter(
+            (strategy) =>
+              !forceTupleMembershipFallbackForTest ||
+              strategy.kind !== "computed-key-lookup",
+          )
+          .map((strategy) => [strategy.join, strategy] as const),
       ),
       new Map(
         physical.conditionalLookupChoices.map(
@@ -2774,6 +2815,7 @@ function renderAndBudget(
   enableSingletonRankFusion = true,
   finalRenderCapture?: FinalRenderCompileCapture,
   disableCompileOrderForTest = false,
+  forceTupleMembershipFallbackForTest = false,
 ): CompiledQuery<object> {
   assertPhysicalSharedRelationInterfaceViewMatches(
     sharedRelationInterfaces,
@@ -2881,9 +2923,13 @@ function renderAndBudget(
         ),
         includeSharedRelations,
         new Map(
-          physical.joinOrderStrategies.map(
-            (strategy) => [strategy.join, strategy] as const,
-          ),
+          physical.joinOrderStrategies
+            .filter(
+              (strategy) =>
+                !forceTupleMembershipFallbackForTest ||
+                strategy.kind !== "computed-key-lookup",
+            )
+            .map((strategy) => [strategy.join, strategy] as const),
         ),
         new Map(
           physical.conditionalLookupChoices.map(
@@ -3084,6 +3130,7 @@ function renderAndBudget(
       enableSingletonRankFusion,
       finalRenderCapture,
       disableCompileOrderForTest,
+      forceTupleMembershipFallbackForTest,
     );
   }
 }
@@ -3639,5 +3686,453 @@ function withParameterSlotShape(
     parameterStrategy: layout.strategy,
     parameterOccurrenceCount: layout.occurrenceCount,
     parameterSlotCount: layout.slotCount,
+  };
+}
+
+// Private adaptive renderer; ordinary SQL remains the public compiled query.
+import { registerAdaptiveQueryExecutionForCompiler } from "@/lib/db/query/adaptive-execution";
+
+import { deriveRuntimeBooleanMembership } from "./physical/runtime-boolean-membership";
+import {
+  deriveRuntimeWindowCertificate,
+  relationInputs,
+  type RuntimeWindowKey,
+} from "./physical/runtime-window-certificate";
+
+export function compileD1AdaptiveQueryForTest(
+  plan: PhysicalQueryPlan<object>,
+  options: D1CompileOptions = {},
+) {
+  // Preserve an exact ordinary public statement, including current physical
+  // validation and budget/error behavior, before constructing the private probe.
+  const original = compileD1QueryInternal(plan, options, true);
+  return compilePrivateAdaptiveWithBudget(plan, options, original);
+}
+function compilePrivateAdaptiveWithBudget(
+  plan: PhysicalQueryPlan<object>,
+  options: D1CompileOptions,
+  original: CompiledQuery<object>,
+) {
+  try {
+    return compilePrivateAdaptiveForTest(plan, options, original);
+  } catch (error) {
+    if (error instanceof D1StatementBudgetError)
+      return {
+        original,
+        derivation: {
+          eligible: false as const,
+          reason: "private-adaptive-budget",
+        },
+      };
+    throw error;
+  }
+}
+function compilePrivateAdaptiveForTest(
+  plan: PhysicalQueryPlan<object>,
+  options: D1CompileOptions,
+  original: CompiledQuery<object>,
+) {
+  const fresh = deriveRuntimeWindowCertificate(plan);
+  if (!fresh.eligible) return { original, derivation: fresh };
+  const c = fresh.certificate;
+  // SQL identifiers are case-insensitive. Decline this private candidate if
+  // its reserved namespace is already present; the original remains valid.
+  if (
+    [...reservePlanIdentifiers(plan)].some((n) =>
+      n.toLowerCase().startsWith("_d1_adaptive_"),
+    )
+  )
+    return {
+      original,
+      derivation: {
+        eligible: false as const,
+        reason: "private-adaptive-identifier-collision",
+      },
+    };
+  const conditionalMembership = deriveRuntimeBooleanMembership(plan);
+  if (!conditionalMembership.length)
+    return {
+      original,
+      derivation: {
+        eligible: false as const,
+        reason: "no-conditional-positive-membership",
+      },
+    };
+  const view = validatePhysicalQueryPlan(plan);
+  const nodes: LogicalQueryNode[] = [];
+  const seen = new Set<LogicalQueryNode>();
+  const visit = (n: LogicalQueryNode) => {
+    if (seen.has(n)) return;
+    seen.add(n);
+    for (const i of relationInputs(n)) visit(i.node);
+    nodes.push(n);
+  };
+  visit(plan.root);
+  const names = new Map(plan.sharedRelations.map((d) => [d.node, d.name]));
+  const required = new Set<LogicalQueryNode>([c.owner.node]);
+  let id = 0;
+  for (const n of nodes)
+    if (required.has(n) && !names.has(n))
+      names.set(n, `_d1_adaptive_input_${id++}`);
+  const measured = optimizeForFinalShape(
+    plan,
+    true,
+    true,
+    true,
+    false,
+    true,
+    true,
+    view,
+    true,
+    false,
+    true,
+  ).physical;
+  const membershipStrategies = new Map(
+    (measured.membershipOptimization?.strategies ?? []).map(
+      (s) =>
+        [
+          s.expression,
+          {
+            strategy: s.strategy,
+            ...(s.jsonText === undefined ? {} : { jsonText: s.jsonText }),
+          },
+        ] as const,
+    ),
+  );
+  const textStrategies = new Map(
+    (measured.membershipOptimization?.rowStrategies ?? []).map(
+      (s) =>
+        [
+          s.node,
+          {
+            strategy: s.strategy,
+            ...(s.jsonSegments === undefined
+              ? {}
+              : { jsonSegments: s.jsonSegments.map((j) => j.jsonText) }),
+          },
+        ] as const,
+    ),
+  );
+  const context = renderContext(
+    names,
+    membershipStrategies,
+    undefined,
+    new Map(plan.directScanProjections.map((d) => [d.project, d])),
+    reservePlanIdentifiers(plan),
+    textStrategies,
+    undefined,
+    new Map(plan.passthroughProjectFusions.map((d) => [d.project, d])),
+    new Map(plan.constantFilterJoinProjections.map((d) => [d.project, d])),
+    new Map(
+      plan.constantFilterJoinProjections.map((d) => [
+        d.join,
+        new Set(d.referencedOutputColumns),
+      ]),
+    ),
+    new Map(
+      (measured.membershipOptimization?.tupleMemberships ?? []).map((d) => [
+        d.project,
+        d,
+      ]),
+    ),
+    new Map(plan.selfMembershipChoices.map((d) => [d.project, d])),
+    true,
+    new Map(plan.joinOrderStrategies.map((d) => [d.join, d])),
+    new Map(plan.conditionalLookupChoices.map((d) => [d.join, d])),
+    new Map(plan.rowPipelineChoices.map((d) => [d.root, d])),
+    false,
+    plan.lexicographicComparisonChoices,
+    view,
+    [
+      ...semiMembershipChoicesForRender(plan, true, false),
+      ...conditionalMembership.map((c) => c.choice),
+    ],
+    plan.singletonRankChoices,
+    true,
+    undefined,
+    plan.nativeNullOrderingChoices,
+  );
+  // Added probe-owned inputs carry their separate conditional proof. Existing
+  // static interfaces remain unchanged; no static gate is overridden.
+  const definitions: SqlFragment[] = [];
+  for (const n of nodes) {
+    const name = names.get(n);
+    if (!name) continue;
+    context.bypassSharedNode = n;
+    const body = compileNode(n, context, new Map());
+    context.bypassSharedNode = undefined;
+    const existing = plan.sharedRelations.find((d) => d.node === n);
+    definitions.push(
+      concat(
+        identifier(name),
+        text(
+          required.has(n) || existing?.materialization === "materialized"
+            ? " AS MATERIALIZED ("
+            : " AS (",
+        ),
+        body,
+        text(")"),
+      ),
+    );
+  }
+  const field = (alias: string, index: number) =>
+    concat(identifier(alias), text("."), identifier(`_c${index}`));
+  const guardFor = (
+    source: QuerySource,
+    tuple: readonly SqlExpression[],
+    keys: readonly RuntimeWindowKey[],
+  ): SqlFragment => {
+    const name = names.get(source.node);
+    const alias = `_d1_adaptive_keys_${id++}`;
+    const scopes = new Map([[source.scope, { alias }]]);
+    const storage = keys.map((k) => {
+      const v = field(alias, k.index);
+      return k.storage === "text"
+        ? concat(text("typeof("), v, text(") = 'text'"))
+        : concat(
+            text("((typeof("),
+            v,
+            text(") = 'integer'"),
+            ...(k.storage === "safe-integer-or-constructed"
+              ? [
+                  text(" OR (typeof("),
+                  v,
+                  text(") = 'real' AND "),
+                  v,
+                  text(" IN ("),
+                  join(
+                    (k.constructedRealValues ?? []).map((n) => text(String(n))),
+                  ),
+                  text("))"),
+                ]
+              : []),
+            text(") AND "),
+            v,
+            text(" BETWEEN -9007199254740991 AND 9007199254740991)"),
+          );
+    });
+    // GROUP uses exactly the actual partition and full ORDER expressions,
+    // including explicit null markers. This is stricter than bare schema PKs.
+    return concat(
+      text(
+        "SELECT CASE WHEN COALESCE(MAX(_d1_n),0)>1 OR COALESCE(MAX(_d1_bad),0)>0 THEN 0 ELSE 1 END AS _d1_ok FROM (SELECT COUNT(*) AS _d1_n,MAX(CASE WHEN ",
+      ),
+      join(storage, text(" AND ")),
+      text(" THEN 0 ELSE 1 END) AS _d1_bad FROM "),
+      name
+        ? identifier(name)
+        : parenthesize(compileNode(source.node, context, new Map())),
+      text(" AS "),
+      identifier(alias),
+      text(" GROUP BY "),
+      join(tuple.map((e) => compileD1Expression(e, scopes, context))),
+      text(")"),
+    );
+  };
+  const guards = c.windows.map((o) => guardFor(o.input, o.tuple, o.keys));
+  guards.push(
+    concat(
+      text("SELECT COUNT(*) <= "),
+      text(String(c.maximumOwnerRows)),
+      text(" FROM "),
+      identifier(names.get(c.owner.node)!),
+    ),
+  );
+  for (const obligation of c.ownerAggregates) {
+    const alias = `_d1_adaptive_aggregate_keys_${id++}`;
+    const checks = obligation.extremaIndexes.map((index) => {
+      const v = field(alias, index);
+      return concat(
+        text("("),
+        v,
+        text(" IS NULL OR (typeof("),
+        v,
+        text(")='integer' AND "),
+        v,
+        text(" BETWEEN -9007199254740991 AND 9007199254740991))"),
+      );
+    });
+    for (const index of obligation.sumIndexes) {
+      const v = field(alias, index);
+      const converted = concat(text("CAST("), v, text(" AS REAL)"));
+      checks.push(
+        concat(
+          text("("),
+          v,
+          text(" IS NULL OR ("),
+          converted,
+          text(
+            ` BETWEEN -${MAXIMUM_SUM_MAGNITUDE} AND ${MAXIMUM_SUM_MAGNITUDE} AND `,
+          ),
+          converted,
+          text("=CAST("),
+          converted,
+          text(" AS INTEGER)))"),
+        ),
+      );
+    }
+    if (checks.length)
+      guards.push(
+        concat(
+          text(
+            `SELECT CASE WHEN COUNT(*)<=${MAXIMUM_OWNER_ROWS} AND COALESCE(MAX(CASE WHEN `,
+          ),
+          join(checks, text(" AND ")),
+          text(" THEN 0 ELSE 1 END),0)=0 THEN 1 ELSE 0 END FROM "),
+          identifier(names.get(c.owner.node)!),
+          text(" AS "),
+          identifier(alias),
+        ),
+      );
+  }
+  const guardName = "_d1_adaptive_guard";
+  definitions.push(
+    concat(
+      identifier(guardName),
+      text(" AS MATERIALIZED (SELECT CASE WHEN "),
+      join(
+        guards.map((g) => concat(text("("), g, text(")=1"))),
+        text(" AND "),
+      ),
+      text(" THEN 1 ELSE 0 END AS _d1_ok)"),
+    ),
+  );
+  const sort = c.terminalSort;
+  const sortAlias = "_d1_adaptive_sorted";
+  const scopes = new Map([[sort.input.scope, { alias: sortAlias }]]);
+  let ordered: SqlFragment = concat(
+    text("SELECT "),
+    join(outputList(context, sort.input.fields.length, sortAlias)),
+    text(", ROW_NUMBER() OVER (ORDER BY "),
+    join(
+      sort.keys.map((k) =>
+        concat(
+          compileD1Expression(k.expression, scopes, context),
+          text(` ${k.direction}`),
+        ),
+      ),
+    ),
+    text(") AS _d1_ordinal FROM "),
+    parenthesize(compileNode(sort.input.node, context, new Map())),
+    text(" AS "),
+    identifier(sortAlias),
+  );
+  let serial = 0;
+  for (const n of [...c.terminalPath].reverse()) {
+    const alias = `_d1_adaptive_output_${serial++}`;
+    if (n.kind === "limit")
+      ordered = concat(
+        text("SELECT "),
+        identifier(alias),
+        text(".* FROM ("),
+        ordered,
+        text(") AS "),
+        identifier(alias),
+        text(" ORDER BY _d1_ordinal LIMIT "),
+        compileD1Expression(n.count, new Map(), context),
+      );
+    else if (n.kind === "project")
+      ordered = concat(
+        text("SELECT "),
+        join(
+          n.projections.map((p, i) =>
+            concat(
+              compileD1Expression(
+                p.expression,
+                new Map([[n.input.scope, { alias }]]),
+                context,
+              ),
+              text(` AS _c${i}`),
+            ),
+          ),
+        ),
+        text(", "),
+        identifier(alias),
+        text("._d1_ordinal FROM ("),
+        ordered,
+        text(") AS "),
+        identifier(alias),
+      );
+    else throw new Error("invalid_adaptive_terminal_path");
+  }
+  const fields = plan.fields.map((f) => f.name);
+  const tagField = "_d1_adaptive_tag",
+    guardField = "_d1_adaptive_allowed",
+    ordinalField = "_d1_adaptive_ordinal";
+  if (
+    new Set(
+      [...fields, tagField, guardField, ordinalField].map((f) =>
+        f.toLowerCase(),
+      ),
+    ).size !==
+    fields.length + 3
+  )
+    return {
+      original,
+      derivation: {
+        eligible: false as const,
+        reason: "private-adaptive-field-collision",
+      },
+    };
+  const head = concat(
+    text("SELECT 0 AS "),
+    identifier(tagField),
+    text(", _d1_ok AS "),
+    identifier(guardField),
+    text(", 0 AS "),
+    identifier(ordinalField),
+    text(", "),
+    join(fields.map((f) => concat(text("NULL AS "), identifier(f)))),
+    text(" FROM "),
+    identifier(guardName),
+  );
+  const body = concat(
+    text("SELECT 1 AS "),
+    identifier(tagField),
+    text(", NULL AS "),
+    identifier(guardField),
+    text(", _d1_ordinal AS "),
+    identifier(ordinalField),
+    text(", "),
+    join(fields.map((f, i) => concat(text(`_c${i} AS `), identifier(f)))),
+    text(" FROM ("),
+    ordered,
+    text(") LIMIT CASE (SELECT _d1_ok FROM "),
+    identifier(guardName),
+    text(") WHEN 1 THEN -1 ELSE 0 END"),
+  );
+  const fragment = concat(
+    text("WITH "),
+    join(definitions),
+    text(" "),
+    head,
+    text(" UNION ALL SELECT * FROM ("),
+    body,
+    text(") ORDER BY "),
+    identifier(tagField),
+    text(", "),
+    identifier(ordinalField),
+  );
+  // Only the ordinary final typed parameter-layout renderer is allowed here.
+  // No SQL string replacement, aliased report matching or value coercion.
+  const layout = optimizePhysicalParameterSlots(fragment.bindings);
+  const numbered = layout
+    ? renderNumberedParameterSlots(fragment, layout)
+    : undefined;
+  const query = compileAndBudget(numbered ?? fragment, {
+    ...options,
+    tag: "adaptive-window-probe",
+  });
+  const transport = { tagField, guardField, ordinalField, fields };
+  registerAdaptiveQueryExecutionForCompiler(original, {
+    query,
+    layout: transport,
+  });
+  return {
+    original,
+    query,
+    layout: transport,
+    derivation: fresh,
+    conditionalMembership,
   };
 }

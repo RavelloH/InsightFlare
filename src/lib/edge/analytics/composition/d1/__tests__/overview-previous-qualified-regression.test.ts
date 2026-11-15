@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
@@ -39,6 +39,7 @@ import {
   compileQualificationProgramEnvelope,
   type QualificationEnvelopeImportedGroupedSummaryReference,
 } from "@/lib/edge/analytics/providers/d1/internal/qualification-program-envelope";
+import * as wholeReader from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import { createOverviewReader } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
@@ -1123,7 +1124,22 @@ describe("Overview previous qualified regression", () => {
       expect(deferred).toBeUndefined();
       if (!forwarded)
         throw new Error("wave97b_unsupported_forwarded_query_missing");
-      const filters = forwarded.filters;
+      // The current fallback carries whole completion. Build the historical
+      // handle route independently before invoking the historical raw readers.
+      const selector = vi
+        .spyOn(wholeReader, "selectWholeOriginalConsumer")
+        .mockReturnValue(undefined);
+      let legacyForwarded: CanonicalQuery<"overview">;
+      try {
+        legacyForwarded = (await middleware(
+          "overview",
+          unsupportedPreviousQuery(),
+          async (legacy) => legacy,
+        )) as CanonicalQuery<"overview">;
+      } finally {
+        selector.mockRestore();
+      }
+      const filters = legacyForwarded.filters;
       if (!filters) throw new Error("wave97b_unsupported_filters_missing");
       const legacyReader = createOverviewReader(
         testEnv(database, trace()),

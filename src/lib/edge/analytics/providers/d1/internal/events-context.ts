@@ -32,11 +32,18 @@ import {
   type EventMembershipFallbackPlan,
   prepareEventMembershipFallbackPlan,
 } from "./event-membership-fallback";
+import {
+  bindWholeOriginalEventDetailReader,
+  bindWholeOriginalReader,
+  type WholeOriginalEventDetailMembership,
+} from "./whole-filter-reader-preparation";
 
 export { EVENT_CONTEXT_CARD_KEYS };
 export type { EventContextCardKey };
 
 export interface EventContextQueryOptions {
+  readonly wholeOriginalOwner?: object;
+  readonly wholeOriginalDetail?: WholeOriginalEventDetailMembership;
   readonly deferredQualification?: DeferredEventContextQualification;
   /** Request-private Event membership shared with the other type-detail reports. */
   readonly membership?: EventMembershipFallback;
@@ -152,23 +159,62 @@ async function queryLegacyEventContextRowsFromD1(
   eventName: string | undefined,
   selectedKeys: readonly EventContextCardKey[],
   diagnostics?: D1ReadDiagnostics,
+  wholeOriginalOwner?: object,
+  wholeOriginalDetail?: WholeOriginalEventDetailMembership,
 ): Promise<Record<string, unknown>[]> {
   const metadata = scopedFilterMetadata(filters);
-  const plan = buildEventContextReportPlan({
-    siteId,
-    queryTime: queryWindowToTime(window),
-    filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
-    ...(eventName !== undefined ? { eventName } : {}),
-    limit,
-    selectedKeys,
-  });
+  const readerQueryTime = queryWindowToTime(window);
+  const wholeDetail = wholeOriginalDetail
+    ? bindWholeOriginalEventDetailReader({
+        membership: wholeOriginalDetail,
+        child: "context",
+        siteId,
+        filters,
+        queryTime: metadata?.time ?? readerQueryTime,
+        readerQueryTime,
+        scopePlan: metadata?.plan,
+      })
+    : undefined;
+  const wholeOriginal =
+    wholeDetail ??
+    (wholeOriginalOwner
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalOwner,
+          consumer: {
+            kind: "event-context",
+            configuration: {
+              limit,
+              selectedKeys,
+              ...(eventName !== undefined ? { eventName } : {}),
+            },
+          },
+          siteId,
+          filters,
+          queryTime: metadata?.time ?? readerQueryTime,
+          readerQueryTime,
+          scopePlan: metadata?.plan,
+        })
+      : undefined);
+  const plan =
+    wholeOriginal?.plan ??
+    buildEventContextReportPlan({
+      siteId,
+      queryTime: readerQueryTime,
+      filters,
+      ...(metadata ? { scopePlan: metadata.plan } : {}),
+      ...(eventName !== undefined ? { eventName } : {}),
+      limit,
+      selectedKeys,
+    });
   return queryAnalyticsReportOutputRowsFromD1(
     env,
     plan,
     EVENT_CONTEXT_REPORT_OUTPUT,
     undefined,
     diagnostics,
+    ...(wholeOriginal
+      ? ([wholeOriginal.executionInputs] as const)
+      : ([] as const)),
   );
 }
 
@@ -314,6 +360,11 @@ export async function queryEventAnalyticsContextCardsFromD1(
       eventName,
       selected,
       options?.diagnostics,
+      ...(options?.wholeOriginalOwner
+        ? ([options.wholeOriginalOwner] as const)
+        : options?.wholeOriginalDetail
+          ? ([undefined, options.wholeOriginalDetail] as const)
+          : ([] as const)),
     );
   return mapContextCardRows(rows);
 }

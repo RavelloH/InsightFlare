@@ -21,6 +21,8 @@ import {
   SHARE_TREND_OTHER_LABEL,
   shareTrendSeriesKey,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
+import type { D1ExecutionOptions } from "@/lib/edge/analytics/providers/d1/internal/execution-options";
+import { bindWholeOriginalReader } from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import type { Env } from "@/lib/edge/types";
 
 import {
@@ -43,38 +45,75 @@ export async function queryCrossDimensionFromD1(
   primaryDimension: CrossDimensionDefinition,
   secondaryDimension: CrossDimensionDefinition,
   qualification?: TechnologyPageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<BrowserCrossBreakdownDimensionDataRow> {
   const metadata = scopedFilterMetadata(filters);
   const queryTime = qualification?.queryTime ?? queryWindowToTime(window);
-  const plan = buildTechnologyCrossBreakdownPlan({
-    siteId,
-    queryTime,
-    filters,
-    ...(qualification
-      ? {
-          scopePlan: qualification.scopePlan,
-          pageVisitQualification: true as const,
-        }
-      : metadata
-        ? { scopePlan: metadata.plan }
-        : {}),
-    family: "client",
-    primarySelection: primaryDimension.selection,
-    secondarySelection: secondaryDimension.selection,
-    primaryLimit,
-    secondaryLimit,
-    tokens: {
-      unknown: CLIENT_CROSS_UNKNOWN_TOKEN,
-      otherPrimary: CLIENT_CROSS_OTHER_PRIMARY_TOKEN,
-      otherSecondary: CLIENT_CROSS_OTHER_SECONDARY_TOKEN,
-    },
-  });
-  const bound = bindTechnologyPageVisitQualification({
-    siteId,
-    filters,
-    qualification,
-    plan,
-  });
+  const wholeOriginal =
+    !qualification && wholeOriginalOwner
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalOwner,
+          consumer: {
+            kind: "page",
+            family: "cross-dimension",
+            reader: {
+              kind: "technology-client-cross",
+              configuration: {
+                family: "client",
+                primarySelection: primaryDimension.selection,
+                secondarySelection: secondaryDimension.selection,
+                primaryLimit,
+                secondaryLimit,
+                tokens: {
+                  unknown: CLIENT_CROSS_UNKNOWN_TOKEN,
+                  otherPrimary: CLIENT_CROSS_OTHER_PRIMARY_TOKEN,
+                  otherSecondary: CLIENT_CROSS_OTHER_SECONDARY_TOKEN,
+                },
+              },
+            },
+          },
+          siteId,
+          filters,
+          queryTime: metadata?.time ?? queryWindowToTime(window),
+          scopePlan: metadata?.plan,
+          readerQueryTime: queryWindowToTime(window),
+          ...(execution ? { execution } : {}),
+        })
+      : undefined;
+  const plan =
+    wholeOriginal?.plan ??
+    buildTechnologyCrossBreakdownPlan({
+      siteId,
+      queryTime,
+      filters,
+      ...(qualification
+        ? {
+            scopePlan: qualification.scopePlan,
+            pageVisitQualification: true as const,
+          }
+        : metadata
+          ? { scopePlan: metadata.plan }
+          : {}),
+      family: "client",
+      primarySelection: primaryDimension.selection,
+      secondarySelection: secondaryDimension.selection,
+      primaryLimit,
+      secondaryLimit,
+      tokens: {
+        unknown: CLIENT_CROSS_UNKNOWN_TOKEN,
+        otherPrimary: CLIENT_CROSS_OTHER_PRIMARY_TOKEN,
+        otherSecondary: CLIENT_CROSS_OTHER_SECONDARY_TOKEN,
+      },
+    });
+  const bound =
+    wholeOriginal ??
+    bindTechnologyPageVisitQualification({
+      siteId,
+      filters,
+      qualification,
+      plan,
+    });
   const queryRows = await queryAnalyticsReportOutputSetRowsFromD1(
     env,
     bound.plan,
@@ -98,6 +137,9 @@ export async function queryCrossDimensionFromD1(
     },
     undefined,
     bound.executionInputs,
+    ...((wholeOriginal?.execution ? [wholeOriginal.execution] : []) as [
+      D1ExecutionOptions?,
+    ]),
   );
   return mapCrossDimensionRows(queryRows, primaryDimension, secondaryDimension);
 }

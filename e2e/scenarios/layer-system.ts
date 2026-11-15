@@ -64,6 +64,10 @@ async function clickVisibleSelectOption(
   const content = page.locator('[data-slot="select-content"]:visible').last();
   await expect(content).toBeVisible();
   const option = content.locator(`[role="option"][data-value="${value}"]`);
+  await clickUnobscuredOption(option);
+}
+
+async function clickUnobscuredOption(option: Locator) {
   await expect(option).toBeVisible();
   await option.scrollIntoViewIfNeeded();
   const hitTarget = await option.evaluate((element) => {
@@ -97,17 +101,42 @@ async function clickVisibleSelectOption(
 async function openFilterAndUseSelect(
   page: Page,
   expectedFrameCount: number,
-  fieldValue: string,
+  fieldValue: "page.path" | "event.name",
   valueText: string,
   artifactPrefix: string,
 ) {
   await expectFrameCount(page, expectedFrameCount);
-  const filterDialog = page.locator('[role="dialog"]:visible').last();
+  const filterDialog = page
+    .getByRole("dialog")
+    .filter({ has: page.getByRole("button", { name: "应用", exact: true }) })
+    .last();
   const selectTriggers = filterDialog.locator('[data-slot="select-trigger"]');
   await expect(selectTriggers).toHaveCount(3);
 
-  await clickVisibleSelectOption(page, selectTriggers.nth(1), fieldValue);
-  await clickVisibleSelectOption(page, selectTriggers.nth(2), "eq");
+  const fieldTrigger = filterDialog.getByRole("button", {
+    name: /^(页面路径|事件名称)$/,
+  });
+  await expect(fieldTrigger).toHaveCount(1);
+  await fieldTrigger.click();
+  const fieldPicker = page
+    .getByRole("dialog")
+    .filter({ has: page.getByPlaceholder("搜索", { exact: true }) })
+    .last();
+  await expect(fieldPicker).toBeVisible();
+  await fieldPicker.getByPlaceholder("搜索", { exact: true }).fill(fieldValue);
+  const fieldLabels = { "page.path": "页面路径", "event.name": "事件名称" };
+  await clickUnobscuredOption(
+    fieldPicker.getByRole("button", {
+      name: fieldLabels[fieldValue],
+      exact: true,
+    }),
+  );
+  await expect(fieldPicker).not.toBeVisible();
+  await expect(fieldTrigger).toHaveText(fieldLabels[fieldValue]);
+
+  const operatorTrigger = selectTriggers.filter({ hasText: /^等于$/ });
+  await expect(operatorTrigger).toHaveCount(1);
+  await clickVisibleSelectOption(page, operatorTrigger, "eq");
 
   const unsetValueButton = filterDialog
     .getByRole("button")
@@ -135,7 +164,7 @@ async function openFilterAndUseSelect(
   expect(nestedSnapshot.frames.at(-1)?.zIndex).toBe("0");
 
   const topFrameId = nestedSnapshot.frames.at(-1)?.id;
-  await selectTriggers.nth(2).click();
+  await operatorTrigger.click();
   const openFloatingContent = page
     .locator('[data-slot="select-content"]:visible')
     .last();

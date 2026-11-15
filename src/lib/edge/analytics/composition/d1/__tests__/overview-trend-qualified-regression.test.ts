@@ -68,6 +68,14 @@ const nativePreimageSha256 = {
   aggregate: "de0910f7bd3dddefa489519ce0df4a723152264581b02e0c4d51ca0d08534885",
   trend: "1238efa70557ac4dc6187a93af98aba7a67eb6bea74c4af2ff1853e7aa203a38",
 } as const;
+// The historical preimage above remains evidence; pin the same snapshot after
+// actually normalizing its process-local prepared membership identifier. The
+// aggregate now includes two safe computed-key lookup GROUP barriers (+106 B);
+// its logical plan, bindings, and physical shape remain unchanged.
+const normalizedNativeSnapshotSha256 = {
+  aggregate: "7ca95dfa0e996d22dcb0f4f45d1510d3f379ee53d0c81494c68bb14497653d2a",
+  trend: "f101ec4ab69e90bcaf5af8ca5af5275b191e0d168eb98e4e6c540fc785103302",
+} as const;
 
 interface TestSite {
   readonly id: string;
@@ -388,7 +396,7 @@ function nativePlanSnapshot(
   // Prepared memberships carry a process-local label; normalize it so the
   // pinned preimage does not depend on how many memberships ran before.
   const serialized = JSON.stringify(snapshot).replace(
-    /prepared-membership-d+/g,
+    /prepared-membership-\d+/g,
     "prepared-membership",
   );
   return {
@@ -1368,8 +1376,10 @@ describe("qualified D1 Overview and Trend", () => {
         ...trendSnapshot.snapshot,
       },
     );
-    expect(aggregateSnapshot.sha256).toBe(nativePreimageSha256.aggregate);
-    expect(trendSnapshot.sha256).toBe(nativePreimageSha256.trend);
+    expect(aggregateSnapshot.sha256).toBe(
+      normalizedNativeSnapshotSha256.aggregate,
+    );
+    expect(trendSnapshot.sha256).toBe(normalizedNativeSnapshotSha256.trend);
     expect(aggregate.outputs[0]?.id).toBe("overview-aggregate");
     expect(trend.outputs[0]?.id).toBe("overview-trend");
   });

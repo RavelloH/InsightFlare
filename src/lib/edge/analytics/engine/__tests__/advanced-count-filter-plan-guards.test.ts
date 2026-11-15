@@ -11,11 +11,11 @@ import {
   buildAdvancedCountFilterPayloadCombinedPlan,
   createAdvancedCountQualificationBuilder,
 } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
-import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import {
   classifyAdvancedCountFilter,
   classifyAdvancedEventCandidateCountFilter,
-} from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
+} from "@/lib/edge/analytics/engine/advanced-filter-count-support";
+import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 
 const SITE_ID = "count-plan-guard-site" as SiteId;

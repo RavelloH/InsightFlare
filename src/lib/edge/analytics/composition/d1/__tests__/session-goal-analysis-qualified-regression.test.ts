@@ -48,6 +48,7 @@ import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/inter
 import * as goalDefinitionReader from "@/lib/edge/analytics/providers/d1/internal/goals";
 import type { SessionListCursor } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
 import { sessionListPageFromRecords } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
+import * as preparedMembershipModule from "@/lib/edge/analytics/providers/d1/internal/prepared-membership-relations";
 import { compileQualificationProgramEnvelope } from "@/lib/edge/analytics/providers/d1/internal/qualification-program-envelope";
 import * as sessionListQualificationRequest from "@/lib/edge/analytics/providers/d1/internal/session-list-qualification-request";
 import { readSiteSessions } from "@/lib/edge/analytics/providers/d1/operations/site-journeys";
@@ -1511,78 +1512,96 @@ describe("Sessions Goal qualified runtime", () => {
     }
   });
 
-  it("reuses the resolved Goal through numeric Count fallback", async () => {
-    const database = makeDatabase();
-    const legacyDatabase = makeDatabase();
-    const legacyTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
-    const countFilter = parseFilterDsl(
-      "count(page { page.durationMs gt 5 }) eq 1",
-      analyticsFilterRegistry,
-    );
-    database
-      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
-      .run("invalid-duration", "e-count-goal");
-    legacyDatabase
-      .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
-      .run("invalid-duration", "e-count-goal");
-    const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
-    const { runtime, diagnostics } = routeHarness(database, trace);
-    let providerError: unknown;
-    try {
-      const result = await runtime.execute(
-        "sessions",
-        runtimeQuery({
-          goalId: "goal-page",
-          scope: "session",
+  it.each([
+    { goalId: "goal-page", scope: "session" },
+    { goalId: "goal-page", scope: "visitor" },
+    { goalId: "goal-event", scope: "session" },
+    { goalId: "goal-event", scope: "visitor" },
+  ] as const)(
+    "reuses $goalId with one $scope dependency after numeric Count fallback",
+    async ({ goalId, scope }) => {
+      const database = makeDatabase();
+      const legacyDatabase = makeDatabase();
+      const legacyTrace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const countFilter = parseFilterDsl(
+        "count(page { page.durationMs gt 5 }) eq 1",
+        analyticsFilterRegistry,
+      );
+      database
+        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+        .run("invalid-duration", "e-count-goal");
+      legacyDatabase
+        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+        .run("invalid-duration", "e-count-goal");
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const { runtime, diagnostics } = routeHarness(database, trace);
+      const bridge = vi.spyOn(
+        preparedMembershipModule,
+        "registerPreparedMembership",
+      );
+      let providerError: unknown;
+      try {
+        const result = await runtime.execute(
+          "sessions",
+          runtimeQuery({
+            goalId,
+            scope,
+            limit: 20,
+            countFilter,
+          }),
+          {
+            onProviderError(error) {
+              providerError = error;
+            },
+          },
+        );
+        expect(providerError).toBeUndefined();
+        expect(result.ok).toBe(true);
+        if (!result.ok) throw new Error("session_goal_numeric_fallback_failed");
+        expect(bridge).not.toHaveBeenCalled();
+        const legacy = await readLegacyPage({
+          database: legacyDatabase,
+          trace: legacyTrace,
+          goalId,
+          scope,
+          sort: { key: "startedAt", direction: "desc" },
+          cursor: null,
+          pageIndex: 0,
+          evidenceCase: "numeric-fallback",
           limit: 20,
           countFilter,
-        }),
-        {
-          onProviderError(error) {
-            providerError = error;
+        });
+        expect(result.data).toEqual(legacy);
+        expect(
+          trace.preparedSql.filter((sql) =>
+            sql.includes('"analysis_definitions"'),
+          ),
+        ).toHaveLength(1);
+        expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+          kind: "numeric-data-domain",
+          fieldIds: ["page.durationMs"],
+        });
+        writeEvidence(
+          `runtime-numeric-fallback-${goalId}-${scope}-reused.json`,
+          {
+            state:
+              "post-route-real-sqlite-whole-count-fallback-reuses-parsed-goal",
+            node: process.version,
+            items: result.data.items,
+            fallbackReason: diagnostics.advancedCountSqlFallbackReason,
+            calls: trace.preparedSql.map((sql, index) => ({
+              sql,
+              bindings: trace.bindings[index] ?? [],
+            })),
           },
-        },
-      );
-      expect(providerError).toBeUndefined();
-      expect(result.ok).toBe(true);
-      if (!result.ok) throw new Error("session_goal_numeric_fallback_failed");
-      const legacy = await readLegacyPage({
-        database: legacyDatabase,
-        trace: legacyTrace,
-        goalId: "goal-page",
-        scope: "session",
-        sort: { key: "startedAt", direction: "desc" },
-        cursor: null,
-        pageIndex: 0,
-        evidenceCase: "numeric-fallback",
-        limit: 20,
-        countFilter,
-      });
-      expect(result.data).toEqual(legacy);
-      expect(
-        trace.preparedSql.filter((sql) =>
-          sql.includes('"analysis_definitions"'),
-        ),
-      ).toHaveLength(1);
-      expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
-        kind: "numeric-data-domain",
-        fieldIds: ["page.durationMs"],
-      });
-      writeEvidence("runtime-numeric-fallback-goal-reused.json", {
-        state: "post-route-real-sqlite-whole-count-fallback-reuses-parsed-goal",
-        node: process.version,
-        items: result.data.items,
-        fallbackReason: diagnostics.advancedCountSqlFallbackReason,
-        calls: trace.preparedSql.map((sql, index) => ({
-          sql,
-          bindings: trace.bindings[index] ?? [],
-        })),
-      });
-    } finally {
-      database.close();
-      legacyDatabase.close();
-    }
-  });
+        );
+      } finally {
+        bridge.mockRestore();
+        database.close();
+        legacyDatabase.close();
+      }
+    },
+  );
 
   it("treats a valid Goal with no matching Session as an empty successful result", async () => {
     const database = makeDatabase();

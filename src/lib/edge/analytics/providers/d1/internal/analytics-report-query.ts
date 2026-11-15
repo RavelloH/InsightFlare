@@ -1,21 +1,11 @@
-import {
-  caseWhen,
-  compileD1Query,
-  constant,
-  isNull,
-  lowerLogicalPlan,
-  sort,
-  union,
-} from "@/lib/db";
-import type { AnyExpression } from "@/lib/db/query/expression";
+import { compileD1Query, lowerLogicalPlan } from "@/lib/db";
 import type { SlotId } from "@/lib/edge/analytics/engine/logical/ids";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import type { LogicalOutput } from "@/lib/edge/analytics/engine/logical/plan";
-import type { LogicalValueType } from "@/lib/edge/analytics/engine/logical/slots";
 import { isSameLogicalValueType } from "@/lib/edge/analytics/engine/logical/slots";
-import {
+import type {
   AnalyticsLogicalToDbLowerer,
-  type LoweredAnalyticsLogicalOutput,
+  LoweredAnalyticsLogicalOutput,
 } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import type { AnalyticsDbRelation } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-storage";
 import { currentD1Operation } from "@/lib/edge/observability/logger";
@@ -23,27 +13,21 @@ import type { Env } from "@/lib/edge/types";
 
 import { queryD1CompiledAll } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
+import type { D1ExecutionOptions } from "./execution-options";
 import type { QualificationExecutionInputs } from "./qualification-execution-inputs";
 
-export interface AnalyticsReportOutputOrderKey {
-  readonly field: string;
-  readonly direction: "asc" | "desc";
-  readonly nulls: "first" | "last";
-}
-
-export interface AnalyticsReportMultiOutputSelection {
-  readonly outputIds: readonly string[];
-  /** Output aliases in the requested Generic relation position order. */
-  readonly fields: readonly string[];
-  readonly orderBy: readonly AnalyticsReportOutputOrderKey[];
-}
-
-interface SelectedOutputField {
-  readonly name: string;
-  readonly slot: SlotId;
-  readonly type: LogicalValueType;
-  readonly nullable: boolean;
-}
+export type {
+  AnalyticsReportMultiOutputSelection,
+  AnalyticsReportOutputOrderKey,
+} from "./analytics-report-output-selection";
+import {
+  createAnalyticsReportLowerer,
+  lowerAnalyticsReportOutputSetRelation,
+} from "./analytics-logical-command-lowering";
+import type {
+  AnalyticsReportMultiOutputSelection,
+  SelectedOutputField,
+} from "./analytics-report-output-selection";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -136,28 +120,6 @@ function selectedOutputFields(
   });
 }
 
-function createReportLowerer(
-  plan: ValidatedLogicalPlan,
-  errorPrefix: string,
-  qualificationExecutionInputs?: QualificationExecutionInputs,
-): AnalyticsLogicalToDbLowerer {
-  const siteIds = plan.context.subject.siteIds;
-  const siteCount = Array.isArray(siteIds) ? siteIds.length : "invalid";
-  if (
-    !Array.isArray(siteIds) ||
-    siteIds.length === 0 ||
-    siteIds.some((siteId) => typeof siteId !== "string" || siteId.length === 0)
-  )
-    throw new Error(`${errorPrefix}_site_subject_unsupported:${siteCount}`);
-  return new AnalyticsLogicalToDbLowerer(
-    plan,
-    siteIds.length === 1
-      ? { siteId: siteIds[0]!, time: plan.context.time }
-      : { siteIds, time: plan.context.time },
-    qualificationExecutionInputs ? { qualificationExecutionInputs } : {},
-  );
-}
-
 function outputRelation(
   lowerer: AnalyticsLogicalToDbLowerer,
   lowered: LoweredAnalyticsLogicalOutput,
@@ -186,14 +148,28 @@ export async function queryAnalyticsReportOutputRowsFromD1(
   outputMissingMessage = `analytics_report_output_missing:${outputId}`,
   diagnostics?: D1ReadDiagnostics,
   qualificationExecutionInputs?: QualificationExecutionInputs,
+  execution?: D1ExecutionOptions,
 ): Promise<Record<string, unknown>[]> {
   const output = plan.outputs.find((candidate) => candidate.id === outputId);
   if (!output) throw new Error(outputMissingMessage);
-  const lowerer = createReportLowerer(
+  const lowerer = createAnalyticsReportLowerer(
     plan,
     "analytics_report",
     qualificationExecutionInputs,
+    execution,
   );
+  if (execution?.program) {
+    if (qualificationExecutionInputs)
+      throw new Error("logical_program_mixed_qualification_inputs");
+    const stage = execution.program.appendStage(plan, [outputId]);
+    return execution.program.executeSqlAtOriginalReportCheckpoint(
+      stage,
+      outputId,
+      currentD1Operation() ?? "analytics.query.all",
+      env,
+      diagnostics,
+    );
+  }
   return executeReportRelation(
     env,
     outputRelation(
@@ -212,6 +188,7 @@ export async function queryAnalyticsReportOutputSetRowsFromD1(
   selection: AnalyticsReportMultiOutputSelection,
   diagnostics?: D1ReadDiagnostics,
   qualificationExecutionInputs?: QualificationExecutionInputs,
+  execution?: D1ExecutionOptions,
 ): Promise<Record<string, unknown>[]> {
   validateMultiOutputSelection(selection);
   const outputs = selection.outputIds.map((outputId) => {
@@ -239,54 +216,27 @@ export async function queryAnalyticsReportOutputSetRowsFromD1(
     }
   }
 
-  const lowerer = createReportLowerer(
-    plan,
-    "analytics_report_multi_output",
-    qualificationExecutionInputs,
-  );
-  const loweredOutputs = lowerer.lowerMany(outputs);
-  const branches = outputs.map((output, index) =>
-    outputRelation(
-      lowerer,
-      loweredOutputs[index]!,
-      outputSchemas[index]!.map(({ name, slot }) => ({ name, slot })),
-    ),
-  );
-  let combined = branches[0]!;
-  for (const branch of branches.slice(1))
-    combined = union(combined, branch, true) as AnalyticsDbRelation;
-
-  const sortKeys = selection.orderBy.flatMap((key) => {
-    const expression = combined.columns[key.field] as AnyExpression | undefined;
-    if (!expression)
-      throw new Error(
-        `analytics_report_multi_output_order_field_missing:${key.field}`,
-      );
-    const direction: "ASC" | "DESC" = key.direction === "asc" ? "ASC" : "DESC";
-    const nativeNulls = key.direction === "asc" ? "first" : "last";
-    return [
-      ...(key.nulls === nativeNulls
-        ? []
-        : [
-            {
-              expression: caseWhen(
-                [
-                  {
-                    when: isNull(expression),
-                    then: constant(key.nulls === "first" ? 0 : 1),
-                  },
-                ],
-                constant(key.nulls === "first" ? 1 : 0),
-              ),
-              direction: "ASC" as const,
-            },
-          ]),
-      { expression, direction },
-    ];
-  });
+  if (execution?.program) {
+    const stage = execution.program.appendStage(plan, selection.outputIds);
+    return execution.program.executeOutputSetAtOriginalReportCheckpoint(
+      stage,
+      selection,
+      outputSchemas,
+      env,
+      diagnostics,
+      qualificationExecutionInputs,
+    );
+  }
   return executeReportRelation(
     env,
-    sortKeys.length > 0 ? sort(combined, sortKeys) : combined,
+    lowerAnalyticsReportOutputSetRelation(
+      plan,
+      outputs,
+      outputSchemas,
+      selection,
+      qualificationExecutionInputs,
+      execution,
+    ),
     diagnostics,
   );
 }

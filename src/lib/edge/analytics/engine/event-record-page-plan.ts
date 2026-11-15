@@ -5,6 +5,7 @@ import type {
 import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { QueryTime } from "@/lib/edge/analytics/contract/types";
 import type { SiteId } from "@/lib/edge/analytics/contract/types";
+import { buildEventReportSource } from "@/lib/edge/analytics/engine/event-source-plan";
 import {
   LogicalPlanBuilder,
   type LogicalRelationHandle,
@@ -288,8 +289,30 @@ export function buildEventRecordPagePlan(input: {
   readonly scopePlan?: ScopedFilterPlan;
   /** Request-private Event membership bound by the Provider at execution. */
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
+  readonly qualificationSemantics?: "whole-original";
   readonly options: EventRecordPageOptions;
 }): ValidatedLogicalPlan {
+  if (input.qualificationSemantics === "whole-original") {
+    const { builder, events } = buildEventReportSource({
+      siteId: input.siteId,
+      queryTime: input.queryTime,
+      filters: input.filters,
+      ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+      ...(input.qualificationDependencyRefs
+        ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+        : {}),
+      qualificationSemantics: input.qualificationSemantics,
+      attributes: EVENT_RECORD_ATTRIBUTES,
+      ...(input.options.eventName !== undefined
+        ? {
+            eventName: input.options.eventName,
+            eventNameInputSemantics: "legacy-truthy-raw" as const,
+          }
+        : {}),
+    });
+    appendEventRecordPage(builder, events, input.options);
+    return builder.finish();
+  }
   const time = semanticTemporalDomainsFromQueryTime(input.queryTime);
   const subject = createSemanticSubjectDomain({
     origin: "site",

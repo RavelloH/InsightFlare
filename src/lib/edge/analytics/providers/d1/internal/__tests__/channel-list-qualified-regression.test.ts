@@ -1,6 +1,6 @@
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
@@ -18,6 +18,7 @@ import {
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import { ADVANCED_FILTER_MAX_ACTIVITIES } from "@/lib/edge/analytics/engine/advanced-filter-activity-plan";
 import { buildChannelListQualificationPlan } from "@/lib/edge/analytics/engine/channel-list-qualification-plan";
+import * as wholeFamily from "@/lib/edge/analytics/engine/page-whole-original-family";
 import { preparedMembershipIdentities } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
 import {
   d1AdvancedFilterMiddleware,
@@ -330,66 +331,77 @@ async function oldListDto(
   query: ChannelQuery,
   trace: SqliteD1Trace,
 ): Promise<{ readonly items: readonly unknown[] }> {
-  const env = testEnv(database, trace);
-  const middleware = d1AdvancedFilterMiddleware(env, undefined, SITE);
-  // The old channels-list route used generic Count preparation before its
-  // existing channel reader. "pages" selects that same generic middleware.
-  const eventCandidate = query.scopePlan?.scope === "event";
-  const forwarded = (await middleware(
-    eventCandidate ? "channels" : "pages",
-    query,
-    async (value) => value,
-  )) as ChannelQuery;
-  const deferred = eventCandidate
-    ? deferredChannelListQualificationFromQuery(forwarded)
-    : undefined;
-  const filters = deferred
-    ? await prepareDeferredEventQualificationFallback(deferred)
-    : forwarded.filters;
-  if (!filters) throw new Error("wave95u_legacy_channel_list_filters_missing");
-  const metadata = scopedFilterMetadata(filters);
-  const matches = metadata?.plan.preparedMembership;
-  const entityIds =
-    preparedMembershipIdentities(matches).entityIds?.map(({ id }) => id) ?? [];
-  const serializedFilters = JSON.stringify(query.filters);
-  const checksEventOwner =
-    serializedFilters.includes("event.name") &&
-    !serializedFilters.includes('"kind":"not"');
-  if (checksEventOwner && entityIds.length > 0)
-    expect(entityIds).not.toContain(
-      metadata?.plan.scope === "visitor"
-        ? "visitor-no-owner"
-        : "session-no-owner",
+  // Selecting another operation is insufficient once that operation also has
+  // whole completion. Keep this historical handle oracle isolated explicitly.
+  const whole = vi
+    .spyOn(wholeFamily, "pageWholeOriginalFamilyFromQuery")
+    .mockReturnValue(undefined);
+  try {
+    const env = testEnv(database, trace);
+    const middleware = d1AdvancedFilterMiddleware(env, undefined, SITE);
+    // The old channels-list route used generic Count preparation before its
+    // existing channel reader. "pages" selects that same generic middleware.
+    const eventCandidate = query.scopePlan?.scope === "event";
+    const forwarded = (await middleware(
+      eventCandidate ? "channels" : "pages",
+      query,
+      async (value) => value,
+    )) as ChannelQuery;
+    const deferred = eventCandidate
+      ? deferredChannelListQualificationFromQuery(forwarded)
+      : undefined;
+    const filters = deferred
+      ? await prepareDeferredEventQualificationFallback(deferred)
+      : forwarded.filters;
+    if (!filters)
+      throw new Error("wave95u_legacy_channel_list_filters_missing");
+    const metadata = scopedFilterMetadata(filters);
+    const matches = metadata?.plan.preparedMembership;
+    const entityIds =
+      preparedMembershipIdentities(matches).entityIds?.map(({ id }) => id) ??
+      [];
+    const serializedFilters = JSON.stringify(query.filters);
+    const checksEventOwner =
+      serializedFilters.includes("event.name") &&
+      !serializedFilters.includes('"kind":"not"');
+    if (checksEventOwner && entityIds.length > 0)
+      expect(entityIds).not.toContain(
+        metadata?.plan.scope === "visitor"
+          ? "visitor-no-owner"
+          : "session-no-owner",
+      );
+    recordEvidence("legacy-count-preparation", {
+      scope: metadata?.plan.scope,
+      matches,
+      emptyOwnerExcluded: checksEventOwner
+        ? entityIds.length === 0 ||
+          !entityIds.includes(
+            metadata?.plan.scope === "visitor"
+              ? "visitor-no-owner"
+              : "session-no-owner",
+          )
+        : null,
+      nativeFilter: filters.root,
+      sql: trace.preparedSql,
+    });
+    const rows = await queryChannelsFromD1(
+      env,
+      SITE,
+      WINDOW,
+      filters,
+      query.limit ?? 100,
     );
-  recordEvidence("legacy-count-preparation", {
-    scope: metadata?.plan.scope,
-    matches,
-    emptyOwnerExcluded: checksEventOwner
-      ? entityIds.length === 0 ||
-        !entityIds.includes(
-          metadata?.plan.scope === "visitor"
-            ? "visitor-no-owner"
-            : "session-no-owner",
-        )
-      : null,
-    nativeFilter: filters.root,
-    sql: trace.preparedSql,
-  });
-  const rows = await queryChannelsFromD1(
-    env,
-    SITE,
-    WINDOW,
-    filters,
-    query.limit ?? 100,
-  );
-  return {
-    items: rows.map((row) => ({
-      channel: row.channel,
-      views: row.views,
-      sessions: row.sessions,
-      visitors: row.visitors,
-    })),
-  };
+    return {
+      items: rows.map((row) => ({
+        channel: row.channel,
+        views: row.views,
+        sessions: row.sessions,
+        visitors: row.visitors,
+      })),
+    };
+  } finally {
+    whole.mockRestore();
+  }
 }
 
 async function actualListDto(

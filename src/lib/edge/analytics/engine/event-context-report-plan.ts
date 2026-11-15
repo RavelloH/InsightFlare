@@ -253,6 +253,7 @@ function boundaryPages(
     readonly filters: FilterDocument;
     readonly scopePlan?: ScopedFilterPlan;
     readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
+    readonly qualificationSemantics?: "whole-original";
     readonly subject: ReturnType<
       typeof createEventReportSourceContext
     >["subject"];
@@ -261,9 +262,12 @@ function boundaryPages(
 ): LogicalRelationHandle {
   const selection = input.scopePlan
     ? createSemanticScopedSourceSelection({
-        profile: input.qualificationDependencyRefs
-          ? "prepared-scoped-v1"
-          : "prepared-scoped-reader-window-v1",
+        profile:
+          input.qualificationSemantics === "whole-original"
+            ? "prepared-whole-filter-reader-window-v1"
+            : input.qualificationDependencyRefs
+              ? "prepared-scoped-v1"
+              : "prepared-scoped-reader-window-v1",
         filters: input.filters,
         subject: input.subject,
         time: input.time,
@@ -498,6 +502,7 @@ export function buildEventContextReportPlan(input: {
    * the prepared domains, so the canonical prepared Source is used directly.
    */
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
+  readonly qualificationSemantics?: "whole-original";
   /** Page visit membership for the session-boundary Page Source. */
   readonly pageVisitDependencyRefs?: readonly QualificationDependencyRef[];
   readonly eventName?: string;
@@ -513,6 +518,9 @@ export function buildEventContextReportPlan(input: {
     queryTime: input.queryTime,
     filters: input.filters,
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    ...(input.qualificationSemantics
+      ? { qualificationSemantics: input.qualificationSemantics }
+      : {}),
     ...(input.scopePlan && !input.qualificationDependencyRefs
       ? { preparedTimePolicy: "reader-window" as const }
       : {}),
@@ -539,6 +547,9 @@ export function buildEventContextReportPlan(input: {
         queryTime: input.queryTime,
         filters: input.filters,
         ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+        ...(input.qualificationSemantics
+          ? { qualificationSemantics: input.qualificationSemantics }
+          : {}),
         ...(input.pageVisitDependencyRefs
           ? { qualificationDependencyRefs: input.pageVisitDependencyRefs }
           : {}),

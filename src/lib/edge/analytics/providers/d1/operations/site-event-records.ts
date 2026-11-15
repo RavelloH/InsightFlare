@@ -26,6 +26,7 @@ import {
   queryEventRecordPageWithMembershipFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
 import { queryQualifiedEventRecordPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
+import { hasWholeOriginalCompletion } from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import type { Env } from "@/lib/edge/types";
 import {
   decodePageCursor,
@@ -51,6 +52,7 @@ export interface ReadSiteEventRecordsInput {
   };
   readonly audience?: QueryAudience;
   readonly deferredQualification?: DeferredEventRecordsQualification;
+  readonly wholeOriginalOwner?: object;
   readonly diagnostics?: D1ReadDiagnostics;
   readonly page: { readonly limit: number; readonly cursor?: string | null };
 }
@@ -209,6 +211,9 @@ export async function readSiteEventRecords(input: ReadSiteEventRecordsInput) {
             cursor,
             scopePlan: scopedFilterMetadata(fallbackFilters)?.plan,
             queryTime: input.queryTime ?? deferred.time,
+            ...(hasWholeOriginalCompletion(deferred, "event-records")
+              ? { wholeOriginalOwner: deferred }
+              : {}),
           },
         );
       }
@@ -227,6 +232,9 @@ export async function readSiteEventRecords(input: ReadSiteEventRecordsInput) {
         cursor,
         scopePlan: input.scopePlan,
         queryTime: input.queryTime,
+        ...(input.wholeOriginalOwner
+          ? { wholeOriginalOwner: input.wholeOriginalOwner }
+          : {}),
       },
     );
   }

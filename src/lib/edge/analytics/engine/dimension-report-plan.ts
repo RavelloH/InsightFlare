@@ -11,6 +11,7 @@ import {
   addPageReportSourceToBuilder,
   createPageReportSource,
 } from "@/lib/edge/analytics/engine/page-report-plan";
+import type { ProgramMembershipOutput } from "@/lib/edge/analytics/engine/program-membership-source";
 import {
   semanticPageDimension,
   type SemanticPageDimensionId,
@@ -649,6 +650,8 @@ export function pageDimensionReportSource(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly membershipOutput?: ProgramMembershipOutput;
+  readonly qualificationSemantics?: "whole-original";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly selections: readonly PageDimensionSelection[];
@@ -707,6 +710,8 @@ function pageDimensionSource(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly membershipOutput?: ProgramMembershipOutput;
+  readonly qualificationSemantics?: "whole-original";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly selection: PageDimensionSelection;
@@ -936,6 +941,8 @@ export function buildDimensionTopPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly membershipOutput?: ProgramMembershipOutput;
+  readonly qualificationSemantics?: "whole-original";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly limit: number;
@@ -955,6 +962,8 @@ export function buildDimensionPagePlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly membershipOutput?: ProgramMembershipOutput;
+  readonly qualificationSemantics?: "whole-original";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly limit: number;

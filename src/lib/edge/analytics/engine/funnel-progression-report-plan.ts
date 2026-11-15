@@ -132,6 +132,9 @@ function stepSelection(
     time: base.time,
     ...(preparedPlanOperation ? { preparedPlanOperation } : {}),
     ...(expectedPlan ? { expectedPlan } : {}),
+    ...(base.qualificationDependencyRefs
+      ? { qualificationDependencyRefs: base.qualificationDependencyRefs }
+      : {}),
     ...(base.profile === "direct-page-entity-only-compat-v1"
       ? { compatibilityScope: base.entityKind! }
       : {}),

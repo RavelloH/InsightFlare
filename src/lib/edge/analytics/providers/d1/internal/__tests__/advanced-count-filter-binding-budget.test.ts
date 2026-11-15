@@ -14,9 +14,9 @@ import {
   ADVANCED_COUNT_FILTER_OUTPUTS,
   buildAdvancedCountFilterMatchPlan,
 } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import { classifyAdvancedCountFilter } from "@/lib/edge/analytics/engine/advanced-filter-count-support";
 import type { AdvancedFilterNumericCompatibilityRequirement } from "@/lib/edge/analytics/engine/semantic/advanced-filter-field-requirements";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
-import { classifyAdvancedCountFilter } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import {
   analyticsFilterRegistry,

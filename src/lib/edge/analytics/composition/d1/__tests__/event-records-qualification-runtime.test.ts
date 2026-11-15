@@ -28,6 +28,7 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import type { EventRecordsQualificationCompilationEvidence } from "@/lib/edge/analytics/providers/d1/internal/analytics-event-record-qualification-program";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
+import { hasWholeOriginalCompletion } from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import { readSiteEventRecords } from "@/lib/edge/analytics/providers/d1/operations/site-event-records";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
@@ -264,6 +265,9 @@ async function legacyPage(env: Env, query: RecordsQuery) {
     sort: { field: "occurredAt", direction: query.sort.direction },
     audience: query.context.policy.audience,
     page: query.page,
+    ...(hasWholeOriginalCompletion(deferred, "event-records")
+      ? { wholeOriginalOwner: deferred }
+      : {}),
   });
 }
 
@@ -282,6 +286,16 @@ async function legacyCorePage(env: Env, query: RecordsQuery) {
   ).filters;
   if (!filters)
     throw new Error("wave97ei_api_v1_event_records_core_filters_missing");
+  // The Core fallback now carries a request-local whole-original relation.
+  // Keep its actual middleware output owner, as the real registry does; a
+  // filters-only low-level reader can no longer consume a removed legacy ID handle.
+  const wholeOriginalOwner = hasWholeOriginalCompletion(
+    preparedQuery as QueryInput,
+    "event-records",
+  )
+    ? preparedQuery
+    : undefined;
+  expect(wholeOriginalOwner).toBeDefined();
   return readSiteEventRecords({
     env,
     siteId: SITE_ID,
@@ -292,6 +306,7 @@ async function legacyCorePage(env: Env, query: RecordsQuery) {
     eventName: query.eventName,
     sort: { field: "occurredAt", direction: query.sort.direction },
     audience: query.context.policy.audience,
+    ...(wholeOriginalOwner ? { wholeOriginalOwner } : {}),
     page: query.page,
   });
 }

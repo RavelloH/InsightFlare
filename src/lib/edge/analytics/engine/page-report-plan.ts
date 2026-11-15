@@ -7,13 +7,20 @@ import type {
 import {
   LogicalPlanBuilder,
   type LogicalRelationHandle,
+  type LogicalSourceOptions,
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
+import {
+  appendProgramMembershipSourceInput,
+  type ProgramMembershipOutput,
+} from "@/lib/edge/analytics/engine/program-membership-source";
 import { resolveAnalyticsScope } from "@/lib/edge/analytics/engine/semantic/entities";
 import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { SemanticRelationshipId } from "@/lib/edge/analytics/engine/semantic/relationships";
 import {
+  completeSemanticScopedSourceSelection,
   createSemanticScopedSourceSelection,
+  resolveSemanticScopedSourceSelectionContext,
   type SemanticScopedSourceSelection,
   snapshotSemanticScopedSourceSelection,
 } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
@@ -66,7 +73,9 @@ export function createPageReportSource(input: {
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
+  readonly membershipOutput?: ProgramMembershipOutput;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly sourceSelection?: SemanticScopedSourceSelection;
@@ -91,6 +100,7 @@ export function createPageReportSourceForSubject(input: {
   };
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
+  readonly membershipOutput?: ProgramMembershipOutput;
   readonly scopePlan?: ScopedFilterPlan;
   readonly preparedTimePolicy?: "reader-window-v1" | "scoped-reader-window-v1";
   readonly sourceSelection?: SemanticScopedSourceSelection;
@@ -109,7 +119,9 @@ function createPageReportSourceForDomain(
   input: {
     readonly queryTime: QueryTime;
     readonly filters: FilterDocument;
+    readonly membershipOutput?: ProgramMembershipOutput;
     readonly scopePlan?: ScopedFilterPlan;
+    readonly qualificationSemantics?: "whole-original";
     readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
     readonly preparedTimePolicy?:
       "reader-window-v1" | "scoped-reader-window-v1";
@@ -120,6 +132,14 @@ function createPageReportSourceForDomain(
   subject: ReturnType<typeof createSemanticSubjectDomain>,
 ) {
   const time = semanticTemporalDomainsFromQueryTime(input.queryTime);
+  if (input.qualificationSemantics && !input.scopePlan)
+    throw new Error(
+      "invalid_page_report_source_selection:whole_original_requires_prepared_scope_plan",
+    );
+  if (input.qualificationSemantics && input.sourceSelection)
+    throw new Error(
+      "invalid_page_report_source_selection:whole_original_disallows_selection_override",
+    );
   if (input.preparedTimePolicy && !input.scopePlan)
     throw new Error(
       "invalid_page_report_source_selection:reader_window_requires_prepared_scope_plan",
@@ -132,16 +152,88 @@ function createPageReportSourceForDomain(
     throw new Error(
       "invalid_page_report_source_selection:override_disallows_qualification_dependency",
     );
+  if (input.membershipOutput && (!input.scopePlan || input.sourceSelection))
+    throw new Error(
+      "invalid_page_report_source_selection:program_requires_prepared_scope_plan",
+    );
+  let programSource:
+    | {
+        readonly builder: LogicalPlanBuilder;
+        readonly inputs: ReturnType<typeof appendProgramMembershipSourceInput>;
+        readonly selection: SemanticScopedSourceSelection;
+      }
+    | undefined;
+  if (input.membershipOutput) {
+    // Preserve the existing metadata/expected-plan/auth/time checkpoint before
+    // importing any new dependency graph. No role proof is fabricated here.
+    const context = resolveSemanticScopedSourceSelectionContext({
+      profile:
+        input.qualificationSemantics === "whole-original"
+          ? "prepared-whole-filter-reader-window-v1"
+          : input.scopePlan
+            ? input.preparedTimePolicy === "reader-window-v1"
+              ? "prepared-page-reader-window-v1"
+              : input.preparedTimePolicy === "scoped-reader-window-v1"
+                ? "prepared-scoped-reader-window-v1"
+                : "prepared-scoped-v1"
+            : "direct-page-analytics-v1",
+      filters: input.filters,
+      subject: input.membershipOutput.plan.context.subject,
+      time,
+      ...(input.scopePlan ? { expectedPlan: input.scopePlan } : {}),
+      ...(input.qualificationDependencyRefs
+        ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+        : {}),
+    });
+    // The actual producer may retain the authenticated site's teamId. Preserve
+    // that full subject while checking the reader's exact one-site domain.
+    if (
+      context.subject.origin !== "site" ||
+      context.subject.siteIds.length !== 1 ||
+      subject.origin !== "site" ||
+      subject.siteIds.length !== 1 ||
+      context.subject.siteIds[0] !== subject.siteIds[0]
+    )
+      throw new Error(
+        "invalid_page_report_source_selection:program_subject_mismatch",
+      );
+    const builder = new LogicalPlanBuilder({
+      subject: context.subject,
+      time: context.time,
+      scope: resolveAnalyticsScope(context.scope),
+      originOperation: "pages",
+    });
+    const inputs = appendProgramMembershipSourceInput(
+      builder,
+      input.membershipOutput,
+      {
+        mode: context.mode,
+        entity: "page",
+      },
+    );
+    programSource = {
+      builder,
+      inputs,
+      selection: completeSemanticScopedSourceSelection(
+        context,
+        inputs.semanticInputs,
+      ),
+    };
+  }
   const selection =
+    programSource?.selection ??
     input.sourceSelection ??
     createSemanticScopedSourceSelection({
-      profile: input.scopePlan
-        ? input.preparedTimePolicy === "reader-window-v1"
-          ? "prepared-page-reader-window-v1"
-          : input.preparedTimePolicy === "scoped-reader-window-v1"
-            ? "prepared-scoped-reader-window-v1"
-            : "prepared-scoped-v1"
-        : "direct-page-analytics-v1",
+      profile:
+        input.qualificationSemantics === "whole-original"
+          ? "prepared-whole-filter-reader-window-v1"
+          : input.scopePlan
+            ? input.preparedTimePolicy === "reader-window-v1"
+              ? "prepared-page-reader-window-v1"
+              : input.preparedTimePolicy === "scoped-reader-window-v1"
+                ? "prepared-scoped-reader-window-v1"
+                : "prepared-scoped-v1"
+            : "direct-page-analytics-v1",
       filters: input.filters,
       subject,
       time,
@@ -177,15 +269,20 @@ function createPageReportSourceForDomain(
     if (!sameSelectionValue(normalizedSelection, expectedSelection))
       throw new Error("invalid_page_report_source_selection:override_mismatch");
   }
-  const builder = new LogicalPlanBuilder({
-    subject,
-    time,
-    scope: resolveAnalyticsScope(selection.scope),
-    originOperation: "pages",
-  });
+  const builder =
+    programSource?.builder ??
+    new LogicalPlanBuilder({
+      subject,
+      time,
+      scope: resolveAnalyticsScope(selection.scope),
+      originOperation: "pages",
+    });
   return addPageReportSourceToBuilder(builder, {
     attributes: input.attributes,
     ...(input.relationships ? { relationships: input.relationships } : {}),
+    ...(programSource
+      ? { membershipInputs: programSource.inputs.sourceInputs }
+      : {}),
     selection,
   });
 }
@@ -196,6 +293,7 @@ export function addPageReportSourceToBuilder(
   input: {
     readonly attributes: readonly string[];
     readonly selection: SemanticScopedSourceSelection;
+    readonly membershipInputs?: LogicalSourceOptions["membershipInputs"];
     readonly relationships?: readonly SemanticRelationshipId[];
   },
 ) {
@@ -204,6 +302,9 @@ export function addPageReportSourceToBuilder(
     attributes: input.attributes,
     ...(input.relationships ? { relationships: input.relationships } : {}),
     selection: input.selection,
+    ...(input.membershipInputs
+      ? { membershipInputs: input.membershipInputs }
+      : {}),
   });
   return { builder, pages, selection: input.selection };
 }
@@ -269,6 +370,8 @@ export function buildTopPagesPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly limit: number;
   readonly includeDetails: boolean;
 }): ValidatedLogicalPlan {
@@ -371,7 +474,9 @@ export function buildPagesPagePlan(input: {
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
+  readonly membershipOutput?: ProgramMembershipOutput;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly limit: number;
   readonly includeDetails: boolean;

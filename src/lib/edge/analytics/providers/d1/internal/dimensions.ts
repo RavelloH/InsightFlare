@@ -25,6 +25,7 @@ import {
   type PageDimensionSelectionId,
   validatePageDimensionSelection,
 } from "@/lib/edge/analytics/engine/dimension-report-plan";
+import { pageMembershipDimensionContract } from "@/lib/edge/analytics/engine/page-channel-membership-reader-contract";
 import {
   buildPageTabsPlan,
   PAGE_TAB_OUTPUT_FIELDS,
@@ -45,6 +46,7 @@ import type { Env } from "@/lib/edge/types";
 import { InvalidCursorError } from "@/lib/pagination";
 
 import {
+  bindDeferredPageMembershipSuccessor,
   type DeferredChannelOverviewQualification,
   type DeferredOverviewPageTableQualification,
   type DeferredPageDimensionQualification,
@@ -84,6 +86,8 @@ import {
 } from "./core-dimensions";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import type { AdvancedCountSqlFallbackReason } from "./diagnostics";
+import { dimensionTopQualificationConsumerKey } from "./dimension-top-qualification";
+import type { D1ExecutionOptions } from "./execution-options";
 import {
   assertFilterValuesPageQualificationProjection,
   bindPageVisitQualificationPreparation,
@@ -100,6 +104,8 @@ import {
   pageResult,
   paginationBindingForWindow,
 } from "./pagination";
+import { bindTeamExactWholeOriginalReader } from "./whole-filter-reader-preparation";
+import { bindWholeOriginalReader } from "./whole-filter-reader-preparation";
 
 export interface DimensionAggregateCursor {
   /** The first two values are the concrete ORDER BY metrics. */
@@ -269,23 +275,81 @@ export async function queryDimensionFromD1(
     sortDirection?: "asc" | "desc";
   },
   diagnostics?: D1ReadDiagnostics,
+  qualification?: {
+    readonly preparation: unknown;
+    readonly queryTime: QueryTime;
+    readonly scopePlan: ScopedFilterPlan;
+    readonly consumer: "site-exact-dimension";
+  },
+  wholeOriginalReader?: { readonly owner: object; readonly dimension: string },
 ): Promise<DimensionRow[]> {
   const selection = validatePageDimensionSelection(selectionInput);
   const sortBy = dimensionSortKey(options?.sortBy);
   const sortDirection = dimensionSortDirection(options?.sortDirection);
   const metadata = scopedFilterMetadata(filters);
-  const plan = buildDimensionTopPlan({
-    siteId,
-    queryTime: metadata?.time ?? queryWindowToTime(window),
-    filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
-    limit,
-    selection,
-    excludeEmpty: options?.excludeEmpty,
-    search: options?.search,
-    sortBy,
-    sortDirection,
-  });
+  const queryTime =
+    qualification?.queryTime ?? metadata?.time ?? queryWindowToTime(window);
+  const scopePlan = qualification?.scopePlan ?? metadata?.plan;
+  if (wholeOriginalReader && qualification)
+    throw new Error("team_exact_whole_original_conflicting_qualification");
+  const whole = wholeOriginalReader
+    ? bindTeamExactWholeOriginalReader({
+        owner: wholeOriginalReader.owner,
+        dimension: wholeOriginalReader.dimension,
+        siteId,
+        filters,
+        readerQueryTime: queryTime,
+        selection,
+        limit,
+        excludeEmpty: options?.excludeEmpty,
+        search: options?.search,
+        sortBy,
+        sortDirection,
+      })
+    : undefined;
+  const builtPlan =
+    whole?.plan ??
+    buildDimensionTopPlan({
+      siteId,
+      queryTime,
+      filters,
+      ...(scopePlan ? { scopePlan } : {}),
+      ...(qualification
+        ? { qualificationDependencyRefs: pageRoleDependencyRefs(scopePlan) }
+        : {}),
+      limit,
+      selection,
+      excludeEmpty: options?.excludeEmpty,
+      search: options?.search,
+      sortBy,
+      sortDirection,
+    });
+  const plan = qualification
+    ? snapshotPageVisitQualificationPlan(builtPlan)
+    : builtPlan;
+  const qualificationExecutionInputs =
+    whole?.executionInputs ??
+    (qualification
+      ? bindPageVisitQualificationPreparation({
+          preparation: qualification.preparation,
+          siteId,
+          filters,
+          queryTime,
+          scopePlan: qualification.scopePlan,
+          consumerKey: dimensionTopQualificationConsumerKey(
+            qualification.consumer,
+            {
+              limit,
+              selection,
+              excludeEmpty: options?.excludeEmpty,
+              search: options?.search,
+              sortBy,
+              sortDirection,
+            },
+          ),
+          plan,
+        })
+      : undefined);
   return (
     await queryAnalyticsReportOutputRowsFromD1(
       env,
@@ -293,6 +357,7 @@ export async function queryDimensionFromD1(
       "dimension-top",
       undefined,
       diagnostics,
+      qualificationExecutionInputs,
     )
   ).map((row) => ({
     value: String(row.value ?? ""),
@@ -324,8 +389,21 @@ export async function queryDimensionPageFromD1(
     readonly queryTime: QueryTime;
     readonly scopePlan: ScopedFilterPlan;
     readonly consumer: string;
+    readonly assertFresh?: () => void;
   },
+  wholeOriginalReader?: {
+    readonly owner: object;
+    readonly dimension: string;
+    readonly cursorText: string | null;
+  },
+  stagedMembership?: {
+    readonly deferred: DeferredPageDimensionQualification;
+    readonly dimension: string;
+    readonly cursorText: string | null;
+  },
+  execution?: D1ExecutionOptions,
 ): Promise<PageResult<DimensionRow>> {
+  qualification?.assertFresh?.();
   const selection = validatePageDimensionSelection(selectionInput);
   const sortBy = dimensionSortKey(options?.sortBy);
   const sortDirection = dimensionSortDirection(options?.sortDirection);
@@ -333,24 +411,112 @@ export async function queryDimensionPageFromD1(
   const queryTime =
     qualification?.queryTime ?? metadata?.time ?? queryWindowToTime(window);
   const scopePlan = qualification?.scopePlan ?? metadata?.plan;
-  const builtPlan = buildDimensionPagePlan({
-    siteId,
-    queryTime,
-    filters,
-    ...(scopePlan ? { scopePlan } : {}),
-    ...(qualification
-      ? {
-          qualificationDependencyRefs: pageRoleDependencyRefs(scopePlan),
-        }
-      : {}),
-    limit,
-    selection,
-    excludeEmpty: options?.excludeEmpty,
-    search: options?.search,
-    sortBy,
-    sortDirection,
-    cursor,
-  });
+  const stagedContract = stagedMembership
+    ? pageMembershipDimensionContract(stagedMembership.dimension)
+    : undefined;
+  if (
+    stagedMembership &&
+    (qualification !== undefined ||
+      wholeOriginalReader !== undefined ||
+      stagedContract?.selection !== selection ||
+      options?.excludeEmpty !== false ||
+      audience !== "private-dashboard")
+  )
+    throw new Error("page_membership_reader_configuration_mismatch");
+  const wholeContract = wholeOriginalReader
+    ? pageMembershipDimensionContract(wholeOriginalReader.dimension)
+    : undefined;
+  const wholeOriginal =
+    wholeOriginalReader &&
+    !qualification &&
+    wholeContract?.selection === selection &&
+    options?.excludeEmpty === false &&
+    audience === "private-dashboard"
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalReader.owner,
+          consumer: {
+            kind: "page",
+            family: "dimension",
+            reader: {
+              kind: "dimension-page",
+              configuration: {
+                kind: "dimension-page",
+                dimension: wholeOriginalReader.dimension,
+                cursorText: wholeOriginalReader.cursorText,
+                limit,
+                excludeEmpty: false,
+                audience: "private-dashboard",
+                search: options?.search,
+                sortBy,
+                sortDirection,
+                cursor,
+              },
+            },
+          },
+          siteId,
+          filters,
+          queryTime: metadata?.time ?? queryTime,
+          scopePlan: metadata?.plan,
+          readerQueryTime: queryTime,
+          ...(execution ? { execution } : {}),
+        })
+      : undefined;
+  const staged = stagedMembership
+    ? bindDeferredPageMembershipSuccessor({
+        deferred: stagedMembership.deferred,
+        siteId,
+        filters,
+        queryTime,
+        scopePlan: scopePlan!,
+        consumer: {
+          kind: "dimension-page",
+          configuration: {
+            kind: "dimension-page",
+            dimension: stagedMembership.dimension,
+            cursorText: stagedMembership.cursorText,
+            limit,
+            excludeEmpty: false,
+            audience: "private-dashboard",
+            search: options?.search,
+            sortBy,
+            sortDirection,
+            cursor,
+          },
+        },
+      })
+    : undefined;
+  // Only this execution's completed physical producer can become an explicit
+  // Source predecessor. Existing qualified/deferred/whole bindings stay first.
+  const membershipOutputs =
+    !qualification && !wholeOriginalReader && !stagedMembership
+      ? (execution?.program?.completedWholeOutputs ?? [])
+      : [];
+  const membershipOutput = membershipOutputs[0];
+  const builtPlan =
+    staged?.plan ??
+    wholeOriginal?.plan ??
+    buildDimensionPagePlan({
+      siteId,
+      queryTime,
+      filters,
+      ...(scopePlan ? { scopePlan } : {}),
+      ...(membershipOutput ? { membershipOutput } : {}),
+      ...(qualification
+        ? {
+            qualificationDependencyRefs: pageRoleDependencyRefs(scopePlan),
+          }
+        : {}),
+      limit,
+      selection,
+      excludeEmpty: options?.excludeEmpty,
+      search: options?.search,
+      sortBy,
+      sortDirection,
+      cursor,
+    });
+  // Keep the original semantic/builder checks ahead of new graph ambiguity.
+  if (membershipOutputs.length > 1)
+    throw new Error("dimension_program_membership_producer_ambiguous");
   const plan = qualification
     ? snapshotPageVisitQualificationPlan(builtPlan)
     : builtPlan;
@@ -376,15 +542,31 @@ export async function queryDimensionPageFromD1(
         ),
         plan,
       })
-    : undefined;
-  const rows = await queryAnalyticsReportOutputRowsFromD1(
-    env,
-    plan,
-    "dimension-page",
-    undefined,
-    diagnostics,
-    qualificationExecutionInputs,
-  );
+    : (staged?.executionInputs ?? wholeOriginal?.executionInputs);
+  let rows: Awaited<ReturnType<typeof queryAnalyticsReportOutputRowsFromD1>>;
+  qualification?.assertFresh?.();
+  try {
+    rows = await (membershipOutput || wholeOriginal?.execution
+      ? queryAnalyticsReportOutputRowsFromD1(
+          env,
+          plan,
+          "dimension-page",
+          undefined,
+          diagnostics,
+          qualificationExecutionInputs,
+          wholeOriginal?.execution ?? execution,
+        )
+      : queryAnalyticsReportOutputRowsFromD1(
+          env,
+          plan,
+          "dimension-page",
+          undefined,
+          diagnostics,
+          qualificationExecutionInputs,
+        ));
+  } finally {
+    qualification?.assertFresh?.();
+  }
   const mapped = rows.map((row) => ({
     value: String(row.value ?? ""),
     views: Number(row.views ?? 0),
@@ -401,6 +583,9 @@ export async function queryDimensionPageFromD1(
     options: { search: options?.search, sortBy, sortDirection },
     audience,
     rows: mapped,
+    ...(qualification?.assertFresh
+      ? { assertFresh: qualification.assertFresh }
+      : {}),
   });
 }
 
@@ -434,28 +619,42 @@ export async function dimensionPageResultFromRows(input: {
   };
   readonly audience: QueryAudience;
   readonly rows: readonly DimensionRow[];
+  readonly assertFresh?: () => void;
 }): Promise<PageResult<DimensionRow>> {
+  input.assertFresh?.();
   const { primary, secondary } = dimensionSortColumns(input.options.sortBy);
   const page = pageResult([...input.rows], input.limit);
-  const binding = await dimensionCursorBinding(
-    "dimensions",
-    input.siteId,
-    input.window,
-    input.filters,
-    input.selection,
-    input.options.search,
-    input.audience,
-    input.options.sortBy,
-    input.options.sortDirection,
-  );
-  const nextCursor =
-    page.hasMore && page.last
-      ? await encodePageCursor(input.env, binding, {
-          primary: page.last[primary],
-          secondary: page.last[secondary],
-          value: page.last.value,
-        })
-      : null;
+  let binding: string;
+  input.assertFresh?.();
+  try {
+    binding = await dimensionCursorBinding(
+      "dimensions",
+      input.siteId,
+      input.window,
+      input.filters,
+      input.selection,
+      input.options.search,
+      input.audience,
+      input.options.sortBy,
+      input.options.sortDirection,
+    );
+  } finally {
+    input.assertFresh?.();
+  }
+  let nextCursor: string | null = null;
+  if (page.hasMore && page.last) {
+    input.assertFresh?.();
+    try {
+      nextCursor = await encodePageCursor(input.env, binding, {
+        primary: page.last[primary],
+        secondary: page.last[secondary],
+        value: page.last.value,
+      });
+    } finally {
+      input.assertFresh?.();
+    }
+  }
+  input.assertFresh?.();
   return {
     items: page.rows,
     pagination: {
@@ -695,27 +894,57 @@ export async function querySessionPathDimensionFromD1(
     readonly scopePlan: ScopedFilterPlan;
     readonly audience: QueryAudience;
   },
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<DimensionRow[]> {
   const metadata = scopedFilterMetadata(filters);
   const queryTime =
     qualification?.queryTime ?? metadata?.time ?? queryWindowToTime(window);
   const scopePlan = qualification?.scopePlan ?? metadata?.plan;
-  const builtPlan = buildSessionPathTopPlan({
-    siteId,
-    queryTime,
-    filters,
-    ...(scopePlan ? { scopePlan } : {}),
-    ...(qualification
-      ? {
-          qualificationDependencyRefs: pageRoleDependencyRefs(scopePlan),
-        }
-      : {}),
-    limit,
-    kind,
-    search,
-    sortBy: dimensionSortKey(sortBy),
-    sortDirection: dimensionSortDirection(sortDirection),
-  });
+  const wholeOriginal =
+    wholeOriginalOwner && !qualification
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalOwner,
+          consumer: {
+            kind: "page",
+            family: "dimension",
+            reader: {
+              kind: "boundary-top",
+              configuration: {
+                limit,
+                kind,
+                search,
+                sortBy: dimensionSortKey(sortBy),
+                sortDirection: dimensionSortDirection(sortDirection),
+              },
+            },
+          },
+          siteId,
+          filters,
+          queryTime: metadata?.time ?? queryTime,
+          scopePlan: metadata?.plan,
+          readerQueryTime: queryTime,
+          ...(execution ? { execution } : {}),
+        })
+      : undefined;
+  const builtPlan =
+    wholeOriginal?.plan ??
+    buildSessionPathTopPlan({
+      siteId,
+      queryTime,
+      filters,
+      ...(scopePlan ? { scopePlan } : {}),
+      ...(qualification
+        ? {
+            qualificationDependencyRefs: pageRoleDependencyRefs(scopePlan),
+          }
+        : {}),
+      limit,
+      kind,
+      search,
+      sortBy: dimensionSortKey(sortBy),
+      sortDirection: dimensionSortDirection(sortDirection),
+    });
   const plan = qualification
     ? snapshotPageVisitQualificationPlan(builtPlan)
     : builtPlan;
@@ -736,7 +965,7 @@ export async function querySessionPathDimensionFromD1(
         }),
         plan,
       })
-    : undefined;
+    : wholeOriginal?.executionInputs;
   return (
     await queryAnalyticsReportOutputRowsFromD1(
       env,
@@ -745,6 +974,9 @@ export async function querySessionPathDimensionFromD1(
       undefined,
       diagnostics,
       qualificationExecutionInputs,
+      ...((wholeOriginal?.execution ? [wholeOriginal.execution] : []) as [
+        D1ExecutionOptions?,
+      ]),
     )
   ).map((row) => ({
     value: String(row.value ?? ""),
@@ -1198,6 +1430,8 @@ export async function querySessionBoundaryDimensionFromD1(
     readonly queryTime?: QueryTime;
     readonly scopePlan?: ScopedFilterPlan;
     readonly audience?: QueryAudience;
+    readonly wholeOriginalOwner?: object;
+    readonly execution?: D1ExecutionOptions;
   },
 ): Promise<DimensionRow[]> {
   const deferred = options?.deferredQualification;
@@ -1309,7 +1543,7 @@ export async function querySessionBoundaryDimensionFromD1(
         : undefined,
     );
   }
-  return querySessionPathDimensionFromD1(
+  const ordinaryArguments = [
     env,
     siteId,
     window,
@@ -1320,7 +1554,17 @@ export async function querySessionBoundaryDimensionFromD1(
     search,
     sortBy,
     sortDirection,
-  );
+  ] as const;
+  return options?.wholeOriginalOwner
+    ? querySessionPathDimensionFromD1(
+        ...ordinaryArguments,
+        undefined,
+        options.wholeOriginalOwner,
+        ...((options.execution ? [options.execution] : []) as [
+          D1ExecutionOptions?,
+        ]),
+      )
+    : querySessionPathDimensionFromD1(...ordinaryArguments);
 }
 
 function sameSessionBoundaryDimensionQueryTime(
@@ -1354,6 +1598,8 @@ export async function queryPageTabsFromD1(
     readonly scopePlan: ScopedFilterPlan;
     readonly consumerKey: unknown;
   },
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<{
   path: DimensionRow[];
   title: DimensionRow[];
@@ -1365,7 +1611,7 @@ export async function queryPageTabsFromD1(
   const queryTime =
     qualification?.queryTime ?? metadata?.time ?? queryWindowToTime(window);
   const scopePlan = qualification?.scopePlan ?? metadata?.plan;
-  const builtPlan = buildPageTabsPlan({
+  const readerConfiguration = {
     siteId,
     queryTime,
     filters,
@@ -1374,7 +1620,25 @@ export async function queryPageTabsFromD1(
       ? { qualificationDependencyRefs: pageRoleDependencyRefs(scopePlan) }
       : {}),
     limit,
-  });
+  };
+  const wholeOriginal = wholeOriginalOwner
+    ? bindWholeOriginalReader({
+        owner: wholeOriginalOwner,
+        consumer: {
+          kind: "page",
+          family: "pages",
+          reader: { kind: "page-tabs", configuration: { limit } },
+        },
+        siteId,
+        filters,
+        queryTime: metadata?.time ?? queryTime,
+        scopePlan: metadata?.plan,
+        readerQueryTime: queryTime,
+        ...(execution ? { execution } : {}),
+      })
+    : undefined;
+  const builtPlan =
+    wholeOriginal?.plan ?? buildPageTabsPlan(readerConfiguration);
   const plan = qualification
     ? snapshotPageVisitQualificationPlan(builtPlan)
     : builtPlan;
@@ -1388,7 +1652,7 @@ export async function queryPageTabsFromD1(
         consumerKey: qualification.consumerKey,
         plan,
       })
-    : undefined;
+    : wholeOriginal?.executionInputs;
   const rows = await queryAnalyticsReportOutputSetRowsFromD1(
     env,
     plan,
@@ -1399,6 +1663,9 @@ export async function queryPageTabsFromD1(
     },
     undefined,
     qualificationExecutionInputs,
+    ...((wholeOriginal?.execution ? [wholeOriginal.execution] : []) as [
+      D1ExecutionOptions?,
+    ]),
   );
   const byCard = new Map<string, DimensionRow[]>();
   for (const row of rows) {

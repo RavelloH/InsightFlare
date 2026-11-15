@@ -15,8 +15,10 @@ import type {
   DeferredReferrerOverviewQualification,
   DeferredReferrersQualification,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import { bindWholeFilterReader } from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import type { Env } from "@/lib/edge/types";
 
+import type { ReferrersTimeMembershipDependency } from "./advanced-filter-execution";
 import {
   executePageDimensionQualificationProgram,
   executeReferrersQualificationProgram,
@@ -33,6 +35,7 @@ import type {
 } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import { queryReferrersFromD1 } from "./dimensions";
+import type { D1ExecutionOptions } from "./execution-options";
 import {
   assertFilterValuesPageQualificationProjection,
   bindPageVisitQualificationPreparation,
@@ -53,6 +56,7 @@ import {
   bindReferrersSummaryQualification,
   type ReferrersSummaryQualificationPreparation,
 } from "./referrers-qualification-execution";
+import { bindWholeOriginalReader } from "./whole-filter-reader-preparation";
 export interface ReferrerAggregateCursor {
   /** The first two values are the concrete ORDER BY metrics. */
   readonly primary: number;
@@ -131,6 +135,9 @@ export async function queryReferrerSummaryFromD1(
     readonly scopePlan: ScopedFilterPlan;
     readonly queryTime: QueryTime;
   },
+  dependency?: ReferrersTimeMembershipDependency,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<ReferrerSummaryRow> {
   const metadata = scopedFilterMetadata(filters);
   const qualificationBinding = qualification
@@ -143,8 +150,35 @@ export async function queryReferrerSummaryFromD1(
         topN,
       })
     : undefined;
+  const dependencyBinding = dependency
+    ? bindWholeFilterReader({
+        dependency,
+        siteId,
+        consumer: { kind: "referrers-summary", configuration: { topN } },
+      })
+    : undefined;
+  const wholeOriginal =
+    !dependencyBinding && !qualificationBinding && wholeOriginalOwner
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalOwner,
+          consumer: {
+            kind: "page",
+            family: "referrers",
+            reader: { kind: "referrers-summary", configuration: { topN } },
+          },
+          siteId,
+          filters,
+          queryTime: metadata?.time ?? queryWindowToTime(window),
+          scopePlan: metadata?.plan,
+          ...(execution ? { execution } : {}),
+        })
+      : undefined;
+  const dependencyPlan = dependencyBinding?.plan;
+  const dependencyInputs = dependencyBinding?.executionInputs;
   const plan =
+    dependencyPlan ??
     qualificationBinding?.plan ??
+    wholeOriginal?.plan ??
     buildReferrerSummaryPlan({
       siteId,
       queryTime: metadata?.time ?? queryWindowToTime(window),
@@ -152,7 +186,10 @@ export async function queryReferrerSummaryFromD1(
       ...(metadata ? { scopePlan: metadata.plan } : {}),
       topN,
     });
-  const qualificationExecutionInputs = qualificationBinding?.executionInputs;
+  const qualificationExecutionInputs =
+    dependencyInputs ??
+    qualificationBinding?.executionInputs ??
+    wholeOriginal?.executionInputs;
   const rows = await queryAnalyticsReportOutputSetRowsFromD1(
     env,
     plan,
@@ -176,6 +213,9 @@ export async function queryReferrerSummaryFromD1(
     },
     diagnostics,
     qualificationExecutionInputs,
+    ...((wholeOriginal?.execution ? [wholeOriginal.execution] : []) as [
+      D1ExecutionOptions?,
+    ]),
   );
   const summary = rows.find((row) => row.rowType === "summary") ?? {};
   const topRows = rows.filter((row) => row.rowType === "top");
@@ -275,12 +315,14 @@ export async function queryReferrersPageFromD1(
     readonly scopePlan: ScopedFilterPlan;
     readonly filterValuesProjection?: FilterValuesPageQualificationProjection;
   },
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<PageResult<ReferrerRow>> {
   const metadata = scopedFilterMetadata(filters);
   const queryTime =
     qualification?.queryTime ?? metadata?.time ?? queryWindowToTime(window);
   const scopePlan = qualification?.scopePlan ?? metadata?.plan;
-  const builtPlan = buildReferrersPagePlan({
+  const readerConfiguration = {
     siteId,
     queryTime,
     filters,
@@ -296,7 +338,35 @@ export async function queryReferrersPageFromD1(
     sortBy,
     sortDirection,
     ...(cursor ? { cursor } : {}),
-  });
+  };
+  const wholeOriginal = wholeOriginalOwner
+    ? bindWholeOriginalReader({
+        owner: wholeOriginalOwner,
+        consumer: {
+          kind: "page",
+          family: "referrers",
+          reader: {
+            kind: "referrers-page",
+            configuration: {
+              limit,
+              includeFullUrl,
+              ...(search !== undefined ? { search } : {}),
+              sortBy,
+              sortDirection,
+              ...(cursor ? { cursor } : {}),
+            },
+          },
+        },
+        siteId,
+        filters,
+        queryTime: metadata?.time ?? queryTime,
+        scopePlan: metadata?.plan,
+        readerQueryTime: queryTime,
+        ...(execution ? { execution } : {}),
+      })
+    : undefined;
+  const builtPlan =
+    wholeOriginal?.plan ?? buildReferrersPagePlan(readerConfiguration);
   const plan = qualification
     ? snapshotPageVisitQualificationPlan(builtPlan)
     : builtPlan;
@@ -328,7 +398,7 @@ export async function queryReferrersPageFromD1(
             }),
         plan,
       })
-    : undefined;
+    : wholeOriginal?.executionInputs;
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
     plan,
@@ -336,6 +406,9 @@ export async function queryReferrersPageFromD1(
     undefined,
     diagnostics,
     qualificationExecutionInputs,
+    ...((wholeOriginal?.execution ? [wholeOriginal.execution] : []) as [
+      D1ExecutionOptions?,
+    ]),
   );
   return referrerPageFromRows({
     env,

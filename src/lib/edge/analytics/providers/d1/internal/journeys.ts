@@ -2,6 +2,7 @@ import type { Env } from "@/lib/edge/types";
 
 import type { FilterDocument, GeoPointAggregate, QueryWindow } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
+import type { D1ExecutionOptions } from "./execution-options";
 import {
   type GeoPointsPageVisitQualification,
   queryGeoPointsFromD1,
@@ -62,6 +63,7 @@ export async function queryGeoPointAggregate(
   limit: number,
   diagnostics?: D1ReadDiagnostics,
   qualification?: GeoPointsPageVisitQualification,
+  execution?: D1ExecutionOptions,
 ): Promise<GeoPointAggregate> {
   return queryGeoPointsFromD1(
     env,
@@ -71,5 +73,6 @@ export async function queryGeoPointAggregate(
     limit,
     diagnostics,
     qualification,
+    execution,
   );
 }

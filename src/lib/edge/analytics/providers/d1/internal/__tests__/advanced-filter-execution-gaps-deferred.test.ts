@@ -148,6 +148,7 @@ type DeferredFactory = () => Promise<DeferredSubject>;
 
 async function qualify(input: {
   readonly operation: string;
+  readonly audience?: "private-dashboard" | "api-v1" | "public-share";
   readonly extra?: Request;
   readonly scope: "event" | "session" | "visitor";
   readonly pick: (forwarded: unknown) => unknown;
@@ -157,7 +158,7 @@ async function qualify(input: {
   const prepared = prepareScopedQuery(
     input.operation as never,
     {
-      context: siteQueryContext(SITE, "private-dashboard"),
+      context: siteQueryContext(SITE, input.audience ?? "private-dashboard"),
       time: TIME,
       filters: parseFilterDsl(FILTER, analyticsFilterRegistry),
       scopePreference: input.scope,
@@ -344,5 +345,92 @@ describe("advanced filter execution deferred qualification aborts", () => {
         readerAudience: "private-dashboard",
       }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("Page audience decisions preserve fallback and proof boundaries", () => {
+  it.each(["api-v1", "public-share"] as const)(
+    "declines an event Page reader for %s without rejecting the valid fallback",
+    async (readerAudience) => {
+      const subject = await pageVisitEventCandidate();
+      const before = subject.armable.completedStatements();
+      await expect(
+        prepareDeferredPageVisitQualification(subject.deferred, "key", {
+          readerAudience,
+        }),
+      ).resolves.toBeUndefined();
+      expect(subject.armable.completedStatements()).toBe(before);
+      await expect(
+        prepareDeferredEventQualificationFallback(subject.deferred as never),
+      ).resolves.toBeDefined();
+      expect(subject.armable.completedStatements()).toBeGreaterThan(before);
+    },
+  );
+
+  it("retains the optional reader for private request-audience consumers", async () => {
+    const { deferred } = await pageVisitEventCandidate();
+    await expect(
+      prepareDeferredPageVisitQualification(deferred, "key"),
+    ).resolves.toBeDefined();
+  });
+
+  it.each(["private-dashboard", "api-v1"] as const)(
+    "retains authorized entity membership for %s without a private opt-in",
+    async (audience) => {
+      const { deferred } = await qualify({
+        operation: "channels",
+        extra: { mode: "list" },
+        scope: "session",
+        audience,
+        pick: deferredChannelListQualificationFromQuery,
+      });
+      await expect(
+        prepareDeferredPageVisitQualification(deferred, "key", {
+          readerAudience: audience,
+          readerQueryTime: TIME,
+        }),
+      ).resolves.toBeDefined();
+    },
+  );
+
+  it("preserves the public-share channel preparation exclusion and valid fallback", async () => {
+    const armable = createArmableEnv();
+    const query = prepareScopedQuery("channels", {
+      context: siteQueryContext(SITE, "public-share"),
+      time: TIME,
+      filters: parseFilterDsl(FILTER, analyticsFilterRegistry),
+      scopePreference: "session",
+      mode: "list",
+    } as never);
+    const forwarded = await d1AdvancedFilterMiddleware(
+      armable.env,
+      undefined,
+      SITE,
+    )("channels", query, async (value) => value);
+    expect(
+      deferredChannelListQualificationFromQuery(forwarded),
+    ).toBeUndefined();
+    expect(forwarded).toBeDefined();
+  });
+
+  it("does not accept cloned private preparations or mismatched reader windows", async () => {
+    const { deferred, armable } = await pageVisitEventCandidate();
+    const before = armable.completedStatements();
+    await expect(
+      prepareDeferredPageVisitQualification(
+        { ...(deferred as Request) },
+        "key",
+        {
+          readerAudience: "private-dashboard",
+        },
+      ),
+    ).resolves.toBeUndefined();
+    await expect(
+      prepareDeferredPageVisitQualification(deferred, "key", {
+        readerAudience: "private-dashboard",
+        readerQueryTime: createQueryTime(121, 130, "UTC", 500),
+      }),
+    ).resolves.toBeUndefined();
+    expect(armable.completedStatements()).toBe(before);
   });
 });

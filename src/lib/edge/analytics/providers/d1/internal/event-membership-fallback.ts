@@ -21,6 +21,10 @@ import {
 import type { QualificationExecutionInputs } from "./qualification-execution-inputs";
 
 export interface EventMembershipReportContext {
+  /** Only a completed whole-original producer can opt in its canonical reader. */
+  readonly qualificationSemantics?: "whole-original";
+  /** Live whole document observed at this exact canonical builder checkpoint. */
+  readonly readerFilters?: FilterDocument;
   readonly queryTime: QueryTime;
   readonly scopePlan: ScopedFilterPlan;
   readonly qualificationDependencyRefs: readonly QualificationDependencyRef[];

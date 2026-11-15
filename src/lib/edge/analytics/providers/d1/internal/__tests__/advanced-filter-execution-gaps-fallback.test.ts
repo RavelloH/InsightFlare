@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import { createSqliteD1Database } from "@/lib/db/__tests__/sqlite-d1";
@@ -10,9 +10,23 @@ import {
   scopedFilterMetadata,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
-import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import type { QueryInput } from "@/lib/edge/analytics/contract/types";
+import {
+  d1AdvancedFilterMiddleware,
+  deferredPerformanceSummaryQualificationFromQuery,
+} from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import * as wholeReaders from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
+
+// These middleware-only historical carrier oracles inspect preparedMembership.
+// Decline only the finite whole-reader catalog; SQL/Count admission, authorization,
+// evaluation, register, and all original assertions execute through the real code.
+const originalWholeSelector = wholeReaders.selectWholeOriginalConsumer;
+const legacyWholeCarrier = vi
+  .spyOn(wholeReaders, "selectWholeOriginalConsumer")
+  .mockReturnValue(undefined);
+afterAll(() => legacyWholeCarrier.mockRestore());
 
 const SITE = "gap-fallback-site";
 const TIME = createQueryTime(120, 130, "UTC", 500);
@@ -288,6 +302,33 @@ const fallbackCases: readonly FallbackCase[] = [
 
 describe("advanced filter execution legacy fallback routing", () => {
   const env = createEnv();
+
+  it("keeps current whole fallback distinct from deferred Count admission", async () => {
+    legacyWholeCarrier.mockImplementation(originalWholeSelector);
+    try {
+      const request = buildQuery({
+        operation: "performance",
+        extra: { mode: "summary", time: OTHER_TIME },
+        scope: "session",
+      });
+      const forwarded = (await d1AdvancedFilterMiddleware(env, undefined, SITE)(
+        "performance",
+        request as never,
+        async (value) => value,
+      )) as unknown as QueryInput & Request;
+      expect(wholeReaders.hasWholeOriginalCompletion(forwarded, "page")).toBe(
+        true,
+      );
+      expect(
+        scopedFilterMetadata(forwarded.filters)?.plan.preparedMembership,
+      ).toBeUndefined();
+      expect(
+        deferredPerformanceSummaryQualificationFromQuery(forwarded),
+      ).toBeUndefined();
+    } finally {
+      legacyWholeCarrier.mockReturnValue(undefined);
+    }
+  });
 
   it.each(fallbackCases)(
     "routes $name to the complete legacy evaluation",

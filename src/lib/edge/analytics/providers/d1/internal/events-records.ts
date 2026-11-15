@@ -43,6 +43,7 @@ import {
   type EventRecordPageOutputRow,
   queryEventRecordPageOutputRowsFromD1,
 } from "./event-record-page-output";
+import { bindWholeOriginalReader } from "./whole-filter-reader-preparation";
 
 export type EventRecordCursor = EventRecordPageCursor;
 
@@ -112,6 +113,7 @@ export async function queryEventRecordPageFromD1(
     cursor?: EventRecordCursor | null;
     scopePlan?: ScopedFilterPlan;
     queryTime?: QueryTime;
+    wholeOriginalOwner?: object;
   },
 ): Promise<EventRecordPage> {
   const preparedMetadata = scopedFilterMetadata(filters);
@@ -126,14 +128,44 @@ export async function queryEventRecordPageFromD1(
       window.timeZone,
       window.nowMs,
     );
-  const plan = buildEventRecordPagePlan({
-    siteId,
-    queryTime,
-    filters,
-    ...(scopePlan ? { scopePlan } : {}),
-    options,
-  });
-  const rawRows = await queryEventRecordPageOutputRowsFromD1(env, plan);
+  const wholeOriginal = options.wholeOriginalOwner
+    ? bindWholeOriginalReader({
+        owner: options.wholeOriginalOwner,
+        consumer: {
+          kind: "event-records",
+          configuration: {
+            limit: options.limit,
+            sort: options.sort,
+            ...(options.search !== undefined ? { search: options.search } : {}),
+            ...(options.eventName !== undefined
+              ? { eventName: options.eventName }
+              : {}),
+            ...(options.cursor ? { cursor: options.cursor } : {}),
+          },
+        },
+        siteId,
+        filters,
+        queryTime: preparedTime ?? queryTime,
+        readerQueryTime: queryTime,
+        scopePlan,
+      })
+    : undefined;
+  const plan =
+    wholeOriginal?.plan ??
+    buildEventRecordPagePlan({
+      siteId,
+      queryTime,
+      filters,
+      ...(scopePlan ? { scopePlan } : {}),
+      options,
+    });
+  const rawRows = await queryEventRecordPageOutputRowsFromD1(
+    env,
+    plan,
+    ...(wholeOriginal
+      ? ([wholeOriginal.executionInputs] as const)
+      : ([] as const)),
+  );
   return eventRecordPageFromOutputRows(rawRows, options);
 }
 

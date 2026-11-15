@@ -11,6 +11,7 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 
+import appStylesheetUrl from "@/app/globals.css?url";
 import { LayerSystemFixture } from "@/components/dashboard/site-pages/overview/layer-system-fixture";
 import { GlobalScrollbars } from "@/components/global-scrollbars";
 import { AppQueryProvider } from "@/components/query-client-provider";
@@ -32,8 +33,6 @@ import { APP_NAME } from "@/lib/constants";
 import { localeToHtmlLang, resolveLocale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n/messages";
 import Link from "@/lib/router";
-
-import "@/app/globals.css";
 const THEME_INIT_SCRIPT = `(function(){try{var k='insightflare-theme';var t=localStorage.getItem(k)||'system';var d=t==='dark'||(t==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d);document.documentElement.style.colorScheme=d?'dark':'light'}catch(e){}})()`;
 const ESBUILD_NAME_HELPER_SCRIPT = `(function(){if(typeof globalThis.__name!=="function"){globalThis.__name=function(target){return target}}})()`;
 const DEMO_ANALYTICS_SCRIPT_SRC =
@@ -47,6 +46,7 @@ export const Route = createRootRoute({
       { name: "description", content: `${APP_NAME} analytics dashboard` },
     ],
     links: [
+      { rel: "stylesheet", href: appStylesheetUrl },
       { rel: "icon", href: "/favicon.ico" },
       { rel: "manifest", href: "/site.webmanifest" },
     ],

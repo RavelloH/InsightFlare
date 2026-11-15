@@ -25,11 +25,11 @@ import {
   type QueryTime,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
+import * as countSupport from "@/lib/edge/analytics/engine/advanced-filter-count-support";
 import {
   preparedMembershipFromIds,
   preparedMembershipIdentities,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
-import * as countSupport from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import * as siteCoverageModule from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-site-coverage";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";

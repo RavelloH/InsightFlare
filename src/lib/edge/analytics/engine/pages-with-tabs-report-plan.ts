@@ -130,6 +130,7 @@ export function buildPagesWithTabsPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly limit: number;
   readonly includeDetails: boolean;
@@ -139,6 +140,9 @@ export function buildPagesWithTabsPlan(input: {
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
+    ...(input.qualificationSemantics
+      ? { qualificationSemantics: input.qualificationSemantics }
+      : {}),
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
     ...(input.qualificationDependencyRefs
       ? { qualificationDependencyRefs: input.qualificationDependencyRefs }

@@ -1,4 +1,4 @@
-import { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
+import { D1ProgramProviderRegistry } from "@/lib/edge/analytics/composition/d1/program-provider-registry";
 import { createAnalyticsQueryRuntime } from "@/lib/edge/analytics/composition/query-runtime";
 import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
@@ -28,7 +28,7 @@ export function createD1SiteProviderRegistry(options: D1SiteRuntimeBindings) {
     siteId: options.siteId,
     diagnostics,
   };
-  const registry = new AnalyticsProviderRegistry()
+  const registry = new D1ProgramProviderRegistry()
     .register("overview", overviewProvider(reader, overviewTrendQualification))
     .register("trend", trendProvider(reader, overviewTrendQualification));
   registerSiteContractProviders(registry, options);

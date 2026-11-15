@@ -47,8 +47,11 @@ type AnyTypedQueryProvider = {
  * maintains one provider map.
  */
 export class AnalyticsProviderRegistry {
-  private readonly providers = new Map<QueryOperation, AnyTypedQueryProvider>();
-  private readonly middlewares: TypedQueryProviderMiddleware[] = [];
+  protected readonly providers = new Map<
+    QueryOperation,
+    AnyTypedQueryProvider
+  >();
+  protected readonly middlewares: TypedQueryProviderMiddleware[] = [];
 
   useMiddleware(middleware: TypedQueryProviderMiddleware): this {
     this.middlewares.push(middleware);

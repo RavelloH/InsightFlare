@@ -60,6 +60,7 @@ import {
   queryEventTypeAggregate,
   queryEventTypePageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
+import { hasWholeOriginalCompletion } from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";
 import {
   createInvocationLogger,
@@ -284,10 +285,14 @@ async function executeLegacyEventTypesRequest(input: {
     input.prepared.search,
     cursor,
     input.prepared.context.policy.audience,
+    hasWholeOriginalCompletion(deferred, "event-types")
+      ? { wholeOriginalOwner: deferred }
+      : undefined,
   );
 }
 
-/** Execute the complete legacy Count+report request with this exact DSL. */
+/** Execute the current complete fallback Count+report request with this DSL.
+ * This helper is not an independent historical-source oracle. */
 async function executeLegacyEventSummaryRequest(input: {
   readonly env: Env;
   readonly prepared: QueryInput & {
@@ -303,7 +308,15 @@ async function executeLegacyEventSummaryRequest(input: {
   const deferred = deferredEventSummaryQualificationFromQuery(forwarded);
   if (!deferred) throw new Error("wave94b_full_legacy_request_not_prepared");
   const filters = await prepareDeferredEventSummaryFallback(deferred);
-  return queryEventsSummaryFromD1(input.env, SITE_ID, WINDOW, filters);
+  return queryEventsSummaryFromD1(
+    input.env,
+    SITE_ID,
+    WINDOW,
+    filters,
+    hasWholeOriginalCompletion(deferred, "event-summary")
+      ? { wholeOriginalOwner: deferred }
+      : undefined,
+  );
 }
 
 function recordExecutionEvidence(
@@ -2569,6 +2582,9 @@ describe("Wave38 Event type and summary Logical migration regressions", () => {
         SITE_ID,
         WINDOW,
         baselineFilters,
+        hasWholeOriginalCompletion(baselineDeferred, "event-summary")
+          ? { wholeOriginalOwner: baselineDeferred }
+          : undefined,
       );
       const baselineDto = {
         summary: {

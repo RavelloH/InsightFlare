@@ -1210,75 +1210,55 @@ describe("Pages Dashboard production qualification", () => {
   ).flatMap((metric) =>
     (["asc", "desc"] as const).map((direction) => ({ metric, direction })),
   );
-  const cursorPageCases = metricDirections.flatMap(({ metric, direction }) =>
-    [0, 1, 2, 3].map((pageIndex) => ({ metric, direction, pageIndex })),
-  );
-  it.each(cursorPageCases)(
-    "sort cursor page: $metric $direction page $pageIndex",
-    async ({ metric, direction, pageIndex }) => {
+  it.each(metricDirections)(
+    "sort cursor page chain: $metric $direction",
+    async ({ metric, direction }) => {
       const id = `sort-${metric}-${direction}`;
       await withFixture(async (fixture) => {
         let cursor: string | null = null;
-        let expectedPage:
-          Awaited<ReturnType<typeof queryPagesDashboard>> | undefined;
-        let expectedStatements: StatementEvidence = [];
-        let inputCursor: string | null = null;
-        for (let oraclePage = 0; oraclePage <= pageIndex; oraclePage += 1) {
-          if (oraclePage === pageIndex) inputCursor = cursor;
+        for (let pageIndex = 0; pageIndex < 4; pageIndex += 1) {
           const query = queryFor({
             page: { limit: 4, cursor },
             sort: { key: metric, direction },
           });
           const oracle = await runLegacyPage(
             fixture,
-            `${id}-page-${pageIndex}-oracle-${oraclePage}`,
+            `${id}-page-${pageIndex}-oracle-${pageIndex}`,
             query,
           );
-          expectedPage = oracle.value;
-          expectedStatements = oracle.statements;
-          if (oraclePage < pageIndex) {
-            expect(oracle.value.pagination.hasMore).toBe(true);
-            expect(oracle.value.pagination.nextCursor).toEqual(
+          const expectedPage = oracle.value;
+          const expectedStatements = oracle.statements;
+          expect(expectedPage.pagination.limit).toBe(4);
+          expect(expectedPage.pagination.returned).toBe(
+            expectedPage.items.length,
+          );
+          if (pageIndex < 3) {
+            expect(expectedPage.pagination.hasMore).toBe(true);
+            expect(expectedPage.pagination.nextCursor).toEqual(
               expect.any(String),
             );
+          } else {
+            expect(pageIndex).toBe(3);
+            expect(expectedPage.pagination.hasMore).toBe(false);
+            expect(expectedPage.pagination.nextCursor).toBeNull();
           }
-          cursor = oracle.value.pagination.nextCursor;
-        }
-        if (!expectedPage)
-          throw new Error("wave97e_cursor_oracle_page_missing");
-        expect(expectedPage.pagination.limit).toBe(4);
-        expect(expectedPage.pagination.returned).toBe(
-          expectedPage.items.length,
-        );
-        if (pageIndex < 3) {
-          expect(expectedPage.pagination.hasMore).toBe(true);
-          expect(expectedPage.pagination.nextCursor).toEqual(
-            expect.any(String),
+          const result = await runRegistryParity(
+            fixture,
+            `${id}-page-${pageIndex}`,
+            query,
+            expectedPage,
+            expectedStatements,
           );
-        } else {
-          expect(pageIndex).toBe(3);
-          expect(expectedPage.pagination.hasMore).toBe(false);
-          expect(expectedPage.pagination.nextCursor).toBeNull();
+          expect(result.actual.pagination.hasMore).toBe(
+            expectedPage.pagination.hasMore,
+          );
+          expect(result.actual.pagination.nextCursor).toBe(
+            expectedPage.pagination.nextCursor,
+          );
+          expect(result.actual).toEqual(expectedPage);
+          completedCursorPageTests.add(`${id}-page-${pageIndex}`);
+          cursor = expectedPage.pagination.nextCursor;
         }
-        const actualQuery = queryFor({
-          page: { limit: 4, cursor: inputCursor },
-          sort: { key: metric, direction },
-        });
-        const result = await runRegistryParity(
-          fixture,
-          `${id}-page-${pageIndex}`,
-          actualQuery,
-          expectedPage,
-          expectedStatements,
-        );
-        expect(result.actual.pagination.hasMore).toBe(
-          expectedPage.pagination.hasMore,
-        );
-        expect(result.actual.pagination.nextCursor).toBe(
-          expectedPage.pagination.nextCursor,
-        );
-        expect(result.actual).toEqual(expectedPage);
-        completedCursorPageTests.add(`${id}-page-${pageIndex}`);
       });
     },
   );

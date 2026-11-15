@@ -1,4 +1,7 @@
-import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
+import type {
+  LogicalPlan,
+  ValidatedLogicalPlan,
+} from "@/lib/edge/analytics/engine/logical/plan";
 import {
   EVENT_FILTER_ENTITY_MEMBERSHIP_DEPENDENCY,
   EVENT_FILTER_EVENT_MEMBERSHIP_DEPENDENCY,
@@ -24,6 +27,8 @@ interface QualificationExecutionState {
   readonly bindings: readonly QualificationDependencyRelationBinding[];
   readonly plan: ValidatedLogicalPlan;
   attached: boolean;
+  lowerer?: object;
+  readonly analysisInputs?: readonly AnalysisResultQualificationExecutionBinding[];
 }
 
 const qualificationExecutionStates = new WeakMap<
@@ -32,7 +37,7 @@ const qualificationExecutionStates = new WeakMap<
 >();
 
 function planDependencies(
-  plan: ValidatedLogicalPlan,
+  plan: LogicalPlan,
 ): readonly QualificationDependencyRef[] {
   return plan.nodes.flatMap((node) =>
     node.kind === "source"
@@ -131,7 +136,92 @@ export function attachQualificationExecutionInputs(
     !Object.isFrozen(plan)
   )
     throw new Error("qualification_execution_input_plan_mismatch");
-  assertBindingsMatchPlan(state.bindings, plan);
+  if (state.analysisInputs)
+    assertAnalysisInputsMatchPlan(state.analysisInputs, plan);
+  else assertBindingsMatchPlan(state.bindings, plan);
+  state.lowerer = lowerer;
   state.attached = true;
   return state.bindings;
+}
+
+export interface AnalysisResultQualificationExecutionBinding {
+  readonly childPlan: ValidatedLogicalPlan;
+  readonly executionInputs: QualificationExecutionInputs;
+}
+function assertAnalysisInputsMatchPlan(
+  bindings: readonly AnalysisResultQualificationExecutionBinding[],
+  plan: ValidatedLogicalPlan,
+): void {
+  const children = [
+    ...new Set(
+      plan.nodes.flatMap((n) =>
+        n.kind === "analysis-result" && planDependencies(n.childPlan).length > 0
+          ? [n.childPlan]
+          : [],
+      ),
+    ),
+  ];
+  if (
+    planDependencies(plan).length !== 0 ||
+    children.length === 0 ||
+    children.length !== bindings.length ||
+    new Set(bindings.map((b) => b.childPlan)).size !== bindings.length ||
+    children.some((c) => !bindings.some((b) => b.childPlan === c))
+  )
+    throw new Error("qualification_execution_analysis_dependency_unexpected");
+  for (const b of bindings) {
+    const st = qualificationExecutionStates.get(b.executionInputs);
+    if (!st || st.plan !== b.childPlan || st.attached || st.analysisInputs)
+      throw new Error("qualification_execution_analysis_input_mismatch");
+    assertBindingsMatchPlan(st.bindings, b.childPlan);
+  }
+}
+/** Compose independently bound child inputs without merging dependency refs.
+ * Original child capabilities are consumed atomically; delegated capabilities
+ * remain private to this exact frozen parent and its imported child identities. */
+export function createAnalysisResultQualificationExecutionInputsForTrustedPlan(
+  bindings: readonly AnalysisResultQualificationExecutionBinding[],
+  plan: ValidatedLogicalPlan,
+): QualificationExecutionInputs {
+  if (!Object.isFrozen(plan))
+    throw new Error("qualification_execution_plan_not_frozen");
+  assertAnalysisInputsMatchPlan(bindings, plan);
+  const delegated = bindings.map((b) => {
+    const state = qualificationExecutionStates.get(b.executionInputs)!;
+    state.attached = true;
+    const handle = Object.freeze(
+      Object.create(null),
+    ) as QualificationExecutionInputs;
+    qualificationExecutionStates.set(handle, {
+      bindings: state.bindings,
+      plan: b.childPlan,
+      attached: false,
+    });
+    return Object.freeze({ childPlan: b.childPlan, executionInputs: handle });
+  });
+  const handle = Object.freeze(
+    Object.create(null),
+  ) as QualificationExecutionInputs;
+  qualificationExecutionStates.set(handle, {
+    bindings: [],
+    plan,
+    analysisInputs: Object.freeze(delegated),
+    attached: false,
+  });
+  return handle;
+}
+/** Called only after this lowerer attached the exact parent capability. */
+export function analysisResultQualificationExecutionInputsForLowerer(
+  input: unknown,
+  lowerer: object,
+  plan: ValidatedLogicalPlan,
+): readonly AnalysisResultQualificationExecutionBinding[] {
+  if (input === undefined) return [];
+  const st =
+    typeof input === "object" && input !== null
+      ? qualificationExecutionStates.get(input)
+      : undefined;
+  if (!st || !st.attached || st.lowerer !== lowerer || st.plan !== plan)
+    throw new Error("qualification_execution_analysis_input_mismatch");
+  return st.analysisInputs ?? [];
 }

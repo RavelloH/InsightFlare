@@ -40,6 +40,7 @@ interface TechnologyRadarPlanInput {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   /** Select the canonical prepared-scoped Page Source for an already prepared visit relation. */
   readonly pageVisitQualification?: true;
   readonly dimension: TechnologyRadarDimension;
@@ -313,6 +314,9 @@ export function buildTechnologyRadarPlan(
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
+    ...(input.qualificationSemantics
+      ? { qualificationSemantics: input.qualificationSemantics }
+      : {}),
     ...(input.pageVisitQualification
       ? {
           qualificationDependencyRefs: pageRoleDependencyRefs(input.scopePlan),

@@ -10,7 +10,10 @@ import { OVERVIEW_CHANNELS_REPORT_OUTPUT } from "@/lib/edge/analytics/engine/cha
 import { buildOverviewChannelsPlan } from "@/lib/edge/analytics/engine/channel-client-geo-report-plan";
 import { pageRoleDependencyRefs } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import {
+  bindDeferredChannelMembershipSuccessor,
   type DeferredChannelListQualification,
+  hasDeferredChannelMembershipProgram,
+  prepareDeferredChannelMembershipFallback,
   prepareDeferredEventQualificationFallback,
   prepareDeferredPageVisitQualification,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
@@ -27,12 +30,14 @@ import type {
   AdvancedCountSqlFallbackReason,
   D1ReadDiagnostics,
 } from "./diagnostics";
+import type { D1ExecutionOptions } from "./execution-options";
 import {
   bindPageVisitQualificationPreparation,
   pageVisitQualificationConsumerKey,
   type PageVisitQualificationPreparation,
   snapshotPageVisitQualificationPlan,
 } from "./page-visit-qualification-execution";
+import { bindWholeOriginalReader } from "./whole-filter-reader-preparation";
 
 export interface ChannelAggregateRow {
   readonly channel: TrafficChannelId;
@@ -52,68 +57,141 @@ function mapChannelRows(
   }));
 }
 
+interface ChannelsPageQualification {
+  readonly kind?: never;
+  readonly preparation: PageVisitQualificationPreparation;
+  readonly queryTime: QueryTime;
+  readonly scopePlan: ScopedFilterPlan;
+  readonly sourceLimit: number | undefined;
+  readonly audience: QueryAudience;
+  readonly hasComparison: boolean;
+  readonly hasCurrent: boolean;
+  readonly hasReference: boolean;
+}
+
+interface ChannelsStagedQualification {
+  readonly kind: "channels-whole-logical-stages";
+  readonly deferred: DeferredChannelListQualification;
+  readonly queryTime: QueryTime;
+  readonly scopePlan: ScopedFilterPlan;
+}
+
 export async function queryChannelsFromD1(
   env: Env,
   siteId: string,
   window: QueryWindow,
   filters: FilterDocument,
   limit: number,
-  qualification?: {
-    readonly preparation: PageVisitQualificationPreparation;
-    readonly queryTime: QueryTime;
-    readonly scopePlan: ScopedFilterPlan;
-    readonly sourceLimit: number | undefined;
-    readonly audience: QueryAudience;
-    readonly hasComparison: boolean;
-    readonly hasCurrent: boolean;
-    readonly hasReference: boolean;
-  },
+  qualification?: ChannelsPageQualification | ChannelsStagedQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<ChannelAggregateRow[]> {
   const metadata = scopedFilterMetadata(filters);
   const queryTime =
     qualification?.queryTime ?? metadata?.time ?? queryWindowToTime(window);
   const scopePlan = qualification?.scopePlan ?? metadata?.plan;
-  const builtPlan = buildOverviewChannelsPlan({
-    siteId,
-    queryTime,
-    filters,
-    ...(scopePlan ? { scopePlan } : {}),
-    ...(qualification
-      ? {
-          qualificationDependencyRefs: pageRoleDependencyRefs(scopePlan),
-        }
-      : {}),
-    limit,
-  });
-  const plan = qualification
-    ? snapshotPageVisitQualificationPlan(builtPlan)
-    : builtPlan;
-  const qualificationExecutionInputs = qualification
-    ? bindPageVisitQualificationPreparation({
-        preparation: qualification.preparation,
+  const stagedQualification =
+    qualification?.kind === "channels-whole-logical-stages"
+      ? qualification
+      : undefined;
+  const pageQualification =
+    qualification?.kind === "channels-whole-logical-stages"
+      ? undefined
+      : qualification;
+  const staged = stagedQualification
+    ? bindDeferredChannelMembershipSuccessor({
+        deferred: stagedQualification.deferred,
         siteId,
         filters,
         queryTime,
-        scopePlan: qualification.scopePlan,
-        consumerKey: channelListQualificationConsumerKey({
-          limit,
-          sourceLimit: qualification.sourceLimit,
-          audience: qualification.audience,
-          hasComparison: qualification.hasComparison,
-          hasCurrent: qualification.hasCurrent,
-          hasReference: qualification.hasReference,
-        }),
-        plan,
+        scopePlan: stagedQualification.scopePlan,
+        limit,
       })
     : undefined;
-  const rows = await queryAnalyticsReportOutputRowsFromD1(
-    env,
-    plan,
-    "overview-channels",
-    undefined,
-    undefined,
-    qualificationExecutionInputs,
-  );
+  const wholeOriginal =
+    !qualification && wholeOriginalOwner
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalOwner,
+          consumer: {
+            kind: "page",
+            family: "channels",
+            reader: { kind: "channels-list", configuration: { limit } },
+          },
+          siteId,
+          filters,
+          queryTime: metadata?.time ?? queryWindowToTime(window),
+          scopePlan: metadata?.plan,
+          readerQueryTime: queryTime,
+          ...(execution ? { execution } : {}),
+        })
+      : undefined;
+  // Existing qualification and whole-reader bindings retain priority.
+  const membershipOutputs =
+    !qualification && !wholeOriginalOwner
+      ? (execution?.program?.completedWholeOutputs ?? [])
+      : [];
+  const membershipOutput = membershipOutputs[0];
+  const builtPlan =
+    staged?.plan ??
+    wholeOriginal?.plan ??
+    buildOverviewChannelsPlan({
+      siteId,
+      queryTime,
+      filters,
+      ...(scopePlan ? { scopePlan } : {}),
+      ...(membershipOutput ? { membershipOutput } : {}),
+      ...(pageQualification
+        ? {
+            qualificationDependencyRefs: pageRoleDependencyRefs(scopePlan),
+          }
+        : {}),
+      limit,
+    });
+  // Preserve the original integer-limit and Source checks before ambiguity.
+  if (membershipOutputs.length > 1)
+    throw new Error("channels_program_membership_producer_ambiguous");
+  const plan = pageQualification
+    ? snapshotPageVisitQualificationPlan(builtPlan)
+    : builtPlan;
+  const qualificationExecutionInputs =
+    staged?.executionInputs ??
+    wholeOriginal?.executionInputs ??
+    (pageQualification
+      ? bindPageVisitQualificationPreparation({
+          preparation: pageQualification.preparation,
+          siteId,
+          filters,
+          queryTime,
+          scopePlan: pageQualification.scopePlan,
+          consumerKey: channelListQualificationConsumerKey({
+            limit,
+            sourceLimit: pageQualification.sourceLimit,
+            audience: pageQualification.audience,
+            hasComparison: pageQualification.hasComparison,
+            hasCurrent: pageQualification.hasCurrent,
+            hasReference: pageQualification.hasReference,
+          }),
+          plan,
+        })
+      : undefined);
+  const rows = await (membershipOutput || wholeOriginal?.execution
+    ? queryAnalyticsReportOutputRowsFromD1(
+        env,
+        plan,
+        "overview-channels",
+        undefined,
+        undefined,
+        qualificationExecutionInputs,
+        wholeOriginal?.execution ?? execution,
+      )
+    : queryAnalyticsReportOutputRowsFromD1(
+        env,
+        plan,
+        "overview-channels",
+        undefined,
+        undefined,
+        qualificationExecutionInputs,
+      ));
   return mapChannelRows(rows);
 }
 
@@ -190,9 +268,13 @@ export async function queryQualifiedChannelListFromD1(input: {
     input.deferred,
     consumerKey,
   );
+  const staged =
+    !preparation && hasDeferredChannelMembershipProgram(input.deferred);
   const fallbackFilters = preparation
     ? input.filters
-    : await prepareDeferredEventQualificationFallback(input.deferred);
+    : await (staged
+        ? prepareDeferredChannelMembershipFallback(input.deferred)
+        : prepareDeferredEventQualificationFallback(input.deferred));
   const rows = await queryChannelsFromD1(
     input.env,
     input.siteId,
@@ -210,7 +292,17 @@ export async function queryQualifiedChannelListFromD1(input: {
           hasCurrent: input.hasCurrent,
           hasReference: input.hasReference,
         }
-      : undefined,
+      : staged
+        ? {
+            kind: "channels-whole-logical-stages",
+            deferred: input.deferred,
+            queryTime:
+              scopedFilterMetadata(fallbackFilters)?.time ?? input.queryTime,
+            scopePlan:
+              scopedFilterMetadata(fallbackFilters)?.plan ??
+              input.deferred.metadata.plan,
+          }
+        : undefined,
   );
   return {
     kind: "legacy",

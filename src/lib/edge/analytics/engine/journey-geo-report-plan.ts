@@ -10,6 +10,7 @@ import type {
 import { snapshotLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { validateLogicalPlan } from "@/lib/edge/analytics/engine/logical/validator";
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
+import type { ProgramMembershipOutput } from "@/lib/edge/analytics/engine/program-membership-source";
 import { qualificationPlanMetadata } from "@/lib/edge/analytics/engine/qualification-plan-metadata";
 import {
   appendQualifiedPageSource,
@@ -76,6 +77,7 @@ interface JourneyGeoPlanInput {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly membershipOutput?: ProgramMembershipOutput;
 }
 
 function createGeoSource(
@@ -393,6 +395,7 @@ export function buildJourneyGeoPageVisitCompatibilityPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly qualificationDependencyRefs: readonly QualificationDependencyRef[];
   readonly limit: number;
   readonly level: JourneyGeoSummaryLevel;
@@ -401,6 +404,9 @@ export function buildJourneyGeoPageVisitCompatibilityPlan(input: {
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
+    ...(input.qualificationSemantics
+      ? { qualificationSemantics: input.qualificationSemantics }
+      : {}),
     scopePlan: input.scopePlan,
     qualificationDependencyRefs: input.qualificationDependencyRefs,
     attributes: [

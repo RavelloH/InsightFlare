@@ -1,5 +1,6 @@
 import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
+import type { EventTrendReaderStage } from "@/lib/edge/analytics/engine/event-membership-reader-contract";
 import {
   buildEventTrendOtherPlan,
   buildEventTrendPointsPlan,
@@ -35,6 +36,10 @@ import {
   type EventMembershipFallback,
   prepareEventMembershipFallback,
 } from "./event-membership-fallback";
+import {
+  advanceWholeOriginalEventTrend,
+  bindWholeOriginalReader,
+} from "./whole-filter-reader-preparation";
 
 function trendPlanInput(
   siteId: string,
@@ -109,6 +114,7 @@ export async function queryEventsTrendFromD1(
   eventName?: string,
   options?: {
     readonly deferredQualification?: DeferredEventTrendQualification;
+    readonly wholeOriginalOwner?: object;
     readonly diagnostics?: D1ReadDiagnostics;
   },
 ) {
@@ -197,6 +203,19 @@ export async function queryEventsTrendFromD1(
       options?.diagnostics,
     );
   }
+  if (options?.wholeOriginalOwner)
+    return queryLegacyEventsTrendFromD1(
+      env,
+      siteId,
+      window,
+      interval,
+      filters,
+      limit,
+      eventName,
+      options.diagnostics,
+      undefined,
+      options.wholeOriginalOwner,
+    );
   return queryLegacyEventsTrendFromD1(
     env,
     siteId,
@@ -219,6 +238,7 @@ async function queryLegacyEventsTrendFromD1(
   eventName?: string,
   diagnostics?: D1ReadDiagnostics,
   membership?: EventMembershipFallback,
+  wholeOriginalOwner?: object,
 ) {
   const baseSource = trendPlanInput(siteId, window, filters);
   const eventFilter = eventName !== undefined ? { eventName } : {};
@@ -226,16 +246,36 @@ async function queryLegacyEventsTrendFromD1(
   const runReport = async (
     outputId: string,
     build: (source: typeof baseSource) => ValidatedLogicalPlan,
+    stage: EventTrendReaderStage,
   ) => {
-    const bound = membership?.bindPlan((context) =>
-      build({
-        siteId,
-        queryTime: context.queryTime,
-        filters,
-        scopePlan: context.scopePlan,
-        qualificationDependencyRefs: context.qualificationDependencyRefs,
-      } as typeof baseSource),
-    );
+    const wholeBound = wholeOriginalOwner
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalOwner,
+          consumer: {
+            kind: "event-trend",
+            configuration: { interval, limit, ...eventFilter },
+            stage,
+          },
+          siteId,
+          filters,
+          queryTime: baseSource.queryTime,
+          scopePlan: baseSource.scopePlan,
+          readerQueryTime: baseSource.queryTime,
+        })
+      : undefined;
+    if (wholeOriginalOwner && !wholeBound)
+      throw new Error("whole_filter_reader_consumer_mismatch");
+    const bound =
+      wholeBound ??
+      membership?.bindPlan((context) =>
+        build({
+          siteId,
+          queryTime: context.queryTime,
+          filters,
+          scopePlan: context.scopePlan,
+          qualificationDependencyRefs: context.qualificationDependencyRefs,
+        } as typeof baseSource),
+      );
     return queryAnalyticsReportOutputRowsFromD1(
       env,
       bound?.plan ?? build(baseSource),
@@ -246,21 +286,32 @@ async function queryLegacyEventsTrendFromD1(
     );
   };
   const seriesRows = (
-    await runReport(EVENT_TREND_OUTPUTS.series, (source) =>
-      buildEventTrendSeriesPlan({ ...source, ...eventFilter, limit }),
+    await runReport(
+      EVENT_TREND_OUTPUTS.series,
+      (source) =>
+        buildEventTrendSeriesPlan({ ...source, ...eventFilter, limit }),
+      { kind: "series" },
     )
   ).map(seriesRow);
   const mappedSeries = mapEventTrendSeries(seriesRows);
   const seriesNames = seriesRows.map((row) => row.eventName);
+  if (wholeOriginalOwner)
+    advanceWholeOriginalEventTrend(wholeOriginalOwner, {
+      kind: "series",
+      rows: seriesRows,
+    });
   const trendRows = (
-    await runReport(EVENT_TREND_OUTPUTS.points, (source) =>
-      buildEventTrendPointsPlan({
-        ...source,
-        ...eventFilter,
-        interval,
-        seriesNames,
-        otherToken: SHARE_TREND_OTHER_TOKEN,
-      }),
+    await runReport(
+      EVENT_TREND_OUTPUTS.points,
+      (source) =>
+        buildEventTrendPointsPlan({
+          ...source,
+          ...eventFilter,
+          interval,
+          seriesNames,
+          otherToken: SHARE_TREND_OTHER_TOKEN,
+        }),
+      { kind: "points", seriesNames },
     )
   ).map((row): EventTrendPointRow => ({
     bucket: Number(row.bucket ?? -1),
@@ -270,15 +321,23 @@ async function queryLegacyEventsTrendFromD1(
   const hasOther = trendRows.some(
     (row) => String(row.seriesKey) === SHARE_TREND_OTHER_TOKEN,
   );
+  if (wholeOriginalOwner)
+    advanceWholeOriginalEventTrend(wholeOriginalOwner, {
+      kind: "points",
+      rows: trendRows,
+    });
   const [otherRow] = hasOther
     ? (
-        await runReport(EVENT_TREND_OUTPUTS.other, (source) =>
-          buildEventTrendOtherPlan({
-            ...source,
-            ...eventFilter,
-            seriesNames,
-            otherLabel: SHARE_TREND_OTHER_LABEL,
-          }),
+        await runReport(
+          EVENT_TREND_OUTPUTS.other,
+          (source) =>
+            buildEventTrendOtherPlan({
+              ...source,
+              ...eventFilter,
+              seriesNames,
+              otherLabel: SHARE_TREND_OTHER_LABEL,
+            }),
+          { kind: "other", seriesNames },
         )
       ).map(seriesRow)
     : [];
@@ -340,6 +399,11 @@ function mapEventTrendResult(
   return { series, data };
 }
 
+import {
+  bindWholeOriginalEventDetailReader,
+  type WholeOriginalEventDetailMembership,
+} from "./whole-filter-reader-preparation";
+
 export async function queryEventTypeTrendFromD1(
   env: Env,
   siteId: string,
@@ -348,6 +412,7 @@ export async function queryEventTypeTrendFromD1(
   filters: FilterDocument,
   eventName: string,
   membership?: EventMembershipFallback,
+  wholeOriginalDetail?: WholeOriginalEventDetailMembership,
 ) {
   const source = trendPlanInput(siteId, window, filters);
   const bound = membership?.bindPlan((context) =>
@@ -361,15 +426,28 @@ export async function queryEventTypeTrendFromD1(
       interval,
     }),
   );
+  const wholeDetail =
+    !bound && wholeOriginalDetail
+      ? bindWholeOriginalEventDetailReader({
+          membership: wholeOriginalDetail,
+          child: "trend",
+          siteId,
+          filters,
+          queryTime: source.queryTime,
+          readerQueryTime: source.queryTime,
+          scopePlan: source.scopePlan,
+        })
+      : undefined;
   const rows = (
     await queryAnalyticsReportOutputRowsFromD1(
       env,
       bound?.plan ??
+        wholeDetail?.plan ??
         buildEventTypeTrendPlan({ ...source, eventName, interval }),
       EVENT_TREND_OUTPUTS.typePoints,
       undefined,
       undefined,
-      bound?.executionInputs,
+      bound?.executionInputs ?? wholeDetail?.executionInputs,
     )
   ).map((row): EventTypeTrendPointRow => ({
     bucket: Number(row.bucket ?? -1),

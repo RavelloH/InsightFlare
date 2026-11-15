@@ -13,6 +13,8 @@ import type {
 import type { PhysicalSemiMembershipChoice } from "./semi-membership";
 
 export type SemiMembershipCostReason =
+  | "selected-materialized-right-membership"
+  | "anti-source-is-not-materialized"
   | "selected-unique-right-point-lookup-with-left-index"
   | "right-source-has-no-unique-point-lookup-proof"
   | "left-source-is-not-an-unfiltered-catalog-scan"
@@ -42,7 +44,8 @@ export interface SemiMembershipCostEvidence {
 /**
  * Cost strategy for a semantically safe membership candidate. `choice` is
  * still the independently recomputed domain/totality proof. This layer only
- * selects IN when both access paths have explicit schema evidence.
+ * selects IN for an already materialized right relation (build its membership
+ * index once), or when both catalog access paths have explicit schema evidence.
  */
 export interface PhysicalSemiMembershipCostSelection {
   readonly choice: PhysicalSemiMembershipChoice;
@@ -486,6 +489,30 @@ function leftAccess(
 function selectSemiMembershipCost(
   choice: PhysicalSemiMembershipChoice,
 ): PhysicalSemiMembershipCostSelection {
+  // A materialized relation has no catalog index on its exported columns.
+  // EXISTS can therefore rescan it for every left row. IN builds the lookup
+  // once, also through total filters/projections over that current boundary.
+  let rightNode = choice.right.node;
+  const visited = new Set<LogicalQueryNode>();
+  while (!visited.has(rightNode)) {
+    visited.add(rightNode);
+    if (choice.materializedStops.includes(rightNode))
+      return {
+        choice,
+        strategy: "in",
+        reason: "selected-materialized-right-membership",
+      };
+    if (rightNode.kind !== "project" && rightNode.kind !== "filter") break;
+    rightNode = rightNode.input.node;
+  }
+  // Anti membership has measured benefit for a materialized set. Keep the
+  // existing NOT EXISTS access path for other sources until separately costed.
+  if (choice.node.kind === "anti-join")
+    return {
+      choice,
+      strategy: "exists",
+      reason: "anti-source-is-not-materialized",
+    };
   const right = findUniquePointLookup(choice.right);
   if (!right)
     return {

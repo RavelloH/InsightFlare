@@ -5,14 +5,13 @@
  * Runs only through `pnpm run test:cost` with these environment variables:
  *   CLOUDFLARE_API_TOKEN, C01_ACCOUNT_ID, C01_D1_DATABASE_ID
  * and, optionally, C01_VISITS (default 5000) and C01_REPORT_PATH.
- * The database must be a disposable benchmark database (name prefix
- * `if-c01-bench-`); anything else is refused.
+ * The database must exactly match the approved benchmark name and UUID.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import { createSqliteD1Database } from "@/lib/db/__tests__/sqlite-d1";
@@ -28,10 +27,17 @@ import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/inter
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 
+import { referrersCostBudget } from "./cost-guards";
+import { databaseFingerprint } from "./fingerprint";
+import {
+  COST_STRATEGIES,
+  executeCostStrategy,
+  seedFingerprint,
+} from "./referrers-cost-harness";
+import { resetRemoteCostFixture } from "./remote-cost-fixture";
 import {
   assertDisposableDatabase,
   createRemoteD1Database,
-  execRemote,
   type RemoteD1Options,
   type RemoteStatementMeta,
 } from "./remote-d1-database";
@@ -48,7 +54,12 @@ const TOKEN = process.env.CLOUDFLARE_API_TOKEN ?? "";
 const ACCOUNT = process.env.C01_ACCOUNT_ID ?? "";
 const DATABASE = process.env.C01_D1_DATABASE_ID ?? "";
 const VISITS = Number(process.env.C01_VISITS ?? "5000");
-const enabled = TOKEN !== "" && ACCOUNT !== "" && DATABASE !== "";
+const configured = [TOKEN, ACCOUNT, DATABASE].filter(Boolean).length;
+if ((ACCOUNT !== "" || DATABASE !== "") && configured < 3)
+  throw new Error("c01_remote_configuration_incomplete");
+if (!Number.isSafeInteger(VISITS) || VISITS < 1 || VISITS > 30000)
+  throw new Error("c01_visits_out_of_range:1..30000");
+const enabled = configured === 3;
 
 const TIME = createQueryTime(
   SEED_BASE_MS,
@@ -101,13 +112,13 @@ function queryFor(scenario: Scenario) {
   } as QueryInput & { readonly time: typeof TIME });
   return {
     ...prepared,
-    time: TIME,
     variant: "summary",
     topN: 10,
   };
 }
 
 async function execute(env: Env, scenario: Scenario) {
+  const started = performance.now();
   const diagnostics = createD1ReadDiagnostics();
   const provider = createD1SiteProviderRegistry({
     env,
@@ -116,7 +127,11 @@ async function execute(env: Env, scenario: Scenario) {
   }).resolve("referrers");
   if (!provider) throw new Error("referrers_provider_missing");
   const result = await provider.execute(queryFor(scenario) as never);
-  return { value: result.value, diagnostics };
+  return {
+    value: result.value,
+    diagnostics,
+    elapsedMs: Number((performance.now() - started).toFixed(3)),
+  };
 }
 
 function summarize(metas: readonly RemoteStatementMeta[]) {
@@ -135,142 +150,222 @@ function summarize(metas: readonly RemoteStatementMeta[]) {
   };
 }
 
-describe.skipIf(!enabled)("Referrers summary on a real Cloudflare D1", () => {
-  const options: RemoteD1Options = {
-    accountId: ACCOUNT,
-    databaseId: DATABASE,
-    token: TOKEN,
-  };
-  let local: DatabaseSync;
-  const report: Record<string, unknown>[] = [];
+describe.skipIf(!enabled)(
+  `Referrers summary on a real Cloudflare D1${enabled ? "" : " (SKIPPED: no C01 target configured)"}`,
+  () => {
+    const options: RemoteD1Options = {
+      accountId: ACCOUNT,
+      databaseId: DATABASE,
+      token: TOKEN,
+    };
+    let local: DatabaseSync;
+    let remoteSqliteVersion: unknown;
+    let verifiedDatabaseFingerprint: string;
+    const report: Record<string, unknown>[] = [];
 
-  beforeAll(async () => {
-    await assertDisposableDatabase(options);
-    // Local database with identical rows, used to check the remote answers.
-    local = createMigratedDatabase();
-    for (const statement of [
-      ...buildSiteStatements(),
-      ...buildDataStatements({ visits: VISITS }),
-    ])
-      local.exec(statement);
-
-    // Remote: keep an already seeded database, otherwise rebuild it.
-    let seeded = false;
-    try {
-      const probe = createRemoteD1Database(options);
-      const row = await probe
-        .prepare("SELECT count(*) AS n FROM visits")
-        .first<{ n: number }>();
-      seeded = row?.n === VISITS;
-    } catch {
-      seeded = false;
-    }
-    if (!seeded) {
-      const tables = (await (async () => {
-        const database = createRemoteD1Database(options);
-        const result = await database
-          .prepare(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'",
-          )
-          .all<{ name: string }>();
-        return result.results.map((row) => row.name);
-      })()) as string[];
-      // The database is disposable (checked above); start from a clean slate.
-      // Tables that others reference can only go once their dependants are
-      // gone, so keep sweeping until nothing is left.
-      let remaining = [...tables];
-      for (let pass = 0; remaining.length > 0 && pass < 10; pass += 1) {
-        const failed: string[] = [];
-        for (const name of remaining) {
-          try {
-            await execRemote(options, `DROP TABLE IF EXISTS "${name}"`);
-          } catch {
-            failed.push(name);
-          }
-        }
-        remaining = failed;
-      }
-      if (remaining.length > 0)
-        throw new Error(`c01_cannot_clear_database:${remaining.join(",")}`);
-      const schemaPath = resolve(process.cwd(), "docs/schema.sql");
-      const schema = readFileSync(schemaPath, "utf8")
-        .replace(/^--.*$/gmu, "")
-        .split(/;\s*\n/u)
-        .map((statement) => statement.trim())
-        .filter(Boolean);
-      for (const statement of schema) await execRemote(options, statement);
+    beforeAll(async () => {
+      await assertDisposableDatabase(options);
+      // Local database with identical rows, used to check the remote answers.
+      local = createMigratedDatabase();
       for (const statement of [
         ...buildSiteStatements(),
         ...buildDataStatements({ visits: VISITS }),
       ])
-        await execRemote(options, statement);
-    }
-  }, 900_000);
+        local.exec(statement);
 
-  it.each(SCENARIOS)(
-    "$name",
-    async (scenario) => {
-      const localExecution = await execute(
-        {
-          DB: createSqliteD1Database(local),
-          MAIN_SECRET: "c01-secret",
-        } as unknown as Env,
-        scenario,
+      // Remote: keep an already seeded database, otherwise rebuild it.
+      const expectedFingerprint = await databaseFingerprint(
+        createSqliteD1Database(local),
+        VISITS,
       );
-      const metas: RemoteStatementMeta[] = [];
-      const remoteExecution = await execute(
-        {
-          DB: createRemoteD1Database({
-            ...options,
-            onStatement: (meta) => metas.push(meta),
-          }),
-          MAIN_SECRET: "c01-secret",
-        } as unknown as Env,
-        scenario,
-      );
-      // The real D1 must answer exactly like the local SQLite replica.
-      expect(remoteExecution.value).toEqual(localExecution.value);
-      // Explain every statement that reads a lot, so a hot spot is explained
-      // by the plan D1 chose and not only by the row count.
-      const plans: { sqlBytes: number; plan: string[] }[] = [];
-      for (const meta of metas.filter((entry) => entry.rowsRead > 100_000)) {
-        const explained = await createRemoteD1Database(options)
-          .prepare(`EXPLAIN QUERY PLAN ${meta.sql}`)
-          .bind(...meta.params)
-          .all<{ id: number; parent: number; detail: string }>();
-        plans.push({
-          sqlBytes: Buffer.byteLength(meta.sql),
-          plan: explained.results.map(
-            (row) => `${row.id}<-${row.parent} ${row.detail}`,
-          ),
-        });
+      let seeded = false;
+      try {
+        const probe = createRemoteD1Database(options);
+        seeded =
+          (await databaseFingerprint(probe, VISITS)) === expectedFingerprint;
+      } catch (error) {
+        // An empty/older schema can be reseeded; transport/metadata failures must
+        // never be interpreted as permission to reset even this test database.
+        if (
+          !(error instanceof Error) ||
+          !/no such (table|column)/iu.test(error.message)
+        )
+          throw error;
+        seeded = false;
       }
-      report.push({
-        scenario: scenario.name,
-        visits: VISITS,
-        fallbackReason:
-          remoteExecution.diagnostics.advancedCountSqlFallbackReason ?? null,
-        ...summarize(metas),
-        heavyPlans: plans,
-        statementDetail: metas.map((meta) => ({
-          rowsRead: meta.rowsRead,
-          rowsWritten: meta.rowsWritten,
-          sqlDurationMs: meta.sqlDurationMs,
-          parameters: meta.parameterCount,
-          sqlBytes: Buffer.byteLength(meta.sql),
-          resultRows: meta.resultRows,
-        })),
-      });
-    },
-    300_000,
-  );
+      if (!seeded) {
+        const schemaPath = resolve(process.cwd(), "docs/schema.sql");
+        const schema = readFileSync(schemaPath, "utf8")
+          .replace(/^--.*$/gmu, "")
+          .split(/;\s*\n/u)
+          .map((statement) => statement.trim())
+          .filter(Boolean);
+        await resetRemoteCostFixture(options, schema, [
+          ...buildSiteStatements(),
+          ...buildDataStatements({ visits: VISITS }),
+        ]);
+      }
+      verifiedDatabaseFingerprint = await databaseFingerprint(
+        createRemoteD1Database(options),
+        VISITS,
+      );
+      expect(verifiedDatabaseFingerprint).toBe(expectedFingerprint);
+      try {
+        remoteSqliteVersion = {
+          status: "available",
+          value: await createRemoteD1Database(options)
+            .prepare("SELECT sqlite_version() AS version")
+            .first(),
+        };
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          !error.message.includes(
+            "not authorized to use function: sqlite_version",
+          )
+        )
+          throw error;
+        remoteSqliteVersion = {
+          status: "unavailable",
+          reason: "D1 denies sqlite_version()",
+        };
+      }
+    }, 900_000);
 
-  it("writes the baseline report", () => {
-    const path = resolve(
-      process.env.C01_REPORT_PATH ?? ".tmp/c01-baseline-referrers.json",
+    afterAll(() => {
+      local?.close();
+      const path = resolve(
+        process.env.C01_REPORT_PATH ?? ".tmp/c01-baseline-referrers.json",
+      );
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify(report, null, 2));
+    });
+
+    it.each(SCENARIOS)(
+      "$name",
+      async (scenario) => {
+        const localExecution = await execute(
+          {
+            DB: createSqliteD1Database(local),
+            MAIN_SECRET: "c01-secret",
+          } as unknown as Env,
+          scenario,
+        );
+        const metas: RemoteStatementMeta[] = [];
+        const remoteExecution = await execute(
+          {
+            DB: createRemoteD1Database({
+              ...options,
+              onStatement: (meta) => metas.push(meta),
+            }),
+            MAIN_SECRET: "c01-secret",
+          } as unknown as Env,
+          scenario,
+        );
+        // The real D1 must answer exactly like the local SQLite replica.
+        expect(remoteExecution.value).toEqual(localExecution.value);
+        // Explain every statement that reads a lot, so a hot spot is explained
+        // by the plan D1 chose and not only by the row count.
+        const plans: { sqlBytes: number; sql: string; plan: string[] }[] = [];
+        for (const meta of metas.filter((entry) => entry.rowsRead > 100_000)) {
+          const explained = await createRemoteD1Database(options)
+            .prepare(`EXPLAIN QUERY PLAN ${meta.sql}`)
+            .bind(...meta.params)
+            .all<{ id: number; parent: number; detail: string }>();
+          plans.push({
+            sqlBytes: Buffer.byteLength(meta.sql),
+            sql: meta.sql,
+            plan: explained.results.map(
+              (row) => `${row.id}<-${row.parent} ${row.detail}`,
+            ),
+          });
+        }
+        report.push({
+          engine: "remote-cloudflare-d1",
+          remoteSqliteVersion,
+          verifiedDatabaseFingerprint,
+          strategy: "automatic",
+          elapsedMs: remoteExecution.elapsedMs,
+          seedFingerprint: seedFingerprint(VISITS),
+          nodeVersion: process.version,
+          scenario: scenario.name,
+          visits: VISITS,
+          fallbackReason:
+            remoteExecution.diagnostics.advancedCountSqlFallbackReason ?? null,
+          ...summarize(metas),
+          heavyPlans: plans,
+          statementDetail: metas.map((meta) => ({
+            rowsRead: meta.rowsRead,
+            rowsWritten: meta.rowsWritten,
+            sqlDurationMs: meta.sqlDurationMs,
+            parameters: meta.parameterCount,
+            sqlBytes: Buffer.byteLength(meta.sql),
+            resultRows: meta.resultRows,
+          })),
+        });
+      },
+      300_000,
     );
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(report, null, 2));
-    expect(report.length).toBe(SCENARIOS.length);
-  });
-});
+
+    it.each(["session", "visitor"] as const)(
+      "same-query forced strategies / %s",
+      async (scope) => {
+        let oracle: unknown;
+        for (const strategy of COST_STRATEGIES) {
+          const metas: RemoteStatementMeta[] = [];
+          const localExecution = await executeCostStrategy(
+            {
+              DB: createSqliteD1Database(local),
+              MAIN_SECRET: "c01-secret",
+            } as Env,
+            scope,
+            strategy,
+          );
+          const execution = await executeCostStrategy(
+            {
+              DB: createRemoteD1Database({
+                ...options,
+                onStatement: (meta) => metas.push(meta),
+              }),
+              MAIN_SECRET: "c01-secret",
+            } as Env,
+            scope,
+            strategy,
+          );
+          expect(execution.value).toEqual(localExecution.value);
+          if (oracle !== undefined) expect(execution.value).toEqual(oracle);
+          oracle = execution.value;
+          const cost = summarize(metas);
+          const budget = referrersCostBudget(VISITS, strategy);
+          report.push({
+            engine: "remote-cloudflare-d1",
+            remoteSqliteVersion,
+            verifiedDatabaseFingerprint,
+            nodeVersion: process.version,
+            seedFingerprint: seedFingerprint(VISITS),
+            visits: VISITS,
+            ...execution,
+            ...cost,
+            budget,
+            statementDetail: metas,
+          });
+          if (budget.status === "applicable") {
+            const detail = `${scope}/${strategy}/${VISITS}: ${JSON.stringify({ cost, budget })}`;
+            expect(cost.rowsRead, detail).toBeLessThanOrEqual(
+              budget.maxRowsRead,
+            );
+            expect(cost.statements, detail).toBeLessThanOrEqual(
+              budget.maxStatements,
+            );
+            expect(cost.rowsWritten, detail).toBe(budget.maxRowsWritten);
+          }
+        }
+      },
+      600000,
+    );
+
+    it("writes the baseline report", () => {
+      expect(report.length).toBe(SCENARIOS.length + 2 * COST_STRATEGIES.length);
+    });
+  },
+);

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import { D1_MAX_BOUND_PARAMETERS, D1_MAX_SQL_UTF8_BYTES } from "@/lib/db";
@@ -47,6 +47,7 @@ import {
   querySessionBoundaryDimensionFromD1,
   querySessionPathDimensionPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/dimensions";
+import * as wholeReaders from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 import { encodePageCursor, paginationBindingForWindow } from "@/lib/pagination";
@@ -651,11 +652,21 @@ async function legacyBoundaryFor(
   readonly filters: BoundaryTestQuery["filters"];
 }> {
   const env = testEnv(database, trace);
-  const forwarded = (await d1AdvancedFilterMiddleware(env, undefined, SITE)(
-    "dimension",
-    query,
-    async (prepared) => prepared,
-  )) as BoundaryTestQuery;
+  // This helper is the real legacy-carrier oracle. Decline only the closed
+  // completion catalog so the original middleware still evaluates/registers.
+  const completion = vi
+    .spyOn(wholeReaders, "selectWholeOriginalConsumer")
+    .mockReturnValue(undefined);
+  let forwarded: BoundaryTestQuery;
+  try {
+    forwarded = (await d1AdvancedFilterMiddleware(env, undefined, SITE)(
+      "dimension",
+      query,
+      async (prepared) => prepared,
+    )) as BoundaryTestQuery;
+  } finally {
+    completion.mockRestore();
+  }
   const deferred =
     deferredSessionBoundaryDimensionQualificationFromQuery(forwarded);
   const filters = deferred

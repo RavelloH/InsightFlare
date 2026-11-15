@@ -12,6 +12,7 @@ import type {
   LogicalRelationHandle,
 } from "@/lib/edge/analytics/engine/logical/builder";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
+import type { ProgramMembershipOutput } from "@/lib/edge/analytics/engine/program-membership-source";
 import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
@@ -176,6 +177,8 @@ function buildCardOutputs(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly limit: number;
   readonly cards: readonly CardDefinition[];
   readonly includeVisitors: boolean;
@@ -184,7 +187,13 @@ function buildCardOutputs(input: {
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
+    ...(input.qualificationSemantics
+      ? { qualificationSemantics: input.qualificationSemantics }
+      : {}),
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
+    ...(input.qualificationDependencyRefs
+      ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+      : {}),
     selections: input.cards.map((card) => card.selection),
     includeVisitors: input.includeVisitors,
   });
@@ -217,7 +226,9 @@ export function buildOverviewChannelsPlan(input: {
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
+  readonly membershipOutput?: ProgramMembershipOutput;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly limit: number;
 }): ValidatedLogicalPlan {
@@ -228,6 +239,12 @@ export function buildOverviewChannelsPlan(input: {
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
+    ...(input.membershipOutput
+      ? { membershipOutput: input.membershipOutput }
+      : {}),
+    ...(input.qualificationSemantics
+      ? { qualificationSemantics: input.qualificationSemantics }
+      : {}),
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
     ...(input.qualificationDependencyRefs
       ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
@@ -271,6 +288,8 @@ export function buildOverviewClientDimensionsPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly limit: number;
 }): ValidatedLogicalPlan {
   return buildCardOutputs({
@@ -285,6 +304,8 @@ export function buildOverviewGeoDimensionsPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly limit: number;
 }): ValidatedLogicalPlan {
   return buildCardOutputs({

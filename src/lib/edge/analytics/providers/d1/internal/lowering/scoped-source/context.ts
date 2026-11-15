@@ -2,6 +2,10 @@ import type { SourceNode } from "@/lib/edge/analytics/engine/logical/nodes";
 import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import { requiredLegacyVisitColumnNames } from "@/lib/edge/analytics/providers/d1/internal/analytics-legacy-scoped-dataset";
 import type { AnalyticsRelationalStorageContext } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-storage";
+import type {
+  ScopedQualificationRelations,
+  SourceMembershipRelations,
+} from "@/lib/edge/analytics/providers/d1/internal/logical-source-membership-inputs";
 import type { QualificationDependencyRelationBinding } from "@/lib/edge/analytics/providers/d1/internal/qualification-execution-inputs";
 
 import {
@@ -20,10 +24,7 @@ export class AnalyticsScopedSourceContext {
   readonly entityQualifications = new Map<string, IdentityRelation>();
   readonly rowLocalEventMatches = new Map<string, IdentityRelation>();
   readonly pageEventOwnerPairs = new Map<string, IdentityRelation>();
-  readonly qualificationRelations = new Map<
-    QualificationDependencyRef,
-    QualificationDependencyRelationBinding["relation"]
-  >();
+  readonly qualificationRelations: ScopedQualificationRelations;
   readonly postObservationBaseRequirements = new Map<
     string,
     PostObservationBaseRequirements
@@ -32,12 +33,24 @@ export class AnalyticsScopedSourceContext {
     storage: AnalyticsRelationalStorageContext,
     sources: readonly SourceNode[] = [],
     qualificationBindings: readonly QualificationDependencyRelationBinding[] = [],
+    sourceInputs?: SourceMembershipRelations,
   ) {
     this.storage = storage;
+    const qualificationRelations = new Map<
+      QualificationDependencyRef,
+      QualificationDependencyRelationBinding["relation"]
+    >();
+    if (sourceInputs && qualificationBindings.length !== 0)
+      throw new Error(
+        "logical_source_membership_inputs_mixed_with_qualification",
+      );
+    this.qualificationRelations = sourceInputs
+      ? Object.freeze({ sourceInputs })
+      : qualificationRelations;
     for (const binding of qualificationBindings) {
-      if (this.qualificationRelations.has(binding.dependencyRef))
+      if (qualificationRelations.has(binding.dependencyRef))
         throw new Error("qualification_execution_dependency_duplicate");
-      this.qualificationRelations.set(binding.dependencyRef, binding.relation);
+      qualificationRelations.set(binding.dependencyRef, binding.relation);
     }
     for (const source of sources) {
       if (!source.selection) continue;

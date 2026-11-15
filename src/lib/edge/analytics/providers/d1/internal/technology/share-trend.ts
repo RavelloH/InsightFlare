@@ -29,6 +29,8 @@ import {
   shareTrendSeriesKey,
   timeBucketTimestamp,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
+import type { D1ExecutionOptions } from "@/lib/edge/analytics/providers/d1/internal/execution-options";
+import { bindWholeOriginalReader } from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import type { Env } from "@/lib/edge/types";
 
 import {
@@ -242,6 +244,7 @@ async function executeTrendOutputs(
   qualificationExecutionInputs?: ReturnType<
     typeof bindTechnologyPageVisitQualification
   >["executionInputs"],
+  execution?: D1ExecutionOptions,
 ): Promise<ShareTrendQueryRow[]> {
   const selection = {
     outputIds: outputKinds.flatMap(trendOutputIds),
@@ -269,6 +272,7 @@ async function executeTrendOutputs(
     selection,
     undefined,
     qualificationExecutionInputs,
+    ...((execution ? [execution] : []) as [D1ExecutionOptions?]),
   );
 }
 
@@ -281,37 +285,66 @@ export async function queryShareTrendFromD1(
   limit: number,
   dimension: TechnologyShareTrendDimension,
   qualification?: TechnologyPageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<ShareTrendResult> {
   const buckets = buildTimeBuckets(window, interval);
   const metadata = scopedFilterMetadata(filters);
   const normalizedLimit = Math.min(Math.max(1, limit), 12);
-  const plan = buildTechnologyShareTrendPlan({
-    siteId,
-    queryTime: qualification?.queryTime ?? queryWindowToTime(window),
-    filters,
-    ...(qualification
-      ? {
-          scopePlan: qualification.scopePlan,
-          pageVisitQualification: true as const,
-        }
-      : metadata
-        ? { scopePlan: metadata.plan }
-        : {}),
-    interval,
-    limit: normalizedLimit,
-    dimension,
-  });
-  const bound = bindTechnologyPageVisitQualification({
-    siteId,
-    filters,
-    qualification,
-    plan,
-  });
+  const wholeOriginal =
+    !qualification && wholeOriginalOwner
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalOwner,
+          consumer: {
+            kind: "page",
+            family: "share-trend",
+            reader: {
+              kind: "technology-share",
+              configuration: { interval, limit: normalizedLimit, dimension },
+            },
+          },
+          siteId,
+          filters,
+          queryTime: metadata?.time ?? queryWindowToTime(window),
+          scopePlan: metadata?.plan,
+          readerQueryTime: queryWindowToTime(window),
+          ...(execution ? { execution } : {}),
+        })
+      : undefined;
+  const plan =
+    wholeOriginal?.plan ??
+    buildTechnologyShareTrendPlan({
+      siteId,
+      queryTime: qualification?.queryTime ?? queryWindowToTime(window),
+      filters,
+      ...(qualification
+        ? {
+            scopePlan: qualification.scopePlan,
+            pageVisitQualification: true as const,
+          }
+        : metadata
+          ? { scopePlan: metadata.plan }
+          : {}),
+      interval,
+      limit: normalizedLimit,
+      dimension,
+    });
+  const bound =
+    wholeOriginal ??
+    bindTechnologyPageVisitQualification({
+      siteId,
+      filters,
+      qualification,
+      plan,
+    });
   const rows = await executeTrendOutputs(
     env,
     bound.plan as ReturnType<typeof buildTechnologyShareTrendPlan>,
     ["single"],
     bound.executionInputs,
+    ...((wholeOriginal?.execution ? [wholeOriginal.execution] : []) as [
+      D1ExecutionOptions?,
+    ]),
   );
   return mapShareTrendRows(
     rows,
@@ -330,36 +363,65 @@ export async function queryReferrerAndChannelTrendFromD1(
   filters: FilterDocument,
   limit: number,
   qualification?: TechnologyPageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<ReferrerAndChannelTrendResult> {
   const buckets = buildTimeBuckets(window, interval);
   const metadata = scopedFilterMetadata(filters);
   const normalizedLimit = Math.min(Math.max(1, limit), 12);
-  const plan = buildTechnologyReferrerChannelTrendPlan({
-    siteId,
-    queryTime: qualification?.queryTime ?? queryWindowToTime(window),
-    filters,
-    ...(qualification
-      ? {
-          scopePlan: qualification.scopePlan,
-          pageVisitQualification: true as const,
-        }
-      : metadata
-        ? { scopePlan: metadata.plan }
-        : {}),
-    interval,
-    limit: normalizedLimit,
-  });
-  const bound = bindTechnologyPageVisitQualification({
-    siteId,
-    filters,
-    qualification,
-    plan,
-  });
+  const wholeOriginal =
+    !qualification && wholeOriginalOwner
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalOwner,
+          consumer: {
+            kind: "page",
+            family: "share-trend",
+            reader: {
+              kind: "technology-referrer-channel",
+              configuration: { interval, limit: normalizedLimit },
+            },
+          },
+          siteId,
+          filters,
+          queryTime: metadata?.time ?? queryWindowToTime(window),
+          scopePlan: metadata?.plan,
+          readerQueryTime: queryWindowToTime(window),
+          ...(execution ? { execution } : {}),
+        })
+      : undefined;
+  const plan =
+    wholeOriginal?.plan ??
+    buildTechnologyReferrerChannelTrendPlan({
+      siteId,
+      queryTime: qualification?.queryTime ?? queryWindowToTime(window),
+      filters,
+      ...(qualification
+        ? {
+            scopePlan: qualification.scopePlan,
+            pageVisitQualification: true as const,
+          }
+        : metadata
+          ? { scopePlan: metadata.plan }
+          : {}),
+      interval,
+      limit: normalizedLimit,
+    });
+  const bound =
+    wholeOriginal ??
+    bindTechnologyPageVisitQualification({
+      siteId,
+      filters,
+      qualification,
+      plan,
+    });
   const rows = await executeTrendOutputs(
     env,
     bound.plan as ReturnType<typeof buildTechnologyShareTrendPlan>,
     ["source", "channel"],
     bound.executionInputs,
+    ...((wholeOriginal?.execution ? [wholeOriginal.execution] : []) as [
+      D1ExecutionOptions?,
+    ]),
   );
   return {
     source: mapShareTrendRows(
@@ -386,6 +448,8 @@ export async function queryClientDimensionTrendFromD1(
   dimension: ClientDimensionKey,
   limit: number,
   qualification?: TechnologyPageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<ShareTrendResult> {
   return queryShareTrendFromD1(
     env,
@@ -396,6 +460,11 @@ export async function queryClientDimensionTrendFromD1(
     limit,
     CLIENT_DIMENSIONS[dimension],
     qualification,
+    ...((wholeOriginalOwner && execution
+      ? [wholeOriginalOwner, execution]
+      : wholeOriginalOwner
+        ? [wholeOriginalOwner]
+        : []) as [object?, D1ExecutionOptions?]),
   );
 }
 
@@ -408,6 +477,8 @@ export async function queryUtmDimensionTrendFromD1(
   dimension: UtmDimensionKey,
   limit: number,
   qualification?: TechnologyPageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<ShareTrendResult> {
   return queryShareTrendFromD1(
     env,
@@ -418,6 +489,11 @@ export async function queryUtmDimensionTrendFromD1(
     limit,
     UTM_DIMENSIONS[dimension],
     qualification,
+    ...((wholeOriginalOwner && execution
+      ? [wholeOriginalOwner, execution]
+      : wholeOriginalOwner
+        ? [wholeOriginalOwner]
+        : []) as [object?, D1ExecutionOptions?]),
   );
 }
 
@@ -429,6 +505,8 @@ export async function queryReferrerTrendFromD1(
   filters: FilterDocument,
   limit: number,
   qualification?: TechnologyPageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<ShareTrendResult> {
   return queryShareTrendFromD1(
     env,
@@ -439,5 +517,10 @@ export async function queryReferrerTrendFromD1(
     limit,
     "referrerDomain",
     qualification,
+    ...((wholeOriginalOwner && execution
+      ? [wholeOriginalOwner, execution]
+      : wholeOriginalOwner
+        ? [wholeOriginalOwner]
+        : []) as [object?, D1ExecutionOptions?]),
   );
 }

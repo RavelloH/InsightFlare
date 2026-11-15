@@ -22,12 +22,17 @@ import {
   type TeamSiteListPage,
 } from "@/lib/edge/analytics/providers/d1/internal/team";
 import {
+  type TeamSitesQualification,
+  teamSitesQualificationReaders,
+} from "@/lib/edge/analytics/providers/d1/internal/team-sites-qualification";
+import {
   createOverviewReader,
   readLatestSiteActivity,
   toQueryTime,
 } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import type { Env } from "@/lib/edge/types";
 export interface ReadTeamSitesInput {
+  readonly qualification?: TeamSitesQualification;
   readonly env: Env;
   readonly teamId: string;
   readonly window: QueryWindow;
@@ -74,8 +79,10 @@ async function teamSitesCursorBinding(
 async function readTeamSitesPage(
   input: ReadTeamSitesInput,
   page: NonNullable<ReadTeamSitesInput["page"]>,
+  assertFresh?: () => void,
 ): Promise<{ rows: TeamSiteListPage["rows"]; nextCursor: string | null }> {
   const binding = await teamSitesCursorBinding(input);
+  assertFresh?.();
   const cursor = await decodePageCursor(
     input.env,
     binding,
@@ -83,6 +90,7 @@ async function readTeamSitesPage(
     "team-sites",
     teamSiteCursor,
   );
+  assertFresh?.();
   const result = await queryTeamSitesPageFromD1(
     input.env,
     input.teamId,
@@ -90,12 +98,12 @@ async function readTeamSitesPage(
     cursor,
     input.allowedSiteIds,
   );
-  return {
-    rows: result.rows,
-    nextCursor: result.nextCursor
-      ? await encodePageCursor(input.env, binding, result.nextCursor)
-      : null,
-  };
+  assertFresh?.();
+  const nextCursor = result.nextCursor
+    ? await encodePageCursor(input.env, binding, result.nextCursor)
+    : null;
+  assertFresh?.();
+  return { rows: result.rows, nextCursor };
 }
 function source(values: readonly QuerySource[]): QuerySource {
   if (values.length === 0) return "raw";
@@ -109,21 +117,37 @@ function source(values: readonly QuerySource[]): QuerySource {
 export async function readTeamSites(
   input: ReadTeamSitesInput,
 ): Promise<TeamSitesQueryResult> {
+  const qualified = input.qualification
+    ? teamSitesQualificationReaders(input, input.qualification)
+    : undefined;
   const requestedPage = input.page ?? { limit: 20, cursor: null };
-  const page = await readTeamSitesPage(input, requestedPage);
+  const page = await readTeamSitesPage(
+    input,
+    requestedPage,
+    qualified?.assertFresh,
+  );
+  qualified?.assertFresh();
   const sites = page.rows;
   const time = toQueryTime(input.window);
   const values = await Promise.all(
     sites.map(async (site) => {
-      const reader = createOverviewReader(input.env, site.id);
+      qualified?.assertFresh();
+      const bound = qualified?.site(site.id);
+      const filters = bound?.filters ?? input.filters;
+      const reader = createOverviewReader(
+        input.env,
+        site.id,
+        undefined,
+        bound?.membership,
+      );
       const overview = await reader.readOverview({
         time,
-        filters: input.filters,
+        filters,
       });
       const trend = input.interval
         ? await reader.readTrend({
             time,
-            filters: input.filters,
+            filters,
             interval: input.interval,
           })
         : undefined;
@@ -131,7 +155,9 @@ export async function readTeamSites(
         input.env,
         site.id,
         input.window,
-        input.filters,
+        filters,
+        undefined,
+        bound?.membership,
       );
       return {
         site: {
@@ -152,6 +178,7 @@ export async function readTeamSites(
       };
     }),
   );
+  qualified?.assertFresh();
   return {
     data: {
       items: values.map((value) => value.site),

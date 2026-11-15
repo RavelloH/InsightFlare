@@ -15,6 +15,7 @@ export interface EventPayloadReportSourceInput {
   readonly scopePlan?: ScopedFilterPlan;
   /** Request-private Event membership; the canonical prepared Source is used. */
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
+  readonly qualificationSemantics?: "whole-original";
   readonly eventName?: string;
 }
 
@@ -45,6 +46,9 @@ export function buildEventPayloadReportSource(
       : {}),
     ...(input.qualificationDependencyRefs
       ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+      : {}),
+    ...(input.qualificationSemantics
+      ? { qualificationSemantics: input.qualificationSemantics }
       : {}),
     attributes: ["event.report.eventName"],
     ...(input.eventName !== undefined

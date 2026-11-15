@@ -31,15 +31,18 @@ import {
 } from "@/lib/edge/analytics/contract";
 import { createQueryTime } from "@/lib/edge/analytics/contract/helpers";
 import { ADVANCED_FILTER_MAX_ACTIVITIES } from "@/lib/edge/analytics/engine/advanced-filter-activity-plan";
+import * as countSupport from "@/lib/edge/analytics/engine/advanced-filter-count-support";
 import {
   snapshotLogicalPlan,
   type ValidatedLogicalPlan,
 } from "@/lib/edge/analytics/engine/logical/plan";
 import { validateLogicalPlan } from "@/lib/edge/analytics/engine/logical/validator";
+import * as wholeFamily from "@/lib/edge/analytics/engine/page-whole-original-family";
 import { buildReferrerSummaryPlan } from "@/lib/edge/analytics/engine/referrer-report-plan";
+import * as pageRecipe from "@/lib/edge/analytics/engine/referrers-page-membership-dependency-plan";
 import { buildReferrersQualificationPlan } from "@/lib/edge/analytics/engine/referrers-qualification-plan";
+import * as timeRecipe from "@/lib/edge/analytics/engine/referrers-time-membership-plan";
 import { EVENT_FILTER_PAGE_VISIT_DEPENDENCY } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
-import * as countSupport from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import {
   d1AdvancedFilterMiddleware,
   deferredReferrersQualificationFromQuery,
@@ -461,59 +464,76 @@ async function legacyRead(
   query: ReferrersQuery,
   trace: SqliteD1Trace,
 ): Promise<{ readonly value: unknown; readonly deferred: unknown }> {
-  const env = testEnv(database, trace);
-  const forwarded = await d1AdvancedFilterMiddleware(env, undefined, SITE)(
-    "referrers",
-    query,
-    async (prepared) => prepared,
-  );
-  const deferred = deferredReferrersQualificationFromQuery(forwarded);
-  const forwardedQuery = forwarded as ReferrersQuery;
-  const filters = deferred
-    ? await prepareDeferredEventQualificationFallback(deferred)
-    : (forwardedQuery.filters ?? query.filters ?? EMPTY_FILTER_DOCUMENT);
-  if (query.variant === "summary")
-    return {
-      value: await queryReferrerSummaryFromD1(
-        env,
-        SITE,
-        WINDOW,
-        filters,
-        summaryTopN(query),
-      ),
-      deferred,
-    };
-  const page = pageParameters(query);
-  const cursor = await decodeReferrersCursor(
-    env,
-    SITE,
-    WINDOW,
-    filters,
-    page.includeFullUrl,
-    page.search,
-    page.cursorText,
-    query.context.policy.audience,
-    page.sortBy,
-    page.sortDirection,
-  );
-  if (page.cursorText && !cursor) throw new InvalidCursorError("referrers");
-  return {
-    value: await queryReferrersPageFromD1(
+  // This helper deliberately exercises the historical handle reader. The real
+  // registry reader separately covers request-owned recipes and whole completion.
+  const whole = vi
+    .spyOn(wholeFamily, "pageWholeOriginalFamilyFromQuery")
+    .mockReturnValue(undefined);
+  const time = vi
+    .spyOn(timeRecipe, "planReferrersTimeMembershipDependency")
+    .mockReturnValue(undefined);
+  const pageRecipePlan = vi
+    .spyOn(pageRecipe, "planReferrersPageMembershipDependencies")
+    .mockReturnValue(undefined);
+  try {
+    const env = testEnv(database, trace);
+    const forwarded = await d1AdvancedFilterMiddleware(env, undefined, SITE)(
+      "referrers",
+      query,
+      async (prepared) => prepared,
+    );
+    const deferred = deferredReferrersQualificationFromQuery(forwarded);
+    const forwardedQuery = forwarded as ReferrersQuery;
+    const filters = deferred
+      ? await prepareDeferredEventQualificationFallback(deferred)
+      : (forwardedQuery.filters ?? query.filters ?? EMPTY_FILTER_DOCUMENT);
+    if (query.variant === "summary")
+      return {
+        value: await queryReferrerSummaryFromD1(
+          env,
+          SITE,
+          WINDOW,
+          filters,
+          summaryTopN(query),
+        ),
+        deferred,
+      };
+    const page = pageParameters(query);
+    const cursor = await decodeReferrersCursor(
       env,
       SITE,
       WINDOW,
       filters,
-      page.limit,
       page.includeFullUrl,
       page.search,
-      cursor,
-      undefined,
+      page.cursorText,
       query.context.policy.audience,
       page.sortBy,
       page.sortDirection,
-    ),
-    deferred,
-  };
+    );
+    if (page.cursorText && !cursor) throw new InvalidCursorError("referrers");
+    return {
+      value: await queryReferrersPageFromD1(
+        env,
+        SITE,
+        WINDOW,
+        filters,
+        page.limit,
+        page.includeFullUrl,
+        page.search,
+        cursor,
+        undefined,
+        query.context.policy.audience,
+        page.sortBy,
+        page.sortDirection,
+      ),
+      deferred,
+    };
+  } finally {
+    whole.mockRestore();
+    time.mockRestore();
+    pageRecipePlan.mockRestore();
+  }
 }
 
 async function deferredFor(
@@ -902,9 +922,16 @@ describe("qualified flat Referrers pages and summary", () => {
           code: "forced_core_oracle",
           reason: "The test forces the Core evaluator as the oracle.",
         });
-      const oracle = await legacyRead(database, build(timeDsl), traceFor());
-      const baseline = await legacyRead(database, build(), traceFor());
-      classify.mockRestore();
+      const { oracle, baseline } = await (async () => {
+        try {
+          return {
+            oracle: await legacyRead(database, build(timeDsl), traceFor()),
+            baseline: await legacyRead(database, build(), traceFor()),
+          };
+        } finally {
+          classify.mockRestore();
+        }
+      })();
       // The time leaf must change the answer, otherwise parity proves nothing.
       expect(oracle.value).not.toEqual(baseline.value);
 

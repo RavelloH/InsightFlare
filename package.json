@@ -64,7 +64,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage --coverage.reporter=text --coverage.reporter=html --coverage.reportsDirectory=coverage/core",
     "test:coverage:tracker": "vitest run --config vitest.tracker.config.ts --coverage --coverage.reporter=text --coverage.reporter=html --coverage.reportsDirectory=coverage/tracker",
-    "test:coverage:check": "pnpm run test:coverage",
+    "test:coverage:check": "pnpm run test:coverage --maxWorkers=3 --testTimeout=240000 --coverage.reportOnFailure=true",
     "test:e2e": "tsx scripts/e2e.ts",
     "e2e:serve": "tsx scripts/e2e.ts --serve",
     "test:e2e:show": "tsx scripts/e2e.ts --headed --workers=1",

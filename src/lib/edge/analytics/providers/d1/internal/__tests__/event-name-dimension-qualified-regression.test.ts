@@ -46,6 +46,7 @@ import {
   queryEventNameDimensionFromD1,
   queryEventTypeAggregate,
 } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
+import { hasWholeOriginalCompletion } from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 
@@ -424,6 +425,7 @@ function testEnvWithControlResultBehavior(
   } as unknown as Env;
 }
 
+// Current generic-route comparison; the frozen pre-migration runtime oracle lives separately.
 async function runLegacyList(
   query: EventNameDimensionQuery,
   trace: SqliteD1Trace,
@@ -447,6 +449,9 @@ async function runLegacyList(
     filters,
     eventNameListLimit(query),
     searchText(query),
+    ...(hasWholeOriginalCompletion(forwarded as object, "event-name-dimension")
+      ? ([forwarded as object] as const)
+      : ([] as const)),
   );
   return { items: mapDimensionRows(rows) };
 }

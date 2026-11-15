@@ -1,5 +1,6 @@
 @import "@fontsource-variable/jetbrains-mono/wght.css";
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+@source "../";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "overlayscrollbars/styles/overlayscrollbars.css";

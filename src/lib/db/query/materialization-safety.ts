@@ -164,9 +164,24 @@ function safeLimit(
 }
 
 function totalLocal(expression: SqlExpression, source: QuerySource): boolean {
+  const scope = source.scope;
+  const fieldCount = source.fields.length;
+  // Direct projections do not need a recursive-expression traversal. Keep
+  // reading the scope and bounds on every proof; this is not a node cache.
+  if (
+    expression !== null &&
+    typeof expression === "object" &&
+    expression.kind === "column"
+  )
+    return (
+      expression.scope === scope &&
+      Number.isInteger(expression.index) &&
+      expression.index >= 0 &&
+      expression.index < fieldCount
+    );
   return isMaterializationSafeExpression(
     expression,
-    new Map([[source.scope, source.fields.length]]),
+    new Map([[scope, fieldCount]]),
   );
 }
 
@@ -548,6 +563,29 @@ export function isMaterializationSafeAggregateExpression(
       hasSafeBoundedUnitSumInput(expression, input)) ||
     (expression.name === "SUM" &&
       expression.expression.kind === "column" &&
+      expression.expression.scope === input.scope &&
+      countPartitionColumn(input, expression.expression.index))
+  );
+}
+
+/** Totality alone does not make floating aggregation or integer cancellation
+ * independent of input order. Keep this proof separate from reuse totality. */
+export function isOrderStableSumExpression(
+  expression: SqlExpression,
+  input: QuerySource,
+): boolean {
+  if (expression.kind !== "aggregate") return false;
+  if (
+    expression.name !== "SUM" ||
+    !expression.expression ||
+    !totalLocal(expression.expression, input)
+  )
+    return false;
+  return (
+    (boundedCountGroupInput(input) &&
+      unitBoundedNumericExpression(expression.expression, input)) ||
+    hasSafeBoundedUnitSumInput(expression, input) ||
+    (expression.expression.kind === "column" &&
       expression.expression.scope === input.scope &&
       countPartitionColumn(input, expression.expression.index))
   );

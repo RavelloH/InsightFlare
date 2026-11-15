@@ -20,6 +20,7 @@ export interface ReadSiteBreakdownInput {
   readonly dimension: string;
   readonly limit: number;
   readonly filters: FilterDocument;
+  readonly wholeOriginalOwner?: object;
 }
 
 function unsupportedDimension(dimension: string): never {
@@ -62,15 +63,33 @@ export async function readSiteBreakdown(
                 input.dimension,
               );
               if (!selection) unsupportedDimension(input.dimension);
-              return queryDimensionFromD1(
-                input.env,
-                input.siteId,
-                input.window,
-                input.filters,
-                input.limit,
-                selection,
-                { excludeEmpty: true },
-              );
+              const args: Parameters<typeof queryDimensionFromD1> =
+                input.wholeOriginalOwner
+                  ? [
+                      input.env,
+                      input.siteId,
+                      input.window,
+                      input.filters,
+                      input.limit,
+                      selection,
+                      { excludeEmpty: true },
+                      undefined,
+                      undefined,
+                      {
+                        owner: input.wholeOriginalOwner,
+                        dimension: input.dimension,
+                      },
+                    ]
+                  : [
+                      input.env,
+                      input.siteId,
+                      input.window,
+                      input.filters,
+                      input.limit,
+                      selection,
+                      { excludeEmpty: true },
+                    ];
+              return queryDimensionFromD1(...args);
             })();
   return {
     items: rows.map((row) => ({

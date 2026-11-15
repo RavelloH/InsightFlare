@@ -927,11 +927,16 @@ function resolveInternalImport(
   sourceAbsolute: string,
   specifier: string,
 ): string | null {
+  // Vite's URL imports still depend on the same physical module. Resolve
+  // that module so the usual existence and subsystem rules remain enforced.
+  const modulePath = specifier.endsWith("?url")
+    ? specifier.slice(0, -4)
+    : specifier;
   let base: string;
-  if (specifier.startsWith("@/")) {
-    base = path.join(root, "src", specifier.slice(2));
-  } else if (specifier.startsWith(".")) {
-    base = path.resolve(path.dirname(sourceAbsolute), specifier);
+  if (modulePath.startsWith("@/")) {
+    base = path.join(root, "src", modulePath.slice(2));
+  } else if (modulePath.startsWith(".")) {
+    base = path.resolve(path.dirname(sourceAbsolute), modulePath);
   } else {
     return null;
   }

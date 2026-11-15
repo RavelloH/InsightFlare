@@ -113,6 +113,7 @@ function eventSummarySource(input: {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
+  readonly qualificationSemantics?: "whole-original";
 }) {
   return buildEventReportSource({
     siteId: input.siteId,
@@ -121,6 +122,9 @@ function eventSummarySource(input: {
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
     ...(input.qualificationDependencyRefs
       ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+      : {}),
+    ...(input.qualificationSemantics
+      ? { qualificationSemantics: input.qualificationSemantics }
       : {}),
     attributes: EVENT_REPORT_BASE_ATTRIBUTES,
   });
@@ -308,6 +312,7 @@ export function buildEventTypeSummaryPlan(input: {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
+  readonly qualificationSemantics?: "whole-original";
   readonly query: EventTypeSummaryQuery;
 }): ValidatedLogicalPlan {
   const { builder, events } = eventSummarySource(input);

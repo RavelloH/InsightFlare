@@ -218,6 +218,8 @@ export function buildOverviewAggregatePlan(input: {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
+  readonly pageVisitDependencyRefs?: readonly QualificationDependencyRef[];
+  readonly qualificationSemantics?: "whole-original";
 }): ValidatedLogicalPlan {
   const source = createOverviewReportSource({
     ...input,

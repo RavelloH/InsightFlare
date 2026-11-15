@@ -14,6 +14,7 @@ import type {
   PerformanceSummaryRow,
   PerformanceTrendPointRow,
 } from "@/lib/edge/analytics/providers/d1/internal/core-types";
+import type { D1ExecutionOptions } from "@/lib/edge/analytics/providers/d1/internal/execution-options";
 import type { PerformancePageVisitQualification } from "@/lib/edge/analytics/providers/d1/internal/performance";
 import {
   queryAllPerformanceTrendsFromD1,
@@ -40,6 +41,8 @@ export interface ReadSitePerformanceInput {
   readonly window: QueryWindow;
   readonly filters: FilterDocument;
   readonly qualification?: PerformancePageVisitQualification;
+  readonly wholeOriginalOwner?: object;
+  readonly execution?: D1ExecutionOptions;
 }
 export interface ReadSitePerformanceTimeseriesInput extends ReadSitePerformanceInput {
   readonly interval: "minute" | "hour" | "day" | "week" | "month";
@@ -91,7 +94,17 @@ export async function readSitePerformanceSummary(
       input.siteId,
       input.window,
       input.filters,
-      ...(input.qualification ? [input.qualification] : []),
+      ...((input.wholeOriginalOwner && input.execution
+        ? [input.qualification, input.wholeOriginalOwner, input.execution]
+        : input.wholeOriginalOwner
+          ? [input.qualification, input.wholeOriginalOwner]
+          : input.qualification
+            ? [input.qualification]
+            : []) as [
+        qualification?: PerformancePageVisitQualification,
+        owner?: object,
+        execution?: D1ExecutionOptions,
+      ]),
     ),
   };
 }
@@ -135,7 +148,17 @@ export async function readSitePerformanceTimeseries(
     input.window,
     input.interval,
     input.filters,
-    ...(input.qualification ? [input.qualification] : []),
+    ...((input.wholeOriginalOwner && input.execution
+      ? [input.qualification, input.wholeOriginalOwner, input.execution]
+      : input.wholeOriginalOwner
+        ? [input.qualification, input.wholeOriginalOwner]
+        : input.qualification
+          ? [input.qualification]
+          : []) as [
+      qualification?: PerformancePageVisitQualification,
+      owner?: object,
+      execution?: D1ExecutionOptions,
+    ]),
   );
   return serializePerformanceTimeseries(input.interval, result);
 }
@@ -167,14 +190,34 @@ export async function readSitePerformanceBreakdown(
           input.window,
           input.filters,
           input.limit,
-          ...(input.qualification ? [input.qualification] : []),
+          ...((input.wholeOriginalOwner && input.execution
+            ? [input.qualification, input.wholeOriginalOwner, input.execution]
+            : input.wholeOriginalOwner
+              ? [input.qualification, input.wholeOriginalOwner]
+              : input.qualification
+                ? [input.qualification]
+                : []) as [
+            qualification?: PerformancePageVisitQualification,
+            owner?: object,
+            execution?: D1ExecutionOptions,
+          ]),
         )
       : await queryPerformanceCountriesFromD1(
           input.env,
           input.siteId,
           input.window,
           input.filters,
-          ...(input.qualification ? [input.qualification] : []),
+          ...((input.wholeOriginalOwner && input.execution
+            ? [input.qualification, input.wholeOriginalOwner, input.execution]
+            : input.wholeOriginalOwner
+              ? [input.qualification, input.wholeOriginalOwner]
+              : input.qualification
+                ? [input.qualification]
+                : []) as [
+            qualification?: PerformancePageVisitQualification,
+            owner?: object,
+            execution?: D1ExecutionOptions,
+          ]),
         );
   return serializePerformanceBreakdown(dimension.data, input.metric, result);
 }

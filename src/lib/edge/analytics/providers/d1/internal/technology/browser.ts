@@ -38,6 +38,9 @@ import {
   SHARE_TREND_OTHER_LABEL,
   shareTrendSeriesKey,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
+import type { D1ExecutionOptions } from "@/lib/edge/analytics/providers/d1/internal/execution-options";
+import type { QualificationExecutionInputs } from "@/lib/edge/analytics/providers/d1/internal/qualification-execution-inputs";
+import { bindWholeOriginalReader } from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import type { Env } from "@/lib/edge/types";
 
 import { mapBrowserCrossDimensionRows } from "./browser-cross";
@@ -57,6 +60,8 @@ export async function queryBrowserTrendFromD1(
   filters: FilterDocument,
   limit: number,
   qualification?: TechnologyPageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<{
   series: BrowserTrendSeriesRow[];
   data: BrowserTrendPointRow[];
@@ -70,6 +75,11 @@ export async function queryBrowserTrendFromD1(
     limit,
     "browser",
     qualification,
+    ...((wholeOriginalOwner && execution
+      ? [wholeOriginalOwner, execution]
+      : wholeOriginalOwner
+        ? [wholeOriginalOwner]
+        : []) as [object?, D1ExecutionOptions?]),
   );
 }
 
@@ -81,6 +91,8 @@ export async function queryBrowserEngineTrendFromD1(
   filters: FilterDocument,
   limit: number,
   qualification?: TechnologyPageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<{
   series: BrowserTrendSeriesRow[];
   data: BrowserTrendPointRow[];
@@ -94,6 +106,11 @@ export async function queryBrowserEngineTrendFromD1(
     limit,
     "browserEngine",
     qualification,
+    ...((wholeOriginalOwner && execution
+      ? [wholeOriginalOwner, execution]
+      : wholeOriginalOwner
+        ? [wholeOriginalOwner]
+        : []) as [object?, D1ExecutionOptions?]),
   );
 }
 
@@ -105,29 +122,55 @@ export async function queryBrowserVersionBreakdownFromD1(
   browserLimit: number,
   versionLimit: number,
   qualification?: TechnologyPageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<BrowserVersionBreakdownRow[]> {
   const metadata = scopedFilterMetadata(filters);
   const queryTime = qualification?.queryTime ?? queryWindowToTime(window);
-  const plan = buildBrowserVersionBreakdownPlan({
-    siteId,
-    queryTime,
-    filters,
-    ...(qualification
-      ? {
-          scopePlan: qualification.scopePlan,
-          pageVisitQualification: true as const,
-        }
-      : metadata
-        ? { scopePlan: metadata.plan }
-        : {}),
-    browserLimit,
-  });
-  const bound = bindTechnologyPageVisitQualification({
-    siteId,
-    filters,
-    qualification,
-    plan,
-  });
+  const wholeOriginal =
+    !qualification && wholeOriginalOwner
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalOwner,
+          consumer: {
+            kind: "page",
+            family: "radar",
+            reader: {
+              kind: "technology-browser-version",
+              configuration: { browserLimit, versionLimit },
+            },
+          },
+          siteId,
+          filters,
+          queryTime: metadata?.time ?? queryWindowToTime(window),
+          scopePlan: metadata?.plan,
+          readerQueryTime: queryWindowToTime(window),
+          ...(execution ? { execution } : {}),
+        })
+      : undefined;
+  const plan =
+    wholeOriginal?.plan ??
+    buildBrowserVersionBreakdownPlan({
+      siteId,
+      queryTime,
+      filters,
+      ...(qualification
+        ? {
+            scopePlan: qualification.scopePlan,
+            pageVisitQualification: true as const,
+          }
+        : metadata
+          ? { scopePlan: metadata.plan }
+          : {}),
+      browserLimit,
+    });
+  const bound =
+    wholeOriginal ??
+    bindTechnologyPageVisitQualification({
+      siteId,
+      filters,
+      qualification,
+      plan,
+    });
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
     bound.plan,
@@ -135,6 +178,9 @@ export async function queryBrowserVersionBreakdownFromD1(
     undefined,
     undefined,
     bound.executionInputs,
+    ...((wholeOriginal?.execution ? [wholeOriginal.execution] : []) as [
+      D1ExecutionOptions?,
+    ]),
   );
   return mapBrowserVersionBreakdownRows(rows, versionLimit);
 }
@@ -250,42 +296,80 @@ export async function queryBrowserCrossDimensionFromD1(
   dimensionLimit: number,
   dimensionSelection: PageDimensionSelection,
   fallbackKeyBase: string,
+  wholeOriginal?: {
+    readonly owner: object;
+    readonly stage: "operatingSystem" | "deviceType";
+    readonly configuration: {
+      readonly browserLimit: number;
+      readonly operatingSystemLimit: number;
+      readonly deviceTypeLimit: number;
+    };
+  },
 ): Promise<BrowserCrossBreakdownDimensionDataRow> {
   const metadata = scopedFilterMetadata(filters);
-  const plan = buildTechnologyCrossBreakdownPlan({
-    siteId,
-    queryTime: queryWindowToTime(window),
-    filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
-    family: "browser",
-    primarySelection: PAGE_DIMENSION_SELECTIONS.browser,
-    secondarySelection: dimensionSelection,
-    primaryLimit: browserLimit,
-    secondaryLimit: dimensionLimit,
-    tokens: {
-      unknown: BROWSER_CROSS_UNKNOWN_TOKEN,
-      otherPrimary: BROWSER_CROSS_OTHER_BROWSER_TOKEN,
-      otherSecondary: BROWSER_CROSS_OTHER_DIMENSION_TOKEN,
+  const readerQueryTime = queryWindowToTime(window);
+  const wholeOriginalBound = wholeOriginal
+    ? bindWholeOriginalReader({
+        owner: wholeOriginal.owner,
+        consumer: {
+          kind: "page",
+          family: "cross-dimension",
+          reader: {
+            kind: "technology-browser-cross-stage",
+            stage: wholeOriginal.stage,
+            configuration: wholeOriginal.configuration,
+          },
+        },
+        siteId,
+        filters,
+        queryTime: metadata?.time ?? readerQueryTime,
+        ...(metadata ? { scopePlan: metadata.plan } : {}),
+        readerQueryTime,
+      })
+    : undefined;
+  const plan =
+    wholeOriginalBound?.plan ??
+    buildTechnologyCrossBreakdownPlan({
+      siteId,
+      queryTime: readerQueryTime,
+      filters,
+      ...(metadata ? { scopePlan: metadata.plan } : {}),
+      family: "browser",
+      primarySelection: PAGE_DIMENSION_SELECTIONS.browser,
+      secondarySelection: dimensionSelection,
+      primaryLimit: browserLimit,
+      secondaryLimit: dimensionLimit,
+      tokens: {
+        unknown: BROWSER_CROSS_UNKNOWN_TOKEN,
+        otherPrimary: BROWSER_CROSS_OTHER_BROWSER_TOKEN,
+        otherSecondary: BROWSER_CROSS_OTHER_DIMENSION_TOKEN,
+      },
+    });
+  const queryRows = await queryAnalyticsReportOutputSetRowsFromD1(
+    env,
+    plan,
+    {
+      outputIds: Object.values(TECHNOLOGY_CROSS_BREAKDOWN_OUTPUTS),
+      fields: [
+        "rowType",
+        "browser",
+        "dimension",
+        "views",
+        "visitors",
+        "sessions",
+        "rowOrder",
+      ],
+      orderBy: [
+        { field: "rowType", direction: "asc", nulls: "first" },
+        { field: "rowOrder", direction: "asc", nulls: "first" },
+        { field: "browser", direction: "asc", nulls: "first" },
+        { field: "dimension", direction: "asc", nulls: "first" },
+      ],
     },
-  });
-  const queryRows = await queryAnalyticsReportOutputSetRowsFromD1(env, plan, {
-    outputIds: Object.values(TECHNOLOGY_CROSS_BREAKDOWN_OUTPUTS),
-    fields: [
-      "rowType",
-      "browser",
-      "dimension",
-      "views",
-      "visitors",
-      "sessions",
-      "rowOrder",
-    ],
-    orderBy: [
-      { field: "rowType", direction: "asc", nulls: "first" },
-      { field: "rowOrder", direction: "asc", nulls: "first" },
-      { field: "browser", direction: "asc", nulls: "first" },
-      { field: "dimension", direction: "asc", nulls: "first" },
-    ],
-  });
+    ...((wholeOriginalBound
+      ? [undefined, wholeOriginalBound.executionInputs]
+      : []) as [undefined?, QualificationExecutionInputs?]),
+  );
   return mapBrowserCrossDimensionRows(queryRows, fallbackKeyBase);
 }
 
@@ -298,6 +382,7 @@ export async function queryBrowserCrossBreakdownFromD1(
   osLimit: number,
   deviceTypeLimit: number,
   qualification?: TechnologyPageVisitQualification,
+  wholeOriginalOwner?: object,
 ): Promise<{
   operatingSystem: BrowserCrossBreakdownDimensionDataRow;
   deviceType: BrowserCrossBreakdownDimensionDataRow;
@@ -392,6 +477,21 @@ export async function queryBrowserCrossBreakdownFromD1(
       osLimit,
       PAGE_DIMENSION_SELECTIONS.operatingSystem,
       "os",
+      ...((wholeOriginalOwner
+        ? [
+            {
+              owner: wholeOriginalOwner,
+              stage: "operatingSystem" as const,
+              configuration: {
+                browserLimit,
+                operatingSystemLimit: osLimit,
+                deviceTypeLimit,
+              },
+            },
+          ]
+        : []) as [
+        NonNullable<Parameters<typeof queryBrowserCrossDimensionFromD1>[8]>?,
+      ]),
     ),
     queryBrowserCrossDimensionFromD1(
       env,
@@ -402,6 +502,21 @@ export async function queryBrowserCrossBreakdownFromD1(
       deviceTypeLimit,
       PAGE_DIMENSION_SELECTIONS.deviceType,
       "device",
+      ...((wholeOriginalOwner
+        ? [
+            {
+              owner: wholeOriginalOwner,
+              stage: "deviceType" as const,
+              configuration: {
+                browserLimit,
+                operatingSystemLimit: osLimit,
+                deviceTypeLimit,
+              },
+            },
+          ]
+        : []) as [
+        NonNullable<Parameters<typeof queryBrowserCrossDimensionFromD1>[8]>?,
+      ]),
     ),
   ]);
 

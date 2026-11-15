@@ -40,6 +40,7 @@ export interface EventTrendPlanInput {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
+  readonly qualificationSemantics?: "whole-original";
   readonly eventName?: string;
 }
 
@@ -59,6 +60,12 @@ function eventTrendSource(input: EventTrendPlanInput) {
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
     ...(input.qualificationDependencyRefs
       ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+      : {}),
+    ...(input.qualificationSemantics
+      ? {
+          qualificationSemantics: input.qualificationSemantics,
+          wholeOriginalSourcePolicy: "prepared-scoped-v1" as const,
+        }
       : {}),
     attributes: EVENT_REPORT_TREND_ATTRIBUTES,
     ...(input.eventName !== undefined

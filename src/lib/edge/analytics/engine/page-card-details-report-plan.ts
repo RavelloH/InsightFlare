@@ -41,6 +41,7 @@ interface PageCardSourceInput {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly pathnames: readonly string[];
 }
@@ -61,6 +62,9 @@ function createPageCardSource(
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
+    ...(input.qualificationSemantics
+      ? { qualificationSemantics: input.qualificationSemantics }
+      : {}),
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
     ...(input.qualificationDependencyRefs
       ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
@@ -305,6 +309,7 @@ export function buildPageCardDetailsPlan(input: {
   readonly interval: CalendarGranularity;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly pathnames: readonly string[];
   readonly titleLimit: number;

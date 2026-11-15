@@ -53,6 +53,7 @@ import {
   type AnalyticsLegacyVisitColumnName,
 } from "@/lib/edge/analytics/providers/d1/internal/analytics-legacy-scoped-types";
 import { type AnalyticsDbRelation } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-storage";
+import type { ScopedQualificationRelations } from "@/lib/edge/analytics/providers/d1/internal/logical-source-membership-inputs";
 import { resolvePreparedMembership } from "@/lib/edge/analytics/providers/d1/internal/prepared-membership-relations";
 import { analyticsFilterDefinition } from "@/lib/filter-contract/filter-registry";
 import {
@@ -553,10 +554,17 @@ function qualifiedRelation(
   dataset: AnalyticsLegacyScopedDataset,
   selection: SemanticScopedSourceSelection,
   role: QualifiedRole,
-  qualificationRelations: ReadonlyMap<string, AnalyticsDbRelation> | undefined,
+  qualificationRelations: ScopedQualificationRelations | undefined,
 ): IdentityRelation | undefined {
   let relation: AnalyticsDbRelation | undefined;
-  if (selection.preparedMembership) {
+  if (qualificationRelations && "sourceInputs" in qualificationRelations) {
+    if (selection.preparedMembership || selection.qualificationDependencyRefs)
+      throw new Error(
+        "logical_source_membership_inputs_mixed_with_qualification",
+      );
+    relation = qualificationRelations.sourceInputs[role];
+    if (!relation) throw new Error("logical_source_membership_role_missing");
+  } else if (selection.preparedMembership) {
     const registered = resolvePreparedMembership(selection.preparedMembership);
     if (!registered) throw new Error("prepared_membership_unregistered");
     relation = registered[role];
@@ -594,7 +602,7 @@ function qualifiedRelation(
 export function observationEventMatches(
   dataset: AnalyticsLegacyScopedDataset,
   selection: SemanticScopedSourceSelection,
-  qualificationRelations?: ReadonlyMap<string, AnalyticsDbRelation>,
+  qualificationRelations?: ScopedQualificationRelations,
 ): IdentityRelation {
   const context: AnalyticsLegacyScopedPredicateContext = {
     selection,
@@ -671,13 +679,15 @@ export function entityEventMatches(
   dataset: AnalyticsLegacyScopedDataset,
   selection: SemanticScopedSourceSelection,
   qualifiedEntities?: IdentityRelation,
-  qualificationRelations?: ReadonlyMap<string, AnalyticsDbRelation>,
+  qualificationRelations?: ScopedQualificationRelations,
 ): IdentityRelation {
   const kind = selection.entityKind;
   if (!kind) throw new TypeError("Scoped entity mode requires an entity kind.");
   const hasPreparedEntities =
     selection.preparedMembership !== undefined ||
-    selection.qualificationDependencyRefs !== undefined;
+    selection.qualificationDependencyRefs !== undefined ||
+    (qualificationRelations !== undefined &&
+      "sourceInputs" in qualificationRelations);
   const explicit =
     hasPreparedEntities && !qualifiedEntities
       ? qualifiedRelation(dataset, selection, "entity", qualificationRelations)
@@ -703,6 +713,29 @@ export function entityEventMatches(
       ),
     );
     return eventIdentityRows({ ...gatedEvents, relation: matches });
+  }
+
+  if (
+    selection.filter.root === null &&
+    !hasPreparedEntities &&
+    qualifiedEntities === undefined
+  ) {
+    // The unrestricted universe includes entityRowsFromEvent(readEvents),
+    // so every nonblank owner key is already its own membership witness.
+    // Keep the same source, raw-key predicate and name gate; only omit the
+    // redundant join to the Page/Event entity union.
+    const events = applyNameGate(dataset.readEvents, dataset, selection);
+    return eventIdentityRows({
+      ...events,
+      relation: filter(
+        events.relation,
+        and(
+          isNotNull(events.relation.columns.site_pk!),
+          isNotNull(events.relation.columns.event_id!),
+          nonBlank(events.relation.columns[entityColumnName(events, kind)]!),
+        ),
+      ),
+    });
   }
 
   const universe =
@@ -808,7 +841,7 @@ export function eventOwnerPairsForObservationFilter(
 export function observationPagePairMatches(
   dataset: AnalyticsLegacyScopedDataset,
   selection: SemanticScopedSourceSelection,
-  qualificationRelations?: ReadonlyMap<string, AnalyticsDbRelation>,
+  qualificationRelations?: ScopedQualificationRelations,
 ): IdentityRelation {
   const qualifiedVisits = qualifiedRelation(
     dataset,
@@ -863,7 +896,7 @@ export function entityPageRows(
   dataset: AnalyticsLegacyScopedDataset,
   selection: SemanticScopedSourceSelection,
   qualifiedEntities?: IdentityRelation,
-  qualificationRelations?: ReadonlyMap<string, AnalyticsDbRelation>,
+  qualificationRelations?: ScopedQualificationRelations,
 ): AnalyticsDbRelation {
   const kind = selection.entityKind;
   if (!kind) throw new TypeError("Scoped entity mode requires an entity kind.");
@@ -1119,7 +1152,7 @@ export function selectedPageRows(
   selection: SemanticScopedSourceSelection,
   matchingEventOwnerPairs?: IdentityRelation,
   qualifiedEntities?: IdentityRelation,
-  qualificationRelations?: ReadonlyMap<string, AnalyticsDbRelation>,
+  qualificationRelations?: ScopedQualificationRelations,
 ): AnalyticsLegacyPageRow {
   const relation =
     selection.profile === "direct-page-analytics-v1"
@@ -1339,7 +1372,10 @@ export class ScopedSourceMembership {
     selection: SemanticScopedSourceSelection,
     qualifiedEntities?: IdentityRelation,
   ): IdentityRelation {
-    if (canReuseRowLocalEventMatches(selection)) {
+    if (
+      !("sourceInputs" in this.#context.qualificationRelations) &&
+      canReuseRowLocalEventMatches(selection)
+    ) {
       const baseSelection = withoutEventNameGate(selection);
       const key = JSON.stringify(baseSelection);
       let baseMatches = this.#context.rowLocalEventMatches.get(key);

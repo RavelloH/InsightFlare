@@ -11,6 +11,23 @@ import {
   queryOverviewForSitesFromHourlyRollups,
   queryTrendForSitesFromHourlyRollups,
 } from "@/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries";
+
+import {
+  bindWholeOriginalOverview,
+  type WholeOriginalOverviewMembership,
+} from "./whole-filter-reader-preparation";
+export type OverviewMembership =
+  EventMembershipFallback | WholeOriginalOverviewMembership;
+
+function isWholeOriginalOverviewMembership(
+  membership: OverviewMembership | undefined,
+): membership is WholeOriginalOverviewMembership {
+  return (
+    !!membership &&
+    Object.getOwnPropertyDescriptor(membership, "kind")?.value ===
+      "whole-original-overview"
+  );
+}
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -38,20 +55,31 @@ export async function queryOverviewFromD1(
   window: QueryWindow,
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
-  membership?: EventMembershipFallback,
+  membership?: OverviewMembership,
 ): Promise<OverviewAggregateRow> {
   const readerTime = queryWindowToTime(window);
-  const bound = membership?.bindPlan(
-    (context) =>
-      buildOverviewAggregatePlan({
+  const bound = isWholeOriginalOverviewMembership(membership)
+    ? bindWholeOriginalOverview({
+        owner: membership.owner,
+        kind: "aggregate",
         siteId,
-        queryTime: readerTime,
         filters,
-        scopePlan: context.scopePlan,
-        qualificationDependencyRefs: context.qualificationDependencyRefs,
-      }),
-    readerTime,
-  );
+        readerQueryTime: readerTime,
+      })
+    : membership?.bindPlan(
+        (context) =>
+          buildOverviewAggregatePlan({
+            siteId,
+            queryTime: readerTime,
+            filters: context.readerFilters ?? filters,
+            scopePlan: context.scopePlan,
+            qualificationDependencyRefs: context.qualificationDependencyRefs,
+            ...(context.qualificationSemantics
+              ? { qualificationSemantics: context.qualificationSemantics }
+              : {}),
+          }),
+        readerTime,
+      );
   const plan =
     bound?.plan ??
     buildOverviewAggregatePlan({
@@ -85,22 +113,34 @@ export async function queryTrendFromD1(
   interval: Interval,
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
-  membership?: EventMembershipFallback,
+  membership?: OverviewMembership,
 ): Promise<TrendAggregateRow[]> {
   const buckets = buildTimeBuckets(window, interval);
   const readerTime = queryWindowToTime(window);
-  const bound = membership?.bindPlan(
-    (context) =>
-      buildOverviewTrendPlan({
+  const bound = isWholeOriginalOverviewMembership(membership)
+    ? bindWholeOriginalOverview({
+        owner: membership.owner,
+        kind: "trend",
         siteId,
-        queryTime: readerTime,
         filters,
+        readerQueryTime: readerTime,
         interval,
-        scopePlan: context.scopePlan,
-        qualificationDependencyRefs: context.qualificationDependencyRefs,
-      }),
-    readerTime,
-  );
+      })
+    : membership?.bindPlan(
+        (context) =>
+          buildOverviewTrendPlan({
+            siteId,
+            queryTime: readerTime,
+            filters: context.readerFilters ?? filters,
+            interval,
+            scopePlan: context.scopePlan,
+            qualificationDependencyRefs: context.qualificationDependencyRefs,
+            ...(context.qualificationSemantics
+              ? { qualificationSemantics: context.qualificationSemantics }
+              : {}),
+          }),
+        readerTime,
+      );
   const plan =
     bound?.plan ??
     buildOverviewTrendPlan({
@@ -139,12 +179,30 @@ export async function queryLatestSiteActivity(
   window: QueryWindow,
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
+  membership?: EventMembershipFallback,
 ): Promise<number | null> {
-  const plan = buildLatestSiteActivityPlan({
-    siteId,
-    queryTime: queryWindowToTime(window),
-    filters,
-  });
+  const readerTime = queryWindowToTime(window);
+  const bound = membership?.bindPlan(
+    (context) =>
+      buildLatestSiteActivityPlan({
+        siteId,
+        queryTime: readerTime,
+        filters: context.readerFilters ?? filters,
+        scopePlan: context.scopePlan,
+        qualificationDependencyRefs: context.qualificationDependencyRefs,
+        ...(context.qualificationSemantics
+          ? { qualificationSemantics: context.qualificationSemantics }
+          : {}),
+      }),
+    readerTime,
+  );
+  const plan =
+    bound?.plan ??
+    buildLatestSiteActivityPlan({
+      siteId,
+      queryTime: queryWindowToTime(window),
+      filters,
+    });
   recordScopedFilterDiagnostics(diagnostics, scopedFilterMetadata(filters));
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
@@ -152,6 +210,7 @@ export async function queryLatestSiteActivity(
     "overview-latest-site-activity",
     undefined,
     diagnostics,
+    bound?.executionInputs,
   );
   const row = rows[0];
   const raw = row?.lastActivityAt;
@@ -165,10 +224,14 @@ export async function queryOverviewAggregate(
   window: QueryWindow,
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
-  membership?: EventMembershipFallback,
+  membership?: OverviewMembership,
 ): Promise<PreferredSourceResult<OverviewAggregateRow>> {
   const scopedMetadata = scopedFilterMetadata(filters);
-  if (!hasFilterDocument(filters) && !scopedMetadata) {
+  if (
+    !hasFilterDocument(filters) &&
+    !scopedMetadata &&
+    !isWholeOriginalOverviewMembership(membership)
+  ) {
     const rollup = await queryOverviewForSitesFromHourlyRollups(
       env,
       [siteId],
@@ -206,10 +269,14 @@ export async function queryTrendAggregate(
   interval: Interval,
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
-  membership?: EventMembershipFallback,
+  membership?: OverviewMembership,
 ): Promise<PreferredSourceResult<TrendAggregateRow[]>> {
   const scopedMetadata = scopedFilterMetadata(filters);
-  if (!hasFilterDocument(filters) && !scopedMetadata) {
+  if (
+    !hasFilterDocument(filters) &&
+    !scopedMetadata &&
+    !isWholeOriginalOverviewMembership(membership)
+  ) {
     const rollup = await queryTrendForSitesFromHourlyRollups(
       env,
       [siteId],

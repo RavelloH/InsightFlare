@@ -17,6 +17,10 @@ import {
   EVENT_TYPE_SUMMARY_OUTPUTS,
   type EventNameDimensionListRequest,
 } from "@/lib/edge/analytics/engine/event-type-summary-plan";
+import {
+  bindWholeOriginalReader,
+  hasWholeOriginalCompletion,
+} from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -57,6 +61,7 @@ import {
   pageResult,
   paginationBindingForWindow,
 } from "./pagination";
+import type { QualificationExecutionInputs } from "./qualification-execution-inputs";
 
 export interface EventTypeAggregateCursor {
   readonly views: number;
@@ -104,19 +109,40 @@ async function queryCustomEventNamesFromD1(
   filters: FilterDocument,
   limit: number,
   search?: string,
+  wholeOriginalOwner?: object,
 ): Promise<DimensionRow[]> {
   const metadata = scopedFilterMetadata(filters);
-  const plan = buildEventTypeSummaryPlan({
-    siteId,
-    queryTime: metadata?.time ?? queryWindowToTime(window),
-    filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
-    query: { kind: "list", limit, ...(search !== undefined ? { search } : {}) },
-  });
+  const query = {
+    kind: "list" as const,
+    limit,
+    ...(search !== undefined ? { search } : {}),
+  };
+  const wholeOriginal = wholeOriginalOwner
+    ? bindWholeOriginalReader({
+        owner: wholeOriginalOwner,
+        consumer: { kind: "event-name-dimension", configuration: query },
+        siteId,
+        filters,
+        queryTime: metadata?.time ?? queryWindowToTime(window),
+        scopePlan: metadata?.plan,
+      })
+    : undefined;
+  const plan =
+    wholeOriginal?.plan ??
+    buildEventTypeSummaryPlan({
+      siteId,
+      queryTime: metadata?.time ?? queryWindowToTime(window),
+      filters,
+      ...(metadata ? { scopePlan: metadata.plan } : {}),
+      query,
+    });
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
     plan,
     EVENT_TYPE_SUMMARY_OUTPUTS.list,
+    ...((wholeOriginal
+      ? [undefined, undefined, wholeOriginal.executionInputs]
+      : []) as [undefined?, undefined?, QualificationExecutionInputs?]),
   );
   return rows.map((row) => ({
     value: String(row.value ?? ""),
@@ -133,6 +159,7 @@ export async function queryEventTypeAggregate(
   filters: FilterDocument,
   limit: number,
   search?: string,
+  wholeOriginalOwner?: object,
 ): Promise<DimensionRow[]> {
   return queryCustomEventNamesFromD1(
     env,
@@ -141,6 +168,7 @@ export async function queryEventTypeAggregate(
     filters,
     limit,
     search,
+    ...(wholeOriginalOwner ? ([wholeOriginalOwner] as const) : ([] as const)),
   );
 }
 
@@ -172,6 +200,7 @@ export async function queryEventNameDimensionFromD1(
   request: EventNameDimensionListRequest,
   options?: {
     readonly deferredQualification?: DeferredEventNameDimensionQualification;
+    readonly wholeOriginalOwner?: object;
     readonly diagnostics?: D1ReadDiagnostics;
     readonly scopePlan?: ScopedFilterPlan;
   },
@@ -262,6 +291,9 @@ export async function queryEventNameDimensionFromD1(
       reportFilters,
       request.limit,
       request.search,
+      ...(options?.wholeOriginalOwner
+        ? ([options.wholeOriginalOwner] as const)
+        : ([] as const)),
     );
   return rows.map((row) => ({
     value: String(row.value ?? ""),
@@ -282,6 +314,7 @@ export async function queryEventTypePageFromD1(
   audience: QueryAudience = "private-dashboard",
   options?: {
     readonly deferredQualification?: DeferredEventTypesQualification;
+    readonly wholeOriginalOwner?: object;
     readonly diagnostics?: D1ReadDiagnostics;
   },
 ): Promise<PageResult<DimensionRow>> {
@@ -357,24 +390,45 @@ export async function queryEventTypePageFromD1(
   }
   if (!rows) {
     const metadata = scopedFilterMetadata(reportFilters);
-    const plan = buildEventTypeSummaryPlan({
-      siteId,
-      queryTime: metadata?.time ?? queryWindowToTime(window),
-      filters: reportFilters,
-      ...(metadata ? { scopePlan: metadata.plan } : {}),
-      query: {
-        kind: "page",
-        limit,
-        ...(search !== undefined ? { search } : {}),
-        ...(cursor ? { cursor } : {}),
-      },
-    });
+    const query = {
+      kind: "page" as const,
+      limit,
+      ...(search !== undefined ? { search } : {}),
+      ...(cursor ? { cursor } : {}),
+    };
+    const wholeOriginalOwner =
+      options?.wholeOriginalOwner ??
+      (deferred && hasWholeOriginalCompletion(deferred, "event-types")
+        ? deferred
+        : undefined);
+    const wholeOriginal = wholeOriginalOwner
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalOwner,
+          consumer: { kind: "event-types", configuration: query },
+          siteId,
+          filters: reportFilters,
+          queryTime: metadata?.time ?? queryWindowToTime(window),
+          scopePlan: metadata?.plan,
+        })
+      : undefined;
+    const plan =
+      wholeOriginal?.plan ??
+      buildEventTypeSummaryPlan({
+        siteId,
+        queryTime: metadata?.time ?? queryWindowToTime(window),
+        filters: reportFilters,
+        ...(metadata ? { scopePlan: metadata.plan } : {}),
+        query,
+      });
     rows = await queryAnalyticsReportOutputRowsFromD1(
       env,
       plan,
       EVENT_TYPE_SUMMARY_OUTPUTS.page,
       undefined,
       options?.diagnostics,
+      ...(wholeOriginal
+        ? ([wholeOriginal.executionInputs] as const)
+        : ([] as const)),
     );
   }
   return eventTypePageResultFromRows({
@@ -502,6 +556,7 @@ export async function queryEventsSummaryFromD1(
   filters: FilterDocument,
   options?: {
     readonly deferredQualification?: DeferredEventSummaryQualification;
+    readonly wholeOriginalOwner?: object;
     readonly diagnostics?: D1ReadDiagnostics;
   },
 ): Promise<{
@@ -541,8 +596,25 @@ export async function queryEventsSummaryFromD1(
       reportFilters = await prepareDeferredEventSummaryFallback(deferred);
   }
   const metadata = scopedFilterMetadata(reportFilters);
+  const wholeOriginalOwner =
+    options?.wholeOriginalOwner ??
+    (deferred && hasWholeOriginalCompletion(deferred, "event-summary")
+      ? deferred
+      : undefined);
+  const wholeOriginal =
+    !membership && wholeOriginalOwner
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalOwner,
+          consumer: { kind: "event-summary" },
+          siteId,
+          filters: reportFilters,
+          queryTime: metadata?.time ?? queryWindowToTime(window),
+          scopePlan: metadata?.plan,
+        })
+      : undefined;
   const plan =
     membership?.plan ??
+    wholeOriginal?.plan ??
     buildEventSummaryCardsPlan({
       siteId,
       queryTime: metadata?.time ?? queryWindowToTime(window),
@@ -578,7 +650,7 @@ export async function queryEventsSummaryFromD1(
         ],
       },
       options?.diagnostics,
-      membership?.executionInputs,
+      membership?.executionInputs ?? wholeOriginal?.executionInputs,
     )) ?? [];
   return eventSummaryFromRows(rows);
 }

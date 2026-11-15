@@ -97,6 +97,9 @@ export function DetailDrawer({
     useState<ContentAreaBounds | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const closeAnimationFrameRef = useRef<number | null>(null);
+  const closeCompletionTimerRef = useRef<number | null>(null);
+  const closeGenerationRef = useRef(0);
+  const onOpenChangeRef = useRef(onOpenChange);
   const closeTranslateYRef = useRef(0);
   const closeDurationRef = useRef(CLOSE_MIN_DURATION_MS);
   const pointerGestureRef = useRef<{
@@ -118,6 +121,11 @@ export function DetailDrawer({
   const stackLift = -Math.min(stackDepth, MAX_STACK_LIFT_DEPTH) * STACK_LIFT_PX;
 
   const clearCloseAnimationPending = useCallback(() => {
+    closeGenerationRef.current += 1;
+    if (closeCompletionTimerRef.current !== null) {
+      window.clearTimeout(closeCompletionTimerRef.current);
+      closeCompletionTimerRef.current = null;
+    }
     if (closeAnimationFrameRef.current !== null) {
       window.cancelAnimationFrame(closeAnimationFrameRef.current);
       closeAnimationFrameRef.current = null;
@@ -140,6 +148,8 @@ export function DetailDrawer({
   }, [getScrollElement]);
 
   const triggerCloseAnimation = useCallback(() => {
+    clearCloseAnimationPending();
+    isPreparingCloseRef.current = true;
     setIsCloseInteractionDisabled(true);
     closeTranslateYRef.current =
       (getScrollElement()?.scrollTop ?? 0) +
@@ -161,7 +171,36 @@ export function DetailDrawer({
       closeAnimationFrameRef.current = null;
       setIsClosing(true);
     });
-  }, [getScrollElement]);
+  }, [clearCloseAnimationPending, getScrollElement]);
+
+  const finishClose = useCallback(() => {
+    if (!isPreparingCloseRef.current) return;
+    isPreparingCloseRef.current = false;
+    clearCloseAnimationPending();
+    resetScrollPosition();
+    setRendered(false);
+    onOpenChangeRef.current(false);
+  }, [clearCloseAnimationPending, resetScrollPosition]);
+
+  useEffect(() => {
+    onOpenChangeRef.current = onOpenChange;
+  }, [onOpenChange]);
+
+  useEffect(() => {
+    if (!isClosing) return;
+    const generation = closeGenerationRef.current;
+    // Interrupted or zero-distance transforms need not emit transitionend.
+    const timer = window.setTimeout(() => {
+      if (generation === closeGenerationRef.current) finishClose();
+    }, closeDurationRef.current);
+    closeCompletionTimerRef.current = timer;
+    return () => {
+      window.clearTimeout(timer);
+      if (closeCompletionTimerRef.current === timer) {
+        closeCompletionTimerRef.current = null;
+      }
+    };
+  }, [finishClose, isClosing]);
 
   const handleClose = useCallback(() => {
     if (!rendered || isClosing || isPreparingCloseRef.current) return;
@@ -488,10 +527,7 @@ export function DetailDrawer({
                         }
 
                         if (isClosing) {
-                          resetScrollPosition();
-                          setRendered(false);
-                          isPreparingCloseRef.current = false;
-                          onOpenChange(false);
+                          finishClose();
                           return;
                         }
 

@@ -91,6 +91,7 @@ describe("D1 overview reader", () => {
       window,
       filters,
       expect.anything(),
+      undefined,
     );
   });
 });

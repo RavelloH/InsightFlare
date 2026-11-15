@@ -171,6 +171,7 @@ export function selectionForPostObservationFilter(
   if (!stage) throw new Error("legacy_post_observation_filter_missing");
   const {
     preparedMembership: _preparedMembership,
+    qualificationDependencyRefs: _qualificationDependencyRefs,
     eventNameGate: _eventNameGate,
     postObservationFilter: _postObservationFilter,
     ...baseSelection

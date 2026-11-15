@@ -57,6 +57,7 @@ import {
   buildAdvancedCountFilterMatchPlan,
   createAdvancedCountQualificationBuilder,
 } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import { classifyAdvancedCountFilter } from "@/lib/edge/analytics/engine/advanced-filter-count-support";
 import {
   appendFunnelProgressionRelations,
   createJourneyFunnelProgressionSourceSelections,
@@ -84,13 +85,14 @@ import {
   preparedMembershipFromIds,
   preparedMembershipIdentities,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
-import { classifyAdvancedCountFilter } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
+import * as eventMembershipFallbackModule from "@/lib/edge/analytics/providers/d1/internal/event-membership-fallback";
 import {
   sessionListPageFromRecords,
   visitorListPageFromRecords,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
+import * as preparedMembershipModule from "@/lib/edge/analytics/providers/d1/internal/prepared-membership-relations";
 import { compileQualificationProgramEnvelope } from "@/lib/edge/analytics/providers/d1/internal/qualification-program-envelope";
 import {
   deferredSessionListQualificationFromQuery,
@@ -186,6 +188,9 @@ const DROPOFF_CASES = [
 
 // Shared MATERIALIZED definitions keep only the first two singleton choices
 // at two reachable readers; later choices have one final-render emission.
+// Closed, total nested membership now uses its proven one-time membership
+// strategy. Pin the shorter emitted SQL; admission limits and fusion counts stay
+// exact, including both normally accepted and selected statement fingerprints.
 const COMPACT_ALIAS_CASES = [
   {
     caseId: "same-scope-10",
@@ -196,13 +201,13 @@ const COMPACT_ALIAS_CASES = [
     originalSqlBytes: 91_703,
     originalSqlSha256:
       "68267A0514A1DCD012F32B1EC09612E719D9019CBD07F84CB273C15E68284CD5",
-    expectedNormalSqlBytes: 67_480,
+    expectedNormalSqlBytes: 67_040,
     expectedNormalSqlSha256:
-      "6EE96AA3A23BAB78D3EE0EDDB1FB6443F683915B61A9944AA0D6C4206E7971F6",
+      "469A168097E303A97484204ECABE4B7A90D53A24F357DC617AEF5E58726A3526",
     expectedNormalAccepted: true,
-    expectedSelectedSqlBytes: 67_480,
+    expectedSelectedSqlBytes: 67_040,
     expectedSelectedSqlSha256:
-      "6EE96AA3A23BAB78D3EE0EDDB1FB6443F683915B61A9944AA0D6C4206E7971F6",
+      "469A168097E303A97484204ECABE4B7A90D53A24F357DC617AEF5E58726A3526",
     expectedSingletonRankFusionCount: 10,
     expectedSingletonRankEmissionCounts: [2, 2, 1, 1, 1, 1, 1, 1, 1, 1],
   },
@@ -215,13 +220,13 @@ const COMPACT_ALIAS_CASES = [
     originalSqlBytes: 92_537,
     originalSqlSha256:
       "962F76A8B0BB29AB7737CE7AF075EA1E8464403D456E62F05FF3243A080881A2",
-    expectedNormalSqlBytes: 68_112,
+    expectedNormalSqlBytes: 67_672,
     expectedNormalSqlSha256:
-      "EB030BF0243C11EF38A4EE83431908681FA4EF74D1B5BE5476220FC0F65FD60A",
+      "58D4EF37FF89AA5B8F6112E61B9F29B4268EDE4A5209D4EC9AA6C9E4771BF0A8",
     expectedNormalAccepted: true,
-    expectedSelectedSqlBytes: 68_112,
+    expectedSelectedSqlBytes: 67_672,
     expectedSelectedSqlSha256:
-      "EB030BF0243C11EF38A4EE83431908681FA4EF74D1B5BE5476220FC0F65FD60A",
+      "58D4EF37FF89AA5B8F6112E61B9F29B4268EDE4A5209D4EC9AA6C9E4771BF0A8",
     expectedSingletonRankFusionCount: 10,
     expectedSingletonRankEmissionCounts: [2, 2, 1, 1, 1, 1, 1, 1, 1, 1],
   },
@@ -234,13 +239,13 @@ const COMPACT_ALIAS_CASES = [
     originalSqlBytes: 102_844,
     originalSqlSha256:
       "6801F5D080F6F9FC1563756DF2D7658C7A44F0C3FF8836386AE7EC6E427B861E",
-    expectedNormalSqlBytes: 72_541,
+    expectedNormalSqlBytes: 72_035,
     expectedNormalSqlSha256:
-      "ED50236785F9EBED4EAE1818B4F5A00ADCF32D9D47470BC7EF9A64BEEFFAA815",
+      "0F2CA97F46102A446A7CE2E12244198AA8176A1D1245D8299A410521EE1D11D4",
     expectedNormalAccepted: true,
-    expectedSelectedSqlBytes: 72_541,
+    expectedSelectedSqlBytes: 72_035,
     expectedSelectedSqlSha256:
-      "ED50236785F9EBED4EAE1818B4F5A00ADCF32D9D47470BC7EF9A64BEEFFAA815",
+      "0F2CA97F46102A446A7CE2E12244198AA8176A1D1245D8299A410521EE1D11D4",
     expectedSingletonRankFusionCount: 12,
     expectedSingletonRankEmissionCounts: [2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
   },
@@ -253,13 +258,13 @@ const COMPACT_ALIAS_CASES = [
     originalSqlBytes: 103_844,
     originalSqlSha256:
       "78A6B03F240E4A9BA02B454391928F24BA65BBCC03B2168C724E088E371DBA28",
-    expectedNormalSqlBytes: 73_278,
+    expectedNormalSqlBytes: 72_772,
     expectedNormalSqlSha256:
-      "6E610F3DC904FF5BA381636E6AF9F2FD521C70EEDB656386F3140EE5BA97044C",
+      "73E2246C3F2D06F4812216DDC4ED769F11A0D52DA27A376FA0035E83EAD2952F",
     expectedNormalAccepted: true,
-    expectedSelectedSqlBytes: 73_278,
+    expectedSelectedSqlBytes: 72_772,
     expectedSelectedSqlSha256:
-      "6E610F3DC904FF5BA381636E6AF9F2FD521C70EEDB656386F3140EE5BA97044C",
+      "73E2246C3F2D06F4812216DDC4ED769F11A0D52DA27A376FA0035E83EAD2952F",
     expectedSingletonRankFusionCount: 12,
     expectedSingletonRankEmissionCounts: [2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
   },
@@ -2916,12 +2921,20 @@ describe("Journey Funnel safe composition diagnostics", () => {
           ),
         ).toBe(true);
       }
-      if (caseId === "cross-scope-10" || caseId === "cross-scope-12") {
-        expect(normalAttempt.statement.physicalPlanShape).toHaveProperty(
-          "semiMembershipCount",
-          0,
-        );
-      }
+      // Cross-scope membership now has the same closed/total proof as the
+      // same-scope program. Pin complete two-key choices and their emissions
+      // instead of requiring the former correlated-only physical fallback.
+      const expectedMembershipCount = stepCount === 12 ? 20 : 17;
+      expect(normalAttempt.statement.physicalPlanShape).toMatchObject({
+        semiMembershipCount: expectedMembershipCount,
+        semiMemberships: Array.from(
+          { length: expectedMembershipCount },
+          (_unused, index) => ({
+            keyCount: 2,
+            emissionCount: index < 3 ? 2 : 1,
+          }),
+        ),
+      });
       expect(normalAttempt.statement.bindings?.length ?? 0).toBe(
         stepCount === 12 ? 32 : 30,
       );
@@ -3612,6 +3625,92 @@ describe("Journey Funnel safe composition diagnostics", () => {
 
   describe("private Count/Funnel qualification", () => {
     it.each([
+      { operation: "visitors", scope: "session" },
+      { operation: "visitors", scope: "visitor" },
+      { operation: "sessions", scope: "session" },
+      { operation: "sessions", scope: "visitor" },
+    ] as const)(
+      "binds the resolved Funnel stages to one $scope relation for $operation after numeric fallback",
+      async ({ operation, scope }) => {
+        const database = createMigratedDatabase();
+        const bridge = vi.spyOn(
+          preparedMembershipModule,
+          "registerPreparedMembership",
+        );
+        let oldRoute = vi
+          .spyOn(
+            eventMembershipFallbackModule,
+            "prepareEventMembershipFallback",
+          )
+          .mockResolvedValue(undefined);
+        try {
+          seedFixture(database);
+          seedPrivateCountFunnelFixture(database, operation);
+          database.prepare("UPDATE visits SET duration_ms = 10").run();
+          database
+            .prepare(
+              "UPDATE visits SET duration_ms = ? WHERE rowid = (SELECT MIN(rowid) FROM visits)",
+            )
+            .run("invalid-duration");
+          const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+          const env = {
+            DB: createSqliteD1Database(database, trace),
+            MAIN_SECRET,
+          } as unknown as Env;
+          const runtime = createD1SiteQueryRuntime({ env, siteId: SITE_ID });
+          const request = queryFor({
+            operation,
+            funnel: { stepId: "step-1" },
+            filterDsl: "count(page { page.durationMs gt 5 }) gte 1",
+            scopePreference: scope,
+          });
+          const before = await runtime.execute(operation, request as never);
+          expect(before.ok, JSON.stringify(before)).toBe(true);
+          expect(bridge).toHaveBeenCalledTimes(1);
+          oldRoute.mockRestore();
+          bridge.mockClear();
+          const after = await runtime.execute(operation, request as never, {
+            onProviderError(error) {
+              throw error;
+            },
+          });
+          expect(after).toEqual(before);
+          expect(bridge).not.toHaveBeenCalled();
+          if (!before.ok || !after.ok)
+            throw new Error("analysis_relation_fallback_failed");
+          expect(after.data.items.length).toBeGreaterThan(0);
+          expect(after.data.pagination.hasMore).toBe(true);
+          const next = {
+            ...request,
+            page: {
+              ...request.page,
+              cursor: before.data.pagination.nextCursor,
+            },
+          };
+          const afterNext = await runtime.execute(operation, next as never, {
+            onProviderError(error) {
+              throw error;
+            },
+          });
+          expect(bridge).not.toHaveBeenCalled();
+          oldRoute = vi
+            .spyOn(
+              eventMembershipFallbackModule,
+              "prepareEventMembershipFallback",
+            )
+            .mockResolvedValue(undefined);
+          const beforeNext = await runtime.execute(operation, next as never);
+          expect(afterNext).toEqual(beforeNext);
+        } finally {
+          oldRoute.mockRestore();
+          bridge.mockRestore();
+          database.close();
+        }
+      },
+      30_000,
+    );
+
+    it.each([
       { operation: "visitors", outcome: "omitted" },
       { operation: "visitors", outcome: "converted" },
       { operation: "sessions", outcome: "omitted" },
@@ -3784,94 +3883,90 @@ describe("Journey Funnel safe composition diagnostics", () => {
     );
 
     describe("private Count/Funnel dropoff qualification", () => {
-      it.each(DROPOFF_CASES)(
-        "matches selected-step dropoff for $operation with $countScope Count",
-        async ({ operation, countScope, progressionScope }) => {
-          const database = createMigratedDatabase();
-          try {
-            seedFixture(database);
-            const fixture = seedPrivateCountFunnelDropoffFixture(
-              database,
+      async function prepareDropoffCase({
+        operation,
+        countScope,
+        progressionScope,
+      }: (typeof DROPOFF_CASES)[number]) {
+        const database = createMigratedDatabase();
+        try {
+          seedFixture(database);
+          const fixture = seedPrivateCountFunnelDropoffFixture(
+            database,
+            operation,
+            countScope,
+          );
+          const identity = operation === "visitors" ? "visitorId" : "sessionId";
+          const sortField =
+            operation === "visitors" ? "lastSeenAt" : "startedAt";
+          const makeRequest = (
+            stepId: "dropoff-step-0" | "dropoff-step-1" | "dropoff-step-2",
+            pageLimit: number,
+            cursor: string | null = null,
+          ) =>
+            queryFor({
               operation,
-              countScope,
-            );
-            const identity =
-              operation === "visitors" ? "visitorId" : "sessionId";
-            const sortField =
-              operation === "visitors" ? "lastSeenAt" : "startedAt";
-            const makeRequest = (
-              stepId: "dropoff-step-0" | "dropoff-step-1" | "dropoff-step-2",
-              pageLimit: number,
-              cursor: string | null = null,
-            ) =>
-              queryFor({
-                operation,
-                funnel: { stepId, outcome: "dropoff" },
-                filterDsl: COUNT_FILTER_DSL,
-                scopePreference: countScope,
-                pageLimit,
-                cursor,
-              });
-            const middleRequest = makeRequest("dropoff-step-1", 1);
+              funnel: { stepId, outcome: "dropoff" },
+              filterDsl: COUNT_FILTER_DSL,
+              scopePreference: countScope,
+              pageLimit,
+              cursor,
+            });
+          const middleRequest = makeRequest("dropoff-step-1", 1);
 
-            const countProducerTrace: SqliteD1Trace = {
-              preparedSql: [],
-              bindings: [],
-            };
-            const countProducerEnv = {
-              DB: createSqliteD1Database(database, countProducerTrace),
-              MAIN_SECRET,
-            } as unknown as Env;
-            const countForwarded = await withLegacyJourneyListReader(
-              operation,
-              () => forwardedQuery(countProducerEnv, operation, middleRequest),
+          const countProducerTrace: SqliteD1Trace = {
+            preparedSql: [],
+            bindings: [],
+          };
+          const countProducerEnv = {
+            DB: createSqliteD1Database(database, countProducerTrace),
+            MAIN_SECRET,
+          } as unknown as Env;
+          const countForwarded = await withLegacyJourneyListReader(
+            operation,
+            () => forwardedQuery(countProducerEnv, operation, middleRequest),
+          );
+          const countRows = preparedMembershipIdentities(
+            (countForwarded.scopePlan as ScopedFilterPlan).preparedMembership,
+          ).entityIds;
+          expect(countRows).toBeDefined();
+          if (!countRows) throw new Error("dropoff_legacy_count_ids_missing");
+          expect(countRows.every(({ siteId }) => siteId === SITE_ID)).toBe(
+            true,
+          );
+          const countEntityIds = countRows.map(({ id }) => id).sort();
+          expect(countEntityIds).toEqual(fixture.expectedCountIds);
+          expect(
+            fixture.noCountEntityIds.every(
+              (id) => !countEntityIds.includes(id),
+            ),
+          ).toBe(true);
+          expect(
+            fixture.noNativeEntityIds.every(
+              (id) => !countEntityIds.includes(id),
+            ),
+          ).toBe(true);
+          expect(
+            fixture.noPreviousEntityIds.every((id) =>
+              countEntityIds.includes(id),
+            ),
+          ).toBe(true);
+          if (fixture.uncountedConversionSessionId) {
+            const uncountedConversionSessionId =
+              fixture.uncountedConversionSessionId;
+            const uncountedConversionVisitorId =
+              fixture.uncountedConversionVisitorId;
+            const countQualifiedStep0SessionId =
+              fixture.countQualifiedStep0SessionId;
+            if (!uncountedConversionVisitorId || !countQualifiedStep0SessionId)
+              throw new Error("dropoff_counterexample_fixture_incomplete");
+            expect(countEntityIds).not.toContain(uncountedConversionSessionId);
+            expect(fixture.middleDropoffIds).toContain(
+              uncountedConversionVisitorId,
             );
-            const countRows = preparedMembershipIdentities(
-              (countForwarded.scopePlan as ScopedFilterPlan).preparedMembership,
-            ).entityIds;
-            expect(countRows).toBeDefined();
-            if (!countRows) throw new Error("dropoff_legacy_count_ids_missing");
-            expect(countRows.every(({ siteId }) => siteId === SITE_ID)).toBe(
-              true,
-            );
-            const countEntityIds = countRows.map(({ id }) => id).sort();
-            expect(countEntityIds).toEqual(fixture.expectedCountIds);
-            expect(
-              fixture.noCountEntityIds.every(
-                (id) => !countEntityIds.includes(id),
-              ),
-            ).toBe(true);
-            expect(
-              fixture.noNativeEntityIds.every(
-                (id) => !countEntityIds.includes(id),
-              ),
-            ).toBe(true);
-            expect(
-              fixture.noPreviousEntityIds.every((id) =>
-                countEntityIds.includes(id),
-              ),
-            ).toBe(true);
-            if (fixture.uncountedConversionSessionId) {
-              const uncountedConversionSessionId =
-                fixture.uncountedConversionSessionId;
-              const uncountedConversionVisitorId =
-                fixture.uncountedConversionVisitorId;
-              const countQualifiedStep0SessionId =
-                fixture.countQualifiedStep0SessionId;
-              if (
-                !uncountedConversionVisitorId ||
-                !countQualifiedStep0SessionId
-              )
-                throw new Error("dropoff_counterexample_fixture_incomplete");
-              expect(countEntityIds).not.toContain(
-                uncountedConversionSessionId,
-              );
-              expect(fixture.middleDropoffIds).toContain(
-                uncountedConversionVisitorId,
-              );
-              const counterexampleEvents = database
-                .prepare(
-                  `SELECT visits.session_id, custom_event_names.name
+            const counterexampleEvents = database
+              .prepare(
+                `SELECT visits.session_id, custom_event_names.name
                    FROM custom_events
                    JOIN visits
                      ON visits.visit_id = custom_events.visit_id
@@ -3881,311 +3976,288 @@ describe("Journey Funnel safe composition diagnostics", () => {
                      AND visits.visitor_id = ?
                      AND custom_event_names.name IN ('dropoff-start', 'dropoff-middle')
                    ORDER BY custom_event_names.name, visits.session_id`,
-                )
-                .all(
-                  SITE_ID,
-                  uncountedConversionVisitorId,
-                ) as unknown as readonly {
-                readonly session_id: string;
-                readonly name: string;
-              }[];
-              expect(counterexampleEvents).toEqual([
-                {
-                  session_id: uncountedConversionSessionId,
-                  name: "dropoff-middle",
-                },
-                {
-                  session_id: countQualifiedStep0SessionId,
-                  name: "dropoff-start",
-                },
-              ]);
-              expect(countEntityIds).toContain(countQualifiedStep0SessionId);
-            }
-            if (countScope !== progressionScope)
-              expect(
-                fixture.middleDropoffIds.every(
-                  (id) => !countEntityIds.includes(id),
-                ),
-              ).toBe(true);
-
-            const legacyReaderTrace: SqliteD1Trace = {
-              preparedSql: [],
-              bindings: [],
-            };
-            const legacyEnv = {
-              DB: createSqliteD1Database(database, legacyReaderTrace),
-              MAIN_SECRET,
-            } as unknown as Env;
-            const nativeTrace: SqliteD1Trace = {
-              preparedSql: [],
-              bindings: [],
-            };
-            const nativeEnv = {
-              DB: createSqliteD1Database(database, nativeTrace),
-              MAIN_SECRET,
-            } as unknown as Env;
-            const runtime = createD1SiteQueryRuntime({
-              env: nativeEnv,
-              siteId: SITE_ID,
-            });
-            const readConfiguration = (value: unknown) =>
-              operation === "visitors"
-                ? visitorListQualificationConfigurationFromQuery(value)
-                : sessionListQualificationConfigurationFromQuery(
-                    value,
-                    "sessions",
-                  );
-            const nativeEvidence: {
-              readonly metadataDefinitionReads: number;
-              readonly siteMetadataReads: number;
-              readonly factQueries: readonly {
-                readonly sql: string;
-                readonly bindings: readonly unknown[];
-                readonly sqlBytes: number;
-                readonly bindingCount: number;
-                readonly hasRowKind: boolean;
-                readonly hasOutputId: boolean;
-              }[];
-            }[] = [];
-            const runNative = async (
-              request: CanonicalQuery<"visitors"> | CanonicalQuery<"sessions">,
-            ) => {
-              const forwarded = await forwardedQuery(
-                nativeEnv,
-                operation,
-                request,
-              );
-              const deferred =
-                operation === "visitors"
-                  ? deferredVisitorListQualificationFromQuery(forwarded)
-                  : deferredSessionListQualificationFromQuery(forwarded);
-              expect(deferred).toBeDefined();
-              expect(
-                (forwarded.scopePlan as { readonly scope?: unknown }).scope,
-              ).toBe(countScope);
-              expect(
-                (
-                  forwarded.scopePlan as {
-                    readonly preparedMembership?: unknown;
-                  }
-                ).preparedMembership,
-              ).toBeUndefined();
-              expect(readConfiguration(forwarded)?.analysisContext).toEqual(
-                request.analysisContext,
-              );
-
-              const callStart = nativeTrace.preparedSql.length;
-              const result = await runtime.execute(operation, request as never);
-              expect(result.ok).toBe(true);
-              if (!result.ok) throw new Error("dropoff_native_request_failed");
-              const calls = nativeTrace.preparedSql
-                .slice(callStart)
-                .map((sql, index) => ({
-                  sql,
-                  bindings: nativeTrace.bindings[callStart + index] ?? [],
-                }));
-              const definitionReads = calls.filter(({ sql }) =>
-                sql.includes('"analysis_definitions"'),
-              );
-              const siteMetadataReads = calls.filter(({ sql }) =>
-                sql.includes('"sites"'),
-              );
-              const factQueries = calls.filter(
-                ({ sql }) =>
-                  !sql.includes('"analysis_definitions"') &&
-                  !sql.includes('"sites"'),
-              );
-              expect(definitionReads).toHaveLength(1);
-              expect(siteMetadataReads).toHaveLength(1);
-              expect(factQueries).toHaveLength(1);
-              expect(
-                factQueries.every(
-                  ({ sql, bindings }) =>
-                    sql.includes('"rowKind"') &&
-                    sql.includes('"outputId"') &&
-                    new TextEncoder().encode(sql).byteLength <=
-                      d1Budget.D1_MAX_SQL_UTF8_BYTES &&
-                    bindings.length <= d1Budget.D1_MAX_BOUND_PARAMETERS,
-                ),
-              ).toBe(true);
-              const evidence = {
-                metadataDefinitionReads: definitionReads.length,
-                siteMetadataReads: siteMetadataReads.length,
-                factQueries: factQueries.map(({ sql, bindings }) => ({
-                  sql,
-                  bindings,
-                  sqlBytes: new TextEncoder().encode(sql).byteLength,
-                  bindingCount: bindings.length,
-                  hasRowKind: sql.includes('"rowKind"'),
-                  hasOutputId: sql.includes('"outputId"'),
-                })),
-              };
-              nativeEvidence.push(evidence);
-              return { data: result.data, forwarded, evidence };
-            };
-
-            const middleContext = {
-              type: "funnel" as const,
-              funnelId:
-                operation === "visitors" ? "funnel-visitor" : "funnel-session",
-              stepId: "dropoff-step-1",
-            };
-            const parserProbe = {
-              ...(await forwardedQuery(nativeEnv, operation, middleRequest)),
-              analysisContext: middleContext,
-            };
-            const omittedOutcome = readConfiguration(parserProbe);
-            expect(omittedOutcome?.analysisContext).toEqual(middleContext);
-            expect(
-              Object.hasOwn(omittedOutcome?.analysisContext ?? {}, "outcome"),
-            ).toBe(false);
-            const convertedOutcome = readConfiguration({
-              ...parserProbe,
-              analysisContext: { ...middleContext, outcome: "converted" },
-            });
-            expect(convertedOutcome?.analysisContext).toEqual({
-              ...middleContext,
-              outcome: "converted",
-            });
-            const dropoffOutcome = readConfiguration({
-              ...parserProbe,
-              analysisContext: { ...middleContext, outcome: "dropoff" },
-            });
-            expect(dropoffOutcome?.analysisContext).toEqual({
-              ...middleContext,
-              outcome: "dropoff",
-            });
-            expect(
-              readConfiguration({
-                ...parserProbe,
-                analysisContext: { ...middleContext, outcome: "unknown" },
-              }),
-            ).toBeUndefined();
-
-            const middleLegacyFirst = await legacyListPageWithCountMatches({
-              env: legacyEnv,
-              operation,
-              request: middleRequest,
-              countEntityIds,
-              cursor: null,
-            });
-            const middleLegacySecond = await legacyListPageWithCountMatches({
-              env: legacyEnv,
-              operation,
-              request: middleRequest,
-              countEntityIds,
-              cursor: middleLegacyFirst.pagination.nextCursor,
-            });
-            const middleNativeFirst = await runNative(middleRequest);
-            const middleNativeSecond = await runNative(
-              makeRequest(
-                "dropoff-step-1",
-                1,
-                middleLegacyFirst.pagination.nextCursor,
-              ) as CanonicalQuery<"visitors"> | CanonicalQuery<"sessions">,
-            );
-            expect(middleNativeFirst.data).toEqual(middleLegacyFirst);
-            expect(middleNativeSecond.data).toEqual(middleLegacySecond);
-            expect(middleNativeFirst.data.pagination.hasMore).toBe(true);
-            expect(middleNativeFirst.data.pagination.nextCursor).toBe(
-              middleLegacyFirst.pagination.nextCursor,
-            );
-            expect(middleNativeSecond.data.pagination.hasMore).toBe(false);
-            const middleItems = [
-              ...middleNativeFirst.data.items,
-              ...middleNativeSecond.data.items,
-            ];
-            const middleReportIds = middleItems.map(
-              (item) =>
-                (item as unknown as Record<string, unknown>)[
-                  identity
-                ] as string,
-            );
-            expect([...middleReportIds].sort()).toEqual(
-              [...fixture.middleDropoffIds].sort(),
-            );
-            expect(new Set(middleReportIds).size).toBe(
-              fixture.middleDropoffIds.length,
-            );
-            const tieValues = middleItems.map(
-              (item) => (item as unknown as Record<string, unknown>)[sortField],
-            );
-            expect(new Set(tieValues).size).toBe(1);
-
-            const lastRequest = makeRequest("dropoff-step-2", 10);
-            const lastLegacy = await legacyListPageWithCountMatches({
-              env: legacyEnv,
-              operation,
-              request: lastRequest,
-              countEntityIds,
-              cursor: null,
-              limit: 10,
-            });
-            const lastNative = await runNative(lastRequest);
-            expect(lastNative.data).toEqual(lastLegacy);
-            const lastReportIds = lastNative.data.items.map(
-              (item) =>
-                (item as unknown as Record<string, unknown>)[
-                  identity
-                ] as string,
-            );
-            expect([...lastReportIds].sort()).toEqual(
-              [...fixture.lastDropoffIds].sort(),
-            );
-            expect(lastNative.data.pagination.hasMore).toBe(false);
-            expect(lastNative.data.pagination.nextCursor).toBeNull();
+              )
+              .all(
+                SITE_ID,
+                uncountedConversionVisitorId,
+              ) as unknown as readonly {
+              readonly session_id: string;
+              readonly name: string;
+            }[];
+            expect(counterexampleEvents).toEqual([
+              {
+                session_id: uncountedConversionSessionId,
+                name: "dropoff-middle",
+              },
+              {
+                session_id: countQualifiedStep0SessionId,
+                name: "dropoff-start",
+              },
+            ]);
+            expect(countEntityIds).toContain(countQualifiedStep0SessionId);
+          }
+          if (countScope !== progressionScope)
             expect(
               fixture.middleDropoffIds.every(
-                (id) => !lastReportIds.includes(id),
-              ),
-            ).toBe(true);
-            expect(
-              fixture.reachedSelectedIds.every(
-                (id) => !fixture.middleDropoffIds.includes(id),
+                (id) => !countEntityIds.includes(id),
               ),
             ).toBe(true);
 
-            const firstRequest = makeRequest("dropoff-step-0", 10);
-            const firstLegacy = await legacyListPageWithCountMatches({
-              env: legacyEnv,
+          const legacyReaderTrace: SqliteD1Trace = {
+            preparedSql: [],
+            bindings: [],
+          };
+          const legacyEnv = {
+            DB: createSqliteD1Database(database, legacyReaderTrace),
+            MAIN_SECRET,
+          } as unknown as Env;
+          const nativeTrace: SqliteD1Trace = {
+            preparedSql: [],
+            bindings: [],
+          };
+          const nativeEnv = {
+            DB: createSqliteD1Database(database, nativeTrace),
+            MAIN_SECRET,
+          } as unknown as Env;
+          const runtime = createD1SiteQueryRuntime({
+            env: nativeEnv,
+            siteId: SITE_ID,
+          });
+          const readConfiguration = (value: unknown) =>
+            operation === "visitors"
+              ? visitorListQualificationConfigurationFromQuery(value)
+              : sessionListQualificationConfigurationFromQuery(
+                  value,
+                  "sessions",
+                );
+          const nativeEvidence: {
+            readonly metadataDefinitionReads: number;
+            readonly siteMetadataReads: number;
+            readonly factQueries: readonly {
+              readonly sql: string;
+              readonly bindings: readonly unknown[];
+              readonly sqlBytes: number;
+              readonly bindingCount: number;
+              readonly hasRowKind: boolean;
+              readonly hasOutputId: boolean;
+            }[];
+          }[] = [];
+          const runNative = async (
+            request: CanonicalQuery<"visitors"> | CanonicalQuery<"sessions">,
+          ) => {
+            const forwarded = await forwardedQuery(
+              nativeEnv,
               operation,
-              request: firstRequest,
-              countEntityIds,
-              cursor: null,
-              limit: 10,
-            });
-            const firstNative = await runNative(firstRequest);
-            expect(firstNative.data).toEqual(firstLegacy);
-            expect(firstNative.data.items).toEqual([]);
-            expect(firstNative.data.pagination.hasMore).toBe(false);
-            expect(firstNative.data.pagination.nextCursor).toBeNull();
+              request,
+            );
+            const deferred =
+              operation === "visitors"
+                ? deferredVisitorListQualificationFromQuery(forwarded)
+                : deferredSessionListQualificationFromQuery(forwarded);
+            expect(deferred).toBeDefined();
+            expect(
+              (forwarded.scopePlan as { readonly scope?: unknown }).scope,
+            ).toBe(countScope);
+            expect(
+              (
+                forwarded.scopePlan as {
+                  readonly preparedMembership?: unknown;
+                }
+              ).preparedMembership,
+            ).toBeUndefined();
+            expect(readConfiguration(forwarded)?.analysisContext).toEqual(
+              request.analysisContext,
+            );
 
-            const oldCountProducerCalls = countProducerTrace.preparedSql.map(
-              (sql, index) => ({
+            const callStart = nativeTrace.preparedSql.length;
+            const result = await runtime.execute(operation, request as never);
+            expect(result.ok).toBe(true);
+            if (!result.ok) throw new Error("dropoff_native_request_failed");
+            const calls = nativeTrace.preparedSql
+              .slice(callStart)
+              .map((sql, index) => ({
                 sql,
-                bindings: countProducerTrace.bindings[index] ?? [],
-              }),
+                bindings: nativeTrace.bindings[callStart + index] ?? [],
+              }));
+            const definitionReads = calls.filter(({ sql }) =>
+              sql.includes('"analysis_definitions"'),
             );
-            const oldListReaderCalls = legacyReaderTrace.preparedSql.map(
-              (sql, index) => ({
+            const siteMetadataReads = calls.filter(({ sql }) =>
+              sql.includes('"sites"'),
+            );
+            const factQueries = calls.filter(
+              ({ sql }) =>
+                !sql.includes('"analysis_definitions"') &&
+                !sql.includes('"sites"'),
+            );
+            expect(definitionReads).toHaveLength(1);
+            expect(siteMetadataReads).toHaveLength(1);
+            expect(factQueries).toHaveLength(1);
+            expect(
+              factQueries.every(
+                ({ sql, bindings }) =>
+                  sql.includes('"rowKind"') &&
+                  sql.includes('"outputId"') &&
+                  new TextEncoder().encode(sql).byteLength <=
+                    d1Budget.D1_MAX_SQL_UTF8_BYTES &&
+                  bindings.length <= d1Budget.D1_MAX_BOUND_PARAMETERS,
+              ),
+            ).toBe(true);
+            const evidence = {
+              metadataDefinitionReads: definitionReads.length,
+              siteMetadataReads: siteMetadataReads.length,
+              factQueries: factQueries.map(({ sql, bindings }) => ({
                 sql,
-                bindings: legacyReaderTrace.bindings[index] ?? [],
-              }),
-            );
-            writeEvidence(
-              `private-count-funnel-dropoff-${operation}-${countScope}.json`,
-              {
-                state: "actual-private-count-funnel-dropoff-native-sqlite",
+                bindings,
+                sqlBytes: new TextEncoder().encode(sql).byteLength,
+                bindingCount: bindings.length,
+                hasRowKind: sql.includes('"rowKind"'),
+                hasOutputId: sql.includes('"outputId"'),
+              })),
+            };
+            nativeEvidence.push(evidence);
+            return { data: result.data, forwarded, evidence };
+          };
+
+          const middleContext = {
+            type: "funnel" as const,
+            funnelId:
+              operation === "visitors" ? "funnel-visitor" : "funnel-session",
+            stepId: "dropoff-step-1",
+          };
+          const parserProbe = {
+            ...(await forwardedQuery(nativeEnv, operation, middleRequest)),
+            analysisContext: middleContext,
+          };
+          const omittedOutcome = readConfiguration(parserProbe);
+          expect(omittedOutcome?.analysisContext).toEqual(middleContext);
+          expect(
+            Object.hasOwn(omittedOutcome?.analysisContext ?? {}, "outcome"),
+          ).toBe(false);
+          const convertedOutcome = readConfiguration({
+            ...parserProbe,
+            analysisContext: { ...middleContext, outcome: "converted" },
+          });
+          expect(convertedOutcome?.analysisContext).toEqual({
+            ...middleContext,
+            outcome: "converted",
+          });
+          const dropoffOutcome = readConfiguration({
+            ...parserProbe,
+            analysisContext: { ...middleContext, outcome: "dropoff" },
+          });
+          expect(dropoffOutcome?.analysisContext).toEqual({
+            ...middleContext,
+            outcome: "dropoff",
+          });
+          expect(
+            readConfiguration({
+              ...parserProbe,
+              analysisContext: { ...middleContext, outcome: "unknown" },
+            }),
+          ).toBeUndefined();
+
+          return {
+            database,
+            fixture,
+            identity,
+            sortField,
+            makeRequest,
+            middleRequest,
+            countEntityIds,
+            legacyEnv,
+            runNative,
+            countProducerTrace,
+            legacyReaderTrace,
+            nativeEvidence,
+          };
+        } catch (error) {
+          database.close();
+          throw error;
+        }
+      }
+      const DROPOFF_STAGES = [
+        "middle-two-pages",
+        "last-step",
+        "first-step",
+      ] as const;
+      it.each(
+        DROPOFF_CASES.flatMap((testCase) =>
+          DROPOFF_STAGES.map((stage) => ({ ...testCase, stage })),
+        ),
+      )(
+        "matches selected-step dropoff $stage for $operation with $countScope Count",
+        async (testCase) => {
+          const { operation, countScope, progressionScope, stage } = testCase;
+          const {
+            database,
+            fixture,
+            identity,
+            sortField,
+            makeRequest,
+            middleRequest,
+            countEntityIds,
+            legacyEnv,
+            runNative,
+            countProducerTrace,
+            legacyReaderTrace,
+            nativeEvidence,
+          } = await prepareDropoffCase(testCase);
+          try {
+            let stageEvidence: Record<string, unknown>;
+            if (stage === "middle-two-pages") {
+              const middleLegacyFirst = await legacyListPageWithCountMatches({
+                env: legacyEnv,
                 operation,
-                countScope,
-                progressionScope,
-                funnelStepIds: [
-                  "dropoff-step-0",
-                  "dropoff-step-1",
-                  "dropoff-step-2",
-                ],
+                request: middleRequest,
                 countEntityIds,
-                expectedCountIds: fixture.expectedCountIds,
+                cursor: null,
+              });
+              const middleLegacySecond = await legacyListPageWithCountMatches({
+                env: legacyEnv,
+                operation,
+                request: middleRequest,
+                countEntityIds,
+                cursor: middleLegacyFirst.pagination.nextCursor,
+              });
+              const middleNativeFirst = await runNative(middleRequest);
+              const middleNativeSecond = await runNative(
+                makeRequest(
+                  "dropoff-step-1",
+                  1,
+                  middleLegacyFirst.pagination.nextCursor,
+                ) as CanonicalQuery<"visitors"> | CanonicalQuery<"sessions">,
+              );
+              expect(middleNativeFirst.data).toEqual(middleLegacyFirst);
+              expect(middleNativeSecond.data).toEqual(middleLegacySecond);
+              expect(middleNativeFirst.data.pagination.hasMore).toBe(true);
+              expect(middleNativeFirst.data.pagination.nextCursor).toBe(
+                middleLegacyFirst.pagination.nextCursor,
+              );
+              expect(middleNativeSecond.data.pagination.hasMore).toBe(false);
+              const middleItems = [
+                ...middleNativeFirst.data.items,
+                ...middleNativeSecond.data.items,
+              ];
+              const middleReportIds = middleItems.map(
+                (item) =>
+                  (item as unknown as Record<string, unknown>)[
+                    identity
+                  ] as string,
+              );
+              expect([...middleReportIds].sort()).toEqual(
+                [...fixture.middleDropoffIds].sort(),
+              );
+              expect(new Set(middleReportIds).size).toBe(
+                fixture.middleDropoffIds.length,
+              );
+              const tieValues = middleItems.map(
+                (item) =>
+                  (item as unknown as Record<string, unknown>)[sortField],
+              );
+              expect(new Set(tieValues).size).toBe(1);
+
+              stageEvidence = {
                 middle: {
                   expectedReportIds: fixture.middleDropoffIds,
                   actualReportIds: middleReportIds,
@@ -4201,6 +4273,42 @@ describe("Journey Funnel safe composition diagnostics", () => {
                   },
                   stableSortTie: tieValues,
                 },
+              };
+            } else if (stage === "last-step") {
+              const lastRequest = makeRequest("dropoff-step-2", 10);
+              const lastLegacy = await legacyListPageWithCountMatches({
+                env: legacyEnv,
+                operation,
+                request: lastRequest,
+                countEntityIds,
+                cursor: null,
+                limit: 10,
+              });
+              const lastNative = await runNative(lastRequest);
+              expect(lastNative.data).toEqual(lastLegacy);
+              const lastReportIds = lastNative.data.items.map(
+                (item) =>
+                  (item as unknown as Record<string, unknown>)[
+                    identity
+                  ] as string,
+              );
+              expect([...lastReportIds].sort()).toEqual(
+                [...fixture.lastDropoffIds].sort(),
+              );
+              expect(lastNative.data.pagination.hasMore).toBe(false);
+              expect(lastNative.data.pagination.nextCursor).toBeNull();
+              expect(
+                fixture.middleDropoffIds.every(
+                  (id) => !lastReportIds.includes(id),
+                ),
+              ).toBe(true);
+              expect(
+                fixture.reachedSelectedIds.every(
+                  (id) => !fixture.middleDropoffIds.includes(id),
+                ),
+              ).toBe(true);
+
+              stageEvidence = {
                 last: {
                   expectedReportIds: fixture.lastDropoffIds,
                   actualReportIds: lastReportIds,
@@ -4208,11 +4316,60 @@ describe("Journey Funnel safe composition diagnostics", () => {
                   legacy: lastLegacy,
                   factQueries: lastNative.evidence,
                 },
+              };
+            } else {
+              const firstRequest = makeRequest("dropoff-step-0", 10);
+              const firstLegacy = await legacyListPageWithCountMatches({
+                env: legacyEnv,
+                operation,
+                request: firstRequest,
+                countEntityIds,
+                cursor: null,
+                limit: 10,
+              });
+              const firstNative = await runNative(firstRequest);
+              expect(firstNative.data).toEqual(firstLegacy);
+              expect(firstNative.data.items).toEqual([]);
+              expect(firstNative.data.pagination.hasMore).toBe(false);
+              expect(firstNative.data.pagination.nextCursor).toBeNull();
+
+              stageEvidence = {
                 firstStep: {
                   actual: firstNative.data,
                   legacy: firstLegacy,
                   factQueries: firstNative.evidence,
                 },
+              };
+            }
+            const oldCountProducerCalls = countProducerTrace.preparedSql.map(
+              (sql, index) => ({
+                sql,
+                bindings: countProducerTrace.bindings[index] ?? [],
+              }),
+            );
+            const oldListReaderCalls = legacyReaderTrace.preparedSql.map(
+              (sql, index) => ({
+                sql,
+                bindings: legacyReaderTrace.bindings[index] ?? [],
+              }),
+            );
+            writeEvidence(
+              `private-count-funnel-dropoff-${operation}-${countScope}-${stage}.json`,
+              {
+                state:
+                  "actual-private-count-funnel-dropoff-native-sqlite-partitioned",
+                stage,
+                operation,
+                countScope,
+                progressionScope,
+                funnelStepIds: [
+                  "dropoff-step-0",
+                  "dropoff-step-1",
+                  "dropoff-step-2",
+                ],
+                countEntityIds,
+                expectedCountIds: fixture.expectedCountIds,
+                ...stageEvidence,
                 controls: {
                   noCountReportIds: fixture.noCountIds,
                   noCountEntityIds: fixture.noCountEntityIds,
@@ -4230,7 +4387,7 @@ describe("Journey Funnel safe composition diagnostics", () => {
                 },
                 oldCountProducerCalls,
                 oldListReaderCalls,
-                nativeRequests: nativeEvidence,
+                nativeEvidence,
               },
             );
           } finally {
@@ -4638,52 +4795,54 @@ describe("Journey Funnel safe composition diagnostics", () => {
           sharedCountMatchReferences: countMatchReferenceCount,
           sameNativeFilterOnEveryFunnelSource,
         };
-        writeEvidence(`native-source-${operation}-budget-diagnostic.json`, {
-          state: "compiled-budgeted-sqlite-executed",
-          operation,
-          countScope: count.scope,
-          filterDsl: COUNT_FILTER_DSL,
-          funnelConfig: config,
-          result: compilation,
-          logicalSummary,
-          logicalGraph: composition.plan,
-          windowProofs:
-            genericGraphs.length === 1
-              ? actualRowNumberProofs(genericGraphs[0] as QuerySource)
-              : [],
-          genericGraph: genericGraphs.map(graphSnapshot),
-          genericSummary: genericGraphs.map(objectGraphSummary),
-          physicalGraph: physicalGraphs.map(graphSnapshot),
-          physicalSummary: physicalGraphs.map(objectGraphSummary),
-          compiledStatement: statement
-            ? {
-                tag: statement.tag,
-                sql: statement.sql,
-                bindings: statement.bindings ?? [],
-                sqlBytes: new TextEncoder().encode(statement.sql).byteLength,
-                bindingCount: statement.bindings?.length ?? 0,
-                physicalPlanShape: statement.physicalPlanShape,
-              }
-            : null,
-          mainSqlExecuted: true,
-          mainSqlRows,
-          mainReportItems: mainItems,
-          mainControls,
-          legacyResult: legacyResult.data,
-          legacySqlCalls: legacyTrace.preparedSql.map((sql, index) => ({
-            sql,
-            bindings: legacyTrace.bindings[index] ?? [],
-          })),
-          budgetWasCalledThroughOriginalAssertion: statements.includes(
-            statement!,
-          ),
-          baselineOrdinarySql: {
-            visitor:
-              "see the accepted ordinary public-reference measurement in this run directory",
-            session:
-              "see the accepted ordinary public-reference measurement in this run directory",
-          },
-        });
+        if (EVIDENCE_DIRECTORY) {
+          writeEvidence(`native-source-${operation}-budget-diagnostic.json`, {
+            state: "compiled-budgeted-sqlite-executed",
+            operation,
+            countScope: count.scope,
+            filterDsl: COUNT_FILTER_DSL,
+            funnelConfig: config,
+            result: compilation,
+            logicalSummary,
+            logicalGraph: composition.plan,
+            windowProofs:
+              genericGraphs.length === 1
+                ? actualRowNumberProofs(genericGraphs[0] as QuerySource)
+                : [],
+            genericGraph: genericGraphs.map(graphSnapshot),
+            genericSummary: genericGraphs.map(objectGraphSummary),
+            physicalGraph: physicalGraphs.map(graphSnapshot),
+            physicalSummary: physicalGraphs.map(objectGraphSummary),
+            compiledStatement: statement
+              ? {
+                  tag: statement.tag,
+                  sql: statement.sql,
+                  bindings: statement.bindings ?? [],
+                  sqlBytes: new TextEncoder().encode(statement.sql).byteLength,
+                  bindingCount: statement.bindings?.length ?? 0,
+                  physicalPlanShape: statement.physicalPlanShape,
+                }
+              : null,
+            mainSqlExecuted: true,
+            mainSqlRows,
+            mainReportItems: mainItems,
+            mainControls,
+            legacyResult: legacyResult.data,
+            legacySqlCalls: legacyTrace.preparedSql.map((sql, index) => ({
+              sql,
+              bindings: legacyTrace.bindings[index] ?? [],
+            })),
+            budgetWasCalledThroughOriginalAssertion: statements.includes(
+              statement!,
+            ),
+            baselineOrdinarySql: {
+              visitor:
+                "see the accepted ordinary public-reference measurement in this run directory",
+              session:
+                "see the accepted ordinary public-reference measurement in this run directory",
+            },
+          });
+        }
       } finally {
         compileSpy.mockRestore();
         lowerSpy.mockRestore();

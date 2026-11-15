@@ -5,6 +5,11 @@ import type {
   SlotId,
 } from "@/lib/edge/analytics/engine/logical/ids";
 import type { LogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
+import type {
+  MembershipReadNode,
+  WholeMembershipCoreNode,
+  WholeMembershipNode,
+} from "@/lib/edge/analytics/engine/logical/whole-membership";
 import type { SemanticAttributeId } from "@/lib/edge/analytics/engine/semantic/attributes";
 import type { AnalyticsEntityKind } from "@/lib/edge/analytics/engine/semantic/entities";
 import type {
@@ -36,11 +41,20 @@ export type SourceValueBinding =
     }
   | { readonly kind: "occurrence-time"; readonly slot: SlotId };
 
+/** A visible, deduplicated identity relation in the same logical plan. */
+export interface SourceMembershipInput {
+  readonly input: RelationId;
+  readonly role: "entity" | "visit" | "event";
+  readonly siteId: SlotId;
+  readonly memberId: SlotId;
+}
+
 export interface SourceNode extends LogicalNodeBase {
   readonly kind: "source";
   readonly entity: AnalyticsEntityKind;
   readonly temporalDomain: TemporalDomainRef;
   readonly selection?: SemanticScopedSourceSelection;
+  readonly membershipInputs?: readonly SourceMembershipInput[];
   readonly values: readonly SourceValueBinding[];
 }
 
@@ -262,12 +276,17 @@ export interface AnalysisResultFieldMapping {
 /** Imports an independently validated scalar/keyed analysis result. */
 export interface AnalysisResultNode extends LogicalNodeBase {
   readonly kind: "analysis-result";
+  /** Read an actual predecessor output from this execution's logical program. */
+  readonly execution?: "program";
   readonly childPlan: LogicalPlan;
   readonly outputId: string;
   readonly mappings: readonly AnalysisResultFieldMapping[];
 }
 
 export type LogicalNode =
+  | WholeMembershipNode
+  | WholeMembershipCoreNode
+  | MembershipReadNode
   | SourceNode
   | RelationshipLookupNode
   | FilterNode

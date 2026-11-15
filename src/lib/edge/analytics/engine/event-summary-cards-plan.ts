@@ -68,6 +68,7 @@ export function buildEventSummaryCardsPlan(input: {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
+  readonly qualificationSemantics?: "whole-original";
 }): ValidatedLogicalPlan {
   const { builder, events } = buildEventReportSource({
     siteId: input.siteId,
@@ -76,6 +77,9 @@ export function buildEventSummaryCardsPlan(input: {
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
     ...(input.qualificationDependencyRefs
       ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+      : {}),
+    ...(input.qualificationSemantics
+      ? { qualificationSemantics: input.qualificationSemantics }
       : {}),
     attributes: [
       ...EVENT_REPORT_BASE_ATTRIBUTES,

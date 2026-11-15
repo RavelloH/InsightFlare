@@ -3,8 +3,10 @@ import {
   scopedFilterMetadata,
   type SiteId,
 } from "@/lib/edge/analytics/contract";
+import type { ScopedFilterPlan } from "@/lib/edge/analytics/contract/scoped-filter";
 import type { ValidatedLogicalPlan } from "@/lib/edge/analytics/engine/logical/plan";
 import { createPageReportSource } from "@/lib/edge/analytics/engine/page-report-plan";
+import type { QualificationDependencyRef } from "@/lib/edge/analytics/engine/semantic/qualification-dependency";
 import { createSemanticScopedSourceSelection } from "@/lib/edge/analytics/engine/semantic/scoped-source-selection";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
@@ -14,8 +16,13 @@ export function buildLatestSiteActivityPlan(input: {
   readonly siteId: string;
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
+  readonly qualificationSemantics?: "whole-original";
 }): ValidatedLogicalPlan {
-  const metadata = scopedFilterMetadata(input.filters);
+  const metadata = input.scopePlan
+    ? { plan: input.scopePlan }
+    : scopedFilterMetadata(input.filters);
   const sourceSelection =
     !metadata && input.filters.root !== null
       ? createSemanticScopedSourceSelection({

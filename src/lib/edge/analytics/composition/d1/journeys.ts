@@ -5,6 +5,7 @@ import {
   type QueryInput,
 } from "@/lib/edge/analytics/contract";
 import type { LegacyJourneyQuery } from "@/lib/edge/analytics/contract/canonical-operation-map";
+import type { JourneyListAnalysis } from "@/lib/edge/analytics/engine/journey-entity-list-report-plan";
 import {
   deferredEventQualificationFromQuery,
   prepareDeferredEventQualificationFallback,
@@ -74,7 +75,7 @@ function listSortFromRequest(
   return { field, direction };
 }
 
-/** Entity-mode list requests without an analysis read the entity membership. */
+/** Report and resolved analysis stages read one request-owned entity relation. */
 async function prepareJourneyListMembership(input: {
   readonly request: object;
   readonly deferred: {
@@ -91,10 +92,13 @@ async function prepareJourneyListMembership(input: {
   readonly sort: unknown;
   readonly search: string | undefined;
   readonly page: unknown;
+  readonly resolvedAnalysis?: JourneyListAnalysis;
 }) {
   const qualification = input.deferred.qualification;
   if (
-    (input.request as { readonly analysisContext?: unknown }).analysisContext ||
+    ((input.request as { readonly analysisContext?: unknown })
+      .analysisContext &&
+      !input.resolvedAnalysis) ||
     !("metadata" in qualification) ||
     qualification.metadata.plan.mode !== "entity"
   )
@@ -107,10 +111,17 @@ async function prepareJourneyListMembership(input: {
       sort: input.sort,
       search: input.search ?? null,
       page: input.page,
+      ...(input.resolvedAnalysis ? { analysis: input.resolvedAnalysis } : {}),
     },
     maxPlans: 1,
-    // the list reads a Page and an Event Source of the same entity membership
-    maxSourcesPerRole: 2,
+    // Base Page/Event Sources plus the finite, already resolved analysis stages.
+    // Each Funnel step can read both roles, with one optional empty Page source.
+    maxSourcesPerRole:
+      input.resolvedAnalysis?.type === "goal"
+        ? 4
+        : input.resolvedAnalysis?.type === "funnel"
+          ? 3 + 2 * (input.resolvedAnalysis.stepIndex + 1)
+          : 2,
   });
 }
 
@@ -144,8 +155,8 @@ export function registerJourneyProviders(
           if (options.diagnostics)
             options.diagnostics.advancedCountSqlFallbackReason =
               qualified.fallbackReason;
-          // Session and visitor filters without a goal/funnel analysis read one
-          // request-private entity membership instead of the legacy ID bridge.
+          // The report and any resolved Goal/Funnel stages share the request's
+          // entity membership through an explicit plan dependency.
           const membership = await prepareJourneyListMembership({
             request,
             deferred,
@@ -153,6 +164,7 @@ export function registerJourneyProviders(
             sort,
             search,
             page: pageRequest,
+            resolvedAnalysis: qualified.resolvedAnalysis,
           });
           const fallbackFilters = membership
             ? deferred.qualification.filters
@@ -230,8 +242,8 @@ export function registerJourneyProviders(
           if (options.diagnostics)
             options.diagnostics.advancedCountSqlFallbackReason =
               qualified.fallbackReason;
-          // Session and visitor filters without a goal/funnel analysis read one
-          // request-private entity membership instead of the legacy ID bridge.
+          // The report and any resolved Goal/Funnel stages share the request's
+          // entity membership through an explicit plan dependency.
           const membership = await prepareJourneyListMembership({
             request,
             deferred,
@@ -239,6 +251,7 @@ export function registerJourneyProviders(
             sort,
             search,
             page: pageRequest,
+            resolvedAnalysis: qualified.resolvedAnalysis,
           });
           const fallbackFilters = membership
             ? deferred.qualification.filters

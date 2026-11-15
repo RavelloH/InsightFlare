@@ -17,10 +17,11 @@ import {
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
 import type { SiteId } from "@/lib/edge/analytics/contract/types";
+import * as countSupport from "@/lib/edge/analytics/engine/advanced-filter-count-support";
 import { preparedMembershipIdentities } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
-import * as countSupport from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
+import * as wholeReaders from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 import type { ExpandedCustomEventData } from "@/lib/edge/ingest/custom-event-json";
 import { expandCustomEventDataJson } from "@/lib/edge/ingest/custom-event-json";
@@ -29,6 +30,15 @@ import type { BufferedCustomEventRow } from "@/lib/edge/ingest/types";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 import * as filterEvaluator from "@/lib/filter-contract/filter-evaluator";
+
+// These middleware-only historical carrier oracles inspect preparedMembership.
+// Decline only the finite whole-reader catalog; SQL/Count admission, authorization,
+// evaluation, register, and all original assertions execute through the real code.
+
+const legacyWholeCarrier = vi
+  .spyOn(wholeReaders, "selectWholeOriginalConsumer")
+  .mockReturnValue(undefined);
+afterAll(() => legacyWholeCarrier.mockRestore());
 
 const SITE_ID = "wave91c-payload-execution" as SiteId;
 const PAYLOAD_COUNT_DSL =

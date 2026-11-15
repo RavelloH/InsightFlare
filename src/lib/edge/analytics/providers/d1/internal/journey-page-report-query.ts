@@ -3,6 +3,7 @@ import type { Env } from "@/lib/edge/types";
 
 import { queryAnalyticsReportOutputRowsFromD1 } from "./analytics-report-query";
 import type { D1ReadDiagnostics } from "./diagnostics";
+import type { D1ExecutionOptions } from "./execution-options";
 import type { QualificationExecutionInputs } from "./qualification-execution-inputs";
 
 export async function queryJourneyPageReportRowsFromD1(
@@ -11,6 +12,7 @@ export async function queryJourneyPageReportRowsFromD1(
   outputId: string,
   diagnostics?: D1ReadDiagnostics,
   qualificationExecutionInputs?: QualificationExecutionInputs,
+  execution?: D1ExecutionOptions,
 ): Promise<Record<string, unknown>[]> {
   return queryAnalyticsReportOutputRowsFromD1(
     env,
@@ -19,5 +21,6 @@ export async function queryJourneyPageReportRowsFromD1(
     `journey_page_report_output_missing:${outputId}`,
     diagnostics,
     qualificationExecutionInputs,
+    execution,
   );
 }

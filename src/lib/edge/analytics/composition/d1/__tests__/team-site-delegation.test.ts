@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
@@ -13,7 +13,13 @@ import {
   teamQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { prepareScopedQuery } from "@/lib/edge/analytics/contract/scoped-filter";
-import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import { planTeamExactDimensionExecution } from "@/lib/edge/analytics/engine/team-exact-dimension-plan";
+import {
+  d1AdvancedFilterMiddleware,
+  prepareSiteExactDimensionInputs,
+} from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import { hasWholeOriginalCompletion } from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
+import { readTeamBreakdown } from "@/lib/edge/analytics/providers/d1/operations/team-breakdown";
 import { readTeamOverview } from "@/lib/edge/analytics/providers/d1/operations/team-overview";
 import { readTeamTimeseries } from "@/lib/edge/analytics/providers/d1/operations/team-timeseries";
 import type { Env } from "@/lib/edge/types";
@@ -220,6 +226,228 @@ function teamRequest(scope: "session" | "visitor", dsl = QUALIFIER) {
     allowedSiteIds: [SITE_A, SITE_B],
   };
 }
+
+async function jointBreakdown(
+  database: DatabaseSync,
+  request: ReturnType<typeof teamRequest> & {
+    dimension: string;
+    mode: "breakdown";
+    limit: number;
+  },
+) {
+  const env = envFor(database, traceFor());
+  const prepared = prepareScopedQuery("dimension", request);
+  const joint = (await d1AdvancedFilterMiddleware(env)(
+    "dimension",
+    prepared,
+    async (value) => value,
+  )) as typeof prepared;
+  return readTeamBreakdown({
+    env,
+    teamId: TEAM,
+    allowedSiteIds: request.allowedSiteIds,
+    dimension: request.dimension,
+    limit: request.limit,
+    window: {
+      startMs: TIME.range.startMs,
+      endExclusiveMs: TIME.range.endExclusiveMs,
+      nowMs: TIME.capturedAtMs,
+      timeZone: TIME.reportingTimeZone,
+    },
+    filters: joint.filters,
+    ...(hasWholeOriginalCompletion(joint, "team-exact-dimension")
+      ? { wholeOriginalOwner: joint }
+      : {}),
+  });
+}
+
+describe("team exact page dimensions", () => {
+  it("rejects an unauthorized qualification target before any storage read", async () => {
+    const prepare = vi.fn();
+    const query = prepareScopedQuery("dimension", {
+      ...teamRequest("session"),
+      mode: "breakdown",
+      dimension: "page.path",
+    });
+    await expect(
+      prepareSiteExactDimensionInputs({
+        env: { DB: { prepare } } as unknown as Env,
+        query,
+        siteIds: [SITE_C],
+      }),
+    ).rejects.toMatchObject({
+      domainError: {
+        kind: "invalid-input",
+        issues: [
+          {
+            path: "filters",
+            code: "advanced_filter_execution_site_context_mismatch",
+          },
+        ],
+      },
+    });
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it.each(["public-share", "api-v1"] as const)(
+    "retains the previous route for %s",
+    (audience) => {
+      const query = prepareScopedQuery("dimension", {
+        ...teamRequest("session"),
+        context: teamQueryContext(TEAM, audience, [SITE_A, SITE_B]),
+        mode: "breakdown",
+        dimension: "page.path",
+      });
+      expect(planTeamExactDimensionExecution(query)).toEqual({
+        kind: "legacy",
+        reason: "audience",
+      });
+    },
+  );
+
+  it("does not accept a scoped plan copied from another authorized domain", () => {
+    const query = prepareScopedQuery("dimension", {
+      ...teamRequest("session"),
+      mode: "breakdown",
+      dimension: "page.path",
+    });
+    expect(
+      planTeamExactDimensionExecution({
+        ...query,
+        context: teamQueryContext(TEAM, "private-dashboard", [SITE_A]),
+      }),
+    ).toEqual({ kind: "legacy", reason: "request-context-mismatch" });
+  });
+  it.each(["session", "visitor"] as const)(
+    "preserves the full DTO and site-local %s membership",
+    async (scope) => {
+      const database = createFixture();
+      const request = {
+        ...teamRequest(scope),
+        mode: "breakdown" as const,
+        dimension: "page.path",
+        limit: 0,
+      };
+      const expected = await jointBreakdown(database, request);
+      expect(expected.items.map(({ key, views }) => ({ key, views }))).toEqual([
+        { key: "/p", views: 3 },
+        { key: "/q", views: 2 },
+      ]);
+      const trace = traceFor();
+      const actual = await createD1TeamQueryRuntime({
+        env: envFor(database, trace),
+      }).execute("dimension", request);
+      expect(actual.ok).toBe(true);
+      if (actual.ok) expect(actual.data).toEqual(expected);
+      for (const values of trace.bindings)
+        expect(values.map(String)).not.toContain(SITE_C);
+    },
+  );
+
+  it.each(["page.path exists", "count(page) gte 0"])(
+    "merges all keys before the final limit with %s",
+    async (dsl) => {
+      const database = createMigratedDatabase();
+      databases.add(database);
+      database.exec("PRAGMA foreign_keys = OFF");
+      for (const [site, paths] of [
+        [SITE_A, ["/a", "/a", "/x", "/x", ""]],
+        [SITE_B, ["/b", "/b", "/b", "/x", "/x", ""]],
+      ] as const)
+        seedSite(
+          database,
+          site,
+          site === SITE_A ? 1 : 2,
+          paths.map((path, index) => ({
+            id: String(index),
+            sessionId: `s${index}`,
+            visitorId: `v${index}`,
+            path,
+            at: 110 + index,
+            event: false,
+          })),
+        );
+      const request = {
+        ...teamRequest("session", dsl),
+        mode: "breakdown" as const,
+        dimension: "page.path",
+        limit: 1,
+      };
+      const expected = await jointBreakdown(database, request);
+      const actual = await createD1TeamQueryRuntime({
+        env: envFor(database, traceFor()),
+      }).execute("dimension", request);
+      expect(actual.ok).toBe(true);
+      if (actual.ok) expect(actual.data).toEqual(expected);
+      expect(expected.items).toEqual([
+        { key: "/x", label: "/x", views: 4, sessions: 4, visitors: 4 },
+      ]);
+    },
+  );
+
+  it.each([
+    [QUALIFIER, "exact"],
+    [`${QUALIFIER} and time gte @range.start+1ms`, "independent-time-domains"],
+    ["first(page).path exists", "independent-time-domains"],
+    [
+      'sequence([event { event.name eq "qualifier" }, page]) exists',
+      "independent-time-domains",
+    ],
+    ['count(event { event.payload("/amount") gte 1 }) gte 1', "payload"],
+  ])("keeps %s on its proven route (%s)", async (dsl, reason) => {
+    const database = createFixture();
+    const request = {
+      ...teamRequest("session", dsl),
+      mode: "breakdown" as const,
+      dimension: "page.path",
+      limit: 0,
+    };
+    const decision = planTeamExactDimensionExecution(
+      prepareScopedQuery("dimension", request),
+    );
+    expect(decision).toMatchObject(
+      reason === "exact"
+        ? { kind: "exact", qualification: "sql-membership" }
+        : { kind: "legacy", reason },
+    );
+    const expected = await jointBreakdown(database, request);
+    const actual = await createD1TeamQueryRuntime({
+      env: envFor(database, traceFor()),
+    }).execute("dimension", request);
+    expect(actual.ok).toBe(true);
+    if (actual.ok) expect(actual.data).toEqual(expected);
+  });
+
+  it("preserves the single request-wide activity cap across sites", async () => {
+    const database = createFixture();
+    for (const site of [SITE_A, SITE_B]) {
+      database
+        .prepare(
+          `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<10001)
+        INSERT INTO visits (visit_id, site_id, site_pk, visitor_id, session_id, status, started_at, last_activity_at, pathname, hostname, duration_ms)
+        SELECT ? || i, ?, (SELECT site_pk FROM site_identities WHERE site_id=?), 'cap-v', 'cap-s', 'closed', 150,150,'/cap','cap.test',0 FROM n`,
+        )
+        .run(`cap-${site}-`, site, site);
+    }
+    const request = {
+      ...teamRequest("session", "count(page) gte 0"),
+      mode: "breakdown" as const,
+      dimension: "page.path",
+      limit: 0,
+    };
+    await expect(jointBreakdown(database, request)).rejects.toMatchObject({
+      domainError: {
+        kind: "invalid-input",
+        issues: [{ path: "filters", code: "filter_activity_limit_exceeded" }],
+      },
+    });
+    const actual = await createD1TeamQueryRuntime({
+      env: envFor(database, traceFor()),
+    }).execute("dimension", request);
+    expect(actual).toMatchObject({ ok: false });
+    expect(JSON.stringify(actual)).toContain("filter_activity_limit_exceeded");
+  });
+});
 
 /** The previous behaviour: one joint evaluation, then a packed membership. */
 async function jointOverview(

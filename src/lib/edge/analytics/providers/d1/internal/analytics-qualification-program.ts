@@ -143,14 +143,16 @@ import {
   type DeferredReferrersQualification,
   type DeferredSessionBoundaryDimensionQualification,
   type DeferredSessionBoundaryOverviewPageQualification,
-  isCanonicalPrivateChannelListWholeFilterRequest,
-  isCanonicalPrivateChannelOverviewWholeFilterRequest,
-  isCanonicalPrivatePageDimensionWholeFilterRequest,
   isDeferredEventQualification,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import type { AnalyticsDbRelation } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-storage";
 import type { AnalyticsQualificationAdmissionPolicy } from "@/lib/edge/analytics/providers/d1/internal/lowering/event-summary-admission";
+import {
+  isCanonicalPrivateChannelListWholeFilterRequest,
+  isCanonicalPrivateChannelOverviewWholeFilterRequest,
+  isCanonicalPrivatePageDimensionWholeFilterRequest,
+} from "@/lib/edge/analytics/providers/d1/internal/whole-filter-request";
 import { currentD1Operation } from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
 import type { FilterDocument } from "@/lib/filter-contract/filters";

@@ -1,6 +1,7 @@
 import { buildTrafficChannelSqlExpression } from "@/lib/analytics/traffic-channel-rules";
 import type { AnalyticsProviderRegistry } from "@/lib/edge/analytics/application/provider-registry";
 import { typedQueryProviderFor } from "@/lib/edge/analytics/application/provider-registry";
+import { typedD1QueryProviderFor } from "@/lib/edge/analytics/composition/d1/program-provider-registry";
 import type {
   ChannelOverviewTabQuery,
   DimensionOverviewTabQuery,
@@ -13,6 +14,7 @@ import type {
 import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
 import { attachScopedFilterMetadata } from "@/lib/edge/analytics/contract/scoped-filter";
+import { comparisonPageReaderContract } from "@/lib/edge/analytics/engine/comparison-page-reader-contract";
 import { comparisonPageTab } from "@/lib/edge/analytics/engine/comparison-page-tabs";
 import {
   analyticsPageDimensionSelection,
@@ -26,6 +28,16 @@ import {
 import { normalizeEventNameDimensionListRequest } from "@/lib/edge/analytics/engine/event-type-summary-plan";
 import { normalizeReferrerOverviewTableRequest } from "@/lib/edge/analytics/engine/referrer-report-plan";
 import { normalizeSessionBoundaryDimensionRequest } from "@/lib/edge/analytics/engine/session-path-report-plan";
+import {
+  claimIndependentPageChannelMembershipDependency,
+  hasIndependentPageChannelMembershipDependency,
+} from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import { comparisonMembershipDependenciesFromQuery } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import {
+  claimIndependentReferrersPageMembershipDependency,
+  hasIndependentReferrersPageMembershipDependency,
+} from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import { referrersTimeMembershipDependencyFromQuery } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import {
   deferredChannelListQualificationFromQuery,
   deferredChannelOverviewQualificationFromQuery,
@@ -42,8 +54,10 @@ import {
   deferredReferrersQualificationFromQuery,
   deferredSessionBoundaryDimensionQualificationFromQuery,
   deferredSessionBoundaryOverviewPageQualificationFromQuery,
+  hasDeferredPageMembershipProgram,
   prepareDeferredComparisonPageQualificationFallback,
   prepareDeferredEventQualificationFallback,
+  prepareDeferredPageMembershipFallback,
   prepareDeferredPageVisitQualification,
   prepareDeferredReferrersSummaryQualification,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
@@ -87,6 +101,7 @@ import {
   queryEventNameDimensionFromD1,
   queryEventTypeAggregate,
 } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
+import type { D1ExecutionOptions } from "@/lib/edge/analytics/providers/d1/internal/execution-options";
 import { queryFilterValuesPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/filter-values";
 import { queryFilterValuesPageWithQualification } from "@/lib/edge/analytics/providers/d1/internal/filter-values-qualification-program";
 import { executeGeoPointsQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/geo-points-qualification-program";
@@ -133,6 +148,11 @@ import {
 } from "@/lib/edge/analytics/providers/d1/internal/referrers";
 import { executeRetentionQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/retention-qualification-program";
 import { deferredRetentionQualificationFromQuery } from "@/lib/edge/analytics/providers/d1/internal/retention-qualification-request";
+import {
+  type WholeOriginalComparisonMembership,
+  wholeOriginalComparisonReaderTab,
+} from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
+import { hasWholeOriginalCompletion } from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import {
   readSitePerformanceBreakdown,
   readSitePerformanceSummary,
@@ -203,35 +223,7 @@ function overviewComparisonDimensionSelection(
 ): PageDimensionSelection | null {
   const comparisonTab = comparisonPageTab(tab);
   if (comparisonTab) return comparisonTab.selection;
-  const comparisonSelections: Readonly<Record<string, PageDimensionSelection>> =
-    {
-      "page.path": PAGE_DIMENSION_SELECTIONS.pagePathTrimmed,
-      "page.query": PAGE_DIMENSION_SELECTIONS.pageQueryTrimmed,
-      "page.title": PAGE_DIMENSION_SELECTIONS.pageTitleTrimmed,
-      "page.hostname": PAGE_DIMENSION_SELECTIONS.pageHostnameTrimmed,
-      "source.domain": PAGE_DIMENSION_SELECTIONS.referrerDomain,
-      "source.link": PAGE_DIMENSION_SELECTIONS.referrerUrl,
-      "source.channel": PAGE_DIMENSION_SELECTIONS.trafficChannel,
-      "client.browser": PAGE_DIMENSION_SELECTIONS.browser,
-      "client.osVersion": PAGE_DIMENSION_SELECTIONS.osVersion,
-      "client.deviceType": PAGE_DIMENSION_SELECTIONS.deviceType,
-      "client.language": PAGE_DIMENSION_SELECTIONS.language,
-      "client.screenSize": PAGE_DIMENSION_SELECTIONS.screenSize,
-      "utm.source": PAGE_DIMENSION_SELECTIONS.utmSource,
-      "utm.medium": PAGE_DIMENSION_SELECTIONS.utmMedium,
-      "utm.campaign": PAGE_DIMENSION_SELECTIONS.utmCampaign,
-      "utm.term": PAGE_DIMENSION_SELECTIONS.utmTerm,
-      "utm.content": PAGE_DIMENSION_SELECTIONS.utmContent,
-      "geo.country": PAGE_DIMENSION_SELECTIONS.countryTrimmed,
-      "geo.region": PAGE_DIMENSION_SELECTIONS.region,
-      "geo.city": PAGE_DIMENSION_SELECTIONS.city,
-      "geo.continent": PAGE_DIMENSION_SELECTIONS.continentTrimmed,
-      "geo.timezone": PAGE_DIMENSION_SELECTIONS.timezoneTrimmed,
-      "geo.organization": PAGE_DIMENSION_SELECTIONS.organizationTrimmed,
-    };
-  return Object.hasOwn(comparisonSelections, tab)
-    ? comparisonSelections[tab]!
-    : null;
+  return comparisonPageReaderContract(tab)?.selection ?? null;
 }
 function isPerformanceQuery(input: QueryInput): input is PerformanceQuery {
   if (!("time" in input) || !("mode" in input)) return false;
@@ -875,6 +867,28 @@ export async function overviewTabData(
         };
       }
       if (cursorText && !cursor) throw new InvalidCursorError("overview-tab");
+      const wholeCurrent = hasWholeOriginalCompletion(
+        comparisonCurrent,
+        "comparison-page",
+      )
+        ? comparisonCurrent
+        : undefined;
+      const wholeReference = hasWholeOriginalCompletion(
+        comparisonReference,
+        "comparison-page",
+      )
+        ? comparisonReference
+        : undefined;
+      const wholeTab = wholeOriginalComparisonReaderTab(tab);
+      const whole: WholeOriginalComparisonMembership | undefined =
+        wholeTab !== undefined && (wholeCurrent || wholeReference)
+          ? {
+              kind: "whole-original-comparison-page",
+              tab: wholeTab,
+              ...(wholeCurrent ? { current: wholeCurrent } : {}),
+              ...(wholeReference ? { reference: wholeReference } : {}),
+            }
+          : undefined;
       const page = await queryComparisonDimensionPageFromD1(
         options.env,
         options.siteId,
@@ -893,6 +907,9 @@ export async function overviewTabData(
         },
         cursor,
         audience,
+        options.diagnostics,
+        comparisonMembershipDependenciesFromQuery(request),
+        ...(whole ? ([whole] as const) : []),
       );
       return {
         data: {
@@ -1308,11 +1325,14 @@ export function registerSiteContractProviders(
   registry
     .register(
       "dimension",
-      typedQueryProviderFor("dimension", async (input) => {
+      typedD1QueryProviderFor("dimension", async (input, d1Execution) => {
         const request = input;
         if (request.mode === "overview-tab") {
           return { value: await overviewTabData(options, request) };
         }
+        const wholeOriginalOwner = hasWholeOriginalCompletion(request, "page")
+          ? request
+          : undefined;
         const pageRequest =
           request.page && typeof request.page === "object"
             ? (request.page as { limit?: unknown; cursor?: unknown })
@@ -1360,6 +1380,12 @@ export function registerSiteContractProviders(
                   eventNameRequest,
                   {
                     ...(deferred ? { deferredQualification: deferred } : {}),
+                    ...(hasWholeOriginalCompletion(
+                      request,
+                      "event-name-dimension",
+                    )
+                      ? { wholeOriginalOwner: request }
+                      : {}),
                     ...(request.scopePlan
                       ? { scopePlan: request.scopePlan }
                       : {}),
@@ -1406,9 +1432,18 @@ export function registerSiteContractProviders(
               search,
               sortBy,
               sortDirection,
-              sessionBoundaryRequest
+              sessionBoundaryRequest || wholeOriginalOwner
                 ? {
-                    request: sessionBoundaryRequest,
+                    ...(sessionBoundaryRequest
+                      ? { request: sessionBoundaryRequest }
+                      : {}),
+                    ...(wholeOriginalOwner ? { wholeOriginalOwner } : {}),
+                    ...(wholeOriginalOwner &&
+                    request.context.policy.audience === "private-dashboard" &&
+                    d1Execution?.program &&
+                    d1Execution.program.completedWholeOutputs.length > 0
+                      ? { execution: d1Execution }
+                      : {}),
                     queryTime: request.time,
                     ...(request.scopePlan
                       ? { scopePlan: request.scopePlan }
@@ -1462,6 +1497,8 @@ export function registerSiteContractProviders(
                   : {}),
               }
             : undefined;
+          const independentMembership =
+            hasIndependentPageChannelMembershipDependency(request);
           let cursor: Awaited<ReturnType<typeof decodeDimensionCursor>>;
           try {
             cursor = await decodeDimensionCursor(
@@ -1477,6 +1514,8 @@ export function registerSiteContractProviders(
               normalized.sortDirection,
             );
           } catch (error) {
+            if (independentMembership)
+              hasIndependentPageChannelMembershipDependency(request);
             if (
               normalizedCursorText &&
               qualifiedInput &&
@@ -1485,6 +1524,8 @@ export function registerSiteContractProviders(
               await preflightQualifiedDimensionPageCursorFromD1(qualifiedInput);
             throw error;
           }
+          if (independentMembership)
+            hasIndependentPageChannelMembershipDependency(request);
           if (normalizedCursorText && !cursor) {
             if (qualifiedInput)
               await preflightQualifiedDimensionPageCursorFromD1(qualifiedInput);
@@ -1499,9 +1540,35 @@ export function registerSiteContractProviders(
             if (qualified.kind === "executed") {
               page = qualified.page;
             } else {
-              const fallbackFilters =
-                await prepareDeferredEventQualificationFallback(deferred!);
-              page = await queryDimensionPageFromD1(
+              const stagedMembership = hasDeferredPageMembershipProgram(
+                deferred!,
+              );
+              const readerConsumer = stagedMembership
+                ? {
+                    kind: "dimension-page" as const,
+                    configuration: {
+                      kind: "dimension-page" as const,
+                      dimension: normalized.dimension,
+                      cursorText: normalizedCursorText,
+                      limit: normalized.limit,
+                      excludeEmpty: false as const,
+                      audience: "private-dashboard" as const,
+                      search: qualifiedInput.options.search,
+                      sortBy: normalized.sortBy,
+                      sortDirection: normalized.sortDirection,
+                      cursor,
+                    },
+                  }
+                : undefined;
+              const fallbackFilters = await (stagedMembership
+                ? prepareDeferredPageMembershipFallback(
+                    deferred!,
+                    readerConsumer,
+                  )
+                : prepareDeferredEventQualificationFallback(deferred!));
+              const readerArguments: Parameters<
+                typeof queryDimensionPageFromD1
+              > = [
                 options.env,
                 options.siteId,
                 window,
@@ -1512,28 +1579,78 @@ export function registerSiteContractProviders(
                 cursor,
                 options.diagnostics,
                 audience,
-              );
+              ];
+              if (stagedMembership) {
+                readerArguments[10] = undefined;
+                readerArguments[11] = undefined;
+                readerArguments[12] = {
+                  deferred: deferred!,
+                  dimension: normalized.dimension,
+                  cursorText: normalizedCursorText,
+                };
+              }
+              page = await queryDimensionPageFromD1(...readerArguments);
             }
           } else {
-            page = await queryDimensionPageFromD1(
-              options.env,
-              options.siteId,
-              window,
-              filters,
-              normalized.limit,
-              selection,
-              {
-                excludeEmpty: false,
-                ...(normalized.search !== undefined
-                  ? { search: normalized.search }
-                  : {}),
-                sortBy: normalized.sortBy,
-                sortDirection: normalized.sortDirection,
-              },
-              cursor,
-              options.diagnostics,
-              audience,
-            );
+            const qualification = independentMembership
+              ? claimIndependentPageChannelMembershipDependency(
+                  request,
+                  {
+                    kind: "dimension-page",
+                    dimension: normalized.dimension,
+                    limit: normalized.limit,
+                    cursorText: normalized.cursorText,
+                    ...(normalized.search !== undefined
+                      ? { search: normalized.search }
+                      : {}),
+                    sortBy: normalized.sortBy ?? "views",
+                    sortDirection: normalized.sortDirection ?? "desc",
+                    excludeEmpty: false,
+                    audience: "private-dashboard",
+                  },
+                  cursor,
+                )
+              : undefined;
+            try {
+              qualification?.assertFresh();
+              const readerArguments: Parameters<
+                typeof queryDimensionPageFromD1
+              > = [
+                options.env,
+                options.siteId,
+                window,
+                filters,
+                normalized.limit,
+                selection,
+                {
+                  excludeEmpty: false,
+                  ...(normalized.search !== undefined
+                    ? { search: normalized.search }
+                    : {}),
+                  sortBy: normalized.sortBy,
+                  sortDirection: normalized.sortDirection,
+                },
+                cursor,
+                options.diagnostics,
+                audience,
+                qualification,
+              ];
+              if (wholeOriginalOwner)
+                readerArguments[11] = {
+                  owner: wholeOriginalOwner,
+                  dimension: normalized.dimension,
+                  cursorText: normalized.cursorText,
+                };
+              if (
+                !qualification &&
+                d1Execution?.program &&
+                d1Execution.program.completedWholeOutputs.length > 0
+              )
+                readerArguments[13] = d1Execution;
+              page = await queryDimensionPageFromD1(...readerArguments);
+            } finally {
+              qualification?.assertFresh();
+            }
           }
           return {
             value: {
@@ -1546,7 +1663,7 @@ export function registerSiteContractProviders(
     )
     .register(
       "geo-points",
-      typedQueryProviderFor("geo-points", async (input) => {
+      typedD1QueryProviderFor("geo-points", async (input, d1Execution) => {
         const request = input;
         const deferred = deferredGeoPointsQualificationFromQuery(input);
         let filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
@@ -1597,13 +1714,24 @@ export function registerSiteContractProviders(
           );
           limit = deferred.configuration.limit;
         }
-        const aggregate = await queryGeoPointAggregate(
-          options.env,
-          options.siteId,
-          timeWindow(request.time),
-          filters,
-          limit,
-        );
+        const aggregate = await (d1Execution
+          ? queryGeoPointAggregate(
+              options.env,
+              options.siteId,
+              timeWindow(request.time),
+              filters,
+              limit,
+              undefined,
+              undefined,
+              d1Execution,
+            )
+          : queryGeoPointAggregate(
+              options.env,
+              options.siteId,
+              timeWindow(request.time),
+              filters,
+              limit,
+            ));
         return {
           value: {
             points: aggregate.points,
@@ -1616,8 +1744,11 @@ export function registerSiteContractProviders(
     )
     .register(
       "channels",
-      typedQueryProviderFor("channels", async (input) => {
+      typedD1QueryProviderFor("channels", async (input, d1Execution) => {
         const request = input;
+        const wholeOriginalOwner = hasWholeOriginalCompletion(input, "page")
+          ? input
+          : undefined;
         if (request.mode === "overview-tab") {
           return { value: await overviewTabData(options, request, "channels") };
         }
@@ -1629,51 +1760,98 @@ export function registerSiteContractProviders(
             ? deferredChannelListQualificationFromQuery(request)
             : undefined;
         const requestFlags = request as unknown as Record<string, unknown>;
-        const rows =
-          deferredChannelList && request.mode === "list"
-            ? (
-                await queryQualifiedChannelListFromD1({
-                  env: options.env,
-                  siteId: options.siteId,
-                  window,
-                  queryTime: request.time,
-                  filters,
-                  ...(request.scopePlan
-                    ? { scopePlan: request.scopePlan }
-                    : {}),
-                  mode: request.mode,
-                  limit,
-                  sourceLimit:
-                    typeof request.limit === "number"
-                      ? request.limit
-                      : undefined,
-                  audience: request.context.policy.audience,
-                  hasComparison: requestFlags.comparison !== undefined,
-                  hasCurrent: requestFlags.current !== undefined,
-                  hasReference: requestFlags.reference !== undefined,
-                  deferred: deferredChannelList,
-                  ...(options.diagnostics
-                    ? { diagnostics: options.diagnostics }
-                    : {}),
-                })
-              ).rows
-            : await queryChannelAggregate(
-                options.env,
-                options.siteId,
-                window,
-                filters,
+        const independentMembership =
+          hasIndependentPageChannelMembershipDependency(request);
+        const qualification = independentMembership
+          ? claimIndependentPageChannelMembershipDependency(
+              request,
+              {
+                kind: "channels-list",
+                mode: "list",
                 limit,
-              );
-        return {
-          value: {
-            items: rows.map((row) => ({
-              channel: row.channel,
-              views: row.views,
-              sessions: row.sessions,
-              visitors: row.visitors,
-            })),
-          },
-        };
+                sourceLimit:
+                  typeof request.limit === "number" ? request.limit : undefined,
+                audience: "private-dashboard",
+                hasComparison: false,
+                hasCurrent: false,
+                hasReference: false,
+              },
+              null,
+            )
+          : undefined;
+        try {
+          qualification?.assertFresh();
+          const rows =
+            deferredChannelList && request.mode === "list"
+              ? (
+                  await queryQualifiedChannelListFromD1({
+                    env: options.env,
+                    siteId: options.siteId,
+                    window,
+                    queryTime: request.time,
+                    filters,
+                    ...(request.scopePlan
+                      ? { scopePlan: request.scopePlan }
+                      : {}),
+                    mode: request.mode,
+                    limit,
+                    sourceLimit:
+                      typeof request.limit === "number"
+                        ? request.limit
+                        : undefined,
+                    audience: request.context.policy.audience,
+                    hasComparison: requestFlags.comparison !== undefined,
+                    hasCurrent: requestFlags.current !== undefined,
+                    hasReference: requestFlags.reference !== undefined,
+                    deferred: deferredChannelList,
+                    ...(options.diagnostics
+                      ? { diagnostics: options.diagnostics }
+                      : {}),
+                  })
+                ).rows
+              : await queryChannelAggregate(
+                  options.env,
+                  options.siteId,
+                  window,
+                  filters,
+                  limit,
+                  qualification
+                    ? {
+                        ...qualification,
+                        sourceLimit:
+                          typeof request.limit === "number"
+                            ? request.limit
+                            : undefined,
+                        audience: request.context.policy.audience,
+                        hasComparison: requestFlags.comparison !== undefined,
+                        hasCurrent: requestFlags.current !== undefined,
+                        hasReference: requestFlags.reference !== undefined,
+                      }
+                    : undefined,
+                  ...((!qualification &&
+                  d1Execution?.program &&
+                  d1Execution.program.completedWholeOutputs.length > 0
+                    ? [wholeOriginalOwner, d1Execution]
+                    : wholeOriginalOwner
+                      ? [wholeOriginalOwner]
+                      : []) as [
+                    object?,
+                    Parameters<typeof queryChannelAggregate>[7]?,
+                  ]),
+                );
+          return {
+            value: {
+              items: rows.map((row) => ({
+                channel: row.channel,
+                views: row.views,
+                sessions: row.sessions,
+                visitors: row.visitors,
+              })),
+            },
+          };
+        } finally {
+          qualification?.assertFresh();
+        }
       }),
     )
     .register(
@@ -1804,11 +1982,14 @@ export function registerSiteContractProviders(
     )
     .register(
       "performance",
-      typedQueryProviderFor("performance", async (input) => {
+      typedD1QueryProviderFor("performance", async (input, d1Execution) => {
         if (!input || !isPerformanceQuery(input)) {
           throw new Error("unsupported-performance-query-mode");
         }
         const request = input;
+        const wholeOriginalOwner = hasWholeOriginalCompletion(input, "page")
+          ? input
+          : undefined;
         const deferred = deferredPerformanceSummaryQualificationFromQuery(
           request as unknown as QueryInput & Record<string, unknown>,
         );
@@ -1887,6 +2068,13 @@ export function registerSiteContractProviders(
                 siteId: options.siteId,
                 window,
                 filters,
+                ...(wholeOriginalOwner ? { wholeOriginalOwner } : {}),
+                ...(wholeOriginalOwner &&
+                request.context.policy.audience === "private-dashboard" &&
+                d1Execution?.program &&
+                d1Execution.program.completedWholeOutputs.length > 0
+                  ? { execution: d1Execution }
+                  : {}),
               }),
             };
           }
@@ -1942,6 +2130,13 @@ export function registerSiteContractProviders(
                 window,
                 filters,
                 interval: request.interval,
+                ...(wholeOriginalOwner ? { wholeOriginalOwner } : {}),
+                ...(wholeOriginalOwner &&
+                request.context.policy.audience === "private-dashboard" &&
+                d1Execution?.program &&
+                d1Execution.program.completedWholeOutputs.length > 0
+                  ? { execution: d1Execution }
+                  : {}),
               }),
             };
           }
@@ -2007,6 +2202,13 @@ export function registerSiteContractProviders(
                 dimension: request.dimension,
                 metric: request.metric,
                 limit: request.limit ?? 20,
+                ...(wholeOriginalOwner ? { wholeOriginalOwner } : {}),
+                ...(wholeOriginalOwner &&
+                request.context.policy.audience === "private-dashboard" &&
+                d1Execution?.program &&
+                d1Execution.program.completedWholeOutputs.length > 0
+                  ? { execution: d1Execution }
+                  : {}),
               }),
             };
           }
@@ -2063,6 +2265,18 @@ export function registerSiteContractProviders(
                 request.interval,
                 filters,
                 request.limit ?? 18,
+                ...((wholeOriginalOwner &&
+                request.context.policy.audience === "private-dashboard" &&
+                d1Execution?.program &&
+                d1Execution.program.completedWholeOutputs.length > 0
+                  ? [undefined, wholeOriginalOwner, d1Execution]
+                  : wholeOriginalOwner
+                    ? [undefined, wholeOriginalOwner]
+                    : []) as [
+                  qualification?: undefined,
+                  owner?: object,
+                  execution?: D1ExecutionOptions,
+                ]),
               ),
             };
           }
@@ -2071,8 +2285,11 @@ export function registerSiteContractProviders(
     )
     .register(
       "pages",
-      typedQueryProviderFor("pages", async (input) => {
+      typedD1QueryProviderFor("pages", async (input, d1Execution) => {
         const request = input;
+        const wholeOriginalOwner = hasWholeOriginalCompletion(input, "page")
+          ? input
+          : undefined;
         const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
         if (request.variant === "tabs") {
           deferredPagesAggregatePageQualificationFromQuery(request);
@@ -2132,6 +2349,9 @@ export function registerSiteContractProviders(
                     scopePlan: deferred.metadata.plan,
                     consumerKey,
                   },
+                  ...((wholeOriginalOwner ? [wholeOriginalOwner] : []) as [
+                    object?,
+                  ]),
                 ),
               };
             const fallbackFilters =
@@ -2143,6 +2363,9 @@ export function registerSiteContractProviders(
                 window,
                 fallbackFilters,
                 limit,
+                ...((wholeOriginalOwner
+                  ? [undefined, wholeOriginalOwner]
+                  : []) as [undefined?, object?]),
               ),
             };
           }
@@ -2153,6 +2376,14 @@ export function registerSiteContractProviders(
               timeWindow(request.time),
               filters,
               numberField(request, "limit", 20),
+              ...((wholeOriginalOwner &&
+              request.context.policy.audience === "private-dashboard" &&
+              d1Execution?.program &&
+              d1Execution.program.completedWholeOutputs.length > 0
+                ? [undefined, wholeOriginalOwner, d1Execution]
+                : wholeOriginalOwner
+                  ? [undefined, wholeOriginalOwner]
+                  : []) as [undefined?, object?, D1ExecutionOptions?]),
             ),
           };
         }
@@ -2239,6 +2470,9 @@ export function registerSiteContractProviders(
                     scopePlan: deferred.metadata.plan,
                     consumerKey,
                   },
+                  ...((wholeOriginalOwner ? [wholeOriginalOwner] : []) as [
+                    object?,
+                  ]),
                 ),
                 source: "raw",
               };
@@ -2266,6 +2500,9 @@ export function registerSiteContractProviders(
                 request.includeDetails === true,
                 fallbackCursor,
                 request.context.policy.audience,
+                ...((wholeOriginalOwner
+                  ? [undefined, wholeOriginalOwner]
+                  : []) as [undefined?, object?]),
               ),
               source: "raw",
             };
@@ -2290,6 +2527,14 @@ export function registerSiteContractProviders(
               request.includeDetails === true,
               cursor,
               request.context.policy.audience,
+              ...((wholeOriginalOwner &&
+              request.context.policy.audience === "private-dashboard" &&
+              d1Execution?.program &&
+              d1Execution.program.completedWholeOutputs.length > 0
+                ? [undefined, wholeOriginalOwner, d1Execution]
+                : wholeOriginalOwner
+                  ? [undefined, wholeOriginalOwner]
+                  : []) as [undefined?, object?, D1ExecutionOptions?]),
             ),
             source: "raw",
           };
@@ -2370,6 +2615,9 @@ export function registerSiteContractProviders(
                     scopePlan: deferred.metadata.plan,
                     consumerKey,
                   },
+                  ...((wholeOriginalOwner ? [wholeOriginalOwner] : []) as [
+                    object?,
+                  ]),
                 ),
                 source: "raw",
               };
@@ -2396,6 +2644,9 @@ export function registerSiteContractProviders(
                 includeDetails,
                 cursor,
                 request.context.policy.audience,
+                ...((wholeOriginalOwner
+                  ? [undefined, wholeOriginalOwner]
+                  : []) as [undefined?, object?]),
               ),
               source: "raw",
             };
@@ -2410,17 +2661,27 @@ export function registerSiteContractProviders(
             request.context.policy.audience,
           );
           if (cursorText && !cursor) throw new InvalidCursorError("pages");
+          const readerArguments: Parameters<typeof queryPagesPageFromD1> = [
+            options.env,
+            options.siteId,
+            timeWindow(request.time),
+            filters,
+            limit,
+            includeDetails,
+            cursor,
+            request.context.policy.audience,
+          ];
+          if (wholeOriginalOwner) {
+            readerArguments[8] = undefined;
+            readerArguments[9] = wholeOriginalOwner;
+          }
+          if (
+            d1Execution?.program &&
+            d1Execution.program.completedWholeOutputs.length > 0
+          )
+            readerArguments[10] = d1Execution;
           return {
-            value: await queryPagesPageFromD1(
-              options.env,
-              options.siteId,
-              timeWindow(request.time),
-              filters,
-              limit,
-              includeDetails,
-              cursor,
-              request.context.policy.audience,
-            ),
+            value: await queryPagesPageFromD1(...readerArguments),
             source: "raw",
           };
         }
@@ -2428,14 +2689,36 @@ export function registerSiteContractProviders(
     )
     .register(
       "referrers",
-      typedQueryProviderFor("referrers", async (input) => {
+      typedD1QueryProviderFor("referrers", async (input, d1Execution) => {
         const request = input;
+        const wholeOriginalOwner = hasWholeOriginalCompletion(input, "page")
+          ? input
+          : undefined;
         if (request.variant === "summary") {
           const topN = numberField(
             request,
             "topN",
             numberField(request, "limit", 5),
           );
+          const membershipDependency =
+            referrersTimeMembershipDependencyFromQuery(input);
+          if (membershipDependency)
+            return {
+              value: await queryReferrerSummaryFromD1(
+                options.env,
+                options.siteId,
+                timeWindow(request.time),
+                request.filters ?? EMPTY_FILTER_DOCUMENT,
+                topN,
+                options.diagnostics,
+                undefined,
+                membershipDependency,
+                ...((wholeOriginalOwner ? [wholeOriginalOwner] : []) as [
+                  object?,
+                ]),
+              ),
+              source: "raw",
+            };
           const deferred = deferredReferrersQualificationFromQuery(input);
           if (deferred?.referrersRequest.kind === "summary") {
             const execution = await queryQualifiedReferrerSummaryFromD1({
@@ -2471,6 +2754,9 @@ export function registerSiteContractProviders(
                     scopePlan: deferred.metadata.plan,
                     queryTime: deferred.time,
                   },
+                  ...((wholeOriginalOwner
+                    ? [undefined, wholeOriginalOwner]
+                    : []) as [undefined?, object?]),
                 ),
                 source: "raw",
               };
@@ -2484,6 +2770,9 @@ export function registerSiteContractProviders(
                 fallbackFilters,
                 topN,
                 options.diagnostics,
+                ...((wholeOriginalOwner
+                  ? [undefined, undefined, wholeOriginalOwner]
+                  : []) as [undefined?, undefined?, object?]),
               ),
               source: "raw",
             };
@@ -2496,6 +2785,19 @@ export function registerSiteContractProviders(
               request.filters ?? EMPTY_FILTER_DOCUMENT,
               topN,
               options.diagnostics,
+              ...((wholeOriginalOwner &&
+              request.context.policy.audience === "private-dashboard" &&
+              d1Execution?.program &&
+              d1Execution.program.completedWholeOutputs.length > 0
+                ? [undefined, undefined, wholeOriginalOwner, d1Execution]
+                : wholeOriginalOwner
+                  ? [undefined, undefined, wholeOriginalOwner]
+                  : []) as [
+                undefined?,
+                undefined?,
+                object?,
+                D1ExecutionOptions?,
+              ]),
             ),
             source: "raw",
           };
@@ -2565,8 +2867,13 @@ export function registerSiteContractProviders(
                     scopePlan: deferred.metadata.plan,
                   }
                 : undefined,
+              ...((wholeOriginalOwner ? [wholeOriginalOwner] : []) as [
+                object?,
+              ]),
             );
           };
+          const independentMembership =
+            hasIndependentReferrersPageMembershipDependency(input);
           let cursor: ReferrerAggregateCursor | null = null;
           let cursorError: InvalidCursorError | undefined;
           try {
@@ -2586,6 +2893,9 @@ export function registerSiteContractProviders(
             if (error instanceof InvalidCursorError && cursorText)
               cursorError = error;
             else throw error;
+          } finally {
+            if (independentMembership)
+              hasIndependentReferrersPageMembershipDependency(input);
           }
           if (cursorText && (!cursor || cursorError)) {
             if (deferred?.referrersRequest.kind === "page") {
@@ -2648,6 +2958,39 @@ export function registerSiteContractProviders(
               source: "raw",
             };
           }
+          if (independentMembership) {
+            const qualification =
+              claimIndependentReferrersPageMembershipDependency(input, {
+                limit,
+                includeFullUrl,
+                search,
+                cursor,
+                audience: request.context.policy.audience,
+                sortBy,
+                sortDirection,
+              })!;
+            qualification.assertFresh();
+            const value = await queryReferrersPageFromD1(
+              options.env,
+              options.siteId,
+              window,
+              filters,
+              limit,
+              includeFullUrl,
+              search,
+              cursor,
+              undefined,
+              request.context.policy.audience,
+              sortBy,
+              sortDirection,
+              qualification,
+              ...((wholeOriginalOwner ? [wholeOriginalOwner] : []) as [
+                object?,
+              ]),
+            );
+            qualification.assertFresh();
+            return { value, source: "raw" };
+          }
           return {
             value: await queryReferrersPageFromD1(
               options.env,
@@ -2662,6 +3005,14 @@ export function registerSiteContractProviders(
               request.context.policy.audience,
               sortBy,
               sortDirection,
+              ...((wholeOriginalOwner &&
+              request.context.policy.audience === "private-dashboard" &&
+              d1Execution?.program &&
+              d1Execution.program.completedWholeOutputs.length > 0
+                ? [undefined, wholeOriginalOwner, d1Execution]
+                : wholeOriginalOwner
+                  ? [undefined, wholeOriginalOwner]
+                  : []) as [undefined?, object?, D1ExecutionOptions?]),
             ),
             source: "raw",
           };

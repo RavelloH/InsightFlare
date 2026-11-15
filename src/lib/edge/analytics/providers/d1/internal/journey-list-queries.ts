@@ -1,14 +1,12 @@
 import { compileD1Query, lowerLogicalPlan } from "@/lib/db";
-import type {
-  FilterDocument,
-  FunnelConfigV2,
-} from "@/lib/edge/analytics/contract";
+import type { FilterDocument } from "@/lib/edge/analytics/contract";
 import { queryWindowToTime } from "@/lib/edge/analytics/contract/helpers";
 import {
   buildJourneySessionListReportPlan,
   buildJourneyVisitorListReportPlan,
   JOURNEY_SESSION_LIST_REPORT_OUTPUT,
   JOURNEY_VISITOR_LIST_REPORT_OUTPUT,
+  type JourneyListAnalysis,
 } from "@/lib/edge/analytics/engine/journey-entity-list-report-plan";
 import {
   buildJourneyEventPageReportPlan,
@@ -41,14 +39,7 @@ import {
   mapVisitorRow,
 } from "./journey-helpers";
 import { queryJourneyPageReportRowsFromD1 } from "./journey-page-report-query";
-export type JourneyListAnalysis =
-  | { readonly type: "goal"; readonly filter: FilterDocument }
-  | {
-      readonly type: "funnel";
-      readonly config: FunnelConfigV2;
-      readonly stepIndex: number;
-      readonly outcome?: "converted" | "dropoff";
-    };
+export type { JourneyListAnalysis } from "@/lib/edge/analytics/engine/journey-entity-list-report-plan";
 export interface VisitorListCursor {
   sortValue: number;
   lastSeenAt?: number;
@@ -210,7 +201,7 @@ export async function queryVisitorListPageFromD1(
     search?: string;
     cursor?: VisitorListCursor | null;
     analysis?: JourneyListAnalysis;
-    /** Request-private entity membership; ignored when an analysis is present. */
+    /** Request-private entity membership shared with optional analysis stages. */
     membership?: EventMembershipFallback;
   },
 ): Promise<VisitorListPage> {
@@ -224,16 +215,14 @@ export async function queryVisitorListPageFromD1(
     cursor: options.cursor,
     analysis: options.analysis,
   };
-  const bound = options.analysis
-    ? undefined
-    : options.membership?.bindPlan(
-        (context) =>
-          buildJourneyVisitorListReportPlan({
-            ...planInput,
-            qualificationDependencyRefs: context.qualificationDependencyRefs,
-          }),
-        queryWindowToTime(window),
-      );
+  const bound = options.membership?.bindPlan(
+    (context) =>
+      buildJourneyVisitorListReportPlan({
+        ...planInput,
+        qualificationDependencyRefs: context.qualificationDependencyRefs,
+      }),
+    queryWindowToTime(window),
+  );
   const plan = bound?.plan ?? buildJourneyVisitorListReportPlan(planInput);
   const records = await queryJourneyPageReportRowsFromD1(
     env,
@@ -290,7 +279,7 @@ export async function querySessionListPageFromD1(
     target?: { readonly type: "visitor" | "session"; readonly value: string };
     analysis?: JourneyListAnalysis;
     preparedPlanOperation?: "sessions" | "visitor-sessions";
-    /** Request-private entity membership; ignored when an analysis is present. */
+    /** Request-private entity membership shared with optional analysis stages. */
     membership?: EventMembershipFallback;
   },
 ): Promise<SessionListPage> {
@@ -306,16 +295,14 @@ export async function querySessionListPageFromD1(
     analysis: options.analysis,
     preparedPlanOperation: options.preparedPlanOperation,
   };
-  const bound = options.analysis
-    ? undefined
-    : options.membership?.bindPlan(
-        (context) =>
-          buildJourneySessionListReportPlan({
-            ...planInput,
-            qualificationDependencyRefs: context.qualificationDependencyRefs,
-          }),
-        queryWindowToTime(window),
-      );
+  const bound = options.membership?.bindPlan(
+    (context) =>
+      buildJourneySessionListReportPlan({
+        ...planInput,
+        qualificationDependencyRefs: context.qualificationDependencyRefs,
+      }),
+    queryWindowToTime(window),
+  );
   const plan = bound?.plan ?? buildJourneySessionListReportPlan(planInput);
   const records = await queryJourneyPageReportRowsFromD1(
     env,

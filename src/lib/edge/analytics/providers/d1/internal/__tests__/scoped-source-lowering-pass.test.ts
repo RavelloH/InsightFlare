@@ -14,15 +14,15 @@ import {
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { semanticTemporalDomainsFromQueryTime } from "@/lib/edge/analytics/engine/semantic/time";
 import { preparedMembershipFromIds } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
-import {
-  AnalyticsLegacyScopedStorage,
-  entityQualificationCacheKey,
-  pageEventOwnerPairCacheKey,
-} from "@/lib/edge/analytics/providers/d1/internal/analytics-legacy-scoped-storage";
 import type {
   AnalyticsRelationalStorageContext,
   LoweredAnalyticsSource,
 } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-storage";
+import { ScopedSourceLoweringPass } from "@/lib/edge/analytics/providers/d1/internal/lowering/scoped-source/scoped-source-lowering-pass";
+import {
+  entityQualificationCacheKey,
+  pageEventOwnerPairCacheKey,
+} from "@/lib/edge/analytics/providers/d1/internal/lowering/scoped-source/selection-compatibility";
 import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 import { normalizeFilterDocument } from "@/lib/filter-contract/filters";
 
@@ -101,7 +101,7 @@ const plan = buildEventRecordPagePlan({
 const eventSource = plan.nodes.find(
   (node): node is SourceNode => node.kind === "source",
 )!;
-const storage = new AnalyticsLegacyScopedStorage(
+const storage = new ScopedSourceLoweringPass(
   {} as AnalyticsRelationalStorageContext,
 );
 const source = {
@@ -110,7 +110,7 @@ const source = {
   providerBindings: [],
 } satisfies LoweredAnalyticsSource;
 
-describe("legacy scoped Event storage guards", () => {
+describe("scoped Event storage lowering guards", () => {
   it("leaves sources without a selection untouched", () => {
     const node = { ...eventSource, selection: undefined };
     expect(storage.lowerEventReportSource(node, "source", source)).toBe(source);

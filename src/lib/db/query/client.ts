@@ -2,6 +2,7 @@ import { createDatabaseRuntime } from "@/lib/db/d1-runtime";
 import type { CompiledMutation } from "@/lib/db/mutation/plan";
 import type { DatabaseRuntime, DatabaseRuntimeOptions } from "@/lib/db/types";
 
+import { tryExecuteAdaptiveQuery } from "./adaptive-execution";
 import type { CompiledQuery } from "./compiled";
 
 export interface DatabaseClient {
@@ -14,7 +15,7 @@ export interface DatabaseClient {
 export function createDatabaseClient(runtime: DatabaseRuntime): DatabaseClient {
   return {
     all<Row extends object>(query: CompiledQuery<Row>): Promise<D1Result<Row>> {
-      return runtime.all<Row>(query);
+      return tryExecuteAdaptiveQuery(runtime, query) ?? runtime.all<Row>(query);
     },
     first<Row extends object>(query: CompiledQuery<Row>): Promise<Row | null> {
       return runtime.first<Row>(query);

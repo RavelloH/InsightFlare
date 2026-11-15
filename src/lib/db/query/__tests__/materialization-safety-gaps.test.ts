@@ -33,7 +33,9 @@ import type { SqlExpression } from "@/lib/db/query/expression";
 import {
   isMaterializationSafeAggregateExpression,
   isMaterializationSafeExpression,
+  isMaterializationSafeNode,
 } from "@/lib/db/query/materialization-safety";
+import type { ProjectNode } from "@/lib/db/query/plan";
 import { schema } from "@/lib/db/schema";
 
 const values = () => scan(schema.custom_event_json_values);
@@ -265,6 +267,54 @@ describe("expression-level materialization safety guards", () => {
     expect(isMaterializationSafeExpression(cyclic as never, scopes)).toBe(
       false,
     );
+  });
+});
+
+describe("fresh local projection safety", () => {
+  it("rechecks direct-column scope and bounds after an earlier successful proof", () => {
+    const input = values();
+    const other = values();
+    const selected = project(input, { value: input.columns.event_pk });
+    const original = (selected.node as ProjectNode).projections[0]!;
+    const expression = { ...input.columns.event_pk };
+    const node = {
+      ...selected.node,
+      projections: [{ ...original, expression }],
+    } as ProjectNode;
+    expect(isMaterializationSafeNode(node)).toBe(true);
+
+    for (const index of [-1, 0.5, input.fields.length, Number.NaN]) {
+      expression.index = index;
+      expect(isMaterializationSafeNode(node)).toBe(false);
+    }
+    expression.index = input.columns.event_pk.index;
+    expression.scope = other.scope;
+    expect(isMaterializationSafeNode(node)).toBe(false);
+    expression.scope = input.scope;
+    expect(isMaterializationSafeNode(node)).toBe(true);
+  });
+
+  it("retains recursive totality and malformed-expression rejection", () => {
+    const input = values();
+    const selected = project(input, { value: input.columns.event_pk });
+    const original = (selected.node as ProjectNode).projections[0]!;
+    for (const expression of [
+      null,
+      "column",
+      callFunction("abs", input.columns.event_pk),
+      eq(input.columns.event_pk, values().columns.event_pk),
+    ]) {
+      const node = {
+        ...selected.node,
+        projections: [{ ...original, expression }],
+      } as ProjectNode;
+      expect(isMaterializationSafeNode(node)).toBe(false);
+    }
+    expect(
+      isMaterializationSafeNode(
+        project(input, { value: castInteger(input.columns.event_pk) }).node,
+      ),
+    ).toBe(true);
   });
 });
 

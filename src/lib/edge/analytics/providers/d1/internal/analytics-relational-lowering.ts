@@ -94,7 +94,13 @@ import {
   type LoweredAnalyticsSource,
   normalizeAnalyticsRelationalSiteIds,
 } from "./analytics-relational-storage";
+import type {
+  D1LogicalProgramExecution,
+  ProgramMembershipPhysicalFold,
+} from "./logical-program-execution";
+import type { SourceMembershipRelations } from "./logical-source-membership-inputs";
 import {
+  analysisResultQualificationExecutionInputsForLowerer,
   attachQualificationExecutionInputs,
   type QualificationExecutionInputs,
 } from "./qualification-execution-inputs";
@@ -222,8 +228,12 @@ function assertNonNullableUnaryEntitySet(
 
 function logicalNodeInputs(node: LogicalNode): readonly RelationId[] {
   switch (node.kind) {
-    case "source":
+    case "whole-filter-membership":
+    case "whole-filter-core":
+    case "membership-read":
       return [];
+    case "source":
+      return node.membershipInputs?.map((edge) => edge.input) ?? [];
     case "analysis-result":
       return [];
     case "relationship-lookup":
@@ -273,9 +283,16 @@ export interface AnalyticsDbOutputColumn {
 /** Memoized per-node lowering from validated Analytics IR into Generic DB Relations. */
 export class AnalyticsLogicalToDbLowerer {
   readonly #plan: ValidatedLogicalPlan;
+  readonly #program: D1LogicalProgramExecution | undefined;
   readonly #nodes: ReadonlyMap<RelationId, LogicalNode>;
   readonly #logicalSlots: ReadonlyMap<SlotId, LogicalSlot>;
   readonly #memo = new Map<RelationId, LoweredRelation>();
+  /** Successful Source adoptions of an actual finite fused physical operator.
+   * Intermediates are not separately materialized or inserted into #memo. */
+  readonly #programMembershipSourceFolds: {
+    readonly source: SourceNode;
+    readonly physical: ProgramMembershipPhysicalFold;
+  }[] = [];
   readonly #eventPayloadAdmissionPackets = new Map<
     RelationId,
     EventPayloadAdmissionPacket
@@ -330,6 +347,14 @@ export class AnalyticsLogicalToDbLowerer {
   readonly #scopedSourceLowering: ScopedSourceLoweringPass;
   readonly #eventPayloadAdmissionPolicy:
     EventPayloadAdmissionPolicy | undefined;
+  readonly #analysisResultExecutionInputs = new Map<
+    object,
+    QualificationExecutionInputs
+  >();
+  readonly #analysisResultExecutionLowerers = new Map<
+    object,
+    AnalyticsLogicalToDbLowerer
+  >();
   readonly #qualificationAdmissionPolicy:
     AnalyticsQualificationAdmissionPolicy | undefined;
   #qualificationAdmittedControls: AnalyticsDbRelation | undefined;
@@ -347,15 +372,23 @@ export class AnalyticsLogicalToDbLowerer {
       readonly comparisonPageQualificationGate?: ComparisonPageQualificationGate;
       readonly comparisonDomainAdmissionBinding?: RegisteredComparisonAdmissionBinding;
       readonly qualificationExecutionInputs?: QualificationExecutionInputs;
+      readonly program?: D1LogicalProgramExecution;
     } = {},
   ) {
     this.#plan = plan;
+    this.#program = options.program;
     this.#storageContext = storageContext;
     const qualificationBindings = attachQualificationExecutionInputs(
       options.qualificationExecutionInputs,
       this,
       plan,
     );
+    for (const b of analysisResultQualificationExecutionInputsForLowerer(
+      options.qualificationExecutionInputs,
+      this,
+      plan,
+    ))
+      this.#analysisResultExecutionInputs.set(b.childPlan, b.executionInputs);
     this.#comparisonAdmissionBinding = options.comparisonDomainAdmissionBinding;
     if (
       this.#comparisonAdmissionBinding &&
@@ -709,14 +742,19 @@ export class AnalyticsLogicalToDbLowerer {
     // A multi-output caller needs the union of required slots on shared nodes.
     // Lower all roots after that union is known so they share one source graph.
     this.#memo.clear();
+    this.#programMembershipSourceFolds.length = 0;
     this.#qualificationAdmittedControls = undefined;
     this.#qualificationAdmissionUngatedNodes.clear();
     this.#eventPayloadAdmissionPackets.clear();
     this.#prepareRequiredSlots(outputs, selectedNodes);
     let roots = outputs.map((output) => this.#lowerNode(output.relation));
-    if (this.#memo.size !== selectedNodes.size) {
+    const physicallyCovered = this.#physicallyCoveredNodeIds(selectedNodes);
+    if (
+      physicallyCovered.size !== selectedNodes.size ||
+      [...selectedNodes].some((id) => !physicallyCovered.has(id))
+    ) {
       const unreachable = this.#plan.nodes.find(
-        (node) => selectedNodes.has(node.id) && !this.#memo.has(node.id),
+        (node) => selectedNodes.has(node.id) && !physicallyCovered.has(node.id),
       );
       reject(
         unreachable ? nodePath(unreachable.id) : "nodes",
@@ -1016,6 +1054,50 @@ export class AnalyticsLogicalToDbLowerer {
     return childLowerer?.loweredRelationForPlan(relationId);
   }
 
+  /** Coverage includes ordinary node lowering and actual finite operator
+   * fusion. A fused ancestor never becomes a reusable #lowerNode result:
+   * another output/use still lowers that node normally and can reject. */
+  #physicallyCoveredNodeIds(
+    selected: ReadonlySet<RelationId>,
+  ): Set<RelationId> {
+    const covered = new Set(this.#memo.keys());
+    for (const { source, physical } of this.#programMembershipSourceFolds) {
+      const chain = physical.logical.logicalNodes;
+      if (
+        this.#nodes.get(source.id) !== source ||
+        !selected.has(source.id) ||
+        !this.#memo.has(source.id) ||
+        physical.consumer !== this.#plan ||
+        !source.membershipInputs?.includes(physical.edge) ||
+        physical.logical.role !== physical.edge.role ||
+        chain[0] !== physical.logical.imported ||
+        chain[chain.length - 1]?.id !== physical.edge.input
+      )
+        reject(
+          nodePath(source.id),
+          "Program Source fold has no exact successful adoption.",
+        );
+      chain.forEach((node, index) => {
+        const inputs = logicalNodeInputs(node);
+        if (
+          this.#nodes.get(node.id) !== node ||
+          !selected.has(node.id) ||
+          (index === 0
+            ? node.kind !== "analysis-result" ||
+              node.execution !== "program" ||
+              inputs.length !== 0
+            : inputs.length !== 1 || inputs[0] !== chain[index - 1]!.id)
+        )
+          reject(
+            nodePath(node.id),
+            "Program Source fold is not a closed exact IR chain.",
+          );
+        covered.add(node.id);
+      });
+    }
+    return covered;
+  }
+
   #reachableNodeIds(roots: readonly RelationId[]): Set<RelationId> {
     const reachable = new Set<RelationId>();
     const pending = [...roots];
@@ -1197,6 +1279,13 @@ export class AnalyticsLogicalToDbLowerer {
     const path = nodePath(id);
     let result: LoweredRelation;
     switch (node.kind) {
+      case "whole-filter-membership":
+      case "whole-filter-core":
+      case "membership-read":
+        return reject(
+          path,
+          "This finite staged command requires the common staged runtime, not a single SQL relation.",
+        );
       case "source":
         result = this.#lowerSource(node, path);
         break;
@@ -1634,6 +1723,64 @@ export class AnalyticsLogicalToDbLowerer {
   }
 
   #lowerSource(node: SourceNode, path: string): LoweredRelation {
+    // A normal relational predecessor, not externally supplied rows or a
+    // qualification-ref lookup. Validation also checks the exact two-slot key.
+    let sourceInputs: SourceMembershipRelations | undefined;
+    const programFolds: ProgramMembershipPhysicalFold[] = [];
+    if (node.membershipInputs) {
+      const roles: {
+        entity?: AnalyticsDbRelation;
+        visit?: AnalyticsDbRelation;
+        event?: AnalyticsDbRelation;
+      } = {};
+      for (const edge of node.membershipInputs) {
+        if (roles[edge.role]) reject(path, "Duplicate Source membership role.");
+        const folded = this.#program?.lowerSourceMembershipInput(
+          this.#plan,
+          edge,
+        );
+        if (folded) {
+          roles[edge.role] = folded.relation;
+          programFolds.push(folded);
+          continue;
+        }
+        const input = this.#lowerNode(edge.input);
+        const site = valueForSlot(
+          input.relation,
+          input.slots,
+          edge.siteId,
+          path,
+        );
+        const member = valueForSlot(
+          input.relation,
+          input.slots,
+          edge.memberId,
+          path,
+        );
+        if (
+          site.kind !== "scalar" ||
+          member.kind !== "scalar" ||
+          site.nullable ||
+          member.nullable ||
+          site.type.kind !== "scalar" ||
+          site.type.scalar !== "string" ||
+          member.type.kind !== "scalar" ||
+          member.type.scalar !== "string"
+        )
+          reject(path, "Source membership requires two non-null string slots.");
+        const column =
+          edge.role === "entity"
+            ? "entity_id"
+            : edge.role === "visit"
+              ? "visit_id"
+              : "event_id";
+        roles[edge.role] = project(input.relation, {
+          site_id: site.expression,
+          [column]: member.expression,
+        });
+      }
+      sourceInputs = Object.freeze(roles);
+    }
     let lowered: LoweredAnalyticsSource;
     const providerRequests =
       this.#requiredProviderSourceBindings.get(node.id) ?? [];
@@ -1648,6 +1795,7 @@ export class AnalyticsLogicalToDbLowerer {
         node,
         path,
         source,
+        sourceInputs,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1863,8 +2011,23 @@ export class AnalyticsLogicalToDbLowerer {
           logical.lineage,
         ];
       }),
+      ...(node.membershipInputs
+        ? [
+            node.membershipInputs.map((edge) => [
+              edge.input,
+              edge.role,
+              edge.siteId,
+              edge.memberId,
+            ]),
+          ]
+        : []),
     ]);
-    const cached = this.#loweredSources.get(sourceSignature);
+    // A program fusion must use the exact role DBIR just produced above.
+    // Ordinary Source carrier reuse keeps its original behavior.
+    const cached =
+      programFolds.length === 0
+        ? this.#loweredSources.get(sourceSignature)
+        : undefined;
     if (cached) {
       const providerColumnIds = lowered.providerBindings.flatMap((binding) => [
         binding.request.id,
@@ -1939,6 +2102,12 @@ export class AnalyticsLogicalToDbLowerer {
       result,
       path,
     );
+    // Only now has this Source successfully used the actual role relation and
+    // passed all storage, layout and Provider-binding checks.
+    for (const physical of programFolds)
+      this.#programMembershipSourceFolds.push(
+        Object.freeze({ source: node, physical }),
+      );
     return {
       ...result,
       candidateActivity:
@@ -2324,7 +2493,15 @@ export class AnalyticsLogicalToDbLowerer {
     path: string,
   ): LoweredRelation {
     let byOutput = this.#analysisResultOutputs.get(node.childPlan);
-    let childLowered = byOutput?.get(node.outputId);
+    let childLowered =
+      node.execution === "program"
+        ? this.#program?.readImportedOutput(this.#plan, node.id)
+        : byOutput?.get(node.outputId);
+    if (node.execution === "program" && !childLowered)
+      reject(
+        path,
+        "An explicit program dependency requires its exact executing context.",
+      );
     if (!childLowered) {
       const qualificationBinding =
         this.#analysisResultQualificationBindings.get(node.childPlan);
@@ -2426,10 +2603,27 @@ export class AnalyticsLogicalToDbLowerer {
       );
       if (!childOutput)
         reject(`${path}.outputId`, "The child output is not declared.");
-      const childLowerer = new AnalyticsLogicalToDbLowerer(childPlan, {
-        ...this.#storageContext,
-        time: childPlan.context.time,
-      });
+      const delegatedInput = this.#analysisResultExecutionInputs.get(
+        node.childPlan,
+      );
+      let childLowerer = delegatedInput
+        ? this.#analysisResultExecutionLowerers.get(node.childPlan)
+        : undefined;
+      if (!childLowerer) {
+        childLowerer = new AnalyticsLogicalToDbLowerer(
+          childPlan,
+          {
+            ...this.#storageContext,
+            time: childPlan.context.time,
+          },
+          { qualificationExecutionInputs: delegatedInput },
+        );
+        if (delegatedInput)
+          this.#analysisResultExecutionLowerers.set(
+            node.childPlan,
+            childLowerer,
+          );
+      }
       childLowered = childLowerer.lower(childOutput);
       if (!byOutput) {
         byOutput = new Map();
@@ -3343,6 +3537,11 @@ export class AnalyticsLogicalToDbLowerer {
       case "event-payload-occurrences":
       case "event-payload-properties":
         // Aggregates and joins do not supply a storage-backed Observation key.
+        return false;
+      case "whole-filter-membership":
+      case "membership-read":
+      case "whole-filter-core":
+        // Finite commands do not supply a storage-backed Observation key.
         return false;
       case "analysis-result":
         // Imported values are already aggregated and cannot authorize raw reads.
@@ -4279,9 +4478,15 @@ export class AnalyticsLogicalToDbLowerer {
           if (this.#addRequiredSlots(relation, slots)) changed = true;
         };
         switch (node.kind) {
-          case "source":
+          case "whole-filter-membership":
+          case "whole-filter-core":
+          case "membership-read":
           case "analysis-result":
             // Imported children keep their own relation/slot namespace.
+            break;
+          case "source":
+            for (const edge of node.membershipInputs ?? [])
+              add(edge.input, [edge.siteId, edge.memberId]);
             break;
           case "filter":
             add(node.input, [

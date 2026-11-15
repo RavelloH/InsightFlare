@@ -4,6 +4,7 @@ import type {
   FilterScopePreference,
   ScopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
+import type { AdvancedFilterExecutionDecision } from "@/lib/edge/analytics/engine/advanced-filter-execution-plan";
 
 import type { QualificationCompatibilityMismatch } from "./qualification-compatibility";
 
@@ -73,10 +74,22 @@ export interface D1ReadDiagnostics {
   requiresRawSource?: boolean;
   /** Internal reason an otherwise supported count tree used the old evaluator. */
   advancedCountSqlFallbackReason?: AdvancedCountSqlFallbackReason;
+  /** Internal executed strategy decisions; never included in public headers. */
+  advancedFilterExecution?: AdvancedFilterExecutionDecision;
+  advancedFilterExecutionHistory?: AdvancedFilterExecutionDecision[];
   /** Test/runtime audit hook; absent from normal request diagnostics. */
   onEventRecordsQualificationCompile?: (
     evidence: D1EventRecordsCompilationEvidence,
   ) => void;
+}
+
+export function recordAdvancedFilterExecution(
+  diagnostics: D1ReadDiagnostics | undefined,
+  decision: AdvancedFilterExecutionDecision,
+): void {
+  if (!diagnostics) return;
+  diagnostics.advancedFilterExecution = decision;
+  (diagnostics.advancedFilterExecutionHistory ??= []).push(decision);
 }
 
 interface D1ResultWithMeta {

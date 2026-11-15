@@ -247,6 +247,8 @@ export function buildTopReferrersPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
+  readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly limit: number;
   readonly includeFullUrl: boolean;
   readonly search?: string;
@@ -290,6 +292,7 @@ export function buildReferrersPagePlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly limit: number;
   readonly includeFullUrl: boolean;
@@ -345,6 +348,7 @@ export function buildReferrerSummaryPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly topN: number;
 }): ValidatedLogicalPlan {

@@ -3,8 +3,11 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  and,
   antiJoin,
+  callFunction,
   compileD1Query,
+  constant,
   eq,
   filter,
   gt,
@@ -12,8 +15,11 @@ import {
   lt,
   param,
   project,
+  rowNumber,
   scan,
   semiJoin,
+  union,
+  window,
 } from "@/lib/db";
 import {
   compileD1QuerySemiMembershipFallbackForTest,
@@ -21,6 +27,7 @@ import {
   compileD1QueryUnoptimizedForTest,
 } from "@/lib/db/query/compiler";
 import type { AnyExpression } from "@/lib/db/query/expression";
+import { semiMembershipCostSelections } from "@/lib/db/query/physical/semi-membership-cost";
 import { validatePhysicalQueryPlan } from "@/lib/db/query/physical-plan";
 import type { Relation } from "@/lib/db/query/plan";
 import { schema } from "@/lib/db/schema";
@@ -124,6 +131,107 @@ describe("Generic SemiJoin cost selection", () => {
     for (const name of registeredTables)
       Reflect.deleteProperty(mutableSchema, name);
     registeredTables.clear();
+  });
+
+  it("proves nested membership and UNION DISTINCT inputs and indexes a licensed right boundary", () => {
+    const source = relationFor(catalogTable("cost_materialized_membership"));
+    const left = union(source, source, false);
+    const nested = semiJoin(source, left, eq(param(1), param(1)));
+    const right = filter(
+      source,
+      eq(column(source, "lookup_key"), param("target")),
+    );
+    const keys = project(right, {
+      key: column(right as TestRelation, "membership_key"),
+    });
+    const query = semiJoin(
+      nested,
+      keys,
+      eq(column(nested as TestRelation, "membership_key"), keys.columns.key),
+    );
+    const physical = lowerLogicalPlan(query);
+    expect(physical.semiMembershipChoices).toHaveLength(1);
+    const choice = physical.semiMembershipChoices[0]!;
+    // Cost selection consumes the freshly licensed materialized stops from
+    // totality analysis; engine integration covers their actual production.
+    expect(
+      semiMembershipCostSelections([
+        { ...choice, materializedStops: [right.node] },
+      ]),
+    ).toMatchObject([
+      { strategy: "in", reason: "selected-materialized-right-membership" },
+    ]);
+    expect(
+      semiMembershipCostSelections([
+        { ...choice, materializedStops: [nested.node] },
+      ]),
+    ).toMatchObject([{ strategy: "exists" }]);
+    const db = new DatabaseSync(":memory:");
+    try {
+      db.exec(
+        "CREATE TABLE cost_materialized_membership(id INTEGER PRIMARY KEY, membership_key TEXT, lookup_key TEXT NOT NULL)",
+      );
+      const insert = db.prepare(
+        "INSERT INTO cost_materialized_membership VALUES (?, ?, ?)",
+      );
+      for (const [index, key] of [
+        "same",
+        "same",
+        "nul\0tail",
+        new Uint8Array([97]),
+        null,
+      ].entries())
+        insert.run(index + 1, key, String(index));
+      insert.run(101, "same", "target");
+      const optimized = compileD1QuerySemiMembershipForceSafeForTest(query);
+      const fallback = compileD1QuerySemiMembershipFallbackForTest(query);
+      expect(optimized.sql).toContain(" IN (SELECT ");
+      expect(rows(db, optimized)).toEqual(rows(db, fallback));
+      expect(rows(db, optimized)).toHaveLength(3);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps an unsafe expression inside a nested membership behind EXISTS", () => {
+    const source = relationFor(catalogTable("cost_nested_error"));
+    const unsafe = project(source, {
+      id: callFunction("abs", column(source, "id")),
+      key: column(source, "membership_key"),
+    });
+    const nested = semiJoin(
+      source,
+      unsafe,
+      eq(column(source, "id"), unsafe.columns.id),
+    );
+    const right = filter(
+      source,
+      eq(column(source, "lookup_key"), param("target")),
+    );
+    const candidate = semiJoin(
+      nested,
+      right,
+      eq(
+        column(nested as TestRelation, "membership_key"),
+        column(right as TestRelation, "membership_key"),
+      ),
+    );
+    expect(lowerLogicalPlan(candidate).semiMembershipChoices).toHaveLength(0);
+    expect(
+      compileD1QuerySemiMembershipForceSafeForTest(candidate).sql,
+    ).not.toContain(" IN (SELECT ");
+    const db = new DatabaseSync(":memory:");
+    try {
+      db.exec(`CREATE TABLE cost_nested_error(id INTEGER PRIMARY KEY, membership_key TEXT, lookup_key TEXT NOT NULL);
+        INSERT INTO cost_nested_error VALUES (-9223372036854775808, 'same', 'target')`);
+      for (const compiled of [
+        compileD1QuerySemiMembershipForceSafeForTest(candidate),
+        compileD1QuerySemiMembershipFallbackForTest(candidate),
+      ])
+        expect(() => rows(db, compiled)).toThrow(/integer overflow/u);
+    } finally {
+      db.close();
+    }
   });
 
   it("composes reordered project maps without mistaking a non-unique filter for a unique lookup", () => {
@@ -526,7 +634,7 @@ describe("Generic SemiJoin cost selection", () => {
     }
   });
 
-  it("does not turn AntiJoin into membership IN", () => {
+  it("keeps nonmaterialized AntiJoin at NOT EXISTS despite catalog point lookup evidence", () => {
     const table = relationFor(catalogTable("wave97bm_cost_anti"));
     const scanTable = (
       table.node as { kind: "scan"; table: SchemaTableReference }
@@ -546,8 +654,213 @@ describe("Generic SemiJoin cost selection", () => {
       ),
     );
     expect(
+      lowerLogicalPlan(candidate).semiMembershipCostSelections,
+    ).toMatchObject([
+      { strategy: "exists", reason: "anti-source-is-not-materialized" },
+    ]);
+    expect(compileD1Query(candidate).sql).toContain("NOT EXISTS (SELECT ");
+    expect(
       compileD1QuerySemiMembershipForceSafeForTest(candidate).sql,
-    ).toContain("NOT EXISTS (SELECT ");
+    ).toContain(") IS NOT TRUE");
+  });
+
+  it("preserves composite anti membership NULLs, empty sets and duplicate left bags", () => {
+    const name = "cost_anti_tuple";
+    const table = catalogTable(name);
+    const leftScan = relationFor(table);
+    const rightScan = scan(
+      table as typeof schema.site_identities,
+    ) as TestRelation;
+    const left = union(
+      filter(leftScan, lt(column(leftScan, "id"), param(100))),
+      filter(leftScan, lt(column(leftScan, "id"), param(100))),
+      true,
+    ) as TestRelation;
+    const db = new DatabaseSync(":memory:");
+    try {
+      db.exec(
+        `CREATE TABLE ${name}(id INTEGER PRIMARY KEY, membership_key TEXT COLLATE BINARY, lookup_key TEXT COLLATE BINARY NOT NULL)`,
+      );
+      const insert = db.prepare(`INSERT INTO ${name} VALUES (?, ?, ?)`);
+      for (const [id, key, site] of [
+        [1, "same", "a"],
+        [2, "same", "b"],
+        [3, null, "a"],
+        [4, "nul\0tail", "a"],
+        [5, new Uint8Array([0, 255]), "a"],
+        [6, "missing", "a"],
+        [101, "same", "a"],
+        [102, null, "a"],
+        [103, "nul\0tail", "a"],
+        [104, new Uint8Array([0, 255]), "a"],
+      ] as const)
+        insert.run(id, key, site);
+      for (const threshold of [100, 1000]) {
+        const right = filter(
+          rightScan,
+          gt(column(rightScan, "id"), param(threshold)),
+        ) as TestRelation;
+        const candidate = antiJoin(
+          left,
+          right,
+          and(
+            eq(column(left, "membership_key"), column(right, "membership_key")),
+            eq(column(left, "lookup_key"), column(right, "lookup_key")),
+          ),
+        );
+        const physical = lowerLogicalPlan(candidate);
+        expect(physical.semiMembershipChoices).toHaveLength(1);
+        const choice = physical.semiMembershipChoices[0]!;
+        expect(
+          semiMembershipCostSelections([
+            { ...choice, materializedStops: [right.node] },
+          ]),
+        ).toMatchObject([
+          { strategy: "in", reason: "selected-materialized-right-membership" },
+        ]);
+        const optimized =
+          compileD1QuerySemiMembershipForceSafeForTest(candidate);
+        const fallback = compileD1QuerySemiMembershipFallbackForTest(candidate);
+        expect(optimized.sql).toContain(") IS NOT TRUE");
+        expect(optimized.sql).not.toContain("NOT IN");
+        expect(optimized.physicalPlanShape).toMatchObject({
+          semiMembershipCount: 1,
+          semiMemberships: [{ keyCount: 2, emissionCount: 1 }],
+        });
+        expect(fallback.physicalPlanShape).not.toHaveProperty(
+          "semiMembershipCount",
+        );
+        expect(rows(db, optimized)).toEqual(rows(db, fallback));
+        expect(rows(db, optimized).map((row) => row.id)).toEqual(
+          threshold === 100
+            ? [2, 2, 3, 3, 6, 6]
+            : [1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6],
+        );
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("selects and freshly validates anti IN against an actual licensed materialized boundary", () => {
+    const name = "cost_anti_licensed";
+    const table = catalogTable(name);
+    const left = relationFor(table);
+    const rightScan = scan(
+      table as typeof schema.site_identities,
+    ) as TestRelation;
+    const right = filter(
+      rightScan,
+      gt(column(rightScan, "id"), param(100)),
+    ) as TestRelation;
+    const ascending = window(right, {
+      rank: rowNumber({
+        orderBy: [{ expression: column(right, "id"), direction: "ASC" }],
+      }),
+    });
+    const descending = window(right, {
+      rank: rowNumber({
+        orderBy: [{ expression: column(right, "id"), direction: "DESC" }],
+      }),
+    });
+    const unmatched = antiJoin(
+      left,
+      right,
+      eq(column(left, "membership_key"), column(right, "membership_key")),
+    );
+    const output = union(
+      union(
+        project(ascending, {
+          branch: constant("window-a"),
+          id: ascending.columns.id!,
+        }),
+        project(descending, {
+          branch: constant("window-b"),
+          id: descending.columns.id!,
+        }),
+        true,
+      ),
+      project(unmatched, {
+        branch: constant("anti"),
+        id: unmatched.columns.id!,
+      }),
+      true,
+    );
+    const physical = lowerLogicalPlan(output);
+    expect(
+      physical.sharedRelations.find(({ node }) => node === right.node),
+    ).toMatchObject({ materialization: "materialized" });
+    expect(physical.semiMembershipCostSelections).toMatchObject([
+      { strategy: "in", reason: "selected-materialized-right-membership" },
+    ]);
+    expect(validatePhysicalQueryPlan(physical)).toBeDefined();
+    const selected = physical.semiMembershipCostSelections[0]!;
+    expect(() =>
+      validatePhysicalQueryPlan({
+        ...physical,
+        semiMembershipCostSelections: [
+          { ...selected, reason: "anti-source-is-not-materialized" },
+        ],
+      }),
+    ).toThrow(/semi membership cost selections/u);
+    const optimized = compileD1Query(physical);
+    const fallback = compileD1QuerySemiMembershipFallbackForTest(physical);
+    expect(optimized.sql).toContain(") IS NOT TRUE");
+    expect(fallback.sql).toContain("NOT EXISTS (SELECT ");
+    expect(optimized.physicalPlanShape).toMatchObject({
+      semiMembershipCount: 1,
+      semiMemberships: [{ keyCount: 1, emissionCount: 1 }],
+    });
+    const db = new DatabaseSync(":memory:");
+    try {
+      db.exec(
+        `CREATE TABLE ${name}(id INTEGER PRIMARY KEY,membership_key TEXT,lookup_key TEXT NOT NULL); INSERT INTO ${name} VALUES(1,'hit','a'),(2,'miss','b'),(3,NULL,'c'),(101,'hit','d'),(102,NULL,'e')`,
+      );
+      expect(rows(db, optimized)).toEqual(rows(db, fallback));
+      expect(
+        rows(db, optimized)
+          .filter((row) => row.branch === "anti")
+          .map((row) => row.id)
+          .sort((a, b) => Number(a) - Number(b)),
+      ).toEqual([2, 3, 102]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("retains anti error short-circuiting when an unvisited right expression can overflow", () => {
+    const name = "cost_anti_partial";
+    const table = catalogTable(name);
+    const leftScan = relationFor(table);
+    const rightScan = scan(
+      table as typeof schema.site_identities,
+    ) as TestRelation;
+    const left = filter(
+      leftScan,
+      gt(column(leftScan, "id"), param(0)),
+    ) as TestRelation;
+    const right = project(rightScan, {
+      key: callFunction("abs", column(rightScan, "id")),
+    });
+    const candidate = antiJoin(
+      left,
+      right,
+      eq(column(left, "id"), right.columns.key),
+    );
+    expect(lowerLogicalPlan(candidate).semiMembershipChoices).toHaveLength(0);
+    const optimized = compileD1QuerySemiMembershipForceSafeForTest(candidate);
+    const fallback = compileD1QuerySemiMembershipFallbackForTest(candidate);
+    expect(optimized.sql).not.toContain(" IS NOT TRUE");
+    const db = new DatabaseSync(":memory:");
+    try {
+      db.exec(
+        `CREATE TABLE ${name}(id INTEGER PRIMARY KEY,membership_key TEXT,lookup_key TEXT NOT NULL);INSERT INTO ${name} VALUES(-9223372036854775808,'k','k')`,
+      );
+      expect(rows(db, optimized)).toEqual([]);
+      expect(rows(db, optimized)).toEqual(rows(db, fallback));
+    } finally {
+      db.close();
+    }
   });
 
   it("keeps BLOB, NULL, duplicate and NUL rows equivalent in the force-safe path", () => {

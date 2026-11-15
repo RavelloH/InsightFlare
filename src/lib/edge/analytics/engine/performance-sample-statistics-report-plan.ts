@@ -103,6 +103,7 @@ function createSource(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly preparedTimePolicy?: "reader-window-v1";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly attributes: readonly string[];
@@ -158,6 +159,7 @@ export function buildPerformanceSummariesPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly preparedTimePolicy?: "reader-window-v1";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
 }): ValidatedLogicalPlan {
@@ -174,6 +176,7 @@ export function buildPerformanceTrendPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly preparedTimePolicy?: "reader-window-v1";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly interval: Interval;
@@ -229,6 +232,7 @@ type PerformanceReportInput = {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly preparedTimePolicy?: "reader-window-v1";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
 };
@@ -536,6 +540,7 @@ export function buildPerformanceAllTrendsPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly preparedTimePolicy?: "reader-window-v1";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly interval: Interval;
@@ -584,6 +589,7 @@ export function buildPerformanceDashboardPlan(input: {
   readonly queryTime: QueryTime;
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
   readonly preparedTimePolicy?: "reader-window-v1";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly interval: Interval;

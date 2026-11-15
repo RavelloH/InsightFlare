@@ -1,12 +1,10 @@
-import { classifyTrafficChannel } from "@/lib/analytics/traffic-channel-rules";
-import { browserEngineLabel } from "@/lib/browser-engine";
-import {
-  type CompiledQuery,
-  D1StatementBudgetError,
-  valuesRelation,
-} from "@/lib/db";
+import { valuesRelation } from "@/lib/db";
 import { AnalyticsProviderDomainError } from "@/lib/edge/analytics/application/errors";
-import type { TypedQueryProviderMiddleware } from "@/lib/edge/analytics/application/provider-registry";
+import { checkPageMembershipAudiencePolicy } from "@/lib/edge/analytics/application/page-membership-audience-policy";
+import {
+  createSiteExactDimensionQualificationProjection,
+  type SiteExactDimensionQualificationProjection,
+} from "@/lib/edge/analytics/application/site-exact-dimension";
 import type {
   CalendarGranularity,
   Interval,
@@ -37,17 +35,21 @@ import {
   type ScopedFilterPlan,
 } from "@/lib/edge/analytics/contract/scoped-filter";
 import {
-  advancedCountFilterCombinedGroupWidth,
   type AdvancedCountFilterMatchPlanInput,
   type AdvancedCountQualificationPlanInput,
   type AdvancedEventCandidateCountPlanInput,
-  buildAdvancedCountFilterCombinedPlan,
-  buildAdvancedCountFilterGuardPlan,
-  buildAdvancedCountFilterMatchPlan,
-  buildAdvancedCountFilterPayloadCombinedPlan,
 } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import { advancedCountPayloadPaths } from "@/lib/edge/analytics/engine/advanced-count-payload-selector";
-import { ADVANCED_FILTER_MAX_ACTIVITIES } from "@/lib/edge/analytics/engine/advanced-filter-activity-plan";
+import {
+  classifyAdvancedCountFilter,
+  classifyAdvancedEventCandidateCountFilter,
+} from "@/lib/edge/analytics/engine/advanced-filter-count-support";
+import { planAdvancedFilterExecution } from "@/lib/edge/analytics/engine/advanced-filter-execution-plan";
+import {
+  type ComparisonMembershipDependencyPlan,
+  planComparisonMembershipDependencies,
+} from "@/lib/edge/analytics/engine/comparison-membership-dependency-plan";
+import { comparisonPageReaderContract } from "@/lib/edge/analytics/engine/comparison-page-reader-contract";
 import type { ComparisonReportFamily } from "@/lib/edge/analytics/engine/comparison-report-plan";
 import {
   dimensionPageSelection,
@@ -56,15 +58,28 @@ import {
   type NormalizedOverviewPageTableRequest,
   normalizeOverviewPageTableRequest,
   overviewPageTableDescriptor,
-  PAGE_DIMENSION_SELECTIONS,
 } from "@/lib/edge/analytics/engine/dimension-report-plan";
 import {
   type EventNameDimensionListRequest,
   normalizeEventNameDimensionListRequest,
 } from "@/lib/edge/analytics/engine/event-type-summary-plan";
 import { resolveJourneyListQualificationFilters } from "@/lib/edge/analytics/engine/journey-list-qualification-filters";
+import {
+  type MembershipPreparationStep,
+  normalizeMembershipPreparations,
+} from "@/lib/edge/analytics/engine/membership-dependency-plan";
+import {
+  type OverviewMembershipDependencyPlan,
+  planOverviewMembershipDependencies,
+} from "@/lib/edge/analytics/engine/overview-membership-dependency-plan";
 import type { OverviewTrendQualificationConfiguration } from "@/lib/edge/analytics/engine/overview-trend-qualification-plan";
+import {
+  type PageChannelMembershipReader,
+  planPageChannelMembershipDependencies,
+} from "@/lib/edge/analytics/engine/page-channel-membership-dependency-plan";
 import { splitPageDimensionNativeFilters } from "@/lib/edge/analytics/engine/page-dimension-qualification-plan";
+import type { PageReaderConsumer } from "@/lib/edge/analytics/engine/page-membership-reader-catalog";
+import { pageWholeOriginalFamilyFromQuery } from "@/lib/edge/analytics/engine/page-whole-original-family";
 import { PERFORMANCE_METRICS } from "@/lib/edge/analytics/engine/performance-sample-statistics-report-plan";
 import {
   type QualifiedSourceFilterMode,
@@ -76,9 +91,11 @@ import {
   type ReferrerPageSortKey,
 } from "@/lib/edge/analytics/engine/referrer-report-plan";
 import {
-  type AdvancedCountNumberSelectorField,
-  advancedCountSelectorField,
-} from "@/lib/edge/analytics/engine/semantic/count-selector-fields";
+  planReferrersPageMembershipDependencies,
+  type ReferrersPageMembershipDependencyPlan,
+  type ReferrersPageReaderConfiguration,
+} from "@/lib/edge/analytics/engine/referrers-page-membership-dependency-plan";
+import { planReferrersTimeMembershipDependency } from "@/lib/edge/analytics/engine/referrers-time-membership-plan";
 import {
   EVENT_CONTEXT_CARD_KEYS,
   type EventContextCardKey,
@@ -97,6 +114,17 @@ import {
   normalizeSessionBoundaryDimensionRequest,
 } from "@/lib/edge/analytics/engine/session-path-report-plan";
 import {
+  planTeamExactDimensionExecution,
+  type TeamExactDimensionQuery,
+} from "@/lib/edge/analytics/engine/team-exact-dimension-plan";
+import { planTeamExactMembershipDependencies } from "@/lib/edge/analytics/engine/team-exact-membership-dependency-plan";
+import { planTeamExactWholeOriginalReader } from "@/lib/edge/analytics/engine/team-exact-whole-reader-plan";
+import {
+  planTeamSitesMembershipDependencies,
+  type TeamSitesMembershipQuery,
+} from "@/lib/edge/analytics/engine/team-sites-membership-dependency-plan";
+import { planTeamSitesWholeOriginalReaders } from "@/lib/edge/analytics/engine/team-sites-whole-reader-plan";
+import {
   sameTechnologyCrossQualificationConfiguration,
   type TechnologyCrossQualificationConfiguration,
 } from "@/lib/edge/analytics/engine/technology-cross-qualification-plan";
@@ -105,6 +133,7 @@ import {
   type TechnologyShareTrendQualificationConfiguration,
   technologyShareTrendQualificationConfiguration,
 } from "@/lib/edge/analytics/engine/technology-share-trend-report-plan";
+import { pageVisitQualificationConsumerKey } from "@/lib/edge/analytics/providers/d1/internal/page-visit-qualification-execution";
 import {
   createPageVisitQualificationPreparation,
   type PageVisitQualificationPreparation,
@@ -113,14 +142,39 @@ import {
   createReferrersSummaryQualificationPreparation,
   type ReferrersSummaryQualificationPreparation,
 } from "@/lib/edge/analytics/providers/d1/internal/referrers-qualification-execution";
+import {
+  createTeamSitesQualification,
+  type TeamSitesQualification,
+} from "@/lib/edge/analytics/providers/d1/internal/team-sites-qualification";
+import {
+  evaluateWholeFilterMembership as evaluateForSitesCore,
+  type QualificationMatchRow,
+} from "@/lib/edge/analytics/providers/d1/internal/whole-filter-membership-executor";
+import {
+  projectWholeOriginalMembership,
+  type WholeOriginalProjection,
+} from "@/lib/edge/analytics/providers/d1/internal/whole-filter-membership-projection";
+import { wholeOriginalTeamSitesQualificationFromQuery } from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
+import {
+  associateWholeOriginalCompletion,
+  selectWholeOriginalConsumer,
+  transferWholeOriginalCompletion,
+  wholeOriginalComparisonReaderTab,
+  type WholeOriginalConsumer,
+} from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
+import {
+  associateWholeFilterReaderDependency,
+  createWholeFilterReaderDependency,
+  type WholeFilterReaderDependency,
+  wholeFilterReaderDependencyFromQuery,
+} from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
+import {
+  isCanonicalPrivateChannelListWholeFilterRequest,
+  isCanonicalPrivateChannelOverviewWholeFilterRequest,
+  isCanonicalPrivatePageDimensionWholeFilterRequest,
+} from "@/lib/edge/analytics/providers/d1/internal/whole-filter-request";
+import { createTeamWholeOriginalMembershipInvocation } from "@/lib/edge/analytics/providers/d1/internal/whole-membership-stage-program";
 import type { Env } from "@/lib/edge/types";
-import type {
-  FilterEvaluationDataset,
-  FilterEvaluationEntity,
-} from "@/lib/filter-contract/filter-evaluator";
-import { evaluateFilterDocument } from "@/lib/filter-contract/filter-evaluator";
-import { buildCanonicalFilterScopeFacts } from "@/lib/filter-contract/filter-facts";
-import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
 import { filterDocumentUsesAdvancedExpressions } from "@/lib/filter-contract/filter-types";
 import type {
   FilterDocument,
@@ -129,38 +183,19 @@ import type {
 } from "@/lib/filter-contract/filters";
 
 import { sqliteBoundText } from "./lowering/scoped-source/selection-compatibility";
-import type { AdvancedFilterActivityRow } from "./advanced-filter-activity-query";
-import { queryAdvancedFilterActivityRange } from "./advanced-filter-activity-query";
-import {
-  compileAdvancedFilterCountCombinedQuery,
-  compileAdvancedFilterCountGuardQuery,
-  compileAdvancedFilterCountMatchesQuery,
-  compileAdvancedFilterCountPayloadCombinedQuery,
-  queryAdvancedFilterCountCombined,
-  queryAdvancedFilterCountGuard,
-  queryAdvancedFilterCountMatches,
-  queryAdvancedFilterCountPayloadCombined,
-  validateAdvancedFilterCountCombinedMatches,
-  validateAdvancedFilterCountPayloadCombinedMatches,
-} from "./advanced-filter-count-query";
-import { ADVANCED_FILTER_MAX_PAYLOAD_NODES } from "./advanced-filter-count-resource-policy";
-import type { AdvancedCountFilterSupport } from "./advanced-filter-count-support";
-import {
-  classifyAdvancedCountFilter,
-  classifyAdvancedEventCandidateCountFilter,
-} from "./advanced-filter-count-support";
-import type { AdvancedFilterPayloadNode } from "./advanced-filter-payload-query";
-import { queryAdvancedFilterPayloadNodes } from "./advanced-filter-payload-query";
 import { siteCoverage } from "./advanced-filter-site-coverage";
+import { executeAnalyticsLogicalStage } from "./analytics-logical-staged-runtime";
 import type { AnalyticsDbRelation } from "./analytics-relational-storage";
 import { semanticSubjectForAuthorizedSubset } from "./authorized-site-subject";
 import { comparisonReportFamilyForTab } from "./comparison-report-family";
 import { resolveCrossBreakdownPageDimension } from "./core-dimensions";
-import type {
-  AdvancedCountSqlFallbackReason,
-  D1ReadDiagnostics,
+import type { D1ReadDiagnostics } from "./diagnostics";
+import {
+  recordAdvancedFilterExecution,
+  recordScopedFilterDiagnostics,
 } from "./diagnostics";
-import { recordScopedFilterDiagnostics } from "./diagnostics";
+import { siteExactDimensionQualificationConsumerKey } from "./dimension-top-qualification";
+import type { D1QueryProviderMiddleware } from "./execution-options";
 import {
   attachFilterValuesQualificationToQuery,
   type DeferredFilterValuesQualificationInput,
@@ -168,8 +203,6 @@ import {
   filterValuesQualificationConfigurationFromQuery,
   filterValuesQualificationConfigurationsEqual,
 } from "./filter-values-qualification-request";
-import { registerPreparedMembership } from "./prepared-membership-relations";
-export { deferredFilterValuesQualificationFromQuery } from "./filter-values-qualification-request";
 import {
   attachGeoPointsQualificationToQuery,
   type DeferredGeoPointsQualificationInput,
@@ -182,6 +215,7 @@ import {
   type JourneyEventPageQualificationConfiguration,
   journeyEventPageQualificationConfigurationFromQuery,
 } from "./journey-event-page-qualification-request";
+import type { D1LogicalProgramExecution } from "./logical-program-execution";
 import {
   isInvalidOverviewSnapshot,
   readOwnDataProperty,
@@ -197,6 +231,8 @@ import {
   pagesDashboardQualificationConfigurationFromQuery,
   qualificationRequestOwnDataSnapshot,
 } from "./pages-dashboard-qualification-request";
+import { entityMembershipRelation } from "./prepared-membership-relations";
+import { registerPreparedMembership } from "./prepared-membership-relations";
 import {
   attachRetentionQualificationToQuery,
   type DeferredRetentionQualificationInput,
@@ -215,18 +251,13 @@ import {
   type VisitorListQualificationConfiguration,
   visitorListQualificationConfigurationFromQuery,
 } from "./visitor-list-qualification-request";
-
-const SITE_CHUNK_SIZE = 90;
-
-type RawEvaluationRow = AdvancedFilterActivityRow;
-
-type RawPayloadNode = AdvancedFilterPayloadNode;
-
-interface QualificationMatchRow {
-  readonly siteId: string;
-  readonly kind: "entity" | "visit" | "event";
-  readonly id: string;
-}
+import {
+  createChannelsWholeMembershipInvocation,
+  createDeferredWholeOriginalCompletionMembershipInvocation,
+  createPageWholeMembershipInvocation,
+  createWholeOriginalCompletionMembershipInvocation,
+} from "./whole-membership-stage-program";
+export { deferredFilterValuesQualificationFromQuery } from "./filter-values-qualification-request";
 
 const DEFERRED_EVENT_QUALIFICATION = Symbol(
   "insightflare.deferred-event-qualification",
@@ -410,6 +441,15 @@ export interface DeferredEventQualification {
   readonly subject: SemanticSubjectDomain;
   readonly countInput: AdvancedCountFilterMatchPlanInput;
   readonly coverage: ReadonlyMap<string, number>;
+  readonly channelMembershipInvocation?: ReturnType<
+    typeof createChannelsWholeMembershipInvocation
+  >;
+  readonly wholeOriginalMembership?: {
+    readonly consumer: WholeOriginalConsumer;
+    readonly invocation: ReturnType<
+      typeof createDeferredWholeOriginalCompletionMembershipInvocation
+    >;
+  };
   readonly diagnostics?: D1ReadDiagnostics;
   readonly signal?: AbortSignal;
   readonly eventContextRequest?: DeferredEventContextRequest;
@@ -790,1049 +830,1043 @@ function invalidInput(
   });
 }
 
-function siteChunks(siteIds: readonly string[]): string[][] {
-  const chunks: string[][] = [];
-  for (let index = 0; index < siteIds.length; index += SITE_CHUNK_SIZE) {
-    chunks.push(siteIds.slice(index, index + SITE_CHUNK_SIZE));
-  }
-  return chunks;
-}
-
-function evaluationReadRanges(
-  candidate: { readonly startMs: number; readonly endExclusiveMs: number },
-  read: { readonly startMs: number; readonly endExclusiveMs: number },
-): Array<{ readonly startMs: number; readonly endExclusiveMs: number }> {
-  const ranges = [candidate, read]
-    .filter((range) => range.startMs < range.endExclusiveMs)
-    .sort((left, right) => left.startMs - right.startMs);
-  const merged: Array<{ startMs: number; endExclusiveMs: number }> = [];
-  for (const range of ranges) {
-    const previous = merged.at(-1);
-    if (!previous || range.startMs > previous.endExclusiveMs) {
-      merged.push({ ...range });
-    } else if (range.endExclusiveMs > previous.endExclusiveMs) {
-      previous.endExclusiveMs = range.endExclusiveMs;
-    }
-  }
-  return merged;
-}
-
-function payloadPaths(expression: FilterDocument["root"]): {
-  readonly paths: readonly string[];
-  readonly wholePayload: boolean;
-} {
-  const paths = new Set<string>();
-  let wholePayload = false;
-  const target = (value: FilterTargetExpression): void => {
-    if (value.kind === "event-payload") paths.add(value.path);
-    else if (value.kind === "member") {
-      target(value.object);
-      if (value.member === "payload") wholePayload = true;
-    } else if (value.kind === "context-intrinsic") {
-      if (value.intrinsic === "same") target(value.input);
-    } else if (value.kind === "occurrence-time") {
-      target(value.input);
-    } else if (value.kind === "selector") {
-      target(value.collection);
-      visit(value.predicate);
-    } else if (value.kind === "projection") {
-      target(value.collection);
-      if (value.member === "payload") {
-        if (value.path) paths.add(value.path);
-        else wholePayload = true;
-      }
-    } else if (value.kind === "reducer") target(value.input);
-    else if (value.kind === "arithmetic") {
-      target(value.left);
-      target(value.right);
-    } else if (value.kind === "bucket") target(value.input);
-    else if (value.kind === "window") {
-      target(value.collection);
-      target(value.anchor);
-    } else if (value.kind === "periods") target(value.collection);
-    else if (value.kind === "sequence") value.steps.forEach(target);
-    else if (value.kind === "adjacent") target(value.sequence);
-    else if (value.kind === "without") {
-      target(value.sequence);
-      target(value.excluded);
-    }
-  };
-  const visit = (node: FilterDocument["root"]): void => {
-    if (!node) return;
-    if (node.kind === "condition") {
-      target(node.target);
-      if (
-        node.value &&
-        typeof node.value === "object" &&
-        !Array.isArray(node.value) &&
-        "kind" in node.value
-      )
-        target(node.value as FilterTargetExpression);
-    } else if (node.kind === "not") visit(node.child);
-    else node.children.forEach(visit);
-  };
-  visit(expression);
-  return { paths: [...paths].sort(), wholePayload };
-}
-
-async function loadActivities(
-  env: Env,
-  subject: SemanticSubjectDomain,
-  siteIds: readonly string[],
-  ranges: readonly {
-    readonly startMs: number;
-    readonly endExclusiveMs: number;
-  }[],
-  diagnostics?: D1ReadDiagnostics,
-  signal?: AbortSignal,
-): Promise<RawEvaluationRow[]> {
-  const activities: RawEvaluationRow[] = [];
-  for (const chunk of siteChunks(siteIds)) {
-    for (const range of ranges) {
-      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      const rows = await queryAdvancedFilterActivityRange({
-        env,
-        subject,
-        siteIds: chunk,
-        range,
-        diagnostics,
-        signal,
-      });
-      activities.push(...rows);
-      if (activities.length > ADVANCED_FILTER_MAX_ACTIVITIES) {
-        throw invalidInput("filters", "filter_activity_limit_exceeded");
-      }
-    }
-  }
-  return activities;
-}
-
-function nodeValue(node: RawPayloadNode): unknown {
-  if (node.value_type === 0) return null;
-  if (node.value_type === 1) return node.string_value;
-  if (node.value_type === 2) return node.number_value;
-  if (node.value_type === 3) return Number(node.boolean_value) === 1;
-  if (node.value_type === 5) return [];
-  return {};
-}
-
-function reconstructPayloads(
-  nodes: readonly RawPayloadNode[],
-): Map<string, unknown> {
-  const grouped = new Map<string, RawPayloadNode[]>();
-  for (const node of nodes) {
-    const list = grouped.get(node.event_id) ?? [];
-    list.push(node);
-    grouped.set(node.event_id, list);
-  }
-  const payloads = new Map<string, unknown>();
-  for (const [eventId, records] of grouped) {
-    const values = new Map<number, unknown>();
-    let root: unknown = {};
-    for (const node of records) values.set(node.node_id, nodeValue(node));
-    for (const node of records) {
-      const value = values.get(node.node_id);
-      if (node.parent_node_id === null) {
-        root = value;
-        continue;
-      }
-      const parent = values.get(node.parent_node_id);
-      if (!parent || typeof parent !== "object") continue;
-      if (Array.isArray(parent)) {
-        if (typeof node.array_index === "number")
-          parent[node.array_index] = value;
-      } else if (node.key_name !== null) {
-        (parent as Record<string, unknown>)[node.key_name] = value;
-      }
-    }
-    payloads.set(eventId, root);
-  }
-  return payloads;
-}
-
-async function loadPayloads(
-  env: Env,
-  subject: SemanticSubjectDomain,
-  siteIds: readonly string[],
-  ranges: readonly {
-    readonly startMs: number;
-    readonly endExclusiveMs: number;
-  }[],
-  paths: ReturnType<typeof payloadPaths>,
-  diagnostics?: D1ReadDiagnostics,
-  signal?: AbortSignal,
-): Promise<Map<string, unknown>> {
-  const payloadNodes: RawPayloadNode[] = [];
-  for (const chunk of siteChunks(siteIds)) {
-    for (const range of ranges) {
-      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      const rows = await queryAdvancedFilterPayloadNodes({
-        env,
-        subject,
-        siteIds: chunk,
-        range,
-        paths: paths.paths,
-        wholePayload: paths.wholePayload,
-        diagnostics,
-        signal,
-      });
-      payloadNodes.push(...rows);
-      if (payloadNodes.length > ADVANCED_FILTER_MAX_PAYLOAD_NODES) {
-        throw invalidInput("filters", "filter_payload_node_limit_exceeded");
-      }
-    }
-  }
-  return reconstructPayloads(payloadNodes);
-}
-
-function directColumn(
-  fieldId: string,
-  strategy: string,
-  row: RawEvaluationRow,
-): unknown {
-  if (strategy.startsWith("column."))
-    return row[strategy.slice("column.".length)];
-  if (strategy === "event.name")
-    return row.kind === "event" ? row.event_name : undefined;
-  if (strategy === "derived.trafficChannel") {
-    return classifyTrafficChannel({
-      referrerHost: String(row.referrer_host ?? ""),
-      utmSource: String(row.utm_source ?? ""),
-      utmMedium: String(row.utm_medium ?? ""),
-      utmCampaign: String(row.utm_campaign ?? ""),
+type WholeEvaluationInput = {
+  readonly env: Env;
+  readonly subject: SemanticSubjectDomain;
+  readonly siteIds: readonly string[];
+  readonly filters: FilterDocument;
+  readonly plan: ScopedFilterPlan;
+  readonly time: QueryTime;
+  readonly diagnostics?: D1ReadDiagnostics;
+  readonly signal?: AbortSignal;
+  readonly coverage?: ReadonlyMap<string, number>;
+  readonly program?: D1LogicalProgramExecution;
+  readonly deferredInvocation?: ReturnType<
+    typeof createDeferredWholeOriginalCompletionMembershipInvocation
+  >;
+};
+function evaluateForSites(
+  input: WholeEvaluationInput & { readonly program: D1LogicalProgramExecution },
+): Promise<PreparedMembership | undefined>;
+function evaluateForSites(
+  input: WholeEvaluationInput,
+): Promise<PreparedMembership>;
+function evaluateForSites(
+  input: WholeEvaluationInput & { readonly completion: WholeOriginalConsumer },
+): Promise<WholeOriginalProjection>;
+async function evaluateForSites(
+  input: WholeEvaluationInput & { readonly completion?: WholeOriginalConsumer },
+): Promise<PreparedMembership | WholeOriginalProjection | undefined> {
+  // The raw staged evaluator retains the caller's original completion or
+  // registered projection. Its finite domain does not authorize a reader.
+  const stagedEntityEvaluation =
+    input.subject.origin === "site" &&
+    input.subject.siteIds.length === 1 &&
+    input.siteIds.length === 1 &&
+    input.siteIds[0] === input.subject.siteIds[0] &&
+    ((input.plan.mode === "entity" &&
+      (input.plan.scope === "session" || input.plan.scope === "visitor")) ||
+      (input.plan.mode === "observation" && input.plan.scope === "event")) &&
+    input.coverage === undefined;
+  // Only closed Team whole-original completions can opt into a joint raw program.
+  // Keep exact authorized domain/order; no caller coverage or arbitrary slots.
+  const stagedTeamEvaluation =
+    (input.completion?.kind === "team-sites" ||
+      input.completion?.kind === "team-exact-dimension") &&
+    input.subject.origin === "team" &&
+    input.coverage === undefined &&
+    input.plan.mode === "entity" &&
+    (input.plan.scope === "session" || input.plan.scope === "visitor") &&
+    input.siteIds.length === input.subject.siteIds.length &&
+    input.siteIds.every(
+      (siteId, index) => siteId === input.subject.siteIds[index],
+    );
+  // Retain the same actual single-site S/V invocation in the D1-owned
+  // program, including an existing private completion. Deferred coverage
+  // predecessors keep their original invocation and execution route.
+  const programInvocation =
+    input.program &&
+    (!input.completion || input.deferredInvocation === undefined) &&
+    stagedEntityEvaluation &&
+    input.plan.mode === "entity" &&
+    (input.plan.scope === "session" || input.plan.scope === "visitor")
+      ? createWholeOriginalCompletionMembershipInvocation({
+          env: input.env,
+          subject: input.subject,
+          filters: input.filters,
+          queryTime: input.time,
+          scope: input.plan.scope,
+          originalScopePlan: input.plan,
+          ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
+          ...(input.signal ? { signal: input.signal } : {}),
+        })
+      : undefined;
+  const matches = await (programInvocation
+    ? input.program!.executeWholeAtOriginalCheckpoint(programInvocation)
+    : input.deferredInvocation
+      ? executeAnalyticsLogicalStage({
+          kind: "whole-original-completion-at-original-checkpoint",
+          invocation: input.deferredInvocation,
+        })
+      : stagedEntityEvaluation || stagedTeamEvaluation
+        ? executeAnalyticsLogicalStage({
+            kind: "whole-original-completion-at-original-checkpoint",
+            invocation: stagedTeamEvaluation
+              ? createTeamWholeOriginalMembershipInvocation({
+                  env: input.env,
+                  subject: input.subject,
+                  filters: input.filters,
+                  queryTime: input.time,
+                  scope: input.plan.scope as "session" | "visitor",
+                  originalScopePlan: input.plan,
+                  ...(input.diagnostics
+                    ? { diagnostics: input.diagnostics }
+                    : {}),
+                  ...(input.signal ? { signal: input.signal } : {}),
+                })
+              : createWholeOriginalCompletionMembershipInvocation({
+                  env: input.env,
+                  subject: input.subject,
+                  filters: input.filters,
+                  queryTime: input.time,
+                  scope: input.plan.scope,
+                  originalScopePlan: input.plan,
+                  ...(input.diagnostics
+                    ? { diagnostics: input.diagnostics }
+                    : {}),
+                  ...(input.signal ? { signal: input.signal } : {}),
+                }),
+          })
+        : evaluateForSitesCore(input));
+  if (input.completion) {
+    // Preserve the original selected-role projection/error checkpoint before
+    // declaring the actual terminal. Completion still returns its projection;
+    // early [] has no terminal and retains the original owner/reader route.
+    const projection = projectWholeOriginalMembership({
+      siteIds: input.siteIds,
+      mode: input.plan.mode,
+      matches,
     });
-  }
-  if (strategy === "derived.browserEngine")
-    return browserEngineLabel(String(row.browser ?? ""), String(row.os ?? ""));
-  if (strategy === "derived.osVersion") {
-    const os = String(row.os ?? "").trim();
-    const version = String(row.os_version ?? "").trim();
-    return os && version ? `${os} ${version}` : os || version;
-  }
-  if (strategy === "derived.screenSize") {
-    return row.screen_width !== null &&
-      row.screen_width !== undefined &&
-      row.screen_height !== null &&
-      row.screen_height !== undefined
-      ? `${row.screen_width}x${row.screen_height}`
-      : "";
+    if (programInvocation)
+      input.program!.completedWholeOutput(programInvocation);
+    return projection;
   }
   if (
-    strategy === "session.boundary.entry" ||
-    strategy === "session.boundary.exit"
+    programInvocation &&
+    input.program!.completedWholeOutput(programInvocation)
   )
     return undefined;
-  if (strategy.startsWith("fact.")) return undefined;
-  if (strategy === "event.payload") return undefined;
-  void fieldId;
-  return undefined;
-}
-
-function fieldsFor(row: RawEvaluationRow): Record<string, unknown> {
-  const fields: Record<string, unknown> = {};
-  for (const [fieldId, definition] of analyticsFilterRegistry) {
-    const value = directColumn(fieldId, definition.compilerStrategy, row);
-    if (value !== undefined) {
-      fields[fieldId] =
-        definition.compilerStrategy === "column.is_eu" && value !== null
-          ? Number(value) === 1
-          : value;
-    }
-  }
-  if (row.kind === "event") fields["event.name"] = row.event_name;
-  return fields;
-}
-
-function aggregateFacts(
-  records: readonly FilterEvaluationEntity[],
-): Map<string, Record<string, unknown>> {
-  const activities = records.filter(
-    (item): item is FilterEvaluationEntity & { kind: "page" | "event" } =>
-      item.kind === "page" || item.kind === "event",
-  );
-  const canonical = buildCanonicalFilterScopeFacts(activities);
-  const result = new Map<string, Record<string, unknown>>();
-  for (const [id, facts] of canonical.sessions)
-    result.set(`session:${id}`, { ...facts });
-  for (const [id, facts] of canonical.visitors)
-    result.set(`visitor:${id}`, { ...facts });
-  return result;
-}
-
-function entitiesForRows(
-  rows: readonly RawEvaluationRow[],
-  payloads: ReadonlyMap<string, unknown>,
-  candidateRange: { readonly startMs: number; readonly endExclusiveMs: number },
-  filterRange: {
-    readonly startMs: number;
-    readonly endExclusiveMs: number;
-  },
-  readRange: {
-    readonly startMs: number;
-    readonly endExclusiveMs: number;
-  },
-  explicitFilterRange: boolean,
-): FilterEvaluationDataset {
-  const initial = rows.map((row): FilterEvaluationEntity => ({
-    kind: row.kind,
-    // The legacy evaluator's public type is narrower than its SQL row contract.
-    // Keep nullable database values intact at runtime; this only bridges TS types.
-    id: row.id as string,
-    time: row.time,
-    visitId: row.visit_id as string,
-    sessionId: row.session_id ?? undefined,
-    visitorId: row.visitor_id ?? undefined,
-    fields: fieldsFor(row),
-    ...(row.kind === "event"
-      ? {
-          payload: payloads.has(row.id as string)
-            ? payloads.get(row.id as string)
-            : {},
-        }
-      : {}),
-  }));
-  const candidate = initial.filter(
-    (item) =>
-      item.time !== undefined &&
-      item.time >= candidateRange.startMs &&
-      item.time < candidateRange.endExclusiveMs,
-  );
-  const read = initial.filter(
-    (item) =>
-      item.time !== undefined &&
-      item.time >= readRange.startMs &&
-      item.time < readRange.endExclusiveMs,
-  );
-  const filter = initial.filter(
-    (item) =>
-      item.time !== undefined &&
-      item.time >= filterRange.startMs &&
-      item.time < filterRange.endExclusiveMs,
-  );
-  const evaluationFacts = aggregateFacts(explicitFilterRange ? filter : read);
-  const candidateFacts = aggregateFacts(candidate);
-  const withFacts = initial.map((item) => {
-    const fields = { ...item.fields };
-    const candidateFields = { ...item.fields };
-    if (item.sessionId) {
-      Object.assign(fields, evaluationFacts.get(`session:${item.sessionId}`));
-      Object.assign(
-        candidateFields,
-        candidateFacts.get(`session:${item.sessionId}`),
-      );
-    }
-    if (item.visitorId) {
-      Object.assign(fields, evaluationFacts.get(`visitor:${item.visitorId}`));
-      Object.assign(
-        candidateFields,
-        candidateFacts.get(`visitor:${item.visitorId}`),
-      );
-    }
-    return { ...item, fields, candidateFields };
-  });
-  const pages = withFacts.filter((item) => item.kind === "page");
-  const events = withFacts.filter((item) => item.kind === "event");
-  return {
-    pages,
-    events,
-    coverageRange: {
-      startMs: Number.MIN_SAFE_INTEGER,
-      endExclusiveMs: Number.MAX_SAFE_INTEGER,
-    },
-  };
-}
-
-type EvaluationRange = {
-  readonly startMs: number;
-  readonly endExclusiveMs: number;
-};
-
-interface CountSqlSiteState {
-  readonly siteId: string;
-  readonly readRange: EvaluationRange;
-  readonly expressionRange: EvaluationRange | null;
-}
-
-function intersectEvaluationRanges(
-  left: EvaluationRange,
-  right: EvaluationRange,
-): EvaluationRange | null {
-  const startMs = Math.max(left.startMs, right.startMs);
-  const endExclusiveMs = Math.min(left.endExclusiveMs, right.endExclusiveMs);
-  return startMs < endExclusiveMs ? { startMs, endExclusiveMs } : null;
-}
-
-/** Entity identities produced by the Count SQL slice; never part of a plan. */
-interface CountSqlIdentity {
-  readonly siteId: string;
-  readonly id: string;
-}
-
-interface CountSqlMatches {
-  readonly entityIds?: readonly CountSqlIdentity[];
-}
-
-type CountSqlEvaluation =
-  | {
-      readonly kind: "evaluated";
-      readonly matches: CountSqlMatches;
-    }
-  | {
-      readonly kind: "legacy";
-      readonly fallbackReason: AdvancedCountSqlFallbackReason;
-    };
-
-interface PreparedCountMatchGroup {
-  readonly query: CompiledQuery<Record<string, unknown>>;
-}
-
-interface PreparedCountGuard {
-  readonly query: CompiledQuery<Record<string, unknown>>;
-  readonly numericCompatibilityFields: readonly AdvancedCountNumberSelectorField[];
-}
-
-async function evaluateAdvancedCountSql(input: {
-  readonly env: Env;
-  readonly subject: SemanticSubjectDomain;
-  readonly siteIds: readonly string[];
-  readonly support: Extract<AdvancedCountFilterSupport, { kind: "supported" }>;
-  readonly plan: ScopedFilterPlan;
-  readonly time: QueryTime;
-  readonly coverage: ReadonlyMap<string, number>;
-  readonly readRange: EvaluationRange;
-  readonly diagnostics?: D1ReadDiagnostics;
-  readonly signal?: AbortSignal;
-}): Promise<CountSqlEvaluation> {
-  if (input.plan.scope !== "session" && input.plan.scope !== "visitor")
-    throw new Error("advanced_filter_count_sql_scope_changed_after_preflight");
-  if (input.siteIds.length === 0)
-    return {
-      kind: "evaluated",
-      matches: { entityIds: [] },
-    };
-
-  const fullHistory = input.time.fullHistory === true;
-  const explicitFilterRange = input.time.filterRange !== undefined;
-  const capturedEnd = input.time.capturedAtMs + 1;
-  const sites: CountSqlSiteState[] = [];
-  for (const siteId of input.siteIds) {
-    const createdAt = input.coverage.get(siteId);
-    if (createdAt === undefined)
-      throw invalidInput("readRange", "filter_evaluation_range_unavailable");
-    const siteReadRange = fullHistory
-      ? { startMs: createdAt, endExclusiveMs: capturedEnd }
-      : input.readRange;
-    const siteFilterRange = explicitFilterRange
-      ? {
-          startMs: input.time.filterRange!.startMs ?? createdAt,
-          endExclusiveMs: input.time.filterRange!.endExclusiveMs ?? capturedEnd,
-        }
-      : undefined;
-    // The existing provider skips a site whose explicit filter domain is empty
-    // before constructing its evaluator dataset.
-    if (
-      siteFilterRange &&
-      siteFilterRange.startMs >= siteFilterRange.endExclusiveMs
-    )
-      continue;
-    if (
-      !Number.isSafeInteger(siteReadRange.startMs) ||
-      !Number.isSafeInteger(siteReadRange.endExclusiveMs) ||
-      siteReadRange.startMs >= siteReadRange.endExclusiveMs
-    )
-      return {
-        kind: "legacy",
-        fallbackReason: { kind: "invalid-range" },
-      };
-    const expressionRange = siteFilterRange
-      ? intersectEvaluationRanges(siteReadRange, siteFilterRange)
-      : siteReadRange;
-    sites.push({ siteId, readRange: siteReadRange, expressionRange });
-  }
-
-  const activeSites = sites.filter(
-    (
-      site,
-    ): site is CountSqlSiteState & {
-      readonly expressionRange: EvaluationRange;
-    } => site.expressionRange !== null,
-  );
-  const numericCompatibilityRequirements =
-    input.support.numericCompatibilityRequirements;
-  const numericCompatibilityFields = numericCompatibilityRequirements.map(
-    ({ fieldId }): AdvancedCountNumberSelectorField => {
-      const field = advancedCountSelectorField(fieldId);
-      if (!field || field.kind !== "number")
-        throw new Error(
-          "advanced_filter_count_support_returned_invalid_numeric_field",
-        );
-      return field;
-    },
-  );
-  const combinedSite = activeSites[0];
-  const combinedRange = input.time.range;
-  const combinedIsApplicable =
-    !fullHistory &&
-    !explicitFilterRange &&
-    input.siteIds.length === 1 &&
-    activeSites.length === 1 &&
-    combinedSite?.siteId === input.siteIds[0] &&
-    combinedSite.readRange.startMs === combinedRange.startMs &&
-    combinedSite.readRange.endExclusiveMs === combinedRange.endExclusiveMs &&
-    combinedSite.expressionRange.startMs === combinedRange.startMs &&
-    combinedSite.expressionRange.endExclusiveMs ===
-      combinedRange.endExclusiveMs &&
-    input.readRange.startMs === combinedRange.startMs &&
-    input.readRange.endExclusiveMs === combinedRange.endExclusiveMs;
-  if (combinedIsApplicable && combinedSite) {
-    if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    const subject = semanticSubjectForAuthorizedSubset(
-      input.subject,
-      [combinedSite.siteId],
-      "activity",
-    );
-    const combinedInput = {
-      subject,
-      candidateRange: input.time.range,
-      readRange: combinedSite.readRange,
-      expressionRange: combinedSite.expressionRange,
-      expressionUsesExplicitRange: false,
-      lowerBounds: [
-        {
-          siteId: combinedSite.siteId,
-          startMs: combinedSite.readRange.startMs,
-        },
-      ],
-      scope: input.plan.scope,
-      reportingTimeZone: input.time.reportingTimeZone,
-      capturedAtMs: input.time.capturedAtMs,
-      analysis: input.support.analysis,
-      numericCompatibilityRequirements,
-    };
-    const payloadPaths = advancedCountPayloadPaths(
-      input.support.document.root!,
-    );
-    if (payloadPaths.length > 0) {
-      const payloadPlan =
-        buildAdvancedCountFilterPayloadCombinedPlan(combinedInput);
-      let payloadQuery: ReturnType<
-        typeof compileAdvancedFilterCountPayloadCombinedQuery
-      >;
-      try {
-        payloadQuery =
-          compileAdvancedFilterCountPayloadCombinedQuery(payloadPlan);
-      } catch (error) {
-        if (!(error instanceof D1StatementBudgetError)) throw error;
-        return {
-          kind: "legacy",
-          fallbackReason: {
-            kind: "compile-budget",
-            item: error.item,
-            actual: error.actual,
-            limit: error.limit,
-          },
-        };
-      }
-      if (input.signal?.aborted)
-        throw new DOMException("Aborted", "AbortError");
-      const payload = await queryAdvancedFilterCountPayloadCombined({
-        env: input.env,
-        query: payloadQuery,
-        diagnostics: input.diagnostics,
-      });
-      if (input.signal?.aborted)
-        throw new DOMException("Aborted", "AbortError");
-      if (payload.rawCount > ADVANCED_FILTER_MAX_ACTIVITIES)
-        throw invalidInput("filters", "filter_activity_limit_exceeded");
-      if (payload.payloadNodeCount > ADVANCED_FILTER_MAX_PAYLOAD_NODES)
-        throw invalidInput("filters", "filter_payload_node_limit_exceeded");
-      if (payload.nullActivityIdCount > 0)
-        return {
-          kind: "legacy",
-          fallbackReason: { kind: "null-activity-id" },
-        };
-      if (payload.siteIdentityMismatchCount > 0)
-        return {
-          kind: "legacy",
-          fallbackReason: { kind: "site-identity-mismatch" },
-        };
-      const payloadControls: Array<
-        | "missing-event-fact"
-        | "invalid-structure"
-        | "invalid-value"
-        | "event-fact-multiplicity"
-      > = [];
-      if (payload.payloadMissingFactCount > 0)
-        payloadControls.push("missing-event-fact");
-      if (payload.payloadStructureInvalidCount > 0)
-        payloadControls.push("invalid-structure");
-      if (payload.payloadValueInvalidCount > 0)
-        payloadControls.push("invalid-value");
-      if (payload.payloadMultiplicityInvalidCount > 0)
-        payloadControls.push("event-fact-multiplicity");
-      if (payloadControls.length > 0)
-        return {
-          kind: "legacy",
-          fallbackReason: {
-            kind: "payload-data-domain",
-            controls: Object.freeze(payloadControls),
-          },
-        };
-      const entityIds: CountSqlIdentity[] =
-        validateAdvancedFilterCountPayloadCombinedMatches(
-          payload.matches,
-          combinedSite.siteId,
-        ).map(({ siteId, entityId }) => ({ siteId, id: entityId }));
-      entityIds.sort(
-        (left, right) =>
-          left.siteId.localeCompare(right.siteId) ||
-          left.id.localeCompare(right.id),
-      );
-      return { kind: "evaluated", matches: { entityIds } };
-    }
-
-    const combinedPlan = buildAdvancedCountFilterCombinedPlan(combinedInput);
-    const logicalGroupWidth =
-      advancedCountFilterCombinedGroupWidth(combinedPlan);
-    let combinedQuery: ReturnType<
-      typeof compileAdvancedFilterCountCombinedQuery
-    > = null;
-    if (logicalGroupWidth !== null && logicalGroupWidth <= 16) {
-      try {
-        combinedQuery = compileAdvancedFilterCountCombinedQuery(combinedPlan);
-      } catch (error) {
-        if (!(error instanceof D1StatementBudgetError)) throw error;
-      }
-    }
-    if (combinedQuery) {
-      if (input.signal?.aborted)
-        throw new DOMException("Aborted", "AbortError");
-      const combined = await queryAdvancedFilterCountCombined({
-        env: input.env,
-        query: combinedQuery,
-        diagnostics: input.diagnostics,
-      });
-      if (input.signal?.aborted)
-        throw new DOMException("Aborted", "AbortError");
-      if (combined.rawCount > ADVANCED_FILTER_MAX_ACTIVITIES)
-        throw invalidInput("filters", "filter_activity_limit_exceeded");
-      if (combined.nullActivityIdCount > 0)
-        return {
-          kind: "legacy",
-          fallbackReason: { kind: "null-activity-id" },
-        };
-      if (combined.siteIdentityMismatchCount > 0)
-        return {
-          kind: "legacy",
-          fallbackReason: { kind: "site-identity-mismatch" },
-        };
-      if (combined.numericCompatibilityFieldIds.length > 0)
-        return {
-          kind: "legacy",
-          fallbackReason: {
-            kind: "numeric-data-domain",
-            fieldIds: combined.numericCompatibilityFieldIds,
-          },
-        };
-      const entityIds: CountSqlIdentity[] =
-        validateAdvancedFilterCountCombinedMatches(
-          combined.matches,
-          combinedSite.siteId,
-        ).map(({ siteId, entityId }) => ({ siteId, id: entityId }));
-      entityIds.sort(
-        (left, right) =>
-          left.siteId.localeCompare(right.siteId) ||
-          left.id.localeCompare(right.id),
-      );
-      return { kind: "evaluated", matches: { entityIds } };
-    }
-  }
-  const matchGroupSize = fullHistory ? 24 : SITE_CHUNK_SIZE;
-  const preparedGroups: PreparedCountMatchGroup[] = [];
-  for (let index = 0; index < activeSites.length; index += matchGroupSize) {
-    if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    const group = activeSites.slice(index, index + matchGroupSize);
-    const batchReadRange = {
-      startMs: Math.min(...group.map((site) => site.readRange.startMs)),
-      endExclusiveMs: Math.min(
-        ...group.map((site) => site.readRange.endExclusiveMs),
-      ),
-    };
-    const batchExpressionRange = {
-      startMs: Math.min(...group.map((site) => site.expressionRange.startMs)),
-      endExclusiveMs: Math.min(
-        ...group.map((site) => site.expressionRange.endExclusiveMs),
-      ),
-    };
-    if (
-      batchReadRange.startMs >= batchReadRange.endExclusiveMs ||
-      batchExpressionRange.startMs >= batchExpressionRange.endExclusiveMs
-    )
-      return {
-        kind: "legacy",
-        fallbackReason: { kind: "invalid-range" },
-      };
-
-    const groupSiteIds = group.map((site) => site.siteId);
-    const subject = semanticSubjectForAuthorizedSubset(
-      input.subject,
-      groupSiteIds,
-      "activity",
-    );
-    const matchPlan = buildAdvancedCountFilterMatchPlan({
-      subject,
-      candidateRange: input.time.range,
-      readRange: batchReadRange,
-      ...(explicitFilterRange ? { filterRange: batchExpressionRange } : {}),
-      expressionRange: batchExpressionRange,
-      expressionUsesExplicitRange: explicitFilterRange,
-      lowerBounds: group.map((site) => ({
-        siteId: site.siteId,
-        startMs: explicitFilterRange
-          ? site.expressionRange.startMs
-          : site.readRange.startMs,
-      })),
-      scope: input.plan.scope,
-      reportingTimeZone: input.time.reportingTimeZone,
-      capturedAtMs: input.time.capturedAtMs,
-      analysis: input.support.analysis,
-      numericCompatibilityRequirements,
-    });
-    try {
-      preparedGroups.push({
-        query: compileAdvancedFilterCountMatchesQuery(matchPlan),
-      });
-    } catch (error) {
-      if (!(error instanceof D1StatementBudgetError)) throw error;
-      return {
-        kind: "legacy",
-        fallbackReason: {
-          kind: "compile-budget",
-          item: error.item,
-          actual: error.actual,
-          limit: error.limit,
-        },
-      };
-    }
-  }
-
-  const readRanges = evaluationReadRanges(input.time.range, input.readRange);
-  const preparedGuards: PreparedCountGuard[] = [];
-  for (const siteIds of siteChunks(input.siteIds)) {
-    const subject = semanticSubjectForAuthorizedSubset(
-      input.subject,
-      siteIds,
-      "activity",
-    );
-    for (const range of readRanges) {
-      if (input.signal?.aborted)
-        throw new DOMException("Aborted", "AbortError");
-      const guardPlan = buildAdvancedCountFilterGuardPlan({
-        subject,
-        range,
-        reportingTimeZone: input.time.reportingTimeZone,
-        numericCompatibilityRequirements,
-      });
-      try {
-        preparedGuards.push({
-          query: compileAdvancedFilterCountGuardQuery(guardPlan),
-          numericCompatibilityFields,
-        });
-      } catch (error) {
-        if (!(error instanceof D1StatementBudgetError)) throw error;
-        return {
-          kind: "legacy",
-          fallbackReason: {
-            kind: "compile-budget",
-            item: error.item,
-            actual: error.actual,
-            limit: error.limit,
-          },
-        };
-      }
-    }
-  }
-  let loadedRawActivities = 0;
-  let hasNullActivityId = false;
-  let hasSiteIdentityMismatch = false;
-  const numericCompatibilityFieldIds = new Set<string>();
-  for (const guard of preparedGuards) {
-    if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    const guarded = await queryAdvancedFilterCountGuard({
-      env: input.env,
-      query: guard.query,
-      numericCompatibilityFields: guard.numericCompatibilityFields,
-      diagnostics: input.diagnostics,
-    });
-    loadedRawActivities += guarded.rawCount;
-    if (loadedRawActivities > ADVANCED_FILTER_MAX_ACTIVITIES)
-      throw invalidInput("filters", "filter_activity_limit_exceeded");
-    hasNullActivityId ||= guarded.nullActivityIdCount > 0;
-    hasSiteIdentityMismatch ||= guarded.siteIdentityMismatchCount > 0;
-    guarded.numericCompatibilityFieldIds.forEach((fieldId) =>
-      numericCompatibilityFieldIds.add(fieldId),
-    );
-  }
-  if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-  if (hasNullActivityId)
-    return {
-      kind: "legacy",
-      fallbackReason: { kind: "null-activity-id" },
-    };
-  if (hasSiteIdentityMismatch)
-    return {
-      kind: "legacy",
-      fallbackReason: { kind: "site-identity-mismatch" },
-    };
-  if (numericCompatibilityFieldIds.size > 0)
-    return {
-      kind: "legacy",
-      fallbackReason: {
-        kind: "numeric-data-domain",
-        fieldIds: [...numericCompatibilityFieldIds].sort(),
-      },
-    };
-  if (activeSites.length === 0)
-    return { kind: "evaluated", matches: { entityIds: [] } };
-
-  const entityIds: CountSqlIdentity[] = [];
-  for (const group of preparedGroups) {
-    if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    const result = await queryAdvancedFilterCountMatches({
-      env: input.env,
-      query: group.query,
-      numericCompatibilityFields,
-      diagnostics: input.diagnostics,
-    });
-    if (result.numericCompatibilityFieldIds.length > 0)
-      return {
-        kind: "legacy",
-        fallbackReason: {
-          kind: "numeric-data-domain",
-          fieldIds: result.numericCompatibilityFieldIds,
-        },
-      };
-    for (const match of result.matches)
-      entityIds.push({ siteId: match.siteId, id: match.entityId });
-  }
-
-  entityIds.sort(
-    (left, right) =>
-      left.siteId.localeCompare(right.siteId) ||
-      left.id.localeCompare(right.id),
-  );
-  return { kind: "evaluated", matches: { entityIds } };
-}
-
-async function evaluateForSitesCore(input: {
-  readonly env: Env;
-  readonly subject: SemanticSubjectDomain;
-  readonly siteIds: readonly string[];
-  readonly filters: FilterDocument;
-  readonly plan: ScopedFilterPlan;
-  readonly time: QueryTime;
-  readonly diagnostics?: D1ReadDiagnostics;
-  readonly signal?: AbortSignal;
-  readonly coverage?: ReadonlyMap<string, number>;
-}): Promise<QualificationMatchRow[]> {
-  if (input.time.filterRangeEmpty) return [];
-  const countSqlSupport = classifyAdvancedCountFilter(
-    input.filters,
-    input.plan.scope,
-    input.time.filterRange !== undefined
-      ? {
-          timeLeafContext: {
-            candidateRange: input.time.range,
-            capturedAtMs: input.time.capturedAtMs,
-          },
-        }
-      : {},
-  );
-  const authorizedSiteIds = new Set<string>(input.subject.siteIds);
-  if (input.siteIds.some((siteId) => !authorizedSiteIds.has(siteId)))
-    throw invalidInput(
-      "filters",
-      "advanced_filter_execution_site_context_mismatch",
-    );
-  const fullHistory = input.time.fullHistory === true;
-  const coverage =
-    input.coverage ??
-    (await siteCoverage(
-      input.env,
-      input.siteIds,
-      input.diagnostics,
-      input.signal,
-    ));
-  const readRange = fullHistory
-    ? {
-        startMs: Math.min(
-          ...input.siteIds.map(
-            (siteId) => coverage.get(siteId) ?? Number.MAX_SAFE_INTEGER,
-          ),
-        ),
-        endExclusiveMs: input.time.capturedAtMs + 1,
-      }
-    : (input.time.readRange ?? input.time.range);
-  if (readRange.endExclusiveMs > input.time.capturedAtMs + 1) {
-    throw invalidInput("readRange", "filter_evaluation_range_unavailable");
-  }
-  for (const siteId of input.siteIds) {
-    const createdAt = coverage.get(siteId);
-    if (
-      createdAt === undefined ||
-      (!fullHistory && readRange.startMs < createdAt)
-    ) {
-      throw invalidInput("readRange", "filter_evaluation_range_unavailable");
-    }
-  }
-  if (countSqlSupport.kind === "supported") {
-    const countSql = await evaluateAdvancedCountSql({
-      ...input,
-      support: countSqlSupport,
-      coverage,
-      readRange,
-    });
-    if (countSql.kind === "evaluated")
-      return (countSql.matches.entityIds ?? []).map((identity) => ({
-        siteId: identity.siteId,
-        kind: "entity" as const,
-        id: identity.id,
-      }));
-    if (input.diagnostics)
-      input.diagnostics.advancedCountSqlFallbackReason =
-        countSql.fallbackReason;
-  }
-  const paths = payloadPaths(input.filters.root);
-  const readRanges = evaluationReadRanges(input.time.range, readRange);
-  const [rows, payloads] = await Promise.all([
-    loadActivities(
-      input.env,
-      input.subject,
-      input.siteIds,
-      readRanges,
-      input.diagnostics,
-      input.signal,
-    ),
-    paths.paths.length || paths.wholePayload
-      ? loadPayloads(
-          input.env,
-          input.subject,
-          input.siteIds,
-          readRanges,
-          paths,
-          input.diagnostics,
-          input.signal,
-        )
-      : Promise.resolve(new Map<string, unknown>()),
-  ]);
-  const matches: QualificationMatchRow[] = [];
-  const rowsBySite = new Map<unknown, RawEvaluationRow[]>();
-  for (const row of rows) {
-    const siteRows = rowsBySite.get(row.site_id) ?? [];
-    siteRows.push(row);
-    rowsBySite.set(row.site_id, siteRows);
-  }
-  for (const siteId of input.siteIds) {
-    const createdAt = coverage.get(siteId)!;
-    const siteRows = rowsBySite.get(siteId) ?? [];
-    const siteReadRange = fullHistory
-      ? {
-          startMs: createdAt,
-          endExclusiveMs: input.time.capturedAtMs + 1,
-        }
-      : readRange;
-    const siteFilterRange = input.time.filterRange
-      ? {
-          startMs: input.time.filterRange.startMs ?? createdAt,
-          endExclusiveMs:
-            input.time.filterRange.endExclusiveMs ??
-            input.time.capturedAtMs + 1,
-        }
-      : input.time.range;
-    if (siteFilterRange.startMs >= siteFilterRange.endExclusiveMs) continue;
-    const dataset = entitiesForRows(
-      siteRows,
-      payloads,
-      {
-        startMs: input.time.range.startMs,
-        endExclusiveMs: input.time.range.endExclusiveMs,
-      },
-      siteFilterRange,
-      siteReadRange,
-      input.time.filterRange !== undefined,
-    );
-    let result;
-    try {
-      result = evaluateFilterDocument(
-        input.filters,
-        {
-          ...dataset,
-          coverageRange: {
-            startMs: createdAt,
-            endExclusiveMs: input.time.capturedAtMs + 1,
-          },
-        },
-        {
-          scope: input.plan.scope,
-          candidateRange: input.time.range,
-          ...(input.time.filterRange ? { filterRange: siteFilterRange } : {}),
-          readRange: siteReadRange,
-          filterRangeEmpty: input.time.filterRangeEmpty ?? false,
-          reportingTimeZone: input.time.reportingTimeZone,
-          capturedAtMs: input.time.capturedAtMs,
-          maxActivities: ADVANCED_FILTER_MAX_ACTIVITIES,
-          maxSequenceMatches: 50_000,
-        },
-      );
-    } catch (error) {
-      const code = error instanceof Error ? error.message : "";
-      if (code === "filter_evaluation_range_unavailable")
-        throw invalidInput("readRange", code);
-      if (
-        code === "filter_activity_limit_exceeded" ||
-        code === "filter_sequence_match_limit_exceeded" ||
-        code === "filter_sequence_work_limit_exceeded"
-      )
-        throw invalidInput("filters", code);
-      throw error;
-    }
-    if (input.plan.scope === "event") {
-      for (const id of result.matchingVisitIds)
-        matches.push({ siteId, kind: "visit", id });
-      for (const id of result.matchingEventIds)
-        matches.push({ siteId, kind: "event", id });
-    } else {
-      for (const id of result.matchingScopeEntityIds)
-        matches.push({ siteId, kind: "entity", id });
-    }
-  }
-  return matches.sort(
-    (left, right) =>
-      left.siteId.localeCompare(right.siteId) ||
-      left.kind.localeCompare(right.kind) ||
-      left.id.localeCompare(right.id),
-  );
-}
-
-async function evaluateForSites(input: {
-  readonly env: Env;
-  readonly subject: SemanticSubjectDomain;
-  readonly siteIds: readonly string[];
-  readonly filters: FilterDocument;
-  readonly plan: ScopedFilterPlan;
-  readonly time: QueryTime;
-  readonly diagnostics?: D1ReadDiagnostics;
-  readonly signal?: AbortSignal;
-  readonly coverage?: ReadonlyMap<string, number>;
-}): Promise<PreparedMembership> {
-  const matches = await evaluateForSitesCore(input);
-  // The evaluated identities become physical relations registered behind an
-  // opaque handle; the plan only ever carries that handle.
   return registerPreparedMembership({
     siteIds: input.siteIds,
     mode: input.plan.mode,
     matches,
   });
+}
+
+export interface IndependentOverviewMembershipDependency {
+  readonly operation: "overview" | "trend";
+  readonly enginePlan: OverviewMembershipDependencyPlan<{
+    readonly operation: "overview" | "trend";
+    readonly configuration: OverviewTrendQualificationConfiguration;
+  }>;
+  readonly preparation: PageVisitQualificationPreparation;
+  readonly filters: FilterDocument;
+  readonly queryTime: QueryTime;
+  readonly scopePlan: ScopedFilterPlan;
+  readonly consumerKey: ReturnType<typeof pageVisitQualificationConsumerKey>;
+  readonly siteId: string;
+  readonly requestSnapshot: string;
+}
+const independentOverviewMembershipDependencies = new WeakMap<
+  object,
+  IndependentOverviewMembershipDependency
+>();
+export function independentOverviewMembershipDependencyFromQuery(
+  value: unknown,
+  operation: "overview" | "trend",
+): IndependentOverviewMembershipDependency | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const state = independentOverviewMembershipDependencies.get(value);
+  if (
+    state &&
+    (state.operation !== operation ||
+      qualificationRequestOwnDataSnapshot(value) !== state.requestSnapshot)
+  )
+    throw new Error("overview_membership_request_changed");
+  return state;
+}
+async function prepareIndependentOverviewMembershipDependency(input: {
+  readonly env: Env;
+  readonly query: QueryInput & Record<string, unknown>;
+  readonly operation: "overview" | "trend";
+  readonly subject: SemanticSubjectDomain;
+  readonly siteIds: readonly string[];
+  readonly diagnostics?: D1ReadDiagnostics;
+  readonly signal?: AbortSignal;
+}): Promise<IndependentOverviewMembershipDependency | undefined> {
+  const q = input.query,
+    filters = q.filters,
+    metadata = scopedFilterMetadata(filters);
+  if (
+    !filters?.root ||
+    !metadata ||
+    !queryHasNoComparisonState(q) ||
+    q.context.policy.audience !== "private-dashboard" ||
+    input.subject.origin !== "site" ||
+    input.siteIds.length !== 1 ||
+    input.subject.siteIds.length !== 1 ||
+    input.subject.siteIds[0] !== input.siteIds[0] ||
+    metadata.siteIds.length !== 1 ||
+    metadata.siteIds[0] !== input.siteIds[0] ||
+    metadata.plan.preparedMembership !== undefined ||
+    metadata.plan.mode !== "entity" ||
+    metadata.plan.scope === "event" ||
+    metadata.plan.membership.kind !== "entity" ||
+    !metadata.time?.filterRange ||
+    metadata.time.fullHistory === true ||
+    metadata.time.filterRangeEmpty === true ||
+    !q.time ||
+    !sameEventFieldsQueryTime(q.time as QueryTime, metadata.time)
+  )
+    return undefined;
+  const time = metadata.time;
+  // Overview's actual reader reconstructs this report window. The preparation
+  // keeps the independent original C/F/R, rather than substituting this C.
+  const readerTime = queryWindowToTime({
+    startMs: time.range.startMs,
+    endExclusiveMs: time.range.endExclusiveMs,
+    nowMs: time.capturedAtMs,
+    timeZone: time.reportingTimeZone,
+  });
+  const configuration = overviewTrendConfigurationForQuery(input.operation, {
+    ...q,
+    time: readerTime,
+  });
+  if (!configuration) return undefined;
+  const execution = planAdvancedFilterExecution({
+    subject: input.subject,
+    filters,
+    scope: metadata.plan.scope,
+    time,
+    reportFusionAvailable: false,
+  });
+  const keys =
+    configuration.kind === "trend"
+      ? ["current-trend" as const]
+      : [
+          "current-overview" as const,
+          ...(configuration.kind === "overview-with-previous" ||
+          configuration.kind === "overview-with-previous-and-detail"
+            ? ["previous-overview" as const]
+            : []),
+          ...(configuration.kind === "overview-with-detail" ||
+          configuration.kind === "overview-with-previous-and-detail"
+            ? ["current-detail" as const]
+            : []),
+        ];
+  const enginePlan = planOverviewMembershipDependencies({
+    preparation: { key: "original", execution, filters, queryTime: time },
+    readerQueryTime: readerTime,
+    operation: input.operation,
+    configuration,
+    importedOutputs: keys.map((childKey) => ({ childKey, outputId: childKey })),
+    consumer: { operation: input.operation, configuration },
+  });
+  if (!enginePlan) return undefined;
+  const requestSnapshot = qualificationRequestOwnDataSnapshot(q);
+  if (requestSnapshot === undefined) return undefined;
+  const step = enginePlan.preparation;
+  // This is the same whole-original-filter evaluator prepareSide used. Its
+  // fresh admission enforces the fixed descriptor bounds and error order.
+  const matches = await evaluateForSitesCore({
+    env: input.env,
+    subject: step.membership.subject,
+    siteIds: metadata.siteIds,
+    filters: step.filters,
+    plan: metadata.plan,
+    time: step.queryTime,
+    diagnostics: input.diagnostics,
+    signal: input.signal,
+  });
+  if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  if (qualificationRequestOwnDataSnapshot(q) !== requestSnapshot)
+    throw new Error("overview_membership_request_changed");
+  const consumerKey = pageVisitQualificationConsumerKey(
+    input.operation,
+    enginePlan,
+  );
+  const preparation = createPageVisitQualificationPreparation({
+    siteId: input.siteIds[0]!,
+    filters,
+    queryTime: time,
+    scopePlan: metadata.plan,
+    consumerKey,
+    relation: createEntityMembershipRelation(input.siteIds[0]!, matches),
+    dependencyRef: step.dependencyRef,
+    maxBindings: enginePlan.children.length,
+    maxSourcesPerRole: 2,
+  });
+  return Object.freeze({
+    operation: input.operation,
+    enginePlan,
+    preparation,
+    filters,
+    queryTime: time,
+    scopePlan: metadata.plan,
+    consumerKey,
+    siteId: input.siteIds[0]!,
+    requestSnapshot,
+  });
+}
+
+interface IndependentPageChannelMembershipState {
+  readonly enginePlan: NonNullable<
+    ReturnType<typeof planPageChannelMembershipDependencies>
+  >;
+  readonly relation: AnalyticsDbRelation;
+  readonly filters: FilterDocument;
+  readonly queryTime: QueryTime;
+  readonly scopePlan: ScopedFilterPlan;
+  readonly siteId: string;
+  readonly requestSnapshot: string;
+  claimed: boolean;
+}
+const independentPageChannelMemberships = new WeakMap<
+  object,
+  IndependentPageChannelMembershipState
+>();
+function independentPageChannelMembershipState(query: unknown) {
+  if (!query || typeof query !== "object") return undefined;
+  const state = independentPageChannelMemberships.get(query);
+  if (
+    state &&
+    qualificationRequestOwnDataSnapshot(query) !== state.requestSnapshot
+  )
+    throw new Error("page_channel_membership_request_changed");
+  return state;
+}
+export function hasIndependentPageChannelMembershipDependency(
+  query: unknown,
+): boolean {
+  return independentPageChannelMembershipState(query) !== undefined;
+}
+function independentPageChannelReader(
+  q: QueryInput & Record<string, unknown>,
+  operation: "dimension" | "channels",
+): PageChannelMembershipReader | undefined {
+  if (operation === "dimension") {
+    if (q.mode === "overview-tab") return undefined;
+    const normalized = normalizeDimensionPageRequest({
+      dimension: typeof q.dimension === "string" ? q.dimension : "",
+      page: q.page,
+      limit: q.limit,
+      sort: q.sort,
+      search: q.search,
+    });
+    if (!normalized) return undefined;
+    return {
+      kind: "dimension-page",
+      dimension: normalized.dimension,
+      limit: normalized.limit,
+      cursorText: normalized.cursorText,
+      ...(normalized.search !== undefined ? { search: normalized.search } : {}),
+      sortBy: normalized.sortBy ?? "views",
+      sortDirection: normalized.sortDirection ?? "desc",
+      excludeEmpty: false,
+      audience: "private-dashboard",
+    };
+  }
+  if (q.mode !== "list") return undefined;
+  const sourceLimit = q.limit;
+  if (sourceLimit !== undefined && typeof sourceLimit !== "number")
+    return undefined;
+  return {
+    kind: "channels-list",
+    mode: "list",
+    limit: sourceLimit ?? 100,
+    sourceLimit,
+    audience: "private-dashboard",
+    hasComparison: false,
+    hasCurrent: false,
+    hasReference: false,
+  };
+}
+async function prepareIndependentPageChannelMembershipDependency(input: {
+  readonly env: Env;
+  readonly query: QueryInput & Record<string, unknown>;
+  readonly operation: "dimension" | "channels";
+  readonly subject: SemanticSubjectDomain;
+  readonly siteIds: readonly string[];
+  readonly diagnostics?: D1ReadDiagnostics;
+  readonly signal?: AbortSignal;
+}): Promise<IndependentPageChannelMembershipState | undefined> {
+  const q = input.query,
+    filters = q.filters,
+    metadata = scopedFilterMetadata(filters);
+  if (
+    !filters?.root ||
+    !metadata ||
+    !queryHasNoComparisonState(q) ||
+    q.context.policy.audience !== "private-dashboard" ||
+    input.subject.origin !== "site" ||
+    input.siteIds.length !== 1 ||
+    input.subject.siteIds.length !== 1 ||
+    input.subject.siteIds[0] !== input.siteIds[0] ||
+    metadata.siteIds.length !== 1 ||
+    metadata.siteIds[0] !== input.siteIds[0] ||
+    !queryScopePlanMatchesMetadata(q, metadata.plan) ||
+    metadata.plan.preparedMembership !== undefined ||
+    metadata.plan.mode !== "entity" ||
+    metadata.plan.scope === "event" ||
+    metadata.plan.membership.kind !== "entity" ||
+    !metadata.time?.filterRange ||
+    metadata.time.fullHistory ||
+    metadata.time.filterRangeEmpty ||
+    !q.time ||
+    !sameEventFieldsQueryTime(q.time as QueryTime, metadata.time) ||
+    advancedCountPayloadPaths(filters.root).length > 0 ||
+    filtersUseSequenceSemantics(filters) ||
+    q.analysisContext !== undefined ||
+    q.goalId !== undefined ||
+    q.funnelId !== undefined
+  )
+    return undefined;
+  const time = metadata.time,
+    reader = independentPageChannelReader(q, input.operation);
+  if (
+    !reader ||
+    [time.range, time.readRange ?? time.range, time.filterRange].some(
+      (r) =>
+        !r ||
+        typeof r.startMs !== "number" ||
+        typeof r.endExclusiveMs !== "number" ||
+        !Number.isFinite(r.startMs) ||
+        !Number.isFinite(r.endExclusiveMs) ||
+        r.startMs >= r.endExclusiveMs,
+    )
+  )
+    return undefined;
+  const derive = () =>
+    planPageChannelMembershipDependencies({
+      preparation: {
+        key: "original",
+        filters,
+        queryTime: time,
+        execution: planAdvancedFilterExecution({
+          subject: input.subject,
+          filters,
+          scope: metadata.plan.scope,
+          time,
+          reportFusionAvailable: false,
+        }),
+      },
+      readerQueryTime: time,
+      reader,
+    });
+  const enginePlan = derive(),
+    requestSnapshot = qualificationRequestOwnDataSnapshot(q);
+  if (!enginePlan || requestSnapshot === undefined) return undefined;
+  const step = enginePlan.preparations[0]!;
+  const matches = await evaluateForSitesCore({
+    env: input.env,
+    subject: step.membership.subject,
+    siteIds: metadata.siteIds,
+    filters: step.filters,
+    plan: metadata.plan,
+    time: step.queryTime,
+    diagnostics: input.diagnostics,
+    signal: input.signal,
+  });
+  if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  if (
+    qualificationRequestOwnDataSnapshot(q) !== requestSnapshot ||
+    qualificationRequestOwnDataSnapshot(derive()) !==
+      qualificationRequestOwnDataSnapshot(enginePlan)
+  )
+    throw new Error("page_channel_membership_request_changed");
+  return {
+    enginePlan,
+    relation: createEntityMembershipRelation(input.siteIds[0]!, matches),
+    filters,
+    queryTime: time,
+    scopePlan: metadata.plan,
+    siteId: input.siteIds[0]!,
+    requestSnapshot,
+    claimed: false,
+  };
+}
+export function claimIndependentPageChannelMembershipDependency(
+  query: unknown,
+  reader: PageChannelMembershipReader,
+  cursor: {
+    readonly primary: number;
+    readonly secondary: number;
+    readonly value: string;
+  } | null,
+) {
+  const state = independentPageChannelMembershipState(query);
+  if (!state) return undefined;
+  if (state.claimed) throw new Error("page_channel_membership_replayed");
+  const readerSnapshot = qualificationRequestOwnDataSnapshot(reader);
+  const expected = state.enginePlan.consumer;
+  // JSON snapshots omit undefined optional fields. Restore this one declared
+  // channel field, while preserving the exact complete caller-reader snapshot.
+  const expectedReader =
+    expected.kind === "channels-list"
+      ? { ...expected, sourceLimit: expected.sourceLimit }
+      : expected;
+  if (
+    readerSnapshot === undefined ||
+    readerSnapshot !== qualificationRequestOwnDataSnapshot(expectedReader) ||
+    (cursor !== null &&
+      (reader.kind !== "dimension-page" ||
+        Object.keys(cursor).sort().join(",") !== "primary,secondary,value" ||
+        !Number.isFinite(cursor.primary) ||
+        !Number.isFinite(cursor.secondary) ||
+        typeof cursor.value !== "string"))
+  )
+    throw new Error("page_channel_membership_reader_mismatch");
+  const cursorSnapshot = qualificationRequestOwnDataSnapshot(cursor);
+  if (cursor !== null && cursorSnapshot === undefined)
+    throw new Error("page_channel_membership_reader_mismatch");
+  const consumer = "independent-dimension-page";
+  const consumerKey =
+    reader.kind === "dimension-page"
+      ? pageVisitQualificationConsumerKey(consumer, {
+          limit: reader.limit,
+          selection: dimensionPageSelection(reader.dimension)!,
+          excludeEmpty: false,
+          search: reader.search,
+          sortBy: reader.sortBy,
+          sortDirection: reader.sortDirection,
+          cursor,
+          audience: reader.audience,
+        })
+      : pageVisitQualificationConsumerKey("channel-list", {
+          limit: reader.limit,
+          sourceLimit: reader.sourceLimit,
+          audience: reader.audience,
+          hasComparison: reader.hasComparison,
+          hasCurrent: reader.hasCurrent,
+          hasReference: reader.hasReference,
+        });
+  const preparation = createPageVisitQualificationPreparation({
+    siteId: state.siteId,
+    filters: state.filters,
+    queryTime: state.queryTime,
+    scopePlan: state.scopePlan,
+    consumerKey,
+    relation: state.relation,
+    dependencyRef: state.enginePlan.preparations[0]!.dependencyRef,
+    maxBindings: 1,
+    maxSourcesPerRole: 1,
+  });
+  state.claimed = true;
+  return {
+    preparation,
+    queryTime: state.queryTime,
+    scopePlan: state.scopePlan,
+    consumer,
+    assertFresh() {
+      independentPageChannelMembershipState(query);
+      if (
+        qualificationRequestOwnDataSnapshot(reader) !== readerSnapshot ||
+        qualificationRequestOwnDataSnapshot(cursor) !== cursorSnapshot
+      )
+        throw new Error("page_channel_membership_reader_mismatch");
+    },
+  };
+}
+
+interface IndependentReferrersPageMembershipState {
+  readonly enginePlan: ReferrersPageMembershipDependencyPlan;
+  readonly relation: AnalyticsDbRelation;
+  readonly filters: FilterDocument;
+  readonly queryTime: QueryTime;
+  readonly scopePlan: ScopedFilterPlan;
+  readonly siteId: string;
+  readonly requestSnapshot: string;
+  claimed: boolean;
+}
+const independentReferrersPageMemberships = new WeakMap<
+  object,
+  IndependentReferrersPageMembershipState
+>();
+function independentReferrersPageMembershipState(query: unknown) {
+  if (!query || typeof query !== "object") return undefined;
+  const state = independentReferrersPageMemberships.get(query);
+  if (
+    state &&
+    qualificationRequestOwnDataSnapshot(query) !== state.requestSnapshot
+  )
+    throw new Error("referrers_page_membership_request_changed");
+  return state;
+}
+/** Check both before and after the owner's unchanged cursor-decoding await. */
+export function hasIndependentReferrersPageMembershipDependency(
+  query: unknown,
+): boolean {
+  return independentReferrersPageMembershipState(query) !== undefined;
+}
+function independentReferrersPageConfiguration(
+  q: QueryInput & Record<string, unknown>,
+): ReferrersPageReaderConfiguration | undefined {
+  if (
+    q.variant === "summary" ||
+    (q.variant !== undefined && q.variant !== "page")
+  )
+    return undefined;
+  const page =
+    q.page && typeof q.page === "object"
+      ? (q.page as Record<string, unknown>)
+      : {};
+  const limit =
+    typeof page.limit === "number" && Number.isFinite(page.limit)
+      ? page.limit
+      : typeof q.limit === "number" && Number.isFinite(q.limit)
+        ? q.limit
+        : 20;
+  if (!Number.isSafeInteger(limit) || limit < 0) return undefined;
+  return {
+    limit,
+    includeFullUrl: q.includeFullUrl === true,
+    ...(typeof q.search === "string" ? { search: q.search } : {}),
+    cursorText: typeof page.cursor === "string" ? page.cursor : null,
+    audience: "private-dashboard",
+    sortBy: q.sort === "visitors" ? "visitors" : "views",
+    sortDirection: q.direction === "asc" ? "asc" : "desc",
+  };
+}
+async function prepareIndependentReferrersPageMembershipDependency(input: {
+  readonly env: Env;
+  readonly query: QueryInput & Record<string, unknown>;
+  readonly subject: SemanticSubjectDomain;
+  readonly siteIds: readonly string[];
+  readonly diagnostics?: D1ReadDiagnostics;
+  readonly signal?: AbortSignal;
+}): Promise<IndependentReferrersPageMembershipState | undefined> {
+  const q = input.query,
+    filters = q.filters,
+    metadata = scopedFilterMetadata(filters);
+  if (
+    !filters?.root ||
+    !metadata ||
+    !queryHasNoComparisonState(q) ||
+    q.context.policy.audience !== "private-dashboard" ||
+    input.subject.origin !== "site" ||
+    input.siteIds.length !== 1 ||
+    input.subject.siteIds.length !== 1 ||
+    input.subject.siteIds[0] !== input.siteIds[0] ||
+    metadata.siteIds.length !== 1 ||
+    metadata.siteIds[0] !== input.siteIds[0] ||
+    !queryScopePlanMatchesMetadata(q, metadata.plan) ||
+    metadata.plan.preparedMembership !== undefined ||
+    metadata.plan.mode !== "entity" ||
+    metadata.plan.scope === "event" ||
+    metadata.plan.membership.kind !== "entity" ||
+    !metadata.time?.filterRange ||
+    metadata.time.fullHistory ||
+    metadata.time.filterRangeEmpty ||
+    !q.time ||
+    !sameEventFieldsQueryTime(q.time as QueryTime, metadata.time) ||
+    advancedCountPayloadPaths(filters.root).length > 0 ||
+    filtersUseSequenceSemantics(filters) ||
+    q.analysisContext !== undefined ||
+    q.goalId !== undefined ||
+    q.funnelId !== undefined
+  )
+    return undefined;
+  const time = metadata.time,
+    configuration = independentReferrersPageConfiguration(q);
+  if (
+    !configuration ||
+    [time.range, time.readRange ?? time.range, time.filterRange].some(
+      (r) =>
+        !r ||
+        typeof r.startMs !== "number" ||
+        typeof r.endExclusiveMs !== "number" ||
+        !Number.isFinite(r.startMs) ||
+        !Number.isFinite(r.endExclusiveMs) ||
+        r.startMs >= r.endExclusiveMs,
+    )
+  )
+    return undefined;
+  const execution = planAdvancedFilterExecution({
+    subject: input.subject,
+    filters,
+    scope: metadata.plan.scope,
+    time,
+    reportFusionAvailable: false,
+  });
+  const enginePlan = planReferrersPageMembershipDependencies({
+    preparation: { key: "original", execution, filters, queryTime: time },
+    // This reader historically uses metadata.time, including original C/F/R.
+    readerQueryTime: time,
+    configuration,
+  });
+  const requestSnapshot = qualificationRequestOwnDataSnapshot(q);
+  if (!enginePlan || requestSnapshot === undefined) return undefined;
+  const step = enginePlan.steps[0]!;
+  const matches = await evaluateForSitesCore({
+    env: input.env,
+    subject: step.membership.subject,
+    siteIds: metadata.siteIds,
+    filters: step.filters,
+    plan: metadata.plan,
+    time: step.queryTime,
+    diagnostics: input.diagnostics,
+    signal: input.signal,
+  });
+  if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  if (qualificationRequestOwnDataSnapshot(q) !== requestSnapshot)
+    throw new Error("referrers_page_membership_request_changed");
+  return {
+    enginePlan,
+    filters,
+    queryTime: time,
+    scopePlan: metadata.plan,
+    siteId: input.siteIds[0]!,
+    relation: createEntityMembershipRelation(input.siteIds[0]!, matches),
+    requestSnapshot,
+    claimed: false,
+  };
+}
+/** Called only after the owner's original cursor decoder and its context checks. */
+export function claimIndependentReferrersPageMembershipDependency(
+  query: unknown,
+  configuration: {
+    readonly limit: number;
+    readonly includeFullUrl: boolean;
+    readonly search?: string;
+    readonly cursor: {
+      readonly primary: number;
+      readonly secondary: number;
+      readonly referrer: string;
+    } | null;
+    readonly audience: QueryAudience;
+    readonly sortBy: "views" | "visitors";
+    readonly sortDirection: "asc" | "desc";
+  },
+) {
+  const state = independentReferrersPageMembershipState(query);
+  if (!state) return undefined;
+  if (state.claimed) throw new Error("referrers_page_membership_replayed");
+  const expected = state.enginePlan.consumer.configuration;
+  const { cursor, ...actual } = configuration;
+  const expectedReader = {
+    limit: expected.limit,
+    includeFullUrl: expected.includeFullUrl,
+    search: expected.search,
+    audience: expected.audience,
+    sortBy: expected.sortBy,
+    sortDirection: expected.sortDirection,
+  };
+  const readerSnapshot = qualificationRequestOwnDataSnapshot(configuration);
+  if (
+    readerSnapshot === undefined ||
+    qualificationRequestOwnDataSnapshot(actual) !==
+      qualificationRequestOwnDataSnapshot(expectedReader) ||
+    (cursor !== null &&
+      (Object.keys(cursor).sort().join(",") !== "primary,referrer,secondary" ||
+        !Number.isFinite(cursor.primary) ||
+        !Number.isFinite(cursor.secondary) ||
+        typeof cursor.referrer !== "string"))
+  )
+    throw new Error("referrers_page_membership_reader_mismatch");
+  const consumerKey = pageVisitQualificationConsumerKey(
+    "referrers-page",
+    configuration,
+  );
+  const readStep = state.enginePlan.steps[2];
+  const preparation = createPageVisitQualificationPreparation({
+    siteId: state.siteId,
+    filters: state.filters,
+    queryTime: state.queryTime,
+    scopePlan: state.scopePlan,
+    consumerKey,
+    relation: state.relation,
+    dependencyRef: state.enginePlan.steps[0]!.dependencyRef,
+    maxBindings: readStep.maxPlans,
+    maxSourcesPerRole: readStep.maxSources,
+  });
+  state.claimed = true;
+  return {
+    preparation,
+    queryTime: readStep.queryTime,
+    scopePlan: state.scopePlan,
+    assertFresh() {
+      independentReferrersPageMembershipState(query);
+      if (qualificationRequestOwnDataSnapshot(configuration) !== readerSnapshot)
+        throw new Error("referrers_page_membership_reader_mismatch");
+    },
+  };
+}
+
+export type ReferrersTimeMembershipDependency = WholeFilterReaderDependency;
+export function referrersTimeMembershipDependencyFromQuery(
+  value: unknown,
+): ReferrersTimeMembershipDependency | undefined {
+  return wholeFilterReaderDependencyFromQuery(value, "referrers-summary");
+}
+async function prepareReferrersTimeMembershipDependency(input: {
+  env: Env;
+  query: QueryInput & Record<string, unknown>;
+  subject: SemanticSubjectDomain;
+  siteIds: readonly string[];
+  diagnostics?: D1ReadDiagnostics;
+  signal?: AbortSignal;
+}): Promise<ReferrersTimeMembershipDependency | undefined> {
+  const q = input.query;
+  const filters = q.filters;
+  const metadata = scopedFilterMetadata(filters);
+  if (
+    !filters?.root ||
+    !metadata ||
+    !queryHasNoComparisonState(q) ||
+    q.variant !== "summary" ||
+    q.context.policy.audience !== "private-dashboard" ||
+    input.subject.origin !== "site" ||
+    input.siteIds.length !== 1 ||
+    input.subject.siteIds.length !== 1 ||
+    input.subject.siteIds[0] !== input.siteIds[0] ||
+    metadata.siteIds.length !== 1 ||
+    metadata.siteIds[0] !== input.siteIds[0] ||
+    metadata.plan.preparedMembership !== undefined ||
+    metadata.plan.mode !== "entity" ||
+    metadata.plan.scope === "event" ||
+    metadata.plan.membership.kind !== "entity" ||
+    !metadata.time?.filterRange ||
+    !q.time ||
+    !sameEventFieldsQueryTime(q.time as QueryTime, metadata.time)
+  )
+    return undefined;
+  const time = metadata.time;
+  const topN =
+    typeof q.topN === "number" && Number.isFinite(q.topN)
+      ? q.topN
+      : typeof q.limit === "number" && Number.isFinite(q.limit)
+        ? q.limit
+        : 5;
+  if (!Number.isSafeInteger(topN) || topN < 0) return undefined;
+  const execution = planAdvancedFilterExecution({
+    subject: input.subject,
+    filters,
+    scope: metadata.plan.scope,
+    time,
+    reportFusionAvailable: false,
+  });
+  const enginePlan = planReferrersTimeMembershipDependency({
+    execution,
+    topN,
+    filters,
+    queryTime: time,
+  });
+  if (!enginePlan) return undefined;
+  const requestSnapshot = qualificationRequestOwnDataSnapshot(q);
+  if (requestSnapshot === undefined) return undefined;
+  // The original whole-filter SQL/Core evaluator completes before any report is constructed.
+  const [prepareStep, readStep] = enginePlan.steps;
+  const matches = await evaluateForSitesCore({
+    env: input.env,
+    subject: enginePlan.membership.subject,
+    siteIds: enginePlan.membership.subject.siteIds,
+    filters: prepareStep.filters,
+    plan: metadata.plan,
+    time: prepareStep.queryTime,
+    diagnostics: input.diagnostics,
+    signal: input.signal,
+  });
+  if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  return createWholeFilterReaderDependency({
+    siteId: input.siteIds[0]!,
+    consumer: { kind: "referrers-summary", configuration: { topN } },
+    readerQueryTime: readStep.queryTime,
+    filters,
+    queryTime: time,
+    scopePlan: metadata.plan,
+    matches,
+    requestSnapshot,
+  });
+}
+
+export interface ComparisonMembershipSideDependency {
+  readonly preparation: PageVisitQualificationPreparation;
+  readonly filters: FilterDocument;
+  readonly queryTime: QueryTime;
+  readonly readerQueryTime: QueryTime;
+  readonly scopePlan: ScopedFilterPlan;
+  readonly consumerKey: unknown;
+}
+export interface ComparisonMembershipDependencies {
+  readonly enginePlan: ComparisonMembershipDependencyPlan;
+  readonly current: ComparisonMembershipSideDependency;
+  readonly reference: ComparisonMembershipSideDependency;
+  readonly requestSnapshot: string;
+}
+const comparisonMembershipDependencies = new WeakMap<
+  object,
+  ComparisonMembershipDependencies
+>();
+export function comparisonMembershipDependenciesFromQuery(
+  q: unknown,
+): ComparisonMembershipDependencies | undefined {
+  if (typeof q !== "object" || q === null) return undefined;
+  const state = comparisonMembershipDependencies.get(q);
+  if (
+    state &&
+    comparisonPageRequestSnapshot(
+      q as QueryInput & Record<string, unknown>,
+      "dimension",
+    ) !== state.requestSnapshot
+  )
+    throw new Error("comparison_membership_request_changed");
+  return state;
+}
+async function prepareComparisonMembershipDependencies(input: {
+  env: Env;
+  query: QueryInput & Record<string, unknown>;
+  subject: SemanticSubjectDomain;
+  siteIds: readonly string[];
+  diagnostics?: D1ReadDiagnostics;
+  signal?: AbortSignal;
+}): Promise<ComparisonMembershipDependencies | undefined> {
+  const q = input.query;
+  if (
+    q.mode !== "overview-tab" ||
+    typeof q.tab !== "string" ||
+    comparisonPageReaderContract(q.tab)?.route !== "membership-recipe" ||
+    q.context.policy.audience !== "private-dashboard" ||
+    input.subject.origin !== "site" ||
+    input.subject.siteIds.length !== 1 ||
+    input.siteIds.length !== 1 ||
+    input.subject.siteIds[0] !== input.siteIds[0] ||
+    !q.current ||
+    !q.reference ||
+    !q.comparison
+  )
+    return undefined;
+  const sides = {} as Record<
+    "current" | "reference",
+    {
+      side: FilterSide;
+      metadata: NonNullable<ReturnType<typeof scopedFilterMetadata>>;
+      execution: ReturnType<typeof planAdvancedFilterExecution>;
+      readerQueryTime: QueryTime;
+    }
+  >;
+  for (const name of ["current", "reference"] as const) {
+    const side = q[name] as FilterSide,
+      metadata = scopedFilterMetadata(side.filters);
+    if (
+      !side.filters?.root ||
+      !side.time ||
+      !metadata ||
+      metadata.plan.preparedMembership !== undefined ||
+      metadata.plan.mode !== "entity" ||
+      metadata.plan.scope === "event" ||
+      metadata.plan.membership.kind !== "entity" ||
+      metadata.siteIds.length !== 1 ||
+      metadata.siteIds[0] !== input.siteIds[0]
+    )
+      return undefined;
+    const time = metadata.time ?? side.time;
+    sides[name] = {
+      side,
+      metadata,
+      readerQueryTime: canonicalComparisonQueryTime(side.time),
+      execution: planAdvancedFilterExecution({
+        subject: input.subject,
+        filters: side.filters,
+        scope: metadata.plan.scope,
+        time,
+        reportFusionAvailable: false,
+      }),
+    };
+  }
+  const comparison = q.comparison as {
+    metric: unknown;
+    sortBy: unknown;
+    direction: unknown;
+  };
+  const consumer = {
+    operation: "dimension",
+    siteId: input.siteIds[0],
+    mode: q.mode,
+    tab: q.tab,
+    limit:
+      typeof q.limit === "number" && Number.isFinite(q.limit) ? q.limit : 100,
+    cursorToken:
+      typeof q.cursor === "string" && q.cursor.length > 0 ? q.cursor : null,
+    search:
+      typeof q.search === "string" && q.search.length > 0
+        ? q.search
+        : undefined,
+    metric: comparison.metric,
+    sortBy: comparison.sortBy,
+    direction: comparison.direction,
+    audience: q.context.policy.audience,
+  };
+  const enginePlan = planComparisonMembershipDependencies({
+    current: {
+      execution: sides.current.execution,
+      filters: sides.current.side.filters!,
+      queryTime: sides.current.metadata.time ?? sides.current.side.time!,
+      readerQueryTime: sides.current.readerQueryTime,
+    },
+    reference: {
+      execution: sides.reference.execution,
+      filters: sides.reference.side.filters!,
+      queryTime: sides.reference.metadata.time ?? sides.reference.side.time!,
+      readerQueryTime: sides.reference.readerQueryTime,
+    },
+    consumer,
+  });
+  if (!enginePlan) return undefined;
+  const requestSnapshot = comparisonPageRequestSnapshot(q, "dimension");
+  const prepared = {} as Record<
+    "current" | "reference",
+    ComparisonMembershipSideDependency
+  >;
+  for (const step of enginePlan.steps) {
+    if (step.kind !== "prepare-membership") continue;
+    const original = sides[step.side],
+      time = step.queryTime;
+    const matches = await evaluateForSitesCore({
+      env: input.env,
+      subject: step.membership.subject,
+      siteIds: step.membership.subject.siteIds,
+      filters: step.filters,
+      plan: original.metadata.plan,
+      time,
+      diagnostics: input.diagnostics,
+      signal: input.signal,
+    });
+    if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    const consumerKey = Object.freeze({
+      operation: "comparison-dimension-side",
+      side: step.side,
+      enginePlan,
+    });
+    prepared[step.side] = Object.freeze({
+      preparation: createPageVisitQualificationPreparation({
+        siteId: input.siteIds[0]!,
+        filters: original.side.filters!,
+        queryTime: time,
+        scopePlan: original.metadata.plan,
+        consumerKey,
+        relation: createEntityMembershipRelation(input.siteIds[0]!, matches),
+        dependencyRef: step.dependencyRef,
+        maxBindings: enginePlan.steps[2].maxPlansPerSide,
+        maxSourcesPerRole: enginePlan.steps[2].maxSourcesPerSide,
+      }),
+      filters: original.side.filters!,
+      queryTime: time,
+      readerQueryTime: step.readerQueryTime,
+      scopePlan: original.metadata.plan,
+      consumerKey,
+    });
+  }
+  return Object.freeze({ enginePlan, ...prepared, requestSnapshot });
 }
 
 function sameRange(
@@ -3919,71 +3953,6 @@ function ownDescriptor(
   } catch {
     return undefined;
   }
-}
-
-export function isCanonicalPrivatePageDimensionWholeFilterRequest(input: {
-  readonly mode: unknown;
-  readonly audience: unknown;
-  readonly dimension?: unknown;
-  readonly tab?: unknown;
-  readonly selection: unknown;
-  readonly excludeEmpty: unknown;
-  readonly overviewFamily?: unknown;
-}): boolean {
-  if (input.audience !== "private-dashboard") return false;
-  if (input.mode === "breakdown") {
-    if (
-      typeof input.dimension !== "string" ||
-      input.dimension === "traffic.channel" ||
-      input.excludeEmpty !== false
-    )
-      return false;
-    const canonicalSelection = dimensionPageSelection(input.dimension);
-    return (
-      canonicalSelection !== null &&
-      JSON.stringify(input.selection) === JSON.stringify(canonicalSelection)
-    );
-  }
-  if (input.mode !== "overview-tab" || typeof input.tab !== "string")
-    return false;
-  const descriptor = overviewPageTableDescriptor(input.tab);
-  return (
-    descriptor !== null &&
-    (descriptor.family === "page" ||
-      descriptor.family === "client" ||
-      descriptor.family === "utm" ||
-      descriptor.family === "geo") &&
-    (input.overviewFamily === undefined ||
-      input.overviewFamily === descriptor.family) &&
-    input.excludeEmpty === descriptor.excludeEmpty &&
-    JSON.stringify(input.selection) === JSON.stringify(descriptor.selection)
-  );
-}
-
-export function isCanonicalPrivateChannelListWholeFilterRequest(input: {
-  readonly mode: unknown;
-  readonly audience: unknown;
-}): boolean {
-  return input.mode === "list" && input.audience === "private-dashboard";
-}
-
-export function isCanonicalPrivateChannelOverviewWholeFilterRequest(input: {
-  readonly mode: unknown;
-  readonly audience: unknown;
-  readonly tab: unknown;
-  readonly family: unknown;
-  readonly selection: unknown;
-  readonly excludeEmpty: unknown;
-}): boolean {
-  return (
-    input.mode === "overview-tab" &&
-    input.audience === "private-dashboard" &&
-    input.tab === "source.channel" &&
-    input.family === "channel" &&
-    input.excludeEmpty === true &&
-    JSON.stringify(input.selection) ===
-      JSON.stringify(PAGE_DIMENSION_SELECTIONS.trafficChannel)
-  );
 }
 
 function queryHasNoComparisonState(query: unknown): boolean {
@@ -6274,17 +6243,25 @@ async function prepareDeferredEventQualification(input: {
   // Count plans cannot carry (they require the exact candidate window). Such
   // requests stay undeferred, and the middleware evaluates their membership in
   // SQL through `evaluateForSitesCore`, which does pass the context.
-  const support =
+  const executionPlan =
     metadata.plan.scope === "event"
-      ? classifyAdvancedEventCandidateCountFilter(supportFilters)
-      : classifyAdvancedCountFilter(
-          supportFilters,
-          metadata.plan.scope,
-          allowPrivateQualifiedGeoBareFields
-            ? { allowPrivateQualifiedGeoBareFields: true }
-            : {},
-        );
+      ? undefined
+      : planAdvancedFilterExecution({
+          subject: input.subject,
+          filters: supportFilters,
+          scope: metadata.plan.scope,
+          time,
+          reportFusionAvailable: true,
+          ...(allowPrivateQualifiedGeoBareFields
+            ? { allowPrivateQualifiedGeoBareFields: true as const }
+            : {}),
+        });
+  const support =
+    executionPlan?.support ??
+    classifyAdvancedEventCandidateCountFilter(supportFilters);
   if (
+    (executionPlan !== undefined &&
+      executionPlan.decision.strategy !== "sql-report-fusion") ||
     support.kind !== "supported" ||
     advancedCountPayloadPaths(support.document.root!).length > 0 ||
     (input.operation === "channel-list" &&
@@ -6411,12 +6388,66 @@ async function prepareDeferredEventQualification(input: {
   if (input.operation === "event-field-values" && !eventFieldValuesRequest)
     return null;
   const siteId = metadata.siteIds[0]!;
-  const coverage = await siteCoverage(
-    input.env,
-    [siteId],
-    input.diagnostics,
-    input.signal,
-  );
+  // This branch is reached only after the original fusion/Count/no-payload and
+  // channel request gates above. It does not admit Seq-only or Core requests.
+  // Late root changes on an already admitted request are read by Stage 0 at the
+  // original fallback checkpoint, not rejected by a fresh Count-only gate.
+  const channelMembershipInvocation =
+    ((input.operation === "channel-list" && channelListRequest !== undefined) ||
+      (input.operation === "page-dimension" &&
+        pageDimensionRequest !== undefined)) &&
+    query.context.policy.audience === "private-dashboard" &&
+    input.subject.origin === "site" &&
+    input.subject.siteIds.length === 1 &&
+    input.subject.siteIds[0] === siteId &&
+    metadata.plan.mode === "entity" &&
+    (metadata.plan.scope === "session" || metadata.plan.scope === "visitor")
+      ? (input.operation === "channel-list"
+          ? createChannelsWholeMembershipInvocation
+          : createPageWholeMembershipInvocation)({
+          env: input.env,
+          subject: input.subject,
+          filters,
+          queryTime: time,
+          scope: metadata.plan.scope,
+          ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
+          ...(input.signal ? { signal: input.signal } : {}),
+        })
+      : undefined;
+  // This is the existing Count-admitted deferred branch. Select only the
+  // already closed one-plan Event readers; application exposure is unchanged.
+  const deferredWholeConsumer =
+    (input.operation === "event-summary" ||
+      input.operation === "event-types" ||
+      input.operation === "event-fields" ||
+      input.operation === "event-field-values" ||
+      input.operation === "event-records") &&
+    input.subject.origin === "site" &&
+    input.subject.siteIds.length === 1 &&
+    input.subject.siteIds[0] === siteId &&
+    ((metadata.plan.mode === "entity" &&
+      (metadata.plan.scope === "session" ||
+        metadata.plan.scope === "visitor")) ||
+      (metadata.plan.mode === "observation" && metadata.plan.scope === "event"))
+      ? Object.freeze({ kind: input.operation })
+      : undefined;
+  const wholeOriginalMembershipInvocation = deferredWholeConsumer
+    ? createDeferredWholeOriginalCompletionMembershipInvocation({
+        env: input.env,
+        subject: input.subject,
+        filters,
+        queryTime: time,
+        scope: metadata.plan.scope,
+        originalScopePlan: metadata.plan,
+        ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+      })
+    : undefined;
+  const coverageInvocation =
+    channelMembershipInvocation ?? wholeOriginalMembershipInvocation;
+  const coverage = await (coverageInvocation
+    ? coverageInvocation.readCoverageAtOriginalCheckpoint()
+    : siteCoverage(input.env, [siteId], input.diagnostics, input.signal));
   if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
   const createdAt = coverage.get(siteId);
   if (createdAt === undefined || readRange.startMs < createdAt)
@@ -6563,6 +6594,15 @@ async function prepareDeferredEventQualification(input: {
       : {}),
     subject: input.subject,
     coverage,
+    ...(channelMembershipInvocation ? { channelMembershipInvocation } : {}),
+    ...(deferredWholeConsumer && wholeOriginalMembershipInvocation
+      ? {
+          wholeOriginalMembership: Object.freeze({
+            consumer: deferredWholeConsumer,
+            invocation: wholeOriginalMembershipInvocation,
+          }),
+        }
+      : {}),
     ...(input.diagnostics ? { diagnostics: input.diagnostics } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
     ...(eventContextRequest ? { eventContextRequest } : {}),
@@ -6793,6 +6833,12 @@ async function prepareDeferredEventQualification(input: {
                                 : null;
   if (!deferred) return null;
   deferredEventQualifications.add(deferred);
+  channelMembershipInvocation?.retainDeferredOwnerAtOriginalConstruction(
+    deferred,
+  );
+  wholeOriginalMembershipInvocation?.retainDeferredOwnerAtOriginalConstruction(
+    deferred,
+  );
   deferredPageVisitEligibility.set(
     deferred,
     Object.freeze({
@@ -6805,6 +6851,8 @@ async function prepareDeferredEventQualification(input: {
         input.allowPrivateTechnologyWholeFilterOptIn === true,
     }),
   );
+  if (executionPlan)
+    recordAdvancedFilterExecution(input.diagnostics, executionPlan.decision);
   return deferred;
 }
 
@@ -7506,11 +7554,6 @@ function isPrivatePageVisitConsumer(
   readerAudience?: QueryAudience,
 ): boolean {
   const eligibility = deferredPageVisitEligibility.get(deferred);
-  if (
-    eligibility?.audience !== "private-dashboard" ||
-    (readerAudience !== undefined && readerAudience !== eligibility.audience)
-  )
-    return false;
   const request = deferred as DeferredEventCandidatePageProjection & {
     readonly referrersRequest?: { readonly audience?: unknown };
     readonly referrerOverviewRequest?: { readonly audience?: unknown };
@@ -7524,53 +7567,44 @@ function isPrivatePageVisitConsumer(
     };
     readonly filterValuesRequest?: { readonly audience?: unknown };
   };
-  switch (deferred.operation) {
-    case "pages-aggregate-page":
-      return (
-        request.pagesAggregatePageRequest?.audience === "private-dashboard"
-      );
-    case "pages-tabs":
-      return request.pagesTabsRequest?.audience === "private-dashboard";
-    case "performance":
-      return (
-        readerAudience === "private-dashboard" &&
-        eligibility.performancePrivateOptIn
-      );
-    case "geo-points":
-      return (
-        readerAudience === "private-dashboard" &&
-        eligibility.geoPointsPrivateOptIn
-      );
-    case "cross-dimension":
-    case "radar":
-    case "share-trend":
-      return (
-        readerAudience === "private-dashboard" &&
-        eligibility.technologyPrivateOptIn
-      );
-    case "referrers":
-      return request.referrersRequest?.audience === "private-dashboard";
-    case "page-dimension":
-      return request.referrerOverviewRequest?.audience === "private-dashboard";
-    case "channel-overview":
-      return request.overviewPageTableRequest?.audience === "private-dashboard";
-    case "channel-list":
-      return request.channelListRequest?.audience === "private-dashboard";
-    case "session-boundary-dimension":
-      return (
-        request.sessionBoundaryDimensionRequest?.audience ===
-        "private-dashboard"
-      );
-    case "session-boundary-overview-page":
-      return (
-        request.sessionBoundaryOverviewPageRequest?.audience ===
-        "private-dashboard"
-      );
-    case "filter-values":
-      return request.filterValuesRequest?.audience === "private-dashboard";
-    default:
-      return false;
-  }
+  // Only adapt provider request shapes here; all audience rules live in the
+  // application policy. The WeakMap above supplies trusted preparation facts.
+  const consumerAudience = (() => {
+    switch (deferred.operation) {
+      case "pages-aggregate-page":
+        return request.pagesAggregatePageRequest?.audience;
+      case "pages-tabs":
+        return request.pagesTabsRequest?.audience;
+      case "referrers":
+        return request.referrersRequest?.audience;
+      case "page-dimension":
+        return request.referrerOverviewRequest?.audience;
+      case "channel-overview":
+        return request.overviewPageTableRequest?.audience;
+      case "channel-list":
+        return request.channelListRequest?.audience;
+      case "session-boundary-dimension":
+        return request.sessionBoundaryDimensionRequest?.audience;
+      case "session-boundary-overview-page":
+        return request.sessionBoundaryOverviewPageRequest?.audience;
+      case "filter-values":
+        return request.filterValuesRequest?.audience;
+      default:
+        return undefined;
+    }
+  })();
+  return checkPageMembershipAudiencePolicy({
+    exposure: "event-page-visits",
+    operation: deferred.operation,
+    preparationAudience: eligibility?.audience,
+    readerAudience,
+    consumerAudience,
+    privateOptIns: eligibility && {
+      performance: eligibility.performancePrivateOptIn,
+      geoPoints: eligibility.geoPointsPrivateOptIn,
+      technology: eligibility.technologyPrivateOptIn,
+    },
+  }).allowed;
 }
 
 /**
@@ -7641,23 +7675,6 @@ export async function prepareDeferredPageVisitQualification(
   });
 }
 
-const ENTITY_PAGE_ROLE_OPERATIONS: readonly DeferredEventQualificationOperation[] =
-  [
-    "share-trend",
-    "radar",
-    "cross-dimension",
-    "performance",
-    "geo-points",
-    "pages-aggregate-page",
-    "pages-tabs",
-    "referrers",
-    "page-dimension",
-    "channel-overview",
-    "channel-list",
-    "session-boundary-dimension",
-    "session-boundary-overview-page",
-  ];
-
 /**
  * Page-role consumers of a session or visitor filter: evaluate the existing
  * Core fallback into a request-private entity membership. The entity relation
@@ -7678,7 +7695,10 @@ async function prepareDeferredEntityPageQualification(
   const deferred = deferredInput;
   const plan = deferred.metadata.plan;
   if (
-    !ENTITY_PAGE_ROLE_OPERATIONS.includes(deferred.operation) ||
+    !checkPageMembershipAudiencePolicy({
+      exposure: "entity-membership",
+      operation: deferred.operation,
+    }).allowed ||
     plan.mode !== "entity" ||
     plan.scope === "event" ||
     plan.membership.kind !== "entity" ||
@@ -7792,6 +7812,8 @@ export async function prepareDeferredEventMembershipQualification(
   options: {
     readonly maxBindings?: number;
     readonly maxSourcesPerRole?: number;
+    /** Exact frozen engine value. It grants no eligibility and is freshly rederived. */
+    readonly evaluationStep?: MembershipPreparationStep;
     /** Also expose the Page visits of the same evaluation (session-boundary reads). */
     readonly withPageVisits?: boolean;
   } = {},
@@ -7819,22 +7841,61 @@ export async function prepareDeferredEventMembershipQualification(
   )
     return undefined;
 
+  let evaluationFilters = deferred.filters;
+  let evaluationTime = deferred.time;
+  const evaluationStep = options.evaluationStep;
+  const originalScope = evaluationStep
+    ? JSON.stringify(scopePlanRequestSnapshot(deferred.metadata.plan))
+    : undefined;
+  const assertEvaluationStep = () => {
+    if (!evaluationStep) return;
+    const expected = normalizeMembershipPreparations([
+      {
+        key: evaluationStep.key,
+        execution: planAdvancedFilterExecution({
+          subject: deferred.subject,
+          filters: deferred.filters,
+          scope: deferred.metadata.plan.scope,
+          time: deferred.time,
+          reportFusionAvailable: false,
+        }),
+        filters: deferred.filters,
+        queryTime: deferred.time,
+      },
+    ])?.[0];
+    // Fresh evaluator admission enforces these same fixed activity/work/match
+    // bounds. This value never supplies an alternative limit or subject.
+    if (
+      !Object.isFrozen(evaluationStep) ||
+      !expected ||
+      JSON.stringify(expected) !== JSON.stringify(evaluationStep) ||
+      JSON.stringify(scopePlanRequestSnapshot(deferred.metadata.plan)) !==
+        originalScope
+    )
+      throw new Error("overview_membership_preparation_step_mismatch");
+  };
+  if (evaluationStep) {
+    assertEvaluationStep();
+    evaluationFilters = evaluationStep.filters;
+    evaluationTime = evaluationStep.queryTime;
+  }
   const matches = await evaluateForSitesCore({
     env: deferred.env,
     subject: deferred.subject,
     siteIds: [deferred.siteId],
-    filters: deferred.filters,
+    filters: evaluationFilters,
     plan: deferred.metadata.plan,
-    time: deferred.time,
+    time: evaluationTime,
     diagnostics: deferred.diagnostics,
     signal: deferred.signal,
     coverage: deferred.coverage,
   });
   if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  assertEvaluationStep();
   return createPageVisitQualificationPreparation({
     siteId: deferred.siteId,
-    filters: deferred.filters,
-    queryTime: deferred.time,
+    filters: evaluationFilters,
+    queryTime: evaluationTime,
     scopePlan: deferred.metadata.plan,
     consumerKey,
     relation: entityMode
@@ -7858,6 +7919,87 @@ export async function prepareDeferredEventMembershipQualification(
       ? { maxSourcesPerRole: options.maxSourcesPerRole }
       : {}),
   });
+}
+
+/** Describe and execute only the existing private Overview entity fallback. */
+export async function prepareDeferredOverviewMembershipRecipe(
+  deferred: DeferredOverviewTrendQualification,
+) {
+  if (
+    !isDeferredOverviewTrendQualification(deferred) ||
+    !isDeferredEventQualification(deferred.qualification)
+  )
+    return undefined;
+  const qualification = deferred.qualification;
+  if (
+    qualification.metadata.plan.mode !== "entity" ||
+    qualification.metadata.plan.scope === "event" ||
+    !sameCandidateReadAndFilterWindow(qualification.time)
+  )
+    return undefined;
+  const configuration = deferred.configuration;
+  const childKeys =
+    configuration.kind === "trend"
+      ? ["current-trend" as const]
+      : [
+          "current-overview" as const,
+          ...(configuration.kind === "overview-with-previous" ||
+          configuration.kind === "overview-with-previous-and-detail"
+            ? ["previous-overview" as const]
+            : []),
+          ...(configuration.kind === "overview-with-detail" ||
+          configuration.kind === "overview-with-previous-and-detail"
+            ? ["current-detail" as const]
+            : []),
+        ];
+  const enginePlan = planOverviewMembershipDependencies({
+    preparation: {
+      key: "original",
+      execution: planAdvancedFilterExecution({
+        subject: qualification.subject,
+        filters: qualification.filters,
+        scope: qualification.metadata.plan.scope,
+        time: qualification.time,
+        reportFusionAvailable: false,
+      }),
+      filters: qualification.filters,
+      queryTime: qualification.time,
+    },
+    readerQueryTime: qualification.requestTime,
+    operation: deferred.operation,
+    configuration,
+    importedOutputs: childKeys.map((childKey) => ({
+      childKey,
+      outputId: childKey,
+    })),
+    consumer: { operation: deferred.operation, configuration },
+  });
+  if (!enginePlan) return undefined;
+  const consumerKey = pageVisitQualificationConsumerKey(
+    deferred.operation,
+    enginePlan,
+  );
+  const preparation = await prepareDeferredEventMembershipQualification(
+    qualification,
+    consumerKey,
+    [deferred.operation],
+    {
+      maxBindings: enginePlan.children.length,
+      maxSourcesPerRole: 2,
+      evaluationStep: enginePlan.preparation,
+    },
+  );
+  return preparation
+    ? {
+        enginePlan,
+        preparation,
+        consumerKey,
+        filters: qualification.filters,
+        queryTime: qualification.time,
+        scopePlan: qualification.metadata.plan,
+        siteId: qualification.siteId,
+      }
+    : undefined;
 }
 
 /** Prepare only the private, one-site, same-window Referrers summary slice. */
@@ -7975,7 +8117,9 @@ export async function prepareDeferredEventQualificationFallback(
   )
     throw new Error("deferred_event_qualification_untrusted");
   if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-  const preparedMembership = await evaluateForSites({
+  const wholeOriginal = deferred.wholeOriginalMembership;
+  wholeOriginal?.invocation.assertSameDeferredOwner(deferred);
+  const evaluationInput = {
     env: deferred.env,
     subject: deferred.subject,
     siteIds: [deferred.siteId],
@@ -7985,12 +8129,197 @@ export async function prepareDeferredEventQualificationFallback(
     diagnostics: deferred.diagnostics,
     signal: deferred.signal,
     coverage: deferred.coverage,
-  });
+  };
+  const result = await (wholeOriginal
+    ? evaluateForSites({
+        ...evaluationInput,
+        completion: wholeOriginal.consumer,
+        deferredInvocation: wholeOriginal.invocation,
+      })
+    : evaluateForSites(evaluationInput));
   if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-  return attachScopedFilterMetadata(deferred.filters, {
+  const filters = attachScopedFilterMetadata(deferred.filters, {
     ...deferred.metadata,
-    plan: { ...deferred.metadata.plan, preparedMembership },
+    plan: wholeOriginal
+      ? { ...deferred.metadata.plan }
+      : {
+          ...deferred.metadata.plan,
+          preparedMembership: result as PreparedMembership,
+        },
   });
+  if (wholeOriginal)
+    associateWholeOriginalCompletion(
+      deferred,
+      wholeOriginal.consumer,
+      result as WholeOriginalProjection,
+      {
+        filters,
+        metadata: scopedFilterMetadata(filters)!,
+      },
+    );
+  return filters;
+}
+
+/** The existing deferred WeakSet remains the only entry authentication. A
+ * declaration, physical frame, reader key or LogicalPlan is not a substitute. */
+export function hasDeferredChannelMembershipProgram(
+  deferred: DeferredChannelListQualification,
+): boolean {
+  return (
+    isDeferredEventQualification(deferred) &&
+    deferred.operation === "channel-list" &&
+    deferred.channelMembershipInvocation !== undefined
+  );
+}
+
+/** Corresponds to evaluateForSites' original async frame and projection await.
+ * Stage 0 owns its own original evaluator frame through the common runtime. */
+async function evaluateDeferredChannelMembershipProgram(
+  deferred:
+    DeferredChannelListQualification | DeferredPageDimensionQualification,
+): Promise<void> {
+  const invocation = deferred.channelMembershipInvocation;
+  if (!invocation) throw new Error("channels_membership_invocation_missing");
+  invocation.assertSameDeferredOwner(deferred);
+  await executeAnalyticsLogicalStage({
+    kind: "channels-whole-membership-at-original-checkpoint",
+    invocation,
+  });
+  invocation.projectAtOriginalRegistrationCheckpoint(deferred);
+}
+
+/** The old fallback outer frame, authentication, abort checkpoints and shallow
+ * scoped-filter copy remain here. Only the register transport is replaced. */
+export async function prepareDeferredPageMembershipFallback(
+  deferred:
+    DeferredChannelListQualification | DeferredPageDimensionQualification,
+  readerConsumer?: PageReaderConsumer,
+): Promise<FilterDocument> {
+  if (
+    !isDeferredEventQualification(deferred) ||
+    (deferred.operation !== "channel-list" &&
+      deferred.operation !== "page-dimension") ||
+    !deferred.channelMembershipInvocation
+  )
+    throw new Error("deferred_event_qualification_untrusted");
+  if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  if (deferred.operation === "page-dimension") {
+    if (!readerConsumer)
+      throw new Error("page_membership_reader_consumer_missing");
+    deferred.channelMembershipInvocation.retainReaderConsumerAtOriginalFallbackCheckpoint(
+      deferred,
+      readerConsumer,
+    );
+  }
+  await evaluateDeferredChannelMembershipProgram(deferred);
+  if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  const filters = attachScopedFilterMetadata(deferred.filters, {
+    ...deferred.metadata,
+    plan: { ...deferred.metadata.plan },
+  });
+  deferred.channelMembershipInvocation.retainReaderFiltersAtOriginalReturnCheckpoint(
+    deferred,
+    filters,
+  );
+  return filters;
+}
+
+/** Keep the original exported function/promise identity for the first consumer. */
+export const prepareDeferredChannelMembershipFallback =
+  prepareDeferredPageMembershipFallback;
+
+export function hasDeferredPageMembershipProgram(
+  deferred: DeferredPageDimensionQualification,
+): boolean {
+  return (
+    isDeferredEventQualification(deferred) &&
+    deferred.operation === "page-dimension" &&
+    deferred.channelMembershipInvocation !== undefined
+  );
+}
+
+/** Runs at queryChannelsFromD1's original builder checkpoint, after the whole
+ * result and old fallback copy exist. No canonical reader is built earlier. */
+export function bindDeferredChannelMembershipSuccessor(input: {
+  readonly deferred: DeferredChannelListQualification;
+  readonly siteId: string;
+  readonly filters: FilterDocument;
+  readonly queryTime: QueryTime;
+  readonly scopePlan: ScopedFilterPlan;
+  readonly limit: number;
+}) {
+  const deferred = input.deferred;
+  if (
+    !isDeferredEventQualification(deferred) ||
+    deferred.operation !== "channel-list" ||
+    !deferred.channelMembershipInvocation
+  )
+    throw new Error("deferred_event_qualification_untrusted");
+  if (
+    input.siteId !== deferred.siteId ||
+    input.scopePlan !== scopedFilterMetadata(input.filters)?.plan ||
+    input.queryTime !==
+      (scopedFilterMetadata(input.filters)?.time ?? deferred.time)
+  )
+    throw new Error("channels_membership_reader_context_mismatch");
+  return deferred.channelMembershipInvocation.bindSuccessorAtOriginalBuilderCheckpoint(
+    {
+      owner: deferred,
+      siteId: input.siteId,
+      filters: input.filters,
+      queryTime: input.queryTime,
+      scopePlan: input.scopePlan,
+      limit: input.limit,
+    },
+  );
+}
+
+export function bindDeferredPageMembershipSuccessor(input: {
+  readonly deferred: DeferredPageDimensionQualification;
+  readonly siteId: string;
+  readonly filters: FilterDocument;
+  readonly queryTime: QueryTime;
+  readonly scopePlan: ScopedFilterPlan;
+  readonly consumer: Extract<PageReaderConsumer, { kind: "dimension-page" }>;
+}) {
+  const deferred = input.deferred;
+  if (
+    !isDeferredEventQualification(deferred) ||
+    deferred.operation !== "page-dimension" ||
+    !deferred.channelMembershipInvocation
+  )
+    throw new Error("deferred_event_qualification_untrusted");
+  const metadata = scopedFilterMetadata(input.filters);
+  if (
+    input.siteId !== deferred.siteId ||
+    input.scopePlan !== metadata?.plan ||
+    input.queryTime !== (metadata?.time ?? deferred.time)
+  )
+    throw new Error("page_membership_reader_context_mismatch");
+  const configuration = input.consumer.configuration;
+  const original = deferred.pageDimensionRequest;
+  if (
+    configuration.dimension !== original.dimension ||
+    configuration.limit !== original.limit ||
+    configuration.cursorText !== original.cursorText ||
+    configuration.search !== original.search ||
+    configuration.sortBy !== original.sortBy ||
+    configuration.sortDirection !== original.sortDirection ||
+    configuration.excludeEmpty !== false ||
+    configuration.audience !== original.audience
+  )
+    throw new Error("page_membership_reader_configuration_mismatch");
+  return deferred.channelMembershipInvocation.bindSuccessorAtOriginalBuilderCheckpoint(
+    {
+      owner: deferred,
+      siteId: input.siteId,
+      filters: input.filters,
+      queryTime: input.queryTime,
+      scopePlan: input.scopePlan,
+      limit: original.limit,
+      consumer: input.consumer,
+    },
+  );
 }
 
 /**
@@ -8046,6 +8375,8 @@ function prepareSide(
   side: FilterSide,
   diagnostics?: D1ReadDiagnostics,
   signal?: AbortSignal,
+  completion?: WholeOriginalConsumer,
+  program?: D1LogicalProgramExecution,
 ): Promise<PreparedFilterSide> | null {
   const filters = side.filters;
   if (!filters?.root || !filterDocumentUsesAdvancedExpressions(filters))
@@ -8056,7 +8387,7 @@ function prepareSide(
   const time = metadata.time ?? side.time;
   if (!time)
     throw invalidInput("time", "advanced_filter_execution_context_required");
-  return evaluateForSites({
+  const evaluationInput = {
     env,
     subject,
     siteIds: metadata.siteIds.length ? metadata.siteIds : siteIds,
@@ -8065,15 +8396,263 @@ function prepareSide(
     time,
     diagnostics,
     signal,
-  }).then((preparedMembership: PreparedMembership) => {
-    const plan = { ...metadata.plan, preparedMembership };
-    return {
-      side: {
-        ...side,
-        filters: attachScopedFilterMetadata(filters, { ...metadata, plan }),
-      },
-      plan,
+  };
+  const evaluation = completion
+    ? evaluateForSites({
+        ...evaluationInput,
+        completion,
+        ...(program ? { program } : {}),
+      })
+    : program
+      ? evaluateForSites({ ...evaluationInput, program })
+      : evaluateForSites(evaluationInput);
+  return evaluation.then((result) => {
+    const plan =
+      completion || result === undefined
+        ? { ...metadata.plan }
+        : {
+            ...metadata.plan,
+            preparedMembership: result as PreparedMembership,
+          };
+    const preparedSide = {
+      ...side,
+      filters: attachScopedFilterMetadata(filters, { ...metadata, plan }),
     };
+    if (completion)
+      associateWholeOriginalCompletion(
+        preparedSide,
+        completion,
+        result as WholeOriginalProjection,
+        {
+          filters: preparedSide.filters,
+          metadata: scopedFilterMetadata(preparedSide.filters)!,
+          ...(program ? { program } : {}),
+          ...(completion.kind === "event-type-detail" ||
+          completion.kind === "team-sites" ||
+          completion.kind === "team-exact-dimension"
+            ? { qualificationTime: time }
+            : {}),
+        },
+      );
+    return { side: preparedSide, plan };
+  });
+}
+
+export interface SiteExactDimensionInput {
+  readonly filters: FilterDocument;
+  readonly qualifiedPlan?: ScopedFilterPlan;
+  readonly qualification?: SiteExactDimensionQualificationProjection;
+}
+/** Joint admission is intentionally not a per-site prepare loop. */
+export async function prepareSiteExactDimensionInputs(input: {
+  readonly env: Env;
+  readonly query: TeamExactDimensionQuery;
+  readonly siteIds: readonly string[];
+  readonly diagnostics?: D1ReadDiagnostics;
+  readonly signal?: AbortSignal;
+}): Promise<ReadonlyMap<string, SiteExactDimensionInput>> {
+  const decision = planTeamExactDimensionExecution(input.query);
+  if (decision.kind !== "exact")
+    return await Promise.reject(
+      invalidInput("filters", "site_exact_dimension_qualification_unavailable"),
+    );
+  if (decision.qualification === "native") {
+    // Replace the removed async helper's native frame, including rejected
+    // authorization checks, without adding a checkpoint to the SQL branch.
+    const native = await (async () => {
+      const subject = semanticSubjectFromQuerySubject(
+        input.query.context.subject,
+      );
+      if (
+        input.siteIds.some(
+          (siteId) => !subject.siteIds.some((id) => id === siteId),
+        )
+      )
+        throw invalidInput(
+          "filters",
+          "advanced_filter_execution_site_context_mismatch",
+        );
+      const filters = input.query.filters ?? EMPTY_FILTER_DOCUMENT;
+      return new Map(input.siteIds.map((siteId) => [siteId, filters]));
+    })();
+    return new Map(
+      [...native].map(([siteId, filters]) => [siteId, { filters }]),
+    );
+  }
+  const recipe = planTeamExactMembershipDependencies(input.query);
+  if (!recipe)
+    return await Promise.reject(
+      invalidInput("filters", "site_exact_dimension_qualification_unavailable"),
+    );
+  if (
+    input.siteIds.some((siteId) => !recipe.admission.siteIds.includes(siteId))
+  )
+    throw invalidInput(
+      "filters",
+      "advanced_filter_execution_site_context_mismatch",
+    );
+  const query = input.query;
+  const metadata = scopedFilterMetadata(query.filters)!;
+  const originalFilters = query.filters;
+  const originalTime = query.time;
+  const originalMetadataTime = metadata.time;
+  const originalPlan = metadata.plan;
+  const originalSiteIds = metadata.siteIds;
+  const originalTargetSiteIds = input.siteIds;
+  const originalContext = query.context;
+  const contextSnapshot = () => {
+    const request = qualificationRequestOwnDataSnapshot(query);
+    const targets = qualificationRequestOwnDataSnapshot({
+      requestedSiteIds: input.siteIds,
+    });
+    return request === undefined || targets === undefined
+      ? undefined
+      : `${request}|${targets}`;
+  };
+  const originalContextSnapshot = contextSnapshot();
+  const recipeSnapshot = JSON.stringify(recipe);
+  const assertAdmissionContext = () => {
+    const currentMetadata = scopedFilterMetadata(query.filters);
+    if (
+      query.filters !== originalFilters ||
+      query.time !== originalTime ||
+      query.context !== originalContext ||
+      currentMetadata !== metadata ||
+      currentMetadata.time !== originalMetadataTime ||
+      currentMetadata.plan !== originalPlan ||
+      currentMetadata.siteIds !== originalSiteIds ||
+      input.siteIds !== originalTargetSiteIds ||
+      originalContextSnapshot === undefined ||
+      contextSnapshot() !== originalContextSnapshot ||
+      JSON.stringify(planTeamExactMembershipDependencies(query)) !==
+        recipeSnapshot
+    )
+      throw invalidInput(
+        "filters",
+        "team_exact_membership_admission_context_mismatch",
+      );
+  };
+  assertAdmissionContext();
+  const matches = await evaluateForSitesCore({
+    env: input.env,
+    subject: semanticSubjectFromQuerySubject(query.context.subject),
+    siteIds: recipe.admission.siteIds,
+    filters: recipe.admission.filters,
+    plan: metadata.plan,
+    time: recipe.admission.queryTime,
+    diagnostics: input.diagnostics,
+    signal: input.signal,
+  });
+  assertAdmissionContext();
+  const children = new Map(
+    recipe.children.map((child) => [child.siteId, child]),
+  );
+  return new Map(
+    input.siteIds.map((siteId) => {
+      const child = children.get(siteId)!;
+      const filters = attachScopedFilterMetadata(query.filters!, {
+        ...metadata,
+        siteIds: [siteId],
+      });
+      const preparation = createPageVisitQualificationPreparation({
+        siteId,
+        filters,
+        queryTime: metadata.time,
+        scopePlan: metadata.plan,
+        consumerKey: siteExactDimensionQualificationConsumerKey(
+          query.dimension,
+        ),
+        relation: entityMembershipRelation(
+          [siteId],
+          matches.filter((match) => match.siteId === siteId),
+        ),
+        dependencyRef: child.dependencyRef,
+        maxBindings: child.maxPlans,
+        maxSourcesPerRole: child.maxSources,
+      });
+      return [
+        siteId,
+        {
+          filters,
+          qualifiedPlan: metadata.plan,
+          qualification: createSiteExactDimensionQualificationProjection({
+            siteId,
+            audience: query.context.policy.audience,
+            dimension: query.dimension,
+            filters,
+            time: metadata.time,
+            scopePlan: metadata.plan,
+            ...(query.scopePreference !== undefined
+              ? { scopePreference: query.scopePreference }
+              : {}),
+            preparation,
+          }),
+        },
+      ];
+    }),
+  );
+}
+
+/** Team-site listing retains one joint admission before any cursor or page I/O. */
+export async function prepareTeamSitesQualification(input: {
+  readonly env: Env;
+  readonly query: TeamSitesMembershipQuery;
+  readonly signal?: AbortSignal;
+}): Promise<TeamSitesQualification | undefined> {
+  const whole = wholeOriginalTeamSitesQualificationFromQuery(input.query);
+  if (whole) return whole;
+  const query = input.query,
+    recipe = planTeamSitesMembershipDependencies(query);
+  if (!recipe) return undefined;
+  const metadata = scopedFilterMetadata(query.filters)!;
+  const original = {
+    filters: query.filters,
+    time: query.time,
+    context: query.context,
+    metadata,
+    plan: metadata.plan,
+    siteIds: metadata.siteIds,
+    metadataTime: metadata.time,
+  };
+  const contextSnapshot = () => qualificationRequestOwnDataSnapshot(query);
+  const before = contextSnapshot(),
+    recipeSnapshot = JSON.stringify(recipe);
+  const assertFresh = () => {
+    const current = scopedFilterMetadata(query.filters);
+    if (
+      query.filters !== original.filters ||
+      query.time !== original.time ||
+      query.context !== original.context ||
+      current !== original.metadata ||
+      current.plan !== original.plan ||
+      current.time !== original.metadataTime ||
+      current.siteIds !== original.siteIds ||
+      before === undefined ||
+      contextSnapshot() !== before ||
+      JSON.stringify(planTeamSitesMembershipDependencies(query)) !==
+        recipeSnapshot
+    )
+      throw invalidInput(
+        "filters",
+        "team_sites_membership_admission_context_mismatch",
+      );
+  };
+  assertFresh();
+  const matches = await evaluateForSitesCore({
+    env: input.env,
+    subject: semanticSubjectFromQuerySubject(query.context.subject),
+    siteIds: recipe.admission.siteIds,
+    filters: recipe.admission.filters,
+    plan: metadata.plan,
+    time: recipe.admission.queryTime,
+    signal: input.signal,
+  });
+  assertFresh();
+  return createTeamSitesQualification({
+    query,
+    recipe,
+    relation: entityMembershipRelation(recipe.admission.siteIds, matches),
+    assertFresh,
   });
 }
 
@@ -8084,7 +8663,7 @@ export function d1AdvancedFilterMiddleware(
   env: Env,
   diagnostics?: D1ReadDiagnostics,
   expectedSiteId?: string,
-): TypedQueryProviderMiddleware {
+): D1QueryProviderMiddleware {
   return async (operation: QueryOperation, input: unknown, next, execution) => {
     const rawEventContextRequestSnapshot =
       operation === "event-context"
@@ -9259,10 +9838,187 @@ export function d1AdvancedFilterMiddleware(
         return next(output);
       }
     }
+    if (operation === "dimension" || operation === "channels") {
+      const dependency =
+        await prepareIndependentPageChannelMembershipDependency({
+          env,
+          query,
+          operation,
+          subject,
+          siteIds,
+          diagnostics,
+          signal: execution?.signal,
+        });
+      if (dependency) {
+        independentPageChannelMemberships.set(output, dependency);
+        return next(output);
+      }
+    }
+    if (operation === "referrers") {
+      const dependency = await prepareReferrersTimeMembershipDependency({
+        env,
+        query,
+        subject,
+        siteIds,
+        diagnostics,
+        signal: execution?.signal,
+      });
+      if (dependency) {
+        associateWholeFilterReaderDependency(output, dependency);
+        return next(output);
+      }
+      const pageDependency =
+        await prepareIndependentReferrersPageMembershipDependency({
+          env,
+          query,
+          subject,
+          siteIds,
+          diagnostics,
+          signal: execution?.signal,
+        });
+      if (pageDependency) {
+        independentReferrersPageMemberships.set(output, pageDependency);
+        return next(output);
+      }
+    }
+    if (
+      operation === "dimension" &&
+      comparisonRequestProof.kind === "matched"
+    ) {
+      const dependency = await prepareComparisonMembershipDependencies({
+        env,
+        query,
+        subject,
+        siteIds,
+        diagnostics,
+        signal: execution?.signal,
+      });
+      if (dependency) {
+        comparisonMembershipDependencies.set(output, dependency);
+        return next(output);
+      }
+    }
+    if (operation === "overview" || operation === "trend") {
+      const dependency = await prepareIndependentOverviewMembershipDependency({
+        env,
+        query,
+        operation,
+        subject,
+        siteIds,
+        diagnostics,
+        signal: execution?.signal,
+      });
+      if (dependency) {
+        independentOverviewMembershipDependencies.set(output, dependency);
+        return next(output);
+      }
+    }
     let preparedPrimaryPlan: ScopedFilterPlan | undefined;
+    const pageWholeFamily = pageWholeOriginalFamilyFromQuery(operation, query);
+    const teamSitesWholeReaders =
+      operation === "team-sites"
+        ? planTeamSitesWholeOriginalReaders(
+            query as unknown as TeamSitesMembershipQuery,
+          )
+        : undefined;
+    const teamExactWholeReader =
+      operation === "dimension"
+        ? planTeamExactWholeOriginalReader(
+            query as unknown as TeamExactDimensionQuery,
+          )
+        : undefined;
+    const selectedWholeOriginalConsumer: WholeOriginalConsumer | undefined =
+      teamExactWholeReader
+        ? { kind: "team-exact-dimension", readers: teamExactWholeReader }
+        : teamSitesWholeReaders
+          ? { kind: "team-sites", readers: teamSitesWholeReaders }
+          : selectWholeOriginalConsumer({
+              operation,
+              pageFamily: pageWholeFamily,
+              eventNameDimension: outputEventNameDimensionRequest !== null,
+            });
+    const originalMetadata =
+      selectedWholeOriginalConsumer !== undefined
+        ? scopedFilterMetadata(query.filters)
+        : undefined;
+    const singleEventWholeConsumer =
+      selectedWholeOriginalConsumer?.kind === "event-summary" ||
+      selectedWholeOriginalConsumer?.kind === "event-types" ||
+      selectedWholeOriginalConsumer?.kind === "event-fields" ||
+      selectedWholeOriginalConsumer?.kind === "event-field-values" ||
+      selectedWholeOriginalConsumer?.kind === "event-records";
+    const stagedEventTrendWholeConsumer =
+      selectedWholeOriginalConsumer?.kind === "event-trend";
+    const dualRoleEventContextWholeConsumer =
+      selectedWholeOriginalConsumer?.kind === "event-context";
+    // Reuse the existing entity Page-role exposure only for this original
+    // API summary path. Private whole-filter opt-ins and Event-to-Page rules
+    // remain in their existing branches above.
+    const apiReferrersSummaryWholeConsumer =
+      selectedWholeOriginalConsumer?.kind === "page" &&
+      selectedWholeOriginalConsumer.family === "referrers" &&
+      query.context.policy.audience === "api-v1" &&
+      ownDataValue(query, "variant") === "summary" &&
+      checkPageMembershipAudiencePolicy({
+        exposure: "entity-membership",
+        operation: "referrers",
+      }).allowed;
+    const siteCompletion: WholeOriginalConsumer | undefined =
+      selectedWholeOriginalConsumer !== undefined &&
+      (query.context.policy.audience === "private-dashboard" ||
+        apiReferrersSummaryWholeConsumer ||
+        ((singleEventWholeConsumer ||
+          stagedEventTrendWholeConsumer ||
+          dualRoleEventContextWholeConsumer) &&
+          (query.context.policy.audience === "api-v1" ||
+            query.context.policy.audience === "public-share"))) &&
+      querySubject.kind === "site" &&
+      siteIds.length === 1 &&
+      originalMetadata?.siteIds.length === 1 &&
+      originalMetadata.siteIds[0] === siteIds[0] &&
+      originalMetadata.time !== undefined &&
+      ((originalMetadata.plan.mode === "entity" &&
+        (originalMetadata.plan.scope === "session" ||
+          originalMetadata.plan.scope === "visitor")) ||
+        ((singleEventWholeConsumer ||
+          stagedEventTrendWholeConsumer ||
+          dualRoleEventContextWholeConsumer) &&
+          originalMetadata.plan.mode === "observation" &&
+          originalMetadata.plan.scope === "event"))
+        ? selectedWholeOriginalConsumer
+        : undefined;
+    const completion =
+      (teamSitesWholeReaders &&
+        selectedWholeOriginalConsumer?.kind === "team-sites") ||
+      (teamExactWholeReader &&
+        selectedWholeOriginalConsumer?.kind === "team-exact-dimension")
+        ? selectedWholeOriginalConsumer
+        : siteCompletion;
     if (query.current && query.reference) {
       for (const sideName of ["current", "reference"] as const) {
         const side = query[sideName] as FilterSide;
+        const sideMetadata = scopedFilterMetadata(side.filters);
+        const comparisonReaderTab = wholeOriginalComparisonReaderTab(query.tab);
+        const comparisonCompletion: WholeOriginalConsumer | undefined =
+          operation === "dimension" &&
+          query.mode === "overview-tab" &&
+          comparisonReaderTab !== undefined &&
+          query.context.policy.audience === "private-dashboard" &&
+          querySubject.kind === "site" &&
+          siteIds.length === 1 &&
+          sideMetadata?.siteIds.length === 1 &&
+          sideMetadata.siteIds[0] === siteIds[0] &&
+          sideMetadata.time !== undefined &&
+          sideMetadata.plan.preparedMembership === undefined &&
+          sideMetadata.plan.mode === "entity" &&
+          (sideMetadata.plan.scope === "session" ||
+            sideMetadata.plan.scope === "visitor")
+            ? {
+                kind: "comparison-page",
+                side: sideName,
+                tab: comparisonReaderTab,
+              }
+            : undefined;
         const pending = prepareSide(
           env,
           subject,
@@ -9270,6 +10026,7 @@ export function d1AdvancedFilterMiddleware(
           side,
           diagnostics,
           execution?.signal,
+          comparisonCompletion,
         );
         if (!pending) continue;
         const prepared = await pending;
@@ -9288,10 +10045,29 @@ export function d1AdvancedFilterMiddleware(
         side,
         diagnostics,
         execution?.signal,
+        completion,
+        (completion !== undefined &&
+          query.context.policy.audience === "private-dashboard" &&
+          querySubject.kind === "site") ||
+          operation === "geo-points" ||
+          (operation === "channels" &&
+            ownDataValue(query, "mode") === "list") ||
+          (operation === "pages" &&
+            pageWholeFamily === "pages" &&
+            ownDataValue(query, "mode") === undefined &&
+            ownDataValue(query, "variant") !== "tabs" &&
+            ownDataValue(query, "includeTabs") !== true) ||
+          (operation === "dimension" &&
+            pageWholeFamily === "dimension" &&
+            ownDataValue(query, "dimension") !== "session.entryPath" &&
+            ownDataValue(query, "dimension") !== "session.exitPath")
+          ? execution?.program
+          : undefined,
       );
       if (pending) {
         const prepared = await pending;
         output.filters = prepared.side.filters;
+        transferWholeOriginalCompletion(prepared.side, output);
         preparedPrimaryPlan = prepared.plan;
       }
     }

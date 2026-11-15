@@ -19,6 +19,11 @@ export interface ReadTeamBreakdownInput {
   readonly limit: number;
   readonly filters: FilterDocument;
   readonly allowedSiteIds?: readonly string[];
+  readonly wholeOriginalOwner?: object;
+  /** Receives only the authenticated sites, before any report is read. */
+  readonly readExactSites?: (
+    siteIds: readonly string[],
+  ) => Promise<readonly BreakdownResult[]>;
 }
 
 function mergeBreakdownItems(
@@ -64,17 +69,22 @@ export async function readTeamBreakdown(
   // comparison engine. It intentionally omits the historical per-site top
   // candidate cut; applying a limit before the merge is not exact.
   const perSiteLimit = 0;
-  const results = await Promise.all(
-    sites.map((site) =>
-      readSiteBreakdown({
-        env: input.env,
-        siteId: site.id,
-        window: input.window,
-        dimension: input.dimension,
-        limit: perSiteLimit,
-        filters: input.filters,
-      }),
-    ),
-  );
+  const results = input.readExactSites
+    ? await input.readExactSites(sites.map((site) => site.id))
+    : await Promise.all(
+        sites.map((site) =>
+          readSiteBreakdown({
+            env: input.env,
+            siteId: site.id,
+            window: input.window,
+            dimension: input.dimension,
+            limit: perSiteLimit,
+            filters: input.filters,
+            ...(input.wholeOriginalOwner
+              ? { wholeOriginalOwner: input.wholeOriginalOwner }
+              : {}),
+          }),
+        ),
+      );
   return mergeBreakdownItems(results, input.limit);
 }

@@ -139,6 +139,12 @@ function aggregateMeasure(
 
 function nodeHeader(node: LogicalNode): string {
   switch (node.kind) {
+    case "whole-filter-membership":
+      return `${relation(node.id)} WholeMembershipProgram<${node.profile}> grain=${grain(node.grain)} coverage=${node.coverageSource} lateFilter=${node.lateFilterInput}`;
+    case "whole-filter-core":
+      return `${relation(node.id)} BoundedFilterCore<${node.profile}> grain=${grain(node.grain)} input=${node.inputSource} maxActivities=${node.bounds.maxActivities}`;
+    case "membership-read":
+      return `${relation(node.id)} MembershipRead<${node.read.kind}> grain=${grain(node.grain)}`;
     case "source":
       return `${relation(node.id)} Source<${node.entity}> grain=${grain(node.grain)} domain=${node.temporalDomain}`;
     case "relationship-lookup":
@@ -178,7 +184,7 @@ function nodeHeader(node: LogicalNode): string {
     case "analysis-result": {
       const subject = node.childPlan.context.subject;
       const scope = node.childPlan.context.scope;
-      return `${relation(node.id)} AnalysisResult grain=${grain(node.grain)} childSubject=${subject.origin}[${subject.siteIds.join(",")}]${subject.teamId ? ` team=${subject.teamId}` : ""} childScope=${scope.requested}/${scope.logicalScope ?? "auto"} childOutput=${JSON.stringify(node.outputId)}`;
+      return `${relation(node.id)} AnalysisResult grain=${grain(node.grain)} childSubject=${subject.origin}[${subject.siteIds.join(",")}]${subject.teamId ? ` team=${subject.teamId}` : ""} childScope=${scope.requested}/${scope.logicalScope ?? "auto"} childOutput=${JSON.stringify(node.outputId)}${node.execution === "program" ? " execution=program" : ""}`;
     }
   }
 }
@@ -189,7 +195,27 @@ function nodeLines(
 ): string[] {
   const lines = [nodeHeader(node)];
   switch (node.kind) {
+    case "whole-filter-membership":
+      lines.push(
+        "  PROGRAM existing sequence -> Count -> bounded original Core; SQL children remain visible LogicalPlans",
+      );
+      break;
+    case "whole-filter-core":
+      lines.push(
+        "  HOST fixed evaluator over actual invocation read predecessors; no storage access",
+      );
+      break;
+    case "membership-read":
+      if (node.read.kind === "payload-nodes")
+        lines.push(
+          `  PATHS ${node.read.paths.map((path) => JSON.stringify(path)).join(",")} whole=${node.read.wholePayload}`,
+        );
+      break;
     case "source":
+      for (const input of node.membershipInputs ?? [])
+        lines.push(
+          `  MEMBERSHIP ${input.role} input=${relation(input.input)} site=${slot(input.siteId)} member=${slot(input.memberId)}`,
+        );
       for (const value of node.values) {
         const detail =
           value.kind === "self"

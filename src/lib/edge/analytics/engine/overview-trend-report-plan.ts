@@ -363,6 +363,8 @@ export function buildOverviewTrendPlan(input: {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
+  readonly pageVisitDependencyRefs?: readonly QualificationDependencyRef[];
+  readonly qualificationSemantics?: "whole-original";
   readonly interval: CalendarGranularity;
 }): ValidatedLogicalPlan {
   const source = createOverviewReportSource({
@@ -372,6 +374,12 @@ export function buildOverviewTrendPlan(input: {
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
     ...(input.qualificationDependencyRefs
       ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
+      : {}),
+    ...(input.pageVisitDependencyRefs
+      ? { pageVisitDependencyRefs: input.pageVisitDependencyRefs }
+      : {}),
+    ...(input.qualificationSemantics
+      ? { qualificationSemantics: input.qualificationSemantics }
       : {}),
     pageAttributes: [
       "page.report.sessionId",

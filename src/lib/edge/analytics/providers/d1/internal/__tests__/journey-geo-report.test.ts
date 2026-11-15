@@ -28,6 +28,10 @@ import type {
   QueryInput,
   QueryTime,
 } from "@/lib/edge/analytics/contract/types";
+import {
+  classifyAdvancedCountFilter,
+  classifyAdvancedEventCandidateCountFilter,
+} from "@/lib/edge/analytics/engine/advanced-filter-count-support";
 import { buildJourneyGeoPointsQualificationPlan } from "@/lib/edge/analytics/engine/journey-geo-report-plan";
 import { buildVisitFilterSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/legacy-core-filters";
 import {
@@ -40,10 +44,6 @@ import {
   preparedMembershipIdentities,
   toPreparedMembership,
 } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
-import {
-  classifyAdvancedCountFilter,
-  classifyAdvancedEventCandidateCountFilter,
-} from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import {
   d1AdvancedFilterMiddleware,
   prepareDeferredEventQualificationFallback,

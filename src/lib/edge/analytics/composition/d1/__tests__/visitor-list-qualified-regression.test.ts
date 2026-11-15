@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createMigratedDatabase } from "@/../scripts/schema/database";
 import {
@@ -23,6 +23,7 @@ import {
 } from "@/lib/edge/analytics/contract";
 import type { VisitorListSortKey } from "@/lib/edge/analytics/contract/types";
 import type { AdvancedCountFilterMatchPlanInput } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import { classifyAdvancedCountFilter } from "@/lib/edge/analytics/engine/advanced-filter-count-support";
 import { JOURNEY_VISITOR_LIST_REPORT_OUTPUT } from "@/lib/edge/analytics/engine/journey-entity-list-report-plan";
 import {
   buildJourneyVisitorGoalListQualificationPlan,
@@ -32,7 +33,6 @@ import { PAGE_DIMENSION_QUALIFICATION_CONTROL_OUTPUT } from "@/lib/edge/analytic
 import { splitPageDimensionNativeFilters } from "@/lib/edge/analytics/engine/qualified-page-source";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { preparedMembershipIdentities } from "@/lib/edge/analytics/providers/d1/internal/__tests__/prepared-membership-fixture";
-import { classifyAdvancedCountFilter } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import {
   d1AdvancedFilterMiddleware,
   deferredEventQualificationFromQuery,
@@ -43,6 +43,7 @@ import { mapVisitors } from "@/lib/edge/analytics/providers/d1/internal/core-map
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import { mapVisitorRow } from "@/lib/edge/analytics/providers/d1/internal/journey-helpers";
 import { visitorListPageFromRecords } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
+import * as preparedMembershipModule from "@/lib/edge/analytics/providers/d1/internal/prepared-membership-relations";
 import { compileQualificationProgramEnvelope } from "@/lib/edge/analytics/providers/d1/internal/qualification-program-envelope";
 import { executeVisitorListQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/visitor-list-qualification-program";
 import {
@@ -2504,63 +2505,80 @@ describe("Visitors Goal qualified runtime special branches", () => {
     }
   });
 
-  it("reuses the parsed Goal in a public numeric Count fallback", async () => {
-    const database = createMigratedDatabase();
-    const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
-    const diagnostics = createD1ReadDiagnostics();
-    const env = {
-      DB: createSqliteD1Database(database, trace),
-      MAIN_SECRET: "wave97r-visitor-list-baseline-secret",
-    } as unknown as Env;
-    try {
-      seedGoalFixture(database);
-      database
-        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
-        .run("invalid-duration", "v1-match-1");
-      const request = visitorGoalRuntimeRequest({
-        goalId: "goal-page",
-        scope: "session",
-        filterDsl: GOAL_NUMERIC_COUNT_FILTER_DSL,
-      });
-      const routeStart = trace.preparedSql.length;
-      const actual = await createD1SiteQueryRuntime({
-        env,
-        siteId: SITE_ID,
-        diagnostics,
-      }).execute("visitors", request);
-      expect(actual.ok, JSON.stringify(actual)).toBe(true);
-      if (!actual.ok)
-        throw new Error("visitor_goal_numeric_route_fallback_failed");
-      const routeCalls = trace.preparedSql.slice(routeStart);
-      expect(
-        routeCalls.filter((sql) => sql.includes('"analysis_definitions"')),
-      ).toHaveLength(1);
-      expect(
-        routeCalls.filter(
-          (sql) => sql.includes('"rowKind"') && sql.includes('"outputId"'),
-        ),
-      ).toHaveLength(1);
-      expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
-        kind: "numeric-data-domain",
-        fieldIds: ["page.durationMs"],
-      });
-      const legacy = await legacyVisitorPage(env, request);
-      expect(actual.data).toEqual(legacy);
-      expect(goalLookupSqlCalls(trace)).toHaveLength(2);
-      writeGoalStageEvidence("post-route-goal-numeric-fallback-reuse.json", {
-        state: "post-route-whole-count-fallback-reuses-resolved-goal",
-        nodeVersion: process.version,
-        result: actual.data,
-        legacy,
-        routeCalls,
-        totalGoalLookupsWithOneExplicitLegacyReference:
-          goalLookupSqlCalls(trace).length,
-        fallbackReason: diagnostics.advancedCountSqlFallbackReason,
-      });
-    } finally {
-      database.close();
-    }
-  });
+  it.each([
+    { goalId: "goal-page", scope: "session" },
+    { goalId: "goal-page", scope: "visitor" },
+    { goalId: "goal-event", scope: "session" },
+    { goalId: "goal-event", scope: "visitor" },
+  ] as const)(
+    "reuses $goalId with one $scope dependency after numeric Count fallback",
+    async ({ goalId, scope }) => {
+      const database = createMigratedDatabase();
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const diagnostics = createD1ReadDiagnostics();
+      const env = {
+        DB: createSqliteD1Database(database, trace),
+        MAIN_SECRET: "wave97r-visitor-list-baseline-secret",
+      } as unknown as Env;
+      const bridge = vi.spyOn(
+        preparedMembershipModule,
+        "registerPreparedMembership",
+      );
+      try {
+        seedGoalFixture(database);
+        database
+          .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+          .run("invalid-duration", "v1-match-1");
+        const request = visitorGoalRuntimeRequest({
+          goalId,
+          scope,
+          filterDsl: GOAL_NUMERIC_COUNT_FILTER_DSL,
+        });
+        const routeStart = trace.preparedSql.length;
+        const actual = await createD1SiteQueryRuntime({
+          env,
+          siteId: SITE_ID,
+          diagnostics,
+        }).execute("visitors", request);
+        expect(actual.ok, JSON.stringify(actual)).toBe(true);
+        if (!actual.ok)
+          throw new Error("visitor_goal_numeric_route_fallback_failed");
+        const routeCalls = trace.preparedSql.slice(routeStart);
+        expect(
+          routeCalls.filter((sql) => sql.includes('"analysis_definitions"')),
+        ).toHaveLength(1);
+        expect(
+          routeCalls.filter(
+            (sql) => sql.includes('"rowKind"') && sql.includes('"outputId"'),
+          ),
+        ).toHaveLength(1);
+        expect(diagnostics.advancedCountSqlFallbackReason).toMatchObject({
+          kind: "numeric-data-domain",
+          fieldIds: ["page.durationMs"],
+        });
+        expect(bridge).not.toHaveBeenCalled();
+        const legacy = await legacyVisitorPage(env, request);
+        expect(actual.data).toEqual(legacy);
+        expect(goalLookupSqlCalls(trace)).toHaveLength(2);
+        writeGoalStageEvidence(
+          `post-route-${goalId}-${scope}-numeric-fallback-reuse.json`,
+          {
+            state: "post-route-whole-count-fallback-reuses-resolved-goal",
+            nodeVersion: process.version,
+            result: actual.data,
+            legacy,
+            routeCalls,
+            totalGoalLookupsWithOneExplicitLegacyReference:
+              goalLookupSqlCalls(trace).length,
+            fallbackReason: diagnostics.advancedCountSqlFallbackReason,
+          },
+        );
+      } finally {
+        bridge.mockRestore();
+        database.close();
+      }
+    },
+  );
 
   it("prepares Count fallback once then returns the saved missing Goal error", async () => {
     const database = createMigratedDatabase();

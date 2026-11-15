@@ -52,8 +52,11 @@ import {
   type EventContextCardKey,
   queryEventAnalyticsContextCardsFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-context";
+import * as preparation from "@/lib/edge/analytics/providers/d1/internal/page-visit-qualification-execution";
+import * as bridge from "@/lib/edge/analytics/providers/d1/internal/prepared-membership-relations";
 import type { Env } from "@/lib/edge/types";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
+import * as core from "@/lib/filter-contract/filter-evaluator";
 import type { FilterDocument } from "@/lib/filter-contract/filters";
 
 const SITE_ID = "wave94e-event-context";
@@ -1166,46 +1169,289 @@ describe("Wave94E qualified Event Context", () => {
     } as QueryInput & {
       readonly time: QueryTime;
     }) as PreparedEventContextQuery;
-    const forwarded = await d1AdvancedFilterMiddleware(
-      testEnv(database, newTrace()),
-    )("event-context", prepared, async (value) => value);
-    expect(
-      deferredEventContextQualificationFromQuery(forwarded),
-    ).toBeUndefined();
-
-    const baselineCards = await queryEventAnalyticsContextCardsFromD1(
-      testEnv(database, newTrace()),
-      SITE_ID,
-      WINDOW,
-      (forwarded as PreparedEventContextQuery).filters,
-      100,
-      "signup",
-      EVENT_CONTEXT_CARD_KEYS,
+    const create = vi.spyOn(
+      preparation,
+      "createPageVisitQualificationPreparation",
     );
-    const actualTrace = newTrace();
-    const provider = createD1SiteProviderRegistry({
-      env: testEnv(database, actualTrace),
-      siteId: SITE_ID,
-    }).resolve("event-context");
-    if (!provider) throw new Error("wave97em_api_v1_context_provider_missing");
-    const actual = await provider.execute({
-      ...prepared,
-      eventName: "signup",
-      limit: 100,
-      selectedKeys: EVENT_CONTEXT_CARD_KEYS,
-    } as never);
-    expect(actual.value).toEqual({
-      eventName: "signup",
-      cards: mapEventAnalyticsContextCards(baselineCards),
-    });
-    expect(actualTrace.preparedSql.length).toBeGreaterThan(0);
-    writeEvidence({
-      kind: "wave97em-event-context-api-v1-core-compatibility-v1",
-      statementCount: actualTrace.preparedSql.length,
-      statements: statementEvidence(actualTrace),
-      dto: actual.value,
-      dtoEqual: true,
-    });
+    const bind = vi.spyOn(preparation, "bindPageVisitQualificationPreparation");
+    const register = vi.spyOn(bridge, "registerPreparedMembership");
+    const resolve = vi.spyOn(bridge, "resolvePreparedMembership");
+    const evaluate = vi.spyOn(core, "evaluateFilterDocument");
+    try {
+      const forwarded = await d1AdvancedFilterMiddleware(
+        testEnv(database, newTrace()),
+      )("event-context", prepared, async (value) => value);
+      expect(
+        deferredEventContextQualificationFromQuery(forwarded),
+      ).toBeUndefined();
+
+      const baselineCards = await queryEventAnalyticsContextCardsFromD1(
+        testEnv(database, newTrace()),
+        SITE_ID,
+        WINDOW,
+        (forwarded as PreparedEventContextQuery).filters,
+        100,
+        "signup",
+        EVENT_CONTEXT_CARD_KEYS,
+        { wholeOriginalOwner: forwarded as PreparedEventContextQuery },
+      );
+      expect(evaluate).toHaveBeenCalledTimes(1);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(bind).toHaveBeenCalledTimes(1);
+      expect(register).not.toHaveBeenCalled();
+      expect(resolve).not.toHaveBeenCalled();
+      evaluate.mockClear();
+      create.mockClear();
+      bind.mockClear();
+      const actualTrace = newTrace();
+      const provider = createD1SiteProviderRegistry({
+        env: testEnv(database, actualTrace),
+        siteId: SITE_ID,
+      }).resolve("event-context");
+      if (!provider)
+        throw new Error("wave97em_api_v1_context_provider_missing");
+      const actual = await provider.execute({
+        ...prepared,
+        eventName: "signup",
+        limit: 100,
+        selectedKeys: EVENT_CONTEXT_CARD_KEYS,
+      } as never);
+      expect(actual.value).toEqual({
+        eventName: "signup",
+        cards: mapEventAnalyticsContextCards(baselineCards),
+      });
+      expect(actualTrace.preparedSql.length).toBeGreaterThan(0);
+      // Exact pre-migration registry result, from this original fixture/request.
+      expect(actual.value).toEqual({
+        eventName: "signup",
+        cards: {
+          page: {
+            path: [
+              {
+                label: "/qualifying",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+            query: [
+              {
+                label: "plan=pro",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+            title: [
+              {
+                label: "Context title",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+            hostname: [
+              {
+                label: "context.test",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+            entry: [
+              {
+                label: "/qualifying",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+            exit: [
+              {
+                label: "/qualifying",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+          },
+          source: {
+            domain: [
+              {
+                label: "ref.test",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+            link: [
+              {
+                label: "https://ref.test/previous",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+          },
+          client: {
+            browser: [
+              {
+                label: "Chrome",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+            osVersion: [
+              {
+                label: "macOS 17.0",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+            deviceType: [
+              {
+                label: "desktop",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+            language: [
+              {
+                label: "en-US",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+            screenSize: [
+              {
+                label: "1440x900",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+          },
+          geo: {
+            country: [
+              {
+                value: "US",
+                label: "US",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+            region: [
+              {
+                value: "US::CA::California",
+                label: "US::CA::California",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+            city: [
+              {
+                value: "US::CA::California::San Francisco",
+                label: "US::CA::California::San Francisco",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+            continent: [
+              {
+                value: "North America",
+                label: "North America",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+            timezone: [
+              {
+                value: "America/Los_Angeles",
+                label: "America/Los_Angeles",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+            organization: [
+              {
+                value: "Example Organization",
+                label: "Example Organization",
+                views: 2,
+                sessions: 1,
+                visitors: 1,
+              },
+            ],
+          },
+        },
+      });
+      expect(actualTrace.preparedSql).toHaveLength(3);
+      expect(
+        createHash("sha256")
+          .update(
+            JSON.stringify(
+              statementEvidence(actualTrace).map(({ sql, bindings }) => ({
+                sql,
+                bindings,
+              })),
+            ),
+          )
+          .digest("hex"),
+      ).toBe(
+        "f571cb4a87450a9b647f96bec9077bf29a971d9e0be8f6b3d0977df74faeb2c1",
+      );
+      expect(evaluate).toHaveBeenCalledTimes(1);
+      expect(register).not.toHaveBeenCalled();
+      expect(resolve).not.toHaveBeenCalled();
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(bind).toHaveBeenCalledTimes(1);
+      const preparationInput = create.mock.calls[0]![0];
+      expect(preparationInput).toMatchObject({
+        maxBindings: 1,
+        maxSourcesPerRole: 1,
+        qualificationSemantics: "whole-original",
+      });
+      expect(
+        (preparationInput.additionalRelations ?? []).map(
+          (role) => role.dependencyRef,
+        ),
+      ).toEqual([EVENT_FILTER_PAGE_VISIT_DEPENDENCY]);
+      expect(bind.mock.calls[0]![0].preparation).toBe(
+        create.mock.results[0]?.value,
+      );
+      expect(
+        bind.mock.calls[0]![0].plan.nodes.filter(
+          (node) => node.kind === "source",
+        ).map((source) => ({
+          entity: source.entity,
+          refs: source.selection?.qualificationDependencyRefs,
+        })),
+      ).toEqual([
+        { entity: "event", refs: ["event-filter-event-membership-v1"] },
+        { entity: "page", refs: [EVENT_FILTER_PAGE_VISIT_DEPENDENCY] },
+      ]);
+      writeEvidence({
+        kind: "wave97em-event-context-api-v1-core-compatibility-v1",
+        statementCount: actualTrace.preparedSql.length,
+        statements: statementEvidence(actualTrace),
+        dto: actual.value,
+        dtoEqual: true,
+      });
+    } finally {
+      create.mockRestore();
+      bind.mockRestore();
+      register.mockRestore();
+      resolve.mockRestore();
+      evaluate.mockRestore();
+    }
   });
 
   it("returns the empty DTO without SQL for direct empty selection and for empty qualification", async () => {

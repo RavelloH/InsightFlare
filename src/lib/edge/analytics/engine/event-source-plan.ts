@@ -33,10 +33,32 @@ export interface EventReportSourceContext {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly preparedTimePolicy?: "reader-window";
+  readonly qualificationSemantics?: "whole-original";
+  readonly wholeOriginalSourcePolicy?: "prepared-scoped-v1";
   /** Request-private Event membership bound by the Provider at execution. */
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly subject: SemanticSubjectDomain;
   readonly time: SemanticTemporalDomains;
+}
+
+function originalSourcePolicy(input: {
+  readonly scopePlan?: ScopedFilterPlan;
+  readonly qualificationSemantics?: "whole-original";
+  readonly wholeOriginalSourcePolicy?: "prepared-scoped-v1";
+}): "prepared-scoped-v1" | undefined {
+  const property = Object.getOwnPropertyDescriptor(
+    input,
+    "wholeOriginalSourcePolicy",
+  );
+  if (!property) return undefined;
+  if (
+    !("value" in property) ||
+    property.value !== "prepared-scoped-v1" ||
+    input.qualificationSemantics !== "whole-original" ||
+    !input.scopePlan
+  )
+    throw new Error("event_source_whole_original_policy_invalid");
+  return "prepared-scoped-v1";
 }
 
 /** Uses an existing semantic builder so qualification and report Sources share
@@ -47,16 +69,23 @@ export function createEventReportSourceContextForBuilder(
   options: {
     readonly scopePlan?: ScopedFilterPlan;
     readonly preparedTimePolicy?: "reader-window";
+    readonly qualificationSemantics?: "whole-original";
+    readonly wholeOriginalSourcePolicy?: "prepared-scoped-v1";
   } = {},
 ): EventReportSourceContext {
+  const sourcePolicy = originalSourcePolicy(options);
   if (options.preparedTimePolicy && !options.scopePlan)
     throw new Error("event_source_reader_window_requires_prepared_scope");
   return {
     builder,
     filters,
+    ...(sourcePolicy ? { wholeOriginalSourcePolicy: sourcePolicy } : {}),
     ...(options.scopePlan ? { scopePlan: options.scopePlan } : {}),
     ...(options.preparedTimePolicy
       ? { preparedTimePolicy: options.preparedTimePolicy }
+      : {}),
+    ...(options.qualificationSemantics
+      ? { qualificationSemantics: options.qualificationSemantics }
       : {}),
     subject: builder.context.subject,
     time: builder.context.time,
@@ -70,12 +99,17 @@ export function createEventReportSourceContext(input: {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly preparedTimePolicy?: "reader-window";
+  readonly qualificationSemantics?: "whole-original";
+  readonly wholeOriginalSourcePolicy?: "prepared-scoped-v1";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
 }): EventReportSourceContext {
+  const sourcePolicy = originalSourcePolicy(input);
   if (input.preparedTimePolicy && !input.scopePlan)
     throw new Error("event_source_reader_window_requires_prepared_scope");
   if (input.qualificationDependencyRefs && !input.scopePlan)
     throw new Error("event_source_dependency_requires_prepared_scope");
+  if (input.qualificationSemantics && !input.scopePlan)
+    throw new Error("event_source_whole_original_requires_prepared_scope");
   const time = semanticTemporalDomainsFromQueryTime(input.queryTime);
   const subject = createSemanticSubjectDomain({
     origin: "site",
@@ -90,9 +124,13 @@ export function createEventReportSourceContext(input: {
   return {
     builder,
     filters: input.filters,
+    ...(sourcePolicy ? { wholeOriginalSourcePolicy: sourcePolicy } : {}),
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
     ...(input.preparedTimePolicy
       ? { preparedTimePolicy: input.preparedTimePolicy }
+      : {}),
+    ...(input.qualificationSemantics
+      ? { qualificationSemantics: input.qualificationSemantics }
       : {}),
     ...(input.qualificationDependencyRefs
       ? { qualificationDependencyRefs: input.qualificationDependencyRefs }
@@ -111,11 +149,15 @@ export function addEventReportSource(
     readonly eventNameInputSemantics?: EventNameInputSemantics;
   },
 ): LogicalRelationHandle {
-  const readerWindow = context.preparedTimePolicy === "reader-window";
+  const sourcePolicy = originalSourcePolicy(context);
+  const readerWindow =
+    context.preparedTimePolicy === "reader-window" ||
+    context.qualificationSemantics === "whole-original";
   const eventNameSemantics =
     input.eventNameInputSemantics ?? "trimmed-nonempty";
   if (
     readerWindow &&
+    !sourcePolicy &&
     input.eventName !== undefined &&
     eventNameSemantics !== "legacy-truthy-raw"
   )
@@ -123,11 +165,15 @@ export function addEventReportSource(
       "event_source_reader_window_requires_legacy_truthy_raw_event_name",
     );
   const selection = createSemanticScopedSourceSelection({
-    profile: context.scopePlan
-      ? readerWindow
-        ? "prepared-scoped-reader-window-v1"
-        : "prepared-scoped-v1"
-      : "direct-event-analytics-v1",
+    profile:
+      context.qualificationSemantics === "whole-original"
+        ? "prepared-whole-filter-reader-window-v1"
+        : context.scopePlan
+          ? readerWindow
+            ? "prepared-scoped-reader-window-v1"
+            : "prepared-scoped-v1"
+          : "direct-event-analytics-v1",
+    ...(sourcePolicy ? { wholeOriginalSourcePolicy: sourcePolicy } : {}),
     filters: context.filters,
     subject: context.subject,
     time: context.time,
@@ -137,7 +183,7 @@ export function addEventReportSource(
           qualificationDependencyRefs: context.qualificationDependencyRefs,
         }
       : {}),
-    ...(!readerWindow && input.eventName !== undefined
+    ...((!readerWindow || sourcePolicy) && input.eventName !== undefined
       ? {
           eventName: input.eventName,
           eventNameInputSemantics: eventNameSemantics,
@@ -149,7 +195,7 @@ export function addEventReportSource(
     attributes: input.attributes,
     selection,
   });
-  if (!readerWindow || !input.eventName) return events;
+  if (!readerWindow || sourcePolicy || !input.eventName) return events;
   const eventName = context.builder.coalesce(
     context.builder.slot(events, "attribute:event.report.eventName"),
     context.builder.literal("", { kind: "scalar", scalar: "string" }),
@@ -174,6 +220,8 @@ export function buildEventReportSource(input: {
   readonly filters: FilterDocument;
   readonly scopePlan?: ScopedFilterPlan;
   readonly preparedTimePolicy?: "reader-window";
+  readonly qualificationSemantics?: "whole-original";
+  readonly wholeOriginalSourcePolicy?: "prepared-scoped-v1";
   readonly qualificationDependencyRefs?: readonly QualificationDependencyRef[];
   readonly attributes: readonly string[];
   readonly eventName?: string;
@@ -182,13 +230,18 @@ export function buildEventReportSource(input: {
   readonly builder: LogicalPlanBuilder;
   readonly events: LogicalRelationHandle;
 } {
+  const sourcePolicy = originalSourcePolicy(input);
   const context = createEventReportSourceContext({
+    ...(sourcePolicy ? { wholeOriginalSourcePolicy: sourcePolicy } : {}),
     siteId: input.siteId,
     queryTime: input.queryTime,
     filters: input.filters,
     ...(input.scopePlan ? { scopePlan: input.scopePlan } : {}),
     ...(input.preparedTimePolicy
       ? { preparedTimePolicy: input.preparedTimePolicy }
+      : {}),
+    ...(input.qualificationSemantics
+      ? { qualificationSemantics: input.qualificationSemantics }
       : {}),
     ...(input.qualificationDependencyRefs
       ? { qualificationDependencyRefs: input.qualificationDependencyRefs }

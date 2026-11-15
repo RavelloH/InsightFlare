@@ -11,6 +11,8 @@ import type {
   QueryWindow,
   ReferrerRadarRow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
+import type { D1ExecutionOptions } from "@/lib/edge/analytics/providers/d1/internal/execution-options";
+import { bindWholeOriginalReader } from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import type { Env } from "@/lib/edge/types";
 
 import {
@@ -74,30 +76,59 @@ async function queryTechnologyRadarFromD1(
   dimension: TechnologyRadarDimension,
   limit?: number,
   qualification?: TechnologyPageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<TechnologyRadarRow[]> {
   const metadata = scopedFilterMetadata(filters);
   const queryTime = qualification?.queryTime ?? queryWindowToTime(window);
-  const plan = buildTechnologyRadarPlan({
-    siteId,
-    queryTime,
-    filters,
-    ...(qualification
-      ? {
-          scopePlan: qualification.scopePlan,
-          pageVisitQualification: true as const,
-        }
-      : metadata
-        ? { scopePlan: metadata.plan }
-        : {}),
-    dimension,
-    ...(limit === undefined ? {} : { limit }),
-  });
-  const bound = bindTechnologyPageVisitQualification({
-    siteId,
-    filters,
-    qualification,
-    plan,
-  });
+  const wholeOriginal =
+    !qualification && wholeOriginalOwner
+      ? bindWholeOriginalReader({
+          owner: wholeOriginalOwner,
+          consumer: {
+            kind: "page",
+            family: "radar",
+            reader: {
+              kind: "technology-radar",
+              configuration: {
+                dimension,
+                ...(limit === undefined ? {} : { limit }),
+              },
+            },
+          },
+          siteId,
+          filters,
+          queryTime: metadata?.time ?? queryWindowToTime(window),
+          scopePlan: metadata?.plan,
+          readerQueryTime: queryWindowToTime(window),
+          ...(execution ? { execution } : {}),
+        })
+      : undefined;
+  const plan =
+    wholeOriginal?.plan ??
+    buildTechnologyRadarPlan({
+      siteId,
+      queryTime,
+      filters,
+      ...(qualification
+        ? {
+            scopePlan: qualification.scopePlan,
+            pageVisitQualification: true as const,
+          }
+        : metadata
+          ? { scopePlan: metadata.plan }
+          : {}),
+      dimension,
+      ...(limit === undefined ? {} : { limit }),
+    });
+  const bound =
+    wholeOriginal ??
+    bindTechnologyPageVisitQualification({
+      siteId,
+      filters,
+      qualification,
+      plan,
+    });
   const rows = await queryAnalyticsReportOutputRowsFromD1(
     env,
     bound.plan,
@@ -105,6 +136,9 @@ async function queryTechnologyRadarFromD1(
     undefined,
     undefined,
     bound.executionInputs,
+    ...((wholeOriginal?.execution ? [wholeOriginal.execution] : []) as [
+      D1ExecutionOptions?,
+    ]),
   );
   return mapTechnologyRadarRows(rows, dimension);
 }
@@ -115,6 +149,8 @@ export async function queryBrowserRadarFromD1(
   window: QueryWindow,
   filters: FilterDocument,
   qualification?: TechnologyPageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<
   Array<{
     browser: string;
@@ -137,6 +173,11 @@ export async function queryBrowserRadarFromD1(
       "browser",
       undefined,
       qualification,
+      ...((wholeOriginalOwner && execution
+        ? [wholeOriginalOwner, execution]
+        : wholeOriginalOwner
+          ? [wholeOriginalOwner]
+          : []) as [object?, D1ExecutionOptions?]),
     )
   )
     .filter((row) => row.browser!.length > 0 && row.visitors > 0)
@@ -160,6 +201,8 @@ export async function queryReferrerRadarFromD1(
   filters: FilterDocument,
   limit: number,
   qualification?: TechnologyPageVisitQualification,
+  wholeOriginalOwner?: object,
+  execution?: D1ExecutionOptions,
 ): Promise<ReferrerRadarRow[]> {
   return (
     await queryTechnologyRadarFromD1(
@@ -170,6 +213,11 @@ export async function queryReferrerRadarFromD1(
       "referrer",
       limit,
       qualification,
+      ...((wholeOriginalOwner && execution
+        ? [wholeOriginalOwner, execution]
+        : wholeOriginalOwner
+          ? [wholeOriginalOwner]
+          : []) as [object?, D1ExecutionOptions?]),
     )
   )
     .filter((row) => row.visitors > 0)

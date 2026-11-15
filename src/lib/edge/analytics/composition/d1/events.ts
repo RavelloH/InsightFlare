@@ -49,6 +49,10 @@ import {
   queryEventTypeTrendFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-trend";
 import { queryEventTypeDetailQualificationFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-type-detail";
+import {
+  hasWholeOriginalCompletion,
+  type WholeOriginalEventDetailMembership,
+} from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import { readSiteEventRecords } from "@/lib/edge/analytics/providers/d1/operations/site-event-records";
 import { InvalidCursorError } from "@/lib/pagination";
 
@@ -71,6 +75,12 @@ export function registerEventProviders(
       "event-types",
       typedQueryProviderFor("event-types", async (input) => {
         const request = input;
+        const wholeOriginalOwner = hasWholeOriginalCompletion(
+          request,
+          "event-types",
+        )
+          ? request
+          : undefined;
         const limit = numberField(request, "limit", 20);
         const search = stringField(request, "search") || undefined;
         const cursorText = stringField(request, "cursor") || null;
@@ -118,6 +128,7 @@ export function registerEventProviders(
           request.context.policy.audience,
           {
             ...(deferredQualification ? { deferredQualification } : {}),
+            ...(wholeOriginalOwner ? { wholeOriginalOwner } : {}),
             ...(options.diagnostics
               ? { diagnostics: options.diagnostics }
               : {}),
@@ -137,10 +148,16 @@ export function registerEventProviders(
         const request = input;
         const deferredQualification =
           deferredEventSummaryQualificationFromQuery(request);
+        const wholeOriginalOwner = hasWholeOriginalCompletion(
+          request,
+          "event-summary",
+        )
+          ? request
+          : undefined;
         const window = timeWindow(request.time);
         const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
         const data =
-          deferredQualification || options.diagnostics
+          deferredQualification || options.diagnostics || wholeOriginalOwner
             ? await queryEventsSummaryFromD1(
                 options.env,
                 options.siteId,
@@ -148,6 +165,7 @@ export function registerEventProviders(
                 filters,
                 {
                   ...(deferredQualification ? { deferredQualification } : {}),
+                  ...(wholeOriginalOwner ? { wholeOriginalOwner } : {}),
                   ...(options.diagnostics
                     ? { diagnostics: options.diagnostics }
                     : {}),
@@ -182,6 +200,12 @@ export function registerEventProviders(
         const interval = request.interval ?? "day";
         const deferredQualification =
           deferredEventTrendQualificationFromQuery(request);
+        const wholeOriginalOwner = hasWholeOriginalCompletion(
+          request,
+          "event-trend",
+        )
+          ? request
+          : undefined;
         const eventName = stringField(request, "eventName") || undefined;
         return {
           value: {
@@ -194,12 +218,15 @@ export function registerEventProviders(
               request.filters ?? EMPTY_FILTER_DOCUMENT,
               numberField(request, "limit", 8),
               eventName,
-              ...(deferredQualification || options.diagnostics
+              ...(deferredQualification ||
+              options.diagnostics ||
+              wholeOriginalOwner
                 ? [
                     {
                       ...(deferredQualification
                         ? { deferredQualification }
                         : {}),
+                      ...(wholeOriginalOwner ? { wholeOriginalOwner } : {}),
                       ...(options.diagnostics
                         ? { diagnostics: options.diagnostics }
                         : {}),
@@ -215,6 +242,12 @@ export function registerEventProviders(
       "event-records",
       typedQueryProviderFor("event-records", async (input) => {
         const request = input;
+        const wholeOriginalOwner = hasWholeOriginalCompletion(
+          request,
+          "event-records",
+        )
+          ? request
+          : undefined;
         const deferredQualification =
           deferredEventRecordsQualificationFromQuery(request);
         return {
@@ -233,6 +266,7 @@ export function registerEventProviders(
             search: stringField(request, "search") || undefined,
             eventName: stringField(request, "eventName") || undefined,
             ...(deferredQualification ? { deferredQualification } : {}),
+            ...(wholeOriginalOwner ? { wholeOriginalOwner } : {}),
             ...(options.diagnostics
               ? { diagnostics: options.diagnostics }
               : {}),
@@ -245,6 +279,12 @@ export function registerEventProviders(
       "event-field-values",
       typedQueryProviderFor("event-field-values", async (input) => {
         const request = input;
+        const wholeOriginalOwner = hasWholeOriginalCompletion(
+          request,
+          "event-field-values",
+        )
+          ? request
+          : undefined;
         const deferredQualification =
           deferredEventFieldValuesQualificationFromQuery(request);
         const eventName = stringField(request, "eventName") || undefined;
@@ -327,6 +367,9 @@ export function registerEventProviders(
               search,
               cursor,
               request.context.policy.audience,
+              ...(wholeOriginalOwner
+                ? ([wholeOriginalOwner] as const)
+                : ([] as const)),
             );
         return {
           value: {
@@ -345,6 +388,12 @@ export function registerEventProviders(
       "event-fields",
       typedQueryProviderFor("event-fields", async (input) => {
         const request = input;
+        const wholeOriginalOwner = hasWholeOriginalCompletion(
+          request,
+          "event-fields",
+        )
+          ? request
+          : undefined;
         const deferredQualification =
           deferredEventFieldsQualificationFromQuery(request);
         const eventName = stringField(request, "eventName") || undefined;
@@ -436,6 +485,9 @@ export function registerEventProviders(
               limit,
               cursor,
               request.context.policy.audience,
+              ...(wholeOriginalOwner
+                ? ([wholeOriginalOwner] as const)
+                : ([] as const)),
             );
         return {
           value: {
@@ -452,6 +504,12 @@ export function registerEventProviders(
       "event-context",
       typedQueryProviderFor("event-context", async (input) => {
         const request = input;
+        const wholeOriginalOwner = hasWholeOriginalCompletion(
+          request,
+          "event-context",
+        )
+          ? request
+          : undefined;
         const deferredQualification =
           deferredEventContextQualificationFromQuery(request);
         const eventName = stringField(request, "eventName");
@@ -477,7 +535,9 @@ export function registerEventProviders(
                   limit,
                   eventName,
                   selectedKeys.length > 0 ? selectedKeys : undefined,
-                  ...(deferredQualification || options.diagnostics
+                  ...(deferredQualification ||
+                  options.diagnostics ||
+                  wholeOriginalOwner
                     ? [
                         {
                           ...(deferredQualification
@@ -486,6 +546,7 @@ export function registerEventProviders(
                           ...(options.diagnostics
                             ? { diagnostics: options.diagnostics }
                             : {}),
+                          ...(wholeOriginalOwner ? { wholeOriginalOwner } : {}),
                         },
                       ]
                     : []),
@@ -553,6 +614,21 @@ export function registerEventProviders(
                         deferredQualification,
                       )
                     : filters;
+                const wholeOriginalDetail:
+                  WholeOriginalEventDetailMembership | undefined =
+                  !membership &&
+                  hasWholeOriginalCompletion(request, "event-type-detail")
+                    ? {
+                        kind: "whole-original-event-type-detail",
+                        owner: request,
+                        configuration: {
+                          eventName,
+                          interval,
+                          includeBreakdowns,
+                          includeContext,
+                        },
+                      }
+                    : undefined;
                 const [overview, trend, cards] = await Promise.all([
                   measured("event_type_detail.overview", () =>
                     queryEventTypeOverviewFromD1(
@@ -564,6 +640,7 @@ export function registerEventProviders(
                       {
                         includeBreakdowns,
                         ...(membership ? { membership } : {}),
+                        ...(wholeOriginalDetail ? { wholeOriginalDetail } : {}),
                       },
                     ),
                   ),
@@ -576,6 +653,9 @@ export function registerEventProviders(
                       reportFilters,
                       eventName,
                       membership,
+                      ...(wholeOriginalDetail
+                        ? ([wholeOriginalDetail] as const)
+                        : ([] as const)),
                     ),
                   ),
                   includeContext
@@ -588,7 +668,11 @@ export function registerEventProviders(
                           100,
                           eventName,
                           undefined,
-                          membership ? { membership } : undefined,
+                          membership
+                            ? { membership }
+                            : wholeOriginalDetail
+                              ? { wholeOriginalDetail }
+                              : undefined,
                         ),
                       )
                     : Promise.resolve(null),

@@ -17,8 +17,8 @@ import {
   appendAdvancedEventCandidateCountQualification,
   createAdvancedCountQualificationBuilder,
 } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
+import { classifyAdvancedEventCandidateCountFilter } from "@/lib/edge/analytics/engine/advanced-filter-count-support";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
-import { classifyAdvancedEventCandidateCountFilter } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import { AnalyticsLogicalToDbLowerer } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-lowering";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 

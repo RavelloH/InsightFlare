@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type * as databaseCompiler from "@/lib/db/query/compiler";
 import {
   createQueryTime,
   EMPTY_FILTER_DOCUMENT,
@@ -20,6 +21,20 @@ import {
 import type { Env } from "@/lib/edge/types";
 
 import { filterFixture } from "./filter-fixtures";
+
+// This queue-backed adapter checks ordinary SQL assembly and DTO mapping. A
+// shallow copy preserves the real compiler's public SQL, bindings and shape,
+// while intentionally leaving its private adaptive transport registration behind.
+// The adaptive protocol is exercised with real SQLite in runtime-adaptive.test.ts.
+vi.mock("@/lib/db/query/compiler", async (importOriginal) => {
+  const actual = await importOriginal<typeof databaseCompiler>();
+  return {
+    ...actual,
+    compileD1Query: (...args: Parameters<typeof actual.compileD1Query>) => ({
+      ...actual.compileD1Query(...args),
+    }),
+  };
+});
 
 type QueryBinding = string | number | null;
 

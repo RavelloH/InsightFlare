@@ -54,6 +54,11 @@ import {
   pageResult,
   paginationBindingForWindow,
 } from "./pagination";
+import type { QualificationExecutionInputs } from "./qualification-execution-inputs";
+import {
+  bindWholeOriginalReader,
+  hasWholeOriginalCompletion,
+} from "./whole-filter-reader-preparation";
 
 export interface EventFieldCursor {
   readonly events: number;
@@ -175,21 +180,46 @@ export async function queryEventFieldsPageFromD1(
   limit: number,
   cursor?: EventFieldCursor | null,
   audience: QueryAudience = "private-dashboard",
+  wholeOriginalOwner?: object,
 ): Promise<PageResult<EventFieldRow>> {
   const metadata = scopedFilterMetadata(filters);
-  const plan = buildEventFieldsPagePlan({
-    siteId,
-    queryTime: queryWindowToTime(window),
-    filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
-    ...(eventName !== undefined ? { eventName } : {}),
-    limit,
-    ...(cursor ? { cursor } : {}),
-  });
+  const readerQueryTime = queryWindowToTime(window);
+  const wholeOriginal = wholeOriginalOwner
+    ? bindWholeOriginalReader({
+        owner: wholeOriginalOwner,
+        consumer: {
+          kind: "event-fields",
+          configuration: {
+            limit,
+            ...(cursor ? { cursor } : {}),
+            ...(eventName !== undefined ? { eventName } : {}),
+          },
+        },
+        siteId,
+        filters,
+        queryTime: metadata?.time ?? readerQueryTime,
+        readerQueryTime,
+        scopePlan: metadata?.plan,
+      })
+    : undefined;
+  const plan =
+    wholeOriginal?.plan ??
+    buildEventFieldsPagePlan({
+      siteId,
+      queryTime: readerQueryTime,
+      filters,
+      ...(metadata ? { scopePlan: metadata.plan } : {}),
+      ...(eventName !== undefined ? { eventName } : {}),
+      limit,
+      ...(cursor ? { cursor } : {}),
+    });
   const rows = (await queryAnalyticsReportOutputRowsFromD1(
     env,
     plan,
     EVENT_FIELDS_PAGE_OUTPUT,
+    ...((wholeOriginal
+      ? [undefined, undefined, wholeOriginal.executionInputs]
+      : []) as [undefined?, undefined?, QualificationExecutionInputs?]),
   )) as unknown as EventFieldRow[];
   return eventFieldsPageFromRows(
     env,
@@ -372,6 +402,9 @@ export async function queryQualifiedEventFieldsPageFromD1(
     input.limit,
     input.cursor,
     input.audience,
+    ...(hasWholeOriginalCompletion(input.deferred, "event-fields")
+      ? ([input.deferred] as const)
+      : ([] as const)),
   );
 }
 
@@ -461,34 +494,64 @@ export async function queryEventFieldValuesPageFromD1(
   search?: string,
   cursor?: EventFieldValueCursor | null,
   audience: QueryAudience = "private-dashboard",
+  wholeOriginalOwner?: object,
 ): Promise<PageResult<EventFieldValueRow>> {
   const metadata = scopedFilterMetadata(filters);
-  const source = buildEventPayloadReportSource({
-    siteId,
-    queryTime: queryWindowToTime(window),
-    filters,
-    ...(metadata ? { scopePlan: metadata.plan } : {}),
-    ...(eventName !== undefined ? { eventName } : {}),
-  });
+  const readerQueryTime = queryWindowToTime(window);
+  const wholeOriginal = wholeOriginalOwner
+    ? bindWholeOriginalReader({
+        owner: wholeOriginalOwner,
+        consumer: {
+          kind: "event-field-values",
+          configuration: {
+            fieldPath,
+            valueTypeCode: customEventJsonTypeCode(fieldValueType),
+            limit,
+            ...(search !== undefined ? { search } : {}),
+            ...(cursor ? { cursor } : {}),
+            ...(eventName !== undefined ? { eventName } : {}),
+          },
+        },
+        siteId,
+        filters,
+        queryTime: metadata?.time ?? readerQueryTime,
+        readerQueryTime,
+        scopePlan: metadata?.plan,
+      })
+    : undefined;
+  const source = wholeOriginal
+    ? undefined
+    : buildEventPayloadReportSource({
+        siteId,
+        queryTime: readerQueryTime,
+        filters,
+        ...(metadata ? { scopePlan: metadata.plan } : {}),
+        ...(eventName !== undefined ? { eventName } : {}),
+      });
   const valueTypeCode = customEventJsonTypeCode(fieldValueType);
-  if (valueTypeCode === null) {
+  if (valueTypeCode === null || (wholeOriginal && "kind" in wholeOriginal)) {
     return {
       items: [],
       pagination: { limit, returned: 0, hasMore: false, nextCursor: null },
     };
   }
-  const plan = buildEventFieldValuesPagePlan({
-    source,
-    fieldPath,
-    valueTypeCode,
-    limit,
-    ...(search !== undefined ? { search } : {}),
-    ...(cursor ? { cursor } : {}),
-  });
+  const plan =
+    wholeOriginal?.plan ??
+    buildEventFieldValuesPagePlan({
+      source: source!,
+      fieldPath,
+      valueTypeCode,
+      limit,
+      ...(search !== undefined ? { search } : {}),
+      ...(cursor ? { cursor } : {}),
+    });
   const rows = (await queryAnalyticsReportOutputRowsFromD1(
     env,
     plan,
     EVENT_FIELD_VALUES_PAGE_OUTPUT,
+    ...((wholeOriginal
+      ? [undefined, undefined, wholeOriginal.executionInputs]
+      : []) as [undefined?, undefined?, QualificationExecutionInputs?]),
   )) as unknown as EventFieldValueRow[];
   return eventFieldValuesPageFromRows(
     env,
@@ -707,6 +770,9 @@ export async function queryQualifiedEventFieldValuesPageFromD1(
     input.search,
     input.cursor,
     input.audience,
+    ...(hasWholeOriginalCompletion(input.deferred, "event-field-values")
+      ? ([input.deferred] as const)
+      : ([] as const)),
   );
 }
 

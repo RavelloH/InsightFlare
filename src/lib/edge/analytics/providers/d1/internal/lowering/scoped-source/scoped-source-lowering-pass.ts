@@ -3,6 +3,7 @@ import type {
   AnalyticsRelationalStorageContext,
   LoweredAnalyticsSource,
 } from "@/lib/edge/analytics/providers/d1/internal/analytics-relational-storage";
+import type { SourceMembershipRelations } from "@/lib/edge/analytics/providers/d1/internal/logical-source-membership-inputs";
 import type { QualificationDependencyRelationBinding } from "@/lib/edge/analytics/providers/d1/internal/qualification-execution-inputs";
 
 import { AnalyticsScopedSourceContext } from "./context";
@@ -12,17 +13,21 @@ import { ScopedPageSourceLowerer } from "./page-source";
 import { ScopedPostObservationLowerer } from "./post-observation";
 
 export class ScopedSourceLoweringPass {
+  readonly #storage: AnalyticsRelationalStorageContext;
   readonly #page: ScopedPageSourceLowerer;
   readonly #event: ScopedEventSourceLowerer;
   constructor(
     storage: AnalyticsRelationalStorageContext,
     sources: readonly SourceNode[] = [],
     qualificationBindings: readonly QualificationDependencyRelationBinding[] = [],
+    sourceInputs?: SourceMembershipRelations,
   ) {
+    this.#storage = storage;
     const context = new AnalyticsScopedSourceContext(
       storage,
       sources,
       qualificationBindings,
+      sourceInputs,
     );
     const membership = new ScopedSourceMembership(context);
     const postObservation = new ScopedPostObservationLowerer(
@@ -44,7 +49,18 @@ export class ScopedSourceLoweringPass {
     node: SourceNode,
     path: string,
     source: LoweredAnalyticsSource,
+    sourceInputs?: SourceMembershipRelations,
   ): LoweredAnalyticsSource {
+    if (sourceInputs) {
+      // Each explicit edge has its own lowering context. Old selection-based
+      // caches cannot accidentally reuse another Source's predecessor.
+      return new ScopedSourceLoweringPass(
+        this.#storage,
+        [node],
+        [],
+        sourceInputs,
+      ).lowerSelectedReportSource(node, path, source);
+    }
     if (!node.selection) return source;
     if (node.entity === "page")
       return this.lowerPageReportSource(node, path, source);

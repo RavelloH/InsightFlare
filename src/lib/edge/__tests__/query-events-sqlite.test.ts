@@ -4492,7 +4492,11 @@ describe("event detail D1 SQL", () => {
       expect(visitors).toMatchObject([
         { visitorId: "visitor-1", views: 3, sessions: 1 },
       ]);
-      expect(d1.calls.every(({ sql }) => sql.includes("EXISTS ("))).toBe(true);
+      expect(d1.calls).toHaveLength(2);
+      // The generic optimizer uses native membership for this safe key set.
+      expect(d1.calls.every(({ sql }) => sql.includes(" IN (SELECT "))).toBe(
+        true,
+      );
       expect(
         d1.calls.every(
           ({ sql }) =>

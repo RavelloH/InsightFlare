@@ -30,6 +30,7 @@ import {
   buildAdvancedCountFilterMatchPlan,
 } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import { ADVANCED_FILTER_MAX_ACTIVITIES } from "@/lib/edge/analytics/engine/advanced-filter-activity-plan";
+import { classifyAdvancedCountFilter } from "@/lib/edge/analytics/engine/advanced-filter-count-support";
 import {
   type AdvancedCountNumberSelectorField,
   advancedCountSelectorField,
@@ -46,7 +47,6 @@ import {
   queryAdvancedFilterCountGuard,
   queryAdvancedFilterCountMatches,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-query";
-import { classifyAdvancedCountFilter } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { siteCoverage } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-site-coverage";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";

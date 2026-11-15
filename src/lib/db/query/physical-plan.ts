@@ -8,10 +8,12 @@ import {
   assertCurrentPhysicalCompileOrderPolicy,
   derivePhysicalCompileOrderPolicy,
 } from "./physical/compile-order";
+import { computedMembershipLookupStrategy } from "./physical/computed-membership-lookup";
 import {
   analyzeConditionalLookupChoices,
   sameConditionalLookupChoices,
 } from "./physical/conditional-lookup";
+import { hasOrderStableConsumers } from "./physical/consumer-order-stability";
 import type {
   ConstantFilterJoinProjection,
   DirectScanProjectionChoice,
@@ -50,6 +52,10 @@ import {
   sameRowPipelineChoices,
 } from "./physical/row-pipeline";
 import {
+  assertCurrentRuntimeAdaptiveCandidate,
+  derivePhysicalRuntimeAdaptiveCandidate,
+} from "./physical/runtime-adaptive-selection";
+import {
   partitionSelfMembershipCandidates,
   type PhysicalSelfMembershipChoice,
 } from "./physical/self-membership";
@@ -71,6 +77,7 @@ import {
   samePhysicalSharedRelationDefinitionIdentity,
   snapshotPhysicalSharedRelationLayout,
 } from "./physical/shared-relation-interfaces";
+import { sharedSingletonLookupReuse } from "./physical/shared-singleton-lookup-reuse";
 import {
   analyzeSingletonRankChoices,
   sameSingletonRankChoices,
@@ -2073,6 +2080,11 @@ function joinOrderStrategies(
     LogicalQueryNode,
     BoundedFactLocalReuseEvidence
   >,
+  boundaries: ReadonlyMap<
+    LogicalQueryNode,
+    PhysicalSharedRelationBoundaryEvidence
+  >,
+  tupleMemberships: readonly PositiveTupleMembershipCandidate[],
 ): readonly PhysicalJoinOrderStrategy[] {
   const analysis = analyzeSharedRelations(root);
   const shared = new Map(
@@ -2143,6 +2155,59 @@ function joinOrderStrategies(
       const indexed = factLocalIndexedStrategy(join, evidence.owner, shared);
       if (indexed) strategies.push(indexed);
     }
+  }
+  // A direct selection can observe which row an unordered join visits first.
+  // Aggregation consumes its input before outer selections. DISTINCT can
+  // stream into LIMIT and therefore must retain the selection restriction.
+  const selectionSensitive = new Set<LogicalQueryNode>();
+  const orderVisits = new Map<LogicalQueryNode, Set<boolean>>();
+  const markSelection = (node: LogicalQueryNode, sensitive: boolean): void => {
+    const states = orderVisits.get(node) ?? new Set<boolean>();
+    if (states.has(sensitive)) return;
+    states.add(sensitive);
+    orderVisits.set(node, states);
+    if (node.kind === "aggregate") sensitive = false;
+    if (node.kind === "limit" || node.kind === "sort" || node.kind === "window")
+      sensitive = true;
+    if (sensitive) selectionSensitive.add(node);
+    for (const child of nodeChildren(node))
+      markSelection(child.node, sensitive);
+  };
+  markSelection(root, false);
+  // DISTINCT consumers can make SQLite favor a fact-window scan over an
+  // otherwise available base-key seek through a preserved LEFT JOIN side.
+  // Keep the computed-key barrier in that context. Aggregate is an independent
+  // consumer; paths in a shared DAG are conservative if any path is DISTINCT.
+  const distinctConsumers = new Set<LogicalQueryNode>();
+  const consumerVisits = new Map<LogicalQueryNode, Set<boolean>>();
+  const markConsumer = (node: LogicalQueryNode, regrouped: boolean): void => {
+    const states = consumerVisits.get(node) ?? new Set<boolean>();
+    if (states.has(regrouped)) return;
+    states.add(regrouped);
+    consumerVisits.set(node, states);
+    if (node.kind === "aggregate") regrouped = false;
+    if (node.kind === "distinct") regrouped = true;
+    if (regrouped) distinctConsumers.add(node);
+    for (const child of nodeChildren(node)) markConsumer(child.node, regrouped);
+  };
+  markConsumer(root, false);
+  const tupleMembershipProjects = new Set(
+    tupleMemberships.map(({ project }) => project),
+  );
+  for (const node of nodes) {
+    if (node.kind !== "project" || selectionSensitive.has(node)) continue;
+    const strategy = computedMembershipLookupStrategy(
+      node,
+      boundaries,
+      tupleMembershipProjects,
+      !distinctConsumers.has(node),
+    );
+    if (
+      strategy &&
+      hasOrderStableConsumers(node, root) &&
+      !strategies.some((current) => current.join === strategy.join)
+    )
+      strategies.push(strategy);
   }
   return strategies;
 }
@@ -2856,6 +2921,7 @@ function candidateFacts(
     rowNumberWindow: false,
     ordinaryRowNumberWindow: false,
   };
+  const ordinaryVisited = new Set<LogicalQueryNode>();
   const visited = new Map<
     LogicalQueryNode,
     Map<
@@ -2863,29 +2929,120 @@ function candidateFacts(
       Map<ConstantExistenceCorrelationContext | undefined, Set<boolean>>
     >
   >();
+  const inspect = (current: SqlExpression, querySourcePath: boolean): void => {
+    if (current.kind === "column") {
+      facts.referencedScopes.push(current.scope);
+      facts.referencedColumns.push({
+        scope: current.scope,
+        index: current.index,
+      });
+    }
+    if (
+      current.kind === "unixepoch" ||
+      current.kind === "in-subquery" ||
+      (current.kind === "scalar-subquery" &&
+        (!isConstantExistenceQuery(current.query) || querySourcePath))
+    ) {
+      facts.forbidden = true;
+      facts.unsafe = true;
+    }
+    switch (current.kind) {
+      case "binary":
+      case "distinct-from":
+        inspect(current.left, querySourcePath);
+        inspect(current.right, querySourcePath);
+        break;
+      case "boolean":
+        current.expressions.forEach((child) => inspect(child, querySourcePath));
+        break;
+      case "not":
+      case "null-check":
+      case "in-list":
+        inspect(current.expression, querySourcePath);
+        break;
+      case "cast-text":
+        inspect(current.expression, querySourcePath);
+        break;
+      case "text-position":
+        inspect(current.text, querySourcePath);
+        inspect(current.needle, querySourcePath);
+        break;
+      case "text-substring":
+        inspect(current.text, querySourcePath);
+        inspect(current.start, querySourcePath);
+        if (current.length) inspect(current.length, querySourcePath);
+        break;
+      case "text-like":
+        inspect(current.text, querySourcePath);
+        inspect(current.pattern, querySourcePath);
+        break;
+      case "cast-integer":
+      case "cast-real":
+        inspect(current.expression, querySourcePath);
+        break;
+      case "in-subquery":
+        inspect(current.expression, querySourcePath);
+        break;
+      case "function":
+        current.arguments.forEach((child) => inspect(child, querySourcePath));
+        break;
+      case "aggregate":
+        if (current.expression) inspect(current.expression, querySourcePath);
+        break;
+      case "coalesce":
+        current.expressions.forEach((child) => inspect(child, querySourcePath));
+        break;
+      case "case":
+        current.branches.forEach((branch) => {
+          inspect(branch.when, querySourcePath);
+          inspect(branch.then, querySourcePath);
+        });
+        if (current.else) inspect(current.else, querySourcePath);
+        break;
+      case "column":
+      case "parameter":
+      case "excluded":
+      case "unixepoch":
+      case "scalar-subquery":
+      case "constant":
+        break;
+    }
+  };
   const visit = (
     node: LogicalQueryNode,
     querySourcePath: boolean,
     constantExistencePath: boolean,
     correlationContext?: ConstantExistenceCorrelationContext,
   ): void => {
-    let querySourceContexts = visited.get(node);
-    if (!querySourceContexts) {
-      querySourceContexts = new Map();
-      visited.set(node, querySourceContexts);
+    // The ordinary relation path has no correlation context. Avoid allocating
+    // the nested query-context maps for this common, already-deduplicated path.
+    if (
+      !querySourcePath &&
+      !constantExistencePath &&
+      correlationContext === undefined
+    ) {
+      if (ordinaryVisited.has(node)) return;
+      ordinaryVisited.add(node);
+    } else {
+      let querySourceContexts = visited.get(node);
+      if (!querySourceContexts) {
+        querySourceContexts = new Map();
+        visited.set(node, querySourceContexts);
+      }
+      let correlationContexts = querySourceContexts.get(querySourcePath);
+      if (!correlationContexts) {
+        correlationContexts = new Map();
+        querySourceContexts.set(querySourcePath, correlationContexts);
+      }
+      let constantExistenceContexts =
+        correlationContexts.get(correlationContext);
+      if (!constantExistenceContexts) {
+        constantExistenceContexts = new Set();
+        correlationContexts.set(correlationContext, constantExistenceContexts);
+      }
+      if (constantExistenceContexts.has(constantExistencePath)) return;
+      constantExistenceContexts.add(constantExistencePath);
     }
-    let correlationContexts = querySourceContexts.get(querySourcePath);
-    if (!correlationContexts) {
-      correlationContexts = new Map();
-      querySourceContexts.set(querySourcePath, correlationContexts);
-    }
-    let constantExistenceContexts = correlationContexts.get(correlationContext);
-    if (!constantExistenceContexts) {
-      constantExistenceContexts = new Set();
-      correlationContexts.set(correlationContext, constantExistenceContexts);
-    }
-    if (constantExistenceContexts.has(constantExistencePath)) return;
-    constantExistenceContexts.add(constantExistencePath);
     facts.scopes.add(node.scope);
     if (node !== root) {
       const boundary = materializedBoundaries?.get(node);
@@ -2909,20 +3066,23 @@ function candidateFacts(
       !querySourcePath && !constantExistencePath
         ? constantExistenceCorrelationContext(node, materializedBoundaries)
         : undefined;
-    const isTotal =
-      isMaterializationSafeNode(node) ||
-      (requireTotalExpressions &&
-        allowRankOnePartitionedRowNumberProof &&
-        isSafeProvenPartitionedRowNumberWindow(node)) ||
-      (requireTotalExpressions &&
-        node.kind === "window" &&
-        readerWindowTotality?.(node) === true) ||
-      (querySourcePath &&
-        constantExistencePath &&
-        correlationContext !== undefined &&
-        totalNodeWithVisibleScopes(node, correlationContext.outerScopes)) ||
-      localConstantExistenceContext !== undefined;
-    if (requireTotalExpressions && !isTotal) {
+    if (
+      requireTotalExpressions &&
+      !(
+        isMaterializationSafeNode(node) ||
+        (requireTotalExpressions &&
+          allowRankOnePartitionedRowNumberProof &&
+          isSafeProvenPartitionedRowNumberWindow(node)) ||
+        (requireTotalExpressions &&
+          node.kind === "window" &&
+          readerWindowTotality?.(node) === true) ||
+        (querySourcePath &&
+          constantExistencePath &&
+          correlationContext !== undefined &&
+          totalNodeWithVisibleScopes(node, correlationContext.outerScopes)) ||
+        localConstantExistenceContext !== undefined
+      )
+    ) {
       facts.unsafe = true;
       return;
     }
@@ -2960,88 +3120,8 @@ function candidateFacts(
         facts.unsafe = true;
       }
     }
-    for (const expression of nodeExpressions(node)) {
-      const inspect = (current: SqlExpression): void => {
-        if (current.kind === "column") {
-          facts.referencedScopes.push(current.scope);
-          facts.referencedColumns.push({
-            scope: current.scope,
-            index: current.index,
-          });
-        }
-        if (
-          current.kind === "unixepoch" ||
-          current.kind === "in-subquery" ||
-          (current.kind === "scalar-subquery" &&
-            (!isConstantExistenceQuery(current.query) || querySourcePath))
-        ) {
-          facts.forbidden = true;
-          facts.unsafe = true;
-        }
-        switch (current.kind) {
-          case "binary":
-          case "distinct-from":
-            inspect(current.left);
-            inspect(current.right);
-            break;
-          case "boolean":
-            current.expressions.forEach(inspect);
-            break;
-          case "not":
-          case "null-check":
-          case "in-list":
-            inspect(current.expression);
-            break;
-          case "cast-text":
-            inspect(current.expression);
-            break;
-          case "text-position":
-            inspect(current.text);
-            inspect(current.needle);
-            break;
-          case "text-substring":
-            inspect(current.text);
-            inspect(current.start);
-            if (current.length) inspect(current.length);
-            break;
-          case "text-like":
-            inspect(current.text);
-            inspect(current.pattern);
-            break;
-          case "cast-integer":
-          case "cast-real":
-            inspect(current.expression);
-            break;
-          case "in-subquery":
-            inspect(current.expression);
-            break;
-          case "function":
-            current.arguments.forEach(inspect);
-            break;
-          case "aggregate":
-            if (current.expression) inspect(current.expression);
-            break;
-          case "coalesce":
-            current.expressions.forEach(inspect);
-            break;
-          case "case":
-            current.branches.forEach((branch) => {
-              inspect(branch.when);
-              inspect(branch.then);
-            });
-            if (current.else) inspect(current.else);
-            break;
-          case "column":
-          case "parameter":
-          case "excluded":
-          case "unixepoch":
-          case "scalar-subquery":
-          case "constant":
-            break;
-        }
-      };
-      inspect(expression);
-    }
+    for (const expression of nodeExpressions(node))
+      inspect(expression, querySourcePath);
     nodeChildren(node).forEach((source) =>
       visit(
         source.node,
@@ -4050,6 +4130,7 @@ function selectedMaterializedBoundaryLicenseSource(
 }
 
 function sharedRelationDefinitionsForCandidates(
+  root: LogicalQueryNode,
   analysis: SharedRelationAnalysis,
   rankOneProjectCandidates: ReadonlySet<LogicalQueryNode>,
   rankOneFactFilterCandidates: ReadonlySet<LogicalQueryNode>,
@@ -4198,6 +4279,11 @@ function sharedRelationDefinitionsForCandidates(
         (facts.materializedBoundary && !facts.unsafe)) &&
       candidateFactsAreClosed(facts, boundaryContext);
     if (!isSafe) continue;
+
+    if (sharedSingletonLookupReuse(node, root)) {
+      sharedMaterializations.set(node, "materialized");
+      continue;
+    }
 
     if (hasTerminalBagLicense) {
       sharedMaterializations.set(node, "auto");
@@ -4364,6 +4450,7 @@ function sharedRelationDefinitions(
     analysis.closedWindowScopeMemo,
   );
   const baseline = sharedRelationDefinitionsForCandidates(
+    root,
     analysis,
     baselineRankOneProjectCandidates,
     baselineRankOneFactFilterCandidates,
@@ -4588,6 +4675,7 @@ function sharedRelationDefinitions(
     maximumFields: MAX_MATERIALIZED_SHARED_RELATION_FIELDS,
   });
   const baseDefinitions = sharedRelationDefinitionsForCandidates(
+    root,
     analysis,
     rankOneProjectCandidates,
     rankOneFactFilterCandidates,
@@ -4870,6 +4958,8 @@ export function validatePhysicalQueryPlan<Row extends object>(
     plan.root,
     expected,
     sharedAnalysis.boundedFactLocal,
+    currentBoundaryContext.interfaces,
+    membershipCandidates,
   );
   const expectedConditionalLookupChoices = analyzeConditionalLookupChoices(
     plan.root,
@@ -5074,6 +5164,7 @@ export function validatePhysicalQueryPlan<Row extends object>(
       "invalid_plan",
       "Physical shared relation interfaces were not freshly analyzed",
     );
+  assertCurrentRuntimeAdaptiveCandidate(plan);
   return createPhysicalSharedRelationInterfaceView({
     root: plan.root,
     definitions: rawActualDefinitions as readonly SharedRelationDefinition[],
@@ -5165,6 +5256,8 @@ export function lowerLogicalQuerySource<Row extends object>(
     source.node,
     sharedRelations,
     sharedAnalysis.boundedFactLocal,
+    currentBoundaryContext.interfaces,
+    membershipCandidates,
   );
   const conditionalLookupChoices = analyzeConditionalLookupChoices(source.node);
   const lexicographicChoices = lexicographicComparisonChoices(source.node);
@@ -5173,7 +5266,7 @@ export function lowerLogicalQuerySource<Row extends object>(
     sharedRelations,
     currentBoundaryContext.interfaces,
   );
-  return {
+  const physical: PhysicalQueryPlan<Row> = {
     kind: "physical-query",
     root: source.node,
     scope: source.scope,
@@ -5194,6 +5287,11 @@ export function lowerLogicalQuerySource<Row extends object>(
     lexicographicComparisonChoices: lexicographicChoices,
     ...(compileOrderPolicy ? { compileOrderPolicy } : {}),
   };
+  const runtimeAdaptiveCandidate =
+    derivePhysicalRuntimeAdaptiveCandidate(physical);
+  return runtimeAdaptiveCandidate
+    ? { ...physical, runtimeAdaptiveCandidate }
+    : physical;
 }
 
 /** @internal Recompute the current production SemiJoin eligibility proof. */

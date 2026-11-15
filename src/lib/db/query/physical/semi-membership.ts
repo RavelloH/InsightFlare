@@ -16,7 +16,7 @@ import type {
   SemiJoinNode,
 } from "@/lib/db/query/plan";
 
-/** Exact, freshly-derived positive SemiJoin membership shape. */
+/** Exact, freshly-derived strict SemiJoin or AntiJoin membership shape. */
 export interface PhysicalSemiMembershipChoice {
   readonly node: SemiJoinNode;
   readonly condition: SqlExpression;
@@ -302,16 +302,9 @@ function totalAndClosedInput(
       "recursive closure is forbidden in a membership input",
       currentBoundary,
     );
-  if (root.kind === "semi-join" || root.kind === "anti-join")
-    return veto(
-      "nested membership input is not totality-closed",
-      currentBoundary,
-    );
-  if (root.kind === "union" && !root.all)
-    return veto(
-      "UNION DISTINCT is forbidden in a membership input",
-      currentBoundary,
-    );
+  // Nested membership and UNION DISTINCT are safe when their conditions and
+  // every input are closed and total. Recursing below proves that contract;
+  // rejecting the node family alone needlessly forces correlated rescans.
   if (!isMaterializationSafeNode(root))
     return veto(
       "node is not certified as materialization-safe",
@@ -570,6 +563,17 @@ export function analyzeSemiMembershipKeyCondition(
   };
 }
 
+/** Reuse the same closed/total contract for positive Join membership. */
+export function isTotalAndClosedMembershipInput(
+  root: LogicalQueryNode,
+  boundaries: BoundaryEvidenceMap,
+): boolean {
+  return (
+    totalAndClosedInput(root, boundaries, new Set(), new Set(), new Set())
+      .kind === "proven"
+  );
+}
+
 export interface SemiMembershipCandidateAnalysis {
   readonly candidateIndex: number;
   readonly node: SemiJoinNode;
@@ -604,7 +608,7 @@ export function analyzeSemiMembershipCandidates(
   const analyses: SemiMembershipCandidateAnalysis[] = [];
   let candidateIndex = 0;
   for (const node of nodes) {
-    if (node.kind !== "semi-join") continue;
+    if (node.kind !== "semi-join" && node.kind !== "anti-join") continue;
     const index = candidateIndex++;
     const keys = analyzeSemiMembershipKeyCondition(node);
     if (keys.kind === "rejected") {

@@ -13,6 +13,7 @@ import type {
   QueryOperation,
   QueryTime,
 } from "@/lib/edge/analytics/contract/types";
+import type { SourceMembershipInput } from "@/lib/edge/analytics/engine/logical/nodes";
 import type { LogicalPlanContext } from "@/lib/edge/analytics/engine/logical/plan";
 import {
   isQualificationDependencyRef,
@@ -40,6 +41,7 @@ export type SemanticScopedSourceProfile =
   | "prepared-scoped-v1"
   | "prepared-page-reader-window-v1"
   | "prepared-scoped-reader-window-v1"
+  | "prepared-whole-filter-reader-window-v1"
   | "direct-event-records-v1"
   | "direct-event-analytics-v1"
   | "direct-page-analytics-v1"
@@ -70,6 +72,8 @@ export interface SemanticPostObservationFilter {
 export interface SemanticScopedSourceSelection {
   readonly version: 1;
   readonly profile: SemanticScopedSourceProfile;
+  /** Retain original prepared Source time/name semantics with the whole-result carrier. */
+  readonly wholeOriginalSourcePolicy?: "prepared-scoped-v1";
   readonly filter: FilterDocument;
   readonly scope: FilterScope;
   readonly mode: "observation" | "entity";
@@ -89,6 +93,8 @@ export interface SemanticScopedSourceSelection {
 
 export interface CreateSemanticScopedSourceSelectionInput {
   readonly profile: SemanticScopedSourceProfile;
+  /** Retain original prepared Source time/name semantics with the whole-result carrier. */
+  readonly wholeOriginalSourcePolicy?: "prepared-scoped-v1";
   readonly filters: FilterDocument;
   readonly subject: SemanticSubjectDomain;
   readonly time: SemanticTemporalDomains;
@@ -118,7 +124,8 @@ function isDependencyCapableProfile(
   return (
     profile === "prepared-scoped-v1" ||
     profile === "prepared-page-reader-window-v1" ||
-    profile === "prepared-scoped-reader-window-v1"
+    profile === "prepared-scoped-reader-window-v1" ||
+    profile === "prepared-whole-filter-reader-window-v1"
   );
 }
 
@@ -176,6 +183,108 @@ function snapshotQualificationDependencyRefs(
   return Object.freeze(snapshot);
 }
 
+/** Snapshot actual logical relation edges, never a proof of completed work. */
+export function snapshotSourceMembershipInputs(
+  inputs: readonly SourceMembershipInput[] | undefined,
+): readonly SourceMembershipInput[] | undefined {
+  if (inputs === undefined) return undefined;
+  if (!Array.isArray(inputs)) fail("membership_inputs_invalid");
+  const length = Object.getOwnPropertyDescriptor(inputs, "length")?.value;
+  if (!Number.isSafeInteger(length) || length < 1 || length > 2)
+    fail("membership_inputs_invalid");
+  const arrayKeys = Reflect.ownKeys(inputs);
+  if (
+    arrayKeys.length !== length + 1 ||
+    arrayKeys.some(
+      (key) =>
+        key !== "length" &&
+        (typeof key !== "string" ||
+          !/^(0|[1-9][0-9]*)$/.test(key) ||
+          Number(key) >= length),
+    )
+  )
+    fail("membership_inputs_invalid");
+  const snapshots: SourceMembershipInput[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(inputs, String(index));
+    const value: unknown =
+      descriptor && "value" in descriptor ? descriptor.value : undefined;
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      fail("membership_inputs_invalid");
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null)
+      fail("membership_inputs_invalid");
+    const keys = Reflect.ownKeys(value);
+    if (
+      keys.length !== 4 ||
+      keys.some(
+        (key) =>
+          typeof key !== "string" ||
+          !["input", "role", "siteId", "memberId"].includes(key),
+      )
+    )
+      fail("membership_inputs_invalid");
+    const input = ownDataProperty(value, "input").value;
+    const role = ownDataProperty(value, "role").value;
+    const siteId = ownDataProperty(value, "siteId").value;
+    const memberId = ownDataProperty(value, "memberId").value;
+    if (
+      typeof input !== "number" ||
+      !Number.isSafeInteger(input) ||
+      input < 0 ||
+      typeof siteId !== "number" ||
+      !Number.isSafeInteger(siteId) ||
+      siteId < 0 ||
+      typeof memberId !== "number" ||
+      !Number.isSafeInteger(memberId) ||
+      memberId < 0 ||
+      siteId === memberId ||
+      (role !== "entity" && role !== "visit" && role !== "event") ||
+      snapshots.some((snapshot) => snapshot.role === role)
+    )
+      fail("membership_inputs_invalid");
+    // Numeric brand conversion follows validation of the existing logical IDs.
+    snapshots.push(
+      Object.freeze({
+        input: input as SourceMembershipInput["input"],
+        role,
+        siteId: siteId as SourceMembershipInput["siteId"],
+        memberId: memberId as SourceMembershipInput["memberId"],
+      }),
+    );
+  }
+  return Object.freeze(snapshots);
+}
+
+function validateSourceMembershipInputSemantics(
+  inputs: readonly SourceMembershipInput[] | undefined,
+  selection: Pick<
+    SemanticScopedSourceSelection,
+    "profile" | "filter" | "mode" | "scope" | "entityKind"
+  >,
+  preparedMembership: PreparedMembership | undefined,
+  qualificationDependencyRefs:
+    readonly QualificationDependencyRef[] | undefined,
+): void {
+  if (inputs === undefined) return;
+  if (
+    preparedMembership !== undefined ||
+    qualificationDependencyRefs !== undefined
+  )
+    fail("membership_inputs_legacy_dependency_conflict");
+  if (
+    !isDependencyCapableProfile(selection.profile) ||
+    (selection.mode === "entity"
+      ? selection.scope === "event" ||
+        selection.entityKind === undefined ||
+        inputs.length !== 1 ||
+        inputs[0]!.role !== "entity"
+      : selection.scope !== "event" ||
+        inputs.some((input) => input.role === "entity"))
+  )
+    fail("membership_inputs_semantics_mismatch");
+}
+
 function ownDataProperty(
   value: object,
   property: string,
@@ -185,6 +294,20 @@ function ownDataProperty(
   if (!("value" in descriptor))
     fail("qualification_dependency_accessor_rejected");
   return { present: true, value: descriptor.value };
+}
+
+function originalSourcePolicy(value: {
+  readonly profile: SemanticScopedSourceProfile;
+  readonly wholeOriginalSourcePolicy?: "prepared-scoped-v1";
+}): "prepared-scoped-v1" | undefined {
+  const property = ownDataProperty(value, "wholeOriginalSourcePolicy");
+  if (!property.present) return undefined;
+  if (
+    property.value !== "prepared-scoped-v1" ||
+    value.profile !== "prepared-whole-filter-reader-window-v1"
+  )
+    fail("whole_original_source_policy_invalid");
+  return "prepared-scoped-v1";
 }
 
 function isEmptyAndFilter(filters: FilterDocument): boolean {
@@ -298,6 +421,30 @@ function canonicalSiteIds(siteIds: readonly string[]): readonly string[] {
   return Object.freeze([...new Set(siteIds)].sort());
 }
 
+/** A second observation predicate may consume the already-qualified entity
+ * domain. Its physical dependency is still bound to this exact frozen plan;
+ * it does not qualify the stage against an unfiltered activity universe. */
+function isEntityAnalysisDependencyStage(
+  selection: SemanticScopedSourceSelection,
+): boolean {
+  const time = selection.time;
+  return (
+    selection.profile === "prepared-scoped-reader-window-v1" &&
+    selection.mode === "entity" &&
+    selection.scope !== "event" &&
+    selection.entityKind === selection.scope &&
+    selection.subject.origin === "site" &&
+    selection.subject.siteIds.length === 1 &&
+    selection.authorizedSiteIds.length === 1 &&
+    selection.authorizedSiteIds[0] === selection.subject.siteIds[0] &&
+    selection.eventNameGate === undefined &&
+    sameJsonValue(selection.preparationTime, time) &&
+    time.read.kind === "bounded" &&
+    sameJsonValue(time.read.range, time.candidate) &&
+    (time.filter === undefined || sameJsonValue(time.filter, time.candidate))
+  );
+}
+
 function snapshotMembership(
   plan: ScopedFilterPlan,
   authorizedSiteIds: ReadonlySet<string>,
@@ -350,9 +497,11 @@ function sameResolvedSelection(
   );
 }
 
-export function createSemanticScopedSourceSelection(
+/** Value-only parsing at the original semantic checkpoint, not execution authority. */
+export function resolveSemanticScopedSourceSelectionContext(
   input: CreateSemanticScopedSourceSelectionInput,
-): SemanticScopedSourceSelection {
+) {
+  const sourcePolicy = originalSourcePolicy(input);
   const filters = snapshotSelectionFilter(input.profile, input.filters);
   const postObservationFilter = input.postObservationFilter
     ? snapshotPostObservationFilter(input.postObservationFilter)
@@ -371,13 +520,13 @@ export function createSemanticScopedSourceSelection(
   let mode: "observation" | "entity";
   let entityKind: "session" | "visitor" | undefined;
   let authorizedSiteIds: readonly string[];
-  let preparedMembership: PreparedMembership | undefined;
   let preparationTime: SemanticTemporalDomains | undefined;
 
   if (
     input.profile === "prepared-scoped-v1" ||
     input.profile === "prepared-page-reader-window-v1" ||
-    input.profile === "prepared-scoped-reader-window-v1"
+    input.profile === "prepared-scoped-reader-window-v1" ||
+    input.profile === "prepared-whole-filter-reader-window-v1"
   ) {
     if (
       !metadata ||
@@ -388,9 +537,10 @@ export function createSemanticScopedSourceSelection(
     if (metadata.resolvedScope !== metadata.plan.scope)
       return fail("prepared_scope_mismatch");
     const resolvedTime = snapshotQueryTime(metadata.time);
-    if (input.profile === "prepared-scoped-v1") {
+    if (input.profile === "prepared-scoped-v1" || sourcePolicy) {
       if (!sameJsonValue(resolvedTime, time))
         return fail("prepared_time_mismatch");
+      if (sourcePolicy) preparationTime = resolvedTime;
     } else if (input.profile === "prepared-page-reader-window-v1") {
       if (
         input.eventName !== undefined ||
@@ -427,36 +577,6 @@ export function createSemanticScopedSourceSelection(
       !sameResolvedPlan(independentlyResolved, input.expectedPlan)
     )
       return fail("prepared_plan_mismatch");
-    if (
-      filters.root &&
-      filterDocumentUsesAdvancedExpressions(filters) &&
-      input.expectedPlan.preparedMembership === undefined &&
-      qualificationDependencyRefs === undefined
-    )
-      return fail("prepared_advanced_matches_missing");
-    if (
-      input.expectedPlan.preparedMembership !== undefined &&
-      qualificationDependencyRefs !== undefined
-    )
-      return fail("prepared_matches_and_qualification_dependency_conflict");
-    if (
-      qualificationDependencyRefs !== undefined &&
-      (!isDependencyCapableProfile(input.profile) ||
-        (input.expectedPlan.mode === "entity"
-          ? input.expectedPlan.membership.kind !== "entity" ||
-            input.expectedPlan.scope === "event"
-          : input.expectedPlan.scope !== "event" ||
-            input.expectedPlan.mode !== "observation" ||
-            input.expectedPlan.membership.kind === "entity") ||
-        !qualificationDependencyRefsMatchScope(
-          qualificationDependencyRefs,
-          input.expectedPlan.mode,
-        ) ||
-        !filters.root ||
-        !filterDocumentUsesAdvancedExpressions(filters))
-    )
-      return fail("qualification_dependency_semantics_mismatch");
-    preparedMembership = snapshotMembership(input.expectedPlan, authorized);
   } else if (
     input.profile === "direct-event-records-v1" ||
     input.profile === "direct-event-analytics-v1"
@@ -550,6 +670,99 @@ export function createSemanticScopedSourceSelection(
     return fail("unknown_profile");
   }
 
+  return Object.freeze({
+    input,
+    sourcePolicy,
+    filters,
+    postObservationFilter,
+    subject,
+    time,
+    qualificationDependencyRefs,
+    scope,
+    mode,
+    entityKind,
+    authorizedSiteIds,
+    preparationTime,
+  });
+}
+
+export type ResolvedSemanticScopedSourceSelectionContext = ReturnType<
+  typeof resolveSemanticScopedSourceSelectionContext
+>;
+
+/** Completes the original selection after actual relation inputs exist. */
+export function completeSemanticScopedSourceSelection(
+  context: ResolvedSemanticScopedSourceSelectionContext,
+  membershipInputs?: readonly SourceMembershipInput[],
+): SemanticScopedSourceSelection {
+  const {
+    input,
+    sourcePolicy,
+    filters,
+    postObservationFilter,
+    subject,
+    time,
+    qualificationDependencyRefs,
+    scope,
+    mode,
+    entityKind,
+    authorizedSiteIds,
+    preparationTime,
+  } = context;
+  const sourceMembershipInputs =
+    snapshotSourceMembershipInputs(membershipInputs);
+  let preparedMembership: PreparedMembership | undefined;
+  if (isDependencyCapableProfile(input.profile)) {
+    if (sourceMembershipInputs !== undefined)
+      validateSourceMembershipInputSemantics(
+        sourceMembershipInputs,
+        { profile: input.profile, filter: filters, mode, scope, entityKind },
+        input.expectedPlan!.preparedMembership,
+        qualificationDependencyRefs,
+      );
+    if (
+      filters.root &&
+      filterDocumentUsesAdvancedExpressions(filters) &&
+      input.expectedPlan!.preparedMembership === undefined &&
+      qualificationDependencyRefs === undefined &&
+      sourceMembershipInputs === undefined
+    )
+      return fail("prepared_advanced_matches_missing");
+    if (
+      input.expectedPlan!.preparedMembership !== undefined &&
+      qualificationDependencyRefs !== undefined
+    )
+      return fail("prepared_matches_and_qualification_dependency_conflict");
+    if (
+      input.profile === "prepared-whole-filter-reader-window-v1" &&
+      ((qualificationDependencyRefs === undefined &&
+        sourceMembershipInputs === undefined) ||
+        input.expectedPlan!.preparedMembership !== undefined)
+    )
+      return fail("whole_original_dependency_required");
+    if (
+      qualificationDependencyRefs !== undefined &&
+      (!isDependencyCapableProfile(input.profile) ||
+        (input.expectedPlan!.mode === "entity"
+          ? input.expectedPlan!.membership.kind !== "entity" ||
+            input.expectedPlan!.scope === "event"
+          : input.expectedPlan!.scope !== "event" ||
+            input.expectedPlan!.mode !== "observation" ||
+            input.expectedPlan!.membership.kind === "entity") ||
+        !qualificationDependencyRefsMatchScope(
+          qualificationDependencyRefs,
+          input.expectedPlan!.mode,
+        ) ||
+        (input.profile !== "prepared-whole-filter-reader-window-v1" &&
+          (!filters.root || !filterDocumentUsesAdvancedExpressions(filters))))
+    )
+      return fail("qualification_dependency_semantics_mismatch");
+    preparedMembership = snapshotMembership(
+      input.expectedPlan!,
+      new Set(authorizedSiteIds),
+    );
+  }
+
   if (
     input.eventNameInputSemantics !== undefined &&
     input.eventNameInputSemantics !== "trimmed-nonempty" &&
@@ -565,7 +778,7 @@ export function createSemanticScopedSourceSelection(
       : input.eventName || undefined;
   const shouldGateDefinedRawValue =
     eventNameSemantics === "defined-raw-value" &&
-    input.profile === "prepared-scoped-v1" &&
+    (input.profile === "prepared-scoped-v1" || sourcePolicy !== undefined) &&
     input.eventName !== undefined;
   const eventNameGate =
     normalizedEventName || shouldGateDefinedRawValue
@@ -574,7 +787,7 @@ export function createSemanticScopedSourceSelection(
             ? input.eventName!
             : normalizedEventName!,
           semantics:
-            input.profile === "prepared-scoped-v1"
+            input.profile === "prepared-scoped-v1" || sourcePolicy !== undefined
               ? shouldGateDefinedRawValue
                 ? ("prepared-defined-raw-value-v1" as const)
                 : ("prepared-trimmed-label-v1" as const)
@@ -582,9 +795,15 @@ export function createSemanticScopedSourceSelection(
         }
       : undefined;
 
+  if (
+    sourceMembershipInputs !== undefined &&
+    !isDependencyCapableProfile(input.profile)
+  )
+    fail("membership_inputs_semantics_mismatch");
   const selection = deepFreeze({
     version: 1 as const,
     profile: input.profile,
+    ...(sourcePolicy ? { wholeOriginalSourcePolicy: sourcePolicy } : {}),
     filter: filters,
     scope,
     mode,
@@ -602,12 +821,23 @@ export function createSemanticScopedSourceSelection(
   return selection;
 }
 
+export function createSemanticScopedSourceSelection(
+  input: CreateSemanticScopedSourceSelectionInput,
+  membershipInputs?: readonly SourceMembershipInput[],
+): SemanticScopedSourceSelection {
+  return completeSemanticScopedSourceSelection(
+    resolveSemanticScopedSourceSelectionContext(input),
+    membershipInputs,
+  );
+}
+
 export function validateSemanticScopedSourceSelection(
   selection: SemanticScopedSourceSelection,
   context: {
     readonly subject: SemanticSubjectDomain;
     readonly time: SemanticTemporalDomains;
   },
+  membershipInputs?: readonly SourceMembershipInput[],
 ): void {
   if (
     !selection ||
@@ -617,6 +847,7 @@ export function validateSemanticScopedSourceSelection(
       "prepared-scoped-v1",
       "prepared-page-reader-window-v1",
       "prepared-scoped-reader-window-v1",
+      "prepared-whole-filter-reader-window-v1",
       "direct-event-records-v1",
       "direct-event-analytics-v1",
       "direct-page-analytics-v1",
@@ -627,6 +858,7 @@ export function validateSemanticScopedSourceSelection(
     !["observation", "entity"].includes(selection.mode)
   )
     fail("invalid_descriptor");
+  const sourcePolicy = originalSourcePolicy(selection);
   if (Object.prototype.hasOwnProperty.call(selection, "postObservationFilter"))
     validatePostObservationProfile(selection);
   const compatibilityEmptyAnd =
@@ -649,6 +881,28 @@ export function validateSemanticScopedSourceSelection(
   const qualificationDependencyRefs = snapshotQualificationDependencyRefs(
     dependencyProperty.value,
   );
+  const sourceMembershipInputs =
+    snapshotSourceMembershipInputs(membershipInputs);
+  if (sourceMembershipInputs !== undefined)
+    validateSourceMembershipInputSemantics(
+      sourceMembershipInputs,
+      selection,
+      selection.preparedMembership,
+      qualificationDependencyRefs,
+    );
+  if (
+    sourceMembershipInputs !== undefined &&
+    Object.prototype.hasOwnProperty.call(selection, "postObservationFilter") &&
+    !isEntityAnalysisDependencyStage(selection)
+  )
+    fail("membership_inputs_semantics_mismatch");
+  if (
+    selection.profile === "prepared-whole-filter-reader-window-v1" &&
+    ((qualificationDependencyRefs === undefined &&
+      sourceMembershipInputs === undefined) ||
+      selection.preparedMembership !== undefined)
+  )
+    fail("whole_original_dependency_required");
   if (
     dependencyProperty.value !== undefined &&
     (!isDependencyCapableProfile(selection.profile) ||
@@ -660,9 +914,14 @@ export function validateSemanticScopedSourceSelection(
         selection.mode,
       ) ||
       selection.preparedMembership !== undefined ||
-      !selection.filter.root ||
-      !filterDocumentUsesAdvancedExpressions(selection.filter) ||
-      Object.prototype.hasOwnProperty.call(selection, "postObservationFilter"))
+      (selection.profile !== "prepared-whole-filter-reader-window-v1" &&
+        (!selection.filter.root ||
+          !filterDocumentUsesAdvancedExpressions(selection.filter))) ||
+      (Object.prototype.hasOwnProperty.call(
+        selection,
+        "postObservationFilter",
+      ) &&
+        !isEntityAnalysisDependencyStage(selection)))
   )
     fail("qualification_dependency_semantics_mismatch");
   const authorized = canonicalSiteIds(selection.authorizedSiteIds);
@@ -685,13 +944,15 @@ export function validateSemanticScopedSourceSelection(
       selection.filter.root &&
       filterDocumentUsesAdvancedExpressions(selection.filter) &&
       selection.preparedMembership === undefined &&
-      qualificationDependencyRefs === undefined
+      qualificationDependencyRefs === undefined &&
+      sourceMembershipInputs === undefined
     )
       fail("prepared_advanced_matches_missing");
   }
   if (
     selection.profile === "prepared-page-reader-window-v1" ||
-    selection.profile === "prepared-scoped-reader-window-v1"
+    selection.profile === "prepared-scoped-reader-window-v1" ||
+    selection.profile === "prepared-whole-filter-reader-window-v1"
   ) {
     if (!selection.preparationTime) fail("prepared_time_snapshot_missing");
     let normalizedPreparationTime: SemanticTemporalDomains;
@@ -702,6 +963,11 @@ export function validateSemanticScopedSourceSelection(
     }
     if (!sameJsonValue(normalizedPreparationTime, selection.preparationTime))
       fail("preparation_time_snapshot_invalid");
+    if (
+      sourcePolicy &&
+      !sameJsonValue(selection.preparationTime, selection.time)
+    )
+      fail("prepared_time_mismatch");
     const resolved = createScopedFilterPlan(
       "event-records",
       selection.filter,
@@ -713,10 +979,11 @@ export function validateSemanticScopedSourceSelection(
       selection.filter.root &&
       filterDocumentUsesAdvancedExpressions(selection.filter) &&
       selection.preparedMembership === undefined &&
-      qualificationDependencyRefs === undefined
+      qualificationDependencyRefs === undefined &&
+      sourceMembershipInputs === undefined
     )
       fail("prepared_advanced_matches_missing");
-    if (selection.eventNameGate !== undefined)
+    if (selection.eventNameGate !== undefined && !sourcePolicy)
       fail(
         selection.profile === "prepared-page-reader-window-v1"
           ? "page_reader_window_event_name_unsupported"
@@ -797,7 +1064,8 @@ export function validateSemanticScopedSourceSelection(
     if (
       selection.profile === "prepared-scoped-v1" ||
       selection.profile === "prepared-page-reader-window-v1" ||
-      selection.profile === "prepared-scoped-reader-window-v1"
+      selection.profile === "prepared-scoped-reader-window-v1" ||
+      selection.profile === "prepared-whole-filter-reader-window-v1"
         ? selection.eventNameGate.semantics !== "prepared-trimmed-label-v1" &&
           selection.eventNameGate.semantics !== "prepared-defined-raw-value-v1"
         : selection.eventNameGate.semantics !==
@@ -815,8 +1083,9 @@ export function validateSemanticScopedSourceSelection(
 export function snapshotSemanticScopedSourceSelection(
   selection: SemanticScopedSourceSelection,
   context: LogicalPlanContext,
+  membershipInputs?: readonly SourceMembershipInput[],
 ): SemanticScopedSourceSelection {
-  validateSemanticScopedSourceSelection(selection, context);
+  validateSemanticScopedSourceSelection(selection, context, membershipInputs);
   const compatibilityEmptyAnd =
     selection.profile === "direct-page-session-compat-v1" &&
     isEmptyAndFilter(selection.filter);

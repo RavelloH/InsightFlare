@@ -33,6 +33,7 @@ import {
   buildAdvancedCountFilterMatchPlan,
 } from "@/lib/edge/analytics/engine/advanced-count-filter-plan";
 import { ADVANCED_FILTER_EXACT_AGGREGATE_VALUE_LIMIT } from "@/lib/edge/analytics/engine/advanced-filter-activity-plan";
+import { classifyAdvancedCountFilter } from "@/lib/edge/analytics/engine/advanced-filter-count-support";
 import { advancedCountSelectorField } from "@/lib/edge/analytics/engine/semantic/count-selector-fields";
 import { createSemanticSubjectDomain } from "@/lib/edge/analytics/engine/semantic/subject";
 import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/__tests__/journey-list-parent-scoped-oracle";
@@ -47,10 +48,10 @@ import {
   queryAdvancedFilterCountGuard,
   queryAdvancedFilterCountMatches,
 } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-query";
-import { classifyAdvancedCountFilter } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-count-support";
 import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
 import { createD1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
 import { compileFilterDocument } from "@/lib/edge/analytics/providers/d1/internal/filter-compiler";
+import * as wholeReaders from "@/lib/edge/analytics/providers/d1/internal/whole-filter-reader-preparation";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 import { expandCustomEventDataJson } from "@/lib/edge/ingest/custom-event-json";
 import type { Env } from "@/lib/edge/types";
@@ -66,6 +67,15 @@ import {
   type FilterEvaluationDataset,
   type FilterEvaluationEntity,
 } from "@/lib/filter-contract/filter-evaluator";
+
+// These middleware-only historical carrier oracles inspect preparedMembership.
+// Decline only the finite whole-reader catalog; SQL/Count admission, authorization,
+// evaluation, register, and all original assertions execute through the real code.
+
+const legacyWholeCarrier = vi
+  .spyOn(wholeReaders, "selectWholeOriginalConsumer")
+  .mockReturnValue(undefined);
+afterAll(() => legacyWholeCarrier.mockRestore());
 
 const SITE_ID = "site-advanced-filter";
 
@@ -1437,6 +1447,17 @@ describe("D1 advanced filter execution", () => {
         kind: "numeric-data-domain",
         fieldIds: ["page.durationMs"],
       });
+      expect(
+        secondDiagnostics.advancedFilterExecutionHistory?.map(
+          ({ strategy, reason }) => ({ strategy, reason }),
+        ),
+      ).toEqual([
+        { strategy: "sql-membership", reason: "membership-builder-selected" },
+        { strategy: "bounded-core", reason: "sql-runtime-numeric-data-domain" },
+      ]);
+      expect(secondDiagnostics.advancedFilterExecution?.strategy).toBe(
+        "bounded-core",
+      );
       expect(
         queries.filter((sql) => /AS MATERIALIZED/iu.test(sql)),
       ).toHaveLength(2);
