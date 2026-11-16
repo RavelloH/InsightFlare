@@ -65,6 +65,17 @@ export interface D1EventRecordsCompilationEvidence {
   readonly logicalPlan: unknown;
 }
 
+/**
+ * A request that left the SQL-first path for the Core evaluation that
+ * produces a request-private membership. `entry` names the shared fallback
+ * door and `operation` the consumer family that used it, so the fallback
+ * rate can be read per family without touching each call site.
+ */
+export interface D1AdvancedFallbackEntry {
+  readonly entry: "complete-event-qualification" | "page-membership";
+  readonly operation: string;
+}
+
 export interface D1ReadDiagnostics {
   rowsRead: number;
   rowsReadAvailable: boolean;
@@ -77,10 +88,20 @@ export interface D1ReadDiagnostics {
   /** Internal executed strategy decisions; never included in public headers. */
   advancedFilterExecution?: AdvancedFilterExecutionDecision;
   advancedFilterExecutionHistory?: AdvancedFilterExecutionDecision[];
+  /** Internal; one record per use of a shared fallback door. */
+  advancedFallbackEntries?: D1AdvancedFallbackEntry[];
   /** Test/runtime audit hook; absent from normal request diagnostics. */
   onEventRecordsQualificationCompile?: (
     evidence: D1EventRecordsCompilationEvidence,
   ) => void;
+}
+
+export function recordAdvancedFallbackEntry(
+  diagnostics: D1ReadDiagnostics | undefined,
+  entry: D1AdvancedFallbackEntry,
+): void {
+  if (!diagnostics) return;
+  (diagnostics.advancedFallbackEntries ??= []).push(entry);
 }
 
 export function recordAdvancedFilterExecution(

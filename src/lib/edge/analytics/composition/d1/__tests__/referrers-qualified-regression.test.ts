@@ -2293,6 +2293,41 @@ describe("qualified flat Referrers pages and summary", () => {
     });
   });
 
+  it("records which shared fallback door and consumer family a request used", async () => {
+    const run = async (mutate: (database: DatabaseSync) => void) => {
+      const { database } = createFixture();
+      mutate(database);
+      const diagnostics = createD1ReadDiagnostics();
+      const provider = createD1SiteProviderRegistry({
+        env: testEnv(database, traceFor()),
+        siteId: SITE,
+        diagnostics,
+      }).resolve("referrers");
+      if (!provider) throw new Error("fallback_observation_provider_missing");
+      await provider.execute(
+        queryFor({
+          scope: "session",
+          limit: 2,
+          filterDsl: `${BASE_FILTER} and count(page { page.durationMs gt 5 }) gte 1`,
+        }) as never,
+      );
+      return diagnostics;
+    };
+    // Clean numeric data stays on the SQL-first route: no fallback door used.
+    const native = await run(() => undefined);
+    expect(native.advancedFallbackEntries).toBeUndefined();
+    // Invalid numeric data makes the whole reader fall back; the shared door
+    // and the consumer family are recorded once, without touching the result.
+    const fallback = await run((database) =>
+      database
+        .prepare("UPDATE visits SET duration_ms = ? WHERE visit_id = ?")
+        .run("invalid-duration", "a-source"),
+    );
+    expect(fallback.advancedFallbackEntries).toEqual([
+      { entry: "complete-event-qualification", operation: "referrers" },
+    ]);
+  });
+
   it("keeps malformed cursor precedence after numeric fallback without an old report read", async () => {
     const { database } = createFixture();
     database

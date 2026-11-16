@@ -191,6 +191,7 @@ import { comparisonReportFamilyForTab } from "./comparison-report-family";
 import { resolveCrossBreakdownPageDimension } from "./core-dimensions";
 import type { D1ReadDiagnostics } from "./diagnostics";
 import {
+  recordAdvancedFallbackEntry,
   recordAdvancedFilterExecution,
   recordScopedFilterDiagnostics,
 } from "./diagnostics";
@@ -8117,6 +8118,10 @@ export async function prepareDeferredEventQualificationFallback(
   )
     throw new Error("deferred_event_qualification_untrusted");
   if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  recordAdvancedFallbackEntry(deferred.diagnostics, {
+    entry: "complete-event-qualification",
+    operation: deferred.operation,
+  });
   const wholeOriginal = deferred.wholeOriginalMembership;
   wholeOriginal?.invocation.assertSameDeferredOwner(deferred);
   const evaluationInput = {
@@ -8203,6 +8208,10 @@ export async function prepareDeferredPageMembershipFallback(
   )
     throw new Error("deferred_event_qualification_untrusted");
   if (deferred.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  recordAdvancedFallbackEntry(deferred.diagnostics, {
+    entry: "page-membership",
+    operation: deferred.operation,
+  });
   if (deferred.operation === "page-dimension") {
     if (!readerConsumer)
       throw new Error("page_membership_reader_consumer_missing");
