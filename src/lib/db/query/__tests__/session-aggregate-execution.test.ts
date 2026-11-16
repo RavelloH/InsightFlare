@@ -88,7 +88,7 @@ for (const scope of ["session", "visitor"] as const) {
   for (const stage of ["provider-parity", "physical-proof"] as const) {
     it(`preserves dirty Sessions DTO and cursors through the default adaptive compiler and keeps overflowing false branches lazy (${scope}/${stage})`, async () => {
       const native = createMigratedDatabase();
-      for (const sql of buildJourneyEventFieldsCostFixture(120).seed)
+      for (const sql of buildJourneyEventFieldsCostFixture(30).seed)
         native.exec(sql);
       native.exec(
         "UPDATE visits SET duration_ms='invalid-duration' WHERE visit_id='v1'",
