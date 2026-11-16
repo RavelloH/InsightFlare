@@ -1,0 +1,529 @@
+import type { DatabaseSync } from "node:sqlite";
+
+import { describe, expect, it } from "vitest";
+
+import { createMigratedDatabase } from "@/../scripts/schema/database";
+import {
+  createSqliteD1Database,
+  type SqliteD1Trace,
+} from "@/lib/db/__tests__/sqlite-d1";
+import type { CanonicalQuery, QueryInput } from "@/lib/edge/analytics/contract";
+import {
+  createQueryTime,
+  prepareScopedQuery,
+  siteQueryContext,
+} from "@/lib/edge/analytics/contract";
+import { d1AdvancedFilterMiddleware } from "@/lib/edge/analytics/providers/d1/internal/advanced-filter-execution";
+import { executeVisitorListQualificationProgram } from "@/lib/edge/analytics/providers/d1/internal/visitor-list-qualification-program";
+import { deferredVisitorListQualificationFromQuery } from "@/lib/edge/analytics/providers/d1/internal/visitor-list-qualification-request";
+import type { Env } from "@/lib/edge/types";
+import { parseFilterDsl } from "@/lib/filter-contract";
+import { analyticsFilterRegistry } from "@/lib/filter-contract/filter-registry";
+
+const SITE_ID = "visitor-list-program-guards";
+const BASE = Date.UTC(2026, 9, 1);
+const END = BASE + 24 * 60 * 60 * 1000;
+const FILTER_DSL =
+  'page.path eq "/match" and count(page { page.path eq "/match" }) gte 1';
+const PREFIX = "visitor_list_qualification";
+
+type Row = Record<string, unknown>;
+
+interface Hooks {
+  /** Runs when the Goal/Funnel definition lookup statement executes. */
+  readonly onAnalysisLookup?: () => void;
+}
+
+function seedFixture(database: DatabaseSync): void {
+  database.exec("PRAGMA foreign_keys = OFF");
+  database
+    .prepare("INSERT INTO site_identities (site_id) VALUES (?)")
+    .run(SITE_ID);
+  const site = database
+    .prepare("SELECT site_pk FROM site_identities WHERE site_id = ?")
+    .get(SITE_ID) as { readonly site_pk: number };
+  database
+    .prepare(
+      `INSERT INTO sites (id, team_id, name, domain, created_at)
+       VALUES (?, 'guards-team', 'Visitor guards', 'baseline.test', 0)`,
+    )
+    .run(SITE_ID);
+  const insert = database.prepare(
+    `INSERT INTO visits (
+      visit_id, site_id, site_pk, visitor_id, session_id, status,
+      started_at, last_activity_at, pathname, hostname
+    ) VALUES (?, ?, ?, ?, ?, 'closed', ?, ?, ?, 'baseline.test')`,
+  );
+  for (const [index, id] of ["one", "two"].entries()) {
+    insert.run(
+      `visit-${id}`,
+      SITE_ID,
+      Number(site.site_pk),
+      `visitor-${id}`,
+      `session-${id}`,
+      BASE + 1_000 * (index + 1),
+      BASE + 1_000 * (index + 1) + 400,
+      "/match",
+    );
+  }
+  const insertDefinition = database.prepare(
+    `INSERT INTO analysis_definitions (
+      id, site_id, kind, name, config_json, config_version, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  insertDefinition.run(
+    "goal-ok",
+    SITE_ID,
+    "goal",
+    "goal-ok",
+    JSON.stringify({ filterDslVersion: 1, filterDsl: 'page.path eq "/match"' }),
+    1,
+    BASE,
+    BASE,
+  );
+  insertDefinition.run(
+    "funnel-ok",
+    SITE_ID,
+    "funnel",
+    "funnel-ok",
+    JSON.stringify({
+      filterDslVersion: 1,
+      progressionScope: "visitor",
+      conversionWindowMs: 60_000,
+      steps: [
+        { id: "step-0", filterDsl: 'page.path eq "/match"' },
+        { id: "step-1", filterDsl: 'page.path eq "/never"' },
+      ],
+    }),
+    2,
+    BASE,
+    BASE,
+  );
+}
+
+function d1With(
+  database: DatabaseSync,
+  rewrite: (results: Row[]) => unknown,
+  hooks: Hooks,
+): NonNullable<Env["DB"]> {
+  const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+  const base = createSqliteD1Database(database, trace);
+  const proxy = {
+    prepare(sql: string) {
+      const statement = base.prepare(sql);
+      const lookup = sql.includes('"analysis_definitions"');
+      const prepared = {
+        bind(...values: Parameters<typeof statement.bind>) {
+          statement.bind(...values);
+          return prepared;
+        },
+        async first<R>() {
+          const result = await statement.first<R>();
+          if (lookup) hooks.onAnalysisLookup?.();
+          return result;
+        },
+        async all<R>() {
+          const result = await statement.all<R>();
+          if (lookup) hooks.onAnalysisLookup?.();
+          if (!sql.includes('"rowKind"') || !sql.includes('"outputId"'))
+            return result;
+          return {
+            ...result,
+            results: rewrite(result.results as Row[]) as R[],
+          };
+        },
+        run() {
+          return statement.run();
+        },
+      };
+      return prepared;
+    },
+    batch(statements: Parameters<typeof base.batch>[0]) {
+      return base.batch(statements);
+    },
+  };
+  return proxy as unknown as NonNullable<Env["DB"]>;
+}
+
+interface ExecuteOptions {
+  readonly scope?: "session" | "visitor";
+  readonly cursor?: string;
+  readonly withoutSecret?: boolean;
+  readonly analysisContext?: Record<string, unknown>;
+  readonly hooks?: Hooks;
+  readonly controller?: AbortController;
+  /** Called after the middleware branded the query, before the program runs. */
+  readonly beforeProgram?: () => void;
+}
+
+async function execute(
+  rewrite: (results: Row[]) => unknown,
+  options: ExecuteOptions = {},
+) {
+  const database = createMigratedDatabase();
+  try {
+    seedFixture(database);
+    const env = {
+      DB: d1With(database, rewrite, options.hooks ?? {}),
+      ...(options.withoutSecret
+        ? {}
+        : { MAIN_SECRET: "visitor-list-program-guards-secret" }),
+    } as unknown as Env;
+    const request = {
+      context: siteQueryContext(SITE_ID, "private-dashboard"),
+      time: createQueryTime(BASE, END, "UTC", END),
+      filters: parseFilterDsl(FILTER_DSL, analyticsFilterRegistry),
+      scopePreference: options.scope ?? "visitor",
+      ...(options.analysisContext
+        ? { analysisContext: options.analysisContext }
+        : {}),
+      page: { limit: 5, cursor: options.cursor ?? null },
+      sort: { key: "lastSeenAt", direction: "desc" },
+    } as unknown as CanonicalQuery<"visitors">;
+    const prepared = prepareScopedQuery(
+      "visitors",
+      request,
+    ) as unknown as QueryInput & Record<string, unknown>;
+    let query: (QueryInput & Record<string, unknown>) | undefined;
+    await d1AdvancedFilterMiddleware(env, undefined, SITE_ID)(
+      "visitors",
+      prepared,
+      async (next) => {
+        query = next as QueryInput & Record<string, unknown>;
+        return next;
+      },
+      options.controller ? { signal: options.controller.signal } : undefined,
+    );
+    const deferred = deferredVisitorListQualificationFromQuery(query!);
+    options.beforeProgram?.();
+    return await executeVisitorListQualificationProgram({
+      query: query!,
+      deferred: deferred!,
+      env,
+    });
+  } finally {
+    database.close();
+  }
+}
+
+const mapRows =
+  (transform: (row: Row, index: number) => unknown) => (results: Row[]) =>
+    results.map(transform);
+
+const withControl = (patch: Row) =>
+  mapRows((row) => (row.rowKind === "control" ? { ...row, ...patch } : row));
+
+describe("visitor list qualification envelope guards", () => {
+  it("accepts the untouched envelope as the executed baseline", async () => {
+    const result = await execute((results) => results);
+    expect(result.kind).toBe("executed");
+    if (result.kind === "executed") {
+      expect(result.controlRowCount).toBe(1);
+      expect(result.reportRowCount).toBe(2);
+      expect(result.result.items.map((item) => item.visitorId).sort()).toEqual([
+        "visitor-one",
+        "visitor-two",
+      ]);
+    }
+  });
+
+  it.each([null, 7, "row", []])(
+    "rejects the non-record envelope row %j",
+    async (bad) => {
+      await expect(
+        execute(mapRows((row, index) => (index === 0 ? bad : row))),
+      ).rejects.toThrow(`${PREFIX}_envelope_row_invalid`);
+    },
+  );
+
+  it("rejects rows whose own keys cannot be enumerated", async () => {
+    await expect(
+      execute(
+        mapRows(
+          () =>
+            new Proxy(
+              {},
+              {
+                ownKeys() {
+                  throw new Error("hostile ownKeys");
+                },
+              },
+            ),
+        ),
+      ),
+    ).rejects.toThrow(`${PREFIX}_envelope_row_invalid`);
+  });
+
+  it("rejects rows with extra, symbol or accessor columns", async () => {
+    await expect(
+      execute(mapRows((row) => ({ ...row, extra: 1 }))),
+    ).rejects.toThrow(`${PREFIX}_envelope_row_schema_invalid`);
+    await expect(
+      execute(mapRows((row) => ({ ...row, [Symbol("hidden")]: 1 }))),
+    ).rejects.toThrow(`${PREFIX}_envelope_row_schema_invalid`);
+    await expect(
+      execute(
+        mapRows((row) => {
+          const hostile: Row = { ...row };
+          Object.defineProperty(hostile, "rowKind", {
+            enumerable: true,
+            get: () => row.rowKind,
+          });
+          return hostile;
+        }),
+      ),
+    ).rejects.toThrow(`${PREFIX}_envelope_row_schema_invalid`);
+  });
+
+  it("rejects an unknown row kind", async () => {
+    await expect(
+      execute((results) => {
+        const report = results.findIndex((row) => row.rowKind === "report");
+        return results.map((row, index) =>
+          index === report ? { ...row, rowKind: "other" } : row,
+        );
+      }),
+    ).rejects.toThrow(`${PREFIX}_envelope_kind_invalid`);
+  });
+
+  it("requires exactly one control row addressed to the control output", async () => {
+    await expect(
+      execute((results) => results.filter((row) => row.rowKind !== "control")),
+    ).rejects.toThrow(`${PREFIX}_control_row_invalid`);
+    await expect(
+      execute((results) => {
+        const control = results.find((row) => row.rowKind === "control")!;
+        return [...results, control];
+      }),
+    ).rejects.toThrow(`${PREFIX}_control_row_invalid`);
+    await expect(
+      execute(withControl({ outputId: "elsewhere" })),
+    ).rejects.toThrow(`${PREFIX}_control_row_invalid`);
+  });
+
+  it("rejects control rows of another entity kind or carrying report values", async () => {
+    await expect(
+      execute(withControl({ entityKind: "session" })),
+    ).rejects.toThrow(`${PREFIX}_control_kind_mismatch`);
+    await expect(execute(withControl({ visitorId: "leak" }))).rejects.toThrow(
+      `${PREFIX}_control_kind_mismatch`,
+    );
+  });
+
+  it("rejects report rows of another output or carrying control values", async () => {
+    await expect(
+      execute(
+        mapRows((row) =>
+          row.rowKind === "report" ? { ...row, outputId: "other-output" } : row,
+        ),
+      ),
+    ).rejects.toThrow(`${PREFIX}_report_row_invalid`);
+    await expect(
+      execute(
+        mapRows((row) =>
+          row.rowKind === "report" ? { ...row, rawCount: 1 } : row,
+        ),
+      ),
+    ).rejects.toThrow(`${PREFIX}_report_row_invalid`);
+  });
+
+  it("rejects empty and repeated visitor identities", async () => {
+    await expect(
+      execute(
+        mapRows((row) =>
+          row.rowKind === "report" ? { ...row, visitorId: "" } : row,
+        ),
+      ),
+    ).rejects.toThrow(`${PREFIX}_report_identity_invalid`);
+    await expect(
+      execute(
+        mapRows((row) =>
+          row.rowKind === "report" ? { ...row, visitorId: "dup" } : row,
+        ),
+      ),
+    ).rejects.toThrow(`${PREFIX}_report_identity_invalid`);
+  });
+
+  it("rejects control counters that are not safe non-negative integers", async () => {
+    for (const bad of [-1, 1.5, "3", null, Number.MAX_SAFE_INTEGER + 2])
+      await expect(execute(withControl({ rawCount: bad }))).rejects.toThrow(
+        `${PREFIX}_control_invalid:rawCount`,
+      );
+    await expect(
+      execute(withControl({ duplicateIdentityCount: "x" })),
+    ).rejects.toThrow(`${PREFIX}_control_invalid:duplicateIdentityCount`);
+  });
+
+  it("raises a gate violation when a fallback control still returns report rows", async () => {
+    await expect(
+      execute(withControl({ nullActivityIdCount: 1 })),
+    ).rejects.toThrow(`${PREFIX}_gate_violation`);
+  });
+
+  it("falls back to the legacy reader when the control demands it and no rows leak", async () => {
+    const result = await execute((results) =>
+      results
+        .filter((row) => row.rowKind === "control")
+        .map((row) => ({ ...row, nullActivityIdCount: 2 })),
+    );
+    expect(result).toMatchObject({
+      kind: "fallback",
+      fallbackReason: { kind: "null-activity-id" },
+    });
+    const mismatch = await execute((results) =>
+      results
+        .filter((row) => row.rowKind === "control")
+        .map((row) => ({ ...row, siteIdentityMismatchCount: 1 })),
+    );
+    expect(mismatch).toMatchObject({
+      kind: "fallback",
+      fallbackReason: { kind: "site-identity-mismatch" },
+    });
+  });
+
+  it("throws the combined identity errors when the control reports bad identities", async () => {
+    await expect(
+      execute(withControl({ invalidIdentityCount: 1 })),
+    ).rejects.toThrow("advanced_filter_count_combined_identity_invalid");
+    await expect(
+      execute(withControl({ duplicateIdentityCount: 1 })),
+    ).rejects.toThrow("advanced_filter_count_combined_identity_repeated");
+  });
+
+  it("rejects an activity count above the cap with a typed domain error", async () => {
+    await expect(
+      execute(withControl({ rawCount: Number.MAX_SAFE_INTEGER })),
+    ).rejects.toMatchObject({ name: "AnalyticsProviderDomainError" });
+  });
+});
+
+describe("visitor list qualification analysis context aborts", () => {
+  const goal = { type: "goal", goalId: "missing-goal" };
+  const funnel = {
+    type: "funnel",
+    funnelId: "missing-funnel",
+    stepId: "step-1",
+  };
+
+  it.each([goal, funnel])(
+    "aborts before resolving the %j definition when already aborted",
+    async (analysisContext) => {
+      const controller = new AbortController();
+      let lookups = 0;
+      await expect(
+        execute((results) => results, {
+          analysisContext,
+          controller,
+          hooks: { onAnalysisLookup: () => (lookups += 1) },
+          beforeProgram: () => controller.abort(),
+        }),
+      ).rejects.toMatchObject({ name: "AbortError", message: "Aborted" });
+      expect(lookups).toBe(0);
+    },
+  );
+
+  it.each([goal, funnel])(
+    "reports an abort instead of the lookup error for %j",
+    async (analysisContext) => {
+      const controller = new AbortController();
+      let lookups = 0;
+      await expect(
+        execute((results) => results, {
+          analysisContext,
+          controller,
+          hooks: {
+            onAnalysisLookup: () => {
+              lookups += 1;
+              controller.abort();
+            },
+          },
+        }),
+      ).rejects.toMatchObject({ name: "AbortError", message: "Aborted" });
+      expect(lookups).toBe(1);
+    },
+  );
+
+  it("surfaces a missing Funnel as the saved post-fallback error after safe controls", async () => {
+    await expect(
+      execute((results) => results, { analysisContext: funnel }),
+    ).rejects.toThrow("resource-not-found");
+  });
+
+  it("surfaces a missing Goal as the saved post-fallback error after safe controls", async () => {
+    await expect(
+      execute((results) => results, { analysisContext: goal }),
+    ).rejects.toThrow("resource-not-found");
+  });
+
+  const goalOk = { type: "goal", goalId: "goal-ok" };
+  const funnelOk = {
+    type: "funnel",
+    funnelId: "funnel-ok",
+    stepId: "step-0",
+  };
+
+  it.each([goalOk, funnelOk])(
+    "aborts after a successful %j lookup before the Count envelope runs",
+    async (analysisContext) => {
+      const controller = new AbortController();
+      let lookups = 0;
+      let envelopes = 0;
+      await expect(
+        execute(
+          (results) => {
+            envelopes += 1;
+            return results;
+          },
+          {
+            analysisContext,
+            controller,
+            hooks: {
+              onAnalysisLookup: () => {
+                lookups += 1;
+                controller.abort();
+              },
+            },
+          },
+        ),
+      ).rejects.toMatchObject({ name: "AbortError", message: "Aborted" });
+      expect(lookups).toBe(1);
+      expect(envelopes).toBe(0);
+    },
+  );
+
+  it.each([goalOk, funnelOk])(
+    "resolves the saved analysis for %j and carries it on the executed result",
+    async (analysisContext) => {
+      const result = await execute((results) => results, { analysisContext });
+      expect(result.kind).toBe("executed");
+      if (result.kind === "executed") {
+        expect(result.controlRowCount).toBe(1);
+      }
+    },
+  );
+});
+
+describe("visitor list qualification program cursor handling", () => {
+  it("returns the malformed cursor error only after safe controls", async () => {
+    let envelopes = 0;
+    await expect(
+      execute(
+        (results) => {
+          envelopes += 1;
+          return results;
+        },
+        { cursor: "malformed-cursor" },
+      ),
+    ).rejects.toMatchObject({ name: "InvalidCursorError" });
+    expect(envelopes).toBe(1);
+  });
+
+  it("does not mask a non-cursor decoding failure as an invalid cursor", async () => {
+    await expect(
+      execute((results) => results, {
+        cursor: "malformed-cursor",
+        withoutSecret: true,
+      }),
+    ).rejects.toThrow("data-unavailable");
+  });
+});
