@@ -9,7 +9,10 @@ import {
   loadDashboardInitialWindow,
   loadDashboardRoot,
 } from "@/lib/dashboard/route-data";
-import type { DashboardTeamContext } from "@/lib/dashboard/server";
+import type {
+  DashboardContext,
+  DashboardTeamContext,
+} from "@/lib/dashboard/server";
 import { buildManagementSections } from "@/lib/dashboard/team-sections";
 import { usePathname } from "@/lib/router";
 export const Route = createFileRoute("/$locale/app")({
@@ -32,6 +35,13 @@ function AppLayout() {
         ?.context as { teamContext?: DashboardTeamContext } | undefined,
   });
   const teamContext = teamRouteContext?.teamContext;
+  const siteRouteContext = useRouterState({
+    select: ({ matches }) =>
+      matches.find(
+        (match) => match.routeId === "/$locale/app/$teamSlug/$siteSlug",
+      )?.context as { siteContext?: DashboardContext } | undefined,
+  });
+  const authorizedActiveSite = siteRouteContext?.siteContext?.activeSite;
 
   const shellContext = dashboardRoot ?? teamContext;
   if (!shellContext) return <Outlet />;
@@ -44,6 +54,7 @@ function AppLayout() {
       teams={shellContext.teams}
       teamGroups={shellContext.teamGroups}
       activeTeamSlug={dashboardRoot ? undefined : teamContext?.activeTeam.slug}
+      authorizedActiveSite={authorizedActiveSite}
       sites={dashboardRoot ? undefined : teamContext?.sites}
       unreadAttentionCount={shellContext.unreadAttentionCount}
       initialQueryWindow={initialDashboardWindow}

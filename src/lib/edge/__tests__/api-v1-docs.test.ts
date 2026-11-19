@@ -167,8 +167,11 @@ describe("api v1 public docs", () => {
     const raw = JSON.stringify(manifest);
 
     expect(manifest).toEqual(renderSkillsManifest(version, template));
-    expect(serializeSkillsManifest(manifest)).toBe(
-      readFileSync(resolve(root, "docs/skills.json"), "utf8"),
+    // Git may check out this generated JSON using CRLF on Windows. Check the
+    // exact serialized document while treating platform line endings equally.
+    const checkedIn = readFileSync(resolve(root, "docs/skills.json"), "utf8");
+    expect(serializeSkillsManifest(manifest).replaceAll("\r\n", "\n")).toBe(
+      checkedIn.replaceAll("\r\n", "\n"),
     );
     expect(manifest.manifestVersion).toBe(1);
     expect(manifest.version).toBe(version);

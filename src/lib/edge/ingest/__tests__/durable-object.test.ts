@@ -958,6 +958,7 @@ describe("IngestDurableObject", () => {
       expect(console.log).toHaveBeenLastCalledWith(
         expect.objectContaining({
           source: "do",
+          trigger: "websocket",
           request: {
             route: "/ws",
             method: "WEBSOCKET",

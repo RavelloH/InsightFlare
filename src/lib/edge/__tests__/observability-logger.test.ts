@@ -107,6 +107,23 @@ describe("edge observability logger", () => {
     expect(console.warn).not.toHaveBeenCalled();
   });
 
+  it("keeps baseline completion idempotent across emit and async completion", async () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+      now: () => 10,
+    });
+    logger.info("baseline.started");
+    const direct = logger.emit();
+    const later = await logger.emitWhenComplete();
+
+    expect(later).toBe(direct);
+    expect(console.log).toHaveBeenCalledOnce();
+    expect(direct.logs).toEqual([
+      { timeMs: 0, level: "info", message: "baseline.started" },
+    ]);
+  });
+
   it("uses warning output for client failures and normal output otherwise", () => {
     const clientFailure = createInvocationLogger({
       source: "worker",

@@ -1,4 +1,5 @@
 import { cpus as osCpus } from "node:os";
+import process from "node:process";
 
 import path from "path";
 import { defineConfig } from "vitest/config";
@@ -7,7 +8,29 @@ import { parse } from "yaml";
 // Keep the test pool bounded on high-core machines.  V8 coverage writes one
 // temporary file per worker; an unbounded pool makes that merge flaky under
 // the full check and can also starve the integration tests of CPU.
-const VITEST_MAX_WORKERS = Math.min(16, Math.max(1, osCpus().length));
+const VITEST_MAX_WORKERS = Math.min(4, Math.max(1, osCpus().length));
+
+// Vitest must not inherit the shell's production mode. React 19 deliberately
+// omits act() from its production export; tests require its development export.
+process.env.NODE_ENV = "test";
+
+// Vitest 4 removed environmentMatchGlobs; use disjoint projects so Node's
+// built-in modules (node:sqlite/async_hooks) are never browser-externalized.
+const NODE_TEST_SCOPES = [
+  "src/lib/edge/**",
+  "src/lib/api-v1/**",
+  "src/lib/hono/**",
+  "src/lib/db/**",
+  "src/lib/notifications/edge/**",
+  "scripts/**",
+  "src/__tests__/middleware.test.ts",
+];
+const NODE_TEST_FILES = [
+  ...NODE_TEST_SCOPES.slice(0, -1).map(
+    (scope) => `${scope}/*.{test,spec}.{ts,tsx,js,jsx}`,
+  ),
+  NODE_TEST_SCOPES[NODE_TEST_SCOPES.length - 1],
+];
 
 export default defineConfig({
   plugins: [
@@ -31,6 +54,26 @@ export default defineConfig({
   },
   test: {
     environment: "happy-dom",
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "node",
+          environment: "node",
+          include: NODE_TEST_FILES,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "dom",
+          environment: "happy-dom",
+          setupFiles: ["./src/test/setup-react-act.ts"],
+          include: ["**/*.{test,spec}.{ts,tsx,js,jsx}"],
+          exclude: NODE_TEST_SCOPES,
+        },
+      },
+    ],
     environmentOptions: {
       happyDOM: {
         // Keep URL parsing deterministic across local and Linux CI runs. Without
@@ -112,6 +155,10 @@ export default defineConfig({
         // route-sync behavior has a focused component test, while its broad
         // control-state matrix is not part of the global query coverage budget.
         "src/components/dashboard/dashboard-query-provider.tsx",
+        // Browser-only perception persistence and authorization lifecycle are
+        // validated through focused unit and Playwright integration tests.
+        "src/lib/perception-search/index.ts",
+        "src/lib/perception-search/runtime.ts",
       ],
     },
   },
