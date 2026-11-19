@@ -22,9 +22,18 @@ scope_raw_events(site_pk, site_id, event_pk, event_id, visit_id, session_id, vis
     (2, 'b', 201, 'e1', 'v1', 's1', 'u1', '/home', 'view', 45)
 )`;
 
-function qualified(expression: string, scope: "event" | "session" | "visitor") {
+function qualified(
+  expression: string,
+  scope: "event" | "session" | "visitor",
+  clock?: {
+    nowMs: number;
+    rangeStartMs: number;
+    rangeEndExclusiveMs: number;
+    timeZone: string;
+  },
+) {
   const document = parseFilterDsl(expression, analyticsFilterRegistry);
-  const output = compileCollectionSqlQualification(document, scope);
+  const output = compileCollectionSqlQualification(document, scope, {}, clock);
   const { ctes, bindings } = composeBoundCtes(output.ctes);
   const database = new DatabaseSync(":memory:");
   try {
@@ -186,15 +195,117 @@ scope_history_events(site_pk, site_id, event_pk, event_id, visit_id, session_id,
     ]);
   });
 
-  it("does not quietly accept an unsupported P3/P4 scalar form", () => {
-    expect(() =>
-      compileCollectionSqlQualification(
-        parseFilterDsl(
-          'first(EVENT).name eq "purchase"',
-          analyticsFilterRegistry,
-        ),
+  it("orders first/last/nth occurrences in SQL and handles empty input", () => {
+    expect(qualified('first(EVENT).name eq "purchase"', "session")).toEqual([
+      { site_pk: 1, entity_id: "s1" },
+    ]);
+    expect(qualified('last(PAGE).path eq "/home"', "session")).toEqual([
+      { site_pk: 1, entity_id: "s1" },
+      { site_pk: 1, entity_id: "s2" },
+      { site_pk: 2, entity_id: "s1" },
+    ]);
+    expect(qualified('nth(PAGE, 2).path eq "/home"', "session")).toEqual([
+      { site_pk: 1, entity_id: "s1" },
+    ]);
+  });
+
+  it("compiles Projection aggregates and arithmetic as correlated SQLite Scalars", () => {
+    expect(qualified("sum(PAGE -> durationMs) eq 40", "session")).toEqual([
+      { site_pk: 1, entity_id: "s1" },
+    ]);
+    expect(qualified("avg(PAGE -> durationMs) eq 20", "session")).toEqual([
+      { site_pk: 1, entity_id: "s1" },
+      { site_pk: 1, entity_id: "s2" },
+      { site_pk: 2, entity_id: "s1" },
+    ]);
+    expect(qualified("countDistinct(PAGE -> path) eq 2", "session")).toEqual([
+      { site_pk: 1, entity_id: "s1" },
+    ]);
+    expect(qualified("add(count(EVENT), count(PAGE)) eq 3", "session")).toEqual(
+      [{ site_pk: 1, entity_id: "s1" }],
+    );
+  });
+
+  it("evaluates correlated Window anchors, SQL time literals and half-open bounds", () => {
+    expect(
+      qualified(
+        'count(window(EVENT { $.name eq "purchase" }, first(EVENT), [0ms, 10ms])) eq 1',
         "session",
       ),
-    ).toThrow(/not implemented/);
+    ).toEqual([{ site_pk: 1, entity_id: "s1" }]);
+    const clock = {
+      nowMs: 100,
+      rangeStartMs: 20,
+      rangeEndExclusiveMs: 40,
+      timeZone: "UTC",
+    };
+    expect(
+      qualified(
+        "count(window(EVENT, @range.start, [0ms, 20ms])) eq 1",
+        "session",
+        clock,
+      ),
+    ).toEqual([
+      { site_pk: 1, entity_id: "s1" },
+      { site_pk: 1, entity_id: "s2" },
+    ]);
+    expect(
+      qualified(
+        "time(first(EVENT)) between [@range.start, @range.end]",
+        "session",
+        clock,
+      ),
+    ).toEqual([
+      { site_pk: 1, entity_id: "s1" },
+      { site_pk: 1, entity_id: "s2" },
+    ]);
+  });
+
+  it("only enumerates nonempty natural Periods and binds $items to the active Period", () => {
+    const clock = {
+      nowMs: 100,
+      rangeStartMs: 0,
+      rangeEndExclusiveMs: 86_400_000,
+      timeZone: "UTC",
+    };
+    expect(
+      qualified("count(periods(PAGE, 1d)) eq 1", "session", clock),
+    ).toEqual([
+      { site_pk: 1, entity_id: "s1" },
+      { site_pk: 1, entity_id: "s2" },
+      { site_pk: 2, entity_id: "s1" },
+    ]);
+    expect(
+      qualified(
+        "periods(PAGE, 1d) { count($items) gte 2 } exists",
+        "session",
+        clock,
+      ),
+    ).toEqual([{ site_pk: 1, entity_id: "s1" }]);
+  });
+
+  it("performs IANA Bucketing and typed distinct labels on SQL observations", () => {
+    const clock = {
+      nowMs: 100,
+      rangeStartMs: 0,
+      rangeEndExclusiveMs: 86_400_000,
+      timeZone: "UTC",
+    };
+    expect(
+      qualified("countDistinct(bucket(PAGE, 1d)) eq 1", "session", clock),
+    ).toEqual([
+      { site_pk: 1, entity_id: "s1" },
+      { site_pk: 1, entity_id: "s2" },
+      { site_pk: 2, entity_id: "s1" },
+    ]);
+  });
+
+  it("rejects natural Periods if the required query time context was not provided", () => {
+    expect(() =>
+      compileCollectionSqlQualification(
+        parseFilterDsl("periods(EVENT, 1w) exists", analyticsFilterRegistry),
+        "session",
+      ),
+    ).toThrow(/IANA time context/);
   });
 });

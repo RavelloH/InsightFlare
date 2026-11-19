@@ -12,17 +12,36 @@ import type {
   FilterValue,
 } from "@/lib/filter-contract/filters";
 
-import { compileFilterDocument } from "./filter-compiler";
+import {
+  compileFilterDocument,
+  compileRegisteredFieldScalar,
+} from "./filter-compiler";
 import { compileExactJsonPointerPredicate } from "./filter-json-pointer";
+import { compileJsonPointerValue } from "./filter-json-pointer-value";
 import {
   boundCte,
   type BoundCteDefinition,
   type FilterQualificationSql,
   safeQualificationIdentifier,
 } from "./filter-qualification";
+import { sqlCalendarPeriods } from "./filter-sql-calendar";
+import {
+  boundTimeAnchorMs,
+  compileSqlScalar,
+  durationMilliseconds,
+  type SqlScalarTimeContext,
+} from "./filter-sql-scalars";
+import {
+  compileAdjacentMatches,
+  compileSequenceMatches,
+  compileWithoutMatches,
+  timelineCte,
+} from "./filter-sql-sequences";
 import { buildScopedFactsCtes } from "./scoped-facts";
 
-type EntityKind = "event" | "page" | "session" | "visitor";
+type EntityKind =
+  "event" | "page" | "session" | "visitor" | "period" | "sequence";
+type RootEntityKind = Exclude<EntityKind, "period" | "sequence">;
 type RootScope = "event" | "session" | "visitor";
 
 /** Local source relations supplied by the authorized SQL dataset. */
@@ -50,14 +69,19 @@ interface PredicateFragment extends SqlFragment {
 interface SqlFrame {
   /** The parent entity to which root collections are correlated. */
   readonly anchorAlias: string;
-  readonly anchorKind: EntityKind;
+  readonly anchorKind: RootEntityKind;
   /** The item whose fields/payload are read by the current predicate. */
   readonly currentAlias: string;
   readonly currentKind: EntityKind;
+  readonly periodAlias?: string;
+  readonly periodItems?: SqlCollectionRef;
+  readonly sequenceAlias?: string;
 }
 
 interface SqlCollectionRef extends SqlFragment {
   readonly entityKind: EntityKind;
+  readonly periodItems?: SqlCollectionRef;
+  readonly sequenceAlias?: string;
 }
 
 function scalar(value: unknown): value is FilterValue {
@@ -77,7 +101,18 @@ function compareScalar(
   left: SqlFragment,
   operator: FilterOperator,
   value: unknown,
+  clock?: SqlScalarTimeContext,
 ): SqlFragment {
+  const parameter = (input: unknown): string | number | null => {
+    if (scalar(input)) return typedBinding(input);
+    if (input && typeof input === "object" && "kind" in input) {
+      if (input.kind === "time-anchor")
+        return boundTimeAnchorMs(input as never, clock);
+      if (input.kind === "duration")
+        return durationMilliseconds(input as never);
+    }
+    throw new TypeError("Expected a scalar, Duration or Time Anchor.");
+  };
   switch (operator) {
     case "exists":
     case "notNull":
@@ -92,16 +127,12 @@ function compareScalar(
         bindings: left.bindings,
       };
     case "between": {
-      if (!Array.isArray(value) || value.length !== 2 || !value.every(scalar)) {
-        throw new TypeError("SQL BETWEEN requires two scalar values.");
+      if (!Array.isArray(value) || value.length !== 2) {
+        throw new TypeError("SQL BETWEEN requires two endpoints.");
       }
       return {
         sql: `${left.sql} BETWEEN ? AND ?`,
-        bindings: [
-          ...left.bindings,
-          typedBinding(value[0]),
-          typedBinding(value[1]),
-        ],
+        bindings: [...left.bindings, parameter(value[0]), parameter(value[1])],
       };
     }
     case "in":
@@ -131,7 +162,7 @@ function compareScalar(
       };
     }
     default: {
-      if (!scalar(value)) throw new TypeError("Expected a scalar comparison.");
+      const right = parameter(value);
       const comparison: Record<string, string> = {
         eq: "=",
         neq: "!=",
@@ -145,7 +176,7 @@ function compareScalar(
         throw new TypeError(`Unsupported scalar comparison: ${operator}`);
       return {
         sql: `${left.sql} ${symbol} ?`,
-        bindings: [...left.bindings, typedBinding(value)],
+        bindings: [...left.bindings, right],
       };
     }
   }
@@ -160,7 +191,10 @@ function onlyApplicable(expression: PredicateFragment): PredicateFragment {
 class SqlCollectionCompiler {
   private aliasIndex = 0;
 
-  constructor(private readonly sources: SqlQualificationSources) {}
+  constructor(
+    private readonly sources: SqlQualificationSources,
+    private readonly clock?: SqlScalarTimeContext,
+  ) {}
 
   private alias(): string {
     return `filter_item_${++this.aliasIndex}`;
@@ -209,6 +243,11 @@ class SqlCollectionCompiler {
         return "scope_filter_sessions";
       case "visitor":
         return "scope_filter_visitors";
+      case "period":
+      case "sequence":
+        throw new TypeError(
+          "Derived Period/Sequence is not a source relation.",
+        );
     }
   }
 
@@ -226,6 +265,131 @@ class SqlCollectionCompiler {
         entityKind: target.entity,
       };
     }
+    if (target.kind === "sequence") {
+      const steps = target.steps.map((step) => this.collection(step, frame));
+      const anchor = frame.anchorKind;
+      if (
+        steps.some(
+          (step) => step.entityKind !== "page" && step.entityKind !== "event",
+        )
+      ) {
+        throw new TypeError("Sequence requires Page/Event step collections.");
+      }
+      return compileSequenceMatches(steps as never, anchor);
+    }
+    if (target.kind === "adjacent") {
+      const seq = this.collection(target.sequence, frame);
+      if (seq.entityKind !== "sequence") {
+        throw new TypeError("Adjacent must wrap a Sequence.");
+      }
+      return compileAdjacentMatches(seq as never);
+    }
+    if (target.kind === "without") {
+      const seq = this.collection(target.sequence, frame);
+      if (seq.entityKind !== "sequence") {
+        throw new TypeError("Without must wrap a Sequence.");
+      }
+      const excluded = this.collection(target.excluded, frame);
+      if (excluded.entityKind !== "page" && excluded.entityKind !== "event") {
+        throw new TypeError("Without excluded set must contain occurrences.");
+      }
+      return compileWithoutMatches(
+        seq as never,
+        excluded as never,
+        frame.anchorKind,
+      );
+    }
+    if (target.kind === "context-intrinsic" && target.intrinsic === "items") {
+      if (!frame.periodAlias || !frame.periodItems) {
+        throw new TypeError(
+          "Period items require a currently bound Period Selector.",
+        );
+      }
+      const source = frame.periodItems;
+      const alias = this.alias();
+      const time =
+        source.entityKind === "page"
+          ? `${alias}.started_at`
+          : source.entityKind === "event"
+            ? `${alias}.occurred_at`
+            : null;
+      if (!time)
+        throw new TypeError("Period items require Page/Event occurrences.");
+      return {
+        sql: `SELECT ${alias}.* FROM (${source.sql}) ${alias}
+          WHERE ${time} >= ${frame.periodAlias}.period_start
+            AND ${time} < ${frame.periodAlias}.period_end`,
+        bindings: source.bindings,
+        entityKind: source.entityKind,
+      };
+    }
+    if (target.kind === "periods") {
+      if (!this.clock) {
+        throw new TypeError(
+          "Natural Periods require the query's IANA time context.",
+        );
+      }
+      const source = this.collection(target.collection, frame);
+      const kind = source.entityKind;
+      if (kind !== "page" && kind !== "event") {
+        throw new TypeError("Periods require Page/Event occurrences.");
+      }
+      const item = this.alias();
+      const period = this.alias();
+      const time =
+        kind === "page" ? `${item}.started_at` : `${item}.occurred_at`;
+      const calendar = sqlCalendarPeriods(target.interval, this.clock);
+      const periodStart = `json_extract(${period}.value, '$.start')`;
+      const periodEnd = `json_extract(${period}.value, '$.end')`;
+      return {
+        entityKind: "period",
+        periodItems: source,
+        sql: `SELECT ${periodStart} AS period_start, ${periodEnd} AS period_end
+          FROM json_each(?) ${period}
+          WHERE EXISTS (
+            SELECT 1 FROM (${source.sql}) ${item}
+            WHERE ${time} >= ${periodStart}
+              AND ${time} < ${periodEnd}
+          )`,
+        bindings: [JSON.stringify(calendar), ...source.bindings],
+      };
+    }
+    if (target.kind === "window") {
+      const source = this.collection(target.collection, frame);
+      if (source.entityKind !== "page" && source.entityKind !== "event") {
+        throw new TypeError("Window requires Page or Event occurrences.");
+      }
+      const alias = this.alias();
+      const time =
+        source.entityKind === "page"
+          ? `${alias}.started_at`
+          : `${alias}.occurred_at`;
+      const anchor = compileSqlScalar(
+        target.anchor,
+        (collection) => this.collection(collection, frame),
+        this.clock,
+      );
+      if (anchor.type !== "date" && anchor.type !== "number") {
+        throw new TypeError("Window anchor must have a temporal value.");
+      }
+      const startOffset = durationMilliseconds(target.startOffset);
+      const endOffset = durationMilliseconds(target.endOffset);
+      if (startOffset >= endOffset)
+        throw new TypeError("Invalid half-open Window offsets.");
+      return {
+        entityKind: source.entityKind,
+        sql: `SELECT ${alias}.* FROM (${source.sql}) ${alias}
+          WHERE ${time} >= (${anchor.sql}) + ?
+            AND ${time} < (${anchor.sql}) + ?`,
+        bindings: [
+          ...source.bindings,
+          ...anchor.bindings,
+          startOffset,
+          ...anchor.bindings,
+          endOffset,
+        ],
+      };
+    }
     if (target.kind === "selector") {
       const parent = this.collection(target.collection, frame);
       const alias = this.alias();
@@ -240,6 +404,13 @@ class SqlCollectionCompiler {
             : frame.anchorKind,
         currentAlias: alias,
         currentKind: parent.entityKind,
+        periodAlias: parent.entityKind === "period" ? alias : frame.periodAlias,
+        periodItems:
+          parent.entityKind === "period"
+            ? parent.periodItems
+            : frame.periodItems,
+        sequenceAlias:
+          parent.entityKind === "sequence" ? alias : frame.sequenceAlias,
       };
       const predicate = onlyApplicable(
         this.expression(target.predicate, child),
@@ -334,11 +505,124 @@ class SqlCollectionCompiler {
     );
   }
 
+  private sequenceSame(
+    input: FilterTargetExpression,
+    frame: SqlFrame,
+  ): SqlFragment {
+    if (!frame.sequenceAlias) {
+      throw new TypeError("$same requires a bound Sequence item.");
+    }
+    const step = "same_step";
+    const event = "same_event";
+    const visit = "same_visit";
+    let encoded: string;
+    let bindings: readonly (string | number | null)[] = [];
+    if (input.kind === "current-payload") {
+      const payload = compileJsonPointerValue(event, input.path);
+      encoded = `CASE WHEN json_extract(${step}.value, '$.kind') = 'event'
+        THEN ${payload.sql} ELSE NULL END`;
+      bindings = payload.bindings;
+    } else if (input.kind === "member") {
+      const members: string[] = [];
+      let root: FilterTargetExpression = input;
+      while (root.kind === "member") {
+        members.unshift(root.member);
+        root = root.object;
+      }
+      if (root.kind !== "context-root" || root.context !== "current") {
+        throw new TypeError("$same must read the current Sequence occurrence.");
+      }
+      const member = members.join(".");
+      const eventMember = resolveEntityMember(
+        "event",
+        member,
+        analyticsFilterRegistry,
+      );
+      const pageMember = resolveEntityMember(
+        "page",
+        member,
+        analyticsFilterRegistry,
+      );
+      if (!eventMember && !pageMember) {
+        throw new TypeError("Unknown Sequence member for $same.");
+      }
+      const scalar = (fieldId: string, alias: string): string => {
+        const sql = compileRegisteredFieldScalar(fieldId, alias);
+        const definition = analyticsFilterDefinition(fieldId)!;
+        const type =
+          definition.valueKind === "boolean"
+            ? 3
+            : definition.valueKind === "number"
+              ? 2
+              : 1;
+        return `CASE WHEN ${sql} IS NOT NULL
+          THEN json_object('t', ${type}, 'v', ${sql})
+          ELSE NULL END`;
+      };
+      encoded = `CASE
+        WHEN json_extract(${step}.value, '$.kind') = 'event' THEN
+          ${eventMember || pageMember ? scalar((eventMember ?? pageMember)!.fieldId, event) : "NULL"}
+        WHEN json_extract(${step}.value, '$.kind') = 'page' THEN
+          ${pageMember ? scalar(pageMember.fieldId, visit) : "NULL"}
+        ELSE NULL END`;
+    } else {
+      throw new TypeError("Unsupported $same scalar target.");
+    }
+    const tokens = `SELECT ${encoded} AS typed_value
+      FROM json_each(${frame.sequenceAlias}.sequence_steps) ${step}
+      LEFT JOIN ${this.source("event")} ${event}
+        ON ${event}.site_pk = json_extract(${step}.value, '$.site_pk')
+       AND ${event}.event_pk = json_extract(${step}.value, '$.event_pk')
+       AND json_extract(${step}.value, '$.kind') = 'event'
+      LEFT JOIN ${this.source("page")} ${visit}
+        ON ${visit}.site_pk = json_extract(${step}.value, '$.site_pk')
+       AND ${visit}.visit_id = json_extract(${step}.value, '$.visit_id')
+       AND json_extract(${step}.value, '$.kind') = 'page'`;
+    return {
+      sql: `(SELECT CASE WHEN
+        COUNT(typed_value) = json_array_length(${frame.sequenceAlias}.sequence_steps)
+        AND COUNT(DISTINCT typed_value) = 1
+        AND SUM(CASE WHEN json_extract(typed_value, '$.t') IN (1, 2, 3)
+          THEN 1 ELSE 0 END) = json_array_length(${frame.sequenceAlias}.sequence_steps)
+        THEN 1 ELSE 0 END
+        FROM (${tokens}) same_values)`,
+      bindings,
+    };
+  }
+
   private condition(
     condition: FilterCondition,
     frame: SqlFrame,
   ): PredicateFragment {
     const target = condition.target;
+    if (target.kind === "context-intrinsic" && target.context === "sequence") {
+      if (!frame.sequenceAlias)
+        throw new TypeError("Sequence intrinsic outside Sequence item.");
+      const alias = frame.sequenceAlias;
+      let value: SqlFragment;
+      if (target.intrinsic === "span") {
+        value = { sql: `(${alias}.end_ms - ${alias}.start_ms)`, bindings: [] };
+      } else if (target.intrinsic === "gap") {
+        const from = target.from - 1;
+        const to = target.to - 1;
+        value = {
+          sql: `(json_extract(${alias}.sequence_steps, '$[${to}].time')
+            - json_extract(${alias}.sequence_steps, '$[${from}].time'))`,
+          bindings: [],
+        };
+      } else {
+        value = this.sequenceSame(target.input, frame);
+      }
+      return {
+        ...compareScalar(
+          value,
+          condition.operator,
+          condition.value,
+          this.clock,
+        ),
+        applicable: true,
+      };
+    }
     if (target.kind === "field") return this.fieldCondition(condition, frame);
     if (target.kind === "event-payload" || target.kind === "current-payload") {
       if (frame.currentKind !== "event") {
@@ -364,11 +648,31 @@ class SqlCollectionCompiler {
       let root: FilterTargetExpression = target;
       while (root.kind === "member") root = root.object;
       if (root.kind !== "context-root" || root.context !== "current") {
-        throw new TypeError("SQL member target is not implemented.");
+        const scalar = compileSqlScalar(
+          target,
+          (collection) => this.collection(collection, frame),
+          this.clock,
+        );
+        return {
+          ...compareScalar(
+            scalar,
+            condition.operator,
+            condition.value,
+            this.clock,
+          ),
+          applicable: true,
+        };
       }
       return { sql: "0", bindings: [], applicable: false };
     }
-    if (target.kind === "selector" || target.kind === "entity-root") {
+    if (
+      target.kind === "selector" ||
+      target.kind === "entity-root" ||
+      target.kind === "sequence" ||
+      target.kind === "adjacent" ||
+      target.kind === "without" ||
+      target.kind === "periods"
+    ) {
       const collection = this.collection(target, frame);
       const found = `EXISTS (SELECT 1 FROM (${collection.sql}) matched)`;
       if (condition.operator === "exists") {
@@ -383,14 +687,25 @@ class SqlCollectionCompiler {
       }
       throw new TypeError("Collection predicates need EXISTS or NOT EXISTS.");
     }
-    if (target.kind === "reducer" && target.reducer === "count") {
-      const collection = this.collection(target.input, frame);
-      const count: SqlFragment = {
-        sql: `(SELECT COUNT(*) FROM (${collection.sql}) counted)`,
-        bindings: collection.bindings,
-      };
+    if (
+      target.kind === "reducer" ||
+      target.kind === "arithmetic" ||
+      target.kind === "occurrence-time" ||
+      target.kind === "duration" ||
+      target.kind === "time-anchor"
+    ) {
+      const scalar = compileSqlScalar(
+        target,
+        (collection) => this.collection(collection, frame),
+        this.clock,
+      );
       return {
-        ...compareScalar(count, condition.operator, condition.value),
+        ...compareScalar(
+          scalar,
+          condition.operator,
+          condition.value,
+          this.clock,
+        ),
         applicable: true,
       };
     }
@@ -471,6 +786,7 @@ export function compileCollectionSqlQualification(
   document: FilterDocument,
   scope: RootScope,
   sources: SqlQualificationSources = {},
+  clock?: SqlScalarTimeContext,
 ): FilterQualificationSql {
   // SQL identifiers cannot come from the Filter DSL or user input.
   const candidateVisits = safeQualificationIdentifier(
@@ -491,9 +807,13 @@ export function compileCollectionSqlQualification(
   const filterEvents = safeQualificationIdentifier(
     sources.filterEvents ?? universeEvents,
   );
-  const compiler = new SqlCollectionCompiler({ filterVisits, filterEvents });
+  const compiler = new SqlCollectionCompiler(
+    { filterVisits, filterEvents },
+    clock,
+  );
   const ctes: BoundCteDefinition[] = [
     ...factCtes(filterVisits, filterEvents),
+    timelineCte(filterVisits, filterEvents),
     boundCte(
       "scope_filter_sessions",
       `scope_filter_sessions AS (

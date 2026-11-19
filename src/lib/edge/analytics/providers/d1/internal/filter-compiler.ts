@@ -599,6 +599,29 @@ function expression(compiler: Compiler, item: FilterExpression): string {
   return `(${item.children.map((child) => expression(compiler, child)).join(operator)})`;
 }
 
+/**
+ * Return a registered Field's scalar SQL expression for a locally bound row.
+ * The caller is responsible for providing the appropriate source relation,
+ * applicability and entity identity; this does not compile an entire query.
+ */
+export function compileRegisteredFieldScalar(
+  fieldId: string,
+  alias: string,
+): string {
+  const field = analyticsFilterDefinition(fieldId);
+  if (!field) throw new TypeError(`Unknown registered Field: ${fieldId}.`);
+  const valid = validAlias(alias, "Scalar row alias");
+  const compiler: Compiler = {
+    alias: valid,
+    eventAlias: valid,
+    sessionSource: "scope_raw_visits",
+    bindings: [],
+    payloadIndex: 0,
+    orLikeIndex: 0,
+  };
+  return directColumn(compiler, compilerStrategyFor(field));
+}
+
 export function compileFilterDocument(
   document: FilterDocument,
   options: FilterCompilerOptions = {},
