@@ -284,6 +284,32 @@ scope_history_events(site_pk, site_id, event_pk, event_id, visit_id, session_id,
     ).toEqual([{ site_pk: 1, entity_id: "s1" }]);
   });
 
+  it("evaluates top-level Filter time against the current scope's activities", () => {
+    const clock = {
+      nowMs: 100,
+      rangeStartMs: 20,
+      rangeEndExclusiveMs: 40,
+      timeZone: "UTC",
+    };
+    expect(
+      qualified(
+        "time gte @range.start AND time lt @range.end",
+        "session",
+        clock,
+      ),
+    ).toEqual([
+      { site_pk: 1, entity_id: "s1" },
+      { site_pk: 1, entity_id: "s2" },
+    ]);
+    expect(
+      qualified(
+        'time gte @range.start AND time lt @range.end AND count(EVENT { $.name eq "view" }) eq 1',
+        "session",
+        clock,
+      ),
+    ).toEqual([{ site_pk: 1, entity_id: "s2" }]);
+  });
+
   it("performs IANA Bucketing and typed distinct labels on SQL observations", () => {
     const clock = {
       nowMs: 100,

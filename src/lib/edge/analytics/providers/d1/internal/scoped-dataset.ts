@@ -12,6 +12,7 @@ import {
   type ObservationPredicatePlan,
   planObservationFilter,
   type QueryOperation,
+  type QueryTime,
   scopedFilterMetadata,
   type ScopedFilterPlan,
 } from "@/lib/edge/analytics/contract";
@@ -37,6 +38,11 @@ import {
   type FilterQualificationSql,
   type SqlBinding,
 } from "./filter-qualification";
+import {
+  compileCollectionSqlQualification,
+  type SqlQualificationSources,
+} from "./filter-sql-collections";
+import type { SqlScalarTimeContext } from "./filter-sql-scalars";
 
 export type { SqlBinding } from "./filter-qualification";
 
@@ -913,6 +919,147 @@ ${name} AS (
   return { relation: compile(expression), ctes };
 }
 
+interface FilterSqlDomains {
+  readonly definitions: readonly BoundCteDefinition[];
+  readonly sources: SqlQualificationSources;
+  readonly clock: SqlScalarTimeContext;
+}
+
+/**
+ * The report query window Q is never silently widened by Filter history.
+ * R supplies authorized historical activities, F supplies predicate facts,
+ * and U supplies the entity universe for NOT/count=0. SQL ultimately
+ * maps the qualified identity to Q for final reporting.
+ */
+function buildFilterSqlDomains(
+  input: ScopedDatasetCompilerInput,
+  time: QueryTime,
+): FilterSqlDomains {
+  const clock = {
+    nowMs: time.capturedAtMs,
+    rangeStartMs: input.window.startMs,
+    rangeEndExclusiveMs: input.window.endExclusiveMs,
+    timeZone: time.reportingTimeZone,
+  };
+  const queryStart = input.window.startMs;
+  const queryEnd = input.window.endExclusiveMs;
+  const requestedFilter = time.filterRange;
+  const filterStart =
+    requestedFilter?.startMs ??
+    (requestedFilter ? Number.MIN_SAFE_INTEGER : queryStart);
+  const filterEnd =
+    requestedFilter?.endExclusiveMs ??
+    (requestedFilter ? time.capturedAtMs + 1 : queryEnd);
+  const explicitReadStart = time.fullHistory
+    ? Number.MIN_SAFE_INTEGER
+    : (time.readRange?.startMs ?? queryStart);
+  const explicitReadEnd = time.fullHistory
+    ? time.capturedAtMs + 1
+    : (time.readRange?.endExclusiveMs ?? queryEnd);
+  const readStart = Math.min(explicitReadStart, filterStart);
+  const readEnd = Math.max(explicitReadEnd, filterEnd);
+  if (
+    !Number.isSafeInteger(readStart) ||
+    !Number.isSafeInteger(readEnd) ||
+    readEnd > time.capturedAtMs + 1 ||
+    readStart >= readEnd
+  ) {
+    throw new RangeError("filter_evaluation_range_unavailable");
+  }
+
+  const readSameAsQuery = readStart === queryStart && readEnd === queryEnd;
+  const readVisits = "scope_filter_read_visits";
+  const readEvents = "scope_filter_read_events";
+  const filterVisits = "scope_filter_evaluation_visits";
+  const filterEvents = "scope_filter_evaluation_events";
+  const definitions: BoundCteDefinition[] = [];
+  if (readSameAsQuery) {
+    definitions.push(
+      boundCte(readVisits, `${readVisits} AS (SELECT * FROM scope_raw_visits)`),
+      boundCte(readEvents, `${readEvents} AS (SELECT * FROM scope_raw_events)`),
+    );
+  } else {
+    definitions.push(
+      boundCte(
+        readVisits,
+        visitSource(input.siteIds).replace(
+          "scope_raw_visits AS MATERIALIZED",
+          `${readVisits} AS MATERIALIZED`,
+        ),
+        [...input.siteIds, readStart, readEnd],
+      ),
+      boundCte(
+        readEvents,
+        eventSource(input.siteIds, input.compatibilityEventSource).replace(
+          "scope_raw_events AS MATERIALIZED",
+          `${readEvents} AS MATERIALIZED`,
+        ),
+        [...input.siteIds, readStart, readEnd],
+      ),
+    );
+  }
+
+  if (time.filterRangeEmpty) {
+    definitions.push(
+      boundCte(
+        filterVisits,
+        `${filterVisits} AS (SELECT * FROM ${readVisits} WHERE 0)`,
+      ),
+      boundCte(
+        filterEvents,
+        `${filterEvents} AS (SELECT * FROM ${readEvents} WHERE 0)`,
+      ),
+    );
+  } else if (requestedFilter) {
+    definitions.push(
+      boundCte(
+        filterVisits,
+        `${filterVisits} AS (SELECT * FROM ${readVisits}
+          WHERE started_at >= ? AND started_at < ?)`,
+        [filterStart, filterEnd],
+      ),
+      boundCte(
+        filterEvents,
+        `${filterEvents} AS (SELECT * FROM ${readEvents}
+          WHERE occurred_at >= ? AND occurred_at < ?)`,
+        [filterStart, filterEnd],
+      ),
+    );
+  } else {
+    definitions.push(
+      boundCte(
+        filterVisits,
+        `${filterVisits} AS (SELECT * FROM scope_raw_visits)`,
+      ),
+      boundCte(
+        filterEvents,
+        `${filterEvents} AS (SELECT * FROM scope_raw_events)`,
+      ),
+    );
+  }
+  const hasExplicitQualificationRange = Boolean(
+    requestedFilter || time.filterRangeEmpty,
+  );
+  return {
+    definitions,
+    sources: {
+      candidateVisits: "scope_raw_visits",
+      candidateEvents: "scope_raw_events",
+      universeVisits: hasExplicitQualificationRange
+        ? filterVisits
+        : "scope_raw_visits",
+      universeEvents: hasExplicitQualificationRange
+        ? filterEvents
+        : "scope_raw_events",
+      filterVisits,
+      filterEvents,
+      readVisits,
+      readEvents,
+    },
+    clock,
+  };
+}
+
 /**
  * Compile validated basic Filter SQL into typed, site-scoped qualification
  * relations. The read sources and authorization belong to the enclosing
@@ -924,10 +1071,16 @@ ${name} AS (
 export function compileSqlQualification(
   filters: FilterDocument,
   plan: ScopedFilterPlan,
+  domains?: FilterSqlDomains,
 ): FilterQualificationSql {
   if (filterDocumentUsesAdvancedExpressions(filters)) {
-    throw new TypeError(
-      "Advanced Filter SQL qualification has not been implemented.",
+    if (!domains)
+      throw new TypeError("Advanced SQL requires authorized time domains.");
+    return compileCollectionSqlQualification(
+      filters,
+      plan.scope,
+      domains.sources,
+      domains.clock,
     );
   }
   if (plan.mode === "entity" && plan.membership.kind === "entity") {
@@ -989,16 +1142,16 @@ export function compileScopedDatasetSql(
   }
 
   const advancedMatches = input.plan.advancedMatches;
-  if (
+  const advancedSql = Boolean(
     input.filters.root &&
     filterDocumentUsesAdvancedExpressions(input.filters) &&
-    !advancedMatches
-  ) {
-    throw new Error("advanced_filter_execution_context_required");
-  }
-
+    !advancedMatches,
+  );
+  const domains = advancedSql
+    ? buildFilterSqlDomains(input, metadata!.time)
+    : undefined;
   const qualification = !advancedMatches
-    ? compileSqlQualification(input.filters, input.plan)
+    ? compileSqlQualification(input.filters, input.plan, domains)
     : null;
   const advancedRelations = advancedMatches
     ? advancedMatchesRelations(advancedMatches)
@@ -1079,7 +1232,7 @@ scope_final_events AS (
 scope_final_events AS (
   SELECT re.*
   FROM scope_raw_events re
-  INNER JOIN scope_matching_events matching_events
+  INNER JOIN ${qualification?.kind === "observation" ? qualification.matchedEventRelation : "scope_matching_events"} matching_events
     ON matching_events.site_pk = re.site_pk
    AND matching_events.event_id = re.event_id
 )`;
@@ -1098,6 +1251,7 @@ scope_final_events AS (
       "visit_source",
       "visit_source AS (SELECT * FROM scope_raw_visits)",
     ),
+    ...(domains?.definitions ?? []),
     ...(qualification?.ctes ?? []),
     ...(advancedRelations ?? []),
   ];

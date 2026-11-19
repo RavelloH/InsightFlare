@@ -132,6 +132,33 @@ describe("P3 typed SQL scalar aggregation", () => {
     }
   });
 
+  it("supports first/last/nth of registered Event members and projected JSON scalars", () => {
+    const db = fixture();
+    try {
+      expect(qualifies(db, 'first(EVENT).name eq "purchase"')).toBe(true);
+      expect(qualifies(db, 'last(EVENT).name eq "view"')).toBe(true);
+      expect(qualifies(db, 'nth(EVENT,2).name eq "purchase"')).toBe(true);
+      expect(qualifies(db, 'first(EVENT -> payload("/amount")) eq 5')).toBe(
+        true,
+      );
+      expect(qualifies(db, 'last(EVENT -> payload("/sku")) eq "free"')).toBe(
+        true,
+      );
+      expect(qualifies(db, 'nth(EVENT -> payload("/sku"),2) eq "pro"')).toBe(
+        true,
+      );
+      expect(qualifies(db, 'count(EVENT -> payload("/amount")) eq 3')).toBe(
+        true,
+      );
+      expect(qualifies(db, 'count(EVENT -> payload("/missing")) eq 0')).toBe(
+        true,
+      );
+      expect(qualifies(db, 'first(EVENT -> name) eq "purchase"')).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
   it("keeps the SELECT-projection JSON bind before filtered FROM binds", () => {
     const db = fixture();
     try {

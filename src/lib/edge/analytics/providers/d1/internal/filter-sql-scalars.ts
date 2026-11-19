@@ -57,6 +57,59 @@ function fieldProjection(
   };
 }
 
+interface ProjectedScalarRows {
+  readonly sql: string;
+  readonly bindings: readonly (string | number | null)[];
+  readonly type: SqlScalarRef["type"];
+  readonly payload: boolean;
+}
+
+function projectedScalarRows(
+  projection: Extract<FilterTargetExpression, { kind: "projection" }>,
+  compileCollection: ScalarCollectionCompiler,
+): ProjectedScalarRows {
+  const collection = compileCollection(projection.collection);
+  const payload = projection.member === "payload";
+  if (payload && (collection.entityKind !== "event" || !projection.path)) {
+    throw new TypeError(
+      "Payload Projection must select an Event JSON pointer.",
+    );
+  }
+  const alias = "projection_item";
+  const json = payload
+    ? compileJsonPointerValue(alias, projection.path!)
+    : null;
+  const field = json
+    ? null
+    : fieldProjection(collection.entityKind, projection.member, alias);
+  const time =
+    collection.entityKind === "page"
+      ? `${alias}.started_at`
+      : collection.entityKind === "event"
+        ? `${alias}.occurred_at`
+        : "0";
+  const id =
+    collection.entityKind === "page"
+      ? `${alias}.visit_id`
+      : collection.entityKind === "event"
+        ? `${alias}.event_id`
+        : collection.entityKind === "session"
+          ? `${alias}.session_id`
+          : collection.entityKind === "visitor"
+            ? `${alias}.visitor_id`
+            : null;
+  if (!id)
+    throw new TypeError("Scalar Projection requires an entity collection.");
+  return {
+    sql: `SELECT ${json?.sql ?? field!.sql} AS projected,
+      ${time} AS sort_time, ${id} AS sort_id
+      FROM (${collection.sql}) ${alias}`,
+    bindings: [...(json?.bindings ?? []), ...collection.bindings],
+    type: field?.type ?? "unknown",
+    payload,
+  };
+}
+
 function memberPath(target: FilterTargetExpression): {
   readonly root: FilterTargetExpression;
   readonly member: string;
@@ -82,13 +135,23 @@ function orderedItems(
       ? `${alias}.occurred_at`
       : collection.entityKind === "page"
         ? `${alias}.started_at`
-        : null;
-  if (!time) {
-    throw new TypeError(
-      "P3 ordered reducer requires an occurrence collection.",
-    );
-  }
-  const id = collection.entityKind === "event" ? "event_id" : "visit_id";
+        : collection.entityKind === "period"
+          ? `${alias}.period_start`
+          : collection.entityKind === "sequence"
+            ? `${alias}.start_ms`
+            : null;
+  const id =
+    collection.entityKind === "event"
+      ? "event_id"
+      : collection.entityKind === "page"
+        ? "visit_id"
+        : collection.entityKind === "period"
+          ? "period_start"
+          : collection.entityKind === "sequence"
+            ? "sequence_positions"
+            : collection.entityKind === "session"
+              ? "session_id"
+              : "visitor_id";
   const order = direction === "last" ? "DESC" : "ASC";
   const offset = direction === "nth" ? (index ?? 1) - 1 : 0;
   if (!Number.isSafeInteger(offset) || offset < 0) {
@@ -96,7 +159,7 @@ function orderedItems(
   }
   return {
     sql: `(SELECT ${projection} FROM (${collection.sql}) ${alias}
-      ORDER BY ${time} ${order},
+      ORDER BY ${time ? `${time} ${order},` : ""}
         ${alias}.${id} COLLATE BINARY ${order} LIMIT 1 OFFSET ${offset})`,
     bindings: collection.bindings,
     type: "unknown",
@@ -231,6 +294,37 @@ export function compileSqlScalar(
     };
   }
   if (target.kind === "reducer") {
+    if (
+      target.input.kind === "projection" &&
+      ["count", "first", "last", "nth"].includes(target.reducer)
+    ) {
+      const projected = projectedScalarRows(target.input, compileCollection);
+      const rows = `(${projected.sql}) projected_items`;
+      if (target.reducer === "count") {
+        return {
+          sql: `(SELECT COUNT(projected) FROM ${rows})`,
+          bindings: projected.bindings,
+          type: "number",
+        };
+      }
+      const direction = target.reducer === "last" ? "DESC" : "ASC";
+      const index = target.reducer === "nth" ? (target.index ?? 1) - 1 : 0;
+      if (!Number.isSafeInteger(index) || index < 0) {
+        throw new TypeError("Invalid nth projected item index.");
+      }
+      const value = projected.payload
+        ? "json_extract(projected, '$.v')"
+        : "projected";
+      return {
+        sql: `(SELECT ${value}
+          FROM ${rows}
+          WHERE projected IS NOT NULL
+          ORDER BY sort_time ${direction}, sort_id COLLATE BINARY ${direction}
+          LIMIT 1 OFFSET ${index})`,
+        bindings: projected.bindings,
+        type: projected.type,
+      };
+    }
     if (target.input.kind === "bucket") {
       if (!clock)
         throw new TypeError(
@@ -282,9 +376,17 @@ export function compileSqlScalar(
           ? "ordered_item.occurred_at"
           : collection.entityKind === "page"
             ? "ordered_item.started_at"
-            : null;
+            : collection.entityKind === "period"
+              ? "ordered_item.period_start"
+              : collection.entityKind === "sequence"
+                ? "ordered_item.start_ms"
+                : collection.entityKind === "session"
+                  ? "ordered_item.session_id"
+                  : collection.entityKind === "visitor"
+                    ? "ordered_item.visitor_id"
+                    : null;
       if (!projection)
-        throw new TypeError("Ordered Event/Page timestamp is required.");
+        throw new TypeError("Ordered SQL entity must have an identity.");
       return {
         ...orderedItems(collection, target.reducer, target.index, projection),
         type: "date",

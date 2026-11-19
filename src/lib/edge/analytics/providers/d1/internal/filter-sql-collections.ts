@@ -55,6 +55,9 @@ export interface SqlQualificationSources {
   /** Predicate activity range (F); may be historical. */
   readonly filterVisits?: string;
   readonly filterEvents?: string;
+  /** Complete authorized read range R, used by Window and full timeline. */
+  readonly readVisits?: string;
+  readonly readEvents?: string;
 }
 
 interface SqlFragment {
@@ -233,12 +236,20 @@ class SqlCollectionCompiler {
     return clauses.join(" AND ");
   }
 
-  private source(kind: EntityKind): string {
+  private source(kind: EntityKind, readMode = false): string {
     switch (kind) {
       case "page":
-        return this.sources.filterVisits ?? "scope_raw_visits";
+        return readMode
+          ? (this.sources.readVisits ??
+              this.sources.filterVisits ??
+              "scope_raw_visits")
+          : (this.sources.filterVisits ?? "scope_raw_visits");
       case "event":
-        return this.sources.filterEvents ?? "scope_raw_events";
+        return readMode
+          ? (this.sources.readEvents ??
+              this.sources.filterEvents ??
+              "scope_raw_events")
+          : (this.sources.filterEvents ?? "scope_raw_events");
       case "session":
         return "scope_filter_sessions";
       case "visitor":
@@ -254,10 +265,11 @@ class SqlCollectionCompiler {
   private collection(
     target: FilterTargetExpression,
     frame: SqlFrame,
+    readMode = false,
   ): SqlCollectionRef {
     if (target.kind === "entity-root") {
       const name = this.alias();
-      const source = this.source(target.entity);
+      const source = this.source(target.entity, readMode);
       return {
         sql: `SELECT ${name}.* FROM ${source} ${name}
           WHERE ${this.relationship(frame, name, target.entity)}`,
@@ -266,7 +278,9 @@ class SqlCollectionCompiler {
       };
     }
     if (target.kind === "sequence") {
-      const steps = target.steps.map((step) => this.collection(step, frame));
+      const steps = target.steps.map((step) =>
+        this.collection(step, frame, readMode),
+      );
       const anchor = frame.anchorKind;
       if (
         steps.some(
@@ -278,18 +292,18 @@ class SqlCollectionCompiler {
       return compileSequenceMatches(steps as never, anchor);
     }
     if (target.kind === "adjacent") {
-      const seq = this.collection(target.sequence, frame);
+      const seq = this.collection(target.sequence, frame, readMode);
       if (seq.entityKind !== "sequence") {
         throw new TypeError("Adjacent must wrap a Sequence.");
       }
       return compileAdjacentMatches(seq as never);
     }
     if (target.kind === "without") {
-      const seq = this.collection(target.sequence, frame);
+      const seq = this.collection(target.sequence, frame, readMode);
       if (seq.entityKind !== "sequence") {
         throw new TypeError("Without must wrap a Sequence.");
       }
-      const excluded = this.collection(target.excluded, frame);
+      const excluded = this.collection(target.excluded, frame, true);
       if (excluded.entityKind !== "page" && excluded.entityKind !== "event") {
         throw new TypeError("Without excluded set must contain occurrences.");
       }
@@ -329,7 +343,7 @@ class SqlCollectionCompiler {
           "Natural Periods require the query's IANA time context.",
         );
       }
-      const source = this.collection(target.collection, frame);
+      const source = this.collection(target.collection, frame, readMode);
       const kind = source.entityKind;
       if (kind !== "page" && kind !== "event") {
         throw new TypeError("Periods require Page/Event occurrences.");
@@ -355,7 +369,7 @@ class SqlCollectionCompiler {
       };
     }
     if (target.kind === "window") {
-      const source = this.collection(target.collection, frame);
+      const source = this.collection(target.collection, frame, true);
       if (source.entityKind !== "page" && source.entityKind !== "event") {
         throw new TypeError("Window requires Page or Event occurrences.");
       }
@@ -391,7 +405,7 @@ class SqlCollectionCompiler {
       };
     }
     if (target.kind === "selector") {
-      const parent = this.collection(target.collection, frame);
+      const parent = this.collection(target.collection, frame, readMode);
       const alias = this.alias();
       const child: SqlFrame = {
         anchorAlias:
@@ -635,6 +649,60 @@ class SqlCollectionCompiler {
       return { ...compiled, applicable: true };
     }
     if (target.kind === "member") {
+      if (
+        target.member === "time" &&
+        target.object.kind === "context-root" &&
+        target.object.context === "current"
+      ) {
+        if (frame.currentKind === "page" || frame.currentKind === "event") {
+          const column =
+            frame.currentKind === "page" ? "started_at" : "occurred_at";
+          const test = compareScalar(
+            { sql: `${frame.currentAlias}.${column}`, bindings: [] },
+            condition.operator,
+            condition.value,
+            this.clock,
+          );
+          return { ...test, applicable: true };
+        }
+        if (
+          frame.currentKind === "session" ||
+          frame.currentKind === "visitor"
+        ) {
+          const relation =
+            frame.currentKind === "session" ? "session_id" : "visitor_id";
+          const clauses = (kind: "page" | "event") => {
+            const alias =
+              kind === "page" ? "scope_time_page" : "scope_time_event";
+            const test = compareScalar(
+              {
+                sql: `${alias}.${kind === "page" ? "started_at" : "occurred_at"}`,
+                bindings: [],
+              },
+              condition.operator,
+              condition.value,
+              this.clock,
+            );
+            return {
+              sql: `EXISTS (SELECT 1 FROM ${this.source(kind)} ${alias}
+                WHERE ${alias}.site_pk = ${frame.currentAlias}.site_pk
+                  AND ${alias}.${relation} = ${frame.currentAlias}.${relation}
+                  AND ${test.sql})`,
+              bindings: test.bindings,
+            };
+          };
+          const visits = clauses("page");
+          const events = clauses("event");
+          return {
+            sql: `(${visits.sql} OR ${events.sql})`,
+            bindings: [...visits.bindings, ...events.bindings],
+            applicable: true,
+          };
+        }
+        throw new TypeError(
+          "Time context must bind a Page, Event, Session or Visitor.",
+        );
+      }
       const fieldId = this.currentMember(target, frame.currentKind);
       if (fieldId) {
         return this.fieldCondition(
@@ -807,13 +875,19 @@ export function compileCollectionSqlQualification(
   const filterEvents = safeQualificationIdentifier(
     sources.filterEvents ?? universeEvents,
   );
+  const readVisits = safeQualificationIdentifier(
+    sources.readVisits ?? filterVisits,
+  );
+  const readEvents = safeQualificationIdentifier(
+    sources.readEvents ?? filterEvents,
+  );
   const compiler = new SqlCollectionCompiler(
-    { filterVisits, filterEvents },
+    { filterVisits, filterEvents, readVisits, readEvents },
     clock,
   );
   const ctes: BoundCteDefinition[] = [
     ...factCtes(filterVisits, filterEvents),
-    timelineCte(filterVisits, filterEvents),
+    timelineCte(readVisits, readEvents),
     boundCte(
       "scope_filter_sessions",
       `scope_filter_sessions AS (
