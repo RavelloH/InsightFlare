@@ -279,7 +279,11 @@ class SqlCollectionCompiler {
     }
     if (target.kind === "sequence") {
       const steps = target.steps.map((step) =>
-        this.collection(step, frame, readMode),
+        this.collection(
+          step,
+          frame,
+          readMode || !this.clock?.filterRangeExplicit,
+        ),
       );
       const anchor = frame.anchorKind;
       if (
@@ -352,7 +356,28 @@ class SqlCollectionCompiler {
       const period = this.alias();
       const time =
         kind === "page" ? `${item}.started_at` : `${item}.occurred_at`;
-      const calendar = sqlCalendarPeriods(target.interval, this.clock);
+      const clock = this.clock;
+      const start = readMode
+        ? (clock.readStartMs ?? clock.rangeStartMs)
+        : (clock.filterStartMs ?? clock.rangeStartMs);
+      const end = readMode
+        ? (clock.readEndExclusiveMs ?? clock.rangeEndExclusiveMs)
+        : (clock.filterEndExclusiveMs ?? clock.rangeEndExclusiveMs);
+      // Natural IANA boundaries cannot be enumerated for unknown unbounded
+      // retained history. Raise a visible error rather than querying only Q.
+      if (
+        !Number.isSafeInteger(start) ||
+        start < -8_640_000_000_000_000 ||
+        !Number.isSafeInteger(end) ||
+        end > 8_640_000_000_000_000
+      ) {
+        throw new RangeError("filter_calendar_history_requires_retained_start");
+      }
+      const calendar = sqlCalendarPeriods(target.interval, {
+        ...clock,
+        rangeStartMs: start,
+        rangeEndExclusiveMs: end,
+      });
       const periodStart = `json_extract(${period}.value, '$.start')`;
       const periodEnd = `json_extract(${period}.value, '$.end')`;
       return {
@@ -380,7 +405,8 @@ class SqlCollectionCompiler {
           : `${alias}.occurred_at`;
       const anchor = compileSqlScalar(
         target.anchor,
-        (collection) => this.collection(collection, frame),
+        (collection, useReadRange) =>
+          this.collection(collection, frame, useReadRange),
         this.clock,
       );
       if (anchor.type !== "date" && anchor.type !== "number") {
@@ -584,11 +610,11 @@ class SqlCollectionCompiler {
     }
     const tokens = `SELECT ${encoded} AS typed_value
       FROM json_each(${frame.sequenceAlias}.sequence_steps) ${step}
-      LEFT JOIN ${this.source("event")} ${event}
+      LEFT JOIN ${this.source("event", true)} ${event}
         ON ${event}.site_pk = json_extract(${step}.value, '$.site_pk')
        AND ${event}.event_pk = json_extract(${step}.value, '$.event_pk')
        AND json_extract(${step}.value, '$.kind') = 'event'
-      LEFT JOIN ${this.source("page")} ${visit}
+      LEFT JOIN ${this.source("page", true)} ${visit}
         ON ${visit}.site_pk = json_extract(${step}.value, '$.site_pk')
        AND ${visit}.visit_id = json_extract(${step}.value, '$.visit_id')
        AND json_extract(${step}.value, '$.kind') = 'page'`;
@@ -718,7 +744,8 @@ class SqlCollectionCompiler {
       if (root.kind !== "context-root" || root.context !== "current") {
         const scalar = compileSqlScalar(
           target,
-          (collection) => this.collection(collection, frame),
+          (collection, useReadRange) =>
+            this.collection(collection, frame, useReadRange),
           this.clock,
         );
         return {
@@ -764,7 +791,8 @@ class SqlCollectionCompiler {
     ) {
       const scalar = compileSqlScalar(
         target,
-        (collection) => this.collection(collection, frame),
+        (collection, useReadRange) =>
+          this.collection(collection, frame, useReadRange),
         this.clock,
       );
       return {
@@ -881,6 +909,42 @@ export function compileCollectionSqlQualification(
   const readEvents = safeQualificationIdentifier(
     sources.readEvents ?? filterEvents,
   );
+  // A future-only (proven empty) Filter domain must not let historical
+  // Sequence, Window or WITHOUT reads qualify any report entities.
+  if (clock?.filterRangeEmpty) {
+    if (scope === "event") {
+      return {
+        kind: "observation",
+        matchedVisitRelation: "scope_filter_matched_visits",
+        matchedEventRelation: "scope_filter_matched_events",
+        ctes: [
+          boundCte(
+            "scope_filter_matched_visits",
+            `scope_filter_matched_visits AS (
+              SELECT site_pk, visit_id FROM ${candidateVisits} WHERE 0)`,
+          ),
+          boundCte(
+            "scope_filter_matched_events",
+            `scope_filter_matched_events AS (
+              SELECT site_pk, event_id FROM ${candidateEvents} WHERE 0)`,
+          ),
+        ],
+      };
+    }
+    return {
+      kind: "entity",
+      entityKind: scope,
+      qualifiedEntityRelation: "scope_filter_qualified_entities",
+      ctes: [
+        boundCte(
+          "scope_filter_qualified_entities",
+          `scope_filter_qualified_entities AS (
+            SELECT site_pk, ${scope === "session" ? "session_id" : "visitor_id"} AS entity_id
+            FROM ${candidateVisits} WHERE 0)`,
+        ),
+      ],
+    };
+  }
   const compiler = new SqlCollectionCompiler(
     { filterVisits, filterEvents, readVisits, readEvents },
     clock,

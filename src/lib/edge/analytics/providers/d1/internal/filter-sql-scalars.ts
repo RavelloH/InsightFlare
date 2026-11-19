@@ -27,6 +27,7 @@ export interface SqlScalarRef {
 
 export type ScalarCollectionCompiler = (
   target: FilterTargetExpression,
+  useReadRange?: boolean,
 ) => SqlScalarCollection;
 
 function fieldProjection(
@@ -67,8 +68,9 @@ interface ProjectedScalarRows {
 function projectedScalarRows(
   projection: Extract<FilterTargetExpression, { kind: "projection" }>,
   compileCollection: ScalarCollectionCompiler,
+  useReadRange = false,
 ): ProjectedScalarRows {
-  const collection = compileCollection(projection.collection);
+  const collection = compileCollection(projection.collection, useReadRange);
   const payload = projection.member === "payload";
   if (payload && (collection.entityKind !== "event" || !projection.path)) {
     throw new TypeError(
@@ -191,6 +193,15 @@ export interface SqlScalarTimeContext {
   readonly rangeStartMs: number;
   readonly rangeEndExclusiveMs: number;
   readonly timeZone: string;
+  /** True when an explicit top-level Filter Time bounds positional reducers. */
+  readonly filterRangeExplicit?: boolean;
+  readonly filterRangeEmpty?: boolean;
+  /** Authorized history range R used by ordered operations. */
+  readonly readStartMs?: number;
+  readonly readEndExclusiveMs?: number;
+  /** Optional explicit business evaluation period F. */
+  readonly filterStartMs?: number;
+  readonly filterEndExclusiveMs?: number;
 }
 
 /** Convert relative temporal literals once per query; never read activity in JS. */
@@ -251,7 +262,10 @@ export function compileSqlScalar(
         root.reducer === "last" ||
         root.reducer === "nth")
     ) {
-      const collection = compileCollection(root.input);
+      const collection = compileCollection(
+        root.input,
+        !clock?.filterRangeExplicit,
+      );
       const field = fieldProjection(
         collection.entityKind,
         member,
@@ -275,7 +289,10 @@ export function compileSqlScalar(
     ) {
       throw new TypeError("Occurrence-time SQL requires an ordered reducer.");
     }
-    const collection = compileCollection(inner.input);
+    const collection = compileCollection(
+      inner.input,
+      !clock?.filterRangeExplicit,
+    );
     const column =
       collection.entityKind === "event"
         ? "ordered_item.occurred_at"
@@ -298,7 +315,11 @@ export function compileSqlScalar(
       target.input.kind === "projection" &&
       ["count", "first", "last", "nth"].includes(target.reducer)
     ) {
-      const projected = projectedScalarRows(target.input, compileCollection);
+      const projected = projectedScalarRows(
+        target.input,
+        compileCollection,
+        target.reducer !== "count" && !clock?.filterRangeExplicit,
+      );
       const rows = `(${projected.sql}) projected_items`;
       if (target.reducer === "count") {
         return {
@@ -335,7 +356,17 @@ export function compileSqlScalar(
       if (source.entityKind !== "page" && source.entityKind !== "event") {
         throw new TypeError("Bucket input requires Page or Event occurrences.");
       }
-      const timeline = sqlCalendarPeriods(bucket.interval, clock);
+      const startMs = clock.filterStartMs ?? clock.rangeStartMs;
+      const endExclusiveMs =
+        clock.filterEndExclusiveMs ?? clock.rangeEndExclusiveMs;
+      if (startMs === Number.MIN_SAFE_INTEGER) {
+        throw new RangeError("filter_calendar_history_requires_retained_start");
+      }
+      const timeline = sqlCalendarPeriods(bucket.interval, {
+        ...clock,
+        rangeStartMs: startMs,
+        rangeEndExclusiveMs: endExclusiveMs,
+      });
       const time =
         source.entityKind === "page"
           ? "bucket_item.started_at"
@@ -370,7 +401,10 @@ export function compileSqlScalar(
       target.reducer === "last" ||
       target.reducer === "nth"
     ) {
-      const collection = compileCollection(target.input);
+      const collection = compileCollection(
+        target.input,
+        !clock?.filterRangeExplicit,
+      );
       const projection =
         collection.entityKind === "event"
           ? "ordered_item.occurred_at"

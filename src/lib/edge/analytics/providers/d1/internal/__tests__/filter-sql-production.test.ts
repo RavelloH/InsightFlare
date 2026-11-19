@@ -10,7 +10,10 @@ import {
   type QueryTime,
 } from "@/lib/edge/analytics/contract";
 import { VISIT_SOURCE_COLUMNS } from "@/lib/edge/analytics/providers/d1/internal/core-sources";
-import { compileScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
+import {
+  compileScopedDatasetSql,
+  scopedDatasetForUnpreparedReader,
+} from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 
 const SITES = ["site-a", "site-b"];
@@ -212,6 +215,181 @@ describe("P5 Scoped Dataset integration: SQL-only advanced qualification", () =>
     } finally {
       db.close();
     }
+  });
+
+  it("uses the full authorized read range R for ordered first(Event), while keeping report Q", () => {
+    const db = sqliteFixture();
+    try {
+      const historical: QueryTime = {
+        ...createQueryTime(100, 300, "UTC", 400),
+        fullHistory: true,
+      };
+      const earliest = dataset(
+        'first(EVENT).name eq "purchase"',
+        "session",
+        historical,
+      );
+      expect(
+        select(
+          db,
+          `WITH ${earliest.ctes}
+        SELECT site_pk,visit_id FROM ${earliest.visitRelation}
+        ORDER BY site_pk,visit_id`,
+          earliest.bindings.map((b) => b.value),
+        ),
+      ).toEqual([
+        { site_pk: 1, visit_id: "v-new" },
+        { site_pk: 2, visit_id: "v-new" },
+      ]);
+      const firstSignup = dataset(
+        'first(EVENT).name eq "signup"',
+        "session",
+        historical,
+      );
+      expect(
+        select(
+          db,
+          `WITH ${firstSignup.ctes}
+        SELECT site_pk,visit_id FROM ${firstSignup.visitRelation}`,
+          firstSignup.bindings.map((b) => b.value),
+        ),
+      ).toEqual([]);
+      // An explicit Filter domain F changes the ordered collection even
+      // when the authorized R range still contains the old purchase.
+      const explicit: QueryTime = {
+        ...historical,
+        filterRange: { startMs: 100, endExclusiveMs: 300 },
+      };
+      const bounded = dataset(
+        'first(EVENT).name eq "signup"',
+        "session",
+        explicit,
+      );
+      expect(
+        select(
+          db,
+          `WITH ${bounded.ctes}
+        SELECT site_pk,visit_id FROM ${bounded.visitRelation}`,
+          bounded.bindings.map((b) => b.value),
+        ),
+      ).toEqual([{ site_pk: 1, visit_id: "v-new" }]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("uses historical R for Sequence steps while retaining only Q report Visits", () => {
+    const db = sqliteFixture();
+    try {
+      const historical: QueryTime = {
+        ...createQueryTime(100, 300, "UTC", 400),
+        fullHistory: true,
+      };
+      const result = dataset(
+        'sequence([EVENT { $.name eq "purchase" }, EVENT { $.name eq "signup" }]) exists',
+        "session",
+        historical,
+      );
+      expect(
+        select(
+          db,
+          `WITH ${result.ctes}
+        SELECT site_pk,visit_id FROM ${result.visitRelation}`,
+          result.bindings.map((b) => b.value),
+        ),
+      ).toEqual([{ site_pk: 1, visit_id: "v-new" }]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps Calendar Bucket and Periods on explicit F rather than truncating to Q", () => {
+    const db = sqliteFixture();
+    try {
+      db.exec(`INSERT INTO custom_events(
+        event_pk, site_pk, site_id, event_id, visit_id, event_name_id, occurred_at
+      ) VALUES(107, 1, 'site-a', 'e-prior-day', 'v-old', 1, -86399950)`);
+      const time: QueryTime = {
+        ...createQueryTime(100, 300, "UTC", 400),
+        filterRange: { startMs: -86400000, endExclusiveMs: 300 },
+        readRange: {
+          startMs: -86400000,
+          endExclusiveMs: 300,
+        } as QueryTime["range"],
+      };
+      for (const expression of [
+        "countDistinct(bucket(EVENT, 1d)) eq 2",
+        "count(periods(EVENT, 1d)) eq 2",
+      ]) {
+        const compiled = dataset(expression, "session", time);
+        expect(
+          select(
+            db,
+            `WITH ${compiled.ctes}
+          SELECT site_pk, visit_id FROM ${compiled.visitRelation}`,
+            compiled.bindings.map((binding) => binding.value),
+          ),
+        ).toEqual([{ site_pk: 1, visit_id: "v-new" }]);
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reports an explicit failure for unknown unbounded IANA calendar history", () => {
+    const time: QueryTime = {
+      ...createQueryTime(100, 300, "UTC", 400),
+      fullHistory: true,
+      filterRange: { endExclusiveMs: 300 },
+    };
+    expect(() =>
+      dataset("count(periods(EVENT, 1d)) gte 1", "session", time),
+    ).toThrow("filter_calendar_history_requires_retained_start");
+  });
+
+  it("short-circuits proven empty Filter time across historical Sequence/Window and entity scopes", () => {
+    const db = sqliteFixture();
+    try {
+      const time: QueryTime = {
+        ...createQueryTime(100, 300, "UTC", 400),
+        fullHistory: true,
+        filterRangeEmpty: true,
+      };
+      for (const scope of ["session", "visitor", "event"] as const) {
+        const result = dataset(
+          'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
+          scope,
+          time,
+        );
+        expect(result.ctes).not.toContain("scope_filter_timeline");
+        expect(
+          select(
+            db,
+            `WITH ${result.ctes}
+          SELECT site_pk, visit_id FROM ${result.visitRelation}`,
+            result.bindings.map((binding) => binding.value),
+          ),
+        ).toEqual([]);
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects Relation DSL at unprepared compatibility readers instead of silently using legacy visit-only filters", () => {
+    const document = parseFilterDsl(
+      'count(EVENT { $.name eq "purchase" }) gte 1',
+      analyticsFilterRegistry,
+    );
+    expect(() =>
+      scopedDatasetForUnpreparedReader(
+        "overview",
+        "site-a",
+        WINDOW,
+        document,
+        "session",
+      ),
+    ).toThrow("advanced_filter_requires_prepared_scope");
   });
 
   it("rejects a broken historical range instead of returning false zero matches", () => {

@@ -1,5 +1,4 @@
 import {
-  type AdvancedFilterMatches,
   analyticsFilterDefinition,
   attachScopedFilterMetadata,
   createQueryTime,
@@ -70,44 +69,6 @@ export interface ScopedDatasetCompilerInput {
   readonly compatibilityEventSource?: boolean;
 }
 
-function advancedIdentityRelation(
-  name: string,
-  identities: AdvancedFilterMatches["entityIds"] | undefined,
-): BoundCteDefinition {
-  if (!identities?.length) {
-    return boundCte(
-      name,
-      `${name} AS (SELECT CAST(NULL AS INTEGER) AS site_pk, CAST(NULL AS TEXT) AS entity_id WHERE 0)`,
-    );
-  }
-  const branches = identities.map(
-    () =>
-      "SELECT si.site_pk, ? AS entity_id FROM site_identities si WHERE si.site_id = ?",
-  );
-  return boundCte(
-    name,
-    `${name} AS (${branches.join(" UNION ")})`,
-    identities.flatMap(({ siteId, id }) => [id, siteId]),
-  );
-}
-
-function advancedMatchesRelations(
-  matches: AdvancedFilterMatches,
-): readonly BoundCteDefinition[] {
-  const entities = advancedIdentityRelation(
-    "scope_advanced_matching_entities",
-    matches.entityIds,
-  );
-  const visits = advancedIdentityRelation(
-    "scope_advanced_matching_visit_ids",
-    matches.visitIds,
-  );
-  const events = advancedIdentityRelation(
-    "scope_advanced_matching_event_ids",
-    matches.eventIds,
-  );
-  return [entities, visits, events];
-}
 export function scopedDatasetFor(
   siteId: string,
   window: QueryWindow,
@@ -142,6 +103,11 @@ export function scopedDatasetForUnpreparedReader(
   scope: FilterScope,
 ): ScopedDatasetSql | null {
   if (filters.root === null) return null;
+  if (filterDocumentUsesAdvancedExpressions(filters)) {
+    // Direct compatibility readers do not carry authoritative Q/F/R history
+    // or audience authorization; never approximate a Relation via visit SQL.
+    throw new Error("advanced_filter_requires_prepared_scope");
+  }
 
   const plan = createScopedFilterPlan(operation, filters, scope);
   if (!plan) return null;
@@ -935,12 +901,6 @@ function buildFilterSqlDomains(
   input: ScopedDatasetCompilerInput,
   time: QueryTime,
 ): FilterSqlDomains {
-  const clock = {
-    nowMs: time.capturedAtMs,
-    rangeStartMs: input.window.startMs,
-    rangeEndExclusiveMs: input.window.endExclusiveMs,
-    timeZone: time.reportingTimeZone,
-  };
   const queryStart = input.window.startMs;
   const queryEnd = input.window.endExclusiveMs;
   const requestedFilter = time.filterRange;
@@ -950,12 +910,12 @@ function buildFilterSqlDomains(
   const filterEnd =
     requestedFilter?.endExclusiveMs ??
     (requestedFilter ? time.capturedAtMs + 1 : queryEnd);
-  const explicitReadStart = time.fullHistory
-    ? Number.MIN_SAFE_INTEGER
-    : (time.readRange?.startMs ?? queryStart);
-  const explicitReadEnd = time.fullHistory
-    ? time.capturedAtMs + 1
-    : (time.readRange?.endExclusiveMs ?? queryEnd);
+  const explicitReadStart =
+    time.readRange?.startMs ??
+    (time.fullHistory ? Number.MIN_SAFE_INTEGER : queryStart);
+  const explicitReadEnd =
+    time.readRange?.endExclusiveMs ??
+    (time.fullHistory ? time.capturedAtMs + 1 : queryEnd);
   const readStart = Math.min(explicitReadStart, filterStart);
   const readEnd = Math.max(explicitReadEnd, filterEnd);
   if (
@@ -967,6 +927,18 @@ function buildFilterSqlDomains(
     throw new RangeError("filter_evaluation_range_unavailable");
   }
 
+  const clock: SqlScalarTimeContext = {
+    nowMs: time.capturedAtMs,
+    rangeStartMs: queryStart,
+    rangeEndExclusiveMs: queryEnd,
+    timeZone: time.reportingTimeZone,
+    filterRangeExplicit: Boolean(requestedFilter),
+    filterRangeEmpty: Boolean(time.filterRangeEmpty),
+    filterStartMs: filterStart,
+    filterEndExclusiveMs: filterEnd,
+    readStartMs: readStart,
+    readEndExclusiveMs: readEnd,
+  };
   const readSameAsQuery = readStart === queryStart && readEnd === queryEnd;
   const readVisits = "scope_filter_read_visits";
   const readEvents = "scope_filter_read_events";
@@ -1141,56 +1113,31 @@ export function compileScopedDatasetSql(
     throw new Error("scoped_dataset_metadata_required");
   }
 
-  const advancedMatches = input.plan.advancedMatches;
-  const advancedSql = Boolean(
-    input.filters.root &&
-    filterDocumentUsesAdvancedExpressions(input.filters) &&
-    !advancedMatches,
+  const domains =
+    input.filters.root && filterDocumentUsesAdvancedExpressions(input.filters)
+      ? buildFilterSqlDomains(input, metadata!.time)
+      : undefined;
+  const qualification = compileSqlQualification(
+    input.filters,
+    input.plan,
+    domains,
   );
-  const domains = advancedSql
-    ? buildFilterSqlDomains(input, metadata!.time)
-    : undefined;
-  const qualification = !advancedMatches
-    ? compileSqlQualification(input.filters, input.plan, domains)
-    : null;
-  const advancedRelations = advancedMatches
-    ? advancedMatchesRelations(advancedMatches)
-    : null;
   const entityColumnName =
     input.plan.mode === "entity" && input.plan.membership.kind === "entity"
       ? entityColumn(input.plan.membership.entityKind)
       : null;
   const finalVisitRelation =
-    advancedMatches && input.plan.mode === "entity"
+    input.plan.mode === "entity"
       ? `
 scope_final_visits AS (
   SELECT rv.*
   FROM scope_raw_visits rv
-  INNER JOIN scope_advanced_matching_entities matching_entities
+  INNER JOIN ${qualification.kind === "entity" ? qualification.qualifiedEntityRelation : "scope_universe"} matching_entities
     ON matching_entities.site_pk = rv.site_pk
    AND matching_entities.entity_id = rv.${entityColumnName}
   WHERE TRIM(COALESCE(rv.${entityColumnName}, '')) != ''
 )`
-      : advancedMatches
-        ? `
-scope_final_visits AS (
-  SELECT rv.*
-  FROM scope_raw_visits rv
-  INNER JOIN scope_advanced_matching_visit_ids matching_visits
-    ON matching_visits.site_pk = rv.site_pk
-   AND matching_visits.entity_id = rv.visit_id
-)`
-        : input.plan.mode === "entity"
-          ? `
-scope_final_visits AS (
-  SELECT rv.*
-  FROM scope_raw_visits rv
-  INNER JOIN ${qualification?.kind === "entity" ? qualification.qualifiedEntityRelation : "scope_universe"} matching_entities
-    ON matching_entities.site_pk = rv.site_pk
-   AND matching_entities.entity_id = rv.${entityColumnName}
-  WHERE TRIM(COALESCE(rv.${entityColumnName}, '')) != ''
-)`
-          : `
+      : `
 scope_final_visits AS (
   SELECT rv.*
   FROM scope_raw_visits rv
@@ -1199,40 +1146,21 @@ scope_final_visits AS (
    AND matching_visits.visit_id = rv.visit_id
 )`;
   const finalEventRelation =
-    advancedMatches && input.plan.mode === "entity"
+    input.plan.mode === "entity"
       ? `
 scope_final_events AS (
   SELECT re.*
   FROM scope_raw_events re
-  INNER JOIN scope_advanced_matching_entities matching_entities
+  INNER JOIN ${qualification.kind === "entity" ? qualification.qualifiedEntityRelation : "scope_universe"} matching_entities
     ON matching_entities.site_pk = re.site_pk
    AND matching_entities.entity_id = re.${entityColumnName}
   WHERE TRIM(COALESCE(re.${entityColumnName}, '')) != ''
 )`
-      : advancedMatches
-        ? `
+      : `
 scope_final_events AS (
   SELECT re.*
   FROM scope_raw_events re
-  INNER JOIN scope_advanced_matching_event_ids matching_events
-    ON matching_events.site_pk = re.site_pk
-   AND matching_events.entity_id = re.event_id
-)`
-        : input.plan.mode === "entity"
-          ? `
-scope_final_events AS (
-  SELECT re.*
-  FROM scope_raw_events re
-  INNER JOIN ${qualification?.kind === "entity" ? qualification.qualifiedEntityRelation : "scope_universe"} matching_entities
-    ON matching_entities.site_pk = re.site_pk
-   AND matching_entities.entity_id = re.${entityColumnName}
-  WHERE TRIM(COALESCE(re.${entityColumnName}, '')) != ''
-)`
-          : `
-scope_final_events AS (
-  SELECT re.*
-  FROM scope_raw_events re
-  INNER JOIN ${qualification?.kind === "observation" ? qualification.matchedEventRelation : "scope_matching_events"} matching_events
+  INNER JOIN ${qualification.kind === "observation" ? qualification.matchedEventRelation : "scope_matching_events"} matching_events
     ON matching_events.site_pk = re.site_pk
    AND matching_events.event_id = re.event_id
 )`;
@@ -1253,7 +1181,6 @@ scope_final_events AS (
     ),
     ...(domains?.definitions ?? []),
     ...(qualification?.ctes ?? []),
-    ...(advancedRelations ?? []),
   ];
   if (qualification?.kind === "observation") {
     // An Event qualifies its associated Visit for report output; the Visit
