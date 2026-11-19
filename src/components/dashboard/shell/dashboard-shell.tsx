@@ -1,4 +1,10 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from "react";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
@@ -35,6 +41,7 @@ import { AppShellLayout } from "@/components/app-shell-layout";
 import { AppSidebarBrand } from "@/components/app-sidebar-brand";
 import { TeamSelect } from "@/components/dashboard/admin/team-select";
 import { AnalyticsTabs } from "@/components/dashboard/common/analytics-tabs";
+import { GlobalPerceptionSearch } from "@/components/dashboard/search/global-search";
 import { DashboardHeaderControls } from "@/components/dashboard/shell/dashboard-header-controls";
 import { DashboardQueryProvider } from "@/components/dashboard/shell/dashboard-query-provider";
 import { SidebarFooterMenus } from "@/components/dashboard/shell/sidebar-footer-menus";
@@ -59,6 +66,8 @@ import {
 } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import type { SiteSearchSection } from "@/lib/perception-search/core";
+import { setPerceptionAuthorization } from "@/lib/perception-search/runtime";
 import Link from "@/lib/router";
 import { usePathname, useSearchParams } from "@/lib/router";
 
@@ -88,6 +97,7 @@ interface DashboardShellProps {
   pathname: string;
   messages: AppMessages;
   user: {
+    id: string;
     username: string;
     name: string;
     email: string;
@@ -97,6 +107,7 @@ interface DashboardShellProps {
   teams: TeamData[];
   teamGroups?: SessionTeamGroups;
   activeTeamSlug?: string;
+  authorizedActiveSite?: { id: string; slug: string; name: string };
   sites?: SidebarSite[];
   unreadAttentionCount?: number;
   teamSections?: TeamSectionNavItem[];
@@ -112,6 +123,7 @@ export function DashboardShell({
   teams,
   teamGroups,
   activeTeamSlug,
+  authorizedActiveSite,
   sites = [],
   unreadAttentionCount = 0,
   teamSections,
@@ -268,11 +280,17 @@ export function DashboardShell({
     : "";
   const activeSiteName = hasActiveSite
     ? resolvedSites.find((site) => site.slug === resolvedActiveSiteSlug)
-        ?.name || resolvedActiveSiteSlug
+        ?.name ||
+      (authorizedActiveSite?.slug === resolvedActiveSiteSlug
+        ? authorizedActiveSite.name
+        : "") ||
+      resolvedActiveSiteSlug
     : "";
   const activeSiteId = hasActiveSite
     ? resolvedSites.find((site) => site.slug === resolvedActiveSiteSlug)?.id ||
-      ""
+      (authorizedActiveSite?.slug === resolvedActiveSiteSlug
+        ? authorizedActiveSite.id
+        : "")
     : "";
   const isRealtimeRoute = Boolean(
     hasActiveSite && activeSiteBase && mainSiteSection === "realtime",
@@ -418,6 +436,98 @@ export function DashboardShell({
     [messages.common.visitors, messages.common.views],
   );
   const sidebarContextMode = routeState.mode === "root" ? "root" : "team";
+
+  // The server-authorized dashboard tree is the only authority for local suggestions.
+  // On account, team or site changes the runtime immediately rejects stale scopes.
+  useLayoutEffect(() => {
+    const allowedTeamIds = new Set(teams.map((team) => team.id));
+    const allowedSiteIds = new Set(sidebarSites.map((site) => site.id));
+    if (authorizedActiveSite?.slug === resolvedActiveSiteSlug) {
+      allowedSiteIds.add(authorizedActiveSite.id);
+    }
+    const teamRoutes = new Map(
+      teams.map(
+        (team) => [team.id, "/" + locale + "/app/" + team.slug] as const,
+      ),
+    );
+    const siteRoutes = new Map(
+      activeTeamId && activeSiteId && activeSiteBase
+        ? [
+            [
+              activeSiteId,
+              {
+                teamId: activeTeamId,
+                baseHref: activeSiteBase,
+                sections: new Set(
+                  analyticsSections.map((tab) => tab.key as SiteSearchSection),
+                ),
+              },
+            ] as const,
+          ]
+        : [],
+    );
+    const navigation = [
+      {
+        key: "dashboard",
+        label: messages.appName,
+        target: { kind: "app" as const },
+        scope: { userId: user.id },
+      },
+      ...teams.map((team) => ({
+        key: "team:" + team.id,
+        label: team.name,
+        target: { kind: "team" as const, teamId: team.id },
+        scope: { userId: user.id, teamId: team.id },
+      })),
+      ...(activeTeamId && activeSiteId && activeSiteBase
+        ? analyticsSections.map((tab) => ({
+            key: "site:" + activeSiteId + ":" + tab.key,
+            label: analyticsTabLabel(tab, messages),
+            target: {
+              kind: "site" as const,
+              teamId: activeTeamId,
+              siteId: activeSiteId,
+              section: tab.key as SiteSearchSection,
+            },
+            scope: {
+              userId: user.id,
+              teamId: activeTeamId,
+              siteId: activeSiteId,
+            },
+            subtitle: activeSiteName,
+          }))
+        : []),
+    ];
+    setPerceptionAuthorization(
+      {
+        userId: user.id,
+        locale,
+        allowedTeamIds,
+        allowedSiteIds,
+        teamRoutes,
+        siteRoutes,
+        activeTeamId,
+        activeSiteId,
+        activeSiteBase: activeSiteBase ?? undefined,
+      },
+      navigation,
+    );
+  }, [
+    user.id,
+    locale,
+    teams,
+    sidebarSites,
+    analyticsSections,
+    activeTeamId,
+    activeSiteId,
+    activeSiteBase,
+    activeSiteName,
+    authorizedActiveSite,
+    resolvedActiveSiteSlug,
+    appRootHref,
+    messages,
+  ]);
+
   const teamSelector = liveActiveTeamSlug ? (
     <SidebarGroup className={SIDEBAR_COLLAPSE_SECTION_CLASS}>
       <SidebarGroupContent>
@@ -776,7 +886,8 @@ export function DashboardShell({
                     </BreadcrumbList>
                   </Breadcrumb>
                 </div>
-                <div className="ml-auto min-w-0">
+                <div className="ml-auto flex min-w-0 items-center gap-1">
+                  <GlobalPerceptionSearch locale={locale} />
                   <DashboardHeaderControls
                     locale={locale}
                     messages={messages}

@@ -38,6 +38,10 @@ import type { PagesDashboardMetric } from "@/lib/dashboard-api/contract/types/pa
 import type { FilterDocument } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import {
+  capturePerceptionGuard,
+  observeLoadedDimension,
+} from "@/lib/perception-search/runtime";
 const PAGE_LIST_PAGE_SIZE = 25;
 function moveTrendAfterPage(ids: readonly string[]): string[] {
   const withoutTrend = ids.filter((id) => id !== "trend");
@@ -205,8 +209,9 @@ export function PagesClientPage({
       comparisonQuery?.window.to ?? null,
       comparisonFiltersKey,
     ],
-    queryFn: ({ pageParam, signal }) =>
-      fetchPagesDashboard(siteId, window, filters, {
+    queryFn: async ({ pageParam, signal }) => {
+      const guard = capturePerceptionGuard(siteId);
+      const page = await fetchPagesDashboard(siteId, window, filters, {
         cursor: pageParam,
         limit: PAGE_LIST_PAGE_SIZE,
         search: debouncedQuery,
@@ -216,7 +221,17 @@ export function PagesClientPage({
         comparisonMetric: sort.key,
         comparisonSortBy: "current",
         signal,
-      }),
+      });
+      if (!signal.aborted) {
+        observeLoadedDimension(
+          siteId,
+          "page.path",
+          page.data.items.map((row) => row.pathname),
+          guard,
+        );
+      }
+      return page;
+    },
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) =>
       lastPage.data.pagination.hasMore
