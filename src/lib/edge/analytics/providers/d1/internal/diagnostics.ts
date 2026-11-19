@@ -5,6 +5,7 @@ import type {
   ScopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
 import type { AdvancedFilterExecutionDecision } from "@/lib/edge/analytics/engine/advanced-filter-execution-plan";
+import { currentInvocationLogger } from "@/lib/edge/observability/logger";
 
 import type { QualificationCompatibilityMismatch } from "./qualification-compatibility";
 
@@ -96,12 +97,22 @@ export interface D1ReadDiagnostics {
   ) => void;
 }
 
+/** Event name written to the invocation log for every fallback door use. */
+export const ADVANCED_FALLBACK_LOG_MESSAGE =
+  "analytics.advanced-filter.fallback";
+
 export function recordAdvancedFallbackEntry(
   diagnostics: D1ReadDiagnostics | undefined,
   entry: D1AdvancedFallbackEntry,
 ): void {
-  if (!diagnostics) return;
-  (diagnostics.advancedFallbackEntries ??= []).push(entry);
+  if (diagnostics) (diagnostics.advancedFallbackEntries ??= []).push(entry);
+  // The fallback rate per door and consumer family is read from the existing
+  // invocation log. Only requests that actually fall back write an event, the
+  // logger bounds the event count, and nothing happens outside a request.
+  currentInvocationLogger()?.info(ADVANCED_FALLBACK_LOG_MESSAGE, {
+    entry: entry.entry,
+    operation: entry.operation,
+  });
 }
 
 export function recordAdvancedFilterExecution(
