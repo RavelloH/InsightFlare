@@ -30,10 +30,15 @@ import {
 } from "./core-sources";
 import type { QueryWindow } from "./core-types";
 import { compileFilterDocument } from "./filter-compiler";
+import {
+  boundCte,
+  type BoundCteDefinition,
+  composeBoundCtes,
+  type FilterQualificationSql,
+  type SqlBinding,
+} from "./filter-qualification";
 
-export interface SqlBinding {
-  readonly value: string | number | null;
-}
+export type { SqlBinding } from "./filter-qualification";
 
 export interface ScopedDatasetSql {
   readonly ctes: string;
@@ -59,35 +64,30 @@ export interface ScopedDatasetCompilerInput {
   readonly compatibilityEventSource?: boolean;
 }
 
-interface AdvancedIdentitySql {
-  readonly ctes: string;
-  readonly bindings: Array<string>;
-}
-
 function advancedIdentityRelation(
   name: string,
   identities: AdvancedFilterMatches["entityIds"] | undefined,
-): AdvancedIdentitySql {
+): BoundCteDefinition {
   if (!identities?.length) {
-    return {
-      ctes: `${name} AS (SELECT CAST(NULL AS INTEGER) AS site_pk, CAST(NULL AS TEXT) AS entity_id WHERE 0)`,
-      bindings: [],
-    };
+    return boundCte(
+      name,
+      `${name} AS (SELECT CAST(NULL AS INTEGER) AS site_pk, CAST(NULL AS TEXT) AS entity_id WHERE 0)`,
+    );
   }
   const branches = identities.map(
     () =>
       "SELECT si.site_pk, ? AS entity_id FROM site_identities si WHERE si.site_id = ?",
   );
-  return {
-    ctes: `${name} AS (${branches.join(" UNION ")})`,
-    bindings: identities.flatMap(({ siteId, id }) => [id, siteId]),
-  };
+  return boundCte(
+    name,
+    `${name} AS (${branches.join(" UNION ")})`,
+    identities.flatMap(({ siteId, id }) => [id, siteId]),
+  );
 }
 
-function advancedMatchesRelations(matches: AdvancedFilterMatches): {
-  readonly ctes: string;
-  readonly bindings: Array<string>;
-} {
+function advancedMatchesRelations(
+  matches: AdvancedFilterMatches,
+): readonly BoundCteDefinition[] {
   const entities = advancedIdentityRelation(
     "scope_advanced_matching_entities",
     matches.entityIds,
@@ -100,10 +100,7 @@ function advancedMatchesRelations(matches: AdvancedFilterMatches): {
     "scope_advanced_matching_event_ids",
     matches.eventIds,
   );
-  return {
-    ctes: [entities.ctes, visits.ctes, events.ctes].join(",\n"),
-    bindings: [...entities.bindings, ...visits.bindings, ...events.bindings],
-  };
+  return [entities, visits, events];
 }
 export function scopedDatasetFor(
   siteId: string,
@@ -610,8 +607,7 @@ function compileMembershipCondition(
 }
 interface MembershipSql {
   readonly relation: string;
-  readonly ctes: string[];
-  readonly bindings: Array<string | number>;
+  readonly ctes: readonly BoundCteDefinition[];
 }
 interface ObservationRelationSql {
   readonly cte: string;
@@ -775,15 +771,21 @@ function compileObservationRelation(
   source: string,
   alias: string,
   predicate: ObservationPredicatePlan,
-): ObservationRelationSql {
+  observation: "visit" | "event",
+): BoundCteDefinition {
+  const id = observation === "visit" ? "visit_id" : "event_id";
+  const projection = `${alias}.site_pk, ${alias}.${id}`;
   if (predicate.kind === "all") {
-    return { cte: `${name} AS (SELECT * FROM ${source})`, bindings: [] };
+    return boundCte(
+      name,
+      `${name} AS (SELECT ${projection} FROM ${source} ${alias})`,
+    );
   }
   if (predicate.kind === "none") {
-    return {
-      cte: `${name} AS (SELECT * FROM ${source} WHERE 0)`,
-      bindings: [],
-    };
+    return boundCte(
+      name,
+      `${name} AS (SELECT ${projection} FROM ${source} ${alias} WHERE 0)`,
+    );
   }
   const compiled = compileFilterDocument(
     { version: 1, root: predicate.expression },
@@ -793,10 +795,11 @@ function compileObservationRelation(
       sessionSource: "scope_raw_visits",
     },
   );
-  return {
-    cte: `${name} AS (SELECT ${alias}.* FROM ${source} ${alias} ${compiled.clause})`,
-    bindings: [...compiled.bindings],
-  };
+  return boundCte(
+    name,
+    `${name} AS (SELECT ${projection} FROM ${source} ${alias} ${compiled.clause})`,
+    compiled.bindings,
+  );
 }
 function compileEntityMembership(
   expression: EntitySetExpression | null,
@@ -804,9 +807,22 @@ function compileEntityMembership(
   factKinds: ReadonlySet<ScopedFactKind>,
 ): MembershipSql {
   const column = entityColumn(entityKind);
-  const ctes: string[] = [
-    ...buildScopedFactsCtes(factKinds),
-    `
+  // Existing fact builders emit several adjacent top-level CTEs. Keep
+  // their current SQL unchanged while assigning each definition an identity.
+  const factCtes = buildScopedFactsCtes(factKinds).flatMap((definition) => {
+    const sections = definition.trim().split(/\),\s*(?=scope_[a-z_]+ AS \()/g);
+    return sections.map((section, index) => {
+      const sql = index < sections.length - 1 ? `${section})` : section;
+      const name = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s+AS\s*\(/.exec(sql)?.[1];
+      if (!name) throw new TypeError("Invalid fact CTE definition.");
+      return boundCte(name, sql);
+    });
+  });
+  const ctes: BoundCteDefinition[] = [
+    ...factCtes,
+    boundCte(
+      "scope_universe",
+      `
 scope_universe AS (
   SELECT DISTINCT site_pk, ${column} AS entity_id
   FROM scope_raw_visits
@@ -816,8 +832,8 @@ scope_universe AS (
   FROM scope_raw_events
   WHERE TRIM(COALESCE(${column}, '')) != ''
 )`,
+    ),
   ];
-  const bindings: Array<string | number> = [];
   let index = 0;
 
   const compile = (node: EntitySetExpression | null): string => {
@@ -825,18 +841,26 @@ scope_universe AS (
     if (node.kind === "condition") {
       const compiled = compileMembershipCondition(node.condition, entityKind);
       const name = `scope_membership_${index++}`;
-      ctes.push(`
+      ctes.push(
+        boundCte(
+          name,
+          `
 ${name} AS (
 ${compiled.sql.replaceAll("SESSION_COLUMN", column)}
-)`);
-      bindings.push(...compiled.bindings);
+)`,
+          compiled.bindings,
+        ),
+      );
       return name;
     }
 
     if (node.kind === "not") {
       const child = compile(node.child);
       const name = `scope_membership_${index++}`;
-      ctes.push(`
+      ctes.push(
+        boundCte(
+          name,
+          `
 ${name} AS (
   SELECT u.site_pk, u.entity_id
   FROM scope_universe u
@@ -846,19 +870,29 @@ ${name} AS (
     WHERE child.site_pk = u.site_pk
       AND child.entity_id = u.entity_id
   )
-)`);
+)`,
+        ),
+      );
       return name;
     }
 
     const children = node.children.map(compile);
     const name = `scope_membership_${index++}`;
     if (node.kind === "or") {
-      ctes.push(`
+      ctes.push(
+        boundCte(
+          name,
+          `
 ${name} AS (
   ${children.map((child) => `SELECT site_pk, entity_id FROM ${child}`).join("\n  UNION\n  ")}
-)`);
+)`,
+        ),
+      );
     } else {
-      ctes.push(`
+      ctes.push(
+        boundCte(
+          name,
+          `
 ${name} AS (
       SELECT first_child.site_pk, first_child.entity_id
   FROM ${children[0]} first_child
@@ -869,13 +903,70 @@ ${name} AS (
       return `INNER JOIN ${child} ${alias} ON ${alias}.site_pk = first_child.site_pk AND ${alias}.entity_id = first_child.entity_id`;
     })
     .join("\n  ")}
-)`);
+)`,
+        ),
+      );
     }
     return name;
   };
 
-  return { relation: compile(expression), ctes, bindings };
+  return { relation: compile(expression), ctes };
 }
+
+/**
+ * Compile validated basic Filter SQL into typed, site-scoped qualification
+ * relations. The read sources and authorization belong to the enclosing
+ * Scoped Dataset, not to the expression compiler.
+ *
+ * Advanced AST expressions continue through the historical path until P5;
+ * unsupported expressions must never be treated as a match-all.
+ */
+export function compileSqlQualification(
+  filters: FilterDocument,
+  plan: ScopedFilterPlan,
+): FilterQualificationSql {
+  if (filterDocumentUsesAdvancedExpressions(filters)) {
+    throw new TypeError(
+      "Advanced Filter SQL qualification has not been implemented.",
+    );
+  }
+  if (plan.mode === "entity" && plan.membership.kind === "entity") {
+    const membership = compileEntityMembership(
+      plan.membership.expression,
+      plan.membership.entityKind,
+      factEntityKindsForFilter(filters.root),
+    );
+    return {
+      kind: "entity",
+      entityKind: plan.membership.entityKind,
+      qualifiedEntityRelation: membership.relation,
+      ctes: membership.ctes,
+    };
+  }
+  const observationPlan = planObservationFilter(filters.root);
+  return {
+    kind: "observation",
+    matchedVisitRelation: "scope_matching_visits",
+    matchedEventRelation: "scope_matching_events",
+    ctes: [
+      compileObservationRelation(
+        "scope_matching_visits",
+        "scope_raw_visits",
+        "v",
+        observationPlan.visit,
+        "visit",
+      ),
+      compileObservationRelation(
+        "scope_matching_events",
+        "scope_raw_events",
+        "e",
+        observationPlan.event,
+        "event",
+      ),
+    ],
+  };
+}
+
 /**
  * Compile the one relation bundle consumed by historical D1 providers.
  * Raw sources, entity universes, and membership sets stay inside this
@@ -906,38 +997,11 @@ export function compileScopedDatasetSql(
     throw new Error("advanced_filter_execution_context_required");
   }
 
-  const entityMembership =
-    !advancedMatches &&
-    input.plan.mode === "entity" &&
-    input.plan.membership.kind === "entity"
-      ? compileEntityMembership(
-          input.plan.membership.expression,
-          input.plan.membership.entityKind,
-          factEntityKindsForFilter(input.filters.root),
-        )
-      : null;
-  const observationPlan =
-    !advancedMatches && input.plan.mode === "observation"
-      ? planObservationFilter(input.filters.root)
-      : null;
+  const qualification = !advancedMatches
+    ? compileSqlQualification(input.filters, input.plan)
+    : null;
   const advancedRelations = advancedMatches
     ? advancedMatchesRelations(advancedMatches)
-    : null;
-  const matchingVisits = observationPlan
-    ? compileObservationRelation(
-        "scope_matching_visits",
-        "scope_raw_visits",
-        "v",
-        observationPlan.visit,
-      )
-    : null;
-  const matchingEvents = observationPlan
-    ? compileObservationRelation(
-        "scope_matching_events",
-        "scope_raw_events",
-        "e",
-        observationPlan.event,
-      )
     : null;
   const entityColumnName =
     input.plan.mode === "entity" && input.plan.membership.kind === "entity"
@@ -968,19 +1032,12 @@ scope_final_visits AS (
 scope_final_visits AS (
   SELECT rv.*
   FROM scope_raw_visits rv
-  INNER JOIN ${entityMembership?.relation ?? "scope_universe"} matching_entities
+  INNER JOIN ${qualification?.kind === "entity" ? qualification.qualifiedEntityRelation : "scope_universe"} matching_entities
     ON matching_entities.site_pk = rv.site_pk
    AND matching_entities.entity_id = rv.${entityColumnName}
   WHERE TRIM(COALESCE(rv.${entityColumnName}, '')) != ''
 )`
           : `
-scope_matching_visit_ids AS (
-  SELECT site_pk, visit_id
-  FROM scope_matching_visits
-  UNION
-  SELECT site_pk, visit_id
-  FROM scope_matching_events
-),
 scope_final_visits AS (
   SELECT rv.*
   FROM scope_raw_visits rv
@@ -1013,26 +1070,61 @@ scope_final_events AS (
 scope_final_events AS (
   SELECT re.*
   FROM scope_raw_events re
-  INNER JOIN ${entityMembership?.relation ?? "scope_universe"} matching_entities
+  INNER JOIN ${qualification?.kind === "entity" ? qualification.qualifiedEntityRelation : "scope_universe"} matching_entities
     ON matching_entities.site_pk = re.site_pk
    AND matching_entities.entity_id = re.${entityColumnName}
   WHERE TRIM(COALESCE(re.${entityColumnName}, '')) != ''
 )`
           : `
 scope_final_events AS (
-  SELECT *
-  FROM scope_matching_events
+  SELECT re.*
+  FROM scope_raw_events re
+  INNER JOIN scope_matching_events matching_events
+    ON matching_events.site_pk = re.site_pk
+   AND matching_events.event_id = re.event_id
 )`;
-  const ctes = `
-${visitSource(input.siteIds)},
-${eventSource(input.siteIds, input.compatibilityEventSource)},
-visit_source AS (SELECT * FROM scope_raw_visits),
-${entityMembership ? `${entityMembership.ctes.join(",")},` : ""}
-${advancedRelations ? `${advancedRelations.ctes},` : ""}
-${matchingVisits ? `${matchingVisits.cte},` : ""}
-${matchingEvents ? `${matchingEvents.cte},` : ""}
-${finalVisitRelation},
-${finalEventRelation},
+  const definitions: BoundCteDefinition[] = [
+    boundCte("scope_raw_visits", visitSource(input.siteIds), [
+      ...input.siteIds,
+      input.window.startMs,
+      input.window.endExclusiveMs,
+    ]),
+    boundCte(
+      "scope_raw_events",
+      eventSource(input.siteIds, input.compatibilityEventSource),
+      [...input.siteIds, input.window.startMs, input.window.endExclusiveMs],
+    ),
+    boundCte(
+      "visit_source",
+      "visit_source AS (SELECT * FROM scope_raw_visits)",
+    ),
+    ...(qualification?.ctes ?? []),
+    ...(advancedRelations ?? []),
+  ];
+  if (qualification?.kind === "observation") {
+    // An Event qualifies its associated Visit for report output; the Visit
+    // does not thereby match the Event predicate itself.
+    definitions.push(
+      boundCte(
+        "scope_matching_visit_ids",
+        `
+scope_matching_visit_ids AS (
+  SELECT site_pk, visit_id FROM ${qualification.matchedVisitRelation}
+  UNION
+  SELECT e.site_pk, e.visit_id
+  FROM scope_raw_events e
+  INNER JOIN ${qualification.matchedEventRelation} matched
+    ON matched.site_pk = e.site_pk AND matched.event_id = e.event_id
+)`,
+      ),
+    );
+  }
+  definitions.push(
+    boundCte("scope_final_visits", finalVisitRelation),
+    boundCte("scope_final_events", finalEventRelation),
+    boundCte(
+      "scope_final_sessions",
+      `
 scope_final_sessions AS (
   SELECT DISTINCT site_pk, session_id
   FROM scope_final_visits
@@ -1041,7 +1133,11 @@ scope_final_sessions AS (
   SELECT DISTINCT site_pk, session_id
   FROM scope_final_events
   WHERE TRIM(COALESCE(session_id, '')) != ''
-),
+)`,
+    ),
+    boundCte(
+      "scope_final_visitors",
+      `
 scope_final_visitors AS (
   SELECT DISTINCT site_pk, visitor_id
   FROM scope_final_visits
@@ -1050,22 +1146,13 @@ scope_final_visitors AS (
   SELECT DISTINCT site_pk, visitor_id
   FROM scope_final_events
   WHERE TRIM(COALESCE(visitor_id, '')) != ''
-)`;
-
+)`,
+    ),
+  );
+  const composed = composeBoundCtes(definitions);
   return {
-    ctes,
-    bindings: [
-      ...input.siteIds,
-      input.window.startMs,
-      input.window.endExclusiveMs,
-      ...input.siteIds,
-      input.window.startMs,
-      input.window.endExclusiveMs,
-      ...(entityMembership?.bindings ?? []),
-      ...(advancedRelations?.bindings ?? []),
-      ...(matchingVisits?.bindings ?? []),
-      ...(matchingEvents?.bindings ?? []),
-    ].map((value) => ({ value })),
+    ctes: composed.ctes,
+    bindings: composed.bindings,
     visitRelation: "scope_final_visits",
     eventRelation: "scope_final_events",
     sessionRelation: "scope_final_sessions",
