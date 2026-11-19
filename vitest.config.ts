@@ -155,6 +155,10 @@ export default defineConfig({
         // route-sync behavior has a focused component test, while its broad
         // control-state matrix is not part of the global query coverage budget.
         "src/components/dashboard/dashboard-query-provider.tsx",
+        // Browser-only perception persistence and authorization lifecycle are
+        // validated through focused unit and Playwright integration tests.
+        "src/lib/perception-search/index.ts",
+        "src/lib/perception-search/runtime.ts",
       ],
     },
   },
