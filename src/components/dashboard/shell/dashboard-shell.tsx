@@ -35,6 +35,7 @@ import { AppShellLayout } from "@/components/app-shell-layout";
 import { AppSidebarBrand } from "@/components/app-sidebar-brand";
 import { TeamSelect } from "@/components/dashboard/admin/team-select";
 import { AnalyticsTabs } from "@/components/dashboard/common/analytics-tabs";
+import { GlobalPerceptionSearch } from "@/components/dashboard/search/global-search";
 import { DashboardHeaderControls } from "@/components/dashboard/shell/dashboard-header-controls";
 import { DashboardQueryProvider } from "@/components/dashboard/shell/dashboard-query-provider";
 import { SidebarFooterMenus } from "@/components/dashboard/shell/sidebar-footer-menus";
@@ -59,6 +60,7 @@ import {
 } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import { setPerceptionAuthorization } from "@/lib/perception-search/runtime";
 import Link from "@/lib/router";
 import { usePathname, useSearchParams } from "@/lib/router";
 
@@ -88,6 +90,7 @@ interface DashboardShellProps {
   pathname: string;
   messages: AppMessages;
   user: {
+    id: string;
     username: string;
     name: string;
     email: string;
@@ -418,6 +421,65 @@ export function DashboardShell({
     [messages.common.visitors, messages.common.views],
   );
   const sidebarContextMode = routeState.mode === "root" ? "root" : "team";
+
+  // The server-authorized dashboard tree is the only authority for local suggestions.
+  // On account, team or site changes the runtime immediately rejects stale scopes.
+  useEffect(() => {
+    const allowedTeamIds = new Set(teams.map((team) => team.id));
+    const allowedSiteIds = new Set(sidebarSites.map((site) => site.id));
+    const navigation = [
+      {
+        key: "dashboard",
+        label: messages.appName,
+        href: appRootHref,
+        scope: { userId: user.id },
+      },
+      ...teams.map((team) => ({
+        key: "team:" + team.id,
+        label: team.name,
+        href: "/" + locale + "/app/" + team.slug,
+        scope: { userId: user.id, teamId: team.id },
+      })),
+      ...(activeTeamId && activeSiteId && activeSiteBase
+        ? analyticsSections.map((tab) => ({
+            key: "site:" + activeSiteId + ":" + tab.key,
+            label: analyticsTabLabel(tab, messages),
+            href: tab.href,
+            scope: {
+              userId: user.id,
+              teamId: activeTeamId,
+              siteId: activeSiteId,
+            },
+            subtitle: activeSiteName,
+          }))
+        : []),
+    ];
+    setPerceptionAuthorization(
+      {
+        userId: user.id,
+        locale,
+        allowedTeamIds,
+        allowedSiteIds,
+        activeTeamId,
+        activeSiteId,
+        activeSiteBase: activeSiteBase ?? undefined,
+      },
+      navigation,
+    );
+  }, [
+    user.id,
+    locale,
+    teams,
+    sidebarSites,
+    analyticsSections,
+    activeTeamId,
+    activeSiteId,
+    activeSiteBase,
+    activeSiteName,
+    appRootHref,
+    messages,
+  ]);
+
   const teamSelector = liveActiveTeamSlug ? (
     <SidebarGroup className={SIDEBAR_COLLAPSE_SECTION_CLASS}>
       <SidebarGroupContent>
@@ -776,7 +838,8 @@ export function DashboardShell({
                     </BreadcrumbList>
                   </Breadcrumb>
                 </div>
-                <div className="ml-auto min-w-0">
+                <div className="ml-auto flex min-w-0 items-center gap-1">
+                  <GlobalPerceptionSearch locale={locale} />
                   <DashboardHeaderControls
                     locale={locale}
                     messages={messages}

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import type { Locale } from "@/lib/i18n/config";
 import { navigateWithTransition } from "@/lib/page-transition";
+import { clearPerceptionSession } from "@/lib/perception-search/runtime";
 import { useRouter } from "@/lib/router";
 
 interface LogoutActionButtonProps {
@@ -36,6 +37,7 @@ export function LogoutActionButton({
         credentials: "include",
       });
       if (!response.ok) throw new Error(failedLabel);
+      clearPerceptionSession();
       toast.success(successLabel);
       navigateWithTransition(router, `/${locale}/login`);
     } catch (error) {

@@ -51,6 +51,10 @@ import {
 } from "@/lib/filter-contract/index";
 import { type FilterDocument } from "@/lib/filter-contract/index";
 import { formatI18nTemplate } from "@/lib/i18n/template";
+import {
+  capturePerceptionGuard,
+  observeLoadedDimension,
+} from "@/lib/perception-search/runtime";
 import { usePathname, useRouter } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -730,6 +734,7 @@ export function OverviewPagesSection({
     TabbedDataTableLoader<PageCardTab, PageCardRow, PageCardSortKey>
   >(
     async ({ tab, cursor, limit, search, sort, signal }) => {
+      const observationGuard = capturePerceptionGuard(siteId);
       const requestMetric = comparisonQuery
         ? pageComparisonMetric
         : sort.key === "visitors"
@@ -800,15 +805,24 @@ export function OverviewPagesSection({
         pageCardTabMeta[tab].label === messages.pages.hashTab
           ? messages.pages.noHash
           : undefined;
-      return {
-        items: buildPageCardExportRows(
-          tab,
-          page.items,
-          messages,
-          fallbackLabel,
-        ),
-        pagination: page.pagination,
-      };
+      const items = buildPageCardExportRows(
+        tab,
+        page.items,
+        messages,
+        fallbackLabel,
+      );
+      if (
+        !cardDataOverride &&
+        (tab === "path" || tab === "entry" || tab === "exit")
+      ) {
+        observeLoadedDimension(
+          siteId,
+          "page.path",
+          items.map((row) => row.filterValue ?? row.rawLabel ?? row.label),
+          observationGuard,
+        );
+      }
+      return { items, pagination: page.pagination };
     },
     [
       cardDataOverride,
@@ -827,6 +841,7 @@ export function OverviewPagesSection({
     TabbedDataTableLoader<SourceCardTab, SourceCardRow, PageCardSortKey>
   >(
     async ({ tab, cursor, limit, search, sort, signal }) => {
+      const observationGuard = capturePerceptionGuard(siteId);
       const requestMetric = comparisonQuery
         ? sourceComparisonMetric
         : sort.key === "visitors"
@@ -893,15 +908,21 @@ export function OverviewPagesSection({
               signal,
             });
       const page = overviewTabData(rawPage);
-      return {
-        items: buildSourceCardExportRows(
-          tab,
-          page.items,
-          sourceCardDirectLabel,
-          messages.overview.channelLabels,
-        ),
-        pagination: page.pagination,
-      };
+      const items = buildSourceCardExportRows(
+        tab,
+        page.items,
+        sourceCardDirectLabel,
+        messages.overview.channelLabels,
+      );
+      if (!cardDataOverride && tab === "domain") {
+        observeLoadedDimension(
+          siteId,
+          "referrer.domain",
+          items.map((row) => row.filterValue),
+          observationGuard,
+        );
+      }
+      return { items, pagination: page.pagination };
     },
     [
       cardDataOverride,
@@ -920,6 +941,7 @@ export function OverviewPagesSection({
     TabbedDataTableLoader<ClientDimensionCardTab, PageCardRow, PageCardSortKey>
   >(
     async ({ tab, cursor, limit, search, sort, signal }) => {
+      const observationGuard = capturePerceptionGuard(siteId);
       const requestMetric = comparisonQuery
         ? clientComparisonMetric
         : sort.key === "visitors"
@@ -986,10 +1008,16 @@ export function OverviewPagesSection({
               signal,
             });
       const page = overviewTabData(rawPage);
-      return {
-        items: buildClientDimensionRows(tab, page.items, locale, messages),
-        pagination: page.pagination,
-      };
+      const items = buildClientDimensionRows(tab, page.items, locale, messages);
+      if (!cardDataOverride && tab === "browser") {
+        observeLoadedDimension(
+          siteId,
+          "client.browser",
+          items.map((row) => row.filterValue ?? row.rawLabel ?? row.label),
+          observationGuard,
+        );
+      }
+      return { items, pagination: page.pagination };
     },
     [
       cardDataOverride,
