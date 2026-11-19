@@ -131,13 +131,16 @@ export class IngestDurableObject extends DurableObject {
     const logger = createInvocationLogger({
       source: "do",
       trigger: "request",
+      waitUntil: (work) => this.doState.waitUntil(work),
     });
     logger.info("do.request.started");
 
     try {
       return await runWithInvocationLogger(logger, async () => {
         await logger.measure("do.schema_ready", () => this.schemaReady);
-        const response = await this.handleRequest(request, url, logger);
+        const response = await logger.measure("do.fetch.handler", () =>
+          this.handleRequest(request, url, logger),
+        );
         logger.setRequest({
           route: url.pathname,
           method: request.method,
@@ -211,7 +214,11 @@ export class IngestDurableObject extends DurableObject {
     retryCount?: number;
     isRetry?: boolean;
   }): Promise<void> {
-    const logger = createInvocationLogger({ source: "do", trigger: "alarm" });
+    const logger = createInvocationLogger({
+      source: "do",
+      trigger: "alarm",
+      waitUntil: (work) => this.doState.waitUntil(work),
+    });
     logger.info("do.alarm.started");
     try {
       await runWithInvocationLogger(logger, async () => {
@@ -446,7 +453,11 @@ export class IngestDurableObject extends DurableObject {
     connectedAt: number,
     data?: { code: number },
   ): void {
-    const logger = createInvocationLogger({ source: "do", trigger: "request" });
+    const logger = createInvocationLogger({
+      source: "do",
+      trigger: "websocket",
+      waitUntil: (work) => this.doState.waitUntil(work),
+    });
     logger.setRequest({
       route: "/ws",
       method: "WEBSOCKET",

@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import { type InvocationSnapshot,toInvocationSnapshot } from "./snapshot";
+import { type InvocationSnapshot, toInvocationSnapshot } from "./snapshot";
 
 export const OBSERVABILITY_LOG_VERSION = 1 as const;
 // One record is emitted for each invocation. Keep this comfortably below the
@@ -182,7 +182,14 @@ export interface InvocationLogRecord {
   logsTruncated?: true;
 }
 
+/** A per-invocation observer. It receives only the immutable safe projection. */
+export type InvocationCompletionConsumer = (
+  snapshot: InvocationSnapshot,
+) => void | Promise<void>;
+
 export interface CreateInvocationLoggerOptions {
+  /** Explicit, best-effort lifetime extension, never a durable queue. */
+  waitUntil?: (work: Promise<unknown>) => void;
   source: InvocationSource;
   trigger: InvocationTrigger;
   traceId?: string;
@@ -257,13 +264,23 @@ export interface InvocationLogger {
   recordDoSqlOperation(metrics: InvocationDoSqlMetrics): void;
   /** Read-only safe projection: no trace, log data, raw paths or identity. */
   snapshot(): InvocationSnapshot;
+  /** Register only before emission. Does not observe other invocations. */
+  onComplete(consumer: InvocationCompletionConsumer): () => void;
   build(): InvocationLogRecord;
   emit(): InvocationLogRecord;
   emitWhenComplete(): Promise<InvocationLogRecord>;
 }
 
-const invocationLoggerContext = new AsyncLocalStorage<InvocationLogger>();
-const d1OperationContext = new AsyncLocalStorage<string>();
+const invocationLoggerContext = new AsyncLocalStorage<
+  InvocationLogger | undefined
+>();
+const d1OperationContext = new AsyncLocalStorage<string | undefined>();
+
+function outsideInvocationContext<T>(action: () => T): T {
+  return invocationLoggerContext.run(undefined, () =>
+    d1OperationContext.run(undefined, action),
+  );
+}
 
 export function runWithInvocationLogger<T>(
   logger: InvocationLogger,
@@ -320,6 +337,7 @@ export function createInvocationLogger(
   let doSqlRowsWrittenAvailable = 0;
   let logsTruncated = false;
   let emitted: InvocationLogRecord | undefined;
+  const consumers = new Set<InvocationCompletionConsumer>();
   const background = new Set<Promise<unknown>>();
 
   function sanitizeData(
@@ -353,6 +371,7 @@ export function createInvocationLogger(
     message: string,
     data?: InvocationLogData,
   ): void {
+    if (emitted) return;
     if (events.length >= maxEvents) {
       logsTruncated = true;
       return;
@@ -394,11 +413,12 @@ export function createInvocationLogger(
     operation: string,
     data?: InvocationLogData,
   ): InvocationSpan {
+    if (emitted) return { end() {}, fail() {} };
     const startedAtSpan = now();
     let completed = false;
     record("info", `${operation}.started`, data);
     const finish = (failed: boolean, result?: InvocationLogData) => {
-      if (completed) return;
+      if (completed || emitted) return;
       completed = true;
       const durationMs = toTimeMs(now() - startedAtSpan);
       addOperation(operation, durationMs, failed);
@@ -458,6 +478,7 @@ export function createInvocationLogger(
       }
     },
     track(promise) {
+      if (emitted) return promise;
       background.add(promise);
       void promise.then(
         () => background.delete(promise),
@@ -466,15 +487,19 @@ export function createInvocationLogger(
       return promise;
     },
     setTraceId(nextTraceId) {
+      if (emitted) return;
       traceId = nextTraceId;
     },
     setRequest(nextRequest) {
+      if (emitted) return;
       request = { ...nextRequest };
     },
     setPerformance(nextPerformance) {
+      if (emitted) return;
       performance = { ...performance, ...nextPerformance };
     },
     increment(counter, amount = 1) {
+      if (emitted) return;
       const incrementBy = toCounterValue(amount);
       if (incrementBy === null) return;
       performance = {
@@ -483,6 +508,7 @@ export function createInvocationLogger(
       };
     },
     recordD1Operation(operation, metrics) {
+      if (emitted) return;
       const prior = performance.operations?.[operation] ?? {
         count: 0,
         durationMs: 0,
@@ -509,6 +535,7 @@ export function createInvocationLogger(
       };
     },
     recordDoSqlOperation(metrics) {
+      if (emitted) return;
       doSqlCompleted += 1;
       const rowsRead = toCounterValue(metrics.rowsRead ?? 0);
       const rowsWritten = toCounterValue(metrics.rowsWritten ?? 0);
@@ -542,13 +569,37 @@ export function createInvocationLogger(
       };
     },
     snapshot() {
-      return toInvocationSnapshot(build());
+      return toInvocationSnapshot(emitted ?? build());
+    },
+    onComplete(consumer) {
+      if (emitted) return () => {};
+      consumers.add(consumer);
+      return () => consumers.delete(consumer);
     },
     build,
     emit() {
       if (emitted) return emitted;
       emitted = build();
       consoleFor(emitted)(emitted);
+      if (consumers.size > 0) {
+        const snapshot = toInvocationSnapshot(emitted);
+        const listeners = [...consumers];
+        consumers.clear();
+        // A listener never runs inside the original logging scope. Each
+        // asynchronous failure is swallowed independently of other listeners.
+        const completion = Promise.allSettled(
+          listeners.map((consumer) =>
+            Promise.resolve().then(() =>
+              outsideInvocationContext(() => consumer(snapshot)),
+            ),
+          ),
+        ).then(() => {});
+        try {
+          options.waitUntil?.(completion);
+        } catch {
+          // A rejected lifetime extension cannot change a business result.
+        }
+      }
       return emitted;
     },
     async emitWhenComplete() {
