@@ -1,4 +1,10 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from "react";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
@@ -100,6 +106,7 @@ interface DashboardShellProps {
   teams: TeamData[];
   teamGroups?: SessionTeamGroups;
   activeTeamSlug?: string;
+  authorizedActiveSite?: { id: string; slug: string; name: string };
   sites?: SidebarSite[];
   unreadAttentionCount?: number;
   teamSections?: TeamSectionNavItem[];
@@ -115,6 +122,7 @@ export function DashboardShell({
   teams,
   teamGroups,
   activeTeamSlug,
+  authorizedActiveSite,
   sites = [],
   unreadAttentionCount = 0,
   teamSections,
@@ -271,11 +279,17 @@ export function DashboardShell({
     : "";
   const activeSiteName = hasActiveSite
     ? resolvedSites.find((site) => site.slug === resolvedActiveSiteSlug)
-        ?.name || resolvedActiveSiteSlug
+        ?.name ||
+      (authorizedActiveSite?.slug === resolvedActiveSiteSlug
+        ? authorizedActiveSite.name
+        : "") ||
+      resolvedActiveSiteSlug
     : "";
   const activeSiteId = hasActiveSite
     ? resolvedSites.find((site) => site.slug === resolvedActiveSiteSlug)?.id ||
-      ""
+      (authorizedActiveSite?.slug === resolvedActiveSiteSlug
+        ? authorizedActiveSite.id
+        : "")
     : "";
   const isRealtimeRoute = Boolean(
     hasActiveSite && activeSiteBase && mainSiteSection === "realtime",
@@ -424,9 +438,12 @@ export function DashboardShell({
 
   // The server-authorized dashboard tree is the only authority for local suggestions.
   // On account, team or site changes the runtime immediately rejects stale scopes.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const allowedTeamIds = new Set(teams.map((team) => team.id));
     const allowedSiteIds = new Set(sidebarSites.map((site) => site.id));
+    if (authorizedActiveSite?.slug === resolvedActiveSiteSlug) {
+      allowedSiteIds.add(authorizedActiveSite.id);
+    }
     const navigation = [
       {
         key: "dashboard",
@@ -476,6 +493,8 @@ export function DashboardShell({
     activeSiteId,
     activeSiteBase,
     activeSiteName,
+    authorizedActiveSite,
+    resolvedActiveSiteSlug,
     appRootHref,
     messages,
   ]);

@@ -52,6 +52,13 @@ function ensureChannel() {
     event: MessageEvent<{ type?: string; userId?: string }>,
   ) => {
     if (event.data?.type === "clear" && event.data.userId) {
+      if (current?.userId === event.data.userId) {
+        current = null;
+        authorizationEpoch++;
+        entries = [];
+        perceptionIndex.resetMemory();
+        notify();
+      }
       void perceptionIndex.clearUser(event.data.userId);
     }
     if (
@@ -221,7 +228,7 @@ function observedProvider(): SearchProvider {
                   href: current?.activeSiteBase
                     ? current.activeSiteBase +
                       (item.field === "page.path"
-                        ? "/pages"
+                        ? "/pages?pagePath=" + encodeURIComponent(item.value)
                         : item.field === "referrer.domain"
                           ? "/referrers"
                           : item.field === "event.name"
@@ -261,15 +268,15 @@ export function revokePerceptionSite(siteId: string): void {
   }
   channel?.postMessage({ type: "scope-clear", userId: current?.userId });
 }
-export function clearPerceptionSession(): void {
+export async function clearPerceptionSession(): Promise<void> {
   const userId = current?.userId;
   current = null;
   authorizationEpoch++;
   entries = [];
   perceptionIndex.resetMemory();
   if (userId) {
-    void perceptionIndex.clearUser(userId);
     channel?.postMessage({ type: "clear", userId });
+    await perceptionIndex.clearUser(userId);
   }
   notify();
 }

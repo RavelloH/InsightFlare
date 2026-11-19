@@ -37,7 +37,7 @@ export function LogoutActionButton({
         credentials: "include",
       });
       if (!response.ok) throw new Error(failedLabel);
-      clearPerceptionSession();
+      await clearPerceptionSession();
       toast.success(successLabel);
       navigateWithTransition(router, `/${locale}/login`);
     } catch (error) {

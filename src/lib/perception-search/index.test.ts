@@ -131,4 +131,40 @@ describe("scope, lifecycle and fallback", () => {
     index.observe({ userId: "user-1" }, candidates);
     expect(index.search(first, "")).toEqual([]);
   });
+  it("measures bounded local prefix latency and serialized storage footprint", () => {
+    const index = new PerceptionIndex();
+    for (let start = 0; start < 500; start += 100) {
+      index.observe(
+        first,
+        Array.from({ length: 100 }, (_, i) => ({
+          field: "event.name" as const,
+          value: "Example Event " + (start + i),
+        })),
+      );
+    }
+    const startedAt = performance.now();
+    for (let n = 0; n < 250; n++) {
+      expect(
+        index.search(first, "eve", "event.name", 10).length,
+      ).toBeGreaterThan(0);
+    }
+    const elapsedMs = performance.now() - startedAt;
+    const avgMs = elapsedMs / 250;
+    const serializedBytes = new TextEncoder().encode(
+      JSON.stringify([
+        ...(
+          index as unknown as { records: Map<string, unknown> }
+        ).records.values(),
+      ]),
+    ).length;
+    console.info(
+      "Perception Index benchmark: 500 values, 250 prefix queries; average " +
+        avgMs.toFixed(3) +
+        " ms/query; serialized records " +
+        serializedBytes +
+        " bytes",
+    );
+    expect(avgMs).toBeLessThan(25);
+    expect(serializedBytes).toBeLessThan(256 * 1024);
+  });
 });

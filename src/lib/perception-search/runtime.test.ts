@@ -109,7 +109,31 @@ describe("perception runtime authority and request guards", () => {
     };
     expect(localPerceptionSearch(req)).toEqual([]);
     observeLoadedDimension("site-a", "page.path", ["/public"], guard);
-    expect(localPerceptionSearch({ ...req, query: "public" })).toHaveLength(1);
+    const found = localPerceptionSearch({ ...req, query: "public" });
+    expect(found).toHaveLength(1);
+    expect(found[0].action).toEqual({
+      type: "navigate",
+      href: "/zh/app/team-a/site-a/pages?pagePath=%2Fpublic",
+    });
+    const value = localPerceptionSearch({
+      ...req,
+      mode: "value",
+      field: "page.path",
+      query: "pub",
+    });
+    expect(value[0]?.action).toEqual({
+      type: "apply-filter",
+      field: "page.path",
+      value: "/public",
+    });
+    expect(
+      localPerceptionSearch({
+        ...req,
+        mode: "value",
+        field: "event.name",
+        query: "pub",
+      }),
+    ).toEqual([]);
     clearPerceptionSession();
     expect(localPerceptionSearch({ ...req, query: "public" })).toEqual([]);
   });

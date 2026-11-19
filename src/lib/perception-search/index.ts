@@ -122,7 +122,11 @@ async function openDatabase(): Promise<IDBDatabase | null> {
         db.createObjectStore("values", { keyPath: "id" });
       if (!db.objectStoreNames.contains("meta")) db.createObjectStore("meta");
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      db.onversionchange = () => db.close();
+      resolve(db);
+    };
     req.onerror = () => resolve(null);
     req.onblocked = () => resolve(null);
   });

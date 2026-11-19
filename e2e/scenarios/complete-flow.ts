@@ -7,6 +7,7 @@ import { registerBootstrapScenarios } from "./bootstrap";
 import { registerLayerSystemScenarios } from "./layer-system";
 import { registerNonFunnelCoverageScenarios } from "./non-funnel-coverage";
 import { registerNotificationScenarios } from "./notifications";
+import { registerPerceptionScenarios } from "./perception-search";
 import { registerPlatformIntegrationScenarios } from "./platform-integrations";
 import { registerSystemLifecycleScenarios } from "./system-lifecycle";
 import { registerTeamSiteManagementScenarios } from "./team-site-management";
@@ -22,6 +23,7 @@ test.describe.serial("InsightFlare E2E", () => {
   registerAccountTopologyScenarios(context);
   registerTeamSiteManagementScenarios(context);
   registerTrackingRealtimeScenarios(context);
+  registerPerceptionScenarios(context);
   registerAnalyticsArchiveScenarios(context);
   registerNotificationScenarios(context);
   registerPlatformIntegrationScenarios(context);
