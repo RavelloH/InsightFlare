@@ -1,6 +1,16 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import { type InvocationSnapshot, toInvocationSnapshot } from "./snapshot";
+import {
+  appendSqlSemanticObservation,
+  normalizeSqlSemanticObservation,
+  type SqlSemanticObservation,
+  type SqlSemanticObservationInput,
+} from "./semantic";
+import {
+  type InvocationSnapshot,
+  toInvocationSnapshot,
+  withSqlSemanticObservations,
+} from "./snapshot";
 
 export const OBSERVABILITY_LOG_VERSION = 1 as const;
 // One record is emitted for each invocation. Keep this comfortably below the
@@ -187,6 +197,11 @@ export type InvocationCompletionConsumer = (
   snapshot: InvocationSnapshot,
 ) => void | Promise<void>;
 
+export interface InvocationCompletionOptions {
+  /** Only explicitly authorized consumers receive query candidate site metadata. */
+  readonly includeSqlSemantics?: boolean;
+}
+
 export interface CreateInvocationLoggerOptions {
   /** Explicit, best-effort lifetime extension, never a durable queue. */
   waitUntil?: (work: Promise<unknown>) => void;
@@ -263,9 +278,14 @@ export interface InvocationLogger {
   ): void;
   recordDoSqlOperation(metrics: InvocationDoSqlMetrics): void;
   /** Read-only safe projection: no trace, log data, raw paths or identity. */
-  snapshot(): InvocationSnapshot;
+  snapshot(options?: InvocationCompletionOptions): InvocationSnapshot;
+  /** Trusted query caller: report only a verified executed indexable predicate. */
+  recordSqlSemanticObservation(input: SqlSemanticObservationInput): boolean;
   /** Register only before emission. Does not observe other invocations. */
-  onComplete(consumer: InvocationCompletionConsumer): () => void;
+  onComplete(
+    consumer: InvocationCompletionConsumer,
+    options?: InvocationCompletionOptions,
+  ): () => void;
   build(): InvocationLogRecord;
   emit(): InvocationLogRecord;
   emitWhenComplete(): Promise<InvocationLogRecord>;
@@ -337,7 +357,11 @@ export function createInvocationLogger(
   let doSqlRowsWrittenAvailable = 0;
   let logsTruncated = false;
   let emitted: InvocationLogRecord | undefined;
-  const consumers = new Set<InvocationCompletionConsumer>();
+  const consumers = new Set<{
+    callback: InvocationCompletionConsumer;
+    includeSqlSemantics: boolean;
+  }>();
+  const sqlObservations = new Map<string, SqlSemanticObservation>();
   const background = new Set<Promise<unknown>>();
 
   function sanitizeData(
@@ -568,13 +592,45 @@ export function createInvocationLogger(
         ),
       };
     },
-    snapshot() {
-      return toInvocationSnapshot(emitted ?? build());
+    snapshot(completionOptions) {
+      const base = toInvocationSnapshot(emitted ?? build());
+      return completionOptions?.includeSqlSemantics
+        ? withSqlSemanticObservations(base, [...sqlObservations.values()])
+        : base;
     },
-    onComplete(consumer) {
+    recordSqlSemanticObservation(input) {
+      if (
+        emitted ||
+        performance.cache === "HIT" ||
+        !input ||
+        typeof input !== "object"
+      )
+        return false;
+      // Binding metadata proves a statement settled, but it cannot prove which
+      // predicate was used. Only trusted SQL callers may supply this hint.
+      if (!performance.d1FinishedStatements) return false;
+      if (input.execution === "failed" && !performance.failedStatements)
+        return false;
+      if (
+        input.execution === "succeeded" &&
+        (performance.d1Statements ?? 0) <= (performance.failedStatements ?? 0)
+      )
+        return false;
+      const normalized = normalizeSqlSemanticObservation(input);
+      return normalized
+        ? appendSqlSemanticObservation(sqlObservations, normalized)
+        : false;
+    },
+    onComplete(consumer, completionOptions) {
       if (emitted) return () => {};
-      consumers.add(consumer);
-      return () => consumers.delete(consumer);
+      const registration = {
+        callback: consumer,
+        includeSqlSemantics: completionOptions?.includeSqlSemantics === true,
+      };
+      consumers.add(registration);
+      return () => {
+        consumers.delete(registration);
+      };
     },
     build,
     emit() {
@@ -584,13 +640,22 @@ export function createInvocationLogger(
       if (consumers.size > 0) {
         const snapshot = toInvocationSnapshot(emitted);
         const listeners = [...consumers];
+        const semanticSnapshot = listeners.some(
+          (listener) => listener.includeSqlSemantics,
+        )
+          ? withSqlSemanticObservations(snapshot, [...sqlObservations.values()])
+          : undefined;
         consumers.clear();
         // A listener never runs inside the original logging scope. Each
         // asynchronous failure is swallowed independently of other listeners.
         const completion = Promise.allSettled(
-          listeners.map((consumer) =>
+          listeners.map((listener) =>
             Promise.resolve().then(() =>
-              outsideInvocationContext(() => consumer(snapshot)),
+              outsideInvocationContext(() =>
+                listener.callback(
+                  listener.includeSqlSemantics ? semanticSnapshot! : snapshot,
+                ),
+              ),
             ),
           ),
         ).then(() => {});

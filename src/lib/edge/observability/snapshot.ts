@@ -7,6 +7,7 @@ import type {
   InvocationSource,
   InvocationTrigger,
 } from "./logger";
+import type { SqlSemanticObservation } from "./semantic";
 
 /**
  * A deliberately smaller, allowlisted projection of InvocationLogRecord.
@@ -67,6 +68,8 @@ export interface InvocationSnapshot {
   readonly logsTruncated: boolean;
   readonly sql: InvocationSqlCost;
   readonly operations: readonly InvocationSafeOperation[];
+  /** Privileged opt-in only; never part of the default safe snapshot. */
+  readonly sqlObservations?: readonly SqlSemanticObservation[];
 }
 
 const SAFE_METHODS = new Set([
@@ -150,6 +153,16 @@ function observedHandlerMs(record: InvocationLogRecord): number | undefined {
     }
   }
   return undefined;
+}
+
+export function withSqlSemanticObservations(
+  snapshot: InvocationSnapshot,
+  observations: readonly SqlSemanticObservation[],
+): InvocationSnapshot {
+  return Object.freeze({
+    ...snapshot,
+    sqlObservations: Object.freeze([...observations]),
+  });
 }
 
 export function toInvocationSnapshot(
