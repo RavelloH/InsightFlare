@@ -1,5 +1,18 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
+import {
+  appendSqlSemanticObservation,
+  normalizeSqlSemanticObservation,
+  type SqlSemanticFieldPolicy,
+  type SqlSemanticObservation,
+  type SqlSemanticObservationInput,
+} from "./semantic";
+import {
+  type InvocationSnapshot,
+  toInvocationSnapshot,
+  withSqlSemanticObservations,
+} from "./snapshot";
+
 export const OBSERVABILITY_LOG_VERSION = 1 as const;
 // One record is emitted for each invocation. Keep this comfortably below the
 // Workers log-size limit while preserving the start/end pair for real work.
@@ -8,7 +21,7 @@ const MAX_LOG_VALUE_LENGTH = 160;
 const MAX_ERROR_LOG_VALUE_LENGTH = 4_096;
 
 export type InvocationSource = "worker" | "do";
-export type InvocationTrigger = "request" | "alarm";
+export type InvocationTrigger = "request" | "alarm" | "scheduled" | "websocket";
 export type InvocationLogLevel = "info" | "warn" | "error";
 export type InvocationOutcome = "ok" | "error" | "canceled";
 export type InvocationCacheState = "HIT" | "MISS" | "BYPASS";
@@ -40,6 +53,14 @@ export interface InvocationPerformance {
   d1SqlDurationMs?: number;
   d1TotalAttempts?: number;
   d1Retries?: number;
+  /** Count of per-statement D1 results actually returned, never inferred. */
+  d1FinishedStatements?: number;
+  /** Statements with no result observed (rejection, missing batch slot, etc.). */
+  d1UnobservedStatements?: number;
+  /** Number of D1 API calls whose promise settled, not a statement count. */
+  d1SettledOperations?: number;
+  d1SqlDurationCoverage?: InvocationD1RowsCoverage;
+  d1AttemptsCoverage?: InvocationD1RowsCoverage;
   doSqlStatements?: number;
   doSqlRowsRead?: number;
   doSqlRowsReadAvailable?: boolean;
@@ -72,9 +93,9 @@ export type InvocationPerformanceCounter =
   | "failedStatements"
   | "flushedVisits"
   | "flushedCustomEvents"
-  | "d1SqlDurationMs"
   | "d1TotalAttempts"
   | "d1Retries"
+  | "d1SettledOperations"
   | "doSqlStatements"
   | "doSqlRowsRead"
   | "doSqlRowsWritten"
@@ -176,7 +197,19 @@ export interface InvocationLogRecord {
   logsTruncated?: true;
 }
 
+/** A per-invocation observer. It receives only the immutable safe projection. */
+export type InvocationCompletionConsumer = (
+  snapshot: InvocationSnapshot,
+) => void | Promise<void>;
+
+export interface InvocationCompletionOptions {
+  /** Only explicitly authorized consumers receive query candidate site metadata. */
+  readonly includeSqlSemantics?: boolean;
+}
+
 export interface CreateInvocationLoggerOptions {
+  /** Explicit, best-effort lifetime extension, never a durable queue. */
+  waitUntil?: (work: Promise<unknown>) => void;
   source: InvocationSource;
   trigger: InvocationTrigger;
   traceId?: string;
@@ -249,13 +282,33 @@ export interface InvocationLogger {
     metrics: InvocationD1OperationMetrics,
   ): void;
   recordDoSqlOperation(metrics: InvocationDoSqlMetrics): void;
+  /** Read-only safe projection: no trace, log data, raw paths or identity. */
+  snapshot(options?: InvocationCompletionOptions): InvocationSnapshot;
+  /** Trusted query caller: report only a verified executed indexable predicate. */
+  recordSqlSemanticObservation(
+    input: SqlSemanticObservationInput,
+    policy: SqlSemanticFieldPolicy,
+  ): boolean;
+  /** Register only before emission. Does not observe other invocations. */
+  onComplete(
+    consumer: InvocationCompletionConsumer,
+    options?: InvocationCompletionOptions,
+  ): () => void;
   build(): InvocationLogRecord;
   emit(): InvocationLogRecord;
   emitWhenComplete(): Promise<InvocationLogRecord>;
 }
 
-const invocationLoggerContext = new AsyncLocalStorage<InvocationLogger>();
-const d1OperationContext = new AsyncLocalStorage<string>();
+const invocationLoggerContext = new AsyncLocalStorage<
+  InvocationLogger | undefined
+>();
+const d1OperationContext = new AsyncLocalStorage<string | undefined>();
+
+function outsideInvocationContext<T>(action: () => T): T {
+  return invocationLoggerContext.run(undefined, () =>
+    d1OperationContext.run(undefined, action),
+  );
+}
 
 export function runWithInvocationLogger<T>(
   logger: InvocationLogger,
@@ -312,6 +365,11 @@ export function createInvocationLogger(
   let doSqlRowsWrittenAvailable = 0;
   let logsTruncated = false;
   let emitted: InvocationLogRecord | undefined;
+  const consumers = new Set<{
+    callback: InvocationCompletionConsumer;
+    includeSqlSemantics: boolean;
+  }>();
+  const sqlObservations = new Map<string, SqlSemanticObservation>();
   const background = new Set<Promise<unknown>>();
 
   function sanitizeData(
@@ -345,6 +403,7 @@ export function createInvocationLogger(
     message: string,
     data?: InvocationLogData,
   ): void {
+    if (emitted) return;
     if (events.length >= maxEvents) {
       logsTruncated = true;
       return;
@@ -386,11 +445,12 @@ export function createInvocationLogger(
     operation: string,
     data?: InvocationLogData,
   ): InvocationSpan {
+    if (emitted) return { end() {}, fail() {} };
     const startedAtSpan = now();
     let completed = false;
     record("info", `${operation}.started`, data);
     const finish = (failed: boolean, result?: InvocationLogData) => {
-      if (completed) return;
+      if (completed || emitted) return;
       completed = true;
       const durationMs = toTimeMs(now() - startedAtSpan);
       addOperation(operation, durationMs, failed);
@@ -450,6 +510,7 @@ export function createInvocationLogger(
       }
     },
     track(promise) {
+      if (emitted) return promise;
       background.add(promise);
       void promise.then(
         () => background.delete(promise),
@@ -458,15 +519,19 @@ export function createInvocationLogger(
       return promise;
     },
     setTraceId(nextTraceId) {
+      if (emitted) return;
       traceId = nextTraceId;
     },
     setRequest(nextRequest) {
+      if (emitted) return;
       request = { ...nextRequest };
     },
     setPerformance(nextPerformance) {
+      if (emitted) return;
       performance = { ...performance, ...nextPerformance };
     },
     increment(counter, amount = 1) {
+      if (emitted) return;
       const incrementBy = toCounterValue(amount);
       if (incrementBy === null) return;
       performance = {
@@ -475,6 +540,7 @@ export function createInvocationLogger(
       };
     },
     recordD1Operation(operation, metrics) {
+      if (emitted) return;
       const prior = performance.operations?.[operation] ?? {
         count: 0,
         durationMs: 0,
@@ -501,6 +567,7 @@ export function createInvocationLogger(
       };
     },
     recordDoSqlOperation(metrics) {
+      if (emitted) return;
       doSqlCompleted += 1;
       const rowsRead = toCounterValue(metrics.rowsRead ?? 0);
       const rowsWritten = toCounterValue(metrics.rowsWritten ?? 0);
@@ -533,11 +600,86 @@ export function createInvocationLogger(
         ),
       };
     },
+    snapshot(completionOptions) {
+      const base = toInvocationSnapshot(emitted ?? build());
+      return completionOptions?.includeSqlSemantics
+        ? withSqlSemanticObservations(base, [...sqlObservations.values()])
+        : base;
+    },
+    recordSqlSemanticObservation(input, policy) {
+      if (
+        emitted ||
+        performance.cache === "HIT" ||
+        !input ||
+        typeof input !== "object"
+      )
+        return false;
+      // A resolved D1 result is different from an attempted/missing batch slot.
+      // For rejected calls only the API operation is known to have settled;
+      // the trusted query caller still owns proof of predicate execution.
+      // Conservative: an incomplete batch may hide which predicate ran.
+      // Do not issue successful candidate demand while any result is unknown.
+      if (
+        input.execution === "succeeded" &&
+        (!(performance.d1FinishedStatements ?? 0) ||
+          (performance.d1UnobservedStatements ?? 0) > 0)
+      )
+        return false;
+      if (
+        input.execution === "failed" &&
+        (!(performance.failedStatements ?? 0) ||
+          !(performance.d1SettledOperations ?? 0))
+      )
+        return false;
+      const normalized = normalizeSqlSemanticObservation(input, policy);
+      return normalized
+        ? appendSqlSemanticObservation(sqlObservations, normalized)
+        : false;
+    },
+    onComplete(consumer, completionOptions) {
+      if (emitted) return () => {};
+      const registration = {
+        callback: consumer,
+        includeSqlSemantics: completionOptions?.includeSqlSemantics === true,
+      };
+      consumers.add(registration);
+      return () => {
+        consumers.delete(registration);
+      };
+    },
     build,
     emit() {
       if (emitted) return emitted;
       emitted = build();
       consoleFor(emitted)(emitted);
+      if (consumers.size > 0) {
+        const snapshot = toInvocationSnapshot(emitted);
+        const listeners = [...consumers];
+        const semanticSnapshot = listeners.some(
+          (listener) => listener.includeSqlSemantics,
+        )
+          ? withSqlSemanticObservations(snapshot, [...sqlObservations.values()])
+          : undefined;
+        consumers.clear();
+        // A listener never runs inside the original logging scope. Each
+        // asynchronous failure is swallowed independently of other listeners.
+        const completion = Promise.allSettled(
+          listeners.map((listener) =>
+            Promise.resolve().then(() =>
+              outsideInvocationContext(() =>
+                listener.callback(
+                  listener.includeSqlSemantics ? semanticSnapshot! : snapshot,
+                ),
+              ),
+            ),
+          ),
+        ).then(() => {});
+        try {
+          options.waitUntil?.(completion);
+        } catch {
+          // A rejected lifetime extension cannot change a business result.
+        }
+      }
       return emitted;
     },
     async emitWhenComplete() {

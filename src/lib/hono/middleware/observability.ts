@@ -47,6 +47,7 @@ export function observabilityMiddleware(): MiddlewareHandler<AppEnv> {
       source: "worker",
       trigger: "request",
       traceId: c.get("requestId") || getRequestId(c.req.raw),
+      waitUntil: (work) => c.executionCtx?.waitUntil(work),
     });
     c.set("observabilityLogger", logger);
     c.env = instrumentEnv(c.env, logger);

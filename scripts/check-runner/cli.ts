@@ -125,7 +125,8 @@ function createTasks(fix: boolean): CheckTask[] {
     },
     {
       name: "Typecheck",
-      dependsOn: fix ? ["Lint"] : undefined,
+      // Keep memory-intensive static analysis from competing with ESLint.
+      dependsOn: ["Lint"],
       steps: [
         {
           name: "Typecheck",
@@ -135,7 +136,9 @@ function createTasks(fix: boolean): CheckTask[] {
     },
     {
       name: "Coverage",
-      dependsOn: fix ? ["Lint"] : undefined,
+      // Full coverage with worker threads can exhaust CI/WSL memory when
+      // started alongside ESLint and TypeScript. All gates still run.
+      dependsOn: ["Lint", "Typecheck"],
       steps: [
         {
           name: "Coverage",

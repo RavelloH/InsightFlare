@@ -107,6 +107,7 @@ export default {
     const logger = createInvocationLogger({
       source: "worker",
       trigger: "request",
+      waitUntil: (work) => ctx.waitUntil(work),
     });
     logger.info("request.started");
     const instrumentedEnv = instrumentEnv(env, logger);
@@ -188,7 +189,13 @@ export default {
       throw error;
     } finally {
       logger.info("request.completed");
-      logger.emit();
+      const completion = logger.emitWhenComplete();
+      try {
+        ctx.waitUntil(completion);
+      } catch {
+        // Ending the observation must never replace the original response.
+        void completion;
+      }
     }
   },
 
@@ -199,7 +206,8 @@ export default {
   ) {
     const logger = createInvocationLogger({
       source: "worker",
-      trigger: "alarm",
+      trigger: "scheduled",
+      waitUntil: (work) => ctx.waitUntil(work),
     });
     logger.info("scheduled.started");
     const instrumentedEnv = instrumentEnv(env, logger);
