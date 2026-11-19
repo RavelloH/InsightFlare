@@ -69,17 +69,58 @@ describe("P5 SQL-only site coverage time resolution", () => {
     expect(resolved.fullHistory).toBe(true);
   });
 
-  it("rejects missing sites and historical requests before known site creation", () => {
+  it("accepts partial and entirely pre-creation report windows without losing site scope", () => {
+    const oneLater = new Map([
+      ["site-a", 900],
+      ["site-b", 1500],
+    ]);
+    const observed = createQueryTime(1000, 2000, "UTC", 2500);
+    expect(
+      resolveFilterSqlCoverageTime(observed, ["site-a", "site-b"], oneLater)
+        .readRange,
+    ).toEqual({ startMs: 1000, endExclusiveMs: 2000 });
+    expect(
+      resolveFilterSqlCoverageTime(observed, ["site-b"], oneLater).readRange,
+    ).toEqual({ startMs: 1000, endExclusiveMs: 2000 });
+    expect(
+      resolveFilterSqlCoverageTime(
+        observed,
+        ["site-b"],
+        new Map([["site-b", 2200]]),
+      ).readRange,
+    ).toEqual({ startMs: 1000, endExclusiveMs: 2000 });
+    const entirelyBefore = createQueryTime(100, 200, "UTC", 250);
+    expect(
+      resolveFilterSqlCoverageTime(entirelyBefore, ["site-b"], oneLater)
+        .readRange,
+    ).toEqual({ startMs: 100, endExclusiveMs: 200 });
+    // A future-created site cannot contribute data even to a full-history window.
+    expect(
+      resolveFilterSqlCoverageTime(
+        { ...entirelyBefore, fullHistory: true },
+        ["site-b"],
+        oneLater,
+      ).readRange,
+    ).toEqual({ startMs: 250, endExclusiveMs: 251 });
+  });
+
+  it("rejects missing site coverage, invalid history and reads beyond captured time", () => {
     expect(() =>
       resolveFilterSqlCoverageTime(clock, ["missing"], coverage),
     ).toThrow(AnalyticsProviderDomainError);
+    expect(() => resolveFilterSqlCoverageTime(clock, [], coverage)).toThrow(
+      AnalyticsProviderDomainError,
+    );
     expect(() =>
       resolveFilterSqlCoverageTime(
         {
           ...clock,
-          readRange: { startMs: 0, endExclusiveMs: 300 } as QueryTime["range"],
+          readRange: {
+            startMs: 300,
+            endExclusiveMs: 200,
+          } as QueryTime["range"],
         },
-        ["site-a", "site-b"],
+        ["site-a"],
         coverage,
       ),
     ).toThrow(AnalyticsProviderDomainError);
@@ -140,6 +181,52 @@ describe("P5 SQL-only site coverage time resolution", () => {
     expect(scopedFilterMetadata(output.filters)?.plan).toBe(
       scopedFilterMetadata(filters)?.plan,
     );
+  });
+
+  it("preserves team authorization for differently aged and empty sites", async () => {
+    vi.mocked(queryD1All).mockResolvedValueOnce([
+      { siteId: "site-a", createdAtSeconds: 0.9 },
+      { siteId: "site-b", createdAtSeconds: 1.5 },
+    ]);
+    const time = createQueryTime(1000, 2000, "UTC", 2500);
+    const filters = attachScopedFilterMetadata(
+      prepared('first(EVENT).name eq "purchase"', time),
+      {
+        ...scopedFilterMetadata(
+          prepared('first(EVENT).name eq "purchase"', time),
+        )!,
+        siteIds: ["site-a", "site-b"],
+      },
+    );
+    const input = {
+      context: {
+        subject: {
+          kind: "team" as const,
+          authorizedSiteIds: ["site-a", "site-b"],
+        },
+      },
+      filters,
+      time,
+    };
+    const next = vi.fn(async (query) => query);
+    const output = (await d1FilterSqlHistoryMiddleware({} as Env)(
+      "overview",
+      input,
+      next,
+    )) as typeof input;
+    expect(queryD1All).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(queryD1All).mock.calls[0]?.[2]).toEqual([
+      "site-a",
+      "site-b",
+    ]);
+    expect(scopedFilterMetadata(output.filters)?.siteIds).toEqual([
+      "site-a",
+      "site-b",
+    ]);
+    expect(scopedFilterMetadata(output.filters)?.time.readRange).toEqual({
+      startMs: 1000,
+      endExclusiveMs: 2000,
+    });
   });
 
   it("shares coverage for both Comparison sides instead of reading each twice", async () => {

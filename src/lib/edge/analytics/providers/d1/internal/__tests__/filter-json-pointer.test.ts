@@ -55,6 +55,7 @@ function databaseWithExpandedPayloads(): DatabaseSync {
         nil: null,
         empty: [],
         enabled: false,
+        search: "abc%_\\Suffix",
       },
     ],
     [
@@ -63,6 +64,7 @@ function databaseWithExpandedPayloads(): DatabaseSync {
       {
         items: [{ sku: "X" }, { sku: "Y" }],
         nil: 2,
+        search: "ABC%_\\suffix",
       },
     ],
   ] as const;
@@ -205,6 +207,101 @@ describe("P2 exact event JSON Pointer in SQLite", () => {
       expect(matchedEventPks(db, 'event.payload("/enabled") eq true')).toEqual(
         [],
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("matches literal string text case-sensitively, including LIKE metacharacters", () => {
+    const db = databaseWithExpandedPayloads();
+    const match = (operator: string, needle: string) =>
+      matchedEventPks(
+        db,
+        `event.payload("/search") ${operator} ${JSON.stringify(needle)}`,
+      );
+    try {
+      expect(match("contains", "abc")).toEqual([101]);
+      expect(match("contains", "ABC")).toEqual([201]);
+      expect(match("startsWith", "ABC")).toEqual([201]);
+      expect(match("startsWith", "abc")).toEqual([101]);
+      expect(match("endsWith", "Suffix")).toEqual([101]);
+      expect(match("endsWith", "suffix")).toEqual([201]);
+      expect(match("contains", "%_")).toEqual([101, 201]);
+      expect(match("contains", "a_c")).toEqual([]);
+      expect(match("startsWith", "ab%_")).toEqual([]);
+      expect(match("endsWith", "\\Suffix")).toEqual([101]);
+      expect(match("contains", "\\")).toEqual([101, 201]);
+      expect(match("contains", "")).toEqual([101, 201]);
+      expect(match("endsWith", "")).toEqual([101, 201]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("compiles mixed JSON scalar IN/NOT IN with typed null and no Missing matches", () => {
+    const db = databaseWithExpandedPayloads();
+    try {
+      expect(
+        matchedEventPks(db, 'event.payload("/items/0/sku") in ["A", 1]'),
+      ).toEqual([101]);
+      expect(
+        matchedEventPks(db, 'event.payload("/items/0/sku") notIn ["A", 1]'),
+      ).toEqual([201]);
+      const many = [
+        "A",
+        ...Array.from({ length: 30 }, (_, index) => `SKU-${index}`),
+        2,
+        3,
+        null,
+      ];
+      expect(
+        matchedEventPks(
+          db,
+          `event.payload("/items/0/sku") in ${JSON.stringify(many)}`,
+        ),
+      ).toEqual([101]);
+      expect(
+        matchedEventPks(
+          db,
+          `event.payload("/items/0/sku") notIn ${JSON.stringify(many)}`,
+        ),
+      ).toEqual([201]);
+      expect(
+        matchedEventPks(db, 'event.payload("/nil") in [null, "A"]'),
+      ).toEqual([101]);
+      expect(
+        matchedEventPks(db, 'event.payload("/nil") notIn [null, "A"]'),
+      ).toEqual([201]);
+      expect(matchedEventPks(db, 'event.payload("/nil") in [null, 2]')).toEqual(
+        [101, 201],
+      );
+      expect(
+        matchedEventPks(db, 'event.payload("/enabled") in [false, "false", 0]'),
+      ).toEqual([101]);
+      expect(
+        matchedEventPks(
+          db,
+          'event.payload("/enabled") notIn [true, "false", 0]',
+        ),
+      ).toEqual([101]);
+      expect(
+        matchedEventPks(
+          db,
+          'event.payload("/items/0/sku") in [1, false, null]',
+        ),
+      ).toEqual([]);
+      expect(
+        matchedEventPks(
+          db,
+          'event.payload("/items/0/sku") notIn [1, false, null]',
+        ),
+      ).toEqual([101, 201]);
+      expect(
+        matchedEventPks(db, 'event.payload("/empty") notIn ["A", 1]'),
+      ).toEqual([]);
+      expect(
+        matchedEventPks(db, 'event.payload("/missing") notIn ["A", 1]'),
+      ).toEqual([]);
     } finally {
       db.close();
     }

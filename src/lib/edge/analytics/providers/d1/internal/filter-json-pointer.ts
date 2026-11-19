@@ -1,9 +1,9 @@
 import type {
   FilterCondition,
-  FilterOperator,
   FilterValue,
 } from "@/lib/filter-contract/filters";
 
+import { JSON_EACH_SET_THRESHOLD } from "./filter-compiler";
 import { safeQualificationIdentifier } from "./filter-qualification";
 
 export interface JsonPointerPredicateSql {
@@ -69,13 +69,6 @@ function isValue(value: unknown): value is FilterValue {
   );
 }
 
-function likeBinding(value: string, operator: FilterOperator): string {
-  const escaped = value.replace(/[\\%_]/g, "\\$&");
-  if (operator === "contains") return `%${escaped}%`;
-  if (operator === "startsWith") return `${escaped}%`;
-  return `%${escaped}`;
-}
-
 /**
  * Returns a single correlated SQLite predicate. A recursive traversal walks
  * actual parent/child node IDs (and site-bound key IDs) rather than matching
@@ -128,18 +121,37 @@ export function compileExactJsonPointerPredicate(
       throw new TypeError("Payload membership comparison needs scalar values.");
     }
     const values = value as readonly FilterValue[];
-    const kinds = [...new Set(values.map(scalarType))];
-    if (kinds.length !== 1) {
-      throw new TypeError("Payload membership values must have one JSON type.");
+    const groups = new Map<number, FilterValue[]>();
+    for (const item of values) {
+      const kind = scalarType(item);
+      const group = groups.get(kind) ?? [];
+      group.push(item);
+      groups.set(kind, group);
     }
-    const kind = kinds[0]!;
-    const relation = operator === "in" ? "IN" : "NOT IN";
-    if (kind === 0) {
-      test = `resolved.value_type ${operator === "in" ? "=" : "!="} 0`;
-    } else {
-      bindings.push(...values.map(scalarValue));
-      test = `resolved.value_type = ${kind} AND ${scalarColumn(kind)} ${relation} (${values.map(() => "?").join(", ")})`;
+    const matches: string[] = [];
+    for (const [kind, group] of groups) {
+      if (kind === 0) {
+        matches.push("resolved.value_type = 0");
+      } else {
+        let set: string;
+        if (group.length >= JSON_EACH_SET_THRESHOLD) {
+          bindings.push(JSON.stringify(group.map(scalarValue)));
+          set = "SELECT value FROM json_each(?)";
+        } else {
+          bindings.push(...group.map(scalarValue));
+          set = group.map(() => "?").join(", ");
+        }
+        matches.push(
+          `(resolved.value_type = ${kind} AND ${scalarColumn(kind)} IN (${set}))`,
+        );
+      }
     }
+    const membership = `(${matches.join(" OR ")})`;
+    // Missing is excluded by EXISTS; containers are not JSON scalar values.
+    test =
+      operator === "in"
+        ? membership
+        : `resolved.value_type IN (0, 1, 2, 3) AND NOT ${membership}`;
   } else if (operator === "between") {
     if (!Array.isArray(value) || value.length !== 2) {
       throw new TypeError("JSON BETWEEN requires two endpoints.");
@@ -163,9 +175,19 @@ export function compileExactJsonPointerPredicate(
     if (typeof input !== "string") {
       throw new TypeError("String comparison requires a string.");
     }
-    bindings.push(likeBinding(input, operator));
-    test =
-      "resolved.value_type = 1 AND json_value.string_value LIKE ? ESCAPE '\\'";
+    if (operator === "contains") {
+      bindings.push(input);
+      test =
+        "resolved.value_type = 1 AND INSTR(json_value.string_value, ?) > 0";
+    } else if (operator === "startsWith") {
+      bindings.push(input, input);
+      test =
+        "resolved.value_type = 1 AND SUBSTR(json_value.string_value, 1, LENGTH(?)) = ?";
+    } else {
+      bindings.push(input, input, input);
+      test =
+        "resolved.value_type = 1 AND (LENGTH(?) = 0 OR SUBSTR(json_value.string_value, -LENGTH(?)) = ?)";
+    }
   } else {
     const input = scalar(value);
     const type = scalarType(input);

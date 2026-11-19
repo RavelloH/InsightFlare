@@ -13,6 +13,62 @@ function document(root: unknown) {
 }
 
 describe("filter SQL compiler", () => {
+  it("runs mixed-type Event Payload sets through the direct SQL compiler", () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      db.exec(`
+        CREATE TABLE events(event_pk INTEGER PRIMARY KEY, site_pk INTEGER);
+        CREATE TABLE custom_event_json_paths(id INTEGER PRIMARY KEY, site_pk INTEGER, path TEXT);
+        CREATE TABLE custom_event_json_values(
+          event_pk INTEGER, site_pk INTEGER, path_id INTEGER, value_type INTEGER,
+          string_value TEXT, number_value REAL, boolean_value INTEGER
+        );
+        INSERT INTO events VALUES (1,1),(2,1),(3,1),(4,1),(5,1);
+        INSERT INTO custom_event_json_paths VALUES (1,1,'/sku');
+        INSERT INTO custom_event_json_values VALUES
+          (1,1,1,1,'A',NULL,NULL),
+          (2,1,1,2,NULL,1,NULL),
+          (3,1,1,3,NULL,NULL,0),
+          (4,1,1,0,NULL,NULL,NULL);
+      `);
+      const matched = (
+        operator: "in" | "notIn",
+        values: readonly (string | number | boolean | null)[],
+      ) => {
+        const compiled = compileFilterDocument(
+          document({
+            kind: "condition",
+            target: { kind: "event-payload", path: "/sku" },
+            operator,
+            value: values,
+          }),
+          { eventAlias: "e" },
+        );
+        return db
+          .prepare(
+            `SELECT e.event_pk FROM events e ${compiled.clause} ORDER BY e.event_pk`,
+          )
+          .all(...compiled.bindings)
+          .map((row) => Number((row as { event_pk: number }).event_pk));
+      };
+      expect(matched("in", ["A", 1])).toEqual([1, 2]);
+      expect(matched("notIn", ["A", 1])).toEqual([3, 4]);
+      expect(matched("in", [null, "A"])).toEqual([1, 4]);
+      expect(matched("notIn", [null, "A"])).toEqual([2, 3]);
+      expect(matched("in", [false, 0])).toEqual([3]);
+      expect(matched("notIn", [false, 0])).toEqual([1, 2, 4]);
+      expect(
+        matched("in", [
+          "A",
+          ...Array.from({ length: 30 }, (_, i) => `S${i}`),
+          null,
+        ]),
+      ).toEqual([1, 4]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("compiles numeric and boolean observation fields without text coercion", () => {
     const numeric = compileFilterDocument(
       document({
@@ -508,7 +564,7 @@ describe("filter SQL compiler", () => {
     );
 
     expect(result.clause).toContain("json_each(?)");
-    expect(result.bindings).toEqual(["/plan", JSON.stringify(values), 1]);
+    expect(result.bindings).toEqual(["/plan", JSON.stringify(values)]);
   });
 
   it("keeps small direct sets scalar-bound", () => {
@@ -526,7 +582,7 @@ describe("filter SQL compiler", () => {
     expect(result.bindings).toEqual(["/docs", "/pricing"]);
   });
 
-  it("keeps small payload NOT IN sets typed and rejects mixed payload sets", () => {
+  it("keeps small payload NOT IN sets typed and accepts mixed payload sets", () => {
     const result = compileFilterDocument(
       document({
         kind: "condition",
@@ -536,19 +592,21 @@ describe("filter SQL compiler", () => {
       }),
       { alias: "es", eventAlias: "es" },
     );
-    expect(result.clause).toContain("NOT IN (?, ?)");
-    expect(result.bindings).toEqual(["/plan", "free", "trial", 1]);
+    expect(result.clause).toContain("value_type IN (0, 1, 2, 3) AND NOT");
+    expect(result.clause).toContain("string_value IN (?, ?)");
+    expect(result.bindings).toEqual(["/plan", "free", "trial"]);
 
-    expect(() =>
-      compileFilterDocument(
-        document({
-          kind: "condition",
-          target: { kind: "event-payload", path: "/score" },
-          operator: "in",
-          value: ["free", 1],
-        }),
-      ),
-    ).toThrow("one JSON type");
+    const mixed = compileFilterDocument(
+      document({
+        kind: "condition",
+        target: { kind: "event-payload", path: "/score" },
+        operator: "in",
+        value: ["free", 1],
+      }),
+    );
+    expect(mixed.clause).toContain("string_value IN (?)");
+    expect(mixed.clause).toContain("number_value IN (?)");
+    expect(mixed.bindings).toEqual(["/score", "free", 1]);
 
     expect(() =>
       compileFilterDocument(
@@ -576,17 +634,17 @@ describe("filter SQL compiler", () => {
   });
 
   it("compiles null payload sets and typed payload ranges", () => {
-    expect(() =>
-      compileFilterDocument(
-        document({
-          kind: "condition",
-          target: { kind: "event-payload", path: "/nullable" },
-          operator: "in",
-          value: [null],
-        }),
-        { alias: "es", eventAlias: "es" },
-      ),
-    ).toThrow("non-null scalar");
+    const nullSet = compileFilterDocument(
+      document({
+        kind: "condition",
+        target: { kind: "event-payload", path: "/nullable" },
+        operator: "in",
+        value: [null],
+      }),
+      { alias: "es", eventAlias: "es" },
+    );
+    expect(nullSet.clause).toContain("value_type = 0");
+    expect(nullSet.bindings).toEqual(["/nullable"]);
 
     const range = compileFilterDocument(
       document({

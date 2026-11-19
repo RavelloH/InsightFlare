@@ -46,18 +46,24 @@ export function resolveFilterSqlCoverageTime(
   ) {
     throw invalidCoverage();
   }
-  const earliest = Math.min(...(createdTimes as number[]));
+  // A site can be created after the requested report period. Its empty
+  // contribution must not invalidate queries for the other authorized sites.
   const authorizedEnd = time.capturedAtMs + 1;
+  const earliest = createdTimes.reduce<number>(
+    (start, created) => Math.min(start, created!),
+    time.capturedAtMs,
+  );
   const readRange = time.fullHistory
     ? { startMs: earliest, endExclusiveMs: authorizedEnd }
     : (time.readRange ?? time.range);
+  const { startMs, endExclusiveMs } = readRange;
   if (
-    !Number.isSafeInteger(readRange.startMs) ||
-    !Number.isSafeInteger(readRange.endExclusiveMs) ||
-    readRange.startMs >= readRange.endExclusiveMs ||
-    readRange.endExclusiveMs > authorizedEnd ||
-    (!time.fullHistory &&
-      createdTimes.some((created) => readRange.startMs < created!))
+    typeof startMs !== "number" ||
+    typeof endExclusiveMs !== "number" ||
+    !Number.isSafeInteger(startMs) ||
+    !Number.isSafeInteger(endExclusiveMs) ||
+    startMs >= endExclusiveMs ||
+    endExclusiveMs > authorizedEnd
   ) {
     throw invalidCoverage();
   }

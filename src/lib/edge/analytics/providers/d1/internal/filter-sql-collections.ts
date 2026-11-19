@@ -152,16 +152,21 @@ function compareScalar(
     case "startsWith":
     case "endsWith": {
       if (typeof value !== "string") throw new TypeError("Expected a string.");
-      const escaped = value.replace(/[\\%_]/g, "\\$&");
-      const pattern =
-        operator === "contains"
-          ? `%${escaped}%`
-          : operator === "startsWith"
-            ? `${escaped}%`
-            : `%${escaped}`;
+      if (operator === "contains") {
+        return {
+          sql: `INSTR(${left.sql}, ?) > 0`,
+          bindings: [...left.bindings, value],
+        };
+      }
+      if (operator === "startsWith") {
+        return {
+          sql: `SUBSTR(${left.sql}, 1, LENGTH(?)) = ?`,
+          bindings: [...left.bindings, value, value],
+        };
+      }
       return {
-        sql: `${left.sql} LIKE ? ESCAPE '\\'`,
-        bindings: [...left.bindings, pattern],
+        sql: `(LENGTH(?) = 0 OR SUBSTR(${left.sql}, -LENGTH(?)) = ?)`,
+        bindings: [value, ...left.bindings, value, value],
       };
     }
     default: {

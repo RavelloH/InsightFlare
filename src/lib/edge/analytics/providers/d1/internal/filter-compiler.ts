@@ -513,29 +513,45 @@ function payloadComparison(
   const values = Array.isArray(conditionValue)
     ? conditionValue
     : [conditionValue!];
+  if (condition.operator === "in" || condition.operator === "notIn") {
+    const groups = new Map<number, FilterValue[]>();
+    for (const value of values) {
+      const kind = payloadValueType(value);
+      const group = groups.get(kind) ?? [];
+      group.push(value);
+      groups.set(kind, group);
+    }
+    const matches: string[] = [];
+    for (const [kind, group] of groups) {
+      if (kind === 0) {
+        matches.push(`${valueAlias}.value_type = 0`);
+      } else {
+        const column = payloadValueColumn(valueAlias, group[0]!);
+        const parameters = group.map((item) =>
+          typeof item === "boolean" ? Number(item) : scalar(item),
+        );
+        const set =
+          parameters.length >= JSON_EACH_SET_THRESHOLD
+            ? `SELECT value FROM json_each(${push(compiler, JSON.stringify(parameters))})`
+            : parameters.map((item) => push(compiler, item)).join(", ");
+        matches.push(
+          `(${valueAlias}.value_type = ${kind} AND ${column} IN (${set}))`,
+        );
+      }
+    }
+    const membership = `(${matches.join(" OR ")})`;
+    return exists(
+      ` AND ${condition.operator === "in" ? membership : `${valueAlias}.value_type IN (0, 1, 2, 3) AND NOT ${membership}`}`,
+    );
+  }
   const types = [...new Set(values.map(payloadValueType))];
   if (types.length !== 1)
-    throw new TypeError("Payload set filters require values of one JSON type.");
+    throw new TypeError("Payload range filters require one JSON type.");
   const type = types[0]!;
   const valueColumn = payloadValueColumn(valueAlias, values[0]!);
   if (condition.operator === "between") {
     return exists(
       ` AND ${valueAlias}.value_type = ${push(compiler, type)} AND ${valueColumn} BETWEEN ${push(compiler, scalar(values[0]!))} AND ${push(compiler, scalar(values[1]!))}`,
-    );
-  }
-  if (condition.operator === "in" || condition.operator === "notIn") {
-    if (values.length >= JSON_EACH_SET_THRESHOLD) {
-      const valueSet = push(compiler, jsonSet(values));
-      const typeBinding = push(compiler, type);
-      return exists(
-        ` AND ${valueColumn} ${condition.operator === "in" ? "IN" : "NOT IN"} (SELECT value FROM json_each(${valueSet})) AND ${valueAlias}.value_type = ${typeBinding}`,
-      );
-    }
-    const bindings = values
-      .map((value) => push(compiler, scalar(value)))
-      .join(", ");
-    return exists(
-      ` AND ${valueAlias}.value_type = ${push(compiler, type)} AND ${valueColumn} ${condition.operator === "in" ? "IN" : "NOT IN"} (${bindings})`,
     );
   }
   const value = values[0]!;

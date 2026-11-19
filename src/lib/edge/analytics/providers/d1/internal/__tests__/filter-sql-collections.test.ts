@@ -209,6 +209,34 @@ scope_history_events(site_pk, site_id, event_pk, event_id, visit_id, session_id,
     ]);
   });
 
+  it("matches correlated Scalar strings with binary case sensitivity and literal wildcards", () => {
+    expect(qualified('first(EVENT).name contains "pur"', "session")).toEqual([
+      { site_pk: 1, entity_id: "s1" },
+    ]);
+    expect(qualified('first(EVENT).name contains "PUR"', "session")).toEqual(
+      [],
+    );
+    expect(qualified('first(EVENT).name startsWith "pur"', "session")).toEqual([
+      { site_pk: 1, entity_id: "s1" },
+    ]);
+    expect(qualified('first(EVENT).name startsWith "PUR"', "session")).toEqual(
+      [],
+    );
+    expect(qualified('first(EVENT).name endsWith "chase"', "session")).toEqual([
+      { site_pk: 1, entity_id: "s1" },
+    ]);
+    expect(qualified('first(EVENT).name endsWith "CHASE"', "session")).toEqual(
+      [],
+    );
+    expect(qualified('first(EVENT).name contains "%"', "session")).toEqual([]);
+    expect(qualified('first(EVENT).name contains "_"', "session")).toEqual([]);
+    expect(qualified('first(EVENT).name endsWith ""', "session")).toEqual([
+      { site_pk: 1, entity_id: "s1" },
+      { site_pk: 1, entity_id: "s2" },
+      { site_pk: 2, entity_id: "s1" },
+    ]);
+  });
+
   it("compiles Projection aggregates and arithmetic as correlated SQLite Scalars", () => {
     expect(qualified("sum(PAGE -> durationMs) eq 40", "session")).toEqual([
       { site_pk: 1, entity_id: "s1" },
