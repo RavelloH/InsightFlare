@@ -22,6 +22,8 @@ type D1MetaState = {
   completed: number;
   rowsReadAvailable: number;
   rowsWrittenAvailable: number;
+  sqlDurationAvailable: number;
+  attemptsAvailable: number;
 };
 function asNonNegativeInteger(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
@@ -48,8 +50,21 @@ function recordD1Result(logger: InvocationLogger, result: unknown): void {
     completed: 0,
     rowsReadAvailable: 0,
     rowsWrittenAvailable: 0,
+    sqlDurationAvailable: 0,
+    attemptsAvailable: 0,
   };
   state.completed += 1;
+  const sqlDuration = asNonNegativeInteger(meta?.timings?.sql_duration_ms);
+  if (sqlDuration !== undefined) {
+    state.sqlDurationAvailable += 1;
+    logger.increment("d1SqlDurationMs", sqlDuration);
+  }
+  const attempts = asNonNegativeInteger(meta?.total_attempts);
+  if (attempts !== undefined) {
+    state.attemptsAvailable += 1;
+    logger.increment("d1TotalAttempts", attempts);
+    if (attempts > 1) logger.increment("d1Retries", attempts - 1);
+  }
 
   const rowsRead = asNonNegativeInteger(meta?.rows_read);
   if (rowsRead !== undefined) {
@@ -65,6 +80,12 @@ function recordD1Result(logger: InvocationLogger, result: unknown): void {
 
   D1_META_STATE.set(logger, state);
   logger.setPerformance({
+    d1FinishedStatements: state.completed,
+    d1SqlDurationCoverage: rowsCoverage(
+      state.sqlDurationAvailable,
+      state.completed,
+    ),
+    d1AttemptsCoverage: rowsCoverage(state.attemptsAvailable, state.completed),
     d1RowsReadAvailable: state.rowsReadAvailable > 0,
     d1RowsReadCoverage: rowsCoverage(state.rowsReadAvailable, state.completed),
     d1RowsWrittenCoverage: rowsCoverage(
@@ -72,17 +93,6 @@ function recordD1Result(logger: InvocationLogger, result: unknown): void {
       state.completed,
     ),
   });
-
-  if (meta) {
-    const sqlDuration = asNonNegativeInteger(meta.timings?.sql_duration_ms);
-    if (sqlDuration !== undefined)
-      logger.increment("d1SqlDurationMs", sqlDuration);
-    const attempts = asNonNegativeInteger(meta.total_attempts);
-    if (attempts !== undefined) {
-      logger.increment("d1TotalAttempts", attempts);
-      if (attempts > 1) logger.increment("d1Retries", attempts - 1);
-    }
-  }
 }
 function markMissingD1BatchResults(
   logger: InvocationLogger,
@@ -93,10 +103,18 @@ function markMissingD1BatchResults(
     completed: 0,
     rowsReadAvailable: 0,
     rowsWrittenAvailable: 0,
+    sqlDurationAvailable: 0,
+    attemptsAvailable: 0,
   };
   state.completed += missingResults;
   D1_META_STATE.set(logger, state);
   logger.setPerformance({
+    d1FinishedStatements: state.completed,
+    d1SqlDurationCoverage: rowsCoverage(
+      state.sqlDurationAvailable,
+      state.completed,
+    ),
+    d1AttemptsCoverage: rowsCoverage(state.attemptsAvailable, state.completed),
     d1RowsReadAvailable: state.rowsReadAvailable > 0,
     d1RowsReadCoverage: rowsCoverage(state.rowsReadAvailable, state.completed),
     d1RowsWrittenCoverage: rowsCoverage(
@@ -129,6 +147,7 @@ async function measureD1<T>(
     span.end({ statementCount });
     return result;
   } catch (error) {
+    markMissingD1BatchResults(logger, statementCount);
     logger.increment("failedStatements", statementCount);
     span.fail({ statementCount, ...errorLogData(error) });
     throw error;

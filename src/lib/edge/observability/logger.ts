@@ -1,5 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
+import { type InvocationSnapshot,toInvocationSnapshot } from "./snapshot";
+
 export const OBSERVABILITY_LOG_VERSION = 1 as const;
 // One record is emitted for each invocation. Keep this comfortably below the
 // Workers log-size limit while preserving the start/end pair for real work.
@@ -8,7 +10,7 @@ const MAX_LOG_VALUE_LENGTH = 160;
 const MAX_ERROR_LOG_VALUE_LENGTH = 4_096;
 
 export type InvocationSource = "worker" | "do";
-export type InvocationTrigger = "request" | "alarm";
+export type InvocationTrigger = "request" | "alarm" | "scheduled" | "websocket";
 export type InvocationLogLevel = "info" | "warn" | "error";
 export type InvocationOutcome = "ok" | "error" | "canceled";
 export type InvocationCacheState = "HIT" | "MISS" | "BYPASS";
@@ -40,6 +42,10 @@ export interface InvocationPerformance {
   d1SqlDurationMs?: number;
   d1TotalAttempts?: number;
   d1Retries?: number;
+  /** Statement attempts with a settled result or an observed failure. */
+  d1FinishedStatements?: number;
+  d1SqlDurationCoverage?: InvocationD1RowsCoverage;
+  d1AttemptsCoverage?: InvocationD1RowsCoverage;
   doSqlStatements?: number;
   doSqlRowsRead?: number;
   doSqlRowsReadAvailable?: boolean;
@@ -249,6 +255,8 @@ export interface InvocationLogger {
     metrics: InvocationD1OperationMetrics,
   ): void;
   recordDoSqlOperation(metrics: InvocationDoSqlMetrics): void;
+  /** Read-only safe projection: no trace, log data, raw paths or identity. */
+  snapshot(): InvocationSnapshot;
   build(): InvocationLogRecord;
   emit(): InvocationLogRecord;
   emitWhenComplete(): Promise<InvocationLogRecord>;
@@ -532,6 +540,9 @@ export function createInvocationLogger(
           doSqlCompleted,
         ),
       };
+    },
+    snapshot() {
+      return toInvocationSnapshot(build());
     },
     build,
     emit() {
