@@ -350,6 +350,22 @@ export function localPerceptionSearch(request: SearchRequest): SearchResult[] {
     observedProvider(),
   ]).filter((result) => isAuthorizedScope(result.scope, auth));
 }
+/** Navigation-only suggestions for an empty command palette. */
+export function localPerceptionNavigation(
+  request: SearchRequest,
+): SearchResult[] {
+  const auth = current;
+  if (
+    !auth ||
+    request.scope.userId !== auth.userId ||
+    (request.scope.teamId && !auth.allowedTeamIds.has(request.scope.teamId)) ||
+    !isAuthorizedScope(request.scope, auth)
+  )
+    return [];
+  return searchLocal(request, [navigationProvider(entries)]).filter((result) =>
+    isAuthorizedScope(result.scope, auth),
+  );
+}
 export function revokePerceptionSite(siteId: string): void {
   if (!current?.activeTeamId || !current.allowedSiteIds.has(siteId)) return;
   invalidateScope(

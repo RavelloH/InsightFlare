@@ -528,20 +528,22 @@ export function DashboardShell({
     messages,
   ]);
 
-  const teamSelector = liveActiveTeamSlug ? (
+  const teamSelector = (
     <SidebarGroup className={SIDEBAR_COLLAPSE_SECTION_CLASS}>
-      <SidebarGroupContent>
-        <TeamSelect
-          locale={locale}
-          messages={messages}
-          options={teamOptions}
-          groups={teamOptionGroups}
-          activeTeamSlug={liveActiveTeamSlug}
-        />
+      <SidebarGroupContent className="flex flex-col gap-2">
+        {liveActiveTeamSlug ? (
+          <TeamSelect
+            locale={locale}
+            messages={messages}
+            options={teamOptions}
+            groups={teamOptionGroups}
+            activeTeamSlug={liveActiveTeamSlug}
+          />
+        ) : null}
+        <GlobalPerceptionSearch locale={locale} />
       </SidebarGroupContent>
     </SidebarGroup>
-  ) : null;
-
+  );
   useEffect(() => {
     if (!activeTeamId || sites.length > 0 || clientSitesByTeam[activeTeamId]) {
       return;
@@ -887,7 +889,6 @@ export function DashboardShell({
                   </Breadcrumb>
                 </div>
                 <div className="ml-auto flex min-w-0 items-center gap-1">
-                  <GlobalPerceptionSearch locale={locale} />
                   <DashboardHeaderControls
                     locale={locale}
                     messages={messages}

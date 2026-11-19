@@ -19,7 +19,18 @@ export function registerPerceptionScenarios(context: E2eContext) {
     await signIn(page, "owner-a", context.passwords.ownerA);
     await page.goto(route, { waitUntil: "domcontentloaded" });
     const trigger = page.getByTestId("perception-search-trigger");
+    const teamTrigger = page
+      .locator('button[data-slot="select-trigger"]')
+      .first();
     await expect(trigger).toBeVisible();
+    await expect(trigger).toHaveAttribute("data-slot", "select-trigger");
+    await expect
+      .poll(async () => {
+        const teamBox = await teamTrigger.boundingBox();
+        const searchBox = await trigger.boundingBox();
+        return Boolean(teamBox && searchBox && searchBox.y > teamBox.y);
+      })
+      .toBe(true);
     await expect(
       page.locator("[data-page-transition]").first(),
     ).toHaveAttribute("data-page-transition-ready", "true");
@@ -28,6 +39,8 @@ export function registerPerceptionScenarios(context: E2eContext) {
     });
     await trigger.click();
     await expect(search).toBeVisible();
+    await expect(page.getByRole("group", { name: "快速导航" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "本机观察" })).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(search).not.toBeVisible();
     await page.keyboard.press("Control+k");
@@ -41,13 +54,17 @@ export function registerPerceptionScenarios(context: E2eContext) {
     await expect(search).not.toBeVisible();
 
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "Toggle Sidebar" }).click();
     await expect(trigger).toBeVisible();
     await trigger.click();
     await expect(search).toBeVisible();
+    await expect(page.getByRole("group", { name: "快速导航" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "本机观察" })).toHaveCount(0);
     await search.fill("E2E");
     await expect(page.getByRole("option").first()).toBeVisible();
-    await page.getByRole("button", { name: /搜索全部数据/u }).click();
-    await expect(page.getByText(/尚无可用的服务端全文搜索/u)).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /搜索全部数据/u }),
+    ).toHaveCount(0);
   });
 
   test("12q. IndexedDB only stores whitelisted observations from real loaded Analytics", async ({

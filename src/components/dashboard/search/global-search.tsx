@@ -8,20 +8,25 @@ import {
   DialogTitle,
 } from "@insightflare/ui/dialog";
 import { Input } from "@insightflare/ui/input";
-import { RiArrowRightLine, RiSearchLine } from "@remixicon/react";
+import { SelectLabel, selectTriggerStyles } from "@insightflare/ui/select";
+import {
+  RiArrowDownSLine,
+  RiArrowRightLine,
+  RiSearchLine,
+} from "@remixicon/react";
 
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import { fetchAdminMe, type SiteData } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";
 import {
   resolveSearchAction,
-  searchExplicit,
   type SearchRequest,
   type SearchResult,
 } from "@/lib/perception-search/core";
 import {
   getPerceptionAuthorization,
   getPerceptionVersion,
+  localPerceptionNavigation,
   localPerceptionSearch,
   revokePerceptionSite,
   subscribePerception,
@@ -48,8 +53,35 @@ export function GlobalPerceptionSearch({ locale }: { locale: Locale }) {
     },
     limit: 12,
   };
-  // Always synchronous. No debounce and no implicit server request.
-  const results = open ? localPerceptionSearch(request) : [];
+  // Keep the empty palette a navigation workspace. Observed values are
+  // suggestions only after the user starts searching.
+  const hasQuery = query.trim().length > 0;
+  const matches = open
+    ? hasQuery
+      ? localPerceptionSearch(request)
+      : localPerceptionNavigation({ ...request, limit: 50 })
+    : [];
+  const navigationResults = matches
+    .filter((result) => result.coverage === "static-navigation")
+    .sort((a, b) => {
+      if (hasQuery) return 0;
+      const priority = (result: SearchResult) => {
+        if (result.action.type !== "navigate") return 4;
+        const target = result.action.target;
+        if (target.kind === "app") return 0;
+        if (target.kind === "team" && target.teamId === auth?.activeTeamId)
+          return 1;
+        if (target.kind === "site") return 2;
+        return 3;
+      };
+      return priority(a) - priority(b);
+    });
+  const observedResults = hasQuery
+    ? matches.filter((result) => result.coverage !== "static-navigation")
+    : [];
+  const results = hasQuery
+    ? [...navigationResults, ...observedResults]
+    : navigationResults.slice(0, 8);
   const activeIndex = Math.min(selected, Math.max(results.length - 1, 0));
 
   useEffect(() => {
@@ -62,6 +94,9 @@ export function GlobalPerceptionSearch({ locale }: { locale: Locale }) {
       )
         return;
       event.preventDefault();
+      setQuery("");
+      setSelected(0);
+      setNotice("");
       setOpen((old) => !old);
     };
     window.addEventListener("keydown", onShortcut);
@@ -110,13 +145,36 @@ export function GlobalPerceptionSearch({ locale }: { locale: Locale }) {
     setOpen(false);
     window.location.assign(verified.href);
   }
+  const option = (result: SearchResult, index: number) => (
+    <Button
+      key={result.source + ":" + result.key}
+      id={"perception-item-" + index}
+      type="button"
+      role="option"
+      aria-selected={index === activeIndex}
+      variant={index === activeIndex ? "secondary" : "ghost"}
+      className="w-full justify-start"
+      onMouseEnter={() => setSelected(index)}
+      onClick={() => void execute(result)}
+    >
+      <span className="min-w-0 flex-1 truncate text-left">{result.label}</span>
+      <span className="shrink-0 text-muted-foreground">{result.subtitle}</span>
+      <RiArrowRightLine aria-hidden="true" />
+    </Button>
+  );
+
   return (
     <>
-      <Button
+      <button
         type="button"
-        variant="ghost"
-        size="icon"
+        data-slot="select-trigger"
+        data-size="default"
+        data-placeholder=""
+        className={`${selectTriggerStyles} w-full`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         aria-label={labels.trigger}
+        aria-keyshortcuts="Control+K Meta+K"
         title={labels.trigger + " (Ctrl/⌘ K)"}
         data-testid="perception-search-trigger"
         onClick={() => {
@@ -126,8 +184,15 @@ export function GlobalPerceptionSearch({ locale }: { locale: Locale }) {
           setOpen(true);
         }}
       >
-        <RiSearchLine aria-hidden="true" />
-      </Button>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <RiSearchLine aria-hidden="true" />
+          <span>{labels.trigger}</span>
+        </span>
+        <RiArrowDownSLine
+          aria-hidden="true"
+          className="text-muted-foreground"
+        />
+      </button>
       <Dialog
         open={open}
         onOpenChange={(next) => {
@@ -140,11 +205,11 @@ export function GlobalPerceptionSearch({ locale }: { locale: Locale }) {
         }}
       >
         <DialogContent
-          className="w-[min(94vw,36rem)] max-w-xl p-4"
+          className="max-w-xl"
           aria-describedby="perception-search-description"
         >
           <DialogHeader>
-            <DialogTitle>{labels.title}</DialogTitle>
+            <DialogTitle icon={RiSearchLine}>{labels.title}</DialogTitle>
             <DialogDescription id="perception-search-description">
               {labels.description}
             </DialogDescription>
@@ -186,63 +251,40 @@ export function GlobalPerceptionSearch({ locale }: { locale: Locale }) {
             id="perception-search-results"
             role="listbox"
             aria-label={labels.title}
-            className="max-h-[min(45vh,22rem)] overflow-y-auto"
+            className="max-h-80 overflow-y-auto"
           >
-            {results.map((result, index) => (
-              <button
-                key={result.source + ":" + result.key}
-                id={"perception-item-" + index}
-                type="button"
-                role="option"
-                aria-selected={index === activeIndex}
-                onMouseEnter={() => setSelected(index)}
-                onClick={() => void execute(result)}
-                className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left text-sm hover:bg-accent aria-selected:bg-accent"
+            {navigationResults.length ? (
+              <div
+                role="group"
+                aria-label={hasQuery ? labels.navigation : labels.quickAccess}
               >
-                <span className="min-w-0 flex-1 truncate">{result.label}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {result.coverage === "static-navigation"
-                    ? labels.navigation
-                    : labels.local}
-                </span>
-                <RiArrowRightLine
-                  aria-hidden="true"
-                  className="size-4 shrink-0 text-muted-foreground"
-                />
-              </button>
-            ))}
+                <SelectLabel>
+                  {hasQuery ? labels.navigation : labels.quickAccess}
+                </SelectLabel>
+                {(hasQuery ? navigationResults : results).map((result, index) =>
+                  option(result, index),
+                )}
+              </div>
+            ) : null}
+            {observedResults.length ? (
+              <div role="group" aria-label={labels.local}>
+                <SelectLabel>{labels.local}</SelectLabel>
+                {observedResults.map((result, index) =>
+                  option(result, navigationResults.length + index),
+                )}
+              </div>
+            ) : null}
             {results.length === 0 ? (
-              <p
-                role="status"
-                className="px-2 py-3 text-xs text-muted-foreground"
-              >
+              <p role="status" className="text-xs text-muted-foreground">
                 {labels.empty}
               </p>
             ) : null}
           </div>
-          <div className="flex items-center justify-between border-t pt-2">
-            <span className="text-xs text-muted-foreground">{notice}</span>
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              onClick={() => {
-                void searchExplicit(
-                  {
-                    ...request,
-                    mode: "explicit-fulltext",
-                    userInitiated: true,
-                  },
-                  [],
-                ).then((result) => {
-                  if (result.status === "unavailable")
-                    setNotice(labels.fulltextUnavailable);
-                });
-              }}
-            >
-              {labels.fulltext}
-            </Button>
-          </div>
+          {notice ? (
+            <p role="status" className="text-xs text-destructive">
+              {notice}
+            </p>
+          ) : null}
         </DialogContent>
       </Dialog>
     </>
