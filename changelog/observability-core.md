@@ -12,8 +12,9 @@ is a code-level integration guide, not a new product design.
 - `src/lib/edge/observability/snapshot.ts`: `InvocationSnapshot`,
   `InvocationSqlCost`, `ObservedMetric` and safe allowlisted projection.
 - `src/lib/edge/observability/semantic.ts`:
-  `SqlSemanticObservationInput`, canonical-pointer validation,
-  per-invocation deduplication. This is **not** an index registry.
+  `SqlSemanticObservationInput`, syntax-only pointer validation, an explicitly
+  reviewed `SqlSemanticFieldPolicy` allowlist and per-invocation deduplication.
+  This is **not** an index registry.
 - `src/lib/edge/observability/bindings.ts`: D1 binding-level metadata
   instrumentation. It never derives event semantics from SQL text or binds.
 
@@ -29,10 +30,15 @@ import { currentInvocationLogger } from "@/lib/edge/observability/logger";
 
 const logger = currentInvocationLogger();
 const unsubscribe = logger?.onComplete((snapshot) => {
-  const { rowsRead, cumulativeSqlDurationMs } = snapshot.sql;
+  const { rowsRead, cumulativeSqlDurationMs, finishedStatements,
+    unobservedStatements, settledOperations } = snapshot.sql;
   // rowsRead.coverage: "complete" | "partial" | "unavailable"
   // rowsRead.value is omitted entirely when unavailable.
-  // cumulativeSqlDurationMs is summed engine time, not handler waiting time.
+  // cumulativeSqlDurationMs keeps non-negative fractional milliseconds (0.75).
+  // It is summed engine time, not handler waiting time.
+  // finishedStatements = observed D1 result slots, not inferred successes.
+  // unobservedStatements = attempted but without a returned per-statement result.
+  // settledOperations = D1 API calls completed/rejected (batch counts as one).
   if (rowsRead.coverage === "unavailable") return;
   // Optional, bounded, read-only handling; no D1 calls on normal requests.
 });
@@ -72,6 +78,13 @@ executed indexable predicate and provides a structured candidate after the
 execution has settled:
 
 ```ts
+// Policy must be from reviewed, server-owned static event fields (NOT
+// generated from user filters, event payload, or arbitrary field names).
+import { createSqlSemanticFieldPolicy } from "@/lib/edge/observability/semantic";
+const APPROVED_EVENT_FIELDS = createSqlSemanticFieldPolicy([
+  "/checkout/amount",
+]);
+
 // Example after awaiting an actually executed, indexable scalar query.
 logger?.recordSqlSemanticObservation({
   sitePk: verifiedSitePk,
@@ -80,7 +93,7 @@ logger?.recordSqlSemanticObservation({
   valueType: "number",
   indexKind: "range",
   execution: "succeeded",
-});
+}, APPROVED_EVENT_FIELDS);
 
 // Only explicitly opted-in, trusted internal consumers receive this field.
 logger?.onComplete(
@@ -97,11 +110,24 @@ logger?.onComplete(
 
 Input is runtime-validated and bounded to 32 distinct candidates per
 invocation, deduplicated by (sitePk, eventNameId, canonical JSON Pointer,
-valueType, indexKind). Only static conservative RFC 6901 paths are permitted.
-Do not pass raw event names, SQL, parameters, visitor/session IDs or arbitrary
-user values. The interface refuses candidates until a D1 statement has
-settled, refuses a cache HIT, and distinguishes failed from successful
-execution. **Binding-level completion does not prove a specific predicate
+valueType, indexKind). `isCanonicalSqlPointerSyntax` validates format **only**;
+it is not a privacy check. Each call must additionally supply an opaque policy
+made from explicitly reviewed, server-owned static field paths through
+`createSqlSemanticFieldPolicy([...])`. Without that policy, candidates are
+denied. The policy rejects unknown pointers and common sensitive components
+such as `private_email`, `access_token`, `customer/*`, `sessionId` and
+`apiKey`, even if a path was accidentally present in the supplied allowlist.
+Do not build a policy from user-generated data or filtering parameters;
+the **trusted producer** must ensure the policy matches the actual event schema
+and cannot be influenced by users. This is not an authorization boundary
+against malicious code already executing in the Worker.
+
+The interface refuses candidates without a returned statement result,
+rejects successful candidates when any D1 statement result is unobserved
+(e.g. a short Batch response), refuses a cache HIT, and distinguishes failed
+from successful execution. `d1SettledOperations` confirms only the API call
+settled, not that every statement executed. Without D1 `meta`, cost coverage
+remains `partial` / `unavailable`, never an invented zero. **Binding-level completion does not prove a specific predicate
 was part of a specific statement**: this remains the trusted calling site's
 responsibility. Do not report projection-only/grouping/missing-value,
 array-wildcard, NOT or non-indexable predicates as candidates. No automatic
@@ -174,3 +200,55 @@ the user's explicit review and authorization.
 
 The observations above limit release confidence; production Worker and
 Cloudflare-specific runtime verification remain for the user's review path.
+
+## Independent-review remediation (2026-11-19)
+
+The review at Recalloom
+`/Projects/InsightFlare/Plans/Observability-Core/Independent-Review-2026-11-19.md`
+superseded the earlier claim of completed acceptance. This branch fixes:
+
+- **F1, fractional SQL duration:** accept finite nonnegative
+  `meta.timings.sql_duration_ms` numbers without integer truncation or use
+  of `logger.increment`. All-known zero remains zero; valid `0.75` and
+  multiple fractional values retain their sum. Invalid/overflowing durations
+  do not count toward complete coverage. Rows-read/written and attempt counts
+  remain nonnegative integers only.
+- **F2, batch results:** `statements` counts submitted statements,
+  `finishedStatements` only counts per-statement D1 results actually
+  returned (including a legitimate `null` for `first()`). A missing batch
+  slot, sparse/undefined element, malformed batch return or rejection increments
+  `unobservedStatements` and reduces resource-metadata coverage. One batch
+  resolving or rejecting adds exactly one `settledOperations`, not an
+  inferred number of successful statements. The semantic producer rejects
+  `execution: "succeeded"` whenever any statement is unobserved in that
+  invocation; this is deliberately conservative and may suppress legitimate
+  candidates, but cannot invent confirmed results.
+- **F3, candidate privacy:** `isCanonicalSqlPointerSyntax` only validates
+  pointer syntax. The caller must explicitly supply an opaque
+  `SqlSemanticFieldPolicy` created from a reviewed, static allowlist.
+  There is no permissive default. Sensitive names (including snake_case and
+  camelCase forms) are rejected even if mistakenly included in that list.
+  Unknown/user-generated paths are excluded by the allowlist. A producer must
+  validate allowed paths against its owned event schema; the core does not
+  discover fields or accept an allowlist derived from untrusted input.
+  Runtime syntax/heuristic checks are defense in depth, not proof that an
+  otherwise permitted field is non-sensitive.
+
+**Revalidation:** 10 focused suites / **133 tests passed**; Node
+server/API/edge/Hono regression excluding the same two unrelated failing
+files: **231 suites / 2,159 tests passed**. Full TypeScript, relevant ESLint,
+Prettier, architecture and layer checks passed. The two excluded existing
+files still require baseline reconciliation; do not claim a full repository
+green run.
+
+**Local build:** generating `docs/skills.json` temporarily bypassed its stale
+generated-artifact gate, and the original checked-in file was restored. The
+next `build:local` prebuild requirement stopped because neither
+`MAIN_SECRET` nor `DAILY_SALT_SECRET` was available in this worktree's
+environment. No secrets were persisted, and no complete Worker bundle or
+Cloudflare runtime validation has been obtained. This remains an
+environment-level release-evidence limitation, not a passed build.
+
+**Merge status:** local commits only; independent user acceptance, any needed
+targeted Cloudflare verification, and an explicit merge decision remain
+outstanding.

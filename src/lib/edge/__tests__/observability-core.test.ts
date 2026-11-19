@@ -150,7 +150,9 @@ describe("minimal invocation SQL cost snapshot", () => {
     await expect(env.DB.prepare("SELECT 2").all()).rejects.toThrow("D1 failed");
     expect(logger.snapshot().sql).toMatchObject({
       statements: 2,
-      finishedStatements: 2,
+      finishedStatements: 1,
+      unobservedStatements: 1,
+      settledOperations: 2,
       failedStatements: 1,
       rowsRead: { coverage: "unavailable" },
       rowsWritten: { coverage: "unavailable" },
@@ -203,6 +205,218 @@ describe("minimal invocation SQL cost snapshot", () => {
     });
     expect(snapshot.sql.rowsRead).toEqual({ coverage: "complete", value: 30 });
     expect(snapshot.sql.retries).toEqual({ coverage: "complete", value: 1 });
+  });
+
+  it("retains fractional D1 SQL engine time without changing integer counters", async () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const env = wrap(
+      mockDatabase([
+        {
+          results: [],
+          meta: {
+            rows_read: 2,
+            rows_written: 0,
+            timings: { sql_duration_ms: 0.75 },
+            total_attempts: 1,
+          },
+        },
+        {
+          results: [],
+          meta: {
+            rows_read: 3,
+            rows_written: 1,
+            timings: { sql_duration_ms: 1.375 },
+            total_attempts: 2,
+          },
+        },
+        {
+          results: [],
+          meta: {
+            rows_read: 0,
+            rows_written: 0,
+            timings: { sql_duration_ms: 0 },
+            total_attempts: 1,
+          },
+        },
+      ]),
+      logger,
+    );
+    await env.DB.prepare("SELECT 1").all();
+    expect(logger.snapshot().sql.cumulativeSqlDurationMs).toEqual({
+      coverage: "complete",
+      value: 0.75,
+    });
+    await env.DB.prepare("SELECT 2").all();
+    await env.DB.prepare("SELECT 3").all();
+    expect(logger.snapshot().sql).toMatchObject({
+      statements: 3,
+      finishedStatements: 3,
+      unobservedStatements: 0,
+      settledOperations: 3,
+      rowsRead: { coverage: "complete", value: 5 },
+      rowsWritten: { coverage: "complete", value: 1 },
+      cumulativeSqlDurationMs: { coverage: "complete", value: 2.125 },
+      totalAttempts: { coverage: "complete", value: 4 },
+      retries: { coverage: "complete", value: 1 },
+    });
+    expect(logger.build().performance.d1SqlDurationMs).toBe(2.125);
+  });
+
+  it("does not pass invalid duration or fractional row counts off as valid metadata", async () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const env = wrap(
+      mockDatabase([
+        {
+          results: [],
+          meta: {
+            rows_read: 2.3,
+            rows_written: 0,
+            timings: { sql_duration_ms: -0.25 },
+            total_attempts: 1.5,
+          },
+        },
+        {
+          results: [],
+          meta: {
+            rows_read: 4,
+            rows_written: 0,
+            timings: { sql_duration_ms: 0.125 },
+            total_attempts: 1,
+          },
+        },
+      ]),
+      logger,
+    );
+    await env.DB.prepare("SELECT 1").all();
+    expect(logger.snapshot().sql).toMatchObject({
+      rowsRead: { coverage: "unavailable" },
+      rowsWritten: { coverage: "complete", value: 0 },
+      cumulativeSqlDurationMs: { coverage: "unavailable" },
+      totalAttempts: { coverage: "unavailable" },
+    });
+    await env.DB.prepare("SELECT 2").all();
+    expect(logger.snapshot().sql).toMatchObject({
+      rowsRead: { coverage: "partial", value: 4 },
+      cumulativeSqlDurationMs: { coverage: "partial", value: 0.125 },
+      totalAttempts: { coverage: "partial", value: 1 },
+    });
+  });
+
+  it("does not invent completed SQL from a short, malformed or sparse batch", async () => {
+    const statement = {
+      bind: vi.fn(),
+      all: vi.fn(),
+      first: vi.fn(),
+      run: vi.fn(),
+      raw: vi.fn(),
+    };
+    statement.bind.mockImplementation(() => statement);
+    const batch = vi
+      .fn()
+      .mockResolvedValueOnce([
+        {
+          results: [],
+          meta: {
+            rows_read: 7,
+            rows_written: 0,
+            timings: { sql_duration_ms: 0.75 },
+          },
+        },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        undefined,
+        { results: [], meta: { rows_read: 1 } },
+      ])
+      .mockResolvedValueOnce({ malformed: true });
+    const db = {
+      prepare: vi.fn(() => statement as unknown as D1PreparedStatement),
+      batch,
+      exec: vi.fn(),
+      withSession: vi.fn(),
+      dump: vi.fn(),
+    } as unknown as D1Database;
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const env = wrap(db, logger);
+    const makeBatch = () => [
+      env.DB.prepare("SELECT 1"),
+      env.DB.prepare("SELECT 2"),
+    ];
+
+    await env.DB.batch(makeBatch());
+    expect(logger.snapshot().sql).toMatchObject({
+      statements: 2,
+      finishedStatements: 1,
+      unobservedStatements: 1,
+      settledOperations: 1,
+      rowsRead: { coverage: "partial", value: 7 },
+      cumulativeSqlDurationMs: { coverage: "partial", value: 0.75 },
+    });
+    await env.DB.batch(makeBatch());
+    expect(logger.snapshot().sql).toMatchObject({
+      statements: 4,
+      finishedStatements: 1,
+      unobservedStatements: 3,
+      settledOperations: 2,
+    });
+    await env.DB.batch(makeBatch());
+    expect(logger.snapshot().sql).toMatchObject({
+      statements: 6,
+      finishedStatements: 2,
+      unobservedStatements: 4,
+      settledOperations: 3,
+      rowsRead: { coverage: "partial", value: 8 },
+    });
+    await env.DB.batch(makeBatch());
+    expect(logger.snapshot().sql).toMatchObject({
+      statements: 8,
+      finishedStatements: 2,
+      unobservedStatements: 6,
+      settledOperations: 4,
+    });
+    expect(batch).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not treat rejected batch statements as individually completed", async () => {
+    const statement = {
+      bind: vi.fn(),
+      all: vi.fn(),
+      first: vi.fn(),
+      run: vi.fn(),
+      raw: vi.fn(),
+    };
+    const db = {
+      prepare: vi.fn(() => statement as unknown as D1PreparedStatement),
+      batch: vi.fn().mockRejectedValue(new Error("batch rejected")),
+      exec: vi.fn(),
+      dump: vi.fn(),
+      withSession: vi.fn(),
+    } as unknown as D1Database;
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const env = wrap(db, logger);
+    await expect(
+      env.DB.batch([env.DB.prepare("SELECT 1"), env.DB.prepare("SELECT 2")]),
+    ).rejects.toThrow("batch rejected");
+    expect(logger.snapshot().sql).toMatchObject({
+      statements: 2,
+      finishedStatements: 0,
+      unobservedStatements: 2,
+      settledOperations: 1,
+      failedStatements: 2,
+      rowsRead: { coverage: "unavailable" },
+    });
   });
 
   it("keeps HIT separate from unknown SQL cost and requires no D1 read/write", () => {

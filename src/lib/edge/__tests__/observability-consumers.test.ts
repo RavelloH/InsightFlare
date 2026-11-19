@@ -5,6 +5,7 @@ import {
   createInvocationLogger,
   type InvocationLogger,
 } from "@/lib/edge/observability/logger";
+import { createSqlSemanticFieldPolicy } from "@/lib/edge/observability/semantic";
 import type { InvocationSnapshot } from "@/lib/edge/observability/snapshot";
 
 function fakeD1() {
@@ -94,14 +95,17 @@ describe("Filter-SQL and smart-index consumer contract", () => {
 
     // Only the trusted query caller knows this was an executed scalar range predicate.
     expect(
-      logger.recordSqlSemanticObservation({
-        sitePk: 1,
-        eventNameId: 2,
-        jsonPointer: "/checkout/amount",
-        valueType: "number",
-        indexKind: "range",
-        execution: "succeeded",
-      }),
+      logger.recordSqlSemanticObservation(
+        {
+          sitePk: 1,
+          eventNameId: 2,
+          jsonPointer: "/checkout/amount",
+          valueType: "number",
+          indexKind: "range",
+          execution: "succeeded",
+        },
+        createSqlSemanticFieldPolicy(["/checkout/amount"]),
+      ),
     ).toBe(true);
 
     logger.setRequest({

@@ -32,12 +32,76 @@ export interface SqlSemanticObservation {
 export const MAX_SQL_SEMANTIC_CANDIDATES = 32;
 
 /**
- * Conservative v1 pointer contract. Each canonical segment must be a static
- * field name, with RFC 6901 ~0/~1 escapes permitted. Dynamic identifiers,
- * emails, UUIDs, wildcards, selector indices and raw filter values are rejected.
- * Broader keys require an explicit future privacy review.
+ * Only a reviewed, explicit field list can authorize a semantic candidate.
+ * This is a capability for a trusted query producer, not a schema discovery
+ * mechanism or an API accepting user-provided field names.
  */
-export function isSafeCanonicalPointer(pointer: unknown): pointer is string {
+const SQL_FIELD_POLICY_BRAND: unique symbol = Symbol(
+  "sql-semantic-field-policy",
+);
+export interface SqlSemanticFieldPolicy {
+  readonly [SQL_FIELD_POLICY_BRAND]: true;
+}
+const POLICY_PATHS = new WeakMap<SqlSemanticFieldPolicy, ReadonlySet<string>>();
+
+/** Defense in depth; a syntactically valid pointer can still identify a user. */
+const SENSITIVE_FIELD_COMPONENT =
+  /(?:^|[_-])(email|e_mail|mail|phone|mobile|password|passwd|token|secret|credential|auth|authorization|session|visitor|identity|identification|user|users|customer|account|ip|address|name|ssn|dob|birth|cookie|api_key|private|personal)(?:$|[_-])/i;
+
+function hasSensitiveComponent(pointer: string): boolean {
+  return pointer
+    .slice(1)
+    .split("/")
+    .map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"))
+    .map((part) => part.replace(/([a-z0-9])([A-Z])/g, "$1_$2"))
+    .some((part) => SENSITIVE_FIELD_COMPONENT.test(part));
+}
+
+/**
+ * Supply a literal allowlist reviewed against the actual Event Schema.
+ * Never derive it from filters, request payloads or user-defined field names.
+ * Unknown or sensitive paths are rejected, even if they parse as JSON Pointers.
+ */
+export function createSqlSemanticFieldPolicy(
+  approvedStaticPointers: readonly string[],
+): SqlSemanticFieldPolicy {
+  const allowed = new Set<string>();
+  if (Array.isArray(approvedStaticPointers)) {
+    for (const pointer of approvedStaticPointers) {
+      if (
+        isCanonicalSqlPointerSyntax(pointer) &&
+        !hasSensitiveComponent(pointer)
+      ) {
+        allowed.add(pointer);
+      }
+    }
+  }
+  const policy = Object.freeze({
+    [SQL_FIELD_POLICY_BRAND]: true as const,
+  });
+  POLICY_PATHS.set(policy, allowed);
+  return policy;
+}
+
+export function isApprovedSqlSemanticField(
+  pointer: string,
+  policy: SqlSemanticFieldPolicy | undefined,
+): boolean {
+  return (
+    typeof policy === "object" &&
+    policy !== null &&
+    POLICY_PATHS.get(policy)?.has(pointer) === true &&
+    !hasSensitiveComponent(pointer)
+  );
+}
+
+/**
+ * Checks ONLY JSON Pointer syntax/shape, not privacy or schema authorization.
+ * The producer must also pass a reviewed SqlSemanticFieldPolicy.
+ */
+export function isCanonicalSqlPointerSyntax(
+  pointer: unknown,
+): pointer is string {
   if (
     typeof pointer !== "string" ||
     pointer.length < 2 ||
@@ -59,11 +123,13 @@ export function isSafeCanonicalPointer(pointer: unknown): pointer is string {
 
 export function normalizeSqlSemanticObservation(
   input: SqlSemanticObservationInput,
+  policy: SqlSemanticFieldPolicy | undefined,
 ): SqlSemanticObservation | undefined {
   if (!input || typeof input !== "object") return;
   if (!Number.isSafeInteger(input.sitePk) || input.sitePk < 1) return;
   if (!Number.isSafeInteger(input.eventNameId) || input.eventNameId < 1) return;
-  if (!isSafeCanonicalPointer(input.jsonPointer)) return;
+  if (!isCanonicalSqlPointerSyntax(input.jsonPointer)) return;
+  if (!isApprovedSqlSemanticField(input.jsonPointer, policy)) return;
   if (input.valueType !== "string" && input.valueType !== "number") return;
   if (input.indexKind !== "equality" && input.indexKind !== "range") return;
   if (input.execution !== "succeeded" && input.execution !== "failed") return;

@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import {
   appendSqlSemanticObservation,
   normalizeSqlSemanticObservation,
+  type SqlSemanticFieldPolicy,
   type SqlSemanticObservation,
   type SqlSemanticObservationInput,
 } from "./semantic";
@@ -52,8 +53,12 @@ export interface InvocationPerformance {
   d1SqlDurationMs?: number;
   d1TotalAttempts?: number;
   d1Retries?: number;
-  /** Statement attempts with a settled result or an observed failure. */
+  /** Count of per-statement D1 results actually returned, never inferred. */
   d1FinishedStatements?: number;
+  /** Statements with no result observed (rejection, missing batch slot, etc.). */
+  d1UnobservedStatements?: number;
+  /** Number of D1 API calls whose promise settled, not a statement count. */
+  d1SettledOperations?: number;
   d1SqlDurationCoverage?: InvocationD1RowsCoverage;
   d1AttemptsCoverage?: InvocationD1RowsCoverage;
   doSqlStatements?: number;
@@ -88,9 +93,9 @@ export type InvocationPerformanceCounter =
   | "failedStatements"
   | "flushedVisits"
   | "flushedCustomEvents"
-  | "d1SqlDurationMs"
   | "d1TotalAttempts"
   | "d1Retries"
+  | "d1SettledOperations"
   | "doSqlStatements"
   | "doSqlRowsRead"
   | "doSqlRowsWritten"
@@ -280,7 +285,10 @@ export interface InvocationLogger {
   /** Read-only safe projection: no trace, log data, raw paths or identity. */
   snapshot(options?: InvocationCompletionOptions): InvocationSnapshot;
   /** Trusted query caller: report only a verified executed indexable predicate. */
-  recordSqlSemanticObservation(input: SqlSemanticObservationInput): boolean;
+  recordSqlSemanticObservation(
+    input: SqlSemanticObservationInput,
+    policy: SqlSemanticFieldPolicy,
+  ): boolean;
   /** Register only before emission. Does not observe other invocations. */
   onComplete(
     consumer: InvocationCompletionConsumer,
@@ -598,7 +606,7 @@ export function createInvocationLogger(
         ? withSqlSemanticObservations(base, [...sqlObservations.values()])
         : base;
     },
-    recordSqlSemanticObservation(input) {
+    recordSqlSemanticObservation(input, policy) {
       if (
         emitted ||
         performance.cache === "HIT" ||
@@ -606,17 +614,24 @@ export function createInvocationLogger(
         typeof input !== "object"
       )
         return false;
-      // Binding metadata proves a statement settled, but it cannot prove which
-      // predicate was used. Only trusted SQL callers may supply this hint.
-      if (!performance.d1FinishedStatements) return false;
-      if (input.execution === "failed" && !performance.failedStatements)
-        return false;
+      // A resolved D1 result is different from an attempted/missing batch slot.
+      // For rejected calls only the API operation is known to have settled;
+      // the trusted query caller still owns proof of predicate execution.
+      // Conservative: an incomplete batch may hide which predicate ran.
+      // Do not issue successful candidate demand while any result is unknown.
       if (
         input.execution === "succeeded" &&
-        (performance.d1Statements ?? 0) <= (performance.failedStatements ?? 0)
+        (!(performance.d1FinishedStatements ?? 0) ||
+          (performance.d1UnobservedStatements ?? 0) > 0)
       )
         return false;
-      const normalized = normalizeSqlSemanticObservation(input);
+      if (
+        input.execution === "failed" &&
+        (!(performance.failedStatements ?? 0) ||
+          !(performance.d1SettledOperations ?? 0))
+      )
+        return false;
+      const normalized = normalizeSqlSemanticObservation(input, policy);
       return normalized
         ? appendSqlSemanticObservation(sqlObservations, normalized)
         : false;

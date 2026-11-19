@@ -22,7 +22,12 @@ export interface ObservedMetric {
 
 export interface InvocationSqlCost {
   readonly statements: number;
+  /** Per-statement D1 result objects actually observed; not inferred from a settled batch. */
   readonly finishedStatements: number;
+  /** Attempted statements without a returned D1 result (outcome unconfirmed). */
+  readonly unobservedStatements: number;
+  /** Resolved or rejected D1 API calls; one batch is one operation. */
+  readonly settledOperations: number;
   readonly failedStatements: number;
   readonly rowsRead: ObservedMetric;
   readonly rowsWritten: ObservedMetric;
@@ -182,6 +187,8 @@ export function toInvocationSnapshot(
   const sql = Object.freeze({
     statements,
     finishedStatements: perf.d1FinishedStatements ?? 0,
+    unobservedStatements: perf.d1UnobservedStatements ?? 0,
+    settledOperations: perf.d1SettledOperations ?? 0,
     failedStatements: failed,
     rowsRead: valueOrAbsent(perf.d1RowsReadCoverage, perf.d1RowsRead),
     rowsWritten: valueOrAbsent(perf.d1RowsWrittenCoverage, perf.d1RowsWritten),

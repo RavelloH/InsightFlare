@@ -19,17 +19,41 @@ type D1MetaLike = {
   total_attempts?: unknown;
 };
 type D1MetaState = {
-  completed: number;
+  /** Statements whose wrapper promise has settled, including missing batch slots. */
+  accounted: number;
+  /** Statement results actually returned by D1 (not inferred from batch length). */
+  observedResults: number;
   rowsReadAvailable: number;
   rowsWrittenAvailable: number;
   sqlDurationAvailable: number;
+  sqlDurationTotalMs: number;
   attemptsAvailable: number;
 };
+
+function newD1MetaState(): D1MetaState {
+  return {
+    accounted: 0,
+    observedResults: 0,
+    rowsReadAvailable: 0,
+    rowsWrittenAvailable: 0,
+    sqlDurationAvailable: 0,
+    sqlDurationTotalMs: 0,
+    attemptsAvailable: 0,
+  };
+}
+
 function asNonNegativeInteger(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0
-    ? Math.trunc(value)
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
     : undefined;
 }
+
+function asNonNegativeDuration(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
 function statementKind(sql: string): string {
   const keyword = sql
     .trimStart()
@@ -37,28 +61,55 @@ function statementKind(sql: string): string {
     ?.toLowerCase();
   return keyword || "other";
 }
+
 function rowsCoverage(
   available: number,
-  completed: number,
+  accounted: number,
 ): InvocationD1RowsCoverage {
   if (available === 0) return "unavailable";
-  return available === completed ? "complete" : "partial";
+  return available === accounted ? "complete" : "partial";
 }
+
+function publishD1State(logger: InvocationLogger, state: D1MetaState): void {
+  D1_META_STATE.set(logger, state);
+  logger.setPerformance({
+    // A settled D1 Promise is not proof that each individual batch statement
+    // returned. Never turn missing results or a rejected batch into successes.
+    d1FinishedStatements: state.observedResults,
+    d1UnobservedStatements: state.accounted - state.observedResults,
+    d1SqlDurationCoverage: rowsCoverage(
+      state.sqlDurationAvailable,
+      state.accounted,
+    ),
+    d1AttemptsCoverage: rowsCoverage(state.attemptsAvailable, state.accounted),
+    d1RowsReadAvailable: state.rowsReadAvailable > 0,
+    d1RowsReadCoverage: rowsCoverage(state.rowsReadAvailable, state.accounted),
+    d1RowsWrittenCoverage: rowsCoverage(
+      state.rowsWrittenAvailable,
+      state.accounted,
+    ),
+    ...(state.sqlDurationAvailable > 0
+      ? { d1SqlDurationMs: state.sqlDurationTotalMs }
+      : {}),
+  });
+}
+
 function recordD1Result(logger: InvocationLogger, result: unknown): void {
   const meta = (result as { meta?: D1MetaLike } | null)?.meta;
-  const state = D1_META_STATE.get(logger) ?? {
-    completed: 0,
-    rowsReadAvailable: 0,
-    rowsWrittenAvailable: 0,
-    sqlDurationAvailable: 0,
-    attemptsAvailable: 0,
-  };
-  state.completed += 1;
-  const sqlDuration = asNonNegativeInteger(meta?.timings?.sql_duration_ms);
+  const state = D1_META_STATE.get(logger) ?? newD1MetaState();
+  state.accounted += 1;
+  state.observedResults += 1;
+
+  const sqlDuration = asNonNegativeDuration(meta?.timings?.sql_duration_ms);
   if (sqlDuration !== undefined) {
-    state.sqlDurationAvailable += 1;
-    logger.increment("d1SqlDurationMs", sqlDuration);
+    const nextTotal = state.sqlDurationTotalMs + sqlDuration;
+    // Never expose an overflowing total as a valid measurement.
+    if (Number.isFinite(nextTotal)) {
+      state.sqlDurationAvailable += 1;
+      state.sqlDurationTotalMs = nextTotal;
+    }
   }
+
   const attempts = asNonNegativeInteger(meta?.total_attempts);
   if (attempts !== undefined) {
     state.attemptsAvailable += 1;
@@ -78,51 +129,23 @@ function recordD1Result(logger: InvocationLogger, result: unknown): void {
     logger.increment("d1RowsWritten", rowsWritten);
   }
 
-  D1_META_STATE.set(logger, state);
-  logger.setPerformance({
-    d1FinishedStatements: state.completed,
-    d1SqlDurationCoverage: rowsCoverage(
-      state.sqlDurationAvailable,
-      state.completed,
-    ),
-    d1AttemptsCoverage: rowsCoverage(state.attemptsAvailable, state.completed),
-    d1RowsReadAvailable: state.rowsReadAvailable > 0,
-    d1RowsReadCoverage: rowsCoverage(state.rowsReadAvailable, state.completed),
-    d1RowsWrittenCoverage: rowsCoverage(
-      state.rowsWrittenAvailable,
-      state.completed,
-    ),
-  });
+  publishD1State(logger, state);
 }
-function markMissingD1BatchResults(
+
+/**
+ * Missing slots, malformed batch responses and rejected calls are counted in
+ * the metric coverage denominator, but NEVER in observed/finished results.
+ */
+function markUnobservedD1Results(
   logger: InvocationLogger,
-  missingResults: number,
+  unobserved: number,
 ): void {
-  if (missingResults <= 0) return;
-  const state = D1_META_STATE.get(logger) ?? {
-    completed: 0,
-    rowsReadAvailable: 0,
-    rowsWrittenAvailable: 0,
-    sqlDurationAvailable: 0,
-    attemptsAvailable: 0,
-  };
-  state.completed += missingResults;
-  D1_META_STATE.set(logger, state);
-  logger.setPerformance({
-    d1FinishedStatements: state.completed,
-    d1SqlDurationCoverage: rowsCoverage(
-      state.sqlDurationAvailable,
-      state.completed,
-    ),
-    d1AttemptsCoverage: rowsCoverage(state.attemptsAvailable, state.completed),
-    d1RowsReadAvailable: state.rowsReadAvailable > 0,
-    d1RowsReadCoverage: rowsCoverage(state.rowsReadAvailable, state.completed),
-    d1RowsWrittenCoverage: rowsCoverage(
-      state.rowsWrittenAvailable,
-      state.completed,
-    ),
-  });
+  if (unobserved <= 0) return;
+  const state = D1_META_STATE.get(logger) ?? newD1MetaState();
+  state.accounted += unobserved;
+  publishD1State(logger, state);
 }
+
 async function measureD1<T>(
   logger: InvocationLogger,
   operation: string,
@@ -135,19 +158,31 @@ async function measureD1<T>(
   logger.increment("d1Statements", statementCount);
   try {
     const result = await action();
-    if (resultIsBatch && Array.isArray(result)) {
-      for (const item of result) recordD1Result(logger, item);
-      markMissingD1BatchResults(
-        logger,
-        Math.max(0, statementCount - result.length),
-      );
-    } else {
+    if (resultIsBatch) {
+      if (Array.isArray(result)) {
+        const slots = Math.min(statementCount, result.length);
+        let observed = 0;
+        for (let index = 0; index < slots; index += 1) {
+          if (!(index in result) || result[index] === undefined) continue;
+          recordD1Result(logger, result[index]);
+          observed += 1;
+        }
+        markUnobservedD1Results(logger, statementCount - observed);
+      } else {
+        markUnobservedD1Results(logger, statementCount);
+      }
+    } else if (result !== undefined) {
       recordD1Result(logger, result);
+    } else {
+      markUnobservedD1Results(logger, statementCount);
     }
+    // One D1 API call settled; this is not the count of executed statements.
+    logger.increment("d1SettledOperations");
     span.end({ statementCount });
     return result;
   } catch (error) {
-    markMissingD1BatchResults(logger, statementCount);
+    markUnobservedD1Results(logger, statementCount);
+    logger.increment("d1SettledOperations");
     logger.increment("failedStatements", statementCount);
     span.fail({ statementCount, ...errorLogData(error) });
     throw error;
