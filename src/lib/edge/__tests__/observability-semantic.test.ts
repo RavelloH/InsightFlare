@@ -6,9 +6,13 @@ import {
   type InvocationLogger,
 } from "@/lib/edge/observability/logger";
 import {
+  appendSqlSemanticObservation,
   createSqlSemanticFieldPolicy,
+  isApprovedSqlSemanticField,
   isCanonicalSqlPointerSyntax,
   MAX_SQL_SEMANTIC_CANDIDATES,
+  normalizeSqlSemanticObservation,
+  sqlSemanticCandidateKey,
   type SqlSemanticObservationInput,
 } from "@/lib/edge/observability/semantic";
 
@@ -73,6 +77,97 @@ describe("optional SQL semantic observation", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
   afterEach(() => vi.restoreAllMocks());
+
+  it("rejects malformed candidate dimensions before tracking demand", () => {
+    const policy = createSqlSemanticFieldPolicy([
+      "/checkout/amount",
+      "/items~1total",
+      "/privateEmail",
+      "/untrusted~2pointer",
+    ]);
+    expect(Object.isFrozen(policy)).toBe(true);
+
+    for (const badPointer of [
+      null,
+      42,
+      "",
+      "field",
+      "/" + "a".repeat(257),
+      "/a/b/c/d/e/f/g/h/i",
+      "/bad~2escape",
+      "/0",
+      "/items/*",
+    ]) {
+      expect(isCanonicalSqlPointerSyntax(badPointer), String(badPointer)).toBe(
+        false,
+      );
+    }
+    expect(isCanonicalSqlPointerSyntax("/items~1total")).toBe(true);
+    expect(isApprovedSqlSemanticField("/items~1total", policy)).toBe(true);
+    expect(isApprovedSqlSemanticField("/privateEmail", policy)).toBe(false);
+    expect(isApprovedSqlSemanticField("/untrusted~2pointer", policy)).toBe(
+      false,
+    );
+    expect(isApprovedSqlSemanticField("/unknown", policy)).toBe(false);
+    expect(isApprovedSqlSemanticField("/checkout/amount", undefined)).toBe(
+      false,
+    );
+    expect(isApprovedSqlSemanticField("/checkout/amount", null as never)).toBe(
+      false,
+    );
+
+    const invalid: Array<SqlSemanticObservationInput | null> = [
+      null,
+      { ...candidate, sitePk: 0 },
+      { ...candidate, eventNameId: 0 },
+      { ...candidate, eventNameId: Number.NaN },
+      { ...candidate, jsonPointer: "/unknown" },
+      { ...candidate, jsonPointer: "/privateEmail" },
+      { ...candidate, valueType: "boolean" as never },
+      { ...candidate, indexKind: "prefix" as never },
+      { ...candidate, execution: "pending" as never },
+    ];
+    for (const input of invalid) {
+      expect(
+        normalizeSqlSemanticObservation(
+          input as SqlSemanticObservationInput,
+          policy,
+        ),
+        String(input?.jsonPointer),
+      ).toBeUndefined();
+    }
+
+    const valid = normalizeSqlSemanticObservation(
+      {
+        ...candidate,
+        jsonPointer: "/items~1total",
+        valueType: "string",
+        indexKind: "equality",
+        execution: "failed",
+      },
+      policy,
+    );
+    expect(valid).toMatchObject({
+      jsonPointer: "/items~1total",
+      valueType: "string",
+      indexKind: "equality",
+      executions: 1,
+      requestDemand: 1,
+      failedExecutions: 1,
+    });
+    expect(Object.isFrozen(valid)).toBe(true);
+    if (!valid) throw new Error("Expected approved semantic observation");
+    const key = sqlSemanticCandidateKey(valid);
+    const observed = new Map<string, typeof valid>();
+    expect(appendSqlSemanticObservation(observed, valid)).toBe(true);
+    expect(appendSqlSemanticObservation(observed, valid)).toBe(true);
+    expect(observed.get(key)).toMatchObject({
+      requestDemand: 1,
+      executions: 2,
+      failedExecutions: 2,
+    });
+    expect(Object.isFrozen(observed.get(key))).toBe(true);
+  });
 
   it("only accepts trusted semantic hints after settled actual D1 work", async () => {
     const logger = createInvocationLogger({
