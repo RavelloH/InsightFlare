@@ -297,4 +297,123 @@ export function registerPerceptionScenarios(context: E2eContext) {
     await expect(tab.getByRole("option")).toHaveCount(0);
     await tab.close();
   });
+
+  test("12s. Filter Builder selects an observed local value and applies its legal filter", async ({
+    page,
+  }) => {
+    const team = context.seed.teams.teamA!;
+    const site = context.seed.sites.siteA!;
+    const slug = site.domain
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/gu, "-")
+      .replace(/^-+|-+$/gu, "");
+    await signIn(page, "owner-a", context.passwords.ownerA);
+    await page.goto("/zh/app/" + team.slug + "/" + slug + "/pages", {
+      waitUntil: "domcontentloaded",
+    });
+    await expect(
+      page.getByRole("row", { name: /查看详情: \/product/u }),
+    ).toBeVisible();
+    // The authorized Analytics response populates the index, not a fixture.
+    await page.getByTestId("perception-search-trigger").click();
+    const global = page.getByRole("combobox", {
+      name: /搜索页面、事件和导航/u,
+    });
+    await global.fill("/product");
+    await expect(page.getByRole("option", { name: /product/u })).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    await page
+      .getByRole("button", { name: "筛选", exact: true })
+      .first()
+      .click();
+    const panel = page.getByRole("dialog", { name: "筛选条件" });
+    await expect(panel).toBeVisible();
+    const add = panel.getByRole("button", { name: "添加条件" }).first();
+    if (await add.count()) await add.click();
+    const picker = panel
+      .getByRole("button", { name: /^(页面路径|事件名称)$/u })
+      .last();
+    await expect(picker).toBeVisible();
+    await picker.click();
+    const field = page
+      .getByRole("button", { name: "页面路径", exact: true })
+      .last();
+    await expect(field).toBeVisible();
+    await field.click();
+    await panel
+      .getByRole("button", { name: /未设置/u })
+      .last()
+      .click();
+    const localLabel = page.getByText("本机曾观察到的值", { exact: true });
+    await expect(localLabel).toBeVisible();
+    const observedValue = localLabel
+      .locator("..")
+      .getByRole("button", { name: "/product", exact: true });
+    await expect(observedValue).toBeVisible();
+    await observedValue.click();
+    await expect(
+      panel.getByRole("button", { name: "/product", exact: true }),
+    ).toBeVisible();
+    await panel.getByRole("button", { name: "应用筛选", exact: true }).click();
+    await expect.poll(() => page.url()).toContain("/pages");
+    await expect(
+      page.getByRole("row", { name: /查看详情: \/product/u }),
+    ).toBeVisible();
+  });
+
+  test("12t. revoked search action cannot navigate and cross-tab scope clear hides stale observations", async ({
+    page,
+  }) => {
+    const team = context.seed.teams.teamA!;
+    const site = context.seed.sites.siteA!;
+    const slug = site.domain
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/gu, "-")
+      .replace(/^-+|-+$/gu, "");
+    const route = "/zh/app/" + team.slug + "/" + slug + "/pages";
+    await signIn(page, "owner-a", context.passwords.ownerA);
+    await page.goto(route, { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("row", { name: /查看详情: \/product/u }),
+    ).toBeVisible();
+    await page.getByTestId("perception-search-trigger").click();
+    const search = page.getByRole("combobox", {
+      name: /搜索页面、事件和导航/u,
+    });
+    await search.fill("/product");
+    const option = page.getByRole("option", { name: /product/u });
+    await expect(option).toBeVisible();
+    // Both tabs must hold an authorized observation BEFORE revocation.
+    const tab = await page.context().newPage();
+    await tab.goto(route, { waitUntil: "domcontentloaded" });
+    const tabTrigger = tab.getByTestId("perception-search-trigger");
+    await expect(tabTrigger).toBeVisible();
+    await expect(tab.locator("[data-page-transition]").first()).toHaveAttribute(
+      "data-page-transition-ready",
+      "true",
+    );
+    await tabTrigger.click();
+    const input = tab.getByRole("combobox", { name: /搜索页面、事件和导航/u });
+    await expect(input).toBeVisible();
+    await input.fill("/product");
+    await expect(tab.getByRole("option", { name: /product/u })).toBeVisible();
+    // A live authorization endpoint can revoke access after the index was populated.
+    await page.route("**/api/private/admin/sites?**", async (request) => {
+      await request.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, data: [] }),
+      });
+    });
+    await option.click();
+    await expect(page.getByText("目标已失效或当前无权访问。")).toBeVisible();
+    await expect(option).toHaveCount(0);
+    expect(new URL(page.url()).pathname).toBe(route);
+    // The real revoke action also broadcasts the exact scope to the other tab.
+    await expect(tab.getByRole("option", { name: /product/u })).toHaveCount(0);
+    await page.unroute("**/api/private/admin/sites?**");
+    await page.keyboard.press("Escape");
+    await tab.close();
+  });
 }

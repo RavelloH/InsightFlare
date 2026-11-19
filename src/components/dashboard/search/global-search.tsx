@@ -99,8 +99,16 @@ export function GlobalPerceptionSearch({ locale }: { locale: Locale }) {
         return;
       }
     }
+    // Permissions may change while awaiting the authorization API.
+    // Resolve the typed destination again against the latest in-memory grants.
+    const latest = getPerceptionAuthorization();
+    const verified = latest ? resolveSearchAction(result, latest) : null;
+    if (!verified || verified.type !== "navigate") {
+      setNotice(labels.unavailable);
+      return;
+    }
     setOpen(false);
-    window.location.assign(action.href);
+    window.location.assign(verified.href);
   }
   return (
     <>

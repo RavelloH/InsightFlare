@@ -1,11 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { resolveSearchAction, type SiteSearchSection } from "./core";
+import { perceptionIndex } from "./index";
 import {
   capturePerceptionGuard,
   clearPerceptionSession,
   currentPerceptionScope,
+  getPerceptionAuthorization,
   localPerceptionSearch,
   observeLoadedDimension,
+  revokePerceptionSite,
   setPerceptionAuthorization,
 } from "./runtime";
 
@@ -17,10 +21,22 @@ const base = {
   activeSiteBase: "/zh/app/team-a/site-a",
   allowedTeamIds: new Set(["team-a"]),
   allowedSiteIds: new Set(["site-a"]),
+  teamRoutes: new Map([["team-a", "/zh/app/team-a"]]),
+  siteRoutes: new Map([
+    [
+      "site-a",
+      {
+        teamId: "team-a",
+        baseHref: "/zh/app/team-a/site-a",
+        sections: new Set<SiteSearchSection>(["overview", "pages", "events"]),
+      },
+    ],
+  ]),
 };
 beforeEach(() => vi.stubGlobal("indexedDB", undefined));
-afterEach(() => {
-  clearPerceptionSession();
+afterEach(async () => {
+  await clearPerceptionSession();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 describe("perception runtime authority and request guards", () => {
@@ -34,6 +50,20 @@ describe("perception runtime authority and request guards", () => {
         activeSiteId: "site-b",
         activeSiteBase: "/zh/app/team-a/site-b",
         allowedSiteIds: new Set(["site-a", "site-b"]),
+        siteRoutes: new Map([
+          [
+            "site-b",
+            {
+              teamId: "team-a",
+              baseHref: "/zh/app/team-a/site-b",
+              sections: new Set<SiteSearchSection>([
+                "overview",
+                "pages",
+                "events",
+              ]),
+            },
+          ],
+        ]),
       },
       [],
     );
@@ -113,7 +143,13 @@ describe("perception runtime authority and request guards", () => {
     expect(found).toHaveLength(1);
     expect(found[0].action).toEqual({
       type: "navigate",
-      href: "/zh/app/team-a/site-a/pages?pagePath=%2Fpublic",
+      target: {
+        kind: "site",
+        teamId: "team-a",
+        siteId: "site-a",
+        section: "pages",
+        pagePath: "/public",
+      },
     });
     const value = localPerceptionSearch({
       ...req,
@@ -136,5 +172,87 @@ describe("perception runtime authority and request guards", () => {
     ).toEqual([]);
     clearPerceptionSession();
     expect(localPerceptionSearch({ ...req, query: "public" })).toEqual([]);
+  });
+  it("F1: blocks stale guards, navigation, values and Resolver before IDB cleanup completes", () => {
+    const navigation = [
+      {
+        key: "events",
+        label: "Events",
+        scope: { userId: "user-a", teamId: "team-a", siteId: "site-a" },
+        target: {
+          kind: "site" as const,
+          teamId: "team-a",
+          siteId: "site-a",
+          section: "events" as const,
+        },
+      },
+    ];
+    setPerceptionAuthorization(base, navigation);
+    const guard = capturePerceptionGuard("site-a");
+    observeLoadedDimension("site-a", "event.name", ["BeforeRevoke"], guard);
+    const request = {
+      query: "Before",
+      mode: "value" as const,
+      field: "event.name",
+      locale: "zh",
+      scope: { userId: "user-a", teamId: "team-a", siteId: "site-a" },
+    };
+    const previous = localPerceptionSearch(request)[0];
+    expect(previous?.action.type).toBe("apply-filter");
+    // Even if persistence deletion never settles, permission checks must fail closed.
+    vi.spyOn(perceptionIndex, "clearScope").mockImplementation(
+      () => new Promise<void>(() => {}),
+    );
+    revokePerceptionSite("site-a");
+    expect(getPerceptionAuthorization()?.allowedSiteIds.has("site-a")).toBe(
+      false,
+    );
+    expect(capturePerceptionGuard("site-a")).toBeNull();
+    expect(localPerceptionSearch(request)).toEqual([]);
+    expect(
+      resolveSearchAction(previous, getPerceptionAuthorization()!),
+    ).toBeNull();
+    observeLoadedDimension("site-a", "event.name", ["AfterRevoke"], guard);
+    expect(localPerceptionSearch({ ...request, query: "After" })).toEqual([]);
+    expect(
+      localPerceptionSearch({ ...request, mode: "global", query: "Events" }),
+    ).toEqual([]);
+    // React may re-publish old props, but must not re-authorize the revoked scope.
+    setPerceptionAuthorization(base, navigation);
+    expect(capturePerceptionGuard("site-a")).toBeNull();
+    expect(localPerceptionSearch({ ...request, query: "Before" })).toEqual([]);
+  });
+  it("F1: cross-tab scope invalidation rejects old in-flight response without reloading", async () => {
+    setPerceptionAuthorization(base, []);
+    const guard = capturePerceptionGuard("site-a");
+    observeLoadedDimension("site-a", "event.name", ["BeforeRevoke"], guard);
+    const peer = new BroadcastChannel("insightflare-perception-v1");
+    try {
+      peer.postMessage({
+        type: "scope-clear",
+        userId: "user-a",
+        teamId: "team-a",
+        siteId: "site-a",
+      });
+      await vi.waitFor(() =>
+        expect(currentPerceptionScope("site-a")).toBeNull(),
+      );
+      observeLoadedDimension("site-a", "event.name", ["AfterRevoke"], guard);
+      expect(
+        localPerceptionSearch({
+          query: "After",
+          mode: "global",
+          locale: "zh",
+          scope: { userId: "user-a", teamId: "team-a", siteId: "site-a" },
+        }),
+      ).toEqual([]);
+      expect(getPerceptionAuthorization()?.siteRoutes.has("site-a")).toBe(
+        false,
+      );
+      setPerceptionAuthorization(base, []);
+      expect(capturePerceptionGuard("site-a")).toBeNull();
+    } finally {
+      peer.close();
+    }
   });
 });

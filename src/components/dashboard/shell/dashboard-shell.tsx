@@ -66,6 +66,7 @@ import {
 } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import type { SiteSearchSection } from "@/lib/perception-search/core";
 import { setPerceptionAuthorization } from "@/lib/perception-search/runtime";
 import Link from "@/lib/router";
 import { usePathname, useSearchParams } from "@/lib/router";
@@ -444,24 +445,50 @@ export function DashboardShell({
     if (authorizedActiveSite?.slug === resolvedActiveSiteSlug) {
       allowedSiteIds.add(authorizedActiveSite.id);
     }
+    const teamRoutes = new Map(
+      teams.map(
+        (team) => [team.id, "/" + locale + "/app/" + team.slug] as const,
+      ),
+    );
+    const siteRoutes = new Map(
+      activeTeamId && activeSiteId && activeSiteBase
+        ? [
+            [
+              activeSiteId,
+              {
+                teamId: activeTeamId,
+                baseHref: activeSiteBase,
+                sections: new Set(
+                  analyticsSections.map((tab) => tab.key as SiteSearchSection),
+                ),
+              },
+            ] as const,
+          ]
+        : [],
+    );
     const navigation = [
       {
         key: "dashboard",
         label: messages.appName,
-        href: appRootHref,
+        target: { kind: "app" as const },
         scope: { userId: user.id },
       },
       ...teams.map((team) => ({
         key: "team:" + team.id,
         label: team.name,
-        href: "/" + locale + "/app/" + team.slug,
+        target: { kind: "team" as const, teamId: team.id },
         scope: { userId: user.id, teamId: team.id },
       })),
       ...(activeTeamId && activeSiteId && activeSiteBase
         ? analyticsSections.map((tab) => ({
             key: "site:" + activeSiteId + ":" + tab.key,
             label: analyticsTabLabel(tab, messages),
-            href: tab.href,
+            target: {
+              kind: "site" as const,
+              teamId: activeTeamId,
+              siteId: activeSiteId,
+              section: tab.key as SiteSearchSection,
+            },
             scope: {
               userId: user.id,
               teamId: activeTeamId,
@@ -477,6 +504,8 @@ export function DashboardShell({
         locale,
         allowedTeamIds,
         allowedSiteIds,
+        teamRoutes,
+        siteRoutes,
         activeTeamId,
         activeSiteId,
         activeSiteBase: activeSiteBase ?? undefined,

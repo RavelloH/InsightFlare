@@ -21,10 +21,43 @@ export interface SearchRequest {
   /** Only the explicit user action may set this; never an input change. */
   userInitiated?: boolean;
 }
+/** Navigation is expressed as authorized entity IDs, never a provider-owned URL. */
+export const SITE_SEARCH_SECTIONS = [
+  "overview",
+  "realtime",
+  "pages",
+  "referrers",
+  "campaigns",
+  "sessions",
+  "visitors",
+  "events",
+  "funnels",
+  "goals",
+  "retention",
+  "geo",
+  "devices",
+  "browsers",
+  "performance",
+  "settings",
+] as const;
+export type SiteSearchSection = (typeof SITE_SEARCH_SECTIONS)[number];
+export type SearchNavigationTarget =
+  | { kind: "app" }
+  | { kind: "team"; teamId: string }
+  | {
+      kind: "site";
+      teamId: string;
+      siteId: string;
+      section: SiteSearchSection;
+      pagePath?: string;
+    };
 export type SearchAction =
-  | { type: "navigate"; href: string }
+  | { type: "navigate"; target: SearchNavigationTarget }
   | { type: "apply-filter"; field: string; value: string }
   | { type: "explicit-search"; query: string };
+export type ResolvedSearchAction =
+  | { type: "navigate"; href: string }
+  | Exclude<SearchAction, { type: "navigate" }>;
 export interface SearchResult {
   kind: SearchKind;
   key: string;
@@ -49,6 +82,16 @@ export interface SearchResolutionContext {
   locale: string;
   allowedTeamIds: ReadonlySet<string>;
   allowedSiteIds: ReadonlySet<string>;
+  /** Trusted server-authorized ID-to-path maps, never supplied by a provider. */
+  teamRoutes: ReadonlyMap<string, string>;
+  siteRoutes: ReadonlyMap<
+    string,
+    {
+      teamId: string;
+      baseHref: string;
+      sections: ReadonlySet<SiteSearchSection>;
+    }
+  >;
 }
 export function normalized(value: string): string {
   return value.normalize("NFKC").trim().toLocaleLowerCase();
@@ -141,41 +184,102 @@ export async function searchExplicit(
   request: SearchRequest,
   providers: readonly SearchProvider[],
 ): Promise<{
-  status: "ok" | "unavailable" | "cancelled";
+  status: "ok" | "unavailable" | "cancelled" | "error";
   results: SearchResult[];
 }> {
   if (request.mode !== "explicit-fulltext" || !request.userInitiated) {
     return { status: "unavailable", results: [] };
   }
+  if (request.signal?.aborted) return { status: "cancelled", results: [] };
   const available = providers.filter(
     (p) => p.cost === "remote" && p.modes.includes("explicit-fulltext"),
   );
   if (!available.length) return { status: "unavailable", results: [] };
-  const groups = await Promise.all(
-    available.map((provider) => Promise.resolve(provider.search(request))),
-  );
-  if (request.signal?.aborted) return { status: "cancelled", results: [] };
-  return { status: "ok", results: mergeSearchResults(request, groups) };
+  let onAbort: (() => void) | undefined;
+  const cancelled = new Promise<"cancelled">((resolve) => {
+    if (!request.signal) return;
+    onAbort = () => resolve("cancelled");
+    request.signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    // Providers receive the same AbortSignal; even an uncooperative provider
+    // cannot hold the UI waiting after cancellation.
+    const groups = await Promise.race([
+      Promise.all(
+        available.map((provider) => Promise.resolve(provider.search(request))),
+      ),
+      cancelled,
+    ]);
+    if (groups === "cancelled" || request.signal?.aborted)
+      return { status: "cancelled", results: [] };
+    return { status: "ok", results: mergeSearchResults(request, groups) };
+  } catch {
+    return {
+      status: request.signal?.aborted ? "cancelled" : "error",
+      results: [],
+    };
+  } finally {
+    if (onAbort && request.signal)
+      request.signal.removeEventListener("abort", onAbort);
+  }
 }
 export function resolveSearchAction(
   result: SearchResult,
   context: SearchResolutionContext,
-): SearchAction | null {
+): ResolvedSearchAction | null {
   if (result.scope.userId !== context.userId) return null;
   if (result.scope.teamId && !context.allowedTeamIds.has(result.scope.teamId))
     return null;
   if (result.scope.siteId && !context.allowedSiteIds.has(result.scope.siteId))
     return null;
   if (result.action.type === "navigate") {
-    const path = result.action.href;
+    const target = result.action.target;
+    const root = "/" + context.locale + "/app";
+    // Validate the final URL built from trusted routes, not just the result's scope.
+    if (target.kind === "app") {
+      return result.scope.teamId || result.scope.siteId
+        ? null
+        : { type: "navigate", href: root };
+    }
+    if (target.kind === "team") {
+      if (result.scope.teamId !== target.teamId || result.scope.siteId)
+        return null;
+      const href = context.teamRoutes.get(target.teamId);
+      if (!href || !isSafeRoute(href, root, 1)) return null;
+      return { type: "navigate", href };
+    }
     if (
-      !path.startsWith("/" + context.locale + "/app") ||
-      (path.length > ("/" + context.locale + "/app").length &&
-        !["/", "?"].includes(path[("/" + context.locale + "/app").length])) ||
-      path.startsWith("//") ||
-      /[\\\p{Cc}]/u.test(path)
+      result.scope.teamId !== target.teamId ||
+      result.scope.siteId !== target.siteId ||
+      !context.allowedTeamIds.has(target.teamId) ||
+      !context.allowedSiteIds.has(target.siteId)
     )
       return null;
+    const route = context.siteRoutes.get(target.siteId);
+    if (
+      !route ||
+      route.teamId !== target.teamId ||
+      !route.sections.has(target.section) ||
+      !isSafeRoute(route.baseHref, root, 2) ||
+      !SITE_SEARCH_SECTIONS.includes(target.section)
+    )
+      return null;
+    if (target.pagePath !== undefined && target.section !== "pages")
+      return null;
+    if (
+      target.pagePath !== undefined &&
+      (target.pagePath.length > 120 ||
+        !target.pagePath.startsWith("/") ||
+        target.pagePath.startsWith("//") ||
+        /[?&#\\<>\p{Cc}]/u.test(target.pagePath))
+    )
+      return null;
+    const suffix = target.section === "overview" ? "" : "/" + target.section;
+    const detail =
+      target.pagePath === undefined
+        ? ""
+        : "?pagePath=" + encodeURIComponent(target.pagePath);
+    return { type: "navigate", href: route.baseHref + suffix + detail };
   }
   if (
     result.action.type === "apply-filter" &&
@@ -185,11 +289,20 @@ export function resolveSearchAction(
     return null;
   return result.action;
 }
+/** Only slug paths from the authorized route tree can become destinations. */
+function isSafeRoute(href: string, root: string, segments: number): boolean {
+  if (!href.startsWith(root + "/") || /[?#\\\p{Cc}]/u.test(href)) return false;
+  const parts = href.slice(root.length + 1).split("/");
+  return (
+    parts.length === segments &&
+    parts.every((part) => /^[a-z0-9-]+$/iu.test(part))
+  );
+}
 export function navigationProvider(
   entries: readonly {
     key: string;
     label: string;
-    href: string;
+    target: SearchNavigationTarget;
     scope: SearchScope;
     subtitle?: string;
   }[],
@@ -207,7 +320,7 @@ export function navigationProvider(
         subtitle: entry.subtitle,
         source: "navigation",
         coverage: "static-navigation" as const,
-        action: { type: "navigate" as const, href: entry.href },
+        action: { type: "navigate" as const, target: entry.target },
       })),
   };
 }

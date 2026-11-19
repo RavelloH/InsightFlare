@@ -1,11 +1,13 @@
 import {
   navigationProvider,
   searchLocal,
+  type SearchNavigationTarget,
   type SearchProvider,
   type SearchRequest,
   type SearchResolutionContext,
   type SearchResult,
   type SearchScope,
+  type SiteSearchSection,
 } from "./core";
 import {
   type ObservedCandidate,
@@ -22,12 +24,40 @@ interface RuntimeContext extends SearchResolutionContext {
 type NavigationEntry = {
   key: string;
   label: string;
-  href: string;
+  target: SearchNavigationTarget;
   scope: SearchScope;
   subtitle?: string;
 };
 let current: RuntimeContext | null = null;
 let authorizationEpoch = 0;
+/** A revoked scope stays denied for this page session, even after failed IDB cleanup. */
+const revokedScopes = new Set<string>();
+const revocationKey = (scope: Required<SearchScope>) =>
+  JSON.stringify([scope.userId, scope.teamId, scope.siteId]);
+function isRevoked(scope: Required<SearchScope>): boolean {
+  return revokedScopes.has(revocationKey(scope));
+}
+function isAuthorizedScope(
+  scope: SearchScope,
+  context: RuntimeContext | null = current,
+): boolean {
+  if (!context || scope.userId !== context.userId) return false;
+  if (scope.teamId && !context.allowedTeamIds.has(scope.teamId)) return false;
+  if (scope.siteId) {
+    if (
+      !scope.teamId ||
+      !context.allowedSiteIds.has(scope.siteId) ||
+      context.siteRoutes.get(scope.siteId)?.teamId !== scope.teamId ||
+      isRevoked({
+        userId: scope.userId,
+        teamId: scope.teamId,
+        siteId: scope.siteId,
+      })
+    )
+      return false;
+  }
+  return true;
+}
 export interface ObservationGuard {
   userId: string;
   teamId: string;
@@ -49,7 +79,12 @@ function ensureChannel() {
   if (channel || typeof BroadcastChannel === "undefined") return;
   channel = new BroadcastChannel("insightflare-perception-v1");
   channel.onmessage = (
-    event: MessageEvent<{ type?: string; userId?: string }>,
+    event: MessageEvent<{
+      type?: string;
+      userId?: string;
+      teamId?: string;
+      siteId?: string;
+    }>,
   ) => {
     if (event.data?.type === "clear" && event.data.userId) {
       if (current?.userId === event.data.userId) {
@@ -61,24 +96,51 @@ function ensureChannel() {
       }
       void perceptionIndex.clearUser(event.data.userId);
     }
+    const active = current;
     if (
       event.data?.type === "scope-clear" &&
-      event.data.userId === current?.userId
+      active &&
+      event.data.userId === active.userId
     ) {
-      perceptionIndex.resetMemory();
-      if (
-        current?.activeTeamId &&
-        current.activeSiteId &&
-        current.allowedTeamIds.has(current.activeTeamId) &&
-        current.allowedSiteIds.has(current.activeSiteId)
-      )
-        void perceptionIndex.load({
-          userId: current.userId,
-          teamId: current.activeTeamId,
-          siteId: current.activeSiteId,
-        });
+      // Never reload from stale permissions before a fresh authorized response.
+      const teamId = event.data.teamId ?? active.activeTeamId;
+      const siteId = event.data.siteId ?? active.activeSiteId;
+      if (teamId && siteId)
+        invalidateScope({ userId: active.userId, teamId, siteId }, false);
     }
   };
+}
+/** Fail closed immediately, before any async IndexedDB operation. */
+function invalidateScope(
+  scope: Required<SearchScope>,
+  broadcast: boolean,
+): void {
+  revokedScopes.add(revocationKey(scope));
+  authorizationEpoch++;
+  if (current?.userId === scope.userId) {
+    if (current.activeTeamId === scope.teamId) {
+      current = {
+        ...current,
+        allowedSiteIds: new Set(
+          [...current.allowedSiteIds].filter((id) => id !== scope.siteId),
+        ),
+        siteRoutes: new Map(
+          [...current.siteRoutes].filter(([id]) => id !== scope.siteId),
+        ),
+      };
+    }
+    entries = entries.filter(
+      (entry) =>
+        entry.scope.userId !== scope.userId ||
+        entry.scope.teamId !== scope.teamId ||
+        entry.scope.siteId !== scope.siteId,
+    );
+  }
+  // clearScope synchronously evicts memory and invalidates in-flight loads,
+  // then queues the persistent deletion after any already queued writes.
+  void perceptionIndex.clearScope(scope);
+  if (broadcast) channel?.postMessage({ type: "scope-clear", ...scope });
+  notify();
 }
 export function setPerceptionAuthorization(
   context: RuntimeContext,
@@ -116,24 +178,49 @@ export function setPerceptionAuthorization(
     previous &&
     previous.activeTeamId &&
     previous.activeSiteId &&
-    (previous.userId !== context.userId ||
-      !context.allowedTeamIds.has(previous.activeTeamId) ||
-      !context.allowedSiteIds.has(previous.activeSiteId))
+    previous.userId === context.userId &&
+    previous.activeTeamId === context.activeTeamId &&
+    !context.allowedSiteIds.has(previous.activeSiteId)
   ) {
-    void perceptionIndex.clearScope({
-      userId: previous.userId,
-      teamId: previous.activeTeamId,
-      siteId: previous.activeSiteId,
-    });
-    channel?.postMessage({ type: "scope-clear", userId: previous.userId });
+    invalidateScope(
+      {
+        userId: previous.userId,
+        teamId: previous.activeTeamId,
+        siteId: previous.activeSiteId,
+      },
+      true,
+    );
   }
-  current = context;
-  entries = navigation;
+  // A stale React tree must not re-grant a site revoked by a live API response.
+  const teamId = context.activeTeamId;
+  current = {
+    ...context,
+    allowedTeamIds: new Set(context.allowedTeamIds),
+    allowedSiteIds: new Set(
+      [...context.allowedSiteIds].filter(
+        (id) =>
+          !teamId || !isRevoked({ userId: context.userId, teamId, siteId: id }),
+      ),
+    ),
+    teamRoutes: new Map(context.teamRoutes),
+    siteRoutes: new Map(
+      [...context.siteRoutes].filter(
+        ([id]) =>
+          !teamId || !isRevoked({ userId: context.userId, teamId, siteId: id }),
+      ),
+    ),
+  };
+  entries = navigation.filter((entry) => isAuthorizedScope(entry.scope));
   if (
     context.activeTeamId &&
     context.activeSiteId &&
-    context.allowedTeamIds.has(context.activeTeamId) &&
-    context.allowedSiteIds.has(context.activeSiteId)
+    current.allowedTeamIds.has(context.activeTeamId) &&
+    current.allowedSiteIds.has(context.activeSiteId) &&
+    !isRevoked({
+      userId: context.userId,
+      teamId: context.activeTeamId,
+      siteId: context.activeSiteId,
+    })
   ) {
     void perceptionIndex.load({
       userId: context.userId,
@@ -163,7 +250,8 @@ export function currentPerceptionScope(
     !current.activeSiteId ||
     current.activeSiteId !== siteId ||
     !current.allowedSiteIds.has(siteId) ||
-    !current.allowedTeamIds.has(current.activeTeamId)
+    !current.allowedTeamIds.has(current.activeTeamId) ||
+    isRevoked({ userId: current.userId, teamId: current.activeTeamId, siteId })
   )
     return null;
   return { userId: current.userId, teamId: current.activeTeamId, siteId };
@@ -225,20 +313,25 @@ function observedProvider(): SearchProvider {
               ? { type: "apply-filter", field: item.field, value: item.value }
               : {
                   type: "navigate",
-                  href: current?.activeSiteBase
-                    ? current.activeSiteBase +
-                      (item.field === "page.path"
-                        ? "/pages?pagePath=" + encodeURIComponent(item.value)
-                        : item.field === "referrer.domain"
-                          ? "/referrers"
-                          : item.field === "event.name"
-                            ? "/events"
-                            : item.field.startsWith("utm.")
-                              ? "/campaigns"
-                              : item.field === "client.browser"
-                                ? "/browsers"
-                                : "")
-                    : "/",
+                  target: {
+                    kind: "site",
+                    teamId: item.scope.teamId,
+                    siteId: item.scope.siteId,
+                    section: (item.field === "page.path"
+                      ? "pages"
+                      : item.field === "referrer.domain"
+                        ? "referrers"
+                        : item.field === "event.name"
+                          ? "events"
+                          : item.field.startsWith("utm.")
+                            ? "campaigns"
+                            : item.field === "client.browser"
+                              ? "browsers"
+                              : "overview") satisfies SiteSearchSection,
+                    ...(item.field === "page.path"
+                      ? { pagePath: item.value }
+                      : {}),
+                  },
                 },
         })),
   };
@@ -249,24 +342,20 @@ export function localPerceptionSearch(request: SearchRequest): SearchResult[] {
     !auth ||
     request.scope.userId !== auth.userId ||
     (request.scope.teamId && !auth.allowedTeamIds.has(request.scope.teamId)) ||
-    (request.scope.siteId && !auth.allowedSiteIds.has(request.scope.siteId))
+    !isAuthorizedScope(request.scope, auth)
   )
     return [];
   return searchLocal(request, [
     navigationProvider(entries),
     observedProvider(),
-  ]);
+  ]).filter((result) => isAuthorizedScope(result.scope, auth));
 }
 export function revokePerceptionSite(siteId: string): void {
-  if (current?.activeSiteId === siteId && current?.activeTeamId) {
-    const scope = {
-      userId: current.userId,
-      teamId: current.activeTeamId,
-      siteId,
-    };
-    void perceptionIndex.clearScope(scope);
-  }
-  channel?.postMessage({ type: "scope-clear", userId: current?.userId });
+  if (!current?.activeTeamId || !current.allowedSiteIds.has(siteId)) return;
+  invalidateScope(
+    { userId: current.userId, teamId: current.activeTeamId, siteId },
+    true,
+  );
 }
 export async function clearPerceptionSession(): Promise<void> {
   const userId = current?.userId;
@@ -277,6 +366,9 @@ export async function clearPerceptionSession(): Promise<void> {
   if (userId) {
     channel?.postMessage({ type: "clear", userId });
     await perceptionIndex.clearUser(userId);
+    for (const key of revokedScopes)
+      if (key.startsWith(JSON.stringify([userId]).slice(0, -1) + ","))
+        revokedScopes.delete(key);
   }
   notify();
 }
