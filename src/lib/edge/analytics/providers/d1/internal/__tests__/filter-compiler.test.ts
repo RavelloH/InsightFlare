@@ -42,8 +42,13 @@ describe("filter SQL compiler", () => {
           (4,2,1,0,NULL,NULL,NULL);
       `);
       const matched = (
-        operator: "in" | "notIn",
-        values: readonly (string | number | boolean | null)[],
+        operator: "eq" | "neq" | "in" | "notIn",
+        values:
+          | readonly (string | number | boolean | null)[]
+          | string
+          | number
+          | boolean
+          | null,
       ) => {
         const compiled = compileFilterDocument(
           document({
@@ -61,6 +66,18 @@ describe("filter SQL compiler", () => {
           .all(...compiled.bindings)
           .map((row) => Number((row as { event_pk: number }).event_pk));
       };
+      expect(matched("eq", "A")).toEqual([1]);
+      expect(matched("neq", "A")).toEqual([2, 3]);
+      expect(matched("neq", 1)).toEqual([1, 3]);
+      expect(matched("neq", false)).toEqual([1, 2]);
+      expect(matched("neq", true)).toEqual([1, 2, 3]);
+      expect(matched("neq", 0)).toEqual([1, 2, 3]);
+      expect(matched("neq", "A")).toEqual(
+        matched("notIn", ["A"]).filter((x) => x !== 4),
+      );
+      expect(matched("neq", 1)).toEqual(
+        matched("notIn", [1]).filter((x) => x !== 4),
+      );
       expect(matched("in", ["A", 1])).toEqual([1, 2]);
       expect(matched("notIn", ["A", 1])).toEqual([3, 4]);
       expect(matched("in", [null, "A"])).toEqual([1, 4]);

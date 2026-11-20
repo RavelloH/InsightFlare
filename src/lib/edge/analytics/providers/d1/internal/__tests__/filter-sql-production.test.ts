@@ -97,7 +97,7 @@ function sqlitePayloadFixture(): DatabaseSync {
   );
   const payloads: ReadonlyArray<readonly [number, number, object]> = [
     [101, 1, { items: [{ sku: "A" }] }], // historical Event outside Q
-    [102, 1, { items: [] }],
+    [102, 1, { items: [], hetero: null }],
     [
       103,
       1,
@@ -107,15 +107,21 @@ function sqlitePayloadFixture(): DatabaseSync {
         "*": "literal-star",
         nested: { "a/b": 7, "~tag": 8 },
         nil: null,
+        hetero: "A",
         enabled: false,
         search: "abc%_\\Suffix",
       },
     ],
-    [104, 1, { emptyObj: {}, misc: "other" }],
+    [104, 1, { emptyObj: {}, misc: "other", hetero: false }],
     [
       201,
       2,
-      { items: [{ sku: "X" }, { sku: "Y" }], nil: 2, search: "ABC%_\\suffix" },
+      {
+        items: [{ sku: "X" }, { sku: "Y" }],
+        nil: 2,
+        hetero: 1,
+        search: "ABC%_\\suffix",
+      },
     ],
   ];
   for (const [eventPk, sitePk, payload] of payloads) {
@@ -293,6 +299,67 @@ describe("FSQL-07 ordinary Event Payload through real ScopedDataset SQL", () => 
       expect(matched(db, 'event.payload("/search") contains "%_"')).toEqual([
         ...a,
         ...b,
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("FSQL-08 compares differing String, Number and Boolean Payload types as unequal", () => {
+    const db = sqlitePayloadFixture();
+    try {
+      const check = (expr: string) =>
+        matched(db, 'event.payload("/hetero") ' + expr);
+      expect(check('eq "A"')).toEqual(a);
+      expect(check('neq "A"')).toEqual([...view, ...b]);
+      expect(check('notIn ["A"]')).toEqual([...signup, ...view, ...b]);
+      expect(check("neq 1")).toEqual([...a, ...view]);
+      expect(check("notIn [1]")).toEqual([...a, ...signup, ...view]);
+      expect(check("neq false")).toEqual([...a, ...b]);
+      expect(check("notIn [false]")).toEqual([...a, ...signup, ...b]);
+      expect(check("eq false")).toEqual(view);
+      expect(check("neq 0")).toEqual([...a, ...view, ...b]);
+      expect(check("neq true")).toEqual([...a, ...view, ...b]);
+      expect(check('in [null, "A"]')).toEqual([...a, ...signup]);
+      expect(check('notIn [null, "A"]')).toEqual([...view, ...b]);
+      expect(check('neq "missing"')).toEqual([...a, ...view, ...b]);
+      expect(matched(db, 'event.payload("/items") neq "A"')).toEqual([]);
+      expect(matched(db, 'event.payload("/missing") neq "A"')).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("FSQL-08 uses the same typed NEQ inside advanced current-payload selectors", () => {
+    const db = sqlitePayloadFixture();
+    try {
+      const matchedVisits = (expr: string) => {
+        const result = dataset(
+          'EVENT { $.payload("/hetero") ' + expr + " } exists",
+          "session",
+        );
+        return select(
+          db,
+          "WITH " +
+            result.ctes +
+            " SELECT site_pk,visit_id FROM " +
+            result.visitRelation +
+            " ORDER BY site_pk,visit_id",
+          result.bindings.map((binding) => binding.value),
+        );
+      };
+      expect(matchedVisits('neq "A"')).toEqual([
+        { site_pk: 1, visit_id: "v-docs" },
+        { site_pk: 2, visit_id: "v-new" },
+      ]);
+      expect(matchedVisits('notIn ["A"]')).toEqual([
+        { site_pk: 1, visit_id: "v-docs" },
+        { site_pk: 1, visit_id: "v-new" },
+        { site_pk: 2, visit_id: "v-new" },
+      ]);
+      expect(matchedVisits("neq 1")).toEqual([
+        { site_pk: 1, visit_id: "v-docs" },
+        { site_pk: 1, visit_id: "v-new" },
       ]);
     } finally {
       db.close();

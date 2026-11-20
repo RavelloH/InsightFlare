@@ -203,6 +203,13 @@ export function compileExactJsonPointerPredicate(
     if (!symbol) throw new TypeError(`Unsupported JSON operator: ${operator}`);
     if (type === 0) {
       test = `resolved.value_type ${symbol} 0`;
+    } else if (operator === "neq") {
+      // A present, non-null JSON scalar of another type is unequal even if
+      // its typed value column is NULL. Explicit Null, containers and Missing
+      // remain outside the non-null scalar comparison domain.
+      bindings.push(scalarValue(input));
+      test = `resolved.value_type IN (1, 2, 3) AND
+        (resolved.value_type != ${type} OR ${scalarColumn(type)} != ?)`;
     } else {
       bindings.push(scalarValue(input));
       test = `resolved.value_type = ${type} AND ${scalarColumn(type)} ${symbol} ?`;

@@ -37,6 +37,7 @@ import {
   compileWithoutMatches,
   timelineCte,
 } from "./filter-sql-sequences";
+import { JSON_EACH_SET_THRESHOLD } from "./filter-sql-set";
 import { buildScopedFactsCtes } from "./scoped-facts";
 
 type EntityKind =
@@ -100,12 +101,112 @@ function typedBinding(value: FilterValue): string | number | null {
   return typeof value === "boolean" ? Number(value) : value;
 }
 
+/** Compare a projected Event JSON value by its original tagged type.
+ * A Boolean true and Number 1 both have SQLite numeric value 1, so
+ * unwrapping JSON before EQ/NEQ/IN/NOT IN loses public Payload semantics.
+ */
+function compareTypedJsonScalar(
+  left: SqlFragment & { readonly typedSql?: string },
+  operator: FilterOperator,
+  value: unknown,
+): SqlFragment | null {
+  if (!left.typedSql || !["eq", "neq", "in", "notIn"].includes(operator))
+    return null;
+
+  const kindOf = (input: FilterValue): number =>
+    input === null
+      ? 0
+      : typeof input === "string"
+        ? 1
+        : typeof input === "number"
+          ? 2
+          : 3;
+  const valueType = "json_extract(typed_value, '$.t')";
+  const actual = "json_extract(typed_value, '$.v')";
+  const values: Array<string | number> = [];
+  let predicate: string;
+
+  if (operator === "eq" || operator === "neq") {
+    if (!scalar(value) || value === null)
+      throw new TypeError("JSON scalar comparison needs a non-null scalar.");
+    const expectedType = kindOf(value);
+    values.push(typedBinding(value) as string | number);
+    predicate =
+      operator === "eq"
+        ? "(" + valueType + " = " + expectedType + " AND " + actual + " = ?)"
+        : "(" +
+          valueType +
+          " IN (1, 2, 3) AND (" +
+          valueType +
+          " != " +
+          expectedType +
+          " OR " +
+          actual +
+          " != ?))";
+  } else {
+    if (!Array.isArray(value) || !value.length || !value.every(scalar))
+      throw new TypeError("JSON membership needs a nonempty scalar set.");
+    const groups = new Map<number, FilterValue[]>();
+    for (const item of value as FilterValue[]) {
+      const kind = kindOf(item);
+      const group = groups.get(kind) ?? [];
+      group.push(item);
+      groups.set(kind, group);
+    }
+    const comparisons: string[] = [];
+    for (const [kind, group] of groups) {
+      if (kind === 0) {
+        comparisons.push(valueType + " = 0");
+      } else {
+        let set: string;
+        if (group.length >= JSON_EACH_SET_THRESHOLD) {
+          values.push(JSON.stringify(group.map((item) => typedBinding(item))));
+          set = "SELECT value FROM json_each(?)";
+        } else {
+          values.push(
+            ...group.map((item) => typedBinding(item) as string | number),
+          );
+          set = group.map(() => "?").join(", ");
+        }
+        comparisons.push(
+          "(" +
+            valueType +
+            " = " +
+            kind +
+            " AND " +
+            actual +
+            " IN (" +
+            set +
+            "))",
+        );
+      }
+    }
+    const membership = "(" + comparisons.join(" OR ") + ")";
+    predicate =
+      operator === "in"
+        ? membership
+        : "(" + valueType + " IN (0, 1, 2, 3) AND NOT " + membership + ")";
+  }
+  return {
+    sql:
+      "(SELECT COALESCE(" +
+      predicate +
+      ", 0) FROM (SELECT " +
+      left.typedSql +
+      " AS typed_value))",
+    // SELECT predicate placeholders precede nested FROM pointer placeholders.
+    bindings: [...values, ...left.bindings],
+  };
+}
+
 function compareScalar(
-  left: SqlFragment,
+  left: SqlFragment & { readonly typedSql?: string },
   operator: FilterOperator,
   value: unknown,
   clock?: SqlScalarTimeContext,
 ): SqlFragment {
+  const typed = compareTypedJsonScalar(left, operator, value);
+  if (typed) return typed;
   const parameter = (input: unknown): string | number | null => {
     if (scalar(input)) return typedBinding(input);
     if (input && typeof input === "object" && "kind" in input) {

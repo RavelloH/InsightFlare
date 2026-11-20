@@ -23,6 +23,8 @@ export interface SqlScalarRef {
   readonly bindings: readonly (string | number | null)[];
   /** SQL NULL denotes Missing for the supported registered-field projection. */
   readonly type: "number" | "string" | "boolean" | "date" | "unknown";
+  /** Tagged JSON scalar for comparisons; sql stays unwrapped for time/math. */
+  readonly typedSql?: string;
 }
 
 export type ScalarCollectionCompiler = (
@@ -344,6 +346,17 @@ export function compileSqlScalar(
           LIMIT 1 OFFSET ${index})`,
         bindings: projected.bindings,
         type: projected.type,
+        typedSql: projected.payload
+          ? "(SELECT projected FROM " +
+            rows +
+            " WHERE projected IS NOT NULL ORDER BY sort_time " +
+            direction +
+            ", sort_id COLLATE BINARY " +
+            direction +
+            " LIMIT 1 OFFSET " +
+            index +
+            ")"
+          : undefined,
       };
     }
     if (target.input.kind === "bucket") {
@@ -468,6 +481,7 @@ export function compileSqlScalar(
       const value = json ? "json_extract(projected, '$.v')" : "projected";
       const jsonType = "json_extract(projected, '$.t')";
       let expression: string;
+      let typedSql: string | undefined;
       if (target.reducer === "countDistinct") {
         // JSON text includes explicit type tags. Number 1, string "1",
         // boolean true and JSON null have distinct typed encodings.
@@ -489,6 +503,20 @@ export function compileSqlScalar(
             ORDER BY ${jsonType} ${target.reducer === "min" ? "ASC" : "DESC"},
               ${value} COLLATE BINARY ${target.reducer === "min" ? "ASC" : "DESC"}
             LIMIT 1)`;
+          typedSql =
+            "(SELECT projected FROM " +
+            source +
+            " WHERE " +
+            jsonType +
+            " IN (1, 2, 3)" +
+            " ORDER BY " +
+            jsonType +
+            (target.reducer === "min" ? " ASC" : " DESC") +
+            ", " +
+            value +
+            " COLLATE BINARY " +
+            (target.reducer === "min" ? "ASC" : "DESC") +
+            " LIMIT 1)";
         } else {
           expression = `(SELECT ${target.reducer === "min" ? "MIN" : "MAX"}(${value})
             FROM ${source})`;
@@ -497,6 +525,7 @@ export function compileSqlScalar(
       return {
         sql: expression,
         bindings,
+        typedSql,
         type:
           target.reducer === "sum" ||
           target.reducer === "avg" ||

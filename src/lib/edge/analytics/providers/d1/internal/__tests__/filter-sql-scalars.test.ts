@@ -29,9 +29,9 @@ function fixture(): DatabaseSync {
     "INSERT INTO custom_event_json_values VALUES(?,?,?,?,?,?,?)",
   );
   for (const [eventPk, data] of [
-    [101, { amount: 5, sku: "pro" }],
-    [102, { amount: "5", sku: "pro" }],
-    [103, { amount: null, sku: "free" }],
+    [101, { amount: 5, sku: "pro", flag: true }],
+    [102, { amount: "5", sku: "pro", flag: "true" }],
+    [103, { amount: null, sku: "free", flag: false }],
     [104, { sku: "free" }],
   ] as const) {
     const expanded = expandCustomEventData(data);
@@ -154,6 +154,49 @@ describe("P3 typed SQL scalar aggregation", () => {
         true,
       );
       expect(qualifies(db, 'first(EVENT -> name) eq "purchase"')).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves JSON type tags for ordered Payload Projection equality and membership", () => {
+    const db = fixture();
+    try {
+      expect(qualifies(db, 'first(EVENT -> payload("/flag")) eq true')).toBe(
+        true,
+      );
+      expect(qualifies(db, 'first(EVENT -> payload("/flag")) eq 1')).toBe(
+        false,
+      );
+      expect(qualifies(db, 'first(EVENT -> payload("/flag")) neq 1')).toBe(
+        true,
+      );
+      expect(qualifies(db, 'first(EVENT -> payload("/flag")) neq false')).toBe(
+        true,
+      );
+      expect(qualifies(db, 'first(EVENT -> payload("/flag")) in [1]')).toBe(
+        false,
+      );
+      expect(qualifies(db, 'first(EVENT -> payload("/flag")) notIn [1]')).toBe(
+        true,
+      );
+      expect(qualifies(db, 'first(EVENT -> payload("/amount")) neq "5"')).toBe(
+        true,
+      );
+      expect(qualifies(db, 'first(EVENT -> payload("/amount")) in ["5"]')).toBe(
+        false,
+      );
+      expect(qualifies(db, 'max(EVENT -> payload("/flag")) eq true')).toBe(
+        true,
+      );
+      expect(qualifies(db, 'max(EVENT -> payload("/flag")) eq 1')).toBe(false);
+      expect(qualifies(db, 'max(EVENT -> payload("/flag")) neq 1')).toBe(true);
+      expect(qualifies(db, 'min(EVENT -> payload("/flag")) eq "true"')).toBe(
+        true,
+      );
+      expect(qualifies(db, 'min(EVENT -> payload("/flag")) neq true')).toBe(
+        true,
+      );
     } finally {
       db.close();
     }
