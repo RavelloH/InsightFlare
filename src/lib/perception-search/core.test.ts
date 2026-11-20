@@ -35,6 +35,51 @@ describe("Search Core", () => {
     expect(matchScore("分析页面", "分析")).toBe(80);
     expect(matchScore("Chrome", "rom")).toBe(0);
   });
+  it("matches typed navigation commands by metric keys and site domain aliases", () => {
+    const provider = navigationProvider([
+      {
+        key: "metric:s1:bounceRate",
+        label: "跳出率",
+        keywords: ["bounceRate", "bounce rate"],
+        group: "metric",
+        target: {
+          kind: "site",
+          teamId: "t1",
+          siteId: "s1",
+          section: "overview",
+          metric: "bounceRate",
+        },
+        scope,
+      },
+      {
+        key: "site:s1",
+        label: "我的站点",
+        keywords: ["analytics.example.test"],
+        group: "site",
+        target: {
+          kind: "site",
+          teamId: "t1",
+          siteId: "s1",
+          section: "overview",
+        },
+        scope,
+      },
+    ]);
+    const metric = searchLocal({ ...request, query: "bounce rate" }, [
+      provider,
+    ]);
+    expect(metric.map((result) => [result.key, result.group])).toEqual([
+      ["metric:s1:bounceRate", "metric"],
+    ]);
+    expect(
+      searchLocal({ ...request, query: "analytics.example" }, [provider]).map(
+        (result) => result.key,
+      ),
+    ).toEqual(["site:s1"]);
+    expect(searchLocal({ ...request, query: "unrelated" }, [provider])).toEqual(
+      [],
+    );
+  });
   it("deduplicates by scope and canonical identity, not label", () => {
     const same = make("Chrome");
     const other = { ...same, key: "second" };
@@ -174,6 +219,59 @@ describe("Search Core", () => {
       type: "navigate",
       href: "/zh/app/team-a/site-a/pages?pagePath=%2Fproduct",
     });
+    const metricAction = {
+      ...valid,
+      action: {
+        type: "navigate" as const,
+        target: {
+          kind: "site" as const,
+          teamId: "t1",
+          siteId: "s1",
+          section: "overview" as const,
+          metric: "bounceRate" as const,
+        },
+      },
+    };
+    expect(resolveSearchAction(metricAction, ctx)).toEqual({
+      type: "navigate",
+      href: "/zh/app/team-a/site-a#overview-metric-bounceRate",
+    });
+    expect(
+      resolveSearchAction(
+        {
+          ...metricAction,
+          action: {
+            ...metricAction.action,
+            target: {
+              ...metricAction.action.target,
+              section: "pages" as const,
+            },
+          },
+        },
+        ctx,
+      ),
+    ).toBeNull();
+    expect(
+      resolveSearchAction(
+        {
+          ...metricAction,
+          action: {
+            ...metricAction.action,
+            target: {
+              ...metricAction.action.target,
+              metric: "invalid" as "bounceRate",
+            },
+          },
+        },
+        ctx,
+      ),
+    ).toBeNull();
+    expect(
+      resolveSearchAction(
+        { ...metricAction, scope: { ...scope, siteId: "s2" } },
+        ctx,
+      ),
+    ).toBeNull();
     expect(
       resolveSearchAction(
         {

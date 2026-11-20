@@ -66,8 +66,13 @@ import {
 } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
-import type { SiteSearchSection } from "@/lib/perception-search/core";
+import {
+  SITE_OVERVIEW_METRICS,
+  type SiteOverviewMetric,
+  type SiteSearchSection,
+} from "@/lib/perception-search/core";
 import { setPerceptionAuthorization } from "@/lib/perception-search/runtime";
+import { buildOverviewMetricsLabels } from "@/lib/product-ui-labels/overview";
 import Link from "@/lib/router";
 import { usePathname, useSearchParams } from "@/lib/router";
 
@@ -451,51 +456,121 @@ export function DashboardShell({
       ),
     );
     const siteRoutes = new Map(
-      activeTeamId && activeSiteId && activeSiteBase
-        ? [
-            [
-              activeSiteId,
-              {
-                teamId: activeTeamId,
-                baseHref: activeSiteBase,
-                sections: new Set(
-                  analyticsSections.map((tab) => tab.key as SiteSearchSection),
-                ),
-              },
-            ] as const,
-          ]
-        : [],
+      sidebarSites.map(
+        (site) =>
+          [
+            site.id,
+            {
+              teamId: activeTeamId,
+              baseHref: buildSitePath(
+                locale,
+                liveActiveTeamSlug || "",
+                site.slug,
+              ),
+              sections: new Set<SiteSearchSection>(
+                site.id === activeSiteId
+                  ? analyticsSections.map((tab) => tab.key as SiteSearchSection)
+                  : ["overview"],
+              ),
+            },
+          ] as const,
+      ),
     );
+    if (
+      activeTeamId &&
+      activeSiteId &&
+      activeSiteBase &&
+      !siteRoutes.has(activeSiteId)
+    ) {
+      siteRoutes.set(activeSiteId, {
+        teamId: activeTeamId,
+        baseHref: activeSiteBase,
+        sections: new Set<SiteSearchSection>(
+          analyticsSections.map((tab) => tab.key as SiteSearchSection),
+        ),
+      });
+    }
+    const metricLabels = buildOverviewMetricsLabels(messages);
+    const metricKeywords: Record<SiteOverviewMetric, string[]> = {
+      views: ["views", "pageviews", "pv"],
+      visitors: ["visitors", "unique visitors", "uv"],
+      sessions: ["sessions", "visits"],
+      bounceRate: ["bounceRate", "bounce rate"],
+      pagesPerSession: ["pagesPerSession", "pages per session"],
+      avgDuration: ["avgDuration", "average duration", "session duration"],
+    };
     const navigation = [
       {
         key: "dashboard",
         label: messages.appName,
         target: { kind: "app" as const },
         scope: { userId: user.id },
+        group: "workspace" as const,
       },
       ...teams.map((team) => ({
         key: "team:" + team.id,
         label: team.name,
         target: { kind: "team" as const, teamId: team.id },
         scope: { userId: user.id, teamId: team.id },
+        group: "team" as const,
+        keywords: [team.slug],
       })),
-      ...(activeTeamId && activeSiteId && activeSiteBase
-        ? analyticsSections.map((tab) => ({
-            key: "site:" + activeSiteId + ":" + tab.key,
-            label: analyticsTabLabel(tab, messages),
+      ...(activeTeamId
+        ? sidebarSites.map((site) => ({
+            key: "site:" + site.id,
+            label: site.name,
             target: {
               kind: "site" as const,
               teamId: activeTeamId,
-              siteId: activeSiteId,
-              section: tab.key as SiteSearchSection,
+              siteId: site.id,
+              section: "overview" as const,
             },
-            scope: {
-              userId: user.id,
-              teamId: activeTeamId,
-              siteId: activeSiteId,
-            },
-            subtitle: activeSiteName,
+            scope: { userId: user.id, teamId: activeTeamId, siteId: site.id },
+            subtitle: site.domain,
+            group: "site" as const,
+            keywords: [site.domain, site.slug],
           }))
+        : []),
+      ...(activeTeamId && activeSiteId && activeSiteBase
+        ? [
+            ...SITE_OVERVIEW_METRICS.map((metric) => ({
+              key: "metric:" + activeSiteId + ":" + metric,
+              label: metricLabels[metric],
+              target: {
+                kind: "site" as const,
+                teamId: activeTeamId,
+                siteId: activeSiteId,
+                section: "overview" as const,
+                metric,
+              },
+              scope: {
+                userId: user.id,
+                teamId: activeTeamId,
+                siteId: activeSiteId,
+              },
+              subtitle: activeSiteName,
+              group: "metric" as const,
+              keywords: metricKeywords[metric],
+            })),
+            ...analyticsSections.map((tab) => ({
+              key: "section:" + activeSiteId + ":" + tab.key,
+              label: analyticsTabLabel(tab, messages),
+              target: {
+                kind: "site" as const,
+                teamId: activeTeamId,
+                siteId: activeSiteId,
+                section: tab.key as SiteSearchSection,
+              },
+              scope: {
+                userId: user.id,
+                teamId: activeTeamId,
+                siteId: activeSiteId,
+              },
+              subtitle: activeSiteName,
+              group: "section" as const,
+              keywords: [tab.key],
+            })),
+          ]
         : []),
     ];
     setPerceptionAuthorization(

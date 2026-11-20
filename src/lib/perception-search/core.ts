@@ -41,6 +41,17 @@ export const SITE_SEARCH_SECTIONS = [
   "settings",
 ] as const;
 export type SiteSearchSection = (typeof SITE_SEARCH_SECTIONS)[number];
+export const SITE_OVERVIEW_METRICS = [
+  "views",
+  "visitors",
+  "sessions",
+  "bounceRate",
+  "pagesPerSession",
+  "avgDuration",
+] as const;
+export type SiteOverviewMetric = (typeof SITE_OVERVIEW_METRICS)[number];
+export type SearchCommandGroup =
+  "workspace" | "team" | "site" | "metric" | "section";
 export type SearchNavigationTarget =
   | { kind: "app" }
   | { kind: "team"; teamId: string }
@@ -50,6 +61,7 @@ export type SearchNavigationTarget =
       siteId: string;
       section: SiteSearchSection;
       pagePath?: string;
+      metric?: SiteOverviewMetric;
     };
 export type SearchAction =
   | { type: "navigate"; target: SearchNavigationTarget }
@@ -63,6 +75,8 @@ export interface SearchResult {
   key: string;
   label: string;
   subtitle?: string;
+  group?: SearchCommandGroup;
+  keywords?: readonly string[];
   scope: SearchScope;
   source: string;
   coverage: SearchCoverage;
@@ -117,6 +131,12 @@ function sameScope(a: SearchScope, b: SearchScope): boolean {
     (!a.siteId || !b.siteId || a.siteId === b.siteId)
   );
 }
+export function resultMatchScore(result: SearchResult, query: string): number {
+  return Math.max(
+    matchScore(result.label, query),
+    ...(result.keywords?.map((value) => matchScore(value, query)) ?? []),
+  );
+}
 export function resultIdentity(result: SearchResult): string {
   return JSON.stringify([
     result.scope.userId,
@@ -140,7 +160,7 @@ export function mergeSearchResults(
         result.action.field !== request.field)
     )
       continue;
-    const score = matchScore(result.label, request.query);
+    const score = resultMatchScore(result, request.query);
     if (!score) continue;
     const id = resultIdentity(result);
     const old = dedup.get(id);
@@ -155,8 +175,8 @@ export function mergeSearchResults(
   return [...dedup.values()]
     .sort(
       (a, b) =>
-        matchScore(b.label, request.query) -
-          matchScore(a.label, request.query) ||
+        resultMatchScore(b, request.query) -
+          resultMatchScore(a, request.query) ||
         (b.observedAt ?? 0) - (a.observedAt ?? 0) ||
         a.label.localeCompare(b.label) ||
         resultIdentity(a).localeCompare(resultIdentity(b)),
@@ -264,6 +284,13 @@ export function resolveSearchAction(
       !SITE_SEARCH_SECTIONS.includes(target.section)
     )
       return null;
+    if (
+      target.metric !== undefined &&
+      (target.section !== "overview" ||
+        target.pagePath !== undefined ||
+        !SITE_OVERVIEW_METRICS.includes(target.metric))
+    )
+      return null;
     if (target.pagePath !== undefined && target.section !== "pages")
       return null;
     if (
@@ -279,7 +306,11 @@ export function resolveSearchAction(
       target.pagePath === undefined
         ? ""
         : "?pagePath=" + encodeURIComponent(target.pagePath);
-    return { type: "navigate", href: route.baseHref + suffix + detail };
+    const anchor = target.metric ? "#overview-metric-" + target.metric : "";
+    return {
+      type: "navigate",
+      href: route.baseHref + suffix + detail + anchor,
+    };
   }
   if (
     result.action.type === "apply-filter" &&
@@ -305,6 +336,8 @@ export function navigationProvider(
     target: SearchNavigationTarget;
     scope: SearchScope;
     subtitle?: string;
+    group?: SearchCommandGroup;
+    keywords?: readonly string[];
   }[],
 ): SearchProvider {
   return {
@@ -318,6 +351,8 @@ export function navigationProvider(
         label: entry.label,
         scope: entry.scope,
         subtitle: entry.subtitle,
+        group: entry.group,
+        keywords: entry.keywords,
         source: "navigation",
         coverage: "static-navigation" as const,
         action: { type: "navigate" as const, target: entry.target },

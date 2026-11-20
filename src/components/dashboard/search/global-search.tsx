@@ -9,17 +9,14 @@ import {
 } from "@insightflare/ui/dialog";
 import { Input } from "@insightflare/ui/input";
 import { SelectLabel, selectTriggerStyles } from "@insightflare/ui/select";
-import {
-  RiArrowDownSLine,
-  RiArrowRightLine,
-  RiSearchLine,
-} from "@remixicon/react";
+import { RiArrowRightLine, RiSearchLine } from "@remixicon/react";
 
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import { fetchAdminMe, type SiteData } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";
 import {
   resolveSearchAction,
+  type SearchCommandGroup,
   type SearchRequest,
   type SearchResult,
 } from "@/lib/perception-search/core";
@@ -42,6 +39,17 @@ export function GlobalPerceptionSearch({ locale }: { locale: Locale }) {
   useSyncExternalStore(subscribePerception, getPerceptionVersion, () => "0:0");
   const labels = perceptionLabels[locale];
   const auth = getPerceptionAuthorization();
+  const contextMode = auth?.activeSiteId
+    ? "site"
+    : auth?.activeTeamId
+      ? "team"
+      : "root";
+  const triggerLabel =
+    contextMode === "site"
+      ? labels.searchMetrics
+      : contextMode === "team"
+        ? labels.searchSites
+        : labels.searchTeams;
   const request: SearchRequest = {
     query,
     mode: "global",
@@ -51,39 +59,39 @@ export function GlobalPerceptionSearch({ locale }: { locale: Locale }) {
       teamId: auth?.activeTeamId,
       siteId: auth?.activeSiteId,
     },
-    limit: 12,
+    limit: 50,
   };
-  // Keep the empty palette a navigation workspace. Observed values are
-  // suggestions only after the user starts searching.
   const hasQuery = query.trim().length > 0;
   const matches = open
     ? hasQuery
       ? localPerceptionSearch(request)
-      : localPerceptionNavigation({ ...request, limit: 50 })
+      : localPerceptionNavigation(request)
     : [];
-  const navigationResults = matches
-    .filter((result) => result.coverage === "static-navigation")
-    .sort((a, b) => {
-      if (hasQuery) return 0;
-      const priority = (result: SearchResult) => {
-        if (result.action.type !== "navigate") return 4;
-        const target = result.action.target;
-        if (target.kind === "app") return 0;
-        if (target.kind === "team" && target.teamId === auth?.activeTeamId)
-          return 1;
-        if (target.kind === "site") return 2;
-        return 3;
-      };
-      return priority(a) - priority(b);
-    });
-  const observedResults = hasQuery
-    ? matches.filter((result) => result.coverage !== "static-navigation")
-    : [];
-  const results = hasQuery
-    ? [...navigationResults, ...observedResults]
-    : navigationResults.slice(0, 8);
+  const groups: { id: SearchCommandGroup; label: string }[] =
+    contextMode === "site"
+      ? [
+          { id: "metric", label: labels.metrics },
+          { id: "section", label: labels.sections },
+        ]
+      : contextMode === "team"
+        ? [{ id: "site", label: labels.sites }]
+        : [{ id: "team", label: labels.teams }];
+  const groupedResults = groups.map((group) => ({
+    ...group,
+    results: matches.filter(
+      (result) =>
+        result.coverage === "static-navigation" && result.group === group.id,
+    ),
+  }));
+  const observedResults =
+    contextMode === "site" && hasQuery
+      ? matches.filter((result) => result.coverage === "local-observed-only")
+      : [];
+  const results = [
+    ...groupedResults.flatMap((group) => group.results),
+    ...observedResults,
+  ];
   const activeIndex = Math.min(selected, Math.max(results.length - 1, 0));
-
   useEffect(() => {
     const onShortcut = (event: KeyboardEvent) => {
       if (
@@ -173,9 +181,9 @@ export function GlobalPerceptionSearch({ locale }: { locale: Locale }) {
         className={`${selectTriggerStyles} w-full`}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={labels.trigger}
+        aria-label={triggerLabel}
         aria-keyshortcuts="Control+K Meta+K"
-        title={labels.trigger + " (Ctrl/⌘ K)"}
+        title={triggerLabel + " (Ctrl/⌘ K)"}
         data-testid="perception-search-trigger"
         onClick={() => {
           setNotice("");
@@ -186,12 +194,8 @@ export function GlobalPerceptionSearch({ locale }: { locale: Locale }) {
       >
         <span className="flex min-w-0 items-center gap-1.5">
           <RiSearchLine aria-hidden="true" />
-          <span>{labels.trigger}</span>
+          <span>{triggerLabel}</span>
         </span>
-        <RiArrowDownSLine
-          aria-hidden="true"
-          className="text-muted-foreground"
-        />
       </button>
       <Dialog
         open={open}
@@ -217,7 +221,7 @@ export function GlobalPerceptionSearch({ locale }: { locale: Locale }) {
           <Input
             autoFocus
             value={query}
-            aria-label={labels.placeholder}
+            aria-label={triggerLabel}
             aria-controls="perception-search-results"
             aria-activedescendant={
               results.length ? "perception-item-" + activeIndex : undefined
@@ -225,7 +229,7 @@ export function GlobalPerceptionSearch({ locale }: { locale: Locale }) {
             role="combobox"
             aria-autocomplete="list"
             aria-expanded="true"
-            placeholder={labels.placeholder}
+            placeholder={triggerLabel}
             onChange={(event) => {
               setQuery(event.target.value);
               setSelected(0);
@@ -253,27 +257,24 @@ export function GlobalPerceptionSearch({ locale }: { locale: Locale }) {
             aria-label={labels.title}
             className="max-h-80 overflow-y-auto"
           >
-            {navigationResults.length ? (
-              <div
-                role="group"
-                aria-label={hasQuery ? labels.navigation : labels.quickAccess}
-              >
-                <SelectLabel>
-                  {hasQuery ? labels.navigation : labels.quickAccess}
-                </SelectLabel>
-                {(hasQuery ? navigationResults : results).map((result, index) =>
-                  option(result, index),
-                )}
-              </div>
-            ) : null}
+            {groupedResults.map((group) =>
+              group.results.length ? (
+                <div key={group.id} role="group" aria-label={group.label}>
+                  <SelectLabel>{group.label}</SelectLabel>
+                  {group.results.map((result) =>
+                    option(result, results.indexOf(result)),
+                  )}
+                </div>
+              ) : null,
+            )}
             {observedResults.length ? (
               <div role="group" aria-label={labels.local}>
                 <SelectLabel>{labels.local}</SelectLabel>
-                {observedResults.map((result, index) =>
-                  option(result, navigationResults.length + index),
+                {observedResults.map((result) =>
+                  option(result, results.indexOf(result)),
                 )}
               </div>
-            ) : null}
+            ) : null}{" "}
             {results.length === 0 ? (
               <p role="status" className="text-xs text-muted-foreground">
                 {labels.empty}

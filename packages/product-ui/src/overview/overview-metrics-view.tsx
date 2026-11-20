@@ -111,7 +111,11 @@ export function OverviewMetricsView({
             const effectiveDelta = hasDelta ? (item.delta ?? 0) : null;
 
             return (
-              <div key={label} className={metricCellBorderClasses(index)}>
+              <div
+                key={item.key}
+                id={`overview-metric-${item.key}`}
+                className={metricCellBorderClasses(index)}
+              >
                 <div className="relative min-h-[74px]">
                   <div className="absolute inset-y-0 right-0 w-1/2 min-w-0">
                     <MetricAreaChart

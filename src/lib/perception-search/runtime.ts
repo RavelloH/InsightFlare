@@ -1,5 +1,6 @@
 import {
   navigationProvider,
+  type SearchCommandGroup,
   searchLocal,
   type SearchNavigationTarget,
   type SearchProvider,
@@ -27,6 +28,8 @@ type NavigationEntry = {
   target: SearchNavigationTarget;
   scope: SearchScope;
   subtitle?: string;
+  group?: SearchCommandGroup;
+  keywords?: readonly string[];
 };
 let current: RuntimeContext | null = null;
 let authorizationEpoch = 0;
