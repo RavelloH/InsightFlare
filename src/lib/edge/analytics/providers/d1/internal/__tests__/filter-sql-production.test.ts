@@ -11,16 +11,25 @@ import {
   attachScopedFilterMetadata,
   createQueryTime,
   createScopedFilterPlan,
+  FILTER_SCOPE_CAPABILITIES,
   type QueryTime,
 } from "@/lib/edge/analytics/contract";
 import { VISIT_SOURCE_COLUMNS } from "@/lib/edge/analytics/providers/d1/internal/core-sources";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
+import {
+  querySessionsFromD1,
+  queryVisitorsFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
 import { queryOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/overview";
+import { queryTrendFromD1 } from "@/lib/edge/analytics/providers/d1/internal/overview";
+import { queryTopPagesFromD1 } from "@/lib/edge/analytics/providers/d1/internal/pages";
+import { queryReferrerSummaryFromD1 } from "@/lib/edge/analytics/providers/d1/internal/referrers";
 import {
   applyObservationFilterToScopedDataset,
   compileScopedDatasetSql,
   scopedDatasetForUnpreparedReader,
 } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
+import { queryTeamOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/team";
 import { expandCustomEventData } from "@/lib/edge/ingest/custom-event-json";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 import { filterDocumentUsesAdvancedExpressions } from "@/lib/filter-contract/filter-types";
@@ -526,6 +535,141 @@ describe("FSQL-07 ordinary Event Payload through real ScopedDataset SQL", () => 
     }
   });
 
+  it("executes real Pages, Trend, Referrers and Team Reader output with authorized site scope", async () => {
+    const db = sqlitePayloadFixture();
+    try {
+      const raw = parseFilterDsl(
+        'event.payload("/items/1/sku") eq "B"',
+        analyticsFilterRegistry,
+      );
+      const plan = createScopedFilterPlan("pages", raw, "event")!;
+      const filters = attachScopedFilterMetadata(raw, {
+        requestedScope: "event",
+        resolvedScope: plan.scope,
+        plan,
+        time: createQueryTime(100, 300, "UTC", 400),
+        siteIds: ["site-a"],
+      });
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const env = { DB: createSqliteD1Database(db, trace) } as never;
+
+      expect(
+        await queryTopPagesFromD1(env, "site-a", WINDOW, 10, false, filters),
+      ).toEqual([
+        { pathname: "/home", query: "", hash: "", views: 1, sessions: 1 },
+      ]);
+      expect(
+        await queryTopPagesFromD1(env, "site-b", WINDOW, 10, false, filters),
+      ).toEqual([]);
+
+      const trend = await queryTrendFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        "minute",
+        filters,
+      );
+      expect(trend.map((item) => item.views).reduce((a, b) => a + b, 0)).toBe(
+        1,
+      );
+      expect(
+        trend.map((item) => item.visitors).reduce((a, b) => a + b, 0),
+      ).toBe(1);
+      expect(
+        (await queryTrendFromD1(env, "site-b", WINDOW, "minute", filters))
+          .map((item) => item.views)
+          .reduce((a, b) => a + b, 0),
+      ).toBe(0);
+
+      const refs = await queryReferrerSummaryFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        filters,
+        5,
+      );
+      expect(refs).toMatchObject({
+        totalViews: 1,
+        directViews: 1,
+        externalViews: 0,
+        uniqueDomains: 0,
+      });
+      expect(
+        (await queryReferrerSummaryFromD1(env, "site-b", WINDOW, filters, 5))
+          .totalViews,
+      ).toBe(0);
+
+      const team = await queryTeamOverviewFromD1(
+        env,
+        ["site-a", "site-b"],
+        WINDOW,
+        undefined,
+        filters,
+      );
+      expect(team.get("site-a")).toMatchObject({
+        views: 1,
+        sessions: 1,
+        visitors: 1,
+      });
+      expect(team.get("site-b")?.views ?? 0).toBe(0);
+      expect(
+        trace.preparedSql.filter((sql) => sql.includes("pointer_nodes")).length,
+      ).toBeGreaterThanOrEqual(6);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns correct prepared visitor and session Reader rows with no cross-site collisions", async () => {
+    const db = sqlitePayloadFixture();
+    try {
+      const raw = parseFilterDsl(
+        'event.payload("/items/1/sku") eq "B"',
+        analyticsFilterRegistry,
+      );
+      const env = { DB: createSqliteD1Database(db) } as never;
+      const filtered = (
+        op: "visitors" | "sessions",
+        scope: "visitor" | "session",
+      ) => {
+        const plan = createScopedFilterPlan(op, raw, scope)!;
+        return attachScopedFilterMetadata(raw, {
+          requestedScope: scope,
+          resolvedScope: plan.scope,
+          plan,
+          time: createQueryTime(100, 300, "UTC", 400),
+          siteIds: ["site-a"],
+        });
+      };
+      const visitors = filtered("visitors", "visitor");
+      const sessions = filtered("sessions", "session");
+      const siteAVisitors = await queryVisitorsFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        visitors,
+        10,
+      );
+      const siteASessions = await querySessionsFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        sessions,
+        10,
+      );
+      expect(siteAVisitors.map((item) => item.visitorId)).toEqual(["u1"]);
+      expect(siteASessions.map((item) => item.sessionId)).toEqual(["s1"]);
+      expect(
+        await queryVisitorsFromD1(env, "site-b", WINDOW, visitors, 10),
+      ).toEqual([]);
+      expect(
+        await querySessionsFromD1(env, "site-b", WINDOW, sessions, 10),
+      ).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("keeps Comparison-side parameter ordering and Event-to-Visit report expansion correct", () => {
     const db = sqlitePayloadFixture();
     try {
@@ -563,6 +707,67 @@ describe("FSQL-07 ordinary Event Payload through real ScopedDataset SQL", () => 
       db.close();
     }
   });
+});
+
+describe("P5 execution matrix across 35 operation scope contracts", () => {
+  const operations = Object.entries(FILTER_SCOPE_CAPABILITIES).filter(
+    ([, capability]) => capability.kind === "scoped",
+  );
+  const negative = 'count(EVENT { $.name eq "purchase" }) eq 2';
+  const positive = 'count(EVENT { $.name eq "purchase" }) eq 1';
+
+  it.each(operations)(
+    "executes real SQLite dataset rows for %s",
+    (operation, capability) => {
+      if (capability.kind !== "scoped")
+        throw new Error("Expected scoped operation");
+      const db = sqliteFixture();
+      try {
+        for (const [expression, matches] of [
+          [positive, true],
+          [negative, false],
+        ] as const) {
+          const document = parseFilterDsl(expression, analyticsFilterRegistry);
+          const plan = createScopedFilterPlan(operation as never, document)!;
+          expect(plan).not.toBeNull();
+          expect(plan.scope).toBe(capability.autoScope);
+          const filters = attachScopedFilterMetadata(document, {
+            requestedScope: plan.scope,
+            resolvedScope: plan.scope,
+            plan,
+            time: createQueryTime(100, 300, "UTC", 400),
+            siteIds: SITES,
+          });
+          const result = compileScopedDatasetSql({
+            filters,
+            plan,
+            siteIds: SITES,
+            window: WINDOW,
+          });
+          const rows = select(
+            db,
+            "WITH " +
+              result.ctes +
+              " SELECT site_pk, visit_id FROM " +
+              result.visitRelation +
+              " ORDER BY site_pk, visit_id",
+            result.bindings.map((b) => b.value),
+          );
+          if (matches) {
+            expect(rows).toEqual([
+              { site_pk: 1, visit_id: "v-new" },
+              { site_pk: 2, visit_id: "v-new" },
+            ]);
+          } else {
+            expect(rows).toEqual([]);
+          }
+          expect(result.ctes).not.toContain("scope_advanced_matching_entities");
+        }
+      } finally {
+        db.close();
+      }
+    },
+  );
 });
 
 describe("P5 Scoped Dataset integration: SQL-only advanced qualification", () => {

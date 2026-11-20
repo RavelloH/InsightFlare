@@ -29,10 +29,10 @@ function fixture(): DatabaseSync {
     "INSERT INTO custom_event_json_values VALUES(?,?,?,?,?,?,?)",
   );
   for (const [eventPk, data] of [
-    [101, { amount: 5, sku: "pro", flag: true }],
-    [102, { amount: "5", sku: "pro", flag: "true" }],
-    [103, { amount: null, sku: "free", flag: false }],
-    [104, { sku: "free" }],
+    [101, { amount: 5, sku: "pro", flag: true, hetero: 1 }],
+    [102, { amount: "5", sku: "pro", flag: "true", hetero: "1" }],
+    [103, { amount: null, sku: "free", flag: false, hetero: true }],
+    [104, { sku: "free", hetero: false }],
   ] as const) {
     const expanded = expandCustomEventData(data);
     if (!expanded.ok) throw new Error(expanded.error);
@@ -195,6 +195,78 @@ describe("P3 typed SQL scalar aggregation", () => {
         true,
       );
       expect(qualifies(db, 'min(EVENT -> payload("/flag")) neq true')).toBe(
+        true,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("P3-02 keeps heterogeneous distinct/number-only aggregates and division-by-zero SQL Null", () => {
+    const db = fixture();
+    try {
+      expect(
+        qualifies(db, 'countDistinct(EVENT -> payload("/hetero")) eq 4'),
+      ).toBe(true);
+      expect(
+        qualifies(db, 'countDistinct(EVENT -> payload("/hetero")) eq 2'),
+      ).toBe(false);
+      expect(qualifies(db, 'sum(EVENT -> payload("/hetero")) eq 1')).toBe(true);
+      expect(qualifies(db, 'avg(EVENT -> payload("/hetero")) eq 1')).toBe(true);
+      expect(qualifies(db, 'min(EVENT -> payload("/hetero")) eq "1"')).toBe(
+        true,
+      );
+      expect(qualifies(db, 'max(EVENT -> payload("/hetero")) eq true')).toBe(
+        true,
+      );
+      expect(qualifies(db, 'count(EVENT -> payload("/missing")) eq 0')).toBe(
+        true,
+      );
+      expect(
+        qualifies(
+          db,
+          'div(count(EVENT), count(EVENT { $.name eq "unseen" })) isNull',
+        ),
+      ).toBe(true);
+      expect(
+        qualifies(
+          db,
+          'div(count(EVENT), count(EVENT { $.name eq "unseen" })) notNull',
+        ),
+      ).toBe(false);
+      expect(qualifies(db, "div(count(EVENT), count(EVENT)) eq 1")).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("handles zero divisors and mixed JSON values without coercing Booleans", () => {
+    const db = fixture();
+    try {
+      expect(
+        qualifies(
+          db,
+          'div(count(PAGE), count(EVENT { $.name eq "never" })) isNull',
+        ),
+      ).toBe(true);
+      expect(
+        qualifies(
+          db,
+          'div(count(PAGE), count(EVENT { $.name eq "never" })) notNull',
+        ),
+      ).toBe(false);
+      expect(
+        qualifies(
+          db,
+          'div(count(PAGE), count(EVENT { $.name eq "never" })) eq 0',
+        ),
+      ).toBe(false);
+      expect(
+        qualifies(db, 'countDistinct(EVENT -> payload("/flag")) eq 3'),
+      ).toBe(true);
+      expect(qualifies(db, 'sum(EVENT -> payload("/flag")) eq 0')).toBe(true);
+      expect(qualifies(db, 'avg(EVENT -> payload("/flag")) isNull')).toBe(true);
+      expect(qualifies(db, 'first(EVENT -> payload("/missing")) isNull')).toBe(
         true,
       );
     } finally {

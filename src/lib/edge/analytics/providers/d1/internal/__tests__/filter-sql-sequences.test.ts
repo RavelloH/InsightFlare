@@ -84,17 +84,24 @@ function fixture(): DatabaseSync {
   return db;
 }
 
-function qualified(db: DatabaseSync, expression: string) {
+function qualified(
+  db: DatabaseSync,
+  expression: string,
+  sourceSql = source,
+  clock?: Parameters<typeof compileCollectionSqlQualification>[3],
+) {
   const qualification = compileCollectionSqlQualification(
     parseFilterDsl(expression, analyticsFilterRegistry),
     "session",
+    {},
+    clock,
   );
   if (qualification.kind !== "entity")
     throw new Error("Expected entity relation");
   const composed = composeBoundCtes(qualification.ctes);
   return db
     .prepare(
-      `WITH ${source}, ${composed.ctes}
+      `WITH ${sourceSql}, ${composed.ctes}
     SELECT site_pk,entity_id FROM ${qualification.qualifiedEntityRelation}
     ORDER BY site_pk,entity_id`,
     )
@@ -102,6 +109,146 @@ function qualified(db: DatabaseSync, expression: string) {
 }
 
 describe("P4 complete timeline and relational SQL", () => {
+  it("orders same-millisecond Unicode identifiers deterministically and isolates sites", () => {
+    const db = fixture();
+    try {
+      const ties = source
+        .replace("(1,'a',101,'e1'", "(1,'a',101,'é'")
+        .replace("(1,'a',102,'e2'", "(1,'a',102,'Z'")
+        .replace("(1,'a',103,'e3'", "(1,'a',103,'ß'")
+        .replace("'noise',26)", "'noise',20)")
+        .replace("'purchase',30)", "'purchase',20)");
+      const onlySiteOne = [{ site_pk: 1, entity_id: "s1" }];
+      expect(
+        qualified(
+          db,
+          'first(EVENT).name eq "noise" AND nth(EVENT,2).name eq "purchase"',
+          ties,
+        ),
+      ).toEqual(onlySiteOne);
+      expect(
+        qualified(
+          db,
+          'adjacent(sequence([EVENT { $.name eq "noise" }, EVENT { $.name eq "purchase" }])) exists',
+          ties,
+        ),
+      ).toEqual(onlySiteOne);
+      expect(
+        qualified(
+          db,
+          'count(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }])) eq 1',
+          ties,
+        ),
+      ).toEqual([
+        { site_pk: 1, entity_id: "s1" },
+        { site_pk: 1, entity_id: "s2" },
+        { site_pk: 2, entity_id: "s1" },
+      ]);
+      expect(
+        qualified(
+          db,
+          'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
+          ties,
+        ).map((row) => row.site_pk),
+      ).toEqual([1, 1, 2]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("obeys half-open Window start/end and empty windows", () => {
+    const db = fixture();
+    try {
+      const clock = {
+        nowMs: 40,
+        rangeStartMs: 20,
+        rangeEndExclusiveMs: 40,
+        timeZone: "UTC",
+      };
+      expect(
+        qualified(
+          db,
+          "count(window(EVENT, @range.start, [0ms,10ms])) eq 2",
+          source,
+          clock,
+        ),
+      ).toEqual([{ site_pk: 1, entity_id: "s1" }]);
+      expect(
+        qualified(
+          db,
+          "count(window(EVENT, @range.start, [0ms,10ms])) eq 1",
+          source,
+          clock,
+        ),
+      ).toEqual([{ site_pk: 2, entity_id: "s1" }]);
+      expect(
+        qualified(
+          db,
+          "count(window(EVENT, @range.start, [0ms,10ms])) eq 0",
+          source,
+          clock,
+        ),
+      ).toEqual([{ site_pk: 1, entity_id: "s2" }]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("evaluates both 23-hour and 25-hour IANA natural days with exclusive end", () => {
+    for (const [startIso, endIso, hours] of [
+      ["2026-03-08T08:00:00.000Z", "2026-03-09T07:00:00.000Z", 23],
+      ["2026-11-01T07:00:00.000Z", "2026-11-02T08:00:00.000Z", 25],
+    ] as const) {
+      const db = fixture();
+      try {
+        const start = Date.parse(startIso);
+        const end = Date.parse(endIso);
+        expect(end - start).toBe(hours * 3600000);
+        const day =
+          "scope_raw_visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,duration_ms,started_at) AS (" +
+          "VALUES (1,'a','v1','s1','u1','/landing',1," +
+          start +
+          ")" +
+          "),scope_raw_events(site_pk,site_id,event_pk,event_id,visit_id,session_id,visitor_id,pathname,event_name,occurred_at) AS (" +
+          "VALUES (1,'a',101,'at-start','v1','s1','u1','/landing','signup'," +
+          start +
+          ")," +
+          "(1,'a',103,'before-end','v1','s1','u1','/landing','purchase'," +
+          (end - 1) +
+          ")," +
+          "(1,'a',104,'at-end','v1','s1','u1','/landing','purchase'," +
+          end +
+          "))";
+        const clock = {
+          nowMs: end + 1,
+          rangeStartMs: start,
+          rangeEndExclusiveMs: end,
+          filterStartMs: start,
+          filterEndExclusiveMs: end,
+          timeZone: "America/Los_Angeles",
+        };
+        expect(
+          qualified(
+            db,
+            "count(periods(EVENT, 1d) { count($items) eq 2 }) eq 1",
+            day,
+            clock,
+          ),
+        ).toEqual([{ site_pk: 1, entity_id: "s1" }]);
+        expect(
+          qualified(
+            db,
+            "count(window(EVENT, @range.start, [0ms," + hours + "h])) eq 2",
+            day,
+            clock,
+          ),
+        ).toEqual([{ site_pk: 1, entity_id: "s1" }]);
+      } finally {
+        db.close();
+      }
+    }
+  });
+
   it("counts all combinations of ordered N-step Sequence occurrences", () => {
     const db = fixture();
     try {
