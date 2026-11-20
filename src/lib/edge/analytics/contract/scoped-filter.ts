@@ -66,19 +66,6 @@ export interface ScopedFilterPlan {
     "matching-observations" | "matching-sessions" | "matching-visitors";
   readonly requiredSources: ReadonlySet<ObservationSource>;
   readonly requiresRawSource: boolean;
-  /** Resolved once by the D1 runtime for Core/Relation documents. */
-  readonly advancedMatches?: AdvancedFilterMatches;
-}
-
-export interface AdvancedFilterIdentity {
-  readonly siteId: string;
-  readonly id: string;
-}
-
-export interface AdvancedFilterMatches {
-  readonly entityIds?: readonly AdvancedFilterIdentity[];
-  readonly visitIds?: readonly AdvancedFilterIdentity[];
-  readonly eventIds?: readonly AdvancedFilterIdentity[];
 }
 
 export interface ScopedFilteringCapability {

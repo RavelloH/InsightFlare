@@ -324,13 +324,13 @@ export async function queryLatestSiteActivity(
     ? scopedDataset.visitRelation
     : "filtered_visits";
   const sourceSql = scopedDataset
-    ? `${scopedDataset.ctes},`
+    ? scopedDataset.ctes
     : `${visitSource},
 filtered_visits AS MATERIALIZED (
   SELECT *
   FROM visit_source
   ${filter.clause}
-),`;
+)`;
   const sql = `
 WITH
 ${sourceSql}

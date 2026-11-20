@@ -450,7 +450,7 @@ rollup AS (
 SELECT valueType, events, occurrences, firstSeenAt, lastSeenAt,
   stringValue, numberValue, booleanValue,
   COALESCE(stringValue, '') AS valueString,
-  COALESCE(numberValue, -9223372036854775808) AS valueNumber,
+  COALESCE(numberValue, CAST(-9223372036854775808 AS REAL)) AS valueNumber,
   COALESCE(booleanValue, -1) AS valueBoolean
 FROM rollup
 WHERE 1 = 1
