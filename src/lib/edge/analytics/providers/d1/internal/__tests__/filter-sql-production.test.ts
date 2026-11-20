@@ -14,15 +14,43 @@ import {
   FILTER_SCOPE_CAPABILITIES,
   type QueryTime,
 } from "@/lib/edge/analytics/contract";
+import { siteQueryContext } from "@/lib/edge/analytics/contract";
+import { executePrivateQuery } from "@/lib/edge/analytics/interfaces/dashboard/private";
+import { executePublicQuery } from "@/lib/edge/analytics/interfaces/dashboard/public";
+import { createComparisonProviders } from "@/lib/edge/analytics/providers/d1/comparison";
+import { queryChannelAggregate } from "@/lib/edge/analytics/providers/d1/internal/channels";
+import { resolveCrossBreakdownDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
 import { VISIT_SOURCE_COLUMNS } from "@/lib/edge/analytics/providers/d1/internal/core-sources";
+import { DEFAULT_EVENT_RECORD_SORT } from "@/lib/edge/analytics/providers/d1/internal/core-types";
+import { queryDimensionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/dimensions";
+import { queryEventAnalyticsContextCardsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-context";
+import {
+  queryEventFieldsPageFromD1,
+  queryEventFieldValuesPageFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/events-fields";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
+import { queryEventRecordPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
+import {
+  queryEventsSummaryFromD1,
+  queryEventTypePageFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/events-summary";
+import { queryEventsTrendFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-trend";
+import { queryFilterValuesPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/filter-values";
+import { queryFunnelAnalysis } from "@/lib/edge/analytics/providers/d1/internal/funnels";
+import { queryGoalSummaryFromD1 } from "@/lib/edge/analytics/providers/d1/internal/goal-summary";
+import { queryGoalTimeseriesFromD1 } from "@/lib/edge/analytics/providers/d1/internal/goal-timeseries";
 import {
   querySessionsFromD1,
   queryVisitorsFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
+import { queryJourneyEventsPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
+import { queryRetentionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-retention";
+import { queryGeoPointAggregate } from "@/lib/edge/analytics/providers/d1/internal/journeys";
 import { queryOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/overview";
 import { queryTrendFromD1 } from "@/lib/edge/analytics/providers/d1/internal/overview";
 import { queryTopPagesFromD1 } from "@/lib/edge/analytics/providers/d1/internal/pages";
+import { queryPagesWithTabsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/pages";
+import { queryPerformanceDashboardFromD1 } from "@/lib/edge/analytics/providers/d1/internal/performance";
 import { queryReferrerSummaryFromD1 } from "@/lib/edge/analytics/providers/d1/internal/referrers";
 import {
   applyObservationFilterToScopedDataset,
@@ -30,8 +58,15 @@ import {
   scopedDatasetForUnpreparedReader,
 } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import { queryTeamOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/team";
+import { queryTeamDashboardForTeam } from "@/lib/edge/analytics/providers/d1/internal/team";
+import { queryCrossDimensionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/client-cross";
+import { queryBrowserRadarFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/radar";
+import { queryReferrerTrendFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/share-trend";
+import { readSiteVisitorSessions } from "@/lib/edge/analytics/providers/d1/operations/site-journeys";
+import { readTeamSites } from "@/lib/edge/analytics/providers/d1/operations/team-sites";
 import { expandCustomEventData } from "@/lib/edge/ingest/custom-event-json";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
+import { applyFiltersToUrl } from "@/lib/filter-contract/filter-codec";
 import { filterDocumentUsesAdvancedExpressions } from "@/lib/filter-contract/filter-types";
 
 const SITES = ["site-a", "site-b"];
@@ -87,7 +122,7 @@ function sqlitePayloadFixture(): DatabaseSync {
       "CREATE TABLE custom_event_json_keys(id INTEGER PRIMARY KEY, site_pk INTEGER, key TEXT)",
       "CREATE TABLE custom_event_json_paths(id INTEGER PRIMARY KEY, site_pk INTEGER, path TEXT)",
       "CREATE TABLE custom_event_json_nodes(event_pk INTEGER, node_id INTEGER, parent_node_id INTEGER, key_id INTEGER, path_id INTEGER, value_type INTEGER, member_order INTEGER, array_index INTEGER, depth INTEGER, PRIMARY KEY(event_pk,node_id))",
-      "CREATE TABLE custom_event_json_values(event_pk INTEGER, node_id INTEGER, site_pk INTEGER, value_type INTEGER, string_value TEXT, number_value REAL, boolean_value INTEGER)",
+      "CREATE TABLE custom_event_json_values(event_pk INTEGER, node_id INTEGER, site_pk INTEGER, site_id TEXT, event_name_id INTEGER, path_id INTEGER, occurred_at INTEGER, scope_node_id INTEGER, value_type INTEGER, string_value TEXT, string_hash TEXT, number_value REAL, boolean_value INTEGER)",
     ].join("; ") + ";",
   );
   const keys = new Map<string, number>();
@@ -102,7 +137,7 @@ function sqlitePayloadFixture(): DatabaseSync {
     "INSERT INTO custom_event_json_nodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const valueStmt = db.prepare(
-    "INSERT INTO custom_event_json_values VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO custom_event_json_values VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const payloads: ReadonlyArray<readonly [number, number, object]> = [
     [101, 1, { items: [{ sku: "A" }] }], // historical Event outside Q
@@ -164,16 +199,44 @@ function sqlitePayloadFixture(): DatabaseSync {
         node.arrayIndex,
         node.depth,
       );
-    for (const value of expansion.data.values)
+    for (const value of expansion.data.values) {
+      const node = expansion.data.nodes.find(
+        (item) => item.nodeId === value.nodeId,
+      )!;
+      const eventNameId =
+        eventPk === 101 || eventPk === 103
+          ? 1
+          : eventPk === 102
+            ? 2
+            : eventPk === 104
+              ? 3
+              : 4;
+      const occurredAt =
+        eventPk === 101
+          ? 30
+          : eventPk === 102
+            ? 130
+            : eventPk === 103
+              ? 160
+              : eventPk === 104
+                ? 240
+                : 150;
       valueStmt.run(
         eventPk,
         value.nodeId,
         sitePk,
+        sitePk === 1 ? "site-a" : "site-b",
+        eventNameId,
+        paths.get(sitePk + "/" + node.path)!,
+        occurredAt,
+        null,
         value.valueType,
         value.stringValue,
+        null,
         value.numberValue,
         value.booleanValue,
       );
+    }
   }
   return db;
 }
@@ -1078,5 +1141,765 @@ describe("P5 Scoped Dataset integration: SQL-only advanced qualification", () =>
     expect(() => dataset("count(EVENT) gte 1", "session", bad)).toThrow(
       "filter_evaluation_range_unavailable",
     );
+  });
+});
+
+describe("P5 final: visit-derived real production Readers over typed Event payload", () => {
+  function ready(
+    operation: string,
+    expression = 'event.payload("/items/1/sku") eq "B"',
+  ) {
+    const doc = parseFilterDsl(expression, analyticsFilterRegistry);
+    const plan = createScopedFilterPlan(operation as never, doc, "event")!;
+    if (!plan) throw new Error("Missing scoped plan");
+    return attachScopedFilterMetadata(doc, {
+      requestedScope: "event",
+      resolvedScope: plan.scope,
+      plan,
+      time: createQueryTime(100, 300, "UTC", 400),
+      siteIds: ["site-a"],
+    });
+  }
+
+  function runFixture() {
+    const db = sqlitePayloadFixture();
+    db.exec(
+      "UPDATE visits SET browser='Chrome', os='Windows', device_type='Desktop', country='US', region='California', city='LA', latitude=34.05, longitude=-118.25, referrer_host='example.com', referrer_url='https://example.com/from', utm_source='google', perf_ttfb_ms=100, perf_fcp_ms=200, perf_lcp_ms=300 WHERE site_pk=1 AND visit_id='v-new'",
+    );
+    db.exec(
+      "UPDATE visits SET browser='Firefox', os='Linux', device_type='Mobile', country='CA', latitude=45, longitude=-75, referrer_host='other.example' WHERE site_pk=1 AND visit_id='v-docs'",
+    );
+    db.exec(
+      "UPDATE visits SET browser='Safari', os='iOS', device_type='Mobile', country='FR', latitude=48, longitude=2, referrer_host='foreign.example' WHERE site_pk=2",
+    );
+    return { db, env: { DB: createSqliteD1Database(db) } as never };
+  }
+
+  it("Dimension and CrossDimension return only the scoped Page/browser cells", async () => {
+    const { db, env } = runFixture();
+    try {
+      const dimension = ready("dimension");
+      const rows = await queryDimensionFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        dimension,
+        10,
+        "pathname",
+      );
+      expect(rows).toEqual([
+        expect.objectContaining({ value: "/home", views: 1 }),
+      ]);
+      expect(
+        await queryDimensionFromD1(
+          env,
+          "site-b",
+          WINDOW,
+          dimension,
+          10,
+          "pathname",
+        ),
+      ).toEqual([]);
+      const primary = resolveCrossBreakdownDimension("page.path")!;
+      const secondary = resolveCrossBreakdownDimension("client.browser")!;
+      expect(primary).not.toBeNull();
+      expect(secondary).not.toBeNull();
+      const cross = await queryCrossDimensionFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        ready("cross-dimension"),
+        10,
+        10,
+        primary,
+        secondary,
+      );
+      expect(cross).toMatchObject({});
+      expect(JSON.stringify(cross)).toContain("Chrome");
+      expect(JSON.stringify(cross)).not.toContain("Firefox");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("ShareTrend, Radar, PagesDashboard and Channel show selected Visit only", async () => {
+    const { db, env } = runFixture();
+    try {
+      const trends = await queryReferrerTrendFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        "minute",
+        ready("share-trend"),
+        10,
+      );
+      expect(JSON.stringify(trends)).toContain("example.com");
+      expect(JSON.stringify(trends)).not.toContain("other.example");
+      const radar = await queryBrowserRadarFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        ready("radar"),
+      );
+      expect(radar).toEqual([
+        expect.objectContaining({ browser: "Chrome", sessions: 1 }),
+      ]);
+      const pages = await queryPagesWithTabsFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        ready("pages-dashboard"),
+        10,
+        false,
+      );
+      expect(JSON.stringify(pages)).toContain("/home");
+      expect(JSON.stringify(pages)).not.toContain("/docs");
+      const channel = await queryChannelAggregate(
+        env,
+        "site-a",
+        WINDOW,
+        ready("channels"),
+        10,
+      );
+      expect(channel.reduce((sum, item) => sum + item.views, 0)).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("FilterValues, Retention, Geo and Performance aggregate only authorized matches", async () => {
+    const { db, env } = runFixture();
+    try {
+      const values = await queryFilterValuesPageFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        ready("filter-values"),
+        "geo.country",
+        10,
+      );
+      expect(values.items).toEqual([
+        expect.objectContaining({ value: "US", occurrences: 1 }),
+      ]);
+      const retention = await queryRetentionFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        ready("retention"),
+        "minute",
+      );
+      expect(
+        retention.cohorts.reduce((sum, cohort) => sum + cohort.size, 0),
+      ).toBe(1);
+      const geo = await queryGeoPointAggregate(
+        env,
+        "site-a",
+        WINDOW,
+        ready("geo-points"),
+        10,
+      );
+      expect(JSON.stringify(geo)).toContain("US");
+      expect(JSON.stringify(geo)).not.toContain("CA");
+      const performance = await queryPerformanceDashboardFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        "minute",
+        ready("performance"),
+        10,
+      );
+      expect(JSON.stringify(performance)).toContain("/home");
+      expect(JSON.stringify(performance)).not.toContain("/docs");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("EventSummary, Trend and EventTypes return only the matching typed Event", async () => {
+    const { db, env } = runFixture();
+    try {
+      const summary = await queryEventsSummaryFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        ready("event-summary"),
+      );
+      expect(summary.summary).toEqual({
+        events: 1,
+        eventTypes: 1,
+        sessions: 1,
+        visitors: 1,
+      });
+      expect(summary.cards.event.name).toEqual([
+        { value: "purchase", views: 1, sessions: 1, visitors: 1 },
+      ]);
+      expect(
+        (
+          await queryEventsSummaryFromD1(
+            env,
+            "site-b",
+            WINDOW,
+            ready("event-summary"),
+          )
+        ).summary.events,
+      ).toBe(0);
+      const trend = await queryEventsTrendFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        "minute",
+        ready("event-trend"),
+        10,
+      );
+      expect(trend.series).toEqual([
+        expect.objectContaining({ eventName: "purchase", events: 1 }),
+      ]);
+      expect(trend.data.reduce((sum, row) => sum + row.totalEvents, 0)).toBe(1);
+      const types = await queryEventTypePageFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        ready("event-types"),
+        10,
+      );
+      expect(types.items).toEqual([
+        { value: "purchase", views: 1, sessions: 1, visitors: 1 },
+      ]);
+      expect(
+        (
+          await queryEventTypePageFromD1(
+            env,
+            "site-b",
+            WINDOW,
+            ready("event-types"),
+            10,
+          )
+        ).items,
+      ).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("EventFields, FieldValues and Context calculate typed JSON and source cards from actual matches", async () => {
+    const { db, env } = runFixture();
+    try {
+      const fields = await queryEventFieldsPageFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        ready("event-fields"),
+        "purchase",
+        50,
+      );
+      expect(fields.items.map((row) => row.path)).toContain("/items/*/sku");
+      expect(
+        fields.items
+          .filter((row) => row.path === "/items/*/sku")
+          .map((row) => row.occurrences),
+      ).toEqual([2]);
+      const values = await queryEventFieldValuesPageFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        ready("event-field-values"),
+        "purchase",
+        "/items/*/sku",
+        "string",
+        20,
+      );
+      expect(values.items.map((row) => row.stringValue).sort()).toEqual([
+        "A",
+        "B",
+      ]);
+      const context = await queryEventAnalyticsContextCardsFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        ready("event-context"),
+        10,
+        "purchase",
+        ["path", "browser", "country"],
+      );
+      expect(JSON.stringify(context)).toContain("/home");
+      expect(JSON.stringify(context)).toContain("Chrome");
+      expect(JSON.stringify(context)).not.toContain("/docs");
+      expect(
+        (
+          await queryEventFieldsPageFromD1(
+            env,
+            "site-b",
+            WINDOW,
+            ready("event-fields"),
+            "purchase",
+            50,
+          )
+        ).items,
+      ).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("EventRecords and visitor/session Journey read only authorized Event membership", async () => {
+    const { db, env } = runFixture();
+    try {
+      const records = await queryEventRecordPageFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        ready("event-records"),
+        { limit: 20, sort: DEFAULT_EVENT_RECORD_SORT },
+      );
+      expect(records.rows.map((row) => row.eventId)).toEqual(["e-purchase"]);
+      expect(
+        (
+          await queryEventRecordPageFromD1(
+            env,
+            "site-b",
+            WINDOW,
+            ready("event-records"),
+            { limit: 20, sort: DEFAULT_EVENT_RECORD_SORT },
+          )
+        ).rows,
+      ).toEqual([]);
+      const scope = (operation: string, kind: "visitor" | "session") => {
+        const doc = parseFilterDsl(
+          'event.payload("/items/1/sku") eq "B"',
+          analyticsFilterRegistry,
+        );
+        const plan = createScopedFilterPlan(operation as never, doc, kind)!;
+        return attachScopedFilterMetadata(doc, {
+          requestedScope: kind,
+          resolvedScope: plan.scope,
+          plan,
+          time: createQueryTime(100, 300, "UTC", 400),
+          siteIds: ["site-a"],
+        });
+      };
+      for (const [operation, kind] of [
+        ["visitor-events", "visitor"],
+        ["session-events", "session"],
+      ] as const) {
+        const target = { type: kind, value: kind === "visitor" ? "u1" : "s1" };
+        const page = await queryJourneyEventsPageFromD1(
+          env,
+          "site-a",
+          WINDOW,
+          scope(operation, kind),
+          target,
+          30,
+        );
+        expect(
+          page.items
+            .filter((item) => item.kind === "custom")
+            .map((item) => item.id),
+        ).toEqual(expect.arrayContaining(["e-purchase"]));
+        expect(
+          (
+            await queryJourneyEventsPageFromD1(
+              env,
+              "site-b",
+              WINDOW,
+              scope(operation, kind),
+              target,
+              30,
+            )
+          ).items,
+        ).toEqual([]);
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("Comparison overview and breakdown providers return the real selected Event and Visit metrics", async () => {
+    const { db, env } = runFixture();
+    try {
+      const filters = ready("comparison");
+      const query = { time: createQueryTime(100, 300, "UTC", 400), filters };
+      const context = siteQueryContext("site-a", "private-dashboard");
+      const comparison = {
+        context,
+        current: query,
+        reference: query,
+        metrics: ["views" as const],
+      };
+      const provider = createComparisonProviders({ env, siteId: "site-a" });
+      const overview = await provider.overview({
+        side: "current",
+        context,
+        query,
+        comparison,
+      });
+      expect(overview.value).toMatchObject({
+        views: 1,
+        sessions: 1,
+        visitors: 1,
+        events: 1,
+      });
+      const breakdown = await provider.breakdown({
+        side: "current",
+        context,
+        query,
+        comparison: {
+          ...comparison,
+          dimension: "page.path",
+          limit: 10,
+          sort: { by: "current.views" as const, direction: "desc" as const },
+        },
+      });
+      expect(breakdown.value.items).toEqual([
+        expect.objectContaining({
+          key: "/home",
+          views: 1,
+          sessions: 1,
+          visitors: 1,
+        }),
+      ]);
+      const reference = {
+        ...query,
+        filters: ready(
+          "comparison",
+          'event.payload("/items/1/sku") eq "not-present"',
+        ),
+      };
+      expect(
+        (
+          await provider.overview({
+            side: "reference",
+            context,
+            query: reference,
+            comparison: { ...comparison, reference },
+          })
+        ).value.views,
+      ).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("GoalSummary and GoalTimeseries evaluate real event conversion on scoped sessions", async () => {
+    const { db, env } = runFixture();
+    try {
+      const goal = parseFilterDsl(
+        'event.name eq "purchase"',
+        analyticsFilterRegistry,
+      );
+      const filtered = ready("goal-summary");
+      const summary = await queryGoalSummaryFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        filtered,
+        goal,
+      );
+      expect(summary).toEqual({
+        totalSessions: 1,
+        convertedSessions: 1,
+        totalVisitors: 1,
+        convertedVisitors: 1,
+      });
+      const series = await queryGoalTimeseriesFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        "minute",
+        ready("goal-timeseries"),
+        goal,
+      );
+      expect(series.reduce((sum, row) => sum + row.convertedSessions, 0)).toBe(
+        1,
+      );
+      const missing = await queryGoalSummaryFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        filtered,
+        parseFilterDsl('event.name eq "absent"', analyticsFilterRegistry),
+      );
+      expect(missing).toEqual({
+        totalSessions: 1,
+        convertedSessions: 0,
+        totalVisitors: 1,
+        convertedVisitors: 0,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("Funnel SQL distinguishes Event-only and expanded Session scope for signup→purchase", async () => {
+    const { db, env } = runFixture();
+    try {
+      const config = {
+        filterDslVersion: 1 as const,
+        progressionScope: "session" as const,
+        conversionWindowMs: null,
+        steps: [
+          { id: "signup", filterDsl: 'event.name eq "signup"' },
+          { id: "purchase", filterDsl: 'event.name eq "purchase"' },
+        ],
+      };
+      const eventOnly = await queryFunnelAnalysis(
+        env,
+        "site-a",
+        WINDOW,
+        ready("funnel-analysis"),
+        config,
+      );
+      expect(eventOnly.summary.totalProgressions).toBe(0);
+      const sessionDoc = parseFilterDsl(
+        'count(EVENT { $.name eq "purchase" }) eq 1',
+        analyticsFilterRegistry,
+      );
+      const plan = createScopedFilterPlan(
+        "funnel-analysis",
+        sessionDoc,
+        "session",
+      )!;
+      const sessionFilters = attachScopedFilterMetadata(sessionDoc, {
+        requestedScope: "session",
+        resolvedScope: plan.scope,
+        plan,
+        time: createQueryTime(100, 300, "UTC", 400),
+        siteIds: ["site-a"],
+      });
+      const full = await queryFunnelAnalysis(
+        env,
+        "site-a",
+        WINDOW,
+        sessionFilters,
+        config,
+      );
+      expect(full.summary.totalProgressions).toBe(1);
+      expect(full.summary.convertedProgressions).toBe(1);
+      expect(
+        (
+          await queryFunnelAnalysis(
+            env,
+            "site-b",
+            WINDOW,
+            sessionFilters,
+            config,
+          )
+        ).summary.totalProgressions,
+      ).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("TeamSites and TeamDashboard report only member-authorized sites and their filtered metrics", async () => {
+    const { db, env } = runFixture();
+    try {
+      db.exec(
+        "CREATE TABLE sites(id TEXT PRIMARY KEY, team_id TEXT, name TEXT, domain TEXT, public_enabled INTEGER, public_slug TEXT, created_at INTEGER, updated_at INTEGER)",
+      );
+      db.exec(
+        "INSERT INTO sites VALUES ('site-a','team-1','A','a.test',1,'a',1,1),('site-b','team-1','B','b.test',1,'b',2,2)",
+      );
+      const result = await readTeamSites({
+        env,
+        teamId: "team-1",
+        window: WINDOW,
+        filters: ready("team-sites"),
+        allowedSiteIds: ["site-a"],
+        page: { limit: 10, cursor: null },
+      });
+      expect(result.data.items).toHaveLength(1);
+      expect(result.data.items[0]).toMatchObject({
+        siteId: "site-a",
+        metrics: { views: 1, sessions: 1, visitors: 1 },
+      });
+      const preloaded = [
+        {
+          id: "site-a",
+          name: "A",
+          domain: "a.test",
+          teamId: "team-1",
+          publicEnabled: 1,
+          publicSlug: "a",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: "site-b",
+          name: "B",
+          domain: "b.test",
+          teamId: "team-1",
+          publicEnabled: 1,
+          publicSlug: "b",
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      ] as never;
+      const dashboard = await queryTeamDashboardForTeam(
+        env,
+        "team-1",
+        WINDOW,
+        "minute",
+        ["site-a"],
+        undefined,
+        preloaded,
+        ready("team-dashboard"),
+      );
+      expect(dashboard.data.sites).toHaveLength(1);
+      expect(dashboard.data.sites[0]).toMatchObject({
+        id: "site-a",
+        overview: { views: 1, sessions: 1, visitors: 1 },
+      });
+      expect(
+        dashboard.data.trend
+          .flatMap((row) => row.sites)
+          .map((row) => row.siteId),
+      ).toEqual(["site-a"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("VisitorSessions uses real Reader membership and isolates same named visitors on other sites", async () => {
+    const { db, env } = runFixture();
+    try {
+      const request = {
+        env,
+        siteId: "site-a",
+        visitorId: "u1",
+        window: WINDOW,
+        filters: ready("visitor-sessions"),
+        page: { limit: 20, cursor: null },
+        audience: "private-dashboard" as const,
+      };
+      const result = await readSiteVisitorSessions(request);
+      expect(result.items.map((row) => row.sessionId)).toEqual(["s1"]);
+      const other = await readSiteVisitorSessions({
+        ...request,
+        siteId: "site-b",
+      });
+      expect(other.items).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("TeamDashboard never treats an explicitly empty authorization list as unlimited", async () => {
+    const db = sqlitePayloadFixture();
+    try {
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const env = { DB: createSqliteD1Database(db, trace) } as never;
+      const sites = [
+        { id: "site-a", name: "A", teamId: "team-1", domain: "a.test" },
+        { id: "site-b", name: "B", teamId: "team-1", domain: "b.test" },
+      ] as never;
+      const denied = await queryTeamDashboardForTeam(
+        env,
+        "team-1",
+        WINDOW,
+        "minute",
+        [],
+        undefined,
+        sites,
+        ready("team-dashboard"),
+      );
+      expect(denied.data).toEqual({ sites: [], trend: [] });
+      expect(trace.preparedSql).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("real Private/Public query adapters serialize Filter DSL into actual Overview responses", async () => {
+    const { db, env } = runFixture();
+    try {
+      const url = (expr: string) =>
+        applyFiltersToUrl(
+          new URL(
+            "https://app.test/api/public/share/demo/overview?from=100&to=300&timeZone=UTC",
+          ),
+          parseFilterDsl(expr, analyticsFilterRegistry),
+          analyticsFilterRegistry,
+        );
+      const publicAllowed = url('page.path eq "/home"');
+      const shared = await executePublicQuery({
+        env,
+        siteId: "site-a",
+        pathname: "overview",
+        url: publicAllowed,
+        request: new Request(publicAllowed),
+      });
+      expect(shared.status).toBe(200);
+      expect(await shared.json()).toMatchObject({
+        ok: true,
+        data: { views: 1, sessions: 1, visitors: 1 },
+      });
+      const excluded = await executePublicQuery({
+        env,
+        siteId: "site-a",
+        pathname: "overview",
+        url: url('page.path eq "/not-present"'),
+      });
+      expect(excluded.status).toBe(200);
+      expect(await excluded.json()).toMatchObject({
+        ok: true,
+        data: { views: 0 },
+      });
+      const privateUrl = url('event.payload("/items/1/sku") eq "B"');
+      const privateResponse = await executePrivateQuery({
+        env,
+        siteId: "site-a",
+        pathname: "overview",
+        url: privateUrl,
+        request: new Request(privateUrl),
+      });
+      expect(privateResponse.status).toBe(200);
+      expect(await privateResponse.json()).toMatchObject({
+        ok: true,
+        data: { views: 1, sessions: 1, visitors: 1 },
+      });
+      const privateOther = await executePrivateQuery({
+        env,
+        siteId: "site-b",
+        pathname: "overview",
+        url: privateUrl,
+        request: new Request(privateUrl),
+      });
+      expect(privateOther.status).toBe(200);
+      expect(await privateOther.json()).toMatchObject({
+        ok: true,
+        data: { views: 0 },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("public sharing denies hidden details and private-only operations before touching D1", async () => {
+    const db = sqlitePayloadFixture();
+    try {
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const env = { DB: createSqliteD1Database(db, trace) } as never;
+      const base = "https://app.test/api/public/share/demo/";
+      for (const [pathname, query] of [
+        ["overview", "?query=confidential"],
+        ["overview", "?primaryDimension=page.query"],
+        ["overview", "?sourceLink=private"],
+        ["events-records", ""],
+        ["visitor-events", ""],
+        ["sessions", ""],
+      ] as const) {
+        const url = new URL(base + pathname + query);
+        const res = await executePublicQuery({
+          env,
+          siteId: "site-a",
+          pathname,
+          url,
+        });
+        expect(res.status).toBe(404);
+      }
+      expect(trace.preparedSql).toHaveLength(0);
+    } finally {
+      db.close();
+    }
   });
 });

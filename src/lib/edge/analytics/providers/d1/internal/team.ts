@@ -503,10 +503,8 @@ export async function queryTeamDashboardForTeam(
   const allSites = preloadedSites
     ? [...preloadedSites]
     : await listTeamSites(env, teamId, diagnostics);
-  const allowed =
-    allowedSiteIds && allowedSiteIds.length > 0
-      ? new Set(allowedSiteIds)
-      : null;
+  // Undefined means no explicit site limit; [] means access to no sites.
+  const allowed = allowedSiteIds ? new Set(allowedSiteIds) : null;
   const sites = allowed
     ? allSites.filter((site) => allowed.has(site.id))
     : allSites;
