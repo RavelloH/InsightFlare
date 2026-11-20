@@ -49,11 +49,56 @@ type SafeError = {
   severity: "error";
 };
 const ERROR_DEFINITIONS = {
-  d1_operation_failed: { category: "database", errorClass: "database" },
-  unhandled_request: { category: "application", errorClass: "unhandled" },
-  do_alarm_failed: { category: "infrastructure", errorClass: "alarm" },
-  scheduled_failed: { category: "infrastructure", errorClass: "scheduled" },
-  websocket_failed: { category: "application", errorClass: "websocket" },
+  d1_operation_failed: {
+    category: "database",
+    errorClass: "database",
+    operation: "d1.exec",
+  },
+  unhandled_request: {
+    category: "application",
+    errorClass: "unhandled",
+    operation: "request",
+  },
+  do_alarm_failed: {
+    category: "infrastructure",
+    errorClass: "alarm",
+    operation: "do.alarm",
+  },
+  scheduled_failed: {
+    category: "infrastructure",
+    errorClass: "scheduled",
+    operation: "scheduled.tasks",
+  },
+  websocket_failed: {
+    category: "application",
+    errorClass: "websocket",
+    operation: "do.websocket",
+  },
+  websocket_snapshot_failed: {
+    category: "infrastructure",
+    errorClass: "websocket_snapshot",
+    operation: "do.websocket.initial_snapshot",
+  },
+  do_flush_visit_batch_failed: {
+    category: "database",
+    errorClass: "flush",
+    operation: "do.flush.visit_batch",
+  },
+  do_flush_visit_failed: {
+    category: "database",
+    errorClass: "flush",
+    operation: "do.flush.visit",
+  },
+  do_flush_custom_event_failed: {
+    category: "database",
+    errorClass: "flush",
+    operation: "do.flush.custom_event",
+  },
+  query_application_failed: {
+    category: "application",
+    errorClass: "query",
+    operation: "query.application",
+  },
 } as const;
 
 function finite(value: unknown): number {
@@ -110,18 +155,11 @@ function trustedSignals(
     if (out.some((item) => item.code === code)) continue;
     const definition = ERROR_DEFINITIONS[code];
     const operation =
-      code === "d1_operation_failed"
-        ? SAFE_OPERATIONS.has(signal.operation) &&
-          signal.operation.startsWith("d1.")
-          ? signal.operation
-          : "d1.exec"
-        : code === "do_alarm_failed"
-          ? "do.alarm"
-          : code === "scheduled_failed"
-            ? "scheduled.tasks"
-            : code === "websocket_failed"
-              ? "do.websocket"
-              : "request";
+      code === "d1_operation_failed" &&
+      SAFE_OPERATIONS.has(signal.operation) &&
+      signal.operation.startsWith("d1.")
+        ? signal.operation
+        : definition.operation;
     out.push({
       category: definition.category,
       code,
@@ -136,11 +174,17 @@ function trustedSignals(
   const rank = (code: string) =>
     code === "d1_operation_failed"
       ? 0
-      : code === "do_alarm_failed"
+      : code.startsWith("do_flush_")
         ? 1
-        : code === "scheduled_failed"
+        : code === "do_alarm_failed"
           ? 2
-          : 3;
+          : code === "websocket_snapshot_failed"
+            ? 3
+            : code === "query_application_failed"
+              ? 4
+              : code === "scheduled_failed"
+                ? 5
+                : 6;
   return out.sort((a, b) => rank(a.code) - rank(b.code));
 }
 function classify(
@@ -152,7 +196,8 @@ function classify(
   if ((snapshot.status ?? 0) >= 500) return "failure";
   if ((snapshot.status ?? 0) >= 400 && (snapshot.status ?? 0) < 500)
     return "client_error";
-  if (snapshot.outcome === "error") return "failure";
+  if (snapshot.outcome === "error" || snapshot.errorEvents > 0)
+    return "failure";
   return "ok";
 }
 function primaryError(
@@ -173,10 +218,18 @@ function primaryError(
   if (result === "failure")
     return {
       category: "unknown",
-      code: (snapshot.status ?? 0) >= 500 ? "unknown_5xx" : "unknown_failure",
+      code:
+        (snapshot.status ?? 0) >= 500
+          ? "unknown_5xx"
+          : snapshot.errorEvents > 0 && snapshot.outcome === "ok"
+            ? "unclassified_logged_error"
+            : "unknown_failure",
       operation: "",
       location: "",
-      errorClass: "unknown",
+      errorClass:
+        snapshot.errorEvents > 0 && snapshot.outcome === "ok"
+          ? "logged_error"
+          : "unknown",
       severity: "error",
     };
   return undefined;
@@ -239,13 +292,20 @@ function safeJson(
     : '{"v":1,"truncated":true}';
 }
 function appVersion(): string {
-  // Replaced by Vite from the project's package.json at build time.
+  // Both values are injected by Vite at build time, never request-derived.
   const version: unknown = import.meta.env.VITE_APP_VERSION;
-  return typeof version === "string" &&
+  const commit: unknown = import.meta.env.VITE_COMMIT_SHA;
+  const safeVersion =
+    typeof version === "string" &&
     version.length <= 48 &&
     /^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(version)
-    ? version
-    : "unknown";
+      ? version
+      : "unknown";
+  const safeCommit =
+    typeof commit === "string" && /^[0-9a-f]{7,40}$/.test(commit)
+      ? commit.slice(0, 12)
+      : "";
+  return safeCommit ? `${safeVersion}+${safeCommit}` : safeVersion;
 }
 
 /** Immutable, schema-versioned AE point. Never serialize raw logs or errors. */

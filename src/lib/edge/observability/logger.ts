@@ -34,7 +34,12 @@ export type InvocationSafeErrorCode =
   | "unhandled_request"
   | "do_alarm_failed"
   | "scheduled_failed"
-  | "websocket_failed";
+  | "websocket_failed"
+  | "websocket_snapshot_failed"
+  | "do_flush_visit_batch_failed"
+  | "do_flush_visit_failed"
+  | "do_flush_custom_event_failed"
+  | "query_application_failed";
 
 export interface InvocationSafeErrorSignal {
   readonly category: "database" | "application" | "infrastructure";
@@ -89,6 +94,48 @@ function trustedErrorSignal(
       category: "application",
       code: "websocket_failed",
       operation: "do.websocket",
+      severity: "error",
+    };
+  }
+  // These fixed, code-owned events represent caught internal failures even
+  // when the request is deliberately answered with HTTP 101/200/202.
+  if (message === "do.websocket.snapshot_failed") {
+    return {
+      category: "infrastructure",
+      code: "websocket_snapshot_failed",
+      operation: "do.websocket.initial_snapshot",
+      severity: "error",
+    };
+  }
+  if (message === "do.flush.visit_batch_failed") {
+    return {
+      category: "database",
+      code: "do_flush_visit_batch_failed",
+      operation: "do.flush.visit_batch",
+      severity: "error",
+    };
+  }
+  if (message === "do.flush.visit_failed") {
+    return {
+      category: "database",
+      code: "do_flush_visit_failed",
+      operation: "do.flush.visit",
+      severity: "error",
+    };
+  }
+  if (message === "do.flush.custom_event_failed") {
+    return {
+      category: "database",
+      code: "do_flush_custom_event_failed",
+      operation: "do.flush.custom_event",
+      severity: "error",
+    };
+  }
+  if (message === "query.application-operation.failed") {
+    return {
+      category: "application",
+      code: "query_application_failed",
+      operation: "query.application",
       severity: "error",
     };
   }

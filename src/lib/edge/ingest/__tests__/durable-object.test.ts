@@ -2132,7 +2132,18 @@ describe("IngestDurableObject", () => {
   });
 
   it("falls back to individual D1 visit flushes when a batch fails", async () => {
-    const ctx = createTestDo();
+    const points: Array<{
+      indexes: string[];
+      blobs: string[];
+      doubles: number[];
+    }> = [];
+    const ctx = createTestDo({
+      INVOCATION_METRICS: {
+        writeDataPoint: vi.fn((point: (typeof points)[number]) =>
+          points.push(point),
+        ),
+      } as unknown as AnalyticsEngineDataset,
+    });
     ctx.d1.failBatchCalls = 1;
     await postIngest(ctx.object, envelope());
     vi.setSystemTime(NOW + 60_000);
@@ -2142,6 +2153,12 @@ describe("IngestDurableObject", () => {
     );
 
     expect(flush.status).toBe(200);
+    await vi.waitFor(() => expect(points).toHaveLength(2));
+    // The first point was the successful /ingest; the recovered /flush still
+    // records both a D1 failure and a typed local flush failure, exactly once.
+    expect(points[1].indexes).toEqual(["do.flush:failure"]);
+    expect(points[1].blobs[11]).toBe("d1_operation_failed");
+    expect(points[1].blobs[17]).toContain("do_flush_visit_batch_failed");
     expect(ctx.d1.batch).toHaveBeenCalledTimes(2);
     expect(
       ctx.d1.all<{ visit_id: string }>(
@@ -2800,7 +2817,18 @@ describe("IngestDurableObject", () => {
   });
 
   it("retains custom events when D1 custom event flush expansion or insert verification fails", async () => {
-    const invalidJsonCtx = createTestDo();
+    const points: Array<{
+      indexes: string[];
+      blobs: string[];
+      doubles: number[];
+    }> = [];
+    const invalidJsonCtx = createTestDo({
+      INVOCATION_METRICS: {
+        writeDataPoint: vi.fn((point: (typeof points)[number]) =>
+          points.push(point),
+        ),
+      } as unknown as AnalyticsEngineDataset,
+    });
     invalidJsonCtx.d1.insertVisit({ visit_id: "visit-invalid-json" });
     insertBufferedCustomEvent(invalidJsonCtx.sql, {
       event_id: "event-invalid-json",
@@ -2814,6 +2842,11 @@ describe("IngestDurableObject", () => {
     );
 
     expect(invalidJsonFlush.status).toBe(200);
+    await vi.waitFor(() => expect(points).toHaveLength(1));
+    expect(points[0].indexes).toEqual(["do.flush:failure"]);
+    expect(points[0].blobs[11]).toBe("do_flush_custom_event_failed");
+    expect(points[0].doubles[17]).toBe(200);
+    expect(JSON.stringify(points[0])).not.toContain("{not-json");
     expect(
       localRows<{ events: number }>(
         invalidJsonCtx.sql,
@@ -3352,7 +3385,18 @@ describe("IngestDurableObject", () => {
   });
 
   it("records websocket initial snapshot send failures in the invocation log", async () => {
-    const ctx = createTestDo();
+    const points: Array<{
+      indexes: string[];
+      blobs: string[];
+      doubles: number[];
+    }> = [];
+    const ctx = createTestDo({
+      INVOCATION_METRICS: {
+        writeDataPoint: vi.fn((point: (typeof points)[number]) =>
+          points.push(point),
+        ),
+      } as unknown as AnalyticsEngineDataset,
+    });
     const client = new FakeWebSocket();
     const server = new FakeWebSocket();
     server.failSend = true;
@@ -3377,6 +3421,10 @@ describe("IngestDurableObject", () => {
 
     expect(response.status).toBe(101);
     expect(server.accepted).toBe(true);
+    await vi.waitFor(() => expect(points).toHaveLength(1));
+    expect(points[0].indexes).toEqual(["do.ws:failure"]);
+    expect(points[0].blobs[11]).toBe("websocket_snapshot_failed");
+    expect(points[0].doubles[17]).toBe(101);
     expect(console.error).toHaveBeenCalledWith(
       expect.objectContaining({
         source: "do",

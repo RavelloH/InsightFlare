@@ -14,6 +14,7 @@ import { framePolicy } from "@/lib/edge/runtime/frame-policy";
 import { dispatchInternalScheduledTasks } from "@/lib/edge/scheduled-tasks/dispatcher";
 import type { Env } from "@/lib/edge/types";
 import apiApp from "@/lib/hono/app";
+import { dispatchInternalPageRequest } from "@/lib/hono/internal-page-dispatch";
 import { shouldUseHono } from "@/lib/hono/path-match";
 import { localeCookie, resolvePageRequest } from "@/middleware";
 export interface AppServerContext {
@@ -92,11 +93,6 @@ function isServerFunctionRequest(pathname: string): boolean {
 function pageRouteForLog(pathname: string): string {
   return isServerFunctionRequest(pathname) ? "server_function" : "page";
 }
-function markInternalPageRequest(request: Request): Request {
-  const headers = new Headers(request.headers);
-  headers.set("x-insightflare-internal-page-request", "1");
-  return new Request(request, { headers });
-}
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     initializeE2eClock(env);
@@ -149,11 +145,9 @@ export default {
         }
 
         const decision = await logger.measure("page.middleware", () =>
-          resolvePageRequest(request, env, async (internalRequest) =>
-            apiApp.fetch(
-              markInternalPageRequest(internalRequest),
-              instrumentedEnv,
-              ctx,
+          resolvePageRequest(request, env, (internalRequest) =>
+            dispatchInternalPageRequest(internalRequest, (trustedRequest) =>
+              apiApp.fetch(trustedRequest, instrumentedEnv, ctx),
             ),
           ),
         );

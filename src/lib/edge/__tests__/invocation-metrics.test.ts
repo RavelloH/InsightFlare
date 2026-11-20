@@ -25,6 +25,7 @@ import {
   type InvocationTrigger,
 } from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
+import { dispatchInternalPageRequest } from "@/lib/hono/internal-page-dispatch";
 import { observabilityMiddleware } from "@/lib/hono/middleware/observability";
 import type { AppEnv } from "@/lib/hono/types";
 
@@ -104,11 +105,31 @@ describe("AE invocation recording v1", () => {
     expect(point.doubles).toHaveLength(20);
     expect(point.blobs[7]).toBe("HIT");
     expect(point.blobs[8]).toBe("rollup");
+    expect(point.blobs[9]).toMatch(
+      /^(?:unknown|[0-9]+\.[0-9]+\.[0-9]+)(?:\+[0-9a-f]{12})?$/,
+    );
     expect(point.doubles[19]).toBe(1);
     expect(point.doubles.every((n) => Number.isFinite(n) && n >= 0)).toBe(true);
     expect(
       new TextEncoder().encode(point.indexes[0]).length,
     ).toBeLessThanOrEqual(96);
+  });
+
+  it("recognizes a trusted static build commit and rejects malformed deployment identifiers", () => {
+    try {
+      vi.stubEnv("VITE_APP_VERSION", "0.7.1");
+      vi.stubEnv("VITE_COMMIT_SHA", "0123456789abcdef0123456789abcdef01234567");
+      const f = fixture();
+      expect(encodeInvocationMetricsPoint(f.logger.snapshot()).blobs[9]).toBe(
+        "0.7.1+0123456789ab",
+      );
+      vi.stubEnv("VITE_COMMIT_SHA", "CANARY_private_email@example.com");
+      expect(encodeInvocationMetricsPoint(f.logger.snapshot()).blobs[9]).toBe(
+        "0.7.1",
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("preserves fractional SQL engine duration with distinct partial coverage flags", async () => {
@@ -208,6 +229,76 @@ describe("AE invocation recording v1", () => {
     expect(point.doubles[16]).toBe(3);
     expect(point.doubles[17]).toBe(200);
     expect(point.indexes[0]).toBe("api.other:failure");
+  });
+
+  it.each([
+    [
+      "do.websocket.snapshot_failed",
+      101,
+      "websocket_snapshot_failed",
+      "do.websocket.initial_snapshot",
+    ],
+    [
+      "do.flush.visit_batch_failed",
+      200,
+      "do_flush_visit_batch_failed",
+      "do.flush.visit_batch",
+    ],
+    ["do.flush.visit_failed", 200, "do_flush_visit_failed", "do.flush.visit"],
+    [
+      "do.flush.custom_event_failed",
+      200,
+      "do_flush_custom_event_failed",
+      "do.flush.custom_event",
+    ],
+    [
+      "query.application-operation.failed",
+      200,
+      "query_application_failed",
+      "query.application",
+    ],
+  ] as const)(
+    "classifies caught internal event %s despite successful HTTP status",
+    async (event, status, code, operation) => {
+      const f = fixture();
+      registerInvocationMetrics(f.env, f.logger);
+      request(f.logger, status, "ok");
+      f.logger.error(event, {
+        errorMessage: "CANARY_private@example.com",
+        errorStack: "CANARY_stack_secret",
+        operation: "CANARY_attacker_operation",
+      });
+      await f.emit();
+      expect(f.written).toHaveLength(1);
+      const point = f.written[0];
+      expect(point.indexes[0]).toBe("api.other:failure");
+      expect(point.blobs[11]).toBe(code);
+      expect(point.blobs[12]).toBe(operation);
+      expect(point.doubles[17]).toBe(status);
+      expect(JSON.stringify(point)).not.toContain("CANARY");
+    },
+  );
+
+  it("uses a bounded unknown-error classification only for logged successful invocations", async () => {
+    const success = fixture();
+    registerInvocationMetrics(success.env, success.logger);
+    request(success.logger, 200, "ok");
+    success.logger.error("application.some_unmapped_failure", {
+      errorMessage: "CANARY_unknown_secret",
+    });
+    await success.emit();
+    expect(success.written[0].indexes).toEqual(["api.other:failure"]);
+    expect(success.written[0].blobs[10]).toBe("unknown");
+    expect(success.written[0].blobs[11]).toBe("unclassified_logged_error");
+    expect(JSON.stringify(success.written[0])).not.toContain("CANARY");
+
+    const client = fixture();
+    registerInvocationMetrics(client.env, client.logger);
+    request(client.logger, 403, "error");
+    client.logger.error("application.expected_failure");
+    await client.emit();
+    expect(client.written[0].indexes).toEqual(["api.other:client_error"]);
+    expect(client.written[0].blobs[11]).toBe("");
   });
 
   it("never reports normal 4xx or warnings as a server error", async () => {
@@ -374,7 +465,7 @@ describe("AE invocation recording v1", () => {
 });
 
 describe("Hono real middleware invocation integration", () => {
-  it("writes one point from matched route template and skips internal page forwarding", async () => {
+  it("records forged external headers yet skips only code-owned page forwarding", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     const points: InvocationMetricsPoint[] = [];
     const pending: Promise<unknown>[] = [];
@@ -406,16 +497,37 @@ describe("Hono real middleware invocation integration", () => {
     expect(points[0].indexes).toEqual(["api:/api/sites/:siteId:ok"]);
     expect(JSON.stringify(points[0])).not.toContain("private-uuid");
 
-    const internal = await app.fetch(
+    // An external client cannot forge the trusted in-memory Request identity.
+    const forged = await app.fetch(
       new Request("https://internal.test/api/sites/private-uuid", {
         headers: { "x-insightflare-internal-page-request": "1" },
       }),
       env,
       ctx,
     );
+    expect(forged.status).toBe(200);
+    await Promise.all(pending);
+    expect(points).toHaveLength(2);
+    expect(points[1].indexes).toEqual(["api:/api/sites/:siteId:ok"]);
+
+    let internalRequest: Request | undefined;
+    const internal = await dispatchInternalPageRequest(
+      new Request("https://internal.test/api/sites/private-uuid"),
+      (trustedRequest) => {
+        internalRequest = trustedRequest;
+        return app.fetch(trustedRequest, env, ctx);
+      },
+    );
     expect(internal.status).toBe(200);
     await Promise.all(pending);
-    expect(points).toHaveLength(1);
+    expect(points).toHaveLength(2);
+
+    // Trust expires as soon as that internal dispatch has completed.
+    expect(internalRequest).toBeDefined();
+    const reused = await app.fetch(internalRequest!, env, ctx);
+    expect(reused.status).toBe(200);
+    await Promise.all(pending);
+    expect(points).toHaveLength(3);
     vi.restoreAllMocks();
   });
 

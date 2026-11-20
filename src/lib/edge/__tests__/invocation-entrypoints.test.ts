@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { InvocationMetricsPoint } from "@/lib/edge/analytics-engine/invocation-schema";
 import type { Env } from "@/lib/edge/types";
+import type { AppEnv } from "@/lib/hono/types";
 
 vi.mock("@tanstack/react-start/server-entry", () => ({
   default: {
@@ -12,9 +13,21 @@ vi.mock("@/middleware", () => ({
   localeCookie: vi.fn(() => "if_locale=en"),
   resolvePageRequest: vi.fn(async () => ({ response: null, locale: null })),
 }));
-vi.mock("@/lib/hono/app", () => ({
-  default: { fetch: vi.fn(async () => new Response("api")) },
-}));
+vi.mock("@/lib/hono/app", async () => {
+  const { Hono } = await import("hono");
+  const { observabilityMiddleware } =
+    await import("@/lib/hono/middleware/observability");
+  const app = new Hono<AppEnv>();
+  app.use("*", observabilityMiddleware());
+  app.all("/api/*", (c) => c.text("api"));
+  return {
+    default: {
+      fetch: vi.fn((request: Request, env: Env, ctx: ExecutionContext) =>
+        app.fetch(request, env, ctx),
+      ),
+    },
+  };
+});
 vi.mock("@/lib/edge/scheduled-tasks/dispatcher", () => ({
   dispatchInternalScheduledTasks: vi.fn(async () => {}),
 }));
@@ -89,10 +102,31 @@ describe("actual Worker top-level invocation entrypoints", () => {
     expect(JSON.stringify(f.points)).not.toContain("private=secret");
     expect(vi.mocked(apiApp.fetch)).toHaveBeenCalledOnce();
     const forwarded = vi.mocked(apiApp.fetch).mock.calls[0][0] as Request;
-    expect(forwarded.headers.get("x-insightflare-internal-page-request")).toBe(
-      "1",
-    );
+    // The internal origin is proven by Request identity, never by a header.
+    expect(
+      forwarded.headers.get("x-insightflare-internal-page-request"),
+    ).toBeNull();
     expect(vi.mocked(startHandler.fetch)).toHaveBeenCalledOnce();
+  });
+
+  it("records an actual external /api request despite forged internal headers", async () => {
+    const f = setup();
+    for (const headerValue of ["1", "true"]) {
+      const response = await server.fetch(
+        new Request("https://app.test/api/internal?token=CANARY_private", {
+          headers: { "x-insightflare-internal-page-request": headerValue },
+        }),
+        f.env,
+        f.ctx,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("api");
+      await f.finish();
+      expect(f.points).toHaveLength(headerValue === "1" ? 1 : 2);
+      expect(f.points.at(-1)?.indexes).toEqual(["api:/api/*:ok"]);
+    }
+    expect(vi.mocked(apiApp.fetch)).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(f.points)).not.toContain("CANARY_private");
   });
 
   it("uses a distinct trusted Server Function route key", async () => {
