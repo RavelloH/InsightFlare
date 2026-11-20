@@ -341,6 +341,10 @@ export interface AppMessages {
       applyOffset: string;
       removeStep: string;
       addStep: string;
+      moveStepUp: string;
+      moveStepDown: string;
+      addOffset: string;
+      removeOffset: string;
       excludedActivity: string;
       fixedTime: string;
       toggleOffsetSign: string;
@@ -362,6 +366,7 @@ export interface AppMessages {
         time: string;
         field: string;
         "event-payload": string;
+        "current-payload": string;
         "entity-root": string;
         "context-root": string;
         "context-intrinsic": string;
@@ -3350,6 +3355,10 @@ const enMessages = {
       applyOffset: "Apply offset",
       removeStep: "Remove step",
       addStep: "Add sequence step",
+      moveStepUp: "Move step up",
+      moveStepDown: "Move step down",
+      addOffset: "Add offset",
+      removeOffset: "Remove offset",
       excludedActivity: "Excluded activity",
       fixedTime: "Fixed time",
       toggleOffsetSign: "Toggle time offset sign",
@@ -3370,8 +3379,9 @@ const enMessages = {
         "Advanced filters are unavailable for Goal and Funnel steps.",
       targetKinds: {
         time: "Time",
-        field: "Field",
+        field: "Field value",
         "event-payload": "Event payload",
+        "current-payload": "Current event payload",
         "entity-root": "Entity collection",
         "context-root": "Context",
         "context-intrinsic": "Context intrinsic",
@@ -6575,6 +6585,10 @@ const zhMessages = {
       applyOffset: "应用偏移量",
       removeStep: "移除步骤",
       addStep: "添加序列步骤",
+      moveStepUp: "上移步骤",
+      moveStepDown: "下移步骤",
+      addOffset: "添加时间偏移",
+      removeOffset: "移除时间偏移",
       excludedActivity: "排除的活动",
       fixedTime: "固定时间",
       toggleOffsetSign: "切换时间偏移正负",
@@ -6594,8 +6608,9 @@ const zhMessages = {
       unavailableForObservation: "Goal 和 Funnel 步骤不支持高级筛选。",
       targetKinds: {
         time: "时间",
-        field: "字段",
+        field: "字段值",
         "event-payload": "事件载荷",
+        "current-payload": "当前事件载荷",
         "entity-root": "实体集合",
         "context-root": "上下文",
         "context-intrinsic": "上下文内建值",
@@ -9709,6 +9724,10 @@ const zhTwMessages = {
       applyOffset: "應用偏移量",
       removeStep: "移除步驟",
       addStep: "新增序列步驟",
+      moveStepUp: "上移步驟",
+      moveStepDown: "下移步驟",
+      addOffset: "新增時間偏移",
+      removeOffset: "移除時間偏移",
       excludedActivity: "排除的活動",
       fixedTime: "固定時間",
       toggleOffsetSign: "切換時間偏移正負",
@@ -9728,8 +9747,9 @@ const zhTwMessages = {
       unavailableForObservation: "Goal 和 Funnel 步驟不支援高階篩選。",
       targetKinds: {
         time: "時間",
-        field: "欄位",
+        field: "欄位值",
         "event-payload": "事件載荷",
+        "current-payload": "目前事件載荷",
         "entity-root": "實體集合",
         "context-root": "上下文",
         "context-intrinsic": "上下文內建值",
@@ -12849,6 +12869,10 @@ const jaMessages = {
       applyOffset: "オフセットを適用",
       removeStep: "ステップを削除",
       addStep: "シーケンスステップを追加",
+      moveStepUp: "ステップを上に移動",
+      moveStepDown: "ステップを下に移動",
+      addOffset: "時間オフセットを追加",
+      removeOffset: "時間オフセットを削除",
       excludedActivity: "除外するアクティビティ",
       fixedTime: "固定時刻",
       toggleOffsetSign: "時間オフセットの符号を切り替え",
@@ -12869,8 +12893,9 @@ const jaMessages = {
         "Goal と Funnel のステップでは高度なフィルターを使用できません。",
       targetKinds: {
         time: "時刻",
-        field: "フィールド",
+        field: "フィールド値",
         "event-payload": "イベントペイロード",
+        "current-payload": "現在のイベントペイロード",
         "entity-root": "エンティティコレクション",
         "context-root": "コンテキスト",
         "context-intrinsic": "コンテキスト組み込み値",

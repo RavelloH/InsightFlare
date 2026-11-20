@@ -773,12 +773,7 @@ export function RangeValueInput({
     );
   };
   return (
-    <div
-      className={cn(
-        "grid gap-2",
-        numberUnit ? "sm:grid-cols-3" : "sm:grid-cols-2",
-      )}
-    >
+    <div className="grid min-w-0 gap-2">
       <Input
         disabled={disabled}
         type={numberMetadata ? "number" : undefined}

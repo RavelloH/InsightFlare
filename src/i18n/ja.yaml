@@ -438,6 +438,10 @@ filterBuilder:
     applyOffset: オフセットを適用
     removeStep: ステップを削除
     addStep: シーケンスステップを追加
+    moveStepUp: ステップを上に移動
+    moveStepDown: ステップを下に移動
+    addOffset: 時間オフセットを追加
+    removeOffset: 時間オフセットを削除
     excludedActivity: 除外するアクティビティ
     fixedTime: 固定時刻
     toggleOffsetSign: 時間オフセットの符号を切り替え
@@ -456,8 +460,9 @@ filterBuilder:
     unavailableForObservation: Goal と Funnel のステップでは高度なフィルターを使用できません。
     targetKinds:
       time: 時刻
-      field: フィールド
+      field: フィールド値
       event-payload: イベントペイロード
+      current-payload: 現在のイベントペイロード
       entity-root: エンティティコレクション
       context-root: コンテキスト
       context-intrinsic: コンテキスト組み込み値
