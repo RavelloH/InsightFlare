@@ -24,6 +24,7 @@ export function registerPerceptionScenarios(context: E2eContext) {
       .first();
     await expect(trigger).toBeVisible();
     await expect(trigger).toHaveAttribute("data-slot", "select-trigger");
+    await expect(trigger.locator("svg")).toHaveCount(1);
     await expect
       .poll(async () => {
         const teamBox = await teamTrigger.boundingBox();
@@ -35,32 +36,82 @@ export function registerPerceptionScenarios(context: E2eContext) {
       page.locator("[data-page-transition]").first(),
     ).toHaveAttribute("data-page-transition-ready", "true");
     const search = page.getByRole("combobox", {
-      name: /搜索页面、事件和导航/u,
+      name: /搜索指标和分析页面/u,
     });
     await trigger.click();
     await expect(search).toBeVisible();
-    await expect(page.getByRole("group", { name: "快速导航" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "指标" })).toBeVisible();
     await expect(page.getByRole("group", { name: "本机观察" })).toHaveCount(0);
+    const resultsContainer = page
+      .locator("#perception-search-results")
+      .locator("xpath=../..");
+    const fullHeight = await resultsContainer.evaluate(
+      (element) => element.getBoundingClientRect().height,
+    );
+    expect(fullHeight).toBeGreaterThan(0);
     await page.keyboard.press("Escape");
     await expect(search).not.toBeVisible();
     await page.keyboard.press("Control+k");
     await expect(search).toBeVisible();
-    await search.fill("E2E");
-    await expect(page.getByRole("option").first()).toBeVisible();
+    await search.fill("跳出率");
     await expect(
-      page.getByRole("option", { name: /E2E Team A/u }),
+      page
+        .getByRole("group", { name: "指标" })
+        .getByRole("option", { name: /跳出率/u }),
     ).toBeVisible();
+    await expect(page.getByRole("group", { name: "站点" })).toHaveCount(0);
+    await expect
+      .poll(() =>
+        resultsContainer.evaluate(
+          (element) => element.getBoundingClientRect().height,
+        ),
+      )
+      .toBeLessThan(fullHeight);
+    const beforeClose = await page
+      .locator("#perception-search-results [role=option]")
+      .count();
+    expect(beforeClose).toBeGreaterThan(0);
+    await page.evaluate(() => {
+      const dialog = document.querySelector('[data-slot="dialog-content"]');
+      if (!dialog) throw new Error("Search dialog not found");
+      const state = window as Window & { __searchClosingRows?: number };
+      state.__searchClosingRows = -1;
+      const observer = new MutationObserver(() => {
+        if (dialog.getAttribute("data-state") === "closed") {
+          state.__searchClosingRows = dialog.querySelectorAll(
+            "#perception-search-results [role=option]",
+          ).length;
+          observer.disconnect();
+        }
+      });
+      observer.observe(dialog, {
+        attributes: true,
+        attributeFilter: ["data-state"],
+      });
+    });
     await page.keyboard.press("Escape");
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as Window & { __searchClosingRows?: number })
+              .__searchClosingRows,
+        ),
+      )
+      .toBe(beforeClose);
     await expect(search).not.toBeVisible();
+    await page.keyboard.press("Control+k");
+    await expect(search).toHaveValue("");
+    await page.keyboard.press("Escape");
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("button", { name: "Toggle Sidebar" }).click();
     await expect(trigger).toBeVisible();
     await trigger.click();
     await expect(search).toBeVisible();
-    await expect(page.getByRole("group", { name: "快速导航" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "指标" })).toBeVisible();
     await expect(page.getByRole("group", { name: "本机观察" })).toHaveCount(0);
-    await search.fill("E2E");
+    await search.fill("跳出率");
     await expect(page.getByRole("option").first()).toBeVisible();
     await expect(
       page.getByRole("button", { name: /搜索全部数据/u }),
@@ -307,15 +358,17 @@ export function registerPerceptionScenarios(context: E2eContext) {
       )
       .toBe(0);
     await tab.getByTestId("perception-search-trigger").click();
-    const input = tab.getByRole("combobox", { name: /搜索页面、事件和导航/u });
-    // Static team navigation may remain authorized until server logout; it is
-    // not an observed Analytics entry. The previously observed path must vanish.
+    // The cross-tab clear invalidates the local session, so the palette must
+    // fall back to its unauthenticated/root context without stale entries.
+    const input = tab.getByRole("combobox", { name: /搜索团队/u });
+    // Previously observed pages must disappear even if their IndexedDB
+    // deletion was still pending when the dialog opened.
     await input.fill("/product");
     await expect(tab.getByRole("option")).toHaveCount(0);
     await tab.close();
   });
 
-  test("12s. Filter Builder selects an observed local value and applies its legal filter", async ({
+  test("12s. Filter Builder preserves server-ranked value suggestions without local suggestions", async ({
     page,
   }) => {
     const team = context.seed.teams.teamA!;
@@ -334,7 +387,7 @@ export function registerPerceptionScenarios(context: E2eContext) {
     // The authorized Analytics response populates the index, not a fixture.
     await page.getByTestId("perception-search-trigger").click();
     const global = page.getByRole("combobox", {
-      name: /搜索页面、事件和导航/u,
+      name: /搜索指标和分析页面/u,
     });
     await global.fill("/product");
     await expect(page.getByRole("option", { name: /product/u })).toBeVisible();
@@ -362,13 +415,17 @@ export function registerPerceptionScenarios(context: E2eContext) {
       .getByRole("button", { name: /未设置/u })
       .last()
       .click();
-    const localLabel = page.getByText("本机曾观察到的值", { exact: true });
-    await expect(localLabel).toBeVisible();
-    const observedValue = localLabel
-      .locator("..")
-      .getByRole("button", { name: "/product", exact: true });
-    await expect(observedValue).toBeVisible();
-    await observedValue.click();
+    await expect(
+      page.getByText("本机曾观察到的值", { exact: true }),
+    ).toHaveCount(0);
+    // The existing server-ranked list is shown without inserting local values.
+    const remoteValue = page
+      .getByRole("button", {
+        name: /^\/product(?:\s+\d+)?$/u,
+      })
+      .last();
+    await expect(remoteValue).toBeVisible();
+    await remoteValue.click();
     await expect(
       panel.getByRole("button", { name: "/product", exact: true }),
     ).toBeVisible();
@@ -377,6 +434,50 @@ export function registerPerceptionScenarios(context: E2eContext) {
     await expect(
       page.getByRole("row", { name: /查看详情: \/product/u }),
     ).toBeVisible();
+  });
+
+  test("12u. Team command search opens a site and an exact overview metric", async ({
+    page,
+  }) => {
+    const team = context.seed.teams.teamA!;
+    const site = context.seed.sites.siteA!;
+    const slug = site.domain
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/gu, "-")
+      .replace(/^-+|-+$/gu, "");
+    await signIn(page, "owner-a", context.passwords.ownerA);
+    await page.goto("/zh/app/" + team.slug, { waitUntil: "domcontentloaded" });
+    const trigger = page.getByTestId("perception-search-trigger");
+    await expect(trigger).toHaveText(/搜索站点/u);
+    await trigger.click();
+    const input = page.getByRole("combobox", { name: /搜索站点/u });
+    await expect(page.getByRole("group", { name: "站点" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "指标" })).toHaveCount(0);
+    await input.fill(site.domain);
+    const siteOption = page
+      .getByRole("group", { name: "站点" })
+      .getByRole("option", { name: /E2E Analytics Site A/u });
+    await expect(siteOption).toBeVisible();
+    await siteOption.click();
+    await expect(page).toHaveURL(
+      new RegExp("/zh/app/" + team.slug + "/" + slug + "(?:$|[?#])"),
+    );
+
+    await expect(trigger).toHaveText(/搜索指标和分析页面/u);
+    await trigger.click();
+    const metricsInput = page.getByRole("combobox", {
+      name: /搜索指标和分析页面/u,
+    });
+    await expect(page.getByRole("group", { name: "指标" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "分析页面" })).toBeVisible();
+    await metricsInput.fill("bounce rate");
+    const metricOption = page
+      .getByRole("group", { name: "指标" })
+      .getByRole("option", { name: /跳出率/u });
+    await expect(metricOption).toBeVisible();
+    await metricOption.click();
+    await expect(page).toHaveURL(/#overview-metric-bounceRate$/u);
+    await expect(page.locator("#overview-metric-bounceRate")).toBeVisible();
   });
 
   test("12t. revoked search action cannot navigate and cross-tab scope clear hides stale observations", async ({
@@ -396,7 +497,7 @@ export function registerPerceptionScenarios(context: E2eContext) {
     ).toBeVisible();
     await page.getByTestId("perception-search-trigger").click();
     const search = page.getByRole("combobox", {
-      name: /搜索页面、事件和导航/u,
+      name: /搜索指标和分析页面/u,
     });
     await search.fill("/product");
     const option = page.getByRole("option", { name: /product/u });
@@ -411,7 +512,7 @@ export function registerPerceptionScenarios(context: E2eContext) {
       "true",
     );
     await tabTrigger.click();
-    const input = tab.getByRole("combobox", { name: /搜索页面、事件和导航/u });
+    const input = tab.getByRole("combobox", { name: /搜索指标和分析页面/u });
     await expect(input).toBeVisible();
     await input.fill("/product");
     await expect(tab.getByRole("option", { name: /product/u })).toBeVisible();

@@ -1,10 +1,4 @@
-import {
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Button } from "@insightflare/ui/button";
@@ -38,7 +32,6 @@ import {
   getFilterNumberDisplayUnits,
   toDisplayNumberMetadata,
 } from "@/components/dashboard/filters/filter-number-units";
-import { perceptionLabels } from "@/components/dashboard/search/labels";
 import type { DashboardFilterOptionKey } from "@/lib/dashboard/client/data/index";
 import {
   fetchEventTypeFields,
@@ -57,16 +50,10 @@ import {
 } from "@/lib/filter-contract/index";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
-import { resolveSearchAction } from "@/lib/perception-search/core";
 import { isSafeField } from "@/lib/perception-search/index";
 import {
   capturePerceptionGuard,
-  currentPerceptionScope,
-  getPerceptionAuthorization,
-  getPerceptionVersion,
-  localPerceptionSearch,
   observeLoadedDimension,
-  subscribePerception,
 } from "@/lib/perception-search/runtime";
 import { cn } from "@/lib/utils";
 
@@ -435,40 +422,6 @@ export function SearchableValueInput({
   const suggestions =
     suggestionsQuery.data?.pages.flatMap((page) => page.items) ?? [];
   // Synchronous local suggestions even when the existing scoped server picker is loading.
-  const localVersion = useSyncExternalStore(
-    subscribePerception,
-    getPerceptionVersion,
-    () => "0:0",
-  );
-  const localScope = siteId ? currentPerceptionScope(siteId) : null;
-  const localResults =
-    !isPayload &&
-    localScope &&
-    isSafeField(condition.field) &&
-    suggestionMode !== "none" &&
-    !disabled &&
-    valueKind === "string"
-      ? localPerceptionSearch({
-          mode: "value",
-          query: searchToken,
-          locale: "en",
-          scope: localScope,
-          field: condition.field,
-          limit: 8,
-        })
-      : [];
-  void localVersion;
-  const localLabel =
-    typeof globalThis.window === "undefined"
-      ? perceptionLabels.en.localValue
-      : globalThis.window.document.documentElement.lang.startsWith("zh-TW")
-        ? perceptionLabels["zh-tw"].localValue
-        : globalThis.window.document.documentElement.lang.startsWith("zh")
-          ? perceptionLabels.zh.localValue
-          : globalThis.window.document.documentElement.lang.startsWith("ja")
-            ? perceptionLabels.ja.localValue
-            : perceptionLabels.en.localValue;
-
   const inputMode =
     valueKind === "number" || condition.scalarKind === "number"
       ? "decimal"
@@ -691,41 +644,6 @@ export function SearchableValueInput({
           }
         >
           <AutoResizer className="min-h-0 flex-1" initial duration={0.18}>
-            {localResults.length > 0 ? (
-              <div className="border-b border-border pb-1">
-                <div className="px-3 py-1 text-xs text-muted-foreground">
-                  {localLabel}
-                </div>
-                {localResults.map((result) => (
-                  <button
-                    key={result.key}
-                    type="button"
-                    className="flex w-full items-center px-3 py-1.5 text-left text-xs hover:bg-accent"
-                    onClick={() => {
-                      const authorization = getPerceptionAuthorization();
-                      const action = authorization
-                        ? resolveSearchAction(result, authorization)
-                        : null;
-                      if (
-                        !action ||
-                        action.type !== "apply-filter" ||
-                        action.field !== condition.field ||
-                        !analyticsFilterRegistry.has(action.field)
-                      )
-                        return;
-                      if (isList) addListValue(action.value, true);
-                      else {
-                        onChange(action.value);
-                        setSearchToken(action.value);
-                        setOpen(false);
-                      }
-                    }}
-                  >
-                    {result.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
             <AutoTransition transitionKey={menuState} duration={0.18}>
               {suggestionsQuery.isFetching ? (
                 <div className="flex min-h-10 items-center justify-center text-muted-foreground">
