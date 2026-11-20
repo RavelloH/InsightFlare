@@ -1,4 +1,5 @@
 import { isAnalyticsEngineDisabled } from "@/lib/edge/analytics-engine/config";
+import { QUERY_REGISTRY } from "@/lib/edge/analytics-engine/query-registry";
 import type {
   InvocationLogger,
   InvocationSafeErrorSignal,
@@ -512,21 +513,40 @@ export function encodeInvocationMetricsPointV2(
       : observed === total
         ? "complete"
         : "partial";
-  const byWall = metrics.queries.filter((q) => q.wallObserved > 0);
-  const basis = byWall.length ? "apiWall" : "sqlEngine";
-  const hot = [
-    ...(byWall.length
-      ? byWall
-      : metrics.queries.filter((q) => q.engineObserved > 0)),
-  ].sort(
-    (a, b) =>
-      (basis === "apiWall"
-        ? b.apiWallMs - a.apiWallMs
-        : b.sqlEngineMs - a.sqlEngineMs) || a.id.localeCompare(b.id),
-  )[0];
-  const scan = [...metrics.queries]
-    .filter((q) => q.readObserved > 0)
-    .sort((a, b) => b.rowsRead - a.rowsRead || a.id.localeCompare(b.id))[0];
+  // Never compare an independently measured SQL API wait with a Batch
+  // statement's unmeasured API wait. SQL engine is only a fallback when
+  // ALL candidates lack API wall and ALL have complete engine coverage.
+  const candidatesComplete =
+    metrics.queries.length > 0 && metrics.droppedQueries === 0;
+  const allWall =
+    candidatesComplete &&
+    metrics.queries.every((q) => q.wallObserved === q.count);
+  const allEngineOnly =
+    candidatesComplete &&
+    metrics.queries.every(
+      (q) => q.wallObserved === 0 && q.engineObserved === q.count,
+    );
+  const basis = allWall
+    ? "apiWall"
+    : allEngineOnly
+      ? "sqlEngine"
+      : "unavailable";
+  const hot =
+    basis === "unavailable"
+      ? undefined
+      : [...metrics.queries].sort(
+          (a, b) =>
+            (basis === "apiWall"
+              ? b.apiWallMs - a.apiWallMs
+              : b.sqlEngineMs - a.sqlEngineMs) || a.id.localeCompare(b.id),
+        )[0];
+  const scan =
+    !candidatesComplete ||
+    metrics.queries.some((q) => q.readObserved !== q.count)
+      ? undefined
+      : [...metrics.queries].sort(
+          (a, b) => b.rowsRead - a.rowsRead || a.id.localeCompare(b.id),
+        )[0];
   const doFetch = snapshot.operations.find((op) => op.name === "do.fetch");
   const fetchCoverage =
     snapshot.resources.doCalls === 0 || !doFetch
@@ -563,6 +583,8 @@ export function encodeInvocationMetricsPointV2(
   const queryDetails = chosen.map((q) => ({
     id: q.id,
     variant: q.variant,
+    filterShape: q.filter?.code ?? "",
+    granularity: QUERY_REGISTRY.get(q.id)?.granularity ?? "unknown",
     count: q.count,
     apiWallMs: n(q.apiWallMs),
     sqlEngineMs: n(q.sqlEngineMs),
@@ -578,13 +600,39 @@ export function encodeInvocationMetricsPointV2(
       attempts: cov(q.attemptsObserved, q.count),
     },
   }));
+  const templateStatements = metrics.queries.reduce(
+    (sum, q) =>
+      sum +
+      (QUERY_REGISTRY.get(q.id)?.granularity === "sql-template" ? q.count : 0),
+    0,
+  );
+  const familyStatements = metrics.queryCount - templateStatements;
+  const queryGranularity =
+    metrics.queryCount === 0
+      ? "none"
+      : metrics.droppedQueries > 0
+        ? "partial"
+        : templateStatements === metrics.queryCount
+          ? "sql-template"
+          : templateStatements === 0
+            ? "provider-family"
+            : "mixed";
+  // A family-level operation names a useful business family but is NOT proof
+  // that an individual SQL template was identified.
   const attributionComplete =
     metrics.unknownCount === 0 &&
     metrics.droppedQueries === 0 &&
-    metrics.queryCount === snapshot.sql.statements;
+    metrics.queryCount === snapshot.sql.statements &&
+    templateStatements === metrics.queryCount;
   const details = {
     v: 2,
     hotBasis: hot ? basis : "unavailable",
+    rankingCoverage:
+      metrics.droppedQueries > 0
+        ? "truncated"
+        : basis === "unavailable" && metrics.queries.length > 0
+          ? "incomparable"
+          : "complete",
     phases: phases.slice(0, 6),
     queries: queryDetails,
     ...(metrics.filter ? { filter: metrics.filter } : {}),
@@ -610,7 +658,14 @@ export function encodeInvocationMetricsPointV2(
     },
     coverage: {
       query: attributionComplete ? "complete" : "partial",
-      filter: metrics.filter ? "complete" : "unavailable",
+      queryGranularity,
+      templateStatements,
+      familyStatements,
+      filter: metrics.filterAmbiguous
+        ? "mixed"
+        : metrics.filter
+          ? "complete"
+          : "unavailable",
     },
     signals: trustedSignals(snapshot.safeErrors)
       .slice(0, 3)
@@ -653,6 +708,7 @@ export function encodeInvocationMetricsPointV2(
     ["backgroundDrainPresent", snapshot.backgroundDrainMs !== undefined],
     ["doFetchWallPresent", fetchCoverage !== "unavailable"],
     ["hotQueryPresent", Boolean(hot)],
+    ["hotQueryApiWallPresent", Boolean(hot && hot.wallObserved === hot.count)],
     ["scanQueryPresent", Boolean(scan)],
     ["filterPresent", Boolean(metrics.filter)],
     ["detailsTruncated", truncated],
@@ -699,7 +755,10 @@ export function encodeInvocationMetricsPointV2(
       scan?.id ?? "",
       phases[0]?.id ?? "",
       json,
-      metrics.filter?.family ?? "none",
+      hot?.filter?.family ??
+        (metrics.filterAmbiguous
+          ? "mixed"
+          : (metrics.filter?.family ?? "none")),
     ],
     doubles: [
       n(snapshot.invocationDurationMs),

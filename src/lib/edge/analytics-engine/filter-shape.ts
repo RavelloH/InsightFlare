@@ -46,6 +46,8 @@ export type SafeFilterShape = Readonly<{
   operatorGroups: readonly (
     "equality" | "range" | "set" | "stringMatch" | "presence"
   )[];
+  booleanGroups: readonly ("and" | "or" | "not")[];
+  rootBoolean: "and" | "or" | "not" | "condition" | "none";
   fieldGroups: readonly FieldGroup[];
   setSizeBucket: Bucket;
   scope: "observation" | "session" | "visitor" | "unknown";
@@ -135,6 +137,7 @@ export function safeFilterShape(
     custom = false,
     basic = false;
   const ops = new Set<(typeof OPERATORS)[number]>();
+  const booleanOps = new Set<"and" | "or" | "not">();
   const fields = new Set<FieldGroup>();
   const visit = (node: FilterExpression, depth: number): void => {
     if (depth > 20 || count > 128) return;
@@ -153,9 +156,11 @@ export function safeFilterShape(
           Array.isArray(node.value) ? node.value.length : 0,
         );
     } else if (node.kind === "not") {
+      booleanOps.add("not");
       boolean = true;
       visit(node.child, depth + 1);
     } else {
+      booleanOps.add(node.kind);
       boolean = true;
       for (const child of node.children.slice(0, 128)) visit(child, depth + 1);
     }
@@ -175,12 +180,37 @@ export function safeFilterShape(
   const conditionsBucket = bucket(count);
   const maxDepthBucket = bucket(maxDepth);
   const rawSources = plan ? [...plan.requiredSources] : [];
+  // A fixed, low-cardinality Boolean/operator signature: never copy AST text.
+  // All masks come exclusively from the approved, fixed enumerations above.
+  const logic =
+    (["and", "or", "not"] as const)
+      .filter((operator) => booleanOps.has(operator))
+      .map((operator) => operator[0])
+      .join("") || "x";
+  const operatorMask = OPERATORS.reduce(
+    (mask, operator, index) => mask | (ops.has(operator) ? 1 << index : 0),
+    0,
+  );
+  // Distinguish the outermost AND/OR/NOT even when the same operators
+  // appear deeper in the tree (e.g. AND(OR(...), ...) versus OR(AND(...), ...)).
+  const rootBoolean = document.root?.kind ?? "none";
+  const rootCode =
+    rootBoolean === "condition"
+      ? "c"
+      : rootBoolean === "none"
+        ? "x"
+        : rootBoolean[0];
+  const code = `${family}.${rootCode}${logic}.${conditionsBucket}.${maxDepthBucket}.o${operatorMask.toString(36)}`;
   return Object.freeze({
     family,
-    code: `${family}.${conditionsBucket}.${maxDepthBucket}`,
+    code,
     conditionsBucket,
     maxDepthBucket,
     operatorGroups: Object.freeze(OPERATORS.filter((item) => ops.has(item))),
+    booleanGroups: Object.freeze(
+      (["and", "or", "not"] as const).filter((item) => booleanOps.has(item)),
+    ),
+    rootBoolean,
     fieldGroups: Object.freeze(FIELD_GROUPS.filter((item) => fields.has(item))),
     setSizeBucket: bucket(maxSet),
     scope:

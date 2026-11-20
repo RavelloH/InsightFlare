@@ -68,6 +68,52 @@ const PROVIDER_TEMPLATE_OWNERS: Partial<Record<QueryOperation, string>> = {
     "src/lib/edge/analytics/providers/d1/operations/team-dashboard.ts",
 };
 
+/** Approved SQL execution sites; each ID maps to one real source template.
+ * No SQL hash, tag, URL or request-derived component is ever accepted.
+ */
+const STATIC_SQL_TEMPLATES = [
+  {
+    id: "analytics.overview.raw.summary",
+    ownerModule: "src/lib/edge/analytics/providers/d1/internal/overview.ts",
+    variants: ["raw.filtered", "raw.unfiltered"],
+  },
+  {
+    id: "analytics.trend.raw.series",
+    ownerModule: "src/lib/edge/analytics/providers/d1/internal/overview.ts",
+    variants: ["raw.filtered", "raw.unfiltered"],
+  },
+  {
+    id: "analytics.overview.raw.latest_activity",
+    ownerModule: "src/lib/edge/analytics/providers/d1/internal/overview.ts",
+    variants: ["raw.filtered", "raw.unfiltered"],
+  },
+  {
+    id: "analytics.rollup.aggregation_state",
+    ownerModule:
+      "src/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries.ts",
+    variants: ["rollup"],
+  },
+  {
+    id: "analytics.rollup.visit_details",
+    ownerModule:
+      "src/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries.ts",
+    variants: ["raw.unfiltered"],
+  },
+  {
+    id: "analytics.rollup.hourly_rows",
+    ownerModule:
+      "src/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries.ts",
+    variants: ["rollup"],
+  },
+  {
+    id: "analytics.rollup.trend_visit_details",
+    ownerModule:
+      "src/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries.ts",
+    variants: ["raw.unfiltered"],
+  },
+] as const;
+export type StaticSqlTemplateId = (typeof STATIC_SQL_TEMPLATES)[number]["id"];
+
 const SUBQUERY_TEMPLATES = [
   "event_type_detail.overview",
   "event_type_detail.trend",
@@ -100,6 +146,8 @@ export const QUERY_REGISTRY: ReadonlyMap<
     readonly baseSqlTemplateRef: string;
     readonly variants: readonly QueryVariant[];
     readonly revision: 1;
+    readonly granularity:
+      "provider-family" | "query-operation" | "sql-template";
   }
 > = new Map(
   [
@@ -108,13 +156,22 @@ export const QUERY_REGISTRY: ReadonlyMap<
       ownerModule:
         PROVIDER_TEMPLATE_OWNERS[operation] ??
         "src/lib/edge/analytics/providers/d1",
+      granularity: "provider-family" as const,
+      variants: QUERY_VARIANTS as readonly QueryVariant[],
     })),
     ...SUBQUERY_TEMPLATES.map((name) => ({
       id: `analytics.${name}`,
       ownerModule: "src/lib/edge/analytics/composition/d1/events.ts",
+      granularity: "query-operation" as const,
+      variants: QUERY_VARIANTS as readonly QueryVariant[],
+    })),
+    ...STATIC_SQL_TEMPLATES.map((template) => ({
+      ...template,
+      granularity: "sql-template" as const,
+      variants: template.variants as readonly QueryVariant[],
     })),
   ].map(
-    ({ id, ownerModule }) =>
+    ({ id, ownerModule, granularity, variants }) =>
       [
         id,
         Object.freeze({
@@ -122,8 +179,9 @@ export const QUERY_REGISTRY: ReadonlyMap<
           family: "analytics" as const,
           ownerModule,
           baseSqlTemplateRef: ownerModule,
-          variants: QUERY_VARIANTS,
+          variants,
           revision: 1 as const,
+          granularity,
         }),
       ] as const,
   ),
@@ -150,6 +208,30 @@ export function runWithRegisteredSubquery<T>(
   );
 }
 
+export function runWithStaticSqlTemplate<T>(
+  identity: {
+    readonly id: StaticSqlTemplateId;
+    readonly variant: QueryVariant;
+  },
+  action: () => T,
+): T {
+  // The declared ID must be a static template and its variant must be allowed.
+  const entry = QUERY_REGISTRY.get(identity.id);
+  if (
+    entry?.granularity !== "sql-template" ||
+    !entry.variants.includes(identity.variant)
+  )
+    return action();
+  const parent = context.getStore();
+  return context.run(
+    {
+      identity: { id: identity.id, variant: identity.variant },
+      ...(parent?.filter ? { filter: parent.filter } : {}),
+    },
+    action,
+  );
+}
+
 export function registeredProviderQuery(operation: QueryOperation): string {
   const id = `analytics.${operation}`;
   return QUERY_REGISTRY.has(id) ? id : UNKNOWN_QUERY_ID;
@@ -159,8 +241,7 @@ export function verifiedQueryIdentity(
 ): TrustedQueryIdentity {
   if (
     !identity ||
-    !QUERY_REGISTRY.has(identity.id) ||
-    !QUERY_VARIANTS.includes(identity.variant)
+    !QUERY_REGISTRY.get(identity.id)?.variants.includes(identity.variant)
   )
     return { id: UNKNOWN_QUERY_ID, variant: "unknown" };
   return identity;

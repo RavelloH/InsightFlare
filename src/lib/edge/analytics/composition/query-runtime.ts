@@ -13,7 +13,6 @@ import {
   registeredProviderQuery,
   runWithQueryIdentity,
   setCurrentQueryFilterShape,
-  setCurrentQueryVariant,
 } from "@/lib/edge/analytics-engine/query-registry";
 import { currentInvocationLogger } from "@/lib/edge/observability/logger";
 
@@ -78,7 +77,8 @@ export function createAnalyticsQueryRuntime(
                   prepared.scopePlan,
                 );
                 setCurrentQueryFilterShape(shape);
-                setCurrentQueryVariant(shape.execution);
+                // A filter plan does not prove the database chose raw or rollup.
+                // Only actual SQL execution entrypoints may set that variant.
                 collector.setFilter(shape);
               } catch {
                 // Profiling is isolated from business query execution.

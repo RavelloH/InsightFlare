@@ -1,3 +1,4 @@
+import type { SafeFilterShape } from "@/lib/edge/analytics-engine/filter-shape";
 import { currentHotspotCollector } from "@/lib/edge/analytics-engine/hotspot-collector";
 import {
   currentQueryFilterShape,
@@ -16,6 +17,7 @@ const INSTRUMENTED_ENV = Symbol("insightflare.instrumented-env");
 const INVOCATION_LOGGER = Symbol("insightflare.invocation-logger");
 const RAW_D1_STATEMENT = new WeakMap<object, D1PreparedStatement>();
 const D1_STATEMENT_IDENTITY = new WeakMap<object, TrustedQueryIdentity>();
+const D1_STATEMENT_FILTER = new WeakMap<object, SafeFilterShape>();
 const D1_META_STATE = new WeakMap<InvocationLogger, D1MetaState>();
 type D1MetaLike = {
   /** Business mutation count; it is not a resource write-row metric. */
@@ -162,11 +164,13 @@ async function measureD1<T>(
   resultIsBatch = false,
   batchIdentities: readonly TrustedQueryIdentity[] = [],
   identityOverride?: TrustedQueryIdentity,
+  filterOverride?: SafeFilterShape,
+  batchFilters: readonly (SafeFilterShape | undefined)[] = [],
 ): Promise<T> {
   const collector = currentHotspotCollector(logger);
   const started = globalThis.performance?.now() ?? Date.now();
   const identity = identityOverride ?? currentQueryIdentity();
-  const filter = currentQueryFilterShape();
+  const filter = filterOverride ?? currentQueryFilterShape();
   const span = logger.startSpan(operation, data);
   logger.increment("d1Statements", statementCount);
   try {
@@ -198,7 +202,9 @@ async function measureD1<T>(
             ...(asNonNegativeInteger(meta?.total_attempts) !== undefined
               ? { attempts: meta!.total_attempts as number }
               : {}),
-            ...(filter ? { filter } : {}),
+            ...((batchFilters[index] ?? filter)
+              ? { filter: batchFilters[index] ?? filter }
+              : {}),
           });
           observed += 1;
         }
@@ -208,7 +214,9 @@ async function measureD1<T>(
           collector?.record({
             identity: batchIdentities[index] ?? identity,
             batchSharedWall: true,
-            ...(filter ? { filter } : {}),
+            ...((batchFilters[index] ?? filter)
+              ? { filter: batchFilters[index] ?? filter }
+              : {}),
           });
         }
         markUnobservedD1Results(logger, statementCount - observed);
@@ -217,7 +225,9 @@ async function measureD1<T>(
           collector?.record({
             identity: batchIdentities[i] ?? identity,
             batchSharedWall: true,
-            ...(filter ? { filter } : {}),
+            ...((batchFilters[i] ?? filter)
+              ? { filter: batchFilters[i] ?? filter }
+              : {}),
           });
         markUnobservedD1Results(logger, statementCount);
       }
@@ -263,7 +273,9 @@ async function measureD1<T>(
           identity: batchIdentities[i] ?? identity,
           failed: true,
           batchSharedWall: true,
-          ...(filter ? { filter } : {}),
+          ...((batchFilters[i] ?? filter)
+            ? { filter: batchFilters[i] ?? filter }
+            : {}),
         });
     } else {
       collector?.record({
@@ -286,6 +298,7 @@ function wrapD1Statement(
   kind: string,
   bindingCount = 0,
   trustedIdentity: TrustedQueryIdentity = currentQueryIdentity(),
+  trustedFilter: SafeFilterShape | undefined = currentQueryFilterShape(),
 ): D1PreparedStatement {
   const proxy = new Proxy(statement, {
     get(target, property, receiver) {
@@ -297,6 +310,7 @@ function wrapD1Statement(
             kind,
             values.length,
             trustedIdentity,
+            trustedFilter,
           );
       }
       if (
@@ -318,6 +332,7 @@ function wrapD1Statement(
             false,
             [],
             trustedIdentity,
+            trustedFilter,
           );
       }
       const value = Reflect.get(target, property, receiver);
@@ -326,6 +341,7 @@ function wrapD1Statement(
   });
   RAW_D1_STATEMENT.set(proxy, statement);
   D1_STATEMENT_IDENTITY.set(proxy, trustedIdentity);
+  if (trustedFilter) D1_STATEMENT_FILTER.set(proxy, trustedFilter);
   return proxy;
 }
 function unwrapD1Statement(
@@ -356,6 +372,9 @@ function wrapD1Database(
               (item) =>
                 D1_STATEMENT_IDENTITY.get(item) ?? currentQueryIdentity(),
             ),
+            undefined,
+            undefined,
+            statements.map((item) => D1_STATEMENT_FILTER.get(item)),
           );
       }
       if (property === "exec") {

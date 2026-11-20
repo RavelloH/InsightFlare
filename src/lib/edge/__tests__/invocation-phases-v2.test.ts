@@ -177,9 +177,10 @@ describe("v2 actual phases and execution isolation", () => {
     // It must not disappear merely because earlier, cheaper queries ran first.
     expect(point.blobs[13]).toBe("analytics.geo-points");
     expect(point.blobs[16]).toBe("analytics.geo-points");
-    expect(json.coverage.query).toBe("complete");
+    expect(json.coverage.query).toBe("partial");
+    expect(json.coverage.queryGranularity).toBe("provider-family");
     expect(v2BooleanFlag(point.doubles[18], "queryAttributionComplete")).toBe(
-      true,
+      false,
     );
     expect(
       new TextEncoder().encode(point.blobs[18]).length,

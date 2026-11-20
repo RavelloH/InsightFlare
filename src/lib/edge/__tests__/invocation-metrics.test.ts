@@ -431,6 +431,7 @@ describe("AE invocation recording v1 compatibility and v2 production", () => {
       "hotBasis",
       "phases",
       "queries",
+      "rankingCoverage",
       "resources",
       "signals",
       "truncation",

@@ -67,6 +67,8 @@ export const V2_FLAG = {
   filterPresent: 6,
   detailsTruncated: 7,
   queryAttributionComplete: 8,
+  /** True zero is distinguishable from Batch's unmeasured per-query wait. */
+  hotQueryApiWallPresent: 9,
 } as const;
 
 export const V2_COVERAGE_SHIFT = {

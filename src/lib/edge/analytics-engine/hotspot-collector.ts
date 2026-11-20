@@ -2,8 +2,6 @@ import type { InvocationLogger } from "@/lib/edge/observability/logger";
 
 import type { SafeFilterShape } from "./filter-shape";
 import {
-  QUERY_REGISTRY,
-  QUERY_VARIANTS,
   type TrustedQueryIdentity,
   UNKNOWN_QUERY_ID,
   verifiedQueryIdentity,
@@ -47,13 +45,13 @@ export type InvocationHotspots = {
   readonly d1ApiWallSumMs: number;
   readonly d1ApiCallCount: number;
   readonly filter?: SafeFilterShape;
+  readonly filterAmbiguous: boolean;
 };
 
 const collectors = new WeakMap<InvocationLogger, HotspotCollector>();
-// Cover the entire bounded, code-owned (ID, variant) domain. A first-seen
-// cap of 32 could silently discard the actual hottest/most-scanned query.
-// One extra slot is reserved for the unknown_d1 identity.
-const MAX_QUERIES = QUERY_REGISTRY.size * QUERY_VARIANTS.length + 1;
+// Shape-aware IDs multiply the key domain. Keep memory bounded independent
+// of user-controlled AST cardinality and suppress ranking on overflow.
+const MAX_QUERIES = 256;
 
 const finite = (value: number | undefined): number | undefined =>
   typeof value === "number" && Number.isFinite(value) && value >= 0
@@ -69,14 +67,25 @@ export class HotspotCollector {
   private apiWall = 0;
   private apiCalls = 0;
   private filter?: SafeFilterShape;
+  private filterAmbiguous = false;
 
   setFilter(shape: SafeFilterShape): void {
-    if (!this.filter || this.filter.family === "none") this.filter = shape;
+    if (this.filterAmbiguous) return;
+    if (!this.filter) this.filter = shape;
+    else if (JSON.stringify(this.filter) !== JSON.stringify(shape)) {
+      this.filterAmbiguous = true;
+      this.filter = undefined;
+    }
   }
 
   record(sample: QueryObservation): void {
     const identity = verifiedQueryIdentity(sample.identity);
-    const key = `${identity.id}:${identity.variant}`;
+    // An identical ID/variant can execute very different Filter-SQL plans.
+    // The signature contains only stable enums/coarse buckets from safeFilterShape.
+    const shapeSignature = sample.filter
+      ? JSON.stringify(sample.filter)
+      : "no_shape";
+    const key = JSON.stringify([identity.id, identity.variant, shapeSignature]);
     this.count++;
     if (identity.id === UNKNOWN_QUERY_ID) this.unknown++;
 
@@ -146,6 +155,7 @@ export class HotspotCollector {
       queryCount: this.count,
       unknownCount: this.unknown,
       droppedQueries: this.dropped,
+      filterAmbiguous: this.filterAmbiguous,
       d1ApiWallSumMs: this.apiWall,
       d1ApiCallCount: this.apiCalls,
       ...(this.filter ? { filter: this.filter } : {}),

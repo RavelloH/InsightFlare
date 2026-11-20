@@ -63,6 +63,9 @@ describe("Filter-SQL privacy-preserving shape projection", () => {
     expect(safeFilterShape({ version: 1, root: null }).family).toBe("none");
     const a = safeFilterShape(doc("a"));
     expect(a.maxDepthBucket).toBe("3-4");
-    expect(a.code).toMatch(/^[a-z-]+\.[0-9+-]+\.[0-9+-]+$/);
+    expect(a.code).toMatch(
+      /^[a-z-]+\.[aonxc]+\.[0-9+-]+\.[0-9+-]+\.o[0-9a-z]+$/,
+    );
+    expect(a.booleanGroups).toEqual(["and", "not"]);
   });
 });

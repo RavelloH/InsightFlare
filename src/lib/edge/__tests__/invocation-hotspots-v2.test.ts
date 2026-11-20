@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { safeFilterShape } from "@/lib/edge/analytics-engine/filter-shape";
 import { HotspotCollector } from "@/lib/edge/analytics-engine/hotspot-collector";
 import {
   v2BooleanFlag,
@@ -12,6 +13,7 @@ import {
 import {
   registeredProviderQuery,
   runWithQueryIdentity,
+  setCurrentQueryFilterShape,
 } from "@/lib/edge/analytics-engine/query-registry";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";
 import {
@@ -94,7 +96,11 @@ describe("v2 D1 Query ID attribution", () => {
     expect(point.doubles[15]).toBe(17);
     expect(v2CoverageFlag(point.doubles[18], "d1RowsRead")).toBe("complete");
     expect(v2BooleanFlag(point.doubles[18], "queryAttributionComplete")).toBe(
-      true,
+      false,
+    );
+    // A provider-family ID is not evidence of a concrete SQL template.
+    expect(JSON.parse(point.blobs[18]).coverage.queryGranularity).toBe(
+      "provider-family",
     );
     expect(JSON.stringify(point)).not.toContain(secret);
   });
@@ -242,7 +248,11 @@ describe("v2 concurrent and batch attribution", () => {
     expect(point.blobs[14]).toBe("raw.unfiltered");
     expect(point.doubles[5]).toBe(31);
     expect(v2BooleanFlag(point.doubles[18], "queryAttributionComplete")).toBe(
-      true,
+      false,
+    );
+    // A provider-family ID is not evidence of a concrete SQL template.
+    expect(JSON.parse(point.blobs[18]).coverage.queryGranularity).toBe(
+      "provider-family",
     );
   });
 
@@ -273,6 +283,121 @@ describe("v2 concurrent and batch attribution", () => {
     expect(JSON.parse(p.blobs[18]).queries[0].coverage.rowsRead).toBe(
       "partial",
     );
+  });
+});
+
+describe("review R1 F1: real D1 proxy preserves each statement's Filter Shape", () => {
+  const shape = (kind: "and" | "or") =>
+    safeFilterShape({
+      version: 1,
+      root: {
+        kind,
+        children: [
+          {
+            kind: "condition",
+            target: { kind: "field", field: "geo.country" as never },
+            operator: "eq",
+            value: "CANARY_PRIVATE_A",
+          },
+          {
+            kind: "condition",
+            target: { kind: "field", field: "session.durationMS" as never },
+            operator: "gte",
+            value: 1,
+          },
+        ],
+      },
+    });
+
+  it("keeps prepared Batch statements with the same ID/Variant but distinct shapes separate", async () => {
+    const f = setup();
+    const and = shape("and"),
+      or = shape("or");
+    f.env.DB = {
+      prepare: vi.fn(() => ({
+        bind() {
+          return this;
+        },
+      })),
+      batch: vi.fn(async () => [rows(2, 1), rows(99_000, 70)]),
+    } as unknown as D1Database;
+    const w = instrumentEnv(f.env, f.logger);
+    const prepare = (filter: typeof and) =>
+      runWithQueryIdentity(
+        { id: registeredProviderQuery("overview"), variant: "raw.filtered" },
+        () => {
+          setCurrentQueryFilterShape(filter);
+          return w.DB.prepare("SELECT 1 WHERE key = ?").bind(
+            "CANARY_PRIVATE_TOKEN",
+          );
+        },
+      );
+    const a = prepare(and);
+    const b = prepare(or);
+    await runWithInvocationLogger(f.logger, () => w.DB.batch([a, b]));
+    const point = await f.emit();
+    const details = JSON.parse(point.blobs[18]);
+    expect(details.queries).toHaveLength(2);
+    expect(details.queries).toContainEqual(
+      expect.objectContaining({
+        filterShape: and.code,
+        rowsRead: 2,
+        sqlEngineMs: 1,
+      }),
+    );
+    expect(details.queries).toContainEqual(
+      expect.objectContaining({
+        filterShape: or.code,
+        rowsRead: 99_000,
+        sqlEngineMs: 70,
+      }),
+    );
+    expect(point.blobs[15]).toBe(or.code);
+    expect(point.blobs[13]).toBe("analytics.overview");
+    expect(point.doubles[15]).toBe(99_000);
+    expect(JSON.stringify(point)).not.toContain("CANARY_PRIVATE");
+  });
+
+  it("isolates overlapping query scopes with the same ID and different safe shapes", async () => {
+    const f = setup();
+    const and = shape("and"),
+      or = shape("or");
+    f.env.DB = {
+      prepare: vi.fn((sql: string) => ({
+        all: async () => {
+          if (sql === "SLOW") await new Promise((done) => setTimeout(done, 7));
+          return sql === "SLOW" ? rows(9000, 30) : rows(3, 1);
+        },
+      })),
+    } as unknown as D1Database;
+    const w = instrumentEnv(f.env, f.logger);
+    const execute = (sql: string, filter: typeof and) =>
+      runWithInvocationLogger(f.logger, () =>
+        runWithQueryIdentity(
+          { id: registeredProviderQuery("overview"), variant: "raw.filtered" },
+          () => {
+            setCurrentQueryFilterShape(filter);
+            return w.DB.prepare(sql).all();
+          },
+        ),
+      );
+    await Promise.all([execute("SLOW", or), execute("FAST", and)]);
+    const point = await f.emit();
+    const details = JSON.parse(point.blobs[18]);
+    expect(details.queries).toHaveLength(2);
+    expect(details.queries).toContainEqual(
+      expect.objectContaining({
+        filterShape: or.code,
+        rowsRead: 9000,
+      }),
+    );
+    expect(details.queries).toContainEqual(
+      expect.objectContaining({
+        filterShape: and.code,
+        rowsRead: 3,
+      }),
+    );
+    expect(point.blobs[15]).toBe(or.code);
   });
 });
 

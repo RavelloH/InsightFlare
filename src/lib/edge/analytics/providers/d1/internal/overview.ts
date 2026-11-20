@@ -104,6 +104,10 @@ FROM ${metricSource}
           ? scopedDataset.bindings.map((binding) => binding.value)
           : [...visitSourceBindings(siteId, window), ...filter.bindings],
         diagnostics,
+        {
+          id: "analytics.overview.raw.summary",
+          variant: filters.root ? "raw.filtered" : "raw.unfiltered",
+        },
       )
     )[0] ?? {};
   return {
@@ -280,6 +284,10 @@ ORDER BY bucket ASC
         ...sessionBucket.bindings,
       ],
       diagnostics,
+      {
+        id: "analytics.trend.raw.series",
+        variant: filters.root ? "raw.filtered" : "raw.unfiltered",
+      },
     )
   ).map((row) => ({
     bucket: Number(row.bucket ?? 0),
@@ -345,6 +353,10 @@ FROM ${metricSource}
         ? scopedDataset.bindings.map((binding) => binding.value)
         : [...visitSourceBindings(siteId, window), ...filter.bindings],
       diagnostics,
+      {
+        id: "analytics.overview.raw.latest_activity",
+        variant: filters.root ? "raw.filtered" : "raw.unfiltered",
+      },
     )
   )[0];
   const raw = row?.lastActivityAt;
