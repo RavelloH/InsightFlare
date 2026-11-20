@@ -42,6 +42,13 @@ export function registerPerceptionScenarios(context: E2eContext) {
     await expect(search).toBeVisible();
     await expect(page.getByRole("group", { name: "指标" })).toBeVisible();
     await expect(page.getByRole("group", { name: "本机观察" })).toHaveCount(0);
+    const resultsContainer = page
+      .locator("#perception-search-results")
+      .locator("xpath=../..");
+    const fullHeight = await resultsContainer.evaluate(
+      (element) => element.getBoundingClientRect().height,
+    );
+    expect(fullHeight).toBeGreaterThan(0);
     await page.keyboard.press("Escape");
     await expect(search).not.toBeVisible();
     await page.keyboard.press("Control+k");
@@ -53,8 +60,49 @@ export function registerPerceptionScenarios(context: E2eContext) {
         .getByRole("option", { name: /跳出率/u }),
     ).toBeVisible();
     await expect(page.getByRole("group", { name: "站点" })).toHaveCount(0);
+    await expect
+      .poll(() =>
+        resultsContainer.evaluate(
+          (element) => element.getBoundingClientRect().height,
+        ),
+      )
+      .toBeLessThan(fullHeight);
+    const beforeClose = await page
+      .locator("#perception-search-results [role=option]")
+      .count();
+    expect(beforeClose).toBeGreaterThan(0);
+    await page.evaluate(() => {
+      const dialog = document.querySelector('[data-slot="dialog-content"]');
+      if (!dialog) throw new Error("Search dialog not found");
+      const state = window as Window & { __searchClosingRows?: number };
+      state.__searchClosingRows = -1;
+      const observer = new MutationObserver(() => {
+        if (dialog.getAttribute("data-state") === "closed") {
+          state.__searchClosingRows = dialog.querySelectorAll(
+            "#perception-search-results [role=option]",
+          ).length;
+          observer.disconnect();
+        }
+      });
+      observer.observe(dialog, {
+        attributes: true,
+        attributeFilter: ["data-state"],
+      });
+    });
     await page.keyboard.press("Escape");
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as Window & { __searchClosingRows?: number })
+              .__searchClosingRows,
+        ),
+      )
+      .toBe(beforeClose);
     await expect(search).not.toBeVisible();
+    await page.keyboard.press("Control+k");
+    await expect(search).toHaveValue("");
+    await page.keyboard.press("Escape");
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("button", { name: "Toggle Sidebar" }).click();

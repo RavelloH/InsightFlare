@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { Button } from "@insightflare/ui/button";
 import {
   Dialog,
@@ -62,11 +63,10 @@ export function GlobalPerceptionSearch({ locale }: { locale: Locale }) {
     limit: 50,
   };
   const hasQuery = query.trim().length > 0;
-  const matches = open
-    ? hasQuery
-      ? localPerceptionSearch(request)
-      : localPerceptionNavigation(request)
-    : [];
+  // Keep the results mounted during the Dialog exit animation.
+  const matches = hasQuery
+    ? localPerceptionSearch(request)
+    : localPerceptionNavigation(request);
   const groups: { id: SearchCommandGroup; label: string }[] =
     contextMode === "site"
       ? [
@@ -102,14 +102,16 @@ export function GlobalPerceptionSearch({ locale }: { locale: Locale }) {
       )
         return;
       event.preventDefault();
-      setQuery("");
-      setSelected(0);
-      setNotice("");
-      setOpen((old) => !old);
+      if (!open) {
+        setQuery("");
+        setSelected(0);
+        setNotice("");
+      }
+      setOpen(!open);
     };
     window.addEventListener("keydown", onShortcut);
     return () => window.removeEventListener("keydown", onShortcut);
-  }, []);
+  }, [open]);
   async function execute(result: SearchResult) {
     const context = getPerceptionAuthorization();
     if (!context) return;
@@ -251,36 +253,38 @@ export function GlobalPerceptionSearch({ locale }: { locale: Locale }) {
               }
             }}
           />
-          <div
-            id="perception-search-results"
-            role="listbox"
-            aria-label={labels.title}
-            className="max-h-80 overflow-y-auto"
-          >
-            {groupedResults.map((group) =>
-              group.results.length ? (
-                <div key={group.id} role="group" aria-label={group.label}>
-                  <SelectLabel>{group.label}</SelectLabel>
-                  {group.results.map((result) =>
+          <AutoResizer className="w-full" duration={0.24}>
+            <div
+              id="perception-search-results"
+              role="listbox"
+              aria-label={labels.title}
+              className="max-h-80 overflow-y-auto"
+            >
+              {groupedResults.map((group) =>
+                group.results.length ? (
+                  <div key={group.id} role="group" aria-label={group.label}>
+                    <SelectLabel>{group.label}</SelectLabel>
+                    {group.results.map((result) =>
+                      option(result, results.indexOf(result)),
+                    )}
+                  </div>
+                ) : null,
+              )}
+              {observedResults.length ? (
+                <div role="group" aria-label={labels.local}>
+                  <SelectLabel>{labels.local}</SelectLabel>
+                  {observedResults.map((result) =>
                     option(result, results.indexOf(result)),
                   )}
                 </div>
-              ) : null,
-            )}
-            {observedResults.length ? (
-              <div role="group" aria-label={labels.local}>
-                <SelectLabel>{labels.local}</SelectLabel>
-                {observedResults.map((result) =>
-                  option(result, results.indexOf(result)),
-                )}
-              </div>
-            ) : null}{" "}
-            {results.length === 0 ? (
-              <p role="status" className="text-xs text-muted-foreground">
-                {labels.empty}
-              </p>
-            ) : null}
-          </div>
+              ) : null}{" "}
+              {results.length === 0 ? (
+                <p role="status" className="text-xs text-muted-foreground">
+                  {labels.empty}
+                </p>
+              ) : null}
+            </div>
+          </AutoResizer>
           {notice ? (
             <p role="status" className="text-xs text-destructive">
               {notice}
