@@ -3,10 +3,12 @@ import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
+import { executeApiV1Query } from "@/lib/api-v1/analytics/query-application";
 import {
   createSqliteD1Database,
   type SqliteD1Trace,
 } from "@/lib/db/__tests__/sqlite-d1";
+import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition/edge-runtime";
 import {
   attachScopedFilterMetadata,
   createQueryTime,
@@ -1869,6 +1871,57 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         ok: true,
         data: { views: 0 },
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("API v1 canonical application returns real scoped Overview data and rejects forbidden operations before SQL", async () => {
+    const db = sqlitePayloadFixture();
+    try {
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const env = { DB: createSqliteD1Database(db, trace) } as never;
+      const runtime = createEdgeSiteAnalyticsRuntime({ env, siteId: "site-a" });
+      const context = siteQueryContext("site-a", "api-v1");
+      const query = {
+        time: createQueryTime(100, 300, "UTC", 400),
+        filters: ready("overview"),
+      };
+      const result = await executeApiV1Query(
+        undefined,
+        {
+          operation: "site.analytics.overview",
+          executor: runtime,
+          context,
+          query,
+        } as never,
+        {},
+      );
+      expect(result).toMatchObject({ ok: true });
+      expect(JSON.stringify(result)).toContain('"views":1');
+      expect(
+        trace.preparedSql.some((sql) => sql.includes("pointer_nodes")),
+      ).toBe(true);
+      const count = trace.preparedSql.length;
+      const denied = {
+        ...context,
+        policy: { ...context.policy, allowedOperations: new Set() },
+      };
+      const negative = await executeApiV1Query(
+        undefined,
+        {
+          operation: "site.analytics.overview",
+          executor: runtime,
+          context: denied,
+          query: { ...query, context: denied },
+        } as never,
+        {},
+      );
+      expect(negative).toMatchObject({
+        ok: false,
+        error: { kind: "operation-not-allowed" },
+      });
+      expect(trace.preparedSql).toHaveLength(count);
     } finally {
       db.close();
     }
