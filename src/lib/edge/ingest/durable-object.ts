@@ -8,6 +8,7 @@ import {
   writeTrafficSessionEndedFact,
   writeTrafficVisitFinalizedFact,
 } from "@/lib/edge/analytics-engine/index";
+import { registerInvocationMetrics } from "@/lib/edge/analytics-engine/invocation-writer";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";
 import {
   createInvocationLogger,
@@ -133,6 +134,20 @@ export class IngestDurableObject extends DurableObject {
       trigger: "request",
       waitUntil: (work) => this.doState.waitUntil(work),
     });
+    registerInvocationMetrics(this.doEnv, logger);
+    const doRoute =
+      (
+        {
+          "/ws": "do.ws",
+          "/ingest": "do.ingest",
+          "/snapshot": "do.snapshot",
+          "/active": "do.active",
+          "/diagnostic": "do.diagnostic",
+          "/reconcile": "do.reconcile",
+          "/flush": "do.flush",
+        } as Record<string, string>
+      )[url.pathname] ?? "do.other";
+    logger.setRouteKey(doRoute);
     logger.info("do.request.started");
 
     try {
@@ -219,6 +234,8 @@ export class IngestDurableObject extends DurableObject {
       trigger: "alarm",
       waitUntil: (work) => this.doState.waitUntil(work),
     });
+    registerInvocationMetrics(this.doEnv, logger);
+    logger.setRouteKey("do.alarm");
     logger.info("do.alarm.started");
     try {
       await runWithInvocationLogger(logger, async () => {
@@ -458,6 +475,8 @@ export class IngestDurableObject extends DurableObject {
       trigger: "websocket",
       waitUntil: (work) => this.doState.waitUntil(work),
     });
+    registerInvocationMetrics(this.doEnv, logger);
+    logger.setRouteKey("do.websocket");
     logger.setRequest({
       route: "/ws",
       method: "WEBSOCKET",

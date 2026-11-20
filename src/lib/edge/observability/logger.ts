@@ -28,6 +28,120 @@ export type InvocationCacheState = "HIT" | "MISS" | "BYPASS";
 export type InvocationDataSource = "raw" | "rollup" | "mixed";
 export type InvocationD1RowsCoverage = "complete" | "partial" | "unavailable";
 
+/** Deliberately typed facts, never inferred from Error.message/stack. */
+export type InvocationSafeErrorCode =
+  | "d1_operation_failed"
+  | "unhandled_request"
+  | "do_alarm_failed"
+  | "scheduled_failed"
+  | "websocket_failed"
+  | "websocket_snapshot_failed"
+  | "do_flush_visit_batch_failed"
+  | "do_flush_visit_failed"
+  | "do_flush_custom_event_failed"
+  | "query_application_failed";
+
+export interface InvocationSafeErrorSignal {
+  readonly category: "database" | "application" | "infrastructure";
+  readonly code: InvocationSafeErrorCode;
+  readonly operation: string;
+  readonly severity: "error";
+}
+
+function trustedErrorSignal(
+  message: string,
+): InvocationSafeErrorSignal | undefined {
+  const d1 = /^d1\.(all|first|run|raw|exec|batch)\.failed$/.exec(message);
+  if (d1)
+    return {
+      category: "database",
+      code: "d1_operation_failed",
+      operation: `d1.${d1[1]}`,
+      severity: "error",
+    };
+  if (
+    message === "request.unhandled_error" ||
+    message === "do.request.unhandled_error"
+  ) {
+    return {
+      category: "application",
+      code: "unhandled_request",
+      operation: "request",
+      severity: "error",
+    };
+  }
+  if (
+    message === "do.alarm.failed" ||
+    message === "do.alarm.reconcile_failed"
+  ) {
+    return {
+      category: "infrastructure",
+      code: "do_alarm_failed",
+      operation: "do.alarm",
+      severity: "error",
+    };
+  }
+  if (message === "scheduled.failed") {
+    return {
+      category: "infrastructure",
+      code: "scheduled_failed",
+      operation: "scheduled.tasks",
+      severity: "error",
+    };
+  }
+  if (message === "do.websocket.error") {
+    return {
+      category: "application",
+      code: "websocket_failed",
+      operation: "do.websocket",
+      severity: "error",
+    };
+  }
+  // These fixed, code-owned events represent caught internal failures even
+  // when the request is deliberately answered with HTTP 101/200/202.
+  if (message === "do.websocket.snapshot_failed") {
+    return {
+      category: "infrastructure",
+      code: "websocket_snapshot_failed",
+      operation: "do.websocket.initial_snapshot",
+      severity: "error",
+    };
+  }
+  if (message === "do.flush.visit_batch_failed") {
+    return {
+      category: "database",
+      code: "do_flush_visit_batch_failed",
+      operation: "do.flush.visit_batch",
+      severity: "error",
+    };
+  }
+  if (message === "do.flush.visit_failed") {
+    return {
+      category: "database",
+      code: "do_flush_visit_failed",
+      operation: "do.flush.visit",
+      severity: "error",
+    };
+  }
+  if (message === "do.flush.custom_event_failed") {
+    return {
+      category: "database",
+      code: "do_flush_custom_event_failed",
+      operation: "do.flush.custom_event",
+      severity: "error",
+    };
+  }
+  if (message === "query.application-operation.failed") {
+    return {
+      category: "application",
+      code: "query_application_failed",
+      operation: "query.application",
+      severity: "error",
+    };
+  }
+  return undefined;
+}
+
 export interface InvocationRequest {
   route: string;
   method: string;
@@ -275,6 +389,8 @@ export interface InvocationLogger {
   track<T>(promise: Promise<T>): Promise<T>;
   setTraceId(traceId: string | undefined): void;
   setRequest(request: InvocationRequest): void;
+  /** Route template from a trusted router, or a fixed lifecycle key. Never a raw URL. */
+  setRouteKey(routeKey: string): void;
   setPerformance(performance: InvocationPerformancePatch): void;
   increment(counter: InvocationPerformanceCounter, amount?: number): void;
   recordD1Operation(
@@ -359,6 +475,8 @@ export function createInvocationLogger(
   const events: InvocationLogEvent[] = [];
   let traceId = options.traceId;
   let request: InvocationRequest | undefined;
+  let routeKey: string | undefined;
+  const safeErrors: InvocationSafeErrorSignal[] = [];
   let performance: InvocationPerformancePatch = {};
   let doSqlCompleted = 0;
   let doSqlRowsReadAvailable = 0;
@@ -407,6 +525,14 @@ export function createInvocationLogger(
     if (events.length >= maxEvents) {
       logsTruncated = true;
       return;
+    }
+    // Only exact, code-owned event identifiers contribute AE error facts.
+    // Event data itself is deliberately ignored; it may contain secrets.
+    if (level === "error") {
+      const signal = trustedErrorSignal(message);
+      if (signal && !safeErrors.some((item) => item.code === signal.code)) {
+        if (safeErrors.length < 3) safeErrors.push(Object.freeze(signal));
+      }
     }
     const safeData = sanitizeData(data);
     events.push({
@@ -526,6 +652,17 @@ export function createInvocationLogger(
       if (emitted) return;
       request = { ...nextRequest };
     },
+    setRouteKey(nextRouteKey) {
+      if (emitted) return;
+      // Keys are supplied only by Hono's matched route template or fixed
+      // entrypoint mappings. Reject dynamic paths, query strings, and IDs.
+      if (
+        /^(?:api:\/[A-Za-z0-9_./:{}*-]{1,80}|api\.other|page\.other|server_function\.handler|do\.(?:ingest|snapshot|active|diagnostic|reconcile|flush|ws|other|alarm|websocket)|scheduled\.tasks)$/.test(
+          nextRouteKey,
+        )
+      )
+        routeKey = nextRouteKey;
+    },
     setPerformance(nextPerformance) {
       if (emitted) return;
       performance = { ...performance, ...nextPerformance };
@@ -601,7 +738,10 @@ export function createInvocationLogger(
       };
     },
     snapshot(completionOptions) {
-      const base = toInvocationSnapshot(emitted ?? build());
+      const base = toInvocationSnapshot(emitted ?? build(), {
+        routeKey,
+        safeErrors,
+      });
       return completionOptions?.includeSqlSemantics
         ? withSqlSemanticObservations(base, [...sqlObservations.values()])
         : base;
@@ -653,7 +793,10 @@ export function createInvocationLogger(
       emitted = build();
       consoleFor(emitted)(emitted);
       if (consumers.size > 0) {
-        const snapshot = toInvocationSnapshot(emitted);
+        const snapshot = toInvocationSnapshot(emitted, {
+          routeKey,
+          safeErrors,
+        });
         const listeners = [...consumers];
         const semanticSnapshot = listeners.some(
           (listener) => listener.includeSqlSemantics,
