@@ -1,3 +1,9 @@
+import { currentHotspotCollector } from "@/lib/edge/analytics-engine/hotspot-collector";
+import {
+  currentQueryFilterShape,
+  currentQueryIdentity,
+  type TrustedQueryIdentity,
+} from "@/lib/edge/analytics-engine/query-registry";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -9,6 +15,7 @@ import { errorLogData } from "./logger";
 const INSTRUMENTED_ENV = Symbol("insightflare.instrumented-env");
 const INVOCATION_LOGGER = Symbol("insightflare.invocation-logger");
 const RAW_D1_STATEMENT = new WeakMap<object, D1PreparedStatement>();
+const D1_STATEMENT_IDENTITY = new WeakMap<object, TrustedQueryIdentity>();
 const D1_META_STATE = new WeakMap<InvocationLogger, D1MetaState>();
 type D1MetaLike = {
   /** Business mutation count; it is not a resource write-row metric. */
@@ -153,27 +160,93 @@ async function measureD1<T>(
   statementCount: number,
   action: () => Promise<T>,
   resultIsBatch = false,
+  batchIdentities: readonly TrustedQueryIdentity[] = [],
+  identityOverride?: TrustedQueryIdentity,
 ): Promise<T> {
+  const collector = currentHotspotCollector(logger);
+  const started = globalThis.performance?.now() ?? Date.now();
+  const identity = identityOverride ?? currentQueryIdentity();
+  const filter = currentQueryFilterShape();
   const span = logger.startSpan(operation, data);
   logger.increment("d1Statements", statementCount);
   try {
     const result = await action();
     if (resultIsBatch) {
+      collector?.recordBatchApiWall(
+        (globalThis.performance?.now() ?? Date.now()) - started,
+      );
       if (Array.isArray(result)) {
         const slots = Math.min(statementCount, result.length);
         let observed = 0;
         for (let index = 0; index < slots; index += 1) {
-          if (!(index in result) || result[index] === undefined) continue;
+          if (!(index in result) || result[index] == null) continue;
           recordD1Result(logger, result[index]);
+          const meta = (result[index] as { meta?: D1MetaLike } | null)?.meta;
+          collector?.record({
+            identity: batchIdentities[index] ?? identity,
+            batchSharedWall: true,
+            ...(asNonNegativeInteger(meta?.rows_read) !== undefined
+              ? { rowsRead: meta!.rows_read as number }
+              : {}),
+            ...(asNonNegativeInteger(meta?.rows_written) !== undefined
+              ? { rowsWritten: meta!.rows_written as number }
+              : {}),
+            ...(asNonNegativeDuration(meta?.timings?.sql_duration_ms) !==
+            undefined
+              ? { sqlEngineMs: meta!.timings!.sql_duration_ms as number }
+              : {}),
+            ...(asNonNegativeInteger(meta?.total_attempts) !== undefined
+              ? { attempts: meta!.total_attempts as number }
+              : {}),
+            ...(filter ? { filter } : {}),
+          });
           observed += 1;
+        }
+        for (let index = 0; index < statementCount; index++) {
+          if (index < slots && index in result && result[index] != null)
+            continue;
+          collector?.record({
+            identity: batchIdentities[index] ?? identity,
+            batchSharedWall: true,
+            ...(filter ? { filter } : {}),
+          });
         }
         markUnobservedD1Results(logger, statementCount - observed);
       } else {
+        for (let i = 0; i < statementCount; i++)
+          collector?.record({
+            identity: batchIdentities[i] ?? identity,
+            batchSharedWall: true,
+            ...(filter ? { filter } : {}),
+          });
         markUnobservedD1Results(logger, statementCount);
       }
-    } else if (result !== undefined) {
+    } else if (result != null) {
       recordD1Result(logger, result);
+      const meta = (result as { meta?: D1MetaLike } | null)?.meta;
+      collector?.record({
+        identity,
+        apiWallMs: (globalThis.performance?.now() ?? Date.now()) - started,
+        ...(asNonNegativeInteger(meta?.rows_read) !== undefined
+          ? { rowsRead: meta!.rows_read as number }
+          : {}),
+        ...(asNonNegativeInteger(meta?.rows_written) !== undefined
+          ? { rowsWritten: meta!.rows_written as number }
+          : {}),
+        ...(asNonNegativeDuration(meta?.timings?.sql_duration_ms) !== undefined
+          ? { sqlEngineMs: meta!.timings!.sql_duration_ms as number }
+          : {}),
+        ...(asNonNegativeInteger(meta?.total_attempts) !== undefined
+          ? { attempts: meta!.total_attempts as number }
+          : {}),
+        ...(filter ? { filter } : {}),
+      });
     } else {
+      collector?.record({
+        identity,
+        apiWallMs: (globalThis.performance?.now() ?? Date.now()) - started,
+        ...(filter ? { filter } : {}),
+      });
       markUnobservedD1Results(logger, statementCount);
     }
     // One D1 API call settled; this is not the count of executed statements.
@@ -181,6 +254,25 @@ async function measureD1<T>(
     span.end({ statementCount });
     return result;
   } catch (error) {
+    if (resultIsBatch) {
+      collector?.recordBatchApiWall(
+        (globalThis.performance?.now() ?? Date.now()) - started,
+      );
+      for (let i = 0; i < statementCount; i++)
+        collector?.record({
+          identity: batchIdentities[i] ?? identity,
+          failed: true,
+          batchSharedWall: true,
+          ...(filter ? { filter } : {}),
+        });
+    } else {
+      collector?.record({
+        identity,
+        failed: true,
+        apiWallMs: (globalThis.performance?.now() ?? Date.now()) - started,
+        ...(filter ? { filter } : {}),
+      });
+    }
     markUnobservedD1Results(logger, statementCount);
     logger.increment("d1SettledOperations");
     logger.increment("failedStatements", statementCount);
@@ -193,12 +285,19 @@ function wrapD1Statement(
   logger: InvocationLogger,
   kind: string,
   bindingCount = 0,
+  trustedIdentity: TrustedQueryIdentity = currentQueryIdentity(),
 ): D1PreparedStatement {
   const proxy = new Proxy(statement, {
     get(target, property, receiver) {
       if (property === "bind") {
         return (...values: unknown[]) =>
-          wrapD1Statement(target.bind(...values), logger, kind, values.length);
+          wrapD1Statement(
+            target.bind(...values),
+            logger,
+            kind,
+            values.length,
+            trustedIdentity,
+          );
       }
       if (
         property === "all" ||
@@ -216,6 +315,9 @@ function wrapD1Statement(
               (target[property] as (...values: unknown[]) => Promise<unknown>)(
                 ...args,
               ),
+            false,
+            [],
+            trustedIdentity,
           );
       }
       const value = Reflect.get(target, property, receiver);
@@ -223,6 +325,7 @@ function wrapD1Statement(
     },
   });
   RAW_D1_STATEMENT.set(proxy, statement);
+  D1_STATEMENT_IDENTITY.set(proxy, trustedIdentity);
   return proxy;
 }
 function unwrapD1Statement(
@@ -249,6 +352,10 @@ function wrapD1Database(
             statements.length,
             () => target.batch<T>(statements.map(unwrapD1Statement)),
             true,
+            statements.map(
+              (item) =>
+                D1_STATEMENT_IDENTITY.get(item) ?? currentQueryIdentity(),
+            ),
           );
       }
       if (property === "exec") {
@@ -326,16 +433,22 @@ function wrapDurableObjectNamespace(
             return (...fetchArgs: Parameters<DurableObjectStub["fetch"]>) => {
               const span = logger.startSpan("do.fetch");
               logger.increment("doCalls");
-              return value.apply(stubTarget, fetchArgs).then(
-                (response: Response) => {
-                  span.end({ status: response.status });
-                  return response;
-                },
-                (error: unknown) => {
-                  span.fail(errorLogData(error));
-                  throw error;
-                },
-              );
+              try {
+                return value.apply(stubTarget, fetchArgs).then(
+                  (response: Response) => {
+                    span.end({ status: response.status });
+                    return response;
+                  },
+                  (error: unknown) => {
+                    span.fail(errorLogData(error));
+                    throw error;
+                  },
+                );
+              } catch (error) {
+                // A synchronous fetch failure must also close the measured span.
+                span.fail(errorLogData(error));
+                throw error;
+              }
             };
           },
         });

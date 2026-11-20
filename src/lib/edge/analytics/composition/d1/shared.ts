@@ -1,5 +1,6 @@
 import type { QueryTime } from "@/lib/edge/analytics/contract";
 import type { D1ReadDiagnostics } from "@/lib/edge/analytics/providers/d1/internal/diagnostics";
+import { runWithRegisteredSubquery } from "@/lib/edge/analytics-engine/query-registry";
 import {
   currentInvocationLogger,
   runWithD1Operation,
@@ -40,7 +41,11 @@ export function measured<T>(
 ): Promise<T> {
   const logger = currentInvocationLogger();
   return logger
-    ? logger.measure(operation, () => runWithD1Operation(operation, action))
+    ? logger.measure(operation, () =>
+        runWithD1Operation(operation, () =>
+          runWithRegisteredSubquery(operation, action),
+        ),
+      )
     : action();
 }
 export function arrayField<Input extends object, Field extends keyof Input>(

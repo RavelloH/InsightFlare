@@ -48,6 +48,8 @@ export interface QueryExecutionContext {
   readonly onEvent?: (event: AnalyticsQueryEvent) => void;
   /** Allows a protocol adapter to preserve its legacy provider-error mapping. */
   readonly onProviderError?: (error: unknown) => void;
+  /** Code-owned, best-effort observability callback after validation and planning. */
+  readonly onPreparedQuery?: (query: QueryInput) => void;
   readonly operation?: string;
 }
 export interface AnalyticsQueryEvent {
@@ -388,6 +390,11 @@ export class TypedQueryApplicationService {
     }
 
     try {
+      try {
+        executionContext.onPreparedQuery?.(preparedQuery);
+      } catch {
+        // Optional diagnostics must not alter business query results.
+      }
       const provider = invocation.providerRegistry.resolve<Operation>(
         invocation.operation,
       );
