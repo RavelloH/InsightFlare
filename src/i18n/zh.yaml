@@ -437,6 +437,10 @@ filterBuilder:
     applyOffset: 应用偏移量
     removeStep: 移除步骤
     addStep: 添加序列步骤
+    moveStepUp: 上移步骤
+    moveStepDown: 下移步骤
+    addOffset: 添加时间偏移
+    removeOffset: 移除时间偏移
     excludedActivity: 排除的活动
     fixedTime: 固定时间
     toggleOffsetSign: 切换时间偏移正负

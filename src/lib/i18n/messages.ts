@@ -341,6 +341,10 @@ export interface AppMessages {
       applyOffset: string;
       removeStep: string;
       addStep: string;
+      moveStepUp: string;
+      moveStepDown: string;
+      addOffset: string;
+      removeOffset: string;
       excludedActivity: string;
       fixedTime: string;
       toggleOffsetSign: string;
@@ -3350,6 +3354,10 @@ const enMessages = {
       applyOffset: "Apply offset",
       removeStep: "Remove step",
       addStep: "Add sequence step",
+      moveStepUp: "Move step up",
+      moveStepDown: "Move step down",
+      addOffset: "Add offset",
+      removeOffset: "Remove offset",
       excludedActivity: "Excluded activity",
       fixedTime: "Fixed time",
       toggleOffsetSign: "Toggle time offset sign",
@@ -6575,6 +6583,10 @@ const zhMessages = {
       applyOffset: "应用偏移量",
       removeStep: "移除步骤",
       addStep: "添加序列步骤",
+      moveStepUp: "上移步骤",
+      moveStepDown: "下移步骤",
+      addOffset: "添加时间偏移",
+      removeOffset: "移除时间偏移",
       excludedActivity: "排除的活动",
       fixedTime: "固定时间",
       toggleOffsetSign: "切换时间偏移正负",
@@ -9709,6 +9721,10 @@ const zhTwMessages = {
       applyOffset: "應用偏移量",
       removeStep: "移除步驟",
       addStep: "新增序列步驟",
+      moveStepUp: "上移步驟",
+      moveStepDown: "下移步驟",
+      addOffset: "新增時間偏移",
+      removeOffset: "移除時間偏移",
       excludedActivity: "排除的活動",
       fixedTime: "固定時間",
       toggleOffsetSign: "切換時間偏移正負",
@@ -12849,6 +12865,10 @@ const jaMessages = {
       applyOffset: "オフセットを適用",
       removeStep: "ステップを削除",
       addStep: "シーケンスステップを追加",
+      moveStepUp: "ステップを上に移動",
+      moveStepDown: "ステップを下に移動",
+      addOffset: "時間オフセットを追加",
+      removeOffset: "時間オフセットを削除",
       excludedActivity: "除外するアクティビティ",
       fixedTime: "固定時刻",
       toggleOffsetSign: "時間オフセットの符号を切り替え",

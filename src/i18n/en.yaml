@@ -441,6 +441,10 @@ filterBuilder:
     applyOffset: Apply offset
     removeStep: Remove step
     addStep: Add sequence step
+    moveStepUp: Move step up
+    moveStepDown: Move step down
+    addOffset: Add offset
+    removeOffset: Remove offset
     excludedActivity: Excluded activity
     fixedTime: Fixed time
     toggleOffsetSign: Toggle time offset sign
