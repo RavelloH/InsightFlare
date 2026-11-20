@@ -31,6 +31,7 @@ function qualified(
     rangeEndExclusiveMs: number;
     timeZone: string;
   },
+  sourceSql: string = SOURCE,
 ) {
   const document = parseFilterDsl(expression, analyticsFilterRegistry);
   const output = compileCollectionSqlQualification(document, scope, {}, clock);
@@ -40,7 +41,7 @@ function qualified(
     if (output.kind === "entity") {
       return database
         .prepare(
-          `WITH ${SOURCE}, ${ctes}
+          `WITH ${sourceSql}, ${ctes}
         SELECT site_pk, entity_id FROM ${output.qualifiedEntityRelation}
         ORDER BY site_pk, entity_id`,
         )
@@ -48,7 +49,7 @@ function qualified(
     }
     return database
       .prepare(
-        `WITH ${SOURCE}, ${ctes}
+        `WITH ${sourceSql}, ${ctes}
       SELECT 'visit' AS source, site_pk, visit_id AS id
       FROM ${output.matchedVisitRelation}
       UNION ALL
@@ -195,6 +196,39 @@ scope_history_events(site_pk, site_id, event_pk, event_id, visit_id, session_id,
     ]);
   });
 
+  it("P3-01 uses UTF-8 BINARY tie-breakers for same-millisecond Page/Event IDs per site", () => {
+    // Input is intentionally reverse identity order. A < é < 😀 in UTF-8 BINARY.
+    const sameTime = `
+    scope_raw_visits(site_pk, site_id, visit_id, session_id, visitor_id, pathname, duration_ms, started_at) AS (
+      VALUES (1,'a','v😀','s1','u1','/emoji',10,100),
+             (1,'a','vé','s1','u1','/accent',10,100),
+             (1,'a','vA','s1','u1','/ascii',10,100),
+             (2,'b','vA','s1','u1','/other',10,100)
+    ),
+    scope_raw_events(site_pk, site_id, event_pk, event_id, visit_id, session_id, visitor_id, pathname, event_name, occurred_at) AS (
+      VALUES (1,'a',101,'e😀','vA','s1','u1','/ascii','emoji',200),
+             (1,'a',102,'eé','vA','s1','u1','/ascii','accent',200),
+             (1,'a',103,'eA','vA','s1','u1','/ascii','ascii',200),
+             (2,'b',201,'eA','vA','s1','u1','/other','other',200)
+    )`;
+    const match = (expression: string) =>
+      qualified(expression, "session", undefined, sameTime);
+    const firstSite = [{ site_pk: 1, entity_id: "s1" }];
+    expect(match('first(PAGE).path eq "/ascii"')).toEqual(firstSite);
+    expect(match('nth(PAGE,2).path eq "/accent"')).toEqual(firstSite);
+    expect(match('last(PAGE).path eq "/emoji"')).toEqual(firstSite);
+    expect(match('first(EVENT).name eq "ascii"')).toEqual(firstSite);
+    expect(match('nth(EVENT,2).name eq "accent"')).toEqual(firstSite);
+    expect(match('last(EVENT).name eq "emoji"')).toEqual(firstSite);
+    expect(match("nth(EVENT,4) notExists")).toEqual([
+      { site_pk: 1, entity_id: "s1" },
+      { site_pk: 2, entity_id: "s1" },
+    ]);
+    expect(match('first(EVENT).name eq "other"')).toEqual([
+      { site_pk: 2, entity_id: "s1" },
+    ]);
+  });
+
   it("orders first/last/nth occurrences in SQL and handles empty input", () => {
     expect(qualified('first(EVENT).name eq "purchase"', "session")).toEqual([
       { site_pk: 1, entity_id: "s1" },
@@ -287,6 +321,68 @@ scope_history_events(site_pk, site_id, event_pk, event_id, visit_id, session_id,
       { site_pk: 1, entity_id: "s1" },
       { site_pk: 1, entity_id: "s2" },
     ]);
+  });
+
+  it("P4-01 executes DST 23h/25h natural Periods and half-open Window in SQL", () => {
+    for (const [startText, endText, hourCount] of [
+      ["2026-03-08T08:00:00.000Z", "2026-03-09T07:00:00.000Z", 23],
+      ["2026-11-01T07:00:00.000Z", "2026-11-02T08:00:00.000Z", 25],
+    ] as const) {
+      const start = Date.parse(startText);
+      const end = Date.parse(endText);
+      expect(end - start).toBe(hourCount * 3600000);
+      const src = [
+        "scope_raw_visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,duration_ms,started_at) AS (VALUES " +
+          "(1,'a','v1','s1','u1','/home',10," +
+          start +
+          ")," +
+          "(1,'a','v2','s2','u2','/home',10," +
+          end +
+          ")," +
+          "(2,'b','v1','s1','u1','/home',10," +
+          (start - 1) +
+          "))",
+        "scope_raw_events(site_pk,site_id,event_pk,event_id,visit_id,session_id,visitor_id,pathname,event_name,occurred_at) AS (VALUES " +
+          "(1,'a',101,'e1','v1','s1','u1','/home','inside'," +
+          start +
+          ")," +
+          "(1,'a',102,'e2','v1','s1','u1','/home','inside'," +
+          (end - 1) +
+          ")," +
+          "(1,'a',103,'e3','v2','s2','u2','/home','outside'," +
+          end +
+          ")," +
+          "(2,'b',201,'e1','v1','s1','u1','/home','outside'," +
+          (start - 1) +
+          "))",
+      ].join(", ");
+      const clock = {
+        nowMs: end,
+        rangeStartMs: start,
+        rangeEndExclusiveMs: end,
+        timeZone: "America/Los_Angeles",
+      };
+      const match = (expr: string) => qualified(expr, "session", clock, src);
+      const site1 = [{ site_pk: 1, entity_id: "s1" }];
+      expect(
+        match(
+          "count(window(EVENT, @range.start, [0ms, " + hourCount + "h])) eq 2",
+        ),
+      ).toEqual(site1);
+      expect(match("count(periods(EVENT, 1d)) eq 1")).toEqual(site1);
+      expect(match("periods(EVENT, 1d) { count($items) eq 2 } exists")).toEqual(
+        site1,
+      );
+      expect(match("countDistinct(bucket(EVENT, 1d)) eq 1")).toEqual(site1);
+      expect(
+        match(
+          "count(window(EVENT, @range.start, [0ms, " + hourCount + "h])) eq 0",
+        ),
+      ).toEqual([
+        { site_pk: 1, entity_id: "s2" },
+        { site_pk: 2, entity_id: "s1" },
+      ]);
+    }
   });
 
   it("only enumerates nonempty natural Periods and binds $items to the active Period", () => {
