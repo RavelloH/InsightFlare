@@ -7,6 +7,7 @@ import {
   clearPerceptionSession,
   currentPerceptionScope,
   getPerceptionAuthorization,
+  localPerceptionNavigation,
   localPerceptionSearch,
   observeLoadedDimension,
   revokePerceptionSite,
@@ -40,6 +41,41 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 describe("perception runtime authority and request guards", () => {
+  it("shows only authorized navigation on an empty query, not observed values", () => {
+    const request = {
+      query: "",
+      mode: "global" as const,
+      locale: "zh",
+      scope: { userId: "user-a", teamId: "team-a", siteId: "site-a" },
+    };
+    setPerceptionAuthorization(base, [
+      {
+        key: "events",
+        label: "Events",
+        scope: request.scope,
+        target: {
+          kind: "site",
+          teamId: "team-a",
+          siteId: "site-a",
+          section: "events",
+        },
+      },
+    ]);
+    observeLoadedDimension(
+      "site-a",
+      "event.name",
+      ["ObservedOnly"],
+      capturePerceptionGuard("site-a"),
+    );
+    expect(
+      localPerceptionSearch(request).map((result) => result.label),
+    ).toContain("ObservedOnly");
+    expect(
+      localPerceptionNavigation(request).map((result) => result.label),
+    ).toEqual(["Events"]);
+    revokePerceptionSite("site-a");
+    expect(localPerceptionNavigation(request)).toEqual([]);
+  });
   it("rejects stale in-flight Analytics results after a site switch", () => {
     setPerceptionAuthorization(base, []);
     const pending = capturePerceptionGuard("site-a");
