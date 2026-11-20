@@ -724,6 +724,67 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 describe("IngestDurableObject", () => {
+  it("records exactly one invocation AE point for each real DO fetch, alarm and WS callback", async () => {
+    const points: Array<{
+      indexes: string[];
+      blobs: string[];
+      doubles: number[];
+    }> = [];
+    const dataset = {
+      writeDataPoint: vi.fn((point: (typeof points)[number]) =>
+        points.push(point),
+      ),
+    } as unknown as AnalyticsEngineDataset;
+    const ctx = createTestDo({ INVOCATION_METRICS: dataset });
+    const response = await ctx.object.fetch(
+      new Request("https://ingest.internal/no-match?id=private"),
+    );
+    expect(response.status).toBe(404);
+    await vi.waitFor(() => expect(points).toHaveLength(1));
+    expect(points[0].indexes).toEqual(["do.other:client_error"]);
+    expect(JSON.stringify(points[0])).not.toContain("no-match?id=private");
+
+    await ctx.object.alarm();
+    await vi.waitFor(() => expect(points).toHaveLength(2));
+    expect(points[1].indexes).toEqual(["do.alarm:ok"]);
+    expect(points[1].blobs[1]).toBe("alarm");
+
+    const socket = new FakeWebSocket();
+    ctx.object.webSocketError(
+      socket as unknown as WebSocket,
+      new Error("private websocket error"),
+    );
+    await vi.waitFor(() => expect(points).toHaveLength(3));
+    expect(points[2].indexes).toEqual(["do.websocket:failure"]);
+    expect(points[2].blobs[11]).toBe("websocket_failed");
+    expect(dataset.writeDataPoint).toHaveBeenCalledTimes(3);
+  });
+
+  it("never changes DO Alarm rejection or recovery when AE writeDataPoint throws", async () => {
+    const dataset = {
+      writeDataPoint: vi.fn(() => {
+        throw new Error("AE unavailable");
+      }),
+    } as unknown as AnalyticsEngineDataset;
+    const ctx = createTestDo({ INVOCATION_METRICS: dataset });
+    const original = new Error("maintenance must be retried");
+    vi.spyOn(ctx.object as any, "runMaintenance").mockRejectedValue(original);
+    vi.spyOn(ctx.object as any, "reconcileAlarm").mockResolvedValue(undefined);
+    await expect(
+      ctx.object.alarm({ retryCount: 2, isRetry: true }),
+    ).rejects.toBe(original);
+    await vi.waitFor(() =>
+      expect(dataset.writeDataPoint).toHaveBeenCalledTimes(1),
+    );
+    expect(console.error).toHaveBeenCalledOnce();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "do",
+        trigger: "alarm",
+      }),
+    );
+  });
+
   it("exports a durable object class and rejects unknown or invalid request routes", async () => {
     const ctx = createTestDo({ ADMIN_WS_TOKEN: "secret-token" });
 

@@ -10,8 +10,8 @@ import {
   INVOCATION_METRICS_DATASET,
   INVOCATION_METRICS_DOUBLES,
   INVOCATION_METRICS_SCHEMA_VERSION,
-  readInvocationCoverageFlag,
   type InvocationMetricsPoint,
+  readInvocationCoverageFlag,
 } from "@/lib/edge/analytics-engine/invocation-schema";
 import {
   encodeInvocationMetricsPoint,
@@ -299,7 +299,7 @@ describe("AE invocation recording v1", () => {
     f.logger.setRouteKey(`api:/${secret}`);
     f.logger.setRequest({
       route: `/api/user/${secret}?key=${secret}`,
-      method: "GET",
+      method: secret,
       status: 500,
       outcome: "error",
     });
@@ -317,6 +317,8 @@ describe("AE invocation recording v1", () => {
     const point = f.written[0];
     expect(JSON.stringify(point)).not.toContain(secret);
     expect(point.blobs[3]).toBe("api.other");
+    // The existing safe snapshot may omit an untrusted method entirely.
+    expect(point.blobs[4]).toBe("");
     expect(point.blobs[18].length).toBeLessThanOrEqual(4096);
     expect(
       new TextEncoder().encode(point.blobs[18]).length,
@@ -414,6 +416,61 @@ describe("Hono real middleware invocation integration", () => {
     expect(internal.status).toBe(200);
     await Promise.all(pending);
     expect(points).toHaveLength(1);
+    vi.restoreAllMocks();
+  });
+
+  it("classifies a real Hono 200 response with caught D1 failure as a single database failure", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const points: InvocationMetricsPoint[] = [];
+    const pending: Promise<unknown>[] = [];
+    const sqlError = new Error("CANARY_private_sql_and_token");
+    const statement = {
+      all: vi.fn(async () => {
+        throw sqlError;
+      }),
+    };
+    const env = {
+      INVOCATION_METRICS: {
+        writeDataPoint: (point: InvocationMetricsPoint) => points.push(point),
+      },
+      DB: { prepare: vi.fn(() => statement) } as unknown as D1Database,
+      INGEST_DO: {} as DurableObjectNamespace,
+    } as Env;
+    const ctx = {
+      waitUntil: (promise: Promise<unknown>) => {
+        pending.push(promise);
+      },
+      passThroughOnException: () => {},
+    } as ExecutionContext;
+    const app = new Hono<AppEnv>();
+    app.use("*", observabilityMiddleware());
+    app.get("/api/metrics/:metricId", async (c) => {
+      try {
+        await c.env.DB.prepare("SELECT private_data WHERE password = ?").all();
+      } catch {
+        // Application-level fallback intentionally responds with HTTP 200.
+      }
+      return c.text("fallback");
+    });
+    const response = await app.fetch(
+      new Request("https://internal.test/api/metrics/secret-id"),
+      env,
+      ctx,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("fallback");
+    await Promise.all(pending);
+    expect(points).toHaveLength(1);
+    expect(points[0].indexes).toEqual(["api:/api/metrics/:metricId:failure"]);
+    expect(points[0].blobs[11]).toBe("d1_operation_failed");
+    expect(points[0].doubles[3]).toBe(1);
+    expect(points[0].doubles[7]).toBe(1);
+    expect(points[0].doubles[17]).toBe(200);
+    expect(JSON.stringify(points[0])).not.toContain(
+      "CANARY_private_sql_and_token",
+    );
+    expect(JSON.stringify(points[0])).not.toContain("secret-id");
     vi.restoreAllMocks();
   });
 });

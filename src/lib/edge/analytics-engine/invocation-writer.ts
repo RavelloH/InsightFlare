@@ -64,6 +64,20 @@ function finite(value: unknown): number {
 function availableNumber(value: number | undefined, coverage: string): number {
   return coverage === "unavailable" ? 0 : finite(value);
 }
+const SAFE_METHODS = new Set([
+  "GET",
+  "HEAD",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "OPTIONS",
+  "WEBSOCKET",
+]);
+function safeMethod(value: string | undefined): string {
+  // HTTP methods originate in the request and can be attacker-controlled.
+  return value === undefined ? "" : SAFE_METHODS.has(value) ? value : "OTHER";
+}
 function trustedRouteKey(snapshot: InvocationSnapshot): string {
   const fallback: Record<InvocationSnapshot["routeGroup"], string> = {
     api: "api.other",
@@ -78,7 +92,7 @@ function trustedRouteKey(snapshot: InvocationSnapshot): string {
   if (
     candidate &&
     encoder.encode(candidate).length <= 72 &&
-    /^(?:api:\/[A-Za-z0-9_./:{}*\-]+|api\.other|page\.other|server_function\.handler|do\.(?:ingest|snapshot|active|diagnostic|reconcile|flush|ws|other|alarm|websocket)|scheduled\.tasks)$/.test(
+    /^(?:api:\/[A-Za-z0-9_./:{}*-]+|api\.other|page\.other|server_function\.handler|do\.(?:ingest|snapshot|active|diagnostic|reconcile|flush|ws|other|alarm|websocket)|scheduled\.tasks)$/.test(
       candidate,
     )
   ) {
@@ -300,7 +314,7 @@ export function encodeInvocationMetricsPoint(
       snapshot.trigger,
       snapshot.routeGroup,
       routeKey,
-      snapshot.method ?? "",
+      safeMethod(snapshot.method),
       resultClass,
       snapshot.outcome,
       snapshot.cache ?? "",

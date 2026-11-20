@@ -1,8 +1,8 @@
 import handler from "@tanstack/react-start/server-entry";
 
+import { registerInvocationMetrics } from "@/lib/edge/analytics-engine/invocation-writer";
 import { sweepIngestAlarms } from "@/lib/edge/ingest/alarm-sweep";
 import { IngestDurableObject as BaseIngestDurableObject } from "@/lib/edge/ingest/durable-object";
-import { registerInvocationMetrics } from "@/lib/edge/analytics-engine/invocation-writer";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";
 import {
   createInvocationLogger,

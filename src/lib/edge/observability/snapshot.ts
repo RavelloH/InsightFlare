@@ -4,9 +4,9 @@ import type {
   InvocationLogRecord,
   InvocationOperationSummary,
   InvocationOutcome,
+  InvocationSafeErrorSignal,
   InvocationSource,
   InvocationTrigger,
-  InvocationSafeErrorSignal,
 } from "./logger";
 import type { SqlSemanticObservation } from "./semantic";
 
