@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from "hono";
 
+import { registerInvocationMetrics } from "@/lib/edge/analytics-engine/invocation-writer";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";
 import {
   createInvocationLogger,
@@ -49,6 +50,7 @@ export function observabilityMiddleware(): MiddlewareHandler<AppEnv> {
       traceId: c.get("requestId") || getRequestId(c.req.raw),
       waitUntil: (work) => c.executionCtx?.waitUntil(work),
     });
+    registerInvocationMetrics(c.env, logger);
     c.set("observabilityLogger", logger);
     c.env = instrumentEnv(c.env, logger);
     logger.info("request.started");
@@ -71,6 +73,11 @@ export function observabilityMiddleware(): MiddlewareHandler<AppEnv> {
       );
       const dataSource = parseDataSource(
         response?.headers.get("x-insightflare-data-source") ?? null,
+      );
+      logger.setRouteKey(
+        c.req.routePath && c.req.routePath !== "*"
+          ? `api:${c.req.routePath}`
+          : "api.other",
       );
       logger.setRequest({
         route: routeForLog(c.req.routePath),

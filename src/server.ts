@@ -2,6 +2,7 @@ import handler from "@tanstack/react-start/server-entry";
 
 import { sweepIngestAlarms } from "@/lib/edge/ingest/alarm-sweep";
 import { IngestDurableObject as BaseIngestDurableObject } from "@/lib/edge/ingest/durable-object";
+import { registerInvocationMetrics } from "@/lib/edge/analytics-engine/invocation-writer";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";
 import {
   createInvocationLogger,
@@ -109,6 +110,12 @@ export default {
       trigger: "request",
       waitUntil: (work) => ctx.waitUntil(work),
     });
+    registerInvocationMetrics(env, logger);
+    logger.setRouteKey(
+      isServerFunctionRequest(pathname)
+        ? "server_function.handler"
+        : "page.other",
+    );
     logger.info("request.started");
     const instrumentedEnv = instrumentEnv(env, logger);
 
@@ -209,6 +216,8 @@ export default {
       trigger: "scheduled",
       waitUntil: (work) => ctx.waitUntil(work),
     });
+    registerInvocationMetrics(env, logger);
+    logger.setRouteKey("scheduled.tasks");
     logger.info("scheduled.started");
     const instrumentedEnv = instrumentEnv(env, logger);
     if (shouldSkipScheduledTasks(env)) {

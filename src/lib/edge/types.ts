@@ -4,6 +4,7 @@ export interface Env {
   REQUEST_ANALYTICS?: AnalyticsEngineDataset;
   TRAFFIC_ANALYTICS?: AnalyticsEngineDataset;
   EVENT_ANALYTICS?: AnalyticsEngineDataset;
+  INVOCATION_METRICS?: AnalyticsEngineDataset;
   ARCHIVE_BUCKET?: R2Bucket;
   MAIN_SECRET?: string;
   DAILY_SALT_SECRET?: string;
