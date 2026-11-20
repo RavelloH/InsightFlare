@@ -459,8 +459,9 @@ filterBuilder:
     unavailableForObservation: Goal 和 Funnel 步骤不支持高级筛选。
     targetKinds:
       time: 时间
-      field: 字段
+      field: 字段值
       event-payload: 事件载荷
+      current-payload: 当前事件载荷
       entity-root: 实体集合
       context-root: 上下文
       context-intrinsic: 上下文内建值

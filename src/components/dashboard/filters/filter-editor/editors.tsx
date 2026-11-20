@@ -414,12 +414,7 @@ function CurrentTimeValueEditor({
   };
 
   return (
-    <div
-      className={cn(
-        "sm:col-span-2",
-        between ? "grid gap-3 sm:grid-cols-2" : "space-y-3",
-      )}
-    >
+    <div className={cn("sm:col-span-2", between ? "grid gap-3" : "space-y-3")}>
       {indices.map((index) => {
         const currentValue = readValue(index);
         const currentAnchor = isTimeAnchorValue(currentValue)
@@ -521,7 +516,7 @@ function CurrentTimeValueEditor({
                 </label>
 
                 {currentAnchor.offset ? (
-                  <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="grid gap-2">
                     <div className="space-y-1">
                       <Label>
                         {messages.filterBuilder.advancedEditor.durationAmount}
@@ -1288,6 +1283,24 @@ function ConditionEditor({
     patchAdvanced({ value });
   };
 
+  // A root-level intrinsic edits its own comparison; do not render it twice.
+  const intrinsicEditsOwnComparison =
+    intrinsicCondition === advancedCondition &&
+    (intrinsicTarget?.intrinsic === "span" ||
+      intrinsicTarget?.intrinsic === "gap" ||
+      intrinsicTarget?.intrinsic === "items");
+  const hasComparisonValue =
+    needsValue &&
+    !(
+      advancedTarget?.kind === "context-intrinsic" &&
+      advancedTarget.intrinsic === "same"
+    ) &&
+    !(
+      advancedCondition &&
+      (valueIsExpression || computedRange) &&
+      (intrinsicTarget?.intrinsic === "span" ||
+        intrinsicTarget?.intrinsic === "gap")
+    );
   const showTargetStructure = Boolean(
     advancedTarget &&
     ![
@@ -1333,7 +1346,7 @@ function ConditionEditor({
           index: path.join("."),
         })}
       </div>
-      <div className="grid min-w-0 grid-cols-1 gap-2 sm:col-span-2 sm:grid-cols-2">
+      <div className="min-w-0 sm:col-span-2">
         <div className="min-w-0 space-y-2">
           <SearchablePopover
             open={fieldPickerOpen}
@@ -1411,41 +1424,8 @@ function ConditionEditor({
             </SearchablePopoverContent>
           </SearchablePopover>
         </div>
-        <div className="min-w-0 space-y-2">
-          <Select value={operator} onValueChange={setOperator}>
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {operators.map((operator) => (
-                <SelectItem key={operator} value={operator}>
-                  {messages.filterBuilder.operatorLabels[operator] ?? operator}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
       </div>
 
-      {needsValue && isCurrentTimeTarget && advancedCondition ? (
-        <CurrentTimeValueEditor
-          operator={operator}
-          value={advancedCondition.value}
-          timeZone={window?.timeZone}
-          messages={messages}
-          onChange={setCurrentTimeValue}
-        />
-      ) : null}
-
-      {needsValue && occurrenceTimeTarget && advancedCondition ? (
-        <CurrentTimeValueEditor
-          operator={operator}
-          value={advancedCondition.value}
-          timeZone={window?.timeZone}
-          messages={messages}
-          onChange={setCurrentTimeValue}
-        />
-      ) : null}
       {intrinsicTarget?.context === "sequence" &&
       intrinsicTarget.intrinsic === "gap" ? (
         <div className="grid gap-2 sm:col-span-2 sm:grid-cols-2">
@@ -1604,9 +1584,8 @@ function ConditionEditor({
       (intrinsicTarget.intrinsic === "span" ||
         intrinsicTarget.intrinsic === "gap") &&
       intrinsicCondition ? (
-        <div className="grid gap-2 sm:col-span-2 sm:grid-cols-[minmax(8rem,0.7fr)_minmax(0,1fr)]">
-          <div className="space-y-1">
-            <Label>{messages.filterBuilder.match}</Label>
+        <div className="grid grid-cols-2 gap-2 sm:col-span-2">
+          <div className="min-w-0">
             <Select
               value={intrinsicCondition.operator}
               onValueChange={(value) => {
@@ -1625,7 +1604,10 @@ function ConditionEditor({
                 }));
               }}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger
+                className="w-full"
+                aria-label={messages.filterBuilder.match}
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1637,71 +1619,70 @@ function ConditionEditor({
               </SelectContent>
             </Select>
           </div>
-          {(intrinsicCondition.operator === "between" ? [0, 1] : [0]).map(
-            (index) => {
-              const duration = durationAt(intrinsicCondition.value, index);
-              return (
-                <div
-                  key={index}
-                  className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(5rem,0.45fr)]"
-                >
-                  <div className="space-y-1">
-                    <Label>
-                      {messages.filterBuilder.advancedEditor.durationAmount}
-                    </Label>
-                    <Input
-                      type="number"
-                      step="any"
-                      value={duration.amount}
-                      onChange={(event) => {
-                        const amount = Number(event.target.value);
-                        if (Number.isFinite(amount))
-                          setIntrinsicDuration(index, { amount });
-                      }}
-                    />
+          <div className="min-w-0 space-y-2">
+            {(intrinsicCondition.operator === "between" ? [0, 1] : [0]).map(
+              (index) => {
+                const duration = durationAt(intrinsicCondition.value, index);
+                return (
+                  <div
+                    key={index}
+                    className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(5rem,0.45fr)]"
+                  >
+                    <div className="space-y-1">
+                      <Label>
+                        {messages.filterBuilder.advancedEditor.durationAmount}
+                      </Label>
+                      <Input
+                        type="number"
+                        step="any"
+                        value={duration.amount}
+                        onChange={(event) => {
+                          const amount = Number(event.target.value);
+                          if (Number.isFinite(amount))
+                            setIntrinsicDuration(index, { amount });
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>{messages.filterBuilder.durationUnit}</Label>
+                      <Select
+                        value={duration.unit}
+                        onValueChange={(value) => {
+                          if (
+                            (
+                              ELAPSED_DURATION_UNITS as readonly string[]
+                            ).includes(value)
+                          )
+                            setIntrinsicDuration(index, {
+                              unit: value as FilterDurationUnit,
+                            });
+                        }}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ELAPSED_DURATION_UNITS.map((unit) => (
+                            <SelectItem key={unit} value={unit}>
+                              {unit}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <Label>{messages.filterBuilder.durationUnit}</Label>
-                    <Select
-                      value={duration.unit}
-                      onValueChange={(value) => {
-                        if (
-                          (
-                            ELAPSED_DURATION_UNITS as readonly string[]
-                          ).includes(value)
-                        )
-                          setIntrinsicDuration(index, {
-                            unit: value as FilterDurationUnit,
-                          });
-                      }}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ELAPSED_DURATION_UNITS.map((unit) => (
-                          <SelectItem key={unit} value={unit}>
-                            {unit}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              );
-            },
-          )}
+                );
+              },
+            )}
+          </div>
         </div>
       ) : null}
 
       {intrinsicTarget?.context === "period" &&
       intrinsicTarget.intrinsic === "items" &&
       intrinsicCondition ? (
-        <div className="grid gap-2 sm:col-span-2 sm:grid-cols-[minmax(8rem,0.7fr)_minmax(0,1fr)]">
-          <div className="space-y-1">
-            <Label>
-              {messages.filterBuilder.advancedEditor.periodItemCount}
-            </Label>
+        <div className="grid grid-cols-2 gap-2 sm:col-span-2">
+          <div className="min-w-0">
             <Select
               value={intrinsicCondition.operator}
               onValueChange={(value) => {
@@ -1716,7 +1697,10 @@ function ConditionEditor({
                 }));
               }}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger
+                className="w-full"
+                aria-label={messages.filterBuilder.match}
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1728,42 +1712,44 @@ function ConditionEditor({
               </SelectContent>
             </Select>
           </div>
-          {(intrinsicCondition.operator === "between" ? [0, 1] : [0]).map(
-            (index) => {
-              const value = Array.isArray(intrinsicCondition.value)
-                ? intrinsicCondition.value[index]
-                : intrinsicCondition.value;
-              return (
-                <div key={index} className="space-y-1">
-                  <Label>
-                    {messages.filterBuilder.advancedEditor.periodItemCount}
-                  </Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={typeof value === "number" ? value : 1}
-                    onChange={(event) => {
-                      const count = Number(event.target.value);
-                      if (!Number.isSafeInteger(count) || count < 0) return;
-                      updateIntrinsicCondition((current) => {
-                        if (current.operator !== "between")
-                          return { ...current, value: count };
-                        const values = Array.isArray(current.value)
-                          ? [...current.value]
-                          : [1, 3];
-                        values[index] = count;
-                        return {
-                          ...current,
-                          value: values as FilterCondition["value"],
-                        };
-                      });
-                    }}
-                  />
-                </div>
-              );
-            },
-          )}
+          <div className="min-w-0 space-y-2">
+            {(intrinsicCondition.operator === "between" ? [0, 1] : [0]).map(
+              (index) => {
+                const value = Array.isArray(intrinsicCondition.value)
+                  ? intrinsicCondition.value[index]
+                  : intrinsicCondition.value;
+                return (
+                  <div key={index} className="space-y-1">
+                    <Label>
+                      {messages.filterBuilder.advancedEditor.periodItemCount}
+                    </Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={typeof value === "number" ? value : 1}
+                      onChange={(event) => {
+                        const count = Number(event.target.value);
+                        if (!Number.isSafeInteger(count) || count < 0) return;
+                        updateIntrinsicCondition((current) => {
+                          if (current.operator !== "between")
+                            return { ...current, value: count };
+                          const values = Array.isArray(current.value)
+                            ? [...current.value]
+                            : [1, 3];
+                          values[index] = count;
+                          return {
+                            ...current,
+                            value: values as FilterCondition["value"],
+                          };
+                        });
+                      }}
+                    />
+                  </div>
+                );
+              },
+            )}
+          </div>
         </div>
       ) : null}
 
@@ -1797,65 +1783,6 @@ function ConditionEditor({
             showKind={false}
             renderPredicate={renderPredicate}
           />
-        </div>
-      ) : null}
-
-      {needsValue &&
-      advancedCondition &&
-      !isCurrentTimeTarget &&
-      !occurrenceTimeTarget &&
-      computedTimeValue ? (
-        <CurrentTimeValueEditor
-          operator={operator}
-          value={advancedCondition.value}
-          timeZone={window?.timeZone}
-          messages={messages}
-          onChange={(value) => patchAdvanced({ value })}
-        />
-      ) : null}
-      {needsValue &&
-      advancedCondition &&
-      !isCurrentTimeTarget &&
-      !occurrenceTimeTarget &&
-      !computedTimeValue &&
-      (valueIsExpression || computedRange) &&
-      !(
-        intrinsicTarget &&
-        (intrinsicTarget.intrinsic === "span" ||
-          intrinsicTarget.intrinsic === "gap")
-      ) ? (
-        <div className="grid min-w-0 gap-2 sm:col-span-2 sm:grid-cols-2">
-          {(operator === "between" && Array.isArray(advancedCondition.value)
-            ? advancedCondition.value
-            : [advancedCondition.value]
-          ).map((item, index) =>
-            isFilterTargetExpression(item as FilterCondition["value"]) ? (
-              <FilterTargetExpressionEditor
-                key={index}
-                target={item as FilterTargetExpression}
-                audience={audience}
-                messages={messages}
-                showKind={false}
-                renderPredicate={renderPredicate}
-                onChange={(next) => {
-                  if (next.kind !== "duration" && next.kind !== "time-anchor")
-                    return;
-                  if (
-                    operator === "between" &&
-                    Array.isArray(advancedCondition.value)
-                  ) {
-                    const values = [...advancedCondition.value];
-                    values[index] = next;
-                    patchAdvanced({
-                      value: values as FilterCondition["value"],
-                    });
-                  } else {
-                    patchAdvanced({ value: next });
-                  }
-                }}
-              />
-            ) : null,
-          )}
         </div>
       ) : null}
 
@@ -1963,57 +1890,173 @@ function ConditionEditor({
         </div>
       ) : null}
 
-      {needsValue &&
-      !isCurrentTimeTarget &&
-      !(advancedCondition && (valueIsExpression || computedRange)) &&
-      !(
-        advancedTarget?.kind === "context-intrinsic" &&
-        advancedTarget.intrinsic === "same"
-      ) ? (
-        <div className="space-y-2 sm:col-span-2">
-          {valueIsBoolean ? (
-            <Select
-              disabled={valueDisabled}
-              value={valueText || undefined}
-              onValueChange={(value) => setValue(value === "true")}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder={messages.filterBuilder.valueUnset} />
+      {!intrinsicEditsOwnComparison ? (
+        <div
+          className={cn(
+            "grid min-w-0 gap-2 sm:col-span-2",
+            hasComparisonValue ? "grid-cols-2" : "grid-cols-1",
+          )}
+        >
+          <div className="min-w-0">
+            <Select value={operator} onValueChange={setOperator}>
+              <SelectTrigger
+                className="w-full"
+                aria-label={messages.filterBuilder.match}
+              >
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="true">
-                  {messages.filterBuilder.booleanTrue}
-                </SelectItem>
-                <SelectItem value="false">
-                  {messages.filterBuilder.booleanFalse}
-                </SelectItem>
+                {operators.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {messages.filterBuilder.operatorLabels[option] ?? option}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
-          ) : valueIsRange ? (
-            <RangeValueInput
-              condition={controlCondition}
-              disabled={valueDisabled}
-              inputMode={valueIsNumber ? "decimal" : undefined}
-              messages={messages}
-              numberMetadata={definition?.number}
-              numberUnit={valueIsNumber ? definition?.unit : undefined}
-              onChange={setValueText}
-            />
-          ) : (
-            <SearchableValueInput
-              condition={controlCondition}
-              disabled={valueDisabled}
-              document={document}
-              eventName={eventName}
-              messages={messages}
-              siteId={siteId}
-              resolvedScope={resolvedScope}
-              valueKind={editorValueKind}
-              window={window}
-              onChange={setValueText}
-              onListChange={setValue}
-            />
-          )}
+          </div>
+          {hasComparisonValue ? (
+            <div className="min-w-0 space-y-2">
+              {needsValue && isCurrentTimeTarget && advancedCondition ? (
+                <CurrentTimeValueEditor
+                  operator={operator}
+                  value={advancedCondition.value}
+                  timeZone={window?.timeZone}
+                  messages={messages}
+                  onChange={setCurrentTimeValue}
+                />
+              ) : null}
+
+              {needsValue && occurrenceTimeTarget && advancedCondition ? (
+                <CurrentTimeValueEditor
+                  operator={operator}
+                  value={advancedCondition.value}
+                  timeZone={window?.timeZone}
+                  messages={messages}
+                  onChange={setCurrentTimeValue}
+                />
+              ) : null}
+              {needsValue &&
+              advancedCondition &&
+              !isCurrentTimeTarget &&
+              !occurrenceTimeTarget &&
+              computedTimeValue ? (
+                <CurrentTimeValueEditor
+                  operator={operator}
+                  value={advancedCondition.value}
+                  timeZone={window?.timeZone}
+                  messages={messages}
+                  onChange={(value) => patchAdvanced({ value })}
+                />
+              ) : null}
+              {needsValue &&
+              advancedCondition &&
+              !isCurrentTimeTarget &&
+              !occurrenceTimeTarget &&
+              !computedTimeValue &&
+              (valueIsExpression || computedRange) &&
+              !(
+                intrinsicTarget &&
+                (intrinsicTarget.intrinsic === "span" ||
+                  intrinsicTarget.intrinsic === "gap")
+              ) ? (
+                <div className="grid min-w-0 gap-2">
+                  {(operator === "between" &&
+                  Array.isArray(advancedCondition.value)
+                    ? advancedCondition.value
+                    : [advancedCondition.value]
+                  ).map((item, index) =>
+                    isFilterTargetExpression(
+                      item as FilterCondition["value"],
+                    ) ? (
+                      <FilterTargetExpressionEditor
+                        key={index}
+                        target={item as FilterTargetExpression}
+                        audience={audience}
+                        messages={messages}
+                        showKind={false}
+                        renderPredicate={renderPredicate}
+                        onChange={(next) => {
+                          if (
+                            next.kind !== "duration" &&
+                            next.kind !== "time-anchor"
+                          )
+                            return;
+                          if (
+                            operator === "between" &&
+                            Array.isArray(advancedCondition.value)
+                          ) {
+                            const values = [...advancedCondition.value];
+                            values[index] = next;
+                            patchAdvanced({
+                              value: values as FilterCondition["value"],
+                            });
+                          } else {
+                            patchAdvanced({ value: next });
+                          }
+                        }}
+                      />
+                    ) : null,
+                  )}
+                </div>
+              ) : null}
+
+              {needsValue &&
+              !isCurrentTimeTarget &&
+              !(advancedCondition && (valueIsExpression || computedRange)) &&
+              !(
+                advancedTarget?.kind === "context-intrinsic" &&
+                advancedTarget.intrinsic === "same"
+              ) ? (
+                <div className="space-y-2 sm:col-span-2">
+                  {valueIsBoolean ? (
+                    <Select
+                      disabled={valueDisabled}
+                      value={valueText || undefined}
+                      onValueChange={(value) => setValue(value === "true")}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue
+                          placeholder={messages.filterBuilder.valueUnset}
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="true">
+                          {messages.filterBuilder.booleanTrue}
+                        </SelectItem>
+                        <SelectItem value="false">
+                          {messages.filterBuilder.booleanFalse}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : valueIsRange ? (
+                    <RangeValueInput
+                      condition={controlCondition}
+                      disabled={valueDisabled}
+                      inputMode={valueIsNumber ? "decimal" : undefined}
+                      messages={messages}
+                      numberMetadata={definition?.number}
+                      numberUnit={valueIsNumber ? definition?.unit : undefined}
+                      onChange={setValueText}
+                    />
+                  ) : (
+                    <SearchableValueInput
+                      condition={controlCondition}
+                      disabled={valueDisabled}
+                      document={document}
+                      eventName={eventName}
+                      messages={messages}
+                      siteId={siteId}
+                      resolvedScope={resolvedScope}
+                      valueKind={editorValueKind}
+                      window={window}
+                      onChange={setValueText}
+                      onListChange={setValue}
+                    />
+                  )}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

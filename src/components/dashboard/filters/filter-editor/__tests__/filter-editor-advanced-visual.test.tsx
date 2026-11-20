@@ -71,6 +71,72 @@ describe("FilterEditor advanced visual integration", () => {
     );
   });
 
+  it("places a comparison operator beside its numeric value and uses field-value type labels", async () => {
+    const source = "add(page.durationMs, page.durationMs) gte 1";
+    const onApply = await mount(source);
+    const operator = host.querySelector<HTMLButtonElement>(
+      `[aria-label="${messages.filterBuilder.match}"]`,
+    );
+    const row = operator?.parentElement?.parentElement;
+    expect(row?.classList.contains("grid-cols-2")).toBe(true);
+    expect(row?.querySelector('input[value="1"]')).not.toBeNull();
+
+    const selected = Array.from(host.querySelectorAll('[role="combobox"]')).map(
+      (element) => element.textContent?.trim(),
+    );
+    const fieldKind = messages.filterBuilder.advancedEditor.targetKinds.field;
+    const selectedField = messages.filterBuilder.fieldLabels["page.durationMs"];
+    expect(
+      selected.filter((label) => label === fieldKind).length,
+    ).toBeGreaterThan(0);
+    expect(selected.filter((label) => label === fieldKind).length).toBe(
+      selected.filter((label) => label === selectedField).length,
+    );
+    expect(selected).not.toContain("page.durationMs");
+
+    await apply();
+    expect(
+      parseFilterDsl(
+        onApply.mock.calls[0]![0] as string,
+        analyticsFilterRegistry,
+      ),
+    ).toEqual(parseFilterDsl(source, analyticsFilterRegistry));
+  });
+
+  it("distinguishes recursive expression kinds from their selected reducer and entity", async () => {
+    const source = "add(first(PAGE).durationMs, page.durationMs) gte 1";
+    const onApply = await mount(source);
+    const selected = Array.from(host.querySelectorAll('[role="combobox"]')).map(
+      (element) => element.textContent?.trim(),
+    );
+    const reducerKind =
+      messages.filterBuilder.advancedEditor.targetKinds.reducer;
+    const entityKind =
+      messages.filterBuilder.advancedEditor.targetKinds["entity-root"];
+    expect(
+      selected.filter((label) => label === "first(...)").length,
+    ).toBeGreaterThan(0);
+    expect(selected.filter((label) => label === "first(...)").length).toBe(
+      selected.filter((label) => label === reducerKind).length,
+    );
+    expect(selected.filter((label) => label === "PAGE").length).toBe(
+      selected.filter((label) => label === entityKind).length,
+    );
+    expect(selected).toContain(
+      messages.filterBuilder.advancedEditor.targetKinds.reducer,
+    );
+    expect(selected).toContain(
+      messages.filterBuilder.advancedEditor.targetKinds["entity-root"],
+    );
+    await apply();
+    expect(
+      parseFilterDsl(
+        onApply.mock.calls[0]![0] as string,
+        analyticsFilterRegistry,
+      ),
+    ).toEqual(parseFilterDsl(source, analyticsFilterRegistry));
+  });
+
   it("removes the selector when its last nested condition is deleted", async () => {
     const source =
       'sum(EVENT { $.name eq "purchase" } -> payload("/amount")) gt 1000';

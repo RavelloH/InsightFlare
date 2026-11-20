@@ -278,26 +278,6 @@ export function changeReducerKind(
   };
 }
 
-function targetName(target: Target): string {
-  if (target.kind === "field") return target.field;
-  if (target.kind === "entity-root") return target.entity.toUpperCase();
-  if (target.kind === "reducer") return target.reducer + "(...)";
-  if (target.kind === "arithmetic") return target.operator + "(...)";
-  if (target.kind === "context-intrinsic")
-    return target.intrinsic === "items" ? "$items" : "$" + target.intrinsic;
-  if (
-    target.kind === "member" &&
-    target.object.kind === "context-root" &&
-    target.object.context === "current"
-  )
-    return "$." + target.member;
-  if (target.kind === "time-anchor") return "@" + target.anchor;
-  if (target.kind === "duration") return "duration";
-  if (target.kind === "context-root") return "$";
-  if (target.kind === "event-payload" || target.kind === "current-payload")
-    return "payload(...)";
-  return target.kind + "(...)";
-}
 function TargetSelect({
   value,
   options,
@@ -480,9 +460,7 @@ export function FilterTargetExpressionEditor({
     )
     .map((kind) => ({
       value: kind,
-      label: targetName(
-        kind === target.kind ? target : createKind(kind, audience, role),
-      ),
+      label: messages.filterBuilder.advancedEditor.targetKinds[kind],
     }));
   const kind = target.kind;
   return (

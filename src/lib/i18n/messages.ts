@@ -366,6 +366,7 @@ export interface AppMessages {
         time: string;
         field: string;
         "event-payload": string;
+        "current-payload": string;
         "entity-root": string;
         "context-root": string;
         "context-intrinsic": string;
@@ -3378,8 +3379,9 @@ const enMessages = {
         "Advanced filters are unavailable for Goal and Funnel steps.",
       targetKinds: {
         time: "Time",
-        field: "Field",
+        field: "Field value",
         "event-payload": "Event payload",
+        "current-payload": "Current event payload",
         "entity-root": "Entity collection",
         "context-root": "Context",
         "context-intrinsic": "Context intrinsic",
@@ -6606,8 +6608,9 @@ const zhMessages = {
       unavailableForObservation: "Goal 和 Funnel 步骤不支持高级筛选。",
       targetKinds: {
         time: "时间",
-        field: "字段",
+        field: "字段值",
         "event-payload": "事件载荷",
+        "current-payload": "当前事件载荷",
         "entity-root": "实体集合",
         "context-root": "上下文",
         "context-intrinsic": "上下文内建值",
@@ -9744,8 +9747,9 @@ const zhTwMessages = {
       unavailableForObservation: "Goal 和 Funnel 步驟不支援高階篩選。",
       targetKinds: {
         time: "時間",
-        field: "欄位",
+        field: "欄位值",
         "event-payload": "事件載荷",
+        "current-payload": "目前事件載荷",
         "entity-root": "實體集合",
         "context-root": "上下文",
         "context-intrinsic": "上下文內建值",
@@ -12889,8 +12893,9 @@ const jaMessages = {
         "Goal と Funnel のステップでは高度なフィルターを使用できません。",
       targetKinds: {
         time: "時刻",
-        field: "フィールド",
+        field: "フィールド値",
         "event-payload": "イベントペイロード",
+        "current-payload": "現在のイベントペイロード",
         "entity-root": "エンティティコレクション",
         "context-root": "コンテキスト",
         "context-intrinsic": "コンテキスト組み込み値",

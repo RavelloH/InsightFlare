@@ -463,8 +463,9 @@ filterBuilder:
     unavailableForObservation: Advanced filters are unavailable for Goal and Funnel steps.
     targetKinds:
       time: Time
-      field: Field
+      field: Field value
       event-payload: Event payload
+      current-payload: Current event payload
       entity-root: Entity collection
       context-root: Context
       context-intrinsic: Context intrinsic
