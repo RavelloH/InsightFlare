@@ -109,6 +109,37 @@ function qualified(
 }
 
 describe("P4 complete timeline and relational SQL", () => {
+  it("joins each filtered Sequence step before its complete timeline lookup", () => {
+    const expression =
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists';
+    const compiled = compileCollectionSqlQualification(
+      parseFilterDsl(expression, analyticsFilterRegistry),
+      "session",
+    );
+    if (compiled.kind !== "entity")
+      throw new Error("Expected entity qualification");
+    const sql = composeBoundCtes(compiled.ctes).ctes;
+    expect(sql).toContain(
+      "CROSS JOIN scope_filter_timeline sequence_activity_1",
+    );
+    expect(sql).toContain(
+      "CROSS JOIN scope_filter_timeline sequence_activity_2",
+    );
+    expect(sql).toContain(
+      "sequence_activity_2.session_key = sequence_activity_1.session_key",
+    );
+    const db = fixture();
+    try {
+      expect(qualified(db, expression)).toEqual([
+        { site_pk: 1, entity_id: "s1" },
+        { site_pk: 1, entity_id: "s2" },
+        { site_pk: 2, entity_id: "s1" },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("orders same-millisecond Unicode identifiers deterministically and isolates sites", () => {
     const db = fixture();
     try {

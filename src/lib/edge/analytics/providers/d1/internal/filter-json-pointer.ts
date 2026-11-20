@@ -226,19 +226,20 @@ export function compileExactJsonPointerPredicate(
       FROM pointer_nodes parent
       INNER JOIN json_each(?) segment
         ON CAST(segment.key AS INTEGER) = parent.depth
-      INNER JOIN custom_event_json_nodes child
-        ON child.event_pk = ${alias}.event_pk
-       AND child.parent_node_id = parent.node_id
+      -- Keep recursive parent before child so the (event_pk, parent_node_id)
+      -- index constrains each step instead of scanning all nodes per Event.
+      CROSS JOIN custom_event_json_nodes child
       LEFT JOIN custom_event_json_keys key_name
         ON key_name.id = child.key_id
        AND key_name.site_pk = ${alias}.site_pk
-      WHERE (
-        parent.value_type = 4
-        AND key_name.key = json_extract(segment.value, '$.member')
-      ) OR (
-        parent.value_type = 5
-        AND child.array_index = json_extract(segment.value, '$.arrayIndex')
-      )
+      WHERE child.event_pk = ${alias}.event_pk
+        AND child.parent_node_id = parent.node_id
+        AND (
+          (parent.value_type = 4
+           AND key_name.key = json_extract(segment.value, '$.member'))
+          OR (parent.value_type = 5
+           AND child.array_index = json_extract(segment.value, '$.arrayIndex'))
+        )
     )
     SELECT 1
     FROM pointer_nodes resolved

@@ -75,6 +75,7 @@ export function compileSequenceMatches(
   const identity = anchorIdentity(anchor);
   const select: string[] = [];
   const source: string[] = [];
+  const constraints: string[] = [];
   const bindings: Array<string | number | null> = [];
 
   for (let index = 0; index < steps.length; index++) {
@@ -88,11 +89,13 @@ export function compileSequenceMatches(
       step.entityKind === "event"
         ? `${activity}.event_pk = ${item}.event_pk`
         : `${activity}.visit_id = ${item}.visit_id`;
+    // Keep each filtered step before its timeline lookup. SQLite otherwise
+    // tends to rescan the entire timeline for every candidate Session.
     source.push(`${index === 0 ? "FROM" : "CROSS JOIN"} (${step.sql}) ${item}
-      INNER JOIN scope_filter_timeline ${activity}
-        ON ${activity}.site_pk = ${item}.site_pk
-       AND ${activity}.activity_kind = '${step.entityKind}'
-       AND ${key}`);
+      CROSS JOIN scope_filter_timeline ${activity}`);
+    constraints.push(`${activity}.site_pk = ${item}.site_pk`);
+    constraints.push(`${activity}.activity_kind = '${step.entityKind}'`);
+    constraints.push(key);
     bindings.push(...step.bindings);
     select.push(`json_object('kind', ${activity}.activity_kind,
       'time', ${activity}.activity_time,
@@ -103,7 +106,6 @@ export function compileSequenceMatches(
 
   const first = "sequence_activity_1";
   const last = `sequence_activity_${steps.length}`;
-  const constraints: string[] = [];
   for (let index = 2; index <= steps.length; index++) {
     const current = `sequence_activity_${index}`;
     const previous = `sequence_activity_${index - 1}`;

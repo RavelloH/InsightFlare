@@ -296,6 +296,39 @@ describe("FSQL-07 ordinary Event Payload through real ScopedDataset SQL", () => 
     );
   }
 
+  it("constrains each exact JSON Pointer child lookup by both Event and parent node", () => {
+    const db = sqlitePayloadFixture();
+    try {
+      db.exec(
+        "CREATE INDEX idx_custom_event_nodes_event_parent ON custom_event_json_nodes(event_pk, parent_node_id, member_order, array_index)",
+      );
+      const statement = dataset(
+        'event.payload("/items/1/sku") eq "B"',
+        "event",
+      );
+      const query = `EXPLAIN QUERY PLAN WITH ${statement.ctes}
+        SELECT COUNT(*) AS matched FROM ${statement.eventRelation}`;
+      const plan = db
+        .prepare(query)
+        .all(...statement.bindings.map((binding) => binding.value));
+      const childLookups = plan
+        .map((row) => String(row.detail))
+        .filter((detail) =>
+          detail.includes(
+            "SEARCH child USING INDEX idx_custom_event_nodes_event_parent",
+          ),
+        );
+      expect(childLookups.length).toBeGreaterThan(0);
+      expect(
+        childLookups.every((detail) =>
+          detail.includes("(event_pk=? AND parent_node_id=?)"),
+        ),
+      ).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
   it("uses exact array offsets, escaped keys and literal star, never dictionary wildcard", () => {
     const db = sqlitePayloadFixture();
     try {
