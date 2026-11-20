@@ -4,17 +4,26 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 
 import {
+  createSqliteD1Database,
+  type SqliteD1Trace,
+} from "@/lib/db/__tests__/sqlite-d1";
+import {
   attachScopedFilterMetadata,
   createQueryTime,
   createScopedFilterPlan,
   type QueryTime,
 } from "@/lib/edge/analytics/contract";
 import { VISIT_SOURCE_COLUMNS } from "@/lib/edge/analytics/providers/d1/internal/core-sources";
+import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
+import { queryOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/overview";
 import {
+  applyObservationFilterToScopedDataset,
   compileScopedDatasetSql,
   scopedDatasetForUnpreparedReader,
 } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
+import { expandCustomEventData } from "@/lib/edge/ingest/custom-event-json";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
+import { filterDocumentUsesAdvancedExpressions } from "@/lib/filter-contract/filter-types";
 
 const SITES = ["site-a", "site-b"];
 const WINDOW = {
@@ -61,6 +70,99 @@ function sqliteFixture(): DatabaseSync {
   return database;
 }
 
+/** Persist genuine ingest expansion as Node/Key/Path/Value rows. */
+function sqlitePayloadFixture(): DatabaseSync {
+  const db = sqliteFixture();
+  db.exec(
+    [
+      "CREATE TABLE custom_event_json_keys(id INTEGER PRIMARY KEY, site_pk INTEGER, key TEXT)",
+      "CREATE TABLE custom_event_json_paths(id INTEGER PRIMARY KEY, site_pk INTEGER, path TEXT)",
+      "CREATE TABLE custom_event_json_nodes(event_pk INTEGER, node_id INTEGER, parent_node_id INTEGER, key_id INTEGER, path_id INTEGER, value_type INTEGER, member_order INTEGER, array_index INTEGER, depth INTEGER, PRIMARY KEY(event_pk,node_id))",
+      "CREATE TABLE custom_event_json_values(event_pk INTEGER, node_id INTEGER, site_pk INTEGER, value_type INTEGER, string_value TEXT, number_value REAL, boolean_value INTEGER)",
+    ].join("; ") + ";",
+  );
+  const keys = new Map<string, number>();
+  const paths = new Map<string, number>();
+  const keyStmt = db.prepare(
+    "INSERT INTO custom_event_json_keys VALUES (?, ?, ?)",
+  );
+  const pathStmt = db.prepare(
+    "INSERT INTO custom_event_json_paths VALUES (?, ?, ?)",
+  );
+  const nodeStmt = db.prepare(
+    "INSERT INTO custom_event_json_nodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  );
+  const valueStmt = db.prepare(
+    "INSERT INTO custom_event_json_values VALUES (?, ?, ?, ?, ?, ?, ?)",
+  );
+  const payloads: ReadonlyArray<readonly [number, number, object]> = [
+    [101, 1, { items: [{ sku: "A" }] }], // historical Event outside Q
+    [102, 1, { items: [] }],
+    [
+      103,
+      1,
+      {
+        items: [{ sku: "A" }, { sku: "B" }],
+        "0": "literal-zero",
+        "*": "literal-star",
+        nested: { "a/b": 7, "~tag": 8 },
+        nil: null,
+        enabled: false,
+        search: "abc%_\\Suffix",
+      },
+    ],
+    [104, 1, { emptyObj: {}, misc: "other" }],
+    [
+      201,
+      2,
+      { items: [{ sku: "X" }, { sku: "Y" }], nil: 2, search: "ABC%_\\suffix" },
+    ],
+  ];
+  for (const [eventPk, sitePk, payload] of payloads) {
+    const expansion = expandCustomEventData(payload);
+    if (!expansion.ok) throw new Error(expansion.error);
+    for (const key of expansion.data.keys) {
+      const identity = sitePk + "/" + key;
+      if (!keys.has(identity)) {
+        const id = keys.size + 1;
+        keys.set(identity, id);
+        keyStmt.run(id, sitePk, key);
+      }
+    }
+    for (const path of expansion.data.paths) {
+      const identity = sitePk + "/" + path;
+      if (!paths.has(identity)) {
+        const id = paths.size + 1;
+        paths.set(identity, id);
+        pathStmt.run(id, sitePk, path);
+      }
+    }
+    for (const node of expansion.data.nodes)
+      nodeStmt.run(
+        eventPk,
+        node.nodeId,
+        node.parentNodeId,
+        node.key === null ? null : keys.get(sitePk + "/" + node.key)!,
+        paths.get(sitePk + "/" + node.path)!,
+        node.valueType,
+        node.memberOrder,
+        node.arrayIndex,
+        node.depth,
+      );
+    for (const value of expansion.data.values)
+      valueStmt.run(
+        eventPk,
+        value.nodeId,
+        sitePk,
+        value.valueType,
+        value.stringValue,
+        value.numberValue,
+        value.booleanValue,
+      );
+  }
+  return db;
+}
+
 function dataset(
   expression: string,
   scope: "event" | "session" | "visitor" = "session",
@@ -91,6 +193,310 @@ function select(
 ) {
   return database.prepare(sql).all(...parameters);
 }
+
+describe("FSQL-07 ordinary Event Payload through real ScopedDataset SQL", () => {
+  const a = [{ site_pk: 1, event_id: "e-purchase" }];
+  const b = [{ site_pk: 2, event_id: "e-purchase" }];
+  const signup = [{ site_pk: 1, event_id: "e-signup" }];
+  const view = [{ site_pk: 1, event_id: "e-view" }];
+  function matched(db: DatabaseSync, expression: string) {
+    const document = parseFilterDsl(expression, analyticsFilterRegistry);
+    expect(filterDocumentUsesAdvancedExpressions(document)).toBe(false);
+    const sql = dataset(expression, "event");
+    expect(sql.ctes).toContain("pointer_nodes");
+    expect(sql.ctes).not.toContain("custom_event_json_paths");
+    return select(
+      db,
+      "WITH " +
+        sql.ctes +
+        " SELECT site_pk, event_id FROM " +
+        sql.eventRelation +
+        " ORDER BY site_pk, event_id",
+      sql.bindings.map((binding) => binding.value),
+    );
+  }
+
+  it("uses exact array offsets, escaped keys and literal star, never dictionary wildcard", () => {
+    const db = sqlitePayloadFixture();
+    try {
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM custom_event_json_paths WHERE path = '/items/*/sku'",
+          )
+          .get(),
+      ).toEqual({ n: 2 });
+      expect(matched(db, 'event.payload("/items/0/sku") eq "A"')).toEqual(a);
+      expect(matched(db, 'event.payload("/items/1/sku") eq "B"')).toEqual(a);
+      expect(matched(db, 'event.payload("/items/0/sku") eq "B"')).toEqual([]);
+      expect(matched(db, 'event.payload("/items/1/sku") eq "Y"')).toEqual(b);
+      expect(matched(db, 'event.payload("/items/*/sku") eq "A"')).toEqual([]);
+      expect(matched(db, 'event.payload("/*") eq "literal-star"')).toEqual(a);
+      expect(matched(db, 'event.payload("/0") eq "literal-zero"')).toEqual(a);
+      expect(matched(db, 'event.payload("/nested/a~1b") eq 7')).toEqual(a);
+      expect(matched(db, 'event.payload("/nested/~0tag") eq 8')).toEqual(a);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("distinguishes containers, empty arrays and objects, JSON null, missing and NOT EXISTS", () => {
+    const db = sqlitePayloadFixture();
+    try {
+      expect(matched(db, 'event.payload("/items") exists')).toEqual([
+        ...a,
+        ...signup,
+        ...b,
+      ]);
+      expect(matched(db, 'event.payload("/items") notExists')).toEqual(view);
+      expect(matched(db, 'event.payload("/items") isEmpty')).toEqual(signup);
+      expect(matched(db, 'event.payload("/items/0") exists')).toEqual([
+        ...a,
+        ...b,
+      ]);
+      expect(matched(db, 'event.payload("/items/0") notExists')).toEqual([
+        ...signup,
+        ...view,
+      ]);
+      expect(matched(db, 'event.payload("/emptyObj") isEmpty')).toEqual(view);
+      expect(matched(db, 'event.payload("/nil") isNull')).toEqual(a);
+      expect(matched(db, 'event.payload("/nil") notExists')).toEqual([
+        ...signup,
+        ...view,
+      ]);
+      expect(matched(db, 'event.payload("/nil") notNull')).toEqual(b);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps typed IN/NOT IN and case-sensitive text matching scoped to each site", () => {
+    const db = sqlitePayloadFixture();
+    try {
+      expect(matched(db, 'event.payload("/items/0/sku") in ["A", 1]')).toEqual(
+        a,
+      );
+      expect(
+        matched(db, 'event.payload("/items/0/sku") notIn ["A", 1]'),
+      ).toEqual(b);
+      expect(matched(db, 'event.payload("/items/0/sku") notExists')).toEqual([
+        ...signup,
+        ...view,
+      ]);
+      expect(matched(db, 'event.payload("/nil") in [null, 2]')).toEqual([
+        ...a,
+        ...b,
+      ]);
+      expect(matched(db, 'event.payload("/nil") notIn [null, "A"]')).toEqual(b);
+      expect(matched(db, 'event.payload("/search") contains "ABC"')).toEqual(b);
+      expect(matched(db, 'event.payload("/search") contains "abc"')).toEqual(a);
+      expect(matched(db, 'event.payload("/search") contains "%_"')).toEqual([
+        ...a,
+        ...b,
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not silently route ordinary payload through Visit-only unprepared Reader fallback", () => {
+    const db = sqlitePayloadFixture();
+    try {
+      const filter = parseFilterDsl(
+        'event.payload("/items/0/sku") eq "A"',
+        analyticsFilterRegistry,
+      );
+      const sql = scopedDatasetForUnpreparedReader(
+        "overview",
+        "site-a",
+        WINDOW,
+        filter,
+        "event",
+      );
+      expect(sql).not.toBeNull();
+      expect(sql!.ctes).toContain("pointer_nodes");
+      expect(
+        select(
+          db,
+          `WITH ${sql!.ctes} SELECT site_pk, event_id FROM ${sql!.eventRelation} ORDER BY event_id`,
+          sql!.bindings.map((item) => item.value),
+        ),
+      ).toEqual(a);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns correct real Overview Reader metrics for ordinary prepared and unprepared Payload filters", async () => {
+    const db = sqlitePayloadFixture();
+    try {
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const env = { DB: createSqliteD1Database(db, trace) } as never;
+      const raw = parseFilterDsl(
+        'event.payload("/items/0/sku") eq "A"',
+        analyticsFilterRegistry,
+      );
+      const unprepared = await queryOverviewFromD1(env, "site-a", WINDOW, raw);
+      expect(unprepared).toEqual({
+        views: 1,
+        sessions: 1,
+        visitors: 1,
+        bounces: 1,
+        totalDuration: 20,
+        durationViews: 1,
+      });
+      const plan = createScopedFilterPlan("overview", raw, "session")!;
+      const prepared = attachScopedFilterMetadata(raw, {
+        requestedScope: "session",
+        resolvedScope: plan.scope,
+        plan,
+        time: createQueryTime(100, 300, "UTC", 400),
+        siteIds: ["site-a"],
+      });
+      const preparedResult = await queryOverviewFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        prepared,
+      );
+      expect(preparedResult).toEqual(unprepared);
+      const missing = parseFilterDsl(
+        'event.payload("/items/0/sku") eq "X"',
+        analyticsFilterRegistry,
+      );
+      expect(
+        (await queryOverviewFromD1(env, "site-a", WINDOW, missing)).views,
+      ).toBe(0);
+      expect(
+        trace.preparedSql.some((sql) => sql.includes("pointer_nodes")),
+      ).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns correctly isolated Event Overview Reader summary and local EXPLAIN QUERY PLAN", async () => {
+    const db = sqlitePayloadFixture();
+    try {
+      const raw = parseFilterDsl(
+        'event.payload("/items/0/sku") eq "A"',
+        analyticsFilterRegistry,
+      );
+      const plan = createScopedFilterPlan("overview", raw, "event")!;
+      const filters = attachScopedFilterMetadata(raw, {
+        requestedScope: "event",
+        resolvedScope: plan.scope,
+        plan,
+        time: createQueryTime(100, 300, "UTC", 400),
+        siteIds: ["site-a"],
+      });
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const env = { DB: createSqliteD1Database(db, trace) } as never;
+      const result = await queryEventTypeOverviewFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        filters,
+        "purchase",
+        { includeBreakdowns: false },
+      );
+      expect(result.summary).toMatchObject({
+        events: 1,
+        eventTypes: 1,
+        sessions: 1,
+        visitors: 1,
+      });
+      const unknownSiteResult = await queryEventTypeOverviewFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        filters,
+        "signup",
+        { includeBreakdowns: false },
+      );
+      expect(unknownSiteResult.summary.events).toBe(0);
+      for (let i = 0; i < trace.preparedSql.length; i++) {
+        const query = trace.preparedSql[i]!;
+        const binds = trace.bindings[i]!;
+        const plan = db.prepare("EXPLAIN QUERY PLAN " + query).all(...binds);
+        expect(plan.length).toBeGreaterThan(0);
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps Funnel step Observation Payload results within the final scoped dataset", () => {
+    const db = sqlitePayloadFixture();
+    try {
+      const empty = { version: 1 as const, root: null };
+      const plan = createScopedFilterPlan("overview", empty, "event")!;
+      const source = compileScopedDatasetSql({
+        filters: empty,
+        plan,
+        siteIds: SITES,
+        window: WINDOW,
+      });
+      const step = parseFilterDsl(
+        'event.payload("/items/1/sku") eq "B"',
+        analyticsFilterRegistry,
+      );
+      const result = applyObservationFilterToScopedDataset(
+        source,
+        step,
+        "step_payload",
+      );
+      expect(result.ctes).toContain("pointer_nodes");
+      expect(
+        select(
+          db,
+          `WITH ${source.ctes}, ${result.ctes} SELECT site_pk, event_id FROM ${result.matchedEventRelation} ORDER BY site_pk,event_id`,
+          [...source.bindings, ...result.bindings].map((item) => item.value),
+        ),
+      ).toEqual(a);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps Comparison-side parameter ordering and Event-to-Visit report expansion correct", () => {
+    const db = sqlitePayloadFixture();
+    try {
+      const current = dataset('event.payload("/items/0/sku") eq "A"', "event");
+      const reference = dataset(
+        'event.payload("/items/0/sku") eq "X"',
+        "event",
+      );
+      const rename = (sql: string, prefix: string) =>
+        sql
+          .replace(/\bscope_[A-Za-z0-9_]*/g, (name) => prefix + "_" + name)
+          .replace(/\bvisit_source\b/g, prefix + "_visit_source");
+      const combined = select(
+        db,
+        "WITH " +
+          rename(current.ctes, "current") +
+          ", " +
+          rename(reference.ctes, "reference") +
+          " SELECT (SELECT COUNT(*) FROM current_scope_final_events) AS current_count, " +
+          "(SELECT COUNT(*) FROM reference_scope_final_events) AS reference_count",
+        [...current.bindings, ...reference.bindings].map((item) => item.value),
+      );
+      expect(combined).toEqual([{ current_count: 1, reference_count: 1 }]);
+      const visits = select(
+        db,
+        "WITH " +
+          current.ctes +
+          " SELECT site_pk, visit_id FROM " +
+          current.visitRelation +
+          " ORDER BY site_pk, visit_id",
+        current.bindings.map((item) => item.value),
+      );
+      expect(visits).toEqual([{ site_pk: 1, visit_id: "v-new" }]);
+    } finally {
+      db.close();
+    }
+  });
+});
 
 describe("P5 Scoped Dataset integration: SQL-only advanced qualification", () => {
   it("runs a complex Selector/Count Filter without any advanced JS match IDs", () => {

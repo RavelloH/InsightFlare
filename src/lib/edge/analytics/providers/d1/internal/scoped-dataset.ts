@@ -111,7 +111,12 @@ export function scopedDatasetForUnpreparedReader(
 
   const plan = createScopedFilterPlan(operation, filters, scope);
   if (!plan) return null;
-  if (factEntityKindsForFilter(filters.root).size === 0) {
+  // The Visit-only compatibility bridge cannot match structured Event Payload.
+  // Resolve ordinary Payloads through the canonical event-bearing dataset.
+  if (
+    factEntityKindsForFilter(filters.root).size === 0 &&
+    !plan.requiredSources.has("payload")
+  ) {
     return compileUnpreparedCompatibilityDataset(
       siteId,
       window,

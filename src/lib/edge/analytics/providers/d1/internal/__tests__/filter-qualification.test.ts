@@ -206,10 +206,24 @@ describe("P1 SQL qualification", () => {
     const compiled = composeBoundCtes(qualification.ctes);
     withSqlite((db) => {
       db.exec(`
-        CREATE TABLE custom_event_json_paths(id INTEGER, site_pk INTEGER, path TEXT);
-        CREATE TABLE custom_event_json_values(event_pk INTEGER, site_pk INTEGER, path_id INTEGER, value_type INTEGER, string_value TEXT);
-        INSERT INTO custom_event_json_paths VALUES (1, 1, '/plan'), (2, 2, '/plan');
-        INSERT INTO custom_event_json_values VALUES (101, 1, 1, 1, 'pro'), (102, 1, 1, 1, 'free'), (201, 2, 2, 1, 'pro');
+        CREATE TABLE custom_event_json_keys(id INTEGER, site_pk INTEGER, key TEXT);
+        CREATE TABLE custom_event_json_nodes(
+          event_pk INTEGER, node_id INTEGER, parent_node_id INTEGER, key_id INTEGER,
+          value_type INTEGER, array_index INTEGER
+        );
+        CREATE TABLE custom_event_json_values(
+          event_pk INTEGER, node_id INTEGER, site_pk INTEGER, value_type INTEGER,
+          string_value TEXT, number_value REAL, boolean_value INTEGER
+        );
+        INSERT INTO custom_event_json_keys VALUES (1, 1, 'plan'), (2, 2, 'plan');
+        INSERT INTO custom_event_json_nodes VALUES
+          (101, 1, NULL, NULL, 4, NULL), (101, 2, 1, 1, 1, NULL),
+          (102, 1, NULL, NULL, 4, NULL), (102, 2, 1, 1, 1, NULL),
+          (201, 1, NULL, NULL, 4, NULL), (201, 2, 1, 2, 1, NULL);
+        INSERT INTO custom_event_json_values VALUES
+          (101, 2, 1, 1, 'pro', NULL, NULL),
+          (102, 2, 1, 1, 'free', NULL, NULL),
+          (201, 2, 2, 1, 'pro', NULL, NULL);
       `);
       const result = rows(
         db,

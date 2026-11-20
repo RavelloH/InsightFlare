@@ -18,10 +18,11 @@ import {
   normalizeFilterDocument,
 } from "@/lib/filter-contract/filters";
 
-export type FilterSqlBinding = string | number;
+import { compileExactJsonPointerPredicate } from "./filter-json-pointer";
+import { JSON_EACH_SET_THRESHOLD } from "./filter-sql-set";
 
-/** Keep small predicates simple; use one JSON binding when the set is large. */
-export const JSON_EACH_SET_THRESHOLD = 8;
+export { JSON_EACH_SET_THRESHOLD } from "./filter-sql-set";
+export type FilterSqlBinding = string | number;
 
 export interface FilterSql {
   readonly clause: string;
@@ -468,120 +469,23 @@ function sessionBoundary(
   )`;
 }
 
-function payloadValueType(value: FilterValue): number {
-  if (value === null) return 0;
-  if (typeof value === "string") return 1;
-  if (typeof value === "number") return 2;
-  if (typeof value === "boolean") return 3;
-  throw new TypeError("Event payload values must be JSON scalars.");
-}
-
-function payloadValueColumn(alias: string, value: FilterValue): string {
-  if (typeof value === "string") return `${alias}.string_value`;
-  if (typeof value === "number") return `${alias}.number_value`;
-  if (typeof value === "boolean") return `${alias}.boolean_value`;
-  return `${alias}.value_type`;
-}
-
+/** Route ordinary Event Payloads through the same exact node-navigation SQL
+ * as advanced Filter conditions. Path dictionaries normalize array indices and
+ * scalar value tables omit containers; neither can implement RFC 6901 alone.
+ */
 function payloadComparison(
   compiler: Compiler,
   condition: FilterCondition,
 ): string {
-  if (condition.target.kind !== "event-payload")
+  if (condition.target.kind !== "event-payload") {
     throw new TypeError("Payload compiler requires an event-payload target.");
-  const valueAlias = `filter_payload_value_${compiler.payloadIndex}`;
-  const pathAlias = `filter_payload_path_${compiler.payloadIndex}`;
-  compiler.payloadIndex += 1;
-  const base = `${valueAlias}.event_pk = ${compiler.eventAlias}.event_pk AND ${valueAlias}.site_pk = ${compiler.eventAlias}.site_pk AND ${pathAlias}.site_pk = ${compiler.eventAlias}.site_pk AND ${pathAlias}.path = ${push(compiler, condition.target.path)}`;
-  const conditionValue = legacyConditionValue(condition.value);
-  const exists = (extra = "") =>
-    `EXISTS (SELECT 1 FROM custom_event_json_values ${valueAlias} INNER JOIN custom_event_json_paths ${pathAlias} ON ${pathAlias}.id = ${valueAlias}.path_id WHERE ${base}${extra})`;
-  if (condition.operator === "exists") return exists();
-  if (condition.operator === "notExists") return `NOT ${exists()}`;
-  if (condition.operator === "isNull")
-    return exists(` AND ${valueAlias}.value_type = 0`);
-  if (condition.operator === "notNull")
-    return exists(` AND ${valueAlias}.value_type != 0`);
-  if (condition.operator === "isEmpty")
-    return exists(
-      ` AND ${valueAlias}.value_type = 1 AND ${valueAlias}.string_value = ''`,
-    );
-  if (condition.operator === "notEmpty")
-    return exists(
-      ` AND ${valueAlias}.value_type = 1 AND ${valueAlias}.string_value != ''`,
-    );
-  const values = Array.isArray(conditionValue)
-    ? conditionValue
-    : [conditionValue!];
-  if (condition.operator === "in" || condition.operator === "notIn") {
-    const groups = new Map<number, FilterValue[]>();
-    for (const value of values) {
-      const kind = payloadValueType(value);
-      const group = groups.get(kind) ?? [];
-      group.push(value);
-      groups.set(kind, group);
-    }
-    const matches: string[] = [];
-    for (const [kind, group] of groups) {
-      if (kind === 0) {
-        matches.push(`${valueAlias}.value_type = 0`);
-      } else {
-        const column = payloadValueColumn(valueAlias, group[0]!);
-        const parameters = group.map((item) =>
-          typeof item === "boolean" ? Number(item) : scalar(item),
-        );
-        const set =
-          parameters.length >= JSON_EACH_SET_THRESHOLD
-            ? `SELECT value FROM json_each(${push(compiler, JSON.stringify(parameters))})`
-            : parameters.map((item) => push(compiler, item)).join(", ");
-        matches.push(
-          `(${valueAlias}.value_type = ${kind} AND ${column} IN (${set}))`,
-        );
-      }
-    }
-    const membership = `(${matches.join(" OR ")})`;
-    return exists(
-      ` AND ${condition.operator === "in" ? membership : `${valueAlias}.value_type IN (0, 1, 2, 3) AND NOT ${membership}`}`,
-    );
   }
-  const types = [...new Set(values.map(payloadValueType))];
-  if (types.length !== 1)
-    throw new TypeError("Payload range filters require one JSON type.");
-  const type = types[0]!;
-  const valueColumn = payloadValueColumn(valueAlias, values[0]!);
-  if (condition.operator === "between") {
-    return exists(
-      ` AND ${valueAlias}.value_type = ${push(compiler, type)} AND ${valueColumn} BETWEEN ${push(compiler, scalar(values[0]!))} AND ${push(compiler, scalar(values[1]!))}`,
-    );
-  }
-  const value = values[0]!;
-  if (
-    condition.operator === "contains" ||
-    condition.operator === "startsWith" ||
-    condition.operator === "endsWith"
-  ) {
-    if (typeof value !== "string")
-      throw new TypeError("Payload string matching requires a string.");
-    return exists(
-      ` AND ${valueAlias}.value_type = 1 AND ${boundStringMatch(compiler, `${valueAlias}.string_value`, value, condition.operator)}`,
-    );
-  }
-  const operator: Record<string, string> = {
-    eq: "=",
-    neq: "!=",
-    gt: ">",
-    gte: ">=",
-    lt: "<",
-    lte: "<=",
-  };
-  if (value === null)
-    return exists(
-      ` AND ${valueAlias}.value_type ${operator[condition.operator]!} ${push(compiler, 0)}`,
-    );
-  const binding = typeof value === "boolean" ? (value ? 1 : 0) : scalar(value);
-  return exists(
-    ` AND ${valueAlias}.value_type = ${push(compiler, type)} AND ${valueColumn} ${operator[condition.operator]!} ${push(compiler, binding)}`,
+  const result = compileExactJsonPointerPredicate(
+    condition,
+    compiler.eventAlias,
   );
+  compiler.bindings.push(...result.bindings);
+  return result.sql;
 }
 
 function condition(compiler: Compiler, item: FilterCondition): string {

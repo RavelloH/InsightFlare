@@ -3,8 +3,8 @@ import type {
   FilterValue,
 } from "@/lib/filter-contract/filters";
 
-import { JSON_EACH_SET_THRESHOLD } from "./filter-compiler";
 import { safeQualificationIdentifier } from "./filter-qualification";
+import { JSON_EACH_SET_THRESHOLD } from "./filter-sql-set";
 
 export interface JsonPointerPredicateSql {
   readonly sql: string;

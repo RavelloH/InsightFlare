@@ -159,8 +159,21 @@ function createSqliteEventEnv(): { env: Env; d1: SqliteD1Database } {
     CREATE TABLE custom_event_json_values (
       event_pk INTEGER NOT NULL, path_id INTEGER NOT NULL, value_type INTEGER NOT NULL,
       occurred_at INTEGER NOT NULL, string_value TEXT, number_value REAL, boolean_value INTEGER,
-      site_pk INTEGER GENERATED ALWAYS AS (1) STORED
+      site_pk INTEGER GENERATED ALWAYS AS (1) STORED,
+      node_id INTEGER GENERATED ALWAYS AS (2) STORED
     );
+    -- This legacy fixture only stores one flat scalar per Event. Expose the
+    -- matching root/child structure while production tests use real expansion.
+    CREATE VIEW custom_event_json_keys AS
+      SELECT id, site_pk, SUBSTR(path, 2) AS key
+      FROM custom_event_json_paths;
+    CREATE VIEW custom_event_json_nodes AS
+      SELECT event_pk, 1 AS node_id, NULL AS parent_node_id,
+        NULL AS key_id, 4 AS value_type, NULL AS array_index
+      FROM custom_events
+      UNION ALL
+      SELECT event_pk, 2, 1, path_id, value_type, NULL
+      FROM custom_event_json_values;
     CREATE INDEX idx_custom_events_site_pk_name_time
       ON custom_events(site_pk, event_name_id, occurred_at, event_pk);
     CREATE INDEX idx_custom_events_site_pk_time

@@ -597,9 +597,19 @@ base_events AS (
   UNION ALL SELECT 1, 4, 'edge-event-outside', 'edge-session-outside', 'edge-visitor-outside', 180000,
     1, '/', 'purchase', '{}'
 ),
-custom_event_json_paths AS (SELECT 1 AS id, 1 AS site_pk, '/plan' AS path),
+custom_event_json_keys AS (SELECT 1 AS id, 1 AS site_pk, 'plan' AS key),
+custom_event_json_nodes AS (
+  SELECT event_pk, 1 AS node_id, NULL AS parent_node_id,
+    NULL AS key_id, 4 AS value_type, NULL AS array_index
+  FROM base_events
+  UNION ALL
+  SELECT event_pk, 2, 1, 1, 1, NULL
+  FROM base_events
+),
 custom_event_json_values AS (
-  SELECT event_pk, 1 AS site_pk, 1 AS path_id, 1 AS value_type, '' AS string_value
+  SELECT event_pk, 2 AS node_id, 1 AS site_pk, 1 AS value_type,
+    '' AS string_value, CAST(NULL AS REAL) AS number_value,
+    CAST(NULL AS INTEGER) AS boolean_value
   FROM base_events
 ),
 base_sessions AS (
@@ -641,14 +651,20 @@ base_events AS (
   UNION ALL SELECT 1, 4, 'event-4', 'session-4', 'visitor-4', 90000, 1, '/purchase', 'purchase', '{"plan":"pro"}'
   UNION ALL SELECT 1, 5, 'event-empty', '', '', 90000, 1, '/checkout', 'purchase', '{"plan":"pro"}'
 ),
-custom_event_json_paths AS (
-  SELECT 1 AS id, 1 AS site_pk, '/plan' AS path
+custom_event_json_keys AS (SELECT 1 AS id, 1 AS site_pk, 'plan' AS key),
+custom_event_json_nodes AS (
+  SELECT event_pk, 1 AS node_id, NULL AS parent_node_id,
+    NULL AS key_id, 4 AS value_type, NULL AS array_index
+  FROM base_events
+  UNION ALL
+  SELECT event_pk, 2, 1, 1, 1, NULL
+  FROM base_events WHERE event_pk IN (1, 2, 4, 5)
 ),
 custom_event_json_values AS (
-  SELECT 1 AS event_pk, 1 AS site_pk, 1 AS path_id, 1 AS value_type, 'pro' AS string_value
-  UNION ALL SELECT 2, 1, 1, 1, 'pro'
-  UNION ALL SELECT 4, 1, 1, 1, 'pro'
-  UNION ALL SELECT 5, 1, 1, 1, 'pro'
+  SELECT event_pk, 2 AS node_id, 1 AS site_pk, 1 AS value_type,
+    'pro' AS string_value, CAST(NULL AS REAL) AS number_value,
+    CAST(NULL AS INTEGER) AS boolean_value
+  FROM base_events WHERE event_pk IN (1, 2, 4, 5)
 ),
 base_sessions AS (
   SELECT DISTINCT site_pk, session_id FROM base_visits WHERE TRIM(COALESCE(session_id, '')) != ''

@@ -86,11 +86,21 @@ base_events AS (
     '{"plan":"pro"}' AS event_data_json
   FROM series
 ),
-custom_event_json_paths AS (
-  SELECT 1 AS id, 1 AS site_pk, '/plan' AS path
+custom_event_json_keys AS (
+  SELECT 1 AS id, 1 AS site_pk, 'plan' AS key
+),
+custom_event_json_nodes AS (
+  SELECT n AS event_pk, 1 AS node_id, NULL AS parent_node_id,
+    NULL AS key_id, 4 AS value_type, NULL AS array_index
+  FROM series
+  UNION ALL
+  SELECT n, 2, 1, 1, 1, NULL
+  FROM series
 ),
 custom_event_json_values AS (
-  SELECT n AS event_pk, 1 AS site_pk, 1 AS path_id, 1 AS value_type, 'pro' AS string_value
+  SELECT n AS event_pk, 2 AS node_id, 1 AS site_pk,
+    1 AS value_type, 'pro' AS string_value, CAST(NULL AS REAL) AS number_value,
+    CAST(NULL AS INTEGER) AS boolean_value
   FROM series
 ),
 base_sessions AS (

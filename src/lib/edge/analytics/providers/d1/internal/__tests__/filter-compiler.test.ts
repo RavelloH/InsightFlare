@@ -18,18 +18,28 @@ describe("filter SQL compiler", () => {
     try {
       db.exec(`
         CREATE TABLE events(event_pk INTEGER PRIMARY KEY, site_pk INTEGER);
-        CREATE TABLE custom_event_json_paths(id INTEGER PRIMARY KEY, site_pk INTEGER, path TEXT);
+        CREATE TABLE custom_event_json_keys(id INTEGER PRIMARY KEY, site_pk INTEGER, key TEXT);
+        CREATE TABLE custom_event_json_nodes(
+          event_pk INTEGER, node_id INTEGER, parent_node_id INTEGER, key_id INTEGER,
+          value_type INTEGER, array_index INTEGER, PRIMARY KEY(event_pk, node_id)
+        );
         CREATE TABLE custom_event_json_values(
-          event_pk INTEGER, site_pk INTEGER, path_id INTEGER, value_type INTEGER,
+          event_pk INTEGER, node_id INTEGER, site_pk INTEGER, value_type INTEGER,
           string_value TEXT, number_value REAL, boolean_value INTEGER
         );
         INSERT INTO events VALUES (1,1),(2,1),(3,1),(4,1),(5,1);
-        INSERT INTO custom_event_json_paths VALUES (1,1,'/sku');
+        INSERT INTO custom_event_json_keys VALUES (1,1,'sku');
+        INSERT INTO custom_event_json_nodes VALUES
+          (1,1,NULL,NULL,4,NULL),(1,2,1,1,1,NULL),
+          (2,1,NULL,NULL,4,NULL),(2,2,1,1,2,NULL),
+          (3,1,NULL,NULL,4,NULL),(3,2,1,1,3,NULL),
+          (4,1,NULL,NULL,4,NULL),(4,2,1,1,0,NULL),
+          (5,1,NULL,NULL,4,NULL);
         INSERT INTO custom_event_json_values VALUES
-          (1,1,1,1,'A',NULL,NULL),
-          (2,1,1,2,NULL,1,NULL),
-          (3,1,1,3,NULL,NULL,0),
-          (4,1,1,0,NULL,NULL,NULL);
+          (1,2,1,1,'A',NULL,NULL),
+          (2,2,1,2,NULL,1,NULL),
+          (3,2,1,3,NULL,NULL,0),
+          (4,2,1,0,NULL,NULL,NULL);
       `);
       const matched = (
         operator: "in" | "notIn",
@@ -564,7 +574,11 @@ describe("filter SQL compiler", () => {
     );
 
     expect(result.clause).toContain("json_each(?)");
-    expect(result.bindings).toEqual(["/plan", JSON.stringify(values)]);
+    expect(result.bindings).toEqual([
+      JSON.stringify([{ member: "plan", arrayIndex: null }]),
+      1,
+      JSON.stringify(values),
+    ]);
   });
 
   it("keeps small direct sets scalar-bound", () => {
@@ -594,7 +608,12 @@ describe("filter SQL compiler", () => {
     );
     expect(result.clause).toContain("value_type IN (0, 1, 2, 3) AND NOT");
     expect(result.clause).toContain("string_value IN (?, ?)");
-    expect(result.bindings).toEqual(["/plan", "free", "trial"]);
+    expect(result.bindings).toEqual([
+      JSON.stringify([{ member: "plan", arrayIndex: null }]),
+      1,
+      "free",
+      "trial",
+    ]);
 
     const mixed = compileFilterDocument(
       document({
@@ -606,7 +625,12 @@ describe("filter SQL compiler", () => {
     );
     expect(mixed.clause).toContain("string_value IN (?)");
     expect(mixed.clause).toContain("number_value IN (?)");
-    expect(mixed.bindings).toEqual(["/score", "free", 1]);
+    expect(mixed.bindings).toEqual([
+      JSON.stringify([{ member: "score", arrayIndex: null }]),
+      1,
+      "free",
+      1,
+    ]);
 
     expect(() =>
       compileFilterDocument(
@@ -630,7 +654,11 @@ describe("filter SQL compiler", () => {
       }),
       { alias: "es", eventAlias: "es" },
     );
-    expect(result.bindings).toEqual(["/enabled", 3, 1]);
+    expect(result.bindings).toEqual([
+      JSON.stringify([{ member: "enabled", arrayIndex: null }]),
+      1,
+      1,
+    ]);
   });
 
   it("compiles null payload sets and typed payload ranges", () => {
@@ -644,7 +672,10 @@ describe("filter SQL compiler", () => {
       { alias: "es", eventAlias: "es" },
     );
     expect(nullSet.clause).toContain("value_type = 0");
-    expect(nullSet.bindings).toEqual(["/nullable"]);
+    expect(nullSet.bindings).toEqual([
+      JSON.stringify([{ member: "nullable", arrayIndex: null }]),
+      1,
+    ]);
 
     const range = compileFilterDocument(
       document({
@@ -656,7 +687,12 @@ describe("filter SQL compiler", () => {
       { alias: "es", eventAlias: "es" },
     );
     expect(range.clause).toContain("BETWEEN");
-    expect(range.bindings).toEqual(["/score", 2, 10, 20]);
+    expect(range.bindings).toEqual([
+      JSON.stringify([{ member: "score", arrayIndex: null }]),
+      1,
+      10,
+      20,
+    ]);
   });
 
   it("keeps payload missing, JSON null, empty, false, and zero distinct", () => {
@@ -702,14 +738,17 @@ describe("filter SQL compiler", () => {
     expect(result.clause).toContain("boolean_value = ?");
     expect(result.clause).toContain("number_value = ?");
     expect(result.bindings).toEqual([
-      "/empty",
-      "/missing",
-      "/null",
-      "/paid",
-      3,
+      JSON.stringify([{ member: "empty", arrayIndex: null }]),
+      1,
+      JSON.stringify([{ member: "missing", arrayIndex: null }]),
+      1,
+      JSON.stringify([{ member: "null", arrayIndex: null }]),
+      1,
+      JSON.stringify([{ member: "paid", arrayIndex: null }]),
+      1,
       0,
-      "/score",
-      2,
+      JSON.stringify([{ member: "score", arrayIndex: null }]),
+      1,
       0,
     ]);
   });
