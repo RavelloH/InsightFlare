@@ -4,6 +4,7 @@ import type {
   InvocationLogRecord,
   InvocationOperationSummary,
   InvocationOutcome,
+  InvocationSafeErrorSignal,
   InvocationSource,
   InvocationTrigger,
 } from "./logger";
@@ -45,6 +46,18 @@ export interface InvocationSafeOperation {
   readonly cumulativeDurationMs: number;
 }
 
+export interface InvocationResourceSummary {
+  readonly doCalls: number;
+  readonly externalFetches: number;
+  readonly failedExternalFetches: number;
+  readonly kvOperations: number;
+  readonly r2Operations: number;
+  readonly doAlarmOperations: number;
+  readonly doSqlStatements: number;
+  readonly doSqlRowsRead: ObservedMetric;
+  readonly doSqlRowsWritten: ObservedMetric;
+}
+
 export interface InvocationSnapshot {
   readonly version: 1;
   readonly source: InvocationSource;
@@ -52,6 +65,8 @@ export interface InvocationSnapshot {
   readonly outcome: InvocationOutcome;
   /** One of the fixed, coarse route groups; never the raw request path. */
   readonly routeGroup: "api" | "page" | "do" | "websocket" | "scheduled";
+  /** Trusted router template/fixed lifecycle key; never derived from request URL. */
+  readonly routeKey?: string;
   readonly method?:
     | "GET"
     | "POST"
@@ -72,6 +87,11 @@ export interface InvocationSnapshot {
   readonly errorEvents: number;
   readonly logsTruncated: boolean;
   readonly sql: InvocationSqlCost;
+  /** Sum of D1 operation wall times, not end-to-end latency. */
+  readonly d1OperationCumulativeDurationMs: number;
+  readonly resources: InvocationResourceSummary;
+  /** Only fixed, typed event classifications (no message, stack, user payload). */
+  readonly safeErrors: readonly InvocationSafeErrorSignal[];
   readonly operations: readonly InvocationSafeOperation[];
   /** Privileged opt-in only; never part of the default safe snapshot. */
   readonly sqlObservations?: readonly SqlSemanticObservation[];
@@ -172,6 +192,10 @@ export function withSqlSemanticObservations(
 
 export function toInvocationSnapshot(
   record: InvocationLogRecord,
+  trusted: {
+    routeKey?: string;
+    safeErrors?: readonly InvocationSafeErrorSignal[];
+  } = {},
 ): InvocationSnapshot {
   const perf = record.performance;
   const statements = perf.d1Statements ?? 0;
@@ -199,6 +223,35 @@ export function toInvocationSnapshot(
     totalAttempts: valueOrAbsent(perf.d1AttemptsCoverage, perf.d1TotalAttempts),
     retries: valueOrAbsent(perf.d1AttemptsCoverage, perf.d1Retries),
   });
+  const safeCount = (value: number | undefined): number =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0
+      ? value
+      : 0;
+  const doSqlCoverage = (coverage: InvocationD1RowsCoverage | undefined) =>
+    coverage ?? "unavailable";
+  const resources: InvocationResourceSummary = Object.freeze({
+    doCalls: safeCount(perf.doCalls),
+    externalFetches: safeCount(perf.externalFetches),
+    failedExternalFetches: safeCount(perf.failedExternalFetches),
+    kvOperations: safeCount(perf.kvOperations),
+    r2Operations: safeCount(perf.r2Operations),
+    doAlarmOperations: safeCount(perf.doAlarmOperations),
+    doSqlStatements: safeCount(perf.doSqlStatements),
+    doSqlRowsRead: valueOrAbsent(
+      doSqlCoverage(perf.doSqlRowsReadCoverage),
+      perf.doSqlRowsRead,
+    ),
+    doSqlRowsWritten: valueOrAbsent(
+      doSqlCoverage(perf.doSqlRowsWrittenCoverage),
+      perf.doSqlRowsWritten,
+    ),
+  });
+  const d1OperationCumulativeDurationMs = operations
+    .filter((operation) => operation.name.startsWith("d1."))
+    .reduce(
+      (total, operation) => total + safeCount(operation.cumulativeDurationMs),
+      0,
+    );
   const handlerDurationMs = observedHandlerMs(record);
   const webSocketConnectionDurationMs =
     record.request?.method === "WEBSOCKET" &&
@@ -213,6 +266,7 @@ export function toInvocationSnapshot(
       record.request?.outcome ??
       (record.logs.some((log) => log.level === "error") ? "error" : "ok"),
     routeGroup: safeRouteGroup(record),
+    ...(trusted.routeKey ? { routeKey: trusted.routeKey } : {}),
     ...(safeMethod ? { method: safeMethod } : {}),
     ...(record.request?.status !== undefined
       ? { status: record.request.status }
@@ -227,6 +281,9 @@ export function toInvocationSnapshot(
     errorEvents: record.logs.filter((log) => log.level === "error").length,
     logsTruncated: Boolean(record.logsTruncated),
     sql,
+    d1OperationCumulativeDurationMs,
+    resources,
+    safeErrors: Object.freeze([...(trusted.safeErrors ?? [])]),
     operations: Object.freeze(operations),
   });
 }

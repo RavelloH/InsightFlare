@@ -50,3 +50,7 @@ dataset = "insightflare_traffic_events"
 [[analytics_engine_datasets]]
 binding = "EVENT_ANALYTICS"
 dataset = "insightflare_event_facts"
+
+[[analytics_engine_datasets]]
+binding = "INVOCATION_METRICS"
+dataset = "insightflare_invocation_metrics"

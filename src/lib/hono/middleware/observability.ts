@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from "hono";
 
+import { registerInvocationMetrics } from "@/lib/edge/analytics-engine/invocation-writer";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";
 import {
   createInvocationLogger,
@@ -8,6 +9,7 @@ import {
   type InvocationDataSource,
   runWithInvocationLogger,
 } from "@/lib/edge/observability/logger";
+import { isInternalPageRequest } from "@/lib/hono/internal-page-dispatch";
 import type { AppEnv } from "@/lib/hono/types";
 import { getRequestId } from "@/lib/response";
 function parseCacheState(
@@ -39,7 +41,7 @@ export function observabilityMiddleware(): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     // Page routing can internally dispatch to Hono. That is not an external
     // Worker request, so its outer page invocation owns the single record.
-    if (c.req.header("x-insightflare-internal-page-request") === "1") {
+    if (isInternalPageRequest(c.req.raw)) {
       await next();
       return;
     }
@@ -49,6 +51,7 @@ export function observabilityMiddleware(): MiddlewareHandler<AppEnv> {
       traceId: c.get("requestId") || getRequestId(c.req.raw),
       waitUntil: (work) => c.executionCtx?.waitUntil(work),
     });
+    registerInvocationMetrics(c.env, logger);
     c.set("observabilityLogger", logger);
     c.env = instrumentEnv(c.env, logger);
     logger.info("request.started");
@@ -71,6 +74,11 @@ export function observabilityMiddleware(): MiddlewareHandler<AppEnv> {
       );
       const dataSource = parseDataSource(
         response?.headers.get("x-insightflare-data-source") ?? null,
+      );
+      logger.setRouteKey(
+        c.req.routePath && c.req.routePath !== "*"
+          ? `api:${c.req.routePath}`
+          : "api.other",
       );
       logger.setRequest({
         route: routeForLog(c.req.routePath),
