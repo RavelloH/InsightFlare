@@ -2158,7 +2158,10 @@ describe("IngestDurableObject", () => {
     // records both a D1 failure and a typed local flush failure, exactly once.
     expect(points[1].indexes).toEqual(["do.flush:failure"]);
     expect(points[1].blobs[11]).toBe("d1_operation_failed");
-    expect(points[1].blobs[17]).toContain("do_flush_visit_batch_failed");
+    expect(JSON.parse(points[1].blobs[18]).signals).toContainEqual({
+      code: "do_flush_visit_batch_failed",
+      category: "database",
+    });
     expect(ctx.d1.batch).toHaveBeenCalledTimes(2);
     expect(
       ctx.d1.all<{ visit_id: string }>(

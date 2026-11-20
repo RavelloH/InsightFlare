@@ -2,9 +2,9 @@ import type { InvocationLogger } from "@/lib/edge/observability/logger";
 
 import type { SafeFilterShape } from "./filter-shape";
 import {
-  type TrustedQueryIdentity,
   QUERY_REGISTRY,
   QUERY_VARIANTS,
+  type TrustedQueryIdentity,
   UNKNOWN_QUERY_ID,
   verifiedQueryIdentity,
 } from "./query-registry";
