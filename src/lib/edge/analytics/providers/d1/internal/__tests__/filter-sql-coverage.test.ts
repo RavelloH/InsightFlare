@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 
+import { registerComparisonQueryProviders } from "@/lib/edge/analytics/composition/comparison-query-providers";
+import { createComparisonRuntime } from "@/lib/edge/analytics/composition/comparison-runtime";
+import { createD1SiteProviderRegistry } from "@/lib/edge/analytics/composition/d1/create-site-runtime";
+import { createD1TeamProviderRegistry } from "@/lib/edge/analytics/composition/d1/create-team-runtime";
 import {
   attachScopedFilterMetadata,
   createQueryTime,
@@ -176,5 +180,33 @@ describe("P3–P5 full legal advanced AST SQL compile coverage", () => {
     expect(compiled.ctes).toContain("scope_final_events");
     expect(compiled.ctes).not.toContain("scope_advanced_matching_entities");
     expect(compiled.bindings.length).toBeGreaterThanOrEqual(6);
+  });
+});
+
+describe("P5 actual production provider wiring for every declared scoped operation", () => {
+  it("registers every implemented scoped consumer and explicitly excludes missing Explore", () => {
+    const env = { DB: {} } as never;
+    const site = createD1SiteProviderRegistry({ env, siteId: "site-a" });
+    registerComparisonQueryProviders(
+      site,
+      createComparisonRuntime({ env, siteId: "site-a" }),
+    );
+    const team = createD1TeamProviderRegistry({ env });
+    const scoped = Object.entries(FILTER_SCOPE_CAPABILITIES)
+      .filter(([, capability]) => capability.kind === "scoped")
+      .map(([operation]) => operation);
+    expect(scoped).toHaveLength(35);
+    expect(site.resolve("explore")).toBeUndefined();
+    expect(team.resolve("explore")).toBeUndefined();
+    for (const operation of scoped.filter(
+      (name) => !["explore", "team-dashboard"].includes(name),
+    )) {
+      expect(
+        site.resolve(operation as never) ?? team.resolve(operation as never),
+        "Missing actual D1 production provider for " + operation,
+      ).toBeDefined();
+    }
+    // Team dashboard is composed through the private SSR query runtime,
+    // not through a synthetic D1 site/team API v1 provider.
   });
 });
