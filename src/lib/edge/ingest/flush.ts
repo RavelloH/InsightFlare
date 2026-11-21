@@ -1,4 +1,5 @@
 import { createDatabaseRuntime, type DatabaseStatement } from "@/lib/db";
+import { runWithQueryIdentity } from "@/lib/edge/analytics-engine/query-registry";
 import type { TrafficVisitSnapshot } from "@/lib/edge/analytics-engine/traffic-writer";
 import { clampString } from "@/lib/edge/utils";
 
@@ -357,7 +358,10 @@ export async function flushPendingToD1(
           return prepareVisitStatements(row, sitePk);
         });
         const preparedVisits = preparedVisitGroups.flat();
-        await createDatabaseRuntime(context.env.DB).batch(preparedVisits);
+        await runWithQueryIdentity(
+          { id: "ingest.flush.visits", variant: "batch" },
+          () => createDatabaseRuntime(context.env.DB).batch(preparedVisits),
+        );
         recordFlushCounter(context, "flushedVisits", visitRows.length);
         markVisitRowsFlushed(context, visitRows);
       } catch (error) {
@@ -1022,8 +1026,12 @@ async function flushVisitRowIndividually(
 ): Promise<void> {
   try {
     const sitePk = await resolveSitePk(context, row.siteId);
-    await createDatabaseRuntime(context.env.DB).batch(
-      prepareVisitStatements(row, sitePk),
+    await runWithQueryIdentity(
+      { id: "ingest.flush.visits", variant: "batch" },
+      () =>
+        createDatabaseRuntime(context.env.DB).batch(
+          prepareVisitStatements(row, sitePk),
+        ),
     );
     recordFlushCounter(context, "flushedVisits");
     markVisitRowsFlushed(context, [row]);

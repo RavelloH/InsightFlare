@@ -1,4 +1,8 @@
 import { createDatabaseRuntime, type DatabaseStatement } from "@/lib/db";
+import {
+  runWithQueryIdentity,
+  runWithStaticSqlTemplate,
+} from "@/lib/edge/analytics-engine/query-registry";
 import { clampString } from "@/lib/edge/utils";
 
 import { FLUSHED_BUFFER_RETENTION_MS } from "./constants";
@@ -53,7 +57,10 @@ export async function flushCustomEventRowIndividually(
       ids,
       sitePk,
     );
-    await createDatabaseRuntime(context.env.DB).batch(statements);
+    await runWithQueryIdentity(
+      { id: "ingest.flush.custom_events", variant: "batch" },
+      () => createDatabaseRuntime(context.env.DB).batch(statements),
+    );
     if (!(await hasPersistedCustomEvent(context, row.eventId))) {
       context.observability?.warn("do.flush.custom_event_insert_not_confirmed");
       markCustomEventRowsFailed(context, [row], "insert_did_not_create_event");
@@ -184,30 +191,37 @@ async function resolveDictionaryId(
   if (cached !== undefined) return cached;
 
   const spec = dictionarySql(kind);
-  await createDatabaseRuntime(context.env.DB).run({
-    sql: `
+  await runWithStaticSqlTemplate(
+    { id: `ingest.dictionary.${kind}.upsert`, variant: "raw.unfiltered" },
+    () =>
+      createDatabaseRuntime(context.env.DB).run({
+        sql: `
       INSERT INTO ${spec.table} (site_id, site_pk, ${spec.column}, created_at, last_seen_at)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(site_pk, ${spec.column}) DO UPDATE SET
         last_seen_at = excluded.last_seen_at
     `,
-    bindings: [siteId, sitePk, value, seenAt, seenAt],
-    tag: `ingest.dictionary.${kind}.upsert`,
-  });
+        bindings: [siteId, sitePk, value, seenAt, seenAt],
+        tag: `ingest.dictionary.${kind}.upsert`,
+      }),
+  );
 
-  const row = await createDatabaseRuntime(context.env.DB).first<{ id: number }>(
-    {
-      sql: `
+  // Bounded lookup: all() exposes D1 meta without another SQL round trip.
+  const result = await runWithStaticSqlTemplate(
+    { id: `ingest.dictionary.${kind}.lookup`, variant: "raw.unfiltered" },
+    () =>
+      createDatabaseRuntime(context.env.DB).all<{ id: number }>({
+        sql: `
       SELECT id
       FROM ${spec.table}
       WHERE site_pk = ? AND ${spec.column} = ?
       LIMIT 1
     `,
-      bindings: [sitePk, value],
-      tag: `ingest.dictionary.${kind}.first`,
-    },
+        bindings: [sitePk, value],
+        tag: `ingest.dictionary.${kind}.first`,
+      }),
   );
-  const id = Number(row?.id ?? 0);
+  const id = Number(result.results[0]?.id ?? 0);
   if (!Number.isFinite(id) || id <= 0) {
     throw new Error(`Failed to resolve custom event ${kind} dictionary id`);
   }
@@ -268,37 +282,41 @@ async function hasPersistedVisit(
   sitePk: number,
   visitId: string,
 ): Promise<boolean> {
-  const persisted = await createDatabaseRuntime(context.env.DB).first<{
-    ok: number;
-  }>({
-    sql: `
+  const result = await runWithStaticSqlTemplate(
+    { id: "ingest.visits.confirm_persisted", variant: "raw.unfiltered" },
+    () =>
+      createDatabaseRuntime(context.env.DB).all<{ ok: number }>({
+        sql: `
       SELECT 1 AS ok
       FROM visits
       WHERE site_pk = ? AND visit_id = ?
       LIMIT 1
     `,
-    bindings: [sitePk, visitId],
-    tag: "ingest.visits.confirm_persisted",
-  });
-  return persisted !== null;
+        bindings: [sitePk, visitId],
+        tag: "ingest.visits.confirm_persisted",
+      }),
+  );
+  return result.results.length > 0;
 }
 async function hasPersistedCustomEvent(
   context: IngestFlushContext,
   eventId: string,
 ): Promise<boolean> {
-  const persisted = await createDatabaseRuntime(context.env.DB).first<{
-    ok: number;
-  }>({
-    sql: `
+  const result = await runWithStaticSqlTemplate(
+    { id: "ingest.custom_events.confirm_persisted", variant: "raw.unfiltered" },
+    () =>
+      createDatabaseRuntime(context.env.DB).all<{ ok: number }>({
+        sql: `
       SELECT 1 AS ok
       FROM custom_events
       WHERE event_id = ?
       LIMIT 1
     `,
-    bindings: [eventId],
-    tag: "ingest.custom_events.confirm_persisted",
-  });
-  return persisted !== null;
+        bindings: [eventId],
+        tag: "ingest.custom_events.confirm_persisted",
+      }),
+  );
+  return result.results.length > 0;
 }
 function prepareCustomEventStatements(
   row: BufferedCustomEventRow,

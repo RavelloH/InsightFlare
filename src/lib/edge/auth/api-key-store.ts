@@ -16,6 +16,7 @@ import {
   update,
 } from "@/lib/db";
 import { schema } from "@/lib/db/schema";
+import { runWithStaticSqlTemplate } from "@/lib/edge/analytics-engine/query-registry";
 import type { Env } from "@/lib/edge/types";
 import { clampString, nowEpochSeconds } from "@/lib/edge/utils";
 import { apiKeyHashSecret as resolveApiKeyHashSecret } from "@/lib/secrets";
@@ -333,12 +334,17 @@ export async function getApiKeyById(
   keyId: string,
 ): Promise<ApiKeyRow | null> {
   const apiKeys = apiKeyRows();
-  const row = await database(env).first(
-    compileD1Query(
-      limit(filter(apiKeys, eq(apiKeys.columns.id, param(keyId))), 1),
-      { tag: "auth.api_keys.first" },
-    ),
+  // The query is explicitly limited to one row. D1 all() returns the same
+  // result while preserving meta.rows_read/written for the invocation trace.
+  const query = compileD1Query(
+    limit(filter(apiKeys, eq(apiKeys.columns.id, param(keyId))), 1),
+    { tag: "auth.api_keys.first" },
   );
+  const result = await runWithStaticSqlTemplate(
+    { id: "auth.api_keys.lookup_by_id", variant: "raw.unfiltered" },
+    () => database(env).all(query),
+  );
+  const row = result.results[0];
   if (!row) return null;
   return requireApiKeyRow(row);
 }
@@ -348,12 +354,15 @@ export async function getApiKeyByPrefix(
   prefix: string,
 ): Promise<ApiKeyRow | null> {
   const apiKeys = apiKeyRows();
-  const row = await database(env).first(
-    compileD1Query(
-      limit(filter(apiKeys, eq(apiKeys.columns.key_prefix, param(prefix))), 1),
-      { tag: "auth.api_keys.first" },
-    ),
+  const query = compileD1Query(
+    limit(filter(apiKeys, eq(apiKeys.columns.key_prefix, param(prefix))), 1),
+    { tag: "auth.api_keys.first" },
   );
+  const result = await runWithStaticSqlTemplate(
+    { id: "auth.api_keys.lookup_by_prefix", variant: "raw.unfiltered" },
+    () => database(env).all(query),
+  );
+  const row = result.results[0];
   if (!row) return null;
   return requireApiKeyRow(row);
 }

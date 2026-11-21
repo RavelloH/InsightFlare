@@ -35,7 +35,15 @@ function createMockEnv(
             return this;
           }),
           first: vi.fn(async () => matchFirst ?? null),
-          all: vi.fn(async () => ({ results: matchAll ?? [] })),
+          all: vi.fn(async () => ({
+            results: matchAll ?? (matchFirst ? [matchFirst] : []),
+            meta: {
+              rows_read: 1,
+              rows_written: 0,
+              timings: { sql_duration_ms: 0.25 },
+              total_attempts: 1,
+            },
+          })),
           run: vi.fn(async () => ({ success: true })),
         };
         return stmt;
@@ -305,6 +313,9 @@ describe("DB operations", () => {
     const row = await getApiKeyByPrefix(envWithRow, "prefix123");
     expect(row).not.toBeNull();
     expect(envWithRow.DB.prepare).toHaveBeenCalledTimes(1);
+    const statement = vi.mocked(envWithRow.DB.prepare).mock.results[0]?.value;
+    expect(statement.all).toHaveBeenCalledOnce();
+    expect(statement.first).not.toHaveBeenCalled();
 
     const envNull = createMockEnv(null);
     const missing = await getApiKeyByPrefix(envNull, "nope");

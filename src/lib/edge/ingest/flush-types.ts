@@ -1,4 +1,5 @@
 import { createDatabaseRuntime } from "@/lib/db";
+import { runWithStaticSqlTemplate } from "@/lib/edge/analytics-engine/query-registry";
 import type {
   TrafficSessionEndedInput,
   TrafficVisitFinalizedInput,
@@ -36,6 +37,27 @@ export interface IngestFlushContext extends SqlWriter {
   >;
 }
 /**
+ * Every identity lookup returns at most one row. Use D1 all() to retain its
+ * read metadata without executing an additional SQL statement or changing
+ * the query's LIMIT 1 semantics.
+ */
+async function findSitePk(
+  context: IngestFlushContext,
+  siteId: string,
+): Promise<number | null> {
+  const result = await runWithStaticSqlTemplate(
+    { id: "ingest.site_identities.lookup", variant: "raw.unfiltered" },
+    () =>
+      createDatabaseRuntime(context.env.DB).all<{ sitePk: number }>({
+        sql: "SELECT site_pk AS sitePk FROM site_identities WHERE site_id = ? LIMIT 1",
+        bindings: [siteId],
+        tag: "ingest.site_identities.first",
+      }),
+  );
+  return result.results[0]?.sitePk ?? null;
+}
+
+/**
  * Resolve the durable internal site key once per DO lifetime.  The first
  * lookup keeps the common path read-only; INSERT OR IGNORE handles a site
  * whose identity was not present when migration 0039 ran, and the final
@@ -48,33 +70,23 @@ export async function resolveSitePk(
   const cached = context.sitePks.get(siteId);
   if (cached !== undefined) return cached;
 
-  const existing = await createDatabaseRuntime(context.env.DB).first<{
-    sitePk: number;
-  }>({
-    sql: `SELECT site_pk AS sitePk FROM site_identities WHERE site_id = ? LIMIT 1`,
-    bindings: [siteId],
-    tag: "ingest.site_identities.first",
-  });
-  const existingPk = Number(existing?.sitePk ?? 0);
+  const existingPk = Number((await findSitePk(context, siteId)) ?? 0);
   if (Number.isSafeInteger(existingPk) && existingPk > 0) {
     context.sitePks.set(siteId, existingPk);
     return existingPk;
   }
 
-  await createDatabaseRuntime(context.env.DB).run({
-    sql: `INSERT OR IGNORE INTO site_identities (site_id) VALUES (?)`,
-    bindings: [siteId],
-    tag: "ingest.site_identities.insert",
-  });
+  await runWithStaticSqlTemplate(
+    { id: "ingest.site_identities.insert", variant: "raw.unfiltered" },
+    () =>
+      createDatabaseRuntime(context.env.DB).run({
+        sql: "INSERT OR IGNORE INTO site_identities (site_id) VALUES (?)",
+        bindings: [siteId],
+        tag: "ingest.site_identities.insert",
+      }),
+  );
 
-  const created = await createDatabaseRuntime(context.env.DB).first<{
-    sitePk: number;
-  }>({
-    sql: `SELECT site_pk AS sitePk FROM site_identities WHERE site_id = ? LIMIT 1`,
-    bindings: [siteId],
-    tag: "ingest.site_identities.first",
-  });
-  const sitePk = Number(created?.sitePk ?? 0);
+  const sitePk = Number((await findSitePk(context, siteId)) ?? 0);
   if (!Number.isSafeInteger(sitePk) || sitePk <= 0) {
     throw new Error(`Failed to resolve site identity for ${siteId}`);
   }

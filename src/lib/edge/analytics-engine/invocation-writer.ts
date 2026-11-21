@@ -607,6 +607,16 @@ export function encodeInvocationMetricsPointV2(
     0,
   );
   const familyStatements = metrics.queryCount - templateStatements;
+  // Counts cover ALL observed statement groups, not just the six serialized
+  // query details. Missing D1 meta is never silently converted to a zero.
+  const rowsReadObservedStatements = metrics.queries.reduce(
+    (sum, q) => sum + q.readObserved,
+    0,
+  );
+  const rowsWrittenObservedStatements = metrics.queries.reduce(
+    (sum, q) => sum + q.writeObserved,
+    0,
+  );
   const queryGranularity =
     metrics.queryCount === 0
       ? "none"
@@ -630,9 +640,11 @@ export function encodeInvocationMetricsPointV2(
     rankingCoverage:
       metrics.droppedQueries > 0
         ? "truncated"
-        : basis === "unavailable" && metrics.queries.length > 0
-          ? "incomparable"
-          : "complete",
+        : metrics.queries.length === 0
+          ? "unavailable"
+          : basis === "unavailable"
+            ? "incomparable"
+            : "complete",
     phases: phases.slice(0, 6),
     queries: queryDetails,
     ...(metrics.filter ? { filter: metrics.filter } : {}),
@@ -661,6 +673,15 @@ export function encodeInvocationMetricsPointV2(
       queryGranularity,
       templateStatements,
       familyStatements,
+      unknownStatements: metrics.unknownCount,
+      rowsReadObservedStatements,
+      rowsWrittenObservedStatements,
+      // Ranking completeness refers to the candidate comparison, whereas
+      // detail completeness refers only to the serialized top-six subset.
+      queryDetails:
+        metrics.droppedQueries > 0 || candidates.length > chosen.length
+          ? "partial"
+          : "complete",
       filter: metrics.filterAmbiguous
         ? "mixed"
         : metrics.filter
@@ -683,6 +704,7 @@ export function encodeInvocationMetricsPointV2(
   while (size(json) > 4096 && details.queries.length > 0) {
     details.queries.pop();
     details.truncation.queriesDropped++;
+    details.coverage.queryDetails = "partial";
     json = JSON.stringify(details);
   }
   while (size(json) > 4096 && details.phases.length > 0) {

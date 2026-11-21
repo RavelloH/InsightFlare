@@ -116,6 +116,66 @@ const STATIC_SQL_TEMPLATES = [
       "src/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries.ts",
     variants: ["raw.unfiltered"],
   },
+  {
+    id: "auth.api_keys.lookup_by_id",
+    ownerModule: "src/lib/edge/auth/api-key-store.ts",
+    variants: ["raw.unfiltered"],
+  },
+  {
+    id: "auth.api_keys.lookup_by_prefix",
+    ownerModule: "src/lib/edge/auth/api-key-store.ts",
+    variants: ["raw.unfiltered"],
+  },
+  {
+    id: "ingest.site_identities.lookup",
+    ownerModule: "src/lib/edge/ingest/flush-types.ts",
+    variants: ["raw.unfiltered"],
+  },
+  {
+    id: "ingest.site_identities.insert",
+    ownerModule: "src/lib/edge/ingest/flush-types.ts",
+    variants: ["raw.unfiltered"],
+  },
+  {
+    id: "ingest.dictionary.name.upsert",
+    ownerModule: "src/lib/edge/ingest/custom-event-flush.ts",
+    variants: ["raw.unfiltered"],
+  },
+  {
+    id: "ingest.dictionary.name.lookup",
+    ownerModule: "src/lib/edge/ingest/custom-event-flush.ts",
+    variants: ["raw.unfiltered"],
+  },
+  {
+    id: "ingest.dictionary.key.upsert",
+    ownerModule: "src/lib/edge/ingest/custom-event-flush.ts",
+    variants: ["raw.unfiltered"],
+  },
+  {
+    id: "ingest.dictionary.key.lookup",
+    ownerModule: "src/lib/edge/ingest/custom-event-flush.ts",
+    variants: ["raw.unfiltered"],
+  },
+  {
+    id: "ingest.dictionary.path.upsert",
+    ownerModule: "src/lib/edge/ingest/custom-event-flush.ts",
+    variants: ["raw.unfiltered"],
+  },
+  {
+    id: "ingest.dictionary.path.lookup",
+    ownerModule: "src/lib/edge/ingest/custom-event-flush.ts",
+    variants: ["raw.unfiltered"],
+  },
+  {
+    id: "ingest.visits.confirm_persisted",
+    ownerModule: "src/lib/edge/ingest/custom-event-flush.ts",
+    variants: ["raw.unfiltered"],
+  },
+  {
+    id: "ingest.custom_events.confirm_persisted",
+    ownerModule: "src/lib/edge/ingest/custom-event-flush.ts",
+    variants: ["raw.unfiltered"],
+  },
 ] as const;
 export type StaticSqlTemplateId = (typeof STATIC_SQL_TEMPLATES)[number]["id"];
 
@@ -146,7 +206,7 @@ export const QUERY_REGISTRY: ReadonlyMap<
   string,
   {
     readonly id: string;
-    readonly family: "analytics";
+    readonly family: "analytics" | "auth" | "ingest";
     readonly ownerModule: string;
     readonly baseSqlTemplateRef: string;
     readonly variants: readonly QueryVariant[];
@@ -175,13 +235,29 @@ export const QUERY_REGISTRY: ReadonlyMap<
       granularity: "sql-template" as const,
       variants: template.variants as readonly QueryVariant[],
     })),
+    {
+      id: "ingest.flush.visits",
+      ownerModule: "src/lib/edge/ingest/flush.ts",
+      granularity: "provider-family" as const,
+      variants: ["batch"] as readonly QueryVariant[],
+    },
+    {
+      id: "ingest.flush.custom_events",
+      ownerModule: "src/lib/edge/ingest/custom-event-flush.ts",
+      granularity: "provider-family" as const,
+      variants: ["batch"] as readonly QueryVariant[],
+    },
   ].map(
     ({ id, ownerModule, granularity, variants }) =>
       [
         id,
         Object.freeze({
           id,
-          family: "analytics" as const,
+          family: (id.startsWith("auth.")
+            ? "auth"
+            : id.startsWith("ingest.")
+              ? "ingest"
+              : "analytics") as "analytics" | "auth" | "ingest",
           ownerModule,
           baseSqlTemplateRef: ownerModule,
           variants,

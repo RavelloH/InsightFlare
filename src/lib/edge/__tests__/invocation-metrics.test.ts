@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { HotspotCollector } from "@/lib/edge/analytics-engine/hotspot-collector";
 import {
   INV_COVERAGE_SHIFT,
   INV_FLAG_HANDLER_PRESENT,
@@ -19,8 +20,14 @@ import {
 } from "@/lib/edge/analytics-engine/invocation-schema-v2";
 import {
   encodeInvocationMetricsPoint,
+  encodeInvocationMetricsPointV2,
   registerInvocationMetrics,
 } from "@/lib/edge/analytics-engine/invocation-writer";
+import { getApiKeyByPrefix } from "@/lib/edge/auth/api-key-store";
+import {
+  type IngestFlushContext,
+  resolveSitePk,
+} from "@/lib/edge/ingest/flush-types";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";
 import {
   createInvocationLogger,
@@ -209,6 +216,167 @@ describe("AE invocation recording v1 compatibility and v2 production", () => {
     expect(readInvocationCoverageFlag(result.doubles[18], "rowsWritten")).toBe(
       "complete",
     );
+  });
+
+  it("records bounded API key lookup D1 meta and a trusted query template in one SQL call", async () => {
+    const f = fixture();
+    const row = {
+      id: "key-1",
+      team_id: "team-1",
+      name: "Internal test",
+      key_prefix: "safe-prefix",
+      key_hash: "test-hash",
+      scopes_json: "[]",
+      site_ids_json: "[]",
+      created_by_user_id: null,
+      expires_at: null,
+      revoked_at: null,
+      revoked_by_user_id: null,
+      rotated_from_key_id: null,
+      last_used_at: null,
+      created_at: 1,
+      updated_at: 1,
+    };
+    const statement = {
+      bind: vi.fn((..._bindings: unknown[]) => statement),
+      all: vi.fn(async () => ({
+        results: [row],
+        meta: {
+          rows_read: 7,
+          rows_written: 0,
+          total_attempts: 1,
+          timings: { sql_duration_ms: 0.375 },
+        },
+      })),
+      first: vi.fn(async () => row),
+    };
+    const prepare = vi.fn(() => statement);
+    f.env.DB = { prepare } as unknown as D1Database;
+    registerInvocationMetrics(f.env, f.logger);
+    const found = await getApiKeyByPrefix(
+      instrumentEnv(f.env, f.logger),
+      "safe-prefix",
+    );
+    expect(found?.id).toBe(row.id);
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(statement.all).toHaveBeenCalledOnce();
+    expect(statement.first).not.toHaveBeenCalled();
+    await f.emit();
+    expect(f.written).toHaveLength(1);
+    const point = f.written[0];
+    expect(point.doubles[3]).toBe(1);
+    expect(point.doubles[5]).toBe(7);
+    expect(point.doubles[6]).toBe(0);
+    expect(v2CoverageFlag(point.doubles[18], "d1RowsRead")).toBe("complete");
+    expect(v2CoverageFlag(point.doubles[18], "d1RowsWritten")).toBe("complete");
+    const detail = JSON.parse(point.blobs[18]) as {
+      queries: Array<{ id: string; granularity: string }>;
+      coverage: { unknownStatements: number };
+    };
+    expect(detail.queries[0]?.id).toBe("auth.api_keys.lookup_by_prefix");
+    expect(detail.queries[0]?.granularity).toBe("sql-template");
+    expect(detail.coverage.unknownStatements).toBe(0);
+  });
+
+  it("resolves DO site identities with D1 meta, without a second lookup", async () => {
+    const f = fixture("do", "alarm");
+    const statement = {
+      bind: vi.fn((..._bindings: unknown[]) => statement),
+      all: vi.fn(async () => ({
+        results: [{ sitePk: 12 }],
+        meta: {
+          rows_read: 3,
+          rows_written: 0,
+          total_attempts: 1,
+          timings: { sql_duration_ms: 0.12 },
+        },
+      })),
+    };
+    const prepare = vi.fn(() => statement);
+    f.env.DB = { prepare } as unknown as D1Database;
+    registerInvocationMetrics(f.env, f.logger);
+    const context = {
+      env: instrumentEnv(f.env, f.logger),
+      sitePks: new Map<string, number>(),
+    } as unknown as IngestFlushContext;
+    expect(await resolveSitePk(context, "site-1")).toBe(12);
+    expect(await resolveSitePk(context, "site-1")).toBe(12);
+    expect(prepare).toHaveBeenCalledOnce();
+    await f.emit();
+    const point = f.written[0];
+    expect(point.doubles[3]).toBe(1);
+    expect(point.doubles[5]).toBe(3);
+    expect(v2CoverageFlag(point.doubles[18], "d1RowsRead")).toBe("complete");
+    const detail = JSON.parse(point.blobs[18]) as {
+      queries: Array<{ id: string }>;
+    };
+    expect(detail.queries[0]?.id).toBe("ingest.site_identities.lookup");
+  });
+
+  it("distinguishes complete ranking from omitted query detail and unknown read coverage", () => {
+    const f = fixture();
+    const collector = new HotspotCollector();
+    const ids = [
+      "auth.api_keys.lookup_by_prefix",
+      "auth.api_keys.lookup_by_id",
+      "ingest.site_identities.lookup",
+      "ingest.site_identities.insert",
+      "ingest.dictionary.name.lookup",
+      "ingest.dictionary.name.upsert",
+      "ingest.dictionary.key.lookup",
+      "ingest.dictionary.key.upsert",
+    ];
+    ids.forEach((id, index) =>
+      collector.record({
+        identity: { id, variant: "raw.unfiltered" },
+        apiWallMs: index + 1,
+        rowsRead: index + 2,
+        rowsWritten: 0,
+        sqlEngineMs: 0.25,
+        attempts: 1,
+      }),
+    );
+    const point = encodeInvocationMetricsPointV2(
+      f.logger.snapshot(),
+      collector.snapshot(),
+    );
+    const detail = JSON.parse(point.blobs[18]) as {
+      rankingCoverage: string;
+      queries: Array<{ id: string }>;
+      coverage: {
+        queryDetails: string;
+        rowsReadObservedStatements: number;
+        rowsWrittenObservedStatements: number;
+        unknownStatements: number;
+      };
+      truncation: { queriesDropped: number };
+    };
+    expect(detail.rankingCoverage).toBe("complete");
+    expect(detail.coverage.queryDetails).toBe("partial");
+    expect(detail.queries).toHaveLength(6);
+    expect(detail.truncation.queriesDropped).toBe(2);
+    expect(detail.coverage.rowsReadObservedStatements).toBe(8);
+    expect(detail.coverage.rowsWrittenObservedStatements).toBe(8);
+    expect(detail.coverage.unknownStatements).toBe(0);
+    expect(v2BooleanFlag(point.doubles[18], "detailsTruncated")).toBe(true);
+
+    const missing = new HotspotCollector();
+    missing.record({ identity: undefined });
+    const unknown = encodeInvocationMetricsPointV2(
+      f.logger.snapshot(),
+      missing.snapshot(),
+    );
+    const unknownDetails = JSON.parse(unknown.blobs[18]) as {
+      rankingCoverage: string;
+      coverage: {
+        unknownStatements: number;
+        rowsReadObservedStatements: number;
+      };
+    };
+    expect(unknownDetails.rankingCoverage).toBe("incomparable");
+    expect(unknownDetails.coverage.unknownStatements).toBe(1);
+    expect(unknownDetails.coverage.rowsReadObservedStatements).toBe(0);
+    expect(v2BooleanFlag(unknown.doubles[18], "scanQueryPresent")).toBe(false);
   });
 
   it("keeps HTTP 200 internal D1 failure and multiple errors on a single point", async () => {
