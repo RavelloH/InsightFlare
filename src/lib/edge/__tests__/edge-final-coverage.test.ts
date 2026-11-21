@@ -303,8 +303,15 @@ describe("edge ingest flush edge coverage", () => {
       .mockResolvedValueOnce({ ok: 1 })
       .mockResolvedValueOnce(null);
     const run = vi.fn().mockResolvedValue({});
+    const all = vi.fn(async () => {
+      const row = await first();
+      return {
+        results: row === null ? [] : [row],
+        meta: { rows_read: 1, rows_written: 0 },
+      };
+    });
     const prepare = vi.fn(() => ({
-      bind: vi.fn(() => ({ first, run })),
+      bind: vi.fn(() => ({ first, all, run })),
     }));
     const context = flushContext() as IngestFlushContext & {
       sqlRun: ReturnType<typeof vi.fn>;

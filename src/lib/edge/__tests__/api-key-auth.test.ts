@@ -26,6 +26,11 @@ function createMockEnv(keyRow?: Record<string, unknown> | null) {
           return this;
         }),
         first: vi.fn(async () => keyRow ?? null),
+        // The production lookup uses bounded all() to preserve D1 metadata.
+        all: vi.fn(async () => ({
+          results: keyRow ? [keyRow] : [],
+          meta: { rows_read: 1, rows_written: 0 },
+        })),
         run: vi.fn(async () => ({ success: true })),
       })),
     } as unknown as D1Database,
