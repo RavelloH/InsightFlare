@@ -99,6 +99,9 @@ export function buildInvocationStatements(
     limit,
     view,
     kind,
+    sampleQueryId,
+    sampleKind,
+    sampleErrorCode,
     interval,
     timeZone,
   } = query;
@@ -173,16 +176,35 @@ export function buildInvocationStatements(
         ),
       ];
       break;
-    case "samples":
+    case "samples": {
+      // blob14 holds the selected hot query, not every query in blob19.
+      // blob17 holds the selected main scan query; AE has no Trace ID.
+      const samplePredicates = [where];
+      if (sampleQueryId) {
+        const matches = (selected: HotspotKind) => {
+          const [slot, , eligible] = HOTSPOTS[selected];
+          return `(blob${slot} = '${sampleQueryId}' AND ${eligible})`;
+        };
+        samplePredicates.push(
+          sampleKind
+            ? matches(sampleKind)
+            : `(${HOTSPOT_KINDS.map(matches).join(" OR ")})`,
+        );
+      }
+      if (sampleErrorCode)
+        samplePredicates.push(`blob12 = '${sampleErrorCode}'`);
+      const sampleWhere = samplePredicates.join(" AND ");
       statements = [
         statement(
           "samples",
           `toUnixTimestamp(timestamp) AS timestampSeconds, ${dimensions}, blob6 AS resultClass, blob11 AS category, blob12 AS code, blob13 AS operation, blob14 AS hotQueryId, blob15 AS variant, blob16 AS filterShape, blob17 AS scanQueryId, blob18 AS dominantPhase, substring(blob19, 1, 4097) AS details, blob20 AS filterFamily, ${weight} AS sampleInterval, double1 AS invocationWallMs, double2 AS handlerWallMs, double18 AS httpStatus, double19 AS flags`,
           limit,
           "ORDER BY timestamp DESC",
+          sampleWhere,
         ),
       ];
       break;
+    }
     case "hotspots":
       statements = [
         statement("summary", count, 1),

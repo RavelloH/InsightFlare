@@ -1,4 +1,8 @@
 import { normalizeTimeZone } from "@/lib/analytics/time-zone";
+import {
+  QUERY_REGISTRY,
+  UNKNOWN_QUERY_ID,
+} from "@/lib/edge/analytics-engine/query-registry";
 
 const VIEWS = ["overview", "routes", "hotspots", "errors", "samples"] as const;
 export const HOTSPOT_KINDS = [
@@ -24,6 +28,9 @@ const ALLOWED_PARAMS = new Set([
   "routeKey",
   "appVersion",
   "kind",
+  "sampleQueryId",
+  "sampleKind",
+  "sampleErrorCode",
 ]);
 
 export type InvocationView = (typeof VIEWS)[number];
@@ -68,6 +75,9 @@ export function parseInvocationQuery(params: URLSearchParams, now: number) {
     const trigger = choice("trigger", TRIGGERS);
     const resultClass = choice("resultClass", RESULTS);
     const kind = choice("kind", HOTSPOT_KINDS);
+    const sampleQueryId = read("sampleQueryId", /^[a-z0-9_.-]+$/, 96);
+    const sampleKind = choice("sampleKind", HOTSPOT_KINDS);
+    const sampleErrorCode = read("sampleErrorCode", /^[a-z0-9_]{1,64}$/, 64);
     if (
       !timeZone ||
       to > now ||
@@ -75,7 +85,13 @@ export function parseInvocationQuery(params: URLSearchParams, now: number) {
       to - from > 90 * DAY ||
       limit < 1 ||
       limit > 100 ||
-      (kind && view !== "hotspots")
+      (kind && view !== "hotspots") ||
+      ((sampleQueryId || sampleKind || sampleErrorCode) &&
+        view !== "samples") ||
+      (sampleKind && !sampleQueryId) ||
+      (sampleQueryId !== null &&
+        sampleQueryId !== UNKNOWN_QUERY_ID &&
+        !QUERY_REGISTRY.has(sampleQueryId))
     )
       return null;
     const canonicalZone = new Intl.DateTimeFormat("en", {
@@ -92,6 +108,9 @@ export function parseInvocationQuery(params: URLSearchParams, now: number) {
       routeKey,
       appVersion,
       kind,
+      sampleQueryId,
+      sampleKind,
+      sampleErrorCode,
       limit,
       window: {
         from,

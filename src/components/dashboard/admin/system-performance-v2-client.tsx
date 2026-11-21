@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   LatencyPercentileChart,
   type LatencyPercentileChartPoint,
@@ -23,6 +23,7 @@ import {
   DrawerScrollArea,
   DrawerTitle,
 } from "@insightflare/ui/drawer";
+import { Input } from "@insightflare/ui/input";
 import { MetricSummaryGrid } from "@insightflare/ui/metric-summary-grid";
 import { PageHeading } from "@insightflare/ui/page-heading";
 import {
@@ -46,6 +47,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 
 import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useLiveSearchParams } from "@/lib/dashboard/client/history";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -53,15 +55,24 @@ import type { SystemPerformanceV2Labels } from "@/lib/system-performance-labels"
 import { systemPerformanceLabels } from "@/lib/system-performance-labels";
 
 import { DoDiagnosticV2Panel } from "./system-performance/do-diagnostic-v2";
+import { PerformanceCustomRangeDialog } from "./system-performance/performance-custom-range-dialog";
+import {
+  type PerformanceKind,
+  type PerformanceTab,
+  performanceWindow,
+  readPerformanceState,
+  updatePerformanceUrl,
+  VERSION_PATTERN,
+} from "./system-performance/performance-url-state";
 
-type View = "overview" | "hotspots" | "errors" | "do";
-type DoView = "live" | "history";
-type HotKind = "api-hot" | "sql-engine-fallback" | "scan";
+type View = PerformanceTab;
+type HotKind = PerformanceKind;
 type Metric = {
   value: number | null;
   validity?: string;
   coverage?: string;
   observed?: number | null;
+  lowerBound?: boolean;
 };
 type Row = Record<string, unknown>;
 type Result = {
@@ -117,6 +128,7 @@ function metric(input: unknown): Metric {
       coverage: typeof input.coverage === "string" ? input.coverage : undefined,
       validity: typeof input.validity === "string" ? input.validity : undefined,
       observed: numeric(input.observed),
+      lowerBound: input.lowerBound === true,
     };
   return { value: numeric(input) };
 }
@@ -150,7 +162,20 @@ function formatMetric(locale: Locale, item: Metric, suffix = ""): string {
     item.validity === "not_applicable" ||
     item.coverage === "unavailable"
     ? "—"
-    : formatNumber(locale, item.value, suffix);
+    : `${item.lowerBound && item.value !== null ? "≥" : ""}${formatNumber(locale, item.value, suffix)}`;
+}
+function formatObservedCost(
+  locale: Locale,
+  value: unknown,
+  coverage: unknown,
+  suffix = "",
+) {
+  if (coverage === "unavailable") return "—";
+  const observed = numeric(value);
+  return observed === null
+    ? "—"
+    : (coverage === "partial" ? "≥" : "") +
+        formatNumber(locale, observed, suffix);
 }
 function dataStatusLabel(
   copy: SystemPerformanceV2Labels,
@@ -205,14 +230,36 @@ export function SystemPerformanceV2Client({
 }) {
   const copy = systemPerformanceLabels(locale);
   const { timeZone } = useDashboardQueryControls();
-  const [view, setView] = useState<View>("overview");
-  const [doView, setDoView] = useState<DoView>("live");
-  const [rangeHours, setRangeHours] = useState<number>(24);
-  const [source, setSource] = useState<"all" | "worker" | "do">("all");
-  const [kind, setKind] = useState<HotKind>("api-hot");
-  const [routeKey, setRouteKey] = useState("");
+  const searchParams = useLiveSearchParams();
+  const state = readPerformanceState(searchParams);
+  const {
+    view,
+    doView,
+    range,
+    source,
+    kind,
+    routeKey,
+    appVersion,
+    sampleQueryId,
+    sampleKind,
+    sampleErrorCode,
+    sampleResult,
+    sampleTrigger,
+  } = state;
   const [refreshId, setRefreshId] = useState(0);
+  const [versionDraft, setVersionDraft] = useState(appVersion);
+  const [customRangeOpen, setCustomRangeOpen] = useState(false);
   const [drawerRow, setDrawerRow] = useState<Row | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  useEffect(() => setVersionDraft(appVersion), [appVersion]);
+  const setView = (next: View) => {
+    updatePerformanceUrl({ perfTab: next });
+    setDrawerOpen(false);
+  };
+  const setKind = (next: HotKind) =>
+    updatePerformanceUrl({ hotspotKind: next });
+  const setRouteKey = (next: string) =>
+    updatePerformanceUrl({ routeKey: next });
 
   const viewParam =
     view === "do" ? "samples" : view === "hotspots" ? "hotspots" : view;
@@ -224,26 +271,41 @@ export function SystemPerformanceV2Client({
       "admin",
       "system-performance-v2",
       viewParam,
-      rangeHours,
+      range,
+      state.customFrom,
+      state.customTo,
       effectiveSource,
+      appVersion,
+      sampleQueryId,
+      sampleKind,
+      sampleErrorCode,
+      sampleResult,
+      sampleTrigger,
       timeZone,
       refreshId,
       routeKey,
       kind,
     ],
     queryFn: ({ signal }) => {
-      const to = Date.now() - 3000;
+      const window = performanceWindow(state);
       return requestAdminService<Result>("system-performance", {
         params: {
           view: viewParam,
           source: effectiveSource,
-          from: to - rangeHours * 60 * 60 * 1000,
-          to,
+          ...window,
           timeZone,
-          interval: rangeHours <= 24 ? "hour" : "day",
-          limit: 50,
-          ...(view === "hotspots"
-            ? { kind, ...(routeKey ? { routeKey } : {}) }
+          limit: view === "overview" ? 100 : 50,
+          ...(routeKey && view !== "do" ? { routeKey } : {}),
+          ...(appVersion ? { appVersion } : {}),
+          ...(view === "hotspots" ? { kind } : {}),
+          ...(view === "samples"
+            ? {
+                ...(sampleQueryId ? { sampleQueryId } : {}),
+                ...(sampleQueryId && sampleKind ? { sampleKind } : {}),
+                ...(sampleErrorCode ? { sampleErrorCode } : {}),
+                ...(sampleResult ? { resultClass: sampleResult } : {}),
+                ...(sampleTrigger ? { trigger: sampleTrigger } : {}),
+              }
             : {}),
         },
         signal,
@@ -258,21 +320,25 @@ export function SystemPerformanceV2Client({
       "admin",
       "system-performance-v2",
       "routes",
-      rangeHours,
+      range,
+      state.customFrom,
+      state.customTo,
       source,
+      appVersion,
+      routeKey,
       timeZone,
       refreshId,
     ],
     queryFn: ({ signal }) => {
-      const to = Date.now() - 3000;
       return requestAdminService<Result>("system-performance", {
         params: {
           view: "routes",
           source,
-          from: to - rangeHours * 60 * 60 * 1000,
-          to,
+          ...performanceWindow(state),
           timeZone,
           limit: 50,
+          ...(appVersion ? { appVersion } : {}),
+          ...(routeKey ? { routeKey } : {}),
         },
         signal,
       });
@@ -374,16 +440,51 @@ export function SystemPerformanceV2Client({
       icon: <RiErrorWarningLine className="size-4" />,
     },
     { id: "do", label: copy.do, icon: <RiHistoryLine className="size-4" /> },
+    {
+      id: "samples",
+      label: copy.showSamples,
+      icon: <RiDatabase2Line className="size-4" />,
+    },
   ];
 
+  function openDrawer(row: Row) {
+    setDrawerRow(row);
+    setDrawerOpen(true);
+  }
+  function openSamplesFrom(row: Row, origin: "routes" | "hotspots" | "errors") {
+    const rowSource =
+      row.source === "worker" || row.source === "do" ? row.source : source;
+    const rowRoute = textValue(row.routeKey, "");
+    const rowVersion = textValue(row.appVersion, "");
+    updatePerformanceUrl({
+      perfTab: "samples",
+      perfSource: rowSource,
+      routeKey: rowRoute,
+      appVersion: VERSION_PATTERN.test(rowVersion) ? rowVersion : appVersion,
+      sampleQueryId:
+        origin === "hotspots"
+          ? textValue(row.queryId || row.hotQueryId, "")
+          : null,
+      sampleKind: origin === "hotspots" ? kind : null,
+      sampleErrorCode: origin === "errors" ? textValue(row.code, "") : null,
+      sampleResult: origin === "errors" ? textValue(row.resultClass, "") : null,
+      sampleTrigger: textValue(row.trigger, ""),
+    });
+    setDrawerOpen(false);
+  }
   function showRow(row: Row) {
     if (view === "overview") {
       const candidate = textValue(row.routeKey, "");
+      const version = textValue(row.appVersion, "");
       if (candidate) {
-        setRouteKey(candidate);
-        setView("hotspots");
+        updatePerformanceUrl({
+          perfTab: "hotspots",
+          routeKey: candidate,
+          appVersion: VERSION_PATTERN.test(version) ? version : appVersion,
+        });
+        setDrawerOpen(false);
       }
-    } else setDrawerRow(row);
+    } else openDrawer(row);
   }
 
   return (
@@ -394,22 +495,35 @@ export function SystemPerformanceV2Client({
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Select
-              value={String(rangeHours)}
-              onValueChange={(value) => setRangeHours(Number(value))}
+              value={range}
+              onValueChange={(value) => {
+                if (value === "custom") setCustomRangeOpen(true);
+                else
+                  updatePerformanceUrl({
+                    perfRange: value,
+                    perfFrom: null,
+                    perfTo: null,
+                  });
+              }}
             >
-              <SelectTrigger className="w-36">
+              <SelectTrigger className="w-36" aria-label={copy.window}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="24">{copy.last24h}</SelectItem>
-                <SelectItem value="168">{copy.last7d}</SelectItem>
-                <SelectItem value="720">{copy.last30d}</SelectItem>
+                <SelectItem value="1h">{copy.last1h}</SelectItem>
+                <SelectItem value="6h">{copy.last6h}</SelectItem>
+                <SelectItem value="24h">{copy.last24h}</SelectItem>
+                <SelectItem value="7d">{copy.last7d}</SelectItem>
+                <SelectItem value="30d">{copy.last30d}</SelectItem>
+                <SelectItem value="custom">{copy.customRange}</SelectItem>
               </SelectContent>
             </Select>
             {view !== "do" ? (
               <Select
                 value={source}
-                onValueChange={(value) => setSource(value as typeof source)}
+                onValueChange={(value) =>
+                  updatePerformanceUrl({ perfSource: value })
+                }
               >
                 <SelectTrigger className="w-32">
                   <SelectValue />
@@ -420,6 +534,49 @@ export function SystemPerformanceV2Client({
                   <SelectItem value="do">{copy.doSource}</SelectItem>
                 </SelectContent>
               </Select>
+            ) : null}
+            {view !== "do" ? (
+              <form
+                className="flex items-center gap-1"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const value = versionDraft.trim();
+                  if (
+                    value &&
+                    (value.length > 61 || !VERSION_PATTERN.test(value))
+                  )
+                    return;
+                  updatePerformanceUrl({ appVersion: value });
+                }}
+              >
+                <Input
+                  aria-label={copy.appVersion}
+                  className="w-44"
+                  value={versionDraft}
+                  maxLength={61}
+                  placeholder={copy.versionPlaceholder}
+                  onChange={(event) => setVersionDraft(event.target.value)}
+                />
+                <Button
+                  type="submit"
+                  variant="outline"
+                  disabled={
+                    Boolean(versionDraft.trim()) &&
+                    !VERSION_PATTERN.test(versionDraft.trim())
+                  }
+                >
+                  {copy.applyVersion}
+                </Button>
+                {appVersion ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => updatePerformanceUrl({ appVersion: null })}
+                  >
+                    {copy.clearVersion}
+                  </Button>
+                ) : null}
+              </form>
             ) : null}
             <Button
               variant="outline"
@@ -436,6 +593,21 @@ export function SystemPerformanceV2Client({
           </div>
         }
       />
+      <PerformanceCustomRangeDialog
+        open={customRangeOpen}
+        onOpenChange={setCustomRangeOpen}
+        from={state.customFrom}
+        to={state.customTo}
+        timeZone={timeZone}
+        copy={copy}
+        onApply={(from, to) =>
+          updatePerformanceUrl({
+            perfRange: "custom",
+            perfFrom: String(from),
+            perfTo: String(to),
+          })
+        }
+      />
 
       <nav
         aria-label={copy.title}
@@ -449,7 +621,6 @@ export function SystemPerformanceV2Client({
             aria-pressed={item.id === view}
             onClick={() => {
               setView(item.id);
-              setDrawerRow(null);
             }}
           >
             {item.icon}
@@ -464,7 +635,7 @@ export function SystemPerformanceV2Client({
               <Button
                 key={id}
                 variant={doView === id ? "secondary" : "ghost"}
-                onClick={() => setDoView(id)}
+                onClick={() => updatePerformanceUrl({ perfDoView: id })}
                 aria-pressed={doView === id}
               >
                 {id === "live" ? copy.live : copy.history}
@@ -497,7 +668,7 @@ export function SystemPerformanceV2Client({
                   locale={locale}
                   timeZone={timeZone}
                   copy={copy}
-                  onInspect={setDrawerRow}
+                  onInspect={openDrawer}
                 />
               </CardContent>
             </Card>
@@ -563,6 +734,7 @@ export function SystemPerformanceV2Client({
                         timeZone={timeZone}
                         copy={copy}
                         onInspect={showRow}
+                        onSamples={(row) => openSamplesFrom(row, "routes")}
                       />
                     </CardContent>
                   </Card>
@@ -639,6 +811,7 @@ export function SystemPerformanceV2Client({
                         timeZone={timeZone}
                         copy={copy}
                         onInspect={showRow}
+                        onSamples={(row) => openSamplesFrom(row, "hotspots")}
                       />
                       {!rows.length && (hasData || status === "no_data") ? (
                         <p className="text-sm text-muted-foreground">
@@ -648,6 +821,52 @@ export function SystemPerformanceV2Client({
                     </CardContent>
                   </Card>
                 </>
+              ) : view === "samples" ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>{copy.showSamples}</CardTitle>
+                    <CardDescription>
+                      {copy.sampleInvestigationNote}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <p className="text-sm text-muted-foreground">
+                      {copy.sampleLimitNote}
+                    </p>
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {routeKey ? (
+                        <Badge variant="outline">
+                          {copy.route}: {routeKey}
+                        </Badge>
+                      ) : null}
+                      {appVersion ? (
+                        <Badge variant="outline">
+                          {copy.appVersion}: {appVersion}
+                        </Badge>
+                      ) : null}
+                      {sampleQueryId ? (
+                        <Badge variant="outline">
+                          {copy.queryId}: {sampleQueryId} (
+                          {sampleKind || "selected"})
+                        </Badge>
+                      ) : null}
+                      {sampleErrorCode ? (
+                        <Badge variant="outline">
+                          {copy.errorCode}: {sampleErrorCode}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <RowTable
+                      rows={rows}
+                      mode="samples"
+                      loading={loading}
+                      locale={locale}
+                      timeZone={timeZone}
+                      copy={copy}
+                      onInspect={openDrawer}
+                    />
+                  </CardContent>
+                </Card>
               ) : (
                 <Card>
                   <CardHeader>
@@ -662,6 +881,7 @@ export function SystemPerformanceV2Client({
                       timeZone={timeZone}
                       copy={copy}
                       onInspect={showRow}
+                      onSamples={(row) => openSamplesFrom(row, "errors")}
                     />
                   </CardContent>
                 </Card>
@@ -670,11 +890,7 @@ export function SystemPerformanceV2Client({
           </AutoTransition>
         </AutoResizer>
       )}
-      <Drawer
-        open={drawerRow !== null}
-        onOpenChange={(open) => !open && setDrawerRow(null)}
-        direction="right"
-      >
+      <Drawer open={drawerOpen} onOpenChange={setDrawerOpen} direction="right">
         <DrawerContent
           data-dashboard-floating-layer="system-performance-drawer"
           className="!w-full !max-w-none sm:!w-[min(58vw,34rem)]"
@@ -693,6 +909,31 @@ export function SystemPerformanceV2Client({
             <p className="mb-4 text-sm text-muted-foreground">
               {copy.hotDisclaimer}
             </p>
+            {drawerRow && view !== "samples" && view !== "do" ? (
+              <Button
+                variant="outline"
+                className="mb-4"
+                onClick={() =>
+                  openSamplesFrom(
+                    drawerRow,
+                    view === "hotspots"
+                      ? "hotspots"
+                      : view === "errors"
+                        ? "errors"
+                        : "routes",
+                  )
+                }
+              >
+                {copy.showSamples}
+              </Button>
+            ) : null}
+            {view === "samples" && drawerRow ? (
+              <div className="mb-4 text-sm text-muted-foreground">
+                {copy.sampleWeight}:{" "}
+                {formatNumber(locale, numeric(drawerRow.sampleInterval))}.{" "}
+                {copy.sampleInvestigationNote}
+              </div>
+            ) : null}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {drawerRow
                 ? Object.entries(drawerRow)
@@ -743,15 +984,38 @@ export function SystemPerformanceV2Client({
                     </p>
                     <p>
                       {copy.d1ApiWall}:{" "}
-                      {formatNumber(locale, numeric(item.apiWallMs), " ms")}
+                      {formatObservedCost(
+                        locale,
+                        item.apiWallMs,
+                        asObject(item.coverage).api,
+                        " ms",
+                      )}
                     </p>
                     <p>
                       {copy.d1Engine}:{" "}
-                      {formatNumber(locale, numeric(item.sqlEngineMs), " ms")}
+                      {formatObservedCost(
+                        locale,
+                        item.sqlEngineMs,
+                        asObject(item.coverage).engine,
+                        " ms",
+                      )}
                     </p>
                     <p>
                       {copy.d1Rows}:{" "}
-                      {formatNumber(locale, numeric(item.rowsRead))}
+                      {formatObservedCost(
+                        locale,
+                        item.rowsRead,
+                        asObject(item.coverage).rowsRead,
+                      )}
+                    </p>
+                    <p>
+                      {copy.queryCoverage}:{" "}
+                      {Object.entries(asObject(item.coverage))
+                        .map(([key, value]) => key + "=" + textValue(value))
+                        .join(", ") || copy.unavailable}
+                    </p>
+                    <p>
+                      {copy.granularity}: {textValue(item.granularity)}
                     </p>
                   </div>
                 ))}
@@ -812,6 +1076,7 @@ function RowTable({
   locale,
   timeZone,
   onInspect,
+  onSamples,
   mode,
 }: {
   rows: Row[];
@@ -821,6 +1086,7 @@ function RowTable({
   timeZone: string;
   mode: TableMode;
   onInspect: (row: Row) => void;
+  onSamples?: (row: Row) => void;
 }) {
   const samples = mode === "samples";
   const errors = mode === "errors";
@@ -908,9 +1174,20 @@ function RowTable({
                   : formatNumber(locale, numeric(row.weightedValue))}
           </TableCell>
           <TableCell className="text-right">
-            <Button variant="ghost" size="sm" onClick={() => onInspect(row)}>
-              {copy.inspect}
-            </Button>
+            <div className="flex justify-end gap-1">
+              <Button variant="ghost" size="sm" onClick={() => onInspect(row)}>
+                {copy.inspect}
+              </Button>
+              {onSamples ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onSamples(row)}
+                >
+                  {copy.showSamples}
+                </Button>
+              ) : null}
+            </div>
           </TableCell>
         </TableRow>
       ))}

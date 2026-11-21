@@ -424,7 +424,7 @@ function aggregate(sourceRow: Record<string, unknown>): InvocationAggregate {
   const empty = counts.retainedSamples === 0;
   const handlerWeight = sum(sourceRow, "handlerWeight", empty);
   const percentile = (key: "p50" | "p95" | "p99"): number | null => {
-    if (empty || handlerWeight === 0) return number(sourceRow[key], true);
+    if (empty || handlerWeight <= 0) return null;
     return number(sourceRow[key]) as number;
   };
   const weighted = Object.fromEntries(
