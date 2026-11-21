@@ -71,11 +71,18 @@ jobs:
         with:
           version: 10.33.0
 
+      # Node 24.22.3 bundles SQLite 3.54.1, whose stricter CTE expansion
+      # checks and planner changes currently fail five real D1 query fixtures.
+      # Linux Node 24.17.0 (SQLite 3.53.0) passes all focused regressions.
+      # Pin only the test job until SQL compatibility with 3.54 is fixed.
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 24.17.0
           cache: pnpm
+
+      - name: Report test SQLite version
+        run: node -p 'process.versions.sqlite'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
