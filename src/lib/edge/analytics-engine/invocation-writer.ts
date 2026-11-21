@@ -1,4 +1,5 @@
 import { isAnalyticsEngineDisabled } from "@/lib/edge/analytics-engine/config";
+import { QUERY_REGISTRY } from "@/lib/edge/analytics-engine/query-registry";
 import type {
   InvocationLogger,
   InvocationSafeErrorSignal,
@@ -6,6 +7,10 @@ import type {
 import type { InvocationSnapshot } from "@/lib/edge/observability/snapshot";
 import type { Env } from "@/lib/edge/types";
 
+import {
+  type InvocationHotspots,
+  registerHotspotCollector,
+} from "./hotspot-collector";
 import {
   addInvocationCoverageFlag,
   INV_FLAG_HANDLER_PRESENT,
@@ -16,6 +21,11 @@ import {
   type InvocationMetricsPoint,
   type InvocationResultClass,
 } from "./invocation-schema";
+import {
+  INVOCATION_METRICS_SCHEMA_V2,
+  setV2BooleanFlag,
+  setV2CoverageFlag,
+} from "./invocation-schema-v2";
 
 const encoder = new TextEncoder();
 const MAX_JSON_BYTES = 4_096;
@@ -39,6 +49,12 @@ const SAFE_OPERATIONS = new Set([
   "d1.raw",
   "d1.exec",
   "d1.batch",
+  "do.fetch",
+  "background.drain",
+  "event_type_context",
+  "event_type_detail.overview",
+  "event_type_detail.trend",
+  "event_type_detail.context_cards",
 ]);
 type SafeError = {
   category: "database" | "application" | "infrastructure" | "unknown";
@@ -467,12 +483,321 @@ export function registerInvocationMetrics(
   )
     return;
   installed.add(logger);
+  const collector = registerHotspotCollector(logger);
   const dataset = env.INVOCATION_METRICS;
   logger.onComplete((snapshot) => {
     try {
-      dataset.writeDataPoint(encodeInvocationMetricsPoint(snapshot));
+      dataset.writeDataPoint(
+        encodeInvocationMetricsPointV2(snapshot, collector.snapshot()),
+      );
     } catch {
       // AE is strictly best effort and must not recurse into Workers Logs.
     }
   });
+}
+
+/** Encode v2 from the same trusted v1-safe snapshot, never raw request data. */
+export function encodeInvocationMetricsPointV2(
+  snapshot: InvocationSnapshot,
+  metrics: InvocationHotspots,
+): InvocationMetricsPoint {
+  const v1 = encodeInvocationMetricsPoint(snapshot);
+  const n = (v: number | undefined) =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0;
+  const cov = (
+    observed: number,
+    total: number,
+  ): "unavailable" | "partial" | "complete" =>
+    observed === 0 || total === 0
+      ? "unavailable"
+      : observed === total
+        ? "complete"
+        : "partial";
+  // Never compare an independently measured SQL API wait with a Batch
+  // statement's unmeasured API wait. SQL engine is only a fallback when
+  // ALL candidates lack API wall and ALL have complete engine coverage.
+  const candidatesComplete =
+    metrics.queries.length > 0 && metrics.droppedQueries === 0;
+  const allWall =
+    candidatesComplete &&
+    metrics.queries.every((q) => q.wallObserved === q.count);
+  const allEngineOnly =
+    candidatesComplete &&
+    metrics.queries.every(
+      (q) => q.wallObserved === 0 && q.engineObserved === q.count,
+    );
+  const basis = allWall
+    ? "apiWall"
+    : allEngineOnly
+      ? "sqlEngine"
+      : "unavailable";
+  const hot =
+    basis === "unavailable"
+      ? undefined
+      : [...metrics.queries].sort(
+          (a, b) =>
+            (basis === "apiWall"
+              ? b.apiWallMs - a.apiWallMs
+              : b.sqlEngineMs - a.sqlEngineMs) || a.id.localeCompare(b.id),
+        )[0];
+  const scan =
+    !candidatesComplete ||
+    metrics.queries.some((q) => q.readObserved !== q.count)
+      ? undefined
+      : [...metrics.queries].sort(
+          (a, b) => b.rowsRead - a.rowsRead || a.id.localeCompare(b.id),
+        )[0];
+  const doFetch = snapshot.operations.find((op) => op.name === "do.fetch");
+  const fetchCoverage =
+    snapshot.resources.doCalls === 0 || !doFetch
+      ? "unavailable"
+      : doFetch.count === snapshot.resources.doCalls
+        ? "complete"
+        : "partial";
+  const phases = snapshot.operations
+    .filter((op) => SAFE_OPERATIONS.has(op.name))
+    .map((op) => ({
+      id: op.name,
+      count: n(op.count),
+      wallMs: n(op.cumulativeDurationMs),
+    }));
+  if (snapshot.backgroundDrainMs !== undefined)
+    phases.push({
+      id: "background.drain",
+      count: 1,
+      wallMs: n(snapshot.backgroundDrainMs),
+    });
+  phases.sort((a, b) => b.wallMs - a.wallMs || a.id.localeCompare(b.id));
+  const candidates = [...metrics.queries].sort(
+    (a, b) =>
+      b.apiWallMs - a.apiWallMs ||
+      b.rowsRead - a.rowsRead ||
+      a.id.localeCompare(b.id),
+  );
+  const chosen: typeof candidates = [];
+  for (const q of [hot, scan]) if (q && !chosen.includes(q)) chosen.push(q);
+  for (const q of candidates) {
+    if (chosen.length === 6) break;
+    if (!chosen.includes(q)) chosen.push(q);
+  }
+  const queryDetails = chosen.map((q) => ({
+    id: q.id,
+    variant: q.variant,
+    filterShape: q.filter?.code ?? "",
+    granularity: QUERY_REGISTRY.get(q.id)?.granularity ?? "unknown",
+    count: q.count,
+    apiWallMs: n(q.apiWallMs),
+    sqlEngineMs: n(q.sqlEngineMs),
+    rowsRead: n(q.rowsRead),
+    rowsWritten: n(q.rowsWritten),
+    attempts: n(q.attempts),
+    failed: q.failed,
+    coverage: {
+      api: cov(q.wallObserved, q.count),
+      engine: cov(q.engineObserved, q.count),
+      rowsRead: cov(q.readObserved, q.count),
+      rowsWritten: cov(q.writeObserved, q.count),
+      attempts: cov(q.attemptsObserved, q.count),
+    },
+  }));
+  const templateStatements = metrics.queries.reduce(
+    (sum, q) =>
+      sum +
+      (QUERY_REGISTRY.get(q.id)?.granularity === "sql-template" ? q.count : 0),
+    0,
+  );
+  const familyStatements = metrics.queryCount - templateStatements;
+  const queryGranularity =
+    metrics.queryCount === 0
+      ? "none"
+      : metrics.droppedQueries > 0
+        ? "partial"
+        : templateStatements === metrics.queryCount
+          ? "sql-template"
+          : templateStatements === 0
+            ? "provider-family"
+            : "mixed";
+  // A family-level operation names a useful business family but is NOT proof
+  // that an individual SQL template was identified.
+  const attributionComplete =
+    metrics.unknownCount === 0 &&
+    metrics.droppedQueries === 0 &&
+    metrics.queryCount === snapshot.sql.statements &&
+    templateStatements === metrics.queryCount;
+  const details = {
+    v: 2,
+    hotBasis: hot ? basis : "unavailable",
+    rankingCoverage:
+      metrics.droppedQueries > 0
+        ? "truncated"
+        : basis === "unavailable" && metrics.queries.length > 0
+          ? "incomparable"
+          : "complete",
+    phases: phases.slice(0, 6),
+    queries: queryDetails,
+    ...(metrics.filter ? { filter: metrics.filter } : {}),
+    resources: {
+      externalFetches: n(snapshot.resources.externalFetches),
+      kvOps: n(snapshot.resources.kvOperations),
+      r2Ops: n(snapshot.resources.r2Operations),
+      doSqlStatements: n(snapshot.resources.doSqlStatements),
+      doSqlRowsWritten:
+        snapshot.resources.doSqlRowsWritten.coverage === "unavailable"
+          ? null
+          : n(snapshot.resources.doSqlRowsWritten.value),
+      doSqlRowsWrittenCoverage: snapshot.resources.doSqlRowsWritten.coverage,
+      wsLifetimeMs: snapshot.webSocketConnectionDurationMs ?? null,
+      d1Finished: n(snapshot.sql.finishedStatements),
+      d1Unobserved: n(snapshot.sql.unobservedStatements),
+      d1Settled: n(snapshot.sql.settledOperations),
+      d1Attempts:
+        snapshot.sql.totalAttempts.coverage === "unavailable"
+          ? null
+          : n(snapshot.sql.totalAttempts.value),
+      errorEvents: n(snapshot.errorEvents),
+    },
+    coverage: {
+      query: attributionComplete ? "complete" : "partial",
+      queryGranularity,
+      templateStatements,
+      familyStatements,
+      filter: metrics.filterAmbiguous
+        ? "mixed"
+        : metrics.filter
+          ? "complete"
+          : "unavailable",
+    },
+    signals: trustedSignals(snapshot.safeErrors)
+      .slice(0, 3)
+      .map((s) => ({ code: s.code, category: s.category })),
+    truncation: {
+      queriesDropped:
+        metrics.droppedQueries + Math.max(0, candidates.length - chosen.length),
+      phasesDropped: Math.max(0, phases.length - 6),
+      signalsDropped: Math.max(0, snapshot.safeErrors.length - 3),
+    },
+  };
+  const utf8 = new TextEncoder();
+  const size = (s: string) => utf8.encode(s).length;
+  let json = JSON.stringify(details);
+  while (size(json) > 4096 && details.queries.length > 0) {
+    details.queries.pop();
+    details.truncation.queriesDropped++;
+    json = JSON.stringify(details);
+  }
+  while (size(json) > 4096 && details.phases.length > 0) {
+    details.phases.pop();
+    details.truncation.phasesDropped++;
+    json = JSON.stringify(details);
+  }
+  if (size(json) > 4096) {
+    details.truncation.signalsDropped += details.signals.length;
+    details.signals.length = 0;
+    json = JSON.stringify(details);
+  }
+  if (size(json) > 4096)
+    json =
+      '{"v":2,"truncation":{"queriesDropped":999,"phasesDropped":999,"signalsDropped":999}}';
+  const truncated = Object.values(details.truncation).some(
+    (value) => value > 0,
+  );
+  let flags = 0;
+  for (const [name, present] of [
+    ["handlerPresent", snapshot.handlerDurationMs !== undefined],
+    ["httpStatusPresent", snapshot.status !== undefined],
+    ["backgroundDrainPresent", snapshot.backgroundDrainMs !== undefined],
+    ["doFetchWallPresent", fetchCoverage !== "unavailable"],
+    ["hotQueryPresent", Boolean(hot)],
+    ["hotQueryApiWallPresent", Boolean(hot && hot.wallObserved === hot.count)],
+    ["scanQueryPresent", Boolean(scan)],
+    ["filterPresent", Boolean(metrics.filter)],
+    ["detailsTruncated", truncated],
+    ["queryAttributionComplete", attributionComplete],
+  ] as const)
+    flags = setV2BooleanFlag(flags, name, present);
+  for (const [name, coverage] of [
+    ["d1RowsRead", snapshot.sql.rowsRead.coverage],
+    ["d1RowsWritten", snapshot.sql.rowsWritten.coverage],
+    ["d1SqlEngine", snapshot.sql.cumulativeSqlDurationMs.coverage],
+    ["d1Attempts", snapshot.sql.totalAttempts.coverage],
+    [
+      "d1ApiWall",
+      metrics.d1ApiCallCount === 0
+        ? "unavailable"
+        : metrics.d1ApiCallCount === snapshot.sql.settledOperations
+          ? "complete"
+          : "partial",
+    ],
+    ["doSqlRowsRead", snapshot.resources.doSqlRowsRead.coverage],
+    [
+      "hotQueryEngine",
+      hot ? cov(hot.engineObserved, hot.count) : "unavailable",
+    ],
+    [
+      "hotQueryRowsRead",
+      hot ? cov(hot.readObserved, hot.count) : "unavailable",
+    ],
+    [
+      "scanQueryRowsRead",
+      scan ? cov(scan.readObserved, scan.count) : "unavailable",
+    ],
+    ["doFetchWall", fetchCoverage],
+  ] as const)
+    flags = setV2CoverageFlag(flags, name, coverage);
+
+  const point: InvocationMetricsPoint = {
+    indexes: v1.indexes,
+    blobs: [
+      ...v1.blobs.slice(0, 13),
+      hot?.id ?? "",
+      hot?.variant ?? "",
+      hot?.filter?.code ?? "",
+      scan?.id ?? "",
+      phases[0]?.id ?? "",
+      json,
+      hot?.filter?.family ??
+        (metrics.filterAmbiguous
+          ? "mixed"
+          : (metrics.filter?.family ?? "none")),
+    ],
+    doubles: [
+      n(snapshot.invocationDurationMs),
+      n(snapshot.handlerDurationMs),
+      n(snapshot.backgroundDrainMs),
+      n(snapshot.sql.statements),
+      n(snapshot.sql.failedStatements),
+      snapshot.sql.rowsRead.coverage === "unavailable"
+        ? 0
+        : n(snapshot.sql.rowsRead.value),
+      snapshot.sql.rowsWritten.coverage === "unavailable"
+        ? 0
+        : n(snapshot.sql.rowsWritten.value),
+      snapshot.sql.cumulativeSqlDurationMs.coverage === "unavailable"
+        ? 0
+        : n(snapshot.sql.cumulativeSqlDurationMs.value),
+      n(metrics.d1ApiWallSumMs),
+      snapshot.sql.retries.coverage === "unavailable"
+        ? 0
+        : n(snapshot.sql.retries.value),
+      n(snapshot.resources.doCalls),
+      n(doFetch?.cumulativeDurationMs),
+      snapshot.resources.doSqlRowsRead.coverage === "unavailable"
+        ? 0
+        : n(snapshot.resources.doSqlRowsRead.value),
+      n(hot?.apiWallMs),
+      n(hot && hot.engineObserved ? hot.sqlEngineMs : undefined),
+      n(hot && hot.readObserved ? hot.rowsRead : undefined),
+      n(scan && scan.readObserved ? scan.rowsRead : undefined),
+      n(snapshot.status),
+      flags,
+      INVOCATION_METRICS_SCHEMA_V2,
+    ],
+  };
+  if (
+    point.blobs.length !== 20 ||
+    point.doubles.length !== 20 ||
+    point.blobs.reduce((sum, blob) => sum + size(blob), 0) > 16384
+  )
+    throw new Error("invalid invocation metrics v2 point");
+  return point;
 }

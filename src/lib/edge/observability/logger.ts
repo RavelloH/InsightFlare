@@ -192,6 +192,8 @@ export interface InvocationPerformance {
   externalFetches?: number;
   failedExternalFetches?: number;
   webSocketDurationMs?: number;
+  /** Measured real waiting in emitWhenComplete; never derived by subtraction. */
+  backgroundDrainMs?: number;
   operations?: Record<string, InvocationOperationSummary>;
 }
 
@@ -826,11 +828,17 @@ export function createInvocationLogger(
       return emitted;
     },
     async emitWhenComplete() {
+      const drainStarted = now();
       // Background tasks are registered by the request handler before its
       // middleware unwinds. Capture all of them in this invocation record.
       while (background.size > 0) {
         await Promise.allSettled([...background]);
       }
+      if (!emitted)
+        performance = {
+          ...performance,
+          backgroundDrainMs: Math.max(0, now() - drainStarted),
+        };
       return this.emit();
     },
   };

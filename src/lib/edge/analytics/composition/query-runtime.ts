@@ -7,6 +7,14 @@ import type {
   CanonicalResult,
   QueryOperation,
 } from "@/lib/edge/analytics/contract";
+import { safeFilterShape } from "@/lib/edge/analytics-engine/filter-shape";
+import { currentHotspotCollector } from "@/lib/edge/analytics-engine/hotspot-collector";
+import {
+  registeredProviderQuery,
+  runWithQueryIdentity,
+  setCurrentQueryFilterShape,
+} from "@/lib/edge/analytics-engine/query-registry";
+import { currentInvocationLogger } from "@/lib/edge/observability/logger";
 
 import { createAnalyticsQueryApplicationService } from "./query-application-service";
 
@@ -53,7 +61,32 @@ export function createAnalyticsQueryRuntime(
       const requestService = execution.cacheStore
         ? createAnalyticsQueryApplicationService(execution.cacheStore)
         : service;
-      return requestService.execute(invocation, execution);
+      const collector = currentHotspotCollector(currentInvocationLogger());
+      if (!collector) return requestService.execute(invocation, execution);
+      // Query identity comes from a static typed operation, never request data.
+      // All business validation and scope planning remain inside the service.
+      return runWithQueryIdentity(
+        { id: registeredProviderQuery(operation), variant: "unknown" },
+        () =>
+          requestService.execute(invocation, {
+            ...execution,
+            onPreparedQuery: (prepared) => {
+              try {
+                const shape = safeFilterShape(
+                  prepared.filters ?? { version: 1, root: null },
+                  prepared.scopePlan,
+                );
+                setCurrentQueryFilterShape(shape);
+                // A filter plan does not prove the database chose raw or rollup.
+                // Only actual SQL execution entrypoints may set that variant.
+                collector.setFilter(shape);
+              } catch {
+                // Profiling is isolated from business query execution.
+              }
+              execution.onPreparedQuery?.(prepared);
+            },
+          }),
+      );
     },
   };
   return executor as AnalyticsQueryExecutor;

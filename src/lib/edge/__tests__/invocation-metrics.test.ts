@@ -14,6 +14,10 @@ import {
   readInvocationCoverageFlag,
 } from "@/lib/edge/analytics-engine/invocation-schema";
 import {
+  v2BooleanFlag,
+  v2CoverageFlag,
+} from "@/lib/edge/analytics-engine/invocation-schema-v2";
+import {
   encodeInvocationMetricsPoint,
   registerInvocationMetrics,
 } from "@/lib/edge/analytics-engine/invocation-writer";
@@ -66,7 +70,7 @@ function request(
     outcome,
   });
 }
-describe("AE invocation recording v1", () => {
+describe("AE invocation recording v1 compatibility and v2 production", () => {
   beforeEach(() => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -108,7 +112,7 @@ describe("AE invocation recording v1", () => {
     expect(point.blobs[9]).toMatch(
       /^(?:unknown|[0-9]+\.[0-9]+\.[0-9]+)(?:\+[0-9a-f]{12})?$/,
     );
-    expect(point.doubles[19]).toBe(1);
+    expect(point.doubles[19]).toBe(2);
     expect(point.doubles.every((n) => Number.isFinite(n) && n >= 0)).toBe(true);
     expect(
       new TextEncoder().encode(point.indexes[0]).length,
@@ -161,15 +165,12 @@ describe("AE invocation recording v1", () => {
     await f.emit();
     const point = f.written[0];
     expect(point.doubles[3]).toBe(2);
-    expect(point.doubles[4]).toBe(2);
-    expect(point.doubles[8]).toBe(0);
-    expect(point.doubles[10]).toBe(0.375);
-    expect(point.doubles[11]).toBe(2);
-    expect(point.doubles[12]).toBe(1);
-    for (const key of ["rowsRead", "sqlDuration", "attempts"] as const) {
-      expect(readInvocationCoverageFlag(point.doubles[18], key)).toBe(
-        "partial",
-      );
+    expect(point.doubles[4]).toBe(0);
+    expect(point.doubles[7]).toBe(0.375);
+    expect(point.doubles[8]).toBeGreaterThanOrEqual(0);
+    expect(point.doubles[9]).toBe(1);
+    for (const key of ["d1RowsRead", "d1SqlEngine", "d1Attempts"] as const) {
+      expect(v2CoverageFlag(point.doubles[18], key)).toBe("partial");
     }
     expect(point.blobs[11]).toBe("");
   });
@@ -225,8 +226,11 @@ describe("AE invocation recording v1", () => {
     expect(point.blobs[5]).toBe("failure");
     expect(point.blobs[10]).toBe("database");
     expect(point.blobs[11]).toBe("d1_operation_failed");
-    expect(point.blobs[17]).toContain("unhandled_request");
-    expect(point.doubles[16]).toBe(3);
+    expect(JSON.parse(point.blobs[18]).signals).toContainEqual({
+      code: "unhandled_request",
+      category: "application",
+    });
+    expect(JSON.parse(point.blobs[18]).resources.errorEvents).toBe(3);
     expect(point.doubles[17]).toBe(200);
     expect(point.indexes[0]).toBe("api.other:failure");
   });
@@ -311,7 +315,7 @@ describe("AE invocation recording v1", () => {
     expect(point.blobs[5]).toBe("client_error");
     expect(point.blobs[10]).toBe("");
     expect(point.blobs[11]).toBe("");
-    expect(point.doubles[16]).toBe(0);
+    expect(JSON.parse(point.blobs[18]).resources.errorEvents).toBe(0);
     expect(point.indexes[0]).toBe("api.other:client_error");
   });
 
@@ -334,15 +338,22 @@ describe("AE invocation recording v1", () => {
     });
     ws.logger.setPerformance({ webSocketDurationMs: 123.5 });
     await ws.emit();
-    expect(ws.written[0].doubles[2]).toBe(123.5);
-    expect(ws.written[0].doubles[18] & INV_FLAG_WS_PRESENT).toBeTruthy();
+    expect(JSON.parse(ws.written[0].blobs[18]).resources.wsLifetimeMs).toBe(
+      123.5,
+    );
+    expect(ws.written[0].doubles[2]).toBe(0);
+    expect(
+      v2BooleanFlag(ws.written[0].doubles[18], "backgroundDrainPresent"),
+    ).toBe(false);
     const scheduled = fixture("worker", "scheduled");
     registerInvocationMetrics(scheduled.env, scheduled.logger);
     scheduled.logger.setRouteKey("scheduled.tasks");
     await scheduled.emit();
     expect(scheduled.written[0].indexes[0]).toBe("scheduled.tasks:ok");
     expect(scheduled.written[0].doubles[17]).toBe(0);
-    expect(scheduled.written[0].doubles[18] & INV_FLAG_STATUS_PRESENT).toBe(0);
+    expect(
+      v2BooleanFlag(scheduled.written[0].doubles[18], "httpStatusPresent"),
+    ).toBe(false);
   });
 
   it("skips unbound/disabled and isolates failing AE binding even on rethrown alarm", async () => {
@@ -416,11 +427,14 @@ describe("AE invocation recording v1", () => {
     ).toBeLessThanOrEqual(4096);
     const parsed = JSON.parse(point.blobs[18]) as Record<string, unknown>;
     expect(Object.keys(parsed).sort()).toEqual([
-      "do",
-      "ops",
+      "coverage",
+      "hotBasis",
+      "phases",
+      "queries",
+      "rankingCoverage",
       "resources",
       "signals",
-      "truncated",
+      "truncation",
       "v",
     ]);
     expect(JSON.stringify(parsed)).not.toContain("errorMessage");
@@ -577,7 +591,7 @@ describe("Hono real middleware invocation integration", () => {
     expect(points[0].indexes).toEqual(["api:/api/metrics/:metricId:failure"]);
     expect(points[0].blobs[11]).toBe("d1_operation_failed");
     expect(points[0].doubles[3]).toBe(1);
-    expect(points[0].doubles[7]).toBe(1);
+    expect(points[0].doubles[4]).toBe(1);
     expect(points[0].doubles[17]).toBe(200);
     expect(JSON.stringify(points[0])).not.toContain(
       "CANARY_private_sql_and_token",

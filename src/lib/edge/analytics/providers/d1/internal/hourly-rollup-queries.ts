@@ -1,5 +1,6 @@
 import { createDatabaseRuntime, D1_MAX_BOUND_PARAMETERS } from "@/lib/db";
 import { type StoredRollupRow } from "@/lib/edge/analytics/contract/hourly-rollup";
+import { runWithStaticSqlTemplate } from "@/lib/edge/analytics-engine/query-registry";
 import { sitePksFromSiteIdsSql } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
 import { ONE_HOUR_MS } from "@/lib/edge/utils";
@@ -328,16 +329,18 @@ async function queryAggregationStates(
   const states = new Map<string, number>();
   const requested = new Set(siteIds);
   for (const chunk of siteIdChunks(siteIds)) {
-    const result = await createDatabaseRuntime(env.DB).all<AggregationStateRow>(
-      {
-        sql: `
+    const result = await runWithStaticSqlTemplate(
+      { id: "analytics.rollup.aggregation_state", variant: "rollup" },
+      () =>
+        createDatabaseRuntime(env.DB).all<AggregationStateRow>({
+          sql: `
       SELECT site_id AS siteId, aggregated_until_hour AS aggregatedUntilHour
       FROM visit_hourly_aggregation_state
       WHERE site_pk IN ${sitePksFromSiteIdsSql(chunk.length)}
     `,
-        bindings: [...chunk],
-        tag: "analytics.visit_hourly_aggregation_state.all",
-      },
+          bindings: [...chunk],
+          tag: "analytics.visit_hourly_aggregation_state.all",
+        }),
     );
     recordD1RowsRead(diagnostics, result);
     for (const row of result.results) {
@@ -390,8 +393,11 @@ async function queryDetailAccumulatorsForSites(
   }
   const accumulators = new Map<string, MetricAccumulator>();
   for (const chunk of siteIdChunks(siteIds, 2)) {
-    const result = await createDatabaseRuntime(env.DB).all<DetailVisitRow>({
-      sql: `
+    const result = await runWithStaticSqlTemplate(
+      { id: "analytics.rollup.visit_details", variant: "raw.unfiltered" },
+      () =>
+        createDatabaseRuntime(env.DB).all<DetailVisitRow>({
+          sql: `
       SELECT
         site_id AS siteId,
         started_at AS startedAt,
@@ -407,9 +413,10 @@ async function queryDetailAccumulatorsForSites(
       WHERE site_pk IN ${sitePksFromSiteIdsSql(chunk.length)}
         AND started_at >= ? AND started_at < ?
     `,
-      bindings: [...chunk, window.startMs, window.endExclusiveMs],
-      tag: "analytics.visits.all",
-    });
+          bindings: [...chunk, window.startMs, window.endExclusiveMs],
+          tag: "analytics.visits.all",
+        }),
+    );
     recordD1RowsRead(diagnostics, result);
 
     for (const row of result.results) {
@@ -431,8 +438,11 @@ async function queryStoredRollupsForSites(
   if (siteIds.length === 0 || endExclusiveHour <= startHour) return [];
   const rollups: StoredRollupRow[] = [];
   for (const chunk of siteIdChunks(siteIds, 2)) {
-    const result = await createDatabaseRuntime(env.DB).all<StoredRollupRow>({
-      sql: `
+    const result = await runWithStaticSqlTemplate(
+      { id: "analytics.rollup.hourly_rows", variant: "rollup" },
+      () =>
+        createDatabaseRuntime(env.DB).all<StoredRollupRow>({
+          sql: `
       SELECT
         site_id AS siteId,
         hour_bucket AS hourBucket,
@@ -459,9 +469,10 @@ async function queryStoredRollupsForSites(
         AND hour_bucket >= ? AND hour_bucket < ?
       ORDER BY hour_bucket ASC
     `,
-      bindings: [...chunk, startHour, endExclusiveHour],
-      tag: "analytics.visit_hourly_rollups.all",
-    });
+          bindings: [...chunk, startHour, endExclusiveHour],
+          tag: "analytics.visit_hourly_rollups.all",
+        }),
+    );
     recordD1RowsRead(diagnostics, result);
     rollups.push(...result.results);
   }
@@ -713,8 +724,11 @@ async function queryDetailVisitsForSites(
   }
   const visits: DetailVisitRow[] = [];
   for (const chunk of siteIdChunks(siteIds, 2)) {
-    const result = await createDatabaseRuntime(env.DB).all<DetailVisitRow>({
-      sql: `
+    const result = await runWithStaticSqlTemplate(
+      { id: "analytics.rollup.trend_visit_details", variant: "raw.unfiltered" },
+      () =>
+        createDatabaseRuntime(env.DB).all<DetailVisitRow>({
+          sql: `
       SELECT
         site_id AS siteId,
         started_at AS startedAt,
@@ -731,9 +745,10 @@ async function queryDetailVisitsForSites(
         AND started_at >= ? AND started_at < ?
       ORDER BY started_at ASC
     `,
-      bindings: [...chunk, window.startMs, window.endExclusiveMs],
-      tag: "analytics.visits.all",
-    });
+          bindings: [...chunk, window.startMs, window.endExclusiveMs],
+          tag: "analytics.visits.all",
+        }),
+    );
     recordD1RowsRead(diagnostics, result);
     visits.push(...result.results);
   }

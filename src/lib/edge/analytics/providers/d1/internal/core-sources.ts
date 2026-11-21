@@ -1,6 +1,11 @@
 import { createDatabaseRuntime } from "@/lib/db";
 import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
 import {
+  type QueryVariant,
+  runWithStaticSqlTemplate,
+  type StaticSqlTemplateId,
+} from "@/lib/edge/analytics-engine/query-registry";
+import {
   currentD1Operation,
   currentInvocationLogger,
 } from "@/lib/edge/observability/logger";
@@ -341,15 +346,23 @@ export async function queryD1All<T extends object>(
   sql: string,
   bindings: Array<string | number | null>,
   diagnostics?: D1ReadDiagnostics,
+  template?: {
+    readonly id: StaticSqlTemplateId;
+    readonly variant: QueryVariant;
+  },
 ): Promise<T[]> {
   const logger = currentInvocationLogger();
   const operation = currentD1Operation();
   const startedAt = globalThis.performance?.now() ?? Date.now();
-  const result = await createDatabaseRuntime(env.DB).all<T>({
-    sql,
-    bindings,
-    tag: operation ?? "analytics.query.all",
-  });
+  const execute = () =>
+    createDatabaseRuntime(env.DB).all<T>({
+      sql,
+      bindings,
+      tag: operation ?? "analytics.query.all",
+    });
+  const result = template
+    ? await runWithStaticSqlTemplate(template, execute)
+    : await execute();
   const finishedAt = globalThis.performance?.now() ?? Date.now();
   recordD1RowsRead(diagnostics, result);
   if (logger && operation) {

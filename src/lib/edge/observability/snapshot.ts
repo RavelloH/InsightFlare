@@ -89,6 +89,7 @@ export interface InvocationSnapshot {
   readonly sql: InvocationSqlCost;
   /** Sum of D1 operation wall times, not end-to-end latency. */
   readonly d1OperationCumulativeDurationMs: number;
+  readonly backgroundDrainMs?: number;
   readonly resources: InvocationResourceSummary;
   /** Only fixed, typed event classifications (no message, stack, user payload). */
   readonly safeErrors: readonly InvocationSafeErrorSignal[];
@@ -124,6 +125,12 @@ const SAFE_OPERATIONS = new Set([
   "d1.raw",
   "d1.exec",
   "d1.batch",
+  "do.fetch",
+  "background.drain",
+  "event_type_context",
+  "event_type_detail.overview",
+  "event_type_detail.trend",
+  "event_type_detail.context_cards",
 ]);
 
 function valueOrAbsent(
@@ -155,7 +162,9 @@ function safeOperation(
 
 function safeRouteGroup(
   record: InvocationLogRecord,
+  routeKey?: string,
 ): InvocationSnapshot["routeGroup"] {
+  if (routeKey?.startsWith("api:") || routeKey === "api.other") return "api";
   if (record.trigger === "scheduled") return "scheduled";
   if (record.trigger === "websocket" || record.request?.method === "WEBSOCKET")
     return "websocket";
@@ -265,7 +274,7 @@ export function toInvocationSnapshot(
     outcome:
       record.request?.outcome ??
       (record.logs.some((log) => log.level === "error") ? "error" : "ok"),
-    routeGroup: safeRouteGroup(record),
+    routeGroup: safeRouteGroup(record, trusted.routeKey),
     ...(trusted.routeKey ? { routeKey: trusted.routeKey } : {}),
     ...(safeMethod ? { method: safeMethod } : {}),
     ...(record.request?.status !== undefined
@@ -282,6 +291,9 @@ export function toInvocationSnapshot(
     logsTruncated: Boolean(record.logsTruncated),
     sql,
     d1OperationCumulativeDurationMs,
+    ...(perf.backgroundDrainMs !== undefined
+      ? { backgroundDrainMs: perf.backgroundDrainMs }
+      : {}),
     resources,
     safeErrors: Object.freeze([...(trusted.safeErrors ?? [])]),
     operations: Object.freeze(operations),
