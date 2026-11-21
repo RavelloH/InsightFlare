@@ -65,22 +65,32 @@ function createFlushContext(options: {
   const prepare = vi.fn((sql: string) => ({
     bind: vi.fn((...bindings: Binding[]) => {
       calls.push({ sql, bindings });
+      const first = vi.fn(async () => {
+        if (sql.includes("FROM visits")) {
+          return options.visitExists === false ? null : { ok: 1 };
+        }
+        if (sql.includes("FROM custom_events")) {
+          return options.eventExists === false ? null : { ok: 1 };
+        }
+        if (sql.includes("FROM custom_event_names")) return { id: 10 };
+        if (sql.includes("FROM custom_event_json_keys")) return { id: 20 };
+        if (sql.includes("FROM custom_event_json_paths")) {
+          const path = String(bindings[1] ?? "");
+          return { id: path === "/" ? 30 : 31 };
+        }
+        return null;
+      });
       return {
         run: vi.fn(async () => ({})),
-        first: vi.fn(async () => {
-          if (sql.includes("FROM visits")) {
-            return options.visitExists === false ? null : { ok: 1 };
-          }
-          if (sql.includes("FROM custom_events")) {
-            return options.eventExists === false ? null : { ok: 1 };
-          }
-          if (sql.includes("FROM custom_event_names")) return { id: 10 };
-          if (sql.includes("FROM custom_event_json_keys")) return { id: 20 };
-          if (sql.includes("FROM custom_event_json_paths")) {
-            const path = String(bindings[1] ?? "");
-            return { id: path === "/" ? 30 : 31 };
-          }
-          return null;
+        first,
+        // Every lookup is LIMIT 1; all() returns the same bounded row while
+        // retaining D1 metadata so the production collector can observe it.
+        all: vi.fn(async () => {
+          const row = await first();
+          return {
+            results: row === null ? [] : [row],
+            meta: { rows_read: 1, rows_written: 0 },
+          };
         }),
       };
     }),
