@@ -21,6 +21,7 @@ import {
   handleNotificationsReadAll,
   handleNotificationTestAdmin,
 } from "@/lib/edge/admin/notifications/handler";
+import { handleInvocationMetricsAdmin } from "@/lib/edge/admin/observability/invocation-metrics";
 import { handleRequestObservationAdmin } from "@/lib/edge/admin/observability/request-observation";
 import { nf } from "@/lib/edge/admin/response";
 import { handleScheduledTasksAdmin } from "@/lib/edge/admin/scheduled-tasks/handler";
@@ -30,11 +31,8 @@ import {
   handleSiteConfigAdmin,
   handleSitesAdmin,
 } from "@/lib/edge/admin/sites/handler";
-import {
-  handleDoDiagnosticAdmin,
-  handleE2eFlushAdmin,
-  handleSystemPerformanceAdmin,
-} from "@/lib/edge/admin/system/handler";
+import { handleDoDiagnosticScopedAdmin } from "@/lib/edge/admin/system/do-diagnostic-handler";
+import { handleE2eFlushAdmin } from "@/lib/edge/admin/system/handler";
 import {
   handleMembersAdmin,
   handleTeamsAdmin,
@@ -101,11 +99,11 @@ export async function executeRealAdminService(
     case "notification-test":
       return handleNotificationTestAdmin(request, env);
     case "system-performance":
-      return handleSystemPerformanceAdmin(request, env, url, requireActor);
+      return handleInvocationMetricsAdmin(request, env, url);
     case "scheduled-tasks":
       return handleScheduledTasksAdmin(request, env, url, requireActor);
     case "do-diagnostic":
-      return handleDoDiagnosticAdmin(request, env, url, requireActor);
+      return handleDoDiagnosticScopedAdmin(request, env, url, requireActor);
     case "e2e/flush":
       return handleE2eFlushAdmin(request, env, url, requireActor);
     case "notifications":
