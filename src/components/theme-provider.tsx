@@ -25,6 +25,9 @@ const useIsomorphicLayoutEffect =
 
 function storedTheme(): Theme {
   if (typeof window === "undefined") return "system";
+  // ?theme=light|dark 临时覆盖主题（用于官网嵌入与截图），不写入本地存储。
+  const override = new URLSearchParams(window.location.search).get("theme");
+  if (override === "light" || override === "dark") return override;
   const value = window.localStorage.getItem(STORAGE_KEY);
   return value === "light" || value === "dark" || value === "system"
     ? value
