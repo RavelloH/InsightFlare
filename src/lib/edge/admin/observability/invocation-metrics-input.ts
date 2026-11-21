@@ -11,6 +11,20 @@ const TRIGGERS = ["request", "alarm", "scheduled", "websocket"] as const;
 const RESULTS = ["ok", "client_error", "failure", "canceled"] as const;
 const INTERVALS = ["minute", "hour", "day"] as const;
 const DAY = 86_400_000;
+const ALLOWED_PARAMS = new Set([
+  "view",
+  "from",
+  "to",
+  "limit",
+  "interval",
+  "timeZone",
+  "source",
+  "trigger",
+  "resultClass",
+  "routeKey",
+  "appVersion",
+  "kind",
+]);
 
 export type InvocationView = (typeof VIEWS)[number];
 export type HotspotKind = (typeof HOTSPOT_KINDS)[number];
@@ -39,6 +53,7 @@ export function parseInvocationQuery(params: URLSearchParams, now: number) {
     return selected;
   };
   try {
+    if ([...params.keys()].some((key) => !ALLOWED_PARAMS.has(key))) return null;
     const view = choice("view", VIEWS) ?? "overview";
     const to = Number(read("to", /^\d{13}$/) ?? now);
     const from = Number(read("from", /^\d{13}$/) ?? to - DAY);

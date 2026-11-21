@@ -26,7 +26,6 @@ import { privateSessionRoutes } from "@/lib/hono/routes/private/session";
 import { publicSessionRoutes } from "@/lib/hono/routes/public/session";
 import { deriveSecret, SECRET_PURPOSES } from "@/lib/secrets";
 import { DEFAULT_SITE_SCRIPT_SETTINGS } from "@/lib/site-settings";
-import type { DoDiagnosticPayload } from "@/lib/system-performance";
 const deriveMockBytes = vi.hoisted(
   () =>
     (password: Uint8Array, nonce: Uint8Array, length: number): Uint8Array => {
@@ -347,53 +346,6 @@ function mockUuid(...ids: string[]) {
   for (const id of ids) spy.mockReturnValueOnce(uuid(id));
   if (ids.length > 0) spy.mockReturnValue(uuid(ids[ids.length - 1]));
   return spy;
-}
-function diagnosticPayload(
-  overrides: Partial<DoDiagnosticPayload> = {},
-): DoDiagnosticPayload {
-  return {
-    ok: true,
-    snapshotAt: 1_000,
-    thresholds: {
-      staleMs: 1,
-      timeoutMs: 2,
-      hardAgedMs: 3,
-      stuckFlushAttempts: 4,
-    },
-    visits: {
-      total: 12,
-      byStatus: { open: 4, closed: 8 },
-      open: {
-        total: 4,
-        stale: 1,
-        timedOut: 2,
-        hardAged: 3,
-        futureSkewed: 1,
-        oldestStartedAt: 900,
-        newestActivityAt: 990,
-        futureMaxActivityAt: 1_100,
-      },
-      dirty: {
-        total: 3,
-        stuck: 2,
-        maxFlushAttempts: 7,
-      },
-    },
-    customEvents: {
-      total: 5,
-      dirty: 2,
-      stuck: 1,
-      maxFlushAttempts: 6,
-      oldestOccurredAt: 800,
-    },
-    alarm: {
-      scheduledAt: 1_200,
-      nextDueAt: 1_200,
-      nextDueKind: "flush",
-      nextDueEntity: "visit",
-    },
-    ...overrides,
-  };
 }
 describe("private admin edge handler", () => {
   beforeEach(() => {
@@ -3540,298 +3492,67 @@ describe("private admin edge handler", () => {
     });
   });
 
-  describe("system performance route", () => {
+  describe("system performance AE v2 route", () => {
     it("requires system admin access", async () => {
       setSession(userSession);
-      const { env } = createEnv([
+      const { env, prepare } = createEnv([
         statement({ first: userRow({ id: "user-1", system_role: "user" }) }),
       ]);
-
       const response = await dispatch(
         "/api/private/admin/system-performance",
         env,
       );
-
       expect(response.status).toBe(403);
-      expect(await response.json()).toMatchObject({
-        ok: false,
-        error: { message: "Only system admin can view system performance" },
-      });
+      expect(prepare).toHaveBeenCalledTimes(1);
     });
-
-    it("rejects unsupported methods after admin authorization", async () => {
+    it("rejects mutations even for system admins", async () => {
+      setSession(adminSession);
+      const { env } = createEnv([statement({ first: userRow() })]);
+      expect(
+        (
+          await dispatch("/api/private/admin/system-performance", env, {
+            method: "POST",
+          })
+        ).status,
+      ).toBe(405);
+    });
+    it("does not read business D1 when writer is unbound", async () => {
       setSession(adminSession);
       const { env, prepare } = createEnv([statement({ first: userRow() })]);
-
       const response = await dispatch(
         "/api/private/admin/system-performance",
         env,
-        { method: "POST" },
       );
-
-      expect(response.status).toBe(405);
-      expect(await response.json()).toMatchObject({
-        ok: false,
-        error: { message: "Method Not Allowed" },
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        ok: true,
+        data: {
+          view: "overview",
+          status: "writer_not_bound",
+          schemaVersion: 2,
+        },
       });
       expect(prepare).toHaveBeenCalledTimes(1);
     });
-
-    it("aggregates system performance rows into API response data", async () => {
+    it("rejects removed minutes and excessive limits", async () => {
       setSession(adminSession);
-      vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
-      const trendRows = [
-        {
-          bucketSec: 1_799_998_200,
-          visits: "2",
-          customEvents: 3,
-          totalEvents: 5,
-          avgLatencyMs: 100.5,
-          p50LatencyMs: 80,
-          p75LatencyMs: 110,
-          p95LatencyMs: 150,
-          delayedEvents: 1,
-          futureSkewedEvents: 0,
-        },
-      ];
-      const topSiteRows = [
-        {
-          siteId: "site-1",
-          siteName: "Site",
-          siteDomain: "site.example.test",
-          totalEvents: 10,
-          visits: 6,
-          customEvents: 4,
-          avgLatencyMs: "50",
-          delayedEvents: 1,
-          futureSkewedEvents: 2,
-        },
-      ];
-      const slowRows = [
-        {
-          kind: "custom_event",
-          siteId: "site-1",
-          siteName: "Site",
-          siteDomain: "site.example.test",
-          eventAtMs: 100,
-          serverAtMs: 800,
-          latencyMs: 700,
-        },
-        {
-          kind: "other",
-          siteId: "site-2",
-          siteName: "Site 2",
-          siteDomain: "",
-          eventAtMs: 200,
-          serverAtMs: 300,
-          latencyMs: 100,
-        },
-      ];
-      const { env } = createEnv([
+      const { env, prepare } = createEnv([
         statement({ first: userRow() }),
-        statement({
-          first: {
-            totalEvents: 20,
-            visits: 12,
-            customEvents: 8,
-            activeSites: 3,
-            avgLatencyMs: 75,
-            trustedLatencySamples: 19,
-            delayedEvents: 2,
-            futureSkewedEvents: 1,
-            latestCreatedAtSec: 1_799_999_990,
-          },
-        }),
-        statement({
-          first: {
-            p50LatencyMs: 50,
-            p75LatencyMs: 90,
-            p95LatencyMs: 200,
-          },
-        }),
-        statement({ all: trendRows }),
-        statement({ all: topSiteRows }),
-        statement({ all: slowRows }),
-        statement({
-          first: {
-            total: 4,
-            stale: 1,
-            timedOut: 2,
-            oldestStartedAt: 1_799_900_000_000,
-            newestActivityAt: 1_799_999_000_000,
-          },
-        }),
-      ]);
-
-      const response = await dispatch(
-        "/api/private/admin/system-performance?minutes=360",
-        env,
-      );
-
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({
-        ok: true,
-        generatedAt: 1_800_000_000_000,
-        window: {
-          from: 1_799_978_400_000,
-          to: 1_800_000_000_000,
-          minutes: 360,
-          bucketSizeMs: 1_800_000,
-        },
-        summary: {
-          totalEvents: 20,
-          visits: 12,
-          customEvents: 8,
-          activeSites: 3,
-          eventsPerMinute: 20 / 360,
-          latestCreatedAt: 1_799_999_990_000,
-          dataFreshnessMs: 10_000,
-          avgLatencyMs: 75,
-          p50LatencyMs: 50,
-          p75LatencyMs: 90,
-          p95LatencyMs: 200,
-          trustedLatencySamples: 19,
-          delayedEvents: 2,
-          futureSkewedEvents: 1,
-          anomalyRate: 3 / 20,
-        },
-        openVisits: {
-          total: 4,
-          stale: 1,
-          timedOut: 2,
-          oldestStartedAt: 1_799_900_000_000,
-          newestActivityAt: 1_799_999_000_000,
-        },
-        trend: [
-          {
-            bucket: 1_799_998_200,
-            timestampMs: 1_799_998_200_000,
-            visits: 2,
-            customEvents: 3,
-            totalEvents: 5,
-            avgLatencyMs: 100.5,
-            delayedEvents: 1,
-            futureSkewedEvents: 0,
-          },
-        ],
-        topSites: [
-          {
-            ...topSiteRows[0],
-            avgLatencyMs: 50,
-          },
-        ],
-        slowEvents: [
-          {
-            kind: "custom_event",
-            siteId: "site-1",
-            latencyMs: 700,
-          },
-          {
-            kind: "visit",
-            siteId: "site-2",
-            latencyMs: 100,
-          },
-        ],
-      });
-    });
-
-    it("defaults invalid windows and normalizes empty system performance rows", async () => {
-      setSession(adminSession);
-      vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
-      const { env } = createEnv([
         statement({ first: userRow() }),
-        statement({
-          first: {
-            totalEvents: "not-a-number",
-            visits: null,
-            customEvents: undefined,
-            activeSites: Number.POSITIVE_INFINITY,
-            avgLatencyMs: "bad",
-            trustedLatencySamples: "0",
-            delayedEvents: 0,
-            futureSkewedEvents: 0,
-            latestCreatedAtSec: "bad",
-          },
-        }),
-        statement({ first: {} }),
-        statement({ all: [] }),
-        statement({ all: [] }),
-        statement({ all: [] }),
-        statement({ first: {} }),
       ]);
-
-      const response = await dispatch(
-        "/api/private/admin/system-performance?minutes=999",
-        env,
-      );
-
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({
-        ok: true,
-        window: {
-          from: 1_799_996_400_000,
-          to: 1_800_000_000_000,
-          minutes: 60,
-          bucketSizeMs: 300_000,
-        },
-        summary: {
-          totalEvents: 0,
-          visits: 0,
-          customEvents: 0,
-          activeSites: 0,
-          eventsPerMinute: 0,
-          latestCreatedAt: null,
-          dataFreshnessMs: null,
-          avgLatencyMs: null,
-          p50LatencyMs: null,
-          p75LatencyMs: null,
-          p95LatencyMs: null,
-          trustedLatencySamples: 0,
-          delayedEvents: 0,
-          futureSkewedEvents: 0,
-          anomalyRate: 0,
-        },
-        openVisits: {
-          total: 0,
-          stale: 0,
-          timedOut: 0,
-          oldestStartedAt: null,
-          newestActivityAt: null,
-        },
-        trend: [],
-        topSites: [],
-        slowEvents: [],
-      });
-    });
-
-    it("uses hourly buckets for the 1440 minute system performance window", async () => {
-      setSession(adminSession);
-      vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
-      const { env } = createEnv([
-        statement({ first: userRow() }),
-        statement({ first: { totalEvents: 0 } }),
-        statement({ first: {} }),
-        statement({ all: [] }),
-        statement({ all: [] }),
-        statement({ all: [] }),
-        statement({ first: {} }),
-      ]);
-
-      const response = await dispatch(
-        "/api/private/admin/system-performance?minutes=1440",
-        env,
-      );
-
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({
-        ok: true,
-        window: {
-          from: 1_799_913_600_000,
-          to: 1_800_000_000_000,
-          minutes: 1440,
-          bucketSizeMs: 3_600_000,
-        },
-      });
+      expect(
+        (
+          await dispatch(
+            "/api/private/admin/system-performance?minutes=360",
+            env,
+          )
+        ).status,
+      ).toBe(400);
+      expect(
+        (await dispatch("/api/private/admin/system-performance?limit=101", env))
+          .status,
+      ).toBe(400);
+      expect(prepare).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -3866,196 +3587,43 @@ describe("private admin edge handler", () => {
       });
     });
 
-    it("aggregates reachable and unreachable durable object diagnostics", async () => {
+    it("does not wake any DO without an explicit scope", async () => {
       setSession(adminSession);
-      vi.spyOn(Date, "now")
-        .mockReturnValueOnce(5_000)
-        .mockReturnValueOnce(5_010)
-        .mockReturnValueOnce(5_020)
-        .mockReturnValueOnce(5_030)
-        .mockReturnValueOnce(5_040)
-        .mockReturnValue(5_050);
-      const goodDiagnostic = diagnosticPayload();
-      const secondDiagnostic = diagnosticPayload({
-        visits: {
-          total: 6,
-          byStatus: { open: 1 },
-          open: {
-            total: 1,
-            stale: 0,
-            timedOut: 0,
-            hardAged: 0,
-            futureSkewed: 2,
-            oldestStartedAt: 700,
-            newestActivityAt: 800,
-            futureMaxActivityAt: 1_500,
-          },
-          dirty: {
-            total: 4,
-            stuck: 1,
-            maxFlushAttempts: 9,
-          },
-        },
-        customEvents: {
-          total: 3,
-          dirty: 1,
-          stuck: 4,
-          maxFlushAttempts: 8,
-          oldestOccurredAt: null,
-        },
-        alarm: {
-          scheduledAt: null,
-          nextDueAt: null,
-          nextDueKind: null,
-          nextDueEntity: null,
-        },
-      });
-      const ingestDo = createIngestDo({
-        "site-1": {
-          fetch: vi.fn().mockResolvedValue(Response.json(goodDiagnostic)),
-        },
-        "site-2": {
-          fetch: vi
-            .fn()
-            .mockResolvedValue(new Response("bad", { status: 503 })),
-        },
-        "site-3": {
-          fetch: vi
-            .fn()
-            .mockResolvedValue(
-              Response.json({ ok: false, error: "not_ready" }),
-            ),
-        },
-        "site-4": {
-          fetch: vi.fn().mockRejectedValue(new Error("network down")),
-        },
-        "site-5": {
-          fetch: vi.fn().mockResolvedValue(Response.json(secondDiagnostic)),
-        },
-      });
-      const { env } = createEnv(
-        [
-          statement({ first: userRow() }),
-          statement({
-            all: [
-              { id: "site-1", name: "Site 1", domain: "one.example.test" },
-              { id: "site-2", name: "Site 2", domain: "two.example.test" },
-              { id: "site-3", name: "Site 3", domain: "three.example.test" },
-              { id: "site-4", name: "", domain: "" },
-              { id: "site-5", name: "Site 5", domain: "five.example.test" },
-            ],
-          }),
-        ],
-        {
-          ingestDo,
-        },
-      );
-
-      const response = await dispatch("/api/private/admin/do-diagnostic", env);
-
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({
-        ok: true,
-        generatedAt: 5_000,
-        totalSites: 5,
-        reachableSites: 2,
-        unreachableSites: 3,
-        thresholds: goodDiagnostic.thresholds,
-        totals: {
-          bufferedVisits: 18,
-          openVisits: 5,
-          openStale: 1,
-          openTimedOut: 2,
-          openHardAged: 3,
-          openFutureSkewed: 3,
-          dirtyVisits: 7,
-          stuckDirtyVisits: 3,
-          bufferedCustomEvents: 8,
-          dirtyCustomEvents: 3,
-          stuckDirtyCustomEvents: 5,
-          activeAlarms: 1,
-          maxVisitFlushAttempts: 9,
-          maxCustomEventFlushAttempts: 8,
-        },
-        oldestOpenStartedAt: 700,
-        futureMaxActivityAt: 1_500,
-        sites: [
-          {
-            siteId: "site-5",
-            ok: true,
-            diagnostic: secondDiagnostic,
-          },
-          {
-            siteId: "site-1",
-            ok: true,
-            diagnostic: goodDiagnostic,
-          },
-          {
-            siteId: "site-2",
-            ok: false,
-            error: "do_status_503",
-          },
-          {
-            siteId: "site-3",
-            ok: false,
-            error: "not_ready",
-          },
-          {
-            siteId: "site-4",
-            siteName: "site-4",
-            siteDomain: "",
-            ok: false,
-            error: "network down",
-          },
-        ],
-      });
-      expect(ingestDo.idFromName).toHaveBeenCalledWith("site-1");
-      expect(ingestDo.get).toHaveBeenCalledWith("stub:site-1");
+      const { env, prepare, ingestDo } = createEnv([
+        statement({ first: userRow() }),
+      ]);
+      expect(
+        (await dispatch("/api/private/admin/do-diagnostic", env)).status,
+      ).toBe(400);
+      expect(prepare).toHaveBeenCalledTimes(1);
+      expect(ingestDo.get).not.toHaveBeenCalled();
     });
-
-    it("uses default diagnostic thresholds when no sites are reachable", async () => {
+    it("reports empty explicit scan without touching any DO", async () => {
       setSession(adminSession);
-      vi.spyOn(Date, "now").mockReturnValue(10_000);
-      const { env } = createEnv([
+      const { env, prepare, ingestDo } = createEnv([
         statement({ first: userRow() }),
         statement({ all: [] }),
+        statement({ first: { count: 0 } }),
       ]);
-
-      const response = await dispatch("/api/private/admin/do-diagnostic", env);
-
+      const response = await dispatch(
+        "/api/private/admin/do-diagnostic?scope=scan",
+        env,
+      );
       expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({
+      await expect(response.json()).resolves.toMatchObject({
         ok: true,
-        generatedAt: 10_000,
+        scope: "scan",
         totalSites: 0,
+        processedSites: 0,
         reachableSites: 0,
         unreachableSites: 0,
-        thresholds: {
-          staleMs: 30 * 60 * 1000,
-          timeoutMs: 12 * 60 * 60 * 1000,
-          hardAgedMs: 36 * 60 * 60 * 1000,
-          stuckFlushAttempts: 5,
-        },
-        totals: {
-          bufferedVisits: 0,
-          openVisits: 0,
-          openStale: 0,
-          openTimedOut: 0,
-          openHardAged: 0,
-          openFutureSkewed: 0,
-          dirtyVisits: 0,
-          stuckDirtyVisits: 0,
-          bufferedCustomEvents: 0,
-          dirtyCustomEvents: 0,
-          stuckDirtyCustomEvents: 0,
-          activeAlarms: 0,
-          maxVisitFlushAttempts: 0,
-          maxCustomEventFlushAttempts: 0,
-        },
-        oldestOpenStartedAt: null,
-        futureMaxActivityAt: null,
+        partial: false,
+        hasMore: false,
+        nextCursor: null,
         sites: [],
       });
+      expect(prepare).toHaveBeenCalledTimes(3);
+      expect(ingestDo.get).not.toHaveBeenCalled();
     });
   });
 });

@@ -97,7 +97,6 @@ import {
   loadScheduledTasksInitialData,
   loadShareSite,
   loadSiteSettingsInitialData,
-  loadSystemPerformanceInitialData,
   loadSystemSettingsInitialData,
   loadTeamDashboardSnapshot,
   loadTeamManagementInitialData,
@@ -611,27 +610,6 @@ describe("Dashboard route data loaders", () => {
       });
       expect(readDashboardAdmin).toHaveBeenCalledWith("scheduled-tasks", {
         limit: 50,
-      });
-
-      const systemPerformance = {
-        ok: true,
-        generatedAt: 200,
-        window: { minutes: 60 },
-        thresholds: {},
-        summary: { totalEvents: 10 },
-        openVisits: { total: 2 },
-        trend: [],
-        topSites: [],
-        slowEvents: [],
-      };
-      mockAdminReads({ "system-performance": systemPerformance });
-
-      await expect(loadSystemPerformanceInitialData()).resolves.toEqual({
-        data: systemPerformance,
-        fetchedAt: expect.any(Number),
-      });
-      expect(readDashboardAdmin).toHaveBeenCalledWith("system-performance", {
-        minutes: 60,
       });
     });
   });

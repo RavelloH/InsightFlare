@@ -18,6 +18,7 @@ import {
   handleNotificationRulesAdmin,
   handleNotificationTestAdmin,
 } from "@/lib/edge/admin/notifications/handler";
+import { handleInvocationMetricsAdmin } from "@/lib/edge/admin/observability/invocation-metrics";
 import { handleRequestObservationAdmin } from "@/lib/edge/admin/observability/request-observation";
 import { nf } from "@/lib/edge/admin/response";
 import { handleScheduledTasksAdmin } from "@/lib/edge/admin/scheduled-tasks/handler";
@@ -26,10 +27,7 @@ import {
   handleSiteConfigAdmin,
   handleSitesAdmin,
 } from "@/lib/edge/admin/sites/handler";
-import {
-  handleDoDiagnosticAdmin,
-  handleSystemPerformanceAdmin,
-} from "@/lib/edge/admin/system/handler";
+import { handleDoDiagnosticScopedAdmin } from "@/lib/edge/admin/system/do-diagnostic-handler";
 import {
   handleMembersAdmin,
   handleTeamsAdmin,
@@ -75,9 +73,11 @@ vi.mock("@/lib/edge/admin/sites/handler", () => ({
   handleSiteConfigAdmin: vi.fn(),
   handleSitesAdmin: vi.fn(),
 }));
-vi.mock("@/lib/edge/admin/system/handler", () => ({
-  handleDoDiagnosticAdmin: vi.fn(),
-  handleSystemPerformanceAdmin: vi.fn(),
+vi.mock("@/lib/edge/admin/observability/invocation-metrics", () => ({
+  handleInvocationMetricsAdmin: vi.fn(),
+}));
+vi.mock("@/lib/edge/admin/system/do-diagnostic-handler", () => ({
+  handleDoDiagnosticScopedAdmin: vi.fn(),
 }));
 vi.mock("@/lib/edge/admin/teams/handlers", () => ({
   handleMembersAdmin: vi.fn(),
@@ -112,9 +112,9 @@ const routeCases = [
   ["/notification-rules/preview", handleNotificationRulePreviewAdmin, false],
   ["/notification-rules/run", handleNotificationRuleRunAdmin, false],
   ["/notification-test", handleNotificationTestAdmin, false],
-  ["/system-performance", handleSystemPerformanceAdmin, true, true],
+  ["/system-performance", handleInvocationMetricsAdmin, true, false],
   ["/scheduled-tasks", handleScheduledTasksAdmin, true, true],
-  ["/do-diagnostic", handleDoDiagnosticAdmin, true, true],
+  ["/do-diagnostic", handleDoDiagnosticScopedAdmin, true, true],
 ] as const;
 function request(path: string, init?: RequestInit): Request {
   return new Request(`https://app.test${path}`, init);
