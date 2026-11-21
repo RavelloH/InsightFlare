@@ -40,7 +40,16 @@ const input = {
   allowedSiteIds: ["site-1"],
   window: { startMs: 0, endExclusiveMs: 1, nowMs: 1, timeZone: "UTC" },
   interval: "hour" as const,
-  filters: { version: 1 as const, root: null },
+  // Exercise the scoped per-site path; unfiltered bulk Rollup is tested separately.
+  filters: {
+    version: 1 as const,
+    root: {
+      kind: "condition" as const,
+      target: { kind: "field" as const, field: "page.path" as never },
+      operator: "eq" as const,
+      value: "/docs",
+    },
+  },
 };
 
 describe("team sites runtime", () => {

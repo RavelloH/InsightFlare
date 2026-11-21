@@ -8,6 +8,7 @@ import {
   queryOverviewAndTrendForSitesFromHourlyRollupsPartial,
   queryOverviewForSitesFromHourlyRollupsPartial,
 } from "@/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries";
+import { canUseHourlyRollupsForFilter } from "@/lib/edge/analytics/providers/d1/internal/rollup-eligibility";
 import { sitePksFromSiteIdsSql } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
 
@@ -39,16 +40,7 @@ const MAX_SITE_IDS_PER_D1_QUERY = D1_MAX_BOUND_PARAMETERS - 2;
 function hasEffectiveFilter(
   filters?: FilterDocument,
 ): filters is FilterDocument {
-  const scoped = scopedFilterMetadata(filters);
-  // An empty entity-scoped document still carries semantics: an explicit
-  // Session or Visitor scope must not take the rollup path and silently become
-  // the default Event dataset.  An empty observation-scoped document is
-  // equivalent to the unfiltered visit rollup and may retain that
-  // optimization without changing its resolved scope.
-  return (
-    scoped?.plan.mode === "entity" ||
-    (filters?.root !== null && filters?.root !== undefined)
-  );
+  return Boolean(filters) && !canUseHourlyRollupsForFilter(filters);
 }
 function scopedDatasetsForSites(
   siteIds: string[],
@@ -107,6 +99,46 @@ function siteIdChunks(siteIds: string[]): string[][] {
     chunks.push(siteIds.slice(index, index + MAX_SITE_IDS_PER_D1_QUERY));
   }
   return chunks;
+}
+/** Batch the half-open-window latest-activity lookup for authorized sites. */
+export async function queryTeamLatestActivityFromD1(
+  env: Env,
+  siteIds: string[],
+  window: QueryWindow,
+  diagnostics?: D1ReadDiagnostics,
+): Promise<Map<string, number | null>> {
+  const result = new Map<string, number | null>();
+  for (const chunk of siteIdChunks(siteIds)) {
+    const rows = await queryD1All<{
+      siteId: string;
+      lastActivityAt: number | null;
+    }>(
+      env,
+      `
+SELECT site_id AS siteId, MAX(last_activity_at) AS lastActivityAt
+FROM visits
+WHERE site_pk IN ${sitePksFromSiteIdsSql(chunk.length)}
+  AND started_at >= ? AND started_at < ?
+GROUP BY site_id
+`,
+      [...chunk, window.startMs, window.endExclusiveMs],
+      diagnostics,
+      {
+        id: "analytics.team-sites.raw.latest_activity",
+        variant: "raw.unfiltered",
+      },
+    );
+    for (const row of rows) {
+      const value = Number(row.lastActivityAt);
+      result.set(
+        row.siteId,
+        row.lastActivityAt !== null && Number.isSafeInteger(value)
+          ? value
+          : null,
+      );
+    }
+  }
+  return result;
 }
 function buildTeamOverviewSourceCte(siteCount: number): string {
   return `

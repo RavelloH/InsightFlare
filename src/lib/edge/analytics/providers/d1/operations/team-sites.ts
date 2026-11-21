@@ -5,19 +5,33 @@ import {
   effectiveScopeForPagination,
   type FilterDocument,
   filterFingerprint,
+  type OverviewMetrics,
   type QueryAudience,
   type QuerySource,
   type TeamSitesQueryResult,
+  type TrendPoint,
   type TrendResult,
 } from "@/lib/edge/analytics/contract";
-import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
+import type {
+  OverviewAggregateRow,
+  QueryWindow,
+  TrendAggregateRow,
+} from "@/lib/edge/analytics/providers/d1/internal/core";
+import {
+  queryOverviewAndTrendForSitesFromHourlyRollupsPartial,
+  queryOverviewForSitesFromHourlyRollupsPartial,
+} from "@/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries";
+import { queryTrendFromD1 } from "@/lib/edge/analytics/providers/d1/internal/overview";
 import {
   decodePageCursor,
   encodePageCursor,
   hasExactKeys,
   paginationBindingForWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/pagination";
+import { canUseHourlyRollupsForFilter } from "@/lib/edge/analytics/providers/d1/internal/rollup-eligibility";
 import {
+  queryTeamLatestActivityFromD1,
+  queryTeamOverviewFromD1,
   queryTeamSitesPageFromD1,
   type TeamSiteListPage,
 } from "@/lib/edge/analytics/providers/d1/internal/team";
@@ -102,6 +116,31 @@ function source(values: readonly QuerySource[]): QuerySource {
   if (values.every((value) => value === values[0])) return values[0]!;
   return "mixed";
 }
+function asOverviewMetrics(value: OverviewAggregateRow): OverviewMetrics {
+  return {
+    views: value.views,
+    sessions: value.sessions,
+    visitors: value.visitors,
+    bounces: value.bounces,
+    totalDurationMs: value.totalDuration,
+    durationViews: value.durationViews,
+  };
+}
+function asTrendPoint(value: TrendAggregateRow): TrendPoint {
+  return {
+    bucket: value.bucket,
+    timestampMs: value.timestampMs as TrendPoint["timestampMs"],
+    ...asOverviewMetrics(value),
+  };
+}
+const EMPTY_OVERVIEW: OverviewAggregateRow = {
+  views: 0,
+  sessions: 0,
+  visitors: 0,
+  bounces: 0,
+  totalDuration: 0,
+  durationViews: 0,
+};
 /**
  * A team-site composite owns its metadata, metrics, optional trend and latest
  * activity. It intentionally does not project a generic breakdown row.
@@ -113,26 +152,90 @@ export async function readTeamSites(
   const page = await readTeamSitesPage(input, requestedPage);
   const sites = page.rows;
   const time = toQueryTime(input.window);
+  const siteIds = sites.map((site) => site.id);
+  // Only an unfiltered Event/observation scope has the same semantics as
+  // the hourly rollup. Preserve per-site readers for entity/filtered scopes.
+  const canBatch =
+    siteIds.length > 0 && canUseHourlyRollupsForFilter(input.filters);
+  const [rollup, activities] = canBatch
+    ? await Promise.all([
+        input.interval
+          ? queryOverviewAndTrendForSitesFromHourlyRollupsPartial(
+              input.env,
+              siteIds,
+              input.window,
+              input.interval,
+            )
+          : queryOverviewForSitesFromHourlyRollupsPartial(
+              input.env,
+              siteIds,
+              input.window,
+            ).then((overview) => ({ overview, trend: null })),
+        queryTeamLatestActivityFromD1(input.env, siteIds, input.window),
+      ])
+    : [null, null];
+  // The grouped Raw fallback is restricted to sites with missing rollups.
+  // In particular, do not probe hourly state once again per missing site.
+  const missingOverview = rollup
+    ? siteIds.filter((siteId) => !rollup.overview.has(siteId))
+    : [];
+  const rawOverview =
+    missingOverview.length > 0
+      ? await queryTeamOverviewFromD1(
+          input.env,
+          missingOverview,
+          input.window,
+          undefined,
+          input.filters,
+        )
+      : new Map<string, OverviewAggregateRow>();
+
   const values = await Promise.all(
     sites.map(async (site) => {
-      const reader = createOverviewReader(input.env, site.id);
-      const overview = await reader.readOverview({
-        time,
-        filters: input.filters,
-      });
+      // Filtered and entity-scoped queries retain the legacy readers, whose
+      // SQL applies exact scoped membership rather than the Event rollup.
+      const reader = rollup ? null : createOverviewReader(input.env, site.id);
+      const rolledOverview = rollup?.overview.get(site.id);
+      const overview = rollup
+        ? {
+            value: asOverviewMetrics(
+              rolledOverview ?? rawOverview.get(site.id) ?? EMPTY_OVERVIEW,
+            ),
+            source: (rolledOverview ? "rollup" : "raw") as QuerySource,
+            approximateVisitors: false,
+          }
+        : await reader!.readOverview({ time, filters: input.filters });
+      const rolledTrend = rollup?.trend?.get(site.id);
       const trend = input.interval
-        ? await reader.readTrend({
-            time,
-            filters: input.filters,
-            interval: input.interval,
-          })
+        ? rollup
+          ? {
+              value: (
+                rolledTrend ??
+                (await queryTrendFromD1(
+                  input.env,
+                  site.id,
+                  input.window,
+                  input.interval,
+                  input.filters,
+                ))
+              ).map(asTrendPoint),
+              source: (rolledTrend ? "rollup" : "raw") as QuerySource,
+              approximateVisitors: false,
+            }
+          : await reader!.readTrend({
+              time,
+              filters: input.filters,
+              interval: input.interval,
+            })
         : undefined;
-      const lastEventAtMs = await readLatestSiteActivity(
-        input.env,
-        site.id,
-        input.window,
-        input.filters,
-      );
+      const lastEventAtMs = activities
+        ? (activities.get(site.id) ?? null)
+        : await readLatestSiteActivity(
+            input.env,
+            site.id,
+            input.window,
+            input.filters,
+          );
       return {
         site: {
           siteId: site.id,

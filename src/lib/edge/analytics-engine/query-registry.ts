@@ -83,6 +83,11 @@ const STATIC_SQL_TEMPLATES = [
     variants: ["raw.filtered", "raw.unfiltered"],
   },
   {
+    id: "analytics.team-sites.raw.latest_activity",
+    ownerModule: "src/lib/edge/analytics/providers/d1/internal/team.ts",
+    variants: ["raw.unfiltered"],
+  },
+  {
     id: "analytics.overview.raw.latest_activity",
     ownerModule: "src/lib/edge/analytics/providers/d1/internal/overview.ts",
     variants: ["raw.filtered", "raw.unfiltered"],

@@ -1,9 +1,9 @@
 import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
 import {
-  hasFilterDocument,
   queryOverviewForSitesFromHourlyRollups,
   queryTrendForSitesFromHourlyRollups,
 } from "@/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries";
+import { canUseHourlyRollupsForFilter } from "@/lib/edge/analytics/providers/d1/internal/rollup-eligibility";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -371,8 +371,7 @@ export async function queryOverviewAggregate(
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<PreferredSourceResult<OverviewAggregateRow>> {
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  if (!hasFilterDocument(filters) && !scopedDataset) {
+  if (canUseHourlyRollupsForFilter(filters)) {
     const rollup = await queryOverviewForSitesFromHourlyRollups(
       env,
       [siteId],
@@ -404,8 +403,7 @@ export async function queryTrendAggregate(
   filters: FilterDocument,
   diagnostics?: D1ReadDiagnostics,
 ): Promise<PreferredSourceResult<TrendAggregateRow[]>> {
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
-  if (!hasFilterDocument(filters) && !scopedDataset) {
+  if (canUseHourlyRollupsForFilter(filters)) {
     const rollup = await queryTrendForSitesFromHourlyRollups(
       env,
       [siteId],
