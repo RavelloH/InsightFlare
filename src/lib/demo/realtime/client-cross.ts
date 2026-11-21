@@ -1,6 +1,5 @@
 import "@/lib/analytics/time-zone";
 import "@/lib/demo/admin/durable-objects";
-import "@/lib/demo/admin/system-performance";
 import "@/lib/demo/admin/users";
 import "@/lib/demo/data/site-profiles";
 import "@/lib/demo/generators/utils";

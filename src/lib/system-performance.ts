@@ -176,3 +176,22 @@ export interface DoDiagnosticAggregate {
   futureMaxActivityAt: number | null;
   sites: DoDiagnosticSiteEntry[];
 }
+
+/** One explicitly requested live snapshot of a single site's Durable Object. */
+export interface DoDiagnosticSiteResponse {
+  ok: true;
+  scope: "site";
+  generatedAt: number;
+  site: DoDiagnosticSiteEntry;
+}
+
+/** Bounded scan page; totals refer only to observed, reachable sites on this page. */
+export interface DoDiagnosticScanResponse extends DoDiagnosticAggregate {
+  scope: "scan";
+  scanAt: number;
+  requestedSites: number;
+  processedSites: number;
+  partial: boolean;
+  nextCursor: string | null;
+  hasMore: boolean;
+}

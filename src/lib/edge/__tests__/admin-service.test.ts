@@ -72,7 +72,7 @@ describe("admin service route contract", () => {
 
   it("normalizes server demo payloads to the admin response envelope", async () => {
     const request = new Request(
-      "https://app.test/api/private/admin/system-performance?minutes=60",
+      "https://app.test/api/private/admin/system-performance?view=overview",
     );
     const response = await executeDemoAdminService({
       route: "system-performance",
@@ -82,13 +82,14 @@ describe("admin service route contract", () => {
     });
     const payload = (await response.json()) as {
       ok?: unknown;
-      data?: { ok?: unknown; summary?: unknown };
+      data?: { view?: unknown; status?: unknown; data?: { summary?: unknown } };
     };
 
     expect(response.ok).toBe(true);
     expect(payload.ok).toBe(true);
-    expect(payload.data?.ok).toBe(true);
-    expect(payload.data?.summary).toBeDefined();
+    expect(payload.data?.view).toBe("overview");
+    expect(payload.data?.status).toBe("ready");
+    expect(payload.data?.data?.summary).toBeDefined();
   });
 
   it("serves notification email previews through the demo service adapter", async () => {

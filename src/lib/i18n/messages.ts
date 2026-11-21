@@ -6011,7 +6011,7 @@ const enMessages = {
   systemPerformance: {
     title: "System Performance",
     subtitle:
-      "Monitor InsightFlare collection, buffering, and write health from existing analytics rows.",
+      "Diagnose Worker and Durable Object invocation performance using Analytics Engine v2 telemetry.",
     refresh: "Refresh",
     loadFailed: "Failed to load system performance data.",
     noData: "No system performance data in this window.",
@@ -9151,7 +9151,8 @@ const zhMessages = {
   },
   systemPerformance: {
     title: "系统性能",
-    subtitle: "基于现有分析行监控 InsightFlare 的采集、缓冲和写入健康度。",
+    subtitle:
+      "根据 Analytics Engine v2 调用记录，调查 Worker 与 DO 的性能热点和资源成本。",
     refresh: "刷新",
     loadFailed: "加载系统性能数据失败。",
     noData: "当前时间窗口内暂无系统性能数据。",
@@ -12290,7 +12291,8 @@ const zhTwMessages = {
   },
   systemPerformance: {
     title: "系統效能",
-    subtitle: "基於現有分析行監控 InsightFlare 的採集、緩衝和寫入健康度。",
+    subtitle:
+      "依據 Analytics Engine v2 執行紀錄，調查 Worker 與 DO 的效能熱點和資源成本。",
     refresh: "重新整理",
     loadFailed: "載入系統效能資料失敗。",
     noData: "目前時間視窗內暫無系統效能資料。",
@@ -15524,7 +15526,7 @@ const jaMessages = {
   systemPerformance: {
     title: "システムパフォーマンス",
     subtitle:
-      "既存の分析行から InsightFlare の収集、バッファリング、書き込みの健全性を監視します。",
+      "Analytics Engine v2 の実行記録から Worker と DO の性能・リソースコストを調査します。",
     refresh: "更新",
     loadFailed: "システムパフォーマンスデータを読み込めません。",
     noData: "この期間にシステムパフォーマンスデータはありません。",

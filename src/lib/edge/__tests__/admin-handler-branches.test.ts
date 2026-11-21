@@ -20,10 +20,7 @@ import {
   verifyPassword,
 } from "@/lib/edge/admin/auth";
 import { handleSitesAdmin } from "@/lib/edge/admin/sites/handler";
-import {
-  handleDoDiagnosticAdmin,
-  handleSystemPerformanceAdmin,
-} from "@/lib/edge/admin/system/handler";
+import { handleDoDiagnosticScopedAdmin } from "@/lib/edge/admin/system/do-diagnostic-handler";
 import {
   handleMembersAdmin,
   handleTeamsAdmin,
@@ -668,31 +665,9 @@ describe("admin handler low branches", () => {
     const env = createEnv();
     const nonAdminResolver = vi.fn().mockResolvedValue({ isAdmin: false });
     const adminResolver = vi.fn().mockResolvedValue({ isAdmin: true });
-    const performanceUrl = new URL(
-      "https://edge.test/admin/system-performance",
-    );
     const diagnosticUrl = new URL("https://edge.test/admin/do-diagnostic");
 
-    const performanceForbidden = await handleSystemPerformanceAdmin(
-      request("/admin/system-performance", { method: "GET" }),
-      env.env,
-      performanceUrl,
-      nonAdminResolver,
-    );
-    expect(performanceForbidden.status).toBe(403);
-    await expect(jsonOf(performanceForbidden)).resolves.toMatchObject({
-      error: { message: "Only system admin can view system performance" },
-    });
-
-    const performanceMethod = await handleSystemPerformanceAdmin(
-      request("/admin/system-performance", { method: "POST" }),
-      env.env,
-      performanceUrl,
-      adminResolver,
-    );
-    expect(performanceMethod.status).toBe(405);
-
-    const diagnosticForbidden = await handleDoDiagnosticAdmin(
+    const diagnosticForbidden = await handleDoDiagnosticScopedAdmin(
       request("/admin/do-diagnostic", { method: "GET" }),
       env.env,
       diagnosticUrl,
@@ -703,7 +678,7 @@ describe("admin handler low branches", () => {
       error: { message: "Only system admin can view DO diagnostics" },
     });
 
-    const diagnosticMethod = await handleDoDiagnosticAdmin(
+    const diagnosticMethod = await handleDoDiagnosticScopedAdmin(
       request("/admin/do-diagnostic", { method: "POST" }),
       env.env,
       diagnosticUrl,

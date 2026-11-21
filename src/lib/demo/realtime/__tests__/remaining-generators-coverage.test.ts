@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { generateDemoDoDiagnostic } from "@/lib/demo/admin/durable-objects";
-import { generateDemoSystemPerformance } from "@/lib/demo/admin/system-performance";
+import { generateDemoInvocationMetrics } from "@/lib/demo/admin/invocation-metrics-v2";
 import {
   generateDemoTeamInvites,
   getDemoMembers,
@@ -123,26 +123,44 @@ describe("mock remaining generator coverage", () => {
       snippet: expect.stringContaining("<script defer"),
     });
 
-    const performance = generateDemoSystemPerformance({ minutes: 15 });
-    expect(performance.window.minutes).toBe(15);
-    expect(performance.summary.totalEvents).toBe(
-      performance.summary.visits + performance.summary.customEvents,
-    );
-    expect(performance.trend.length).toBeGreaterThan(0);
-    expect(performance.topSites.length).toBeGreaterThan(0);
-
-    const fallbackPerformance = generateDemoSystemPerformance({
-      minutes: "bad",
+    const performance = generateDemoInvocationMetrics({
+      view: "overview",
+      source: "worker",
     });
-    expect(fallbackPerformance.window.minutes).toBe(60);
+    expect(performance).toMatchObject({
+      dataset: "insightflare_invocation_metrics",
+      schemaVersion: 2,
+      view: "overview",
+      status: "ready",
+      sampling: { aggregatesWeighted: true, detailsAreRetainedSamples: true },
+    });
+    expect(performance.data).toMatchObject({
+      summary: {
+        retainedSamples: expect.any(Number),
+        estimatedInvocations: expect.any(Number),
+        weighted: {
+          d1RowsRead: { coverage: "complete" },
+          doSqlRowsRead: { coverage: "unavailable", value: null },
+        },
+      },
+    });
+
     expect(
-      generateDemoSystemPerformance({ minutes: 360 }).trend[1].timestampMs -
-        generateDemoSystemPerformance({ minutes: 360 }).trend[0].timestampMs,
-    ).toBe(30 * 60 * 1000);
-    expect(
-      generateDemoSystemPerformance({ minutes: 1440 }).trend[1].timestampMs -
-        generateDemoSystemPerformance({ minutes: 1440 }).trend[0].timestampMs,
-    ).toBe(60 * 60 * 1000);
+      generateDemoInvocationMetrics({
+        view: "overview",
+        source: "worker",
+        scenario: "partial",
+      }),
+    ).toMatchObject({
+      status: "insufficient_coverage",
+      data: {
+        summary: {
+          weighted: {
+            d1RowsRead: { coverage: "partial", lowerBound: true },
+          },
+        },
+      },
+    });
 
     const diagnostic = generateDemoDoDiagnostic();
     expect(diagnostic.totalSites).toBe(diagnostic.sites.length);

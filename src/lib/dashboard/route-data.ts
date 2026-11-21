@@ -15,7 +15,6 @@ import {
   type SerializableNotificationRuleData,
   type SerializableScheduledTasksData,
   type SiteSettingsInitialData,
-  type SystemPerformanceInitialData,
   type SystemSettingsInitialData,
   type TeamManagementInitialData,
   type TeamNotificationsInitialData,
@@ -314,14 +313,6 @@ export const loadScheduledTasksInitialData = createServerFn({
         fetchedAt: Date.now(),
       }
     : null;
-});
-export const loadSystemPerformanceInitialData = createServerFn({
-  method: "GET",
-}).handler(async (): Promise<SystemPerformanceInitialData | null> => {
-  const data = await readDashboardAdmin("system-performance", {
-    minutes: 60,
-  });
-  return data ? { data, fetchedAt: Date.now() } : null;
 });
 export const loadDashboardSite = createServerFn({ method: "GET" })
   .validator((data: { teamSlug: string; siteSlug: string }) => data)

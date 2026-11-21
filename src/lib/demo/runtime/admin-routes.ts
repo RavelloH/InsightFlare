@@ -3,7 +3,8 @@ import {
   defaultAnalyticsEngineConfig,
   redactAnalyticsEngineConfig,
 } from "@/lib/analytics-engine-config";
-import { generateDemoDoDiagnostic } from "@/lib/demo/admin/durable-objects";
+import { generateDemoDoDiagnosticScoped } from "@/lib/demo/admin/do-diagnostic-v2";
+import { generateDemoInvocationMetrics } from "@/lib/demo/admin/invocation-metrics-v2";
 import {
   createDemoNotificationRule,
   generateDemoNotificationMessages,
@@ -14,7 +15,6 @@ import {
   generateDemoScheduledTasks,
   updateDemoScheduledTasks,
 } from "@/lib/demo/admin/scheduled-tasks";
-import { generateDemoSystemPerformance } from "@/lib/demo/admin/system-performance";
 import {
   generateDemoApiKeys,
   generateDemoTeamInvites,
@@ -560,10 +560,10 @@ export function handleDemoAdminRoutes(
     return generateDemoScheduledTasks(params);
   }
   if (path.includes("/admin/system-performance")) {
-    return generateDemoSystemPerformance(params);
+    return generateDemoInvocationMetrics(params);
   }
   if (path.includes("/admin/do-diagnostic")) {
-    return generateDemoDoDiagnostic();
+    return generateDemoDoDiagnosticScoped(params);
   }
   return undefined;
 }
