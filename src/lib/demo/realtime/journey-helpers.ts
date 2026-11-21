@@ -1,6 +1,5 @@
 import "@/lib/browser-engine";
 import "@/lib/demo/admin/durable-objects";
-import "@/lib/demo/admin/system-performance";
 import "@/lib/demo/admin/users";
 import "@/lib/demo/analytics";
 import "@/lib/demo/data/site-profiles";

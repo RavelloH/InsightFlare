@@ -464,18 +464,35 @@ describe("mock — handleDemoRequest", () => {
       expect(res.ok).toBe(true);
     });
 
-    it("returns system performance metrics", () => {
-      const res = ok(
+    it("returns sampled AE v2 invocation performance, not event delivery latency", () => {
+      const res = asRecord(
         handleDemoRequest({ path: "/api/private/admin/system-performance" }),
       );
-      expect(res.ok).toBe(true);
+      expect(res).toMatchObject({
+        view: "overview",
+        schemaVersion: 2,
+        status: "ready",
+        dataset: "insightflare_invocation_metrics",
+      });
+      expect(asRecord(res.data).summary).toBeDefined();
     });
 
-    it("returns DO diagnostic", () => {
-      const res = ok(
+    it("requires explicit scope for DO diagnostic and does not auto-scan", () => {
+      const withoutScope = asRecord(
         handleDemoRequest({ path: "/api/private/admin/do-diagnostic" }),
       );
-      expect(res.ok).toBe(true);
+      expect(withoutScope).toMatchObject({ ok: false, code: "invalid_scope" });
+      const scan = asRecord(
+        handleDemoRequest({
+          path: "/api/private/admin/do-diagnostic",
+          params: { scope: "scan", limit: 2 },
+        }),
+      );
+      expect(scan).toMatchObject({
+        ok: true,
+        scope: "scan",
+        requestedSites: 2,
+      });
     });
 
     it("returns blocked/included request observation data and paginates detail rows", () => {
@@ -823,31 +840,48 @@ describe("mock — handleDemoRequest", () => {
       }
     });
 
-    it("honors supported system-performance minutes and falls back otherwise", () => {
-      for (const [minutes, bucketSizeMs] of [
-        [15, 60_000],
-        [60, 5 * 60_000],
-        [360, 30 * 60_000],
-        [1440, 60 * 60_000],
-      ] as const) {
+    it("respects v2 AE view, time window, sample coverage and status scenarios", () => {
+      const to = 1_790_000_000_000;
+      for (const view of [
+        "overview",
+        "routes",
+        "hotspots",
+        "errors",
+        "samples",
+      ]) {
         const res = asRecord(
           handleDemoRequest({
             path: "/api/private/admin/system-performance",
-            params: { minutes },
+            params: {
+              view,
+              from: to - 86_400_000,
+              to,
+              source: "worker",
+              limit: 10,
+            },
           }),
         );
-        const window = res.window as Record<string, unknown>;
-        expect(window.minutes).toBe(minutes);
-        expect(window.bucketSizeMs).toBe(bucketSizeMs);
+        expect(res).toMatchObject({
+          view,
+          schemaVersion: 2,
+          status: "ready",
+          window: { from: to - 86_400_000, to },
+        });
       }
-
-      const fallback = asRecord(
+      const partial = asRecord(
         handleDemoRequest({
           path: "/api/private/admin/system-performance",
-          params: { minutes: 999 },
+          params: { scenario: "partial" },
         }),
       );
-      expect((fallback.window as Record<string, unknown>).minutes).toBe(60);
+      expect(partial.status).toBe("insufficient_coverage");
+      const unavailable = asRecord(
+        handleDemoRequest({
+          path: "/api/private/admin/system-performance",
+          params: { scenario: "no_data" },
+        }),
+      );
+      expect(unavailable.status).toBe("no_data");
     });
   });
 

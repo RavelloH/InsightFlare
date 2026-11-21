@@ -1,16 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type * as DemoAdminDurableObjectsModule from "@/lib/demo/admin/durable-objects";
+import type * as DemoAdminInvocationMetricsModule from "@/lib/demo/admin/invocation-metrics-v2";
 import type * as DemoAdminNotificationsModule from "@/lib/demo/admin/notifications";
 import type * as DemoAdminScheduledTasksModule from "@/lib/demo/admin/scheduled-tasks";
-import type * as DemoAdminSystemPerformanceModule from "@/lib/demo/admin/system-performance";
 import type * as DemoAdminUsersModule from "@/lib/demo/admin/users";
 import type { DemoSiteProfile } from "@/lib/demo/data/site-profiles";
 import type * as DemoUtilsModule from "@/lib/demo/generators/utils";
 type AdminModule = typeof DemoAdminUsersModule &
   typeof DemoAdminNotificationsModule &
   typeof DemoAdminScheduledTasksModule &
-  typeof DemoAdminSystemPerformanceModule &
+  typeof DemoAdminInvocationMetricsModule &
   typeof DemoAdminDurableObjectsModule;
 import type {
   DoDiagnosticPayload,
@@ -87,7 +87,7 @@ async function withMockedAdmin<T>({
       ...(await import("@/lib/demo/admin/users")),
       ...(await import("@/lib/demo/admin/notifications")),
       ...(await import("@/lib/demo/admin/scheduled-tasks")),
-      ...(await import("@/lib/demo/admin/system-performance")),
+      ...(await import("@/lib/demo/admin/invocation-metrics-v2")),
       ...(await import("@/lib/demo/admin/durable-objects")),
     };
     return await run(admin);
@@ -198,83 +198,70 @@ describe("mock/admin branch coverage", () => {
     });
   });
 
-  it("returns null system performance aggregates when no latency samples exist", async () => {
+  it("represents missing AE samples as no_data rather than zero execution latency", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(BASE_TIME);
-
     await withMockedAdmin({
       run: (admin) => {
-        const performance = admin.generateDemoSystemPerformance({
-          minutes: 15,
+        const result = admin.generateDemoInvocationMetrics({
+          view: "overview",
+          scenario: "no_data",
         });
-
-        expect(performance.summary.totalEvents).toBe(0);
-        expect(performance.summary.latestCreatedAt).toBeNull();
-        expect(performance.summary.dataFreshnessMs).toBeNull();
-        expect(performance.summary.avgLatencyMs).toBeNull();
-        expect(performance.summary.p50LatencyMs).toBeNull();
-        expect(performance.summary.p75LatencyMs).toBeNull();
-        expect(performance.summary.p95LatencyMs).toBeNull();
-        expect(performance.summary.trustedLatencySamples).toBe(0);
-        expect(performance.summary.anomalyRate).toBe(0);
-        expect(performance.trend).toEqual([]);
-        expect(performance.topSites).toEqual([]);
-        expect(performance.slowEvents).toEqual([]);
+        expect(result).toMatchObject({
+          dataset: "insightflare_invocation_metrics",
+          schemaVersion: 2,
+          status: "no_data",
+          data: null,
+        });
       },
     });
   });
 
-  it("keeps site and trend latency null when all events are future skewed", async () => {
+  it("distinguishes real zero, partial coverage, and Batch-unrankable hot queries", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(BASE_TIME);
-
-    const integrateViews = vi.fn<
-      (siteId: string, from: number, to: number) => number
-    >(() => 4);
-    const siteId = "site-a";
-
     await withMockedAdmin({
-      integrateViews,
-      rngValues: [0.5, 0.015, 0.5],
-      siteProfiles: [makeSiteProfile(siteId)],
       run: (admin) => {
-        const performance = admin.generateDemoSystemPerformance({
-          minutes: 15,
+        const zero = admin.generateDemoInvocationMetrics({
+          view: "overview",
+          scenario: "zero",
+          source: "worker",
         });
-        const siteCalls = integrateViews.mock.calls.filter(
-          ([calledSiteId]) => calledSiteId === siteId,
-        );
-        const clippedLastBucket = siteCalls.find(
-          ([, from, to]) =>
-            to === BASE_TIME && to - from < performance.window.bucketSizeMs,
-        );
-
-        expect(performance.summary.totalEvents).toBeGreaterThan(0);
-        expect(performance.summary.trustedLatencySamples).toBe(0);
-        expect(performance.summary.avgLatencyMs).toBeNull();
-        expect(performance.summary.p50LatencyMs).toBeNull();
-        expect(performance.summary.p75LatencyMs).toBeNull();
-        expect(performance.summary.p95LatencyMs).toBeNull();
-        expect(performance.summary.futureSkewedEvents).toBe(
-          performance.summary.totalEvents,
-        );
-        expect(performance.slowEvents).toEqual([]);
-        expect(performance.topSites).toEqual([
-          expect.objectContaining({
-            siteId,
-            avgLatencyMs: null,
-            futureSkewedEvents: performance.summary.totalEvents,
-          }),
-        ]);
-        expect(performance.trend.length).toBeGreaterThan(0);
-        for (const point of performance.trend) {
-          expect(point.avgLatencyMs).toBeNull();
-          expect(point.p50LatencyMs).toBeNull();
-          expect(point.p75LatencyMs).toBeNull();
-          expect(point.p95LatencyMs).toBeNull();
-        }
-        expect(siteCalls[0]?.[1]).toBeLessThan(performance.window.from);
-        expect(clippedLastBucket).toBeDefined();
+        expect(zero.status).toBe("ready");
+        expect(zero).toMatchObject({
+          data: {
+            summary: {
+              p50: 0,
+              p95: 0,
+              p99: 0,
+              weighted: { d1RowsRead: { value: 0, coverage: "complete" } },
+            },
+          },
+        });
+        const partial = admin.generateDemoInvocationMetrics({
+          view: "overview",
+          scenario: "partial",
+          source: "worker",
+        });
+        expect(partial.status).toBe("insufficient_coverage");
+        expect(partial).toMatchObject({
+          data: {
+            summary: {
+              weighted: {
+                d1RowsRead: { coverage: "partial", lowerBound: true },
+              },
+            },
+          },
+        });
+        const batch = admin.generateDemoInvocationMetrics({
+          view: "hotspots",
+          scenario: "batch",
+        });
+        expect(batch).toMatchObject({
+          data: {
+            hotspots: { "api-hot": [], "sql-engine-fallback": [] },
+          },
+        });
       },
     });
   });

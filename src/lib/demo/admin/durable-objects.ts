@@ -5,10 +5,9 @@ import type {
   DoDiagnosticSiteEntry,
 } from "@/lib/system-performance";
 
-import {
-  DEMO_SYSTEM_STALE_OPEN_VISIT_MS,
-  DEMO_SYSTEM_TIMED_OUT_OPEN_VISIT_MS,
-} from "./system-performance";
+/** Live buffer health thresholds, independent from AE v2 execution latency. */
+const DEMO_SYSTEM_STALE_OPEN_VISIT_MS = 30 * 60 * 1000;
+const DEMO_SYSTEM_TIMED_OUT_OPEN_VISIT_MS = 12 * 60 * 60 * 1000;
 const DEMO_DO_HARD_AGED_MS = 36 * 60 * 60 * 1000;
 const DEMO_DO_STUCK_FLUSH_ATTEMPTS = 5;
 export function generateDemoDoDiagnostic(): DoDiagnosticAggregate {
