@@ -59,3 +59,85 @@ describe("P4 IANA calendar boundaries", () => {
     );
   });
 });
+
+describe("calendar-based SQL range precision for short intervals", () => {
+  const clock = (from: string, to: string) => ({
+    nowMs: Date.parse(to),
+    rangeStartMs: Date.parse(from),
+    rangeEndExclusiveMs: Date.parse(to),
+    timeZone: "UTC",
+  });
+  it("honors distinct one-hour and multi-hour calendar boundaries", () => {
+    const c = clock("2026-01-02T05:30:00Z", "2026-01-02T07:30:00Z");
+    expect(sqlCalendarPeriods(duration("h", 2), c)).toEqual([
+      {
+        start: Date.parse("2026-01-02T04:00:00Z"),
+        end: Date.parse("2026-01-02T06:00:00Z"),
+      },
+      {
+        start: Date.parse("2026-01-02T06:00:00Z"),
+        end: Date.parse("2026-01-02T08:00:00Z"),
+      },
+    ]);
+    expect(sqlCalendarPeriods(duration("h", 1), c)[0]?.start).toBe(
+      Date.parse("2026-01-02T05:00:00Z"),
+    );
+  });
+  it("aligns milliseconds, seconds and minutes as genuine elapsed-time buckets", () => {
+    const variants = [
+      {
+        unit: "ms",
+        amount: 500,
+        from: "2026-01-01T00:00:00.250Z",
+        to: "2026-01-01T00:00:01.250Z",
+        first: "2026-01-01T00:00:00Z",
+        end: "2026-01-01T00:00:00.500Z",
+      },
+      {
+        unit: "s",
+        amount: 5,
+        from: "2026-01-01T00:00:12.500Z",
+        to: "2026-01-01T00:00:17Z",
+        first: "2026-01-01T00:00:10Z",
+        end: "2026-01-01T00:00:15Z",
+      },
+      {
+        unit: "m",
+        amount: 2,
+        from: "2026-01-01T00:03:15Z",
+        to: "2026-01-01T00:05:15Z",
+        first: "2026-01-01T00:02:00Z",
+        end: "2026-01-01T00:04:00Z",
+      },
+    ] as const;
+    for (const v of variants) {
+      const periods = sqlCalendarPeriods(
+        { kind: "duration", unit: v.unit, amount: v.amount },
+        clock(v.from, v.to),
+      );
+      expect(periods[0]).toEqual({
+        start: Date.parse(v.first),
+        end: Date.parse(v.end),
+      });
+      expect(periods.at(-1)!.end).toBeGreaterThanOrEqual(Date.parse(v.to));
+    }
+  });
+  it("rejects nonpositive calendar widths and returns no buckets for an empty window", () => {
+    const c = clock("2026-01-01T00:00:00Z", "2026-01-01T01:00:00Z");
+    expect(() => sqlCalendarPeriods(duration("h", 0), c)).toThrow(
+      "Calendar interval amount",
+    );
+    expect(() =>
+      sqlCalendarPeriods(
+        { kind: "duration", unit: "unknown" as never, amount: 1 },
+        c,
+      ),
+    ).toThrow("Unrecognized Calendar unit.");
+    expect(
+      sqlCalendarPeriods(duration("h", 1), {
+        ...c,
+        rangeEndExclusiveMs: c.rangeStartMs,
+      }),
+    ).toEqual([]);
+  });
+});
