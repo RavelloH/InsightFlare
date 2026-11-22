@@ -456,4 +456,125 @@ describe("AE v2 reader normalization with real coverage and trust boundaries", (
       ).toThrow("Invalid invocation metrics result");
     }
   });
+
+  it("preserves safe nested diagnostics while dropping malformed individual phases and queries", () => {
+    const details = JSON.stringify({
+      v: 2,
+      phases: [
+        null,
+        7,
+        [],
+        { id: "route.handler", count: 1, wallMs: 4 },
+        { id: "d1.all", count: -1, wallMs: 2 },
+      ],
+      queries: [
+        null,
+        [],
+        {
+          id: queryId,
+          variant: "raw.filtered",
+          count: -1,
+          apiWallMs: 0,
+          sqlEngineMs: 0,
+          rowsRead: 0,
+          rowsWritten: 0,
+          attempts: 0,
+        },
+        {
+          id: queryId,
+          variant: "raw.filtered",
+          count: 1,
+          apiWallMs: 4,
+          sqlEngineMs: 2,
+          rowsRead: 3,
+          rowsWritten: 0,
+          attempts: 1,
+          failed: true,
+          coverage: ["not an accepted coverage object"],
+        },
+      ],
+      coverage: {
+        query: "partial",
+        queryGranularity: "mixed",
+        templateStatements: 1,
+        familyStatements: 1,
+      },
+      truncation: { queriesDropped: 2, phasesDropped: 1, signalsDropped: 1 },
+    });
+    const result = normalizeInvocationView("samples", {
+      samples: [sampleRow({ details })],
+    });
+    expect(result.data.samples[0]?.details).toMatchObject({
+      phases: [{ id: "route.handler", count: 1, wallMs: 4 }],
+      queries: [
+        {
+          id: queryId,
+          failed: true,
+          coverage: {
+            api: "unavailable",
+            engine: "unavailable",
+            rowsRead: "unavailable",
+          },
+        },
+      ],
+      coverage: {
+        query: "partial",
+        queryGranularity: "mixed",
+        templateStatements: 1,
+        familyStatements: 1,
+      },
+      truncation: { queriesDropped: 2, phasesDropped: 1, signalsDropped: 1 },
+    });
+  });
+
+  it("discards invalid optional coverage metadata without exposing untrusted JSON fields", () => {
+    const malformed = normalizeInvocationView("samples", {
+      samples: [
+        sampleRow({
+          details: JSON.stringify({
+            v: 2,
+            phases: { id: "route.handler" },
+            queries: "not-an-array",
+            coverage: {
+              query: "complete",
+              queryGranularity: "sql-template",
+              templateStatements: -1,
+              familyStatements: 1,
+            },
+            truncation: {
+              queriesDropped: -1,
+              phasesDropped: 0,
+              signalsDropped: 0,
+            },
+            privateUserId: "must never be returned",
+          }),
+        }),
+        sampleRow({
+          details: JSON.stringify({
+            v: 2,
+            phases: [],
+            queries: [],
+            coverage: ["invalid"],
+            truncation: ["invalid"],
+          }),
+        }),
+        sampleRow({ details: JSON.stringify(null) }),
+        sampleRow({ details: { v: 2 } }),
+      ],
+    });
+    expect(malformed.status).toBe("ready");
+    expect(malformed.data.samples[0]?.details).toEqual({
+      version: 2,
+      phases: [],
+      queries: [],
+      coverage: null,
+      truncation: null,
+    });
+    expect(malformed.data.samples[1]?.details).toMatchObject({
+      coverage: null,
+      truncation: null,
+    });
+    expect(malformed.data.samples[2]?.details).toBeNull();
+    expect(malformed.data.samples[3]?.details).toBeNull();
+  });
 });
