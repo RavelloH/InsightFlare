@@ -192,10 +192,30 @@ async function mount(search: string) {
     await new Promise((resolve) => setTimeout(resolve, 80));
   });
 }
-function tableAction(label: string) {
-  return Array.from(host.querySelectorAll("table button")).find((button) =>
-    button.textContent?.includes(label),
-  ) as HTMLButtonElement | undefined;
+function tableAction(
+  label: string,
+  matches: (button: HTMLButtonElement) => boolean = () => true,
+) {
+  return Array.from(
+    host.querySelectorAll<HTMLButtonElement>("table button"),
+  ).find((button) => button.textContent?.includes(label) && matches(button));
+}
+
+// The admin request may already have started while React Query is still waiting
+// for the response. Poll the rendered table rather than relying on an 80ms sleep,
+// which is not reliable under Linux CI coverage instrumentation.
+async function waitForTableAction(
+  label: string,
+  matches?: (button: HTMLButtonElement) => boolean,
+): Promise<HTMLButtonElement> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const button = tableAction(label, matches);
+    if (button) return button;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+  }
+  throw new Error(`Timed out waiting for table action "${label}"`);
 }
 beforeEach(() => {
   mockRequest.mockReset();
@@ -215,6 +235,16 @@ afterEach(async () => {
 
 describe("system performance v2 investigation UI regression", () => {
   it("restores URL-selected 6h scan/version and opens matching primary-query samples", async () => {
+    // Reproduce the real asynchronous gap between requesting retained samples
+    // and rendering their table. The old fixed-delay test failed in CI here.
+    mockRequest.mockImplementation(async (name, options) => {
+      if (name !== "system-performance") return {} as never;
+      const params = (options?.params ?? {}) as Record<string, unknown>;
+      if (params.view === "samples") {
+        await new Promise((resolve) => setTimeout(resolve, 160));
+      }
+      return response(params) as never;
+    });
     await mount(
       "?perfTab=hotspots&hotspotKind=scan&perfRange=6h&routeKey=api%3A%2Fcollect&appVersion=1.2.3",
     );
@@ -236,9 +266,9 @@ describe("system performance v2 investigation UI regression", () => {
     };
     expect(window.to - window.from).toBe(6 * 3_600_000);
     expect(window.interval).toBe("hour");
-    expect(tableAction(labels.showSamples)).toBeDefined();
+    const showSamples = await waitForTableAction(labels.showSamples);
     await act(async () => {
-      tableAction(labels.showSamples)!.click();
+      showSamples.click();
       await new Promise((resolve) => setTimeout(resolve, 80));
     });
     const params = new URLSearchParams(globalThis.window.location.search);
@@ -254,8 +284,12 @@ describe("system performance v2 investigation UI regression", () => {
           options.params.sampleQueryId === queryId,
       ),
     ).toBe(true);
+    const sampleInspect = await waitForTableAction(
+      labels.inspect,
+      (button) => button.closest("tr")?.textContent?.includes("12 ms") === true,
+    );
     await act(async () => {
-      tableAction(labels.inspect)!.click();
+      sampleInspect.click();
     });
     expect(host.textContent).toContain("route.handler");
     expect(host.textContent).toContain("≥24");
@@ -270,8 +304,9 @@ describe("system performance v2 investigation UI regression", () => {
   it("supports route and error investigation with strict related-sample filters", async () => {
     await mount("?perfTab=overview&perfRange=1h");
     expect(host.textContent).toContain("≥24");
+    const routeSamples = await waitForTableAction(labels.showSamples);
     await act(async () => {
-      tableAction(labels.showSamples)!.click();
+      routeSamples.click();
     });
     expect(new URLSearchParams(window.location.search).get("perfTab")).toBe(
       "samples",
@@ -294,8 +329,9 @@ describe("system performance v2 investigation UI regression", () => {
     expect(new URLSearchParams(window.location.search).get("perfTab")).toBe(
       "errors",
     );
+    const errorSamples = await waitForTableAction(labels.showSamples);
     await act(async () => {
-      tableAction(labels.showSamples)!.click();
+      errorSamples.click();
     });
     const params = new URLSearchParams(window.location.search);
     expect(params.get("sampleErrorCode")).toBe("d1_query_failed");
