@@ -32,13 +32,15 @@ import { fetchBrowserVersionBreakdown } from "@/lib/dashboard/client/data/index"
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { BrowserVersionBreakdownData } from "@/lib/dashboard-api/client/edge";
+import { externalServices } from "@/lib/external-services";
 import type { FilterDocument } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 /* ---------- caniuse types ---------- */
 
-const CANIUSE_BASE = "https://caniuse.ravelloh.com";
+// Overridable with CANIUSE_API_BASE_URL (self-hostable can-i-use-api).
+const caniuseBase = () => externalServices().caniuseBaseUrl;
 interface CaniuseSearchEntry {
   id: string;
   title: string;
@@ -171,13 +173,13 @@ export const CanIUseCompatCard = memo(function CanIUseCompatCard({
     queryKey: ["dashboard", "caniuse-catalog"],
     queryFn: async ({ signal }) => {
       const [searchIndex, hotFeatures, trendingFeatures] = await Promise.all([
-        fetch(CANIUSE_BASE, { signal }).then(
+        fetch(caniuseBase(), { signal }).then(
           (response) => response.json() as Promise<CaniuseSearchEntry[]>,
         ),
-        fetch(`${CANIUSE_BASE}/hot/`, { signal }).then(
+        fetch(`${caniuseBase()}/hot/`, { signal }).then(
           (response) => response.json() as Promise<CaniuseHotFeature[]>,
         ),
-        fetch(`${CANIUSE_BASE}/trending/`, { signal }).then(
+        fetch(`${caniuseBase()}/trending/`, { signal }).then(
           (response) => response.json() as Promise<CaniuseTrendingFeature[]>,
         ),
       ]);
@@ -231,7 +233,7 @@ export const CanIUseCompatCard = memo(function CanIUseCompatCard({
   const featureQuery = useQuery({
     queryKey: ["dashboard", "caniuse-feature", selectedId],
     queryFn: ({ signal }) =>
-      fetch(`${CANIUSE_BASE}/feature/${selectedId}/`, { signal }).then(
+      fetch(`${caniuseBase()}/feature/${selectedId}/`, { signal }).then(
         (response) => response.json() as Promise<CaniuseFeatureDetail>,
       ),
     enabled: !import.meta.env.SSR && Boolean(selectedId),
@@ -251,7 +253,7 @@ export const CanIUseCompatCard = memo(function CanIUseCompatCard({
     queryFn: async ({ signal }) => {
       const results = await Promise.all(
         previewIds.map((id) =>
-          fetch(`${CANIUSE_BASE}/feature/${id}/`, { signal })
+          fetch(`${caniuseBase()}/feature/${id}/`, { signal })
             .then(
               (response) => response.json() as Promise<CaniuseFeatureDetail>,
             )

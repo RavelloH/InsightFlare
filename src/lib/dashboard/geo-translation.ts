@@ -1,6 +1,6 @@
+import { externalServices } from "@/lib/external-services";
 import type { Locale } from "@/lib/i18n/config";
 
-export const GEO_TRANSLATION_API_BASE_URL = "https://locale.ravelloh.com";
 export const GEO_TRANSLATION_DATA_LOCALE = "zh-CN";
 export const GEO_STATE_CODE_PATTERN = /^[A-Z0-9-]{1,16}$/;
 
@@ -161,7 +161,8 @@ export function buildGeoTranslationApiUrl(
     .filter((segment) => segment.length > 0)
     .join("/");
   const suffix = segments.length > 0 ? "/" : "";
-  return `${GEO_TRANSLATION_API_BASE_URL}/${path}${suffix}`;
+  // Overridable with GEO_LOCALE_API_BASE_URL (self-hostable iso-3166-2-locale).
+  return `${externalServices().geoLocaleBaseUrl}/${path}${suffix}`;
 }
 
 function asTrimmedString(value: unknown): string {

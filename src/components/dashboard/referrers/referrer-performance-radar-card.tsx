@@ -18,6 +18,7 @@ import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";
 import type { ReferrerRadarItem } from "@/lib/dashboard-api/client/edge";
+import { externalServices } from "@/lib/external-services";
 import type { FilterDocument } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -125,7 +126,8 @@ async function fetchReferrerMetadata(
   }
 
   const promise = fetch(
-    `https://meta.ravelloh.com/?url=${encodeURIComponent(targetUrl)}`,
+    // Overridable with SITE_META_API_BASE_URL.
+    `${externalServices().siteMetaBaseUrl}/?url=${encodeURIComponent(targetUrl)}`,
     { cache: "force-cache" },
   )
     .then(async (response) => {

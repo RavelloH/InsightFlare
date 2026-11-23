@@ -31,6 +31,8 @@ import { AppQueryProvider } from "@/components/query-client-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TimeZoneProvider } from "@/components/time-zone-provider";
 import { APP_NAME } from "@/lib/constants";
+import { setExternalServices } from "@/lib/external-services";
+import { loadExternalServices } from "@/lib/external-services.functions";
 import { localeToHtmlLang, resolveLocale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n/messages";
 import Link from "@/lib/router";
@@ -59,11 +61,18 @@ export const Route = createRootRoute({
       { rel: "stylesheet", href: globalStylesheetUrl },
     ],
   }),
+  // External service base URLs (env-overridable). Resolved once during SSR and
+  // dehydrated with the page; never refetched on client-side navigation.
+  loader: () => loadExternalServices(),
+  staleTime: Infinity,
+  shouldReload: false,
   notFoundComponent: NotFoundPage,
   errorComponent: ErrorPage,
   component: RootDocument,
 });
 function RootDocument() {
+  // Store before children render so their request builders see the overrides.
+  setExternalServices(Route.useLoaderData());
   const pathname = useLocation({ select: (location) => location.pathname });
   const locale = resolveLocale(pathname.split("/")[1]);
 
