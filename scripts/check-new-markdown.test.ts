@@ -13,6 +13,17 @@ const checker = fileURLToPath(
 );
 let repository: string;
 
+/**
+ * Git exports GIT_DIR/GIT_WORK_TREE to hooks. If inherited here, the
+ * temporary test commands can accidentally mutate the invoking repository
+ * instead of the fixture. Always isolate the subprocess Git environment.
+ */
+function isolatedGitEnv(): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !/^GIT_/i.test(name)),
+  );
+}
+
 function git(...args: string[]): string {
   return execFileSync(
     "git",
@@ -29,7 +40,12 @@ function git(...args: string[]): string {
       `core.hooksPath=${path.join(repository, ".empty-hooks")}`,
       ...args,
     ],
-    { cwd: repository, encoding: "utf8", windowsHide: true },
+    {
+      cwd: repository,
+      env: isolatedGitEnv(),
+      encoding: "utf8",
+      windowsHide: true,
+    },
   );
 }
 
@@ -43,6 +59,7 @@ function stage(file: string, contents = "Document\n"): void {
 function check(cwd = repository) {
   return spawnSync(process.execPath, [checker], {
     cwd,
+    env: isolatedGitEnv(),
     encoding: "utf8",
     windowsHide: true,
   });
@@ -121,6 +138,25 @@ describe("new Markdown commit policy", () => {
     const result = check(path.join(repository, "docs"));
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("docs/blocked.md");
+  });
+
+  it("ignores inherited Git working-tree overrides when running fixture commands", () => {
+    const previousDir = process.env.GIT_DIR;
+    const previousWorkTree = process.env.GIT_WORK_TREE;
+    try {
+      process.env.GIT_DIR = path.join(repository, "invalid-parent-git-dir");
+      process.env.GIT_WORK_TREE = path.join(
+        repository,
+        "invalid-parent-worktree",
+      );
+      stage("changelog/isolated.md");
+      expect(check().status).toBe(0);
+    } finally {
+      if (previousDir === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = previousDir;
+      if (previousWorkTree === undefined) delete process.env.GIT_WORK_TREE;
+      else process.env.GIT_WORK_TREE = previousWorkTree;
+    }
   });
 
   it("fails closed when Git cannot inspect staged files", () => {

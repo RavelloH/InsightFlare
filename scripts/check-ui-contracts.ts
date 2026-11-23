@@ -187,6 +187,8 @@ const productComponentSubpaths = Object.keys(productPackage.exports)
       entry !== "styles.css" &&
       entry !== "tabbed-table" &&
       entry !== "labels" &&
+      // Pure palette calculation is a public utility, not a visual component.
+      entry !== "chart-colors" &&
       entry !== "showcase",
   );
 
