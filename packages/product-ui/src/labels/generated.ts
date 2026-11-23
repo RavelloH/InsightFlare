@@ -295,8 +295,8 @@ export const productUiLabels = {
     eventMetrics: {
       totalEvents: "事件總數",
       shareOfAllEvents: "事件佔比",
-      detailSubtitle: "檢視單次事件的上下文與事件屬性。",
-      eventTypes: "事件類型",
+      detailSubtitle: "檢視單次事件的上下文與事件載荷。",
+      eventTypes: "事件型別",
       breakdownTitle: "上下文分佈",
       sessions: "觸發工作階段",
       avgEventsPerSession: "平均事件/工作階段",
@@ -356,7 +356,7 @@ export const productUiLabels = {
       loadingLabel: "載入中",
     },
     deviceShareOverview: {
-      primaryTitle: "裝置類型佔比",
+      primaryTitle: "裝置型別佔比",
       secondaryTitle: "作業系統佔比",
       valueLabel: "訪客數",
       emptyLabel: "暫無資料",
@@ -378,13 +378,13 @@ export const productUiLabels = {
     },
     browserCrossBreakdown: {
       firstTitle: "瀏覽器 × 系統",
-      secondTitle: "瀏覽器 × 裝置類型",
+      secondTitle: "瀏覽器 × 裝置型別",
       loadingLabel: "載入中",
       emptyLabel: "暫無資料",
     },
     deviceCrossBreakdown: {
-      firstTitle: "裝置類型 × 瀏覽器",
-      secondTitle: "裝置類型 × 作業系統",
+      firstTitle: "裝置型別 × 瀏覽器",
+      secondTitle: "裝置型別 × 作業系統",
       loadingLabel: "載入中",
       emptyLabel: "暫無資料",
     },
