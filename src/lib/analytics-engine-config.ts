@@ -12,6 +12,11 @@ export interface AnalyticsEngineConfig {
   configured: boolean;
   updatedAt: number;
   updatedByUserId?: string;
+  /**
+   * In memory only, never persisted: "environment" when the reader comes from
+   * the INSIGHTFLARE_AE_* Worker variables instead of the admin setting.
+   */
+  source?: "stored" | "environment";
 }
 
 export interface PublicAnalyticsEngineConfig {
@@ -23,6 +28,8 @@ export interface PublicAnalyticsEngineConfig {
   eventDataset: typeof EVENT_ANALYTICS_DATASET;
   apiTokenConfigured: boolean;
   apiTokenHint: string;
+  /** The reader is provided by the deployment and cannot be edited here. */
+  managedByEnvironment: boolean;
   updatedAt: number;
 }
 
@@ -83,6 +90,7 @@ export function redactAnalyticsEngineConfig(
     eventDataset: EVENT_ANALYTICS_DATASET,
     apiTokenConfigured: config.configured,
     apiTokenHint: config.apiTokenHint,
+    managedByEnvironment: config.source === "environment",
     updatedAt: config.updatedAt,
   };
 }
@@ -112,7 +120,11 @@ export function validateAnalyticsEngineConfig(
   if (!/^[a-f0-9]{32}$/i.test(config.accountId)) {
     return "Cloudflare Account ID must be a 32 character hex string";
   }
-  if (config.configured && !config.apiTokenEncrypted) {
+  if (
+    config.configured &&
+    !config.apiTokenEncrypted &&
+    config.source !== "environment"
+  ) {
     return "Cloudflare API token is required";
   }
   return null;

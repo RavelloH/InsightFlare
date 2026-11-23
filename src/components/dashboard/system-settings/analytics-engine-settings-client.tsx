@@ -54,6 +54,7 @@ function defaultConfig(): PublicAnalyticsEngineConfig {
   return {
     accountId: "",
     analyticsEngineDisabled: false,
+    managedByEnvironment: false,
     analyticsEngineEnableUrl: "",
     requestDataset: REQUEST_ANALYTICS_DATASET,
     trafficDataset: TRAFFIC_ANALYTICS_DATASET,
@@ -123,6 +124,9 @@ export function AnalyticsEngineSettingsClient({
   });
   const loading = configQuery.isPending;
   const analyticsEngineDisabled = config.analyticsEngineDisabled;
+  // Deployment-managed reader (INSIGHTFLARE_AE_* Worker variables): shown, not editable.
+  const managedByEnvironment = config.managedByEnvironment;
+  const locked = analyticsEngineDisabled || managedByEnvironment;
   const showSavedApiToken =
     !apiTokenDirty && config.apiTokenConfigured && Boolean(config.apiTokenHint);
   const apiTokenDisplayValue = showSavedApiToken
@@ -155,13 +159,13 @@ export function AnalyticsEngineSettingsClient({
 
   const hasChanges = useMemo(
     () =>
-      !analyticsEngineDisabled &&
+      !locked &&
       (form.accountId !== config.accountId || apiToken.trim().length > 0),
-    [analyticsEngineDisabled, apiToken, config, form],
+    [locked, apiToken, config, form],
   );
 
   async function handleSave() {
-    if (analyticsEngineDisabled) return;
+    if (locked) return;
     setSaving(true);
     try {
       const next = await saveConfig({
@@ -183,7 +187,7 @@ export function AnalyticsEngineSettingsClient({
   }
 
   async function handleDelete() {
-    if (analyticsEngineDisabled) return;
+    if (locked) return;
     setDeleting(true);
     try {
       const next = await deleteConfig();
@@ -252,6 +256,16 @@ export function AnalyticsEngineSettingsClient({
                     </Button>
                   </div>
                 ) : null}
+                {managedByEnvironment && !analyticsEngineDisabled ? (
+                  <div className="border border-dashed bg-muted/40 p-4 text-sm text-muted-foreground lg:col-span-2">
+                    <p className="font-medium text-foreground">
+                      {copy.analyticsEngineManagedTitle}
+                    </p>
+                    <p className="mt-1">
+                      {copy.analyticsEngineManagedDescription}
+                    </p>
+                  </div>
+                ) : null}
                 <div className="space-y-2">
                   <Label htmlFor="analytics-engine-account-id">
                     {copy.analyticsEngineAccountIdLabel}
@@ -259,7 +273,7 @@ export function AnalyticsEngineSettingsClient({
                   <Input
                     id="analytics-engine-account-id"
                     value={form.accountId}
-                    disabled={analyticsEngineDisabled}
+                    disabled={locked}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
@@ -276,7 +290,7 @@ export function AnalyticsEngineSettingsClient({
                     id="analytics-engine-api-token"
                     type={showSavedApiToken ? "text" : "password"}
                     value={apiTokenDisplayValue}
-                    disabled={analyticsEngineDisabled}
+                    disabled={locked}
                     placeholder={apiTokenPlaceholder}
                     onFocus={() => {
                       if (!showSavedApiToken) return;
@@ -296,12 +310,7 @@ export function AnalyticsEngineSettingsClient({
                   <Button
                     type="button"
                     onClick={handleSave}
-                    disabled={
-                      analyticsEngineDisabled ||
-                      saving ||
-                      deleting ||
-                      !hasChanges
-                    }
+                    disabled={locked || saving || deleting || !hasChanges}
                   >
                     {saving ? <Spinner /> : <RiSave3Line />}
                     {saving ? copy.saving : copy.save}
@@ -318,7 +327,7 @@ export function AnalyticsEngineSettingsClient({
                         type="button"
                         variant="destructive"
                         disabled={
-                          analyticsEngineDisabled ||
+                          locked ||
                           loading ||
                           saving ||
                           deleting ||

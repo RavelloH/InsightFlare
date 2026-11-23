@@ -2762,6 +2762,8 @@ systemSettings:
     が有効化されていないため、このデプロイでは Analytics Engine バインディングが自動的に無効化されました。Cloudflare で
     Analytics Engine を有効化し、InsightFlare を再デプロイすると関連分析機能が有効になります。
   analyticsEngineDisabledHint: Analytics Engine が有効化され Worker が再デプロイされるまで、Analytics Engine 設定はロックされます。
+  analyticsEngineManagedTitle: "Analytics Engine の読み取り認証情報はデプロイ側で管理されています"
+  analyticsEngineManagedDescription: "アカウント ID と API トークンは Worker 変数 INSIGHTFLARE_AE_ACCOUNT_ID と INSIGHTFLARE_AE_API_TOKEN から読み込まれます。変更する場合は InsightFlare のデプロイ元で行ってください。"
   analyticsEngineOpenCloudflare: Cloudflare Analytics Engine を開く
   analyticsEngineGuideTitle: Analytics Engine 認証情報を取得
   analyticsEngineGuideDescription: Analytics Engine には Cloudflare
@@ -2856,7 +2858,7 @@ systemSettings:
   loadFailed: メール設定を読み込めません。
 systemPerformance:
   title: システムパフォーマンス
-  subtitle: 既存の分析行から InsightFlare の収集、バッファリング、書き込みの健全性を監視します。
+  subtitle: Analytics Engine v2 の呼び出し記録を使用して、Worker と Durable Object の性能上のボトルネックとリソース消費を分析します。
   refresh: 更新
   loadFailed: システムパフォーマンスデータを読み込めません。
   noData: この期間にシステムパフォーマンスデータはありません。

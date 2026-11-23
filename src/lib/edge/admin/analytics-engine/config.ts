@@ -17,6 +17,7 @@ import {
   parseJson,
 } from "@/lib/edge/admin/response";
 import { analyticsEngineAvailability } from "@/lib/edge/analytics-engine/config";
+import { environmentAnalyticsEngineConfig } from "@/lib/edge/analytics-engine/reader-config";
 import { encryptSecret } from "@/lib/edge/auth/secret-encryption";
 import {
   deleteConfig,
@@ -74,8 +75,17 @@ export async function handleAnalyticsEngineConfigAdmin(
     ? normalizeAnalyticsEngineConfig(rawConfig)
     : defaultAnalyticsEngineConfig();
 
+  const managed = environmentAnalyticsEngineConfig(env);
   if (req.method === "GET") {
-    return jsonResponseFor(req, responseData(env, current));
+    return jsonResponseFor(req, responseData(env, managed ?? current));
+  }
+
+  if (managed) {
+    return bad(
+      "The Analytics Engine reader is managed by the deployment (INSIGHTFLARE_AE_ACCOUNT_ID / INSIGHTFLARE_AE_API_TOKEN). Change it where InsightFlare is deployed.",
+      "analytics_engine_managed_by_environment",
+      req,
+    );
   }
 
   if (analyticsEngineAvailability(env).analyticsEngineDisabled) {

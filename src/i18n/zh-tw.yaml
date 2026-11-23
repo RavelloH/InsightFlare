@@ -2750,6 +2750,8 @@ systemSettings:
     帳戶尚未啟用 Analytics Engine。請先在 Cloudflare 中啟用 Analytics Engine，然後重新部署
     InsightFlare 以啟用相關分析功能。
   analyticsEngineDisabledHint: 在啟用 Analytics Engine 並重新部署 Worker 前，分析引擎設定不可修改。
+  analyticsEngineManagedTitle: "分析引擎讀取憑證由部署管理"
+  analyticsEngineManagedDescription: "帳號 ID 與 API Token 來自 Worker 變數 INSIGHTFLARE_AE_ACCOUNT_ID 和 INSIGHTFLARE_AE_API_TOKEN。如需變更，請在部署 InsightFlare 的地方修改。"
   analyticsEngineOpenCloudflare: 開啟 Cloudflare Analytics Engine
   analyticsEngineGuideTitle: 取得分析引擎設定
   analyticsEngineGuideDescription: 分析引擎需要 Cloudflare 帳號資訊和一個可讀取 Analytics Engine 的 API Token。
@@ -2840,7 +2842,7 @@ systemSettings:
   loadFailed: 載入郵件設定失敗。
 systemPerformance:
   title: 系統效能
-  subtitle: 基於現有分析行監控 InsightFlare 的採集、緩衝和寫入健康度。
+  subtitle: 基於 Analytics Engine v2 呼叫記錄，分析 Worker 與 DO 的效能熱點及資源使用。
   refresh: 重新整理
   loadFailed: 載入系統效能資料失敗。
   noData: 目前時間視窗內暫無系統效能資料。

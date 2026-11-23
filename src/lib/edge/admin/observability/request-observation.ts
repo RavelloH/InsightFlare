@@ -1,15 +1,14 @@
 import {
-  defaultAnalyticsEngineConfig,
-  normalizeAnalyticsEngineConfig,
   redactAnalyticsEngineConfig,
-  SYSTEM_ANALYTICS_ENGINE_CONFIG_KEY,
   validateAnalyticsEngineConfig,
 } from "@/lib/analytics-engine-config";
 import { requireActor } from "@/lib/edge/admin/auth";
 import { bad, jsonResponseFor, na } from "@/lib/edge/admin/response";
 import { analyticsEngineAvailability } from "@/lib/edge/analytics-engine/config";
-import { decryptAnalyticsEngineSecret } from "@/lib/edge/auth/secret-encryption";
-import { readConfig } from "@/lib/edge/system-config";
+import {
+  analyticsEngineReaderToken,
+  readAnalyticsEngineReaderConfig,
+} from "@/lib/edge/analytics-engine/reader-config";
 import type { Env } from "@/lib/edge/types";
 import { clampString } from "@/lib/edge/utils";
 import {
@@ -73,10 +72,7 @@ export async function handleRequestObservationAdmin(
   if (authError) return authError;
   if (req.method !== "GET") return na(req);
 
-  const rawConfig = await readConfig(env, SYSTEM_ANALYTICS_ENGINE_CONFIG_KEY);
-  const config = rawConfig
-    ? normalizeAnalyticsEngineConfig(rawConfig)
-    : defaultAnalyticsEngineConfig();
+  const config = await readAnalyticsEngineReaderConfig(env);
   if (analyticsEngineAvailability(env).analyticsEngineDisabled) {
     return jsonResponseFor(
       req,
@@ -85,7 +81,11 @@ export async function handleRequestObservationAdmin(
   }
 
   const configError = validateAnalyticsEngineConfig(config);
-  if (configError || !config.configured || !config.apiTokenEncrypted) {
+  if (
+    configError ||
+    !config.configured ||
+    (!config.apiTokenEncrypted && config.source !== "environment")
+  ) {
     return jsonResponseFor(req, {
       ...emptyRequestObservationResponse(
         env,
@@ -97,7 +97,7 @@ export async function handleRequestObservationAdmin(
 
   let token: string;
   try {
-    token = await decryptAnalyticsEngineSecret(env, config.apiTokenEncrypted);
+    token = await analyticsEngineReaderToken(env, config);
   } catch {
     return bad(
       "Unable to decrypt Cloudflare API token",

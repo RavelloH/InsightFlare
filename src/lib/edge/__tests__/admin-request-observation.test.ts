@@ -1314,3 +1314,83 @@ describe("request observation admin reader", () => {
     expect(invalidJsonPage.status).toBe(400);
   });
 });
+
+describe("deployment-managed Analytics Engine reader", () => {
+  const managedEnv = (statements: MockStatement[] = []) =>
+    ({
+      ...createEnv(statements),
+      INSIGHTFLARE_AE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
+      INSIGHTFLARE_AE_API_TOKEN: " env-token-1234 ",
+    }) as Env;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    vi.mocked(requireActor).mockResolvedValue(actor as never);
+  });
+
+  it("queries with the environment token without reading the stored setting", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => analyticsResponse([]));
+    const env = managedEnv();
+
+    const response = await handleRequestObservationAdmin(
+      request("/api/private/admin/request-observation?from=0&to=3600000"),
+      env,
+      new URL(
+        "https://app.test/api/private/admin/request-observation?from=0&to=3600000",
+      ),
+    );
+    const body = (await response.json()) as Record<string, any>;
+
+    expect(response.status).toBe(200);
+    expect(body.configured).toBe(true);
+    expect(body.config.managedByEnvironment).toBe(true);
+    expect(body.config.apiTokenHint).toBe("••••1234");
+    expect(env.DB.prepare).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalled();
+    for (const [url, init] of fetchSpy.mock.calls) {
+      expect(String(url)).toContain("0123456789abcdef0123456789abcdef");
+      const headers = new Headers((init as RequestInit).headers);
+      expect(headers.get("authorization")).toBe("Bearer env-token-1234");
+    }
+  });
+
+  it("shows the managed reader and refuses edits from the admin setting", async () => {
+    const read = await handleAnalyticsEngineConfigAdmin(
+      request("/api/private/admin/analytics-engine-config"),
+      managedEnv([statement({ first: null })]),
+    );
+    const readBody = (await read.json()) as Record<string, any>;
+    expect(read.status).toBe(200);
+    expect(readBody.data).toMatchObject({
+      accountId: "0123456789abcdef0123456789abcdef",
+      apiTokenConfigured: true,
+      managedByEnvironment: true,
+    });
+
+    const upsert = statement();
+    const write = await handleAnalyticsEngineConfigAdmin(
+      jsonRequest("/api/private/admin/analytics-engine-config", {
+        accountId: "442fe5198bff93bdf60d4223d9618033",
+        apiToken: "other-token",
+      }),
+      managedEnv([statement({ first: null }), upsert]),
+    );
+    expect(write.status).toBe(400);
+    expect(JSON.stringify(await write.json())).toContain(
+      "analytics_engine_managed_by_environment",
+    );
+    expect(upsert.run).not.toHaveBeenCalled();
+  });
+
+  it("keeps the stored setting when no environment token is present", async () => {
+    const read = await handleAnalyticsEngineConfigAdmin(
+      request("/api/private/admin/analytics-engine-config"),
+      createEnv([statement({ first: null })]),
+    );
+    const body = (await read.json()) as Record<string, any>;
+    expect(body.data.managedByEnvironment).toBe(false);
+  });
+});

@@ -2864,6 +2864,8 @@ systemSettings:
     InsightFlare to activate related analysis features.
   analyticsEngineDisabledHint: Analytics Engine settings are locked until
     Analytics Engine is enabled and the Worker is redeployed.
+  analyticsEngineManagedTitle: "Analytics Engine reader is managed by the deployment"
+  analyticsEngineManagedDescription: "The account ID and API token come from the INSIGHTFLARE_AE_ACCOUNT_ID and INSIGHTFLARE_AE_API_TOKEN Worker variables. Change them where InsightFlare is deployed."
   analyticsEngineOpenCloudflare: Open Cloudflare Analytics Engine
   analyticsEngineGuideTitle: Get Analytics Engine credentials
   analyticsEngineGuideDescription: Analytics Engine needs Cloudflare account
@@ -2968,8 +2970,8 @@ systemSettings:
   loadFailed: Failed to load email configuration.
 systemPerformance:
   title: System Performance
-  subtitle: Monitor InsightFlare collection, buffering, and write health from
-    existing analytics rows.
+  subtitle: Diagnose Worker and Durable Object invocation performance using
+    Analytics Engine v2 telemetry.
   refresh: Refresh
   loadFailed: Failed to load system performance data.
   noData: No system performance data in this window.

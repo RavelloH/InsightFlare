@@ -1,15 +1,13 @@
-import {
-  normalizeAnalyticsEngineConfig,
-  SYSTEM_ANALYTICS_ENGINE_CONFIG_KEY,
-  validateAnalyticsEngineConfig,
-} from "@/lib/analytics-engine-config";
+import { validateAnalyticsEngineConfig } from "@/lib/analytics-engine-config";
 import { requireActor } from "@/lib/edge/admin/auth";
 import { bad, forb, jsonResponseFor, na } from "@/lib/edge/admin/response";
 import { isAnalyticsEngineDisabled } from "@/lib/edge/analytics-engine/config";
 import { INVOCATION_METRICS_DATASET } from "@/lib/edge/analytics-engine/invocation-schema";
 import { INVOCATION_METRICS_SCHEMA_V2 } from "@/lib/edge/analytics-engine/invocation-schema-v2";
-import { decryptAnalyticsEngineSecret } from "@/lib/edge/auth/secret-encryption";
-import { readConfig } from "@/lib/edge/system-config";
+import {
+  analyticsEngineReaderToken,
+  readAnalyticsEngineReaderConfig,
+} from "@/lib/edge/analytics-engine/reader-config";
 import type { Env } from "@/lib/edge/types";
 
 import { type InvocationQuery } from "./invocation-metrics-input";
@@ -144,8 +142,7 @@ export async function handleInvocationMetricsAdmin(
 
   let config;
   try {
-    const raw = await readConfig(env, SYSTEM_ANALYTICS_ENGINE_CONFIG_KEY);
-    config = raw && normalizeAnalyticsEngineConfig(raw);
+    config = await readAnalyticsEngineReaderConfig(env);
   } catch {
     return fail("reader_config_failed");
   }
@@ -155,7 +152,7 @@ export async function handleInvocationMetricsAdmin(
 
   let token;
   try {
-    token = await decryptAnalyticsEngineSecret(env, config.apiTokenEncrypted);
+    token = await analyticsEngineReaderToken(env, config);
     if (!token) return fail("reader_decryption_failed");
   } catch {
     return fail("reader_decryption_failed");
