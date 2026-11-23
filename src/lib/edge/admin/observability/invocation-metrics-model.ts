@@ -291,9 +291,39 @@ function integer(value: unknown): number {
   if (!Number.isSafeInteger(result)) return invalid();
   return result as number;
 }
+
+/**
+ * Cloudflare AE SQL JSONEachRow serializes UInt64/Int64 aggregate values as
+ * decimal strings to avoid losing integer precision in JSON. Only top-level
+ * SQL columns use this decoder; embedded blob19 details stay strictly typed.
+ */
+function sqlNumber(value: unknown, allowNull = false): number | null {
+  if (typeof value !== "string") return number(value, allowNull);
+  if (
+    value.length === 0 ||
+    value.length > 64 ||
+    !/^(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(value)
+  )
+    return invalid();
+  const parsed = Number(value);
+  if (
+    !Number.isFinite(parsed) ||
+    parsed < 0 ||
+    (Number.isInteger(parsed) && !Number.isSafeInteger(parsed))
+  )
+    return invalid();
+  return parsed;
+}
+
+function sqlInteger(value: unknown): number {
+  const parsed = sqlNumber(value);
+  if (!Number.isSafeInteger(parsed)) return invalid();
+  return parsed as number;
+}
+
 function countNumber(value: unknown, empty: boolean): number {
   if (value === null && empty) return 0;
-  return number(value) as number;
+  return sqlNumber(value) as number;
 }
 function sum(
   rowValue: Record<string, unknown>,
@@ -355,10 +385,10 @@ function dimensions(sourceRow: Record<string, unknown>): InvocationDimensions {
 function countMetrics(
   sourceRow: Record<string, unknown>,
 ): InvocationCountMetrics {
-  const retainedSamples = integer(sourceRow.retainedSamples);
+  const retainedSamples = sqlInteger(sourceRow.retainedSamples);
   const empty = retainedSamples === 0;
   const estimatedInvocations = sum(sourceRow, "estimatedInvocations", empty);
-  const maxSampleInterval = number(sourceRow.maxSampleInterval, empty);
+  const maxSampleInterval = sqlNumber(sourceRow.maxSampleInterval, empty);
   if (!empty && (maxSampleInterval === null || maxSampleInterval < 1))
     return invalid();
   return { retainedSamples, estimatedInvocations, maxSampleInterval };
@@ -425,7 +455,7 @@ function aggregate(sourceRow: Record<string, unknown>): InvocationAggregate {
   const handlerWeight = sum(sourceRow, "handlerWeight", empty);
   const percentile = (key: "p50" | "p95" | "p99"): number | null => {
     if (empty || handlerWeight <= 0) return null;
-    return number(sourceRow[key]) as number;
+    return sqlNumber(sourceRow[key]) as number;
   };
   const weighted = Object.fromEntries(
     COVERED_METRICS.map((key) => [key, weightedMetric(sourceRow, key, empty)]),
@@ -588,8 +618,8 @@ function safeDetails(value: unknown): InvocationSafeDetails | null {
 }
 function sample(sourceRow: Record<string, unknown>): InvocationSample {
   const dims = dimensions(sourceRow);
-  const timestampSeconds = integer(sourceRow.timestampSeconds);
-  const flags = integer(sourceRow.flags);
+  const timestampSeconds = sqlInteger(sourceRow.timestampSeconds);
+  const flags = sqlInteger(sourceRow.flags);
   const resultClass = sourceRow.resultClass;
   if (
     timestampSeconds < 0 ||
@@ -640,15 +670,15 @@ function sample(sourceRow: Record<string, unknown>): InvocationSample {
     !SAFE_PHASES.has(dominantPhase as InvocationSafePhase)
   )
     return invalid();
-  const sampleInterval = number(sourceRow.sampleInterval) as number;
+  const sampleInterval = sqlNumber(sourceRow.sampleInterval) as number;
   if (sampleInterval < 1) return invalid();
   const httpStatus = v2BooleanFlag(flags, "httpStatusPresent")
-    ? integer(sourceRow.httpStatus)
+    ? sqlInteger(sourceRow.httpStatus)
     : null;
   if (httpStatus !== null && (httpStatus < 100 || httpStatus > 599))
     return invalid();
   const handlerWallMs = v2BooleanFlag(flags, "handlerPresent")
-    ? number(sourceRow.handlerWallMs)
+    ? sqlNumber(sourceRow.handlerWallMs)
     : null;
   return {
     ...dims,
@@ -673,7 +703,7 @@ function sample(sourceRow: Record<string, unknown>): InvocationSample {
     details: safeDetails(sourceRow.details),
     filterFamily,
     sampleInterval,
-    invocationWallMs: number(sourceRow.invocationWallMs) as number,
+    invocationWallMs: sqlNumber(sourceRow.invocationWallMs) as number,
     handlerWallMs: handlerWallMs as number | null,
     httpStatus,
     flags,
@@ -722,7 +752,7 @@ function hotspot(
     granularity: entry?.granularity ?? "unknown",
     owner: entry?.ownerModule ?? null,
     ...countMetrics(sourceRow),
-    weightedValue: number(sourceRow.weightedValue) as number,
+    weightedValue: sqlNumber(sourceRow.weightedValue) as number,
   };
 }
 function hasData(items: readonly { retainedSamples: number }[]): boolean {
@@ -761,13 +791,13 @@ export function normalizeInvocationView(
     case "overview": {
       const summaryRows = rows(results, "summary");
       const trend = rows(results, "trend").map((item) => {
-        const bucket = integer(item.bucket);
+        const bucket = sqlInteger(item.bucket);
         return { ...aggregate(item), bucket };
       });
       const summary = summaryRows.length ? aggregate(summaryRows[0]!) : null;
       const legacyRows = rows(results, "legacy");
       const legacy = legacyRows.length
-        ? { retainedSamples: integer(legacyRows[0]!.retainedSamples) }
+        ? { retainedSamples: sqlInteger(legacyRows[0]!.retainedSamples) }
         : null;
       const data = { summary, trend, legacy };
       const hasV2Data = (summary?.retainedSamples ?? 0) > 0 || hasData(trend);

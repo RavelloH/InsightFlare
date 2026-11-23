@@ -67,6 +67,129 @@ function sampleRow(overrides: Record<string, unknown> = {}) {
 }
 
 describe("AE v2 reader normalization with real coverage and trust boundaries", () => {
+  it("decodes production AE JSONEachRow numeric strings across all five views", () => {
+    // Cloudflare emits COUNT(), SUM(), and weighted integer aggregates as
+    // quoted decimal strings. These are valid SQL results, not malformed data.
+    const sqlNumbers = (record: Record<string, unknown>) =>
+      Object.fromEntries(
+        Object.entries(record).map(([key, value]) => [
+          key,
+          typeof value === "number" ? String(value) : value,
+        ]),
+      );
+
+    const overview = normalizeInvocationView("overview", {
+      summary: [sqlNumbers(aggregate())],
+      trend: [sqlNumbers({ ...aggregate(), bucket: 1_790_000_000 })],
+      legacy: [{ retainedSamples: "5" }],
+    });
+    expect(overview.status).toBe("ready");
+    expect(overview.data.summary).toMatchObject({
+      retainedSamples: 2,
+      estimatedInvocations: 9,
+      handlerWeight: 5,
+    });
+    expect(overview.data.trend[0]?.bucket).toBe(1_790_000_000);
+    expect(overview.data.legacy?.retainedSamples).toBe(5);
+
+    const routes = normalizeInvocationView("routes", {
+      routes: [sqlNumbers({ ...dimensions, ...aggregate() })],
+    });
+    expect(routes.status).toBe("ready");
+    expect(routes.data.routes[0]?.weighted.d1RowsRead.applicable).toBe(0);
+
+    const errors = normalizeInvocationView("errors", {
+      errors: [
+        sqlNumbers({
+          ...dimensions,
+          retainedSamples: 1,
+          estimatedInvocations: 4,
+          maxSampleInterval: 4,
+          resultClass: "failure",
+          category: "application",
+          code: "ae_reader_invalid_response",
+          operation: "ae.reader.sql",
+        }),
+      ],
+    });
+    expect(errors.status).toBe("ready");
+    expect(errors.data.errors[0]?.retainedSamples).toBe(1);
+
+    const hotspots = normalizeInvocationView("hotspots", {
+      summary: [sqlNumbers(aggregate())],
+      "api-hot": [
+        sqlNumbers({
+          ...dimensions,
+          queryId,
+          variant: "raw.filtered",
+          filterShape: "",
+          filterFamily: "",
+          retainedSamples: 1,
+          estimatedInvocations: 4,
+          maxSampleInterval: 4,
+          weightedValue: 12.5,
+        }),
+      ],
+    });
+    expect(hotspots.status).toBe("ready");
+    expect(hotspots.data.hotspots["api-hot"][0]?.weightedValue).toBe(12.5);
+
+    const samples = normalizeInvocationView("samples", {
+      samples: [sqlNumbers(sampleRow())],
+    });
+    expect(samples.status).toBe("ready");
+    expect(samples.data.samples[0]).toMatchObject({
+      timestampSeconds: 1_790_000_000,
+      sampleInterval: 9,
+      httpStatus: 500,
+      invocationWallMs: 12,
+    });
+  });
+
+  it.each([
+    "9007199254740993",
+    "9007199254740993.0",
+    "9.007199254740993e15",
+    "01",
+    "-1",
+    "+1",
+    " 1",
+    "1 ",
+    "1e309",
+    "NaN",
+    "Infinity",
+    "0x10",
+    "1;DROP TABLE",
+    "1".repeat(100),
+  ])("rejects malformed or imprecise AE integer literals: %s", (raw) => {
+    expect(() =>
+      normalizeInvocationView("overview", {
+        summary: [aggregate({ retainedSamples: raw })],
+      }),
+    ).toThrow("Invalid invocation metrics result");
+  });
+
+  it("rejects malformed AE weighted values and preserves strict nested detail types", () => {
+    for (const raw of ["-1", "Infinity", "NaN", "1e309", " 2", "2ops"]) {
+      expect(() =>
+        normalizeInvocationView("overview", {
+          summary: [aggregate({ invocationWallMs: raw })],
+        }),
+      ).toThrow("Invalid invocation metrics result");
+    }
+    const samples = normalizeInvocationView("samples", {
+      samples: [
+        sampleRow({
+          details: JSON.stringify({
+            v: 2,
+            phases: [{ id: "route.handler", count: "1", wallMs: "12" }],
+          }),
+        }),
+      ],
+    });
+    expect(samples.data.samples[0]?.details?.phases).toEqual([]);
+  });
+
   it("normalizes complete, partial, and unavailable cost metrics without conflating zero and missing", () => {
     const result = normalizeInvocationView("overview", {
       summary: [
