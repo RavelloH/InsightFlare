@@ -10,6 +10,14 @@ import {
   ApiV1ErrorEnvelopeSchema,
   ApiV1ResponseMetaSchema,
 } from "@/lib/api-v1/contract/wire";
+
+import {
+  apiV1CommonFieldDocs,
+  type ApiV1OperationDoc,
+  apiV1OperationDocs,
+  apiV1PathParameterAliases,
+  apiV1PathParameterDocs,
+} from "./api-v1-operation-docs";
 type JsonSchema = Record<string, unknown>;
 type HttpMethod = "get" | "post" | "patch" | "delete";
 export type ApiV1OpenApiOperation = {
@@ -85,27 +93,72 @@ function requiredProperties(schema: JsonSchema): Set<string> {
 function pathParameters(
   path: string,
   schema: JsonSchema,
-  pathParameterSchemas?: Readonly<Record<string, z.ZodType>>,
+  pathParameterSchemas: Readonly<Record<string, z.ZodType>> | undefined,
+  doc: ApiV1OperationDoc,
+  aliases: Record<string, string>,
 ): Array<Record<string, unknown>> {
   const properties = objectProperties(schema);
-  return pathParameterNames(path).map((name) => ({
-    name,
-    in: "path",
-    required: true,
-    schema: clone(
+  const aliasFor = Object.fromEntries(
+    Object.entries(aliases).map(([field, parameter]) => [parameter, field]),
+  );
+  return pathParameterNames(path).map((name) => {
+    const shared = apiV1PathParameterDocs[name];
+    const override = doc.pathParameters?.[name];
+    const parameterSchema = clone(
       pathParameterSchemas?.[name]
         ? jsonSchema(pathParameterSchemas[name])
-        : (properties[name] ?? { type: "string", minLength: 1 }),
-    ),
-    description: `${name} path parameter.`,
-  }));
+        : (properties[name] ??
+            (aliasFor[name] ? properties[aliasFor[name]] : undefined) ?? {
+              type: "string",
+              minLength: 1,
+            }),
+    );
+    const allowed = override?.enum ?? shared?.enum;
+    if (allowed && !pathParameterSchemas?.[name] && !parameterSchema.enum) {
+      parameterSchema.enum = [...allowed];
+    }
+    return {
+      name,
+      in: "path",
+      required: true,
+      schema: parameterSchema,
+      description:
+        override?.description ??
+        shared?.description ??
+        `${name} path parameter.`,
+    };
+  });
+}
+
+/** Field description: operation-specific first, then the shared default. */
+function fieldDescription(
+  doc: ApiV1OperationDoc,
+  name: string,
+): string | undefined {
+  return doc.fields?.[name] ?? apiV1CommonFieldDocs[name];
+}
+
+/** Adds descriptions to top-level request properties that have none. */
+function describeProperties(
+  schema: JsonSchema,
+  doc: ApiV1OperationDoc,
+): JsonSchema {
+  const properties = objectProperties(schema);
+  for (const [name, property] of Object.entries(properties)) {
+    const description = fieldDescription(doc, name);
+    if (description && property.description === undefined) {
+      property.description = description;
+    }
+  }
+  return schema;
 }
 function schemaWithoutPathParameters(
   path: string,
   schema: JsonSchema,
+  aliases: Record<string, string>,
 ): JsonSchema {
   const result = clone(schema);
-  const names = new Set(pathParameterNames(path));
+  const names = new Set([...pathParameterNames(path), ...Object.keys(aliases)]);
   const properties = Object.fromEntries(
     Object.entries(objectProperties(result)).filter(
       ([name]) => !names.has(name),
@@ -124,8 +177,13 @@ function schemaWithoutPathParameters(
 function queryParameters(
   path: string,
   schema: JsonSchema,
+  doc: ApiV1OperationDoc,
+  aliases: Record<string, string>,
 ): Array<Record<string, unknown>> {
-  const pathNames = new Set(pathParameterNames(path));
+  const pathNames = new Set([
+    ...pathParameterNames(path),
+    ...Object.keys(aliases),
+  ]);
   const required = requiredProperties(schema);
   return Object.entries(objectProperties(schema)).flatMap(
     ([name, parameterSchema]) => {
@@ -141,7 +199,7 @@ function queryParameters(
                     in: "query",
                     required: false,
                     schema: clone(pageProperties.limit),
-                    description: "Maximum number of results.",
+                    description: "Maximum number of results per page.",
                   },
                 ]
               : []),
@@ -166,7 +224,8 @@ function queryParameters(
           in: "query",
           required: required.has(name),
           schema: clone(parameterSchema),
-          description: `${name} query parameter.`,
+          description:
+            fieldDescription(doc, name) ?? `${name} query parameter.`,
         },
       ];
     },
@@ -178,15 +237,23 @@ function tagForOperation(operationId: string): string {
   if (
     operationId.includes(".events") ||
     operationId.includes(".eventDetail") ||
-    operationId.includes(".eventTypes") ||
-    operationId.includes(".eventFields") ||
+    operationId.includes(".eventType") ||
     operationId.includes(".eventField")
   ) {
     return "Events";
   }
   if (operationId.includes(".visitor")) return "Visitors";
-  if (operationId.includes(".session")) return "Sessions";
+  if (
+    operationId.includes(".session") ||
+    operationId.includes(".journeyEvent")
+  ) {
+    return "Sessions";
+  }
   if (operationId.includes(".funnelAnalysis")) return "Funnels";
+  if (operationId.startsWith("goals.") || operationId.includes(".goal")) {
+    return "Goals";
+  }
+  if (operationId.startsWith("savedFilters.")) return "Saved Filters";
   if (
     operationId.startsWith("site.analytics.") ||
     operationId.startsWith("team.analytics.")
@@ -202,20 +269,14 @@ function tagForOperation(operationId: string): string {
   if (operationId.startsWith("funnels.")) return "Funnels";
   return "Sites";
 }
-function summaryForOperation(operationId: string): string {
-  return `API v1 ${operationId.replaceAll(".", " ")} operation`;
-}
-function descriptionForOperation(routeId: string): string {
-  if (routeId === "site.analytics.performanceBreakdown") {
-    return "Breaks down Core Web Vitals by page.path or geo.country. Other dimensions are not supported and return validation_failed.";
+function operationDoc(operationId: string): ApiV1OperationDoc {
+  const doc = apiV1OperationDocs[operationId];
+  if (!doc) {
+    throw new Error(
+      `Missing API v1 documentation for operation "${operationId}" in scripts/api-v1-operation-docs.ts`,
+    );
   }
-  if (routeId === "site.analytics.eventsTimeseries") {
-    return "Returns event counts at time points. series contains top-N event-type aggregates for the whole window; points contains the time buckets. The request limit controls top-N event types, not the number of points.";
-  }
-  if (routeId === "site.analytics.eventsSearch") {
-    return "Searches event records. Use page.limit for page size; it supports values from 1 through 200 and is independent of the events timeseries top-N limit.";
-  }
-  return "Typed API v1 operation. Authenticate with an API key through the BearerAuth security scheme.";
+  return doc;
 }
 function successStatus(method: string, operationId: string): string {
   if (method === "DELETE") return "204";
@@ -304,6 +365,12 @@ export function buildApiV1OpenApiPaths(): ApiV1OpenApiPaths {
       "requestSchema" in route ? route.requestSchema : undefined,
     );
     const operationId = "operationId" in route ? route.operationId : route.id;
+    const doc = operationDoc(operationId);
+    const aliases = apiV1PathParameterAliases[operationId] ?? {};
+    const pathParameterSchemas =
+      "pathParameterSchemas" in route
+        ? (route.pathParameterSchemas as Readonly<Record<string, z.ZodType>>)
+        : undefined;
     const status = successStatus(route.method, operationId);
     const parameters =
       route.method === "GET" && requestSchema
@@ -311,32 +378,29 @@ export function buildApiV1OpenApiPaths(): ApiV1OpenApiPaths {
             ...pathParameters(
               route.path,
               requestSchema,
-              "pathParameterSchemas" in route
-                ? (route.pathParameterSchemas as Readonly<
-                    Record<string, z.ZodType>
-                  >)
-                : undefined,
+              pathParameterSchemas,
+              doc,
+              aliases,
             ),
-            ...queryParameters(route.path, requestSchema),
+            ...queryParameters(route.path, requestSchema, doc, aliases),
           ]
-        : requestSchema
-          ? pathParameters(
-              route.path,
-              requestSchema,
-              "pathParameterSchemas" in route
-                ? (route.pathParameterSchemas as Readonly<
-                    Record<string, z.ZodType>
-                  >)
-                : undefined,
-            )
-          : [];
+        : pathParameters(
+            route.path,
+            requestSchema ?? {},
+            pathParameterSchemas,
+            doc,
+            aliases,
+          );
     const bodySchema = requestSchema
-      ? schemaWithoutPathParameters(route.path, requestSchema)
+      ? describeProperties(
+          schemaWithoutPathParameters(route.path, requestSchema, aliases),
+          doc,
+        )
       : undefined;
     const operation: ApiV1OpenApiOperation = {
       operationId,
-      summary: summaryForOperation(operationId),
-      description: descriptionForOperation(route.id),
+      summary: doc.summary,
+      description: doc.description,
       tags: [tagForOperation(operationId)],
       security: [{ BearerAuth: [] }],
       ...(parameters.length > 0 ? { parameters } : {}),
@@ -344,7 +408,14 @@ export function buildApiV1OpenApiPaths(): ApiV1OpenApiPaths {
         ? {
             requestBody: {
               required: true,
-              content: { [json]: { schema: bodySchema } },
+              content: {
+                [json]: {
+                  schema: bodySchema,
+                  ...(doc.requestExample
+                    ? { example: clone(doc.requestExample) }
+                    : {}),
+                },
+              },
             },
           }
         : {}),

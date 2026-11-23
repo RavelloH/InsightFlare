@@ -8,6 +8,18 @@ import YAML from "yaml";
 
 import { createScriptLogger } from "./shared/logger";
 import { buildApiV1OpenApiPaths } from "./api-v1-openapi";
+import { apiV1OperationDocs, apiV1TagDocs } from "./api-v1-operation-docs";
+import {
+  childExampleContext,
+  type ExampleContext,
+  fallbackNumber,
+  fallbackString,
+  fitsSchema,
+  objectRuleExample,
+  refineObject,
+  rootExampleContext,
+  ruleExample,
+} from "./api-v1-response-examples";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const rlog = createScriptLogger();
@@ -283,9 +295,12 @@ function hasNonComponentReference(schema: Record<string, unknown>): boolean {
   return invalid;
 }
 
+/** Where a root schema is used: the operation and the role it plays there. */
+type SchemaUse = { operationId: string; name: string };
+
 function forEachOperationSchema(
   spec: OpenAPISpec,
-  visitor: (schema: Record<string, unknown>) => void,
+  visitor: (schema: Record<string, unknown>, use: SchemaUse) => void,
 ): void {
   for (const pathItem of Object.values(spec.paths)) {
     for (const operation of Object.values(pathItem)) {
@@ -296,15 +311,19 @@ function forEachOperationSchema(
       ) {
         continue;
       }
+      const operationId = String(
+        (operation as unknown as Record<string, unknown>).operationId ?? "",
+      );
       for (const parameter of operation.parameters ?? []) {
-        const schema =
+        const entry =
           parameter &&
           typeof parameter === "object" &&
           !Array.isArray(parameter)
-            ? (parameter as Record<string, unknown>).schema
+            ? (parameter as Record<string, unknown>)
             : undefined;
+        const schema = entry?.schema;
         if (isSchemaObject(schema)) {
-          visitor(schema);
+          visitor(schema, { operationId, name: String(entry?.name ?? "") });
         }
       }
       const requestContents = (
@@ -317,7 +336,7 @@ function forEachOperationSchema(
             ? (content as Record<string, unknown>).schema
             : undefined;
         if (isSchemaObject(schema)) {
-          visitor(schema);
+          visitor(schema, { operationId, name: "request" });
         }
       }
       for (const response of Object.values(operation.responses ?? {})) {
@@ -330,12 +349,95 @@ function forEachOperationSchema(
               ? (content as Record<string, unknown>).schema
               : undefined;
           if (isSchemaObject(schema)) {
-            visitor(schema);
+            visitor(schema, { operationId, name: "response" });
           }
         }
       }
     }
   }
+}
+
+/** Like visitSchemaChildren, but also passes the property name of each child. */
+function visitNamedSchemaChildren(
+  schema: Record<string, unknown>,
+  parentName: string,
+  visitor: (schema: Record<string, unknown>, name: string) => void,
+): void {
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === "properties" || key === "patternProperties") {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      for (const [name, child] of Object.entries(value)) {
+        if (isSchemaObject(child)) visitor(child, name);
+      }
+      continue;
+    }
+    if (key === "$defs") {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      for (const child of Object.values(value)) {
+        if (isSchemaObject(child)) visitor(child, parentName);
+      }
+      continue;
+    }
+    if (schemaChildKeys.has(key)) {
+      if (isSchemaObject(value)) visitor(value, parentName);
+      continue;
+    }
+    if (schemaChildArrayKeys.has(key) && Array.isArray(value)) {
+      for (const child of value) {
+        if (isSchemaObject(child)) visitor(child, parentName);
+      }
+    }
+  }
+}
+
+function pascalCase(value: string): string {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((word) => word[0].toUpperCase() + word.slice(1))
+    .join("");
+}
+
+/**
+ * Readable component name from where a shared schema is used: the common
+ * operationId prefix plus the property (or request/response role), e.g.
+ * `SiteAnalyticsPage` or `SitesResponse`.
+ */
+function schemaNameFromUses(uses: SchemaUse[]): string | undefined {
+  const operations = [...new Set(uses.map((use) => use.operationId))]
+    .filter(Boolean)
+    .sort();
+  const names = [...new Set(uses.map((use) => use.name))].filter(Boolean);
+  if (operations.length === 0 || names.length === 0) return undefined;
+  const commonPrefix = (segments: string[][]) => {
+    const prefix: string[] = [];
+    for (let i = 0; i < segments[0].length; i += 1) {
+      const segment = segments[0][i];
+      if (segments.every((parts) => parts[i] === segment)) prefix.push(segment);
+      else break;
+    }
+    return prefix;
+  };
+  const segments = operations.map((operation) => operation.split("."));
+  let prefix = commonPrefix(segments);
+  // Shared by site and team operations: name it after what they have in common.
+  if (
+    prefix.length === 0 &&
+    segments.every((parts) => parts[0] === "site" || parts[0] === "team")
+  ) {
+    prefix = commonPrefix(segments.map((parts) => parts.slice(1)));
+  }
+  const role =
+    names.length === 1
+      ? pascalCase(names[0])
+      : names.every((name) => name === "request" || name === "response")
+        ? "Body"
+        : "Value";
+  const owner = pascalCase(prefix.join(" "));
+  // Without a common owner, prefix the role so it cannot collide with the
+  // reserved legacy component names (e.g. `Pagination`).
+  return `${owner || "Shared"}${role}`;
 }
 
 function schemaNameHint(schema: Record<string, unknown>): string | undefined {
@@ -399,8 +501,9 @@ function schemaNameHint(schema: Record<string, unknown>): string | undefined {
 function schemaComponentName(
   schema: Record<string, unknown>,
   key: string,
+  uses: SchemaUse[],
 ): string {
-  const hint = schemaNameHint(schema);
+  const hint = schemaNameHint(schema) ?? schemaNameFromUses(uses);
   if (hint) return hint;
   return `SharedSchema_${createHash("sha1").update(key).digest("hex").slice(0, 12)}`;
 }
@@ -456,14 +559,17 @@ function rewriteSchemaChildren(
 function deduplicateOperationSchemas(spec: OpenAPISpec): void {
   const counts = new Map<
     string,
-    { count: number; schema: Record<string, unknown> }
+    { count: number; schema: Record<string, unknown>; uses: SchemaUse[] }
   >();
-  const collect = (schema: Record<string, unknown>) => {
+  const collect = (schema: Record<string, unknown>, use: SchemaUse) => {
     const key = stableSchemaKey(schema);
-    const entry = counts.get(key) ?? { count: 0, schema };
+    const entry = counts.get(key) ?? { count: 0, schema, uses: [] };
     entry.count += 1;
+    entry.uses.push(use);
     counts.set(key, entry);
-    visitSchemaChildren(schema, collect);
+    visitNamedSchemaChildren(schema, use.name, (child, name) =>
+      collect(child, { operationId: use.operationId, name }),
+    );
   };
   forEachOperationSchema(spec, collect);
 
@@ -490,7 +596,7 @@ function deduplicateOperationSchemas(spec: OpenAPISpec): void {
       componentNames.set(key, existingName);
       continue;
     }
-    const baseName = schemaComponentName(entry.schema, key);
+    const baseName = schemaComponentName(entry.schema, key, entry.uses);
     let name = baseName;
     let suffix = 2;
     while (usedNames.has(name)) name = `${baseName}${suffix++}`;
@@ -3777,24 +3883,7 @@ function buildSpec(): OpenAPISpec {
     ],
     security: [{ BearerAuth: [] }],
     tags: [
-      { name: "Discovery", description: "API discovery and capabilities" },
-      { name: "Token", description: "Token introspection" },
-      { name: "Team", description: "Current team resources" },
-      { name: "Sites", description: "Site resources" },
-      {
-        name: "Settings",
-        description: "Tracking, privacy, and sharing settings",
-      },
-      { name: "Analytics", description: "Analytics data primitives" },
-      { name: "Events", description: "Event resources" },
-      { name: "Visitors", description: "Visitor resources" },
-      { name: "Sessions", description: "Session resources" },
-      { name: "Funnels", description: "Funnel resources and analysis" },
-      { name: "Performance", description: "Core Web Vitals performance data" },
-      { name: "Realtime", description: "Realtime activity" },
-      { name: "Batch", description: "Global batch requests" },
-      { name: "Health", description: "Health checks" },
-      { name: "Ingestion", description: "Browser event ingestion" },
+      ...apiV1TagDocs.map((tag) => ({ ...tag })),
       { name: "Dashboard", description: "Dashboard session endpoints" },
       { name: "Sharing", description: "Public shared-dashboard queries" },
       { name: "Management", description: "Dashboard management endpoints" },
@@ -4044,6 +4133,8 @@ function exampleForSchema(
   spec: OpenAPISpec,
   schema: unknown,
   seen = new Set<string>(),
+  name = "",
+  ctx: ExampleContext = rootExampleContext(),
 ): unknown {
   if (!schema || typeof schema !== "object") return undefined;
   const source = schema as Record<string, unknown>;
@@ -4051,12 +4142,39 @@ function exampleForSchema(
     if (seen.has(source.$ref)) return undefined;
     const resolved = resolveSpecPointer(spec, source.$ref);
     return resolved
-      ? exampleForSchema(spec, resolved, new Set([...seen, source.$ref]))
+      ? exampleForSchema(
+          spec,
+          resolved,
+          new Set([...seen, source.$ref]),
+          name,
+          ctx,
+        )
       : undefined;
   }
   if ("const" in source) return source.const;
-  if (Array.isArray(source.enum) && source.enum.length > 0)
-    return source.enum[0];
+  const type = Array.isArray(source.type)
+    ? source.type.find((candidate) => candidate !== "null")
+    : source.type;
+  const leafKind =
+    type === "string" ||
+    type === "number" ||
+    type === "integer" ||
+    type === "boolean"
+      ? type
+      : undefined;
+  const ruled =
+    leafKind && name
+      ? ruleExample(name, ctx, leafKind, source.format as string | undefined)
+      : undefined;
+  if (Array.isArray(source.enum) && source.enum.length > 0) {
+    if (ruled === undefined && ctx.lists[ctx.lists.length - 1] === name) {
+      return source.enum[ctx.index % source.enum.length];
+    }
+    return ruled !== undefined && source.enum.includes(ruled)
+      ? ruled
+      : source.enum[0];
+  }
+  if (ruled !== undefined && fitsSchema(ruled, source)) return ruled;
   if (source.default !== undefined) return source.default;
   if (Array.isArray(source.oneOf) || Array.isArray(source.anyOf)) {
     const variants = (source.oneOf ?? source.anyOf) as unknown[];
@@ -4066,11 +4184,11 @@ function exampleForSchema(
         typeof candidate === "object" &&
         (candidate as Record<string, unknown>).type !== "null",
     );
-    return exampleForSchema(spec, nonNull ?? variants[0], seen);
+    return exampleForSchema(spec, nonNull ?? variants[0], seen, name, ctx);
   }
   if (Array.isArray(source.allOf)) {
     const values = source.allOf
-      .map((part) => exampleForSchema(spec, part, seen))
+      .map((part) => exampleForSchema(spec, part, seen, name, ctx))
       .filter((value) => value !== undefined);
     if (values.every((value) => value && typeof value === "object")) {
       return Object.assign({}, ...values);
@@ -4078,44 +4196,55 @@ function exampleForSchema(
     return values[0];
   }
 
-  const type = Array.isArray(source.type)
-    ? source.type.find((candidate) => candidate !== "null")
-    : source.type;
+  const openObject = (type === "object" || !type) && !source.properties;
+  const ruledObject =
+    (openObject || name === "filter") && name
+      ? objectRuleExample(name, ctx)
+      : undefined;
+  if (ruledObject) return ruledObject;
   if (type === "object" || source.properties) {
     const properties = (source.properties ?? {}) as Record<string, unknown>;
     // Include optional fields so a later allOf branch can refine a broadly
     // typed envelope field such as data.
     const fields = Object.keys(properties);
-    return Object.fromEntries(
-      fields.map((name) => [
-        name,
-        exampleForSchema(spec, properties[name], seen),
+    const result = Object.fromEntries(
+      fields.map((field) => [
+        field,
+        exampleForSchema(
+          spec,
+          properties[field],
+          seen,
+          field,
+          childExampleContext(ctx, field),
+        ),
       ]),
     );
+    refineObject(result, ctx);
+    return result;
   }
   if (type === "array") {
-    const minItems = Math.max(1, Number(source.minItems) || 0);
-    return Array.from({ length: minItems }, () =>
-      exampleForSchema(spec, source.items, seen),
+    const minItems = Number(source.minItems) || 0;
+    const maxItems =
+      typeof source.maxItems === "number" ? source.maxItems : Infinity;
+    const length = Math.min(
+      maxItems,
+      Math.max(minItems, ctx.lists.length === 0 ? 3 : 2),
+    );
+    return Array.from({ length }, (_, index) =>
+      exampleForSchema(
+        spec,
+        source.items,
+        seen,
+        name,
+        childExampleContext(ctx, name, { index }),
+      ),
     );
   }
   if (type === "boolean") return false;
-  if (type === "integer" || type === "number") {
-    const minimum = Number(source.minimum);
-    const exclusiveMinimum = source.exclusiveMinimum;
-    const lowerBound = Number.isFinite(minimum) ? minimum : 0;
-    if (exclusiveMinimum === true) return lowerBound + 1;
-    if (typeof exclusiveMinimum === "number") return exclusiveMinimum + 1;
-    return lowerBound;
-  }
+  if (type === "integer" || type === "number") return fallbackNumber(source);
   if (type === "null") return null;
-  if (type === "string" || !type) {
-    if (source.format === "date-time") return "2026-01-01T00:00:00Z";
-    if (source.format === "uuid") return "550e8400-e29b-41d4-a716-446655440000";
-    if (source.format === "uri") return "https://example.com";
-    if (source.format === "email") return "user@example.com";
-    return "example";
-  }
+  if (type === "string" || !type)
+    return fallbackString(name || "value", source);
   return undefined;
 }
 
@@ -4142,8 +4271,10 @@ function populateTypedApiV1Examples(spec: OpenAPISpec): void {
         continue;
       }
       const typedOperation = operation as unknown as Record<string, unknown>;
+      const requestContent = jsonContent(typedOperation.requestBody);
+      const hasDocumentedRequestExample = requestContent?.example !== undefined;
       const bodies = [
-        typedOperation.requestBody,
+        ...(hasDocumentedRequestExample ? [] : [typedOperation.requestBody]),
         ...Object.entries(
           (typedOperation.responses ?? {}) as Record<string, unknown>,
         )
@@ -4157,7 +4288,18 @@ function populateTypedApiV1Examples(spec: OpenAPISpec): void {
         const jsonContent = content?.[json] as
           Record<string, unknown> | undefined;
         if (!jsonContent?.schema) continue;
-        const example = exampleForSchema(spec, jsonContent.schema);
+        const example =
+          body === typedOperation.requestBody
+            ? exampleForSchema(spec, jsonContent.schema)
+            : (apiV1OperationDocs[String(typedOperation.operationId)]
+                ?.responseExample ??
+              exampleForSchema(
+                spec,
+                jsonContent.schema,
+                new Set<string>(),
+                "",
+                rootExampleContext(String(typedOperation.operationId)),
+              ));
         if (example === undefined) continue;
         jsonContent.example = example;
         delete jsonContent.examples;

@@ -356,15 +356,14 @@ describe("api v1 public docs", () => {
         ?.requestBody?.content?.["application/json"]?.schema,
     );
 
-    expect(overview?.properties?.metrics).toEqual(
+    const metrics = resolveSchema(spec, overview?.properties?.metrics);
+    expect(metrics).toEqual(
       expect.objectContaining({
         minItems: 1,
         maxItems: 20,
       }),
     );
-    expect(overview?.properties?.metrics?.items).toEqual(
-      expect.objectContaining({ type: "string" }),
-    );
+    expect(metrics?.items).toEqual(expect.objectContaining({ type: "string" }));
     expect(resolveSchema(spec, search?.properties?.page)).toEqual(
       expect.objectContaining({
         properties: expect.objectContaining({
