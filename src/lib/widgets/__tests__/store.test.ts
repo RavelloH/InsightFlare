@@ -10,6 +10,8 @@ import {
   readWidget,
   unpublishWidget,
   updateWidgetDraft,
+  WidgetConflictError,
+  WidgetStorageUnavailableError,
 } from "@/lib/widgets/store";
 
 class MemoryKv {
@@ -260,5 +262,136 @@ describe("widget KV store", () => {
     expect(await deleteWidget(env, "team-a", uuid)).toBe(false);
     expect(kv.values.has(primaryKey)).toBe(true);
     expect(kv.values.has(`widget:team:team-a:${uuid}`)).toBe(false);
+  });
+});
+
+describe("widget storage failure isolation and pagination", () => {
+  it("fails closed when KV binding is unavailable", async () => {
+    const noKv = {} as Env;
+    await expect(readWidget(noKv, uuid)).rejects.toBeInstanceOf(
+      WidgetStorageUnavailableError,
+    );
+    await expect(listTeamWidgets(noKv, "team-a")).rejects.toBeInstanceOf(
+      WidgetStorageUnavailableError,
+    );
+  });
+
+  it("does not contact KV when the supplied widget ID is invalid", async () => {
+    expect(await readWidget({} as Env, "not-a-uuid")).toBeNull();
+    expect(await deleteWidget({} as Env, "team-a", "not-a-uuid")).toBe(false);
+  });
+
+  it("hides malformed JSON and malformed persisted records from public readers", async () => {
+    const { kv, env } = environment();
+    await kv.put(`widget:${uuid}`, "{bad-json");
+    expect(await readWidget(env, uuid)).toBeNull();
+    await kv.put(`widget:${uuid}`, JSON.stringify({ title: "invalid schema" }));
+    expect(await readWidget(env, uuid)).toBeNull();
+  });
+
+  it("rejects a deterministic retry token if its existing record belongs to another team", async () => {
+    const { env, kv } = environment();
+    const created = await createWidget(env, {
+      uuid,
+      teamId: "team-a",
+      siteId: "site-a",
+      config,
+    });
+    await kv.put(
+      `widget:${created.uuid}`,
+      JSON.stringify({
+        ...created,
+        teamId: "team-b",
+      }),
+    );
+    await expect(
+      createWidget(env, {
+        uuid,
+        teamId: "team-a",
+        siteId: "site-a",
+        config,
+      }),
+    ).rejects.toBeInstanceOf(WidgetConflictError);
+  });
+
+  it("does not overwrite or unpublish another team's record", async () => {
+    const { env, kv } = environment();
+    const created = await createWidget(env, {
+      uuid,
+      teamId: "team-a",
+      siteId: "site-a",
+      config,
+      publish: true,
+    });
+    expect(
+      await updateWidgetDraft(env, "team-b", created.uuid, {
+        ...config,
+        title: "STOLEN",
+      }),
+    ).toBeNull();
+    expect(await publishWidget(env, "team-b", created.uuid)).toBeNull();
+    expect(await unpublishWidget(env, "team-b", created.uuid)).toBeNull();
+    expect(kv.values.get(`widget:${created.uuid}`)).toContain(
+      '"title":"Visitors"',
+    );
+  });
+
+  it("never deletes an existing widget through the wrong team's index", async () => {
+    const { env, kv } = environment();
+    const created = await createWidget(env, {
+      uuid,
+      teamId: "team-a",
+      siteId: "site-a",
+      config,
+    });
+    await expect(
+      deleteWidget(env, "team-b", created.uuid),
+    ).rejects.toBeInstanceOf(WidgetConflictError);
+    expect(kv.values.has(`widget:${created.uuid}`)).toBe(true);
+  });
+
+  it("supports opaque cursor pagination and filters orphaned and invalid indexes", async () => {
+    const { env, kv } = environment();
+    const created = await createWidget(env, {
+      uuid,
+      teamId: "team-a",
+      siteId: "site-a",
+      config,
+    });
+    await kv.put("widget:team:team-a:bad-uuid", "bad-uuid");
+    await kv.put(
+      "widget:team:team-a:aef8f0db-ccdd-468f-bd9c-344339264caf",
+      "orphan",
+    );
+    const first = await listTeamWidgets(env, "team-a", "0");
+    expect(first.data).toEqual([created]);
+    expect(first.nextCursor).toBeNull();
+    // Exercise the paginated KV contract with a non-complete first page.
+    for (let i = 0; i < 105; i++) {
+      await kv.put(`widget:team:team-a:invalid-${i}`, "orphan");
+    }
+    const firstPage = await listTeamWidgets(env, "team-a");
+    expect(firstPage.nextCursor).toBeTruthy();
+    const next = await listTeamWidgets(env, "team-a", firstPage.nextCursor);
+    expect(next.data).toEqual([]);
+    expect(next.nextCursor).toBeNull();
+  });
+
+  it("preserves invalid indexes of unrelated teams when cleaning retry tokens", async () => {
+    const { env, kv } = environment();
+    await kv.put(`widget:team:team-b:${uuid}`, uuid);
+    expect(await deleteWidget(env, "team-a", uuid)).toBe(false);
+    expect(kv.values.has(`widget:team:team-b:${uuid}`)).toBe(true);
+  });
+
+  it("does not increase a public revision if the widget was never published", async () => {
+    const { env } = environment();
+    const created = await createWidget(env, {
+      uuid,
+      teamId: "team-a",
+      siteId: "site-a",
+      config,
+    });
+    expect(await unpublishWidget(env, "team-a", created.uuid)).toEqual(created);
   });
 });

@@ -4,7 +4,11 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import type { WidgetConfig, WidgetData } from "@/lib/widgets/contract";
-import { renderWidgetDocument, widgetDocumentCsp } from "@/lib/widgets/embed";
+import {
+  renderWidgetDocument,
+  renderWidgetPlaceholder,
+  widgetDocumentCsp,
+} from "@/lib/widgets/embed";
 
 const config: WidgetConfig = {
   title: "Test widget",
@@ -337,5 +341,94 @@ describe("automatic preview locale, optional titles and trusted path links", () 
     expect(make(true)).toContain('data-site-origin="https://example.com"');
     expect(make(true)).toContain('rel = "noopener noreferrer"');
     expect(make(true)).toContain("function pathHref(rawPath)");
+  });
+});
+
+describe("public embed escaping and frame-ancestor security", () => {
+  const statusCases = [
+    "not-found",
+    "unpublished",
+    "domain-denied",
+    "unavailable",
+  ] as const;
+
+  it.each(statusCases)(
+    "returns a localized, noninteractive placeholder for %s",
+    (status) => {
+      for (const locale of ["en", "zh", "zh-tw", "ja"] as const) {
+        const html = renderWidgetPlaceholder(status, locale);
+        expect(html).toContain(`<html lang="${locale}"`);
+        expect(html).toContain('role="status"');
+        // CSP is set by the HTTP response, not embedded as a meta element.
+        expect(html).not.toContain("<script");
+        expect(html).not.toContain('data-uuid="');
+        expect(html).not.toContain("function renderRealtime");
+      }
+    },
+  );
+
+  it("deduplicates explicitly allowed ancestors without broadening their policy", () => {
+    const csp = widgetDocumentCsp(
+      "https://portal.example https://portal.example https://embed.example",
+    );
+    expect(csp).toContain(
+      "frame-ancestors https://portal.example https://embed.example",
+    );
+    expect(csp).not.toContain("frame-ancestors *");
+  });
+
+  it("gives an explicit deny-all ancestor precedence over ordinary domains", () => {
+    expect(widgetDocumentCsp("https://portal.example 'none'")).toContain(
+      "frame-ancestors 'none'",
+    );
+    expect(widgetDocumentCsp("* 'none'")).toContain("frame-ancestors *");
+  });
+
+  it.each([
+    "javascript:alert(1)",
+    "ftp://example.test",
+    "https://valid.test/extra-path",
+    "https://user:password@valid.test",
+    "not a URL",
+    "",
+  ])("drops unsafe iframe ancestor source %s", (ancestor) => {
+    expect(widgetDocumentCsp(ancestor)).toContain("frame-ancestors 'none'");
+  });
+
+  it("supports explicit self-embedding without allowing arbitrary origins", () => {
+    const csp = widgetDocumentCsp("'self'");
+    expect(csp).toContain("frame-ancestors 'self'");
+    expect(csp).not.toContain("frame-ancestors *");
+  });
+
+  it("escapes all dangerous HTML punctuation in titles and visitor-controlled preview labels", () => {
+    const malicious = '</script><img src=x onerror="alert(1)">&\u2028\u2029';
+    const html = renderWidgetDocument({
+      uuid: "11111111-1111-4111-8111-111111111111",
+      config: {
+        ...config,
+        type: "ranking",
+        pageLinksEnabled: true,
+        title: "<>&\"' visitor",
+        range: "30d",
+      },
+      preview: true,
+      previewData: {
+        ...previewData,
+        type: "ranking",
+        rows: [{ label: malicious, value: 8 }],
+      },
+      siteOrigin: "https://example.test?x=1&y=2",
+      themeOverride: "dark",
+    });
+    expect(html).toContain("&lt;&gt;&amp;&quot;&#39; visitor");
+    expect(html).toContain('data-theme="dark"');
+    expect(html).toContain("Last 30 days");
+    expect(html).not.toContain(malicious);
+    expect(html).toContain("\\u003c/script\\u003e");
+    expect(html).toContain("\\u0026");
+    expect(html).toContain("\\u2028");
+    expect(html).toContain("\\u2029");
+    expect(html).toContain("https://example.test?x=1&amp;y=2");
   });
 });

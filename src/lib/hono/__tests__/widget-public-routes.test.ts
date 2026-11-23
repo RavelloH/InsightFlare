@@ -232,3 +232,192 @@ describe("published widgets", () => {
     );
   });
 });
+
+describe("public widget resilience, cache isolation and unsafe input handling", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(readWidget).mockResolvedValue(widget);
+    vi.mocked(widgetSiteBelongsToTeam).mockResolvedValue(true);
+    vi.mocked(readSiteTrackingConfig).mockResolvedValue({
+      siteId: "site",
+      siteDomain: "site.test",
+    } as Awaited<ReturnType<typeof readSiteTrackingConfig>>);
+    vi.mocked(queryWidgetData).mockResolvedValue({
+      type: "metric",
+      metric: "views",
+      value: 3,
+      change: null,
+      from: 1,
+      to: 2,
+      timeZone: "UTC",
+      updatedAt: 2,
+    });
+    vi.mocked(withDashboardCache).mockImplementation((_ctx, _url, load) =>
+      load(),
+    );
+  });
+
+  it("returns neutral 404 pages for unrecognized URLs or malformed UUIDs", async () => {
+    expect((await request("/en/widget/not-a-uuid")).status).toBe(404);
+    expect((await request("/en/widget/")).status).toBe(404);
+    expect((await request("/api/public/widgets/not-a-uuid/data")).status).toBe(
+      404,
+    );
+    expect(readWidget).not.toHaveBeenCalled();
+  });
+
+  it("does not leak storage errors in published HTML or public JSON", async () => {
+    vi.mocked(readWidget).mockRejectedValueOnce(new Error("KV SECRET FAILURE"));
+    const page = await request(documentPath);
+    expect(page.status).toBe(503);
+    expect(await page.text()).not.toContain("KV SECRET FAILURE");
+    vi.mocked(readWidget).mockRejectedValueOnce(new Error("KV SECRET FAILURE"));
+    const json = await request(dataPath);
+    expect(json.status).toBe(503);
+    expect(await json.json()).toEqual({ error: "unavailable" });
+    expect(queryWidgetData).not.toHaveBeenCalled();
+  });
+
+  it("does not disclose draft widgets through the public HTML page", async () => {
+    vi.mocked(readWidget).mockResolvedValueOnce({
+      ...widget,
+      status: "draft",
+      published: null,
+    });
+    expect((await request(documentPath)).status).toBe(404);
+  });
+
+  it("does not disclose unpublished widget datasets", async () => {
+    vi.mocked(readWidget).mockResolvedValueOnce({
+      ...widget,
+      status: "unpublished",
+    });
+    const response = await request(dataPath);
+    expect(response.status).toBe(410);
+    expect(await response.json()).toEqual({ error: "unpublished" });
+    expect(withDashboardCache).not.toHaveBeenCalled();
+  });
+
+  it("returns a 503 JSON response when an analytics query fails without leaking its error", async () => {
+    vi.mocked(queryWidgetData).mockRejectedValueOnce(
+      new Error("internal SQL details"),
+    );
+    const response = await request(dataPath);
+    expect(response.status).toBe(503);
+    const body = await response.text();
+    expect(body).not.toContain("internal SQL details");
+    expect(body).toContain("unavailable");
+  });
+
+  it("enforces allowed iframe origins even when referer contains a path", async () => {
+    const allowed = await request(documentPath, {
+      "sec-fetch-dest": "iframe",
+      referer: "https://site.test/path?x=1",
+    });
+    expect(allowed.status).toBe(200);
+    const denied = await request(documentPath, {
+      "sec-fetch-dest": "iframe",
+      referer: "https://attacker.test/",
+    });
+    expect(denied.status).toBe(403);
+    expect(await denied.text()).not.toContain(widget.draft.title);
+  });
+
+  it("emits an unrestricted ancestor policy only for explicitly public embedding", async () => {
+    vi.mocked(readWidget).mockResolvedValueOnce({
+      ...widget,
+      published: { ...widget.draft, embedMode: "any" },
+    });
+    const response = await request(documentPath, {
+      "sec-fetch-dest": "iframe",
+      referer: "https://arbitrary.test/somewhere",
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-security-policy")).toContain(
+      "frame-ancestors *",
+    );
+  });
+
+  it("does not use untrusted page origins if the site has no verified domain", async () => {
+    vi.mocked(readWidget).mockResolvedValue({
+      ...widget,
+      published: { ...widget.draft, pageLinksEnabled: true },
+    });
+    vi.mocked(readSiteTrackingConfig).mockResolvedValue(null);
+    const response = await request(documentPath);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('data-site-origin=""');
+  });
+
+  it("rejects an invalid or throwing site origin without emitting an arbitrary link", async () => {
+    vi.mocked(readWidget).mockResolvedValue({
+      ...widget,
+      published: { ...widget.draft, pageLinksEnabled: true },
+    });
+    vi.mocked(readSiteTrackingConfig).mockResolvedValueOnce({
+      siteDomain: "https://evil.test/long/path",
+    } as Awaited<ReturnType<typeof readSiteTrackingConfig>>);
+    expect(await (await request(documentPath)).text()).toContain(
+      'data-site-origin=""',
+    );
+    vi.mocked(readSiteTrackingConfig).mockRejectedValueOnce(
+      new Error("secret API"),
+    );
+    expect(await (await request(documentPath)).text()).toContain(
+      'data-site-origin=""',
+    );
+  });
+
+  it("normalizes historical cache keys by time window and ignores arbitrary URL parameters", async () => {
+    const response = await request(
+      dataPath + "?metric=events&filters=private&revision=2",
+    );
+    expect(response.status).toBe(200);
+    expect(withDashboardCache).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(URL),
+      expect.any(Function),
+      expect.objectContaining({
+        cacheName: "insightflare-widget-data",
+        ttlSeconds: 60,
+      }),
+    );
+    const url = vi.mocked(withDashboardCache).mock.calls.at(-1)?.[1];
+    expect(url?.searchParams.has("filters")).toBe(false);
+    expect(url?.searchParams.has("metric")).toBe(false);
+    expect(url?.searchParams.get("revision")).toBe("2");
+  });
+
+  it("normalizes realtime requests into 15-second cache buckets", async () => {
+    vi.mocked(readWidget).mockResolvedValueOnce({
+      ...widget,
+      published: {
+        ...widget.draft,
+        type: "realtime",
+        metric: "visitors",
+        realtimeLayout: "badge",
+      },
+    });
+    const response = await request(dataPath);
+    expect(response.status).toBe(200);
+    const args = vi.mocked(withDashboardCache).mock.calls.at(-1);
+    expect(args?.[3]).toMatchObject({
+      ttlSeconds: 15,
+      identity: {
+        scope: "public",
+        tenantId: "site",
+        route: `widget:${widget.uuid}`,
+      },
+    });
+    const cacheUrl = args?.[1];
+    expect(cacheUrl?.searchParams.has("bucket")).toBe(true);
+    expect(cacheUrl?.searchParams.has("from")).toBe(false);
+  });
+
+  it("uses explicit themes only for allowed light and dark values", async () => {
+    const allowed = await request(documentPath + "?theme=dark");
+    expect(await allowed.text()).toContain('data-theme="dark"');
+    const denied = await request(documentPath + "?theme=../../secret");
+    expect(await denied.text()).not.toContain('data-theme="../../secret"');
+  });
+});

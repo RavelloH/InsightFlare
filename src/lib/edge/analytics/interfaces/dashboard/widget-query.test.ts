@@ -299,3 +299,397 @@ describe("public realtime Widget adapter", () => {
     );
   });
 });
+
+describe("public widget data error and privacy boundary matrix", () => {
+  beforeEach(() => mocks.execute.mockReset());
+
+  const overview = (
+    current: Record<string, number>,
+    previous?: Record<string, number>,
+  ) =>
+    mocks.execute.mockResolvedValue({
+      ok: true,
+      data: { current, ...(previous ? { previous } : {}) },
+    });
+
+  it.each([
+    ["visitors", 8],
+    ["views", 16],
+    ["sessions", 4],
+    ["bounces", 1],
+    ["bounceRate", 0.25],
+    ["avgDurationMs", 750],
+    ["viewsPerSession", 4],
+  ] as const)(
+    "computes %s directly from the authorised overview",
+    async (metric, value) => {
+      overview({
+        visitors: 8,
+        views: 16,
+        sessions: 4,
+        bounces: 1,
+        totalDurationMs: 3000,
+      });
+      const result = await query({ type: "metric", metric, comparison: false });
+      expect(result).toMatchObject({ type: "metric", value, change: null });
+      expect(mocks.execute).toHaveBeenCalledWith(
+        "overview",
+        expect.objectContaining({
+          context: expect.objectContaining({
+            policy: expect.objectContaining({ audience: "public-share" }),
+          }),
+        }),
+      );
+    },
+  );
+
+  it.each(["bounceRate", "avgDurationMs", "viewsPerSession"] as const)(
+    "has zero-safe %s when no sessions exist",
+    async (metric) => {
+      overview({
+        visitors: 0,
+        views: 0,
+        sessions: 0,
+        bounces: 0,
+        totalDurationMs: 0,
+      });
+      const result = await query({ type: "metric", metric, comparison: false });
+      expect(result).toMatchObject({ type: "metric", value: 0, change: null });
+    },
+  );
+
+  it("returns normalized comparison rather than percent units", async () => {
+    overview(
+      {
+        visitors: 200,
+        views: 400,
+        sessions: 100,
+        bounces: 20,
+        totalDurationMs: 1000,
+      },
+      {
+        visitors: 100,
+        views: 250,
+        sessions: 80,
+        bounces: 10,
+        totalDurationMs: 1000,
+      },
+    );
+    const result = await query({
+      type: "metric",
+      metric: "visitors",
+      comparison: true,
+    });
+    expect(result).toMatchObject({ value: 200, change: 1 });
+  });
+
+  it("uses authorized private-dashboard aggregation for event metric", async () => {
+    mocks.execute.mockResolvedValueOnce({
+      ok: true,
+      data: { summary: { events: 9 } },
+    });
+    const result = await query({
+      type: "metric",
+      metric: "events",
+      comparison: false,
+    });
+    expect(result).toMatchObject({ type: "metric", value: 9, change: null });
+    expect(mocks.execute).toHaveBeenCalledWith(
+      "event-summary",
+      expect.objectContaining({
+        context: expect.objectContaining({
+          policy: expect.objectContaining({ audience: "private-dashboard" }),
+        }),
+      }),
+    );
+  });
+
+  it("computes event metric comparisons with the previous comparable window", async () => {
+    mocks.execute
+      .mockResolvedValueOnce({ ok: true, data: { summary: { events: 30 } } })
+      .mockResolvedValueOnce({ ok: true, data: { summary: { events: 15 } } });
+    const result = await query({
+      type: "metric",
+      metric: "events",
+      comparison: true,
+    });
+    expect(result).toMatchObject({ value: 30, change: 1 });
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { type: "metric", metric: "views" },
+    { type: "metric", metric: "events" },
+    { type: "trend", metric: "visitors" },
+    { type: "ranking", metric: "visitors" },
+    { type: "distribution", metric: "visitors" },
+    { type: "geo", metric: "visitors" },
+    {
+      type: "conversion",
+      metric: "events",
+      conversionKind: "event",
+      eventName: "sign_up",
+    },
+    {
+      type: "conversion",
+      metric: "visitors",
+      conversionKind: "goal",
+      goalId: "goal-a",
+    },
+  ] as const)(
+    "rejects failed aggregate query: $type/$metric",
+    async (partial) => {
+      mocks.execute.mockResolvedValue({
+        ok: false,
+        error: { code: "unavailable" },
+      });
+      await expect(query(partial)).rejects.toThrow(/Widget .* query failed/);
+    },
+  );
+
+  it("fails closed on an invalid comparison aggregate", async () => {
+    mocks.execute
+      .mockResolvedValueOnce({ ok: true, data: { summary: { events: 5 } } })
+      .mockResolvedValueOnce({ ok: false, error: { code: "forbidden" } });
+    await expect(
+      query({ type: "metric", metric: "events", comparison: true }),
+    ).rejects.toThrow("Widget event comparison failed");
+  });
+
+  it("preserves missing event comparison and empty goal denominator", async () => {
+    mocks.execute.mockResolvedValueOnce({
+      ok: true,
+      data: { summary: { events: 0 } },
+    });
+    expect(
+      await query({ type: "metric", metric: "events", comparison: false }),
+    ).toMatchObject({ value: 0, change: null });
+    mocks.execute.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        goal: { name: "Test" },
+        timeseries: [
+          {
+            timestampMs: 100,
+            sessions: { total: 0, converted: 0, conversionRate: 0 },
+          },
+        ],
+      },
+    });
+    const goal = await query({
+      type: "conversion",
+      conversionKind: "goal",
+      goalId: "goal-a",
+    });
+    expect(goal).toMatchObject({ total: 0, value: 0, rate: null });
+  });
+
+  it("returns a compact one-series trend from one aggregate request", async () => {
+    mocks.execute.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        points: [{ timestampMs: 10, views: 4, visitors: 3, sessions: 2 }],
+      },
+    });
+    const trend = await query({
+      type: "trend",
+      metric: "views",
+      trendMetrics: [],
+    });
+    expect(trend).toMatchObject({
+      type: "trend",
+      points: [{ timestampMs: 10, value: 4 }],
+    });
+    if (trend.type !== "trend") throw new Error("wrong type");
+    expect(trend.series).toBeUndefined();
+  });
+
+  it.each([
+    [
+      "page.path",
+      [
+        { key: "/ok?utm_source=paid", visitors: 7 },
+        { key: "https://evil.test/open", visitors: 11 },
+        { key: "  ", visitors: 2 },
+        { key: "/docs#section", visitors: 4 },
+      ],
+      ["/ok", "/docs"],
+    ],
+    [
+      "source.domain",
+      [
+        { key: "news.example.com", visitors: 7 },
+        { key: "invalid host/name", visitors: 4 },
+        { key: "x-y.test", visitors: 2 },
+      ],
+      ["news.example.com", "x-y.test"],
+    ],
+    [
+      "geo.country",
+      [
+        { key: "us", visitors: 7 },
+        { key: "not-a-code", visitors: 9 },
+        { key: " jp ", visitors: 3 },
+      ],
+      ["US", "JP"],
+    ],
+  ] as const)(
+    "sanitizes %s labels before publishing",
+    async (dimension, items, labels) => {
+      mocks.execute.mockResolvedValueOnce({ ok: true, data: { items } });
+      const result = await query({
+        type: "ranking",
+        dimension,
+        metric: "visitors",
+      });
+      expect(result.type).toBe("ranking");
+      if (result.type !== "ranking") throw new Error("wrong type");
+      expect(result.rows.map((r) => r.label)).toEqual(labels);
+    },
+  );
+
+  it("uses the chosen distribution dimension and emits no NaN for empty groups", async () => {
+    mocks.execute.mockResolvedValue({
+      ok: true,
+      data: {
+        items: [
+          { key: "desktop", visitors: 0 },
+          { key: "", visitors: 0 },
+          { key: "mobile", visitors: 0 },
+        ],
+      },
+    });
+    const result = await query({
+      type: "distribution",
+      distributionDimension: "utm.source",
+    });
+    expect(result).toMatchObject({
+      type: "distribution",
+      rows: [
+        { label: "desktop", percent: 0 },
+        { label: "mobile", percent: 0 },
+      ],
+    });
+    expect(mocks.execute).toHaveBeenCalledWith(
+      "dimension",
+      expect.objectContaining({ dimension: "utm_source" }),
+    );
+  });
+
+  it("rejects malformed analytics breakdown shapes", async () => {
+    mocks.execute.mockResolvedValue({ ok: true, data: { unexpected: true } });
+    await expect(query({ type: "geo" })).rejects.toThrow(
+      /geographic breakdown/,
+    );
+    await expect(query({ type: "ranking" })).rejects.toThrow(
+      /ranking query failed/,
+    );
+  });
+
+  it("ignores invalid and zero geographic values instead of inventing locations", async () => {
+    mocks.execute.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        items: [
+          { key: "US", visitors: 0 },
+          { key: "DE", visitors: Number.NaN },
+          { key: "SG", visitors: 5 },
+          { key: "unknown", visitors: 3 },
+        ],
+      },
+    });
+    const result = await query({ type: "geo", metric: "visitors" });
+    expect(result).toMatchObject({ type: "geo", unmapped: 3 });
+    if (result.type !== "geo") throw new Error("wrong type");
+    expect(result.points.map((x) => x.country)).toEqual(["SG"]);
+  });
+
+  const snapshot = {
+    sampledAt: 600000,
+    activeNow: 4,
+    bars: [
+      { minute: 100, visitors: -1, views: 2 },
+      { minute: 200, visitors: 2, views: -2 },
+    ],
+    countries: [
+      { country: "US", activeVisitors: 3 },
+      { country: "JP", activeVisitors: 2 },
+      { country: "UNKNOWN", activeVisitors: 5 },
+    ],
+    pages: [
+      { path: "/a", activeVisitors: 5 },
+      { path: "/b", activeVisitors: 2 },
+      { path: "https://evil.test", activeVisitors: 10 },
+      { path: "/" + "x".repeat(513), activeVisitors: 10 },
+    ],
+  };
+
+  const realtime = (
+    response: () => Promise<Response>,
+    layout: "badge" | "map" | "trend" | "pages" = "badge",
+  ) =>
+    queryWidgetData(
+      {
+        INGEST_DO: {
+          idFromName: (siteId: string) => siteId,
+          get: () => ({ fetch: response }),
+        },
+      } as unknown as Env,
+      "site-1",
+      { ...config, type: "realtime", realtimeLayout: layout },
+      window,
+    );
+
+  it("rejects upstream realtime errors and malformed aggregates", async () => {
+    await expect(
+      realtime(async () => new Response(null, { status: 503 })),
+    ).rejects.toThrow("Realtime Widget aggregate unavailable");
+    for (const malformed of [
+      { ...snapshot, activeNow: -1 },
+      { ...snapshot, activeNow: 1.5 },
+      { ...snapshot, sampledAt: Number.NaN },
+      { ...snapshot, bars: null },
+      { ...snapshot, countries: null },
+      { ...snapshot, pages: null },
+    ]) {
+      await expect(
+        realtime(async () => Response.json(malformed)),
+      ).rejects.toThrow("Invalid realtime Widget aggregate");
+    }
+  });
+
+  it("aggregates country data only when a bucket has at least three active visitors", async () => {
+    const result = await realtime(async () => Response.json(snapshot), "map");
+    expect(result.type).toBe("realtime");
+    if (result.type !== "realtime") throw new Error("wrong type");
+    expect(result.points.map((x) => x.country)).toEqual(["US"]);
+    expect(result.bars).toEqual([]);
+  });
+
+  it("filters unsafe pages and exposes only sufficiently active paths", async () => {
+    const result = await realtime(async () => Response.json(snapshot), "pages");
+    expect(result.type).toBe("realtime");
+    if (result.type !== "realtime") throw new Error("wrong type");
+    expect(result.rows).toEqual([{ label: "/a", value: 5 }]);
+  });
+
+  it("clamps negative minute buckets and skips non-finite values", async () => {
+    const result = await realtime(
+      async () =>
+        Response.json({
+          ...snapshot,
+          bars: [
+            ...snapshot.bars,
+            { minute: 300, visitors: Number.NaN, views: 3 },
+          ],
+        }),
+      "trend",
+    );
+    expect(result.type).toBe("realtime");
+    if (result.type !== "realtime") throw new Error("wrong type");
+    expect(result.bars).toEqual([
+      { minute: 100, visitors: 0, views: 2 },
+      { minute: 200, visitors: 2, views: 0 },
+    ]);
+  });
+});

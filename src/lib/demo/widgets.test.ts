@@ -1,8 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 
-import type { generateDemoWidgetData } from "./widgets";
-import { handleDemoWidgetApi, readDemoWidget } from "./widgets";
+import {
+  generateDemoWidgetData,
+  handleDemoWidgetApi,
+  readDemoWidget,
+} from "./widgets";
 
 const teamId = "demo-team-001";
 const endpoint = `https://demo.test/api/private/widgets/teams/${teamId}`;
@@ -167,5 +170,222 @@ describe("demo widgets runtime", () => {
       204,
     );
     expect(readDemoWidget(createUuid)).toBeNull();
+  });
+});
+
+describe("demo widget coverage for every supported visual variant", () => {
+  const base = readDemoWidget(fixtureUuid)!.draft;
+  const siteId = readDemoWidget(fixtureUuid)!.siteId;
+
+  it.each([
+    ["badge", 0, 0, 0],
+    ["trend", 30, 0, 0],
+    ["map", 0, 8, 0],
+    ["pages", 0, 0, 5],
+  ] as const)(
+    "creates %s realtime fixture aggregates with bounded content",
+    (realtimeLayout, bars, points, rows) => {
+      const data = generateDemoWidgetData(siteId, {
+        ...base,
+        type: "realtime",
+        metric: "visitors",
+        realtimeLayout,
+      });
+      expect(data.type).toBe("realtime");
+      if (data.type !== "realtime") throw new Error("wrong type");
+      expect(data.activeNow).toBeGreaterThan(30);
+      expect(data.bars).toHaveLength(bars);
+      expect(data.points).toHaveLength(points);
+      expect(data.rows).toHaveLength(rows);
+      expect(data).not.toHaveProperty("visitorId");
+    },
+  );
+
+  it.each([
+    ["bounceRate", 0.38],
+    ["avgDurationMs", 71500],
+    ["viewsPerSession", 2.45],
+  ] as const)("provides normalized synthetic %s values", (metric, value) => {
+    expect(
+      generateDemoWidgetData(siteId, {
+        ...base,
+        type: "metric",
+        metric,
+      }),
+    ).toMatchObject({ type: "metric", value });
+  });
+
+  it("honors 30-day windows and comparison opt-out", () => {
+    const data = generateDemoWidgetData(siteId, {
+      ...base,
+      type: "trend",
+      metric: "sessions",
+      range: "30d",
+    });
+    expect(data.type).toBe("trend");
+    if (data.type !== "trend") throw new Error("wrong type");
+    expect(data.points).toHaveLength(30);
+    expect(data.series).toBeUndefined();
+    expect(
+      generateDemoWidgetData(siteId, {
+        ...base,
+        type: "metric",
+        metric: "views",
+        comparison: false,
+      }),
+    ).toMatchObject({ change: null });
+  });
+
+  it.each([
+    ["page.path", "/"],
+    ["source.domain", "google.com"],
+    ["geo.country", "US"],
+  ] as const)(
+    "keeps ranked %s preview labels consistent with the real aggregator",
+    (dimension, expected) => {
+      const data = generateDemoWidgetData(siteId, {
+        ...base,
+        type: "ranking",
+        dimension,
+      });
+      expect(data.type).toBe("ranking");
+      if (data.type !== "ranking") throw new Error("wrong type");
+      expect(data.rows[0]?.label).toBe(expected);
+    },
+  );
+
+  it.each([
+    ["client.deviceType", "Desktop"],
+    ["client.browser", "Chrome"],
+    ["utm.source", "google"],
+    ["source.domain", "google.com"],
+  ] as const)(
+    "generates %s synthetic distributions with complete normalized percentages",
+    (distributionDimension, expected) => {
+      const data = generateDemoWidgetData(siteId, {
+        ...base,
+        type: "distribution",
+        distributionDimension,
+        limit: 5,
+      });
+      expect(data.type).toBe("distribution");
+      if (data.type !== "distribution") throw new Error("wrong type");
+      expect(data.rows[0]?.label).toBe(expected);
+      const total = data.rows.reduce((sum, row) => sum + row.percent, 0);
+      expect(total).toBeCloseTo(1);
+    },
+  );
+
+  it.each(["event", "goal"] as const)(
+    "produces %s conversion previews without individual session records",
+    (conversionKind) => {
+      const data = generateDemoWidgetData(siteId, {
+        ...base,
+        type: "conversion",
+        conversionKind,
+        eventName: "signup",
+        goalId: "demo-goal-signup",
+      });
+      expect(data).toMatchObject({
+        type: "conversion",
+        kind: conversionKind,
+        rate: conversionKind === "goal" ? 0.2 : null,
+      });
+      if (data.type !== "conversion") throw new Error("wrong type");
+      expect(data.points).toHaveLength(7);
+    },
+  );
+});
+
+describe("demo Widget HTTP route validation", () => {
+  it("rejects malformed paths and unsupported methods", async () => {
+    expect((await send(endpoint + "/not-a-uuid", "DELETE")).status).toBe(404);
+    expect((await send(endpoint + "/unexpected/path", "POST", {})).status).toBe(
+      404,
+    );
+    expect((await send(endpoint, "PATCH")).status).toBe(404);
+    expect(
+      (await send(endpoint + "/" + fixtureUuid + "/preview", "POST", {}))
+        .status,
+    ).toBe(404);
+  });
+
+  it.each([
+    {
+      description: "no UUID",
+      data: {
+        siteId: readDemoWidget(fixtureUuid)!.siteId,
+        config: readDemoWidget(fixtureUuid)!.draft,
+      },
+    },
+    {
+      description: "invalid config",
+      data: {
+        uuid: createUuid,
+        siteId: readDemoWidget(fixtureUuid)!.siteId,
+        config: {},
+      },
+    },
+    {
+      description: "non-boolean publish",
+      data: {
+        uuid: createUuid,
+        siteId: readDemoWidget(fixtureUuid)!.siteId,
+        config: readDemoWidget(fixtureUuid)!.draft,
+        publish: "yes",
+      },
+    },
+  ])("refuses demo creation with $description", async ({ data }) => {
+    expect((await send(endpoint, "POST", data)).status).toBe(400);
+  });
+
+  it("rejects malformed preview and untrusted site before synthesizing data", async () => {
+    const siteId = readDemoWidget(fixtureUuid)!.siteId;
+    expect(
+      (await send(endpoint + "/preview", "POST", { siteId, config: {} }))
+        .status,
+    ).toBe(400);
+    expect(
+      (
+        await send(endpoint + "/preview", "POST", {
+          siteId: "foreign-site",
+          config: readDemoWidget(fixtureUuid)!.draft,
+        })
+      ).status,
+    ).toBe(400);
+    expect((await send(endpoint + "/preview", "POST", [1, 2])).status).toBe(
+      400,
+    );
+  });
+
+  it("rejects editing or publishing with invalid configuration while preserving existing publication", async () => {
+    const current = readDemoWidget(fixtureUuid)!;
+    const invalid = { config: { invalid: true } };
+    expect(
+      (await send(endpoint + "/" + fixtureUuid, "PUT", invalid)).status,
+    ).toBe(400);
+    expect(
+      (await send(endpoint + "/" + fixtureUuid + "/publish", "POST", invalid))
+        .status,
+    ).toBe(400);
+    expect(readDemoWidget(fixtureUuid)?.revision).toBe(current.revision);
+  });
+
+  it("supports retrying an existing creation token without resetting published data", async () => {
+    const item = readDemoWidget(fixtureUuid)!;
+    const id = "baa596b0-af33-41d7-82c4-a8126b528e82";
+    const input = {
+      uuid: id,
+      siteId: item.siteId,
+      config: item.draft,
+      publish: true,
+    };
+    const first = await send(endpoint, "POST", input);
+    const second = await send(endpoint, "POST", { ...input, publish: false });
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(readDemoWidget(id)?.status).toBe("published");
+    expect((await send(endpoint + "/" + id, "DELETE")).status).toBe(204);
+    expect((await send(endpoint + "/" + id, "DELETE")).status).toBe(404);
   });
 });
