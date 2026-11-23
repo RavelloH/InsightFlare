@@ -198,7 +198,9 @@ describe("edge query performance D1 helpers", () => {
       inp: { avg: null, p50: null, p75: null, p95: null, samples: 0 },
     });
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.sql).toContain("metric_thresholds AS");
+    expect(calls[0]?.sql).toContain("GROUP BY metric");
+    expect(calls[0]?.sql).toContain("MAX(sampleCount) AS samples");
+    expect(calls[0]?.sql).not.toContain("metric_thresholds AS");
     expect(calls[0]?.sql).toContain("FROM visits");
     expect(calls[0]?.sql).toContain("perf_cls AS metricValue");
     expect(calls[0]?.bindings).toEqual([
@@ -312,7 +314,7 @@ describe("edge query performance D1 helpers", () => {
     ]);
     expect(calls[0]?.sql).toContain("perf_lcp_ms AS metricValue");
     expect(calls[0]?.sql).toContain("perf_lcp_ms IS NOT NULL");
-    expect(calls[0]?.sql).toContain("ORDER BY thresholds.bucket ASC");
+    expect(calls[0]?.sql).toContain("ORDER BY bucket ASC");
     expect(calls[0]?.bindings).toEqual([
       ...visitBindings,
       "/pricing",
@@ -909,6 +911,147 @@ describe("edge query performance D1 helpers", () => {
       });
       expect(d1.calls[5]?.sql).toContain("ORDER BY views DESC, country ASC");
       expect(d1.calls[5]?.bindings.at(-1)).toBe(1);
+      const focusedCountries = await queryPerformanceCountriesFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        1,
+        "lcp",
+      );
+      expect(focusedCountries).toHaveLength(1);
+      expect(focusedCountries[0]).toMatchObject({
+        country: "US",
+        views: 3,
+        metrics: {
+          lcp: { avg: 150, p50: 100, p75: 200, p95: 200, samples: 2 },
+          ttfb: { samples: 0 },
+        },
+      });
+      expect(d1.calls[6]?.sql).not.toContain("UNION ALL");
+      expect(d1.calls[6]?.sql).not.toContain("perf_ttfb_ms AS metricValue");
+      expect(d1.calls[6]?.sql).toContain("perf_lcp_ms AS metricValue");
+      const focusedRoutes = await queryPerformanceRoutesFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        1,
+        "lcp",
+      );
+      expect(focusedRoutes[0]).toMatchObject({
+        pathname: "/pricing",
+        views: 3,
+        metrics: {
+          lcp: { avg: 150, p50: 100, p75: 200, p95: 200, samples: 2 },
+          ttfb: { samples: 0 },
+        },
+      });
+      expect(d1.calls[7]?.sql).not.toContain("UNION ALL");
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("keeps dimensions with other vitals but no samples for the requested metric", async () => {
+    const { env, d1 } = createSqlitePerformanceEnv();
+    try {
+      const insert = d1.database.prepare(
+        "INSERT INTO visits (visit_id, site_id, started_at, pathname, country, perf_lcp_ms, perf_fcp_ms) " +
+          "VALUES (?, ?, ?, ?, ?, ?, ?)",
+      );
+      insert.run(
+        "with-lcp",
+        siteId,
+        window.startMs + 60_000,
+        "/with-lcp",
+        "US",
+        100,
+        null,
+      );
+      insert.run(
+        "no-lcp",
+        siteId,
+        window.startMs + 120_000,
+        "/no-lcp",
+        "CA",
+        null,
+        200,
+      );
+      const allCountries = await queryPerformanceCountriesFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        5,
+      );
+      const focusedCountries = await queryPerformanceCountriesFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        5,
+        "lcp",
+      );
+      expect(
+        focusedCountries.map((row) => ({
+          country: row.country,
+          views: row.views,
+          lcp: row.metrics.lcp,
+        })),
+      ).toEqual(
+        allCountries.map((row) => ({
+          country: row.country,
+          views: row.views,
+          lcp: row.metrics.lcp,
+        })),
+      );
+      expect(
+        focusedCountries.find((row) => row.country === "CA")?.metrics.lcp,
+      ).toEqual({
+        avg: null,
+        p50: null,
+        p75: null,
+        p95: null,
+        samples: 0,
+      });
+      const allRoutes = await queryPerformanceRoutesFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        5,
+      );
+      const focusedRoutes = await queryPerformanceRoutesFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        5,
+        "lcp",
+      );
+      expect(
+        focusedRoutes.map((row) => ({
+          pathname: row.pathname,
+          views: row.views,
+          lcp: row.metrics.lcp,
+        })),
+      ).toEqual(
+        allRoutes.map((row) => ({
+          pathname: row.pathname,
+          views: row.views,
+          lcp: row.metrics.lcp,
+        })),
+      );
+      expect(
+        focusedRoutes.find((row) => row.pathname === "/no-lcp")?.metrics.lcp,
+      ).toEqual({
+        avg: null,
+        p50: null,
+        p75: null,
+        p95: null,
+        samples: 0,
+      });
     } finally {
       d1.close();
     }

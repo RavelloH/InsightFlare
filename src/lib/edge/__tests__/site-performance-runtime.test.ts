@@ -114,6 +114,14 @@ describe("site performance runtime", () => {
       metric: "lcp",
       items: [{ key: "/pricing", p75: 1 }],
     });
+    expect(queryPerformanceRoutesFromD1).toHaveBeenCalledWith(
+      input.env,
+      input.siteId,
+      input.window,
+      input.filters,
+      20,
+      "lcp",
+    );
     await expect(
       readSitePerformanceBreakdown({
         ...input,
@@ -139,6 +147,7 @@ describe("site performance runtime", () => {
       input.window,
       input.filters,
       20,
+      "lcp",
     );
   });
 

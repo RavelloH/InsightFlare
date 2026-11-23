@@ -116,6 +116,7 @@ export async function readSitePerformanceBreakdown(
           input.window,
           input.filters,
           input.limit,
+          input.metric,
         )
       : await queryPerformanceCountriesFromD1(
           input.env,
@@ -123,6 +124,7 @@ export async function readSitePerformanceBreakdown(
           input.window,
           input.filters,
           input.limit,
+          input.metric,
         );
   return {
     dimension: dimension.data,
