@@ -1,10 +1,20 @@
-import { PageHeading } from "@insightflare/ui/page-heading";
-import { RiHammerLine } from "@remixicon/react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, notFound } from "@tanstack/react-router";
 
+import { WidgetsManager } from "@/components/dashboard/widgets/widgets-manager";
+import { canManageTeam } from "@/lib/dashboard/permissions";
 import { dashboardPageTitle } from "@/lib/page-title";
 
 export const Route = createFileRoute("/$locale/app/$teamSlug/widgets")({
+  beforeLoad: ({ context }) => {
+    if (
+      !canManageTeam(
+        context.teamContext.activeTeam.membershipRole,
+        context.teamContext.user.systemRole,
+      )
+    ) {
+      throw notFound();
+    }
+  },
   head: ({ match }) => ({
     meta: [
       {
@@ -19,18 +29,19 @@ export const Route = createFileRoute("/$locale/app/$teamSlug/widgets")({
 });
 
 function WidgetsPage() {
-  const copy = Route.useRouteContext().messages.teamManagement.widgets;
+  const { locale, teamContext } = Route.useRouteContext();
+
   return (
-    <div className="space-y-4">
-      <PageHeading title={copy.title} subtitle={copy.subtitle} />
-      <div className="flex min-h-72 items-center justify-center border-y border-dashed">
-        <div className="flex flex-col items-center gap-3 text-center">
-          <div className="flex size-12 items-center justify-center border bg-muted/30 text-muted-foreground">
-            <RiHammerLine className="size-5" aria-hidden="true" />
-          </div>
-          <p className="text-sm font-medium">{copy.underConstruction}</p>
-        </div>
-      </div>
-    </div>
+    <WidgetsManager
+      key={teamContext.activeTeam.id}
+      locale={locale}
+      teamId={teamContext.activeTeam.id}
+      teamName={teamContext.activeTeam.name}
+      sites={teamContext.sites.map((site) => ({
+        id: site.id,
+        name: site.name,
+        domain: site.domain,
+      }))}
+    />
   );
 }

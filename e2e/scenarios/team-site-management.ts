@@ -126,10 +126,15 @@ export function registerTeamSiteManagementScenarios(context: E2eContext) {
     await page.goto(`/zh/app/${teamA?.slug}/widgets`, {
       waitUntil: "domcontentloaded",
     });
-    await expect(page.getByText("正在开发中", { exact: true })).toBeVisible();
-    await expect(page.locator("body")).toHaveAttribute(
-      "data-overlayscrollbars-initialize",
-    );
+    await expect(
+      page.getByRole("button", { name: "创建小组件" }),
+    ).toBeVisible();
+    // Widgets now owns its horizontal scroll area; the body is native.
+    await expect(
+      page
+        .getByRole("region", { name: "从布局开始" })
+        .locator(".os-scrollbar-host"),
+    ).toBeVisible();
     await expect(
       page.locator('link[rel="preload"][as="font"][type="font/woff2"]'),
     ).toHaveCount(1);

@@ -15,7 +15,9 @@
     "registry": "https://registry.npmjs.org/"
   },
   "description": "Props-only InsightFlare product UI components.",
-  "sideEffects": ["**/*.css"],
+  "sideEffects": [
+    "**/*.css"
+  ],
   "files": [
     "dist",
     "src",
@@ -89,6 +91,11 @@
       "types": "./dist/charts/index.d.ts",
       "development": "./src/charts/index.ts",
       "import": "./dist/charts/index.js"
+    },
+    "./chart-colors": {
+      "types": "./dist/charts/chart-colors.d.ts",
+      "development": "./src/charts/chart-colors.ts",
+      "import": "./dist/charts/chart-colors.js"
     },
     "./analytics-tooltip": {
       "types": "./dist/analytics-tooltip/index.d.ts",

@@ -322,11 +322,14 @@ export function registerPerceptionScenarios(context: E2eContext) {
     expect(inspection.owners.every((id) => id === user.id)).toBe(true);
 
     const tab = await page.context().newPage();
-    await tab.goto(route, { waitUntil: "domcontentloaded" });
+    // The second tab must hydrate and register its transition handler before
+    // broadcasting a revoke event. domcontentloaded only confirms SSR HTML.
+    await tab.goto(route, { waitUntil: "load" });
     await expect(tab.getByTestId("perception-search-trigger")).toBeVisible();
     await expect(tab.locator("[data-page-transition]").first()).toHaveAttribute(
       "data-page-transition-ready",
       "true",
+      { timeout: 20_000 },
     );
     // Simulate the session revocation message sent by a logout in another tab.
     await page.evaluate((userId) => {
@@ -358,9 +361,11 @@ export function registerPerceptionScenarios(context: E2eContext) {
       )
       .toBe(0);
     await tab.getByTestId("perception-search-trigger").click();
-    // The cross-tab clear invalidates the local session, so the palette must
-    // fall back to its unauthenticated/root context without stale entries.
-    const input = tab.getByRole("combobox", { name: /搜索团队/u });
+    // The cross-tab clear discards local observations but preserves the live
+    // site grant. The site-scoped search must not expose stale local results.
+    const input = tab.getByRole("combobox", {
+      name: /搜索指标和分析页面/u,
+    });
     // Previously observed pages must disappear even if their IndexedDB
     // deletion was still pending when the dialog opened.
     await input.fill("/product");

@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 
+import { SUPPORTED_LOCALES } from "@/lib/i18n/config";
+
 import { apiNoCacheMiddleware } from "./middleware/api-cache";
 import { handleHonoError } from "./middleware/error-boundary";
 import { observabilityMiddleware } from "./middleware/observability";
@@ -9,6 +11,7 @@ import { e2eRoutes } from "./routes/e2e";
 import { healthRoutes } from "./routes/health";
 import { privateRoutes } from "./routes/private";
 import { publicRoutes } from "./routes/public";
+import { widgetPageRoutes } from "./routes/public/widgets";
 import { scriptRoutes } from "./routes/tracker-script";
 import { v1Routes } from "./routes/v1";
 import { wellKnownRoutes } from "./routes/well-known";
@@ -29,6 +32,10 @@ apiApp.route("/__e2e__", e2eRoutes);
 apiApp.get("/api", (c) => c.redirect("/api/v1", 307));
 apiApp.route("/api/private", privateRoutes);
 apiApp.route("/api/public", publicRoutes);
+apiApp.route("/widget", widgetPageRoutes);
+for (const locale of SUPPORTED_LOCALES) {
+  apiApp.route(`/${locale}/widget`, widgetPageRoutes);
+}
 apiApp.route("/api/v1", v1Routes);
 
 export default apiApp;

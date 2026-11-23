@@ -63,6 +63,10 @@ import {
   readRecentRealtimeEvents,
   snapshotQueryParams,
 } from "./realtime";
+import {
+  readRealtimeWidgetAggregate,
+  type RealtimeWidgetAggregate,
+} from "./realtime-widget";
 import { normalizeIngestRecord } from "./record-normalize";
 import { getEarliestDueWork } from "./scheduler";
 import { advanceAnalyticsSession } from "./session-state";
@@ -94,6 +98,10 @@ export class IngestDurableObject extends DurableObject {
   private readonly sql: IngestSqlAccess;
   private readonly dictionaryIds = new Map<string, number>();
   private readonly sitePks = new Map<string, number>();
+  private realtimeWidgetCache: {
+    expiresAtMs: number;
+    value: RealtimeWidgetAggregate;
+  } | null = null;
   private activeNowCache: {
     readonly cutoffBucket: number;
     readonly expiresAtMs: number;
@@ -142,6 +150,7 @@ export class IngestDurableObject extends DurableObject {
           "/ingest": "do.ingest",
           "/snapshot": "do.snapshot",
           "/active": "do.active",
+          "/widget-realtime": "do.widget_realtime",
           "/diagnostic": "do.diagnostic",
           "/reconcile": "do.reconcile",
           "/flush": "do.flush",
@@ -198,6 +207,9 @@ export class IngestDurableObject extends DurableObject {
 
     if (url.pathname === "/active" && request.method === "GET") {
       return this.handleActive(logger);
+    }
+    if (url.pathname === "/widget-realtime" && request.method === "GET") {
+      return this.handleWidgetRealtime(logger);
     }
 
     if (url.pathname === "/diagnostic" && request.method === "GET") {
@@ -310,6 +322,8 @@ export class IngestDurableObject extends DurableObject {
 
     // Any accepted record can change the active visitor projection. The
     // one-second /active cache is only a derived read optimization.
+    // Keep the 15s public-widget aggregate cache across individual ingest writes.
+    // Otherwise a busy site would recompute it for each embedded widget.
     this.activeNowCache = null;
 
     if (record.kind === "pageview") {
@@ -537,6 +551,29 @@ export class IngestDurableObject extends DurableObject {
       events,
       visits,
     });
+  }
+
+  private async handleWidgetRealtime(
+    logger: InvocationLogger,
+  ): Promise<Response> {
+    const now = Date.now();
+    const cached = this.realtimeWidgetCache;
+    if (cached && now < cached.expiresAtMs) {
+      return jsonResponse({ ok: true, ...cached.value });
+    }
+    const value = await logger.measure(
+      "do.widget_realtime.aggregate",
+      async () =>
+        readRealtimeWidgetAggregate(
+          {
+            sqlAll: <T>(query: string, ...bindings: number[]) =>
+              this.sql.measuredSqlAll<T>(logger, query, ...bindings),
+          },
+          now,
+        ),
+    );
+    this.realtimeWidgetCache = { expiresAtMs: now + 15_000, value };
+    return jsonResponse({ ok: true, ...value });
   }
 
   private async handleActive(logger: InvocationLogger): Promise<Response> {

@@ -8,6 +8,7 @@ import { publicLoginSecurityRoutes } from "./login-security";
 import { publicQueryRoutes } from "./query";
 import { publicResourceRoutes } from "./resources";
 import { publicSessionRoutes } from "./session";
+import { publicWidgetDataRoutes } from "./widgets";
 
 export const publicRoutes = new Hono<AppEnv>();
 
@@ -16,5 +17,6 @@ publicRoutes.route("/login-security", publicLoginSecurityRoutes);
 publicRoutes.route("/account-links", publicAccountLinkRoutes);
 publicRoutes.use("/share/*", publicApiGate());
 publicRoutes.route("/share", publicQueryRoutes);
+publicRoutes.route("/widgets", publicWidgetDataRoutes);
 publicRoutes.use("/resources/*", publicApiGate({ allowImageDest: true }));
 publicRoutes.route("/resources", publicResourceRoutes);

@@ -107,17 +107,23 @@ export function registerTrackingRealtimeScenarios(context: E2eContext) {
 
     await signIn(page, "admin", adminPassword);
     await flushSite(page, siteA?.id || "");
-    const performance = await apiRequest<unknown>(
+    // The system-performance endpoint now reports AE invocation diagnostics,
+    // not site visits/events. Verify persisted tracking via site aggregates.
+    const persisted = await readSiteOverview(page, siteA?.id || "");
+    expect(persisted.views).toBeGreaterThanOrEqual(3);
+    const eventTypes = await apiRequest<{ items: EventType[] }>(
       page,
       "GET",
-      "/api/private/admin/system-performance?minutes=15",
+      siteQueryPath(siteA?.id || "", "event-types"),
+      undefined,
+      "no-store",
     );
-    expect(performance.status).toBe(200);
-    const systemPerformance = performance.payload as unknown as {
-      summary?: { customEvents?: number; visits?: number };
-    };
-    expect(systemPerformance.summary?.visits).toBeGreaterThanOrEqual(1);
-    expect(systemPerformance.summary?.customEvents).toBeGreaterThanOrEqual(1);
+    expect(eventTypes.status).toBe(200);
+    expect(eventTypes.payload.data?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "signup_clicked", views: 1 }),
+      ]),
+    );
 
     const pageviews = collectPayloads
       .filter(

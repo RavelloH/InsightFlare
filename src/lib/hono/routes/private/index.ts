@@ -11,6 +11,7 @@ import { privateRealtimeRoutes } from "./realtime";
 import { privateReleaseRoutes } from "./releases";
 import { privateSavedFilterRoutes } from "./saved-filters";
 import { privateSessionRoutes } from "./session";
+import { privateWidgetRoutes } from "./widgets";
 
 export const privateRoutes = new Hono<AppEnv>();
 
@@ -22,4 +23,5 @@ privateRoutes.route("/notifications", privateNotificationRoutes);
 privateRoutes.route("/realtime", privateRealtimeRoutes);
 privateRoutes.route("/releases", privateReleaseRoutes);
 privateRoutes.route("/saved-filters", privateSavedFilterRoutes);
+privateRoutes.route("/widgets", privateWidgetRoutes);
 privateRoutes.route("/", privateQueryRoutes);

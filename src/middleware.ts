@@ -82,7 +82,7 @@ async function fetchRedirectProfile(
     return null;
   }
 }
-function requestLocale(request: Request): string {
+export function requestLocale(request: Request): string {
   const acceptLanguage = request.headers.get("accept-language");
   if (acceptLanguage) {
     const preferred = acceptLanguage
