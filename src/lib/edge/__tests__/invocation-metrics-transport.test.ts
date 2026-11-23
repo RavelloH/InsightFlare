@@ -62,11 +62,76 @@ describe("invocation metrics transport", () => {
         ok: false,
         code,
         retryAfterSeconds: 12,
+        providerStatus: status,
       });
       expect(JSON.stringify(result)).not.toContain(secretBody);
       expect(fetchImpl).toHaveBeenCalledTimes(1);
     },
   );
+
+  it("classifies an AE SQL 422 without retaining raw SQL or provider text", async () => {
+    const dangerous = "PRIVATE_TOKEN SELECT secret_column FROM private_table";
+    const result = await queryInvocationMetrics({
+      ...input,
+      fetchImpl: async () =>
+        new Response(
+          "Input was invalid: COUNT() function must have 0 arguments: 1 " +
+            dangerous,
+          { status: 422 },
+        ),
+    });
+    expect(result).toEqual({
+      ok: false,
+      code: "invalid_query",
+      retryAfterSeconds: null,
+      providerStatus: 422,
+      reason: "invalid_count_arguments",
+    });
+    expect(JSON.stringify(result)).not.toContain(dangerous);
+  });
+
+  it.each([
+    [
+      'Input was invalid: unable to find type of column: "blob1"',
+      "invalid_column",
+    ],
+    [
+      "Input was invalid: IF() arguments must have the same type",
+      "type_mismatch",
+    ],
+    ["Input was invalid: sql parser error: Expected )", "sql_parse_error"],
+    ["PRIVATE_SQL_TOKEN unrecognized provider response", "invalid_query"],
+  ] as const)(
+    "maps HTTP 422 to a bounded known reason: %s",
+    async (body, reason) => {
+      const result = await queryInvocationMetrics({
+        ...input,
+        fetchImpl: async () => new Response(body, { status: 422 }),
+      });
+      expect(result).toMatchObject({
+        ok: false,
+        code: "invalid_query",
+        providerStatus: 422,
+        reason,
+      });
+      expect(JSON.stringify(result)).not.toContain(body);
+    },
+  );
+
+  it("bounds oversized HTTP 422 responses before classifying them", async () => {
+    const result = await queryInvocationMetrics({
+      ...input,
+      fetchImpl: async () =>
+        new Response("x".repeat(8_192) + "PRIVATE_SQL_TOKEN", { status: 422 }),
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      code: "invalid_query",
+      reason: "invalid_query",
+      providerStatus: 422,
+    });
+    expect(JSON.stringify(result)).not.toContain("PRIVATE_SQL_TOKEN");
+  });
 
   it("rejects redirects without following them", async () => {
     const fetchImpl = vi.fn<typeof fetch>(

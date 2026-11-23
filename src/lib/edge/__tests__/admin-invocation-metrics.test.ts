@@ -4,8 +4,13 @@ import type * as AuthModule from "@/lib/edge/admin/auth";
 import { requireActor } from "@/lib/edge/admin/auth";
 import { buildInvocationStatements } from "@/lib/edge/admin/observability/invocation-metrics-sql";
 import { executeRealAdminService } from "@/lib/edge/admin/service/real";
+import { registerInvocationMetrics } from "@/lib/edge/analytics-engine/invocation-writer";
 import type * as SecretEncryptionModule from "@/lib/edge/auth/secret-encryption";
 import { decryptAnalyticsEngineSecret } from "@/lib/edge/auth/secret-encryption";
+import {
+  createInvocationLogger,
+  runWithInvocationLogger,
+} from "@/lib/edge/observability/logger";
 import type * as SystemConfigModule from "@/lib/edge/system-config";
 import { readConfig } from "@/lib/edge/system-config";
 import type { Env } from "@/lib/edge/types";
@@ -240,6 +245,69 @@ describe("system-performance invocation read dispatch", () => {
     });
     expect((await read({}, "view=unknown")).status).toBe(400);
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("records an HTTP 200 business failure in Worker Logs and the existing AE point", async () => {
+    const rawProviderText =
+      "Input was invalid: COUNT() function must have 0 arguments: 1 PRIVATE_SQL_TOKEN";
+    fetcher.mockResolvedValue(new Response(rawProviderText, { status: 422 }));
+    const waiting: Promise<unknown>[] = [];
+    const writeDataPoint = vi.fn();
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+      waitUntil: (promise) => waiting.push(promise),
+    });
+    registerInvocationMetrics(
+      {
+        INVOCATION_METRICS: { writeDataPoint },
+      } as unknown as Env,
+      logger,
+    );
+    const response = await runWithInvocationLogger(logger, () =>
+      read({}, "view=samples"),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { status: "query_failed", error: { code: "invalid_query" } },
+    });
+    logger.setRouteKey("api:/api/private/admin/system-performance");
+    logger.setRequest({
+      route: "/api/private/admin/system-performance",
+      method: "GET",
+      status: 200,
+      outcome: "ok",
+    });
+    const record = logger.emit();
+    await Promise.all(waiting);
+    expect(record.failure).toMatchObject({
+      code: "ae_reader_invalid_query",
+      operation: "ae.reader.sql",
+    });
+    expect(record.logs).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "ae.reader.invalid_query",
+        data: expect.objectContaining({
+          view: "samples",
+          statement: "samples",
+          providerStatus: 422,
+          reason: "invalid_count_arguments",
+        }),
+      }),
+    );
+    expect(writeDataPoint).toHaveBeenCalledTimes(1);
+    const point = writeDataPoint.mock.calls[0]?.[0] as {
+      blobs: string[];
+      doubles: number[];
+    };
+    expect(point.blobs[5]).toBe("failure");
+    expect(point.blobs[11]).toBe("ae_reader_invalid_query");
+    expect(point.blobs[12]).toBe("ae.reader.sql");
+    expect(point.doubles[17]).toBe(200);
+    expect(JSON.stringify({ record, point })).not.toContain(
+      "PRIVATE_SQL_TOKEN",
+    );
   });
 
   it.each([429, 401, 403, 503, 507, 200])(

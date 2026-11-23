@@ -429,6 +429,13 @@ describe("AE invocation recording v1 compatibility and v2 production", () => {
       "query_application_failed",
       "query.application",
     ],
+    [
+      "ae.reader.invalid_query",
+      200,
+      "ae_reader_invalid_query",
+      "ae.reader.sql",
+    ],
+    ["ae.reader.timeout", 200, "ae_reader_timeout", "ae.reader.sql"],
   ] as const)(
     "classifies caught internal event %s despite successful HTTP status",
     async (event, status, code, operation) => {

@@ -115,6 +115,41 @@ const ERROR_DEFINITIONS = {
     errorClass: "query",
     operation: "query.application",
   },
+  ae_reader_invalid_query: {
+    category: "application",
+    errorClass: "ae_reader",
+    operation: "ae.reader.sql",
+  },
+  ae_reader_auth_failed: {
+    category: "infrastructure",
+    errorClass: "ae_reader",
+    operation: "ae.reader.sql",
+  },
+  ae_reader_rate_limited: {
+    category: "infrastructure",
+    errorClass: "ae_reader",
+    operation: "ae.reader.sql",
+  },
+  ae_reader_timeout: {
+    category: "infrastructure",
+    errorClass: "ae_reader",
+    operation: "ae.reader.sql",
+  },
+  ae_reader_upstream_failed: {
+    category: "infrastructure",
+    errorClass: "ae_reader",
+    operation: "ae.reader.sql",
+  },
+  ae_reader_invalid_response: {
+    category: "application",
+    errorClass: "ae_reader",
+    operation: "ae.reader.sql",
+  },
+  ae_reader_config_failed: {
+    category: "infrastructure",
+    errorClass: "ae_reader",
+    operation: "ae.reader.sql",
+  },
 } as const;
 
 function finite(value: unknown): number {

@@ -87,6 +87,7 @@ describe("AE invocation read transport: bounded errors and strict results", () =
       ok: false,
       code: "rate_limited",
       retryAfterSeconds: null,
+      providerStatus: 429,
     });
   });
 

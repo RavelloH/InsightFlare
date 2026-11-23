@@ -1,5 +1,6 @@
 export type InvocationQueryError =
   | "invalid_request"
+  | "invalid_query"
   | "concurrency_limited"
   | "rate_limited"
   | "unauthorized"
@@ -15,12 +16,21 @@ export type InvocationQueryError =
   | "upstream_error"
   | "network_error";
 
+export type InvocationProviderReason =
+  | "invalid_count_arguments"
+  | "invalid_column"
+  | "type_mismatch"
+  | "sql_parse_error"
+  | "invalid_query";
+
 type InvocationQueryResult =
   | { ok: true; rows: Record<string, unknown>[] }
   | {
       ok: false;
       code: InvocationQueryError;
       retryAfterSeconds: number | null;
+      providerStatus?: number;
+      reason?: InvocationProviderReason;
     };
 
 type InvocationQueryInput = {
@@ -37,14 +47,16 @@ const MAX_CONCURRENT_QUERIES = 4;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 const MAX_ROWS = 100;
 const QUERY_TIMEOUT_MS = 10_000;
+const MAX_PROVIDER_ERROR_BYTES = 2_048;
 
 let activeQueries = 0;
 
 function failure(
   code: InvocationQueryError,
   retryAfterSeconds: number | null = null,
+  diagnostic?: { providerStatus?: number; reason?: InvocationProviderReason },
 ): InvocationQueryResult {
-  return { ok: false, code, retryAfterSeconds };
+  return { ok: false, code, retryAfterSeconds, ...diagnostic };
 }
 
 function endpointFor(input: InvocationQueryInput): URL | null {
@@ -108,6 +120,44 @@ function errorForStatus(status: number): InvocationQueryError {
     default:
       return "upstream_error";
   }
+}
+
+/** Match only code-owned patterns. Never return provider text or a raw SQL fragment. */
+async function classifyProviderError(
+  response: Response,
+): Promise<InvocationProviderReason> {
+  const reader = response.body?.getReader();
+  if (!reader) return "invalid_query";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (size < MAX_PROVIDER_ERROR_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const count = Math.min(value.byteLength, MAX_PROVIDER_ERROR_BYTES - size);
+      chunks.push(value.subarray(0, count));
+      size += count;
+    }
+  } catch {
+    return "invalid_query";
+  } finally {
+    void reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const message = new TextDecoder().decode(bytes).toLowerCase();
+  if (message.includes("count() function must have 0 arguments"))
+    return "invalid_count_arguments";
+  if (message.includes("unable to find type of column"))
+    return "invalid_column";
+  if (message.includes("must have the same type")) return "type_mismatch";
+  if (message.includes("sql parser error")) return "sql_parse_error";
+  return "invalid_query";
 }
 
 function cancelBody(response: Response): void {
@@ -264,8 +314,17 @@ export async function queryInvocationMetrics(
       return failure("redirect_rejected", retryAfterSeconds);
     }
     if (!response.ok) {
+      if (response.status === 422) {
+        const reason = await classifyProviderError(response);
+        return failure("invalid_query", retryAfterSeconds, {
+          providerStatus: response.status,
+          reason,
+        });
+      }
       cancelBody(response);
-      return failure(errorForStatus(response.status), retryAfterSeconds);
+      return failure(errorForStatus(response.status), retryAfterSeconds, {
+        providerStatus: response.status,
+      });
     }
 
     const body = await readBoundedBody(response);

@@ -17,6 +17,14 @@ export const OBSERVABILITY_LOG_VERSION = 1 as const;
 // One record is emitted for each invocation. Keep this comfortably below the
 // Workers log-size limit while preserving the start/end pair for real work.
 export const MAX_INVOCATION_LOG_EVENTS = 512;
+export const MAX_INVOCATION_LOG_BYTES = 64 * 1024;
+// Reserve space for fixed metadata and late-arriving errors.
+const MAX_EVENTS_BYTES = 48 * 1024;
+const MAX_REGULAR_EVENTS_BYTES = 40 * 1024;
+const MAX_SINGLE_EVENT_BYTES = 8 * 1024;
+const logEncoder = new TextEncoder();
+const encodedSize = (value: unknown) =>
+  logEncoder.encode(JSON.stringify(value)).byteLength;
 const MAX_LOG_VALUE_LENGTH = 160;
 const MAX_ERROR_LOG_VALUE_LENGTH = 4_096;
 
@@ -39,7 +47,14 @@ export type InvocationSafeErrorCode =
   | "do_flush_visit_batch_failed"
   | "do_flush_visit_failed"
   | "do_flush_custom_event_failed"
-  | "query_application_failed";
+  | "query_application_failed"
+  | "ae_reader_invalid_query"
+  | "ae_reader_auth_failed"
+  | "ae_reader_rate_limited"
+  | "ae_reader_timeout"
+  | "ae_reader_upstream_failed"
+  | "ae_reader_invalid_response"
+  | "ae_reader_config_failed";
 
 export interface InvocationSafeErrorSignal {
   readonly category: "database" | "application" | "infrastructure";
@@ -51,6 +66,22 @@ export interface InvocationSafeErrorSignal {
 function trustedErrorSignal(
   message: string,
 ): InvocationSafeErrorSignal | undefined {
+  const aeCodes = {
+    "ae.reader.invalid_query": ["application", "ae_reader_invalid_query"],
+    "ae.reader.auth_failed": ["infrastructure", "ae_reader_auth_failed"],
+    "ae.reader.rate_limited": ["infrastructure", "ae_reader_rate_limited"],
+    "ae.reader.timeout": ["infrastructure", "ae_reader_timeout"],
+    "ae.reader.upstream_failed": [
+      "infrastructure",
+      "ae_reader_upstream_failed",
+    ],
+    "ae.reader.invalid_response": ["application", "ae_reader_invalid_response"],
+    "ae.reader.config_failed": ["infrastructure", "ae_reader_config_failed"],
+  } as const;
+  if (Object.hasOwn(aeCodes, message)) {
+    const [category, code] = aeCodes[message as keyof typeof aeCodes];
+    return { category, code, operation: "ae.reader.sql", severity: "error" };
+  }
   const d1 = /^d1\.(all|first|run|raw|exec|batch)\.failed$/.exec(message);
   if (d1)
     return {
@@ -310,7 +341,13 @@ export interface InvocationLogRecord {
   request?: InvocationRequest;
   performance: InvocationPerformance;
   logs: InvocationLogEvent[];
+  /** Trusted, fixed-code projection, searchable without expanding logs[]. */
+  failure?: InvocationSafeErrorSignal;
   logsTruncated?: true;
+  logsDropped?: number;
+  logsDroppedBytes?: number;
+  logsDroppedErrors?: number;
+  operationsTruncated?: true;
 }
 
 /** A per-invocation observer. It receives only the immutable safe projection. */
@@ -366,7 +403,7 @@ function consoleFor(record: InvocationLogRecord): typeof console.log {
   if (record.request?.status !== undefined && record.request.status >= 500) {
     return console.error;
   }
-  if (record.logs.some((event) => event.level === "error")) {
+  if (record.failure || record.logs.some((event) => event.level === "error")) {
     return console.error;
   }
   if (record.request?.status !== undefined && record.request.status >= 400) {
@@ -475,6 +512,12 @@ export function createInvocationLogger(
   const startedAtMs = now();
   const maxEvents = resolveMaxEvents(options.maxEvents);
   const events: InvocationLogEvent[] = [];
+  const eventSizes: number[] = [];
+  let eventBytes = 0;
+  let regularBytes = 0;
+  let logsDropped = 0;
+  let logsDroppedBytes = 0;
+  let logsDroppedErrors = 0;
   let traceId = options.traceId;
   let request: InvocationRequest | undefined;
   let routeKey: string | undefined;
@@ -518,31 +561,75 @@ export function createInvocationLogger(
     return entries.length > 0 ? Object.fromEntries(entries) : undefined;
   }
 
+  function dropEvent(index: number): void {
+    const [removed] = events.splice(index, 1);
+    const [bytes] = eventSizes.splice(index, 1);
+    eventBytes -= bytes;
+    if (removed.level !== "error") regularBytes -= bytes;
+    if (removed.level === "error") logsDroppedErrors++;
+    logsDropped++;
+    logsDroppedBytes += bytes;
+    logsTruncated = true;
+  }
+
   function record(
     level: InvocationLogLevel,
     message: string,
     data?: InvocationLogData,
   ): void {
     if (emitted) return;
-    if (events.length >= maxEvents) {
-      logsTruncated = true;
-      return;
-    }
-    // Only exact, code-owned event identifiers contribute AE error facts.
-    // Event data itself is deliberately ignored; it may contain secrets.
+    // Extract trusted signals before checking event quotas, so AE never loses
+    // a critical classification merely because ordinary logs filled the buffer.
     if (level === "error") {
       const signal = trustedErrorSignal(message);
       if (signal && !safeErrors.some((item) => item.code === signal.code)) {
-        if (safeErrors.length < 3) safeErrors.push(Object.freeze(signal));
+        if (safeErrors.length >= 3) safeErrors.shift();
+        safeErrors.push(Object.freeze(signal));
       }
     }
     const safeData = sanitizeData(data);
-    events.push({
+    const event: InvocationLogEvent = {
       timeMs: toTimeMs(now() - startedAtMs),
       level,
-      message,
+      message: message.slice(0, MAX_LOG_VALUE_LENGTH),
       ...(safeData ? { data: safeData } : {}),
-    });
+    };
+    // Bound even a deliberately oversized multi-field error event.
+    while (encodedSize(event) > MAX_SINGLE_EVENT_BYTES && event.data) {
+      const keys = Object.keys(event.data);
+      if (keys.length === 0) {
+        delete event.data;
+        break;
+      }
+      event.data = Object.fromEntries(Object.entries(event.data).slice(0, -1));
+    }
+    const bytes = encodedSize(event);
+    if (
+      level !== "error" &&
+      (events.length >= maxEvents ||
+        regularBytes + bytes > MAX_REGULAR_EVENTS_BYTES ||
+        eventBytes + bytes > MAX_EVENTS_BYTES)
+    ) {
+      logsDropped++;
+      logsDroppedBytes += bytes;
+      logsTruncated = true;
+      return;
+    }
+    if (level === "error") {
+      while (
+        events.length >= maxEvents ||
+        eventBytes + bytes > MAX_EVENTS_BYTES
+      ) {
+        // Preserve recent errors first; evict info then warnings then old errors.
+        const info = events.findIndex((item) => item.level === "info");
+        const warning = events.findIndex((item) => item.level === "warn");
+        dropEvent(info >= 0 ? info : warning >= 0 ? warning : 0);
+      }
+    }
+    events.push(event);
+    eventSizes.push(bytes);
+    eventBytes += bytes;
+    if (level !== "error") regularBytes += bytes;
   }
 
   function addOperation(
@@ -608,10 +695,54 @@ export function createInvocationLogger(
       performance: {
         durationMs: toTimeMs(now() - startedAtMs),
         ...performance,
+        ...(performance.operations
+          ? { operations: { ...performance.operations } }
+          : {}),
       },
       logs: events.map((event) => ({ ...event })),
+      ...(safeErrors.length ? { failure: { ...safeErrors[0]! } } : {}),
       ...(logsTruncated ? { logsTruncated: true as const } : {}),
+      ...(logsDropped ? { logsDropped } : {}),
+      ...(logsDroppedBytes ? { logsDroppedBytes } : {}),
+      ...(logsTruncated ? { logsDroppedErrors } : {}),
     };
+    // The Worker logging platform has its own invocation-wide limit. Enforce
+    // our smaller budget over the final JSON, not just over stored events.
+    let extraDropped = 0;
+    let extraBytes = 0;
+    let extraErrors = 0;
+    while (
+      encodedSize(record) > MAX_INVOCATION_LOG_BYTES &&
+      record.logs.length
+    ) {
+      const info = record.logs.findIndex((item) => item.level === "info");
+      const warning = record.logs.findIndex((item) => item.level === "warn");
+      const [removed] = record.logs.splice(
+        info >= 0 ? info : warning >= 0 ? warning : 0,
+        1,
+      );
+      extraDropped++;
+      extraBytes += encodedSize(removed);
+      if (removed.level === "error") extraErrors++;
+      record.logsTruncated = true;
+      record.logsDropped = logsDropped + extraDropped;
+      record.logsDroppedBytes = logsDroppedBytes + extraBytes;
+      record.logsDroppedErrors = logsDroppedErrors + extraErrors;
+    }
+    // A pathological number of distinct operation names must not make the
+    // remaining non-event metadata exceed the same serialization budget.
+    let operations = record.performance.operations;
+    if (operations && encodedSize(record) > MAX_INVOCATION_LOG_BYTES) {
+      const names = Object.keys(operations);
+      while (names.length && encodedSize(record) > MAX_INVOCATION_LOG_BYTES) {
+        operations = Object.fromEntries(
+          Object.entries(operations).slice(0, -1),
+        );
+        record.performance.operations = operations;
+        names.pop();
+        record.operationsTruncated = true;
+      }
+    }
     return record;
   }
 

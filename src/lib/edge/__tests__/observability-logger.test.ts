@@ -7,6 +7,7 @@ import {
   currentD1Operation,
   currentInvocationLogger,
   errorLogData,
+  MAX_INVOCATION_LOG_BYTES,
   MAX_INVOCATION_LOG_EVENTS,
   measureCurrentExternalFetch,
   runWithD1Operation,
@@ -176,6 +177,136 @@ describe("edge observability logger", () => {
       logs: [{ timeMs: 0, level: "info", message: "flush.started" }],
       logsTruncated: true,
     });
+  });
+
+  it("evicts ordinary events to preserve late trusted errors in Worker Logs and AE", () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+      maxEvents: 1,
+    });
+    logger.info("ordinary.event");
+    logger.error("ae.reader.invalid_query", {
+      view: "overview",
+      statement: "summary",
+      providerStatus: 422,
+      reason: "invalid_count_arguments",
+    });
+    logger.setRequest({
+      route: "system-performance",
+      method: "GET",
+      status: 200,
+      outcome: "ok",
+    });
+    const record = logger.emit();
+    expect(record.logs).toHaveLength(1);
+    expect(record.logs[0]?.message).toBe("ae.reader.invalid_query");
+    expect(record.failure).toMatchObject({
+      code: "ae_reader_invalid_query",
+      operation: "ae.reader.sql",
+    });
+    expect(record).toMatchObject({
+      logsTruncated: true,
+      logsDropped: 1,
+      logsDroppedErrors: 0,
+    });
+    expect(console.error).toHaveBeenCalledOnce();
+  });
+
+  it("bounds the complete serialized invocation while retaining recent errors", () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    for (let index = 0; index < 512; index++) {
+      logger.info(`large.event.${index}`, {
+        detail: "x".repeat(600),
+        extra: "y".repeat(100),
+      });
+    }
+    logger.error("ae.reader.timeout", {
+      view: "samples",
+      statement: "samples",
+      errorMessage: "z".repeat(40_000),
+    });
+    const record = logger.emit();
+    expect(
+      new TextEncoder().encode(JSON.stringify(record)).byteLength,
+    ).toBeLessThanOrEqual(MAX_INVOCATION_LOG_BYTES);
+    expect(
+      record.logs.some((event) => event.message === "ae.reader.timeout"),
+    ).toBe(true);
+    expect(record.failure?.code).toBe("ae_reader_timeout");
+    expect(record.logsTruncated).toBe(true);
+    expect(record.logsDropped).toBeGreaterThan(0);
+    expect(record.logsDroppedBytes).toBeGreaterThan(0);
+    expect(
+      record.logs[record.logs.length - 1]?.data?.errorMessage,
+    ).not.toContain("z".repeat(40_000));
+  });
+
+  it("keeps recent errors and their safe signals when the error-only quota is full", () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+      maxEvents: 2,
+    });
+    logger.error("ae.reader.invalid_query");
+    logger.error("ae.reader.auth_failed");
+    logger.error("ae.reader.rate_limited");
+    logger.error("ae.reader.timeout");
+    const record = logger.emit();
+    expect(record.logs.map((event) => event.message)).toEqual([
+      "ae.reader.rate_limited",
+      "ae.reader.timeout",
+    ]);
+    expect(record.logsDroppedErrors).toBe(2);
+    expect(record.logsDropped).toBe(2);
+    expect(record.failure?.code).toBe("ae_reader_auth_failed");
+    expect(record.logsTruncated).toBe(true);
+    expect(console.error).toHaveBeenCalledOnce();
+  });
+
+  it("fits a multi-field error event into the per-event budget", () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    logger.error("ae.reader.invalid_response", {
+      errorMessage: "a".repeat(4_096),
+      errorCause: "b".repeat(4_096),
+      errorStack: "c".repeat(4_096),
+    });
+    const record = logger.build();
+    const bytes = new TextEncoder().encode(
+      JSON.stringify(record.logs[0]),
+    ).length;
+    expect(bytes).toBeLessThanOrEqual(8 * 1024);
+    expect(record.failure?.code).toBe("ae_reader_invalid_response");
+    expect(record.logs[0]?.level).toBe("error");
+  });
+
+  it("trims oversized operation metadata without corrupting the live counters", () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    for (let index = 0; index < 300; index++) {
+      const name = `operation.${index}.${"x".repeat(300)}`;
+      const span = logger.startSpan(name);
+      span.end();
+    }
+    const record = logger.build();
+    expect(record.operationsTruncated).toBe(true);
+    expect(
+      new TextEncoder().encode(JSON.stringify(record)).byteLength,
+    ).toBeLessThanOrEqual(MAX_INVOCATION_LOG_BYTES);
+    expect(
+      Object.keys(record.performance.operations ?? {}).length,
+    ).toBeLessThan(300);
+    // The export is a projection, not a mutation of the logger's counters.
+    const second = logger.build();
+    expect(second.operationsTruncated).toBe(true);
   });
 
   it("records detailed spans and waits for tracked background work before emission", async () => {

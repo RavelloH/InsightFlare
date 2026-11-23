@@ -8,6 +8,7 @@ import {
   analyticsEngineReaderToken,
   readAnalyticsEngineReaderConfig,
 } from "@/lib/edge/analytics-engine/reader-config";
+import { currentInvocationLogger } from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
 
 import { type InvocationQuery } from "./invocation-metrics-input";
@@ -17,6 +18,7 @@ import {
   type InvocationStatement,
 } from "./invocation-metrics-sql";
 import {
+  type InvocationProviderReason,
   type InvocationQueryError,
   queryInvocationMetrics,
 } from "./invocation-metrics-transport";
@@ -128,13 +130,55 @@ export async function handleInvocationMetricsAdmin(
   const fail = (
     code: ReadFailure["code"],
     retryAfterSeconds: number | null = null,
-  ) =>
-    respond({
+    context?: {
+      statement?: InvocationStatement["name"];
+      providerStatus?: number;
+      reason?: InvocationProviderReason;
+      durationMs?: number;
+    },
+  ) => {
+    if (code !== "aborted") {
+      const event =
+        code === "invalid_query"
+          ? "ae.reader.invalid_query"
+          : code === "unauthorized" || code === "forbidden"
+            ? "ae.reader.auth_failed"
+            : code === "rate_limited"
+              ? "ae.reader.rate_limited"
+              : code === "timeout"
+                ? "ae.reader.timeout"
+                : code === "malformed_response" ||
+                    code === "response_too_large" ||
+                    code === "too_many_rows" ||
+                    code === "invalid_query_result"
+                  ? "ae.reader.invalid_response"
+                  : code === "reader_config_failed" ||
+                      code === "reader_decryption_failed"
+                    ? "ae.reader.config_failed"
+                    : "ae.reader.upstream_failed";
+      // Only bounded, enumerated metadata reaches Worker Logs and AE v2.
+      // Never log SQL text, token, Cloudflare response body, or the account ID.
+      currentInvocationLogger()?.error(event, {
+        view,
+        ...(context?.statement ? { statement: context.statement } : {}),
+        errorCode: code,
+        ...(context?.providerStatus !== undefined
+          ? { providerStatus: context.providerStatus }
+          : {}),
+        ...(context?.reason ? { reason: context.reason } : {}),
+        ...(context?.durationMs !== undefined
+          ? { durationMs: context.durationMs }
+          : {}),
+        retryable: RETRYABLE_CODES.has(code),
+      });
+    }
+    return respond({
       view,
       status: "query_failed",
       data: null,
       error: { code, retryAfterSeconds, retryable: RETRYABLE_CODES.has(code) },
     });
+  };
   if (isAnalyticsEngineDisabled(env))
     return respond({ view, status: "disabled", data: null });
   if (!env.INVOCATION_METRICS)
@@ -161,6 +205,7 @@ export async function handleInvocationMetricsAdmin(
   const results: Parameters<typeof normalizeInvocationView>[1] = {};
   const deadline = AbortSignal.any([req.signal, AbortSignal.timeout(10_000)]);
   for (const { name, sql, limit: rowLimit } of statements) {
+    const startedAt = performance.now();
     const result = await queryInvocationMetrics({
       apiUrl,
       accountId: config.accountId,
@@ -169,7 +214,13 @@ export async function handleInvocationMetricsAdmin(
       limit: rowLimit,
       signal: deadline,
     });
-    if (!result.ok) return fail(result.code, result.retryAfterSeconds);
+    if (!result.ok)
+      return fail(result.code, result.retryAfterSeconds, {
+        statement: name,
+        providerStatus: result.providerStatus,
+        reason: result.reason,
+        durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      });
     if (
       rowLimit === limit &&
       result.rows.length === limit &&
