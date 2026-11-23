@@ -6,11 +6,13 @@ import {
 } from "@/lib/edge/analytics-engine/request-schema";
 import { issueCollectToken } from "@/lib/edge/auth/collect-token";
 import {
+  applyTrackingStrength,
   handleCollectOptionsRequest,
   handleCollectRequest,
 } from "@/lib/edge/collector/collect";
 import type * as SiteSettingsStoreModule from "@/lib/edge/sites/settings-store";
 import { readSiteTrackingConfig } from "@/lib/edge/sites/settings-store";
+import type { TrackerClientPayload } from "@/lib/edge/types";
 import type {
   SiteSettingsJsonValue,
   SiteTrackingConfig,
@@ -139,6 +141,36 @@ async function readForwardedEnvelope() {
   const fetchInit = stub.fetch.mock.calls[0]?.[1] as RequestInit;
   return JSON.parse(String(fetchInit.body)) as Record<string, unknown>;
 }
+describe("applyTrackingStrength", () => {
+  const payload = {
+    siteId: "site-1",
+    visitId: "visit-1",
+    visitorId: "client-visitor",
+    kind: "pageview",
+  } as TrackerClientPayload;
+
+  it("keeps the client visitor ID for strong tracking, including EU visitors", () => {
+    expect(applyTrackingStrength(payload, "strong", true).visitorId).toBe(
+      "client-visitor",
+    );
+    expect(applyTrackingStrength(payload, "strong", false).visitorId).toBe(
+      "client-visitor",
+    );
+  });
+
+  it("drops the client visitor ID only for EU visitors under smart tracking", () => {
+    expect(applyTrackingStrength(payload, "smart", true).visitorId).toBe("");
+    expect(applyTrackingStrength(payload, "smart", false).visitorId).toBe(
+      "client-visitor",
+    );
+  });
+
+  it("always drops the client visitor ID for weak tracking", () => {
+    expect(applyTrackingStrength(payload, "weak", true).visitorId).toBe("");
+    expect(applyTrackingStrength(payload, "weak", false).visitorId).toBe("");
+  });
+});
+
 describe("collect route", () => {
   beforeEach(() => {
     vi.useRealTimers();

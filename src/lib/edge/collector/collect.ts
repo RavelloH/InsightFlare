@@ -26,7 +26,10 @@ import type { TrackerPayloadKind } from "@/lib/edge/types";
 import { jsonCloneRecord } from "@/lib/edge/utils";
 import { assertContentSize, BODY_SIZE_LIMITS } from "@/lib/form-helpers";
 import { jsonResponse } from "@/lib/response";
-import { normalizeSiteScriptSettings } from "@/lib/site-settings";
+import {
+  normalizeSiteScriptSettings,
+  type TrackingStrength,
+} from "@/lib/site-settings";
 const CORS_BASE_HEADERS = {
   "access-control-allow-methods": "GET, POST, PATCH, OPTIONS",
   "access-control-allow-headers": "content-type",
@@ -473,6 +476,25 @@ function jsonError(
     toCorsHeaders(origin),
   );
 }
+/**
+ * 按站点的跟踪强度决定是否采用客户端上报的访客 ID：
+ * - strong：始终采用（包括欧盟访客）；
+ * - smart：欧盟访客不采用，即使脚本或客户端仍带了 ID（服务端兜底，脚本本身也不会发送）；
+ * - weak：始终不采用。
+ * 不采用时清空 visitorId，入库时会改为由 IP、UA 与每日盐派生的标识。
+ */
+export function applyTrackingStrength(
+  payload: TrackerClientPayload,
+  trackingStrength: TrackingStrength,
+  isEUCountry: boolean,
+): TrackerClientPayload {
+  const keepClientVisitorId =
+    trackingStrength === "strong" ||
+    (trackingStrength === "smart" && !isEUCountry);
+  if (keepClientVisitorId || !payload.visitorId) return payload;
+  return { ...payload, visitorId: "" };
+}
+
 export async function handleCollectOptionsRequest(
   request: Request,
 ): Promise<Response> {
@@ -629,12 +651,20 @@ export async function handleCollectRequest(
   const doId = env.INGEST_DO.idFromName(decision.siteId);
   const stub = env.INGEST_DO.get(doId);
 
+  const clientPayload = applyTrackingStrength(
+    decision.payload,
+    decision.scriptSettings.trackingStrength,
+    Boolean(
+      (requestWithCf as Request & { cf?: { isEUCountry?: boolean } }).cf
+        ?.isEUCountry,
+    ),
+  );
   const envelope: IngestEnvelopePayload = {
     request: serializeRequestPayload(
       requestWithCf,
-      JSON.stringify(decision.payload),
+      JSON.stringify(clientPayload),
     ),
-    client: decision.payload,
+    client: clientPayload,
     trace,
   };
 

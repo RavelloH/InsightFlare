@@ -121,8 +121,10 @@ export async function normalizeIngestRecord(
   const ua = await new UAParser(uaHeaders).getResult().withClientHints();
   const isEU = Boolean(cf.isEUCountry);
 
+  // 是否采用客户端的访客 ID 由采集端按站点跟踪强度决定（见 applyTrackingStrength）：
+  // 需要降级时那里已清空 visitorId；这里只在没有 ID 时派生每日标识。
   let visitorId = clampString(coerceString(client.visitorId), 128);
-  if (isEU || !visitorId) {
+  if (!visitorId) {
     const ip = clampString(
       coerceString(
         requestHeaders["cf-connecting-ip"] ??

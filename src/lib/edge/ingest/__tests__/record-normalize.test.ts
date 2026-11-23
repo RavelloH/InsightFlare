@@ -216,12 +216,13 @@ describe("normalizeIngestRecord rejection reasons", () => {
 describe("normalizeIngestRecord pageview records", () => {
   it("normalizes pageview URL, user, geo, viewport, and EU visitor fields", async () => {
     const { context } = makeContext();
+    // 采集端按跟踪强度清空了访客 ID（smart / weak 下的欧盟访客），这里派生每日标识
     const envelope = makeEnvelope(
       {
         kind: "pageview",
         visitId: "visit-1",
         sessionId: "",
-        visitorId: "client-visitor",
+        visitorId: "",
         hostname: "EXAMPLE.COM",
         pathname: "",
         query:
@@ -289,6 +290,28 @@ describe("normalizeIngestRecord pageview records", () => {
     expect(result.record.sessionId).not.toBe("");
     expect(result.record.previousVisitId).toBe("");
     expect(result.record.previousVisitStartedAt).toBeNull();
+  });
+
+  it("keeps the client visitor ID for EU visitors when the collector forwarded it (strong tracking)", async () => {
+    const { context } = makeContext();
+
+    const result = await normalizeIngestRecord(
+      makeEnvelope(
+        {
+          kind: "pageview",
+          visitId: "visit-1",
+          visitorId: "client-visitor",
+          hostname: "example.com",
+        },
+        { cf: { isEUCountry: true, country: "DE" } },
+      ),
+      context,
+    );
+
+    expect(result.record).toMatchObject({
+      visitorId: "client-visitor",
+      isEU: true,
+    });
   });
 
   it("preserves non-EU visitor fields, parses cross-site referrers, and prefers client timezone", async () => {
