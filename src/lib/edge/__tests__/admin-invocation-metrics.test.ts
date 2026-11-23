@@ -62,10 +62,14 @@ describe("invocation metrics SQL", () => {
       "blob4 = 'api:/v1/{id}' AND blob10 = '1.2.3+abcdef123456'",
     );
     expect(summary.sql).toContain(
-      "COUNT(*) AS retainedSamples, SUM(_sample_interval) AS estimatedInvocations",
+      "COUNT() AS retainedSamples, SUM(_sample_interval) AS estimatedInvocations",
+    );
+    expect(summary.sql).not.toContain("COUNT(*)");
+    expect(summary.sql).toContain(
+      "SUM(if(blob1 = 'worker', double4 * _sample_interval, 0.0)) AS workerD1Statements",
     );
     expect(summary.sql).toContain(
-      "quantileExactWeighted(0.95)(if(blob1 = 'worker' AND blob2 = 'request' AND intDiv(double19, 1) % 2 = 1, double2, 0), if(blob1 = 'worker' AND blob2 = 'request' AND intDiv(double19, 1) % 2 = 1, _sample_interval, 0))",
+      "quantileExactWeighted(0.95)(if(blob1 = 'worker' AND blob2 = 'request' AND intDiv(double19, 1) % 2 = 1, double2, 0.0), if(blob1 = 'worker' AND blob2 = 'request' AND intDiv(double19, 1) % 2 = 1, _sample_interval, 0))",
     );
     expect(summary.sql).toContain(
       "blob1 = 'worker' AND double4 > 0 AND intDiv(double19, 1024) % 4 IN (1, 2), _sample_interval * double6",
@@ -75,7 +79,7 @@ describe("invocation metrics SQL", () => {
     );
     expect(trend.sql).toContain("INTERVAL '1' MINUTE, 'Asia/Shanghai'");
     expect(legacy.sql).toBe(
-      "SELECT COUNT(*) AS retainedSamples FROM insightflare_invocation_metrics WHERE timestamp >= toDateTime(1789996401) AND timestamp < toDateTime(1790000001) AND double20 = 1 LIMIT 1 FORMAT JSONEachRow",
+      "SELECT COUNT() AS retainedSamples FROM insightflare_invocation_metrics WHERE timestamp >= toDateTime(1789996401) AND timestamp < toDateTime(1790000001) AND double20 = 1 LIMIT 1 FORMAT JSONEachRow",
     );
   });
 

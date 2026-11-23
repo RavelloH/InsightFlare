@@ -33,9 +33,9 @@ const flag = (key: keyof typeof V2_FLAG) =>
 const coverage = (key: keyof typeof V2_COVERAGE_SHIFT) =>
   `intDiv(double19, ${2 ** V2_COVERAGE_SHIFT[key]}) % 4`;
 const weight = "_sample_interval";
-const count = `COUNT(*) AS retainedSamples, SUM(${weight}) AS estimatedInvocations, max(${weight}) AS maxSampleInterval`;
+const count = `COUNT() AS retainedSamples, SUM(${weight}) AS estimatedInvocations, max(${weight}) AS maxSampleInterval`;
 const handler = `blob1 = 'worker' AND blob2 = 'request' AND ${flag("handlerPresent")}`;
-const latency = `SUM(if(${handler}, ${weight}, 0)) AS handlerWeight, ${[50, 95, 99].map((percentile) => `quantileExactWeighted(0.${percentile})(if(${handler}, double2, 0), if(${handler}, ${weight}, 0)) AS p${percentile}`).join(", ")}`;
+const latency = `SUM(if(${handler}, ${weight}, 0)) AS handlerWeight, ${[50, 95, 99].map((percentile) => `quantileExactWeighted(0.${percentile})(if(${handler}, double2, 0.0), if(${handler}, ${weight}, 0)) AS p${percentile}`).join(", ")}`;
 
 const COVERED_METRICS = {
   d1RowsRead: ["double6", "d1RowsRead", "blob1 = 'worker' AND double4 > 0"],
@@ -49,7 +49,7 @@ const coveredColumns = Object.entries(COVERED_METRICS).flatMap(
   ([name, [slot, key, applicable]]) => {
     const code = coverage(key);
     const sum = (condition: string, value: string, suffix: string) =>
-      `SUM(if(${condition}, ${value}, 0)) AS ${name}${suffix}`;
+      `SUM(if(${condition}, ${value}, ${suffix === "Observed" ? "0.0" : "0"})) AS ${name}${suffix}`;
     return [
       sum(applicable, weight, "Applicable"),
       sum(`${applicable} AND ${code} = 2`, weight, "Complete"),
@@ -63,7 +63,7 @@ const coveredColumns = Object.entries(COVERED_METRICS).flatMap(
   },
 );
 
-const aggregate = `${count}, ${latency}, SUM(double1 * ${weight}) AS invocationWallMs, SUM(if(blob1 = 'worker', double4 * ${weight}, 0)) AS workerD1Statements, SUM(double11 * ${weight}) AS doFetchCalls, ${coveredColumns.join(", ")}`;
+const aggregate = `${count}, ${latency}, SUM(double1 * ${weight}) AS invocationWallMs, SUM(if(blob1 = 'worker', double4 * ${weight}, 0.0)) AS workerD1Statements, SUM(double11 * ${weight}) AS doFetchCalls, ${coveredColumns.join(", ")}`;
 
 const HOTSPOTS = {
   "api-hot": [
@@ -149,7 +149,7 @@ export function buildInvocationStatements(
         ),
         statement(
           "legacy",
-          "COUNT(*) AS retainedSamples",
+          "COUNT() AS retainedSamples",
           1,
           "",
           `${time} AND double20 = ${INVOCATION_METRICS_SCHEMA_VERSION}`,
@@ -162,7 +162,7 @@ export function buildInvocationStatements(
           "routes",
           `${dimensions}, ${aggregate}`,
           limit,
-          `GROUP BY blob1, blob2, blob4, blob10 ${sort}, blob1, blob2, blob4, blob10`,
+          `GROUP BY blob1, blob2, blob4, blob10 ${sort}`,
         ),
       ];
       break;
@@ -172,7 +172,7 @@ export function buildInvocationStatements(
           "errors",
           `${dimensions}, blob6 AS resultClass, blob11 AS category, blob12 AS code, blob13 AS operation, ${count}`,
           limit,
-          `AND (blob12 != '' OR blob6 = 'failure') GROUP BY blob1, blob2, blob4, blob10, blob6, blob11, blob12, blob13 ${sort}, blob1, blob2, blob4, blob10, blob6, blob11, blob12, blob13`,
+          `AND (blob12 != '' OR blob6 = 'failure') GROUP BY blob1, blob2, blob4, blob10, blob6, blob11, blob12, blob13 ${sort}`,
         ),
       ];
       break;
@@ -199,7 +199,7 @@ export function buildInvocationStatements(
           "samples",
           `toUnixTimestamp(timestamp) AS timestampSeconds, ${dimensions}, blob6 AS resultClass, blob11 AS category, blob12 AS code, blob13 AS operation, blob14 AS hotQueryId, blob15 AS variant, blob16 AS filterShape, blob17 AS scanQueryId, blob18 AS dominantPhase, substring(blob19, 1, 4097) AS details, blob20 AS filterFamily, ${weight} AS sampleInterval, double1 AS invocationWallMs, double2 AS handlerWallMs, double18 AS httpStatus, double19 AS flags`,
           limit,
-          "ORDER BY timestamp DESC",
+          "ORDER BY timestampSeconds DESC",
           sampleWhere,
         ),
       ];
@@ -220,7 +220,7 @@ export function buildInvocationStatements(
             selected,
             `${dimensions}, blob${blob} AS queryId${shapeColumns}, ${count}, SUM(double${slot} * ${weight}) AS weightedValue`,
             limit,
-            `AND ${eligible} AND blob${blob} != '' GROUP BY blob1, blob2, blob4, blob10, blob${blob}${shapeGroup} ORDER BY weightedValue DESC, blob1, blob2, blob4, blob10, blob${blob}${shapeGroup}`,
+            `AND ${eligible} AND blob${blob} != '' GROUP BY blob1, blob2, blob4, blob10, blob${blob}${shapeGroup} ORDER BY weightedValue DESC`,
           );
         }),
       ];

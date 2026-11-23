@@ -20,7 +20,7 @@ describe("AE v2 retained-sample investigation filters", () => {
     expect(statement).toContain("intDiv(double19, 512) % 2 = 1");
     expect(statement).not.toContain("blob19 =");
     expect(statement).toMatch(
-      /ORDER BY timestamp DESC LIMIT 100 FORMAT JSONEachRow$/,
+      /ORDER BY timestampSeconds DESC LIMIT 100 FORMAT JSONEachRow$/,
     );
   });
   it("uses only selected scanQueryId blob17, not secondary detail queries or blob14", () => {
