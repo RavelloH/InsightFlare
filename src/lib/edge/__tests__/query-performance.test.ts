@@ -618,6 +618,7 @@ describe("edge query performance D1 helpers", () => {
         geoContinent: "NA",
         geoOrganization: "Example ISP",
       }),
+      10,
     );
 
     expect(result).toHaveLength(2);
@@ -653,6 +654,7 @@ describe("edge query performance D1 helpers", () => {
       window.endExclusiveMs,
       "na",
       "Example ISP",
+      10,
     ]);
   });
 
@@ -698,6 +700,7 @@ describe("edge query performance D1 helpers", () => {
         siteId,
         window,
         EMPTY_FILTER_DOCUMENT,
+        10,
       ),
     ).resolves.toMatchObject([
       {
@@ -824,6 +827,7 @@ describe("edge query performance D1 helpers", () => {
           siteId,
           window,
           EMPTY_FILTER_DOCUMENT,
+          10,
         ),
       ).resolves.toMatchObject([
         {
@@ -888,6 +892,23 @@ describe("edge query performance D1 helpers", () => {
       expect(d1.calls[4]?.sql).toContain(
         "perf_ttfb_ms IS NOT NULL OR perf_fcp_ms IS NOT NULL",
       );
+      const limitedCountries = await queryPerformanceCountriesFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        1,
+      );
+      expect(limitedCountries).toHaveLength(1);
+      expect(limitedCountries[0]).toMatchObject({
+        country: "US",
+        views: 3,
+        metrics: {
+          lcp: { avg: 150, p50: 100, p75: 200, p95: 200, samples: 2 },
+        },
+      });
+      expect(d1.calls[5]?.sql).toContain("ORDER BY views DESC, country ASC");
+      expect(d1.calls[5]?.bindings.at(-1)).toBe(1);
     } finally {
       d1.close();
     }

@@ -489,6 +489,7 @@ export async function queryPerformanceCountriesFromD1(
   siteId: string,
   window: QueryWindow,
   filters: FilterDocument,
+  limit: number,
 ): Promise<PerformanceCountryRow[]> {
   const source = performanceVisitSource(siteId, window, filters);
   const countryExpr = "UPPER(TRIM(COALESCE(country, '')))";
@@ -513,6 +514,8 @@ country_views AS (
   FROM filtered_visits
   WHERE country != ''
   GROUP BY country
+  ORDER BY views DESC, country ASC
+  LIMIT ?
 ),
 metric_visits AS (
   ${performanceMetricVisitsSql("filtered_visits", ["country"])}
@@ -520,7 +523,7 @@ metric_visits AS (
 scoped_metric_visits AS (
   SELECT metric_visits.*
   FROM metric_visits
-  WHERE country != ''
+  JOIN country_views ON country_views.country = metric_visits.country
 ),
 ordered_values AS (
   SELECT
@@ -568,6 +571,7 @@ ORDER BY country_views.views DESC, thresholds.country ASC, thresholds.metric ASC
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
     ...source.bindings,
     ...source.filterBindings,
+    limit,
   ]);
   return mapPerformanceCountries(rows);
 }

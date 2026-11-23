@@ -27,6 +27,7 @@ import {
   clientDimensionDefinition,
   referrerDomainDimensionDefinition,
   regionValueExpr,
+  resolveCrossBreakdownDimension,
   utmDimensionDefinition,
 } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
 import {
@@ -556,14 +557,9 @@ export async function overviewTabData(
 }
 export function dimensionExpression(dimension: string): string {
   if (dimension === "country") return "country";
-  if (dimension === "page.query") return "query_string";
-  if (dimension === "page.hash") return "hash_fragment";
-  if (dimension.startsWith("utm.")) {
-    const key = dimension.slice("utm.".length) as
-      "source" | "medium" | "campaign" | "term" | "content";
-    return utmDimensionDefinition(key).labelExpr;
-  }
-  return dimension;
+  const definition = resolveCrossBreakdownDimension(dimension);
+  if (!definition) throw new Error(`unsupported-dimension:${dimension}`);
+  return definition.labelExpr;
 }
 export function registerSiteContractProviders(
   registry: AnalyticsProviderRegistry,

@@ -1,3 +1,5 @@
+import { DatabaseSync } from "node:sqlite";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/edge/analytics/providers/d1/internal/channels", () => ({
   queryChannelAggregate: vi.fn(),
@@ -57,6 +59,7 @@ import {
   EMPTY_FILTER_DOCUMENT,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
+import { ANALYTICS_DIMENSIONS } from "@/lib/edge/analytics/contract/catalog";
 import { queryChannelAggregate } from "@/lib/edge/analytics/providers/d1/internal/channels";
 import {
   decodeDimensionCursor,
@@ -341,11 +344,49 @@ describe("D1 site contract provider pagination routing", () => {
     ).rejects.toThrow("invalid-cursor");
   });
 
+  it("compiles all supported scalar dimensions into executable SQLite expressions", () => {
+    const sqlite = new DatabaseSync(":memory:");
+    try {
+      sqlite.exec(
+        "CREATE TABLE visits (" +
+          "pathname TEXT, title TEXT, hostname TEXT, query_string TEXT, hash_fragment TEXT," +
+          "referrer_host TEXT, referrer_url TEXT," +
+          "utm_source TEXT, utm_medium TEXT, utm_campaign TEXT, utm_term TEXT, utm_content TEXT," +
+          "browser TEXT, browser_version TEXT, os TEXT, os_version TEXT, device_type TEXT," +
+          "language TEXT, screen_width INTEGER, screen_height INTEGER," +
+          "country TEXT, region TEXT, region_code TEXT, city TEXT, continent TEXT," +
+          "timezone TEXT, as_organization TEXT)",
+      );
+      for (const dimension of ANALYTICS_DIMENSIONS) {
+        if (dimension.startsWith("session.") || dimension === "event.name")
+          continue;
+        expect(() =>
+          sqlite
+            .prepare(
+              "SELECT " +
+                dimensionExpression(dimension) +
+                " AS value FROM visits",
+            )
+            .all(),
+        ).not.toThrow();
+      }
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it("maps dimension aliases used by API v1 and shared clients", () => {
     expect(dimensionExpression("country")).toBe("country");
-    expect(dimensionExpression("page.query")).toBe("query_string");
-    expect(dimensionExpression("page.hash")).toBe("hash_fragment");
-    expect(dimensionExpression("utm.source")).not.toBe("utm.source");
-    expect(dimensionExpression("custom.dimension")).toBe("custom.dimension");
+    expect(dimensionExpression("page.query")).toContain("query_string");
+    expect(dimensionExpression("page.hash")).toContain("hash_fragment");
+    expect(dimensionExpression("utm.source")).toContain("utm_source");
+    expect(dimensionExpression("geo.country")).toContain("country");
+    expect(dimensionExpression("geo.region")).toContain("region_code");
+    expect(dimensionExpression("page.path")).toContain("pathname");
+    expect(dimensionExpression("referrer.domain")).toContain("referrer_host");
+    expect(dimensionExpression("client.browser")).toContain("browser");
+    expect(() => dimensionExpression("custom.dimension")).toThrow(
+      "unsupported-dimension",
+    );
   });
 });

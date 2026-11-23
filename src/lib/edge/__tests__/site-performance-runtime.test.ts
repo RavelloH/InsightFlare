@@ -133,6 +133,13 @@ describe("site performance runtime", () => {
         limit: 20,
       }),
     ).resolves.toMatchObject({ items: [{ key: "US", label: "US" }] });
+    expect(queryPerformanceCountriesFromD1).toHaveBeenCalledWith(
+      input.env,
+      input.siteId,
+      input.window,
+      input.filters,
+      20,
+    );
   });
 
   it("preserves provider failures for the application boundary", async () => {

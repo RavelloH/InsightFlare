@@ -122,6 +122,7 @@ export async function readSitePerformanceBreakdown(
           input.siteId,
           input.window,
           input.filters,
+          input.limit,
         );
   return {
     dimension: dimension.data,
