@@ -13,12 +13,20 @@ export interface Env {
   ADMIN_WS_TOKEN?: string;
   PARQUET_WASM_URL?: string;
   MAP_RELAY_BASE_URL?: string;
+  /** Browser-side services; see src/lib/external-services.ts. */
+  CANIUSE_API_BASE_URL?: string;
+  GEO_LOCALE_API_BASE_URL?: string;
+  SITE_META_API_BASE_URL?: string;
   BOOTSTRAP_ADMIN_PASSWORD?: string;
   SESSION_WINDOW_MINUTES?: string;
   SCRIPT_CACHE_TTL_SECONDS?: string;
   SITE_SETTINGS_KV?: KVNamespace;
   INSIGHTFLARE_LOGIN_TURNSTILE_DISABLED?: string;
   INSIGHTFLARE_ANALYTICS_ENGINE_DISABLED?: string;
+  /** Analytics Engine reader account set by the deployment; overrides the admin setting. */
+  INSIGHTFLARE_AE_ACCOUNT_ID?: string;
+  /** Analytics Engine reader API token (Worker secret), paired with INSIGHTFLARE_AE_ACCOUNT_ID. */
+  INSIGHTFLARE_AE_API_TOKEN?: string;
   INSIGHTFLARE_E2E?: string;
   INSIGHTFLARE_E2E_NOW?: string;
   INSIGHTFLARE_E2E_CONTROL_TOKEN?: string;
