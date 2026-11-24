@@ -370,6 +370,21 @@ function sessionRow(overrides: Record<string, unknown> = {}) {
 }
 function commonQueryMatches(): SqlMatch[] {
   return [
+    allMatch(
+      ["shared_geo_visits AS MATERIALIZED"],
+      [
+        {
+          rowKind: "point",
+          latitude: 37.77,
+          longitude: -122.42,
+          timestampMs: from,
+          country: "US",
+          region: "CA",
+          regionCode: "CA",
+          city: "San Francisco",
+        },
+      ],
+    ),
     overviewMatch(),
     allMatch(["visit_bucket_rollup AS", "session_bucket_rollup AS"], trendRows),
     allMatch(

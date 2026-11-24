@@ -3596,6 +3596,7 @@ describe("edge overview D1 queries and handlers", () => {
     const { env, calls } = createD1Env([
       [
         {
+          rowKind: "point",
           latitude: "37.7",
           longitude: "-122.4",
           timestampMs: String(window.startMs),
@@ -3604,18 +3605,17 @@ describe("edge overview D1 queries and handlers", () => {
           regionCode: "CA",
           city: "San Francisco",
         },
-      ],
-      [
         {
+          rowKind: "count",
           country: "US",
           views: "7",
           sessions: "4",
           visitors: "3",
         },
       ],
-      [],
       [
         {
+          rowKind: "count",
           country: "us",
           regionCode: "ca",
           region: "California",
@@ -3684,9 +3684,10 @@ describe("edge overview D1 queries and handlers", () => {
         },
       ],
     });
+    expect(calls).toHaveLength(2);
     expect(calls[0].bindings.at(-1)).toBe(9);
-    expect(calls[2].bindings.at(-1)).toBe(10);
-    expect(calls[2].bindings).toEqual(
+    expect(calls[1].bindings.at(-1)).toBe(10);
+    expect(calls[1].bindings).toEqual(
       expect.arrayContaining(["us", "california"]),
     );
   });
