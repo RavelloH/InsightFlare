@@ -489,6 +489,15 @@ describe("edge team query coverage", () => {
               avgDurationMs: 4000,
               bounceRate: 0.2,
             },
+            previousOverview: {
+              views: 5,
+              sessions: 5,
+              visitors: 2,
+              bounces: 2,
+              totalDurationMs: 5000,
+              avgDurationMs: 1000,
+              bounceRate: 0.4,
+            },
             changeRates: {
               views: 100,
               visitors: 100,

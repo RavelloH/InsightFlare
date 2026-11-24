@@ -53,9 +53,6 @@ type PlotPoint = ChangeQuadrantPoint & {
   y: number;
   z: number;
   tone: Tone;
-  callout: boolean;
-  /** Put the label on the left of dots in the right half of the chart. */
-  labelLeft: boolean;
 };
 
 const TONE_COLORS: Record<Tone, string> = {
@@ -109,18 +106,6 @@ function QuadrantDot(props: {
         stroke={color}
         strokeWidth={1}
       />
-      {payload.callout ? (
-        <text
-          x={payload.labelLeft ? cx - radius - 4 : cx + radius + 4}
-          y={cy + 3}
-          textAnchor={payload.labelLeft ? "end" : "start"}
-          className="fill-foreground text-[10px]"
-        >
-          {payload.label.length > 18
-            ? payload.label.slice(0, 17) + "…"
-            : payload.label}
-        </text>
-      ) : null}
     </g>
   );
 }
@@ -136,7 +121,10 @@ export const ChangeQuadrantChart = memo(function ChangeQuadrantChart({
 }: ChangeQuadrantChartProps) {
   const plot = useMemo<PlotPoint[]>(() => {
     const visible = points.filter(
-      (point) => point.value > 0 && Number.isFinite(point.change),
+      (point) =>
+        Number.isFinite(point.value) &&
+        point.value >= 0 &&
+        Number.isFinite(point.change),
     );
     return visible.map((point) => {
       const tone: Tone =
@@ -147,26 +135,32 @@ export const ChangeQuadrantChart = memo(function ChangeQuadrantChart({
             : "steady";
       return {
         ...point,
-        x: point.value,
-        y: Math.max(-Y_LIMIT, Math.min(Y_LIMIT, point.change)),
-        z: point.weight ?? point.value,
+        // log(1 + count) allows a site that lost all its traffic to remain visible.
+        x: point.value + 1,
+        y: Math.max(-100, Math.min(Y_LIMIT, point.change)),
+        z: Math.max(0, point.weight ?? point.value),
         tone,
-        callout: tone !== "steady",
-        labelLeft: false,
       };
     });
   }, [points, threshold]);
-  const rawExtent = Math.max(
-    threshold * 1.5,
-    ...plot.map((point) => Math.abs(point.y) * 1.15),
+  const upperTick = Math.min(
+    Y_LIMIT,
+    Math.ceil(
+      Math.max(threshold * 1.5, ...plot.map((point) => point.y * 1.1)) / 10,
+    ) * 10,
   );
-  const yExtent = Math.ceil(rawExtent / 10) * 10;
-  const yTicks = [-yExtent, -threshold, 0, threshold, yExtent];
-  const xMin = Math.max(1, Math.min(...plot.map((point) => point.x)) / 1.8);
-  const xMax = Math.max(10, ...plot.map((point) => point.x)) * 1.8;
-  const xTicks = logTicks(xMin, xMax);
-  const xMiddle = Math.sqrt(xMin * xMax);
-  for (const point of plot) point.labelLeft = point.x > xMiddle;
+  const upperExtent = upperTick + 10;
+  const lowerExtent = -110;
+  const yTicks = [...new Set([-100, -threshold, 0, threshold, upperTick])].sort(
+    (a, b) => a - b,
+  );
+  const xMin = Math.max(0.8, Math.min(...plot.map((point) => point.x)) / 1.5);
+  const xMax = Math.max(10, ...plot.map((point) => point.x)) * 1.5;
+  const xTicks = [
+    ...(xMin <= 1 ? [1] : []),
+    ...logTicks(Math.max(1, xMin - 1), xMax - 1).map((value) => value + 1),
+  ].filter((value) => value >= xMin && value <= xMax);
+  const clippedUpper = plot.some((point) => point.change > Y_LIMIT);
   const config = {
     value: { label: labels.value, color: TONE_COLORS.steady },
   } satisfies ChartConfig;
@@ -192,7 +186,7 @@ export const ChangeQuadrantChart = memo(function ChangeQuadrantChart({
       <ScatterChart margin={{ top: 8, right: 24, bottom: 4, left: 0 }}>
         <CartesianGrid strokeDasharray="3 3" />
         <ReferenceArea
-          y1={-yExtent}
+          y1={lowerExtent}
           y2={-threshold}
           fill="var(--color-chart-secondary-3)"
           fillOpacity={0.06}
@@ -200,7 +194,7 @@ export const ChangeQuadrantChart = memo(function ChangeQuadrantChart({
         />
         <ReferenceArea
           y1={threshold}
-          y2={yExtent}
+          y2={upperExtent}
           fill="var(--color-chart-4)"
           fillOpacity={0.06}
           ifOverflow="hidden"
@@ -217,7 +211,7 @@ export const ChangeQuadrantChart = memo(function ChangeQuadrantChart({
           axisLine={false}
           tickFormatter={(value) =>
             new Intl.NumberFormat(locale, { notation: "compact" }).format(
-              Number(value),
+              Math.max(0, Number(value) - 1),
             )
           }
           name={labels.value}
@@ -225,18 +219,18 @@ export const ChangeQuadrantChart = memo(function ChangeQuadrantChart({
         <YAxis
           type="number"
           dataKey="y"
-          domain={[-yExtent, yExtent]}
+          domain={[lowerExtent, upperExtent]}
           ticks={yTicks}
           tickLine={false}
           axisLine={false}
           width={48}
           tickFormatter={(value) => {
             const number = Math.round(Number(value));
-            return `${number > 0 ? "+" : ""}${number}%`;
+            return `${number === Y_LIMIT && clippedUpper ? "≥" : ""}${number > 0 ? "+" : ""}${number}%`;
           }}
           name={labels.change}
         />
-        <ZAxis type="number" dataKey="z" range={[40, 420]} />
+        <ZAxis type="number" dataKey="z" range={[40, 300]} />
         <ChartTooltip
           cursor={false}
           content={({ active, payload }) => {

@@ -47,6 +47,7 @@ export function generateDemoTeamDashboard(
       updatedAt:
         now - sInt(mulberry32(fnv1a(site.id)), 1, 14) * 24 * 3600 * 1000,
       overview: metrics,
+      previousOverview: prevMetrics,
       changeRates: {
         views: cr(metrics.views, prevMetrics.views),
         sessions: cr(metrics.sessions, prevMetrics.sessions),

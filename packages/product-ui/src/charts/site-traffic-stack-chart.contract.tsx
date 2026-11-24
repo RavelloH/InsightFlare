@@ -26,19 +26,33 @@ const ALL_SITES = [
 
 function traffic(siteCount: number, dayCount: number) {
   const sites = ALL_SITES.slice(0, siteCount);
+  const data = Array.from({ length: dayCount }, (_, day) => ({
+    timestampMs: fixtureDay(day),
+    sites: sites.map((site, index) => {
+      const visitors = fixtureWave(day, 900 - index * 130, 180, index);
+      return {
+        siteId: site.id,
+        visitors,
+        views: Math.round(visitors * (2.1 + index * 0.15)),
+      };
+    }),
+  }));
   return {
     sites: sites.map((site) => ({ ...site })),
-    data: Array.from({ length: dayCount }, (_, day) => ({
-      timestampMs: fixtureDay(day),
-      sites: sites.map((site, index) => {
-        const visitors = fixtureWave(day, 900 - index * 130, 180, index);
-        return {
-          siteId: site.id,
-          visitors,
-          views: Math.round(visitors * (2.1 + index * 0.15)),
-        };
-      }),
-    })),
+    data,
+    // Showcase supplies example whole-period distinct counts separately.
+    periodTotals: sites.map((site) => {
+      const points = data.flatMap((bucket) =>
+        bucket.sites.filter((point) => point.siteId === site.id),
+      );
+      return {
+        siteId: site.id,
+        views: points.reduce((sum, point) => sum + point.views, 0),
+        visitors: Math.round(
+          points.reduce((sum, point) => sum + point.visitors, 0) * 0.8,
+        ),
+      };
+    }),
     from: fixtureDay(0),
     to: fixtureDay(dayCount - 1),
   };
@@ -87,6 +101,7 @@ export const siteTrafficStackChartFixtures = [
       ...baseProps,
       ...traffic(3, 14),
       data: [],
+      periodTotals: [],
     } satisfies SiteTrafficStackChartProps,
   },
   {
@@ -98,6 +113,18 @@ export const siteTrafficStackChartFixtures = [
       ...baseProps,
       sites: SHOWCASE_TEAM_SITES.map((site) => ({ ...site })),
       data: teamTraffic,
+      periodTotals: SHOWCASE_TEAM_SITES.map((site) => {
+        const points = teamTraffic.flatMap((bucket) =>
+          bucket.sites.filter((point) => point.siteId === site.id),
+        );
+        return {
+          siteId: site.id,
+          views: points.reduce((sum, point) => sum + point.views, 0),
+          visitors: Math.round(
+            points.reduce((sum, point) => sum + point.visitors, 0) * 0.8,
+          ),
+        };
+      }),
       from: SHOWCASE_START_MS,
       to: SHOWCASE_START_MS + (SHOWCASE_DAYS - 1) * SHOWCASE_DAY_MS,
     } satisfies SiteTrafficStackChartProps,

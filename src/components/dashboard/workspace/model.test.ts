@@ -16,6 +16,7 @@ function site(
   id: string,
   overview: Partial<TeamDashboardSite["overview"]>,
   changeRates: Partial<TeamDashboardSite["changeRates"]> = {},
+  previous?: Partial<TeamDashboardSite["overview"]>,
 ): TeamDashboardSite {
   return {
     id,
@@ -37,6 +38,21 @@ function site(
       approximateVisitors: false,
       ...overview,
     },
+    ...(previous === undefined
+      ? {}
+      : {
+          previousOverview: {
+            views: 0,
+            sessions: 0,
+            visitors: 0,
+            bounces: 0,
+            totalDurationMs: 0,
+            avgDurationMs: 0,
+            bounceRate: 0,
+            approximateVisitors: false,
+            ...previous,
+          },
+        }),
     changeRates: {
       views: null,
       visitors: null,
@@ -52,7 +68,7 @@ function site(
 const team = { id: "team-a", slug: "team-a", name: "Team A" } as TeamData;
 
 describe("workspace totals", () => {
-  it("rebuilds previous totals from each site's percent change", () => {
+  it("uses actual previous metrics rather than reconstructing rounded percentages", () => {
     const totals = buildWorkspaceTotals([
       site(
         "a",
@@ -63,7 +79,8 @@ describe("workspace totals", () => {
           totalDurationMs: 40_000,
           avgDurationMs: 200,
         },
-        { visitors: 50, views: 0, sessions: 100, avgDurationMs: 0 },
+        { visitors: 49.99, views: 0, sessions: 100, avgDurationMs: 0 },
+        { visitors: 100, views: 300, sessions: 100, totalDurationMs: 20_000 },
       ),
       site(
         "b",
@@ -75,6 +92,7 @@ describe("workspace totals", () => {
           avgDurationMs: 200,
         },
         { visitors: -50, views: 0, sessions: 0, avgDurationMs: 0 },
+        { visitors: 100, views: 100, sessions: 100, totalDurationMs: 20_000 },
       ),
     ]);
     // Previous visitors: 150 / 1.5 + 50 / 0.5 = 200.
@@ -87,7 +105,38 @@ describe("workspace totals", () => {
     expect(totals.change.avgDurationMs).toBeCloseTo(0);
   });
 
-  it("leaves the change unknown when a site with traffic has no rate", () => {
+  it("includes new and vanished sites even when their rates are null or -100%", () => {
+    const totals = buildWorkspaceTotals([
+      site(
+        "new",
+        { visitors: 30, views: 60, sessions: 40, totalDurationMs: 12_000 },
+        {},
+        {},
+      ),
+      site(
+        "old",
+        {},
+        { visitors: -100, views: -100, sessions: -100 },
+        {
+          visitors: 20,
+          views: 100,
+          sessions: 50,
+          totalDurationMs: 10_000,
+        },
+      ),
+    ]);
+    expect(totals.change.visitors).toBe(50);
+    expect(totals.change.views).toBe(-40);
+    expect(totals.change.sessions).toBe(-20);
+    expect(totals.avgDurationMs).toBe(300);
+    expect(totals.change.avgDurationMs).toBe(50);
+    const newOnly = buildWorkspaceTotals([
+      site("new", { visitors: 10 }, {}, {}),
+    ]);
+    expect(newOnly.change.visitors).toBeNull();
+  });
+
+  it("leaves change unknown when the older snapshot has no previous metrics", () => {
     const totals = buildWorkspaceTotals([
       site("a", { visitors: 10, sessions: 10 }, { visitors: 10 }),
       site("b", { visitors: 10, sessions: 10 }),

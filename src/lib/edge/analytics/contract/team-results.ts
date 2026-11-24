@@ -26,6 +26,8 @@ export interface TeamDashboardOverview {
 }
 export interface TeamDashboardSite extends TeamSiteRow {
   readonly overview: TeamDashboardOverview;
+  /** Actual metrics for the immediately preceding, equally long window. */
+  readonly previousOverview?: TeamDashboardOverview;
   readonly changeRates: Readonly<
     Record<
       | "views"

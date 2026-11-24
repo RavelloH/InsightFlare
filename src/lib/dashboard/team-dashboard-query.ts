@@ -19,6 +19,8 @@ export interface TeamDashboardOverview {
 }
 export interface TeamDashboardSite extends SiteData {
   overview: TeamDashboardOverview;
+  /** Optional for compatibility with snapshots from older server versions. */
+  previousOverview?: TeamDashboardOverview;
   changeRates: Record<
     | "views"
     | "visitors"

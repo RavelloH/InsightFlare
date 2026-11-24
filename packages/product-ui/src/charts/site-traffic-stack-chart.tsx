@@ -44,6 +44,12 @@ export interface SiteTrafficStackChartProps {
       visitors: number;
     }>;
   }>;
+  /** Whole-window metrics. Distinct visitors must not be summed across buckets. */
+  periodTotals?: ReadonlyArray<{
+    siteId: string;
+    views: number;
+    visitors: number;
+  }>;
   sites: Array<{
     id: string;
     name: string;
@@ -695,6 +701,7 @@ const SiteTrafficStackPlot = memo(function SiteTrafficStackPlot({
 });
 export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
   data,
+  periodTotals,
   sites,
   from,
   to,
@@ -825,18 +832,22 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
     useBarLayerTransition(chartData, barTransitionKey);
 
   const totals = useMemo(() => {
-    const map = new Map<string, { views: number; visitors: number }>();
-    for (const item of series) {
-      let viewsSum = 0;
-      let visitorsSum = 0;
-      for (const row of displayedChartData) {
-        viewsSum += row[item.viewsKey] ?? 0;
-        visitorsSum += row[item.visitorsKey] ?? 0;
-      }
-      map.set(item.siteId, { views: viewsSum, visitors: visitorsSum });
-    }
-    return map;
-  }, [displayedChartData, series]);
+    const map = new Map(periodTotals?.map((total) => [total.siteId, total]));
+    // The public component also accepts trend-only input. Views are additive,
+    // but without whole-window totals the unique visitor count is unknown.
+    return new Map(
+      series.map((item) => [
+        item.siteId,
+        map.get(item.siteId) ?? {
+          views: displayedChartData.reduce(
+            (sum, row) => sum + (row[item.viewsKey] ?? 0),
+            0,
+          ),
+          visitors: null,
+        },
+      ]),
+    );
+  }, [displayedChartData, periodTotals, series]);
 
   const getSiteValues = (siteId: string, item: (typeof series)[number]) => {
     if (hoveredPoint) {
@@ -844,7 +855,7 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
       const visitors = hoveredPoint[item.visitorsKey] ?? 0;
       return { views, visitors };
     }
-    return totals.get(siteId) ?? { views: 0, visitors: 0 };
+    return totals.get(siteId) ?? { views: 0, visitors: null };
   };
   const handleHoverPoint = useCallback((point: SiteTrafficChartRow | null) => {
     const nextTimestamp =
@@ -965,7 +976,7 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
                       /
                     </span>
                     <span className="font-mono tabular-nums text-muted-foreground">
-                      {numberFormat(locale, visitors)}
+                      {visitors === null ? "—" : numberFormat(locale, visitors)}
                     </span>
                   </div>
                 </AutoTransition>

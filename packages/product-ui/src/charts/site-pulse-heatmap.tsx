@@ -53,27 +53,81 @@ const LEVELS = 4;
 /** Gap between cells, in whole pixels so every gap renders the same. */
 const CELL_GAP = 2;
 
-function median(values: readonly number[]) {
-  const sorted = values.filter((value) => value > 0).sort((a, b) => a - b);
+/** Include quiet buckets. For sparse sites, the mean retains a fractional
+ * expected count even when the median is zero; busy sites use a robust median. */
+export function pulseBaseline(values: readonly number[]): number {
+  const sorted = values
+    .filter((value) => Number.isFinite(value) && value >= 0)
+    .sort((a, b) => a - b);
   if (!sorted.length) return 0;
   const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2
-    ? sorted[middle]!
-    : (sorted[middle - 1]! + sorted[middle]!) / 2;
+  const median =
+    sorted.length % 2
+      ? sorted[middle]!
+      : (sorted[middle - 1]! + sorted[middle]!) / 2;
+  return median < 3
+    ? sorted.reduce((sum, value) => sum + value, 0) / sorted.length
+    : median;
+}
+
+/** One-sided Poisson tail for small expected counts. */
+function poissonTail(value: number, usual: number): number {
+  const falling = value < usual;
+  const end = falling ? Math.floor(value) : Math.ceil(value) - 1;
+  if (!falling && end > 200) return 0;
+  let term = Math.exp(-usual);
+  let cumulative = end >= 0 ? term : 0;
+  for (let k = 1; k <= end; k++) {
+    term *= usual / k;
+    cumulative += term;
+  }
+  return Math.max(0, Math.min(1, falling ? cumulative : 1 - cumulative));
 }
 
 /**
- * Signed level of a bucket against the site's own median: 0 is usual, ±LEVELS
- * is four times (or a quarter of) the usual level or beyond.
+ * Relative deviation, capped by statistical evidence. A zero-count bucket
+ * with a tiny expected count is ordinary, not a 100% traffic collapse.
+ * Poisson tails are exact for sparse counts; a signed deviance approximation
+ * keeps the cost bounded for high-volume sites. This is a visual heuristic.
  */
 export function pulseLevel(value: number, usual: number): number {
-  if (usual <= 0) return 0;
-  if (value <= 0) return -LEVELS;
-  const ratio = Math.log2(value / usual);
-  // Within about ±15% of usual counts as usual.
+  if (
+    !Number.isFinite(value) ||
+    !Number.isFinite(usual) ||
+    value < 0 ||
+    usual <= 0
+  )
+    return 0;
+  const ratio = value === 0 ? -Infinity : Math.log2(value / usual);
   if (Math.abs(ratio) < 0.2) return 0;
-  const level = Math.sign(ratio) * Math.ceil(Math.abs(ratio) * 2.5);
-  return Math.max(-LEVELS, Math.min(LEVELS, level));
+  const relative = Math.min(LEVELS, Math.ceil(Math.abs(ratio) * 2.5));
+  let evidence: number;
+  if (usual <= 30) {
+    const tail = poissonTail(value, usual);
+    evidence =
+      tail < 0.001 ? 4 : tail < 0.01 ? 3 : tail < 0.05 ? 2 : tail < 0.1 ? 1 : 0;
+  } else {
+    const deviance = Math.sqrt(
+      Math.max(
+        0,
+        2 *
+          (value === 0
+            ? usual
+            : value * Math.log(value / usual) - value + usual),
+      ),
+    );
+    evidence =
+      deviance > 3.09
+        ? 4
+        : deviance > 2.326
+          ? 3
+          : deviance > 1.645
+            ? 2
+            : deviance > 1.282
+              ? 1
+              : 0;
+  }
+  return Math.sign(ratio) * Math.min(relative, evidence) || 0;
 }
 
 /** Mixed in sRGB so the hue never drifts toward the neutral base. */
@@ -144,9 +198,15 @@ export const SitePulseHeatmap = memo(function SitePulseHeatmap({
     [bucketStarts, rows, maxColumns],
   );
   const usual = useMemo(
-    () => merged.rows.map((row) => median(row.values)),
-    [merged.rows],
+    () => rows.map((row) => pulseBaseline(row.values)),
+    [rows],
   );
+  const usualAt = (row: number, column: number) =>
+    (usual[row] ?? 0) *
+    Math.max(
+      0,
+      Math.min(merged.size, bucketStarts.length - column * merged.size),
+    );
   const axisFormatter = useMemo(
     () => createChartAxisDateFormatter(locale, interval, timeZone, "compact"),
     [locale, interval, timeZone],
@@ -185,7 +245,7 @@ export const SitePulseHeatmap = memo(function SitePulseHeatmap({
   const hovered = hover ? merged.rows[hover.row] : undefined;
   const hoveredValue =
     hover && hovered ? (hovered.values[hover.column] ?? 0) : 0;
-  const hoveredUsual = hover ? (usual[hover.row] ?? 0) : 0;
+  const hoveredUsual = hover ? usualAt(hover.row, hover.column) : 0;
   const hoveredPercent =
     hoveredUsual > 0
       ? Math.round(((hoveredValue - hoveredUsual) / hoveredUsual) * 100)
@@ -234,7 +294,7 @@ export const SitePulseHeatmap = memo(function SitePulseHeatmap({
               }
             >
               {row.values.map((value, column) => {
-                const level = pulseLevel(value, usual[rowIndex] ?? 0);
+                const level = pulseLevel(value, usualAt(rowIndex, column));
                 const active =
                   hover?.row === rowIndex && hover.column === column;
                 return (
@@ -343,19 +403,20 @@ export const SitePulseHeatmap = memo(function SitePulseHeatmap({
           <div className="flex items-center justify-between gap-4">
             <span className="text-muted-foreground">{labels.usual}</span>
             <span className="font-mono tabular-nums">
-              {numberFormat(locale, Math.round(hoveredUsual))}
+              {numberFormat(locale, Math.round(hoveredUsual * 100) / 100)}
             </span>
           </div>
           {hoveredPercent !== null ? (
             <div
-              className={cn(
-                "font-mono tabular-nums",
-                hoveredPercent > 0
-                  ? "text-emerald-600"
-                  : hoveredPercent < 0
-                    ? "text-amber-600"
-                    : "text-muted-foreground",
-              )}
+              className="font-mono tabular-nums text-muted-foreground"
+              style={{
+                color:
+                  pulseLevel(hoveredValue, hoveredUsual) > 0
+                    ? "var(--color-chart-4)"
+                    : pulseLevel(hoveredValue, hoveredUsual) < 0
+                      ? "var(--color-chart-secondary-3)"
+                      : undefined,
+              }}
             >
               {labels.versusUsual.replace(
                 "{percent}",

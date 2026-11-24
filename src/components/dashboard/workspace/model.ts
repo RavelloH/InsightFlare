@@ -35,13 +35,6 @@ export interface WorkspaceTotals {
   >;
 }
 
-/** Previous-period value implied by a current value and its percent change. */
-function previousValue(current: number, changePercent: number | null) {
-  if (changePercent === null || !Number.isFinite(changePercent)) return null;
-  const factor = 1 + changePercent / 100;
-  return factor > 0 ? current / factor : null;
-}
-
 function percentChange(current: number, previous: number | null) {
   if (previous === null || previous <= 0) return null;
   return ((current - previous) / previous) * 100;
@@ -68,20 +61,13 @@ export function buildWorkspaceRows(
   );
 }
 
-/**
- * Sums every site. Previous totals are rebuilt from each site's change rate;
- * when any site with traffic lacks one the total change is left unknown.
- */
+/** Sum actual per-site metrics for both periods, never invert rounded rates. */
 export function buildWorkspaceTotals(
   sites: readonly TeamDashboardSite[],
 ): WorkspaceTotals {
   const sum = { visitors: 0, views: 0, sessions: 0, durationMs: 0 };
-  const previous: Record<"visitors" | "views" | "sessions", number | null> = {
-    visitors: 0,
-    views: 0,
-    sessions: 0,
-  };
-  let previousDurationMs: number | null = 0;
+  const previous = { visitors: 0, views: 0, sessions: 0, durationMs: 0 };
+  let previousComplete = true;
   for (const site of sites) {
     const overview = site.overview;
     if (!overview) continue;
@@ -89,35 +75,20 @@ export function buildWorkspaceTotals(
     sum.views += overview.views;
     sum.sessions += overview.sessions;
     sum.durationMs += overview.totalDurationMs;
-    for (const key of ["visitors", "views", "sessions"] as const) {
-      const before = previousValue(
-        overview[key],
-        site.changeRates?.[key] ?? null,
-      );
-      const known = previous[key];
-      previous[key] =
-        known === null || (before === null && overview[key] > 0)
-          ? null
-          : known + (before ?? 0);
+    const before = site.previousOverview;
+    if (!before) {
+      previousComplete = false;
+      continue;
     }
-    const sessionsBefore = previousValue(
-      overview.sessions,
-      site.changeRates?.sessions ?? null,
-    );
-    const avgBefore = previousValue(
-      overview.avgDurationMs,
-      site.changeRates?.avgDurationMs ?? null,
-    );
-    previousDurationMs =
-      previousDurationMs === null ||
-      ((sessionsBefore === null || avgBefore === null) && overview.sessions > 0)
-        ? null
-        : previousDurationMs + (sessionsBefore ?? 0) * (avgBefore ?? 0);
+    previous.visitors += before.visitors;
+    previous.views += before.views;
+    previous.sessions += before.sessions;
+    previous.durationMs += before.totalDurationMs;
   }
   const avgDurationMs = sum.sessions > 0 ? sum.durationMs / sum.sessions : 0;
   const previousAvg =
-    previousDurationMs !== null && previous.sessions
-      ? previousDurationMs / previous.sessions
+    previousComplete && previous.sessions > 0
+      ? previous.durationMs / previous.sessions
       : null;
   return {
     visitors: sum.visitors,
@@ -125,9 +96,15 @@ export function buildWorkspaceTotals(
     sessions: sum.sessions,
     avgDurationMs,
     change: {
-      visitors: percentChange(sum.visitors, previous.visitors),
-      views: percentChange(sum.views, previous.views),
-      sessions: percentChange(sum.sessions, previous.sessions),
+      visitors: percentChange(
+        sum.visitors,
+        previousComplete ? previous.visitors : null,
+      ),
+      views: percentChange(sum.views, previousComplete ? previous.views : null),
+      sessions: percentChange(
+        sum.sessions,
+        previousComplete ? previous.sessions : null,
+      ),
       avgDurationMs: percentChange(avgDurationMs, previousAvg),
     },
   };

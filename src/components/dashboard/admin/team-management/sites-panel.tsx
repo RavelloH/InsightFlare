@@ -111,6 +111,11 @@ export function TeamManagementSitesPanel() {
           <div>
             <SiteTrafficStackChart
               data={aggregateChartRenderData}
+              periodTotals={dashboardSites.map((site) => ({
+                siteId: site.id,
+                views: site.overview.views,
+                visitors: site.overview.visitors,
+              }))}
               sites={aggregateChartSites}
               from={dashboardWindow.from}
               to={dashboardWindow.to}

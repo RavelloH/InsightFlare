@@ -621,6 +621,7 @@ export async function queryTeamDashboardForTeam(
     return {
       ...site,
       overview,
+      previousOverview: previous,
       changeRates: {
         views: percentChange(overview.views, previous.views),
         visitors: percentChange(overview.visitors, previous.visitors),
