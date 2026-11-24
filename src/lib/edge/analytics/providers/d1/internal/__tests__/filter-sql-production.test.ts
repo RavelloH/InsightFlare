@@ -1430,6 +1430,116 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
+  it("pushes visit-context predicates into both observation sources without losing cross-window Events", () => {
+    const db = sqlitePayloadFixture();
+    try {
+      db.exec(`
+        UPDATE visits SET country='US', browser='Chrome', session_id='s-historical', visitor_id='u-historical'
+          WHERE site_pk=1 AND visit_id='v-old';
+        UPDATE visits SET country='US', browser='Chrome' WHERE site_pk=1 AND visit_id='v-new';
+        UPDATE visits SET country='CA', browser=NULL WHERE site_pk=1 AND visit_id='v-docs';
+        UPDATE visits SET country='US', browser='Chrome' WHERE site_pk=2;
+        UPDATE custom_events SET occurred_at=150 WHERE event_pk=101;
+      `);
+      const cases = [
+        {
+          expression: 'geo.country eq "US"',
+          visits: ["v-new"],
+          events: [101, 102, 103],
+          fast: true,
+        },
+        {
+          expression: 'page.path eq "/old" or page.path eq "/home"',
+          visits: ["v-new"],
+          events: [101, 102, 103],
+          fast: true,
+        },
+        {
+          expression: 'geo.country eq "US" and client.browser eq "Chrome"',
+          visits: ["v-new"],
+          events: [101, 102, 103],
+          fast: true,
+        },
+        {
+          expression: 'not (geo.country eq "US")',
+          visits: ["v-docs"],
+          events: [104],
+          fast: true,
+        },
+        {
+          expression: 'event.name eq "purchase"',
+          visits: ["v-new"],
+          events: [101, 103],
+          fast: false,
+        },
+        {
+          expression: 'geo.country eq "US" or event.name eq "view"',
+          visits: ["v-docs", "v-new"],
+          events: [101, 102, 103, 104],
+          fast: false,
+        },
+      ];
+      for (const item of cases) {
+        const doc = parseFilterDsl(item.expression, analyticsFilterRegistry);
+        const plan = createScopedFilterPlan("overview", doc, "event")!;
+        const filters = attachScopedFilterMetadata(doc, {
+          requestedScope: "event",
+          resolvedScope: plan.scope,
+          plan,
+          time: createQueryTime(100, 300, "UTC", 400),
+          siteIds: ["site-a"],
+        });
+        const dataset = compileScopedDatasetSql({
+          filters,
+          plan,
+          siteIds: ["site-a"],
+          window: WINDOW,
+        });
+        expect(dataset.ctes.includes("scope_matching_visit_ids AS")).toBe(
+          !item.fast,
+        );
+        const bindings = dataset.bindings.map((b) => b.value);
+        const run = (sql: string) =>
+          db.prepare(`WITH ${dataset.ctes} ${sql}`).all(...bindings);
+        expect(
+          run(
+            `SELECT visit_id FROM ${dataset.visitRelation} ORDER BY visit_id`,
+          ),
+        ).toEqual(item.visits.map((visit_id) => ({ visit_id })));
+        expect(
+          run(
+            `SELECT event_pk FROM ${dataset.eventRelation} ORDER BY event_pk`,
+          ),
+        ).toEqual(item.events.map((event_pk) => ({ event_pk })));
+        if (item.fast) {
+          expect(dataset.ctes).toContain(
+            "scope_final_visits AS (SELECT * FROM scope_matching_visits)",
+          );
+          expect(dataset.ctes).not.toContain(
+            "scope_raw_visits AS MATERIALIZED",
+          );
+          expect(dataset.ctes).not.toContain(
+            "scope_raw_events AS MATERIALIZED",
+          );
+        }
+        if (item.expression === 'geo.country eq "US"') {
+          expect(
+            run(
+              `SELECT session_id FROM ${dataset.sessionRelation} ORDER BY session_id`,
+            ),
+          ).toEqual([{ session_id: "s-historical" }, { session_id: "s1" }]);
+          expect(
+            run(
+              `SELECT visitor_id FROM ${dataset.visitorRelation} ORDER BY visitor_id`,
+            ),
+          ).toEqual([{ visitor_id: "u-historical" }, { visitor_id: "u1" }]);
+        }
+      }
+    } finally {
+      db.close();
+    }
+  });
+
   it("shares prepared geo observations once while keeping invalid-coordinate visits in every drilldown total", async () => {
     const { db } = runFixture();
     try {

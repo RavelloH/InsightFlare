@@ -7,6 +7,7 @@ import {
   factEntityKindsForFilter,
   type FilterCondition,
   type FilterDocument,
+  type FilterExpression,
   type FilterValue,
   type ObservationPredicatePlan,
   planObservationFilter,
@@ -749,9 +750,12 @@ function compileObservationRelation(
   alias: string,
   predicate: ObservationPredicatePlan,
   observation: "visit" | "event",
+  fullRows = false,
 ): BoundCteDefinition {
   const id = observation === "visit" ? "visit_id" : "event_id";
-  const projection = `${alias}.site_pk, ${alias}.${id}`;
+  const projection = fullRows
+    ? `${alias}.*`
+    : `${alias}.site_pk, ${alias}.${id}`;
   if (predicate.kind === "all") {
     return boundCte(
       name,
@@ -1073,6 +1077,13 @@ export function compileSqlQualification(
       ctes: membership.ctes,
     };
   }
+  return compileObservationQualification(filters);
+}
+
+function compileObservationQualification(
+  filters: FilterDocument,
+  fullRows = false,
+): FilterQualificationSql {
   const observationPlan = planObservationFilter(filters.root);
   return {
     kind: "observation",
@@ -1085,6 +1096,7 @@ export function compileSqlQualification(
         "v",
         observationPlan.visit,
         "visit",
+        fullRows,
       ),
       compileObservationRelation(
         "scope_matching_events",
@@ -1092,9 +1104,72 @@ export function compileSqlQualification(
         "e",
         observationPlan.event,
         "event",
+        fullRows,
       ),
     ],
   };
+}
+
+// These strategies use only columns copied unchanged from the linked Visit
+// into the Event source. Keep this allowlist explicit: a new registered
+// strategy may use event-specific or entity-wide evidence.
+const VISIT_CONTEXT_STRATEGIES = new Set([
+  "column.pathname",
+  "column.title",
+  "column.hostname",
+  "column.query_string",
+  "column.hash_fragment",
+  "column.referrer_host",
+  "column.referrer_url",
+  "column.utm_source",
+  "column.utm_medium",
+  "column.utm_campaign",
+  "column.utm_term",
+  "column.utm_content",
+  "column.browser",
+  "column.browser_version",
+  "column.os",
+  "column.device_type",
+  "column.language",
+  "column.country",
+  "column.region",
+  "column.city",
+  "column.continent",
+  "column.timezone",
+  "column.as_organization",
+  "column.duration_ms",
+  "column.perf_ttfb_ms",
+  "column.perf_fcp_ms",
+  "column.perf_lcp_ms",
+  "column.perf_cls",
+  "column.perf_inp_ms",
+  "column.user_id",
+  "column.user_name",
+  "column.screen_width",
+  "column.screen_height",
+  "column.is_eu",
+  "derived.trafficChannel",
+  "derived.browserEngine",
+  "derived.osVersion",
+  "derived.screenSize",
+]);
+
+function isVisitContextPredicate(expression: FilterExpression): boolean {
+  if (expression.kind === "not")
+    return isVisitContextPredicate(expression.child);
+  if (expression.kind !== "condition") {
+    return expression.children.every(isVisitContextPredicate);
+  }
+  if (expression.target.kind !== "field") return false;
+  const definition = analyticsFilterDefinition(expression.target.field);
+  return Boolean(
+    definition &&
+    definition.source === "visit" &&
+    definition.evaluation === "observation" &&
+    definition.observationKinds.has("visit") &&
+    definition.observationKinds.has("event") &&
+    VISIT_CONTEXT_STRATEGIES.has(definition.compilerStrategy),
+  );
 }
 
 /**
@@ -1122,11 +1197,20 @@ export function compileScopedDatasetSql(
     input.filters.root && filterDocumentUsesAdvancedExpressions(input.filters)
       ? buildFilterSqlDomains(input, metadata!.time)
       : undefined;
-  const qualification = compileSqlQualification(
-    input.filters,
-    input.plan,
-    domains,
-  );
+  // Both observation predicates read the same linked Visit columns. An
+  // Event matching such a predicate cannot qualify a nonmatching in-window
+  // Visit. Events outside the Visit window still remain independently
+  // eligible by occurred_at. Do not apply this rule to explicit entity
+  // scopes, Event payloads, boundary facts or advanced expressions.
+  const directVisitContext =
+    input.plan.scope === "event" &&
+    input.plan.mode === "observation" &&
+    input.filters.root !== null &&
+    !domains &&
+    isVisitContextPredicate(input.filters.root);
+  const qualification = directVisitContext
+    ? compileObservationQualification(input.filters, true)
+    : compileSqlQualification(input.filters, input.plan, domains);
   const entityColumnName =
     input.plan.mode === "entity" && input.plan.membership.kind === "entity"
       ? entityColumn(input.plan.membership.entityKind)
@@ -1141,8 +1225,10 @@ export function compileScopedDatasetSql(
     input.plan.mode === "observation";
   const finalVisitRelation = matchesAllObservations
     ? "scope_final_visits AS (SELECT * FROM scope_raw_visits)"
-    : input.plan.mode === "entity"
-      ? `
+    : directVisitContext
+      ? "scope_final_visits AS (SELECT * FROM scope_matching_visits)"
+      : input.plan.mode === "entity"
+        ? `
 scope_final_visits AS (
   SELECT rv.*
   FROM scope_raw_visits rv
@@ -1151,7 +1237,7 @@ scope_final_visits AS (
    AND matching_entities.entity_id = rv.${entityColumnName}
   WHERE TRIM(COALESCE(rv.${entityColumnName}, '')) != ''
 )`
-      : `
+        : `
 scope_final_visits AS (
   SELECT rv.*
   FROM scope_raw_visits rv
@@ -1161,8 +1247,10 @@ scope_final_visits AS (
 )`;
   const finalEventRelation = matchesAllObservations
     ? "scope_final_events AS (SELECT * FROM scope_raw_events)"
-    : input.plan.mode === "entity"
-      ? `
+    : directVisitContext
+      ? "scope_final_events AS (SELECT * FROM scope_matching_events)"
+      : input.plan.mode === "entity"
+        ? `
 scope_final_events AS (
   SELECT re.*
   FROM scope_raw_events re
@@ -1171,7 +1259,7 @@ scope_final_events AS (
    AND matching_entities.entity_id = re.${entityColumnName}
   WHERE TRIM(COALESCE(re.${entityColumnName}, '')) != ''
 )`
-      : `
+        : `
 scope_final_events AS (
   SELECT re.*
   FROM scope_raw_events re
@@ -1180,14 +1268,24 @@ scope_final_events AS (
    AND matching_events.event_id = re.event_id
 )`;
   const definitions: BoundCteDefinition[] = [
-    boundCte("scope_raw_visits", visitSource(input.siteIds), [
-      ...input.siteIds,
-      input.window.startMs,
-      input.window.endExclusiveMs,
-    ]),
+    boundCte(
+      "scope_raw_visits",
+      directVisitContext
+        ? visitSource(input.siteIds).replace(
+            "scope_raw_visits AS MATERIALIZED (",
+            "scope_raw_visits AS (",
+          )
+        : visitSource(input.siteIds),
+      [...input.siteIds, input.window.startMs, input.window.endExclusiveMs],
+    ),
     boundCte(
       "scope_raw_events",
-      eventSource(input.siteIds, input.compatibilityEventSource),
+      directVisitContext
+        ? eventSource(input.siteIds, input.compatibilityEventSource).replace(
+            "scope_raw_events AS MATERIALIZED (",
+            "scope_raw_events AS (",
+          )
+        : eventSource(input.siteIds, input.compatibilityEventSource),
       [...input.siteIds, input.window.startMs, input.window.endExclusiveMs],
     ),
     boundCte(
@@ -1197,7 +1295,11 @@ scope_final_events AS (
     ...(domains?.definitions ?? []),
     ...(qualification?.ctes ?? []),
   ];
-  if (qualification?.kind === "observation" && !matchesAllObservations) {
+  if (
+    qualification.kind === "observation" &&
+    !matchesAllObservations &&
+    !directVisitContext
+  ) {
     // An Event qualifies its associated Visit for report output; the Visit
     // does not thereby match the Event predicate itself.
     definitions.push(
