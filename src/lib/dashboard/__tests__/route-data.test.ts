@@ -101,6 +101,8 @@ import {
   loadTeamDashboardSnapshot,
   loadTeamManagementInitialData,
   loadTeamNotificationsInitialData,
+  loadWorkspaceSnapshots,
+  WORKSPACE_TEAM_LIMIT,
 } from "@/lib/dashboard/route-data";
 import {
   getDashboardTeamSites,
@@ -283,6 +285,38 @@ describe("Dashboard route data loaders", () => {
           }),
         }),
       );
+    });
+
+    it("loads every workspace team on its own and drops failed teams", async () => {
+      teamDashboardExecute.mockRejectedValueOnce(new Error("internal"));
+      const result = await loadWorkspaceSnapshots({
+        data: { teamIds: ["team-a", "team-b", "team-a"] },
+      } as never);
+
+      expect(Object.keys(result)).toEqual(["team-a", "team-b"]);
+      expect(result["team-a"]).toBeNull();
+      expect(result["team-b"]).toMatchObject({
+        data: { sites: [], trend: [] },
+      });
+      expect(resolveTeamDashboardRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ teamId: "team-b" }),
+      );
+    });
+
+    it("caps the workspace team list and ignores malformed input", async () => {
+      const many = Array.from(
+        { length: WORKSPACE_TEAM_LIMIT + 5 },
+        (_, index) => `team-${index}`,
+      );
+      const capped = await loadWorkspaceSnapshots({
+        data: { teamIds: many },
+      } as never);
+      expect(Object.keys(capped)).toHaveLength(WORKSPACE_TEAM_LIMIT);
+      expect(
+        await loadWorkspaceSnapshots({
+          data: { teamIds: "team-a" },
+        } as never),
+      ).toEqual({});
     });
 
     it("keeps typed operation failures as SSR errors", async () => {

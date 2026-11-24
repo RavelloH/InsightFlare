@@ -2008,7 +2008,7 @@ teamManagement:
     ownerTransferFailed: 轉移所有權失敗。
     invalidTransferTarget: 請選擇新的所有者。
   sites:
-    title: 站點儀表盤
+    title: 站點總覽
     subtitle: 聚合檢視該團隊下所有站點的造訪表現。
     aggregateTitle: 總造訪量
     pagesPerSession: 每工作階段頁面數
@@ -3048,9 +3048,51 @@ sidebarFooter:
   loggingOut: 退出中...
   logoutSuccess: 已登出。
   logoutFailed: 登出失敗，請稍後重試。
-teamEntry:
-  title: 選擇團隊
-  description: 你目前可存取多個團隊，請先選擇要進入的團隊。
+workspace:
+  title: 工作台
+  pulseTitle: "網站脈搏"
+  pulseHint: "每格對比該網站訪客與它自己的平常水準。"
+  pulse:
+    usual: "平常水準"
+    above: "高於平常"
+    below: "低於平常"
+    versusUsual: "比平常 {percent}"
+  greetings:
+    morning: "早安，{name}"
+    afternoon: "午安，{name}"
+    evening: "晚安，{name}"
+  allSitesTitle: "全部網站"
+  totalsTitle: "我的網站合計"
+  totalsHint: "你能存取的所有網站，與上一週期相比"
+  summary: "{teams} 個團隊 · {sites} 個網站"
+  recentSites: 繼續工作
+  attention: 待處理
+  noAttention: 沒有需要處理的通知
+  viewAllNotifications: 全部通知
+  searchSites: 搜尋網站…
+  columns:
+    site: 網站
+    team: 團隊
+    change: 環比
+    trend: 趨勢
+  noSites: 還沒有可以存取的網站
+  noMatch: 沒有符合的網站
+  changesTitle: 明顯變化
+  changesHint: "橫軸為訪客規模，縱軸為較上一週期的變化，超過 ±{percent}% 的網站會被標出。"
+  noChanges: 與上一週期相比，各網站訪客沒有明顯變化
+  partial: "部分團隊的資料暫時無法載入：{teams}"
+  limited: "只顯示前 {count} 個團隊的資料"
+  backToWorkspace: 返回個人工作台
+  personal: 個人
+  personalDashboards: 個人儀表盤
+  teamDashboards: 團隊儀表盤
+  newDashboard: 新增儀表盤
+  systemManagement: 系統管理
+  help: 說明
+  documentation: 文件中心
+  apiReference: API 參考
+  github: GitHub
+  feedback: 問題回饋
 search:
   title: 搜尋
   description: 搜尋分析頁面、指標、網站和資料。

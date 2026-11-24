@@ -2006,7 +2006,7 @@ teamManagement:
     ownerTransferFailed: 转移所有权失败。
     invalidTransferTarget: 请选择新的所有者。
   sites:
-    title: 站点仪表盘
+    title: 站点总览
     subtitle: 聚合查看该团队下所有站点的访问表现。
     aggregateTitle: 总访问量
     pagesPerSession: 每会话页面数
@@ -3048,9 +3048,51 @@ sidebarFooter:
   loggingOut: 退出中...
   logoutSuccess: 已退出登录。
   logoutFailed: 退出登录失败，请稍后重试。
-teamEntry:
-  title: 选择团队
-  description: 你当前可访问多个团队，请先选择要进入的团队。
+workspace:
+  title: 工作台
+  pulseTitle: "站点脉搏"
+  pulseHint: "每格对比该站点访客与它自己的平常水平。"
+  pulse:
+    usual: "平常水平"
+    above: "高于平常"
+    below: "低于平常"
+    versusUsual: "比平常 {percent}"
+  greetings:
+    morning: "早上好，{name}"
+    afternoon: "下午好，{name}"
+    evening: "晚上好，{name}"
+  allSitesTitle: "全部站点"
+  totalsTitle: "我的站点合计"
+  totalsHint: "你能访问的所有站点，与上一周期相比"
+  summary: "{teams} 个团队 · {sites} 个站点"
+  recentSites: 继续工作
+  attention: 待处理
+  noAttention: 没有需要处理的通知
+  viewAllNotifications: 全部通知
+  searchSites: 搜索站点…
+  columns:
+    site: 站点
+    team: 团队
+    change: 环比
+    trend: 趋势
+  noSites: 还没有可以访问的站点
+  noMatch: 没有匹配的站点
+  changesTitle: 明显变化
+  changesHint: "横轴为访客规模，纵轴为较上一周期的变化，超过 ±{percent}% 的站点会被标出。"
+  noChanges: 与上一周期相比，各站点访客没有明显变化
+  partial: "部分团队的数据暂时无法加载：{teams}"
+  limited: "只显示前 {count} 个团队的数据"
+  backToWorkspace: 返回个人工作台
+  personal: 个人
+  personalDashboards: 个人仪表盘
+  teamDashboards: 团队仪表盘
+  newDashboard: 新建仪表盘
+  systemManagement: 系统管理
+  help: 帮助
+  documentation: 文档中心
+  apiReference: API 参考
+  github: GitHub
+  feedback: 问题反馈
 search:
   title: 搜索
   description: 搜索分析页面、指标、站点和数据。

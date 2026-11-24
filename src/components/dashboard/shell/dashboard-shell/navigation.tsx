@@ -20,6 +20,7 @@ import {
   RiWindow2Line,
 } from "@remixicon/react";
 
+import type { SiteSection } from "@/lib/dashboard/paths";
 import { type SiteData, type TeamData } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -77,6 +78,74 @@ export const VALID_ANALYTICS_SECTIONS = new Set([
   "goals",
   "retention",
 ]);
+
+type WorkspaceSiteSection = Exclude<SiteSection, "settings"> | "";
+
+export function isWorkspaceSiteSection(
+  section: string,
+): section is WorkspaceSiteSection {
+  return (
+    section === "" ||
+    (section !== "settings" && VALID_ANALYTICS_SECTIONS.has(section))
+  );
+}
+
+export interface WorkspaceSiteVisit {
+  teamId: string;
+  siteId: string;
+  siteSlug: string;
+  name: string;
+  section: WorkspaceSiteSection;
+}
+
+const workspaceVisitsKey = "insightflare-workspace-visits-v1";
+
+export function readWorkspaceSites(userId: string): WorkspaceSiteVisit[] {
+  try {
+    const visits: unknown = JSON.parse(
+      localStorage.getItem(`${workspaceVisitsKey}:${userId}`) ?? "[]",
+    );
+    if (!Array.isArray(visits)) return [];
+
+    return visits.filter(
+      (visit): visit is WorkspaceSiteVisit =>
+        !!visit &&
+        typeof visit.teamId === "string" &&
+        typeof visit.siteId === "string" &&
+        typeof visit.siteSlug === "string" &&
+        /^[A-Za-z0-9_-]+$/.test(visit.siteSlug) &&
+        typeof visit.name === "string" &&
+        typeof visit.section === "string" &&
+        isWorkspaceSiteSection(visit.section),
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function rememberWorkspaceSite(
+  userId: string,
+  visit: WorkspaceSiteVisit,
+): void {
+  try {
+    const visits = readWorkspaceSites(userId);
+    localStorage.setItem(
+      `${workspaceVisitsKey}:${userId}`,
+      JSON.stringify(
+        [
+          visit,
+          ...visits.filter(
+            (item) =>
+              item.teamId !== visit.teamId || item.siteId !== visit.siteId,
+          ),
+        ].slice(0, 5),
+      ),
+    );
+  } catch {
+    // Browser storage may be unavailable.
+  }
+}
+
 export const DASHBOARD_SCROLLBAR_OPTIONS =
   PERSISTENT_VERTICAL_SCROLLBAR_OPTIONS;
 export const SIDEBAR_COLLAPSE_SECTION_CLASS =

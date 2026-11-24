@@ -11,12 +11,7 @@ import {
 import { dashboardSessionSecret } from "@/lib/secrets";
 import { verifySessionToken } from "@/lib/session";
 type AuthState = "authenticated" | "unauthenticated" | "unknown";
-type InternalFetch = (request: Request) => Promise<Response>;
-const DEMO_DEFAULT_TEAM_SLUG = "xeoos-team";
 const LOCALE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
-interface RedirectProfile {
-  teams: Array<{ slug: string }>;
-}
 export interface PageRequestDecision {
   locale: string | null;
   pathname: string;
@@ -50,37 +45,6 @@ async function authState(request: Request, env: Env): Promise<AuthState> {
   return (await verifySessionToken(token, secret, appNow()))
     ? "authenticated"
     : "unauthenticated";
-}
-async function fetchRedirectProfile(
-  request: Request,
-  internalFetch: InternalFetch,
-): Promise<RedirectProfile | null> {
-  const token = cookieValue(request, SESSION_COOKIE);
-  if (!token) return null;
-
-  try {
-    const url = new URL("/api/private/session", request.url);
-    const response = await internalFetch(
-      new Request(url, {
-        headers: { authorization: `Bearer ${token}` },
-      }),
-    );
-    if (!response.ok) return null;
-    const payload = (await response.json()) as {
-      ok?: boolean;
-      data?: { teams?: Array<{ slug?: unknown }> };
-    };
-    if (!payload.ok) return null;
-    const teams = Array.isArray(payload.data?.teams)
-      ? payload.data.teams
-          .map((team) => String(team.slug || "").trim())
-          .filter(Boolean)
-          .map((slug) => ({ slug }))
-      : [];
-    return { teams };
-  } catch {
-    return null;
-  }
 }
 export function requestLocale(request: Request): string {
   const acceptLanguage = request.headers.get("accept-language");
@@ -144,7 +108,6 @@ function redirectResponse(
 export async function resolvePageRequest(
   request: Request,
   env: Env,
-  internalFetch: InternalFetch,
 ): Promise<PageRequestDecision> {
   const url = new URL(request.url);
   const { pathname } = url;
@@ -173,16 +136,6 @@ export async function resolvePageRequest(
       };
     }
     const rest = normalizePathname(pathname.replace(/^\/[^/]+/, "") || "/");
-    if (rest === "/app") {
-      return {
-        locale: localeFromPath,
-        pathname,
-        response: redirectResponse(
-          request,
-          `/${localeFromPath}/app/${DEMO_DEFAULT_TEAM_SLUG}`,
-        ),
-      };
-    }
     if (rest === "/login") {
       return {
         locale: localeFromPath,
@@ -254,19 +207,6 @@ export async function resolvePageRequest(
     }
 
     const segments = normalizedRestPath.split("/").filter(Boolean);
-    if (segments.length === 1) {
-      const profile = await fetchRedirectProfile(request, internalFetch);
-      if (profile?.teams.length === 1) {
-        return {
-          locale: localeFromPath,
-          pathname,
-          response: redirectResponse(
-            request,
-            `/${localeFromPath}/app/${profile.teams[0].slug}`,
-          ),
-        };
-      }
-    }
     if (segments.length === 2) {
       const tab = url.searchParams.get("tab");
       if (tab === "settings" || tab === "members") {
@@ -298,7 +238,6 @@ export async function resolvePageRequest(
 export async function middleware(
   request: Request,
   env?: Env,
-  internalFetch: InternalFetch = fetch,
 ): Promise<Response> {
   const runtimeEnv =
     env ??
@@ -307,7 +246,7 @@ export async function middleware(
       DEMO_MODE: process.env.VITE_DEMO_MODE,
     } as unknown as Env);
   initializeE2eClock(runtimeEnv);
-  const decision = await resolvePageRequest(request, runtimeEnv, internalFetch);
+  const decision = await resolvePageRequest(request, runtimeEnv);
   if (decision.response) return decision.response;
   const headers = new Headers({ "x-pathname": decision.pathname });
   if (decision.locale) {

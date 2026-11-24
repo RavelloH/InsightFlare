@@ -72,6 +72,7 @@ import {
   getUiGalleryCategoryLabel,
   getUiGalleryCopy,
 } from "@/components/ui-gallery/copy";
+import { APP_WEBSITE_URL } from "@/lib/constants";
 import { resolveLocale } from "@/lib/i18n/config";
 import { getMessages } from "@/lib/i18n/messages";
 import Link from "@/lib/router";
@@ -185,7 +186,7 @@ export function UiGalleryShell() {
         <Sidebar variant="inset" collapsible="icon">
           <SidebarHeader>
             <AppSidebarBrand
-              href="https://github.com/RavelloH/InsightFlare"
+              href={APP_WEBSITE_URL}
               target="_blank"
               rel="noopener noreferrer"
               appName="InsightFlare"

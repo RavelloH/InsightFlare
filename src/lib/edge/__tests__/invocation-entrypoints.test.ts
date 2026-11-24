@@ -77,17 +77,13 @@ describe("actual Worker top-level invocation entrypoints", () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it("records one page invocation; an internal Hono dispatch never adds a point", async () => {
+  it("records one page invocation for the workspace without a profile dispatch", async () => {
     const f = setup();
-    vi.mocked(resolvePageRequest).mockImplementationOnce(
-      async (_request, _env, internalApi) => {
-        const internalResponse = await internalApi(
-          new Request("https://app.test/api/internal"),
-        );
-        expect(internalResponse.status).toBe(200);
-        return { response: null, locale: null, pathname: "/en/app" };
-      },
-    );
+    vi.mocked(resolvePageRequest).mockResolvedValueOnce({
+      response: null,
+      locale: null,
+      pathname: "/en/app",
+    });
     const response = await server.fetch(
       new Request("https://app.test/en/app?private=secret"),
       f.env,
@@ -100,12 +96,7 @@ describe("actual Worker top-level invocation entrypoints", () => {
     expect(f.points[0].indexes).toEqual(["page.other:ok"]);
     expect(f.points[0].blobs[2]).toBe("page");
     expect(JSON.stringify(f.points)).not.toContain("private=secret");
-    expect(vi.mocked(apiApp.fetch)).toHaveBeenCalledOnce();
-    const forwarded = vi.mocked(apiApp.fetch).mock.calls[0][0] as Request;
-    // The internal origin is proven by Request identity, never by a header.
-    expect(
-      forwarded.headers.get("x-insightflare-internal-page-request"),
-    ).toBeNull();
+    expect(vi.mocked(apiApp.fetch)).not.toHaveBeenCalled();
     expect(vi.mocked(startHandler.fetch)).toHaveBeenCalledOnce();
   });
 

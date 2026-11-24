@@ -37,6 +37,7 @@ import {
 
 import { DashboardHeaderControls } from "@/components/dashboard/shell/dashboard-header-controls";
 import { useTheme } from "@/components/theme-provider";
+import { APP_WEBSITE_URL } from "@/lib/constants";
 import {
   isValidLocale,
   type Locale,
@@ -96,7 +97,7 @@ export function ShareHeader({
             <BreadcrumbItem className="shrink-0">
               <BreadcrumbLink asChild>
                 <Link
-                  href="https://github.com/RavelloH/InsightFlare"
+                  href={APP_WEBSITE_URL}
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-center gap-2 text-foreground transition-colors hover:text-primary"

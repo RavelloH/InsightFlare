@@ -35,7 +35,19 @@ import {
   TooltipTrigger,
 } from "@insightflare/ui/tooltip";
 import { VerticalScrollMask } from "@insightflare/ui/vertical-scroll-mask";
-import { RiArrowLeftLine } from "@remixicon/react";
+import {
+  RiAddLine,
+  RiArrowLeftLine,
+  RiArrowRightLine,
+  RiArrowRightUpLine,
+  RiBookOpenLine,
+  RiCodeSSlashLine,
+  RiDashboardLine,
+  RiFeedbackLine,
+  RiGithubLine,
+  RiNotification3Line,
+  RiSettings3Line,
+} from "@remixicon/react";
 
 import { AppShellLayout } from "@/components/app-shell-layout";
 import { AppSidebarBrand } from "@/components/app-sidebar-brand";
@@ -48,6 +60,7 @@ import { SidebarFooterMenus } from "@/components/dashboard/shell/sidebar-footer-
 import { SidebarMenuStage } from "@/components/dashboard/shell/sidebar-menu-stage";
 import { SidebarSiteDetails } from "@/components/dashboard/shell/sidebar-site-details";
 import { useAccountTimeZonePreference } from "@/components/time-zone-provider";
+import { APP_WEBSITE_URL } from "@/lib/constants";
 import { canManageTeam } from "@/lib/dashboard/permissions";
 import {
   parseFilterDocumentFromSearchParams,
@@ -84,6 +97,10 @@ import type {
   SidebarSite,
   TeamSectionNavItem,
 } from "./dashboard-shell/navigation";
+
+const sidebarTrailingIconClass =
+  "absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground group-data-[collapsible=icon]:hidden";
+
 import {
   analyticsTabLabel,
   buildSitePath,
@@ -91,10 +108,11 @@ import {
   getTeamRoleIcon,
   getTeamRoleLabel,
   getTeamSectionIcon,
+  isWorkspaceSiteSection,
   normalizeLocalePath,
   parseActiveTeamSlugFromPath,
   parseSidebarRouteState,
-  SIDEBAR_COLLAPSE_MARGIN_CLASS,
+  rememberWorkspaceSite,
   SIDEBAR_COLLAPSE_SECTION_CLASS,
   SIDEBAR_COLLAPSE_SEPARATOR_CLASS,
   toSidebarSite,
@@ -282,7 +300,64 @@ export function DashboardShell({
   const teamRootHref = liveActiveTeamSlug
     ? `/${locale}/app/${liveActiveTeamSlug}`
     : appRootHref;
-  const backToTeamLabel = messages.common.backToTeam;
+  const workspace = messages.workspace;
+  const helpLinks = [
+    {
+      label: workspace.documentation,
+      href: "https://insightflare.net/docs",
+      Icon: RiBookOpenLine,
+    },
+    {
+      label: workspace.apiReference,
+      href: "https://insightflare.net/docs/api",
+      Icon: RiCodeSSlashLine,
+    },
+    {
+      label: workspace.github,
+      href: "https://github.com/RavelloH/InsightFlare",
+      Icon: RiGithubLine,
+    },
+    {
+      label: workspace.feedback,
+      href: "https://github.com/RavelloH/InsightFlare/issues/new/choose",
+      Icon: RiFeedbackLine,
+    },
+  ];
+  const helpMenu = (
+    <>
+      <hr className="mx-2 border-sidebar-border" />
+      <SidebarGroup>
+        <SidebarGroupLabel>{workspace.help}</SidebarGroupLabel>
+        <SidebarGroupContent>
+          <SidebarMenu>
+            {helpLinks.map(({ label, href, Icon }) => (
+              <SidebarMenuItem key={href}>
+                <SidebarMenuButton
+                  asChild
+                  tooltip={label}
+                  className="relative pr-8"
+                >
+                  <a href={href} target="_blank" rel="noopener noreferrer">
+                    <Icon />
+                    <RiArrowRightUpLine
+                      aria-hidden="true"
+                      className={sidebarTrailingIconClass}
+                    />
+                    <span>{label}</span>
+                  </a>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    </>
+  );
+  const isWorkspace = livePathname.replace(/\/$/, "") === appRootHref;
+  const backLabel =
+    routeState.mode === "site"
+      ? messages.common.backToTeam
+      : workspace.backToWorkspace;
   const activeTeamName = liveActiveTeamSlug
     ? activeTeam?.name || liveActiveTeamSlug
     : "";
@@ -654,6 +729,36 @@ export function DashboardShell({
     rememberCurrentPerceptionNavigation(mainSiteSection || "overview");
   }, [user.id, activeTeamId, activeSiteId, mainSiteSection]);
 
+  const recentSiteId = authorizedActiveSite?.id;
+  const recentSiteSlug = authorizedActiveSite?.slug;
+  const recentSiteName = authorizedActiveSite?.name;
+  useEffect(() => {
+    if (
+      !hasActiveSite ||
+      !activeTeamId ||
+      !recentSiteId ||
+      !recentSiteSlug ||
+      !recentSiteName
+    )
+      return;
+    if (!isWorkspaceSiteSection(mainSiteSection)) return;
+    rememberWorkspaceSite(user.id, {
+      teamId: activeTeamId,
+      siteId: recentSiteId,
+      siteSlug: recentSiteSlug,
+      name: recentSiteName,
+      section: mainSiteSection,
+    });
+  }, [
+    hasActiveSite,
+    activeTeamId,
+    recentSiteId,
+    recentSiteSlug,
+    recentSiteName,
+    mainSiteSection,
+    user.id,
+  ]);
+
   const teamSelector = (
     <SidebarGroup className={SIDEBAR_COLLAPSE_SECTION_CLASS}>
       <SidebarGroupContent className="flex flex-col gap-2">
@@ -720,8 +825,9 @@ export function DashboardShell({
           <Sidebar variant="inset" collapsible="icon">
             <SidebarHeader>
               <AppSidebarBrand
-                href="https://github.com/RavelloH/InsightFlare"
-                target="_black"
+                href={APP_WEBSITE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
                 appName={messages.appName}
                 suffix={import.meta.env.VITE_DEMO_MODE === "1" ? "Demo" : "v1"}
               />
@@ -730,18 +836,22 @@ export function DashboardShell({
             <div className="shrink-0">
               {teamSelector}
 
-              {routeState.mode === "site" ? (
+              {routeState.mode !== "root" ? (
                 <>
                   <SidebarGroup>
                     <SidebarGroupContent>
-                      <SidebarMenu
-                        className={`mb-2 ${SIDEBAR_COLLAPSE_MARGIN_CLASS}`}
-                      >
+                      <SidebarMenu>
                         <SidebarMenuItem>
-                          <SidebarMenuButton asChild>
-                            <Link href={teamRootHref}>
+                          <SidebarMenuButton asChild tooltip={backLabel}>
+                            <Link
+                              href={
+                                routeState.mode === "site"
+                                  ? teamRootHref
+                                  : appRootHref
+                              }
+                            >
                               <RiArrowLeftLine />
-                              <span>{backToTeamLabel}</span>
+                              <span>{backLabel}</span>
                             </Link>
                           </SidebarMenuButton>
                         </SidebarMenuItem>
@@ -767,46 +877,132 @@ export function DashboardShell({
                   {routeState.mode === "root" ? (
                     <>
                       <SidebarGroup>
+                        <SidebarGroupContent>
+                          <SidebarMenu>
+                            <SidebarMenuItem>
+                              <SidebarMenuButton
+                                asChild
+                                isActive={isWorkspace}
+                                tooltip={workspace.title}
+                              >
+                                <Link
+                                  href={appRootHref}
+                                  aria-current={
+                                    isWorkspace ? "page" : undefined
+                                  }
+                                >
+                                  <RiDashboardLine />
+                                  <span>{workspace.title}</span>
+                                </Link>
+                              </SidebarMenuButton>
+                            </SidebarMenuItem>
+                          </SidebarMenu>
+                        </SidebarGroupContent>
+                      </SidebarGroup>
+                      {teams.length > 0 ? (
+                        <SidebarGroup>
+                          <SidebarGroupLabel>
+                            {messages.common.team}
+                          </SidebarGroupLabel>
+                          <SidebarGroupContent>
+                            <SidebarMenu>
+                              {teams.map((team) => {
+                                const RoleIcon = getTeamRoleIcon(
+                                  team.membershipRole,
+                                );
+                                const roleLabel = getTeamRoleLabel(
+                                  messages,
+                                  team.membershipRole,
+                                );
+                                return (
+                                  <SidebarMenuItem key={team.id}>
+                                    <SidebarMenuButton
+                                      asChild
+                                      tooltip={team.name}
+                                      className="relative pr-8"
+                                    >
+                                      <Link
+                                        href={`/${locale}/app/${team.slug}`}
+                                      >
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <span
+                                              aria-label={roleLabel}
+                                              className={
+                                                team.membershipRole === "owner"
+                                                  ? "text-primary"
+                                                  : undefined
+                                              }
+                                            >
+                                              <RoleIcon aria-hidden="true" />
+                                            </span>
+                                          </TooltipTrigger>
+                                          <TooltipContent side="right">
+                                            {roleLabel}
+                                          </TooltipContent>
+                                        </Tooltip>
+                                        <RiArrowRightLine
+                                          aria-hidden="true"
+                                          className={sidebarTrailingIconClass}
+                                        />
+                                        <span>{team.name}</span>
+                                      </Link>
+                                    </SidebarMenuButton>
+                                  </SidebarMenuItem>
+                                );
+                              })}
+                            </SidebarMenu>
+                          </SidebarGroupContent>
+                        </SidebarGroup>
+                      ) : null}
+
+                      <DashboardSidebarEntry
+                        label={workspace.personalDashboards}
+                        createLabel={workspace.newDashboard}
+                      />
+                      <SidebarGroup>
                         <SidebarGroupLabel>
-                          {messages.common.team}
+                          {workspace.personal}
                         </SidebarGroupLabel>
                         <SidebarGroupContent>
                           <SidebarMenu>
-                            {teams.map((team) => {
-                              const RoleIcon = getTeamRoleIcon(
-                                team.membershipRole,
-                              );
-                              const roleLabel = getTeamRoleLabel(
-                                messages,
-                                team.membershipRole,
-                              );
-                              return (
-                                <SidebarMenuItem key={team.id}>
-                                  <SidebarMenuButton asChild>
-                                    <Link href={`/${locale}/app/${team.slug}`}>
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <span
-                                            aria-label={roleLabel}
-                                            className={
-                                              team.membershipRole === "owner"
-                                                ? "text-primary"
-                                                : undefined
-                                            }
-                                          >
-                                            <RoleIcon aria-hidden="true" />
-                                          </span>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="right">
-                                          {roleLabel}
-                                        </TooltipContent>
-                                      </Tooltip>
-                                      <span>{team.name}</span>
-                                    </Link>
-                                  </SidebarMenuButton>
-                                </SidebarMenuItem>
-                              );
-                            })}
+                            <SidebarMenuItem>
+                              <SidebarMenuButton
+                                asChild
+                                isActive={
+                                  routeState.activeRootSectionKey === "inbox"
+                                }
+                                tooltip={messages.notificationCenter.title}
+                              >
+                                <Link href={notificationsHref}>
+                                  <RiNotification3Line />
+                                  <span>
+                                    {messages.notificationCenter.title}
+                                  </span>
+                                  {unreadAttentionCount > 0 ? (
+                                    <span className="ml-auto text-xs tabular-nums text-primary">
+                                      {unreadAttentionCount > 99
+                                        ? "99+"
+                                        : unreadAttentionCount}
+                                    </span>
+                                  ) : null}
+                                </Link>
+                              </SidebarMenuButton>
+                            </SidebarMenuItem>
+                            <SidebarMenuItem>
+                              <SidebarMenuButton
+                                asChild
+                                isActive={
+                                  routeState.activeRootSectionKey === "account"
+                                }
+                                tooltip={messages.accountSettings.title}
+                              >
+                                <Link href={accountHref}>
+                                  <RiSettings3Line />
+                                  <span>{messages.accountSettings.title}</span>
+                                </Link>
+                              </SidebarMenuButton>
+                            </SidebarMenuItem>
                           </SidebarMenu>
                         </SidebarGroupContent>
                       </SidebarGroup>
@@ -818,7 +1014,7 @@ export function DashboardShell({
                           />
                           <SidebarGroup>
                             <SidebarGroupLabel>
-                              {messages.common.management}
+                              {workspace.systemManagement}
                             </SidebarGroupLabel>
                             <SidebarGroupContent>
                               <SidebarMenu>
@@ -848,6 +1044,7 @@ export function DashboardShell({
                           </SidebarGroup>
                         </>
                       ) : null}
+                      {helpMenu}
                     </>
                   ) : (
                     <>
@@ -864,9 +1061,6 @@ export function DashboardShell({
                               <SidebarGroupContent>
                                 <SidebarMenu>
                                   {resolvedTeamSections?.map((item) => {
-                                    const isActive =
-                                      routeState.activeTeamSectionKey ===
-                                      item.key;
                                     const SectionIcon = getTeamSectionIcon(
                                       item.key,
                                     );
@@ -874,7 +1068,11 @@ export function DashboardShell({
                                       <SidebarMenuItem key={item.key}>
                                         <SidebarMenuButton
                                           asChild
-                                          isActive={isActive}
+                                          isActive={
+                                            routeState.activeTeamSectionKey ===
+                                            item.key
+                                          }
+                                          tooltip={item.label}
                                         >
                                           <Link href={item.href}>
                                             <SectionIcon />
@@ -887,43 +1085,10 @@ export function DashboardShell({
                                 </SidebarMenu>
                               </SidebarGroupContent>
                             </SidebarGroup>
-
-                            {hasManagementSections ? (
-                              <>
-                                <SidebarSeparator
-                                  className={SIDEBAR_COLLAPSE_SEPARATOR_CLASS}
-                                />
-                                <SidebarGroup>
-                                  <SidebarGroupLabel>
-                                    {messages.common.management}
-                                  </SidebarGroupLabel>
-                                  <SidebarGroupContent>
-                                    <SidebarMenu>
-                                      {managementSections?.map((item) => {
-                                        const isActive =
-                                          routeState.activeManagementSectionKey ===
-                                          item.key;
-                                        const SectionIcon =
-                                          getManagementSectionIcon(item.key);
-                                        return (
-                                          <SidebarMenuItem key={item.key}>
-                                            <SidebarMenuButton
-                                              asChild
-                                              isActive={isActive}
-                                            >
-                                              <Link href={item.href}>
-                                                <SectionIcon />
-                                                <span>{item.label}</span>
-                                              </Link>
-                                            </SidebarMenuButton>
-                                          </SidebarMenuItem>
-                                        );
-                                      })}
-                                    </SidebarMenu>
-                                  </SidebarGroupContent>
-                                </SidebarGroup>
-                              </>
-                            ) : null}
+                            <DashboardSidebarEntry
+                              label={workspace.teamDashboards}
+                              createLabel={workspace.newDashboard}
+                            />
                           </>
                         ) : (
                           <>
@@ -947,6 +1112,7 @@ export function DashboardShell({
                             </SidebarGroup>
                           </>
                         )}
+                        {helpMenu}
                       </SidebarMenuStage>
                     </>
                   )}
@@ -1029,7 +1195,9 @@ export function DashboardShell({
                     siteId={activeSiteId}
                     resolvedScope={dashboardFilterResolvedScope}
                     showControls={
-                      Boolean(liveActiveTeamSlug) || isAdminObservabilityRoute
+                      Boolean(liveActiveTeamSlug) ||
+                      isAdminObservabilityRoute ||
+                      isWorkspace
                     }
                     showFilterSheet={hasActiveSite}
                     comparisonDisabled={
@@ -1075,5 +1243,34 @@ export function DashboardShell({
         {children}
       </AppShellLayout>
     </DashboardQueryProvider>
+  );
+}
+
+function DashboardSidebarEntry({
+  label,
+  createLabel,
+}: {
+  label: string;
+  createLabel: string;
+}) {
+  return (
+    <SidebarGroup>
+      <SidebarGroupLabel>{label}</SidebarGroupLabel>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              type="button"
+              aria-disabled="true"
+              tooltip={createLabel}
+              className="aria-disabled:pointer-events-auto aria-disabled:opacity-100"
+            >
+              <RiAddLine />
+              <span>{createLabel}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
   );
 }

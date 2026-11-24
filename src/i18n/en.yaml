@@ -2091,7 +2091,7 @@ teamManagement:
     ownerTransferFailed: Failed to transfer ownership.
     invalidTransferTarget: Please choose a new owner.
   sites:
-    title: Site Dashboard
+    title: Site Overview
     subtitle: Aggregated traffic view across all sites in this team.
     aggregateTitle: Total Visits
     pagesPerSession: Pages / Session
@@ -3176,9 +3176,51 @@ sidebarFooter:
   loggingOut: Signing out...
   logoutSuccess: Signed out.
   logoutFailed: Failed to sign out. Please try again.
-teamEntry:
-  title: Choose a Team
-  description: You have access to multiple teams. Choose where to continue.
+workspace:
+  title: Workspace
+  pulseTitle: "Site pulse"
+  pulseHint: "Each cell compares visitors with the site's own usual level."
+  pulse:
+    usual: "Usual"
+    above: "Above usual"
+    below: "Below usual"
+    versusUsual: "{percent} vs usual"
+  greetings:
+    morning: "Good morning, {name}"
+    afternoon: "Good afternoon, {name}"
+    evening: "Good evening, {name}"
+  allSitesTitle: "All sites"
+  totalsTitle: "Across your sites"
+  totalsHint: "All sites you can access, against the previous period"
+  summary: "{teams} teams · {sites} sites"
+  recentSites: Continue working
+  attention: Needs attention
+  noAttention: Nothing needs your attention
+  viewAllNotifications: All notifications
+  searchSites: Search sites…
+  columns:
+    site: Site
+    team: Team
+    change: Change
+    trend: Trend
+  noSites: You don't have access to any sites yet
+  noMatch: No matching sites
+  changesTitle: Notable changes
+  changesHint: "Visitor size against change from the previous period. Sites beyond ±{percent}% are labelled."
+  noChanges: No site's visitors moved much against the previous period
+  partial: "Data for some teams could not be loaded: {teams}"
+  limited: "Showing data for the first {count} teams only"
+  backToWorkspace: Back to workspace
+  personal: Personal
+  personalDashboards: Personal dashboards
+  teamDashboards: Team dashboards
+  newDashboard: New dashboard
+  systemManagement: System administration
+  help: Help
+  documentation: Documentation
+  apiReference: API reference
+  github: GitHub
+  feedback: Send feedback
 search:
   title: Search
   description: Search analytics pages, metrics, sites and data.

@@ -91,59 +91,90 @@ export const loadDashboardTeam = createServerFn({ method: "GET" })
   .validator((data: { teamSlug: string }) => data)
   .handler(({ data }) => getDashboardTeamContext(data.teamSlug));
 /** Loads the first team-dashboard snapshot on the server for a stable hydrate. */
+async function readTeamDashboardSnapshot(data: {
+  teamId: string;
+}): Promise<TeamDashboardSnapshot | null> {
+  const request = getRequest();
+  const runtime = await resolveEdgeRuntime(request);
+  const resolved = await resolveTeamDashboardRequest({
+    request,
+    env: runtime.env,
+    teamId: data.teamId,
+  });
+  if (resolved instanceof Response) return null;
+
+  const preloadedSites = await getDashboardTeamSites(data.teamId);
+
+  const window = resolveDashboardInitialWindow(request.headers.get("cookie"));
+  const filters = parseFilterUrlForAudience("private-dashboard", request.url);
+  const teamDashboardRuntime = createTeamDashboardQueryRuntime({
+    env: resolved.env,
+    teamId: resolved.teamId,
+    window: {
+      startMs: window.from,
+      endExclusiveMs: window.to,
+      nowMs: window.to,
+      timeZone: window.timeZone,
+    },
+    interval: window.interval,
+    allowedSiteIds: resolved.allowedSiteIds,
+    preloadedSites: preloadedSites.map(({ slug: _slug, ...site }) => ({
+      ...site,
+      publicEnabled: Number(Boolean(site.publicEnabled)),
+    })),
+  });
+  const result = await teamDashboardRuntime.execute("team-dashboard", {
+    context: teamQueryContext(
+      resolved.teamId,
+      "private-dashboard",
+      resolved.allowedSiteIds,
+    ),
+    time: createQueryTime(window.from, window.to, window.timeZone, window.to),
+    filters,
+  });
+  if (!result.ok) throw new Error(result.error.kind);
+  return {
+    data: result.data,
+    window: {
+      from: window.from,
+      to: window.to,
+      interval: window.interval,
+      timeZone: window.timeZone,
+    },
+    range: window.preset,
+    fetchedAt: Date.now(),
+  };
+}
 export const loadTeamDashboardSnapshot = createServerFn({ method: "GET" })
   .validator((data: { teamId: string }) => data)
-  .handler(async ({ data }): Promise<TeamDashboardSnapshot | null> => {
-    const request = getRequest();
-    const runtime = await resolveEdgeRuntime(request);
-    const resolved = await resolveTeamDashboardRequest({
-      request,
-      env: runtime.env,
-      teamId: data.teamId,
-    });
-    if (resolved instanceof Response) return null;
-
-    const preloadedSites = await getDashboardTeamSites(data.teamId);
-
-    const window = resolveDashboardInitialWindow(request.headers.get("cookie"));
-    const filters = parseFilterUrlForAudience("private-dashboard", request.url);
-    const teamDashboardRuntime = createTeamDashboardQueryRuntime({
-      env: resolved.env,
-      teamId: resolved.teamId,
-      window: {
-        startMs: window.from,
-        endExclusiveMs: window.to,
-        nowMs: window.to,
-        timeZone: window.timeZone,
-      },
-      interval: window.interval,
-      allowedSiteIds: resolved.allowedSiteIds,
-      preloadedSites: preloadedSites.map(({ slug: _slug, ...site }) => ({
-        ...site,
-        publicEnabled: Number(Boolean(site.publicEnabled)),
-      })),
-    });
-    const result = await teamDashboardRuntime.execute("team-dashboard", {
-      context: teamQueryContext(
-        resolved.teamId,
-        "private-dashboard",
-        resolved.allowedSiteIds,
-      ),
-      time: createQueryTime(window.from, window.to, window.timeZone, window.to),
-      filters,
-    });
-    if (!result.ok) throw new Error(result.error.kind);
-    return {
-      data: result.data,
-      window: {
-        from: window.from,
-        to: window.to,
-        interval: window.interval,
-        timeZone: window.timeZone,
-      },
-      range: window.preset,
-      fetchedAt: Date.now(),
-    };
+  .handler(({ data }) => readTeamDashboardSnapshot(data));
+/** Most teams the workspace reads on one page load. */
+export const WORKSPACE_TEAM_LIMIT = 20;
+/**
+ * Loads the first team-dashboard snapshot of every team on the workspace.
+ * Each team is authorized on its own; a team that fails is left out instead of
+ * failing the page.
+ */
+export const loadWorkspaceSnapshots = createServerFn({ method: "GET" })
+  .validator((data: { teamIds: string[] }) => ({
+    teamIds: Array.isArray(data.teamIds)
+      ? [...new Set(data.teamIds.map(String))].slice(0, WORKSPACE_TEAM_LIMIT)
+      : [],
+  }))
+  .handler(async ({ data }) => {
+    const entries = await Promise.all(
+      data.teamIds.map(async (teamId) => {
+        try {
+          return [teamId, await readTeamDashboardSnapshot({ teamId })] as const;
+        } catch {
+          return [teamId, null] as const;
+        }
+      }),
+    );
+    return Object.fromEntries(entries) as Record<
+      string,
+      TeamDashboardSnapshot | null
+    >;
   });
 function safeInvite(invite: {
   id: string;

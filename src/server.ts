@@ -14,7 +14,6 @@ import { framePolicy } from "@/lib/edge/runtime/frame-policy";
 import { dispatchInternalScheduledTasks } from "@/lib/edge/scheduled-tasks/dispatcher";
 import type { Env } from "@/lib/edge/types";
 import apiApp from "@/lib/hono/app";
-import { dispatchInternalPageRequest } from "@/lib/hono/internal-page-dispatch";
 import { shouldUseHono } from "@/lib/hono/path-match";
 import { localeCookie, resolvePageRequest } from "@/middleware";
 export interface AppServerContext {
@@ -145,11 +144,7 @@ export default {
         }
 
         const decision = await logger.measure("page.middleware", () =>
-          resolvePageRequest(request, env, (internalRequest) =>
-            dispatchInternalPageRequest(internalRequest, (trustedRequest) =>
-              apiApp.fetch(trustedRequest, instrumentedEnv, ctx),
-            ),
-          ),
+          resolvePageRequest(request, env),
         );
         const result = decision.response
           ? withPageHeaders(

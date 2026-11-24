@@ -11,6 +11,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { AuthPageActions } from "@/components/auth/auth-page-actions";
 import { ResetPasswordLinkForm } from "@/components/auth/reset-password-link-form";
+import { APP_WEBSITE_URL } from "@/lib/constants";
 import type { Locale } from "@/lib/i18n/config";
 import { dashboardPageTitle } from "@/lib/page-title";
 import Link from "@/lib/router";
@@ -39,10 +40,7 @@ function Page() {
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-2">
           <div className="flex w-full items-center justify-center py-8 text-4xl text-primary">
-            <Link
-              href="https://github.com/RavelloH/InsightFlare"
-              target="_blank"
-            >
+            <Link href={APP_WEBSITE_URL} target="_blank">
               {t.appName}
             </Link>
           </div>

@@ -6,23 +6,28 @@ import {
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
-import {
-  RiArrowRightSLine,
-  RiLoginBoxLine,
-  RiTeamLine,
-} from "@remixicon/react";
+import { RiLoginBoxLine, RiTeamLine } from "@remixicon/react";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { LogoutActionButton } from "@/components/auth/logout-action-button";
+import { WorkspaceClient } from "@/components/dashboard/workspace/workspace-client";
+import { loadWorkspaceSnapshots } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 import Link from "@/lib/router";
 
 export const Route = createFileRoute("/$locale/app/")({
+  beforeLoad: async ({ context }) => ({
+    workspaceSnapshots: context.dashboardRoot
+      ? await loadWorkspaceSnapshots({
+          data: { teamIds: context.dashboardRoot.teams.map((team) => team.id) },
+        })
+      : null,
+  }),
   head: ({ match }) => ({
     meta: [
       {
         title: dashboardPageTitle(
-          match.context.messages.teamEntry.title,
+          match.context.messages.workspace.title,
           match.context,
         ),
       },
@@ -32,40 +37,24 @@ export const Route = createFileRoute("/$locale/app/")({
 });
 
 function AppIndexPage() {
-  const { locale, messages: t, dashboardRoot } = Route.useRouteContext();
-  if (dashboardRoot && dashboardRoot.teams.length > 0) {
+  const {
+    locale,
+    messages: t,
+    dashboardRoot,
+    workspaceSnapshots,
+  } = Route.useRouteContext();
+  if (dashboardRoot) {
     return (
-      <div className="grid h-[calc(100svh-8rem)] min-h-0 place-items-center overflow-hidden">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle className="inline-flex items-center gap-2">
-              <RiTeamLine className="size-4" />
-              {t.teamEntry.title}
-            </CardTitle>
-            <CardDescription>{t.teamEntry.description}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2 p-4">
-            {dashboardRoot.teams.map((team) => (
-              <Button
-                key={team.id}
-                asChild
-                variant="outline"
-                className="w-full justify-between"
-              >
-                <Link href={`/${locale}/app/${team.slug}`}>
-                  <span className="truncate">{team.name}</span>
-                  <RiArrowRightSLine
-                    data-icon="inline-end"
-                    className="text-muted-foreground"
-                  />
-                </Link>
-              </Button>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
+      <WorkspaceClient
+        key={dashboardRoot.user.id}
+        locale={locale}
+        messages={t}
+        dashboard={dashboardRoot}
+        snapshots={workspaceSnapshots ?? {}}
+      />
     );
   }
+
   return (
     <main className="grid min-h-svh place-items-center p-4">
       <Card className="w-full max-w-lg">

@@ -2017,7 +2017,7 @@ teamManagement:
     ownerTransferFailed: 所有権を移譲できません。
     invalidTransferTarget: 新しい所有者を選択してください。
   sites:
-    title: サイトダッシュボード
+    title: サイト概要
     subtitle: このチーム内すべてのサイトを集計したトラフィックビューです。
     aggregateTitle: 総訪問数
     pagesPerSession: ページ / セッション
@@ -3064,9 +3064,51 @@ sidebarFooter:
   loggingOut: サインアウト中...
   logoutSuccess: サインアウトしました。
   logoutFailed: サインアウトできません。もう一度お試しください。
-teamEntry:
-  title: チームを選択
-  description: 複数のチームにアクセスできます。続行するチームを選択してください。
+workspace:
+  title: ワークスペース
+  pulseTitle: "サイトの脈拍"
+  pulseHint: "各セルはサイト自身の普段の訪問者数と比べた値です。"
+  pulse:
+    usual: "普段"
+    above: "普段より多い"
+    below: "普段より少ない"
+    versusUsual: "普段比 {percent}"
+  greetings:
+    morning: "おはようございます、{name} さん"
+    afternoon: "こんにちは、{name} さん"
+    evening: "こんばんは、{name} さん"
+  allSitesTitle: "すべてのサイト"
+  totalsTitle: "サイト合計"
+  totalsHint: "アクセスできるすべてのサイト（前期比）"
+  summary: "{teams} チーム · {sites} サイト"
+  recentSites: 作業を再開
+  attention: 未対応
+  noAttention: 対応が必要な通知はありません
+  viewAllNotifications: すべての通知
+  searchSites: サイトを検索…
+  columns:
+    site: サイト
+    team: チーム
+    change: 前期比
+    trend: 推移
+  noSites: アクセスできるサイトはまだありません
+  noMatch: 一致するサイトはありません
+  changesTitle: 大きな変化
+  changesHint: "横軸は訪問者数、縦軸は前期比です。±{percent}% を超えるサイトにラベルを表示します。"
+  noChanges: 前期と比べて訪問者数が大きく変化したサイトはありません
+  partial: "一部のチームのデータを読み込めませんでした：{teams}"
+  limited: "最初の {count} チームのデータのみ表示しています"
+  backToWorkspace: 個人ワークスペースへ戻る
+  personal: 個人
+  personalDashboards: 個人ダッシュボード
+  teamDashboards: チームダッシュボード
+  newDashboard: ダッシュボードを作成
+  systemManagement: システム管理
+  help: ヘルプ
+  documentation: ドキュメント
+  apiReference: API リファレンス
+  github: GitHub
+  feedback: フィードバック
 search:
   title: 検索
   description: 分析ページ・指標・サイト・データを検索します。

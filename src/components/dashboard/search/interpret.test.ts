@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   interpret,
+  lookupUsesDate,
   splitPrefix,
 } from "@/components/dashboard/search/interpret";
 
@@ -73,5 +74,20 @@ describe("search query interpretation", () => {
       rest: "abc",
     });
     expect(splitPrefix("https://x.dev")).toEqual({ rest: "https://x.dev" });
+  });
+
+  it("uses the date range only for lookups the API scopes by time", () => {
+    expect(lookupUsesDate("page")).toBe(true);
+    expect(lookupUsesDate("id")).toBe(true);
+    expect(lookupUsesDate("visitor")).toBe(false);
+    expect(lookupUsesDate("session")).toBe(false);
+  });
+
+  it("unwraps quoted values and rejects malformed URLs", () => {
+    expect(interpret('event:"sign up"', "overview").lookups).toEqual([
+      { kind: "event", value: "sign up" },
+    ]);
+    expect(interpret("https://exa mple.com", "overview").error).toBe("invalid");
+    expect(interpret("/a?b", "overview").error).toBe("invalid");
   });
 });
