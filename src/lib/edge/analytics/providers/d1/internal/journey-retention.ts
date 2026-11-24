@@ -43,9 +43,33 @@ export async function queryRetentionFromD1(
     ? null
     : buildVisitFilterSql(filters, "all_visits", { window });
   const visitRelation = scopedDataset?.visitRelation ?? "visit_source";
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? buildVisitSourceCte()},
+  // Prepared scopes and empty filters have identical cohort and activity
+  // observations. Deduplicate narrow visitor/bucket pairs once, then use
+  // the earliest bucket per visitor. Legacy filters still select the
+  // cohort separately and count all later visits outside the predicate.
+  const cohortSql = !filter?.clause
+    ? `
+visit_buckets AS (
+  SELECT visitor_id, ${bucket.sql} AS bucket
+  FROM ${visitRelation}
+  WHERE visitor_id != ''
+),
+visitor_buckets AS (
+  SELECT visitor_id, bucket
+  FROM visit_buckets
+  WHERE bucket IS NOT NULL
+  GROUP BY visitor_id, bucket
+),
+cohort_buckets AS (
+  SELECT bucket, MIN(bucket) OVER (PARTITION BY visitor_id) AS cohort_bucket
+  FROM visitor_buckets
+)
+SELECT cohort_bucket AS cohortBucket, bucket AS visitBucket, COUNT(*) AS visitors
+FROM cohort_buckets
+GROUP BY cohort_bucket, bucket
+ORDER BY cohort_bucket ASC, bucket ASC
+`
+    : `
 all_visits AS MATERIALIZED (
   SELECT
     *,
@@ -85,6 +109,11 @@ FROM visitor_buckets vb
 JOIN cohort_assign ca ON vb.visitor_id = ca.visitor_id
 GROUP BY cohort_bucket, vb.bucket
 ORDER BY cohort_bucket ASC, vb.bucket ASC
+`;
+  const sql = `
+WITH
+${scopedDataset?.ctes ?? buildVisitSourceCte()},
+${cohortSql}
 `;
 
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [

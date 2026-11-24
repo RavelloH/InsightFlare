@@ -9,6 +9,7 @@ import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/cor
 import {
   queryAllPerformanceTrendsFromD1,
   queryPerformanceCountriesFromD1,
+  queryPerformanceDashboardFromD1,
   queryPerformanceRoutesFromD1,
   queryPerformanceSummariesFromD1,
   queryPerformanceTrendFromD1,
@@ -1072,6 +1073,110 @@ describe("edge query performance D1 helpers", () => {
       error: { message: "Invalid time window" },
     });
     expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it("keeps dashboard percentiles and sample counts identical to independent readers", async () => {
+    const { env, d1 } = createSqlitePerformanceEnv();
+    try {
+      const insert = d1.database.prepare(`
+        INSERT INTO visits (
+          visit_id, site_id, started_at, pathname, country,
+          perf_ttfb_ms, perf_fcp_ms, perf_lcp_ms, perf_cls, perf_inp_ms
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (let index = 0; index < 39; index++) {
+        insert.run(
+          "dashboard-" + index,
+          siteId,
+          window.startMs + index * 120000,
+          index % 3 === 0 ? "/second" : "/first",
+          index % 2 === 0 ? "US" : "CA",
+          index % 6 === 0 ? null : 10 * (index % 5),
+          index % 3 === 0 ? null : index * 5,
+          index % 4 === 0 ? null : index * 20,
+          index % 2 === 0 ? 0 : 0.125,
+          index % 7 === 0 ? 0 : null,
+        );
+      }
+      insert.run(
+        "null-metrics",
+        siteId,
+        window.startMs,
+        "/first",
+        "US",
+        null,
+        null,
+        null,
+        null,
+        null,
+      );
+      insert.run(
+        "outside-window",
+        siteId,
+        window.endExclusiveMs,
+        "/first",
+        "US",
+        1,
+        1,
+        1,
+        1,
+        1,
+      );
+      const dashboard = await queryPerformanceDashboardFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        1,
+      );
+      expect(d1.calls).toHaveLength(1);
+      const sql = d1.calls[0]?.sql ?? "";
+      expect(sql).not.toContain("_thresholds AS");
+      expect(sql).not.toContain("JOIN summary_ordered_values");
+      expect(dashboard.summaries).toEqual(
+        await queryPerformanceSummariesFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+        ),
+      );
+      expect(dashboard.trends).toEqual(
+        await queryAllPerformanceTrendsFromD1(
+          env,
+          siteId,
+          window,
+          "hour",
+          EMPTY_FILTER_DOCUMENT,
+        ),
+      );
+      expect(dashboard.routes).toEqual(
+        await queryPerformanceRoutesFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          1,
+        ),
+      );
+      const expectedCountries = await queryPerformanceCountriesFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        10,
+      );
+      expect(dashboard.countries).toHaveLength(expectedCountries.length);
+      expect(
+        new Map(dashboard.countries.map((row) => [row.country, row])),
+      ).toEqual(new Map(expectedCountries.map((row) => [row.country, row])));
+      expect(dashboard.summaries.cls.p50).toBe(0);
+      expect(dashboard.summaries.inp.p95).toBe(0);
+      expect(dashboard.routes[0]?.views).toBe(27);
+    } finally {
+      d1.close();
+    }
   });
 
   it("serves the performance dashboard with one shared D1 statement", async () => {

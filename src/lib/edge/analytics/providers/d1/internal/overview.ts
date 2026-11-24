@@ -63,37 +63,49 @@ export async function queryOverviewFromD1(
   const metricSource = scopedDataset
     ? scopedDataset.visitRelation
     : "filtered_visits";
+  // This is a single-site reader. Count nonempty identities over both
+  // observations, while only visits contribute views, duration and bounces.
+  // A matching Event may refer to a Visit outside the report window.
   const entityCounts = scopedDataset
     ? `
-  (SELECT count(*) FROM ${scopedDataset.sessionRelation}) AS sessions,
-  (SELECT count(*) FROM ${scopedDataset.visitorRelation}) AS visitors,`
+  count(DISTINCT CASE WHEN TRIM(COALESCE(session_id, '')) != '' THEN session_id END) AS sessions,
+  count(DISTINCT CASE WHEN TRIM(COALESCE(visitor_id, '')) != '' THEN visitor_id END) AS visitors,`
     : `
   count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
   count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors,`;
   const sourceSql = scopedDataset
-    ? `${scopedDataset.ctes},`
+    ? `${scopedDataset.ctes},
+report_observations AS MATERIALIZED (
+  SELECT session_id, visitor_id, duration_ms, 1 AS is_visit
+  FROM ${scopedDataset.visitRelation}
+  UNION ALL
+  SELECT session_id, visitor_id, NULL AS duration_ms, 0 AS is_visit
+  FROM ${scopedDataset.eventRelation}
+),`
     : `${visitSource},
 filtered_visits AS MATERIALIZED (
   SELECT *
   FROM visit_source
   ${filter.clause}
 ),`;
+  const reportSource = scopedDataset ? "report_observations" : metricSource;
+  const visitOnly = scopedDataset ? "is_visit = 1 AND " : "";
   const sql = `
 WITH
 ${sourceSql}
 session_rollup AS (
   SELECT vs.session_id, count(*) AS visit_count
-  FROM ${metricSource} vs
-  WHERE vs.session_id != ''
+  FROM ${reportSource} vs
+  WHERE ${visitOnly}vs.session_id != ''
   GROUP BY vs.session_id
 )
 SELECT
-  count(*) AS views,
+  ${scopedDataset ? "count(CASE WHEN is_visit = 1 THEN 1 END)" : "count(*)"} AS views,
 ${entityCounts}
   COALESCE((SELECT count(*) FROM session_rollup WHERE visit_count = 1), 0) AS bounces,
-  COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0) AS totalDuration,
-  COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0) AS durationViews
-FROM ${metricSource}
+  COALESCE(sum(CASE WHEN ${visitOnly}duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0) AS totalDuration,
+  COALESCE(sum(CASE WHEN ${visitOnly}duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0) AS durationViews
+FROM ${reportSource}
 `;
   const row =
     (
@@ -145,10 +157,10 @@ export async function queryTrendFromD1(
     "visit_source AS MATERIALIZED (",
   );
   const buckets = buildTimeBuckets(window, interval);
-  const visitBucket = timeBucketCase(buckets, "started_at");
-  const scopedVisitorBucket = scopedDataset
-    ? timeBucketCase(buckets, "observed_at")
-    : null;
+  const visitBucket = timeBucketCase(
+    buckets,
+    scopedDataset ? "observed_at" : "started_at",
+  );
   const sessionBucket = timeBucketCase(
     buckets,
     scopedDataset ? "session_observed_at" : "session_started_at",
@@ -158,11 +170,11 @@ export async function queryTrendFromD1(
     : "filtered_visits";
   const scopedEntityObservations = scopedDataset
     ? `
-scope_entity_observations AS (
-  SELECT visitor_id, session_id, started_at AS observed_at, 1 AS is_visit_observation
+scope_entity_observations AS MATERIALIZED (
+  SELECT visitor_id, session_id, started_at AS observed_at, 1 AS is_visit_observation, duration_ms
   FROM ${scopedDataset.visitRelation}
   UNION ALL
-  SELECT visitor_id, session_id, occurred_at AS observed_at, 0 AS is_visit_observation
+  SELECT visitor_id, session_id, occurred_at AS observed_at, 0 AS is_visit_observation, NULL AS duration_ms
   FROM ${scopedDataset.eventRelation}
 ),`
     : "";
@@ -171,11 +183,11 @@ scope_entity_observations AS (
 visit_bucket_rollup AS (
   SELECT
     ${visitBucket.sql} AS bucket,
-    count(*) AS views,
-    0 AS visitors,
-    COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0) AS totalDuration,
-    COALESCE(sum(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0) AS durationViews
-  FROM ${metricSource}
+    count(CASE WHEN is_visit_observation = 1 THEN 1 END) AS views,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors,
+    COALESCE(sum(CASE WHEN is_visit_observation = 1 AND duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0) AS totalDuration,
+    COALESCE(sum(CASE WHEN is_visit_observation = 1 AND duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0) AS durationViews
+  FROM scope_entity_observations
   GROUP BY bucket
 ),`
     : `
@@ -189,16 +201,6 @@ visit_bucket_rollup AS (
   FROM ${metricSource}
   GROUP BY bucket
 ),`;
-  const scopedVisitorBucketRollup = scopedDataset
-    ? `
-visitor_bucket_rollup AS (
-  SELECT
-    ${scopedVisitorBucket?.sql} AS bucket,
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-  FROM scope_entity_observations
-  GROUP BY bucket
-),`
-    : "";
   const sessionRollup = scopedDataset
     ? `
 session_rollup AS (
@@ -220,16 +222,7 @@ session_rollup AS (
   WHERE vs.session_id != ''
   GROUP BY vs.session_id
 ),`;
-  const combined = scopedDataset
-    ? `
-combined AS (
-  SELECT bucket, views, visitors, 0 AS sessions, 0 AS bounces, totalDuration, durationViews FROM visit_bucket_rollup
-  UNION ALL
-  SELECT bucket, 0 AS views, visitors, 0 AS sessions, 0 AS bounces, 0 AS totalDuration, 0 AS durationViews FROM visitor_bucket_rollup
-  UNION ALL
-  SELECT bucket, 0 AS views, 0 AS visitors, sessions, bounces, 0 AS totalDuration, 0 AS durationViews FROM session_bucket_rollup
- )`
-    : `
+  const combined = `
 combined AS (
   SELECT bucket, views, visitors, 0 AS sessions, 0 AS bounces, totalDuration, durationViews FROM visit_bucket_rollup
   UNION ALL
@@ -248,7 +241,6 @@ filtered_visits AS MATERIALIZED (
 WITH
 ${sourceSql}
 ${visitBucketRollup}
-${scopedVisitorBucketRollup}
 ${sessionRollup}
 session_bucket_rollup AS (
   SELECT
@@ -280,7 +272,6 @@ ORDER BY bucket ASC
           ? scopedDataset.bindings.map((binding) => binding.value)
           : [...visitSourceBindings(siteId, window), ...filter.bindings]),
         ...visitBucket.bindings,
-        ...(scopedVisitorBucket?.bindings ?? []),
         ...sessionBucket.bindings,
       ],
       diagnostics,

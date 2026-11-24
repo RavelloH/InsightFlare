@@ -13,6 +13,7 @@ import {
   attachScopedFilterMetadata,
   createQueryTime,
   createScopedFilterPlan,
+  EMPTY_FILTER_DOCUMENT,
   FILTER_SCOPE_CAPABILITIES,
   type QueryTime,
 } from "@/lib/edge/analytics/contract";
@@ -1345,6 +1346,293 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       );
       expect(JSON.stringify(performance)).toContain("/home");
       expect(JSON.stringify(performance)).not.toContain("/docs");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("uses raw observations for every empty scope without losing Event-only identities or admitting other sites", async () => {
+    const db = sqlitePayloadFixture();
+    try {
+      db.exec(`
+        UPDATE visits SET session_id='s-event-only', visitor_id='u-event-only'
+          WHERE site_pk=1 AND visit_id='v-old';
+        UPDATE custom_events SET occurred_at=150 WHERE event_pk=101;
+        UPDATE visits SET duration_ms=-1 WHERE site_pk=1 AND visit_id='v-new';
+        UPDATE visits SET duration_ms=0 WHERE site_pk=1 AND visit_id='v-docs';
+        INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms)
+          VALUES(1,'site-a','v-empty','','','/anonymous',180,10),
+                (1,'site-a','v-whitespace',' ',' ','/anonymous',185,10),
+                (1,'site-a','v-null',NULL,NULL,'/anonymous',190,10);
+      `);
+      for (const scope of ["event", "session", "visitor"] as const) {
+        // Each explicit scope must still follow its own membership contract.
+        const doc = { ...EMPTY_FILTER_DOCUMENT };
+        const plan = createScopedFilterPlan("overview", doc, scope)!;
+        const filters = attachScopedFilterMetadata(doc, {
+          requestedScope: scope,
+          resolvedScope: plan.scope,
+          plan,
+          time: createQueryTime(100, 300, "UTC", 400),
+          siteIds: ["site-a"],
+        });
+        const compiled = compileScopedDatasetSql({
+          filters,
+          plan,
+          siteIds: ["site-a"],
+          window: WINDOW,
+        });
+        const run = (sql: string) =>
+          db
+            .prepare(`WITH ${compiled.ctes} ${sql}`)
+            .all(...compiled.bindings.map((b) => b.value));
+        if (scope === "event") {
+          expect(compiled.ctes).toContain(
+            "scope_final_visits AS (SELECT * FROM scope_raw_visits)",
+          );
+          expect(compiled.ctes).toContain(
+            "scope_final_events AS (SELECT * FROM scope_raw_events)",
+          );
+          expect(compiled.ctes).not.toContain("scope_matching_visit_ids AS");
+        } else {
+          const column = scope === "session" ? "session_id" : "visitor_id";
+          expect(compiled.ctes).toContain(
+            `scope_final_visits AS (SELECT * FROM scope_raw_visits WHERE TRIM(COALESCE(${column}, '')) != '')`,
+          );
+          expect(compiled.ctes).toContain(
+            `scope_final_events AS (SELECT * FROM scope_raw_events WHERE TRIM(COALESCE(${column}, '')) != '')`,
+          );
+          expect(compiled.ctes).not.toContain("JOIN scope_universe");
+        }
+        expect(compiled.ctes).not.toContain("scope_raw_visits AS MATERIALIZED");
+        expect(compiled.ctes).not.toContain("scope_raw_events AS MATERIALIZED");
+        expect(
+          run(
+            `SELECT visit_id FROM ${compiled.visitRelation} ORDER BY visit_id`,
+          ),
+        ).toEqual(
+          (scope === "event"
+            ? ["v-docs", "v-empty", "v-new", "v-null", "v-whitespace"]
+            : ["v-docs", "v-new"]
+          ).map((visit_id) => ({ visit_id })),
+        );
+        expect(
+          run(
+            `SELECT event_pk FROM ${compiled.eventRelation} ORDER BY event_pk`,
+          ),
+        ).toEqual([101, 102, 103, 104].map((event_pk) => ({ event_pk })));
+        expect(
+          run(
+            `SELECT session_id FROM ${compiled.sessionRelation} ORDER BY session_id`,
+          ),
+        ).toEqual(
+          ["s-event-only", "s1", "s2"].map((session_id) => ({ session_id })),
+        );
+        expect(
+          run(
+            `SELECT visitor_id FROM ${compiled.visitorRelation} ORDER BY visitor_id`,
+          ),
+        ).toEqual(
+          ["u-event-only", "u1", "u2"].map((visitor_id) => ({ visitor_id })),
+        );
+        // Preserve the original independent Visit and entity rollups as the
+        // differential oracle, including whitespace-only bounce identities,
+        // Event-only entities, duplicate Events, negative and zero durations.
+        const expected = run(`
+          SELECT count(*) AS views,
+            (SELECT count(*) FROM ${compiled.sessionRelation}) AS sessions,
+            (SELECT count(*) FROM ${compiled.visitorRelation}) AS visitors,
+            (SELECT count(*) FROM (
+              SELECT session_id FROM ${compiled.visitRelation}
+              WHERE session_id != '' GROUP BY session_id HAVING count(*) = 1
+            )) AS bounces,
+            COALESCE(sum(CASE WHEN duration_ms >= 0 THEN duration_ms ELSE 0 END),0) AS totalDuration,
+            COALESCE(sum(CASE WHEN duration_ms >= 0 THEN 1 ELSE 0 END),0) AS durationViews
+          FROM ${compiled.visitRelation}
+        `)[0];
+        const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+        const env = { DB: createSqliteD1Database(db, trace) } as never;
+        expect(
+          await queryOverviewFromD1(env, "site-a", WINDOW, filters),
+        ).toEqual(expected);
+        expect(trace.preparedSql).toHaveLength(1);
+        expect(trace.preparedSql[0]).toContain(
+          "report_observations AS MATERIALIZED",
+        );
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("pushes visit-context predicates into both observation sources without losing cross-window Events", () => {
+    const db = sqlitePayloadFixture();
+    try {
+      db.exec(`
+        UPDATE visits SET country='US', browser='Chrome', session_id='s-historical', visitor_id='u-historical'
+          WHERE site_pk=1 AND visit_id='v-old';
+        UPDATE visits SET country='US', browser='Chrome' WHERE site_pk=1 AND visit_id='v-new';
+        UPDATE visits SET country='CA', browser=NULL WHERE site_pk=1 AND visit_id='v-docs';
+        UPDATE visits SET country='US', browser='Chrome' WHERE site_pk=2;
+        UPDATE custom_events SET occurred_at=150 WHERE event_pk=101;
+      `);
+      const cases = [
+        {
+          expression: 'geo.country eq "US"',
+          visits: ["v-new"],
+          events: [101, 102, 103],
+          fast: true,
+        },
+        {
+          expression: 'page.path eq "/old" or page.path eq "/home"',
+          visits: ["v-new"],
+          events: [101, 102, 103],
+          fast: true,
+        },
+        {
+          expression: 'geo.country eq "US" and client.browser eq "Chrome"',
+          visits: ["v-new"],
+          events: [101, 102, 103],
+          fast: true,
+        },
+        {
+          expression: 'not (geo.country eq "US")',
+          visits: ["v-docs"],
+          events: [104],
+          fast: true,
+        },
+        {
+          expression: 'event.name eq "purchase"',
+          visits: ["v-new"],
+          events: [101, 103],
+          fast: false,
+        },
+        {
+          expression: 'geo.country eq "US" or event.name eq "view"',
+          visits: ["v-docs", "v-new"],
+          events: [101, 102, 103, 104],
+          fast: false,
+        },
+      ];
+      for (const item of cases) {
+        const doc = parseFilterDsl(item.expression, analyticsFilterRegistry);
+        const plan = createScopedFilterPlan("overview", doc, "event")!;
+        const filters = attachScopedFilterMetadata(doc, {
+          requestedScope: "event",
+          resolvedScope: plan.scope,
+          plan,
+          time: createQueryTime(100, 300, "UTC", 400),
+          siteIds: ["site-a"],
+        });
+        const dataset = compileScopedDatasetSql({
+          filters,
+          plan,
+          siteIds: ["site-a"],
+          window: WINDOW,
+        });
+        expect(dataset.ctes.includes("scope_matching_visit_ids AS")).toBe(
+          !item.fast,
+        );
+        const bindings = dataset.bindings.map((b) => b.value);
+        const run = (sql: string) =>
+          db.prepare(`WITH ${dataset.ctes} ${sql}`).all(...bindings);
+        expect(
+          run(
+            `SELECT visit_id FROM ${dataset.visitRelation} ORDER BY visit_id`,
+          ),
+        ).toEqual(item.visits.map((visit_id) => ({ visit_id })));
+        expect(
+          run(
+            `SELECT event_pk FROM ${dataset.eventRelation} ORDER BY event_pk`,
+          ),
+        ).toEqual(item.events.map((event_pk) => ({ event_pk })));
+        if (item.fast) {
+          expect(dataset.ctes).toContain(
+            "scope_final_visits AS (SELECT * FROM scope_matching_visits)",
+          );
+          expect(dataset.ctes).not.toContain(
+            "scope_raw_visits AS MATERIALIZED",
+          );
+          expect(dataset.ctes).not.toContain(
+            "scope_raw_events AS MATERIALIZED",
+          );
+        }
+        if (item.expression === 'geo.country eq "US"') {
+          expect(
+            run(
+              `SELECT session_id FROM ${dataset.sessionRelation} ORDER BY session_id`,
+            ),
+          ).toEqual([{ session_id: "s-historical" }, { session_id: "s1" }]);
+          expect(
+            run(
+              `SELECT visitor_id FROM ${dataset.visitorRelation} ORDER BY visitor_id`,
+            ),
+          ).toEqual([{ visitor_id: "u-historical" }, { visitor_id: "u1" }]);
+        }
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("shares prepared geo observations once while keeping invalid-coordinate visits in every drilldown total", async () => {
+    const { db } = runFixture();
+    try {
+      db.exec(`
+        UPDATE visits SET region_code='CA' WHERE site_pk=1 AND visit_id='v-new';
+        UPDATE visits SET country='US', region='California', region_code='CA', city='LA',
+          latitude=NULL, longitude=NULL WHERE site_pk=1 AND visit_id='v-docs';
+        INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms,country,region,region_code,city,latitude,longitude)
+          VALUES(1,'site-a','v-repeat','s1','u1','/home',140,5,'US','California','CA','LA',34.05,-118.25);
+      `);
+      const cases = [
+        {
+          expression: 'page.path contains "/"',
+          key: "countryCounts",
+          item: { country: "US" },
+        },
+        {
+          expression: 'geo.country eq "US"',
+          key: "regionCounts",
+          item: { value: "US::CA::California", label: "California" },
+        },
+        {
+          expression: 'geo.country eq "US" and geo.region eq "California"',
+          key: "cityCounts",
+          item: { value: "US::CA::California::LA", label: "LA" },
+        },
+      ] as const;
+      for (const test of cases) {
+        const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+        const env = { DB: createSqliteD1Database(db, trace) } as never;
+        const result = await queryGeoPointAggregate(
+          env,
+          "site-a",
+          WINDOW,
+          ready("geo-points", test.expression),
+          1,
+        );
+        expect(trace.preparedSql).toHaveLength(1);
+        expect(trace.preparedSql[0]).toContain(
+          "shared_geo_visits AS MATERIALIZED",
+        );
+        expect(result.points).toEqual([
+          expect.objectContaining({
+            latitude: 34.05,
+            longitude: -118.25,
+            pointCount: 2,
+            timestampMs: 140,
+          }),
+        ]);
+        expect(result[test.key]).toEqual([
+          { ...test.item, views: 3, sessions: 2, visitors: 2 },
+        ]);
+        expect(
+          result.countryCounts.length +
+            result.regionCounts.length +
+            result.cityCounts.length,
+        ).toBe(1);
+      }
     } finally {
       db.close();
     }
