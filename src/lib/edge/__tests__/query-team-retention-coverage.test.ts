@@ -737,7 +737,9 @@ describe("edge journey retention coverage", () => {
         },
       ],
     });
-    expect(calls[0].sql).toContain("MIN(bucket) AS cohort_bucket");
+    expect(calls[0].sql).toContain(
+      "MIN(bucket) OVER (PARTITION BY visitor_id) AS cohort_bucket",
+    );
     expect(calls[0].sql).toContain("FROM scope_final_visits");
     expect(calls[0].bindings).toEqual([
       ...visitBindings(),
@@ -747,7 +749,7 @@ describe("edge journey retention coverage", () => {
     ]);
   });
 
-  it("materializes retention visits once while preserving cohort results", async () => {
+  it("aggregates narrow visitor buckets once while preserving cohort results", async () => {
     const database = new DatabaseSync(":memory:");
     database.exec(
       readFileSync("migrations/0008_rebuild_analytics.sql", "utf8"),
@@ -852,7 +854,8 @@ describe("edge journey retention coverage", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]?.sql).toContain("filtered_visits AS MATERIALIZED");
+      expect(calls[0]?.sql).toContain("visitor_buckets AS (");
+      expect(calls[0]?.sql).not.toContain("all_visits AS MATERIALIZED");
       const plan = database
         .prepare(`EXPLAIN QUERY PLAN ${calls[0]?.sql ?? "SELECT 1"}`)
         .all(...(calls[0]?.bindings ?? [])) as Array<{ detail: string }>;
