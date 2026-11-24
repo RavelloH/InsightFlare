@@ -150,7 +150,7 @@ function VisitorConversionBar({
                 duration={0.18}
                 type="fade"
                 presenceMode="wait"
-                className="h-full w-full overflow-hidden bg-muted ring-1 ring-border/50"
+                className="h-full w-full overflow-hidden bg-muted border border-border/50"
               >
                 {loading ? (
                   <Skeleton
@@ -184,7 +184,7 @@ function VisitorConversionBar({
                   duration={0.18}
                   type="fade"
                   presenceMode="wait"
-                  className="h-full overflow-hidden bg-muted ring-1 ring-border/50"
+                  className="h-full overflow-hidden bg-muted border border-border/50"
                 >
                   {comparison.loading ? (
                     <Skeleton

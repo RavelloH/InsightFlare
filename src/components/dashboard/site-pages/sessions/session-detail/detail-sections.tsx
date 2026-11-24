@@ -435,7 +435,7 @@ export const SessionEventCard = memo(function SessionEventCard({
       duration={0.14}
       aria-label={eventDisplayTitle(labels, event)}
     >
-      <Card size="sm" className="border border-foreground/10 py-0 ring-0">
+      <Card size="sm" className="py-0">
         <CardContent className="p-0">
           <div className="flex items-center gap-2 px-1.5 py-1">
             <EventIcon event={event} />
@@ -476,7 +476,7 @@ export const SessionEventCard = memo(function SessionEventCard({
 });
 export function SessionEventSkeletonCard() {
   return (
-    <Card size="sm" className="border border-foreground/10 py-0 ring-0">
+    <Card size="sm" className="py-0">
       <CardContent className="p-0">
         <div className="flex items-center gap-2 px-1.5 py-1">
           <Skeleton className="size-[34px] shrink-0" />

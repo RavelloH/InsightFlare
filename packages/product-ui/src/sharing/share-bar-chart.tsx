@@ -128,7 +128,7 @@ function ShareBarChartContent({
   return (
     <div className="grid gap-4">
       <div
-        className="flex h-6 w-full overflow-hidden rounded-none bg-muted ring-1 ring-border/50"
+        className="flex h-6 w-full overflow-hidden rounded-none bg-muted border border-border/50"
         role="group"
         aria-label={ariaLabel}
       >
