@@ -20,3 +20,16 @@ playwright-report/
 test-results/
 .tmp/
 /AGENTS.md
+
+# Internal development artifacts (never publish)
+.agent/
+.agents/
+plans/
+reports/
+report/
+audit/
+audits/
+evidence/
+output/
+.playwright-cli/
+/.github/engineering/

@@ -1,2 +1,3 @@
 #!/bin/sh
+node scripts/check-repository-policy.mjs --pre-push "$@" || exit $?
 npm run check:verify
