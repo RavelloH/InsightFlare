@@ -13,6 +13,7 @@ import {
   attachScopedFilterMetadata,
   createQueryTime,
   createScopedFilterPlan,
+  EMPTY_FILTER_DOCUMENT,
   FILTER_SCOPE_CAPABILITIES,
   type QueryTime,
 } from "@/lib/edge/analytics/contract";
@@ -1345,6 +1346,85 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       );
       expect(JSON.stringify(performance)).toContain("/home");
       expect(JSON.stringify(performance)).not.toContain("/docs");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("uses raw observations for empty Event scope without losing Event-only identities or admitting other sites", () => {
+    const db = sqlitePayloadFixture();
+    try {
+      db.exec(`
+        UPDATE visits SET session_id='s-event-only', visitor_id='u-event-only'
+          WHERE site_pk=1 AND visit_id='v-old';
+        UPDATE custom_events SET occurred_at=150 WHERE event_pk=101;
+        INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms)
+          VALUES(1,'site-a','v-empty','','','/anonymous',180,10);
+      `);
+      for (const scope of ["event", "session", "visitor"] as const) {
+        // Each explicit scope must still follow its own membership contract.
+        const doc = { ...EMPTY_FILTER_DOCUMENT };
+        const plan = createScopedFilterPlan("overview", doc, scope)!;
+        const filters = attachScopedFilterMetadata(doc, {
+          requestedScope: scope,
+          resolvedScope: plan.scope,
+          plan,
+          time: createQueryTime(100, 300, "UTC", 400),
+          siteIds: ["site-a"],
+        });
+        const compiled = compileScopedDatasetSql({
+          filters,
+          plan,
+          siteIds: ["site-a"],
+          window: WINDOW,
+        });
+        const run = (sql: string) =>
+          db
+            .prepare(`WITH ${compiled.ctes} ${sql}`)
+            .all(...compiled.bindings.map((b) => b.value));
+        if (scope === "event") {
+          expect(compiled.ctes).toContain(
+            "scope_final_visits AS (SELECT * FROM scope_raw_visits)",
+          );
+          expect(compiled.ctes).toContain(
+            "scope_final_events AS (SELECT * FROM scope_raw_events)",
+          );
+          expect(compiled.ctes).not.toContain("scope_matching_visit_ids AS");
+        } else {
+          expect(compiled.ctes).not.toContain(
+            "scope_final_visits AS (SELECT * FROM scope_raw_visits)",
+          );
+        }
+        expect(
+          run(
+            `SELECT visit_id FROM ${compiled.visitRelation} ORDER BY visit_id`,
+          ),
+        ).toEqual(
+          (scope === "event"
+            ? ["v-docs", "v-empty", "v-new"]
+            : ["v-docs", "v-new"]
+          ).map((visit_id) => ({ visit_id })),
+        );
+        expect(
+          run(
+            `SELECT event_pk FROM ${compiled.eventRelation} ORDER BY event_pk`,
+          ),
+        ).toEqual([101, 102, 103, 104].map((event_pk) => ({ event_pk })));
+        expect(
+          run(
+            `SELECT session_id FROM ${compiled.sessionRelation} ORDER BY session_id`,
+          ),
+        ).toEqual(
+          ["s-event-only", "s1", "s2"].map((session_id) => ({ session_id })),
+        );
+        expect(
+          run(
+            `SELECT visitor_id FROM ${compiled.visitorRelation} ORDER BY visitor_id`,
+          ),
+        ).toEqual(
+          ["u-event-only", "u1", "u2"].map((visitor_id) => ({ visitor_id })),
+        );
+      }
     } finally {
       db.close();
     }

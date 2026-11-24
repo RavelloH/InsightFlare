@@ -1131,8 +1131,17 @@ export function compileScopedDatasetSql(
     input.plan.mode === "entity" && input.plan.membership.kind === "entity"
       ? entityColumn(input.plan.membership.entityKind)
       : null;
-  const finalVisitRelation =
-    input.plan.mode === "entity"
+  // In an unfiltered observation scope every raw Visit and Event already
+  // qualifies. Rejoining identity sets cannot add rows to these time-bounded,
+  // authorized relations; it only forces scans of unrelated observations.
+  // Explicit entity scopes still apply their nonempty identity constraints.
+  const matchesAllObservations =
+    input.filters.root === null &&
+    input.plan.scope === "event" &&
+    input.plan.mode === "observation";
+  const finalVisitRelation = matchesAllObservations
+    ? "scope_final_visits AS (SELECT * FROM scope_raw_visits)"
+    : input.plan.mode === "entity"
       ? `
 scope_final_visits AS (
   SELECT rv.*
@@ -1150,8 +1159,9 @@ scope_final_visits AS (
     ON matching_visits.site_pk = rv.site_pk
    AND matching_visits.visit_id = rv.visit_id
 )`;
-  const finalEventRelation =
-    input.plan.mode === "entity"
+  const finalEventRelation = matchesAllObservations
+    ? "scope_final_events AS (SELECT * FROM scope_raw_events)"
+    : input.plan.mode === "entity"
       ? `
 scope_final_events AS (
   SELECT re.*
@@ -1187,7 +1197,7 @@ scope_final_events AS (
     ...(domains?.definitions ?? []),
     ...(qualification?.ctes ?? []),
   ];
-  if (qualification?.kind === "observation") {
+  if (qualification?.kind === "observation" && !matchesAllObservations) {
     // An Event qualifies its associated Visit for report output; the Visit
     // does not thereby match the Event predicate itself.
     definitions.push(
