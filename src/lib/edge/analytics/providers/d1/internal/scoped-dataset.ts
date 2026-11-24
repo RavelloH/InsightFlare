@@ -1223,12 +1223,25 @@ export function compileScopedDatasetSql(
     input.filters.root === null &&
     input.plan.scope === "event" &&
     input.plan.mode === "observation";
+  // Empty entity membership equals the universe of nonempty identities.
+  // Each raw row with a valid identity already contributes to that universe,
+  // so a join to it is redundant even for Event-only entities.
+  const matchesAllEntities =
+    input.filters.root === null &&
+    input.plan.mode === "entity" &&
+    input.plan.membership.kind === "entity" &&
+    input.plan.membership.expression === null &&
+    entityColumnName !== null;
+  const allowSourceInlining =
+    matchesAllObservations || matchesAllEntities || directVisitContext;
   const finalVisitRelation = matchesAllObservations
     ? "scope_final_visits AS (SELECT * FROM scope_raw_visits)"
-    : directVisitContext
-      ? "scope_final_visits AS (SELECT * FROM scope_matching_visits)"
-      : input.plan.mode === "entity"
-        ? `
+    : matchesAllEntities
+      ? `scope_final_visits AS (SELECT * FROM scope_raw_visits WHERE TRIM(COALESCE(${entityColumnName}, '')) != '')`
+      : directVisitContext
+        ? "scope_final_visits AS (SELECT * FROM scope_matching_visits)"
+        : input.plan.mode === "entity"
+          ? `
 scope_final_visits AS (
   SELECT rv.*
   FROM scope_raw_visits rv
@@ -1237,7 +1250,7 @@ scope_final_visits AS (
    AND matching_entities.entity_id = rv.${entityColumnName}
   WHERE TRIM(COALESCE(rv.${entityColumnName}, '')) != ''
 )`
-        : `
+          : `
 scope_final_visits AS (
   SELECT rv.*
   FROM scope_raw_visits rv
@@ -1247,10 +1260,12 @@ scope_final_visits AS (
 )`;
   const finalEventRelation = matchesAllObservations
     ? "scope_final_events AS (SELECT * FROM scope_raw_events)"
-    : directVisitContext
-      ? "scope_final_events AS (SELECT * FROM scope_matching_events)"
-      : input.plan.mode === "entity"
-        ? `
+    : matchesAllEntities
+      ? `scope_final_events AS (SELECT * FROM scope_raw_events WHERE TRIM(COALESCE(${entityColumnName}, '')) != '')`
+      : directVisitContext
+        ? "scope_final_events AS (SELECT * FROM scope_matching_events)"
+        : input.plan.mode === "entity"
+          ? `
 scope_final_events AS (
   SELECT re.*
   FROM scope_raw_events re
@@ -1259,7 +1274,7 @@ scope_final_events AS (
    AND matching_entities.entity_id = re.${entityColumnName}
   WHERE TRIM(COALESCE(re.${entityColumnName}, '')) != ''
 )`
-        : `
+          : `
 scope_final_events AS (
   SELECT re.*
   FROM scope_raw_events re
@@ -1270,7 +1285,7 @@ scope_final_events AS (
   const definitions: BoundCteDefinition[] = [
     boundCte(
       "scope_raw_visits",
-      directVisitContext
+      allowSourceInlining
         ? visitSource(input.siteIds).replace(
             "scope_raw_visits AS MATERIALIZED (",
             "scope_raw_visits AS (",
@@ -1280,7 +1295,7 @@ scope_final_events AS (
     ),
     boundCte(
       "scope_raw_events",
-      directVisitContext
+      allowSourceInlining
         ? eventSource(input.siteIds, input.compatibilityEventSource).replace(
             "scope_raw_events AS MATERIALIZED (",
             "scope_raw_events AS (",

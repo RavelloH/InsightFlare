@@ -1351,7 +1351,7 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
-  it("uses raw observations for empty Event scope without losing Event-only identities or admitting other sites", () => {
+  it("uses raw observations for every empty scope without losing Event-only identities or admitting other sites", () => {
     const db = sqlitePayloadFixture();
     try {
       db.exec(`
@@ -1359,7 +1359,9 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           WHERE site_pk=1 AND visit_id='v-old';
         UPDATE custom_events SET occurred_at=150 WHERE event_pk=101;
         INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms)
-          VALUES(1,'site-a','v-empty','','','/anonymous',180,10);
+          VALUES(1,'site-a','v-empty','','','/anonymous',180,10),
+                (1,'site-a','v-whitespace',' ',' ','/anonymous',185,10),
+                (1,'site-a','v-null',NULL,NULL,'/anonymous',190,10);
       `);
       for (const scope of ["event", "session", "visitor"] as const) {
         // Each explicit scope must still follow its own membership contract.
@@ -1391,17 +1393,24 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           );
           expect(compiled.ctes).not.toContain("scope_matching_visit_ids AS");
         } else {
-          expect(compiled.ctes).not.toContain(
-            "scope_final_visits AS (SELECT * FROM scope_raw_visits)",
+          const column = scope === "session" ? "session_id" : "visitor_id";
+          expect(compiled.ctes).toContain(
+            `scope_final_visits AS (SELECT * FROM scope_raw_visits WHERE TRIM(COALESCE(${column}, '')) != '')`,
           );
+          expect(compiled.ctes).toContain(
+            `scope_final_events AS (SELECT * FROM scope_raw_events WHERE TRIM(COALESCE(${column}, '')) != '')`,
+          );
+          expect(compiled.ctes).not.toContain("JOIN scope_universe");
         }
+        expect(compiled.ctes).not.toContain("scope_raw_visits AS MATERIALIZED");
+        expect(compiled.ctes).not.toContain("scope_raw_events AS MATERIALIZED");
         expect(
           run(
             `SELECT visit_id FROM ${compiled.visitRelation} ORDER BY visit_id`,
           ),
         ).toEqual(
           (scope === "event"
-            ? ["v-docs", "v-empty", "v-new"]
+            ? ["v-docs", "v-empty", "v-new", "v-null", "v-whitespace"]
             : ["v-docs", "v-new"]
           ).map((visit_id) => ({ visit_id })),
         );
