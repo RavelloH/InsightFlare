@@ -3179,3 +3179,52 @@ sidebarFooter:
 teamEntry:
   title: Choose a Team
   description: You have access to multiple teams. Choose where to continue.
+search:
+  title: Search
+  description: Search analytics pages, metrics, sites and data.
+  trigger: Search
+  placeholders:
+    root: Search teams…
+    team: Search sites…
+    site: Search pages, metrics or data…
+  groups:
+    recent: Recent
+    teams: Teams
+    sites: Sites
+    sections: Analytics pages
+    metrics: Metrics
+    data: Data
+    actions: Actions
+  types:
+    all: All
+    page: Page
+    event: Event
+    referrer: Referrer
+    visitor: Visitor
+    session: Session
+    eventRecord: Event record
+    id: Visitor or event record
+    campaign: Campaign
+    browser: Browser
+  lookup:
+    value: Look up “{value}” in {site}
+    retry: Retry “{value}”
+    searching: Searching…
+    noMatch: No matching data
+    failed: Lookup failed
+    enterValue: Enter a value to look up
+    invalid: This value can't be looked up
+  actions:
+    switchSite: Switch site
+    switchTeam: Switch team
+    back: Back
+  range:
+    label: Lookup range
+    apply: Apply
+    cancel: Cancel
+  keys:
+    select: Select
+    open: Open
+    close: Close
+  empty: No matches
+  unavailable: This item no longer exists, or you no longer have access.

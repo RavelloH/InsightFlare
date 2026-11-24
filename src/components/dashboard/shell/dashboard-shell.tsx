@@ -71,7 +71,10 @@ import {
   type SiteOverviewMetric,
   type SiteSearchSection,
 } from "@/lib/perception-search/core";
-import { setPerceptionAuthorization } from "@/lib/perception-search/runtime";
+import {
+  rememberCurrentPerceptionNavigation,
+  setPerceptionAuthorization,
+} from "@/lib/perception-search/runtime";
 import { buildOverviewMetricsLabels } from "@/lib/product-ui-labels/overview";
 import Link from "@/lib/router";
 import { usePathname, useSearchParams } from "@/lib/router";
@@ -647,6 +650,10 @@ export function DashboardShell({
     messages,
   ]);
 
+  useLayoutEffect(() => {
+    rememberCurrentPerceptionNavigation(mainSiteSection || "overview");
+  }, [user.id, activeTeamId, activeSiteId, mainSiteSection]);
+
   const teamSelector = (
     <SidebarGroup className={SIDEBAR_COLLAPSE_SECTION_CLASS}>
       <SidebarGroupContent className="flex flex-col gap-2">
@@ -659,7 +666,15 @@ export function DashboardShell({
             activeTeamSlug={liveActiveTeamSlug}
           />
         ) : null}
-        <GlobalPerceptionSearch locale={locale} />
+        <GlobalPerceptionSearch
+          locale={locale}
+          messages={messages}
+          section={mainSiteSection || "overview"}
+          siteDomain={
+            resolvedSites.find((site) => site.id === activeSiteId)?.domain
+          }
+          siteName={activeSiteName ?? undefined}
+        />
       </SidebarGroupContent>
     </SidebarGroup>
   );

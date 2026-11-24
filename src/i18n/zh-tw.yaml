@@ -3051,3 +3051,52 @@ sidebarFooter:
 teamEntry:
   title: 選擇團隊
   description: 你目前可存取多個團隊，請先選擇要進入的團隊。
+search:
+  title: 搜尋
+  description: 搜尋分析頁面、指標、網站和資料。
+  trigger: 搜尋
+  placeholders:
+    root: 搜尋團隊…
+    team: 搜尋網站…
+    site: 搜尋頁面、指標或資料…
+  groups:
+    recent: 最近造訪
+    teams: 團隊
+    sites: 網站
+    sections: 分析頁面
+    metrics: 指標
+    data: 資料
+    actions: 操作
+  types:
+    all: 全部
+    page: 頁面
+    event: 事件
+    referrer: 來源
+    visitor: 訪客
+    session: 工作階段
+    eventRecord: 事件記錄
+    id: 訪客或事件記錄
+    campaign: 推廣
+    browser: 瀏覽器
+  lookup:
+    value: 在 {site} 中查找「{value}」
+    retry: 重新查找「{value}」
+    searching: 查找中…
+    noMatch: 找不到符合的資料
+    failed: 查找失敗
+    enterValue: 輸入要查找的內容
+    invalid: 無法依這個值查找
+  actions:
+    switchSite: 切換網站
+    switchTeam: 切換團隊
+    back: 返回
+  range:
+    label: 查找範圍
+    apply: 套用
+    cancel: 取消
+  keys:
+    select: 選擇
+    open: 開啟
+    close: 關閉
+  empty: 沒有符合的結果
+  unavailable: 目標已不存在，或你已無權存取。

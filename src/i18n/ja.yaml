@@ -3067,3 +3067,52 @@ sidebarFooter:
 teamEntry:
   title: チームを選択
   description: 複数のチームにアクセスできます。続行するチームを選択してください。
+search:
+  title: 検索
+  description: 分析ページ・指標・サイト・データを検索します。
+  trigger: 検索
+  placeholders:
+    root: チームを検索…
+    team: サイトを検索…
+    site: ページ・指標・データを検索…
+  groups:
+    recent: 最近のアクセス
+    teams: チーム
+    sites: サイト
+    sections: 分析ページ
+    metrics: 指標
+    data: データ
+    actions: 操作
+  types:
+    all: すべて
+    page: ページ
+    event: イベント
+    referrer: 参照元
+    visitor: 訪問者
+    session: セッション
+    eventRecord: イベントレコード
+    id: 訪問者またはイベントレコード
+    campaign: キャンペーン
+    browser: ブラウザ
+  lookup:
+    value: 「{value}」を {site} で検索
+    retry: 「{value}」を再検索
+    searching: 検索中…
+    noMatch: 一致するデータはありません
+    failed: 検索に失敗しました
+    enterValue: 検索する値を入力してください
+    invalid: この値では検索できません
+  actions:
+    switchSite: サイトを切り替え
+    switchTeam: チームを切り替え
+    back: 戻る
+  range:
+    label: 検索期間
+    apply: 適用
+    cancel: キャンセル
+  keys:
+    select: 選択
+    open: 開く
+    close: 閉じる
+  empty: 一致する結果はありません
+  unavailable: 対象が存在しないか、アクセス権がありません。

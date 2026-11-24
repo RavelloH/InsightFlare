@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { matchScore } from "./core";
 import {
+  MAX_PAGE_PATH_PER_SCOPE,
   MAX_PER_SCOPE,
   type ObservedCandidate,
   PerceptionIndex,
@@ -113,6 +114,39 @@ describe("scope, lifecycle and fallback", () => {
     const records = (index as unknown as { records: Map<string, unknown> })
       .records;
     expect(records.size).toBe(MAX_PER_SCOPE);
+  });
+  it("caps page paths at 300 per scope while retaining other dimensions", () => {
+    const index = new PerceptionIndex();
+    for (let start = 0; start < 350; start += 100) {
+      index.observe(
+        first,
+        Array.from({ length: Math.min(100, 350 - start) }, (_, offset) => ({
+          field: "page.path" as const,
+          value: `/page-${start + offset}`,
+        })),
+      );
+    }
+    for (let start = 0; start < 200; start += 100) {
+      index.observe(
+        first,
+        Array.from({ length: 100 }, (_, offset) => ({
+          field: "event.name" as const,
+          value: `Event ${start + offset}`,
+        })),
+      );
+    }
+
+    const records = (index as unknown as { records: Map<string, unknown> })
+      .records;
+    const pagePaths = [...records.values()].filter(
+      (record) => (record as { field?: string }).field === "page.path",
+    );
+    const eventNames = [...records.values()].filter(
+      (record) => (record as { field?: string }).field === "event.name",
+    );
+    expect(pagePaths).toHaveLength(MAX_PAGE_PATH_PER_SCOPE);
+    expect(eventNames).toHaveLength(200);
+    expect(records.size).toBe(500);
   });
   it("degrades to safe in-memory index when IndexedDB open throws", async () => {
     vi.stubGlobal("indexedDB", {

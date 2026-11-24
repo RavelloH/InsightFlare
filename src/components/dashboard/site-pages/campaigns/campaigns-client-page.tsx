@@ -26,6 +26,10 @@ import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { FilterDocument } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import {
+  capturePerceptionGuard,
+  observeLoadedDimension,
+} from "@/lib/perception-search/runtime";
 interface CampaignsClientPageProps {
   locale: Locale;
   messages: AppMessages;
@@ -87,6 +91,17 @@ export function CampaignsClientPage({
   >(
     async ({ tab, cursor, limit, search, signal, sort }) => {
       try {
+        const observationField =
+          tab === "source"
+            ? "utm.source"
+            : tab === "medium"
+              ? "utm.medium"
+              : tab === "campaign"
+                ? "utm.campaign"
+                : null;
+        const observationGuard = observationField
+          ? capturePerceptionGuard(siteId)
+          : null;
         const comparisonMetric =
           tab === "term" || tab === "content"
             ? comparisonMetricByGroup.signals
@@ -118,6 +133,14 @@ export function CampaignsClientPage({
                 : undefined,
           },
         );
+        if (observationField && !signal.aborted) {
+          observeLoadedDimension(
+            siteId,
+            observationField,
+            payload.items.map((row) => row.value ?? row.label),
+            observationGuard,
+          );
+        }
         const items = buildCampaignRows(
           payload.items,
           tab,

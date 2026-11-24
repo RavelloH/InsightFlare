@@ -3051,3 +3051,52 @@ sidebarFooter:
 teamEntry:
   title: 选择团队
   description: 你当前可访问多个团队，请先选择要进入的团队。
+search:
+  title: 搜索
+  description: 搜索分析页面、指标、站点和数据。
+  trigger: 搜索
+  placeholders:
+    root: 搜索团队…
+    team: 搜索站点…
+    site: 搜索页面、指标或数据…
+  groups:
+    recent: 最近访问
+    teams: 团队
+    sites: 站点
+    sections: 分析页面
+    metrics: 指标
+    data: 数据
+    actions: 操作
+  types:
+    all: 全部
+    page: 页面
+    event: 事件
+    referrer: 来源
+    visitor: 访客
+    session: 会话
+    eventRecord: 事件记录
+    id: 访客或事件记录
+    campaign: 推广
+    browser: 浏览器
+  lookup:
+    value: 在 {site} 中查找“{value}”
+    retry: 重新查找“{value}”
+    searching: 查找中…
+    noMatch: 没有找到匹配的数据
+    failed: 查找失败
+    enterValue: 输入要查找的内容
+    invalid: 无法按这个值查找
+  actions:
+    switchSite: 切换站点
+    switchTeam: 切换团队
+    back: 返回
+  range:
+    label: 查找范围
+    apply: 应用
+    cancel: 取消
+  keys:
+    select: 选择
+    open: 打开
+    close: 关闭
+  empty: 没有匹配的结果
+  unavailable: 目标已不存在，或你已无权访问。

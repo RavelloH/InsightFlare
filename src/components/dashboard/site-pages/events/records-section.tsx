@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -44,7 +45,13 @@ import {
   fetchEventRecordDetail,
   fetchEventsRecords,
 } from "@/lib/dashboard/client/data/index";
+import {
+  pushUrlWithoutNavigation,
+  replaceUrlWithoutNavigation,
+  useLiveSearchParams,
+} from "@/lib/dashboard/client/history";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
+import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import { numberFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { EventRecord } from "@/lib/dashboard-api/client/edge";
@@ -66,6 +73,7 @@ import {
   type EventRecordTableColumnId,
   type SortDirection,
 } from "./types";
+const EVENT_RECORD_QUERY_PARAM = "eventRecordId";
 function SortIndicator({
   active,
   direction,
@@ -616,8 +624,10 @@ export const EventRecordsSection = memo(function EventRecordsSection({
   const [sort, setSort] = useState<EventRecordSortState>(
     DEFAULT_EVENT_RECORD_SORT,
   );
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [selectedEventId, setSelectedEventId] = useState("");
+  const searchParams = useLiveSearchParams();
+  const selectedEventId =
+    searchParams.get(EVENT_RECORD_QUERY_PARAM)?.trim() ?? "";
+  const openedRecordFromListRef = useRef(false);
   const eventColumnDefinitions = useMemo<
     readonly AnalyticsTableColumnDefinition<EventRecordTableColumnId>[]
   >(
@@ -642,6 +652,10 @@ export const EventRecordsSection = memo(function EventRecordsSection({
     columns: eventColumnDefinitions,
   });
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
+
+  useEffect(() => {
+    if (!selectedEventId) openedRecordFromListRef.current = false;
+  }, [selectedEventId]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -726,8 +740,7 @@ export const EventRecordsSection = memo(function EventRecordsSection({
         signal,
         preserveErrors: true,
       }),
-    enabled:
-      typeof window !== "undefined" && drawerOpen && Boolean(selectedEventId),
+    enabled: typeof window !== "undefined" && Boolean(selectedEventId),
   });
   const detail = detailQuery.data?.data ?? null;
   const detailLoading = detailQuery.isPending && !detail;
@@ -744,10 +757,33 @@ export const EventRecordsSection = memo(function EventRecordsSection({
     );
   }, []);
 
-  const openRecord = useCallback((eventId: string) => {
-    setSelectedEventId(eventId);
-    setDrawerOpen(true);
-  }, []);
+  const openRecord = useCallback(
+    (eventId: string) => {
+      const normalizedEventId = eventId.trim();
+      if (!normalizedEventId) return;
+      const params = new URLSearchParams(searchParams.toString());
+      if (params.get(EVENT_RECORD_QUERY_PARAM)?.trim() === normalizedEventId)
+        return;
+      params.set(EVENT_RECORD_QUERY_PARAM, normalizedEventId);
+      openedRecordFromListRef.current = true;
+      const query = serializeDashboardSearchParams(params);
+      pushUrlWithoutNavigation(query ? `${pathname}?${query}` : pathname);
+    },
+    [pathname, searchParams],
+  );
+
+  const closeRecord = useCallback(() => {
+    const params = new URLSearchParams(globalThis.window.location.search);
+    if (!params.has(EVENT_RECORD_QUERY_PARAM)) return;
+    if (openedRecordFromListRef.current) {
+      openedRecordFromListRef.current = false;
+      globalThis.window.history.back();
+      return;
+    }
+    params.delete(EVENT_RECORD_QUERY_PARAM);
+    const query = serializeDashboardSearchParams(params);
+    replaceUrlWithoutNavigation(query ? `${pathname}?${query}` : pathname);
+  }, [pathname]);
 
   return (
     <section className="space-y-3">
@@ -803,8 +839,10 @@ export const EventRecordsSection = memo(function EventRecordsSection({
         labels={labels}
         siteId={siteId}
         pathname={pathname}
-        open={drawerOpen}
-        onOpenChange={setDrawerOpen}
+        open={Boolean(selectedEventId)}
+        onOpenChange={(open) => {
+          if (!open) closeRecord();
+        }}
         detail={detail}
         loading={detailLoading}
         error={detailError}

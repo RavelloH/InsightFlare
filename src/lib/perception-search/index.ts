@@ -30,6 +30,7 @@ export interface PerceptionValue extends ObservedCandidate {
 const TTL_MS = 30 * 86400_000;
 export const MAX_PER_SCOPE = 500;
 export const MAX_TOTAL = 2000;
+export const MAX_PAGE_PATH_PER_SCOPE = 300;
 const DB_NAME = "insightflare-perception-v1";
 const DB_VERSION = 2;
 const SAFE_SET: ReadonlySet<string> = new Set(SAFE_FIELDS);
@@ -189,13 +190,22 @@ export class PerceptionIndex {
   private trim(now: number) {
     const valid = [...this.records.values()].filter((r) => isCurrent(r, now));
     const byScope = new Map<string, number>();
+    const pagePathsByScope = new Map<string, number>();
     valid.sort((a, b) => b.observedAt - a.observedAt);
     this.records.clear();
     for (const item of valid) {
       const key = scopeKey(item.scope);
       const count = byScope.get(key) ?? 0;
+      const pagePathCount = pagePathsByScope.get(key) ?? 0;
       if (count >= MAX_PER_SCOPE || this.records.size >= MAX_TOTAL) continue;
+      if (
+        item.field === "page.path" &&
+        pagePathCount >= MAX_PAGE_PATH_PER_SCOPE
+      )
+        continue;
       byScope.set(key, count + 1);
+      if (item.field === "page.path")
+        pagePathsByScope.set(key, pagePathCount + 1);
       this.records.set(item.id, item);
     }
   }
@@ -309,22 +319,32 @@ export class PerceptionIndex {
       db.transaction("values", "readonly").objectStore("values").getAll(),
     )) as PerceptionValue[];
     const seen = new Map<string, number>();
+    const pagePathsSeen = new Map<string, number>();
     const now = Date.now();
     const doomed: string[] = [];
+    let retained = 0;
     records.sort((a, b) => (b.observedAt ?? 0) - (a.observedAt ?? 0));
     for (let i = 0; i < records.length; i++) {
       const item = records[i];
       const ns = item.scope ? scopeKey(item.scope) : "";
       const count = seen.get(ns) ?? 0;
+      const pagePathCount = pagePathsSeen.get(ns) ?? 0;
       if (
         !item.scope ||
         !safeCandidate(item.field, item.value) ||
         !isCurrent(item, now) ||
         count >= MAX_PER_SCOPE ||
-        i >= MAX_TOTAL
+        (item.field === "page.path" &&
+          pagePathCount >= MAX_PAGE_PATH_PER_SCOPE) ||
+        retained >= MAX_TOTAL
       )
         doomed.push(item.id);
-      else seen.set(ns, count + 1);
+      else {
+        retained++;
+        seen.set(ns, count + 1);
+        if (item.field === "page.path")
+          pagePathsSeen.set(ns, pagePathCount + 1);
+      }
     }
     if (!doomed.length) return;
     await new Promise<void>((resolve, reject) => {

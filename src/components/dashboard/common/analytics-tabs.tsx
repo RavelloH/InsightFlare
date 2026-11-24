@@ -77,7 +77,7 @@ interface AnalyticsTabItem {
 interface AnalyticsTabsProps {
   items: AnalyticsTabItem[];
 }
-function getAnalyticsSectionIcon(key: AnalyticsTabKey) {
+export function getAnalyticsSectionIcon(key: string) {
   if (key === "overview") return RiDashboardLine;
   if (key === "request-overview") return RiDashboardLine;
   if (key === "request-abnormal") return RiRobot2Line;

@@ -9,6 +9,7 @@ import {
   getPerceptionAuthorization,
   localPerceptionNavigation,
   localPerceptionSearch,
+  lookupPerception,
   observeLoadedDimension,
   revokePerceptionSite,
   setPerceptionAuthorization,
@@ -41,6 +42,132 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 describe("perception runtime authority and request guards", () => {
+  it("looks up a bare UUID in exactly two site-scoped detail readers and preserves partial hits", async () => {
+    setPerceptionAuthorization(base, []);
+    const value = "f2b07f9c-8a13-4c26-9f98-3f5bc63aee9c";
+    const scope = currentPerceptionScope("site-a")!;
+    const window = {
+      preset: "custom",
+      interval: "day",
+      timeZone: "UTC",
+      from: 100,
+      to: 200,
+    } as const;
+    const urls: URL[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        const url = new URL(input, "https://example.test");
+        urls.push(url);
+        if (url.pathname.endsWith("/visitor-detail")) {
+          return Response.json({
+            ok: true,
+            data: { visitor: { visitorId: value } },
+          });
+        }
+        return new Response(null, { status: 503 });
+      }),
+    );
+
+    await expect(
+      lookupPerception({
+        kind: "id",
+        value,
+        scope,
+        window,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual({
+      hits: [{ kind: "visitor", value }],
+      failed: true,
+      revoked: false,
+    });
+    expect(urls.map(({ pathname }) => pathname)).toEqual([
+      "/api/private/visitor-detail",
+      "/api/private/event-record-detail",
+    ]);
+    expect(
+      urls.every((url) => url.searchParams.get("siteId") === scope.siteId),
+    ).toBe(true);
+    expect(urls[1]?.searchParams.get("from")).toBe(String(window.from));
+    expect(urls[1]?.searchParams.get("to")).toBe(String(window.to));
+  });
+
+  it("discards an in-flight explicit result after navigating to another site", async () => {
+    setPerceptionAuthorization(base, []);
+    const scope = currentPerceptionScope("site-a")!;
+    let finish!: (response: Response) => void;
+    const fetchDetail = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchDetail);
+    const lookup = lookupPerception({
+      kind: "visitor",
+      value: "visitor-a",
+      scope,
+      window: {
+        preset: "custom",
+        interval: "day",
+        timeZone: "UTC",
+        from: 100,
+        to: 200,
+      },
+      signal: new AbortController().signal,
+    });
+    expect(fetchDetail).toHaveBeenCalledOnce();
+    setPerceptionAuthorization({ ...base, activeSiteId: undefined }, []);
+    finish(
+      Response.json({
+        ok: true,
+        data: { visitor: { visitorId: "visitor-a" } },
+      }),
+    );
+    await expect(lookup).resolves.toEqual({
+      hits: [],
+      failed: false,
+      revoked: false,
+    });
+  });
+
+  it("distinguishes a rejected site grant from an unavailable detail endpoint", async () => {
+    setPerceptionAuthorization(base, []);
+    const scope = currentPerceptionScope("site-a")!;
+    const lookup = {
+      kind: "visitor",
+      value: "visitor-a",
+      scope,
+      window: {
+        preset: "custom",
+        interval: "day",
+        timeZone: "UTC",
+        from: 100,
+        to: 200,
+      },
+      signal: new AbortController().signal,
+    } as const;
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({ error: "Site not found" }, { status: 404 }),
+        )
+        .mockResolvedValueOnce(
+          Response.json({ error: "Not found" }, { status: 404 }),
+        ),
+    );
+    await expect(lookupPerception(lookup)).resolves.toMatchObject({
+      revoked: true,
+    });
+    await expect(lookupPerception(lookup)).resolves.toMatchObject({
+      revoked: false,
+      failed: true,
+    });
+  });
+
   it("shows only authorized navigation on an empty query, not observed values", () => {
     const request = {
       query: "",

@@ -418,4 +418,31 @@ describe("typed query adapter validation branches", () => {
     expect(valid.status).toBe(200);
     expect(denied.status).toBe(400);
   });
+  it("allows only a bounded private exact filter-value lookup", async () => {
+    const base =
+      "https://edge.test/query?from=1767225600000&to=1767312000000&filterKey=page.path&exact=true&filter[page.path]=%2Fdocs";
+    const publicContext = siteQueryContext(siteId, "public-share");
+    const [privateExact, unbounded, publicExact, multipleConditions] =
+      await Promise.all([
+        handleFilterValuesContract(env, siteId, new URL(`${base}&limit=1`)),
+        handleFilterValuesContract(env, siteId, new URL(base)),
+        handleFilterValuesContract(
+          env,
+          siteId,
+          new URL(`${base}&limit=1`),
+          undefined,
+          publicContext,
+        ),
+        handleFilterValuesContract(
+          env,
+          siteId,
+          new URL(`${base}&limit=1&filter[event.name]=Signup`),
+        ),
+      ]);
+
+    expect(privateExact.status).toBe(200);
+    expect(unbounded.status).toBe(400);
+    expect(publicExact.status).toBe(400);
+    expect(multipleConditions.status).toBe(400);
+  });
 });

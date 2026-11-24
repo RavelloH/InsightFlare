@@ -30,6 +30,10 @@ import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { FilterDocument } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import {
+  capturePerceptionGuard,
+  observeLoadedDimension,
+} from "@/lib/perception-search/runtime";
 interface ReferrersClientPageProps {
   locale: Locale;
   messages: AppMessages;
@@ -125,6 +129,8 @@ export function ReferrersClientPage({
     >
   >(
     async ({ tab, cursor, limit, search, sort, signal }) => {
+      const observationGuard =
+        tab === "domain" ? capturePerceptionGuard(siteId) : null;
       const comparisonMetric =
         tab === "channel"
           ? comparisonMetricByGroup.channel
@@ -156,6 +162,14 @@ export function ReferrersClientPage({
               : undefined,
         },
       );
+      if (tab === "domain" && !signal.aborted) {
+        observeLoadedDimension(
+          siteId,
+          "referrer.domain",
+          page.items.map((row) => row.value ?? row.label),
+          observationGuard,
+        );
+      }
       const normalized = buildReferrerRowsByTab(
         {
           domain: tab === "domain" ? page.items : [],

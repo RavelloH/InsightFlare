@@ -35,6 +35,10 @@ import type {
 } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
+import {
+  capturePerceptionGuard,
+  observeLoadedDimension,
+} from "@/lib/perception-search/runtime";
 interface EventsClientPageProps {
   locale: Locale;
   messages: AppMessages;
@@ -220,8 +224,21 @@ export function EventsClientPage({
       comparisonFiltersKey,
     ],
     queryFn: async ({ signal }) => {
+      const observationGuard = capturePerceptionGuard(siteId);
       const currentRequest = Promise.all([
-        fetchEventsSummary(siteId, timeWindow, filters, { signal }),
+        fetchEventsSummary(siteId, timeWindow, filters, { signal }).then(
+          (summary) => {
+            if (!signal.aborted) {
+              observeLoadedDimension(
+                siteId,
+                "event.name",
+                summary.cards.event.name.map((row) => row.label),
+                observationGuard,
+              );
+            }
+            return summary;
+          },
+        ),
         fetchEventsTrend(siteId, timeWindow, filters, {
           limit: EVENT_TREND_MAX_SERIES,
           signal,

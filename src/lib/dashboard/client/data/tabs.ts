@@ -276,6 +276,10 @@ export async function fetchFilterValues(
     search?: string;
     signal?: AbortSignal;
     resolvedScope?: FilterScope;
+    /** Keep the selected field constraint for exact first-party lookup only. */
+    exactMatch?: boolean;
+    /** Re-throw transport errors for explicit, user-triggered lookups. */
+    preserveErrors?: boolean;
   },
 ): Promise<DashboardFilterOptionsData["data"]> {
   const payload = await fetchPrivateJson<DashboardFilterOptionsData>(
@@ -288,6 +292,7 @@ export async function fetchFilterValues(
           to: window.to,
           timeZone: window.timeZone,
           filterKey,
+          ...(options?.exactMatch ? { exact: "true" } : {}),
           ...(options?.search?.trim() ? { search: options.search.trim() } : {}),
         },
         options,
@@ -297,7 +302,10 @@ export async function fetchFilterValues(
       options?.resolvedScope,
     ),
     { signal: options?.signal },
-  ).catch(() => emptyDashboardFilterOptions());
+  ).catch((error) => {
+    if (options?.preserveErrors) throw error;
+    return emptyDashboardFilterOptions();
+  });
   return normalizePaginatedCollection<
     DashboardFilterOptionsData["data"]["items"][number]
   >(payload.data);

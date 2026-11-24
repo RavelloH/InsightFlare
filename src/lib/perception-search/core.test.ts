@@ -7,6 +7,7 @@ import {
   resolveSearchAction,
   searchExplicit,
   searchLocal,
+  type SearchNavigationTarget,
   type SearchProvider,
   type SearchRequest,
   type SearchResolutionContext,
@@ -94,7 +95,7 @@ describe("Search Core", () => {
     const providers: SearchProvider[] = [
       {
         id: "remote",
-        modes: ["global", "explicit-fulltext"],
+        modes: ["global", "explicit-lookup"],
         cost: "remote",
         search: remote,
       },
@@ -108,23 +109,129 @@ describe("Search Core", () => {
     expect(searchLocal(request, providers)).toHaveLength(1);
     expect(remote).not.toHaveBeenCalled();
     expect(
-      (
-        await searchExplicit(
-          { ...request, mode: "explicit-fulltext" },
-          providers,
-        )
-      ).status,
+      (await searchExplicit({ ...request, mode: "explicit-lookup" }, providers))
+        .status,
     ).toBe("unavailable");
     expect(remote).not.toHaveBeenCalled();
     expect(
       (
         await searchExplicit(
-          { ...request, mode: "explicit-fulltext", userInitiated: true },
+          { ...request, mode: "explicit-lookup", userInitiated: true },
           providers,
         )
       ).status,
     ).toBe("ok");
     expect(remote).toHaveBeenCalledTimes(1);
+  });
+  it("resolves observed dimensions to their typed landing routes", () => {
+    const ctx: SearchResolutionContext = {
+      userId: "u1",
+      locale: "zh",
+      allowedTeamIds: new Set(["t1"]),
+      allowedSiteIds: new Set(["s1"]),
+      teamRoutes: new Map([["t1", "/zh/app/team-a"]]),
+      siteRoutes: new Map([
+        [
+          "s1",
+          {
+            teamId: "t1",
+            baseHref: "/zh/app/team-a/site-a",
+            sections: new Set([
+              "overview",
+              "pages",
+              "referrers",
+              "campaigns",
+              "sessions",
+              "visitors",
+              "events",
+              "browsers",
+            ]),
+          },
+        ],
+      ]),
+    };
+    const navigateTo = (target: SearchNavigationTarget) =>
+      resolveSearchAction(
+        {
+          ...make("destination"),
+          action: { type: "navigate", target },
+        },
+        ctx,
+      );
+    const base = { kind: "site" as const, teamId: "t1", siteId: "s1" };
+    const cases: [SearchNavigationTarget, string][] = [
+      [
+        { ...base, section: "visitors", visitorId: "visitor-1" },
+        "/zh/app/team-a/site-a/visitors?detail=visitor-1",
+      ],
+      [
+        { ...base, section: "sessions", sessionId: "session-1" },
+        "/zh/app/team-a/site-a/sessions?detail=session-1",
+      ],
+      [
+        { ...base, section: "events", eventName: "Sign up" },
+        "/zh/app/team-a/site-a/events?detail=Sign+up",
+      ],
+      [
+        { ...base, section: "events", eventRecordId: "event/1" },
+        "/zh/app/team-a/site-a/events?eventRecordId=event%2F1",
+      ],
+      [
+        { ...base, section: "pages", pagePath: "/product" },
+        "/zh/app/team-a/site-a/pages?pagePath=%2Fproduct",
+      ],
+      [
+        {
+          ...base,
+          section: "referrers",
+          filter: { field: "referrer.domain", value: "example.com" },
+        },
+        "/zh/app/team-a/site-a/referrers?filter[referrer.domain]=example.com",
+      ],
+      [
+        {
+          ...base,
+          section: "campaigns",
+          filter: { field: "utm.source", value: "newsletter" },
+        },
+        "/zh/app/team-a/site-a/campaigns?filter[utm.source]=newsletter",
+      ],
+      [
+        {
+          ...base,
+          section: "campaigns",
+          filter: { field: "utm.medium", value: "email" },
+        },
+        "/zh/app/team-a/site-a/campaigns?filter[utm.medium]=email",
+      ],
+      [
+        {
+          ...base,
+          section: "campaigns",
+          filter: { field: "utm.campaign", value: "spring" },
+        },
+        "/zh/app/team-a/site-a/campaigns?filter[utm.campaign]=spring",
+      ],
+      [
+        {
+          ...base,
+          section: "browsers",
+          filter: { field: "client.browser", value: "Chrome" },
+        },
+        "/zh/app/team-a/site-a/browsers?filter[client.browser]=Chrome",
+      ],
+    ];
+
+    for (const [target, href] of cases) {
+      expect(navigateTo(target)).toEqual({ type: "navigate", href });
+    }
+    expect(
+      navigateTo({
+        ...base,
+        section: "campaigns",
+        filter: { field: "referrer.domain", value: "example.com" },
+      }),
+    ).toBeNull();
   });
   it("rejects unauthorized, external and wrong-locale actions at execution", () => {
     const ctx: SearchResolutionContext = {
@@ -293,7 +400,7 @@ describe("Search Core", () => {
     const providers: SearchProvider[] = [
       {
         id: "full-text",
-        modes: ["explicit-fulltext"],
+        modes: ["explicit-lookup"],
         cost: "remote",
         search: remote,
       },
@@ -304,7 +411,7 @@ describe("Search Core", () => {
       await searchExplicit(
         {
           ...request,
-          mode: "explicit-fulltext",
+          mode: "explicit-lookup",
           userInitiated: true,
           signal: controller.signal,
         },
@@ -321,7 +428,7 @@ describe("Search Core", () => {
     const inFlight = searchExplicit(
       {
         ...request,
-        mode: "explicit-fulltext",
+        mode: "explicit-lookup",
         userInitiated: true,
         signal: new AbortController().signal,
       },
@@ -333,7 +440,7 @@ describe("Search Core", () => {
     const active = searchExplicit(
       {
         ...request,
-        mode: "explicit-fulltext",
+        mode: "explicit-lookup",
         userInitiated: true,
         signal: during.signal,
       },

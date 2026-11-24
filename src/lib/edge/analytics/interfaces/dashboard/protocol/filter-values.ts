@@ -38,10 +38,44 @@ export async function handleFilterValuesContract(
   }
   const window = parseWindow(url);
   if (!window) return badRequest("Invalid time window");
-  const filters = withoutFilterKey(
-    parseFilterUrlForAudience(queryContext.policy.audience, url),
-    field,
+  const exactLookup = url.searchParams.get("exact");
+  const exactLookupFields = new Set([
+    "page.path",
+    "event.name",
+    "referrer.domain",
+  ]);
+  if (
+    (exactLookup !== null && exactLookup !== "true") ||
+    (exactLookup === "true" &&
+      (queryContext.policy.audience !== "private-dashboard" ||
+        !exactLookupFields.has(field)))
+  ) {
+    return badRequest("Invalid exact filter lookup");
+  }
+  const parsedFilters = parseFilterUrlForAudience(
+    queryContext.policy.audience,
+    url,
   );
+  if (exactLookup === "true") {
+    const condition = parsedFilters.root;
+    if (
+      url.searchParams.get("limit") !== "1" ||
+      url.searchParams.has("cursor") ||
+      url.searchParams.has("search") ||
+      condition?.kind !== "condition" ||
+      condition.operator !== "eq" ||
+      condition.target.kind !== "field" ||
+      condition.target.field !== field ||
+      typeof condition.value !== "string" ||
+      !condition.value.trim()
+    ) {
+      return badRequest("Invalid exact filter lookup");
+    }
+  }
+  const filters =
+    exactLookup === "true"
+      ? parsedFilters
+      : withoutFilterKey(parsedFilters, field);
   const query = {
     context: queryContext,
     time: queryWindowToTime(window),
