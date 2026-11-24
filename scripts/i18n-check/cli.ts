@@ -12,7 +12,7 @@ import {
 } from "./diagnostics";
 import { rlog } from "./logger";
 import { LOCALE_PATHS, LOCALES, TSCONFIG_PATH } from "./paths";
-import { pruneUnusedKeys } from "./prune";
+import { pruneUnusedKeys, regenerateAppMessages } from "./prune";
 import type { NodeInfo } from "./types";
 import { collectTypePaths, parseTsConfig } from "./typescript";
 import { collectUsedKeys } from "./usage-scanner";
@@ -21,6 +21,7 @@ import { collectNodes, readYaml } from "./yaml";
 export async function runCli(
   args: string[] = process.argv.slice(2),
 ): Promise<void> {
+  await regenerateAppMessages();
   rlog.info(
     `Loading translation files (${LOCALES.map((locale) => `${locale}.yaml`).join(", ")})...`,
   );

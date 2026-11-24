@@ -26,6 +26,7 @@ export default [
       ".tmp/**",
       "tmp/**",
       "src/routeTree.gen.ts",
+      "src/lib/i18n/generated/**",
       "src/tracker/**",
       "*.tsbuildinfo",
       "coverage/**",

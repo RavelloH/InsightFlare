@@ -90,6 +90,7 @@ describe("public repository file policy", { timeout: 20000 }, () => {
     ".github/releases/i18n/ja/audit.md",
     "changelog/observability-core.md",
     "changelog/v1.md",
+    "src/lib/i18n/generated/messages.ts",
     "src/report.txt",
     "src/report.json",
     "src/report.html",
@@ -104,7 +105,7 @@ describe("public repository file policy", { timeout: 20000 }, () => {
     const result = check();
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(JSON.stringify(file));
-    expect(result.stderr).toContain("Recalloom");
+    expect(result.stderr).toContain("private workspace outside the repository");
   });
 
   it("allows approved public files and source code", () => {

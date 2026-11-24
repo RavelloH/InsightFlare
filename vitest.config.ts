@@ -5,6 +5,8 @@ import path from "path";
 import { defineConfig } from "vitest/config";
 import { parse } from "yaml";
 
+import { regenerateAppMessages } from "./scripts/i18n-check/prune";
+
 // Keep the test pool bounded on high-core machines.  V8 coverage writes one
 // temporary file per worker; an unbounded pool makes that merge flaky under
 // the full check and can also starve the integration tests of CPU.
@@ -32,7 +34,7 @@ const NODE_TEST_FILES = [
   NODE_TEST_SCOPES[NODE_TEST_SCOPES.length - 1],
 ];
 
-export default defineConfig({
+const config = defineConfig({
   plugins: [
     {
       name: "yaml-as-json",
@@ -135,6 +137,7 @@ export default defineConfig({
         "src/**/analytics.ts",
         "src/**/management.ts",
         "src/lib/i18n/messages.ts",
+        "src/lib/i18n/generated/messages.ts",
         "src/tracker/*.min.ts",
         "src/tracker/sdk.no-perf.min.ts",
         "src/lib/dashboard-api/contract/types/**",
@@ -171,4 +174,9 @@ export default defineConfig({
       ),
     },
   },
+});
+
+export default defineConfig(async () => {
+  await regenerateAppMessages();
+  return config;
 });

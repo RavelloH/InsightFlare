@@ -1,5 +1,5 @@
 /**
- * Watches src/i18n/*.yaml and regenerates src/lib/i18n/messages.ts after a
+ * Watches src/i18n/*.yaml and regenerates src/lib/i18n/generated/messages.ts after a
  * debounce. Used both by the standalone `watch:i18n` script and by the dev
  * runner, so a single implementation stays in sync.
  *
@@ -12,13 +12,13 @@ import path from "node:path";
 
 import type Rlog from "rlog-js";
 
-import { APP_MESSAGES_PATH, LOCALE_PATHS, LOCALES } from "./paths";
+import { LOCALE_PATHS, LOCALES } from "./paths";
 import { regenerateAppMessages } from "./prune";
 
 const DEBOUNCE_MS = 120;
 
 export interface YamlWatcher {
-  start(): void;
+  start(): Promise<void>;
   stop(): void;
 }
 
@@ -45,17 +45,6 @@ export function createYamlWatcher(rlog: Rlog): YamlWatcher {
     }
   }
 
-  function messagesAreFresh(): boolean {
-    try {
-      const generatedAt = fs.statSync(APP_MESSAGES_PATH).mtimeMs;
-      return LOCALES.every(
-        (locale) => generatedAt >= fs.statSync(LOCALE_PATHS[locale]).mtimeMs,
-      );
-    } catch {
-      return false;
-    }
-  }
-
   function scheduleRegenerate(): void {
     if (pending || closed) return;
     pending = true;
@@ -67,14 +56,9 @@ export function createYamlWatcher(rlog: Rlog): YamlWatcher {
   }
 
   return {
-    start(): void {
+    async start(): Promise<void> {
       rlog.info(`Watching ${watchDir} for changes: ${LOCALES.join(", ")}.yaml`);
-      if (messagesAreFresh()) {
-        rlog.info("messages.ts is up to date; skipping regeneration.");
-      } else {
-        rlog.info("Regenerating messages.ts...");
-        void regenerate();
-      }
+      await regenerateAppMessages();
 
       watcher = fs.watch(watchDir, (_eventType, filename) => {
         if (!filename) return;

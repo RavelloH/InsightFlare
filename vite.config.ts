@@ -9,6 +9,7 @@ import { defineConfig, loadEnv } from "vite";
 import { parse } from "yaml";
 
 import packageJson from "./package.json" with { type: "json" };
+import { regenerateAppMessages } from "./scripts/i18n-check/prune";
 
 // Vite watches the project root. Keep generated state, reports, and repository
 // metadata out of chokidar so Cloudflare/TanStack SSR restarts do not traverse
@@ -92,7 +93,8 @@ function ssrMapStubs() {
   };
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(async ({ mode }) => {
+  await regenerateAppMessages();
   const env = loadEnv(mode, process.cwd(), "");
   const isE2E = process.env.INSIGHTFLARE_E2E === "1";
   const e2eGithubApiBase = process.env.INSIGHTFLARE_E2E_GITHUB_API_BASE;

@@ -18,6 +18,7 @@ export const APP_MESSAGES_PATH = path.join(
   SRC_DIR,
   "lib",
   "i18n",
+  "generated",
   "messages.ts",
 );
 

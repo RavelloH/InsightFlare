@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import path from "node:path";
 
 import * as prettier from "prettier";
 import YAML from "yaml";
@@ -69,8 +71,8 @@ function buildMessagesOutput(
     interfaceBody.push(`  ${tsKey(key)}: ${propType};`);
   }
 
-  return `// @generated from src/i18n/*.yaml by scripts/i18n-check.
-import type { Locale } from "./config";
+  return `// @generated from src/i18n/*.yaml. DO NOT EDIT. Edit the YAML source files instead.
+import type { Locale } from "../config";
 
 export interface AppMessages {
 ${interfaceBody.join("\n")}
@@ -88,14 +90,26 @@ export function getMessages(locale: Locale): AppMessages {
 `;
 }
 
-async function formatMessagesFile(): Promise<void> {
-  const source = await fs.readFile(APP_MESSAGES_PATH, "utf8");
+async function writeMessagesFile(source: string): Promise<void> {
   const prettierOptions = await prettier.resolveConfig(APP_MESSAGES_PATH);
   const formatted = await prettier.format(source, {
     ...(prettierOptions ?? {}),
     filepath: APP_MESSAGES_PATH,
   });
-  await fs.writeFile(APP_MESSAGES_PATH, formatted, "utf8");
+  await fs.mkdir(path.dirname(APP_MESSAGES_PATH), { recursive: true });
+  try {
+    if ((await fs.readFile(APP_MESSAGES_PATH, "utf8")) === formatted) return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  // Never expose a partially generated file to a parallel typecheck or watcher.
+  const temporary = APP_MESSAGES_PATH + "." + randomUUID() + ".tmp";
+  try {
+    await fs.writeFile(temporary, formatted, "utf8");
+    await fs.rename(temporary, APP_MESSAGES_PATH);
+  } finally {
+    await fs.rm(temporary, { force: true });
+  }
 }
 
 export async function regenerateAppMessages(): Promise<void> {
@@ -108,12 +122,7 @@ export async function regenerateAppMessages(): Promise<void> {
     ),
   ) as Record<(typeof LOCALES)[number], unknown>;
 
-  await fs.writeFile(
-    APP_MESSAGES_PATH,
-    buildMessagesOutput(parsedYamlByLocale),
-    "utf8",
-  );
-  await formatMessagesFile();
+  await writeMessagesFile(buildMessagesOutput(parsedYamlByLocale));
   rlog.success("Successfully regenerated messages.ts schema!");
 }
 
@@ -164,11 +173,6 @@ export async function pruneUnusedKeys(
     LOCALES.map((locale) => [locale, YAML.parse(prunedTextByLocale[locale])]),
   ) as Record<(typeof LOCALES)[number], unknown>;
 
-  await fs.writeFile(
-    APP_MESSAGES_PATH,
-    buildMessagesOutput(parsedYamlByLocale),
-    "utf8",
-  );
-  formatMessagesFile();
+  await writeMessagesFile(buildMessagesOutput(parsedYamlByLocale));
   rlog.success("Successfully regenerated messages.ts schema!");
 }

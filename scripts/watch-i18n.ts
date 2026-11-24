@@ -1,5 +1,5 @@
 /**
- * Standalone watcher for src/i18n/*.yaml -> src/lib/i18n/messages.ts.
+ * Standalone watcher for src/i18n/*.yaml -> src/lib/i18n/generated/messages.ts.
  *
  * Runtime reads translations from messages.ts (the generated artifact), not
  * from the yaml sources directly. This script keeps the artifact in sync while
@@ -17,6 +17,9 @@ const rlog = createScriptLogger({
 });
 
 const watcher = createYamlWatcher(rlog);
-watcher.start();
+void watcher.start().catch((error: unknown) => {
+  rlog.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+});
 
 rlog.info("Watching for changes. Press Ctrl+C to stop.");

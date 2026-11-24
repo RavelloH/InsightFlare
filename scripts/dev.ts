@@ -76,7 +76,7 @@ async function main(): Promise<void> {
   await runBuildSdk();
 
   const watcher = createYamlWatcher(rlog);
-  watcher.start();
+  await watcher.start();
 
   rlog.info(`Starting vite dev (${VITE})...`);
   const vite = spawn(process.execPath, [VITE, "dev", "--mode", "development"], {

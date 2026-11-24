@@ -33,3 +33,6 @@ evidence/
 output/
 .playwright-cli/
 /.github/engineering/
+
+# Generated translation implementation (edit src/i18n/*.yaml)
+/src/lib/i18n/generated/

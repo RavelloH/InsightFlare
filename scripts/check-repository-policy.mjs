@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 // Public repository admission policy. Do not broaden this policy to publish
-// development artifacts; store them in Recalloom or outside the working tree.
+// development artifacts; store them in a private workspace outside the working tree.
 const exact = new Set([
   ".dev.vars.example",
   ".gitignore",
@@ -70,6 +70,7 @@ const allowed = [
 const internalDir =
   /^(?:plans?|\.agents?|reports?|audits?|evidence|output|\.output|\.playwright-cli|playwright-report|test-results|logs|\.tmp|\.cache|coverage|node_modules|dist|\.wrangler|\.tanstack)$/i;
 function permitted(file) {
+  if (/^src\/lib\/i18n\/generated(?:\/|$)/i.test(file)) return false;
   const segments = file.split("/");
   if (segments.slice(0, -1).some((part) => internalDir.test(part)))
     return false;
@@ -225,7 +226,7 @@ try {
       );
     }
     console.error(
-      "Store internal plans, audits, verification results and handoffs in Recalloom. " +
+      "Store internal plans, audits, verification results and handoffs in a private workspace outside the repository. " +
         "Keep temporary artifacts outside the repository. Do not rename, relocate, " +
         "embed or convert prohibited artifacts to bypass this policy. " +
         "Do not disable or modify this policy to complete a commit. " +
