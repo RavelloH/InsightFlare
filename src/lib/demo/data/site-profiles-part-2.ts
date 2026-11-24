@@ -136,6 +136,7 @@ export const DEMO_SITE_PROFILES_PART_2: DemoSiteProfile[] = [
     ],
     deviceWeights: { Desktop: 0.82, Mobile: 0.15, Tablet: 0.03 },
     weekendFactor: 0.3,
+    momentum: "rise",
     eventNames: [
       "dashboard_view",
       "report_export",

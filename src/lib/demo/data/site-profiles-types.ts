@@ -22,6 +22,11 @@ export interface DemoSiteProfile {
   titles: string[];
   deviceWeights: { Desktop: number; Mobile: number; Tablet: number };
   weekendFactor: number;
+  /**
+   * Recent traffic direction. "rise" and "fall" ramp daily views over the last
+   * weeks so the site shows a clear change against the previous period.
+   */
+  momentum?: "rise" | "fall";
   eventNames: string[];
   hourProfile: DemoSiteHourProfile;
   /**

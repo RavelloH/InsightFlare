@@ -7,6 +7,7 @@ import {
   dailyViewCount,
   demoIntervalStepMs,
   integrateViews,
+  momentumFactor,
   sampleTimestampByCurve,
   siteDayIntegral,
   siteHourShapeIntegral,
@@ -202,5 +203,17 @@ describe("mock/site-curves", () => {
       expect(result).toBeGreaterThanOrEqual(1000);
       expect(result).toBeLessThan(2000);
     });
+  });
+});
+
+describe("demo site momentum", () => {
+  const today = 20_000;
+  it("ramps rising and falling sites toward today only", () => {
+    expect(momentumFactor(undefined, today, today)).toBe(1);
+    expect(momentumFactor("rise", today - 60, today)).toBe(1);
+    expect(momentumFactor("rise", today, today)).toBeCloseTo(2.6);
+    expect(momentumFactor("fall", today, today)).toBeCloseTo(0.4);
+    expect(momentumFactor("rise", today - 20, today)).toBeCloseTo(1.8);
+    expect(momentumFactor("fall", today + 3, today)).toBeCloseTo(0.4);
   });
 });

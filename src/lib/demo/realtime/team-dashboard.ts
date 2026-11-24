@@ -29,7 +29,8 @@ export function generateDemoTeamDashboard(
     const metrics = computeMetrics(site.id, from, to);
     const prevMetrics = computeMetrics(site.id, Math.max(0, from - span), from);
     const cr = (cur: number, prev: number) =>
-      prev === 0 ? null : Math.round(((cur - prev) / prev) * 10000) / 10000;
+      // Percent, matching the D1 provider.
+      prev === 0 ? null : Math.round(((cur - prev) / prev) * 10000) / 100;
     const pagesPerSession =
       metrics.sessions > 0 ? metrics.views / metrics.sessions : 0;
     const previousPagesPerSession =

@@ -84,7 +84,24 @@ export function dailyViewCount(siteId: string, dayNum: number): number {
   // 1970-01-01 (dayNum 0) = Thursday (dow 4). 0=Sun…6=Sat
   const dow = (4 + (((dayNum % 7) + 7) % 7)) % 7;
   if (dow === 0 || dow === 6) pv = Math.round(pv * profile.weekendFactor);
-  return pv;
+  return Math.round(pv * momentumFactor(profile.momentum, dayNum));
+}
+/** Days over which a rising or falling site ramps toward its new level. */
+const MOMENTUM_DAYS = 40;
+/**
+ * Multiplier for sites with recent momentum: 1 before the ramp, then a linear
+ * climb to 2.6× (rise) or a slide to 0.4× (fall) ending today.
+ */
+export function momentumFactor(
+  momentum: "rise" | "fall" | undefined,
+  dayNum: number,
+  todayDayNum = Math.floor(Date.now() / 86_400_000),
+): number {
+  if (!momentum) return 1;
+  const daysAgo = Math.max(0, todayDayNum - dayNum);
+  if (daysAgo >= MOMENTUM_DAYS) return 1;
+  const progress = (MOMENTUM_DAYS - daysAgo) / MOMENTUM_DAYS;
+  return momentum === "rise" ? 1 + 1.6 * progress : 1 - 0.6 * progress;
 }
 /** Integrate views for a site over [fromMs, toMs) using per-site hour shape */
 export function integrateViews(

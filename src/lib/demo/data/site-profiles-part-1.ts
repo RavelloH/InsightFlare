@@ -304,6 +304,7 @@ export const DEMO_SITE_PROFILES_PART_1: DemoSiteProfile[] = [
     ],
     deviceWeights: { Desktop: 0.48, Mobile: 0.47, Tablet: 0.05 },
     weekendFactor: 0.55,
+    momentum: "fall",
     eventNames: [
       "signup_click",
       "video_play",
