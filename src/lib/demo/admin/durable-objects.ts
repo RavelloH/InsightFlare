@@ -16,7 +16,7 @@ export function generateDemoDoDiagnostic(): DoDiagnosticAggregate {
     (site, index) => {
       const rng = mulberry32(fnv1a(`do-diag:${site.id}:${index}`));
       const openTotal = Math.floor(rng() * 30);
-      const stale = Math.min(openTotal, Math.floor(rng() * 12));
+      const stale = index < 3 ? Math.min(openTotal, Math.floor(rng() * 12)) : 0;
       const timedOut = Math.min(stale, Math.floor(rng() * 4));
       const hardAged = index === 0 ? Math.floor(rng() * 3) : 0;
       const futureSkewed = index === 1 ? Math.floor(rng() * 2) : 0;

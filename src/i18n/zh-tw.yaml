@@ -2843,92 +2843,195 @@ systemSettings:
   testFailed: 測試郵件傳送失敗。
   loadFailed: 載入郵件設定失敗。
 systemPerformance:
-  title: 系統效能
-  subtitle: 基於 Analytics Engine v2 呼叫記錄，分析 Worker 與 DO 的效能熱點及資源使用。
-  refresh: 重新整理
-  loadFailed: 載入系統效能資料失敗。
-  noData: 目前時間視窗內暫無系統效能資料。
-  range15m: 最近 15 分鐘
-  range1h: 最近 1 小時
-  range6h: 最近 6 小時
-  range24h: 最近 24 小時
-  totalEvents: 已接收事件
-  p95Latency: P95 估算延遲
-  p50Latency: P50
-  p75Latency: P75
-  p50Label: P50
-  p75Label: P75
-  p95Label: P95
-  dataFreshness: 資料新鮮度
-  noRecentWrite: 暫無最近寫入
-  clockAnomalies: 時鐘/延遲異常
-  delayed: 延遲
-  future: 未來時間戳
-  latencyPercentileTrend: 延遲分位趨勢
-  latencyPercentileTrendDescription: 檢視接收事件的 P50、P75、P95 估算延遲。
-  throughputTrend: 已接收事件吞吐
-  throughputTrendDescription: 檢視接收事件的吞吐情況。
-  visits: 造訪
-  customEvents: 自訂事件
-  anomalyBucket: 異常分桶
-  openVisitHealth: 未關閉造訪堆積
-  openVisitHealthDescription: 尚未被離開事件、路由切換或超時收尾關閉的造訪行。
-  open: 未關閉
-  stale: 停滯
-  timedOut: 已超時
-  oldestOpen: 最早未關閉
-  latestActivity: 最近活動
-  latencySampleHealth: 延遲樣本健康度
-  latencySampleHealthDescription: 檢視可信事件的延遲情況。
-  trustedSamples: 可信樣本
-  topSitesTitle: 系統負載最高的站點
-  topSitesDescription: 目前接收事件數量最多的站點。
-  events: 事件
-  avgLatency: 平均延遲
-  slowestEventsTitle: 估算最慢事件
-  slowestEventsDescription: 目前視窗內伺服器端寫入時間與事件時間正向差值最大的記錄。
-  eventTime: 事件時間
-  serverTime: 伺服器端寫入時間
-  estimatedDelay: 估算延遲
-  doDiagnosticTitle: DO 內部緩衝診斷
-  doDiagnosticDescription: 診斷每個站點的專用 Durable Object 中的資料停滯情況。
-  doDiagnosticLoadFailed: 載入 DO 診斷資料失敗。
-  doDiagnosticLoading: 正在拉取每個 DO 的狀態…
-  doDiagnosticRun: 執行 DO 診斷
-  doDiagnosticEmpty: 暫無站點 DO 狀態。
-  doDiagnosticUnreachable: 部分站點 DO 不可達
-  doDiagnosticReachableSites: 可達 DO
-  doDiagnosticTotalSites: 總站點
-  doDiagnosticActiveAlarms: 活躍 Alarm 定時器
-  doDiagnosticBufferedVisits: 緩衝造訪
-  doDiagnosticOpenVisits: 緩衝未關閉造訪行
-  doDiagnosticOpenStale: 未關閉且停滯 >30 分鐘
-  doDiagnosticOpenTimedOut: 未關閉且停滯 >12 小時
-  doDiagnosticOpenHardAged: 開始時間超過 36 小時
-  doDiagnosticOpenFutureSkew: 未來時間戳
-  doDiagnosticStuckDirty: 未重新整理且卡住
-  doDiagnosticMaxFlushAttempts: 最大重試次數
-  doDiagnosticBufferedCustomEvents: 緩衝自訂事件
-  doDiagnosticOldestOpen: 最早未關閉起始
-  doDiagnosticFutureMaxActivity: 最晚的未來活動時間
-  doDiagnosticSiteList: 風險最高的站點
-  doDiagnosticSiteListDescription: 按風險評分排序，前 20 個站點的 DO 內部緩衝快照。
-  doDiagnosticSiteFailed: 不可達
-  doDiagnosticSiteOpen: 未關閉
-  doDiagnosticSiteStuck: 卡滯
-  doDiagnosticSiteFuture: 未來時間戳
-  doDiagnosticSiteHardAged: 超齡
-  doDiagnosticSiteAlarm: Alarm 狀態
-  doDiagnosticSiteAlarmNone: 無
-  doDiagnosticSiteAlarmDue: 到期
-  doDiagnosticSiteNextDue: 下一次到期
-  doDiagnosticSiteNextDueFlush: Flush
-  doDiagnosticSiteNextDueHidden: 隱藏回退
-  doDiagnosticSiteNextDueTimeout: 造訪超時
-  doDiagnosticSiteResponseMs: 響應耗時
-  doDiagnosticThresholdsHint: 閾值：stale {stale}，timeout {timeout}，hardAged
-    {hardAged}，stuck flush_attempts ≥ {stuck}
-  doDiagnosticHealthy: 目前未發現異常緩衝行。
+  title: "系統效能"
+  subtitle: "Worker 與 Durable Object 的呼叫耗時、D1 開銷與錯誤。"
+  sampledHint: "資料來自 Analytics Engine 抽樣，次數與開銷皆為估算值。"
+  refresh: "重新整理"
+  loading: "載入中…"
+  emptyValue: "—"
+  tabs:
+    overview: "總覽"
+    hotspots: "慢查詢"
+    errors: "錯誤"
+    samples: "呼叫樣本"
+    durableObjects: "Durable Objects"
+  sources:
+    all: "全部來源"
+    worker: "Worker"
+    do: "Durable Object"
+  triggers:
+    request: "請求"
+    alarm: "Alarm"
+    scheduled: "排程工作"
+    websocket: "WebSocket"
+  results:
+    ok: "成功"
+    client_error: "用戶端錯誤"
+    failure: "失敗"
+    canceled: "已取消"
+  categories:
+    database: "資料庫"
+    application: "應用程式"
+    infrastructure: "基礎設施"
+    unknown: "未知"
+  status:
+    readerNotConfigured: "尚未設定 Analytics Engine 讀取權杖，暫時無法檢視效能資料。"
+    writerNotBound: "目前部署未繫結效能資料集，不會記錄呼叫資料。"
+    disabled: "效能資料收集已關閉。"
+    queryFailed: "查詢 Analytics Engine 失敗，請稍後再試。"
+    noData: "所選時間範圍內沒有呼叫紀錄。"
+    partial: "部分呼叫缺少開銷資料，標示 ≥ 的數值為下限。"
+    limited: "結果較多，僅顯示前面的部分。"
+  filters:
+    route: "路由"
+    version: "版本"
+    query: "查詢"
+    errorCode: "錯誤碼"
+    result: "結果"
+    trigger: "觸發方式"
+    source: "來源"
+    clearAll: "清除篩選"
+    remove: "移除篩選：{label}"
+  metrics:
+    invocations: "呼叫次數"
+    invocationsDetail: "{samples} 筆樣本"
+    handlerP95: "處理耗時 P95"
+    handlerP95Detail: "P50 {p50} · P99 {p99}"
+    d1Rows: "D1 讀取列數"
+    d1RowsDetail: "{statements} 條陳述式"
+    failureRate: "失敗率"
+    failureRateDetail: "{count} 次失敗"
+  trend:
+    title: "處理耗時"
+    description: "請求處理耗時的百分位數變化。"
+    p50: "P50"
+    p95: "P95"
+    p99: "P99"
+    empty: "所選時間範圍內沒有耗時資料。"
+  cost:
+    title: "資源開銷"
+    description: "所選時間範圍內的累計值。"
+    d1Rows: "D1 讀取列數"
+    d1Engine: "D1 SQL 執行"
+    d1Api: "D1 呼叫等待"
+    doFetch: "DO 呼叫耗時"
+    doRows: "DO SQLite 讀取列數"
+    notRecorded: "未記錄"
+  routes:
+    title: "路由"
+    description: "依呼叫次數排序，點選一列檢視詳情。"
+    empty: "所選時間範圍內沒有路由資料。"
+  columns:
+    route: "路由"
+    source: "來源"
+    version: "版本"
+    invocations: "呼叫次數"
+    p95: "P95"
+    d1Rows: "D1 讀取列數"
+    time: "時間"
+    result: "結果"
+    duration: "總耗時"
+    handler: "處理耗時"
+    dominantPhase: "主要階段"
+    query: "查詢"
+    filterShape: "篩選條件"
+    errorCode: "錯誤碼"
+    category: "類別"
+    operation: "操作"
+    total: "累計"
+    average: "平均每次"
+  hotspots:
+    title: "慢查詢"
+    kinds:
+      api-hot: "等待耗時"
+      sql-engine-fallback: "執行耗時"
+      scan: "讀取列數"
+    kindDescriptions:
+      api-hot: "從發出 D1 呼叫到取得結果的時間，包含網路往返。"
+      sql-engine-fallback: "D1 回報的 SQL 執行時間。"
+      scan: "每次呼叫中讀取列數最多的查詢。"
+    empty: "沒有可排序的查詢。"
+  errors:
+    title: "錯誤"
+    description: "依發生次數排序。"
+    empty: "所選時間範圍內沒有錯誤。"
+  samples:
+    title: "呼叫樣本"
+    description: "最近抽樣到的 50 次呼叫。"
+    empty: "沒有符合條件的呼叫樣本。"
+  actions:
+    viewSamples: "檢視樣本"
+    viewHotspots: "檢視慢查詢"
+    filterVersion: "只看此版本"
+    filterRoute: "只看此路由"
+  detail:
+    sampleTitle: "呼叫詳情"
+    routeTitle: "路由詳情"
+    hotspotTitle: "查詢詳情"
+    errorTitle: "錯誤詳情"
+    summary: "概況"
+    phases: "耗時階段"
+    phasesHint: "各階段可能重疊，加總不等於總耗時。"
+    queries: "D1 查詢"
+    noDetails: "這次呼叫沒有記錄階段明細。"
+    truncated: "明細過長，有 {count} 項未記錄。"
+    sampleWeight: "抽樣權重"
+    sampleWeightValue: "每筆約代表 {count} 次呼叫"
+    httpStatus: "HTTP 狀態"
+    variant: "執行方式"
+    apiWait: "等待"
+    engine: "執行"
+    rowsRead: "讀取"
+    rowsWritten: "寫入"
+    attempts: "嘗試"
+    failed: "失敗"
+    calls: "{count} 次"
+    owner: "程式位置"
+    granularity: "統計粒度"
+    granularities:
+      provider-family: "查詢族"
+      query-operation: "查詢操作"
+      sql-template: "SQL 範本"
+      unknown: "未知"
+    lowerBound: "部分呼叫未記錄，實際值不低於此數。"
+  durableObjects:
+    snapshotTitle: "網站快照"
+    snapshotDescription: "讀取單一網站 Durable Object 目前的緩衝狀態。"
+    chooseTeam: "選擇團隊"
+    chooseSite: "選擇網站"
+    inspect: "讀取快照"
+    idle: "選擇網站後讀取快照。"
+    failed: "讀取失敗：{reason}"
+    snapshotAt: "快照時間"
+    responseTime: "回應耗時"
+    bufferedVisits: "緩衝造訪"
+    pendingWrites: "待寫入"
+    openVisits: "未結束造訪"
+    stale: "停滯超過 {duration}"
+    timedOut: "超過 {duration} 未結束"
+    hardAged: "開始超過 {duration}"
+    futureSkew: "時間戳超前"
+    stuck: "寫入卡住"
+    maxAttempts: "最大重試次數"
+    customEvents: "緩衝自訂事件"
+    nextAlarm: "下次 Alarm"
+    none: "無"
+    healthy: "沒有異常的緩衝資料。"
+    scanTitle: "批次掃描"
+    scanDescription: "依序讀取所有網站的 Durable Object，每批 {count} 個。"
+    scan: "開始掃描"
+    rescan: "重新掃描"
+    continue: "繼續掃描"
+    scanProgress: "已掃描 {done} / {total} 個網站"
+    scanUnreachable: "{count} 個無法連線"
+    scanEmpty: "尚無掃描結果。"
+    site: "網站"
+    state: "狀態"
+    reachable: "正常"
+    unreachable: "無法連線"
+    attention: "需要留意"
+    invocationsHint: "Durable Object 的呼叫耗時與錯誤可在呼叫樣本中依來源篩選檢視。"
+    viewSamples: "檢視 DO 呼叫樣本"
 loginForm:
   signingIn: 登入中...
   verifyingSecurity: 正在安全驗證...

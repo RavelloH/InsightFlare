@@ -355,10 +355,54 @@ export function DashboardShell({
       requestObservationBase,
     ],
   );
+  const isSystemPerformanceRoute = Boolean(
+    !liveActiveTeamSlug &&
+    normalizeLocalePath(livePathname) === "/app/manage/system-performance",
+  );
+  const systemPerformanceBase = `/${locale}/app/manage/system-performance`;
+  const systemPerformanceTabs = messages.systemPerformance.tabs;
+  const systemPerformanceSections = useMemo<
+    Array<{
+      key: AnalyticsNavKey;
+      href: string;
+      label: string;
+      queryKey: string;
+      queryValue: string;
+      queryDefault?: boolean;
+    }>
+  >(() => {
+    if (!isSystemPerformanceRoute) return [];
+    const tab = (
+      key: AnalyticsNavKey,
+      value: string,
+      label: string,
+      queryDefault = false,
+    ) => ({
+      key,
+      href: queryDefault
+        ? systemPerformanceBase
+        : `${systemPerformanceBase}?perfTab=${value}`,
+      label,
+      queryKey: "perfTab",
+      queryValue: value,
+      queryDefault,
+    });
+    return [
+      tab("perf-overview", "overview", systemPerformanceTabs.overview, true),
+      tab("perf-hotspots", "hotspots", systemPerformanceTabs.hotspots),
+      tab("perf-errors", "errors", systemPerformanceTabs.errors),
+      tab("perf-samples", "samples", systemPerformanceTabs.samples),
+      tab("perf-do", "do", systemPerformanceTabs.durableObjects),
+    ];
+  }, [isSystemPerformanceRoute, systemPerformanceBase, systemPerformanceTabs]);
   const topbarSections =
     analyticsSections.length > 0
       ? analyticsSections
-      : requestObservationSections;
+      : requestObservationSections.length > 0
+        ? requestObservationSections
+        : systemPerformanceSections;
+  const isAdminObservabilityRoute =
+    isRequestObservationRoute || isSystemPerformanceRoute;
   const isGeoRoute = Boolean(
     hasActiveSite && activeSiteBase && mainSiteSection === "geo",
   );
@@ -651,7 +695,7 @@ export function DashboardShell({
   return (
     <DashboardQueryProvider
       scopeKey={activeSiteId}
-      maxRangeDays={isRequestObservationRoute ? 90 : undefined}
+      maxRangeDays={isAdminObservabilityRoute ? 90 : undefined}
       initialWindow={initialQueryWindow}
       initialFilters={initialFilters}
       initialScopePreference={initialScopePreference}
@@ -970,14 +1014,14 @@ export function DashboardShell({
                     siteId={activeSiteId}
                     resolvedScope={dashboardFilterResolvedScope}
                     showControls={
-                      Boolean(liveActiveTeamSlug) || isRequestObservationRoute
+                      Boolean(liveActiveTeamSlug) || isAdminObservabilityRoute
                     }
                     showFilterSheet={hasActiveSite}
                     comparisonDisabled={
                       hasActiveSite && isComparisonDisabledRoute
                     }
                     filterDisabled={isRealtimeRoute}
-                    showRealtimeBadge={!isRequestObservationRoute}
+                    showRealtimeBadge={!isAdminObservabilityRoute}
                   />
                 </div>
               </div>

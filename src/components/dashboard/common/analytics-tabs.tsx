@@ -14,10 +14,13 @@ import {
 import {
   RiComputerLine,
   RiDashboardLine,
+  RiDatabase2Line,
+  RiErrorWarningLine,
   RiFileList3Line,
   RiFilter2Line,
   RiFlashlightLine,
   RiGlobalLine,
+  RiListCheck3,
   RiMapPin2Line,
   RiMegaphoneLine,
   RiPulseLine,
@@ -27,6 +30,7 @@ import {
   RiShareForwardLine,
   RiShieldCheckLine,
   RiSpeedUpLine,
+  RiStackLine,
   RiTargetLine,
   RiUser3Line,
 } from "@remixicon/react";
@@ -56,7 +60,12 @@ type AnalyticsTabKey =
   | "settings"
   | "request-overview"
   | "request-abnormal"
-  | "request-normal";
+  | "request-normal"
+  | "perf-overview"
+  | "perf-hotspots"
+  | "perf-errors"
+  | "perf-samples"
+  | "perf-do";
 interface AnalyticsTabItem {
   key: AnalyticsTabKey;
   href: string;
@@ -73,6 +82,11 @@ function getAnalyticsSectionIcon(key: AnalyticsTabKey) {
   if (key === "request-overview") return RiDashboardLine;
   if (key === "request-abnormal") return RiRobot2Line;
   if (key === "request-normal") return RiShieldCheckLine;
+  if (key === "perf-overview") return RiDashboardLine;
+  if (key === "perf-hotspots") return RiDatabase2Line;
+  if (key === "perf-errors") return RiErrorWarningLine;
+  if (key === "perf-samples") return RiListCheck3;
+  if (key === "perf-do") return RiStackLine;
   if (key === "realtime") return RiPulseLine;
   if (key === "pages") return RiFileList3Line;
   if (key === "referrers") return RiShareForwardLine;

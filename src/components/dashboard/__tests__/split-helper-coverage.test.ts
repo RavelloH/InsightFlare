@@ -7,14 +7,13 @@ vi.mock("@/lib/dashboard-api/client/admin-service", () => ({
 }));
 
 import {
-  formatAge,
-  formatEventKind,
-  formatLatency,
-  formatMetricNumber,
-  formatMetricRate,
-  formatPercent,
-  windowLabel,
-} from "@/components/dashboard/admin/system-performance/formatters";
+  failureCount,
+  formatCount,
+  formatMs,
+  formatRate,
+  formatWeighted,
+  shortVersion,
+} from "@/components/dashboard/admin/system-performance/model";
 import type {
   TabbedDataTableColumn,
   TabbedDataTableRowBase,
@@ -91,12 +90,6 @@ const messages = {
     expressionHelpOtherFields: "Other fields",
     fieldGroups: { page: "Page fields" },
     valueKinds: { string: "String", number: "Number", boolean: "Boolean" },
-  },
-  systemPerformance: {
-    range15m: "15m",
-    range1h: "1h",
-    range6h: "6h",
-    range24h: "24h",
   },
 } as unknown as AppMessages;
 
@@ -287,28 +280,41 @@ describe("recently split dashboard helpers", () => {
     });
   });
 
-  it("formats system performance values across units and ranges", () => {
-    expect(formatMetricNumber("en", 12.6)).toBe("13");
-    expect(formatMetricRate("en", 12.35)).toBe("12.4");
-    expect(formatPercent("en", 0.125)).toBe("12.5%");
-    expect(formatLatency("en", null)).toBe("--");
-    expect(formatLatency("en", Number.NaN)).toBe("--");
-    expect(formatLatency("en", -5)).toBe("0 ms");
-    expect(formatLatency("en", 999)).toBe("999 ms");
-    expect(formatLatency("en", 1250)).toBe("1.25 s");
-    expect(formatAge("en", null)).toBe("--");
-    expect(formatAge("en", Number.POSITIVE_INFINITY)).toBe("--");
-    expect(formatAge("en", -1)).toBe("0 s");
-    expect(formatAge("en", 59_000)).toBe("59 s");
-    expect(formatAge("en", 60_000)).toBe("1 min");
-    expect(formatAge("en", 3_600_000)).toBe("1 h");
-    expect(formatAge("en", 3_660_000)).toBe("1 h 1 min");
-    expect(formatEventKind(messages, "custom_event")).toBe("Custom event");
-    expect(formatEventKind(messages, "anything-else")).toBe("Page view");
-    expect(windowLabel(messages, 15)).toBe("15m");
-    expect(windowLabel(messages, 60)).toBe("1h");
-    expect(windowLabel(messages, 360)).toBe("6h");
-    expect(windowLabel(messages, 1440)).toBe("24h");
+  it("formats system performance values across units and coverage", () => {
+    expect(formatCount("en", null)).toBe("—");
+    expect(formatCount("en", 12.6)).toBe("13");
+    expect(formatCount("en", 2_500_000)).toBe("2.5M");
+    expect(formatMs("en", undefined)).toBe("—");
+    expect(formatMs("en", 4.25)).toBe("4.3 ms");
+    expect(formatMs("en", 999)).toBe("999 ms");
+    expect(formatMs("en", 1250)).toBe("1.25 s");
+    expect(formatMs("en", 90_000)).toBe("1.5 min");
+    expect(formatMs("en", 5_400_000)).toBe("1.5 h");
+    expect(formatRate("en", null)).toBe("—");
+    expect(formatRate("en", 0.125)).toBe("12.5%");
+    expect(formatRate("en", 0.0004)).toBe("0.04%");
+    const metric = {
+      applicable: 10,
+      complete: 6,
+      partial: 4,
+      observed: 1200,
+      value: 1200,
+      coverage: "partial" as const,
+      lowerBound: true,
+    };
+    expect(formatWeighted("en", metric, "count")).toBe("≥ 1,200");
+    expect(
+      formatWeighted("en", { ...metric, coverage: "unavailable" }, "ms"),
+    ).toBe("—");
+    expect(shortVersion("0.7.1+abc123")).toBe("0.7.1");
+    expect(shortVersion(null)).toBe("—");
+    expect(
+      failureCount([
+        { resultClass: "failure", estimatedInvocations: 3 },
+        { resultClass: "client_error", estimatedInvocations: 5 },
+        { resultClass: "failure", estimatedInvocations: 2 },
+      ] as never),
+    ).toBe(5);
   });
 
   it("provides filter catalog labels, groups, and event-name detection", () => {

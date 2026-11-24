@@ -54,7 +54,12 @@ export type AnalyticsNavKey =
   | "settings"
   | "request-overview"
   | "request-abnormal"
-  | "request-normal";
+  | "request-normal"
+  | "perf-overview"
+  | "perf-hotspots"
+  | "perf-errors"
+  | "perf-samples"
+  | "perf-do";
 export const VALID_ANALYTICS_SECTIONS = new Set([
   "realtime",
   "pages",

@@ -2859,93 +2859,195 @@ systemSettings:
   testFailed: テストメールを送信できません。
   loadFailed: メール設定を読み込めません。
 systemPerformance:
-  title: システムパフォーマンス
-  subtitle: Analytics Engine v2 の呼び出し記録を使用して、Worker と Durable Object の性能上のボトルネックとリソース消費を分析します。
-  refresh: 更新
-  loadFailed: システムパフォーマンスデータを読み込めません。
-  noData: この期間にシステムパフォーマンスデータはありません。
-  range15m: 過去 15 分
-  range1h: 過去 1 時間
-  range6h: 過去 6 時間
-  range24h: 過去 24 時間
-  totalEvents: 受理イベント
-  p95Latency: P95 推定遅延
-  p50Latency: P50
-  p75Latency: P75
-  p50Label: P50
-  p75Label: P75
-  p95Label: P95
-  dataFreshness: データ鮮度
-  noRecentWrite: 最近の書き込みなし
-  clockAnomalies: 時計 / 遅延異常
-  delayed: 遅延
-  future: 未来のタイムスタンプ
-  latencyPercentileTrend: 遅延パーセンタイル推移
-  latencyPercentileTrendDescription: 受信イベントの P50、P75、P95 推定遅延を表示します。
-  throughputTrend: 受理イベントスループット
-  throughputTrendDescription: 受信イベントのスループットを表示します。
-  visits: 訪問
-  customEvents: カスタムイベント
-  anomalyBucket: 異常分類
-  openVisitHealth: 未終了訪問バックログ
-  openVisitHealthDescription: leave、ルート変更、タイムアウト確定でまだ閉じられていない未終了行です。
-  open: 未終了
-  stale: 停滞
-  timedOut: タイムアウト
-  oldestOpen: 最古の未終了
-  latestActivity: 最新アクティビティ
-  latencySampleHealth: 遅延サンプルの健全性
-  latencySampleHealthDescription: 信頼イベントの遅延を表示します。
-  trustedSamples: 信頼サンプル
-  topSitesTitle: システム負荷上位サイト
-  topSitesDescription: 現在受信イベント数が最も多いサイトです。
-  events: イベント
-  avgLatency: 平均遅延
-  slowestEventsTitle: 推定最遅イベント
-  slowestEventsDescription: 選択期間で書き込み時刻とイベント時刻の正の差が最大の記録です。
-  eventTime: イベント時刻
-  serverTime: サーバー書き込み時刻
-  estimatedDelay: 推定遅延
-  doDiagnosticTitle: DO バッファ診断
-  doDiagnosticDescription: 各サイトの専用 Durable Object のデータ停滞状況を診断します。
-  doDiagnosticLoadFailed: DO 診断データを読み込めません。
-  doDiagnosticLoading: サイトごとに DO 状態を取得中…
-  doDiagnosticRun: DO 診断を実行
-  doDiagnosticEmpty: DO 状態はありません。
-  doDiagnosticUnreachable: 一部の DO に到達できません
-  doDiagnosticReachableSites: 到達可能 DO
-  doDiagnosticTotalSites: 総サイト数
-  doDiagnosticActiveAlarms: アクティブなアラームタイマー
-  doDiagnosticBufferedVisits: バッファ済み訪問
-  doDiagnosticOpenVisits: バッファ内未終了行
-  doDiagnosticOpenStale: 未終了アイドル >30分
-  doDiagnosticOpenTimedOut: 未終了アイドル >12時間
-  doDiagnosticOpenHardAged: 開始から >36時間
-  doDiagnosticOpenFutureSkew: 未来のタイムスタンプ
-  doDiagnosticStuckDirty: 未フラッシュで停滞
-  doDiagnosticMaxFlushAttempts: 最大再試行回数
-  doDiagnosticBufferedCustomEvents: バッファ済みカスタムイベント
-  doDiagnosticOldestOpen: 最古の未終了 started_at
-  doDiagnosticFutureMaxActivity: 未来側に最もずれた最終活動時刻
-  doDiagnosticSiteList: リスク上位サイト
-  doDiagnosticSiteListDescription: DO ごとのバッファ状態スナップショットをリスクスコア順に並べた上位 20 サイトです。
-  doDiagnosticSiteFailed: 到達不能
-  doDiagnosticSiteOpen: 未終了
-  doDiagnosticSiteStuck: 停滞
-  doDiagnosticSiteFuture: 未来のタイムスタンプ
-  doDiagnosticSiteHardAged: 36時間超過
-  doDiagnosticSiteAlarm: アラーム
-  doDiagnosticSiteAlarmNone: なし
-  doDiagnosticSiteAlarmDue: 期限到来
-  doDiagnosticSiteNextDue: 次回期限
-  doDiagnosticSiteNextDueFlush: フラッシュ
-  doDiagnosticSiteNextDueHidden: 非表示フォールバック
-  doDiagnosticSiteNextDueTimeout: 訪問タイムアウト
-  doDiagnosticSiteResponseMs: 応答時間
-  doDiagnosticThresholdsHint:
-    "しきい値：stale {stale}、timeout {timeout}、hardAged
-    {hardAged}、stuck flush_attempts ≥ {stuck}"
-  doDiagnosticHealthy: 異常なバッファ行は検出されませんでした。
+  title: "システムパフォーマンス"
+  subtitle: "Worker と Durable Object の処理時間、D1 コスト、エラー。"
+  sampledHint: "データは Analytics Engine のサンプリングに基づく推定値です。"
+  refresh: "更新"
+  loading: "読み込み中…"
+  emptyValue: "—"
+  tabs:
+    overview: "概要"
+    hotspots: "遅いクエリ"
+    errors: "エラー"
+    samples: "サンプル"
+    durableObjects: "Durable Objects"
+  sources:
+    all: "すべてのソース"
+    worker: "Worker"
+    do: "Durable Object"
+  triggers:
+    request: "リクエスト"
+    alarm: "Alarm"
+    scheduled: "定期タスク"
+    websocket: "WebSocket"
+  results:
+    ok: "成功"
+    client_error: "クライアントエラー"
+    failure: "失敗"
+    canceled: "キャンセル"
+  categories:
+    database: "データベース"
+    application: "アプリケーション"
+    infrastructure: "インフラ"
+    unknown: "不明"
+  status:
+    readerNotConfigured: "Analytics Engine の読み取りトークンが未設定のため、パフォーマンスデータを表示できません。"
+    writerNotBound: "このデプロイにはパフォーマンスデータセットがバインドされていないため、呼び出しは記録されません。"
+    disabled: "パフォーマンスデータの収集はオフです。"
+    queryFailed: "Analytics Engine のクエリに失敗しました。しばらくしてから再試行してください。"
+    noData: "選択した期間に呼び出しの記録はありません。"
+    partial: "一部の呼び出しでコストが記録されていません。≥ 付きの値は下限です。"
+    limited: "結果が多いため、先頭の一部のみ表示しています。"
+  filters:
+    route: "ルート"
+    version: "バージョン"
+    query: "クエリ"
+    errorCode: "エラーコード"
+    result: "結果"
+    trigger: "トリガー"
+    source: "ソース"
+    clearAll: "フィルターをクリア"
+    remove: "フィルターを解除：{label}"
+  metrics:
+    invocations: "呼び出し数"
+    invocationsDetail: "サンプル {samples} 件"
+    handlerP95: "処理時間 P95"
+    handlerP95Detail: "P50 {p50} · P99 {p99}"
+    d1Rows: "D1 読み取り行数"
+    d1RowsDetail: "{statements} ステートメント"
+    failureRate: "失敗率"
+    failureRateDetail: "失敗 {count} 回"
+  trend:
+    title: "処理時間"
+    description: "リクエスト処理時間のパーセンタイル推移。"
+    p50: "P50"
+    p95: "P95"
+    p99: "P99"
+    empty: "選択した期間に処理時間のデータはありません。"
+  cost:
+    title: "リソースコスト"
+    description: "選択した期間の合計値。"
+    d1Rows: "D1 読み取り行数"
+    d1Engine: "D1 SQL 実行"
+    d1Api: "D1 呼び出し待ち"
+    doFetch: "DO 呼び出し時間"
+    doRows: "DO SQLite 読み取り行数"
+    notRecorded: "記録なし"
+  routes:
+    title: "ルート"
+    description: "呼び出し数順。行をクリックすると詳細を表示します。"
+    empty: "選択した期間にルートのデータはありません。"
+  columns:
+    route: "ルート"
+    source: "ソース"
+    version: "バージョン"
+    invocations: "呼び出し数"
+    p95: "P95"
+    d1Rows: "D1 読み取り行数"
+    time: "時刻"
+    result: "結果"
+    duration: "合計時間"
+    handler: "処理時間"
+    dominantPhase: "主なフェーズ"
+    query: "クエリ"
+    filterShape: "フィルター条件"
+    errorCode: "エラーコード"
+    category: "カテゴリ"
+    operation: "操作"
+    total: "合計"
+    average: "1 回あたり"
+  hotspots:
+    title: "遅いクエリ"
+    kinds:
+      api-hot: "待ち時間"
+      sql-engine-fallback: "実行時間"
+      scan: "読み取り行数"
+    kindDescriptions:
+      api-hot: "D1 を呼び出してから結果を受け取るまでの時間（ネットワーク往復を含む）。"
+      sql-engine-fallback: "D1 が報告した SQL 実行時間。"
+      scan: "各呼び出しで最も多くの行を読み取ったクエリ。"
+    empty: "並べ替えられるクエリはありません。"
+  errors:
+    title: "エラー"
+    description: "発生回数順。"
+    empty: "選択した期間にエラーはありません。"
+  samples:
+    title: "サンプル"
+    description: "直近にサンプリングされた 50 件の呼び出し。"
+    empty: "条件に合うサンプルはありません。"
+  actions:
+    viewSamples: "サンプルを表示"
+    viewHotspots: "遅いクエリを表示"
+    filterVersion: "このバージョンのみ"
+    filterRoute: "このルートのみ"
+  detail:
+    sampleTitle: "呼び出しの詳細"
+    routeTitle: "ルートの詳細"
+    hotspotTitle: "クエリの詳細"
+    errorTitle: "エラーの詳細"
+    summary: "概要"
+    phases: "フェーズ"
+    phasesHint: "フェーズは重なる場合があるため、合計は総時間と一致しません。"
+    queries: "D1 クエリ"
+    noDetails: "この呼び出しのフェーズ詳細は記録されていません。"
+    truncated: "詳細が長すぎるため、{count} 件は記録されていません。"
+    sampleWeight: "サンプル重み"
+    sampleWeightValue: "1 件あたり約 {count} 回の呼び出しに相当"
+    httpStatus: "HTTP ステータス"
+    variant: "実行方式"
+    apiWait: "待ち"
+    engine: "実行"
+    rowsRead: "読み取り"
+    rowsWritten: "書き込み"
+    attempts: "試行"
+    failed: "失敗"
+    calls: "{count} 回"
+    owner: "コードの場所"
+    granularity: "集計粒度"
+    granularities:
+      provider-family: "クエリファミリー"
+      query-operation: "クエリ操作"
+      sql-template: "SQL テンプレート"
+      unknown: "不明"
+    lowerBound: "一部の呼び出しは記録されていないため、実際の値はこれ以上です。"
+  durableObjects:
+    snapshotTitle: "サイトのスナップショット"
+    snapshotDescription: "1 つのサイトの Durable Object の現在のバッファ状態を読み取ります。"
+    chooseTeam: "チームを選択"
+    chooseSite: "サイトを選択"
+    inspect: "スナップショットを取得"
+    idle: "サイトを選択するとスナップショットを取得できます。"
+    failed: "取得に失敗しました：{reason}"
+    snapshotAt: "取得時刻"
+    responseTime: "応答時間"
+    bufferedVisits: "バッファ中の訪問"
+    pendingWrites: "書き込み待ち"
+    openVisits: "未終了の訪問"
+    stale: "{duration} 以上停滞"
+    timedOut: "{duration} 以上未終了"
+    hardAged: "開始から {duration} 以上"
+    futureSkew: "未来のタイムスタンプ"
+    stuck: "書き込み停止"
+    maxAttempts: "最大再試行回数"
+    customEvents: "バッファ中のカスタムイベント"
+    nextAlarm: "次の Alarm"
+    none: "なし"
+    healthy: "異常なバッファデータはありません。"
+    scanTitle: "一括スキャン"
+    scanDescription: "すべてのサイトの Durable Object を {count} 件ずつ読み取ります。"
+    scan: "スキャン開始"
+    rescan: "再スキャン"
+    continue: "続きをスキャン"
+    scanProgress: "{total} サイト中 {done} サイトをスキャン済み"
+    scanUnreachable: "{count} 件に接続できません"
+    scanEmpty: "スキャン結果はまだありません。"
+    site: "サイト"
+    state: "状態"
+    reachable: "正常"
+    unreachable: "接続不可"
+    attention: "要確認"
+    invocationsHint: "Durable Object の処理時間とエラーは、サンプルでソースを絞り込むと確認できます。"
+    viewSamples: "DO のサンプルを表示"
 loginForm:
   signingIn: サインイン中...
   verifyingSecurity: セキュリティ検証中...

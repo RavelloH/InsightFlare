@@ -2971,95 +2971,195 @@ systemSettings:
   testFailed: Failed to send test email.
   loadFailed: Failed to load email configuration.
 systemPerformance:
-  title: System Performance
-  subtitle: Diagnose Worker and Durable Object invocation performance using
-    Analytics Engine v2 telemetry.
-  refresh: Refresh
-  loadFailed: Failed to load system performance data.
-  noData: No system performance data in this window.
-  range15m: Last 15 minutes
-  range1h: Last 1 hour
-  range6h: Last 6 hours
-  range24h: Last 24 hours
-  totalEvents: Accepted Events
-  p95Latency: P95 Estimated Delay
-  p50Latency: P50
-  p75Latency: P75
-  p50Label: P50
-  p75Label: P75
-  p95Label: P95
-  dataFreshness: Data Freshness
-  noRecentWrite: No recent write
-  clockAnomalies: Clock / Delay Anomalies
-  delayed: Delayed
-  future: Future timestamps
-  latencyPercentileTrend: Latency Percentile Trend
-  latencyPercentileTrendDescription: View estimated P50, P75, and P95 delay for received events.
-  throughputTrend: Accepted Event Throughput
-  throughputTrendDescription: View the throughput of received events.
-  visits: Visits
-  customEvents: Custom Events
-  anomalyBucket: Anomaly bucket
-  openVisitHealth: Open Visit Backlog
-  openVisitHealthDescription:
-    Open rows that have not been closed by leave, route
-    change, or timeout finalization.
-  open: Open
-  stale: Stale
-  timedOut: Timed out
-  oldestOpen: Oldest open
-  latestActivity: Latest activity
-  latencySampleHealth: Latency Sample Health
-  latencySampleHealthDescription: View the delay of trusted events.
-  trustedSamples: Trusted samples
-  topSitesTitle: Top Sites by System Load
-  topSitesDescription: Sites receiving the most events in the current view.
-  events: Events
-  avgLatency: Avg delay
-  slowestEventsTitle: Slowest Estimated Events
-  slowestEventsDescription: Highest positive write-time minus event-time gaps in the selected window.
-  eventTime: Event time
-  serverTime: Server write time
-  estimatedDelay: Estimated delay
-  doDiagnosticTitle: DO Buffer Diagnostic
-  doDiagnosticDescription: Diagnoses data stagnation in each site's dedicated Durable Object.
-  doDiagnosticLoadFailed: Failed to load DO diagnostic data.
-  doDiagnosticLoading: Fetching DO state per site…
-  doDiagnosticRun: Run DO diagnostic
-  doDiagnosticEmpty: No DO state available.
-  doDiagnosticUnreachable: Some DOs unreachable
-  doDiagnosticReachableSites: Reachable DOs
-  doDiagnosticTotalSites: Total sites
-  doDiagnosticActiveAlarms: Active alarms
-  doDiagnosticBufferedVisits: Buffered visits
-  doDiagnosticOpenVisits: Buffered open rows
-  doDiagnosticOpenStale: Open idle >30m
-  doDiagnosticOpenTimedOut: Open idle >12h
-  doDiagnosticOpenHardAged: Started >36h ago
-  doDiagnosticOpenFutureSkew: Future timestamps
-  doDiagnosticStuckDirty: Stuck unflushed
-  doDiagnosticMaxFlushAttempts: Max retry attempts
-  doDiagnosticBufferedCustomEvents: Buffered custom events
-  doDiagnosticOldestOpen: Oldest open started_at
-  doDiagnosticFutureMaxActivity: Latest future activity time
-  doDiagnosticSiteList: Top risk sites
-  doDiagnosticSiteListDescription: Top 20 sites by risk score, snapshotted from per-DO buffered state.
-  doDiagnosticSiteFailed: Unreachable
-  doDiagnosticSiteOpen: Open
-  doDiagnosticSiteStuck: Stuck
-  doDiagnosticSiteFuture: Future timestamps
-  doDiagnosticSiteHardAged: Over 36h old
-  doDiagnosticSiteAlarm: Alarm
-  doDiagnosticSiteAlarmNone: None
-  doDiagnosticSiteAlarmDue: Due
-  doDiagnosticSiteNextDue: Next due
-  doDiagnosticSiteNextDueFlush: Flush
-  doDiagnosticSiteNextDueHidden: Hidden fallback
-  doDiagnosticSiteNextDueTimeout: Visit timeout
-  doDiagnosticSiteResponseMs: Response time
-  doDiagnosticThresholdsHint: Thresholds — stale {stale}, timeout {timeout},
-    hardAged {hardAged}, stuck flush_attempts ≥ {stuck}
-  doDiagnosticHealthy: No abnormal buffered rows detected.
+  title: "System Performance"
+  subtitle: "Invocation latency, D1 cost and errors for Workers and Durable Objects."
+  sampledHint: "Data comes from Analytics Engine sampling. Counts and costs are estimates."
+  refresh: "Refresh"
+  loading: "Loading…"
+  emptyValue: "—"
+  tabs:
+    overview: "Overview"
+    hotspots: "Slow queries"
+    errors: "Errors"
+    samples: "Samples"
+    durableObjects: "Durable Objects"
+  sources:
+    all: "All sources"
+    worker: "Worker"
+    do: "Durable Object"
+  triggers:
+    request: "Request"
+    alarm: "Alarm"
+    scheduled: "Scheduled"
+    websocket: "WebSocket"
+  results:
+    ok: "OK"
+    client_error: "Client error"
+    failure: "Failure"
+    canceled: "Canceled"
+  categories:
+    database: "Database"
+    application: "Application"
+    infrastructure: "Infrastructure"
+    unknown: "Unknown"
+  status:
+    readerNotConfigured: "No Analytics Engine read token is configured, so performance data can't be loaded yet."
+    writerNotBound: "This deployment has no performance dataset bound, so invocations aren't recorded."
+    disabled: "Performance collection is turned off."
+    queryFailed: "The Analytics Engine query failed. Try again in a moment."
+    noData: "No invocations in the selected range."
+    partial: "Some invocations are missing cost data. Values marked ≥ are lower bounds."
+    limited: "There are more results than shown."
+  filters:
+    route: "Route"
+    version: "Version"
+    query: "Query"
+    errorCode: "Error code"
+    result: "Result"
+    trigger: "Trigger"
+    source: "Source"
+    clearAll: "Clear filters"
+    remove: "Remove filter: {label}"
+  metrics:
+    invocations: "Invocations"
+    invocationsDetail: "{samples} samples"
+    handlerP95: "Handler P95"
+    handlerP95Detail: "P50 {p50} · P99 {p99}"
+    d1Rows: "D1 rows read"
+    d1RowsDetail: "{statements} statements"
+    failureRate: "Failure rate"
+    failureRateDetail: "{count} failures"
+  trend:
+    title: "Handler latency"
+    description: "Request handler latency percentiles over time."
+    p50: "P50"
+    p95: "P95"
+    p99: "P99"
+    empty: "No latency data in the selected range."
+  cost:
+    title: "Resource cost"
+    description: "Totals for the selected range."
+    d1Rows: "D1 rows read"
+    d1Engine: "D1 SQL execution"
+    d1Api: "D1 call wait"
+    doFetch: "DO call time"
+    doRows: "DO SQLite rows read"
+    notRecorded: "Not recorded"
+  routes:
+    title: "Routes"
+    description: "Sorted by invocations. Click a row for details."
+    empty: "No route data in the selected range."
+  columns:
+    route: "Route"
+    source: "Source"
+    version: "Version"
+    invocations: "Invocations"
+    p95: "P95"
+    d1Rows: "D1 rows"
+    time: "Time"
+    result: "Result"
+    duration: "Total"
+    handler: "Handler"
+    dominantPhase: "Main phase"
+    query: "Query"
+    filterShape: "Filter shape"
+    errorCode: "Error code"
+    category: "Category"
+    operation: "Operation"
+    total: "Total"
+    average: "Per call"
+  hotspots:
+    title: "Slow queries"
+    kinds:
+      api-hot: "Wait time"
+      sql-engine-fallback: "Execution time"
+      scan: "Rows read"
+    kindDescriptions:
+      api-hot: "Time from issuing a D1 call to receiving the result, including the network round trip."
+      sql-engine-fallback: "SQL execution time reported by D1."
+      scan: "The query that read the most rows in each invocation."
+    empty: "No queries to rank."
+  errors:
+    title: "Errors"
+    description: "Sorted by occurrences."
+    empty: "No errors in the selected range."
+  samples:
+    title: "Samples"
+    description: "The 50 most recent sampled invocations."
+    empty: "No samples match these filters."
+  actions:
+    viewSamples: "View samples"
+    viewHotspots: "View slow queries"
+    filterVersion: "Only this version"
+    filterRoute: "Only this route"
+  detail:
+    sampleTitle: "Invocation"
+    routeTitle: "Route"
+    hotspotTitle: "Query"
+    errorTitle: "Error"
+    summary: "Summary"
+    phases: "Phases"
+    phasesHint: "Phases can overlap, so they don't add up to the total."
+    queries: "D1 queries"
+    noDetails: "No phase details were recorded for this invocation."
+    truncated: "Details were too long; {count} items were not recorded."
+    sampleWeight: "Sample weight"
+    sampleWeightValue: "Each sample stands for about {count} invocations"
+    httpStatus: "HTTP status"
+    variant: "Variant"
+    apiWait: "Wait"
+    engine: "Exec"
+    rowsRead: "Read"
+    rowsWritten: "Written"
+    attempts: "Attempts"
+    failed: "Failed"
+    calls: "{count}×"
+    owner: "Source file"
+    granularity: "Granularity"
+    granularities:
+      provider-family: "Query family"
+      query-operation: "Query operation"
+      sql-template: "SQL template"
+      unknown: "Unknown"
+    lowerBound: "Some invocations weren't recorded; the real value is at least this."
+  durableObjects:
+    snapshotTitle: "Site snapshot"
+    snapshotDescription: "Read the current buffer state of one site's Durable Object."
+    chooseTeam: "Team"
+    chooseSite: "Site"
+    inspect: "Read snapshot"
+    idle: "Pick a site to read its snapshot."
+    failed: "Couldn't read snapshot: {reason}"
+    snapshotAt: "Snapshot at"
+    responseTime: "Response time"
+    bufferedVisits: "Buffered visits"
+    pendingWrites: "Pending writes"
+    openVisits: "Open visits"
+    stale: "Stale over {duration}"
+    timedOut: "Open over {duration}"
+    hardAged: "Started over {duration} ago"
+    futureSkew: "Future timestamps"
+    stuck: "Stuck writes"
+    maxAttempts: "Max retries"
+    customEvents: "Buffered custom events"
+    nextAlarm: "Next alarm"
+    none: "None"
+    healthy: "No unusual buffered data."
+    scanTitle: "Batch scan"
+    scanDescription: "Reads every site's Durable Object, {count} at a time."
+    scan: "Start scan"
+    rescan: "Scan again"
+    continue: "Continue"
+    scanProgress: "Scanned {done} of {total} sites"
+    scanUnreachable: "{count} unreachable"
+    scanEmpty: "No scan results yet."
+    site: "Site"
+    state: "State"
+    reachable: "OK"
+    unreachable: "Unreachable"
+    attention: "Needs attention"
+    invocationsHint: "Durable Object latency and errors are in Samples when filtered by source."
+    viewSamples: "View DO samples"
 loginForm:
   signingIn: Signing in...
   verifyingSecurity: Verifying security...

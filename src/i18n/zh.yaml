@@ -2843,92 +2843,195 @@ systemSettings:
   testFailed: 测试邮件发送失败。
   loadFailed: 加载邮件配置失败。
 systemPerformance:
-  title: 系统性能
-  subtitle: 基于 Analytics Engine v2 调用记录，分析 Worker 与 DO 的性能热点和资源开销。
-  refresh: 刷新
-  loadFailed: 加载系统性能数据失败。
-  noData: 当前时间窗口内暂无系统性能数据。
-  range15m: 最近 15 分钟
-  range1h: 最近 1 小时
-  range6h: 最近 6 小时
-  range24h: 最近 24 小时
-  totalEvents: 已接收事件
-  p95Latency: P95 估算延迟
-  p50Latency: P50
-  p75Latency: P75
-  p50Label: P50
-  p75Label: P75
-  p95Label: P95
-  dataFreshness: 数据新鲜度
-  noRecentWrite: 暂无最近写入
-  clockAnomalies: 时钟/延迟异常
-  delayed: 延迟
-  future: 未来时间戳
-  latencyPercentileTrend: 延迟分位趋势
-  latencyPercentileTrendDescription: 查看接收事件的 P50、P75、P95 估算延迟。
-  throughputTrend: 已接收事件吞吐
-  throughputTrendDescription: 查看接收事件的吞吐情况。
-  visits: 访问
-  customEvents: 自定义事件
-  anomalyBucket: 异常分桶
-  openVisitHealth: 未关闭访问堆积
-  openVisitHealthDescription: 尚未被离开事件、路由切换或超时收尾关闭的访问行。
-  open: 未关闭
-  stale: 停滞
-  timedOut: 已超时
-  oldestOpen: 最早未关闭
-  latestActivity: 最近活动
-  latencySampleHealth: 延迟样本健康度
-  latencySampleHealthDescription: 查看可信事件的延迟情况。
-  trustedSamples: 可信样本
-  topSitesTitle: 系统负载最高的站点
-  topSitesDescription: 当前接收事件数量最多的站点。
-  events: 事件
-  avgLatency: 平均延迟
-  slowestEventsTitle: 估算最慢事件
-  slowestEventsDescription: 当前窗口内服务端写入时间与事件时间正向差值最大的记录。
-  eventTime: 事件时间
-  serverTime: 服务端写入时间
-  estimatedDelay: 估算延迟
-  doDiagnosticTitle: DO 内部缓冲诊断
-  doDiagnosticDescription: 诊断每个站点的专用 Durable Object 中的数据停滞情况。
-  doDiagnosticLoadFailed: 加载 DO 诊断数据失败。
-  doDiagnosticLoading: 正在拉取每个 DO 的状态…
-  doDiagnosticRun: 运行 DO 诊断
-  doDiagnosticEmpty: 暂无站点 DO 状态。
-  doDiagnosticUnreachable: 部分站点 DO 不可达
-  doDiagnosticReachableSites: 可达 DO
-  doDiagnosticTotalSites: 总站点
-  doDiagnosticActiveAlarms: 活跃 Alarm 定时器
-  doDiagnosticBufferedVisits: 缓冲访问
-  doDiagnosticOpenVisits: 缓冲未关闭访问行
-  doDiagnosticOpenStale: 未关闭且停滞 >30 分钟
-  doDiagnosticOpenTimedOut: 未关闭且停滞 >12 小时
-  doDiagnosticOpenHardAged: 开始时间超过 36 小时
-  doDiagnosticOpenFutureSkew: 未来时间戳
-  doDiagnosticStuckDirty: 未刷新且卡住
-  doDiagnosticMaxFlushAttempts: 最大重试次数
-  doDiagnosticBufferedCustomEvents: 缓冲自定义事件
-  doDiagnosticOldestOpen: 最早未关闭起始
-  doDiagnosticFutureMaxActivity: 最晚的未来活动时间
-  doDiagnosticSiteList: 风险最高的站点
-  doDiagnosticSiteListDescription: 按风险评分排序，前 20 个站点的 DO 内部缓冲快照。
-  doDiagnosticSiteFailed: 不可达
-  doDiagnosticSiteOpen: 未关闭
-  doDiagnosticSiteStuck: 卡滞
-  doDiagnosticSiteFuture: 未来时间戳
-  doDiagnosticSiteHardAged: 超龄
-  doDiagnosticSiteAlarm: Alarm 状态
-  doDiagnosticSiteAlarmNone: 无
-  doDiagnosticSiteAlarmDue: 到期
-  doDiagnosticSiteNextDue: 下一次到期
-  doDiagnosticSiteNextDueFlush: Flush
-  doDiagnosticSiteNextDueHidden: 隐藏回退
-  doDiagnosticSiteNextDueTimeout: 访问超时
-  doDiagnosticSiteResponseMs: 响应耗时
-  doDiagnosticThresholdsHint: 阈值：stale {stale}，timeout {timeout}，hardAged
-    {hardAged}，stuck flush_attempts ≥ {stuck}
-  doDiagnosticHealthy: 当前未发现异常缓冲行。
+  title: "系统性能"
+  subtitle: "Worker 与 Durable Object 的调用耗时、D1 开销和错误。"
+  sampledHint: "数据来自 Analytics Engine 抽样，次数和开销均为估算值。"
+  refresh: "刷新"
+  loading: "加载中…"
+  emptyValue: "—"
+  tabs:
+    overview: "概览"
+    hotspots: "慢查询"
+    errors: "错误"
+    samples: "调用样本"
+    durableObjects: "Durable Objects"
+  sources:
+    all: "全部来源"
+    worker: "Worker"
+    do: "Durable Object"
+  triggers:
+    request: "请求"
+    alarm: "Alarm"
+    scheduled: "定时任务"
+    websocket: "WebSocket"
+  results:
+    ok: "成功"
+    client_error: "客户端错误"
+    failure: "失败"
+    canceled: "已取消"
+  categories:
+    database: "数据库"
+    application: "应用"
+    infrastructure: "基础设施"
+    unknown: "未知"
+  status:
+    readerNotConfigured: "还没有配置 Analytics Engine 读取令牌，暂时无法查看性能数据。"
+    writerNotBound: "当前部署没有绑定性能数据集，不会记录调用数据。"
+    disabled: "性能数据采集已关闭。"
+    queryFailed: "查询 Analytics Engine 失败，请稍后重试。"
+    noData: "所选时间范围内没有调用记录。"
+    partial: "部分调用缺少开销数据，带 ≥ 的数值是下限。"
+    limited: "结果较多，只显示了前面的部分。"
+  filters:
+    route: "路由"
+    version: "版本"
+    query: "查询"
+    errorCode: "错误码"
+    result: "结果"
+    trigger: "触发方式"
+    source: "来源"
+    clearAll: "清除筛选"
+    remove: "移除筛选：{label}"
+  metrics:
+    invocations: "调用次数"
+    invocationsDetail: "{samples} 条样本"
+    handlerP95: "处理耗时 P95"
+    handlerP95Detail: "P50 {p50} · P99 {p99}"
+    d1Rows: "D1 读取行数"
+    d1RowsDetail: "{statements} 条语句"
+    failureRate: "失败率"
+    failureRateDetail: "{count} 次失败"
+  trend:
+    title: "处理耗时"
+    description: "请求处理耗时的分位数变化。"
+    p50: "P50"
+    p95: "P95"
+    p99: "P99"
+    empty: "所选时间范围内没有耗时数据。"
+  cost:
+    title: "资源开销"
+    description: "所选时间范围内的累计值。"
+    d1Rows: "D1 读取行数"
+    d1Engine: "D1 SQL 执行"
+    d1Api: "D1 调用等待"
+    doFetch: "DO 调用耗时"
+    doRows: "DO SQLite 读取行数"
+    notRecorded: "未记录"
+  routes:
+    title: "路由"
+    description: "按调用次数排序，点击一行查看详情。"
+    empty: "所选时间范围内没有路由数据。"
+  columns:
+    route: "路由"
+    source: "来源"
+    version: "版本"
+    invocations: "调用次数"
+    p95: "P95"
+    d1Rows: "D1 读取行数"
+    time: "时间"
+    result: "结果"
+    duration: "总耗时"
+    handler: "处理耗时"
+    dominantPhase: "主要阶段"
+    query: "查询"
+    filterShape: "过滤条件"
+    errorCode: "错误码"
+    category: "类别"
+    operation: "操作"
+    total: "累计"
+    average: "平均每次"
+  hotspots:
+    title: "慢查询"
+    kinds:
+      api-hot: "等待耗时"
+      sql-engine-fallback: "执行耗时"
+      scan: "读取行数"
+    kindDescriptions:
+      api-hot: "从发出 D1 调用到拿到结果的时间，包含网络往返。"
+      sql-engine-fallback: "D1 报告的 SQL 执行时间。"
+      scan: "每次调用中读取行数最多的查询。"
+    empty: "没有可排序的查询。"
+  errors:
+    title: "错误"
+    description: "按发生次数排序。"
+    empty: "所选时间范围内没有错误。"
+  samples:
+    title: "调用样本"
+    description: "最近抽样到的 50 次调用。"
+    empty: "没有符合条件的调用样本。"
+  actions:
+    viewSamples: "查看样本"
+    viewHotspots: "查看慢查询"
+    filterVersion: "只看此版本"
+    filterRoute: "只看此路由"
+  detail:
+    sampleTitle: "调用详情"
+    routeTitle: "路由详情"
+    hotspotTitle: "查询详情"
+    errorTitle: "错误详情"
+    summary: "概况"
+    phases: "耗时阶段"
+    phasesHint: "各阶段可能重叠，总和不等于总耗时。"
+    queries: "D1 查询"
+    noDetails: "这次调用没有记录阶段明细。"
+    truncated: "明细过长，有 {count} 项未记录。"
+    sampleWeight: "抽样权重"
+    sampleWeightValue: "每条约代表 {count} 次调用"
+    httpStatus: "HTTP 状态"
+    variant: "执行方式"
+    apiWait: "等待"
+    engine: "执行"
+    rowsRead: "读取"
+    rowsWritten: "写入"
+    attempts: "尝试"
+    failed: "失败"
+    calls: "{count} 次"
+    owner: "代码位置"
+    granularity: "统计粒度"
+    granularities:
+      provider-family: "查询族"
+      query-operation: "查询操作"
+      sql-template: "SQL 模板"
+      unknown: "未知"
+    lowerBound: "部分调用未记录，实际值不低于此数。"
+  durableObjects:
+    snapshotTitle: "站点快照"
+    snapshotDescription: "读取单个站点 Durable Object 当前的缓冲状态。"
+    chooseTeam: "选择团队"
+    chooseSite: "选择站点"
+    inspect: "读取快照"
+    idle: "选择站点后读取快照。"
+    failed: "读取失败：{reason}"
+    snapshotAt: "快照时间"
+    responseTime: "响应耗时"
+    bufferedVisits: "缓冲访问"
+    pendingWrites: "待写入"
+    openVisits: "未结束访问"
+    stale: "停滞超过 {duration}"
+    timedOut: "超过 {duration} 未结束"
+    hardAged: "开始超过 {duration}"
+    futureSkew: "时间戳超前"
+    stuck: "写入卡住"
+    maxAttempts: "最大重试次数"
+    customEvents: "缓冲自定义事件"
+    nextAlarm: "下次 Alarm"
+    none: "无"
+    healthy: "没有异常的缓冲数据。"
+    scanTitle: "批量扫描"
+    scanDescription: "依次读取所有站点的 Durable Object，每批 {count} 个。"
+    scan: "开始扫描"
+    rescan: "重新扫描"
+    continue: "继续扫描"
+    scanProgress: "已扫描 {done} / {total} 个站点"
+    scanUnreachable: "{count} 个不可达"
+    scanEmpty: "还没有扫描结果。"
+    site: "站点"
+    state: "状态"
+    reachable: "正常"
+    unreachable: "不可达"
+    attention: "需要关注"
+    invocationsHint: "Durable Object 的调用耗时和错误可以在调用样本中按来源筛选查看。"
+    viewSamples: "查看 DO 调用样本"
 loginForm:
   signingIn: 登录中...
   verifyingSecurity: 正在安全验证...

@@ -15,17 +15,22 @@ import { cn } from "../utils/cn";
 import { intlLocale } from "./chart-format";
 import type { ChartLocale as Locale } from "./types";
 
+export type LatencyPercentileKey = "p50" | "p75" | "p95" | "p99";
+
 export interface LatencyPercentileChartPoint {
   timestampMs: number;
   p50: number | null;
-  p75: number | null;
+  p75?: number | null;
   p95: number | null;
+  p99?: number | null;
 }
 
+/** A series is drawn only when its label is provided. */
 export interface LatencyPercentileChartLabels {
   p50: string;
-  p75: string;
+  p75?: string;
   p95: string;
+  p99?: string;
 }
 
 export interface LatencyPercentileChartProps {
@@ -40,11 +45,25 @@ export interface LatencyPercentileChartProps {
   className?: string;
 }
 
-const LATENCY_SERIES_COLORS = {
+const LATENCY_SERIES_COLORS: Record<LatencyPercentileKey, string> = {
   p50: "var(--color-chart-1)",
   p75: "var(--color-chart-4)",
   p95: "var(--color-chart-5)",
-} as const;
+  p99: "var(--color-chart-secondary-3)",
+};
+const LATENCY_SERIES_WIDTHS: Record<LatencyPercentileKey, number> = {
+  p50: 2,
+  p75: 2.4,
+  p95: 2,
+  p99: 1.6,
+};
+const LATENCY_KEYS: readonly LatencyPercentileKey[] = [
+  "p50",
+  "p75",
+  "p95",
+  "p99",
+];
+const MULTI_DAY_SPAN_MS = 36 * 60 * 60 * 1000;
 const LATENCY_LEGEND_CLASS =
   "pt-6 flex-wrap justify-center gap-x-4 gap-y-2 [&>div>div]:h-2.5 [&>div>div]:w-2.5 [&>div>div]:shrink-0 [&>div>div]:rounded-none";
 
@@ -60,17 +79,27 @@ export const LatencyPercentileChart = memo(function LatencyPercentileChart({
   className,
 }: LatencyPercentileChartProps) {
   const chartData = useMemo(() => Array.from(data), [data]);
-  const hasLatencyData = chartData.some(
-    (point) => point.p50 !== null || point.p75 !== null || point.p95 !== null,
+  const seriesKeys = useMemo(
+    () => LATENCY_KEYS.filter((key) => Boolean(labels[key])),
+    [labels],
   );
+  const hasLatencyData = chartData.some((point) =>
+    seriesKeys.some((key) => point[key] !== null && point[key] !== undefined),
+  );
+  const multiDay = useMemo(() => {
+    if (chartData.length < 2) return false;
+    const stamps = chartData.map((point) => point.timestampMs);
+    return Math.max(...stamps) - Math.min(...stamps) > MULTI_DAY_SPAN_MS;
+  }, [chartData]);
   const bucketFormatter = useMemo(
     () =>
-      new Intl.DateTimeFormat(intlLocale(locale), {
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone,
-      }),
-    [locale, timeZone],
+      new Intl.DateTimeFormat(
+        intlLocale(locale),
+        multiDay
+          ? { month: "numeric", day: "numeric", timeZone }
+          : { hour: "2-digit", minute: "2-digit", timeZone },
+      ),
+    [locale, multiDay, timeZone],
   );
   const tooltipFormatter = useMemo(
     () =>
@@ -85,21 +114,13 @@ export const LatencyPercentileChart = memo(function LatencyPercentileChart({
   );
   const chartConfig = useMemo(
     () =>
-      ({
-        p50: {
-          label: labels.p50,
-          color: LATENCY_SERIES_COLORS.p50,
-        },
-        p75: {
-          label: labels.p75,
-          color: LATENCY_SERIES_COLORS.p75,
-        },
-        p95: {
-          label: labels.p95,
-          color: LATENCY_SERIES_COLORS.p95,
-        },
-      }) satisfies ChartConfig,
-    [labels.p50, labels.p75, labels.p95],
+      Object.fromEntries(
+        seriesKeys.map((key) => [
+          key,
+          { label: labels[key], color: LATENCY_SERIES_COLORS[key] },
+        ]),
+      ) satisfies ChartConfig,
+    [labels, seriesKeys],
   );
 
   return (
@@ -168,39 +189,21 @@ export const LatencyPercentileChart = memo(function LatencyPercentileChart({
                   <ChartLegendContent className={LATENCY_LEGEND_CLASS} />
                 }
               />
-              <Line
-                type="monotone"
-                dataKey="p50"
-                name={labels.p50}
-                legendType="rect"
-                stroke={LATENCY_SERIES_COLORS.p50}
-                strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 4 }}
-                connectNulls={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="p75"
-                name={labels.p75}
-                legendType="rect"
-                stroke={LATENCY_SERIES_COLORS.p75}
-                strokeWidth={2.4}
-                dot={false}
-                activeDot={{ r: 4 }}
-                connectNulls={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="p95"
-                name={labels.p95}
-                legendType="rect"
-                stroke={LATENCY_SERIES_COLORS.p95}
-                strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 4 }}
-                connectNulls={false}
-              />
+              {seriesKeys.map((key) => (
+                <Line
+                  key={key}
+                  type="monotone"
+                  dataKey={key}
+                  name={labels[key]}
+                  legendType="rect"
+                  stroke={LATENCY_SERIES_COLORS[key]}
+                  strokeWidth={LATENCY_SERIES_WIDTHS[key]}
+                  strokeDasharray={key === "p99" ? "4 3" : undefined}
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                  connectNulls={false}
+                />
+              ))}
             </LineChart>
           </ChartContainer>
         ) : (
