@@ -14,7 +14,10 @@ import {
   type QueryTime,
   siteQueryContext,
 } from "@/lib/edge/analytics/contract";
-import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
+import {
+  browserMajorVersionExpr,
+  type QueryWindow,
+} from "@/lib/edge/analytics/providers/d1/internal/core";
 import { queryEventAnalyticsContextCardsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-context";
 import { queryEventFieldsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-fields";
 import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-overview";
@@ -28,6 +31,16 @@ import {
   queryEventTypeTrendFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-trend";
 import { queryFunnelAnalysis } from "@/lib/edge/analytics/providers/d1/internal/funnels";
+import {
+  buildSessionAggregationSql,
+  buildVisitorAggregationSql,
+} from "@/lib/edge/analytics/providers/d1/internal/journey-aggregation-sql";
+import {
+  mapSessionRow,
+  mapVisitorRow,
+  sessionListOrderBy,
+  visitorListOrderBy,
+} from "@/lib/edge/analytics/providers/d1/internal/journey-helpers";
 import {
   querySessionListPageFromD1,
   querySessionsFromD1,
@@ -1196,7 +1209,7 @@ describe("event detail D1 SQL", () => {
     }
   });
 
-  it("includes an entity represented only by an in-window custom event", () => {
+  it("includes an entity represented only by an in-window custom event", async () => {
     const { env, d1 } = createSqliteEventEnv();
     const eventOnlyVisitStart = window.startMs - 2 * 60 * 60 * 1000;
     d1.database
@@ -1289,6 +1302,75 @@ describe("event detail D1 SQL", () => {
         sessions: 1,
         visitors: 1,
       });
+
+      const sessionFilters = preparedJourneyFilters(
+        "sessions",
+        prepared.filters!,
+      );
+      const visitorFilters = preparedJourneyFilters(
+        "visitors",
+        prepared.filters!,
+      );
+      const sessions = await querySessionListPageFromD1(
+        env,
+        siteId,
+        window,
+        sessionFilters,
+        {
+          limit: 1,
+          sort: { key: "startedAt", direction: "desc" },
+        },
+      );
+      expect(sessions.rows).toMatchObject([
+        { sessionId: "session-event-only", views: 0, events: 1 },
+      ]);
+      const sessionQuery = d1.calls.at(-1)!;
+      const sessionBaseline =
+        sessionQuery.sql.slice(
+          0,
+          sessionQuery.sql.indexOf("page_metrics AS ("),
+        ) +
+        buildSessionAggregationSql({
+          browserVersionExpression: browserMajorVersionExpr(),
+          orderBy: "startedAt DESC, sessionId ASC",
+          limitOffset: "LIMIT ?",
+        });
+      expect(sessions.rows).toEqual(
+        d1.database
+          .prepare(sessionBaseline)
+          .all(...sessionQuery.bindings)
+          .map(mapSessionRow),
+      );
+      const visitors = await queryVisitorListPageFromD1(
+        env,
+        siteId,
+        window,
+        visitorFilters,
+        {
+          limit: 1,
+          sort: { key: "lastSeenAt", direction: "desc" },
+        },
+      );
+      expect(visitors.rows).toMatchObject([
+        { visitorId: "visitor-event-only", views: 0, events: 1 },
+      ]);
+      const visitorQuery = d1.calls.at(-1)!;
+      const visitorBaseline =
+        visitorQuery.sql.slice(
+          0,
+          visitorQuery.sql.indexOf("page_metrics AS ("),
+        ) +
+        buildVisitorAggregationSql({
+          browserVersionExpression: browserMajorVersionExpr(),
+          orderBy: "lastSeenAt DESC, visitorId ASC",
+          limitOffset: "LIMIT ?",
+        });
+      expect(visitors.rows).toEqual(
+        d1.database
+          .prepare(visitorBaseline)
+          .all(...visitorQuery.bindings)
+          .map(mapVisitorRow),
+      );
     } finally {
       d1.close();
     }
@@ -1491,6 +1573,74 @@ describe("event detail D1 SQL", () => {
     }
   });
 
+  it("preserves search membership and full entity attributes against the legacy aggregation", async () => {
+    const { env, d1 } = createSqliteEventEnv();
+    try {
+      const filter = filterFixture({ path: "/posts/minecraft-meteor-guide" });
+      const sessionFilters = preparedJourneyFilters("sessions", filter);
+      const visitorFilters = preparedJourneyFilters("visitors", filter);
+      const sessions = await querySessionListPageFromD1(
+        env,
+        siteId,
+        window,
+        sessionFilters,
+        {
+          limit: 1,
+          sort: { key: "views", direction: "desc" },
+          search: "entry",
+        },
+      );
+      expect(sessions.rows).toHaveLength(1);
+      const s = d1.calls.at(-1)!;
+      const oldSessions =
+        s.sql.slice(0, s.sql.indexOf("page_metrics AS (")) +
+        buildSessionAggregationSql({
+          searchWhere:
+            "AND fv.session_id IN (SELECT session_id FROM session_search_entities)",
+          browserVersionExpression: browserMajorVersionExpr(),
+          orderBy: sessionListOrderBy({ key: "views", direction: "desc" }),
+          limitOffset: "LIMIT ?",
+        });
+      expect(sessions.rows).toEqual(
+        d1.database
+          .prepare(oldSessions)
+          .all(...s.bindings)
+          .map(mapSessionRow),
+      );
+      expect(sessions.rows[0]?.views).toBe(3);
+      const visitors = await queryVisitorListPageFromD1(
+        env,
+        siteId,
+        window,
+        visitorFilters,
+        {
+          limit: 1,
+          sort: { key: "views", direction: "desc" },
+          search: "entry",
+        },
+      );
+      expect(visitors.rows).toHaveLength(1);
+      const v = d1.calls.at(-1)!;
+      const oldVisitors =
+        v.sql.slice(0, v.sql.indexOf("page_metrics AS (")) +
+        buildVisitorAggregationSql({
+          searchWhere:
+            "AND fv.visitor_id IN (SELECT visitor_id FROM visitor_search_entities)",
+          browserVersionExpression: browserMajorVersionExpr(),
+          orderBy: visitorListOrderBy({ key: "views", direction: "desc" }),
+          limitOffset: "LIMIT ?",
+        });
+      expect(visitors.rows).toEqual(
+        d1.database
+          .prepare(oldVisitors)
+          .all(...v.bindings)
+          .map(mapVisitorRow),
+      );
+      expect(visitors.rows[0]?.views).toBe(3);
+    } finally {
+      d1.close();
+    }
+  });
   it("keeps the original journey aggregation path without filters", async () => {
     const { env, d1 } = createSqliteEventEnv();
 
@@ -1533,7 +1683,7 @@ describe("event detail D1 SQL", () => {
         { key: "views", direction: "asc" },
         { key: "views", direction: "desc" },
       ] as const) {
-        const expected = await queryVisitorsFromD1(
+        await queryVisitorsFromD1(
           env,
           siteId,
           window,
@@ -1542,6 +1692,20 @@ describe("event detail D1 SQL", () => {
           undefined,
           sort,
         );
+        const captured = d1.calls.at(-1)!;
+        const boundary = captured.sql.indexOf("page_metrics AS (");
+        expect(boundary).toBeGreaterThan(0);
+        const baseline =
+          captured.sql.slice(0, boundary) +
+          buildVisitorAggregationSql({
+            browserVersionExpression: browserMajorVersionExpr(),
+            orderBy: visitorListOrderBy(sort),
+            limitOffset: "LIMIT ?",
+          });
+        const expected = d1.database
+          .prepare(baseline)
+          .all(...captured.bindings)
+          .map(mapVisitorRow);
         const received = [];
         let cursor = null;
         do {
@@ -1555,9 +1719,7 @@ describe("event detail D1 SQL", () => {
           received.push(...page.rows);
           cursor = page.nextCursor;
         } while (cursor);
-        expect(received.map((row) => row.visitorId)).toEqual(
-          expected.map((row) => row.visitorId),
-        );
+        expect(received).toEqual(expected);
       }
 
       for (const sort of [
@@ -1568,7 +1730,7 @@ describe("event detail D1 SQL", () => {
         { key: "views", direction: "asc" },
         { key: "views", direction: "desc" },
       ] as const) {
-        const expected = await querySessionsFromD1(
+        await querySessionsFromD1(
           env,
           siteId,
           window,
@@ -1577,6 +1739,20 @@ describe("event detail D1 SQL", () => {
           undefined,
           sort,
         );
+        const captured = d1.calls.at(-1)!;
+        const boundary = captured.sql.indexOf("page_metrics AS (");
+        expect(boundary).toBeGreaterThan(0);
+        const baseline =
+          captured.sql.slice(0, boundary) +
+          buildSessionAggregationSql({
+            browserVersionExpression: browserMajorVersionExpr(),
+            orderBy: sessionListOrderBy(sort),
+            limitOffset: "LIMIT ?",
+          });
+        const expected = d1.database
+          .prepare(baseline)
+          .all(...captured.bindings)
+          .map(mapSessionRow);
         const received = [];
         let cursor = null;
         do {
@@ -1590,9 +1766,7 @@ describe("event detail D1 SQL", () => {
           received.push(...page.rows);
           cursor = page.nextCursor;
         } while (cursor);
-        expect(received.map((row) => row.sessionId)).toEqual(
-          expected.map((row) => row.sessionId),
-        );
+        expect(received).toEqual(expected);
       }
 
       const cursorQuery = d1.calls.at(-1);

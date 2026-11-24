@@ -564,6 +564,7 @@ ${buildVisitorAggregationSql({
   cursorWhere: cursor.clause,
   orderBy: visitorListOrderBy(options.sort),
   limitOffset: "LIMIT ?",
+  pageFirst: true,
 })}`;
   const records = await queryD1All<Record<string, unknown>>(env, sql, [
     ...(scopedDataset
@@ -693,6 +694,7 @@ ${buildSessionAggregationSql({
   cursorWhere: cursor.clause,
   orderBy: sessionListOrderBy(options.sort),
   limitOffset: "LIMIT ?",
+  pageFirst: true,
 })}`;
   const records = await queryD1All<Record<string, unknown>>(env, sql, [
     ...(scopedDataset

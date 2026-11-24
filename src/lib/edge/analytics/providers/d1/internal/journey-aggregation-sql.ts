@@ -4,6 +4,7 @@ interface VisitorAggregationOptions {
   orderBy: string;
   cursorWhere?: string;
   limitOffset?: string;
+  pageFirst?: boolean;
 }
 
 interface SessionAggregationOptions {
@@ -12,6 +13,7 @@ interface SessionAggregationOptions {
   orderBy: string;
   cursorWhere?: string;
   limitOffset?: string;
+  pageFirst?: boolean;
 }
 
 export interface ScopedFactsSqlOptions {
@@ -144,6 +146,47 @@ scope_visitor_facts AS (
 }
 
 /**
+ * The list sort keys are all aggregate metrics. Resolve the exact page
+ * (including the look-ahead row and cursor) before computing first/latest
+ * attributes, identity ranking, coordinates and custom-event counts.
+ * Detail readers continue to use the unpaged aggregation.
+ */
+function buildPageEntityCtes(
+  options: VisitorAggregationOptions | SessionAggregationOptions,
+  entity: "visitor" | "session",
+): string {
+  if (!options.pageFirst) return "";
+  const id = entity === "visitor" ? "visitor_id" : "session_id";
+  const alias = entity === "visitor" ? "vm" : "sm";
+  const key = entity === "visitor" ? "visitorId" : "sessionId";
+  const metrics =
+    entity === "visitor"
+      ? `MIN(started_at) AS firstSeenAt,
+      MAX(started_at) AS lastSeenAt,
+      COUNT(CASE WHEN is_visit_observation = 1 THEN 1 END) AS views,
+      COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions`
+      : `MIN(started_at) AS startedAt,
+      SUM(COALESCE(duration_ms, 0)) AS totalDurationMs,
+      COUNT(CASE WHEN is_visit_observation = 1 THEN 1 END) AS views`;
+  return `
+page_metrics AS (
+  SELECT fv.${id}, ${metrics}
+  FROM filtered_visits fv
+  WHERE fv.${id} != ''
+  ${options.searchWhere ?? ""}
+  GROUP BY fv.${id}
+),
+page_entities AS MATERIALIZED (
+  SELECT ${alias}.${id} AS ${key}
+  FROM page_metrics ${alias}
+  WHERE 1 = 1
+  ${options.cursorWhere ?? ""}
+  ORDER BY ${options.orderBy}
+  ${options.limitOffset ?? ""}
+),
+`;
+}
+/**
  * Builds the shared set-based visitor aggregation used by list and detail
  * queries. Ranking once lets the aggregate pick first/last values without a
  * correlated ORDER BY/LIMIT subquery for every output row.
@@ -153,7 +196,7 @@ export function buildVisitorAggregationSql(
 ): string {
   const browserVersion = options.browserVersionExpression ?? "browser_version";
   return `
-ranked_visits AS (
+${buildPageEntityCtes(options, "visitor")}ranked_visits AS (
   SELECT
     fv.*,
     ROW_NUMBER() OVER (
@@ -174,6 +217,7 @@ ranked_visits AS (
   FROM filtered_visits fv
   WHERE fv.visitor_id != ''
   ${options.searchWhere ?? ""}
+  ${options.pageFirst ? "AND fv.visitor_id IN (SELECT visitorId FROM page_entities)" : ""}
 ),
 visitor_metrics AS (
   SELECT
@@ -204,7 +248,7 @@ visitor_metrics AS (
 event_counts AS (
   SELECT visitor_id, COUNT(*) AS events
   FROM event_source
-  WHERE visitor_id != ''
+  WHERE ${options.pageFirst ? "visitor_id IN (SELECT visitorId FROM page_entities)" : "visitor_id != ''"}
   GROUP BY visitor_id
 )
 SELECT
@@ -233,9 +277,9 @@ SELECT
 FROM visitor_metrics vm
 LEFT JOIN event_counts ec ON ec.visitor_id = vm.visitor_id
 WHERE 1 = 1
-${options.cursorWhere ?? ""}
+${options.pageFirst ? "" : (options.cursorWhere ?? "")}
 ORDER BY ${options.orderBy}
-${options.limitOffset ?? ""}
+${options.pageFirst ? "" : (options.limitOffset ?? "")}
 `;
 }
 
@@ -249,7 +293,7 @@ export function buildSessionAggregationSql(
 ): string {
   const browserVersion = options.browserVersionExpression ?? "browser_version";
   return `
-ranked_visits AS (
+${buildPageEntityCtes(options, "session")}ranked_visits AS (
   SELECT
     fv.*,
     ROW_NUMBER() OVER (
@@ -270,6 +314,7 @@ ranked_visits AS (
   FROM filtered_visits fv
   WHERE fv.session_id != ''
   ${options.searchWhere ?? ""}
+  ${options.pageFirst ? "AND fv.session_id IN (SELECT sessionId FROM page_entities)" : ""}
 ),
 geo_ranked AS (
   SELECT
@@ -319,7 +364,7 @@ session_metrics AS (
 event_counts AS (
   SELECT session_id, COUNT(*) AS events
   FROM event_source
-  WHERE session_id != ''
+  WHERE ${options.pageFirst ? "session_id IN (SELECT sessionId FROM page_entities)" : "session_id != ''"}
   GROUP BY session_id
 ),
 geo_first AS (
@@ -360,8 +405,8 @@ FROM session_metrics sm
 LEFT JOIN event_counts ec ON ec.session_id = sm.session_id
 LEFT JOIN geo_first gf ON gf.session_id = sm.session_id
 WHERE 1 = 1
-${options.cursorWhere ?? ""}
+${options.pageFirst ? "" : (options.cursorWhere ?? "")}
 ORDER BY ${options.orderBy}
-${options.limitOffset ?? ""}
+${options.pageFirst ? "" : (options.limitOffset ?? "")}
 `;
 }
