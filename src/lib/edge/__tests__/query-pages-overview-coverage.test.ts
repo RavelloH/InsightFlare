@@ -2666,6 +2666,46 @@ describe("edge overview D1 queries and handlers", () => {
         "/other",
       );
 
+      insert.run(
+        "retention-duplicate",
+        siteId,
+        "visitor-match",
+        "retention-session",
+        baseMs + 200,
+        baseMs + 200,
+        "/match",
+      );
+      insert.run(
+        "retention-empty",
+        siteId,
+        "",
+        "empty-session",
+        baseMs + 100,
+        baseMs + 100,
+        "/match",
+      );
+      await expect(
+        queryRetentionFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          "hour",
+        ),
+      ).resolves.toEqual({
+        granularity: "hour",
+        cohorts: [
+          {
+            bucket: baseMs,
+            size: 2,
+            periods: [
+              { index: 0, visitors: 2, rate: 1 },
+              { index: 1, visitors: 1, rate: 0.5 },
+            ],
+          },
+        ],
+      });
+
       await expect(
         queryRetentionFromD1(
           env,
