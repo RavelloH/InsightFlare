@@ -2,6 +2,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { analyticsTooltipContract } from "@insightflare/product-ui/analytics-tooltip";
 import {
+  changeQuadrantChartContract,
   donutChartContract,
   eventTrendBarChartContract,
   latencyPercentileChartContract,
@@ -9,6 +10,7 @@ import {
   performanceRadarChartContract,
   performanceTrendChartContract,
   shareTrendAreaChartContract,
+  sitePulseHeatmapContract,
   siteTrafficStackChartContract,
   stackedBreakdownBarChartContract,
   trafficPairBarChartContract,
@@ -34,6 +36,7 @@ const contracts = [
   analyticsDataTableContract,
   analyticsTableColumnSettingsContract,
   analyticsTooltipContract,
+  changeQuadrantChartContract,
   detailDrawerContract,
   donutChartContract,
   eventTrendBarChartContract,
@@ -43,6 +46,7 @@ const contracts = [
   performanceTrendChartContract,
   shareTrendAreaChartContract,
   siteScopeSelectorContract,
+  sitePulseHeatmapContract,
   siteTrafficStackChartContract,
   stackedBreakdownBarChartContract,
   trafficPairBarChartContract,
@@ -93,6 +97,7 @@ describe("product-ui chart and utility contracts", () => {
 
   it("keeps a realistic showcase fixture for every chart contract", () => {
     for (const contract of [
+      changeQuadrantChartContract,
       donutChartContract,
       eventTrendBarChartContract,
       latencyPercentileChartContract,
@@ -100,6 +105,7 @@ describe("product-ui chart and utility contracts", () => {
       performanceRadarChartContract,
       performanceTrendChartContract,
       shareTrendAreaChartContract,
+      sitePulseHeatmapContract,
       siteTrafficStackChartContract,
       stackedBreakdownBarChartContract,
       trafficPairBarChartContract,

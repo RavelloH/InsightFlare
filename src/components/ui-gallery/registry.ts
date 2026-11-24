@@ -8,6 +8,7 @@ import {
 } from "react";
 import { analyticsTooltipContract } from "@insightflare/product-ui/analytics-tooltip";
 import {
+  changeQuadrantChartContract,
   donutChartContract,
   eventTrendBarChartContract,
   latencyPercentileChartContract,
@@ -15,6 +16,7 @@ import {
   performanceRadarChartContract,
   performanceTrendChartContract,
   shareTrendAreaChartContract,
+  sitePulseHeatmapContract,
   siteTrafficStackChartContract,
   stackedBreakdownBarChartContract,
   trafficPairBarChartContract,
@@ -2040,6 +2042,22 @@ const galleryContracts = {
     ],
     { comparisonItems: undefined },
   ),
+  sitePulseHeatmap: registerPropCards(sitePulseHeatmapContract, [
+    propCard("locale", [propValue("en-US"), propValue("zh-CN")]),
+    propCard("scenario", [
+      propValue("default"),
+      propValue("showcase"),
+      propValue("empty"),
+    ]),
+  ]),
+  changeQuadrantChart: registerPropCards(changeQuadrantChartContract, [
+    propCard("locale", [propValue("en-US"), propValue("zh-CN")]),
+    propCard("scenario", [
+      propValue("default"),
+      propValue("showcase"),
+      propValue("empty"),
+    ]),
+  ]),
   trafficPairBarChart: registerPropCards(trafficPairBarChartContract, [
     propCard("locale", [propValue("en-US"), propValue("zh-CN")]),
     propCard("comparison", [propValue(false), propValue(true)]),
@@ -2743,6 +2761,22 @@ export const uiGalleryRegistry: readonly UiGalleryEntry[] = [
     packageType: "product-ui",
     apiEntry: "@insightflare/product-ui/sharing",
     contract: galleryContracts.sharing,
+  },
+  {
+    slug: "site-pulse-heatmap",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/charts",
+    maxValuesPerRow: 3,
+    previewAlignment: "start",
+    contract: galleryContracts.sitePulseHeatmap,
+  },
+  {
+    slug: "change-quadrant-chart",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/charts",
+    maxValuesPerRow: 3,
+    previewAlignment: "start",
+    contract: galleryContracts.changeQuadrantChart,
   },
   {
     slug: "traffic-pair-bar-chart",

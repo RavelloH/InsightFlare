@@ -1,3 +1,10 @@
+export type {
+  ChangeQuadrantChartProps,
+  ChangeQuadrantLabels,
+  ChangeQuadrantPoint,
+} from "./change-quadrant-chart";
+export { ChangeQuadrantChart } from "./change-quadrant-chart";
+export { changeQuadrantChartContract } from "./change-quadrant-chart.contract";
 export type { ChartAxisDateFormat } from "./chart-time";
 export type { DonutChartDataPoint, DonutChartProps } from "./donut-chart";
 export { DonutChart } from "./donut-chart";
@@ -64,6 +71,13 @@ export type {
 } from "./share-trend-area-chart";
 export { ShareTrendAreaChart } from "./share-trend-area-chart";
 export { shareTrendAreaChartContract } from "./share-trend-area-chart.contract";
+export type {
+  SitePulseHeatmapLabels,
+  SitePulseHeatmapProps,
+  SitePulseHeatmapRow,
+} from "./site-pulse-heatmap";
+export { pulseLevel, SitePulseHeatmap } from "./site-pulse-heatmap";
+export { sitePulseHeatmapContract } from "./site-pulse-heatmap.contract";
 export type { SiteTrafficStackChartProps } from "./site-traffic-stack-chart";
 export { SiteTrafficStackChart } from "./site-traffic-stack-chart";
 export { siteTrafficStackChartContract } from "./site-traffic-stack-chart.contract";
