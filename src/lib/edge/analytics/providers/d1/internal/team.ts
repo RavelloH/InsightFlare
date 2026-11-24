@@ -13,6 +13,7 @@ import { sitePksFromSiteIdsSql } from "@/lib/edge/sites/identity-sql";
 import type { Env } from "@/lib/edge/types";
 
 import type {
+  DimensionRow,
   Interval,
   OverviewAggregateRow,
   QueryWindow,
@@ -670,4 +671,86 @@ export async function queryTeamDashboardForTeam(
     },
     source,
   };
+}
+
+/**
+ * Aggregate a typed scalar dimension across sites in one D1 statement per
+ * binding-budget chunk. DISTINCT identity counts stay site-local, matching
+ * the historical per-site providers before team-wide sums are applied.
+ *
+ * The filter plan is compiled by the same scoped-dataset compiler used for
+ * individual sites and team overview. This avoids accidentally crossing
+ * sites when matching visitor/session/entity membership.
+ */
+export async function queryTeamDimensionFromD1(
+  env: Env,
+  siteIds: string[],
+  window: QueryWindow,
+  filters: FilterDocument,
+  selectExpr: string,
+  diagnostics?: D1ReadDiagnostics,
+): Promise<DimensionRow[]> {
+  if (siteIds.length === 0) return [];
+  const metadata = scopedFilterMetadata(filters);
+  if (!metadata && filters.root !== null) {
+    throw new Error("team_dimension_prepared_scope_required");
+  }
+
+  const datasets = metadata
+    ? scopedDatasetsForSites(siteIds, window, filters)
+    : siteIdChunks(siteIds).map((chunk) => ({
+        siteIds: chunk,
+        dataset: null,
+      }));
+  const totals = new Map<string, DimensionRow>();
+  for (const { siteIds: chunk, dataset } of datasets) {
+    const sql = `
+WITH
+${dataset?.ctes ?? buildVisitSourceCteForSites(chunk.length)},
+per_site_rollup AS (
+  SELECT
+    site_pk,
+    COALESCE(${selectExpr}, '') AS value,
+    count(*) AS views,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+  FROM ${dataset?.visitRelation ?? "visit_source"}
+  GROUP BY site_pk, value
+)
+SELECT
+  value,
+  sum(views) AS views,
+  sum(sessions) AS sessions,
+  sum(visitors) AS visitors
+FROM per_site_rollup
+WHERE TRIM(value) != ''
+GROUP BY value
+`;
+    const bindings = dataset
+      ? dataset.bindings.map((binding) => binding.value)
+      : visitSourceBindingsForSites(chunk, window);
+    const rows = await queryD1All<Record<string, unknown>>(
+      env,
+      sql,
+      bindings,
+      diagnostics,
+    );
+    for (const row of rows) {
+      const value = String(row.value ?? "");
+      const previous = totals.get(value);
+      const views = Number(row.views ?? 0);
+      const sessions = Number(row.sessions ?? 0);
+      const visitors = Number(row.visitors ?? 0);
+      totals.set(value, {
+        value,
+        views: (previous?.views ?? 0) + views,
+        sessions: (previous?.sessions ?? 0) + sessions,
+        visitors: (previous?.visitors ?? 0) + visitors,
+      });
+    }
+  }
+  return [...totals.values()].sort(
+    (left, right) =>
+      right.views - left.views || left.value.localeCompare(right.value),
+  );
 }

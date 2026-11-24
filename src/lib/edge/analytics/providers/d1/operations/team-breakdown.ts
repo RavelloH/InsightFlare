@@ -4,9 +4,14 @@ import {
   type BreakdownItem,
   type BreakdownResult,
   type FilterDocument,
+  scopedFilterMetadata,
 } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { listTeamSites } from "@/lib/edge/analytics/providers/d1/internal/team";
+import { resolveCrossBreakdownDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
+import {
+  listTeamSites,
+  queryTeamDimensionFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/team";
 import type { Env } from "@/lib/edge/types";
 
 import { readSiteBreakdown } from "./site-breakdown";
@@ -60,6 +65,36 @@ export async function readTeamBreakdown(
   const sites = (await listTeamSites(input.env, input.teamId)).filter(
     (site) => !allowed || allowed.has(site.id),
   );
+  if (sites.length === 0) return { items: [] };
+
+  const definition = resolveCrossBreakdownDimension(input.dimension);
+  // Prepared SQL filters carry a site-isolated scoped plan. Unprepared
+  // non-empty filters and special session/event dimensions retain the
+  // historical per-site path instead of approximating their semantics.
+  if (
+    definition &&
+    (input.filters.root === null || scopedFilterMetadata(input.filters))
+  ) {
+    const rows = await queryTeamDimensionFromD1(
+      input.env,
+      sites.map((site) => site.id),
+      input.window,
+      input.filters,
+      definition.labelExpr,
+    );
+    return {
+      items: rows
+        .slice(0, input.limit > 0 ? input.limit : undefined)
+        .map((row) => ({
+          key: row.value,
+          label: row.value,
+          views: row.views,
+          sessions: row.sessions,
+          visitors: row.visitors,
+        })),
+    };
+  }
+
   // A non-positive limit is the internal exact-aggregate mode used by the
   // comparison engine. It intentionally omits the historical per-site top
   // candidate cut; applying a limit before the merge is not exact.
