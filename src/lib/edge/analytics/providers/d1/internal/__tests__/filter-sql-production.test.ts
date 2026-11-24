@@ -1351,13 +1351,15 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
-  it("uses raw observations for every empty scope without losing Event-only identities or admitting other sites", () => {
+  it("uses raw observations for every empty scope without losing Event-only identities or admitting other sites", async () => {
     const db = sqlitePayloadFixture();
     try {
       db.exec(`
         UPDATE visits SET session_id='s-event-only', visitor_id='u-event-only'
           WHERE site_pk=1 AND visit_id='v-old';
         UPDATE custom_events SET occurred_at=150 WHERE event_pk=101;
+        UPDATE visits SET duration_ms=-1 WHERE site_pk=1 AND visit_id='v-new';
+        UPDATE visits SET duration_ms=0 WHERE site_pk=1 AND visit_id='v-docs';
         INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms)
           VALUES(1,'site-a','v-empty','','','/anonymous',180,10),
                 (1,'site-a','v-whitespace',' ',' ','/anonymous',185,10),
@@ -1432,6 +1434,30 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           ),
         ).toEqual(
           ["u-event-only", "u1", "u2"].map((visitor_id) => ({ visitor_id })),
+        );
+        // Preserve the original independent Visit and entity rollups as the
+        // differential oracle, including whitespace-only bounce identities,
+        // Event-only entities, duplicate Events, negative and zero durations.
+        const expected = run(`
+          SELECT count(*) AS views,
+            (SELECT count(*) FROM ${compiled.sessionRelation}) AS sessions,
+            (SELECT count(*) FROM ${compiled.visitorRelation}) AS visitors,
+            (SELECT count(*) FROM (
+              SELECT session_id FROM ${compiled.visitRelation}
+              WHERE session_id != '' GROUP BY session_id HAVING count(*) = 1
+            )) AS bounces,
+            COALESCE(sum(CASE WHEN duration_ms >= 0 THEN duration_ms ELSE 0 END),0) AS totalDuration,
+            COALESCE(sum(CASE WHEN duration_ms >= 0 THEN 1 ELSE 0 END),0) AS durationViews
+          FROM ${compiled.visitRelation}
+        `)[0];
+        const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+        const env = { DB: createSqliteD1Database(db, trace) } as never;
+        expect(
+          await queryOverviewFromD1(env, "site-a", WINDOW, filters),
+        ).toEqual(expected);
+        expect(trace.preparedSql).toHaveLength(1);
+        expect(trace.preparedSql[0]).toContain(
+          "report_observations AS MATERIALIZED",
         );
       }
     } finally {

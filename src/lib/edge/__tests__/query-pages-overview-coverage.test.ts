@@ -2502,6 +2502,150 @@ describe("edge overview D1 queries and handlers", () => {
     }
   });
 
+  it("shares scoped trend observations while preserving cross-bucket sessions and Event-only visitors", async () => {
+    const sqlite = createScopedOverviewSqliteEnv();
+    const hour = 60 * 60 * 1000;
+    try {
+      const insert = sqlite.database.prepare(`
+        INSERT INTO visits (visit_id, site_id, visitor_id, session_id, status,
+          started_at, last_activity_at, pathname, hostname, duration_ms)
+        VALUES (?, ?, ?, ?, 'closed', ?, ?, '/', 'example.test', ?)
+      `);
+      insert.run(
+        "historic-shared",
+        siteId,
+        "u1",
+        "s1",
+        baseMs - hour,
+        baseMs - hour,
+        99,
+      );
+      insert.run(
+        "in-window-first",
+        siteId,
+        "u1",
+        "s1",
+        baseMs + hour + 100,
+        baseMs + hour + 100,
+        0,
+      );
+      insert.run(
+        "in-window-second",
+        siteId,
+        "u1",
+        "s1",
+        baseMs + hour + 200,
+        baseMs + hour + 200,
+        -1,
+      );
+      insert.run(
+        "historic-only",
+        siteId,
+        "u2",
+        "s2",
+        baseMs - hour,
+        baseMs - hour,
+        99,
+      );
+      insert.run(
+        "in-window-bounce",
+        siteId,
+        "u3",
+        "s3",
+        baseMs + 100,
+        baseMs + 100,
+        12,
+      );
+      sqlite.database
+        .prepare(
+          "INSERT INTO custom_event_names (id, site_id, name, last_seen_at) VALUES (?, ?, ?, ?)",
+        )
+        .run(1, siteId, "test", baseMs + hour);
+      const event = sqlite.database.prepare(`
+        INSERT INTO custom_events (event_pk,event_id,site_id,visit_id,event_name_id,
+          occurred_at,received_at,sequence,node_count,value_count)
+        VALUES (?, ?, ?, ?, 1, ?, ?, 0, 0, 0)
+      `);
+      event.run(
+        1,
+        "early-1",
+        siteId,
+        "historic-shared",
+        baseMs + 50,
+        baseMs + 50,
+      );
+      event.run(
+        2,
+        "early-2",
+        siteId,
+        "historic-shared",
+        baseMs + 60,
+        baseMs + 60,
+      );
+      event.run(
+        3,
+        "late-only",
+        siteId,
+        "historic-only",
+        baseMs + hour + 50,
+        baseMs + hour + 50,
+      );
+      event.run(
+        4,
+        "late-repeat",
+        siteId,
+        "in-window-first",
+        baseMs + hour + 150,
+        baseMs + hour + 150,
+      );
+      for (const scope of ["event", "session", "visitor"] as const) {
+        const prepared = prepareScopedQuery("trend", {
+          context: siteQueryContext(siteId, "private-dashboard"),
+          time: createQueryTime(
+            window.startMs,
+            window.endExclusiveMs,
+            window.timeZone,
+            window.nowMs,
+          ),
+          filters: EMPTY_FILTER_DOCUMENT,
+          scopePreference: scope,
+        });
+        expect(
+          await queryTrendFromD1(
+            sqlite.env,
+            siteId,
+            window,
+            "hour",
+            prepared.filters!,
+          ),
+        ).toEqual([
+          {
+            bucket: 0,
+            timestampMs: baseMs,
+            views: 1,
+            visitors: 2,
+            sessions: 2,
+            bounces: 1,
+            totalDuration: 12,
+            durationViews: 1,
+          },
+          {
+            bucket: 1,
+            timestampMs: baseMs + hour,
+            views: 2,
+            visitors: 2,
+            sessions: 1,
+            bounces: 0,
+            totalDuration: 0,
+            durationViews: 1,
+          },
+        ]);
+      }
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it("filters overview visits by each session's entry path", async () => {
     const database = new DatabaseSync(":memory:");
     for (const migration of [
@@ -2787,7 +2931,9 @@ describe("edge overview D1 queries and handlers", () => {
 
     expect(calls[0].sql).toContain("visit_bucket_rollup AS");
     expect(calls[0].sql).toContain("session_bucket_rollup AS");
-    expect(calls[0].sql).toContain("CASE WHEN started_at >=");
+    expect(calls[0].sql).toContain("CASE WHEN observed_at >=");
+    expect(calls[0].sql).toContain("scope_entity_observations AS MATERIALIZED");
+    expect(calls[0].sql).not.toContain("visitor_bucket_rollup AS");
     expect(calls[0].bindings).toEqual([
       ...visitBindings(),
       "mobile",
