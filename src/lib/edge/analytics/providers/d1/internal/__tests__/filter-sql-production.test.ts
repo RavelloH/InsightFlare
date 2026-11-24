@@ -1350,6 +1350,69 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
+  it("shares prepared geo observations once while keeping invalid-coordinate visits in every drilldown total", async () => {
+    const { db } = runFixture();
+    try {
+      db.exec(`
+        UPDATE visits SET region_code='CA' WHERE site_pk=1 AND visit_id='v-new';
+        UPDATE visits SET country='US', region='California', region_code='CA', city='LA',
+          latitude=NULL, longitude=NULL WHERE site_pk=1 AND visit_id='v-docs';
+        INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms,country,region,region_code,city,latitude,longitude)
+          VALUES(1,'site-a','v-repeat','s1','u1','/home',140,5,'US','California','CA','LA',34.05,-118.25);
+      `);
+      const cases = [
+        {
+          expression: 'page.path contains "/"',
+          key: "countryCounts",
+          item: { country: "US" },
+        },
+        {
+          expression: 'geo.country eq "US"',
+          key: "regionCounts",
+          item: { value: "US::CA::California", label: "California" },
+        },
+        {
+          expression: 'geo.country eq "US" and geo.region eq "California"',
+          key: "cityCounts",
+          item: { value: "US::CA::California::LA", label: "LA" },
+        },
+      ] as const;
+      for (const test of cases) {
+        const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+        const env = { DB: createSqliteD1Database(db, trace) } as never;
+        const result = await queryGeoPointAggregate(
+          env,
+          "site-a",
+          WINDOW,
+          ready("geo-points", test.expression),
+          1,
+        );
+        expect(trace.preparedSql).toHaveLength(1);
+        expect(trace.preparedSql[0]).toContain(
+          "shared_geo_visits AS MATERIALIZED",
+        );
+        expect(result.points).toEqual([
+          expect.objectContaining({
+            latitude: 34.05,
+            longitude: -118.25,
+            pointCount: 2,
+            timestampMs: 140,
+          }),
+        ]);
+        expect(result[test.key]).toEqual([
+          { ...test.item, views: 3, sessions: 2, visitors: 2 },
+        ]);
+        expect(
+          result.countryCounts.length +
+            result.regionCounts.length +
+            result.cityCounts.length,
+        ).toBe(1);
+      }
+    } finally {
+      db.close();
+    }
+  });
+
   it("EventSummary, Trend and EventTypes return only the matching typed Event", async () => {
     const { db, env } = runFixture();
     try {
