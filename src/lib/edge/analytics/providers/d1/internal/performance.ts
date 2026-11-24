@@ -587,29 +587,14 @@ summary_ordered_values AS (
     COUNT(*) OVER (PARTITION BY metric) AS sampleCount
   FROM metric_visits
 ),
-summary_thresholds AS (
-  SELECT
-    metric,
-    sampleCount,
-    AVG(metricValue) AS avgValue,
-    CAST(((sampleCount * 50) + 99) / 100 AS INTEGER) AS p50Rank,
-    CAST(((sampleCount * 75) + 99) / 100 AS INTEGER) AS p75Rank,
-    CAST(((sampleCount * 95) + 99) / 100 AS INTEGER) AS p95Rank
-  FROM summary_ordered_values
-  GROUP BY metric, sampleCount
-),
 summary_rows AS (
   SELECT
-    thresholds.metric AS metric,
-    thresholds.sampleCount AS samples,
-    thresholds.avgValue AS avgValue,
-    MIN(CASE WHEN ordered.rowNum >= thresholds.p50Rank THEN ordered.metricValue END) AS p50,
-    MIN(CASE WHEN ordered.rowNum >= thresholds.p75Rank THEN ordered.metricValue END) AS p75,
-    MIN(CASE WHEN ordered.rowNum >= thresholds.p95Rank THEN ordered.metricValue END) AS p95
-  FROM summary_thresholds thresholds
-  JOIN summary_ordered_values ordered
-    ON ordered.metric = thresholds.metric
-  GROUP BY thresholds.metric, thresholds.sampleCount, thresholds.avgValue
+    ordered.metric,
+    MAX(ordered.sampleCount) AS samples,
+    AVG(ordered.metricValue) AS avgValue,
+    ${performancePercentileValuesSql("ordered")}
+  FROM summary_ordered_values ordered
+  GROUP BY ordered.metric
 ),
 trend_ordered_values AS (
   SELECT
@@ -623,36 +608,15 @@ trend_ordered_values AS (
     COUNT(*) OVER (PARTITION BY metric, bucket) AS sampleCount
   FROM metric_visits
 ),
-trend_thresholds AS (
-  SELECT
-    metric,
-    bucket,
-    sampleCount,
-    AVG(metricValue) AS avgValue,
-    CAST(((sampleCount * 50) + 99) / 100 AS INTEGER) AS p50Rank,
-    CAST(((sampleCount * 75) + 99) / 100 AS INTEGER) AS p75Rank,
-    CAST(((sampleCount * 95) + 99) / 100 AS INTEGER) AS p95Rank
-  FROM trend_ordered_values
-  GROUP BY metric, bucket, sampleCount
-),
 trend_rows AS (
   SELECT
-    thresholds.metric AS metric,
-    thresholds.bucket AS bucket,
-    thresholds.sampleCount AS samples,
-    thresholds.avgValue AS avgValue,
-    MIN(CASE WHEN ordered.rowNum >= thresholds.p50Rank THEN ordered.metricValue END) AS p50,
-    MIN(CASE WHEN ordered.rowNum >= thresholds.p75Rank THEN ordered.metricValue END) AS p75,
-    MIN(CASE WHEN ordered.rowNum >= thresholds.p95Rank THEN ordered.metricValue END) AS p95
-  FROM trend_thresholds thresholds
-  JOIN trend_ordered_values ordered
-    ON ordered.metric = thresholds.metric
-   AND ordered.bucket = thresholds.bucket
-  GROUP BY
-    thresholds.metric,
-    thresholds.bucket,
-    thresholds.sampleCount,
-    thresholds.avgValue
+    ordered.metric,
+    ordered.bucket,
+    MAX(ordered.sampleCount) AS samples,
+    AVG(ordered.metricValue) AS avgValue,
+    ${performancePercentileValuesSql("ordered")}
+  FROM trend_ordered_values ordered
+  GROUP BY ordered.metric, ordered.bucket
 ),
 path_views AS (
   SELECT pathname, count(*) AS views
@@ -676,39 +640,17 @@ route_ordered_values AS (
   FROM metric_visits
   JOIN path_views ON path_views.pathname = metric_visits.pathname
 ),
-route_thresholds AS (
-  SELECT
-    pathname,
-    metric,
-    sampleCount,
-    AVG(metricValue) AS avgValue,
-    CAST(((sampleCount * 50) + 99) / 100 AS INTEGER) AS p50Rank,
-    CAST(((sampleCount * 75) + 99) / 100 AS INTEGER) AS p75Rank,
-    CAST(((sampleCount * 95) + 99) / 100 AS INTEGER) AS p95Rank
-  FROM route_ordered_values
-  GROUP BY pathname, metric, sampleCount
-),
 route_rows AS (
   SELECT
-    thresholds.pathname AS pathname,
-    thresholds.metric AS metric,
+    ordered.pathname,
+    ordered.metric,
     path_views.views AS views,
-    thresholds.sampleCount AS samples,
-    thresholds.avgValue AS avgValue,
-    MIN(CASE WHEN ordered.rowNum >= thresholds.p50Rank THEN ordered.metricValue END) AS p50,
-    MIN(CASE WHEN ordered.rowNum >= thresholds.p75Rank THEN ordered.metricValue END) AS p75,
-    MIN(CASE WHEN ordered.rowNum >= thresholds.p95Rank THEN ordered.metricValue END) AS p95
-  FROM route_thresholds thresholds
-  JOIN route_ordered_values ordered
-    ON ordered.pathname = thresholds.pathname
-   AND ordered.metric = thresholds.metric
-  JOIN path_views ON path_views.pathname = thresholds.pathname
-  GROUP BY
-    thresholds.pathname,
-    thresholds.metric,
-    path_views.views,
-    thresholds.sampleCount,
-    thresholds.avgValue
+    MAX(ordered.sampleCount) AS samples,
+    AVG(ordered.metricValue) AS avgValue,
+    ${performancePercentileValuesSql("ordered")}
+  FROM route_ordered_values ordered
+  JOIN path_views ON path_views.pathname = ordered.pathname
+  GROUP BY ordered.pathname, ordered.metric, path_views.views
 ),
 country_views AS (
   SELECT country, count(*) AS views
@@ -731,39 +673,17 @@ country_ordered_values AS (
   FROM metric_visits
   JOIN country_views ON country_views.country = metric_visits.country
 ),
-country_thresholds AS (
-  SELECT
-    country,
-    metric,
-    sampleCount,
-    AVG(metricValue) AS avgValue,
-    CAST(((sampleCount * 50) + 99) / 100 AS INTEGER) AS p50Rank,
-    CAST(((sampleCount * 75) + 99) / 100 AS INTEGER) AS p75Rank,
-    CAST(((sampleCount * 95) + 99) / 100 AS INTEGER) AS p95Rank
-  FROM country_ordered_values
-  GROUP BY country, metric, sampleCount
-),
 country_rows AS (
   SELECT
-    thresholds.country AS country,
-    thresholds.metric AS metric,
+    ordered.country,
+    ordered.metric,
     country_views.views AS views,
-    thresholds.sampleCount AS samples,
-    thresholds.avgValue AS avgValue,
-    MIN(CASE WHEN ordered.rowNum >= thresholds.p50Rank THEN ordered.metricValue END) AS p50,
-    MIN(CASE WHEN ordered.rowNum >= thresholds.p75Rank THEN ordered.metricValue END) AS p75,
-    MIN(CASE WHEN ordered.rowNum >= thresholds.p95Rank THEN ordered.metricValue END) AS p95
-  FROM country_thresholds thresholds
-  JOIN country_ordered_values ordered
-    ON ordered.country = thresholds.country
-   AND ordered.metric = thresholds.metric
-  JOIN country_views ON country_views.country = thresholds.country
-  GROUP BY
-    thresholds.country,
-    thresholds.metric,
-    country_views.views,
-    thresholds.sampleCount,
-    thresholds.avgValue
+    MAX(ordered.sampleCount) AS samples,
+    AVG(ordered.metricValue) AS avgValue,
+    ${performancePercentileValuesSql("ordered")}
+  FROM country_ordered_values ordered
+  JOIN country_views ON country_views.country = ordered.country
+  GROUP BY ordered.country, ordered.metric, country_views.views
 ),
 tagged_rows AS (
   SELECT
