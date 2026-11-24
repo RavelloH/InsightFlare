@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="352" height="40" viewBox="0 0 352 40" role="img" aria-labelledby="title desc">
+  <title id="title">Deploy InsightFlare to Cloudflare</title>
+  <desc id="desc">Deploy the latest official InsightFlare build to your Cloudflare account.</desc>
+  <style>
+    .surface { fill: #147859; }
+    .ink { fill: #edfdf5; }
+    .line { stroke: #edfdf5; }
+    .arrow { animation: nudge 1.6s ease-in-out 2; }
+    @keyframes nudge { 0%, 55%, 100% { transform: translateX(0); } 25% { transform: translateX(3px); } }
+    @media (prefers-color-scheme: dark) {
+      .surface { fill: #15ba81; }
+      .ink { fill: #002c22; }
+      .line { stroke: #002c22; }
+    }
+    @media (prefers-reduced-motion: reduce) { .arrow { animation: none; } }
+  </style>
+  <rect class="surface" width="352" height="40" fill="#147859"/>
+  <g class="line" fill="none" stroke="#edfdf5" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 25h-2a5 5 0 0 1-.6-10 7 7 0 0 1 13.4 1.6A4.3 4.3 0 0 1 28 25h-2"/>
+    <path d="M22 30V19m-4 4 4-4 4 4"/>
+    <path d="M39 10v20" opacity=".24"/>
+  </g>
+  <text class="ink" x="49" y="24.5" fill="#edfdf5" font-family="JetBrains Mono, SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="13" font-weight="600" textLength="249.6" lengthAdjust="spacingAndGlyphs">Deploy InsightFlare to Cloudflare</text>
+  <g class="arrow line" fill="none" stroke="#edfdf5" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M319 20h13m-5-5 5 5-5 5"/>
+  </g>
+</svg>

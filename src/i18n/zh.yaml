@@ -2427,6 +2427,8 @@ managementPages:
     source: 数据来源
     loadFailed: 加载版本索引失败。
     unknown: 未知
+    oneClickUpdate: 一键更新
+    oneClickUpdateHint: 通过 InsightFlare Deploy 更新至最新官方构建
   scheduledTasks:
     subtitle: 查看和管理系统定时任务。
     empty: 暂无定时任务。

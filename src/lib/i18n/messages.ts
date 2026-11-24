@@ -2368,6 +2368,8 @@ export interface AppMessages {
       source: string;
       loadFailed: string;
       unknown: string;
+      oneClickUpdate: string;
+      oneClickUpdateHint: string;
     };
     scheduledTasks: {
       subtitle: string;
@@ -5547,6 +5549,9 @@ const enMessages = {
       source: "Data source",
       loadFailed: "Failed to load the release index.",
       unknown: "Unknown",
+      oneClickUpdate: "One-click update",
+      oneClickUpdateHint:
+        "Update to the latest official build via InsightFlare Deploy",
     },
     scheduledTasks: {
       subtitle: "View and manage system scheduled tasks.",
@@ -8704,6 +8709,8 @@ const zhMessages = {
       source: "数据来源",
       loadFailed: "加载版本索引失败。",
       unknown: "未知",
+      oneClickUpdate: "一键更新",
+      oneClickUpdateHint: "通过 InsightFlare Deploy 更新至最新官方构建",
     },
     scheduledTasks: {
       subtitle: "查看和管理系统定时任务。",
@@ -11847,6 +11854,8 @@ const zhTwMessages = {
       source: "資料來源",
       loadFailed: "載入版本索引失敗。",
       unknown: "未知",
+      oneClickUpdate: "一鍵更新",
+      oneClickUpdateHint: "透過 InsightFlare Deploy 更新至最新官方建置",
     },
     scheduledTasks: {
       subtitle: "檢視和管理系統排程任務。",
@@ -15076,6 +15085,8 @@ const jaMessages = {
       source: "データソース",
       loadFailed: "リリース一覧を読み込めません。",
       unknown: "不明",
+      oneClickUpdate: "ワンクリック更新",
+      oneClickUpdateHint: "InsightFlare Deploy で最新の公式ビルドに更新",
     },
     scheduledTasks: {
       subtitle: "システムのスケジュールタスクを表示・管理します。",

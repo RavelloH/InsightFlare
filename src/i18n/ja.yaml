@@ -2438,6 +2438,8 @@ managementPages:
     source: データソース
     loadFailed: リリース一覧を読み込めません。
     unknown: 不明
+    oneClickUpdate: ワンクリック更新
+    oneClickUpdateHint: InsightFlare Deploy で最新の公式ビルドに更新
   scheduledTasks:
     subtitle: システムのスケジュールタスクを表示・管理します。
     empty: スケジュールタスクはまだありません。

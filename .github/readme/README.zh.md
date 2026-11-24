@@ -6,7 +6,7 @@
 
 兼顾隐私与分析深度的开源网站统计平台：实时流量、访客旅程、转化漏斗，以及 AI Agent 数据分析。
 
-[**在线体验**](https://insight-demo.ravelloh.com/) &nbsp;·&nbsp; [**一键部署到 Cloudflare**](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FRavelloH%2FInsightFlare) &nbsp;·&nbsp; [**源代码**](https://github.com/RavelloH/InsightFlare)
+[**在线体验**](https://insight-demo.ravelloh.com/) &nbsp;·&nbsp; [**一键部署到 Cloudflare**](https://deploy.insightflare.net/zh) &nbsp;·&nbsp; [**源代码**](https://github.com/RavelloH/InsightFlare)
 
 [![GitHub stars](https://img.shields.io/github/stars/RavelloH/InsightFlare?style=flat-square&logo=github)](https://github.com/RavelloH/InsightFlare/stargazers) [![Latest release](https://img.shields.io/github/v/release/RavelloH/InsightFlare?style=flat-square)](https://github.com/RavelloH/InsightFlare/releases) [![License: MIT](https://img.shields.io/github/license/RavelloH/InsightFlare?style=flat-square)](/LICENSE)
 
@@ -192,22 +192,17 @@
 
 ## 快速开始
 
-只需点击以下按钮：
+[![Deploy InsightFlare to Cloudflare](/.github/readme/deploy-insightflare.svg)](https://deploy.insightflare.net/zh)
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FRavelloH%2FInsightFlare)
+通过 InsightFlare Deploy，将最新官方构建一键安装到你自己的 Cloudflare 账号。无需 Fork 仓库、安装 Wrangler 或手动配置资源。
 
-Cloudflare 会自动 Clone 这个仓库、创建并绑定所需要的资源。其中，你需要填写下面两个 Secret：
+1. 连接 Cloudflare 并选择要部署的账号。
+2. 确认部署方案，选择默认访问地址或自定义域名，并设置管理员密码（也可自动生成）。
+3. 点击**安装 InsightFlare**，等待资源创建和部署完成。
 
-| 名称                       | 用途                                                       |
-| -------------------------- | ---------------------------------------------              |
-| `MAIN_SECRET`              | 根密钥，用于派生访客隐私 salt、会话签名和 API Key 哈希密钥 |
-| `BOOTSTRAP_ADMIN_PASSWORD` | 初始化管理员密码                                           |
+打开你的 InsightFlare 实例，使用 `admin` 和管理员密码登录。若密码由系统生成，请在完成页面妥善保存。
 
-`MAIN_SECRET` 用于安全相关的功能，必须是长度超过 16 的随机字符串。可以通过访问 [https://random.ravelloh.com/str/32](https://random.ravelloh.com/str/32) 来生成一个随机字符串。（刷新页面可以得到一个新的字符串）
-
-`BOOTSTRAP_ADMIN_PASSWORD` 是你的默认账号管理员密码。你需要使用 `admin` 账号和这个密码登录仪表板，此后可以在个人设置页面修改用户名和密码。
-
-填写完毕后，等待 3 分钟让项目部署完毕，你就可以登录到仪表盘并开始追踪访问数据了。此外，你可以在项目的设置页面自定义其域名。默认的访问地址是 `https://insightflare.<your-cloudflare-username>.workers.dev`
+> 如需启用请求观测等高级分析功能，请按部署向导提示启用 Analytics Engine，并在授权时允许 API 令牌管理，以便自动配置只读分析令牌。未启用时仍可完成基础安装，之后也可补充配置。
 
 如果无法登录现有管理员账号，修改 `BOOTSTRAP_ADMIN_PASSWORD` 不会重置该账号。在已安装仓库依赖并配置 Cloudflare 身份验证的交互终端中运行 `pnpm run ops:admin:reset-password -- --user <username>`。包括 `cf` CLI 在内的更多参数可通过 `pnpm run ops:admin:reset-password -- --help` 查看。
 
@@ -216,6 +211,8 @@ Cloudflare 会自动 Clone 这个仓库、创建并绑定所需要的资源。�
 ## 进阶配置
 
 ### 启用分析引擎来进行深度分析
+
+使用 Deploy 时，请启用 Analytics Engine，并在授权时允许 API 令牌管理。Deploy 可以自动创建和配置限定于当前账号的只读令牌。已有实例可返回 Deploy 执行更新或应用配置，也可以按下文手动配置。
 
 Analytics Engine 是 InsightFlare 可选的高吞吐分析层，用于将请求观测以及未来的流量、事件分析投影与主数据库解耦：
 
@@ -266,7 +263,7 @@ https://dash.cloudflare.com/?to=/:account/workers/analytics-engine) 并点击右
 
 ### 配置 R2 存储桶用于冷归档
 
-只有需要启用冷归档到 R2 时，才需要手动创建 R2 bucket。默认情况下，访问数据保存 1 年，超时的数据将被压缩保存（可查看访问趋势、数据，但无法进行筛选）。R2 是可选项，Deploy Button 默认不会要求绑定 R2。启用 R2 后，可对超出 1 年的数据进行详细查询。
+只有需要启用冷归档到 R2 时，才需要手动创建 R2 bucket。默认情况下，访问数据保存 1 年，超时的数据将被压缩保存（可查看访问趋势、数据，但无法进行筛选）。R2 是可选项，InsightFlare Deploy 默认不会要求绑定 R2。启用 R2 后，可对超出 1 年的数据进行详细查询。
 
 在 Cloudflare 内创建名为 `insightflare-archive` 的存储桶。并在 `wrangler.toml` 中取消 `[[r2_buckets]]` 的注释即可，如下所示：
 
@@ -279,14 +276,9 @@ preview_bucket_name = "insightflare-archive-preview"
 
 ### 保持更新
 
-我们创立了开创性的 GitHub App 自动更新系统，带给你最简单的更新体验。
+访问 [InsightFlare Deploy](https://deploy.insightflare.net/zh)，或在应用的版本更新页面点击**一键更新**。连接 Cloudflare，选择已有实例所在账号，确认方案并执行更新。Deploy 使用最新 main 官方构建，保留已有绑定与密钥，并执行待处理的 D1 迁移。Worker 回滚不会撤销数据库迁移，请在升级前做好备份。
 
-保持更新仅需要两步：
-
-1. 为你的仓库安装 GitHub App（只需一次，请 **仅选择你部署的 InsightFlare 的仓库**）: [Install InsightFlare Sync](https://github.com/apps/insightflare-sync/installations/new)
-2. 当上游存在更新时，会自动向你的仓库提交一个 PR。你只需要合并这个请求即可。
-
-_想要让自己的项目也能方便的同步到下游？实现细节：[RavelloH/upstream-sync-bot](https://github.com/RavelloH/upstream-sync-bot)（开源模板）+ [RavelloH/InsightFlare-Bot](https://github.com/RavelloH/InsightFlare-Bot)（本项目的 bot 实例）。_
+自行修改源码或使用仓库部署的用户仍可使用 [InsightFlare Sync](https://github.com/apps/insightflare-sync/installations/new) 或自己的 CI/CD。请避免两种部署渠道同时管理同一个 Worker。
 
 ### 自定义事件上报
 
@@ -381,7 +373,7 @@ window.insightflare.identify("user-456", { name: "Bob" });
 
 ## 手动部署
 
-不使用部署按钮，请使用下面的方法来部署：
+如果维护自己的 Fork 或不使用 InsightFlare Deploy，可以按以下步骤手动部署：
 
 1. Fork 或者 Clone 这个仓库到你的 GitHub 账号下
 2. 在 Cloudflare 中创建以下资源：

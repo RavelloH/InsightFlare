@@ -28,6 +28,8 @@ import {
 } from "@/lib/release-index";
 import Link from "@/lib/router";
 import { cn } from "@/lib/utils";
+const DEPLOY_ORIGIN = "https://deploy.insightflare.net";
+const IS_DEMO = import.meta.env.VITE_DEMO_MODE === "1";
 const REPO_RELEASES_URL = "https://github.com/RavelloH/InsightFlare/releases";
 const CURRENT_VERSION = import.meta.env.VITE_APP_VERSION || "0.0.0";
 const CURRENT_COMMIT = import.meta.env.VITE_COMMIT_SHA || null;
@@ -119,9 +121,7 @@ function Page() {
       : "Unknown error"
     : null;
   const latestStableRelease =
-    releases.find((release) => !release.draft && !release.prerelease) ??
-    releases[0] ??
-    null;
+    releases.find((release) => !release.draft && !release.prerelease) ?? null;
   const currentRelease =
     releases.find(
       (release) =>
@@ -147,18 +147,35 @@ function Page() {
     commitCount: labels.commitCount,
   };
 
+  const updateButton = !IS_DEMO ? (
+    <Button asChild>
+      <Link
+        href={`${DEPLOY_ORIGIN}/${resolvedLocale}`}
+        target="_blank"
+        rel="noreferrer"
+        title={labels.oneClickUpdateHint}
+      >
+        <RiRocketLine data-icon="inline-start" />
+        {labels.oneClickUpdate}
+      </Link>
+    </Button>
+  ) : null;
+
   return (
     <div className="space-y-4">
       <PageHeading
         title={messages.managementNav.versionUpdates}
         subtitle={labels.subtitle}
         actions={
-          <Button variant="outline" asChild>
-            <Link href={REPO_RELEASES_URL} target="_blank" rel="noreferrer">
-              <RiExternalLinkLine data-icon="inline-start" />
-              {labels.source}
-            </Link>
-          </Button>
+          <>
+            <Button variant="outline" asChild>
+              <Link href={REPO_RELEASES_URL} target="_blank" rel="noreferrer">
+                <RiExternalLinkLine data-icon="inline-start" />
+                {labels.source}
+              </Link>
+            </Button>
+            {updateButton}
+          </>
         }
       />
 
@@ -317,6 +334,9 @@ function Page() {
                               {labels.openRelease}
                             </Link>
                           </Button>
+                          {release.tagName === latestStableRelease?.tagName
+                            ? updateButton
+                            : null}
                         </div>
                       </div>
 

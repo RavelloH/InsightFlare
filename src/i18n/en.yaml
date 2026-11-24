@@ -2523,6 +2523,8 @@ managementPages:
     source: Data source
     loadFailed: Failed to load the release index.
     unknown: Unknown
+    oneClickUpdate: One-click update
+    oneClickUpdateHint: Update to the latest official build via InsightFlare Deploy
   scheduledTasks:
     subtitle: View and manage system scheduled tasks.
     empty: No scheduled tasks yet.

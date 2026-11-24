@@ -6,7 +6,7 @@
 
 プライバシーに配慮したオープンソース Web アナリティクス。リアルタイム分析、訪問経路、ファネル、AI エージェント連携をひとつに。
 
-[**ライブデモ**](https://insight-demo.ravelloh.com/) &nbsp;·&nbsp; [**Cloudflare にデプロイ**](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FRavelloH%2FInsightFlare) &nbsp;·&nbsp; [**ソースコード**](https://github.com/RavelloH/InsightFlare)
+[**ライブデモ**](https://insight-demo.ravelloh.com/) &nbsp;·&nbsp; [**Cloudflare にデプロイ**](https://deploy.insightflare.net/ja) &nbsp;·&nbsp; [**ソースコード**](https://github.com/RavelloH/InsightFlare)
 
 [![GitHub stars](https://img.shields.io/github/stars/RavelloH/InsightFlare?style=flat-square&logo=github)](https://github.com/RavelloH/InsightFlare/stargazers) [![Latest release](https://img.shields.io/github/v/release/RavelloH/InsightFlare?style=flat-square)](https://github.com/RavelloH/InsightFlare/releases) [![License: MIT](https://img.shields.io/github/license/RavelloH/InsightFlare?style=flat-square)](/LICENSE)
 
@@ -192,22 +192,17 @@
 
 ## クイックスタート
 
-以下のボタンをクリックしてください。
+[![Deploy InsightFlare to Cloudflare](/.github/readme/deploy-insightflare.svg)](https://deploy.insightflare.net/ja)
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FRavelloH%2FInsightFlare)
+InsightFlare Deploy を使って、最新の公式ビルドを自分の Cloudflare アカウントにインストールできます。GitHub のフォーク、Wrangler のインストール、リソースの手動設定は不要です。
 
-Cloudflare がこのリポジトリを複製し、必要なリソースを作成・バインドします。次の 2 つのシークレットを設定してください。
+1. Cloudflare に接続し、デプロイ先のアカウントを選択します。
+2. デプロイ内容を確認し、既定の URL またはカスタムドメインと管理者パスワード（自動生成も可能）を設定します。
+3. **InsightFlare をインストール**を選択し、デプロイが完了するまで待ちます。
 
-| 名前 | 用途 |
-| --- | --- |
-| `MAIN_SECRET` | 訪問者ソルト、セッションキー、API キーハッシュの導出に使うルートシークレット |
-| `BOOTSTRAP_ADMIN_PASSWORD` | 初期管理者パスワード |
+インスタンスを開き、`admin` と管理者パスワードでサインインします。自動生成されたパスワードは完了画面で保存してください。
 
-`MAIN_SECRET` には 16 文字を超えるランダム文字列が必要です。[https://random.ravelloh.com/str/32](https://random.ravelloh.com/str/32) で生成できます。
-
-`BOOTSTRAP_ADMIN_PASSWORD` はデフォルトの管理者アカウント（`admin`）のパスワードです。デプロイ完了後にダッシュボードへサインインし、個人設定からユーザー名とパスワードを変更できます。
-
-変数を設定してから約 3 分待つとデプロイが完了します。デフォルト URL は `https://insightflare.<your-cloudflare-username>.workers.dev` です。
+> リクエスト監視などの高度な機能を利用する場合は、案内に従って Analytics Engine を有効にし、認可時に API トークン管理を許可してください。読み取り専用トークンを自動設定できます。基本的な分析機能はこれらの設定なしでも利用でき、後から設定できます。
 
 既存の管理者アカウントにサインインできない場合、`BOOTSTRAP_ADMIN_PASSWORD` を変更してもそのアカウントのパスワードはリセットされません。リポジトリの依存関係をインストールし、Cloudflare の認証を設定した対話型ターミナルで `pnpm run ops:admin:reset-password -- --user <username>` を実行してください。`cf` CLI を含む各オプションは `pnpm run ops:admin:reset-password -- --help` で確認できます。
 
@@ -216,6 +211,8 @@ Cloudflare がこのリポジトリを複製し、必要なリソースを作成
 ## 高度な設定
 
 ### Analytics Engine を有効にして詳細分析を行う
+
+Deploy を使う場合は Analytics Engine を有効にし、認可時に API トークン管理を許可してください。アカウント限定の読み取り専用トークンを自動作成・設定できます。既存インスタンスの場合は Deploy から更新または設定を適用できます。以下の手動設定も利用できます。
 
 Analytics Engine は InsightFlare のオプションの高スループット分析層です。リクエスト監視と、将来のトラフィック・イベント分析の投影を主データベースから分離します。
 
@@ -264,7 +261,7 @@ Cloudflare のビルド環境では、プロジェクト変数とシークレッ
 
 ### コールドアーカイブ用の R2 バケットを設定する
 
-R2 へのコールドアーカイブを有効にする場合にのみ、R2 バケットを手動で作成する必要があります。既定ではトラフィックデータを 1 年間保持します。期限切れのデータは圧縮して保存されるため傾向やデータを表示できますが、フィルタリングはできません。R2 は任意であり、Deploy Button では既定で R2 バインディングを必要としません。R2 を有効にすると、1 年より古いデータに対して詳細なクエリを実行できます。
+R2 へのコールドアーカイブを有効にする場合にのみ、R2 バケットを手動で作成する必要があります。既定ではトラフィックデータを 1 年間保持します。期限切れのデータは圧縮して保存されるため傾向やデータを表示できますが、フィルタリングはできません。R2 は任意であり、InsightFlare Deploy では既定で R2 バインディングを必要としません。R2 を有効にすると、1 年より古いデータに対して詳細なクエリを実行できます。
 
 Cloudflare で `insightflare-archive` という名前のバケットを作成し、次のように `wrangler.toml` の `[[r2_buckets]]` を有効化してください。
 
@@ -277,14 +274,9 @@ preview_bucket_name = "insightflare-archive-preview"
 
 ### 最新の状態を保つ
 
-InsightFlare には GitHub App を利用した自動更新システムが組み込まれており、簡単に最新バージョンへ更新できます。
+[InsightFlare Deploy](https://deploy.insightflare.net/ja) を開くか、アプリのバージョン更新ページで**ワンクリック更新**を選択します。Cloudflare に接続し、既存インスタンスのアカウントを選び、内容を確認して更新します。Deploy は最新の main の公式ビルドを使用し、既存のバインディングとシークレットを保持し、未適用の D1 マイグレーションを実行します。Worker のロールバックではデータベースの変更は戻らないため、事前にバックアップしてください。
 
-デプロイを最新に保つ手順は 2 つだけです。
-
-1. リポジトリ用の GitHub App をインストールします。必要なのは一度だけです。**InsightFlare をデプロイしたリポジトリだけを選択してください**: [Install InsightFlare Sync](https://github.com/apps/insightflare-sync/installations/new)
-2. アップストリームに更新があると、リポジトリに PR が自動作成されます。その PR をマージするだけです。
-
-_自分のプロジェクトにも同期しやすい仕組みを導入したい場合: [RavelloH/upstream-sync-bot](https://github.com/RavelloH/upstream-sync-bot)（オープンソーステンプレート）+ [RavelloH/InsightFlare-Bot](https://github.com/RavelloH/InsightFlare-Bot)（本プロジェクトの Bot インスタンス）を参照してください。_
+独自のフォークやリポジトリからデプロイしている場合は、[InsightFlare Sync](https://github.com/apps/insightflare-sync/installations/new) や独自の CI/CD も利用できます。同じ Worker を二つの方法で同時に管理しないでください。
 
 ### カスタムイベントの送信
 
@@ -379,7 +371,7 @@ window.insightflare.identify("user-456", { name: "Bob" });
 
 ## 手動デプロイ
 
-デプロイボタンを使用しない場合は、次の手順でデプロイします。
+独自のフォークを管理する場合や InsightFlare Deploy を利用しない場合は、次の手順で手動デプロイできます。
 
 1. このリポジトリを GitHub アカウントへ fork または clone します。
 2. Cloudflare で D1 データベース、KV 名前空間、必要に応じて R2 バケットを作成します。

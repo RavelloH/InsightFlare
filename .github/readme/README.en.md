@@ -6,7 +6,7 @@
 
 Privacy-aware, open-source web analytics with real-time insights, user journeys, funnels, and AI-agent access — on infrastructure you control.
 
-[**Live demo**](https://insight-demo.ravelloh.com/) &nbsp;·&nbsp; [**Deploy to Cloudflare**](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FRavelloH%2FInsightFlare) &nbsp;·&nbsp; [**Source code**](https://github.com/RavelloH/InsightFlare)
+[**Live demo**](https://insight-demo.ravelloh.com/) &nbsp;·&nbsp; [**Deploy to Cloudflare**](https://deploy.insightflare.net/en) &nbsp;·&nbsp; [**Source code**](https://github.com/RavelloH/InsightFlare)
 
 [![GitHub stars](https://img.shields.io/github/stars/RavelloH/InsightFlare?style=flat-square&logo=github)](https://github.com/RavelloH/InsightFlare/stargazers) [![Latest release](https://img.shields.io/github/v/release/RavelloH/InsightFlare?style=flat-square)](https://github.com/RavelloH/InsightFlare/releases) [![License: MIT](https://img.shields.io/github/license/RavelloH/InsightFlare?style=flat-square)](/LICENSE)
 
@@ -192,22 +192,17 @@ Go beyond pageview counts without outsourcing your analytics. InsightFlare runs 
 
 ## Quick Start
 
-Just click the button below:
+[![Deploy InsightFlare to Cloudflare](/.github/readme/deploy-insightflare.svg)](https://deploy.insightflare.net/en)
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FRavelloH%2FInsightFlare)
+Deploy the latest official InsightFlare build to your own Cloudflare account. No GitHub fork, Wrangler installation or manual resource configuration is needed.
 
-Cloudflare will automatically clone this repository and create and bind the required resources. You need to fill in the following two secrets:
+1. Connect to Cloudflare and select your account.
+2. Review the deployment plan, choose a default or custom domain, and set an administrator password (or generate one automatically).
+3. Select **Install InsightFlare** and wait for deployment to complete.
 
-| Name                       | Purpose                                                                       |
-| -------------------------- | -----------------------------------------------------------------------       |
-| `MAIN_SECRET`              | Root secret used to derive visitor salts, session keys, and API key hash keys |
-| `BOOTSTRAP_ADMIN_PASSWORD` | Initial administrator password                                                |
+Open your instance and sign in as `admin` with the administrator password. Save the generated password before leaving the completion page.
 
-`MAIN_SECRET` is used for security-related features and must be a random string longer than 16 characters. You can generate one at [https://random.ravelloh.com/str/32](https://random.ravelloh.com/str/32). Refresh the page to get a new random string.
-
-`BOOTSTRAP_ADMIN_PASSWORD` is the default administrator password. Sign in to the dashboard with the `admin` account and this password. You can change the username and password later on the personal settings page.
-
-After filling in the variables, wait about 3 minutes for the deployment to finish. You can then sign in to the dashboard and start tracking traffic data. You can also customize the domain name on the project settings page. The default URL is `https://insightflare.<your-cloudflare-username>.workers.dev`.
+> For request observability and other Analytics Engine features, enable Analytics Engine when prompted and grant API token management permission so Deploy can configure a read-only token. Core analytics work without it; you can configure it later.
 
 If you lose access to an existing administrator account, changing `BOOTSTRAP_ADMIN_PASSWORD` will not reset it. From an interactive terminal with the repository dependencies installed and Cloudflare authentication configured, run `pnpm run ops:admin:reset-password -- --user <username>`. Use `pnpm run ops:admin:reset-password -- --help` for options, including the `cf` CLI.
 
@@ -216,6 +211,8 @@ If you lose access to an existing administrator account, changing `BOOTSTRAP_ADM
 ## Advanced Configuration
 
 ### Enable Analytics Engine for Deep Analysis
+
+If you use Deploy, enable Analytics Engine and grant API token management permission during authorization. Deploy can create and configure an account-scoped read-only token. For an existing instance, return to Deploy and apply the update or configuration. Manual setup is also supported.
 
 Analytics Engine is InsightFlare's optional high-throughput analytical layer. It keeps request observability and future traffic/event projections separate from the primary database:
 
@@ -265,7 +262,7 @@ You can also write arbitrary `[vars]` entries with `INSIGHTFLARE_VAR_<NAME>`. Fo
 
 ### Configure an R2 Bucket for Cold Archive
 
-You only need to manually create an R2 bucket if you want to enable cold archive to R2. By default, traffic data is retained for 1 year. Expired data is compressed and retained so trends and data can still be viewed, but it cannot be filtered. R2 is optional, and the Deploy Button does not require an R2 binding by default. After R2 is enabled, you can run detailed queries on data older than 1 year.
+You only need to manually create an R2 bucket if you want to enable cold archive to R2. By default, traffic data is retained for 1 year. Expired data is compressed and retained so trends and data can still be viewed, but it cannot be filtered. R2 is optional, and InsightFlare Deploy does not require an R2 binding by default. After R2 is enabled, you can run detailed queries on data older than 1 year.
 
 Create a bucket named `insightflare-archive` in Cloudflare. Then uncomment `[[r2_buckets]]` in `wrangler.toml` as shown below:
 
@@ -278,14 +275,9 @@ preview_bucket_name = "insightflare-archive-preview"
 
 ### Stay Updated
 
-InsightFlare includes a pioneering GitHub App based automatic update system to provide the simplest update experience.
+Open [InsightFlare Deploy](https://deploy.insightflare.net/en), or select **One-click update** on the application's Version Updates page. Connect to Cloudflare, select the account containing your instance, review the plan and confirm the update. Deploy uses the latest official main build, preserves existing bindings and secrets, and applies pending D1 migrations. A Worker rollback does not undo database migrations; back up before upgrading.
 
-Keeping your deployment updated only takes two steps:
-
-1. Install the GitHub App for your repository. This is only required once. **Only select the repository where you deployed InsightFlare**: [Install InsightFlare Sync](https://github.com/apps/insightflare-sync/installations/new)
-2. When upstream updates are available, a PR will be submitted to your repository automatically. You only need to merge that request.
-
-_Want to make your own project easy to sync downstream? Implementation details: [RavelloH/upstream-sync-bot](https://github.com/RavelloH/upstream-sync-bot) (open source template) + [RavelloH/InsightFlare-Bot](https://github.com/RavelloH/InsightFlare-Bot) (this project's bot instance)._
+For custom forks or repository-managed deployments, you can still use [InsightFlare Sync](https://github.com/apps/insightflare-sync/installations/new) or your own CI/CD. Avoid using both deployment channels to manage the same Worker.
 
 ### Custom Event Reporting
 
@@ -380,7 +372,7 @@ Use `reset()` before switching accounts. Calling `identify("user-456")` alone do
 
 ## Manual Deployment
 
-If you do not use the deploy button, deploy with the steps below:
+For custom forks or manual deployments without InsightFlare Deploy, follow these steps:
 
 1. Fork or clone this repository to your GitHub account
 2. Create the following resources in Cloudflare:

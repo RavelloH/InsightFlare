@@ -2429,6 +2429,8 @@ managementPages:
     source: 資料來源
     loadFailed: 載入版本索引失敗。
     unknown: 未知
+    oneClickUpdate: 一鍵更新
+    oneClickUpdateHint: 透過 InsightFlare Deploy 更新至最新官方建置
   scheduledTasks:
     subtitle: 檢視和管理系統排程任務。
     empty: 暫無排程任務。
