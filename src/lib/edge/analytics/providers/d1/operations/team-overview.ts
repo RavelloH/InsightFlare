@@ -7,6 +7,9 @@ import type {
   TeamOverviewQueryResult,
 } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { queryOverviewForSitesFromHourlyRollupsPartial } from "@/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries";
+import { queryOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/overview";
+import { canUseHourlyRollupsForFilter } from "@/lib/edge/analytics/providers/d1/internal/rollup-eligibility";
 import { listTeamSites } from "@/lib/edge/analytics/providers/d1/internal/team";
 import {
   createOverviewReader,
@@ -33,13 +36,46 @@ export async function readTeamOverview(
     (site) => !allowed || allowed.has(site.id),
   );
   const time = toQueryTime(input.window);
+  // Only batch the same observation scope supported by the site reader.
+  // For sites with no rollup, reuse the canonical raw query without
+  // probing their rollup state a second time.
+  const rollups =
+    sites.length > 1 && canUseHourlyRollupsForFilter(input.filters)
+      ? await queryOverviewForSitesFromHourlyRollupsPartial(
+          input.env,
+          sites.map((site) => site.id),
+          input.window,
+        )
+      : null;
   const results = await Promise.all(
-    sites.map((site) =>
-      createOverviewReader(input.env, site.id).readOverview({
-        time,
-        filters: input.filters,
-      }),
-    ),
+    sites.map(async (site) => {
+      if (!rollups)
+        return createOverviewReader(input.env, site.id).readOverview({
+          time,
+          filters: input.filters,
+        });
+      const rolled = rollups.get(site.id);
+      const value =
+        rolled ??
+        (await queryOverviewFromD1(
+          input.env,
+          site.id,
+          input.window,
+          input.filters,
+        ));
+      return {
+        value: {
+          views: value.views,
+          sessions: value.sessions,
+          visitors: value.visitors,
+          bounces: value.bounces,
+          totalDurationMs: value.totalDuration,
+          durationViews: value.durationViews,
+        },
+        source: rolled ? ("rollup" as const) : ("raw" as const),
+        approximateVisitors: false,
+      };
+    }),
   );
   const data = results.reduce<OverviewMetrics>(
     (total, result) => ({

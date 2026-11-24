@@ -8,6 +8,9 @@ import type {
   TrendResult,
 } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
+import { queryTrendForSitesFromHourlyRollupsPartial } from "@/lib/edge/analytics/providers/d1/internal/hourly-rollup-queries";
+import { queryTrendFromD1 } from "@/lib/edge/analytics/providers/d1/internal/overview";
+import { canUseHourlyRollupsForFilter } from "@/lib/edge/analytics/providers/d1/internal/rollup-eligibility";
 import { listTeamSites } from "@/lib/edge/analytics/providers/d1/internal/team";
 import {
   createOverviewReader,
@@ -55,14 +58,51 @@ export async function readTeamTimeseries(
     (site) => !allowed || allowed.has(site.id),
   );
   const time = toQueryTime(input.window);
+  const canBatch =
+    sites.length > 1 && canUseHourlyRollupsForFilter(input.filters);
+  const rollups = canBatch
+    ? await queryTrendForSitesFromHourlyRollupsPartial(
+        input.env,
+        sites.map((site) => site.id),
+        input.window,
+        input.interval,
+      )
+    : null;
   const results = await Promise.all(
-    sites.map((site) =>
-      createOverviewReader(input.env, site.id).readTrend({
-        time,
-        filters: input.filters,
-        interval: input.interval,
-      }),
-    ),
+    sites.map(async (site) => {
+      if (!canBatch)
+        return createOverviewReader(input.env, site.id).readTrend({
+          time,
+          filters: input.filters,
+          interval: input.interval,
+        });
+      // Null means incompatible buckets; an absent site means no usable rollup.
+      // Both cases use the original raw reader directly.
+      const rolled = rollups?.get(site.id);
+      const rows =
+        rolled ??
+        (await queryTrendFromD1(
+          input.env,
+          site.id,
+          input.window,
+          input.interval,
+          input.filters,
+        ));
+      return {
+        value: rows.map((row): TrendPoint => ({
+          bucket: row.bucket,
+          timestampMs: row.timestampMs as TrendPoint["timestampMs"],
+          views: row.views,
+          sessions: row.sessions,
+          visitors: row.visitors,
+          bounces: row.bounces,
+          totalDurationMs: row.totalDuration,
+          durationViews: row.durationViews,
+        })),
+        source: rolled ? ("rollup" as const) : ("raw" as const),
+        approximateVisitors: false,
+      };
+    }),
   );
   return {
     data: {
