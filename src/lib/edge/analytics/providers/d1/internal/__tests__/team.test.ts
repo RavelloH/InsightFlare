@@ -315,7 +315,12 @@ describe("filtered team dashboard aggregates", () => {
       );
 
       expect(result.source).toBe("raw");
-      expect(queryD1AllMock).toHaveBeenCalledTimes(3);
+      expect(queryD1AllMock).toHaveBeenCalledTimes(2);
+      expect(
+        queryD1AllMock.mock.calls.filter(([, sql]) =>
+          String(sql).includes("shared_team_visits AS MATERIALIZED"),
+        ),
+      ).toHaveLength(1);
       expect(
         queryD1AllMock.mock.calls.every(([, sql]) =>
           String(sql).includes("scope_membership_"),

@@ -61,8 +61,12 @@ import {
   compileScopedDatasetSql,
   scopedDatasetForUnpreparedReader,
 } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
-import { queryTeamOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/internal/team";
-import { queryTeamDashboardForTeam } from "@/lib/edge/analytics/providers/d1/internal/team";
+import {
+  queryTeamDashboardForTeam,
+  queryTeamOverviewFromD1,
+  queryTeamScopedCurrentFromD1,
+  queryTeamTrendFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/team";
 import { queryCrossDimensionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/client-cross";
 import { queryBrowserRadarFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/radar";
 import { queryReferrerTrendFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/share-trend";
@@ -2225,6 +2229,76 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         siteId: "site-b",
       });
       expect(other.items).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("shares nonempty team entity qualification with exact independent overview and trend parity", async () => {
+    const { db } = runFixture();
+    try {
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const env = { DB: createSqliteD1Database(db, trace) } as never;
+      for (const scope of ["session", "visitor"] as const) {
+        for (const expression of [
+          'geo.country eq "US"',
+          'page.path contains "/"',
+          'event.name eq "absent"',
+        ]) {
+          const doc = parseFilterDsl(expression, analyticsFilterRegistry);
+          const plan = createScopedFilterPlan("team-dashboard", doc, scope)!;
+          const filters = attachScopedFilterMetadata(doc, {
+            requestedScope: scope,
+            resolvedScope: plan.scope,
+            plan,
+            time: createQueryTime(100, 300, "UTC", 400),
+            siteIds: ["site-a", "site-b"],
+          });
+          const expectedOverview = await queryTeamOverviewFromD1(
+            env,
+            ["site-a", "site-b"],
+            WINDOW,
+            undefined,
+            filters,
+          );
+          const expectedTrend = await queryTeamTrendFromD1(
+            env,
+            ["site-a", "site-b"],
+            WINDOW,
+            "minute",
+            undefined,
+            filters,
+          );
+          const before = trace.preparedSql.length;
+          const actual = await queryTeamScopedCurrentFromD1(
+            env,
+            ["site-a", "site-b"],
+            WINDOW,
+            "minute",
+            filters,
+          );
+          expect(actual.overview).toEqual(expectedOverview);
+          expect(actual.trend).toEqual(expectedTrend);
+          expect(trace.preparedSql.length - before).toBe(1);
+          expect(trace.preparedSql[before]).toContain(
+            "shared_team_visits AS MATERIALIZED",
+          );
+          expect(trace.bindings[before].length).toBeLessThanOrEqual(100);
+          const isolated = await queryTeamScopedCurrentFromD1(
+            env,
+            ["site-a"],
+            WINDOW,
+            "minute",
+            filters,
+          );
+          expect(
+            [...isolated.overview.keys()].every((id) => id === "site-a"),
+          ).toBe(true);
+          expect(isolated.trend.every((row) => row.siteId === "site-a")).toBe(
+            true,
+          );
+        }
+      }
     } finally {
       db.close();
     }
