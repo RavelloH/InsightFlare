@@ -26,7 +26,10 @@ import { toast } from "sonner";
 
 import { useDashboardTimeZone } from "@/components/dashboard/shell/dashboard-query-provider";
 import { shortDateTime } from "@/lib/dashboard/format";
-import type { AdminTeamsInitialData } from "@/lib/dashboard/management-data";
+import {
+  type AdminTeamsInitialData,
+  managementQueryOptions,
+} from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import type { TeamData } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";
@@ -36,15 +39,32 @@ import { useRouter } from "@/lib/router";
 interface AdminTeamsManagementClientProps {
   locale: Locale;
   messages: AppMessages;
+  userId: string;
   initialData?: AdminTeamsInitialData | null;
+  deferredData?: Promise<AdminTeamsInitialData | null> | null;
 }
 async function fetchTeams(signal?: AbortSignal): Promise<TeamData[]> {
   return requestAdminService<TeamData[]>("teams", { signal });
 }
+export function adminTeamsQueryOptions(
+  userId: string,
+  deferred?: Promise<AdminTeamsInitialData | null> | null,
+  retainInFlight = false,
+) {
+  return managementQueryOptions(
+    ["dashboard", "admin-teams", userId],
+    fetchTeams,
+    (snapshot: AdminTeamsInitialData) => snapshot.teams,
+    deferred,
+    retainInFlight,
+  );
+}
 export function AdminTeamsManagementClient({
   locale,
   messages,
+  userId,
   initialData = null,
+  deferredData,
 }: AdminTeamsManagementClientProps) {
   const timeZone = useDashboardTimeZone();
   const router = useRouter();
@@ -53,8 +73,7 @@ export function AdminTeamsManagementClient({
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const teamsQuery = useQuery({
-    queryKey: ["dashboard", "admin-teams"],
-    queryFn: ({ signal }) => fetchTeams(signal),
+    ...adminTeamsQueryOptions(userId, deferredData),
     initialData: initialData?.teams,
     initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
@@ -81,6 +100,7 @@ export function AdminTeamsManagementClient({
   }
 
   async function handleCreateTeam() {
+    if (loading) return;
     if (name.trim().length < 2) {
       toast.error(t.invalidInput);
       return;
@@ -147,7 +167,7 @@ export function AdminTeamsManagementClient({
               />
             </div>
             <div className="md:col-span-2">
-              <Button type="submit" disabled={submitting}>
+              <Button type="submit" disabled={submitting || loading}>
                 <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
                   {submitting ? (
                     <span
@@ -186,7 +206,7 @@ export function AdminTeamsManagementClient({
             loading={loading}
             hasContent={teams.length > 0}
             loadingLabel={messages.common.loading}
-            emptyLabel={noDataText}
+            emptyLabel={teamsQuery.isError ? t.loadFailed : noDataText}
             colSpan={6}
             header={
               <TableRow>

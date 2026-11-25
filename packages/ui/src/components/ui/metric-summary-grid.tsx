@@ -30,6 +30,7 @@ export interface MetricSummaryItem {
   tone?: MetricSummaryTone;
   loading?: boolean;
   detailLoading?: boolean;
+  detailLoadingIndicator?: "spinner" | "skeleton" | "none";
   onClick?: () => void;
   pressed?: boolean;
   disabled?: boolean;
@@ -76,7 +77,8 @@ function MetricSummaryCell({
   loading: boolean;
 }) {
   const isLoading = item.loading ?? loading;
-  const isDetailLoading = isLoading || item.detailLoading;
+  const isDetailLoading =
+    item.detailLoadingIndicator !== "none" && (isLoading || item.detailLoading);
   const contentKey = isLoading
     ? "loading"
     : `${item.value}:${item.change?.value ?? ""}:${
@@ -151,10 +153,16 @@ function MetricSummaryCell({
         presenceMode="wait"
       >
         {isDetailLoading ? (
-          <Skeleton
-            key="loading"
-            className="h-full w-[min(12rem,72%)] rounded-none"
-          />
+          item.detailLoadingIndicator === "spinner" ? (
+            <div key="loading" className="flex h-full items-center">
+              <Spinner className="size-3" />
+            </div>
+          ) : (
+            <Skeleton
+              key="loading"
+              className="h-full w-[min(12rem,72%)] rounded-none"
+            />
+          )
         ) : (
           <p
             key={item.detail ?? "detail"}

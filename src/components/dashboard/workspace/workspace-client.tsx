@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChangeQuadrantChart,
   SitePulseHeatmap,
@@ -37,7 +37,7 @@ import {
   RiSearchLine,
   RiWindow2Line,
 } from "@remixicon/react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { queryOptions, useQueries, useQuery } from "@tanstack/react-query";
 
 import {
   AnalyticsDetailsTooltipTarget,
@@ -57,11 +57,18 @@ import {
   percentFormat,
 } from "@/lib/dashboard/format";
 import { buildSitePath } from "@/lib/dashboard/paths";
+import {
+  loadWorkspaceSiteInventory,
+  WORKSPACE_TEAM_LIMIT,
+} from "@/lib/dashboard/route-data";
 import type { DashboardRootContext } from "@/lib/dashboard/server";
 import {
+  sameTeamDashboardWindow,
   teamDashboardQueryOptions,
   type TeamDashboardSnapshot,
+  type TeamDashboardWindow,
 } from "@/lib/dashboard/team-dashboard-query";
+import type { SiteData } from "@/lib/dashboard-api/client/edge";
 import { fetchNotificationMessages } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -81,7 +88,51 @@ import {
 } from "./model";
 import { AttentionRow, ChangeText, greeting } from "./parts";
 
-const TEAM_LIMIT = 20;
+const TEAM_LIMIT = WORKSPACE_TEAM_LIMIT;
+type WorkspaceInventory = Record<string, SiteData[] | null>;
+export function workspaceInventoryQueryOptions(
+  userId: string,
+  teamIds: string[],
+  readDeferred?: () => Promise<WorkspaceInventory | null> | undefined,
+) {
+  return queryOptions({
+    queryKey: ["workspace", "inventory", userId, ...teamIds],
+    queryFn: async () =>
+      (await readDeferred?.()?.catch(() => null)) ??
+      loadWorkspaceSiteInventory({ data: { teamIds } }),
+    staleTime: 15_000,
+  });
+}
+
+function WorkspaceMetric({
+  status,
+  label,
+  children,
+}: {
+  status: WorkspaceSiteRow["metricsStatus"];
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="inline-flex h-4 items-center justify-center align-middle">
+      <AutoTransition
+        as="span"
+        initial={false}
+        duration={0.2}
+        transitionKey={status ?? "ready"}
+        className="inline-flex h-4 items-center"
+      >
+        {status === "pending" ? (
+          <Spinner className="size-4" aria-label={label} />
+        ) : status === "unavailable" ? (
+          "—"
+        ) : (
+          children
+        )}
+      </AutoTransition>
+    </div>
+  );
+}
 
 function WorkspaceLoading({
   label,
@@ -127,12 +178,16 @@ export function WorkspaceClient({
   locale,
   messages,
   dashboard,
-  snapshots,
+  deferredSnapshots,
+  deferredWindow,
+  deferredInventory,
 }: {
   locale: Locale;
   messages: AppMessages;
   dashboard: DashboardRootContext;
-  snapshots: Record<string, TeamDashboardSnapshot | null>;
+  deferredSnapshots: Record<string, Promise<TeamDashboardSnapshot | null>>;
+  deferredWindow: TeamDashboardWindow;
+  deferredInventory: Promise<WorkspaceInventory | null> | null;
 }) {
   const hydrated = useHydrated();
   const copy = messages.workspace;
@@ -153,13 +208,30 @@ export function WorkspaceClient({
       queryWindow.timeZone,
     ],
   );
+  const consumed = useRef(new WeakSet<object>());
+  const readOnce = <T,>(promise: Promise<T> | null | undefined) => {
+    if (!promise || consumed.current.has(promise)) return undefined;
+    consumed.current.add(promise);
+    return promise;
+  };
+  const inventoryQuery = useQuery({
+    ...workspaceInventoryQueryOptions(
+      user.id,
+      teams.map((team) => team.id),
+      () => readOnce(deferredInventory),
+    ),
+    enabled: hydrated && teams.length > 0,
+  });
   const results = useQueries({
     queries: teams.map((team) =>
       teamDashboardQueryOptions({
         teamId: team.id,
         window,
         range,
-        snapshot: snapshots[team.id] ?? null,
+        readDeferredSnapshot: () =>
+          sameTeamDashboardWindow(deferredWindow, window)
+            ? readOnce(deferredSnapshots[team.id])
+            : undefined,
         enabled: queryReady && Boolean(team.id),
       }),
     ),
@@ -176,10 +248,20 @@ export function WorkspaceClient({
   // across status-only changes. Input and sorting never rebuild time buckets.
   const { rows, siteCount, totals, bucketStarts, rowsById, changePoints } =
     useMemo(
-      () => deriveWorkspaceData(teams, data, window),
-      [teams, data, window],
+      () =>
+        deriveWorkspaceData(teams, data, window, inventoryQuery.data, failed),
+      [teams, data, window, inventoryQuery.data, failed],
     );
   const waitingForSites = analyticsLoading && !rows.length;
+  const siteCountPending = teams.some(
+    (team, index) =>
+      !data[index] &&
+      !failed[index] &&
+      !Array.isArray(inventoryQuery.data?.[team.id]),
+  );
+  const totalsUnavailable = failed.some(
+    (error, index) => error && !data[index],
+  );
 
   const [visits, setVisits] = useState<WorkspaceSiteVisit[]>([]);
   const [search, setSearch] = useState("");
@@ -271,6 +353,7 @@ export function WorkspaceClient({
           />
         ),
         values: row.trend.map((point) => point.visitors),
+        metricsStatus: row.metricsStatus,
       })),
     [rows],
   );
@@ -358,7 +441,7 @@ export function WorkspaceClient({
               greeting(copy.greetings, now, user.name || user.username),
               formatI18nTemplate(copy.summary, {
                 teams: allTeams.length,
-                sites: siteCount,
+                sites: siteCountPending ? "…" : siteCount,
               }),
             ]
               .filter(Boolean)
@@ -486,14 +569,14 @@ export function WorkspaceClient({
                   initial={false}
                   duration={0.2}
                   transitionKey={
-                    waitingForSites
+                    analyticsLoading && !bucketStarts.length
                       ? "loading"
                       : pulseRows.length && bucketStarts.length
                         ? "pulse"
                         : "empty"
                   }
                 >
-                  {waitingForSites ? (
+                  {analyticsLoading && !bucketStarts.length ? (
                     <WorkspaceLoading
                       label={messages.common.loading}
                       className="h-40"
@@ -507,7 +590,8 @@ export function WorkspaceClient({
                       interval={window.interval}
                       labels={pulseLabels}
                       emptyLabel={copy.noSites}
-                      loading={fetching}
+                      loading={analyticsLoading}
+                      loadingLabel={messages.common.loading}
                       onRowSelect={openSite}
                     />
                   )}
@@ -678,19 +762,39 @@ export function WorkspaceClient({
                                   </span>
                                 </TableCell>
                                 <TableCell className="text-right font-mono tabular-nums">
-                                  {numberFormat(locale, row.visitors)}
+                                  <WorkspaceMetric
+                                    status={row.metricsStatus}
+                                    label={messages.common.loading}
+                                  >
+                                    {numberFormat(locale, row.visitors)}
+                                  </WorkspaceMetric>
                                 </TableCell>
                                 <TableCell className="text-right font-mono tabular-nums">
-                                  {numberFormat(locale, row.views)}
+                                  <WorkspaceMetric
+                                    status={row.metricsStatus}
+                                    label={messages.common.loading}
+                                  >
+                                    {numberFormat(locale, row.views)}
+                                  </WorkspaceMetric>
                                 </TableCell>
                                 <TableCell className="hidden text-center font-mono tabular-nums lg:table-cell">
-                                  {percentFormat(locale, row.bounceRate)}
+                                  <WorkspaceMetric
+                                    status={row.metricsStatus}
+                                    label={messages.common.loading}
+                                  >
+                                    {percentFormat(locale, row.bounceRate)}
+                                  </WorkspaceMetric>
                                 </TableCell>
                                 <TableCell className="text-center font-mono tabular-nums">
-                                  <ChangeText value={row.visitorsChange} />
+                                  <WorkspaceMetric
+                                    status={row.metricsStatus}
+                                    label={messages.common.loading}
+                                  >
+                                    <ChangeText value={row.visitorsChange} />
+                                  </WorkspaceMetric>
                                 </TableCell>
                                 <TableCell className="hidden w-28 max-w-40 px-3 sm:table-cell xl:w-40">
-                                  <div className="mx-auto w-full max-w-40 overflow-hidden">
+                                  <div className="relative mx-auto h-4 w-full max-w-40 overflow-hidden">
                                     <TrafficPairBarChart
                                       data={row.trend}
                                       locale={locale}
@@ -704,6 +808,16 @@ export function WorkspaceClient({
                                       maxPoints={36}
                                       className="h-4"
                                     />
+                                    {row.metricsStatus ? (
+                                      <div className="absolute inset-0 flex items-center justify-center">
+                                        <WorkspaceMetric
+                                          status={row.metricsStatus}
+                                          label={messages.common.loading}
+                                        >
+                                          {null}
+                                        </WorkspaceMetric>
+                                      </div>
+                                    ) : null}
                                   </div>
                                 </TableCell>
                               </TableRow>
@@ -809,33 +923,16 @@ export function WorkspaceClient({
             </CardHeader>
             <CardContent>
               <AutoResizer>
-                <AutoTransition
-                  initial={false}
-                  duration={0.2}
-                  transitionKey={
-                    waitingForSites
-                      ? "loading"
-                      : changePoints.length
-                        ? "chart"
-                        : "empty"
-                  }
-                >
-                  {waitingForSites ? (
-                    <WorkspaceLoading
-                      label={messages.common.loading}
-                      className="h-60"
-                    />
-                  ) : (
-                    <ChangeQuadrantChart
-                      points={changePoints}
-                      labels={quadrantLabels}
-                      locale={locale}
-                      threshold={NOTABLE_CHANGE_PERCENT}
-                      onPointSelect={openSite}
-                      emptyLabel={copy.noChanges}
-                    />
-                  )}
-                </AutoTransition>
+                <ChangeQuadrantChart
+                  points={changePoints}
+                  labels={quadrantLabels}
+                  locale={locale}
+                  threshold={NOTABLE_CHANGE_PERCENT}
+                  onPointSelect={openSite}
+                  emptyLabel={copy.noChanges}
+                  loading={analyticsLoading}
+                  loadingLabel={messages.common.loading}
+                />
               </AutoResizer>
             </CardContent>
           </Card>
@@ -861,7 +958,9 @@ export function WorkspaceClient({
                           transitionKey={
                             analyticsLoading
                               ? "loading"
-                              : JSON.stringify([value, change])
+                              : totalsUnavailable
+                                ? "unavailable"
+                                : JSON.stringify([value, change])
                           }
                           initial={false}
                           duration={0.2}
@@ -875,6 +974,8 @@ export function WorkspaceClient({
                                 aria-label={messages.common.loading}
                               />
                             </div>
+                          ) : totalsUnavailable ? (
+                            <div className="flex min-h-5 items-center">—</div>
                           ) : (
                             <div className="flex min-h-5 flex-wrap items-end gap-x-1.5 gap-y-1">
                               <span className="font-mono text-base leading-none tabular-nums">

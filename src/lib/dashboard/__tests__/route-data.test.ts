@@ -1,7 +1,9 @@
+import { QueryClient } from "@tanstack/react-query";
 import type * as ReactStartModule from "@tanstack/react-start";
 import type * as ReactStartServerModule from "@tanstack/react-start/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { managementQueryOptions } from "@/lib/dashboard/management-data";
 import type * as DashboardServerModule from "@/lib/dashboard/server";
 const { teamDashboardExecute } = vi.hoisted(() => ({
   teamDashboardExecute: vi.fn(),
@@ -103,6 +105,7 @@ import {
   loadTeamDashboardSnapshot,
   loadTeamManagementInitialData,
   loadTeamNotificationsInitialData,
+  loadWorkspaceSiteInventory,
   loadWorkspaceSnapshots,
   WORKSPACE_TEAM_LIMIT,
 } from "@/lib/dashboard/route-data";
@@ -326,7 +329,8 @@ describe("Dashboard route data loaders", () => {
       const result = await runWithInvocationLogger(logger, () =>
         loadDashboardBootstrap({ data: { page: "workspace" } }),
       );
-      expect(result.workspaceSnapshots?.["team-a"]).not.toBeNull();
+      expect(result.workspaceSnapshots).toBeNull();
+      expect(teamDashboardExecute).not.toHaveBeenCalled();
       const snapshot = logger.snapshot();
       expect(snapshot.routeKey).toBe(expected);
       expect(
@@ -334,9 +338,8 @@ describe("Dashboard route data loaders", () => {
           ?.count,
       ).toBe(1);
       expect(
-        snapshot.operations.find((op) => op.name === "dashboard.team_snapshot")
-          ?.count,
-      ).toBe(1);
+        snapshot.operations.find((op) => op.name === "dashboard.team_snapshot"),
+      ).toBeUndefined();
     }
   });
 
@@ -356,6 +359,31 @@ describe("Dashboard route data loaders", () => {
       data: { page: "team", teamSlug: "unrelated" },
     });
     expect(unrelated.teamDashboardSnapshot).toBeNull();
+    expect(teamDashboardExecute).not.toHaveBeenCalled();
+  });
+
+  it("loads authorized workspace inventory without analytics or other teams", async () => {
+    vi.mocked(getDashboardProfile).mockResolvedValue({
+      user: { id: "user" },
+      teams: [{ id: "team-a" }, { id: "team-b" }, { id: "team-c" }],
+    } as never);
+    const site = { id: "site-a", name: "A", domain: "a.test" };
+    vi.mocked(readDashboardAdmin).mockImplementation(async (route, params) => {
+      expect(route).toBe("sites");
+      const teamId = (params as { teamId: string }).teamId;
+      if (teamId === "team-a") return [site] as never;
+      if (teamId === "team-b") return [] as never;
+      throw new Error("unavailable");
+    });
+    const inventory = await loadWorkspaceSiteInventory({
+      data: { teamIds: ["team-a", "team-b", "team-c", "forbidden", "team-a"] },
+    });
+    expect(inventory).toEqual({
+      "team-a": [site],
+      "team-b": [],
+      "team-c": null,
+    });
+    expect(readDashboardAdmin).toHaveBeenCalledTimes(3);
     expect(teamDashboardExecute).not.toHaveBeenCalled();
   });
 
@@ -802,5 +830,81 @@ describe("Dashboard route data loaders", () => {
         limit: 50,
       });
     });
+  });
+});
+
+describe("streamed management query options", () => {
+  const client = () =>
+    new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, staleTime: Infinity, gcTime: 0 },
+      },
+    });
+  const select = (snapshot: { fetchedAt: number; value: string }) =>
+    snapshot.value;
+  it("joins a pending server snapshot once and refetches live data after invalidation", async () => {
+    const queryClient = client();
+    const key = ["admin", "one"];
+    const fetchData = vi.fn(async () => "live");
+    let resolve!: (snapshot: { fetchedAt: number; value: string }) => void;
+    const deferred = new Promise<{ fetchedAt: number; value: string }>(
+      (done) => {
+        resolve = done;
+      },
+    );
+    const options = managementQueryOptions(key, fetchData, select, deferred);
+    const first = queryClient.fetchQuery(options);
+    const second = queryClient.fetchQuery(options);
+    expect(fetchData).not.toHaveBeenCalled();
+    resolve({ fetchedAt: Date.now(), value: "streamed" });
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      "streamed",
+      "streamed",
+    ]);
+    await queryClient.invalidateQueries({ queryKey: key });
+    await expect(queryClient.fetchQuery(options)).resolves.toBe("live");
+    expect(fetchData).toHaveBeenCalledTimes(1);
+    queryClient.clear();
+  });
+  it("falls back for null or rejected snapshots and never replaces an existing cache with a late snapshot", async () => {
+    const queryClient = client();
+    const fetchData = vi.fn(async () => "live");
+    for (const [key, deferred] of [
+      [["admin", "null"], Promise.resolve(null)],
+      [["admin", "rejected"], Promise.reject(new Error("server"))],
+    ] as const) {
+      await expect(
+        queryClient.fetchQuery(
+          managementQueryOptions(key, fetchData, select, deferred),
+        ),
+      ).resolves.toBe("live");
+    }
+    const key = ["admin", "cached"];
+    queryClient.setQueryData(key, "cached");
+    await queryClient.invalidateQueries({ queryKey: key });
+    await expect(
+      queryClient.fetchQuery(
+        managementQueryOptions(
+          key,
+          fetchData,
+          select,
+          Promise.resolve({ fetchedAt: Date.now(), value: "old" }),
+        ),
+      ),
+    ).resolves.toBe("live");
+    expect(fetchData).toHaveBeenCalledTimes(3);
+    queryClient.clear();
+  });
+  it("keeps prefetched requests alive without consuming abort signals and partitions account keys", async () => {
+    const queryClient = client();
+    const fetchData = vi.fn(async (_signal?: AbortSignal) => "user-one");
+    const key = ["admin", "account-one"];
+    await queryClient.prefetchQuery(
+      managementQueryOptions(key, fetchData, select, null, true),
+    );
+    expect(fetchData).toHaveBeenCalledWith(undefined);
+    expect(queryClient.getQueryData(key)).toBe("user-one");
+    expect(queryClient.getQueryData(["admin", "account-two"])).toBeUndefined();
+    queryClient.clear();
   });
 });

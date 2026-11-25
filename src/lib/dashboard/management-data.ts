@@ -1,3 +1,9 @@
+import {
+  type QueryClient,
+  type QueryKey,
+  queryOptions,
+} from "@tanstack/react-query";
+
 import type { PublicAnalyticsEngineConfig } from "@/lib/analytics-engine-config";
 import type { AdminPublicLoginTurnstileConfig } from "@/lib/auth/login-turnstile-config";
 import type { NotificationPreferencesData } from "@/lib/dashboard-api/client/edge";
@@ -164,4 +170,43 @@ export type ScheduledTasksInitialData = SerializableScheduledTasksData & {
 export interface SystemPerformanceInitialData {
   data: SystemPerformanceData;
   fetchedAt: number;
+}
+
+/** Join a streamed initial read once; never replace an existing cache entry
+ * with a late snapshot. Client navigation prefetch survives observer changes. */
+const consumedManagementSnapshots = new WeakSet<object>();
+export async function consumeManagementSnapshot<TSnapshot>(
+  client: QueryClient,
+  key: QueryKey,
+  deferred?: Promise<TSnapshot | null> | null,
+): Promise<TSnapshot | null> {
+  if (!deferred || consumedManagementSnapshots.has(deferred)) return null;
+  consumedManagementSnapshots.add(deferred);
+  if (client.getQueryState(key)?.dataUpdatedAt) return null;
+  const snapshot = await deferred.catch(() => null);
+  return client.getQueryState(key)?.dataUpdatedAt ? null : snapshot;
+}
+
+export function managementQueryOptions<
+  TSnapshot extends { fetchedAt: number },
+  TData,
+>(
+  key: QueryKey,
+  fetchData: (signal?: AbortSignal) => Promise<TData>,
+  select: (snapshot: TSnapshot) => TData,
+  deferred?: Promise<TSnapshot | null> | null,
+  retainInFlight = false,
+) {
+  return queryOptions({
+    queryKey: key,
+    queryFn: async (context) => {
+      const snapshot = await consumeManagementSnapshot(
+        context.client,
+        key,
+        deferred,
+      );
+      if (snapshot) return select(snapshot);
+      return fetchData(retainInFlight ? undefined : context.signal);
+    },
+  });
 }

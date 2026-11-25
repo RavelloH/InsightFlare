@@ -29,12 +29,15 @@ import {
   RiRefreshLine,
   RiTimeLine,
 } from "@remixicon/react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { infiniteQueryOptions, useInfiniteQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { useDashboardTimeZone } from "@/components/dashboard/shell/dashboard-query-provider";
 import { numberFormat, shortDateTimeWithSeconds } from "@/lib/dashboard/format";
-import type { ScheduledTasksInitialData } from "@/lib/dashboard/management-data";
+import {
+  consumeManagementSnapshot,
+  type ScheduledTasksInitialData,
+} from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -56,7 +59,9 @@ import {
 interface ScheduledTasksClientProps {
   locale: Locale;
   messages: AppMessages;
+  userId: string;
   initialData?: ScheduledTasksInitialData | null;
+  deferredData?: Promise<ScheduledTasksInitialData | null> | null;
 }
 const STATUS_OPTIONS: Array<ScheduledTaskStatus | "all"> = [
   "all",
@@ -107,10 +112,46 @@ function appendUniqueRuns(
   const nextRuns = incoming.filter((run) => !seen.has(run.id));
   return nextRuns.length > 0 ? [...current, ...nextRuns] : current;
 }
+export function scheduledTasksQueryOptions(
+  userId: string,
+  status: string,
+  deferred?: Promise<ScheduledTasksInitialData | null> | null,
+  retainInFlight = false,
+) {
+  const key = ["dashboard", "scheduled-tasks", status, userId] as const;
+  return infiniteQueryOptions({
+    queryKey: key,
+    queryFn: async (context): Promise<ScheduledTasksData> => {
+      if (status === "all" && context.pageParam === null) {
+        const snapshot = await consumeManagementSnapshot(
+          context.client,
+          key,
+          deferred,
+        );
+        if (snapshot) return snapshot;
+      }
+      return fetchScheduledTasks({
+        status,
+        cursor: context.pageParam,
+        limit: RUN_PAGE_SIZE,
+        signal: retainInFlight ? undefined : context.signal,
+      });
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.runs.pagination.hasMore
+        ? lastPage.runs.pagination.nextCursor
+        : undefined,
+    staleTime: status === "all" ? 30_000 : 0,
+  });
+}
+
 export function ScheduledTasksClient({
   locale,
   messages,
+  userId,
   initialData = null,
+  deferredData,
 }: ScheduledTasksClientProps) {
   const t = messages.managementPages.scheduledTasks;
   const timeZone = useDashboardTimeZone();
@@ -119,27 +160,15 @@ export function ScheduledTasksClient({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [updatingTaskKey, setUpdatingTaskKey] = useState<string | null>(null);
   const runsQuery = useInfiniteQuery({
-    queryKey: ["dashboard", "scheduled-tasks", status],
-    queryFn: ({ pageParam, signal }) =>
-      fetchScheduledTasks({
-        status,
-        cursor: pageParam,
-        limit: RUN_PAGE_SIZE,
-        signal,
-      }),
-    initialPageParam: null as string | null,
-    getNextPageParam: (lastPage) =>
-      lastPage.runs.pagination.hasMore
-        ? lastPage.runs.pagination.nextCursor
+    ...scheduledTasksQueryOptions(userId, status, deferredData),
+    initialData:
+      initialData && status === "all"
+        ? {
+            pages: [initialData],
+            pageParams: [null],
+          }
         : undefined,
-    initialData: initialData
-      ? {
-          pages: [initialData],
-          pageParams: [null],
-        }
-      : undefined,
     initialDataUpdatedAt: initialData?.fetchedAt,
-    staleTime: initialData ? 30_000 : 0,
     enabled: typeof window !== "undefined",
   });
   const runs = useMemo(
@@ -173,7 +202,7 @@ export function ScheduledTasksClient({
   });
 
   const detailQuery = useInfiniteQuery({
-    queryKey: ["dashboard", "scheduled-task-run", selectedRunId],
+    queryKey: ["dashboard", "scheduled-task-run", selectedRunId, userId],
     queryFn: ({ pageParam, signal }) =>
       fetchScheduledTasks({
         runId: selectedRunId,
@@ -329,9 +358,12 @@ export function ScheduledTasksClient({
             id: "runs-24h",
             icon: <RiCalendarScheduleLine />,
             label: t.runs24h,
+            detailLoadingIndicator: "spinner",
             loading: replacingRows,
-            value: numberFormat(locale, data?.health.totalRuns24h ?? 0),
-            detail: `${t.retentionPrefix} ${data?.retentionDays ?? 30} ${t.days}`,
+            value: data ? numberFormat(locale, data.health.totalRuns24h) : "—",
+            detail: data
+              ? `${t.retentionPrefix} ${data.retentionDays} ${t.days}`
+              : "",
           },
           {
             id: "success-rate-24h",
@@ -340,6 +372,7 @@ export function ScheduledTasksClient({
             loading: replacingRows,
             value: formatRate(locale, data?.health.successRate24h ?? null),
             detail: t.successRateDescription,
+            detailLoadingIndicator: "none",
             tone:
               (data?.health.successRate24h ?? 1) >= 0.95
                 ? "positive"
@@ -349,15 +382,19 @@ export function ScheduledTasksClient({
             id: "problem-runs-24h",
             icon: <RiAlarmWarningLine />,
             label: t.problemRuns24h,
+            detailLoadingIndicator: "spinner",
             loading: replacingRows,
-            value: numberFormat(locale, failedOrPartial),
-            detail: `${t.failed}: ${numberFormat(locale, data?.health.failedRuns24h ?? 0)} / ${t.partial}: ${numberFormat(locale, data?.health.partialRuns24h ?? 0)}`,
+            value: data ? numberFormat(locale, failedOrPartial) : "—",
+            detail: data
+              ? `${t.failed}: ${numberFormat(locale, data.health.failedRuns24h)} / ${t.partial}: ${numberFormat(locale, data.health.partialRuns24h)}`
+              : "",
             tone: failedOrPartial > 0 ? "critical" : "positive",
           },
           {
             id: "last-run",
             icon: <RiTimeLine />,
             label: t.lastRun,
+            detailLoadingIndicator: "spinner",
             loading: replacingRows,
             value: data?.health.lastRunAt
               ? shortDateTimeWithSeconds(
@@ -368,7 +405,9 @@ export function ScheduledTasksClient({
               : "--",
             detail: data?.health.staleRunningRuns
               ? `${t.staleRunning}: ${numberFormat(locale, data.health.staleRunningRuns)}`
-              : t.noStaleRunning,
+              : data
+                ? t.noStaleRunning
+                : "",
             tone: data?.health.staleRunningRuns ? "warning" : "default",
           },
         ]}
@@ -387,7 +426,7 @@ export function ScheduledTasksClient({
             loading={replacingRows}
             hasContent={(data?.tasks.length ?? 0) > 0}
             loadingLabel={messages.common.loading}
-            emptyLabel={t.empty}
+            emptyLabel={error ? t.loadFailed : t.empty}
             colSpan={9}
             header={
               <TableRow>

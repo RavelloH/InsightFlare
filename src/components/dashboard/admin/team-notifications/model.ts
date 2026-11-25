@@ -25,6 +25,7 @@ export interface TeamNotificationsClientProps {
   teamSlug: string;
   currentUserId: string;
   initialData?: TeamNotificationsInitialData | null;
+  deferredData?: Promise<TeamNotificationsInitialData | null> | null;
 }
 export type RuleFormType =
   "report" | "milestone" | "threshold" | "change" | "health";

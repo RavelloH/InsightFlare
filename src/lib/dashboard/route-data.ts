@@ -36,6 +36,7 @@ import { fetchPublicSite } from "@/lib/dashboard-api/client/edge";
 import type {
   NotificationMessageData,
   NotificationRuleData,
+  SiteData,
 } from "@/lib/dashboard-api/contract/types";
 import { createTeamDashboardQueryRuntime } from "@/lib/edge/analytics/composition/ssr-query-runtime";
 import {
@@ -205,6 +206,34 @@ async function readWorkspaceSnapshots(teamIds: string[]) {
   >;
 }
 
+/** Lightweight authorized inventory, independently streamed from analytics.
+ * Null means the inventory could not be read, not an empty team. */
+export const loadWorkspaceSiteInventory = createServerFn({ method: "GET" })
+  .validator((data: { teamIds: string[] }) => ({
+    teamIds: Array.isArray(data.teamIds)
+      ? [...new Set(data.teamIds.map(String))].slice(0, WORKSPACE_TEAM_LIMIT)
+      : [],
+  }))
+  .handler(async ({ data }): Promise<Record<string, SiteData[] | null>> => {
+    const profile = await getDashboardProfile();
+    const allowed = new Set(profile?.teams.map((team) => team.id) ?? []);
+    const entries = await Promise.all(
+      data.teamIds
+        .filter((teamId) => allowed.has(teamId))
+        .map(async (teamId) => {
+          try {
+            return [
+              teamId,
+              await readDashboardAdmin("sites", { teamId }),
+            ] as const;
+          } catch {
+            return [teamId, null] as const;
+          }
+        }),
+    );
+    return Object.fromEntries(entries);
+  });
+
 /** One authenticated RPC for the shell and the matched team's initial page.
  * The client supplies route identifiers only; team IDs and ACLs are resolved here. */
 export const loadDashboardBootstrap = createServerFn({ method: "GET" })
@@ -246,31 +275,14 @@ async function readDashboardBootstrap(data: {
   const team = data.teamSlug
     ? getDashboardTeamContext(data.teamSlug)
     : Promise.resolve(null);
-  const snapshots = (async () => {
-    const profile = await getDashboardProfile();
-    if (!profile)
-      return { workspaceSnapshots: null, teamDashboardSnapshot: null };
-    if (data.page === "workspace") {
-      return {
-        workspaceSnapshots: await readWorkspaceSnapshots(
-          profile.teams.slice(0, WORKSPACE_TEAM_LIMIT).map((item) => item.id),
-        ),
-        teamDashboardSnapshot: null,
-      };
-    }
-    return { workspaceSnapshots: null, teamDashboardSnapshot: null };
-  })();
-  const [
-    dashboardRoot,
-    initialDashboardWindow,
-    bootstrapTeamContext,
-    initialSnapshots,
-  ] = await Promise.all([root, initialWindow, team, snapshots]);
+  const [dashboardRoot, initialDashboardWindow, bootstrapTeamContext] =
+    await Promise.all([root, initialWindow, team]);
   return {
     dashboardRoot,
     initialDashboardWindow,
     bootstrapTeamContext,
-    ...initialSnapshots,
+    workspaceSnapshots: null,
+    teamDashboardSnapshot: null,
   };
 }
 

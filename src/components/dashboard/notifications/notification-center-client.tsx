@@ -36,7 +36,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { shortDateTime } from "@/lib/dashboard/format";
-import type { NotificationCenterInitialData } from "@/lib/dashboard/management-data";
+import {
+  managementQueryOptions,
+  type NotificationCenterInitialData,
+} from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import { type NotificationMessageData } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";
@@ -46,8 +49,11 @@ import { usePathname, useRouter, useSearchParams } from "@/lib/router";
 interface NotificationCenterClientProps {
   locale: Locale;
   messages: AppMessages;
+  userId: string;
   teamId?: string;
   initialData?: NotificationCenterInitialData | null;
+  deferredData?: Promise<NotificationCenterInitialData | null> | null;
+  deferredRuleId?: string;
 }
 type NotificationTab = "all" | "unread" | "attention" | "report";
 type NotificationCenterCopy = AppMessages["notificationCenter"];
@@ -303,11 +309,47 @@ function NotificationMessageList({
     </div>
   );
 }
+export function notificationCenterQueryOptions(
+  userId: string,
+  locale: Locale,
+  teamId: string | undefined,
+  ruleId: string,
+  deferred?: Promise<NotificationCenterInitialData | null> | null,
+  retainInFlight = false,
+) {
+  return managementQueryOptions(
+    [
+      "dashboard",
+      "notification-messages",
+      teamId ?? "",
+      ruleId,
+      locale,
+      userId,
+    ],
+    (signal) =>
+      requestAdminService<{
+        messages: NotificationMessageData[];
+        unreadAttentionCount: number;
+      }>("notifications", {
+        params: { teamId, ruleId: ruleId || undefined, locale, limit: 80 },
+        signal,
+      }),
+    (snapshot: NotificationCenterInitialData) => ({
+      messages: snapshot.messages as NotificationMessageData[],
+      unreadAttentionCount: snapshot.unreadAttentionCount,
+    }),
+    deferred,
+    retainInFlight,
+  );
+}
 export function NotificationCenterClient({
   locale,
   messages,
+  userId,
   teamId,
   initialData = null,
+  deferredData,
+  deferredRuleId = "",
 }: NotificationCenterClientProps) {
   const copy = messages.notificationCenter;
   const queryClient = useQueryClient();
@@ -328,30 +370,25 @@ export function NotificationCenterClient({
         teamId ?? "",
         ruleIdFilter,
         locale,
+        userId,
       ] as const,
-    [locale, ruleIdFilter, teamId],
+    [locale, ruleIdFilter, teamId, userId],
   );
   const messagesQuery = useQuery({
-    queryKey: messagesQueryKey,
-    queryFn: ({ signal }) =>
-      requestAdminService<{
-        messages: NotificationMessageData[];
-        unreadAttentionCount: number;
-      }>("notifications", {
-        params: {
-          teamId,
-          ruleId: ruleIdFilter || undefined,
-          locale,
-          limit: 80,
-        },
-        signal,
-      }),
-    initialData: initialData
-      ? {
-          messages: initialData.messages,
-          unreadAttentionCount: initialData.unreadAttentionCount,
-        }
-      : undefined,
+    ...notificationCenterQueryOptions(
+      userId,
+      locale,
+      teamId,
+      ruleIdFilter,
+      ruleIdFilter === deferredRuleId ? deferredData : null,
+    ),
+    initialData:
+      initialData && !ruleIdFilter
+        ? {
+            messages: initialData.messages,
+            unreadAttentionCount: initialData.unreadAttentionCount,
+          }
+        : undefined,
     initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
   });
@@ -389,9 +426,11 @@ export function NotificationCenterClient({
 
   const bodyState = loading
     ? "loading"
-    : filteredMessages.length === 0
-      ? `empty:${activeTab}`
-      : `${activeTab}:${filteredMessages.map((item) => item.id).join(":")}`;
+    : messagesQuery.isError && !messagesQuery.data
+      ? "error"
+      : filteredMessages.length === 0
+        ? `empty:${activeTab}`
+        : `${activeTab}:${filteredMessages.map((item) => item.id).join(":")}`;
 
   useEffect(() => {
     if (messagesQuery.isError) toast.error(copy.loadFailed);
@@ -551,7 +590,11 @@ export function NotificationCenterClient({
               : countForTab(messagesList, tab),
           ),
           detail: copy.tabDescriptions[tab],
+          detailLoadingIndicator: "none",
           loading,
+          ...(messagesQuery.isError && !messagesQuery.data
+            ? { value: "—" }
+            : {}),
           onClick: () => setActiveTab(tab),
           pressed: activeTab === tab,
         }))}
@@ -592,6 +635,12 @@ export function NotificationCenterClient({
               <CardContent className="flex h-40 items-center justify-center text-sm text-muted-foreground">
                 <Spinner className="mr-2 size-4" />
                 {copy.loading}
+              </CardContent>
+            </Card>
+          ) : messagesQuery.isError && !messagesQuery.data ? (
+            <Card key="error">
+              <CardContent className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+                {copy.loadFailed}
               </CardContent>
             </Card>
           ) : filteredMessages.length === 0 ? (

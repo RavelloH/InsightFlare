@@ -62,7 +62,10 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import type { ApiKeysInitialData } from "@/lib/dashboard/management-data";
+import {
+  type ApiKeysInitialData,
+  managementQueryOptions,
+} from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import type {
   ApiKeyData,
@@ -73,9 +76,11 @@ import type { AppMessages } from "@/lib/i18n/messages";
 interface ApiKeysClientProps {
   locale: Locale;
   messages: AppMessages;
+  userId: string;
   teamId: string;
   sites: Array<{ id: string; name: string; domain: string }>;
   initialData?: ApiKeysInitialData | null;
+  deferredData?: Promise<ApiKeysInitialData | null> | null;
 }
 interface ApiKeyCreateResponse {
   key: ApiKeyData;
@@ -145,24 +150,39 @@ function dateTime(locale: Locale, value: number | null): string {
     timeStyle: "short",
   }).format(new Date(value * 1000));
 }
-export function ApiKeysClient({
-  locale,
-  messages,
-  teamId,
-  sites,
-  initialData = null,
-}: ApiKeysClientProps) {
-  const copy = messages.teamManagement.apiKeys;
-  const cancelLabel = messages.teamSelect.cancel;
-  const queryClient = useQueryClient();
-  const keysQueryKey = ["dashboard", "api-keys", teamId] as const;
-  const keysQuery = useQuery({
-    queryKey: keysQueryKey,
-    queryFn: ({ signal }) =>
+export function apiKeysQueryOptions(
+  userId: string,
+  teamId: string,
+  deferred?: Promise<ApiKeysInitialData | null> | null,
+  retainInFlight = false,
+) {
+  return managementQueryOptions(
+    ["dashboard", "api-keys", teamId, userId],
+    (signal) =>
       requestAdminService<ApiKeyData[]>("api-keys", {
         params: { teamId },
         signal,
       }),
+    (snapshot: ApiKeysInitialData) => snapshot.keys,
+    deferred,
+    retainInFlight,
+  );
+}
+export function ApiKeysClient({
+  locale,
+  messages,
+  userId,
+  teamId,
+  sites,
+  initialData = null,
+  deferredData,
+}: ApiKeysClientProps) {
+  const copy = messages.teamManagement.apiKeys;
+  const cancelLabel = messages.teamSelect.cancel;
+  const queryClient = useQueryClient();
+  const keysQueryKey = ["dashboard", "api-keys", teamId, userId] as const;
+  const keysQuery = useQuery({
+    ...apiKeysQueryOptions(userId, teamId, deferredData),
     initialData: initialData?.keys,
     initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
@@ -205,6 +225,7 @@ export function ApiKeysClient({
   }
 
   async function createKey() {
+    if (loading || keysQuery.isError) return;
     if (name.trim().length < 2 || scopes.length === 0) {
       toast.error(copy.invalidInput);
       return;
@@ -308,7 +329,11 @@ export function ApiKeysClient({
         title={copy.title}
         subtitle={copy.subtitle}
         actions={
-          <Button type="button" onClick={() => setCreateOpen(true)}>
+          <Button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            disabled={loading || keysQuery.isError}
+          >
             <RiAddLine data-icon="inline-start" />
             <span>{copy.create}</span>
           </Button>
@@ -325,7 +350,13 @@ export function ApiKeysClient({
           <AutoResizer initial>
             <AutoTransition
               transitionKey={
-                loading ? "loading" : keys.length === 0 ? "empty" : "data"
+                loading
+                  ? "loading"
+                  : keysQuery.isError && !keys.length
+                    ? "error"
+                    : keys.length === 0
+                      ? "empty"
+                      : "data"
               }
               initial={false}
               duration={0.15}
@@ -341,6 +372,18 @@ export function ApiKeysClient({
                     <Spinner className="size-4" />
                     {copy.loading}
                   </span>
+                </div>
+              ) : keysQuery.isError && !keys.length ? (
+                <div className="flex h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <span>{copy.loadFailed}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-label={copy.loadFailed}
+                    onClick={() => void keysQuery.refetch()}
+                  >
+                    <RiRefreshLine className="size-4" />
+                  </Button>
                 </div>
               ) : keys.length === 0 ? (
                 <div
