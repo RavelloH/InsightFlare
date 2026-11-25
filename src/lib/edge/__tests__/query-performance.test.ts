@@ -200,10 +200,9 @@ describe("edge query performance D1 helpers", () => {
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.sql).toContain("GROUP BY metric");
-    expect(calls[0]?.sql).toContain("MAX(sampleCount) AS samples");
-    expect(calls[0]?.sql).toContain(
-      "ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING",
-    );
+    expect(calls[0]?.sql).toContain("COUNT(*) AS samples");
+    expect(calls[0]?.sql).toContain("CUME_DIST() OVER");
+    expect(calls[0]?.sql).not.toContain("ROW_NUMBER() OVER");
     expect(calls[0]?.sql).not.toContain("metric_thresholds AS");
     expect(calls[0]?.sql).toContain("FROM visits");
     expect(calls[0]?.sql).toContain("perf_cls AS metricValue");
@@ -1081,6 +1080,55 @@ describe("edge query performance D1 helpers", () => {
     expect(prepare).not.toHaveBeenCalled();
   });
 
+  it("matches exact nearest ranks at percentile boundaries, ties and sparse samples", async () => {
+    const { env, d1 } = createSqlitePerformanceEnv();
+    try {
+      const insert = d1.database.prepare(
+        "INSERT INTO visits (visit_id, site_id, started_at, pathname, country, perf_ttfb_ms, perf_fcp_ms, perf_lcp_ms, perf_cls, perf_inp_ms) VALUES (?, ?, ?, '/', 'US', ?, ?, ?, ?, ?)",
+      );
+      const ttfb = Array.from({ length: 20 }, (_, i) => i + 1);
+      const fcp = Array.from({ length: 20 }, (_, i) => Math.floor(i / 4));
+      const lcp = Array.from({ length: 20 }, (_, i) => (i < 19 ? i + 1 : null));
+      const cls = Array.from({ length: 20 }, (_, i) => (i < 3 ? 0 : null));
+      for (let i = 0; i < 20; i++) {
+        insert.run(
+          "rank-" + i,
+          siteId,
+          window.startMs + i,
+          ttfb[i]!,
+          fcp[i]!,
+          lcp[i]!,
+          cls[i]!,
+          null,
+        );
+      }
+      const summaries = await queryPerformanceSummariesFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+      );
+      expect(summaries).toEqual({
+        ttfb: { avg: 10.5, p50: 10, p75: 15, p95: 19, samples: 20 },
+        fcp: { avg: 2, p50: 2, p75: 3, p95: 4, samples: 20 },
+        lcp: { avg: 10, p50: 10, p75: 15, p95: 19, samples: 19 },
+        cls: { avg: 0, p50: 0, p75: 0, p95: 0, samples: 3 },
+        inp: { avg: null, p50: null, p75: null, p95: null, samples: 0 },
+      });
+      const dashboard = await queryPerformanceDashboardFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        10,
+      );
+      expect(dashboard.summaries).toEqual(summaries);
+    } finally {
+      d1.close();
+    }
+  });
+
   it("keeps dashboard percentiles and sample counts identical to independent readers", async () => {
     const { env, d1 } = createSqlitePerformanceEnv();
     try {
@@ -1153,9 +1201,7 @@ describe("edge query performance D1 helpers", () => {
       expect(d1.calls).toHaveLength(1);
       const sql = d1.calls[0]?.sql ?? "";
       expect(sql).not.toContain("_thresholds AS");
-      expect(
-        sql.match(/ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING/g),
-      ).toHaveLength(4);
+      expect(sql.match(/CUME_DIST\(\) OVER/g)).toHaveLength(4);
       expect(sql).not.toContain("JOIN summary_ordered_values");
       expect(sql).toContain(
         "WHERE metric_visits.pathname IN (SELECT pathname FROM path_views)",

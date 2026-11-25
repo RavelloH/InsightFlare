@@ -81,6 +81,11 @@ function performanceMetricPresenceSql(): string {
     (metric) => `${PERFORMANCE_METRIC_COLUMNS[metric]} IS NOT NULL`,
   ).join(" OR ");
 }
+// The empirical CDF reaches p at the value of the ceil(n*p)-th sample.
+// Equal metric values share the same cumulative fraction; choosing the
+// minimum qualifying value preserves the exact nearest-rank percentile.
+// D1-sized partitions are far below the floating-point precision limit
+// at which adjacent empirical fractions could round to the same threshold.
 function performancePercentileValuesSql(alias = ""): string {
   const prefix = alias ? alias + "." : "";
   return [50, 75, 95]
@@ -88,11 +93,9 @@ function performancePercentileValuesSql(alias = ""): string {
       (percentile) =>
         "MIN(CASE WHEN " +
         prefix +
-        "rowNum >= CAST(((" +
-        prefix +
-        "sampleCount * " +
-        percentile +
-        ") + 99) / 100 AS INTEGER) THEN " +
+        "cumulativeFraction >= " +
+        percentile / 100 +
+        " THEN " +
         prefix +
         "metricValue END) AS p" +
         percentile,
@@ -236,17 +239,12 @@ ordered_values AS (
   SELECT
     metric,
     metricValue,
-    ROW_NUMBER() OVER (PARTITION BY metric ORDER BY metricValue ASC) AS rowNum,
-    COUNT(*) OVER (
-      PARTITION BY metric
-      ORDER BY metricValue ASC
-      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-    ) AS sampleCount
+    CUME_DIST() OVER (PARTITION BY metric  ORDER BY metricValue ASC) AS cumulativeFraction
   FROM metric_visits
 )
 SELECT
   metric,
-  MAX(sampleCount) AS samples,
+  COUNT(*) AS samples,
   AVG(metricValue) AS avgValue,
   ${performancePercentileValuesSql()}
 FROM ordered_values
@@ -287,17 +285,12 @@ ordered_values AS (
   SELECT
     bucket,
     metricValue,
-    ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY metricValue ASC) AS rowNum,
-    COUNT(*) OVER (
-      PARTITION BY bucket
-      ORDER BY metricValue ASC
-      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-    ) AS sampleCount
+    CUME_DIST() OVER (PARTITION BY bucket  ORDER BY metricValue ASC) AS cumulativeFraction
   FROM metric_visits
 )
 SELECT
   bucket,
-  MAX(sampleCount) AS samples,
+  COUNT(*) AS samples,
   AVG(metricValue) AS avgValue,
   ${performancePercentileValuesSql()}
 FROM ordered_values
@@ -352,20 +345,12 @@ ordered_values AS (
     metric,
     bucket,
     metricValue,
-    ROW_NUMBER() OVER (
-      PARTITION BY metric, bucket
-      ORDER BY metricValue ASC
-    ) AS rowNum,
-    COUNT(*) OVER (
-      PARTITION BY metric, bucket
-      ORDER BY metricValue ASC
-      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-    ) AS sampleCount
+    CUME_DIST() OVER (PARTITION BY metric, bucket ORDER BY metricValue ASC) AS cumulativeFraction
   FROM metric_visits
 )
 SELECT
   metric, bucket,
-  MAX(sampleCount) AS samples,
+  COUNT(*) AS samples,
   AVG(metricValue) AS avgValue,
   ${performancePercentileValuesSql()}
 FROM ordered_values
@@ -424,18 +409,13 @@ ordered_values AS (
     pathname,
     metric,
     metricValue,
-    ROW_NUMBER() OVER (PARTITION BY pathname, metric ORDER BY metricValue ASC) AS rowNum,
-    COUNT(*) OVER (
-      PARTITION BY pathname, metric
-      ORDER BY metricValue ASC
-      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-    ) AS sampleCount
+    CUME_DIST() OVER (PARTITION BY pathname, metric  ORDER BY metricValue ASC) AS cumulativeFraction
   FROM scoped_metric_visits
 ),
 metric_aggregates AS (
   SELECT
     pathname, metric,
-    MAX(sampleCount) AS samples,
+    COUNT(*) AS samples,
     AVG(metricValue) AS avgValue,
     ${performancePercentileValuesSql()}
   FROM ordered_values
@@ -510,18 +490,13 @@ ordered_values AS (
     country,
     metric,
     metricValue,
-    ROW_NUMBER() OVER (PARTITION BY country, metric ORDER BY metricValue ASC) AS rowNum,
-    COUNT(*) OVER (
-      PARTITION BY country, metric
-      ORDER BY metricValue ASC
-      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-    ) AS sampleCount
+    CUME_DIST() OVER (PARTITION BY country, metric  ORDER BY metricValue ASC) AS cumulativeFraction
   FROM scoped_metric_visits
 ),
 metric_aggregates AS (
   SELECT
     country, metric,
-    MAX(sampleCount) AS samples,
+    COUNT(*) AS samples,
     AVG(metricValue) AS avgValue,
     ${performancePercentileValuesSql()}
   FROM ordered_values
@@ -603,18 +578,13 @@ summary_ordered_values AS (
   SELECT
     metric,
     metricValue,
-    ROW_NUMBER() OVER (PARTITION BY metric ORDER BY metricValue ASC) AS rowNum,
-    COUNT(*) OVER (
-      PARTITION BY metric
-      ORDER BY metricValue ASC
-      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-    ) AS sampleCount
+    CUME_DIST() OVER (PARTITION BY metric  ORDER BY metricValue ASC) AS cumulativeFraction
   FROM metric_visits
 ),
 summary_rows AS (
   SELECT
     ordered.metric,
-    MAX(ordered.sampleCount) AS samples,
+    COUNT(*) AS samples,
     AVG(ordered.metricValue) AS avgValue,
     ${performancePercentileValuesSql("ordered")}
   FROM summary_ordered_values ordered
@@ -625,22 +595,14 @@ trend_ordered_values AS (
     metric,
     bucket,
     metricValue,
-    ROW_NUMBER() OVER (
-      PARTITION BY metric, bucket
-      ORDER BY metricValue ASC
-    ) AS rowNum,
-    COUNT(*) OVER (
-      PARTITION BY metric, bucket
-      ORDER BY metricValue ASC
-      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-    ) AS sampleCount
+    CUME_DIST() OVER (PARTITION BY metric, bucket ORDER BY metricValue ASC) AS cumulativeFraction
   FROM metric_visits
 ),
 trend_rows AS (
   SELECT
     ordered.metric,
     ordered.bucket,
-    MAX(ordered.sampleCount) AS samples,
+    COUNT(*) AS samples,
     AVG(ordered.metricValue) AS avgValue,
     ${performancePercentileValuesSql("ordered")}
   FROM trend_ordered_values ordered
@@ -658,15 +620,7 @@ route_ordered_values AS (
     metric_visits.pathname,
     metric_visits.metric,
     metric_visits.metricValue,
-    ROW_NUMBER() OVER (
-      PARTITION BY metric_visits.pathname, metric_visits.metric
-      ORDER BY metric_visits.metricValue ASC
-    ) AS rowNum,
-    COUNT(*) OVER (
-      PARTITION BY metric_visits.pathname, metric_visits.metric
-      ORDER BY metric_visits.metricValue ASC
-      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-    ) AS sampleCount
+    CUME_DIST() OVER (PARTITION BY metric_visits.pathname, metric_visits.metric ORDER BY metric_visits.metricValue ASC) AS cumulativeFraction
   FROM metric_visits
   WHERE metric_visits.pathname IN (SELECT pathname FROM path_views)
 ),
@@ -674,7 +628,7 @@ route_rows AS (
   SELECT
     ordered.pathname,
     ordered.metric,
-    MAX(ordered.sampleCount) AS samples,
+    COUNT(*) AS samples,
     AVG(ordered.metricValue) AS avgValue,
     ${performancePercentileValuesSql("ordered")}
   FROM route_ordered_values ordered
@@ -691,15 +645,7 @@ country_ordered_values AS (
     metric_visits.country,
     metric_visits.metric,
     metric_visits.metricValue,
-    ROW_NUMBER() OVER (
-      PARTITION BY metric_visits.country, metric_visits.metric
-      ORDER BY metric_visits.metricValue ASC
-    ) AS rowNum,
-    COUNT(*) OVER (
-      PARTITION BY metric_visits.country, metric_visits.metric
-      ORDER BY metric_visits.metricValue ASC
-      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-    ) AS sampleCount
+    CUME_DIST() OVER (PARTITION BY metric_visits.country, metric_visits.metric ORDER BY metric_visits.metricValue ASC) AS cumulativeFraction
   FROM metric_visits
   WHERE metric_visits.country != ''
 ),
@@ -707,7 +653,7 @@ country_rows AS (
   SELECT
     ordered.country,
     ordered.metric,
-    MAX(ordered.sampleCount) AS samples,
+    COUNT(*) AS samples,
     AVG(ordered.metricValue) AS avgValue,
     ${performancePercentileValuesSql("ordered")}
   FROM country_ordered_values ordered
