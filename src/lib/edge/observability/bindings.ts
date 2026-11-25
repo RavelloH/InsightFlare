@@ -490,11 +490,22 @@ export function instrumentEnv(env: Env, logger: InvocationLogger): Env {
   if ((env as Env & { [INSTRUMENTED_ENV]?: boolean })[INSTRUMENTED_ENV]) {
     return env;
   }
+  // Preserve binding identity inside this invocation without sharing wrappers
+  // between loggers or reusing a wrapper after the underlying binding changes.
+  let rawDb: D1Database | undefined;
+  let observedDb: D1Database | undefined;
   return new Proxy(env, {
     get(target, property, receiver) {
       if (property === INSTRUMENTED_ENV) return true;
       if (property === INVOCATION_LOGGER) return logger;
-      if (property === "DB") return wrapD1Database(target.DB, logger);
+      if (property === "DB") {
+        const database = target.DB;
+        if (!observedDb || rawDb !== database) {
+          observedDb = wrapD1Database(database, logger);
+          rawDb = database;
+        }
+        return observedDb;
+      }
       if (property === "INGEST_DO") {
         return wrapDurableObjectNamespace(target.INGEST_DO, logger);
       }
