@@ -44,8 +44,7 @@ export function parseUtmDimensionKey(
     ? normalized
     : null;
 }
-export function parseWindow(url: URL): QueryWindow | null {
-  const nowMs = appNow();
+export function parseWindow(url: URL, nowMs = appNow()): QueryWindow | null {
   const defaultFrom = nowMs - ONE_DAY_MS;
   const rawFrom = url.searchParams.get("from");
   const rawTo = url.searchParams.get("to");

@@ -121,6 +121,7 @@ function isPerformanceQuery(input: QueryInput): input is PerformanceQuery {
 export async function overviewTabData(
   options: D1SiteRuntimeBindings,
   request: DimensionOverviewTabQuery | ChannelOverviewTabQuery,
+  execution?: { readonly signal?: AbortSignal },
 ): Promise<OverviewTabResult> {
   const tab = stringField(request, "tab");
   const filters = request.filters ?? EMPTY_FILTER_DOCUMENT;
@@ -293,6 +294,7 @@ export async function overviewTabData(
       cursor,
       undefined,
       audience,
+      { signal: execution?.signal },
     );
     return {
       data: {
@@ -412,6 +414,7 @@ export async function overviewTabData(
       cursor,
       undefined,
       audience,
+      { signal: execution?.signal },
     );
     const items =
       pageTab === "query"
@@ -453,6 +456,7 @@ export async function overviewTabData(
       cursor,
       undefined,
       audience,
+      { signal: execution?.signal },
     );
     return {
       data: {
@@ -500,6 +504,7 @@ export async function overviewTabData(
       cursor,
       undefined,
       audience,
+      { signal: execution?.signal },
     );
     return {
       data: {
@@ -542,6 +547,7 @@ export async function overviewTabData(
     cursor,
     undefined,
     audience,
+    { signal: execution?.signal },
   );
   return {
     data: {
@@ -571,7 +577,7 @@ export function registerSiteContractProviders(
       typedQueryProviderFor("dimension", async (input, execution) => {
         const request = input;
         if (request.mode === "overview-tab") {
-          return { value: await overviewTabData(options, request) };
+          return { value: await overviewTabData(options, request, execution) };
         }
         const pageRequest =
           request.page && typeof request.page === "object"
@@ -693,10 +699,10 @@ export function registerSiteContractProviders(
     )
     .register(
       "channels",
-      typedQueryProviderFor("channels", async (input) => {
+      typedQueryProviderFor("channels", async (input, execution) => {
         const request = input;
         if (request.mode === "overview-tab") {
-          return { value: await overviewTabData(options, request) };
+          return { value: await overviewTabData(options, request, execution) };
         }
         const rows = await queryChannelAggregate(
           options.env,

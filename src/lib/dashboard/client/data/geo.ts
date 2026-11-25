@@ -180,7 +180,7 @@ export async function fetchOverviewGeoDimensionTabPage(
         sortBy: options?.comparisonSortBy,
       },
     ),
-    { signal: options?.signal },
+    { signal: options?.signal, batchOverview: options?.batchOverview },
   ).catch(emptyGeoTabUnlessAborted);
   const rows = normalizePaginatedCollection<
     OverviewGeoTabData["data"]["items"][number]
