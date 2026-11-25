@@ -1,7 +1,7 @@
 import * as React from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   LayerManagerProvider,
@@ -9,12 +9,22 @@ import {
   useOverlayStackState,
 } from "../src/components/ui/layer/layer-manager";
 import {
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogTitle,
+} from "../src/components/ui/responsive-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "../src/components/ui/select";
+
+vi.hoisted(() => {
+  Reflect.deleteProperty(Element.prototype, "animate");
+});
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -97,6 +107,67 @@ describe("Select floating layer", () => {
     expect(host?.dataset.layerHost).toBe("floating");
     expect(host?.dataset.layerFrameId).toBe("frame-a");
     expect(content?.style.zIndex).toBe("");
+  });
+
+  it("opens, focuses and selects a floating option inside a real mobile ResponsiveDialog", async () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 390,
+    });
+    const onChange = vi.fn();
+    const onDialogChange = vi.fn();
+    try {
+      await render(
+        <LayerManagerProvider>
+          <ResponsiveDialog open onOpenChange={onDialogChange}>
+            <ResponsiveDialogContent>
+              <ResponsiveDialogTitle>Choose</ResponsiveDialogTitle>
+              <ResponsiveDialogDescription>
+                Select a value
+              </ResponsiveDialogDescription>
+              <Select onValueChange={onChange}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose a value" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="one">One</SelectItem>
+                </SelectContent>
+              </Select>
+            </ResponsiveDialogContent>
+          </ResponsiveDialog>
+        </LayerManagerProvider>,
+      );
+      const drawer = document.querySelector('[data-slot="drawer-content"]');
+      expect(drawer).not.toBeNull();
+      const trigger = drawer!.querySelector<HTMLButtonElement>(
+        '[data-slot="select-trigger"]',
+      )!;
+      await act(async () => {
+        trigger.focus();
+        trigger.click();
+      });
+      const content = selectContent();
+      expect(content).not.toBeNull();
+      expect(
+        content?.closest("[data-layer-host]")?.getAttribute("data-layer-host"),
+      ).toBe("floating");
+      expect(content?.closest('[aria-hidden="true"]')).toBeNull();
+      await act(async () => content!.focus());
+      expect(document.activeElement).toBe(content);
+      expect(onDialogChange).not.toHaveBeenCalled();
+      await act(async () =>
+        content!.querySelector<HTMLElement>('[role="option"]')!.click(),
+      );
+      expect(onChange).toHaveBeenCalledWith("one");
+      expect(onDialogChange).not.toHaveBeenCalled();
+      expect(trigger.textContent).toContain("One");
+    } finally {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: originalWidth,
+      });
+    }
   });
 
   it("reports stack state from frame order", async () => {

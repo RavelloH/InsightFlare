@@ -2,7 +2,8 @@ import * as React from "react";
 import { Drawer as DrawerPrimitive } from "vaul";
 
 import { cn } from "../../lib/utils";
-import { OverlayFrame } from "./layer/layer-manager";
+import { useCurrentOverlayFrame } from "./layer/layer-context";
+import { OverlayFrame, useOverlayStackState } from "./layer/layer-manager";
 import { LayerPortal } from "./layer/layer-portal";
 import { AppOverlay, useControllableOpen } from "./app-overlay";
 import { VerticalScrollMask } from "./vertical-scroll-mask";
@@ -112,10 +113,36 @@ function DrawerContent({
 }: React.ComponentProps<typeof DrawerPrimitive.Content> & {
   overlayClassName?: string;
 }) {
-  const { zIndex: _zIndex, ...contentStyle } = style ?? {};
-
   return (
     <DrawerPortal>
+      <DrawerContentFrame
+        className={className}
+        overlayClassName={overlayClassName}
+        style={style}
+        {...props}
+      >
+        {children}
+      </DrawerContentFrame>
+    </DrawerPortal>
+  );
+}
+
+function DrawerContentFrame({
+  className,
+  children,
+  overlayClassName,
+  style,
+  onInteractOutside,
+  onEscapeKeyDown,
+  ...props
+}: React.ComponentProps<typeof DrawerPrimitive.Content> & {
+  overlayClassName?: string;
+}) {
+  const { zIndex: _zIndex, ...contentStyle } = style ?? {};
+  const frame = useCurrentOverlayFrame();
+  const { isTopmost } = useOverlayStackState(frame?.id ?? "");
+  return (
+    <>
       <LayerPortal slot="backdrop">
         <DrawerOverlay className={overlayClassName} />
       </LayerPortal>
@@ -128,12 +155,27 @@ function DrawerContent({
           )}
           style={contentStyle}
           {...props}
+          onInteractOutside={(event) => {
+            onInteractOutside?.(event);
+            // The backdrop owns outside dismissal. Floating and nested portals
+            // belong to the managed overlay stack, not the primitive DOM tree.
+            event.preventDefault();
+          }}
+          onEscapeKeyDown={(event) => {
+            onEscapeKeyDown?.(event);
+            if (
+              !isTopmost ||
+              (event.target instanceof Node &&
+                frame?.floatingHost?.contains(event.target))
+            )
+              event.preventDefault();
+          }}
         >
           <div className="mx-auto mt-4 hidden h-1 w-[100px] shrink-0 rounded-none bg-muted group-data-[vaul-drawer-direction=bottom]/drawer-content:block" />
           {children}
         </DrawerPrimitive.Content>
       </LayerPortal>
-    </DrawerPortal>
+    </>
   );
 }
 

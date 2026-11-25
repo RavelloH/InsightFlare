@@ -254,6 +254,7 @@ function SelectTrigger({
         role="combobox"
         aria-haspopup="listbox"
         data-slot="select-trigger"
+        data-vaul-no-drag
         data-size={size}
         data-placeholder={hasValue ? undefined : ""}
         disabled={isDisabled}

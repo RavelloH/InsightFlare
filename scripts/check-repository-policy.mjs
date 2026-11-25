@@ -20,6 +20,7 @@ const exact = new Set([
   "playwright.config.ts",
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
+  "patches/vaul@1.1.2.patch",
   "postcss.config.mjs",
   "prettier.config.js",
   "tsconfig.base.json",

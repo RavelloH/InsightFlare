@@ -1,0 +1,26 @@
+diff --git a/dist/index.js b/dist/index.js
+index 7f343be1fafe1cf302ee6afc7268c29490895e34..3db9741fbf869622ed21f415619873a6c96641e3 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1361,6 +1361,8 @@ function Root({ open: openProp, onOpenChange, children, onDrag: onDragProp, onRe
+         modal
+     ]);
+     return /*#__PURE__*/ React__namespace.default.createElement(DialogPrimitive__namespace.Root, {
++        // InsightFlare LayerManager owns modal boundaries and portals.
++        modal: false,
+         defaultOpen: defaultOpen,
+         onOpenChange: (open)=>{
+             if (!dismissible && !open) return;
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 0dbbce5526681925a81804ced237a045a53c0355..610baae226306108f74e36411bdcb13f7f3da127 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1339,6 +1339,8 @@ function Root({ open: openProp, onOpenChange, children, onDrag: onDragProp, onRe
+         modal
+     ]);
+     return /*#__PURE__*/ React__default.createElement(DialogPrimitive.Root, {
++        // InsightFlare LayerManager owns modal boundaries and portals.
++        modal: false,
+         defaultOpen: defaultOpen,
+         onOpenChange: (open)=>{
+             if (!dismissible && !open) return;
