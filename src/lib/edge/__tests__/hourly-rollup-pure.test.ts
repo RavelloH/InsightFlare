@@ -352,8 +352,93 @@ describe("queryOverviewAndTrendForSitesFromHourlyRollupsPartial", () => {
       expect(sql[1]).not.toMatch(/\b(?:sessions|visitors|bounces)\s*,/);
       expect(sql[1]).not.toContain("perf_");
       expect(sql[2]).not.toContain("perf_");
+      if (mode === "overview") {
+        expect(sql[2]).not.toContain("started_at AS startedAt");
+      } else {
+        expect(sql[2]).toContain("started_at AS startedAt");
+      }
     },
   );
+  it("attributes repeated sessions to their earliest bucket without merging site identities", async () => {
+    const hour = 60 * 60 * 1000;
+    const db = makeDbMock();
+    const rollup = (
+      siteId: string,
+      hourBucket: number,
+      visitorSetJson: string,
+      sessionCountsJson: string,
+    ) => ({
+      siteId,
+      hourBucket,
+      views: 1,
+      durationMsSum: 10,
+      durationMsCount: 1,
+      visitorSetJson,
+      sessionCountsJson,
+    });
+    db.all
+      .mockResolvedValueOnce({
+        results: [
+          { siteId: "site-1", aggregatedUntilHour: 3 },
+          { siteId: "site-2", aggregatedUntilHour: 3 },
+        ],
+      })
+      .mockResolvedValueOnce({
+        results: [
+          rollup("site-1", 3, '[" u "]', '[[" s ",1],["",7]]'),
+          rollup("site-2", 2, '["u"]', '[["s",1]]'),
+          rollup("site-1", 1, '["u"]', '[["s",1],["solo",1]]'),
+          rollup("site-1", 2, "invalid", "invalid"),
+        ],
+      });
+    const env = { DB: db } as unknown as Env;
+    const result = await queryOverviewAndTrendForSitesFromHourlyRollupsPartial(
+      env,
+      ["site-1", "site-2"],
+      {
+        startMs: hour,
+        endExclusiveMs: 4 * hour,
+        nowMs: 5 * hour,
+        timeZone: "UTC",
+      },
+      "hour",
+    );
+    expect(result.overview.get("site-1")).toEqual({
+      views: 3,
+      visitors: 1,
+      sessions: 2,
+      bounces: 1,
+      totalDuration: 30,
+      durationViews: 3,
+    });
+    expect(result.overview.get("site-2")).toMatchObject({
+      views: 1,
+      visitors: 1,
+      sessions: 1,
+      bounces: 1,
+    });
+    expect(
+      result.trend
+        ?.get("site-1")
+        ?.map(({ bucket, sessions, bounces, visitors }) => ({
+          bucket,
+          sessions,
+          bounces,
+          visitors,
+        })),
+    ).toEqual([
+      { bucket: 0, sessions: 2, bounces: 1, visitors: 1 },
+      { bucket: 1, sessions: 0, bounces: 0, visitors: 0 },
+      { bucket: 2, sessions: 0, bounces: 0, visitors: 1 },
+    ]);
+    expect(
+      result.trend?.get("site-2")?.map(({ bucket, sessions, bounces }) => ({
+        bucket,
+        sessions,
+        bounces,
+      })),
+    ).toEqual([{ bucket: 1, sessions: 1, bounces: 1 }]);
+  });
   it("returns empty aggregates for an empty site list", async () => {
     const env = { DB: makeDbMock() } as unknown as Env;
 
