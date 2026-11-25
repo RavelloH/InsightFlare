@@ -2019,7 +2019,14 @@ export function assertFilterAudience(
     if (!expression) return;
     if (expression.kind === "condition") {
       const field = advancedFieldForTarget(expression.target);
-      if (field) assertFieldAudience(field, expression.operator);
+      // Count reducers compare the numeric aggregate, not the projected
+      // member's scalar type. Still check the underlying field's audience.
+      const target = expression.target;
+      const counts =
+        target.kind === "reducer" &&
+        (target.reducer === "count" || target.reducer === "countDistinct");
+      if (field)
+        assertFieldAudience(field, counts ? undefined : expression.operator);
       visitTarget(expression.target);
       return;
     }

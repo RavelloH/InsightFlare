@@ -384,7 +384,7 @@ filterBuilder:
   expression: Filter expression
   expressionPlaceholder: Filter expression...
   naturalLanguageDescription: Natural-language description
-  expressionInvalid: Invalid expression. Click to view syntax help.
+  expressionInvalid: "Invalid expression; check its syntax."
   expressionHelpTitle: Filter expression syntax
   expressionHelpDescription: Available fields and operators are generated from the active filter contract.
   expressionHelpSyntax: Syntax
@@ -490,14 +490,241 @@ filterBuilder:
   savedFiltersLoading: Loading saved filters...
   noSavedFilter: Do not use a saved filter
   systemPresets: System presets
+  dslDiagnostics:
+    location: "Line {line}, column {column}"
+    unknown: "Invalid expression; check its syntax and field types."
+    unterminated_string: "The string is missing its closing quotation mark."
+    invalid_string: "Invalid string; check quotation marks and escape characters."
+    invalid_number: "Enter a valid finite number."
+    invalid_token: "This character is not valid in the expression."
+    unexpected_token: "Unexpected content after the expression."
+    expected_identifier: "Expected a field name or operator here."
+    missing_closing_parenthesis: "Missing closing parenthesis “)”."
+    missing_payload_parenthesis: "Missing closing parenthesis “)”."
+    unknown_operator: "This operator is not supported."
+    invalid_operator: "This operator is not supported."
+    missing_selector_brace: "Missing closing brace “}” in the collection selector."
+    expected_payload_path: "Provide a valid JSON pointer, such as \"/metadata/value\"."
+    invalid_json_path: "Provide a valid JSON pointer, such as \"/metadata/value\"."
+    explicit_projection_required: "Use “->” to project members from a collection."
+    collection_member_requires_projection: "Use “->” to project members from a collection."
+    expected_target: "Expected a valid filter target, such as a field or collection."
+    invalid_target: "Expected a valid filter target, such as a field or collection."
+    invalid_member: "This member is unavailable in the current entity or context."
+    invalid_context_member: "This member is unavailable in the current entity or context."
+    unknown_context_intrinsic: "This context value is invalid or unavailable here."
+    invalid_context_intrinsic: "This context value is invalid or unavailable here."
+    invalid_context_intrinsic_condition: "This context value is invalid or unavailable here."
+    invalid_context_root: "This context value is invalid or unavailable here."
+    invalid_context_intrinsic_arguments: "Incorrect function arguments; check their number and parentheses."
+    invalid_occurrence_time_arguments: "Incorrect function arguments; check their number and parentheses."
+    unexpected_argument: "Incorrect function arguments; check their number and parentheses."
+    missing_argument: "Incorrect function arguments; check their number and parentheses."
+    invalid_sequence_gap: "A step gap requires two increasing positive integer indices."
+    expected_sequence_steps: "A sequence requires a list of at least two valid steps."
+    invalid_sequence: "A sequence requires a list of at least two valid steps."
+    expected_argument_separator: "Missing comma between arguments."
+    expected_duration_range: "A time window needs two valid duration bounds, such as [0d, 7d]."
+    invalid_window: "A time window needs two valid duration bounds, such as [0d, 7d]."
+    invalid_index: "Check the index; an nth index must be a positive integer."
+    unexpected_index: "Check the index; an nth index must be a positive integer."
+    unknown_function: "This function or calculation is not supported."
+    invalid_reducer: "This function or calculation is not supported."
+    invalid_arithmetic: "This function or calculation is not supported."
+    expected_duration: "Expected a valid duration, such as 7d or 30m."
+    invalid_duration: "Expected a valid duration, such as 7d or 30m."
+    invalid_temporal_literal: "Expected a valid duration, such as 7d or 30m."
+    missing_list_bracket: "Missing closing bracket “]”."
+    invalid_range: "A range must contain two valid bounds."
+    expected_value: "A comparison value is required here."
+    missing_value: "A comparison value is required here."
+    unknown_field: "Unknown field; check the list of available fields."
+    invalid_field: "Unknown field; check the list of available fields."
+    field_not_allowed: "This field is not available with your current access permissions."
+    operator_not_allowed: "This operator is incompatible with the field or value type."
+    operator_type_mismatch: "This operator is incompatible with the field or value type."
+    invalid_boolean: "Enter a Boolean value: true or false."
+    invalid_date: "The date or time expression is invalid or incompatible with the current time context."
+    invalid_datetime: "The date or time expression is invalid or incompatible with the current time context."
+    invalid_time_anchor: "The date or time expression is invalid or incompatible with the current time context."
+    invalid_time_scope: "The date or time expression is invalid or incompatible with the current time context."
+    invalid_condition_value: "The comparison value has an incompatible format or type."
+    invalid_canonical_value: "The comparison value has an incompatible format or type."
+    invalid_value: "The comparison value has an incompatible format or type."
+    invalid_scalar: "The comparison value has an incompatible format or type."
+    condition_type_mismatch: "The comparison value has an incompatible format or type."
+    invalid_set: "Provide a non-empty list of compatible values."
+    heterogeneous_set_values: "Provide a non-empty list of compatible values."
+    reversed_range: "The lower bound must not exceed the upper bound."
+    null_requires_unary_operator: "Use isNull or notNull to test for null."
+    unexpected_value: "This operator does not accept a comparison value."
+    number_above_maximum: "The number exceeds the field's maximum."
+    number_below_minimum: "The number is below the field's minimum."
+    number_not_on_step: "The number does not match the field's required increment."
+    too_deep: "The expression is nested too deeply; simplify its structure."
+    too_many_conditions: "The expression exceeds a condition, group, or list limit."
+    too_many_groups: "The expression exceeds a condition, group, or list limit."
+    too_many_set_values: "The expression exceeds a condition, group, or list limit."
+    invalid_limit: "The expression exceeds a condition, group, or list limit."
+    value_too_long: "The comparison value is too long."
+    invalid_entity_root: "This entity collection is invalid or unavailable."
+    invalid_group: "The expression is incomplete; check its conditions and groups."
+    invalid_expression: "The expression is incomplete; check its conditions and groups."
+    missing_child: "The expression is incomplete; check its conditions and groups."
+    missing_predicate: "The expression is incomplete; check its conditions and groups."
+    missing_root: "The expression is incomplete; check its conditions and groups."
+    unsupported_version: "This expression version is not supported."
+    arithmetic_type_mismatch: "Arithmetic requires compatible numeric operands."
+    bucket_period_mismatch: "The grouping interval must be a valid positive integer calendar period."
+    period_interval_mismatch: "The grouping interval must be a valid positive integer calendar period."
+    bucket_type_mismatch: "Time bucketing requires a page or event collection."
+    calendar_offset_not_supported: "Relative offsets require fixed durations, not months or years."
+    expected_collection: "Expected a collection, not an individual value."
+    expected_sequence: "Expected an activity sequence."
+    occurrence_time_type_mismatch: "Expected a valid activity time or time anchor."
+    window_anchor_type_mismatch: "Expected a valid activity time or time anchor."
+    opaque_bucket_value: "A time bucket cannot be compared directly; use a supported aggregation."
+    reducer_type_mismatch: "This aggregation is incompatible with the input collection or value type."
+    relation_requires_session_or_visitor_scope: "This relation requires session or visitor scope."
+    same_value_type_mismatch: "Shared step values must have compatible types and entity bindings."
+    same_value_entity_mismatch: "Shared step values must have compatible types and entity bindings."
+    sequence_step_type_mismatch: "Sequence steps and exclusions must select pages or events."
+    without_type_mismatch: "Sequence steps and exclusions must select pages or events."
+    invalid_condition_entity_domain: "This condition is incompatible with the entity scope."
+  naturalDescription:
+    namedEvent: "events named {name}"
+    singularUnits:
+      ms: "millisecond"
+      s: "second"
+      m: "minute"
+      h: "hour"
+      d: "day"
+      w: "week"
+      mo: "month"
+      y: "year"
+    all: "All of the following hold: {items}"
+    any: "At least one of the following holds: {items}"
+    negate: "The following condition does not hold: {description}"
+    separator: "; "
+    nested: "({description})"
+    page: "page views"
+    event: "events"
+    session: "sessions"
+    visitor: "visitors"
+    current: "the current item"
+    sequenceContext: "the current activity sequence"
+    periodContext: "the current period"
+    bucketContext: "the current time bucket"
+    payload: "event property “{path}”"
+    member: "{field} of {object}"
+    selector: "{collection} matching ({predicate})"
+    projection: "{field} values of {collection}"
+    count: "the number of {input}"
+    countDistinct: "the number of distinct values among {input}"
+    first: "the first of {input}"
+    last: "the last of {input}"
+    nth: "item {index} of {input}"
+    sum: "the sum of {input}"
+    avg: "the average of {input}"
+    min: "the minimum of {input}"
+    max: "the maximum of {input}"
+    add: "({left} plus {right})"
+    sub: "({left} minus {right})"
+    mul: "({left} multiplied by {right})"
+    div: "({left} divided by {right})"
+    duration: "{amount} {unit}"
+    pixels: "{amount} px"
+    now: "the current time"
+    rangeStart: "the start of the query period"
+    rangeEnd: "the end of the query period"
+    before: "{duration} before {anchor}"
+    after: "{duration} after {anchor}"
+    occurrenceTime: "the time of {input}"
+    span: "the time from the first to the last step"
+    gap: "the time between steps {from} and {to}"
+    same: "{input} is the same across steps"
+    items: "the items in each period"
+    bucket: "{input} grouped into {interval} time buckets"
+    periods: "{collection} grouped into {interval} periods"
+    window: "{collection} from {start} to {end} relative to {anchor}"
+    sequence: "activities occurring in order ({steps})"
+    step: "step {index}: {activity}"
+    adjacent: "{sequence}, with consecutive steps"
+    without: "{sequence}, with no intervening {excluded}"
+    collectionExists: "There is a matching instance of {collection}"
+    collectionNotExists: "There is no matching instance of {collection}"
+    trueValue: "true"
+    falseValue: "false"
+    nullValue: "null"
+    namedPage: "page views of path {path}"
+    distinctProjection: "the number of distinct {field} values among {collection}"
+    periodCount: "the number of items per period"
+    ago: "{duration} ago"
+    fromNow: "{duration} from now"
+    firstTime: "the time of the first matching occurrence of {collection}"
+    lastTime: "the time of the most recent matching occurrence of {collection}"
+    relationSequence: "The following activities occurred in order: {steps}"
+    thenSeparator: ", followed by "
+    relationConstraint: "{relation}; the sequence also satisfies: {predicate}"
+    relationAdjacent: "{relation}; the steps are consecutive"
+    relationWithout: "{relation}; no intervening {excluded} occurred"
+    eventOccurred: "At least one occurrence of {collection} was recorded"
+    eventNotOccurred: "No occurrence of {collection} was recorded"
+    pageOccurred: "At least one instance of {collection} was recorded"
+    pageNotOccurred: "No instance of {collection} was recorded"
+    atLeast: "{field} is at least {value}"
+    atMost: "{field} is at most {value}"
+    exactly: "{field} is exactly {value}"
+    moreThan: "{field} exceeds {value}"
+    fewerThan: "{field} is fewer than {value}"
+  dslEditor:
+    title: "DSL editor"
+    description: "Edit the filter expression and confirm to update the filter draft."
+    help: "Syntax help"
+    valid: "Expression is valid"
+    confirm: "Confirm changes"
+    lines: "lines"
+    observationOnly: "Advanced expressions are not supported in this editor."
+  filterLibrary:
+    choose: "Choose a filter"
+    features: "DSL features"
+    title: "Filter library"
+    description: "Browse saved filters and system presets, inspect their DSL, and apply a filter."
+    categories: "Filter categories"
+    all: "All"
+    personal: "Personal"
+    team: "Team"
+    search: "Search filters…"
+    topic: "Topic"
+    allTopics: "All topics"
+    type: "Expression type"
+    allTypes: "All types"
+    standard: "Standard"
+    advanced: "Advanced"
+    scope: "Scope"
+    allScopes: "All scopes"
+    auto: "Auto"
+    currentMatch: "Matches current filter"
+    empty: "No matching filters"
+    back: "Back"
+    updated: "Last updated"
+    formatted: "Formatted"
+    original: "Original"
+    wrap: "Wrap"
+    copy: "Copy"
+    copied: "DSL copied"
+    copyFailed: "Could not copy DSL"
+    cancel: "Cancel"
   systemPresetCategories:
-    acquisition: Acquisition
-    device: Device
-    visitBehavior: Visit behavior
-    sessionEngagement: Session engagement
-    visitorBehavior: Visitor behavior
-    performance: Performance
-    dataQuality: Data quality
+    acquisition: "Acquisition"
+    device: "Devices and environment"
+    pageContent: "Pages and content"
+    eventConversion: "Events and conversion"
+    sessionEngagement: "Sessions and engagement"
+    visitorBehavior: "Visitors and retention"
+    userJourney: "User journeys"
+    performance: "Performance"
+    dataQuality: "Data quality"
   systemPresetScopes:
     preserve: Keep current scope
     event: Event scope
@@ -618,6 +845,234 @@ filterBuilder:
     slowFcp:
       name: Slow FCP
       description: Visits with FCP above 1.8 seconds.
+    paidSearch:
+      name: "Paid search traffic"
+      description: "Select data in the current scope matching: Paid search traffic."
+    emailTraffic:
+      name: "Email traffic"
+      description: "Select data in the current scope matching: Email traffic."
+    campaignNoSource:
+      name: "Campaign without source"
+      description: "Select events or page activity matching: Campaign without source."
+    externalWithUtmMedium:
+      name: "External referral sessions with medium tag"
+      description: "Select sessions matching: External referral sessions with medium tag."
+    multiReferrerVisitor:
+      name: "Visitors with at least two referrer domain values"
+      description: "Select visitors matching: Visitors with at least two referrer domain values."
+    multiCampaignVisitor:
+      name: "Visitors exposed to multiple campaigns"
+      description: "Select visitors matching: Visitors exposed to multiple campaigns."
+    mobileDesktopVisitor:
+      name: "Mobile and desktop visitors"
+      description: "Select visitors matching: Mobile and desktop visitors."
+    multiDeviceVisitor:
+      name: "Cross-device-type visitors"
+      description: "Select visitors matching: Cross-device-type visitors."
+    multiBrowserVisitor:
+      name: "Visitors using multiple browsers"
+      description: "Select visitors matching: Visitors using multiple browsers."
+    multiOsVisitor:
+      name: "Visitors using multiple operating systems"
+      description: "Select visitors matching: Visitors using multiple operating systems."
+    mobileLandscape:
+      name: "Wide-screen mobile activity (width > 600)"
+      description: "Select events or page activity matching: Wide-screen mobile activity (width > 600)."
+    multiLanguageVisitor:
+      name: "Visitors using multiple browser languages"
+      description: "Select visitors matching: Visitors using multiple browser languages."
+    distinctPagesSession:
+      name: "Sessions with four distinct page paths"
+      description: "Select sessions matching: Sessions with four distinct page paths."
+    docsDeepSession:
+      name: "Documentation exploration (three views)"
+      description: "Select sessions matching: Documentation exploration (three views). Example template: adapt paths, event names, payload properties, and thresholds to your site."
+    avgPageDuration:
+      name: "Average page duration of at least one minute"
+      description: "Select sessions matching: Average page duration of at least one minute."
+    maxPageDuration:
+      name: "At least one two-minute page read"
+      description: "Select sessions matching: At least one two-minute page read."
+    totalPageDuration:
+      name: "Total page duration of at least three minutes"
+      description: "Select sessions matching: Total page duration of at least three minutes."
+    firstPricingPage:
+      name: "Pricing page as first page"
+      description: "Select sessions matching: Pricing page as first page. Example template: adapt paths, event names, payload properties, and thresholds to your site. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    lastPricingPage:
+      name: "Pricing page as last page"
+      description: "Select sessions matching: Pricing page as last page. Example template: adapt paths, event names, payload properties, and thresholds to your site. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    secondDocsPage:
+      name: "Documentation as second page view"
+      description: "Select sessions matching: Documentation as second page view. Example template: adapt paths, event names, payload properties, and thresholds to your site."
+    pageQueryActivity:
+      name: "Pages with query parameters"
+      description: "Select events or page activity matching: Pages with query parameters."
+    multiHostname:
+      name: "Visitors across hostnames"
+      description: "Select visitors matching: Visitors across hostnames."
+    purchaseCount:
+      name: "Repeat purchase (at least twice)"
+      description: "Select visitors matching: Repeat purchase (at least twice). Example template: adapt paths, event names, payload properties, and thresholds to your site."
+    purchaseAmount:
+      name: "Total purchase amount at least 100"
+      description: "Select visitors matching: Total purchase amount at least 100. Example template: adapt paths, event names, payload properties, and thresholds to your site."
+    avgPurchaseAmount:
+      name: "Average purchase amount at least 50"
+      description: "Select visitors matching: Average purchase amount at least 50. Example template: adapt paths, event names, payload properties, and thresholds to your site."
+    distinctPurchasedSku:
+      name: "Purchase of at least three distinct SKUs"
+      description: "Select visitors matching: Purchase of at least three distinct SKUs. Example template: adapt paths, event names, payload properties, and thresholds to your site."
+    morePurchasesThanRefunds:
+      name: "More purchases than refunds"
+      description: "Select visitors matching: More purchases than refunds. Example template: adapt paths, event names, payload properties, and thresholds to your site."
+    eventNamesSession:
+      name: "Sessions with three distinct event names"
+      description: "Select sessions matching: Sessions with three distinct event names."
+    eventWithPayload:
+      name: "Events with an ID property"
+      description: "Select events or page activity matching: Events with an ID property. Example template: adapt paths, event names, payload properties, and thresholds to your site."
+    successfulEvent:
+      name: "Events with success=true"
+      description: "Select events or page activity matching: Events with success=true. Example template: adapt paths, event names, payload properties, and thresholds to your site."
+    largeTransaction:
+      name: "Single purchase amount at least 100"
+      description: "Select events or page activity matching: Single purchase amount at least 100. Example template: adapt paths, event names, payload properties, and thresholds to your site."
+    errorEvents:
+      name: "Sessions with multiple error events"
+      description: "Select sessions matching: Sessions with multiple error events. Example template: adapt paths, event names, payload properties, and thresholds to your site."
+    signupNoPurchase:
+      name: "Signup without purchase"
+      description: "Select visitors matching: Signup without purchase. Example template: adapt paths, event names, payload properties, and thresholds to your site."
+    purchaseWithoutRefund:
+      name: "Purchase without a refund record"
+      description: "Select visitors matching: Purchase without a refund record. Example template: adapt paths, event names, payload properties, and thresholds to your site."
+    pageAndEventSession:
+      name: "Sessions with both pages and events"
+      description: "Select sessions matching: Sessions with both pages and events."
+    repeatedPathSession:
+      name: "Repeated views of a single path"
+      description: "Select sessions matching: Repeated views of a single path."
+    eventHeavySession:
+      name: "Sessions with more events than page views"
+      description: "Select sessions matching: Sessions with more events than page views."
+    longNoEventSession:
+      name: "Long sessions without custom events"
+      description: "Select sessions matching: Long sessions without custom events."
+    shortDeepSession:
+      name: "Five or more page views in under a minute"
+      description: "Select sessions matching: Five or more page views in under a minute."
+    highEventRatio:
+      name: "At least two events per page view"
+      description: "Select sessions matching: At least two events per page view."
+    singlePageWithEvent:
+      name: "Single-page sessions with events"
+      description: "Select sessions matching: Single-page sessions with events."
+    recentPageVisitor:
+      name: "Page activity in the last seven days"
+      description: "Select visitors matching: Page activity in the last seven days. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    inactivePageVisitor:
+      name: "Last page view more than 30 days ago"
+      description: "Select visitors matching: Last page view more than 30 days ago. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    activeFiveDays:
+      name: "Active on at least five calendar days"
+      description: "Select visitors matching: Active on at least five calendar days. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    activeThreeWeeks:
+      name: "At least three weeks with three page views each"
+      description: "Select visitors matching: At least three weeks with three page views each. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    weeklyBurst:
+      name: "At least one week with ten page views"
+      description: "Select visitors matching: At least one week with ten page views. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    monthActivity:
+      name: "Active in at least two calendar months"
+      description: "Select visitors matching: Active in at least two calendar months. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    longActivitySpan:
+      name: "Page activity spanning at least 30 days"
+      description: "Select visitors matching: Page activity spanning at least 30 days. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    recentEventVisitor:
+      name: "Custom event activity in the last seven days"
+      description: "Select visitors matching: Custom event activity in the last seven days. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    recentFirstPage:
+      name: "First observed page view within seven days of range end"
+      description: "Select visitors matching: First observed page view within seven days of range end. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    signupToPurchase14d:
+      name: "Purchase within 14 days of signup"
+      description: "Select visitors matching: Purchase within 14 days of signup. Example template: adapt paths, event names, payload properties, and thresholds to your site. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    pricingAdjacentPurchase:
+      name: "Purchase immediately after pricing page"
+      description: "Select sessions matching: Purchase immediately after pricing page. Example template: adapt paths, event names, payload properties, and thresholds to your site. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    signupPurchaseNoCancel:
+      name: "Signup to purchase within seven days without cancellation"
+      description: "Select visitors matching: Signup to purchase within seven days without cancellation. Example template: adapt paths, event names, payload properties, and thresholds to your site. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    sameProductPurchase:
+      name: "Purchase of the same product within seven days of view"
+      description: "Select visitors matching: Purchase of the same product within seven days of view. Example template: adapt paths, event names, payload properties, and thresholds to your site. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    purchaseNoRefundWindow:
+      name: "No refund within one week of first observed purchase"
+      description: "Select visitors matching: No refund within one week of first observed purchase. Example template: adapt paths, event names, payload properties, and thresholds to your site. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    homeDocsJourney:
+      name: "Homepage followed by documentation"
+      description: "Select sessions matching: Homepage followed by documentation. Example template: adapt paths, event names, payload properties, and thresholds to your site. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    docsPricingJourney:
+      name: "Documentation followed by pricing"
+      description: "Select sessions matching: Documentation followed by pricing. Example template: adapt paths, event names, payload properties, and thresholds to your site. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    docsPricingQuick:
+      name: "Documentation to pricing within five minutes"
+      description: "Select sessions matching: Documentation to pricing within five minutes. Example template: adapt paths, event names, payload properties, and thresholds to your site. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    signupActivationPurchase:
+      name: "Signup, activation and purchase in three steps"
+      description: "Select visitors matching: Signup, activation and purchase in three steps. Example template: adapt paths, event names, payload properties, and thresholds to your site. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    cartPurchaseJourney:
+      name: "Add to cart followed by purchase"
+      description: "Select sessions matching: Add to cart followed by purchase. Example template: adapt paths, event names, payload properties, and thresholds to your site. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    signupLaterVisit:
+      name: "Page view one to seven days after signup"
+      description: "Select visitors matching: Page view one to seven days after signup. Example template: adapt paths, event names, payload properties, and thresholds to your site. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    purchaseFollowup:
+      name: "Repeat purchase one to thirty days after first purchase"
+      description: "Select visitors matching: Repeat purchase one to thirty days after first purchase. Example template: adapt paths, event names, payload properties, and thresholds to your site. Uses available activity history and the query time range, not necessarily the complete lifetime."
+    slowPagesSession:
+      name: "Sessions with multiple slow LCP pages"
+      description: "Select sessions matching: Sessions with multiple slow LCP pages."
+    avgLcpSession:
+      name: "Sessions with average LCP over 2.5 s"
+      description: "Select sessions matching: Sessions with average LCP over 2.5 s."
+    worstInpSession:
+      name: "Sessions with INP over 500 ms"
+      description: "Select sessions matching: Sessions with INP over 500 ms."
+    avgClsSession:
+      name: "Sessions with average CLS over 0.1"
+      description: "Select sessions matching: Sessions with average CLS over 0.1."
+    severalSlowTtfb:
+      name: "At least two slow TTFB pages"
+      description: "Select sessions matching: At least two slow TTFB pages."
+    goodMeasuredVitals:
+      name: "All three measured Core Web Vitals are good"
+      description: "Select events or page activity matching: All three measured Core Web Vitals are good."
+    mobileSlowLcp:
+      name: "Slow mobile LCP"
+      description: "Select events or page activity matching: Slow mobile LCP."
+    emptyPageTitle:
+      name: "Sessions with an empty page title"
+      description: "Select sessions matching: Sessions with an empty page title."
+    eventOnlySession:
+      name: "Sessions with events but no pages"
+      description: "Select sessions matching: Sessions with events but no pages."
+    missingPerformance:
+      name: "All Core Web Vitals missing"
+      description: "Select events or page activity matching: All Core Web Vitals missing."
+    missingDevice:
+      name: "Missing device type or browser"
+      description: "Select events or page activity matching: Missing device type or browser."
+    missingCampaignMedium:
+      name: "Campaign present but medium missing"
+      description: "Select events or page activity matching: Campaign present but medium missing."
+    missingPayloadAmount:
+      name: "Purchase event missing amount property"
+      description: "Select events or page activity matching: Purchase event missing amount property. Example template: adapt paths, event names, payload properties, and thresholds to your site."
+    countryChanges:
+      name: "Visitors with multiple recorded countries"
+      description: "Select visitors matching: Visitors with multiple recorded countries."
   savedFiltersPersonal: Personal filters
   savedFiltersTeam: Team filters
   savedFiltersAuthor: "Author: {name}"

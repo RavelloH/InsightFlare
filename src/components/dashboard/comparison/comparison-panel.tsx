@@ -31,7 +31,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { FilterEditor } from "@/components/dashboard/filters/filter-editor";
 import { SavedFilterSelect } from "@/components/dashboard/filters/filter-panel";
-import { fetchSavedFilters } from "@/lib/dashboard/client/data/index";
+import { fetchAllSavedFilters } from "@/lib/dashboard/client/data/index";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { FilterScope } from "@/lib/filter-contract/index";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -76,7 +76,7 @@ function ComparisonFilterDialog({
   const savedFiltersQuery = useQuery({
     queryKey: ["saved-filters", siteId],
     queryFn: ({ signal }: { signal: AbortSignal }) =>
-      fetchSavedFilters(siteId!, { signal }),
+      fetchAllSavedFilters(siteId!, { signal }),
     enabled: open && Boolean(siteId),
     staleTime: 60_000,
   });

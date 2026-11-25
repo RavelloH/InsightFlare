@@ -9,38 +9,37 @@ import {
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Button } from "@insightflare/ui/button";
-import { Clickable } from "@insightflare/ui/clickable";
-import { Input } from "@insightflare/ui/input";
 import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
 import { VerticalScrollMask } from "@insightflare/ui/vertical-scroll-mask";
 import {
   RiChatQuoteLine,
   RiCheckLine,
   RiCloseLine,
-  RiErrorWarningLine,
   RiFilterOffLine,
 } from "@remixicon/react";
 
 import { describeFilterExpression } from "@/lib/dashboard/filter-description";
+import { describeFilterDiagnostic } from "@/lib/dashboard/filter-diagnostic";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import {
   filterConditionCount,
   type FilterDocument,
   filterDocumentUsesAdvancedExpressions,
   type FilterEntityRoot,
-  FilterValidationError,
+  formatFilterDsl,
+  formatFilterDslPretty,
   parseFilterDsl,
 } from "@/lib/filter-contract/index";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 
+import { FilterDslEditorDialog } from "./filter-editor/dsl-editor-dialog";
 import { GroupEditor } from "./filter-editor/editors";
 import {
   allowedFields,
   defaultFieldForEntityRoot,
   directEventName,
 } from "./filter-editor/field-catalog";
-import { FilterExpressionHelpDialog } from "./filter-editor/help-dialog";
 import type {
   EditorGroup,
   EditorNode,
@@ -59,6 +58,7 @@ import {
   removeEditorNode,
   updateEditorNode,
 } from "./filter-editor/model";
+import { FilterDslInput } from "./filter-dsl-highlight";
 export interface FilterEditorProps {
   readonly audience: FilterPanelAudience;
   readonly initialFilterDsl: string;
@@ -166,7 +166,11 @@ export function FilterEditor({
     }
   });
   const [validationError, setValidationError] = useState<string | null>(null);
-  const [expressionHelpOpen, setExpressionHelpOpen] = useState(false);
+  const [dslEditorOpen, setDslEditorOpen] = useState(false);
+  const [dslDraft, setDslDraft] = useState("");
+  const dslInputRef = useRef<HTMLInputElement>(null);
+  const dslOpeningRef = useRef(false);
+  const restoringDslFocusRef = useRef(false);
   const expressionUpdateRef = useRef(false);
 
   useEffect(() => {
@@ -233,6 +237,46 @@ export function FilterEditor({
     }
   }, [controlledDocument, renderedRoot]);
   const eventName = directEventName(renderedRoot);
+  const compactExpression = useMemo(() => {
+    try {
+      return formatFilterDsl(
+        parseFilterDsl(renderedExpressionText, expressionRegistry),
+      );
+    } catch {
+      return renderedExpressionText.replace(/[\r\n]+/g, " ");
+    }
+  }, [renderedExpressionText, expressionRegistry]);
+
+  const openDslEditor = useCallback(() => {
+    if (restoringDslFocusRef.current || dslOpeningRef.current) return;
+    dslOpeningRef.current = true;
+    try {
+      setDslDraft(
+        formatFilterDslPretty(
+          parseFilterDsl(renderedExpressionText, expressionRegistry),
+          expressionRegistry,
+        ),
+      );
+    } catch {
+      setDslDraft(renderedExpressionText);
+    }
+    setDslEditorOpen(true);
+  }, [renderedExpressionText, expressionRegistry]);
+
+  const changeDslEditorOpen = useCallback((next: boolean) => {
+    if (!next) {
+      dslOpeningRef.current = false;
+      setDslEditorOpen(false);
+    }
+  }, []);
+  const restoreDslFocus = useCallback(() => {
+    restoringDslFocusRef.current = true;
+    try {
+      dslInputRef.current?.focus({ preventScroll: true });
+    } finally {
+      restoringDslFocusRef.current = false;
+    }
+  }, []);
 
   const rootFromExpressionText = useCallback(
     (source: string): EditorGroup | null => {
@@ -261,6 +305,25 @@ export function FilterEditor({
       setValidationError(null);
     },
     [rootFromExpressionText],
+  );
+
+  const confirmDslDraft = useCallback(
+    (source: string) => {
+      if (isControlled) onControlledExpressionChange?.(source);
+      else {
+        setExpressionText(source);
+        updateFromExpressionText(source);
+        onDraftChange?.(source);
+      }
+      changeDslEditorOpen(false);
+    },
+    [
+      isControlled,
+      onControlledExpressionChange,
+      updateFromExpressionText,
+      onDraftChange,
+      changeDslEditorOpen,
+    ],
   );
 
   const updateNode = useCallback(
@@ -338,9 +401,8 @@ export function FilterEditor({
     }
     const nextRoot = rootFromExpressionText(expressionText);
     if (!nextRoot) return null;
-    const formatted = expressionTextFromEditor(nextRoot);
+    expressionUpdateRef.current = true;
     setRoot(nextRoot);
-    setExpressionText(formatted);
     setExpressionError(null);
     return nextRoot;
   }, [
@@ -376,25 +438,16 @@ export function FilterEditor({
     }
     try {
       const document: FilterDocument = documentFromEditor(nextRoot);
-      onApply?.(
-        expressionTextFromEditor(nextRoot),
-        filterConditionCount(document),
-      );
+      onApply?.(expressionText, filterConditionCount(document));
     } catch (error) {
-      setValidationError(
-        error instanceof FilterValidationError || error instanceof Error
-          ? error.message === "missing_value"
-            ? messages.filterBuilder.invalid
-            : error.message
-          : invalidFilterLabel,
-      );
+      setValidationError(describeFilterDiagnostic(error, messages).message);
     }
   }, [
     commitExpressionText,
+    expressionText,
     isControlled,
-    messages.filterBuilder.expressionInvalid,
-    invalidFilterLabel,
-    messages.filterBuilder.invalid,
+    messages,
+    observationOnly,
     onApply,
     onControlledApply,
   ]);
@@ -469,56 +522,28 @@ export function FilterEditor({
             syncKey={renderedExpressionText}
             className="w-full min-w-0"
           >
-            <Input
+            <FilterDslInput
+              ref={dslInputRef}
               id={id}
               aria-label={expressionLabel}
               aria-invalid={renderedExpressionError ? true : undefined}
-              className="h-8 min-w-full border-0 bg-transparent px-4 font-mono text-xs shadow-none focus-visible:ring-0 dark:bg-transparent"
+              aria-haspopup="dialog"
+              aria-expanded={dslEditorOpen}
+              className="h-8 min-w-full cursor-text border-0 bg-transparent px-4 font-mono text-xs shadow-none focus-visible:ring-0 dark:bg-transparent"
               placeholder={placeholder}
-              style={{
-                width: `${Math.max(32, renderedExpressionText.length + 3)}ch`,
-              }}
-              value={renderedExpressionText}
-              onChange={(event) => {
-                const source = event.target.value;
-                if (isControlled) {
-                  onControlledExpressionChange?.(source);
-                } else {
-                  setExpressionText(source);
-                  updateFromExpressionText(source);
-                  onDraftChange?.(source);
-                }
-              }}
+              value={compactExpression}
+              readOnly
+              onFocus={openDslEditor}
+              onClick={openDslEditor}
               onKeyDown={(event) => {
-                if (event.key !== "Enter") return;
-                event.preventDefault();
-                if (isControlled) onControlledExpressionCommit?.();
-                else commitExpressionText();
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  openDslEditor();
+                }
               }}
             />
           </OverlayScrollbar>
         </div>
-        <AutoResizer initial={false} duration={0.18}>
-          <AutoTransition
-            transitionKey={renderedExpressionError ? "invalid" : "valid"}
-            type="slideDown"
-            duration={0.18}
-            initial={false}
-          >
-            {renderedExpressionError ? (
-              <div className="flex items-center gap-2 px-4 py-1.5 text-xs text-destructive">
-                <RiErrorWarningLine className="size-4 shrink-0" aria-hidden />
-                <Clickable
-                  className="justify-start text-left text-destructive"
-                  hoverScale={1.05}
-                  onClick={() => setExpressionHelpOpen(true)}
-                >
-                  {renderedExpressionError}
-                </Clickable>
-              </div>
-            ) : null}
-          </AutoTransition>
-        </AutoResizer>
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
           <Button type="button" variant="ghost" onClick={clear}>
             <RiFilterOffLine data-icon="inline-start" />
@@ -541,12 +566,18 @@ export function FilterEditor({
           </div>
         </div>
       </div>
-      <FilterExpressionHelpDialog
+      <FilterDslEditorDialog
+        open={dslEditorOpen}
+        onOpenChange={changeDslEditorOpen}
+        source={dslDraft}
+        onSourceChange={setDslDraft}
+        onConfirm={confirmDslDraft}
+        onRestoreFocus={restoreDslFocus}
+        registry={expressionRegistry}
         audience={audience}
         messages={messages}
         observationOnly={observationOnly}
-        open={expressionHelpOpen}
-        onOpenChange={setExpressionHelpOpen}
+        expressionLabel={expressionLabel}
       />
     </div>
   );

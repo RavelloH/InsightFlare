@@ -384,7 +384,7 @@ filterBuilder:
   expression: 篩選表示式
   expressionPlaceholder: 篩選表示式...
   naturalLanguageDescription: 自然語言描述
-  expressionInvalid: 表示式無效，點選檢視語法幫助
+  expressionInvalid: "表示式無效，請檢查語法。"
   expressionHelpTitle: 篩選表示式語法
   expressionHelpDescription: 可用欄位和運算子由目前篩選契約動態產生。
   expressionHelpSyntax: 語法
@@ -488,14 +488,241 @@ filterBuilder:
   savedFiltersLoading: 正在取得已儲存的篩選...
   noSavedFilter: 不使用已儲存的篩選
   systemPresets: 系統預設
+  dslDiagnostics:
+    location: "第 {line} 行，第 {column} 欄"
+    unknown: "表示式無效，請檢查語法及欄位類型。"
+    unterminated_string: "字串缺少結束引號。"
+    invalid_string: "字串格式無效，請檢查引號及跳脫字元。"
+    invalid_number: "請輸入有效且有限的數字。"
+    invalid_token: "此字元不符合表示式語法。"
+    unexpected_token: "表示式已結束，此處不應再有內容。"
+    expected_identifier: "此處需要欄位名稱或運算子。"
+    missing_closing_parenthesis: "缺少右括號「)」。"
+    missing_payload_parenthesis: "缺少右括號「)」。"
+    unknown_operator: "不支援此運算子。"
+    invalid_operator: "不支援此運算子。"
+    missing_selector_brace: "集合篩選缺少右大括號「}」。"
+    expected_payload_path: "請提供有效的 JSON 指標路徑，例如 \"/metadata/value\"。"
+    invalid_json_path: "請提供有效的 JSON 指標路徑，例如 \"/metadata/value\"。"
+    explicit_projection_required: "集合成員必須透過投影符號「->」存取。"
+    collection_member_requires_projection: "集合成員必須透過投影符號「->」存取。"
+    expected_target: "此處需要有效的篩選對象，例如欄位或集合。"
+    invalid_target: "此處需要有效的篩選對象，例如欄位或集合。"
+    invalid_member: "此成員在目前實體或上下文中不可用。"
+    invalid_context_member: "此成員在目前實體或上下文中不可用。"
+    unknown_context_intrinsic: "此上下文內建值無效或不適用於目前位置。"
+    invalid_context_intrinsic: "此上下文內建值無效或不適用於目前位置。"
+    invalid_context_intrinsic_condition: "此上下文內建值無效或不適用於目前位置。"
+    invalid_context_root: "此上下文內建值無效或不適用於目前位置。"
+    invalid_context_intrinsic_arguments: "函式參數不正確，請檢查參數數量與括號。"
+    invalid_occurrence_time_arguments: "函式參數不正確，請檢查參數數量與括號。"
+    unexpected_argument: "函式參數不正確，請檢查參數數量與括號。"
+    missing_argument: "函式參數不正確，請檢查參數數量與括號。"
+    invalid_sequence_gap: "步驟間隔必須使用兩個遞增的正整數索引。"
+    expected_sequence_steps: "序列需要至少兩個有效步驟，並以清單形式提供。"
+    invalid_sequence: "序列需要至少兩個有效步驟，並以清單形式提供。"
+    expected_argument_separator: "參數之間缺少逗號。"
+    expected_duration_range: "時間視窗需要兩個有效的時長邊界，例如 [0d, 7d]。"
+    invalid_window: "時間視窗需要兩個有效的時長邊界，例如 [0d, 7d]。"
+    invalid_index: "請檢查序號；第 N 項的序號必須為正整數。"
+    unexpected_index: "請檢查序號；第 N 項的序號必須為正整數。"
+    unknown_function: "不支援此函式或計算方式。"
+    invalid_reducer: "不支援此函式或計算方式。"
+    invalid_arithmetic: "不支援此函式或計算方式。"
+    expected_duration: "需要有效的時長，例如 7d 或 30m。"
+    invalid_duration: "需要有效的時長，例如 7d 或 30m。"
+    invalid_temporal_literal: "需要有效的時長，例如 7d 或 30m。"
+    missing_list_bracket: "清單缺少右方括號「]」。"
+    invalid_range: "範圍必須包含兩個有效的邊界值。"
+    expected_value: "此處缺少比較值。"
+    missing_value: "此處缺少比較值。"
+    unknown_field: "找不到此欄位，請查看可用欄位清單。"
+    invalid_field: "找不到此欄位，請查看可用欄位清單。"
+    field_not_allowed: "目前存取權限不允許使用此欄位。"
+    operator_not_allowed: "此運算子不適用於目前欄位或資料類型。"
+    operator_type_mismatch: "此運算子不適用於目前欄位或資料類型。"
+    invalid_boolean: "請輸入布林值 true 或 false。"
+    invalid_date: "日期或時間表示式無效，或不適用於目前時間上下文。"
+    invalid_datetime: "日期或時間表示式無效，或不適用於目前時間上下文。"
+    invalid_time_anchor: "日期或時間表示式無效，或不適用於目前時間上下文。"
+    invalid_time_scope: "日期或時間表示式無效，或不適用於目前時間上下文。"
+    invalid_condition_value: "比較值的格式或類型與篩選對象不相符。"
+    invalid_canonical_value: "比較值的格式或類型與篩選對象不相符。"
+    invalid_value: "比較值的格式或類型與篩選對象不相符。"
+    invalid_scalar: "比較值的格式或類型與篩選對象不相符。"
+    condition_type_mismatch: "比較值的格式或類型與篩選對象不相符。"
+    invalid_set: "請提供非空且類型相容的值清單。"
+    heterogeneous_set_values: "請提供非空且類型相容的值清單。"
+    reversed_range: "範圍的起始值不能大於結束值。"
+    null_requires_unary_operator: "空值應使用 isNull 或 notNull 進行判斷。"
+    unexpected_value: "此運算子不需要比較值。"
+    number_above_maximum: "數值超過此欄位允許的最大值。"
+    number_below_minimum: "數值低於此欄位允許的最小值。"
+    number_not_on_step: "數值不符合此欄位要求的步進。"
+    too_deep: "表示式巢狀過深，請簡化結構。"
+    too_many_conditions: "表示式超過允許的條件、群組或清單數量限制。"
+    too_many_groups: "表示式超過允許的條件、群組或清單數量限制。"
+    too_many_set_values: "表示式超過允許的條件、群組或清單數量限制。"
+    invalid_limit: "表示式超過允許的條件、群組或清單數量限制。"
+    value_too_long: "比較值過長，請縮短後重試。"
+    invalid_entity_root: "此實體集合無效或不可用。"
+    invalid_group: "表示式結構不完整，請補全條件或群組。"
+    invalid_expression: "表示式結構不完整，請補全條件或群組。"
+    missing_child: "表示式結構不完整，請補全條件或群組。"
+    missing_predicate: "表示式結構不完整，請補全條件或群組。"
+    missing_root: "表示式結構不完整，請補全條件或群組。"
+    unsupported_version: "此表示式版本不受支援。"
+    arithmetic_type_mismatch: "算術運算需要類型相容的數值。"
+    bucket_period_mismatch: "分組週期必須是有效的正整數日曆週期。"
+    period_interval_mismatch: "分組週期必須是有效的正整數日曆週期。"
+    bucket_type_mismatch: "時間分桶需要頁面或事件集合。"
+    calendar_offset_not_supported: "相對時間偏移必須使用固定時長，不能使用月或年。"
+    expected_collection: "此處需要集合，而不是單個值。"
+    expected_sequence: "此處需要行為序列。"
+    occurrence_time_type_mismatch: "此處需要有效的活動時間或時間錨點。"
+    window_anchor_type_mismatch: "此處需要有效的活動時間或時間錨點。"
+    opaque_bucket_value: "時間桶不能直接作為比較值，請使用支援的彙總。"
+    reducer_type_mismatch: "此彙總函式不適用於輸入的集合或數值類型。"
+    relation_requires_session_or_visitor_scope: "此關係篩選需要工作階段或訪客作用域。"
+    same_value_type_mismatch: "各步驟中的共有值必須具有相容類型，並屬於對應實體。"
+    same_value_entity_mismatch: "各步驟中的共有值必須具有相容類型，並屬於對應實體。"
+    sequence_step_type_mismatch: "行為序列中的步驟或排除項必須是頁面或事件集合。"
+    without_type_mismatch: "行為序列中的步驟或排除項必須是頁面或事件集合。"
+    invalid_condition_entity_domain: "目前篩選條件不能用於此實體的作用域。"
+  naturalDescription:
+    namedEvent: "名為 {name} 的事件"
+    singularUnits:
+      ms: "毫秒"
+      s: "秒"
+      m: "分鐘"
+      h: "小時"
+      d: "天"
+      w: "週"
+      mo: "個月"
+      y: "年"
+    all: "同時符合以下條件：{items}"
+    any: "至少符合以下一項：{items}"
+    negate: "不符合以下條件：{description}"
+    separator: "；"
+    nested: "（{description}）"
+    page: "頁面瀏覽"
+    event: "事件"
+    session: "工作階段"
+    visitor: "訪客"
+    current: "目前項目"
+    sequenceContext: "目前行為序列"
+    periodContext: "目前週期"
+    bucketContext: "目前時間桶"
+    payload: "事件屬性「{path}」"
+    member: "{object}的{field}"
+    selector: "{collection}中符合以下條件的項目（{predicate}）"
+    projection: "{collection}各自的{field}"
+    count: "{input}的數量"
+    countDistinct: "{input}的不同值數量"
+    first: "{input}中的第一項"
+    last: "{input}中的最後一項"
+    nth: "{input}中的第 {index} 項"
+    sum: "{input}的總和"
+    avg: "{input}的平均值"
+    min: "{input}的最小值"
+    max: "{input}的最大值"
+    add: "（{left}加上{right}）"
+    sub: "（{left}減去{right}）"
+    mul: "（{left}乘以{right}）"
+    div: "（{left}除以{right}）"
+    duration: "{amount} {unit}"
+    pixels: "{amount} 像素"
+    now: "目前時間"
+    rangeStart: "查詢時間範圍的起點"
+    rangeEnd: "查詢時間範圍的終點"
+    before: "{anchor}之前 {duration}"
+    after: "{anchor}之後 {duration}"
+    occurrenceTime: "{input}發生的時間"
+    span: "從序列第一步到最後一步的時長"
+    gap: "第 {from} 步到第 {to} 步的間隔"
+    same: "各步驟中的{input}相同"
+    items: "每個週期中的項目"
+    bucket: "按 {interval} 劃分的{input}時間桶"
+    periods: "按 {interval} 劃分的{collection}週期"
+    window: "以{anchor}為基準、偏移 {start} 至 {end} 的時段內的{collection}"
+    sequence: "按順序發生的行為（{steps}）"
+    step: "第 {index} 步：{activity}"
+    adjacent: "各步驟連續發生的{sequence}"
+    without: "步驟之間未出現{excluded}的{sequence}"
+    collectionExists: "存在{collection}"
+    collectionNotExists: "沒有{collection}"
+    trueValue: "是"
+    falseValue: "否"
+    nullValue: "空值"
+    namedPage: "路徑為 {path} 的頁面瀏覽"
+    distinctProjection: "{collection}中不同{field}的數量"
+    periodCount: "每個週期中的項目數"
+    ago: "{duration}前"
+    fromNow: "{duration}後"
+    firstTime: "首次{collection}的時間"
+    lastTime: "最近一次{collection}的時間"
+    relationSequence: "依序發生過以下行為：{steps}"
+    thenSeparator: "，隨後"
+    relationConstraint: "{relation}；且該序列符合：{predicate}"
+    relationAdjacent: "{relation}；相鄰步驟之間沒有其他活動"
+    relationWithout: "{relation}；步驟之間沒有出現{excluded}"
+    eventOccurred: "發生過{collection}"
+    eventNotOccurred: "未發生過{collection}"
+    pageOccurred: "有過{collection}"
+    pageNotOccurred: "沒有{collection}記錄"
+    atLeast: "{field}至少為 {value}"
+    atMost: "{field}至多為 {value}"
+    exactly: "{field}恰好為 {value}"
+    moreThan: "{field}超過 {value}"
+    fewerThan: "{field}不足 {value}"
+  dslEditor:
+    title: "DSL 編輯器"
+    description: "編輯篩選表示式，確認後更新篩選器草稿。"
+    help: "語法幫助"
+    valid: "表示式有效"
+    confirm: "確認修改"
+    lines: "行"
+    observationOnly: "此編輯器不支援進階表示式。"
+  filterLibrary:
+    choose: "選擇篩選器"
+    features: "DSL 能力"
+    title: "篩選器資源庫"
+    description: "瀏覽已儲存的篩選器和系統預設，查看 DSL 並套用篩選器。"
+    categories: "篩選器分類"
+    all: "全部"
+    personal: "個人"
+    team: "團隊"
+    search: "搜尋篩選器…"
+    topic: "主題"
+    allTopics: "全部主題"
+    type: "運算式類型"
+    allTypes: "全部類型"
+    standard: "一般"
+    advanced: "進階"
+    scope: "作用域"
+    allScopes: "全部作用域"
+    auto: "自動"
+    currentMatch: "符合目前篩選條件"
+    empty: "沒有符合條件的篩選器"
+    back: "返回"
+    updated: "最後更新"
+    formatted: "格式化"
+    original: "原始"
+    wrap: "換行"
+    copy: "複製"
+    copied: "已複製 DSL"
+    copyFailed: "無法複製 DSL"
+    cancel: "取消"
   systemPresetCategories:
-    acquisition: 獲客
-    device: 裝置
-    visitBehavior: 造訪行為
-    sessionEngagement: 工作階段參與度
-    visitorBehavior: 訪客行為
-    performance: 效能
-    dataQuality: 資料品質
+    acquisition: "流量獲取"
+    device: "裝置與環境"
+    pageContent: "頁面與內容"
+    eventConversion: "事件與轉換"
+    sessionEngagement: "工作階段與參與"
+    visitorBehavior: "訪客與留存"
+    userJourney: "使用者路徑"
+    performance: "效能"
+    dataQuality: "資料品質"
   systemPresetScopes:
     preserve: 保留目前範圍
     event: 事件範圍
@@ -616,6 +843,234 @@ filterBuilder:
     slowFcp:
       name: FCP 較慢
       description: FCP 超過 1.8 秒的造訪。
+    paidSearch:
+      name: "付費搜尋流量"
+      description: "篩選符合「付費搜尋流量」條件的目前作用域的資料。"
+    emailTraffic:
+      name: "電子郵件行銷流量"
+      description: "篩選符合「電子郵件行銷流量」條件的目前作用域的資料。"
+    campaignNoSource:
+      name: "有 Campaign 但無來源標籤"
+      description: "篩選符合「有 Campaign 但無來源標籤」條件的事件或頁面活動。"
+    externalWithUtmMedium:
+      name: "含媒介標籤的外部引薦工作階段"
+      description: "篩選符合「含媒介標籤的外部引薦工作階段」條件的工作階段。"
+    multiReferrerVisitor:
+      name: "具有至少兩個引薦網域值的訪客"
+      description: "篩選符合「具有至少兩個引薦網域值的訪客」條件的訪客。"
+    multiCampaignVisitor:
+      name: "接觸多個行銷活動的訪客"
+      description: "篩選符合「接觸多個行銷活動的訪客」條件的訪客。"
+    mobileDesktopVisitor:
+      name: "同時使用行動端和桌面端"
+      description: "篩選符合「同時使用行動端和桌面端」條件的訪客。"
+    multiDeviceVisitor:
+      name: "跨裝置類型訪客"
+      description: "篩選符合「跨裝置類型訪客」條件的訪客。"
+    multiBrowserVisitor:
+      name: "使用多個瀏覽器的訪客"
+      description: "篩選符合「使用多個瀏覽器的訪客」條件的訪客。"
+    multiOsVisitor:
+      name: "使用多個作業系統的訪客"
+      description: "篩選符合「使用多個作業系統的訪客」條件的訪客。"
+    mobileLandscape:
+      name: "寬螢幕行動裝置造訪"
+      description: "篩選符合「寬螢幕行動裝置造訪」條件的事件或頁面活動。"
+    multiLanguageVisitor:
+      name: "使用多種瀏覽器語言的訪客"
+      description: "篩選符合「使用多種瀏覽器語言的訪客」條件的訪客。"
+    distinctPagesSession:
+      name: "瀏覽至少四個不同頁面的工作階段"
+      description: "篩選符合「瀏覽至少四個不同頁面的工作階段」條件的工作階段。"
+    docsDeepSession:
+      name: "深入閱讀文件（三次瀏覽）"
+      description: "篩選符合「深入閱讀文件（三次瀏覽）」條件的工作階段。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。"
+    avgPageDuration:
+      name: "平均頁面停留至少一分鐘"
+      description: "篩選符合「平均頁面停留至少一分鐘」條件的工作階段。"
+    maxPageDuration:
+      name: "至少一次長時間閱讀（兩分鐘）"
+      description: "篩選符合「至少一次長時間閱讀（兩分鐘）」條件的工作階段。"
+    totalPageDuration:
+      name: "累計頁面停留至少三分鐘"
+      description: "篩選符合「累計頁面停留至少三分鐘」條件的工作階段。"
+    firstPricingPage:
+      name: "定價頁作為首次頁面"
+      description: "篩選符合「定價頁作為首次頁面」條件的工作階段。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    lastPricingPage:
+      name: "定價頁作為末次頁面"
+      description: "篩選符合「定價頁作為末次頁面」條件的工作階段。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    secondDocsPage:
+      name: "第二次頁面瀏覽是文件"
+      description: "篩選符合「第二次頁面瀏覽是文件」條件的工作階段。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。"
+    pageQueryActivity:
+      name: "含查詢參數的頁面"
+      description: "篩選符合「含查詢參數的頁面」條件的事件或頁面活動。"
+    multiHostname:
+      name: "造訪多個主機名稱的訪客"
+      description: "篩選符合「造訪多個主機名稱的訪客」條件的訪客。"
+    purchaseCount:
+      name: "重複購買（至少兩次）"
+      description: "篩選符合「重複購買（至少兩次）」條件的訪客。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。"
+    purchaseAmount:
+      name: "累計購買金額至少100"
+      description: "篩選符合「累計購買金額至少100」條件的訪客。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。"
+    avgPurchaseAmount:
+      name: "平均購買金額至少50"
+      description: "篩選符合「平均購買金額至少50」條件的訪客。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。"
+    distinctPurchasedSku:
+      name: "購買至少三種商品"
+      description: "篩選符合「購買至少三種商品」條件的訪客。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。"
+    morePurchasesThanRefunds:
+      name: "購買次數多於退款次數"
+      description: "篩選符合「購買次數多於退款次數」條件的訪客。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。"
+    eventNamesSession:
+      name: "三種以上自訂事件的工作階段"
+      description: "篩選符合「三種以上自訂事件的工作階段」條件的工作階段。"
+    eventWithPayload:
+      name: "含 ID 屬性的事件"
+      description: "篩選符合「含 ID 屬性的事件」條件的事件或頁面活動。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。"
+    successfulEvent:
+      name: "成功狀態的事件"
+      description: "篩選符合「成功狀態的事件」條件的事件或頁面活動。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。"
+    largeTransaction:
+      name: "單筆購買金額至少100"
+      description: "篩選符合「單筆購買金額至少100」條件的事件或頁面活動。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。"
+    errorEvents:
+      name: "多次錯誤事件的工作階段"
+      description: "篩選符合「多次錯誤事件的工作階段」條件的工作階段。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。"
+    signupNoPurchase:
+      name: "註冊但未購買"
+      description: "篩選符合「註冊但未購買」條件的訪客。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。"
+    purchaseWithoutRefund:
+      name: "購買但無退款記錄"
+      description: "篩選符合「購買但無退款記錄」條件的訪客。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。"
+    pageAndEventSession:
+      name: "同時包含瀏覽和自訂事件"
+      description: "篩選符合「同時包含瀏覽和自訂事件」條件的工作階段。"
+    repeatedPathSession:
+      name: "多次瀏覽同一路徑"
+      description: "篩選符合「多次瀏覽同一路徑」條件的工作階段。"
+    eventHeavySession:
+      name: "事件數多於頁面數的工作階段"
+      description: "篩選符合「事件數多於頁面數的工作階段」條件的工作階段。"
+    longNoEventSession:
+      name: "較長但無自訂事件的工作階段"
+      description: "篩選符合「較長但無自訂事件的工作階段」條件的工作階段。"
+    shortDeepSession:
+      name: "一分鐘內瀏覽至少五頁"
+      description: "篩選符合「一分鐘內瀏覽至少五頁」條件的工作階段。"
+    highEventRatio:
+      name: "平均每次瀏覽至少兩個事件"
+      description: "篩選符合「平均每次瀏覽至少兩個事件」條件的工作階段。"
+    singlePageWithEvent:
+      name: "單頁瀏覽但有事件"
+      description: "篩選符合「單頁瀏覽但有事件」條件的工作階段。"
+    recentPageVisitor:
+      name: "最近七天有頁面瀏覽"
+      description: "篩選符合「最近七天有頁面瀏覽」條件的訪客。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    inactivePageVisitor:
+      name: "最後頁面瀏覽距今超過30天"
+      description: "篩選符合「最後頁面瀏覽距今超過30天」條件的訪客。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    activeFiveDays:
+      name: "至少五個自然日活躍"
+      description: "篩選符合「至少五個自然日活躍」條件的訪客。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    activeThreeWeeks:
+      name: "至少三個週期各有三次瀏覽"
+      description: "篩選符合「至少三個週期各有三次瀏覽」條件的訪客。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    weeklyBurst:
+      name: "至少一週瀏覽十次"
+      description: "篩選符合「至少一週瀏覽十次」條件的訪客。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    monthActivity:
+      name: "在至少兩個月份活躍"
+      description: "篩選符合「在至少兩個月份活躍」條件的訪客。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    longActivitySpan:
+      name: "頁面活動跨度至少30天"
+      description: "篩選符合「頁面活動跨度至少30天」條件的訪客。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    recentEventVisitor:
+      name: "最近七天有自訂事件"
+      description: "篩選符合「最近七天有自訂事件」條件的訪客。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    recentFirstPage:
+      name: "查詢範圍末尾七天內的首次瀏覽"
+      description: "篩選符合「查詢範圍末尾七天內的首次瀏覽」條件的訪客。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    signupToPurchase14d:
+      name: "註冊後十四天內購買"
+      description: "篩選符合「註冊後十四天內購買」條件的訪客。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    pricingAdjacentPurchase:
+      name: "定價頁後緊接購買"
+      description: "篩選符合「定價頁後緊接購買」條件的工作階段。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    signupPurchaseNoCancel:
+      name: "註冊到購買七天內無取消"
+      description: "篩選符合「註冊到購買七天內無取消」條件的訪客。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    sameProductPurchase:
+      name: "瀏覽後七天內購買同一商品"
+      description: "篩選符合「瀏覽後七天內購買同一商品」條件的訪客。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    purchaseNoRefundWindow:
+      name: "首次購買後一週內無退款"
+      description: "篩選符合「首次購買後一週內無退款」條件的訪客。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    homeDocsJourney:
+      name: "首頁後瀏覽文件"
+      description: "篩選符合「首頁後瀏覽文件」條件的工作階段。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    docsPricingJourney:
+      name: "文件後造訪定價頁"
+      description: "篩選符合「文件後造訪定價頁」條件的工作階段。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    docsPricingQuick:
+      name: "五分鐘內從文件到定價頁"
+      description: "篩選符合「五分鐘內從文件到定價頁」條件的工作階段。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    signupActivationPurchase:
+      name: "註冊、啟用、購買三步路徑"
+      description: "篩選符合「註冊、啟用、購買三步路徑」條件的訪客。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    cartPurchaseJourney:
+      name: "加入購物車後完成購買"
+      description: "篩選符合「加入購物車後完成購買」條件的工作階段。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    signupLaterVisit:
+      name: "註冊一至七天後再次瀏覽"
+      description: "篩選符合「註冊一至七天後再次瀏覽」條件的訪客。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    purchaseFollowup:
+      name: "首次購買後一至三十天回購"
+      description: "篩選符合「首次購買後一至三十天回購」條件的訪客。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。 以查詢可用的活動歷史與時間範圍為準，不代表完整生命週期。"
+    slowPagesSession:
+      name: "多次遭遇較慢 LCP 的工作階段"
+      description: "篩選符合「多次遭遇較慢 LCP 的工作階段」條件的工作階段。"
+    avgLcpSession:
+      name: "平均 LCP 超過2.5秒的工作階段"
+      description: "篩選符合「平均 LCP 超過2.5秒的工作階段」條件的工作階段。"
+    worstInpSession:
+      name: "存在嚴重 INP 問題的工作階段（>500ms）"
+      description: "篩選符合「存在嚴重 INP 問題的工作階段（>500ms）」條件的工作階段。"
+    avgClsSession:
+      name: "平均 CLS 超過0.1的工作階段"
+      description: "篩選符合「平均 CLS 超過0.1的工作階段」條件的工作階段。"
+    severalSlowTtfb:
+      name: "兩次以上慢 TTFB 頁面"
+      description: "篩選符合「兩次以上慢 TTFB 頁面」條件的工作階段。"
+    goodMeasuredVitals:
+      name: "三項已測核心指標均良好"
+      description: "篩選符合「三項已測核心指標均良好」條件的事件或頁面活動。"
+    mobileSlowLcp:
+      name: "行動端慢 LCP"
+      description: "篩選符合「行動端慢 LCP」條件的事件或頁面活動。"
+    emptyPageTitle:
+      name: "存在空頁面標題的工作階段"
+      description: "篩選符合「存在空頁面標題的工作階段」條件的工作階段。"
+    eventOnlySession:
+      name: "僅有自訂事件的工作階段"
+      description: "篩選符合「僅有自訂事件的工作階段」條件的工作階段。"
+    missingPerformance:
+      name: "核心 Web 指標均缺失"
+      description: "篩選符合「核心 Web 指標均缺失」條件的事件或頁面活動。"
+    missingDevice:
+      name: "裝置類型或瀏覽器資訊缺失"
+      description: "篩選符合「裝置類型或瀏覽器資訊缺失」條件的事件或頁面活動。"
+    missingCampaignMedium:
+      name: "Campaign 有值但媒介缺失"
+      description: "篩選符合「Campaign 有值但媒介缺失」條件的事件或頁面活動。"
+    missingPayloadAmount:
+      name: "購買事件缺少金額欄位"
+      description: "篩選符合「購買事件缺少金額欄位」條件的事件或頁面活動。 此為分析範例，請依站點實際路徑、事件名稱、Payload 屬性與閾值調整。"
+    countryChanges:
+      name: "記錄中出現多個國家值"
+      description: "篩選符合「記錄中出現多個國家值」條件的訪客。"
   savedFiltersPersonal: 個人篩選
   savedFiltersTeam: 團隊篩選
   savedFiltersAuthor: "作者：{name}"

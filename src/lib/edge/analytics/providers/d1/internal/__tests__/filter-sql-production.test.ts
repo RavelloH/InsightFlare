@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 
 import { executeApiV1Query } from "@/lib/api-v1/analytics/query-application";
+import { SYSTEM_FILTER_PRESETS } from "@/lib/dashboard/system-filter-presets";
 import {
   createSqliteD1Database,
   type SqliteD1Trace,
@@ -2276,4 +2277,40 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       db.close();
     }
   });
+});
+
+describe("System preset end-to-end SQLite smoke matrix", () => {
+  it.each(SYSTEM_FILTER_PRESETS)(
+    "executes $id for its declared scope",
+    (preset) => {
+      const db = sqlitePayloadFixture();
+      try {
+        const scopes =
+          preset.scope === "preserve"
+            ? (["event", "session", "visitor"] as const)
+            : [preset.scope];
+        for (const scope of scopes) {
+          const sql = dataset(preset.filterDsl, scope);
+          const results = select(
+            db,
+            "WITH " +
+              sql.ctes +
+              " SELECT (SELECT COUNT(*) FROM " +
+              sql.visitRelation +
+              ") AS views, (SELECT COUNT(*) FROM " +
+              sql.eventRelation +
+              ") AS events",
+            sql.bindings.map((binding) => binding.value),
+          );
+          expect(results).toHaveLength(1);
+          expect(results[0]).toEqual({
+            views: expect.any(Number),
+            events: expect.any(Number),
+          });
+        }
+      } finally {
+        db.close();
+      }
+    },
+  );
 });

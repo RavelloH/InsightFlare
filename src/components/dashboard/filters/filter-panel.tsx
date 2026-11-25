@@ -32,9 +32,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createSavedFilter,
   deleteSavedFilter,
-  fetchSavedFilters,
+  fetchAllSavedFilters,
   updateSavedFilter,
 } from "@/lib/dashboard/client/data/index";
+import { describeFilterDiagnostic } from "@/lib/dashboard/filter-diagnostic";
 import { resolveSuggestionScope } from "@/lib/dashboard/filter-suggestion-scope";
 import {
   SYSTEM_FILTER_PRESETS,
@@ -47,7 +48,6 @@ import {
   attachFilterScopePreference,
   filterFingerprint,
   type FilterScopePreference,
-  FilterValidationError,
   parseFilterDsl,
 } from "@/lib/filter-contract/index";
 import type { SavedFilter } from "@/lib/saved-filters";
@@ -136,7 +136,7 @@ export function FilterPanel({
     audience === "private-dashboard" && open && Boolean(siteId);
   const savedFiltersQuery = useQuery({
     queryKey: ["saved-filters", siteId],
-    queryFn: ({ signal }) => fetchSavedFilters(siteId!, { signal }),
+    queryFn: ({ signal }) => fetchAllSavedFilters(siteId!, { signal }),
     enabled: savedFiltersEnabled,
     staleTime: 60_000,
   });
@@ -394,7 +394,6 @@ export function FilterPanel({
     const nextRoot = rootFromExpressionText(expressionText);
     if (!nextRoot) return null;
     setExpressionError(null);
-    setExpressionText(expressionTextFromEditor(nextRoot));
     setExpressionRoot(nextRoot);
     return nextRoot;
   }, [expressionText, rootFromExpressionText, setExpressionRoot]);
@@ -405,15 +404,9 @@ export function FilterPanel({
     try {
       onApply(documentFromEditor(nextRoot), expressionText);
     } catch (error) {
-      setValidationError(
-        error instanceof FilterValidationError || error instanceof Error
-          ? error.message === "missing_value"
-            ? messages.filterBuilder.invalid
-            : error.message
-          : messages.filterBuilder.invalid,
-      );
+      setValidationError(describeFilterDiagnostic(error, messages).message);
     }
-  }, [commitExpressionText, messages.filterBuilder.invalid, onApply]);
+  }, [commitExpressionText, messages, onApply]);
 
   const applyFilterDsl = useCallback(
     (
@@ -434,15 +427,11 @@ export function FilterPanel({
         setValidationError(null);
         onApply(nextDocument, filterDsl, { closePanel: false });
       } catch (error) {
-        setValidationError(
-          error instanceof FilterValidationError || error instanceof Error
-            ? error.message
-            : messages.filterBuilder.invalid,
-        );
+        setValidationError(describeFilterDiagnostic(error, messages).message);
       }
     },
     [
-      messages.filterBuilder.invalid,
+      messages,
       onApply,
       rootFromExpressionText,
       scopePreference,

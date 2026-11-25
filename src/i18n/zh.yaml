@@ -384,7 +384,7 @@ filterBuilder:
   expression: 筛选表达式
   expressionPlaceholder: 筛选表达式...
   naturalLanguageDescription: 自然语言描述
-  expressionInvalid: 表达式无效，点击查看语法帮助
+  expressionInvalid: "表达式无效，请检查语法。"
   expressionHelpTitle: 筛选表达式语法
   expressionHelpDescription: 可用字段和操作符由当前筛选契约动态生成。
   expressionHelpSyntax: 语法
@@ -486,14 +486,241 @@ filterBuilder:
   savedFiltersLoading: 正在获取已保存的筛选...
   noSavedFilter: 不使用已保存的筛选
   systemPresets: 系统预设
+  dslDiagnostics:
+    location: "第 {line} 行，第 {column} 列"
+    unknown: "表达式无效，请检查语法及字段类型。"
+    unterminated_string: "字符串缺少结束引号。"
+    invalid_string: "字符串格式无效，请检查引号及转义字符。"
+    invalid_number: "请输入有效且有限的数字。"
+    invalid_token: "此字符不符合表达式语法。"
+    unexpected_token: "表达式已结束，此处不应再有内容。"
+    expected_identifier: "此处需要字段名或操作符。"
+    missing_closing_parenthesis: "缺少右括号「)」。"
+    missing_payload_parenthesis: "缺少右括号「)」。"
+    unknown_operator: "不支持此操作符。"
+    invalid_operator: "不支持此操作符。"
+    missing_selector_brace: "集合筛选缺少右花括号「}」。"
+    expected_payload_path: "请提供有效的 JSON 指针路径，例如 \"/metadata/value\"。"
+    invalid_json_path: "请提供有效的 JSON 指针路径，例如 \"/metadata/value\"。"
+    explicit_projection_required: "集合成员必须通过投影符号「->」访问。"
+    collection_member_requires_projection: "集合成员必须通过投影符号「->」访问。"
+    expected_target: "此处需要有效的筛选对象，例如字段或集合。"
+    invalid_target: "此处需要有效的筛选对象，例如字段或集合。"
+    invalid_member: "此成员在当前实体或上下文中不可用。"
+    invalid_context_member: "此成员在当前实体或上下文中不可用。"
+    unknown_context_intrinsic: "此上下文内建值无效或不适用于当前位置。"
+    invalid_context_intrinsic: "此上下文内建值无效或不适用于当前位置。"
+    invalid_context_intrinsic_condition: "此上下文内建值无效或不适用于当前位置。"
+    invalid_context_root: "此上下文内建值无效或不适用于当前位置。"
+    invalid_context_intrinsic_arguments: "函数参数不正确，请检查参数数量与括号。"
+    invalid_occurrence_time_arguments: "函数参数不正确，请检查参数数量与括号。"
+    unexpected_argument: "函数参数不正确，请检查参数数量与括号。"
+    missing_argument: "函数参数不正确，请检查参数数量与括号。"
+    invalid_sequence_gap: "步骤间隔必须使用两个递增的正整数索引。"
+    expected_sequence_steps: "序列需要至少两个有效步骤，并以列表形式提供。"
+    invalid_sequence: "序列需要至少两个有效步骤，并以列表形式提供。"
+    expected_argument_separator: "参数之间缺少逗号。"
+    expected_duration_range: "时间窗口需要两个有效的时长边界，例如 [0d, 7d]。"
+    invalid_window: "时间窗口需要两个有效的时长边界，例如 [0d, 7d]。"
+    invalid_index: "请检查序号；第 N 项的序号必须为正整数。"
+    unexpected_index: "请检查序号；第 N 项的序号必须为正整数。"
+    unknown_function: "不支持此函数或计算方式。"
+    invalid_reducer: "不支持此函数或计算方式。"
+    invalid_arithmetic: "不支持此函数或计算方式。"
+    expected_duration: "需要有效的时长，例如 7d 或 30m。"
+    invalid_duration: "需要有效的时长，例如 7d 或 30m。"
+    invalid_temporal_literal: "需要有效的时长，例如 7d 或 30m。"
+    missing_list_bracket: "列表缺少右方括号「]」。"
+    invalid_range: "范围必须包含两个有效的边界值。"
+    expected_value: "此处缺少比较值。"
+    missing_value: "此处缺少比较值。"
+    unknown_field: "找不到此字段，请查看可用字段列表。"
+    invalid_field: "找不到此字段，请查看可用字段列表。"
+    field_not_allowed: "当前访问权限不允许使用此字段。"
+    operator_not_allowed: "此操作符不适用于当前字段或数据类型。"
+    operator_type_mismatch: "此操作符不适用于当前字段或数据类型。"
+    invalid_boolean: "请输入布尔值 true 或 false。"
+    invalid_date: "日期或时间表达式无效，或不适用于当前时间上下文。"
+    invalid_datetime: "日期或时间表达式无效，或不适用于当前时间上下文。"
+    invalid_time_anchor: "日期或时间表达式无效，或不适用于当前时间上下文。"
+    invalid_time_scope: "日期或时间表达式无效，或不适用于当前时间上下文。"
+    invalid_condition_value: "比较值的格式或类型与筛选对象不匹配。"
+    invalid_canonical_value: "比较值的格式或类型与筛选对象不匹配。"
+    invalid_value: "比较值的格式或类型与筛选对象不匹配。"
+    invalid_scalar: "比较值的格式或类型与筛选对象不匹配。"
+    condition_type_mismatch: "比较值的格式或类型与筛选对象不匹配。"
+    invalid_set: "请提供非空且类型兼容的值列表。"
+    heterogeneous_set_values: "请提供非空且类型兼容的值列表。"
+    reversed_range: "范围的起始值不能大于结束值。"
+    null_requires_unary_operator: "空值应使用 isNull 或 notNull 进行判断。"
+    unexpected_value: "此操作符不需要比较值。"
+    number_above_maximum: "数值超过此字段允许的最大值。"
+    number_below_minimum: "数值低于此字段允许的最小值。"
+    number_not_on_step: "数值不符合此字段要求的步进。"
+    too_deep: "表达式嵌套过深，请简化结构。"
+    too_many_conditions: "表达式超过允许的条件、分组或列表数量限制。"
+    too_many_groups: "表达式超过允许的条件、分组或列表数量限制。"
+    too_many_set_values: "表达式超过允许的条件、分组或列表数量限制。"
+    invalid_limit: "表达式超过允许的条件、分组或列表数量限制。"
+    value_too_long: "比较值过长，请缩短后重试。"
+    invalid_entity_root: "此实体集合无效或不可用。"
+    invalid_group: "表达式结构不完整，请补全条件或分组。"
+    invalid_expression: "表达式结构不完整，请补全条件或分组。"
+    missing_child: "表达式结构不完整，请补全条件或分组。"
+    missing_predicate: "表达式结构不完整，请补全条件或分组。"
+    missing_root: "表达式结构不完整，请补全条件或分组。"
+    unsupported_version: "此表达式版本不受支持。"
+    arithmetic_type_mismatch: "算术运算需要类型兼容的数值。"
+    bucket_period_mismatch: "分组周期必须是有效的正整数日历周期。"
+    period_interval_mismatch: "分组周期必须是有效的正整数日历周期。"
+    bucket_type_mismatch: "时间分桶需要页面或事件集合。"
+    calendar_offset_not_supported: "相对时间偏移必须使用固定时长，不能使用月或年。"
+    expected_collection: "此处需要集合，而不是单个值。"
+    expected_sequence: "此处需要行为序列。"
+    occurrence_time_type_mismatch: "此处需要有效的活动时间或时间锚点。"
+    window_anchor_type_mismatch: "此处需要有效的活动时间或时间锚点。"
+    opaque_bucket_value: "时间桶不能直接作为比较值，请使用支持的聚合。"
+    reducer_type_mismatch: "此聚合函数不适用于输入的集合或数值类型。"
+    relation_requires_session_or_visitor_scope: "此关系筛选需要会话或访客作用域。"
+    same_value_type_mismatch: "各步骤中的共有值必须具有兼容类型，并属于对应实体。"
+    same_value_entity_mismatch: "各步骤中的共有值必须具有兼容类型，并属于对应实体。"
+    sequence_step_type_mismatch: "行为序列中的步骤或排除项必须是页面或事件集合。"
+    without_type_mismatch: "行为序列中的步骤或排除项必须是页面或事件集合。"
+    invalid_condition_entity_domain: "当前筛选条件不能用于此实体的作用域。"
+  naturalDescription:
+    namedEvent: "名为 {name} 的事件"
+    singularUnits:
+      ms: "毫秒"
+      s: "秒"
+      m: "分钟"
+      h: "小时"
+      d: "天"
+      w: "周"
+      mo: "个月"
+      y: "年"
+    all: "同时满足以下条件：{items}"
+    any: "至少满足以下一项：{items}"
+    negate: "不满足以下条件：{description}"
+    separator: "；"
+    nested: "（{description}）"
+    page: "页面浏览"
+    event: "事件"
+    session: "会话"
+    visitor: "访客"
+    current: "当前项目"
+    sequenceContext: "当前行为序列"
+    periodContext: "当前周期"
+    bucketContext: "当前时间桶"
+    payload: "事件属性「{path}」"
+    member: "{object}的{field}"
+    selector: "{collection}中符合以下条件的项目（{predicate}）"
+    projection: "{collection}各自的{field}"
+    count: "{input}的数量"
+    countDistinct: "{input}的不同值数量"
+    first: "{input}中的第一项"
+    last: "{input}中的最后一项"
+    nth: "{input}中的第 {index} 项"
+    sum: "{input}的总和"
+    avg: "{input}的平均值"
+    min: "{input}的最小值"
+    max: "{input}的最大值"
+    add: "（{left}加上{right}）"
+    sub: "（{left}减去{right}）"
+    mul: "（{left}乘以{right}）"
+    div: "（{left}除以{right}）"
+    duration: "{amount} {unit}"
+    pixels: "{amount} 像素"
+    now: "当前时间"
+    rangeStart: "查询时间范围的起点"
+    rangeEnd: "查询时间范围的终点"
+    before: "{anchor}之前 {duration}"
+    after: "{anchor}之后 {duration}"
+    occurrenceTime: "{input}发生的时间"
+    span: "从序列第一步到最后一步的时长"
+    gap: "第 {from} 步到第 {to} 步的间隔"
+    same: "各步骤中的{input}相同"
+    items: "每个周期中的项目"
+    bucket: "按 {interval} 划分的{input}时间桶"
+    periods: "按 {interval} 划分的{collection}周期"
+    window: "以{anchor}为基准、偏移 {start} 至 {end} 的时段内的{collection}"
+    sequence: "按顺序发生的行为（{steps}）"
+    step: "第 {index} 步：{activity}"
+    adjacent: "各步骤连续发生的{sequence}"
+    without: "步骤之间未出现{excluded}的{sequence}"
+    collectionExists: "存在{collection}"
+    collectionNotExists: "没有{collection}"
+    trueValue: "是"
+    falseValue: "否"
+    nullValue: "空值"
+    namedPage: "路径为 {path} 的页面浏览"
+    distinctProjection: "{collection}中不同{field}的数量"
+    periodCount: "每个周期中的项目数"
+    ago: "{duration}前"
+    fromNow: "{duration}后"
+    firstTime: "首次{collection}的时间"
+    lastTime: "最近一次{collection}的时间"
+    relationSequence: "依次发生过以下行为：{steps}"
+    thenSeparator: "，随后"
+    relationConstraint: "{relation}；并且该序列满足：{predicate}"
+    relationAdjacent: "{relation}；相邻步骤之间没有其他活动"
+    relationWithout: "{relation}；步骤之间没有出现{excluded}"
+    eventOccurred: "发生过{collection}"
+    eventNotOccurred: "未发生过{collection}"
+    pageOccurred: "有过{collection}"
+    pageNotOccurred: "没有{collection}记录"
+    atLeast: "{field}至少为 {value}"
+    atMost: "{field}至多为 {value}"
+    exactly: "{field}恰好为 {value}"
+    moreThan: "{field}超过 {value}"
+    fewerThan: "{field}不足 {value}"
+  dslEditor:
+    title: "DSL 编辑器"
+    description: "编辑筛选表达式，确认后更新筛选器草稿。"
+    help: "语法帮助"
+    valid: "表达式有效"
+    confirm: "确认修改"
+    lines: "行"
+    observationOnly: "此编辑器不支持高级表达式。"
+  filterLibrary:
+    choose: "选择筛选器"
+    features: "DSL 能力"
+    title: "筛选器资源库"
+    description: "浏览已保存的筛选器和系统预设，查看 DSL 并应用筛选器。"
+    categories: "筛选器分类"
+    all: "全部"
+    personal: "个人"
+    team: "团队"
+    search: "搜索筛选器…"
+    topic: "主题"
+    allTopics: "全部主题"
+    type: "表达式类型"
+    allTypes: "全部类型"
+    standard: "常规"
+    advanced: "高级"
+    scope: "作用域"
+    allScopes: "全部作用域"
+    auto: "自动"
+    currentMatch: "与当前筛选条件匹配"
+    empty: "没有符合条件的筛选器"
+    back: "返回"
+    updated: "最后更新"
+    formatted: "格式化"
+    original: "原始"
+    wrap: "换行"
+    copy: "复制"
+    copied: "已复制 DSL"
+    copyFailed: "无法复制 DSL"
+    cancel: "取消"
   systemPresetCategories:
-    acquisition: 获客
-    device: 设备
-    visitBehavior: 访问行为
-    sessionEngagement: 会话参与度
-    visitorBehavior: 访客行为
-    performance: 性能
-    dataQuality: 数据质量
+    acquisition: "流量获取"
+    device: "设备与环境"
+    pageContent: "页面与内容"
+    eventConversion: "事件与转化"
+    sessionEngagement: "会话与参与"
+    visitorBehavior: "访客与留存"
+    userJourney: "用户路径"
+    performance: "性能"
+    dataQuality: "数据质量"
   systemPresetScopes:
     preserve: 保留当前范围
     event: 事件范围
@@ -614,6 +841,234 @@ filterBuilder:
     slowFcp:
       name: FCP 较慢
       description: FCP 超过 1.8 秒的访问。
+    paidSearch:
+      name: "付费搜索流量"
+      description: "筛选符合「付费搜索流量」条件的当前作用域的数据。"
+    emailTraffic:
+      name: "邮件营销流量"
+      description: "筛选符合「邮件营销流量」条件的当前作用域的数据。"
+    campaignNoSource:
+      name: "有 Campaign 但无来源标签"
+      description: "筛选符合「有 Campaign 但无来源标签」条件的事件或页面活动。"
+    externalWithUtmMedium:
+      name: "含媒介标签的外部引荐会话"
+      description: "筛选符合「含媒介标签的外部引荐会话」条件的会话。"
+    multiReferrerVisitor:
+      name: "具有至少两个引荐域名值的访客"
+      description: "筛选符合「具有至少两个引荐域名值的访客」条件的访客。"
+    multiCampaignVisitor:
+      name: "接触多个营销活动的访客"
+      description: "筛选符合「接触多个营销活动的访客」条件的访客。"
+    mobileDesktopVisitor:
+      name: "同时使用移动端和桌面端"
+      description: "筛选符合「同时使用移动端和桌面端」条件的访客。"
+    multiDeviceVisitor:
+      name: "跨设备类型访客"
+      description: "筛选符合「跨设备类型访客」条件的访客。"
+    multiBrowserVisitor:
+      name: "使用多个浏览器的访客"
+      description: "筛选符合「使用多个浏览器的访客」条件的访客。"
+    multiOsVisitor:
+      name: "使用多个操作系统的访客"
+      description: "筛选符合「使用多个操作系统的访客」条件的访客。"
+    mobileLandscape:
+      name: "宽屏移动设备访问"
+      description: "筛选符合「宽屏移动设备访问」条件的事件或页面活动。"
+    multiLanguageVisitor:
+      name: "使用多种浏览器语言的访客"
+      description: "筛选符合「使用多种浏览器语言的访客」条件的访客。"
+    distinctPagesSession:
+      name: "浏览至少四个不同页面的会话"
+      description: "筛选符合「浏览至少四个不同页面的会话」条件的会话。"
+    docsDeepSession:
+      name: "深入阅读文档（三次浏览）"
+      description: "筛选符合「深入阅读文档（三次浏览）」条件的会话。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。"
+    avgPageDuration:
+      name: "平均页面停留至少一分钟"
+      description: "筛选符合「平均页面停留至少一分钟」条件的会话。"
+    maxPageDuration:
+      name: "至少一次长时间阅读（两分钟）"
+      description: "筛选符合「至少一次长时间阅读（两分钟）」条件的会话。"
+    totalPageDuration:
+      name: "累计页面停留至少三分钟"
+      description: "筛选符合「累计页面停留至少三分钟」条件的会话。"
+    firstPricingPage:
+      name: "定价页作为首次页面"
+      description: "筛选符合「定价页作为首次页面」条件的会话。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    lastPricingPage:
+      name: "定价页作为末次页面"
+      description: "筛选符合「定价页作为末次页面」条件的会话。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    secondDocsPage:
+      name: "第二次页面浏览是文档"
+      description: "筛选符合「第二次页面浏览是文档」条件的会话。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。"
+    pageQueryActivity:
+      name: "含查询参数的页面"
+      description: "筛选符合「含查询参数的页面」条件的事件或页面活动。"
+    multiHostname:
+      name: "访问多个主机名的访客"
+      description: "筛选符合「访问多个主机名的访客」条件的访客。"
+    purchaseCount:
+      name: "重复购买（至少两次）"
+      description: "筛选符合「重复购买（至少两次）」条件的访客。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。"
+    purchaseAmount:
+      name: "累计购买金额至少100"
+      description: "筛选符合「累计购买金额至少100」条件的访客。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。"
+    avgPurchaseAmount:
+      name: "平均购买金额至少50"
+      description: "筛选符合「平均购买金额至少50」条件的访客。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。"
+    distinctPurchasedSku:
+      name: "购买至少三种商品"
+      description: "筛选符合「购买至少三种商品」条件的访客。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。"
+    morePurchasesThanRefunds:
+      name: "购买次数多于退款次数"
+      description: "筛选符合「购买次数多于退款次数」条件的访客。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。"
+    eventNamesSession:
+      name: "三种以上自定义事件的会话"
+      description: "筛选符合「三种以上自定义事件的会话」条件的会话。"
+    eventWithPayload:
+      name: "含 ID 属性的事件"
+      description: "筛选符合「含 ID 属性的事件」条件的事件或页面活动。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。"
+    successfulEvent:
+      name: "成功状态的事件"
+      description: "筛选符合「成功状态的事件」条件的事件或页面活动。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。"
+    largeTransaction:
+      name: "单笔购买金额至少100"
+      description: "筛选符合「单笔购买金额至少100」条件的事件或页面活动。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。"
+    errorEvents:
+      name: "多次错误事件的会话"
+      description: "筛选符合「多次错误事件的会话」条件的会话。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。"
+    signupNoPurchase:
+      name: "注册但未购买"
+      description: "筛选符合「注册但未购买」条件的访客。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。"
+    purchaseWithoutRefund:
+      name: "购买但无退款记录"
+      description: "筛选符合「购买但无退款记录」条件的访客。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。"
+    pageAndEventSession:
+      name: "同时包含浏览和自定义事件"
+      description: "筛选符合「同时包含浏览和自定义事件」条件的会话。"
+    repeatedPathSession:
+      name: "多次浏览同一路径"
+      description: "筛选符合「多次浏览同一路径」条件的会话。"
+    eventHeavySession:
+      name: "事件数多于页面数的会话"
+      description: "筛选符合「事件数多于页面数的会话」条件的会话。"
+    longNoEventSession:
+      name: "较长但无自定义事件的会话"
+      description: "筛选符合「较长但无自定义事件的会话」条件的会话。"
+    shortDeepSession:
+      name: "一分钟内浏览至少五页"
+      description: "筛选符合「一分钟内浏览至少五页」条件的会话。"
+    highEventRatio:
+      name: "平均每次浏览至少两个事件"
+      description: "筛选符合「平均每次浏览至少两个事件」条件的会话。"
+    singlePageWithEvent:
+      name: "单页浏览但有事件"
+      description: "筛选符合「单页浏览但有事件」条件的会话。"
+    recentPageVisitor:
+      name: "最近七天有页面浏览"
+      description: "筛选符合「最近七天有页面浏览」条件的访客。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    inactivePageVisitor:
+      name: "最后页面浏览距今超过30天"
+      description: "筛选符合「最后页面浏览距今超过30天」条件的访客。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    activeFiveDays:
+      name: "至少五个自然日活跃"
+      description: "筛选符合「至少五个自然日活跃」条件的访客。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    activeThreeWeeks:
+      name: "至少三个周周期各有三次浏览"
+      description: "筛选符合「至少三个周周期各有三次浏览」条件的访客。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    weeklyBurst:
+      name: "至少一周浏览十次"
+      description: "筛选符合「至少一周浏览十次」条件的访客。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    monthActivity:
+      name: "在至少两个月份活跃"
+      description: "筛选符合「在至少两个月份活跃」条件的访客。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    longActivitySpan:
+      name: "页面活动跨度至少30天"
+      description: "筛选符合「页面活动跨度至少30天」条件的访客。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    recentEventVisitor:
+      name: "最近七天有自定义事件"
+      description: "筛选符合「最近七天有自定义事件」条件的访客。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    recentFirstPage:
+      name: "查询范围末尾七天内的首次浏览"
+      description: "筛选符合「查询范围末尾七天内的首次浏览」条件的访客。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    signupToPurchase14d:
+      name: "注册后十四天内购买"
+      description: "筛选符合「注册后十四天内购买」条件的访客。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    pricingAdjacentPurchase:
+      name: "定价页后紧接购买"
+      description: "筛选符合「定价页后紧接购买」条件的会话。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    signupPurchaseNoCancel:
+      name: "注册到购买七天内无取消"
+      description: "筛选符合「注册到购买七天内无取消」条件的访客。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    sameProductPurchase:
+      name: "浏览后七天内购买同一商品"
+      description: "筛选符合「浏览后七天内购买同一商品」条件的访客。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    purchaseNoRefundWindow:
+      name: "首次购买后一周内无退款"
+      description: "筛选符合「首次购买后一周内无退款」条件的访客。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    homeDocsJourney:
+      name: "首页后浏览文档"
+      description: "筛选符合「首页后浏览文档」条件的会话。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    docsPricingJourney:
+      name: "文档后访问定价页"
+      description: "筛选符合「文档后访问定价页」条件的会话。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    docsPricingQuick:
+      name: "五分钟内从文档到定价页"
+      description: "筛选符合「五分钟内从文档到定价页」条件的会话。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    signupActivationPurchase:
+      name: "注册、激活、购买三步路径"
+      description: "筛选符合「注册、激活、购买三步路径」条件的访客。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    cartPurchaseJourney:
+      name: "加购后完成购买"
+      description: "筛选符合「加购后完成购买」条件的会话。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    signupLaterVisit:
+      name: "注册一至七天后再次浏览"
+      description: "筛选符合「注册一至七天后再次浏览」条件的访客。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    purchaseFollowup:
+      name: "首次购买后一至三十天复购"
+      description: "筛选符合「首次购买后一至三十天复购」条件的访客。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。 基于查询可用的活动历史和时间范围，不代表完整生命周期。"
+    slowPagesSession:
+      name: "多次遭遇较慢 LCP 的会话"
+      description: "筛选符合「多次遭遇较慢 LCP 的会话」条件的会话。"
+    avgLcpSession:
+      name: "平均 LCP 超过2.5秒的会话"
+      description: "筛选符合「平均 LCP 超过2.5秒的会话」条件的会话。"
+    worstInpSession:
+      name: "存在严重 INP 问题的会话（>500ms）"
+      description: "筛选符合「存在严重 INP 问题的会话（>500ms）」条件的会话。"
+    avgClsSession:
+      name: "平均 CLS 超过0.1的会话"
+      description: "筛选符合「平均 CLS 超过0.1的会话」条件的会话。"
+    severalSlowTtfb:
+      name: "两次以上慢 TTFB 页面"
+      description: "筛选符合「两次以上慢 TTFB 页面」条件的会话。"
+    goodMeasuredVitals:
+      name: "三项已测核心指标均良好"
+      description: "筛选符合「三项已测核心指标均良好」条件的事件或页面活动。"
+    mobileSlowLcp:
+      name: "移动端慢 LCP"
+      description: "筛选符合「移动端慢 LCP」条件的事件或页面活动。"
+    emptyPageTitle:
+      name: "存在空页面标题的会话"
+      description: "筛选符合「存在空页面标题的会话」条件的会话。"
+    eventOnlySession:
+      name: "仅有自定义事件的会话"
+      description: "筛选符合「仅有自定义事件的会话」条件的会话。"
+    missingPerformance:
+      name: "核心 Web 指标均缺失"
+      description: "筛选符合「核心 Web 指标均缺失」条件的事件或页面活动。"
+    missingDevice:
+      name: "设备类型或浏览器信息缺失"
+      description: "筛选符合「设备类型或浏览器信息缺失」条件的事件或页面活动。"
+    missingCampaignMedium:
+      name: "Campaign 有值但媒介缺失"
+      description: "筛选符合「Campaign 有值但媒介缺失」条件的事件或页面活动。"
+    missingPayloadAmount:
+      name: "购买事件缺少金额字段"
+      description: "筛选符合「购买事件缺少金额字段」条件的事件或页面活动。 此为分析示例，请根据站点实际路径、事件名称、Payload 属性和阈值调整。"
+    countryChanges:
+      name: "记录中出现多个国家值"
+      description: "筛选符合「记录中出现多个国家值」条件的访客。"
   savedFiltersPersonal: 个人筛选
   savedFiltersTeam: 团队筛选
   savedFiltersAuthor: "作者：{name}"

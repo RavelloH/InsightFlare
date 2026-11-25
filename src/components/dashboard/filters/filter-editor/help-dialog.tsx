@@ -11,6 +11,7 @@ import {
 import { VerticalScrollMask } from "@insightflare/ui/vertical-scroll-mask";
 import { RiInformationLine } from "@remixicon/react";
 
+import { FilterDslHighlight } from "@/components/dashboard/filters/filter-dsl-highlight";
 import {
   type FilterOperator,
   type FilterValueKind,
@@ -106,7 +107,11 @@ export function FilterExpressionHelpDialog({
                   contentClassName="w-max min-w-full"
                 >
                   <pre className="whitespace-pre-wrap py-3 font-mono text-xs">
-                    {messages.filterBuilder.expressionHelpContextExamples}
+                    <FilterDslHighlight
+                      source={
+                        messages.filterBuilder.expressionHelpContextExamples
+                      }
+                    />
                   </pre>
                 </OverlayScrollbar>
               </section>
@@ -127,7 +132,7 @@ export function FilterExpressionHelpDialog({
                     "between [10, 20]",
                   ].map((example) => (
                     <code key={example} className="bg-muted px-2 py-1">
-                      {example}
+                      <FilterDslHighlight source={example} />
                     </code>
                   ))}
                 </div>

@@ -1,5 +1,6 @@
 import { analyzeFilterDocument } from "./filter-semantics";
 import {
+  assertFilterAudience,
   type CanonicalJsonPath,
   FILTER_OPERATOR_IDS,
   type FilterComparisonValue,
@@ -17,6 +18,7 @@ import {
   type FilterValue,
   normalizeFilterDocument,
 } from "./filters";
+import type { FilterAudience } from "./types";
 
 /** The version of the human-readable filter expression language. */
 export const FILTER_DSL_VERSION = 1 as const;
@@ -1556,7 +1558,10 @@ function rethrowValidationError(
 export function parseFilterDsl(
   source: string,
   registry: FilterFieldRegistry,
-  options: { readonly validateSemantics?: boolean } = {},
+  options: {
+    readonly validateSemantics?: boolean;
+    readonly audience?: FilterAudience;
+  } = {},
 ): FilterDocument {
   if (!source.trim()) {
     return { version: FILTER_DSL_VERSION, root: null };
@@ -1579,6 +1584,8 @@ export function parseFilterDsl(
     );
     if (options.validateSemantics !== false)
       analyzeFilterDocument(normalized, registry);
+    if (options.audience)
+      assertFilterAudience(normalized, registry, options.audience);
   } catch (error) {
     if (error instanceof FilterValidationError) {
       rethrowValidationError(error, source, root, locations);
@@ -1794,4 +1801,200 @@ function formatExpression(
 /** Format a filter document using the canonical DSL v1 surface syntax. */
 export function formatFilterDsl(document: FilterDocument): string {
   return document.root ? formatExpression(document.root) : "";
+}
+
+/** Lexical spans for DSL presentation, preserving every source character. */
+export function filterDslDisplayTokens(source: string): readonly {
+  text: string;
+  kind:
+    | "plain"
+    | "keyword"
+    | "operator"
+    | "function"
+    | "field"
+    | "string"
+    | "literal"
+    | "entity"
+    | "context"
+    | "punctuation";
+}[] {
+  type DisplayToken = ReturnType<typeof filterDslDisplayTokens>[number];
+  let tokens: readonly Token[];
+  let tail: DisplayToken | undefined;
+  try {
+    tokens = tokenize(source);
+  } catch (error) {
+    if (!(error instanceof FilterDslParseError))
+      return [{ text: source, kind: "plain" }];
+    // Preserve highlighting of a valid prefix during incomplete user input.
+    tail = {
+      text: source.slice(error.offset),
+      kind: error.code === "unterminated_string" ? "string" : "plain",
+    };
+    try {
+      tokens = tokenize(source.slice(0, error.offset));
+    } catch {
+      return [{ text: source, kind: "plain" }];
+    }
+  }
+  const lexical = tokens.filter((token) => token.kind !== "end");
+  const result: DisplayToken[] = [];
+  let cursor = 0;
+  for (const [index, token] of lexical.entries()) {
+    if (cursor < token.start)
+      result.push({ text: source.slice(cursor, token.start), kind: "plain" });
+    const raw = source.slice(token.start, token.end);
+    const lower = raw.toLowerCase();
+    let kind: DisplayToken["kind"] = "punctuation";
+    if (token.kind === "string") kind = "string";
+    else if (
+      ["number", "duration", "time-anchor", "boolean", "null"].includes(
+        token.kind,
+      )
+    )
+      kind = "literal";
+    else if (token.kind === "identifier") {
+      if (["and", "or", "not"].includes(lower)) kind = "keyword";
+      else if (OPERATORS.has(lower)) kind = "operator";
+      else if (
+        lexical[index - 1]?.kind === "dollar" &&
+        lexical[index - 1]?.end === token.start
+      )
+        kind = "context";
+      else if (lexical[index + 1]?.kind === "open") kind = "function";
+      else if (["PAGE", "EVENT", "SESSION", "VISITOR"].includes(raw))
+        kind = "entity";
+      else kind = "field";
+    } else if (token.kind === "dollar") kind = "context";
+    result.push({ text: raw, kind });
+    cursor = token.end;
+  }
+  const end = tail ? source.length - tail.text.length : source.length;
+  if (cursor < end)
+    result.push({ text: source.slice(cursor, end), kind: "plain" });
+  if (tail) result.push(tail);
+  return result;
+}
+
+/** Display-only multiline formatting with conventional closing delimiters and infix connectors. */
+export function formatFilterDslPretty(
+  document: FilterDocument,
+  registry: FilterFieldRegistry,
+): string {
+  const source = formatFilterDsl(document);
+  if (!source) return source;
+  const tokens = tokenize(source).filter((token) => token.kind !== "end");
+  const opens = new Set(["open", "brace-open", "list-open"]);
+  const closes = new Set(["close", "brace-close", "list-close"]);
+  const expanded = new Set<number>();
+  const stack: number[] = [];
+  const matching = new Map<number, number>();
+  const parents = new Map<number, number>();
+  const infix = (index: number) => {
+    const token = tokens[index];
+    const previous = tokens[index - 1];
+    return (
+      token?.kind === "identifier" &&
+      ["and", "or"].includes(token.value.toLowerCase()) &&
+      previous &&
+      !["open", "brace-open", "comma", "list-open"].includes(previous.kind) &&
+      !(
+        previous.kind === "identifier" &&
+        ["and", "or", "not"].includes(previous.value.toLowerCase())
+      )
+    );
+  };
+  for (const [index, token] of tokens.entries()) {
+    const parent = stack.at(-1);
+    if (parent !== undefined) parents.set(index, parent);
+    if (opens.has(token.kind)) {
+      stack.push(index);
+      if (token.kind === "brace-open")
+        stack.forEach((item) => expanded.add(item));
+    } else if (closes.has(token.kind)) {
+      const open = stack.pop();
+      if (open !== undefined) matching.set(index, open);
+    } else if (infix(index)) stack.forEach((item) => expanded.add(item));
+  }
+  const breaks = new Map<number, number>();
+  let depth = 0;
+  for (const [index, token] of tokens.entries()) {
+    const next = tokens[index + 1];
+    if (closes.has(token.kind) && expanded.has(matching.get(index) ?? -1)) {
+      depth = Math.max(0, depth - 1);
+      breaks.set(token.start, depth);
+    }
+    if (opens.has(token.kind) && expanded.has(index)) {
+      depth++;
+      if (next) breaks.set(next.start, depth);
+    }
+    if (
+      next &&
+      (infix(index) ||
+        (token.kind === "comma" && expanded.has(parents.get(index) ?? -1)))
+    )
+      breaks.set(next.start, depth);
+  }
+  let result = "";
+  let cursor = 0;
+  for (const token of tokens) {
+    const indent = breaks.get(token.start);
+    result +=
+      (indent === undefined
+        ? source.slice(cursor, token.start)
+        : "\n" + "  ".repeat(indent)) + source.slice(token.start, token.end);
+    cursor = token.end;
+  }
+  result += source.slice(cursor);
+  try {
+    return formatFilterDsl(parseFilterDsl(result, registry)) === source
+      ? result
+      : source;
+  } catch {
+    return source;
+  }
+}
+
+/** Actual DSL constructs used in a document, for discovery and educational previews. */
+export function filterDslFeatures(document: FilterDocument): readonly string[] {
+  const features = new Set<string>();
+  const visit = (value: unknown): void => {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    const node = value as Record<string, unknown>;
+    switch (node.kind) {
+      case "selector":
+      case "projection":
+      case "sequence":
+      case "adjacent":
+      case "without":
+      case "bucket":
+      case "periods":
+      case "window":
+        features.add(node.kind);
+        break;
+      case "reducer":
+        if (typeof node.reducer === "string") features.add(node.reducer);
+        break;
+      case "arithmetic":
+        if (typeof node.operator === "string") features.add(node.operator);
+        break;
+      case "context-intrinsic":
+        if (typeof node.intrinsic === "string")
+          features.add("$" + node.intrinsic);
+        break;
+      case "occurrence-time":
+        features.add("time");
+        break;
+      case "time-anchor":
+        if (typeof node.anchor === "string") features.add("@" + node.anchor);
+        break;
+    }
+    Object.values(node).forEach(visit);
+  };
+  visit(document.root);
+  return [...features];
 }

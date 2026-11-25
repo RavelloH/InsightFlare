@@ -15,18 +15,22 @@ import {
   parseFilterDsl,
 } from "@/lib/filter-contract";
 
+import { EXPANDED_SYSTEM_FILTER_PRESETS } from "./system-filter-presets/index";
+
 export type SystemFilterPresetCategory =
   | "acquisition"
   | "device"
-  | "visitBehavior"
+  | "pageContent"
+  | "eventConversion"
   | "sessionEngagement"
   | "visitorBehavior"
+  | "userJourney"
   | "performance"
   | "dataQuality";
 
 export type SystemFilterPresetScope = "preserve" | FilterScope;
 
-/** The 34 presets currently shown in the filter panel. */
+/** Original stable IDs and the expanded library, in deterministic order. */
 export const SYSTEM_FILTER_PRESET_IDS = [
   // Acquisition (7)
   "directTraffic",
@@ -40,9 +44,10 @@ export const SYSTEM_FILTER_PRESET_IDS = [
   "mobileTraffic",
   "desktopTraffic",
   "tabletTraffic",
-  // Visit behavior (4)
+  // Page and content (2)
   "longPageViews",
   "shortPageViews",
+  // Event and conversion (2)
   "identifiedActivity",
   "customEventActivity",
   // Session engagement (7)
@@ -69,6 +74,7 @@ export const SYSTEM_FILTER_PRESET_IDS = [
   "slowFcp",
   // Data quality (1)
   "geographicAttributionGap",
+  ...EXPANDED_SYSTEM_FILTER_PRESETS.map((item) => item.id),
 ] as const;
 
 export type SystemFilterPresetId = (typeof SYSTEM_FILTER_PRESET_IDS)[number];
@@ -180,20 +186,15 @@ export const SYSTEM_FILTER_PRESETS: readonly SystemFilterPreset[] = [
     "preserve",
   ),
 
+  preset("longPageViews", "pageContent", "page.durationMs gte 30000", "event"),
+  preset("shortPageViews", "pageContent", "page.durationMs lt 10000", "event"),
+  preset("identifiedActivity", "eventConversion", "user.id exists", "event"),
   preset(
-    "longPageViews",
-    "visitBehavior",
-    "page.durationMs gte 30000",
+    "customEventActivity",
+    "eventConversion",
+    "event.name exists",
     "event",
   ),
-  preset(
-    "shortPageViews",
-    "visitBehavior",
-    "page.durationMs lt 10000",
-    "event",
-  ),
-  preset("identifiedActivity", "visitBehavior", "user.id exists", "event"),
-  preset("customEventActivity", "visitBehavior", "event.name exists", "event"),
 
   preset(
     "bouncedSessions",
@@ -277,6 +278,9 @@ export const SYSTEM_FILTER_PRESETS: readonly SystemFilterPreset[] = [
     "dataQuality",
     'geo.country notExists AND referrer.domain neq "__direct__"',
     "preserve",
+  ),
+  ...EXPANDED_SYSTEM_FILTER_PRESETS.map((item) =>
+    preset(item.id, item.category, item.filterDsl, item.scope),
   ),
 ];
 

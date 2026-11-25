@@ -110,6 +110,7 @@ export {
 export {
   createSavedFilter,
   deleteSavedFilter,
+  fetchAllSavedFilters,
   fetchSavedFilters,
   updateSavedFilter,
 } from "@/lib/dashboard/saved-filter-data";

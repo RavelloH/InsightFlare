@@ -1,59 +1,20 @@
 import { describe, expect, it } from "vitest";
 
 import { describeFilterExpression } from "@/lib/dashboard/filter-description";
+import { SYSTEM_FILTER_PRESETS } from "@/lib/dashboard/system-filter-presets";
 import {
   analyticsFilterRegistry,
   type CanonicalJsonPath,
   type FilterExpression,
   type FilterFieldId,
+  parseFilterDsl,
 } from "@/lib/filter-contract";
+import { getMessages } from "@/lib/i18n/messages";
 
 const fieldId = (value: string) => value as FilterFieldId;
 const jsonPath = (value: string) => value as CanonicalJsonPath;
 
-const messages = {
-  conditionDescription: {
-    and: "and",
-    or: "or",
-    not: "not ({description})",
-    emptyFilter: "No filter conditions",
-    filterEquals: "{field} equals {value}",
-    filterNotEquals: "{field} does not equal {value}",
-    filterAnyOf: "{field} is one of {values}",
-    filterNoneOf: "{field} is none of {values}",
-    filterBetween: "{field} is between {from} and {to}",
-    filterContains: "{field} contains {value}",
-    filterStartsWith: "{field} starts with {value}",
-    filterEndsWith: "{field} ends with {value}",
-    filterGreaterThan: "{field} is greater than {value}",
-    filterGreaterThanOrEqual: "{field} is greater than or equal to {value}",
-    filterLessThan: "{field} is less than {value}",
-    filterLessThanOrEqual: "{field} is less than or equal to {value}",
-    filterExists: "{field} exists",
-    filterNotExists: "{field} does not exist",
-    filterIsNull: "{field} is null",
-    filterNotNull: "{field} is not null",
-    filterIsEmpty: "{field} is empty",
-    filterNotEmpty: "{field} is not empty",
-  },
-  filterBuilder: {
-    fieldLabels: {
-      "page.path": "Page path",
-      "referrer.domain": "Referrer domain",
-      "client.deviceType": "Device type",
-      "event.payload": "Event payload",
-      "page.durationMs": "Page duration",
-      "event.name": "Event name",
-    },
-    operatorLabels: {
-      eq: "equals",
-      gte: "is greater than or equal to",
-      in: "is one of",
-      between: "is between",
-      exists: "exists",
-    },
-  },
-} as never;
+const messages = getMessages("en");
 
 describe("filter descriptions", () => {
   it("describes nested filters with typed list and range values", () => {
@@ -106,7 +67,7 @@ describe("filter descriptions", () => {
         messages,
       ),
     ).toBe(
-      'Page path equals "/pricing" and not (Referrer domain equals "google.com" or Device type is one of "Mobile" or "Tablet") and Event payload (/score) is between 120 and 130',
+      'All of the following hold: Page path equals "/pricing"; (The following condition does not hold: (At least one of the following holds: Referrer domain equals "google.com"; Device type is one of "Mobile" or "Tablet")); event property “/score” is between 120 and 130',
     );
   });
 
@@ -117,39 +78,7 @@ describe("filter descriptions", () => {
   });
 
   it("uses localized word order for value collections", () => {
-    const chineseMessages = {
-      conditionDescription: {
-        and: "且",
-        or: "或",
-        not: "不满足（{description}）",
-        emptyFilter: "尚未设置筛选条件",
-        filterEquals: "{field} 为 {value}",
-        filterNotEquals: "{field} 不为 {value}",
-        filterAnyOf: "{field} 属于 {values} 中的任一值",
-        filterNoneOf: "{field} 不属于 {values} 中的任何值",
-        filterBetween: "{field} 介于 {from} 与 {to} 之间",
-        filterContains: "{field} 包含 {value}",
-        filterStartsWith: "{field} 以 {value} 开头",
-        filterEndsWith: "{field} 以 {value} 结尾",
-        filterGreaterThan: "{field} 大于 {value}",
-        filterGreaterThanOrEqual: "{field} 大于或等于 {value}",
-        filterLessThan: "{field} 小于 {value}",
-        filterLessThanOrEqual: "{field} 小于或等于 {value}",
-        filterExists: "{field} 存在",
-        filterNotExists: "{field} 不存在",
-        filterIsNull: "{field} 为 NULL",
-        filterNotNull: "{field} 不为 NULL",
-        filterIsEmpty: "{field} 为空",
-        filterNotEmpty: "{field} 不为空",
-      },
-      filterBuilder: {
-        fieldLabels: {
-          "page.path": "页面路径",
-          "referrer.domain": "来源域名",
-        },
-        operatorLabels: {},
-      },
-    } as never;
+    const chineseMessages = getMessages("zh");
 
     expect(
       describeFilterExpression(
@@ -174,7 +103,7 @@ describe("filter descriptions", () => {
         chineseMessages,
       ),
     ).toBe(
-      '页面路径 以 "/docs" 开头 且 来源域名 属于 "google.com" 或 "news.example.com" 中的任一值',
+      '同时满足以下条件：页面路径 以 "/docs" 开头；来源域名 是以下任一值："google.com" 或 "news.example.com"',
     );
   });
 
@@ -210,7 +139,7 @@ describe("filter descriptions", () => {
     expect(
       describeFilterExpression(expression, analyticsFilterRegistry, messages),
     ).toBe(
-      'Page path contains "docs" and Page duration is greater than or equal to 1000 and Event name exists and Page path is not empty',
+      'All of the following hold: Page path contains "docs"; Time on page is greater than or equal to 1000 milliseconds; Event name exists; Page path is not empty',
     );
   });
 
@@ -230,7 +159,7 @@ describe("filter descriptions", () => {
         analyticsFilterRegistry,
         messages,
       ),
-    ).toBe("time is greater than or equal to @range.start");
+    ).toBe("Time is greater than or equal to the start of the query period");
   });
 
   it("describes every legacy operator and retains typed advanced operands", () => {
@@ -283,7 +212,59 @@ describe("filter descriptions", () => {
       analyticsFilterRegistry,
       messages,
     );
-    expect(dynamic).toContain("sub(count(EVENT), 1h)");
-    expect(dynamic).toContain("1 or 2");
+    expect(dynamic).toContain("the number of events minus 1 hour");
+    expect(dynamic).toContain("between 1 and 2");
+  });
+});
+
+describe("localized natural filter descriptions", () => {
+  it.each(["zh", "zh-tw", "en", "ja"] as const)(
+    "describes all 110 presets in %s without raw DSL functions",
+    (locale) => {
+      const localized = getMessages(locale);
+      for (const preset of SYSTEM_FILTER_PRESETS) {
+        const doc = parseFilterDsl(preset.filterDsl, analyticsFilterRegistry);
+        const result = describeFilterExpression(
+          doc.root,
+          analyticsFilterRegistry,
+          localized,
+        );
+        expect(result, preset.id).toBeTruthy();
+        expect(result, preset.id).not.toMatch(
+          /(?:undefined|\[object Object\]|\b(?:countDistinct|count|sequence|window|periods|bucket|sum|avg|first|last|nth|adjacent|without)\(|\$\.|\$span|@now|@range\.)/,
+        );
+      }
+    },
+  );
+  it("describes sequence order, constraints and absence without implying the wrong scope", () => {
+    const source =
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) { $span lte 14d } exists';
+    const doc = parseFilterDsl(source, analyticsFilterRegistry);
+    const result = describeFilterExpression(
+      doc.root,
+      analyticsFilterRegistry,
+      getMessages("zh"),
+    );
+    expect(result).toContain(
+      '依次发生过以下行为：名为 "signup" 的事件，随后名为 "purchase" 的事件',
+    );
+    expect(result).toContain("14 天");
+    expect(result).not.toContain("访客");
+  });
+  it("preserves temporal range endpoints, list membership, and explicit negation", () => {
+    const source =
+      'NOT (time(last(PAGE)) between [@now-7d, @now] OR page.path in ["/a", "/b"])';
+    const doc = parseFilterDsl(source, analyticsFilterRegistry);
+    const result = describeFilterExpression(
+      doc.root,
+      analyticsFilterRegistry,
+      getMessages("zh"),
+    );
+    expect(result).toContain("不满足以下条件");
+    expect(result).toContain("至少满足以下一项");
+    expect(result).toContain("7 天前");
+    expect(result).toContain("当前时间");
+    expect(result).toContain('"/a"');
+    expect(result).toContain('"/b"');
   });
 });

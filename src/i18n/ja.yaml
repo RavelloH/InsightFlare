@@ -384,7 +384,7 @@ filterBuilder:
   expression: フィルター式
   expressionPlaceholder: フィルター式...
   naturalLanguageDescription: 自然言語の説明
-  expressionInvalid: 式が無効です。クリックして構文ヘルプを確認してください。
+  expressionInvalid: "式が無効です。構文を確認してください。"
   expressionHelpTitle: フィルター式の構文
   expressionHelpDescription: 利用可能なフィールドと演算子は、現在のフィルター契約から動的に生成されます。
   expressionHelpSyntax: 構文
@@ -487,14 +487,241 @@ filterBuilder:
   savedFiltersLoading: 保存済みフィルターを取得中...
   noSavedFilter: 保存済みフィルターを使用しない
   systemPresets: システムプリセット
+  dslDiagnostics:
+    location: "{line}行、{column}列"
+    unknown: "式が無効です。構文とフィールドの型を確認してください。"
+    unterminated_string: "文字列の閉じ引用符がありません。"
+    invalid_string: "文字列の形式が無効です。引用符とエスケープを確認してください。"
+    invalid_number: "有効な有限の数値を入力してください。"
+    invalid_token: "この文字は式の構文で使用できません。"
+    unexpected_token: "式の末尾に不要な内容があります。"
+    expected_identifier: "ここにはフィールド名または演算子が必要です。"
+    missing_closing_parenthesis: "閉じ括弧「)」がありません。"
+    missing_payload_parenthesis: "閉じ括弧「)」がありません。"
+    unknown_operator: "この演算子はサポートされていません。"
+    invalid_operator: "この演算子はサポートされていません。"
+    missing_selector_brace: "集合セレクターの閉じ波括弧「}」がありません。"
+    expected_payload_path: "有効な JSON ポインター（例：\"/metadata/value\"）を指定してください。"
+    invalid_json_path: "有効な JSON ポインター（例：\"/metadata/value\"）を指定してください。"
+    explicit_projection_required: "集合のメンバーは「->」で投影してください。"
+    collection_member_requires_projection: "集合のメンバーは「->」で投影してください。"
+    expected_target: "ここにはフィールドや集合などの有効な対象が必要です。"
+    invalid_target: "ここにはフィールドや集合などの有効な対象が必要です。"
+    invalid_member: "このメンバーは現在のエンティティまたはコンテキストで使用できません。"
+    invalid_context_member: "このメンバーは現在のエンティティまたはコンテキストで使用できません。"
+    unknown_context_intrinsic: "このコンテキスト値は無効か、ここでは使用できません。"
+    invalid_context_intrinsic: "このコンテキスト値は無効か、ここでは使用できません。"
+    invalid_context_intrinsic_condition: "このコンテキスト値は無効か、ここでは使用できません。"
+    invalid_context_root: "このコンテキスト値は無効か、ここでは使用できません。"
+    invalid_context_intrinsic_arguments: "関数の引数が正しくありません。個数と括弧を確認してください。"
+    invalid_occurrence_time_arguments: "関数の引数が正しくありません。個数と括弧を確認してください。"
+    unexpected_argument: "関数の引数が正しくありません。個数と括弧を確認してください。"
+    missing_argument: "関数の引数が正しくありません。個数と括弧を確認してください。"
+    invalid_sequence_gap: "ステップ間隔には昇順の正整数インデックスが2つ必要です。"
+    expected_sequence_steps: "シーケンスには少なくとも2つの有効なステップのリストが必要です。"
+    invalid_sequence: "シーケンスには少なくとも2つの有効なステップのリストが必要です。"
+    expected_argument_separator: "引数の間にコンマがありません。"
+    expected_duration_range: "時間ウィンドウには [0d, 7d] など2つの有効な期間境界が必要です。"
+    invalid_window: "時間ウィンドウには [0d, 7d] など2つの有効な期間境界が必要です。"
+    invalid_index: "インデックスを確認してください。n 番目の指定には正整数が必要です。"
+    unexpected_index: "インデックスを確認してください。n 番目の指定には正整数が必要です。"
+    unknown_function: "この関数または計算方法はサポートされていません。"
+    invalid_reducer: "この関数または計算方法はサポートされていません。"
+    invalid_arithmetic: "この関数または計算方法はサポートされていません。"
+    expected_duration: "7d や 30m などの有効な期間が必要です。"
+    invalid_duration: "7d や 30m などの有効な期間が必要です。"
+    invalid_temporal_literal: "7d や 30m などの有効な期間が必要です。"
+    missing_list_bracket: "閉じ角括弧「]」がありません。"
+    invalid_range: "範囲には2つの有効な境界値が必要です。"
+    expected_value: "ここには比較値が必要です。"
+    missing_value: "ここには比較値が必要です。"
+    unknown_field: "不明なフィールドです。使用可能なフィールドを確認してください。"
+    invalid_field: "不明なフィールドです。使用可能なフィールドを確認してください。"
+    field_not_allowed: "現在のアクセス権限ではこのフィールドを使用できません。"
+    operator_not_allowed: "この演算子はフィールドまたは値の型に適合しません。"
+    operator_type_mismatch: "この演算子はフィールドまたは値の型に適合しません。"
+    invalid_boolean: "真偽値 true または false を入力してください。"
+    invalid_date: "日付または時刻の式が無効か、現在の時間コンテキストに適合しません。"
+    invalid_datetime: "日付または時刻の式が無効か、現在の時間コンテキストに適合しません。"
+    invalid_time_anchor: "日付または時刻の式が無効か、現在の時間コンテキストに適合しません。"
+    invalid_time_scope: "日付または時刻の式が無効か、現在の時間コンテキストに適合しません。"
+    invalid_condition_value: "比較値の形式または型が対象に適合しません。"
+    invalid_canonical_value: "比較値の形式または型が対象に適合しません。"
+    invalid_value: "比較値の形式または型が対象に適合しません。"
+    invalid_scalar: "比較値の形式または型が対象に適合しません。"
+    condition_type_mismatch: "比較値の形式または型が対象に適合しません。"
+    invalid_set: "互換性のある値の空でないリストを指定してください。"
+    heterogeneous_set_values: "互換性のある値の空でないリストを指定してください。"
+    reversed_range: "下限は上限を超えないようにしてください。"
+    null_requires_unary_operator: "null の判定には isNull または notNull を使用してください。"
+    unexpected_value: "この演算子には比較値が不要です。"
+    number_above_maximum: "数値がフィールドの上限を超えています。"
+    number_below_minimum: "数値がフィールドの下限を下回っています。"
+    number_not_on_step: "数値がフィールドの指定された刻みに合っていません。"
+    too_deep: "式の入れ子が深すぎます。構造を簡略化してください。"
+    too_many_conditions: "式が条件、グループ、またはリストの上限を超えています。"
+    too_many_groups: "式が条件、グループ、またはリストの上限を超えています。"
+    too_many_set_values: "式が条件、グループ、またはリストの上限を超えています。"
+    invalid_limit: "式が条件、グループ、またはリストの上限を超えています。"
+    value_too_long: "比較値が長すぎます。"
+    invalid_entity_root: "このエンティティ集合は無効か使用できません。"
+    invalid_group: "式が不完全です。条件とグループを確認してください。"
+    invalid_expression: "式が不完全です。条件とグループを確認してください。"
+    missing_child: "式が不完全です。条件とグループを確認してください。"
+    missing_predicate: "式が不完全です。条件とグループを確認してください。"
+    missing_root: "式が不完全です。条件とグループを確認してください。"
+    unsupported_version: "この式のバージョンはサポートされていません。"
+    arithmetic_type_mismatch: "算術演算には互換性のある数値が必要です。"
+    bucket_period_mismatch: "グループ化間隔には有効な正整数の暦期間が必要です。"
+    period_interval_mismatch: "グループ化間隔には有効な正整数の暦期間が必要です。"
+    bucket_type_mismatch: "時間バケットにはページまたはイベントの集合が必要です。"
+    calendar_offset_not_supported: "相対オフセットには月や年ではなく固定期間を使用してください。"
+    expected_collection: "ここには単一の値ではなく集合が必要です。"
+    expected_sequence: "ここには行動シーケンスが必要です。"
+    occurrence_time_type_mismatch: "有効なアクティビティ時刻または時間アンカーが必要です。"
+    window_anchor_type_mismatch: "有効なアクティビティ時刻または時間アンカーが必要です。"
+    opaque_bucket_value: "時間バケットは直接比較できません。対応する集約を使用してください。"
+    reducer_type_mismatch: "この集約は入力集合または値の型に適合しません。"
+    relation_requires_session_or_visitor_scope: "この関係フィルターにはセッションまたは訪問者スコープが必要です。"
+    same_value_type_mismatch: "ステップ間の共通値には互換性のある型とエンティティが必要です。"
+    same_value_entity_mismatch: "ステップ間の共通値には互換性のある型とエンティティが必要です。"
+    sequence_step_type_mismatch: "シーケンスのステップや除外にはページまたはイベントの集合が必要です。"
+    without_type_mismatch: "シーケンスのステップや除外にはページまたはイベントの集合が必要です。"
+    invalid_condition_entity_domain: "この条件はエンティティのスコープに適合しません。"
+  naturalDescription:
+    namedEvent: "名前が{name}のイベント"
+    singularUnits:
+      ms: "ミリ秒"
+      s: "秒"
+      m: "分"
+      h: "時間"
+      d: "日"
+      w: "週間"
+      mo: "か月"
+      y: "年"
+    all: "次の条件をすべて満たす：{items}"
+    any: "次の条件のうち少なくとも1つを満たす：{items}"
+    negate: "次の条件を満たさない：{description}"
+    separator: "；"
+    nested: "（{description}）"
+    page: "ページ閲覧"
+    event: "イベント"
+    session: "セッション"
+    visitor: "訪問者"
+    current: "現在の項目"
+    sequenceContext: "現在の行動シーケンス"
+    periodContext: "現在の期間"
+    bucketContext: "現在の時間バケット"
+    payload: "イベント属性「{path}」"
+    member: "{object}の{field}"
+    selector: "{collection}のうち次の条件を満たすもの（{predicate}）"
+    projection: "{collection}それぞれの{field}"
+    count: "{input}の件数"
+    countDistinct: "{input}の異なる値の数"
+    first: "{input}の最初の項目"
+    last: "{input}の最後の項目"
+    nth: "{input}の{index}番目の項目"
+    sum: "{input}の合計"
+    avg: "{input}の平均値"
+    min: "{input}の最小値"
+    max: "{input}の最大値"
+    add: "（{left}と{right}の和）"
+    sub: "（{left}から{right}を引いた値）"
+    mul: "（{left}と{right}の積）"
+    div: "（{left}を{right}で割った値）"
+    duration: "{amount}{unit}"
+    pixels: "{amount}ピクセル"
+    now: "現在時刻"
+    rangeStart: "クエリ期間の開始時刻"
+    rangeEnd: "クエリ期間の終了時刻"
+    before: "{anchor}の{duration}前"
+    after: "{anchor}の{duration}後"
+    occurrenceTime: "{input}の発生時刻"
+    span: "最初から最後のステップまでの時間"
+    gap: "ステップ{from}から{to}までの間隔"
+    same: "各ステップの{input}が同じ"
+    items: "各期間内の項目"
+    bucket: "{input}を{interval}ごとに分けた時間バケット"
+    periods: "{collection}を{interval}ごとに分けた期間"
+    window: "{anchor}からの相対時間が{start}〜{end}の範囲内の{collection}"
+    sequence: "順番に発生する行動（{steps}）"
+    step: "ステップ{index}：{activity}"
+    adjacent: "各ステップが連続する{sequence}"
+    without: "ステップ間に{excluded}がない{sequence}"
+    collectionExists: "{collection}が存在する"
+    collectionNotExists: "{collection}が存在しない"
+    trueValue: "はい"
+    falseValue: "いいえ"
+    nullValue: "空値"
+    namedPage: "パスが{path}のページ閲覧"
+    distinctProjection: "{collection}における異なる{field}の数"
+    periodCount: "期間ごとの項目数"
+    ago: "{duration}前"
+    fromNow: "{duration}後"
+    firstTime: "{collection}の初回発生時刻"
+    lastTime: "{collection}の直近の発生時刻"
+    relationSequence: "次の行動が順に発生した：{steps}"
+    thenSeparator: "、続いて"
+    relationConstraint: "{relation}；さらにシーケンスが次の条件を満たす：{predicate}"
+    relationAdjacent: "{relation}；ステップは連続している"
+    relationWithout: "{relation}；ステップ間に{excluded}は発生していない"
+    eventOccurred: "{collection}が発生した"
+    eventNotOccurred: "{collection}が発生していない"
+    pageOccurred: "{collection}が記録された"
+    pageNotOccurred: "{collection}の記録がない"
+    atLeast: "{field}が{value}以上"
+    atMost: "{field}が{value}以下"
+    exactly: "{field}がちょうど{value}"
+    moreThan: "{field}が{value}より多い"
+    fewerThan: "{field}が{value}未満"
+  dslEditor:
+    title: "DSL エディター"
+    description: "フィルター式を編集し、確定すると下書きが更新されます。"
+    help: "構文ヘルプ"
+    valid: "式は有効です"
+    confirm: "変更を確定"
+    lines: "行"
+    observationOnly: "このエディターでは高度な式を使用できません。"
+  filterLibrary:
+    choose: "フィルターを選択"
+    features: "DSL の機能"
+    title: "フィルターライブラリ"
+    description: "保存済みフィルターとシステムプリセットを閲覧し、DSL を確認して適用します。"
+    categories: "フィルターの分類"
+    all: "すべて"
+    personal: "個人"
+    team: "チーム"
+    search: "フィルターを検索…"
+    topic: "トピック"
+    allTopics: "すべてのトピック"
+    type: "式の種類"
+    allTypes: "すべての種類"
+    standard: "標準"
+    advanced: "高度"
+    scope: "スコープ"
+    allScopes: "すべてのスコープ"
+    auto: "自動"
+    currentMatch: "現在のフィルターと一致"
+    empty: "該当するフィルターがありません"
+    back: "戻る"
+    updated: "最終更新"
+    formatted: "整形"
+    original: "元の形式"
+    wrap: "折り返し"
+    copy: "コピー"
+    copied: "DSL をコピーしました"
+    copyFailed: "DSL をコピーできませんでした"
+    cancel: "キャンセル"
   systemPresetCategories:
-    acquisition: 獲得
-    device: デバイス
-    visitBehavior: 訪問行動
-    sessionEngagement: セッションエンゲージメント
-    visitorBehavior: 訪問者行動
-    performance: パフォーマンス
-    dataQuality: データ品質
+    acquisition: "流入"
+    device: "デバイスと環境"
+    pageContent: "ページとコンテンツ"
+    eventConversion: "イベントとコンバージョン"
+    sessionEngagement: "セッションとエンゲージメント"
+    visitorBehavior: "訪問者とリテンション"
+    userJourney: "ユーザージャーニー"
+    performance: "パフォーマンス"
+    dataQuality: "データ品質"
   systemPresetScopes:
     preserve: 現在のスコープを維持
     event: イベントスコープ
@@ -615,6 +842,234 @@ filterBuilder:
     slowFcp:
       name: FCP が遅い
       description: FCP が 1.8 秒を超える訪問です。
+    paidSearch:
+      name: "有料検索トラフィック"
+      description: "有料検索トラフィックに該当する現在のスコープのデータを抽出します。"
+    emailTraffic:
+      name: "メール流入"
+      description: "メール流入に該当する現在のスコープのデータを抽出します。"
+    campaignNoSource:
+      name: "キャンペーンの流入元タグなし"
+      description: "キャンペーンの流入元タグなしに該当するイベントまたはページ活動を抽出します。"
+    externalWithUtmMedium:
+      name: "メディアタグ付き外部参照セッション"
+      description: "メディアタグ付き外部参照セッションに該当するセッションを抽出します。"
+    multiReferrerVisitor:
+      name: "参照元ドメイン値が2種類以上の訪問者"
+      description: "参照元ドメイン値が2種類以上の訪問者に該当する訪問者を抽出します。"
+    multiCampaignVisitor:
+      name: "複数キャンペーンに接触した訪問者"
+      description: "複数キャンペーンに接触した訪問者に該当する訪問者を抽出します。"
+    mobileDesktopVisitor:
+      name: "モバイルとデスクトップの両方を使う訪問者"
+      description: "モバイルとデスクトップの両方を使う訪問者に該当する訪問者を抽出します。"
+    multiDeviceVisitor:
+      name: "複数デバイスタイプの訪問者"
+      description: "複数デバイスタイプの訪問者に該当する訪問者を抽出します。"
+    multiBrowserVisitor:
+      name: "複数ブラウザーを使う訪問者"
+      description: "複数ブラウザーを使う訪問者に該当する訪問者を抽出します。"
+    multiOsVisitor:
+      name: "複数OSを使う訪問者"
+      description: "複数OSを使う訪問者に該当する訪問者を抽出します。"
+    mobileLandscape:
+      name: "幅600超のモバイルアクセス"
+      description: "幅600超のモバイルアクセスに該当するイベントまたはページ活動を抽出します。"
+    multiLanguageVisitor:
+      name: "複数ブラウザー言語の訪問者"
+      description: "複数ブラウザー言語の訪問者に該当する訪問者を抽出します。"
+    distinctPagesSession:
+      name: "異なる4ページ以上を閲覧したセッション"
+      description: "異なる4ページ以上を閲覧したセッションに該当するセッションを抽出します。"
+    docsDeepSession:
+      name: "ドキュメントの深い閲覧（3回）"
+      description: "ドキュメントの深い閲覧（3回）に該当するセッションを抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。"
+    avgPageDuration:
+      name: "平均ページ滞在時間1分以上"
+      description: "平均ページ滞在時間1分以上に該当するセッションを抽出します。"
+    maxPageDuration:
+      name: "2分以上のページ閲覧があるセッション"
+      description: "2分以上のページ閲覧があるセッションに該当するセッションを抽出します。"
+    totalPageDuration:
+      name: "合計ページ滞在時間3分以上"
+      description: "合計ページ滞在時間3分以上に該当するセッションを抽出します。"
+    firstPricingPage:
+      name: "最初のページが料金ページ"
+      description: "最初のページが料金ページに該当するセッションを抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    lastPricingPage:
+      name: "最後のページが料金ページ"
+      description: "最後のページが料金ページに該当するセッションを抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    secondDocsPage:
+      name: "2回目のページ閲覧がドキュメント"
+      description: "2回目のページ閲覧がドキュメントに該当するセッションを抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。"
+    pageQueryActivity:
+      name: "クエリパラメーター付きページ"
+      description: "クエリパラメーター付きページに該当するイベントまたはページ活動を抽出します。"
+    multiHostname:
+      name: "複数ホスト名の訪問者"
+      description: "複数ホスト名の訪問者に該当する訪問者を抽出します。"
+    purchaseCount:
+      name: "リピート購入（2回以上）"
+      description: "リピート購入（2回以上）に該当する訪問者を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。"
+    purchaseAmount:
+      name: "購入金額合計100以上"
+      description: "購入金額合計100以上に該当する訪問者を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。"
+    avgPurchaseAmount:
+      name: "平均購入金額50以上"
+      description: "平均購入金額50以上に該当する訪問者を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。"
+    distinctPurchasedSku:
+      name: "異なるSKUを3種類以上購入"
+      description: "異なるSKUを3種類以上購入に該当する訪問者を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。"
+    morePurchasesThanRefunds:
+      name: "返金回数より購入回数が多い"
+      description: "返金回数より購入回数が多いに該当する訪問者を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。"
+    eventNamesSession:
+      name: "異なるイベント名が3種類以上のセッション"
+      description: "異なるイベント名が3種類以上のセッションに該当するセッションを抽出します。"
+    eventWithPayload:
+      name: "ID属性があるイベント"
+      description: "ID属性があるイベントに該当するイベントまたはページ活動を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。"
+    successfulEvent:
+      name: "success=trueのイベント"
+      description: "success=trueのイベントに該当するイベントまたはページ活動を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。"
+    largeTransaction:
+      name: "1回の購入金額100以上"
+      description: "1回の購入金額100以上に該当するイベントまたはページ活動を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。"
+    errorEvents:
+      name: "エラーイベントが複数回のセッション"
+      description: "エラーイベントが複数回のセッションに該当するセッションを抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。"
+    signupNoPurchase:
+      name: "登録したが未購入"
+      description: "登録したが未購入に該当する訪問者を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。"
+    purchaseWithoutRefund:
+      name: "返金記録のない購入者"
+      description: "返金記録のない購入者に該当する訪問者を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。"
+    pageAndEventSession:
+      name: "ページ閲覧とイベントの両方があるセッション"
+      description: "ページ閲覧とイベントの両方があるセッションに該当するセッションを抽出します。"
+    repeatedPathSession:
+      name: "同じパスを複数回閲覧"
+      description: "同じパスを複数回閲覧に該当するセッションを抽出します。"
+    eventHeavySession:
+      name: "ページ閲覧よりイベントが多いセッション"
+      description: "ページ閲覧よりイベントが多いセッションに該当するセッションを抽出します。"
+    longNoEventSession:
+      name: "長時間だがカスタムイベントのないセッション"
+      description: "長時間だがカスタムイベントのないセッションに該当するセッションを抽出します。"
+    shortDeepSession:
+      name: "1分未満で5ページ以上閲覧"
+      description: "1分未満で5ページ以上閲覧に該当するセッションを抽出します。"
+    highEventRatio:
+      name: "ページ閲覧1回あたりイベント2回以上"
+      description: "ページ閲覧1回あたりイベント2回以上に該当するセッションを抽出します。"
+    singlePageWithEvent:
+      name: "1ページ閲覧でイベントがあるセッション"
+      description: "1ページ閲覧でイベントがあるセッションに該当するセッションを抽出します。"
+    recentPageVisitor:
+      name: "直近7日以内にページ閲覧"
+      description: "直近7日以内にページ閲覧に該当する訪問者を抽出します。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    inactivePageVisitor:
+      name: "最終ページ閲覧が30日より前"
+      description: "最終ページ閲覧が30日より前に該当する訪問者を抽出します。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    activeFiveDays:
+      name: "5日以上の暦日で活動"
+      description: "5日以上の暦日で活動に該当する訪問者を抽出します。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    activeThreeWeeks:
+      name: "週3回以上の閲覧がある週が3週以上"
+      description: "週3回以上の閲覧がある週が3週以上に該当する訪問者を抽出します。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    weeklyBurst:
+      name: "週10回以上閲覧した週がある"
+      description: "週10回以上閲覧した週があるに該当する訪問者を抽出します。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    monthActivity:
+      name: "2か月以上の暦月で活動"
+      description: "2か月以上の暦月で活動に該当する訪問者を抽出します。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    longActivitySpan:
+      name: "ページ活動期間が30日以上"
+      description: "ページ活動期間が30日以上に該当する訪問者を抽出します。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    recentEventVisitor:
+      name: "直近7日以内にカスタムイベント"
+      description: "直近7日以内にカスタムイベントに該当する訪問者を抽出します。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    recentFirstPage:
+      name: "範囲終了前7日以内の最初のページ閲覧"
+      description: "範囲終了前7日以内の最初のページ閲覧に該当する訪問者を抽出します。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    signupToPurchase14d:
+      name: "登録後14日以内に購入"
+      description: "登録後14日以内に購入に該当する訪問者を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    pricingAdjacentPurchase:
+      name: "料金ページの直後に購入"
+      description: "料金ページの直後に購入に該当するセッションを抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    signupPurchaseNoCancel:
+      name: "登録から7日以内の購入（途中キャンセルなし）"
+      description: "登録から7日以内の購入（途中キャンセルなし）に該当する訪問者を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    sameProductPurchase:
+      name: "閲覧後7日以内に同じ商品を購入"
+      description: "閲覧後7日以内に同じ商品を購入に該当する訪問者を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    purchaseNoRefundWindow:
+      name: "最初の購入後1週間以内に返金なし"
+      description: "最初の購入後1週間以内に返金なしに該当する訪問者を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    homeDocsJourney:
+      name: "ホームページからドキュメントへ"
+      description: "ホームページからドキュメントへに該当するセッションを抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    docsPricingJourney:
+      name: "ドキュメントから料金ページへ"
+      description: "ドキュメントから料金ページへに該当するセッションを抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    docsPricingQuick:
+      name: "5分以内にドキュメントから料金ページへ"
+      description: "5分以内にドキュメントから料金ページへに該当するセッションを抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    signupActivationPurchase:
+      name: "登録・有効化・購入の3ステップ"
+      description: "登録・有効化・購入の3ステップに該当する訪問者を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    cartPurchaseJourney:
+      name: "カート追加後に購入"
+      description: "カート追加後に購入に該当するセッションを抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    signupLaterVisit:
+      name: "登録1～7日後にページ閲覧"
+      description: "登録1～7日後にページ閲覧に該当する訪問者を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    purchaseFollowup:
+      name: "初回購入1～30日後に再購入"
+      description: "初回購入1～30日後に再購入に該当する訪問者を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。 利用可能な活動履歴とクエリの時間範囲に基づき、必ずしも全期間を表しません。"
+    slowPagesSession:
+      name: "LCPが遅いページを複数閲覧"
+      description: "LCPが遅いページを複数閲覧に該当するセッションを抽出します。"
+    avgLcpSession:
+      name: "平均LCPが2.5秒超のセッション"
+      description: "平均LCPが2.5秒超のセッションに該当するセッションを抽出します。"
+    worstInpSession:
+      name: "INPが500ms超のセッション"
+      description: "INPが500ms超のセッションに該当するセッションを抽出します。"
+    avgClsSession:
+      name: "平均CLSが0.1超のセッション"
+      description: "平均CLSが0.1超のセッションに該当するセッションを抽出します。"
+    severalSlowTtfb:
+      name: "TTFBが遅いページ2回以上"
+      description: "TTFBが遅いページ2回以上に該当するセッションを抽出します。"
+    goodMeasuredVitals:
+      name: "計測済みCore Web Vitals 3項目が良好"
+      description: "計測済みCore Web Vitals 3項目が良好に該当するイベントまたはページ活動を抽出します。"
+    mobileSlowLcp:
+      name: "モバイルの遅いLCP"
+      description: "モバイルの遅いLCPに該当するイベントまたはページ活動を抽出します。"
+    emptyPageTitle:
+      name: "空のページタイトルを含むセッション"
+      description: "空のページタイトルを含むセッションに該当するセッションを抽出します。"
+    eventOnlySession:
+      name: "イベントのみでページ閲覧のないセッション"
+      description: "イベントのみでページ閲覧のないセッションに該当するセッションを抽出します。"
+    missingPerformance:
+      name: "Core Web Vitalsがすべて欠損"
+      description: "Core Web Vitalsがすべて欠損に該当するイベントまたはページ活動を抽出します。"
+    missingDevice:
+      name: "デバイスタイプまたはブラウザーが欠損"
+      description: "デバイスタイプまたはブラウザーが欠損に該当するイベントまたはページ活動を抽出します。"
+    missingCampaignMedium:
+      name: "キャンペーンあり・メディア欠損"
+      description: "キャンペーンあり・メディア欠損に該当するイベントまたはページ活動を抽出します。"
+    missingPayloadAmount:
+      name: "購入イベントに金額属性がない"
+      description: "購入イベントに金額属性がないに該当するイベントまたはページ活動を抽出します。 分析例です。サイトのパス、イベント名、Payloadの属性、しきい値に合わせて調整してください。"
+    countryChanges:
+      name: "複数の国が記録された訪問者"
+      description: "複数の国が記録された訪問者に該当する訪問者を抽出します。"
   savedFiltersPersonal: 個人用フィルター
   savedFiltersTeam: チームのフィルター
   savedFiltersAuthor: "作成者: {name}"

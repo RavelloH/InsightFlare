@@ -237,3 +237,106 @@ describe("FilterEditor advanced visual integration", () => {
     ).toEqual(parseFilterDsl(source, analyticsFilterRegistry));
   });
 });
+
+describe("FilterEditor focus-to-edit DSL dialog", () => {
+  beforeEach(() => {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    host.remove();
+  });
+
+  const input = () =>
+    host.querySelector<HTMLInputElement>("#filter-editor-expression")!;
+  const textarea = () =>
+    document.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="' + messages.filterBuilder.expression + '"]',
+    )!;
+  const dialogButton = (label: string) =>
+    Array.from(
+      document.querySelectorAll<HTMLButtonElement>(
+        '[data-slot="dialog-content"] button',
+      ),
+    ).find((button) => button.textContent?.trim() === label)!;
+  async function typeDraft(value: string) {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )?.set?.call(textarea(), value);
+      textarea().dispatchEvent(new Event("input", { bubbles: true }));
+      textarea().dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+
+  it("opens on native input focus, confirms only valid multiline DSL and retains it on Apply", async () => {
+    const original = 'page.path eq "/old"';
+    const onApply = await mount(original);
+    expect(input().readOnly).toBe(true);
+    await act(async () => input().focus());
+    expect(textarea()).not.toBeNull();
+    expect(textarea().value).toBe(original);
+    const next = 'page.path eq "/new" AND\nclient.deviceType eq "mobile"';
+    await typeDraft('page.path eq "unfinished');
+    const confirm = () => dialogButton("Confirm changes");
+    expect(confirm().disabled).toBe(true);
+    expect(input().value).toBe(original);
+    await typeDraft(next);
+    expect(confirm().disabled).toBe(false);
+    await act(async () => confirm().click());
+    expect(input().getAttribute("aria-expanded")).toBe("false");
+    expect(input().value).toContain('"/new"');
+    expect(onApply).not.toHaveBeenCalled();
+    await apply();
+    expect(onApply.mock.calls[0]?.[0]).toBe(next);
+  });
+
+  it("underlines only the invalid source range and clears diagnostics after repair", async () => {
+    await mount('page.path eq "/old"');
+    await act(async () => input().focus());
+    const invalid = 'page.path eq "/a" AND\npage.path typo "/b"';
+    await typeDraft(invalid);
+    const marks = () =>
+      Array.from(document.querySelectorAll('[data-dsl-diagnostic="range"]'))
+        .map((mark) => mark.textContent)
+        .join("");
+    expect(marks()).toBe("typo");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 450));
+    });
+    const alert = document.querySelector('[role="alert"]')!;
+    expect(alert.textContent).toContain(
+      messages.filterBuilder.dslDiagnostics.unknown_operator,
+    );
+    expect(alert.textContent).toContain("Line 2");
+    await act(async () => alert.querySelector("button")!.click());
+    expect(textarea().selectionStart).toBe(invalid.indexOf("typo"));
+    expect(textarea().selectionEnd).toBe(invalid.indexOf("typo") + 4);
+    const eof = '(page.path eq "/a"';
+    await typeDraft(eof);
+    expect(
+      document.querySelector('[data-dsl-diagnostic="eof"]'),
+    ).not.toBeNull();
+    await typeDraft(eof + ")");
+    expect(document.querySelector("[data-dsl-diagnostic]")).toBeNull();
+    expect(dialogButton("Confirm changes").disabled).toBe(false);
+  });
+
+  it("cancels an uncommitted draft and can reopen from the original input", async () => {
+    const original = 'page.path eq "/old"';
+    await mount(original);
+    await act(async () => input().focus());
+    await typeDraft('page.path eq "/discard"');
+    await act(async () =>
+      dialogButton(messages.filterBuilder.filterLibrary.cancel).click(),
+    );
+    expect(input().getAttribute("aria-expanded")).toBe("false");
+    expect(input().value).toBe(original);
+    await act(async () => input().click());
+    expect(textarea().value).toBe(original);
+    expect(input().getAttribute("aria-expanded")).toBe("true");
+  });
+});
