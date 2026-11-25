@@ -6,7 +6,7 @@ import {
   useEffect,
   useState,
 } from "react";
-import { Icon } from "@iconify/react";
+import { FlagIcon } from "@insightflare/product-ui/flag-icon";
 import {
   RiCellphoneLine,
   RiComputerLine,
@@ -380,7 +380,7 @@ export const LocationMeta = memo(function LocationMeta({
     <InlineMeta
       icon={
         flagCode ? (
-          <Icon
+          <FlagIcon
             icon={`flagpack:${flagCode.toLowerCase()}`}
             style={{ width: 16, height: 12 }}
             className="block shrink-0"

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   AnimatePresence,
   motion,
@@ -88,12 +88,6 @@ export const AutoTransition = React.forwardRef<
   },
   ref,
 ) {
-  const [hasRendered, setHasRendered] = useState(initial);
-
-  useEffect(() => {
-    if (!hasRendered) setHasRendered(true);
-  }, [hasRendered]);
-
   const resolvedPresenceMode =
     type === "crossFade" ? "popLayout" : presenceMode;
 
@@ -126,7 +120,6 @@ export const AutoTransition = React.forwardRef<
   }, [children, transitionKey]);
 
   const selectedVariants = customVariants || transitionVariants[type];
-  const shouldAnimate = initial || hasRendered;
   const MotionComponent = (
     as === "g"
       ? motion.g
@@ -142,7 +135,11 @@ export const AutoTransition = React.forwardRef<
   ) as React.ElementType;
 
   return (
-    <AnimatePresence mode={resolvedPresenceMode} custom={custom}>
+    <AnimatePresence
+      mode={resolvedPresenceMode}
+      custom={custom}
+      initial={initial}
+    >
       <MotionComponent
         {...motionProps}
         ref={ref}
@@ -150,7 +147,7 @@ export const AutoTransition = React.forwardRef<
         className={className}
         custom={custom}
         variants={selectedVariants}
-        initial={shouldAnimate ? "initial" : false}
+        initial="initial"
         animate="animate"
         exit="exit"
         transition={{ duration }}

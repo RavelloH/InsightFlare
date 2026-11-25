@@ -7,6 +7,7 @@ import process from "node:process";
 import {
   type CommonOptions,
   createRuntime,
+  hasFlag,
   localCli,
   parseCommonOptions,
   resolveViteBuildMode,
@@ -154,9 +155,13 @@ async function main(): Promise<void> {
     ),
   );
   stages.push(
-    await runtime.runStage(2, 4, "Building UI packages", () =>
-      buildPackages(options),
-    ),
+    await runtime.runStage(2, 4, "Building UI packages", async () => {
+      if (hasFlag(process.argv.slice(2), "skip-packages")) {
+        runtime.rlog.info("Reusing UI packages built earlier in this check.");
+        return;
+      }
+      await buildPackages(options);
+    }),
   );
   stages.push(
     await runtime.runStage(3, 4, "Preparing build inputs", () =>

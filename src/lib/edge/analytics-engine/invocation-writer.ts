@@ -43,6 +43,9 @@ const SAFE_OPERATIONS = new Set([
   "page.handler",
   "page.middleware",
   "server_function.handler",
+  "dashboard.bootstrap",
+  "dashboard.profile",
+  "dashboard.team_snapshot",
   "do.fetch.handler",
   "do.schema_ready",
   "do.maintenance",
@@ -193,7 +196,7 @@ function trustedRouteKey(snapshot: InvocationSnapshot): string {
   if (
     candidate &&
     encoder.encode(candidate).length <= 72 &&
-    /^(?:api:\/[A-Za-z0-9_./:{}*-]+|api\.other|page\.other|server_function\.handler|do\.(?:ingest|snapshot|active|diagnostic|reconcile|flush|ws|other|alarm|websocket)|scheduled\.tasks)$/.test(
+    /^(?:api:\/[A-Za-z0-9_./:{}*-]+|api\.other|page\.(?:other|dashboard\.(?:workspace|team|other))|server_function\.(?:handler|dashboard\.bootstrap)|do\.(?:ingest|snapshot|active|diagnostic|reconcile|flush|ws|other|alarm|websocket)|scheduled\.tasks)$/.test(
       candidate,
     )
   ) {

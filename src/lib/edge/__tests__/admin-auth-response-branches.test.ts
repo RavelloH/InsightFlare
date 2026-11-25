@@ -380,40 +380,52 @@ describe("admin auth low branches", () => {
   });
 
   it("builds categorized session team groups", async () => {
-    const createdRows = [
-      { id: "created-team", slug: "created", membershipRole: "owner" },
-    ];
-    const managedRows = [
-      { id: "managed-team", slug: "managed", membershipRole: "admin" },
-    ];
-    const memberRows = [
-      { id: "member-team", slug: "member", membershipRole: "member" },
-    ];
-    const systemRows = [
-      { id: "created-team", slug: "created", membershipRole: "owner" },
-      { id: "system-team", slug: "system", membershipRole: null },
+    const rows = [
+      {
+        id: "created-team",
+        slug: "created",
+        ownerUserId: "admin-1",
+        membershipRole: "owner",
+      },
+      {
+        id: "managed-team",
+        slug: "managed",
+        ownerUserId: "other-user",
+        membershipRole: "admin",
+      },
+      {
+        id: "member-team",
+        slug: "member",
+        ownerUserId: "other-user",
+        membershipRole: "member",
+      },
+      {
+        id: "system-team",
+        slug: "system",
+        ownerUserId: "other-user",
+        membershipRole: null,
+      },
     ];
 
-    const result = await teamGroupsForSession(
-      createEnv([
-        statement({ all: createdRows }),
-        statement({ all: managedRows }),
-        statement({ all: memberRows }),
-        statement({ all: systemRows }),
-      ]).env,
-      { user: userRow({ id: "admin-1" }), isAdmin: true },
-    );
+    const { env, prepare } = createEnv([statement({ all: rows })]);
+    const result = await teamGroupsForSession(env, {
+      user: userRow({ id: "admin-1" }),
+      isAdmin: true,
+    });
 
+    expect(prepare).toHaveBeenCalledTimes(1);
     expect(result.teamGroups).toMatchObject({
       created: [{ id: "created-team", membershipRole: "owner" }],
       managed: [{ id: "managed-team", membershipRole: "admin" }],
       member: [{ id: "member-team", membershipRole: "member" }],
       system: [
         { id: "created-team", membershipRole: "owner" },
+        { id: "managed-team", membershipRole: "admin" },
+        { id: "member-team", membershipRole: "member" },
         { id: "system-team" },
       ],
     });
-    expect(result.teamGroups.system[1]).not.toHaveProperty("membershipRole");
+    expect(result.teamGroups.system[3]).not.toHaveProperty("membershipRole");
     expect(result.teams.map((team) => team.id)).toEqual([
       "created-team",
       "managed-team",

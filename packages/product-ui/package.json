@@ -32,6 +32,11 @@
   ],
   "exports": {
     "./styles.css": "./styles.css",
+    "./flag-icon": {
+      "types": "./dist/flag-icon.d.ts",
+      "development": "./src/flag-icon.tsx",
+      "import": "./dist/flag-icon.js"
+    },
     "./goals": {
       "types": "./dist/goals/index.d.ts",
       "development": "./src/goals/index.ts",

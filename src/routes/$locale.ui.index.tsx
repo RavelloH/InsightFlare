@@ -17,7 +17,7 @@ import {
   uiGalleryRegistry,
 } from "@/components/ui-gallery/registry";
 import { resolveLocale } from "@/lib/i18n/config";
-import { getMessages } from "@/lib/i18n/messages";
+import { getRuntimeMessages } from "@/lib/i18n/runtime-messages";
 import Link from "@/lib/router";
 
 export const Route = createFileRoute("/$locale/ui/")({
@@ -26,7 +26,7 @@ export const Route = createFileRoute("/$locale/ui/")({
 
 function UiGalleryIndex() {
   const locale = resolveLocale(Route.useParams().locale);
-  const messages = getMessages(locale).uiGallery;
+  const messages = getRuntimeMessages(locale).uiGallery;
   const categories = listUiGalleryCategories();
   const counts = new Map(
     categories.map((category) => [

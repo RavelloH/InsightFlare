@@ -1,5 +1,5 @@
 import { type MutableRefObject, useEffect, useRef, useState } from "react";
-import { Icon } from "@iconify/react";
+import { FlagIcon } from "@insightflare/product-ui/flag-icon";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   Breadcrumb,
@@ -184,7 +184,7 @@ export function GeoCountryFlag({
   if (!flagCode) return null;
 
   return (
-    <Icon
+    <FlagIcon
       icon={`flagpack:${flagCode.toLowerCase()}`}
       style={{
         width: 16,
@@ -210,7 +210,7 @@ export function GeoCountryBreadcrumbItem({
     <BreadcrumbItem className="min-w-0">
       <BreadcrumbPage className="inline-flex min-w-0 items-center gap-2">
         {countryIconName ? (
-          <Icon
+          <FlagIcon
             icon={countryIconName}
             style={{
               width: 16,

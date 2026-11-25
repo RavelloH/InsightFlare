@@ -41,21 +41,47 @@
   overflow: hidden;
 }
 
-html[data-scrollbar-mode="native"]
-  .os-scrollbar-viewport[data-scrollbar-axis="vertical"] {
+.os-scrollbar-viewport[data-scrollbar-axis="vertical"]:not(
+    [data-overlayscrollbars-viewport]
+  ) {
   overflow-x: hidden;
   overflow-y: auto;
 }
 
-html[data-scrollbar-mode="native"]
-  .os-scrollbar-viewport[data-scrollbar-axis="horizontal"] {
+.os-scrollbar-viewport[data-scrollbar-axis="horizontal"]:not(
+    [data-overlayscrollbars-viewport]
+  ) {
   overflow-x: auto;
   overflow-y: hidden;
 }
 
-html[data-scrollbar-mode="native"]
-  .os-scrollbar-viewport[data-scrollbar-axis="both"] {
+.os-scrollbar-viewport[data-scrollbar-axis="both"]:not(
+    [data-overlayscrollbars-viewport]
+  ) {
   overflow: auto;
+}
+
+html[data-scrollbar-mode="overlay"]
+  .os-scrollbar-viewport:not([data-overlayscrollbars-viewport]) {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+html[data-scrollbar-mode="overlay"]
+  .os-scrollbar-viewport:not(
+    [data-overlayscrollbars-viewport]
+  )::-webkit-scrollbar {
+  display: block;
+  width: 8px;
+  height: 8px;
+}
+
+html[data-scrollbar-mode="overlay"]
+  .os-scrollbar-viewport:not(
+    [data-overlayscrollbars-viewport]
+  )::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
 }
 
 .os-scrollbar-host {

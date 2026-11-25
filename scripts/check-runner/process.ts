@@ -24,33 +24,30 @@ export interface CapturedProcessResult {
 }
 
 class FailureOutputBuffer {
-  private value = "";
-  private size = 0;
+  private head = Buffer.alloc(0);
+  private tail = Buffer.alloc(0);
   private truncated = false;
 
   append(text: string, terminated: boolean): void {
-    if (this.truncated) return;
-
-    const suffix = terminated ? "\n" : "";
-    const next = `${text}${suffix}`;
-    const remaining = MAX_FAILURE_OUTPUT_BYTES - this.size;
-    if (Buffer.byteLength(next, "utf8") <= remaining) {
-      this.value += next;
-      this.size += Buffer.byteLength(next, "utf8");
-      return;
+    const next = Buffer.from(text + (terminated ? "\n" : ""), "utf8");
+    const headLimit = 16 * 1024;
+    const tailLimit = MAX_FAILURE_OUTPUT_BYTES - headLimit;
+    const available = Math.max(0, headLimit - this.head.length);
+    if (available > 0) {
+      this.head = Buffer.concat([this.head, next.subarray(0, available)]);
     }
-
-    const truncated = Buffer.from(next, "utf8")
-      .subarray(0, Math.max(remaining, 0))
-      .toString("utf8");
-    this.value += truncated;
-    this.size += Buffer.byteLength(truncated, "utf8");
-    this.truncated = true;
+    const rest = next.subarray(available);
+    if (!rest.length) return;
+    const combined = Buffer.concat([this.tail, rest]);
+    if (combined.length > tailLimit) this.truncated = true;
+    this.tail = combined.subarray(Math.max(0, combined.length - tailLimit));
   }
 
   toString(): string {
-    if (!this.truncated) return this.value;
-    return `${this.value}\n[process output truncated after ${MAX_FAILURE_OUTPUT_BYTES} bytes]`;
+    const separator = this.truncated
+      ? "\n[process output truncated; retained beginning and end]\n"
+      : "";
+    return this.head.toString("utf8") + separator + this.tail.toString("utf8");
   }
 }
 

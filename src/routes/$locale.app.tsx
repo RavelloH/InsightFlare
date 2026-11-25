@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-router";
 
 import { DashboardShell } from "@/components/dashboard/shell/dashboard-shell";
+import { createBootstrapHandoff } from "@/lib/dashboard/bootstrap-handoff";
 import { loadDashboardBootstrap } from "@/lib/dashboard/route-data";
 import type {
   DashboardContext,
@@ -13,13 +14,17 @@ import type {
 } from "@/lib/dashboard/server";
 import { buildManagementSections } from "@/lib/dashboard/team-sections";
 import { usePathname } from "@/lib/router";
+const handoff =
+  createBootstrapHandoff<Awaited<ReturnType<typeof loadDashboardBootstrap>>>();
 // Keep this callback independent of the globally registered route union:
 // the root route itself is part of that union.
 async function bootstrapRoute(
   options: unknown,
 ): Promise<Awaited<ReturnType<typeof loadDashboardBootstrap>>> {
-  const { matches } = options as {
+  const { matches, preload, location } = options as {
     matches: Array<{ routeId: string; params: Record<string, unknown> }>;
+    preload: boolean;
+    location: { href: string };
   };
   const teamMatch = matches.find(
     (match) => match.routeId === "/$locale/app/$teamSlug",
@@ -29,15 +34,24 @@ async function bootstrapRoute(
     : matches.some((match) => match.routeId === "/$locale/app/$teamSlug/")
       ? "team"
       : undefined;
-  return loadDashboardBootstrap({
-    data: {
-      teamSlug:
-        typeof teamMatch?.params.teamSlug === "string"
-          ? teamMatch.params.teamSlug
-          : undefined,
-      page,
-    },
-  });
+  const read = () =>
+    loadDashboardBootstrap({
+      data: {
+        teamSlug:
+          typeof teamMatch?.params.teamSlug === "string"
+            ? teamMatch.params.teamSlug
+            : undefined,
+        page,
+      },
+    });
+  // Server requests must never share data across users. Use an exact
+  // destination and cookie state; never reuse a consumed result.
+  if (typeof document === "undefined") return read();
+  return handoff(
+    JSON.stringify([location.href, document.cookie]),
+    preload,
+    read,
+  );
 }
 export const Route = createFileRoute("/$locale/app")({
   beforeLoad: bootstrapRoute,

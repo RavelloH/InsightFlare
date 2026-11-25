@@ -65,4 +65,31 @@ describe("runCapturedProcess", () => {
       }
     },
   );
+  it(
+    "retains the final diagnostic when successful progress fills the output budget",
+    { timeout: 30_000 },
+    async () => {
+      const logger = createTestLogger();
+      try {
+        const result = await runCapturedProcess({
+          command: process.execPath,
+          args: [
+            "-e",
+            'console.log("start-marker"); console.log("a".repeat(200000)); console.error("final-diagnostic"); process.exitCode = 1',
+          ],
+          cwd: process.cwd(),
+          env: process.env,
+          logger,
+          verbose: false,
+        });
+        expect(result.ok).toBe(false);
+        expect(result.output).toContain("start-marker");
+        expect(result.output).toContain("final-diagnostic");
+        expect(result.output).toContain("retained beginning and end");
+        expect(Buffer.byteLength(result.output)).toBeLessThan(132000);
+      } finally {
+        await logger.close();
+      }
+    },
+  );
 });

@@ -20,11 +20,11 @@ import {
 import { useLocation } from "@tanstack/react-router";
 
 import { EventDetailDrawer } from "@/components/dashboard/site-pages/events/event-detail-drawer";
-import { getMessages } from "@/lib/i18n/messages";
+import { type Locale, resolveLocale } from "@/lib/i18n/config";
+import { getRuntimeMessages } from "@/lib/i18n/runtime-messages";
 const FIXTURE_QUERY = "__layerFixture";
 const DETAIL_COUNT = 5;
 const SYNTHETIC_COUNT = 20;
-const STRESS_MESSAGES = getMessages("zh");
 type FixtureMode = "stress" | "synthetic" | null;
 function fixtureMode(search: string): FixtureMode {
   if (!import.meta.env.DEV) return null;
@@ -48,6 +48,7 @@ function SyntheticFrames() {
   );
 }
 function StressControls({
+  locale,
   dialogOpen,
   eventDrawerOpen,
   filterOpen,
@@ -55,6 +56,7 @@ function StressControls({
   onEventDrawerOpenChange,
   onFilterOpenChange,
 }: {
+  readonly locale: Locale;
   readonly dialogOpen: boolean;
   readonly eventDrawerOpen: boolean;
   readonly filterOpen: boolean;
@@ -62,6 +64,7 @@ function StressControls({
   readonly onEventDrawerOpenChange: (open: boolean) => void;
   readonly onFilterOpenChange: (open: boolean) => void;
 }) {
+  const messages = getRuntimeMessages(locale);
   return (
     <div
       data-layer-fixture-stress=""
@@ -116,11 +119,11 @@ function StressControls({
         </DialogContent>
       </Dialog>
       <EventDetailDrawer
-        locale="zh"
-        messages={STRESS_MESSAGES}
-        labels={STRESS_MESSAGES.events}
+        locale={locale}
+        messages={messages}
+        labels={messages.events}
         siteId="e2e-layer-fixture"
-        pathname="/zh/app/e2e-layer-fixture/goals"
+        pathname={"/" + locale + "/app/e2e-layer-fixture/goals"}
         open={eventDrawerOpen}
         onOpenChange={onEventDrawerOpenChange}
         detail={null}
@@ -131,7 +134,7 @@ function StressControls({
     </div>
   );
 }
-function StressFrames() {
+function StressFrames({ locale }: { locale: Locale }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [eventDrawerOpen, setEventDrawerOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -163,6 +166,7 @@ function StressFrames() {
         >
           {isLeaf ? (
             <StressControls
+              locale={locale}
               dialogOpen={dialogOpen}
               eventDrawerOpen={eventDrawerOpen}
               filterOpen={filterOpen}
@@ -181,9 +185,12 @@ function StressFrames() {
 }
 export function LayerSystemFixture() {
   const search = useLocation({ select: (location) => location.searchStr });
+  const locale = useLocation({
+    select: (location) => resolveLocale(location.pathname.split("/")[1]),
+  });
   const mode = fixtureMode(search);
 
   if (mode === "synthetic") return <SyntheticFrames />;
-  if (mode === "stress") return <StressFrames />;
+  if (mode === "stress") return <StressFrames locale={locale} />;
   return null;
 }

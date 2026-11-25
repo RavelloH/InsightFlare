@@ -190,9 +190,21 @@ export function zonedParts(
   timeZone: string,
 ): ZonedDateTimeParts {
   const date = new Date(timestampMs);
-  const parts = getPartsFormatter(
-    resolveReportingTimeZone(timeZone),
-  ).formatToParts(date);
+  const resolved = resolveReportingTimeZone(timeZone);
+  // Analytics timestamps are modern dates. UTC needs no ICU formatting or
+  // offset search; leave historical/invalid dates on the existing path.
+  if (resolved === "UTC" && timestampMs >= 0 && date.getUTCFullYear() <= 9999) {
+    return {
+      year: date.getUTCFullYear(),
+      month: date.getUTCMonth() + 1,
+      day: date.getUTCDate(),
+      hour: date.getUTCHours(),
+      minute: date.getUTCMinutes(),
+      second: date.getUTCSeconds(),
+      millisecond: date.getUTCMilliseconds(),
+    };
+  }
+  const parts = getPartsFormatter(resolved).formatToParts(date);
   const result: ZonedDateTimeParts = {
     year: 1970,
     month: 1,
@@ -249,6 +261,13 @@ export function zonedTimeToUtcMs(
     parts.second,
     parts.millisecond,
   );
+  if (
+    resolved === "UTC" &&
+    utcGuess >= 0 &&
+    new Date(utcGuess).getUTCFullYear() <= 9999
+  ) {
+    return utcGuess;
+  }
   let offset = timeZoneOffsetMinutes(resolved, utcGuess);
   let result = utcGuess - offset * 60_000;
   const nextOffset = timeZoneOffsetMinutes(resolved, result);

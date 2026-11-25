@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { useReportingTimeZone } from "@/components/time-zone-provider";
+import { useHydrated } from "@/hooks/use-hydrated";
 import {
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
@@ -44,6 +45,7 @@ import {
 } from "@/lib/filter-contract/index";
 interface DashboardQueryContextValue {
   range: RangePreset;
+  queryReady: boolean;
   window: TimeWindow;
   filters: FilterDocument;
   uiFilters: FilterDocument;
@@ -211,6 +213,7 @@ export function DashboardQueryProvider({
   initialScopePreference,
 }: DashboardQueryProviderProps) {
   const { timeZone: managedTimeZone } = useReportingTimeZone();
+  const hydrated = useHydrated();
   const routeSearchParams = useLiveSearchParams();
   const routeSearchParamsKey = routeSearchParams.toString();
   // During the first client render after SSR, useSyncExternalStore may still
@@ -280,6 +283,9 @@ export function DashboardQueryProvider({
   useEffect(() => {
     setTimeZone(managedTimeZone);
   }, [managedTimeZone]);
+  // The SSR cookie may be stale or absent. Don't start a query with its
+  // fallback zone while the client manager is resolving the reporting zone.
+  const queryReady = hydrated && timeZone === managedTimeZone;
 
   const resolvedWindow = useMemo(
     () =>
@@ -471,6 +477,7 @@ export function DashboardQueryProvider({
   const contextValue = useMemo<DashboardQueryContextValue>(
     () => ({
       range,
+      queryReady,
       window: windowState,
       filters: normalizeFilters(uiFilters),
       uiFilters,
@@ -489,6 +496,7 @@ export function DashboardQueryProvider({
     }),
     [
       range,
+      queryReady,
       windowState,
       uiFilters,
       uiFilterDsl,
@@ -518,6 +526,7 @@ function useDashboardQueryContext(): DashboardQueryContextValue {
     const fallbackWindow = resolveTimeWindow(DEFAULT_RANGE);
     return {
       range: DEFAULT_RANGE,
+      queryReady: !import.meta.env.SSR,
       window: fallbackWindow,
       filters: EMPTY_FILTERS,
       uiFilters: EMPTY_FILTERS,
@@ -541,6 +550,7 @@ export function useDashboardQuery() {
   const context = useDashboardQueryContext();
   return {
     range: context.range,
+    queryReady: context.queryReady,
     filters: context.filters,
     window: context.window,
     scopePreference: context.scopePreference,

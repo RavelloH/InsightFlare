@@ -29,7 +29,19 @@ function partsFormatter(timeZone: string): Intl.DateTimeFormat {
 }
 
 function zonedParts(timestampMs: number, timeZone: string): ZonedDateTimeParts {
-  const values = partsFormatter(timeZone).formatToParts(new Date(timestampMs));
+  const date = new Date(timestampMs);
+  if (timeZone === "UTC" && timestampMs >= 0 && date.getUTCFullYear() <= 9999) {
+    return {
+      year: date.getUTCFullYear(),
+      month: date.getUTCMonth() + 1,
+      day: date.getUTCDate(),
+      hour: date.getUTCHours(),
+      minute: date.getUTCMinutes(),
+      second: date.getUTCSeconds(),
+      millisecond: date.getUTCMilliseconds(),
+    };
+  }
+  const values = partsFormatter(timeZone).formatToParts(date);
   const result: ZonedDateTimeParts = {
     year: 1970,
     month: 1,
@@ -76,6 +88,12 @@ function zonedTimeToUtcMs(timeZone: string, parts: ZonedDateTimeParts): number {
     parts.second,
     parts.millisecond,
   );
+  if (
+    timeZone === "UTC" &&
+    utcGuess >= 0 &&
+    new Date(utcGuess).getUTCFullYear() <= 9999
+  )
+    return utcGuess;
   let offset = offsetMinutes(timeZone, utcGuess);
   let result = utcGuess - offset * 60_000;
   const adjustedOffset = offsetMinutes(timeZone, result);
@@ -111,7 +129,7 @@ function addCalendarMonths(
   return { year, month, day: Math.min(parts.day, lastDay) };
 }
 
-export function startOfZonedInterval(
+function computeStartOfZonedInterval(
   timestampMs: number,
   interval: DashboardInterval,
   timeZone: string,
@@ -146,7 +164,7 @@ export function startOfZonedInterval(
   return zonedTimeToUtcMs(timeZone, parts);
 }
 
-export function addZonedInterval(
+function computeAddZonedInterval(
   timestampMs: number,
   interval: DashboardInterval,
   timeZone: string,
@@ -162,4 +180,60 @@ export function addZonedInterval(
     Object.assign(parts, addCalendarMonths(parts, 1));
   }
   return zonedTimeToUtcMs(timeZone, parts);
+}
+
+// Multiple sparklines share the same calendar buckets. Cache only pure numeric
+// results, never analytics data; bounded FIFO eviction keeps memory predictable.
+const MAX_CALENDAR_CACHE_ENTRIES = 8192;
+const startCache = new Map<string, number>();
+const addCache = new Map<string, number>();
+function cachedCalendar(
+  cache: Map<string, number>,
+  calculate: (
+    timestamp: number,
+    interval: DashboardInterval,
+    zone: string,
+  ) => number,
+  timestamp: number,
+  interval: DashboardInterval,
+  zone: string,
+): number {
+  const key = JSON.stringify([zone, interval, timestamp]);
+  const cached = cache.get(key);
+  if (cached !== undefined) return cached;
+  const value = calculate(timestamp, interval, zone);
+  if (Number.isFinite(timestamp) && Number.isFinite(value)) {
+    if (cache.size >= MAX_CALENDAR_CACHE_ENTRIES) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+    cache.set(key, value);
+  }
+  return value;
+}
+export function startOfZonedInterval(
+  timestampMs: number,
+  interval: DashboardInterval,
+  timeZone: string,
+): number {
+  return cachedCalendar(
+    startCache,
+    computeStartOfZonedInterval,
+    timestampMs,
+    interval,
+    timeZone,
+  );
+}
+export function addZonedInterval(
+  timestampMs: number,
+  interval: DashboardInterval,
+  timeZone: string,
+): number {
+  return cachedCalendar(
+    addCache,
+    computeAddZonedInterval,
+    timestampMs,
+    interval,
+    timeZone,
+  );
 }

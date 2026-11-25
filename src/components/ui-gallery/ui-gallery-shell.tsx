@@ -74,7 +74,7 @@ import {
 } from "@/components/ui-gallery/copy";
 import { APP_WEBSITE_URL } from "@/lib/constants";
 import { resolveLocale } from "@/lib/i18n/config";
-import { getMessages } from "@/lib/i18n/messages";
+import { getRuntimeMessages } from "@/lib/i18n/runtime-messages";
 import Link from "@/lib/router";
 
 import { listUiGalleryCategories, uiGalleryRegistry } from "./registry";
@@ -127,6 +127,7 @@ const uiEntryIcons: Record<string, RemixiconComponentType> = {
   "analytics-table-column-settings": RiLayoutColumnLine,
   "detail-drawer": RiSideBarLine,
   "site-scope-selector": RiGlobalLine,
+  "flag-icon": RiGlobalLine,
   "analytics-tooltip": RiQuestionLine,
   "tabbed-table": RiTableLine,
   "clickable-table-cell": RiCursorLine,
@@ -143,7 +144,7 @@ export function UiGalleryShell() {
   const switchToZh = "/zh" + localePath;
   const switchToZhTw = "/zh-tw" + localePath;
   const switchToJa = "/ja" + localePath;
-  const messages = getMessages(locale);
+  const messages = getRuntimeMessages(locale);
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const categories = uiGalleryCategories;

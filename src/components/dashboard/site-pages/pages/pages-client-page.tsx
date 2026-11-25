@@ -122,7 +122,8 @@ export function PagesClientPage({
   pathname,
   sitePathname,
 }: PagesClientPageProps) {
-  const { filters, window } = useDashboardQuery() as {
+  const { filters, window, queryReady } = useDashboardQuery() as {
+    queryReady: boolean;
     filters: FilterDocument;
     window: TimeWindow;
   };
@@ -237,7 +238,7 @@ export function PagesClientPage({
       lastPage.data.pagination.hasMore
         ? lastPage.data.pagination.nextCursor
         : undefined,
-    enabled: typeof window !== "undefined",
+    enabled: queryReady,
   });
 
   const rows = useMemo(() => {
@@ -280,10 +281,14 @@ export function PagesClientPage({
       if (!normalizedPagePath) return;
       openedDetailFromListRef.current = true;
       pushUrlWithoutNavigation(
-        pageDetailQueryTarget(pathname, searchParams, normalizedPagePath),
+        pageDetailQueryTarget(
+          pathname,
+          new URLSearchParams(globalThis.window.location.search),
+          normalizedPagePath,
+        ),
       );
     },
-    [pathname, searchParams],
+    [pathname],
   );
 
   const closePageDetail = useCallback(() => {

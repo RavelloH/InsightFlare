@@ -56,10 +56,6 @@ function localeVar(locale: string): string {
   return locale.replace(/-([a-z])/g, (_, c) => c.toUpperCase()) + "Messages";
 }
 
-function formatMessagesConst(locale: string, value: unknown): string {
-  return `const ${localeVar(locale)} = ${JSON.stringify(value, null, 2)} as AppMessages;`;
-}
-
 function buildMessagesOutput(
   parsedYamlByLocale: Record<(typeof LOCALES)[number], unknown>,
 ): string {
@@ -73,12 +69,12 @@ function buildMessagesOutput(
 
   return `// @generated from src/i18n/*.yaml. DO NOT EDIT. Edit the YAML source files instead.
 import type { Locale } from "../config";
+${LOCALES.map((locale) => "import " + localeVar(locale) + " from " + JSON.stringify("./locale-" + locale) + ";").join("\n")}
 
 export interface AppMessages {
 ${interfaceBody.join("\n")}
 }
 
-${LOCALES.map((locale) => formatMessagesConst(locale, parsedYamlByLocale[locale])).join("\n\n")}
 
 const DICTIONARIES: Record<Locale, AppMessages> = {
 ${LOCALES.map((locale) => `  ${tsKey(locale)}: ${localeVar(locale)},`).join("\n")}
@@ -90,26 +86,75 @@ export function getMessages(locale: Locale): AppMessages {
 `;
 }
 
-async function writeMessagesFile(source: string): Promise<void> {
-  const prettierOptions = await prettier.resolveConfig(APP_MESSAGES_PATH);
+async function writeMessagesFile(
+  source: string,
+  target = APP_MESSAGES_PATH,
+): Promise<void> {
+  const prettierOptions = await prettier.resolveConfig(target);
   const formatted = await prettier.format(source, {
     ...(prettierOptions ?? {}),
-    filepath: APP_MESSAGES_PATH,
+    filepath: target,
   });
-  await fs.mkdir(path.dirname(APP_MESSAGES_PATH), { recursive: true });
+  await fs.mkdir(path.dirname(target), { recursive: true });
   try {
-    if ((await fs.readFile(APP_MESSAGES_PATH, "utf8")) === formatted) return;
+    if ((await fs.readFile(target, "utf8")) === formatted) return;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
   // Never expose a partially generated file to a parallel typecheck or watcher.
-  const temporary = APP_MESSAGES_PATH + "." + randomUUID() + ".tmp";
+  const temporary = target + "." + randomUUID() + ".tmp";
   try {
     await fs.writeFile(temporary, formatted, "utf8");
-    await fs.rename(temporary, APP_MESSAGES_PATH);
+    await fs.rename(temporary, target);
   } finally {
     await fs.rm(temporary, { force: true });
   }
+}
+
+async function writeAllMessages(
+  parsedYamlByLocale: Record<(typeof LOCALES)[number], unknown>,
+): Promise<void> {
+  const directory = path.dirname(APP_MESSAGES_PATH);
+  const header = "// @generated from src/i18n/*.yaml. DO NOT EDIT.\n";
+  await Promise.all([
+    ...LOCALES.map((locale) =>
+      writeMessagesFile(
+        header +
+          'import type { AppMessages } from "./messages";\n' +
+          "export default " +
+          JSON.stringify(parsedYamlByLocale[locale], null, 2) +
+          " as AppMessages;\n",
+        path.join(directory, "locale-" + locale + ".ts"),
+      ),
+    ),
+    ...(["errorPage", "notificationEmail"] as const).map((section) =>
+      writeMessagesFile(
+        header +
+          'import type { Locale } from "../config";\nimport type { AppMessages } from "./messages";\n' +
+          "export default " +
+          JSON.stringify(
+            Object.fromEntries(
+              LOCALES.map((locale) => [
+                locale,
+                (parsedYamlByLocale[locale] as Record<string, unknown>)[
+                  section
+                ],
+              ]),
+            ),
+            null,
+            2,
+          ) +
+          " as Record<Locale, AppMessages[" +
+          JSON.stringify(section) +
+          "]>;\n",
+        path.join(
+          directory,
+          section === "errorPage" ? "error-pages.ts" : "notification-email.ts",
+        ),
+      ),
+    ),
+  ]);
+  await writeMessagesFile(buildMessagesOutput(parsedYamlByLocale));
 }
 
 export async function regenerateAppMessages(): Promise<void> {
@@ -122,7 +167,7 @@ export async function regenerateAppMessages(): Promise<void> {
     ),
   ) as Record<(typeof LOCALES)[number], unknown>;
 
-  await writeMessagesFile(buildMessagesOutput(parsedYamlByLocale));
+  await writeAllMessages(parsedYamlByLocale);
   rlog.success("Successfully regenerated messages.ts schema!");
 }
 
@@ -173,6 +218,6 @@ export async function pruneUnusedKeys(
     LOCALES.map((locale) => [locale, YAML.parse(prunedTextByLocale[locale])]),
   ) as Record<(typeof LOCALES)[number], unknown>;
 
-  await writeMessagesFile(buildMessagesOutput(parsedYamlByLocale));
+  await writeAllMessages(parsedYamlByLocale);
   rlog.success("Successfully regenerated messages.ts schema!");
 }

@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useHydrated } from "@/hooks/use-hydrated";
 import { intlLocale } from "@/lib/dashboard/format";
 import type {
   CreatedTeamInviteData,
@@ -46,6 +47,7 @@ export function useTeamManagement({
   teamManagementInitialData = null,
 }: TeamManagementClientProps) {
   const router = useRouter();
+  const hydrated = useHydrated();
 
   const { window: selectedWindow } = useDashboardQuery();
 
@@ -174,9 +176,7 @@ export function useTeamManagement({
       ]);
       return { members, invites, sites, fetchedAt: Date.now() };
     },
-    enabled:
-      typeof window !== "undefined" &&
-      (activeTab === "settings" || activeTab === "members"),
+    enabled: hydrated && (activeTab === "settings" || activeTab === "members"),
     initialData: teamManagementInitialData ?? undefined,
     initialDataUpdatedAt: teamManagementInitialData?.fetchedAt,
   });
@@ -187,7 +187,7 @@ export function useTeamManagement({
       window,
       range: selectedWindow.preset,
       snapshot: teamDashboardSnapshot,
-      enabled: activeTab === "sites",
+      enabled: hydrated && activeTab === "sites",
     }),
   );
 

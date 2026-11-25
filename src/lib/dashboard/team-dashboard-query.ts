@@ -285,3 +285,26 @@ export function buildTeamSiteTrends(
     ]),
   );
 }
+
+// Compact sidebar charts have no axes or tooltip for individual buckets.
+// With no positive counts their rendered paths are empty regardless of range.
+const EMPTY_SIDEBAR_TRENDS: Record<string, TeamTrafficPoint[]> = {};
+export function buildSidebarSiteTrends(
+  siteIds: readonly string[],
+  trend: readonly TeamDashboardTrendBucket[] | undefined,
+  window: TeamDashboardWindow,
+  visible: boolean,
+): Record<string, TeamTrafficPoint[]> {
+  if (!visible || !trend?.length || siteIds.length === 0)
+    return EMPTY_SIDEBAR_TRENDS;
+  const activeIds = new Set<string>();
+  for (const bucket of trend) {
+    for (const point of bucket.sites) {
+      if (safeCount(point.views) > 0 || safeCount(point.visitors) > 0)
+        activeIds.add(point.siteId);
+    }
+  }
+  const chartSiteIds = siteIds.filter((id) => activeIds.has(id));
+  if (chartSiteIds.length === 0) return EMPTY_SIDEBAR_TRENDS;
+  return buildTeamSiteTrends(chartSiteIds, trend, window);
+}

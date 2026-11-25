@@ -1,7 +1,7 @@
 import type { ComponentCategoryId } from "@insightflare/ui/contracts";
 
 import type { Locale } from "@/lib/i18n/config";
-import { getMessages } from "@/lib/i18n/messages";
+import { getRuntimeMessages } from "@/lib/i18n/runtime-messages";
 
 import type { UiGalleryEntry } from "./registry";
 
@@ -17,7 +17,9 @@ export function getUiGalleryCopy(
   return {
     title: entry.contract.title,
     category:
-      getMessages(locale).uiGallery.categories[entry.contract.categoryId],
+      getRuntimeMessages(locale).uiGallery.categories[
+        entry.contract.categoryId
+      ],
   };
 }
 
@@ -26,7 +28,8 @@ export function getUiGalleryCategoryLabel(
   locale: Locale,
 ): string {
   return (
-    getMessages(locale).uiGallery.categories[category as ComponentCategoryId] ??
-    category
+    getRuntimeMessages(locale).uiGallery.categories[
+      category as ComponentCategoryId
+    ] ?? category
   );
 }

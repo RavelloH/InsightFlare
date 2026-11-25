@@ -12,11 +12,10 @@ import {
   createD1DatabaseClient,
   eq as queryEq,
   filter,
-  inList,
   insert,
+  inSubquery,
   join,
   limit,
-  neq,
   onConflictDoUpdate,
   or,
   param,
@@ -25,6 +24,7 @@ import {
   scan,
   schema,
   sort,
+  union,
   unixepoch,
   update,
 } from "@/lib/db";
@@ -554,141 +554,71 @@ export async function teamGroupsForSession(
   const userId = actor.user.id;
   const teams = scan(schema.teams);
   const members = scan(schema.team_members);
-  const createdJoined = join(
+  // For normal users, construct a small index-backed set of authorized team
+  // IDs before the counts. Admins need all teams, so skip the extra set.
+  const owned = filter(
     teams,
+    queryEq(teams.columns.owner_user_id, param(userId)),
+  );
+  const memberships = filter(
+    members,
+    queryEq(members.columns.user_id, param(userId)),
+  );
+  const ownedIds = project(owned, { id: owned.columns.id });
+  const memberIds = project(memberships, { id: memberships.columns.team_id });
+  const authorizedTeams = actor.isAdmin
+    ? teams
+    : filter(teams, inSubquery(teams.columns.id, union(ownedIds, memberIds)));
+  const joined = join(
+    authorizedTeams,
     members,
     and(
-      queryEq(teams.columns.id, members.columns.team_id),
+      queryEq(authorizedTeams.columns.id, members.columns.team_id),
       queryEq(members.columns.user_id, param(userId)),
     ),
     "left",
   );
-  const createdMatching = filter(
-    createdJoined,
-    queryEq(createdJoined.columns.left_owner_user_id, param(userId)),
-  );
-  const createdSelected = project(createdMatching, {
-    id: createdMatching.columns.left_id,
-    name: createdMatching.columns.left_name,
-    slug: createdMatching.columns.left_slug,
-    ownerUserId: createdMatching.columns.left_owner_user_id,
-    createdAt: createdMatching.columns.left_created_at,
-    updatedAt: createdMatching.columns.left_updated_at,
-    membershipRole: coalesce(
-      createdMatching.columns.right_role,
-      param("owner"),
-    ),
-    siteCount: siteCountFor(createdMatching.columns.left_id),
-    memberCount: memberCountFor(createdMatching.columns.left_id),
+  const selected = project(joined, {
+    id: joined.columns.left_id,
+    name: joined.columns.left_name,
+    slug: joined.columns.left_slug,
+    ownerUserId: joined.columns.left_owner_user_id,
+    createdAt: joined.columns.left_created_at,
+    updatedAt: joined.columns.left_updated_at,
+    membershipRole: joined.columns.right_role,
+    siteCount: siteCountFor(joined.columns.left_id),
+    memberCount: memberCountFor(joined.columns.left_id),
   });
-  const createdRowsPromise = database(env).all(
-    compileD1Query(orderedTeams(createdSelected), { tag: "admin.sites.all" }),
+  const { results } = await database(env).all(
+    compileD1Query(orderedTeams(selected), { tag: "admin.sites.all" }),
   );
-
-  const managedJoined = join(
-    teams,
-    members,
-    queryEq(teams.columns.id, members.columns.team_id),
-  );
-  const managedMatching = filter(
-    managedJoined,
-    and(
-      queryEq(managedJoined.columns.right_user_id, param(userId)),
-      inList(managedJoined.columns.right_role, ["owner", "admin"]),
-      neq(managedJoined.columns.left_owner_user_id, param(userId)),
-    ),
-  );
-  const managedSelected = project(managedMatching, {
-    id: managedMatching.columns.left_id,
-    name: managedMatching.columns.left_name,
-    slug: managedMatching.columns.left_slug,
-    ownerUserId: managedMatching.columns.left_owner_user_id,
-    createdAt: managedMatching.columns.left_created_at,
-    updatedAt: managedMatching.columns.left_updated_at,
-    membershipRole: managedMatching.columns.right_role,
-    siteCount: siteCountFor(managedMatching.columns.left_id),
-    memberCount: memberCountFor(managedMatching.columns.left_id),
-  });
-  const managedRowsPromise = database(env).all(
-    compileD1Query(orderedTeams(managedSelected), {
-      tag: "admin.sites.all",
-    }),
-  );
-
-  const memberJoined = join(
-    teams,
-    members,
-    queryEq(teams.columns.id, members.columns.team_id),
-  );
-  const memberMatching = filter(
-    memberJoined,
-    and(
-      queryEq(memberJoined.columns.right_user_id, param(userId)),
-      neq(memberJoined.columns.right_role, param("owner")),
-      neq(memberJoined.columns.right_role, param("admin")),
-      neq(memberJoined.columns.left_owner_user_id, param(userId)),
-    ),
-  );
-  const memberSelected = project(memberMatching, {
-    id: memberMatching.columns.left_id,
-    name: memberMatching.columns.left_name,
-    slug: memberMatching.columns.left_slug,
-    ownerUserId: memberMatching.columns.left_owner_user_id,
-    createdAt: memberMatching.columns.left_created_at,
-    updatedAt: memberMatching.columns.left_updated_at,
-    membershipRole: memberMatching.columns.right_role,
-    siteCount: siteCountFor(memberMatching.columns.left_id),
-    memberCount: memberCountFor(memberMatching.columns.left_id),
-  });
-  const memberRowsPromise = database(env).all(
-    compileD1Query(orderedTeams(memberSelected), { tag: "admin.sites.all" }),
-  );
-
-  let systemRowsPromise: Promise<{ results: Record<string, unknown>[] }> =
-    Promise.resolve({ results: [] });
-  if (actor.isAdmin) {
-    const systemJoined = join(
-      teams,
-      members,
-      and(
-        queryEq(teams.columns.id, members.columns.team_id),
-        queryEq(members.columns.user_id, param(userId)),
-      ),
-      "left",
-    );
-    const systemSelected = project(systemJoined, {
-      id: systemJoined.columns.left_id,
-      name: systemJoined.columns.left_name,
-      slug: systemJoined.columns.left_slug,
-      ownerUserId: systemJoined.columns.left_owner_user_id,
-      createdAt: systemJoined.columns.left_created_at,
-      updatedAt: systemJoined.columns.left_updated_at,
-      membershipRole: systemJoined.columns.right_role,
-      siteCount: siteCountFor(systemJoined.columns.left_id),
-      memberCount: memberCountFor(systemJoined.columns.left_id),
-    });
-    systemRowsPromise = database(env).all(
-      compileD1Query(orderedTeams(systemSelected), {
-        tag: "admin.sites.all",
-      }),
-    );
-  }
-
-  const [createdRows, managedRows, memberRows, systemRows] = await Promise.all([
-    createdRowsPromise,
-    managedRowsPromise,
-    memberRowsPromise,
-    systemRowsPromise,
-  ]);
   const teamGroups: SessionTeamGroups = {
-    created: mapTeamRows(createdRows.results),
-    managed: mapTeamRows(managedRows.results),
-    member: mapTeamRows(memberRows.results),
-    system: mapTeamRows(systemRows.results),
+    created: mapTeamRows(
+      results
+        .filter((row) => row.ownerUserId === userId)
+        .map((row) => ({
+          ...row,
+          membershipRole: row.membershipRole ?? "owner",
+        })),
+    ),
+    managed: mapTeamRows(
+      results.filter(
+        (row) =>
+          row.ownerUserId !== userId &&
+          (row.membershipRole === "owner" || row.membershipRole === "admin"),
+      ),
+    ),
+    member: mapTeamRows(
+      results.filter(
+        (row) =>
+          row.ownerUserId !== userId &&
+          row.membershipRole !== null &&
+          row.membershipRole !== undefined &&
+          row.membershipRole !== "owner" &&
+          row.membershipRole !== "admin",
+      ),
+    ),
+    system: actor.isAdmin ? mapTeamRows(results) : [],
   };
-
-  return {
-    teams: flattenTeamGroups(teamGroups),
-    teamGroups,
-  };
+  return { teams: flattenTeamGroups(teamGroups), teamGroups };
 }

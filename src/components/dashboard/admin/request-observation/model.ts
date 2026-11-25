@@ -2,7 +2,8 @@ import type { RequestObservationTrendPoint } from "@insightflare/product-ui/char
 
 import { durationFormat, intlLocale } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
-import { type AppMessages, getMessages } from "@/lib/i18n/messages";
+import type { AppMessages } from "@/lib/i18n/messages";
+import { getRuntimeMessages } from "@/lib/i18n/runtime-messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
 
 export interface RequestObservationClientProps {
@@ -638,7 +639,7 @@ export function requestObservationUiLabels(
   locale: Locale,
   copy: AppMessages["requestObservation"],
 ): RequestObservationUiLabels {
-  const fallback = getMessages(locale).requestObservation.uiLabels;
+  const fallback = getRuntimeMessages(locale).requestObservation.uiLabels;
   const read = (paths: string[][], value: string) => {
     for (const path of paths) {
       const candidate = nestedMessage(copy, path, "");

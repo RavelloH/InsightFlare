@@ -5,6 +5,10 @@ import type {
   TeamDashboardTrendBucket,
   TeamTrafficPoint,
 } from "@/lib/dashboard/team-dashboard-query";
+import {
+  buildTeamSiteTrends,
+  type TeamDashboardWindow,
+} from "@/lib/dashboard/team-dashboard-query";
 import type { TeamData } from "@/lib/dashboard-api/client/edge";
 
 /** Visitor change (in percent) that counts as a notable movement. */
@@ -137,4 +141,63 @@ export function sortRows(
       left.site.name.localeCompare(right.site.name)
     );
   });
+}
+
+/** Only the data, not transient fetch/error state, drives expensive chart work. */
+export function combineWorkspaceQueries(
+  results: readonly {
+    data?: { data: TeamDashboardData };
+    isPending: boolean;
+    isFetching: boolean;
+    isError: boolean;
+  }[],
+) {
+  return {
+    data: results.map((result) => result.data?.data),
+    loading: results.some((result) => result.isPending),
+    fetching: results.some((result) => result.isFetching),
+    failed: results.map((result) => result.isError),
+  };
+}
+
+export function deriveWorkspaceData(
+  teams: readonly TeamData[],
+  data: readonly (TeamDashboardData | undefined)[],
+  window: TeamDashboardWindow,
+) {
+  const dataByTeam = new Map<string, TeamDashboardData>();
+  teams.forEach((team, index) => {
+    const item = data[index];
+    if (item) dataByTeam.set(team.id, item);
+  });
+  const allData = [...dataByTeam.values()];
+  const sites = allData.flatMap((item) => item.sites);
+  const trendBySite = buildTeamSiteTrends(
+    sites.map((site) => site.id),
+    mergeTeamTrends(allData),
+    window,
+  );
+  const rows = buildWorkspaceRows(teams, dataByTeam, trendBySite);
+  return {
+    rows,
+    siteCount: sites.length,
+    totals: buildWorkspaceTotals(sites),
+    bucketStarts: (trendBySite[sites[0]?.id ?? ""] ?? []).map(
+      (point) => point.timestampMs,
+    ),
+    rowsById: new Map(rows.map((row) => [row.site.id, row])),
+    changePoints: rows.flatMap((row) =>
+      row.visitorsChange === null
+        ? []
+        : [
+            {
+              id: row.site.id,
+              label: row.site.name,
+              value: row.visitors,
+              change: row.visitorsChange,
+              weight: row.views,
+            },
+          ],
+    ),
+  };
 }
