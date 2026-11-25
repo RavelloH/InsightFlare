@@ -16,6 +16,10 @@ export {
 } from "../components/ui/overlays.contract";
 export { pageHeadingContract } from "../components/ui/page-heading.contract";
 export * from "../components/ui/primitives.contract";
+export {
+  responsiveDropdownMenuContract,
+  responsiveSearchablePopoverContract,
+} from "../components/ui/responsive-overlays.contract";
 export { searchablePopoverContract } from "../components/ui/searchable-popover.contract";
 export {
   selectContract,

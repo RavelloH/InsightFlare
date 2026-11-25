@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { Clickable } from "@insightflare/ui/clickable";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@insightflare/ui/dropdown-menu";
+  ResponsiveDropdownMenu as DropdownMenu,
+  ResponsiveDropdownMenuContent as DropdownMenuContent,
+  ResponsiveDropdownMenuItem as DropdownMenuItem,
+  ResponsiveDropdownMenuLabel as DropdownMenuLabel,
+  ResponsiveDropdownMenuSeparator as DropdownMenuSeparator,
+  ResponsiveDropdownMenuTrigger as DropdownMenuTrigger,
+} from "@insightflare/ui/responsive-dropdown-menu";
 import {
   RiArrowRightSLine,
   RiDeleteBinLine,
@@ -48,12 +48,16 @@ export function GoalActions({
               tapScale={0.95}
               onClick={(event) => event.stopPropagation()}
               onPointerDown={(event) => event.stopPropagation()}
-              className="size-8 text-muted-foreground hover:bg-accent hover:text-foreground [&_svg]:size-4"
+              className="size-11 text-muted-foreground md:size-8 hover:bg-accent hover:text-foreground [&_svg]:size-4"
             >
               <RiMoreLine />
             </Clickable>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuContent
+            title={labels.moreActions}
+            align="end"
+            className="w-40"
+          >
             <DropdownMenuLabel>{labels.moreActions}</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem
@@ -88,7 +92,7 @@ export function GoalActions({
             event.stopPropagation();
             onOpen();
           }}
-          className="size-8 text-muted-foreground hover:bg-accent hover:text-foreground [&_svg]:size-4"
+          className="size-11 text-muted-foreground md:size-8 hover:bg-accent hover:text-foreground [&_svg]:size-4"
         >
           <RiArrowRightSLine />
         </Clickable>

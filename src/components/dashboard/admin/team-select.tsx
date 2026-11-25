@@ -2,16 +2,16 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Button } from "@insightflare/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@insightflare/ui/dialog";
 import { Input } from "@insightflare/ui/input";
 import { Label } from "@insightflare/ui/label";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+} from "@insightflare/ui/responsive-dialog";
 import {
   Select,
   SelectContent,
@@ -165,13 +165,13 @@ export const TeamSelect = memo(function TeamSelect({
         }
       }}
     >
-      <DialogContent className="max-w-md">
+      <DialogContent desktopClassName="max-w-md">
         <DialogHeader>
           <DialogTitle icon={RiAddLine}>{copy.createTitle}</DialogTitle>
           <DialogDescription>{copy.createDescription}</DialogDescription>
         </DialogHeader>
         <form
-          className="space-y-3"
+          className="min-h-0 space-y-3 overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-0 md:pb-0"
           onSubmit={(event) => {
             event.preventDefault();
             void handleCreateTeam();
@@ -266,6 +266,7 @@ export const TeamSelect = memo(function TeamSelect({
   return (
     <>
       <Select
+        responsive
         value={selectedSlug}
         onValueChange={(value) => {
           if (value === CREATE_TEAM_VALUE) {
@@ -277,10 +278,10 @@ export const TeamSelect = memo(function TeamSelect({
           navigateWithTransition(router, next.href);
         }}
       >
-        <SelectTrigger className="w-full">
+        <SelectTrigger className="w-full" aria-label={copy.groupLabel}>
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent drawerTitle={copy.groupLabel}>
           {groupedOptions.length > 0 ? (
             groupedOptions.map((group, index) => (
               <SelectGroup key={group.key}>

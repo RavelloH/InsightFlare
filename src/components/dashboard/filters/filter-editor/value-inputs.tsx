@@ -4,10 +4,10 @@ import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Button } from "@insightflare/ui/button";
 import { Input } from "@insightflare/ui/input";
 import {
-  SearchablePopover,
-  SearchablePopoverContent,
-  SearchablePopoverTrigger,
-} from "@insightflare/ui/searchable-popover";
+  ResponsiveSearchablePopover as SearchablePopover,
+  ResponsiveSearchablePopoverContent as SearchablePopoverContent,
+  ResponsiveSearchablePopoverTrigger as SearchablePopoverTrigger,
+} from "@insightflare/ui/responsive-searchable-popover";
 import {
   Select,
   SelectContent,

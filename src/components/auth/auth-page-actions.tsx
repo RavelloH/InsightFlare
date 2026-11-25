@@ -1,14 +1,14 @@
 import { Button } from "@insightflare/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@insightflare/ui/dropdown-menu";
+  ResponsiveDropdownMenu as DropdownMenu,
+  ResponsiveDropdownMenuContent as DropdownMenuContent,
+  ResponsiveDropdownMenuItem as DropdownMenuItem,
+  ResponsiveDropdownMenuLabel as DropdownMenuLabel,
+  ResponsiveDropdownMenuRadioGroup as DropdownMenuRadioGroup,
+  ResponsiveDropdownMenuRadioItem as DropdownMenuRadioItem,
+  ResponsiveDropdownMenuSeparator as DropdownMenuSeparator,
+  ResponsiveDropdownMenuTrigger as DropdownMenuTrigger,
+} from "@insightflare/ui/responsive-dropdown-menu";
 import {
   RiArrowDownSLine,
   RiCheckLine,
@@ -82,7 +82,11 @@ export function AuthPageActions({
             />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-40">
+        <DropdownMenuContent
+          title={messages.common.theme}
+          align="end"
+          className="w-40"
+        >
           <DropdownMenuLabel>{messages.common.theme}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuRadioGroup
@@ -122,7 +126,11 @@ export function AuthPageActions({
             />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-40">
+        <DropdownMenuContent
+          title={messages.common.language}
+          align="end"
+          className="w-40"
+        >
           <DropdownMenuLabel>{messages.common.language}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           {SUPPORTED_LOCALES.map((item) => (

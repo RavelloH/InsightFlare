@@ -1,7 +1,16 @@
 import * as React from "react";
 import { RiArrowDownSLine, RiCheckLine } from "@remixicon/react";
 
+import { useIsMobile } from "../../hooks/use-mobile";
 import { cn } from "../../lib/utils";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerScrollArea,
+  DrawerTitle,
+  DrawerTrigger,
+} from "./drawer";
 import {
   OverlayScrollbar,
   PERSISTENT_VERTICAL_SCROLLBAR_OPTIONS,
@@ -14,6 +23,7 @@ type ItemMeta = {
 };
 
 type SelectContextValue = {
+  mobile: boolean;
   value: string | undefined;
   onValueChange: (value: string) => void;
   open: boolean;
@@ -89,6 +99,8 @@ function collectItems(node: React.ReactNode, out: Map<string, ItemMeta>): void {
 }
 
 export type SelectProps = {
+  /** Use a bottom drawer on narrow screens, for large or important selections. */
+  responsive?: boolean;
   value?: string;
   defaultValue?: string;
   onValueChange?: (value: string) => void;
@@ -102,6 +114,7 @@ export type SelectProps = {
 };
 
 function Select({
+  responsive = false,
   value,
   defaultValue,
   onValueChange,
@@ -113,6 +126,8 @@ function Select({
   required,
   children,
 }: SelectProps) {
+  const isMobile = useIsMobile();
+  const mobile = responsive && isMobile;
   const isValueControlled = value !== undefined;
   const [valueState, setValueState] = React.useState<string | undefined>(
     defaultValue,
@@ -181,6 +196,7 @@ function Select({
 
   const ctxValue = React.useMemo<SelectContextValue>(
     () => ({
+      mobile,
       value: currentValue,
       onValueChange: handleValueChange,
       open,
@@ -196,6 +212,7 @@ function Select({
       itemIdFor,
     }),
     [
+      mobile,
       currentValue,
       handleValueChange,
       open,
@@ -211,9 +228,15 @@ function Select({
 
   return (
     <SelectContext.Provider value={ctxValue}>
-      <Popover.Root open={open} onOpenChange={handleOpenChange}>
-        {children}
-      </Popover.Root>
+      {mobile ? (
+        <Drawer open={open} onOpenChange={handleOpenChange}>
+          {children}
+        </Drawer>
+      ) : (
+        <Popover.Root open={open} onOpenChange={handleOpenChange}>
+          {children}
+        </Popover.Root>
+      )}
       {name ? (
         <input
           type="hidden"
@@ -245,14 +268,15 @@ function SelectTrigger({
   const isDisabled = disabledProp ?? ctx.disabled;
   const hasValue = ctx.value !== undefined && ctx.value !== "";
 
+  const Trigger = ctx.mobile ? DrawerTrigger : Popover.Trigger;
   return (
-    <Popover.Trigger asChild>
+    <Trigger asChild>
       <button
         type="button"
         ref={ctx.triggerRef}
         id={ctx.triggerId}
         role="combobox"
-        aria-haspopup="listbox"
+        aria-haspopup={ctx.mobile ? "dialog" : "listbox"}
         data-slot="select-trigger"
         data-vaul-no-drag
         data-size={size}
@@ -264,7 +288,7 @@ function SelectTrigger({
         {children}
         <RiArrowDownSLine className="pointer-events-none size-4 text-muted-foreground" />
       </button>
-    </Popover.Trigger>
+    </Trigger>
   );
 }
 
@@ -296,11 +320,12 @@ function SelectValue({
 export type SelectContentProps = Omit<
   React.ComponentProps<typeof Popover.Content>,
   "role"
->;
+> & { drawerTitle?: string };
 
 function SelectContent({
   className,
   children,
+  drawerTitle,
   align = "center",
   sideOffset = 4,
   onKeyDown: onKeyDownProp,
@@ -416,6 +441,31 @@ function SelectContent({
   const activeDescendantId = ctx.highlightedValue
     ? ctx.itemIdFor(ctx.highlightedValue)
     : undefined;
+  if (ctx.mobile)
+    return (
+      <DrawerContent aria-describedby={undefined}>
+        <DrawerHeader>
+          <DrawerTitle>
+            {drawerTitle ??
+              ctx.triggerRef.current?.getAttribute("aria-label") ??
+              ctx.triggerRef.current?.textContent}
+          </DrawerTitle>
+        </DrawerHeader>
+        <DrawerScrollArea contentClassName="px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div
+            ref={ctx.contentRef}
+            role="listbox"
+            aria-labelledby={ctx.triggerId}
+            aria-activedescendant={activeDescendantId}
+            tabIndex={0}
+            onKeyDown={handleKeyDown}
+            className="outline-none [&_[data-slot=select-item]]:min-h-11 [&_[data-slot=select-item]]:text-sm"
+          >
+            {children}
+          </div>
+        </DrawerScrollArea>
+      </DrawerContent>
+    );
   return (
     <Popover.Portal>
       <Popover.Content

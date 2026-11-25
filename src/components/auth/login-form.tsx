@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Button } from "@insightflare/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@insightflare/ui/dialog";
 import { Input } from "@insightflare/ui/input";
 import { Label } from "@insightflare/ui/label";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+} from "@insightflare/ui/responsive-dialog";
 import { Spinner } from "@insightflare/ui/spinner";
 import {
   RiLoginBoxLine,
@@ -426,7 +426,7 @@ export function LoginForm({
       </form>
 
       <Dialog open={securityDialogOpen} onOpenChange={setSecurityDialogOpen}>
-        <DialogContent className="max-w-sm">
+        <DialogContent desktopClassName="max-w-sm">
           <DialogHeader>
             <DialogTitle
               icon={RiShieldCrossLine}

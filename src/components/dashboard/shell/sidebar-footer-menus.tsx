@@ -1,13 +1,13 @@
 import { memo, useState } from "react";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@insightflare/ui/dropdown-menu";
+  ResponsiveDropdownMenu as DropdownMenu,
+  ResponsiveDropdownMenuContent as DropdownMenuContent,
+  ResponsiveDropdownMenuItem as DropdownMenuItem,
+  ResponsiveDropdownMenuLabel as DropdownMenuLabel,
+  ResponsiveDropdownMenuSeparator as DropdownMenuSeparator,
+  ResponsiveDropdownMenuTrigger as DropdownMenuTrigger,
+} from "@insightflare/ui/responsive-dropdown-menu";
 import { Spinner } from "@insightflare/ui/spinner";
 import {
   RiLogoutBoxRLine,
@@ -119,7 +119,11 @@ export const SidebarFooterMenus = memo(function SidebarFooterMenus({
             ) : null}
           </span>
         </DropdownMenuTrigger>
-        <DropdownMenuContent sideOffset={8} className="!w-64 !min-w-64">
+        <DropdownMenuContent
+          title={messages.common.account}
+          sideOffset={8}
+          className="!w-64 !min-w-64"
+        >
           <DropdownMenuLabel className="space-y-1">
             <div className="text-sm font-semibold text-foreground">
               {displayName}

@@ -22,14 +22,6 @@ import {
   CardTitle,
 } from "@insightflare/ui/card";
 import { Checkbox } from "@insightflare/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@insightflare/ui/dialog";
 import { Field, FieldDescription, FieldLabel } from "@insightflare/ui/field";
 import { Input } from "@insightflare/ui/input";
 import { PageHeading } from "@insightflare/ui/page-heading";
@@ -632,27 +624,29 @@ export function ApiKeysClient({
         </ResponsiveDialogContent>
       </ResponsiveDialog>
 
-      <Dialog open={secretOpen} onOpenChange={setSecretOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle icon={RiKey2Line}>
+      <ResponsiveDialog open={secretOpen} onOpenChange={setSecretOpen}>
+        <ResponsiveDialogContent desktopClassName="max-w-xl">
+          <ResponsiveDialogHeader>
+            <ResponsiveDialogTitle icon={RiKey2Line}>
               {copy.oneTimeSecretTitle}
-            </DialogTitle>
-            <DialogDescription>
+            </ResponsiveDialogTitle>
+            <ResponsiveDialogDescription>
               {copy.oneTimeSecretDescription}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="break-all border bg-muted/40 p-3 font-mono text-xs">
-            {revealedSecret}
-          </div>
-          <DialogFooter>
+            </ResponsiveDialogDescription>
+          </ResponsiveDialogHeader>
+          <ResponsiveDialogBody>
+            <div className="break-all border bg-muted/40 p-3 font-mono text-xs">
+              {revealedSecret}
+            </div>
+          </ResponsiveDialogBody>
+          <ResponsiveDialogFooter>
             <Button onClick={copySecret}>
               <RiFileCopyLine data-icon="inline-start" />
               {copy.copySecret}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveDialogFooter>
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>
     </div>
   );
 }

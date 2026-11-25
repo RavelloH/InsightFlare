@@ -11,11 +11,11 @@ import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { Button } from "@insightflare/ui/button";
 import { Calendar } from "@insightflare/ui/calendar";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "@insightflare/ui/dialog";
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogTitle as DialogTitle,
+} from "@insightflare/ui/responsive-dialog";
 import { selectTriggerStyles } from "@insightflare/ui/select";
 import {
   type RemixiconComponentType,
@@ -735,7 +735,8 @@ export function GlobalPerceptionSearch({
       </button>
       <Dialog open={open} onOpenChange={changeOpen}>
         <DialogContent
-          className="top-[18vh] max-w-xl translate-y-0 gap-0 p-0"
+          desktopClassName="top-[18vh] max-w-xl translate-y-0 gap-0 p-0"
+          drawerClassName="h-[80dvh] gap-0 overflow-y-auto p-0 pb-[env(safe-area-inset-bottom)]"
           showCloseButton={false}
           aria-describedby={id + "-description"}
           onCloseAutoFocus={(event) => {
@@ -748,7 +749,7 @@ export function GlobalPerceptionSearch({
           <DialogDescription id={id + "-description"} className="sr-only">
             {copy.description}
           </DialogDescription>
-          <div className="flex h-12 items-center gap-2.5 border-b border-border px-3">
+          <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-3">
             {view ? (
               <button
                 type="button"
@@ -778,7 +779,7 @@ export function GlobalPerceptionSearch({
               placeholder={placeholder}
               spellCheck={false}
               autoComplete="off"
-              className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              className="h-full min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground md:text-sm"
               onChange={(event) => changeQuery(event.target.value)}
               onKeyDown={(event) => {
                 if (event.nativeEvent.isComposing) return;
@@ -883,7 +884,7 @@ export function GlobalPerceptionSearch({
                 role="listbox"
                 aria-label={copy.title}
                 aria-busy={effectiveLookup?.pending || undefined}
-                className="max-h-[min(26rem,55vh)] overflow-y-auto py-1"
+                className="max-h-[min(26rem,45dvh)] overflow-y-auto py-1 md:max-h-[min(26rem,55vh)]"
               >
                 {sections.map(({ group, items }) => (
                   <PaletteGroup
@@ -930,13 +931,13 @@ export function GlobalPerceptionSearch({
               </div>
             )}
           </AutoResizer>
-          <div className="flex h-9 items-center gap-3 border-t border-border px-3 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1">
+          <div className="flex h-9 shrink-0 items-center gap-3 border-t border-border px-3 text-xs text-muted-foreground">
+            <span className="hidden items-center gap-1 md:flex">
               <Kbd>↑</Kbd>
               <Kbd>↓</Kbd>
               <span className="ml-0.5">{copy.keys.select}</span>
             </span>
-            <span className="flex items-center gap-1">
+            <span className="hidden items-center gap-1 md:flex">
               <Kbd>↵</Kbd>
               <span className="ml-0.5">{copy.keys.open}</span>
             </span>

@@ -90,6 +90,8 @@ import {
   popoverContract,
   radioGroupContract,
   responsiveDialogContract,
+  responsiveDropdownMenuContract,
+  responsiveSearchablePopoverContract,
   searchablePopoverContract,
   selectContract,
   separatorContract,
@@ -1069,6 +1071,26 @@ const galleryContracts = {
         propValue(true, "true", undefined, true, "on-demand"),
       ]),
       propCard("modal", [propValue(true), propValue(false)]),
+    ],
+    { defaultOpen: false },
+  ),
+  responsiveDropdownMenu: registerPropCards(
+    responsiveDropdownMenuContract,
+    [
+      propCard("defaultOpen", [
+        propValue(false),
+        propValue(true, "true", undefined, true, "on-demand"),
+      ]),
+    ],
+    { defaultOpen: false },
+  ),
+  responsiveSearchablePopover: registerPropCards(
+    responsiveSearchablePopoverContract,
+    [
+      propCard("defaultOpen", [
+        propValue(false),
+        propValue(true, "true", undefined, true, "on-demand"),
+      ]),
     ],
     { defaultOpen: false },
   ),
@@ -2556,6 +2578,18 @@ export const uiGalleryRegistry: readonly UiGalleryEntry[] = [
     packageType: "ui",
     apiEntry: "@insightflare/ui/dropdown-menu",
     contract: galleryContracts.dropdownMenu,
+  },
+  {
+    slug: "responsive-dropdown-menu",
+    packageType: "ui",
+    apiEntry: "@insightflare/ui/responsive-dropdown-menu",
+    contract: galleryContracts.responsiveDropdownMenu,
+  },
+  {
+    slug: "responsive-searchable-popover",
+    packageType: "ui",
+    apiEntry: "@insightflare/ui/responsive-searchable-popover",
+    contract: galleryContracts.responsiveSearchablePopover,
   },
   {
     slug: "responsive-dialog",

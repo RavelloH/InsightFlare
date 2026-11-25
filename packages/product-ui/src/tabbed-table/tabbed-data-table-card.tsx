@@ -13,8 +13,6 @@ import { DataTableSwitch } from "@insightflare/ui/data-table-switch";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@insightflare/ui/dialog";
@@ -26,6 +24,14 @@ import {
   DrawerTitle,
 } from "@insightflare/ui/drawer";
 import { Input } from "@insightflare/ui/input";
+import {
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@insightflare/ui/responsive-dialog";
 import {
   Select,
   SelectContent,
@@ -880,20 +886,25 @@ function TabbedDataTableCardDataControllerImpl<
   const exportCanLoadRows = Boolean(loader);
   const exportPanel =
     exportEnabled && !headerHidden && exportOpen ? (
-      <Dialog
+      <ResponsiveDialog
         open={exportOpen}
         onOpenChange={(open) => {
           setExportOpen(open);
           if (!open) exportAbortControllerRef.current?.abort();
         }}
       >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle icon={RiDownloadLine}>
+        <ResponsiveDialogContent
+          desktopClassName="max-w-md"
+          drawerClassName="overflow-y-auto"
+        >
+          <ResponsiveDialogHeader>
+            <ResponsiveDialogTitle icon={RiDownloadLine}>
               {exportLabels.title}
-            </DialogTitle>
-            <DialogDescription>{exportLabels.description}</DialogDescription>
-          </DialogHeader>
+            </ResponsiveDialogTitle>
+            <ResponsiveDialogDescription>
+              {exportLabels.description}
+            </ResponsiveDialogDescription>
+          </ResponsiveDialogHeader>
           <div className="grid gap-4">
             <div className="grid gap-2">
               <label
@@ -971,7 +982,7 @@ function TabbedDataTableCardDataControllerImpl<
               </p>
             ) : null}
           </div>
-          <DialogFooter>
+          <ResponsiveDialogFooter>
             <Button
               onClick={handleExport}
               disabled={
@@ -982,9 +993,9 @@ function TabbedDataTableCardDataControllerImpl<
               {exporting ? <Spinner /> : <RiDownloadLine />}
               {exporting ? loadingLabel : exportLabels.download}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveDialogFooter>
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>
     ) : null;
 
   const syncKey = [

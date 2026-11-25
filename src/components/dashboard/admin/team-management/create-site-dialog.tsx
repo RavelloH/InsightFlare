@@ -1,15 +1,15 @@
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Button } from "@insightflare/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@insightflare/ui/dialog";
 import { Input } from "@insightflare/ui/input";
 import { Label } from "@insightflare/ui/label";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+} from "@insightflare/ui/responsive-dialog";
 import { Spinner } from "@insightflare/ui/spinner";
 import { RiAddLine, RiCloseLine, RiGlobalLine } from "@remixicon/react";
 
@@ -43,7 +43,7 @@ export function TeamManagementCreateSiteDialog() {
         }
       }}
     >
-      <DialogContent className="max-w-md">
+      <DialogContent desktopClassName="max-w-md">
         <DialogHeader>
           <DialogTitle icon={RiGlobalLine}>
             {siteCreateCopy.createTitle}
@@ -51,7 +51,7 @@ export function TeamManagementCreateSiteDialog() {
           <DialogDescription>{siteCreateCopy.createSubtitle}</DialogDescription>
         </DialogHeader>
         <form
-          className="space-y-3"
+          className="min-h-0 space-y-3 overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-0 md:pb-0"
           onSubmit={(event) => {
             event.preventDefault();
             void handleCreateSite();

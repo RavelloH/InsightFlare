@@ -1,14 +1,14 @@
 import type { ReactNode } from "react";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@insightflare/ui/dropdown-menu";
+  ResponsiveDropdownMenu as DropdownMenu,
+  ResponsiveDropdownMenuContent as DropdownMenuContent,
+  ResponsiveDropdownMenuItem as DropdownMenuItem,
+  ResponsiveDropdownMenuLabel as DropdownMenuLabel,
+  ResponsiveDropdownMenuRadioGroup as DropdownMenuRadioGroup,
+  ResponsiveDropdownMenuRadioItem as DropdownMenuRadioItem,
+  ResponsiveDropdownMenuSeparator as DropdownMenuSeparator,
+  ResponsiveDropdownMenuTrigger as DropdownMenuTrigger,
+} from "@insightflare/ui/responsive-dropdown-menu";
 import {
   RiCheckLine,
   RiComputerLine,
@@ -35,10 +35,10 @@ interface SidebarAppearanceMenusProps {
 }
 
 export const SIDEBAR_FOOTER_TRIGGER_BASE_CLASS =
-  "absolute top-0 flex h-10 w-1/3 items-center justify-center bg-transparent text-sidebar-foreground outline-hidden transition-[left,top,width,background-color,color,border-color] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] group-data-[collapsible=icon]:w-full motion-reduce:transition-none hover:bg-sidebar-accent/60 focus-visible:ring-1 focus-visible:ring-sidebar-ring";
+  "absolute top-0 flex h-11 w-1/3 md:h-10 items-center justify-center bg-transparent text-sidebar-foreground outline-hidden transition-[left,top,width,background-color,color,border-color] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] group-data-[collapsible=icon]:w-full motion-reduce:transition-none hover:bg-sidebar-accent/60 focus-visible:ring-1 focus-visible:ring-sidebar-ring";
 
 const footerGridClass =
-  "relative m-0 h-10 w-full p-0 transition-[height] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none";
+  "relative m-0 h-11 w-full md:h-10 p-0 transition-[height] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none";
 
 function pickThemeIcon(theme: string) {
   if (theme === "dark") return RiMoonLine;
@@ -105,7 +105,11 @@ export function SidebarAppearanceMenus({
         >
           <ThemeIcon className="size-4" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent sideOffset={8} className="!w-44 !min-w-44">
+        <DropdownMenuContent
+          title={messages.common.theme}
+          sideOffset={8}
+          className="!w-44 !min-w-44"
+        >
           <DropdownMenuLabel>{messages.common.theme}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuRadioGroup
@@ -152,7 +156,11 @@ export function SidebarAppearanceMenus({
         >
           <RiGlobalLine className="size-4" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent sideOffset={8} className="!w-44 !min-w-44">
+        <DropdownMenuContent
+          title={messages.common.language}
+          sideOffset={8}
+          className="!w-44 !min-w-44"
+        >
           <DropdownMenuLabel>{messages.common.language}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           {languageOptions.map((item) => (

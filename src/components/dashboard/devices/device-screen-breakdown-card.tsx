@@ -12,12 +12,12 @@ import {
   CardTitle,
 } from "@insightflare/ui/card";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@insightflare/ui/dropdown-menu";
+  ResponsiveDropdownMenu as DropdownMenu,
+  ResponsiveDropdownMenuContent as DropdownMenuContent,
+  ResponsiveDropdownMenuRadioGroup as DropdownMenuRadioGroup,
+  ResponsiveDropdownMenuRadioItem as DropdownMenuRadioItem,
+  ResponsiveDropdownMenuTrigger as DropdownMenuTrigger,
+} from "@insightflare/ui/responsive-dropdown-menu";
 import {
   RiArrowDownSLine,
   RiComputerLine,
@@ -586,7 +586,10 @@ function ScreenPreviewCard({
                 />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent
+              title={messages.devices.selectedViewportLabel}
+              align="end"
+            >
               <DropdownMenuRadioGroup
                 value={selectedItem?.key ?? ""}
                 onValueChange={setSelectedKey}

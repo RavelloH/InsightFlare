@@ -172,6 +172,16 @@
       "development": "./src/components/ui/radio-group.tsx",
       "import": "./dist/components/ui/radio-group.js"
     },
+    "./responsive-dropdown-menu": {
+      "types": "./dist/components/ui/responsive-dropdown-menu.d.ts",
+      "development": "./src/components/ui/responsive-dropdown-menu.tsx",
+      "import": "./dist/components/ui/responsive-dropdown-menu.js"
+    },
+    "./responsive-searchable-popover": {
+      "types": "./dist/components/ui/responsive-searchable-popover.d.ts",
+      "development": "./src/components/ui/responsive-searchable-popover.tsx",
+      "import": "./dist/components/ui/responsive-searchable-popover.js"
+    },
     "./responsive-dialog": {
       "types": "./dist/components/ui/responsive-dialog.d.ts",
       "development": "./src/components/ui/responsive-dialog.tsx",

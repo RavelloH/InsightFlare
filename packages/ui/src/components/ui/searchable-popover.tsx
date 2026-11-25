@@ -1,7 +1,15 @@
 import * as React from "react";
 import { RiSearchLine } from "@remixicon/react";
 
+import { useIsMobile } from "../../hooks/use-mobile";
 import { cn } from "../../lib/utils";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "./drawer";
 import { Input } from "./input";
 import {
   OverlayScrollbar,
@@ -17,8 +25,29 @@ import {
 const SELECTED_RESULT_SELECTOR =
   '[data-selected-item="true"], [aria-selected="true"], [aria-pressed="true"], [aria-checked="true"], [data-state="checked"]';
 
-function SearchablePopover(props: React.ComponentProps<typeof Popover.Root>) {
-  return <Popover.Root {...props} />;
+const MobileSearchContext = React.createContext(false);
+
+function SearchablePopover({
+  responsive = false,
+  ...props
+}: React.ComponentProps<typeof Popover.Root> & { responsive?: boolean }) {
+  const isMobile = useIsMobile();
+  const mobile = responsive && isMobile;
+  return (
+    <MobileSearchContext.Provider value={mobile}>
+      {mobile ? (
+        <Drawer
+          open={props.open}
+          defaultOpen={props.defaultOpen}
+          onOpenChange={props.onOpenChange}
+        >
+          {props.children}
+        </Drawer>
+      ) : (
+        <Popover.Root {...props} />
+      )}
+    </MobileSearchContext.Provider>
+  );
 }
 
 export type SearchablePopoverTriggerProps = Omit<PopoverTriggerProps, "ref">;
@@ -27,7 +56,12 @@ const SearchablePopoverTrigger: React.ForwardRefExoticComponent<
   SearchablePopoverTriggerProps & React.RefAttributes<HTMLButtonElement>
 > = React.forwardRef<HTMLButtonElement, SearchablePopoverTriggerProps>(
   function SearchablePopoverTrigger(props, ref) {
-    return <Popover.Trigger ref={ref} {...props} />;
+    const mobile = React.useContext(MobileSearchContext);
+    return mobile ? (
+      <DrawerTrigger ref={ref} {...props} />
+    ) : (
+      <Popover.Trigger ref={ref} {...props} />
+    );
   },
 );
 
@@ -35,6 +69,8 @@ export interface SearchablePopoverContentProps extends Omit<
   PopoverContentProps,
   "children"
 > {
+  /** Accessible title for the mobile drawer. */
+  drawerTitle?: string;
   /** Optional content shown above the search input, such as selected values. */
   header?: React.ReactNode;
   /** Props for specialized search inputs, such as numeric filters. */
@@ -61,6 +97,7 @@ const SearchablePopoverContent = React.forwardRef<
 >(function SearchablePopoverContent(
   {
     children,
+    drawerTitle,
     className,
     defaultSearchValue,
     header,
@@ -77,6 +114,7 @@ const SearchablePopoverContent = React.forwardRef<
   },
   ref,
 ) {
+  const mobile = React.useContext(MobileSearchContext);
   const [uncontrolledSearchValue, setUncontrolledSearchValue] = React.useState(
     defaultSearchValue ?? "",
   );
@@ -122,6 +160,78 @@ const SearchablePopoverContent = React.forwardRef<
     scrollSelectedResultIntoView();
   };
 
+  const body = (
+    <>
+      {header}
+      <div className="relative shrink-0">
+        <RiSearchLine
+          aria-hidden
+          className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+        />
+        <Input
+          {...searchInputProps}
+          autoFocus={mobile ? false : searchInputProps?.autoFocus}
+          value={resolvedSearchValue}
+          aria-label={
+            searchInputProps?.["aria-label"] ??
+            searchPlaceholder ??
+            searchInputProps?.placeholder
+          }
+          placeholder={searchPlaceholder ?? searchInputProps?.placeholder}
+          className={cn(
+            "border-0 pl-9 text-xs shadow-none focus-visible:ring-0",
+            mobile && "h-11 text-base",
+            searchInputProps?.className,
+          )}
+          onChange={(event) => {
+            const value = event.target.value;
+            if (searchValue === undefined) {
+              setUncontrolledSearchValue(value);
+            }
+            onSearchValueChange?.(value);
+          }}
+        />
+      </div>
+      <OverlayScrollbar
+        axis="vertical"
+        options={PERSISTENT_VERTICAL_SCROLLBAR_OPTIONS}
+        scrollElementRef={setResultsViewportRef}
+        syncKey={syncKey}
+        className={cn(
+          "min-h-0 flex-1 border-t border-border",
+          resultsClassName,
+        )}
+        style={{
+          maxHeight: mobile
+            ? undefined
+            : `min(var(--radix-popover-content-available-height, 100vh), ${resolvedResultsMaxHeight})`,
+        }}
+      >
+        {children}
+      </OverlayScrollbar>
+    </>
+  );
+  if (mobile)
+    return (
+      <DrawerContent
+        ref={ref}
+        className="h-[70dvh] min-h-0 overflow-hidden pb-[env(safe-area-inset-bottom)]"
+        aria-describedby={undefined}
+        onOpenAutoFocus={handleOpenAutoFocus}
+      >
+        <DrawerHeader>
+          <DrawerTitle>
+            {drawerTitle ??
+              searchPlaceholder ??
+              searchInputProps?.["aria-label"] ??
+              searchInputProps?.placeholder}
+          </DrawerTitle>
+        </DrawerHeader>
+        <div className="flex min-h-0 flex-1 flex-col [&_button]:min-h-11">
+          {body}
+        </div>
+      </DrawerContent>
+    );
   return (
     <Popover.Portal>
       <Popover.Content
@@ -134,49 +244,7 @@ const SearchablePopoverContent = React.forwardRef<
         onOpenAutoFocus={handleOpenAutoFocus}
         {...contentProps}
       >
-        {header}
-        <div className="relative shrink-0">
-          <RiSearchLine
-            aria-hidden
-            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            {...searchInputProps}
-            value={resolvedSearchValue}
-            aria-label={
-              searchInputProps?.["aria-label"] ??
-              searchPlaceholder ??
-              searchInputProps?.placeholder
-            }
-            placeholder={searchPlaceholder ?? searchInputProps?.placeholder}
-            className={cn(
-              "border-0 pl-9 text-xs shadow-none focus-visible:ring-0",
-              searchInputProps?.className,
-            )}
-            onChange={(event) => {
-              const value = event.target.value;
-              if (searchValue === undefined) {
-                setUncontrolledSearchValue(value);
-              }
-              onSearchValueChange?.(value);
-            }}
-          />
-        </div>
-        <OverlayScrollbar
-          axis="vertical"
-          options={PERSISTENT_VERTICAL_SCROLLBAR_OPTIONS}
-          scrollElementRef={setResultsViewportRef}
-          syncKey={syncKey}
-          className={cn(
-            "min-h-0 flex-1 border-t border-border",
-            resultsClassName,
-          )}
-          style={{
-            maxHeight: `min(var(--radix-popover-content-available-height, 100vh), ${resolvedResultsMaxHeight})`,
-          }}
-        >
-          {children}
-        </OverlayScrollbar>
+        {body}
       </Popover.Content>
     </Popover.Portal>
   );

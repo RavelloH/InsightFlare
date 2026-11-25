@@ -10,14 +10,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@insightflare/ui/dialog";
 import { JsonTreePanel } from "@insightflare/ui/json-tree";
 import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
 import { PageHeading } from "@insightflare/ui/page-heading";
@@ -543,33 +535,35 @@ export function TeamNotificationsClient({
         </Card>
       </div>
 
-      <Dialog open={testDialogOpen} onOpenChange={setTestDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle icon={RiMailSendLine}>
+      <ResponsiveDialog open={testDialogOpen} onOpenChange={setTestDialogOpen}>
+        <ResponsiveDialogContent desktopClassName="max-w-lg">
+          <ResponsiveDialogHeader>
+            <ResponsiveDialogTitle icon={RiMailSendLine}>
               {copy.deliveryTestTitle}
-            </DialogTitle>
-            <DialogDescription>
+            </ResponsiveDialogTitle>
+            <ResponsiveDialogDescription>
               {copy.deliveryTestDescription}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 text-sm text-muted-foreground">
-            <div className="flex items-center gap-2 text-foreground">
-              <RiCheckboxCircleLine className="size-4 text-emerald-600" />
-              {copy.inAppTestHint}
+            </ResponsiveDialogDescription>
+          </ResponsiveDialogHeader>
+          <ResponsiveDialogBody>
+            <div className="space-y-3 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 text-foreground">
+                <RiCheckboxCircleLine className="size-4 text-emerald-600" />
+                {copy.inAppTestHint}
+              </div>
+              <div
+                className={`flex items-center gap-2${emailConfigured ? " text-foreground" : ""}`}
+              >
+                <RiMailSendLine
+                  className={`size-4${emailConfigured ? " text-emerald-600" : ""}`}
+                />
+                {emailConfigured
+                  ? copy.emailTestConfiguredHint
+                  : copy.emailTestUnconfiguredHint}
+              </div>
             </div>
-            <div
-              className={`flex items-center gap-2${emailConfigured ? " text-foreground" : ""}`}
-            >
-              <RiMailSendLine
-                className={`size-4${emailConfigured ? " text-emerald-600" : ""}`}
-              />
-              {emailConfigured
-                ? copy.emailTestConfiguredHint
-                : copy.emailTestUnconfiguredHint}
-            </div>
-          </div>
-          <DialogFooter>
+          </ResponsiveDialogBody>
+          <ResponsiveDialogFooter>
             <Button
               type="button"
               variant="outline"
@@ -592,9 +586,9 @@ export function TeamNotificationsClient({
               )}
               <span>{copy.sendTestNotification}</span>
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveDialogFooter>
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>
 
       <ResponsiveDialog
         open={previewDialogOpen}

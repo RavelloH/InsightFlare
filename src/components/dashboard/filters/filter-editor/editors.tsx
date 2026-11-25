@@ -5,10 +5,10 @@ import { Checkbox } from "@insightflare/ui/checkbox";
 import { Input } from "@insightflare/ui/input";
 import { Label } from "@insightflare/ui/label";
 import {
-  SearchablePopover,
-  SearchablePopoverContent,
-  SearchablePopoverTrigger,
-} from "@insightflare/ui/searchable-popover";
+  ResponsiveSearchablePopover as SearchablePopover,
+  ResponsiveSearchablePopoverContent as SearchablePopoverContent,
+  ResponsiveSearchablePopoverTrigger as SearchablePopoverTrigger,
+} from "@insightflare/ui/responsive-searchable-popover";
 import {
   Select,
   SelectContent,
