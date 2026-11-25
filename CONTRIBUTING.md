@@ -52,7 +52,9 @@ Avoid mixing unrelated refactors with feature or bug-fix changes.
 
 Use a feature branch rather than pushing development changes directly to main.
 Fix failed checks in the same PR. Enable auto-merge after review, when appropriate;
-the required CI Gate must pass before merging.
+the required CI Gate must pass before merging. For an approved change, run
+`gh pr merge --auto --squash` to request automatic merging when the required
+checks pass. If the base branch has changed, update the PR before merging.
 
 ## Releases
 
