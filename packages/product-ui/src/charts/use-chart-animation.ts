@@ -1,5 +1,47 @@
 import { useEffect, useRef, useState } from "react";
 
+// Chart visibility uses a viewport root and a fixed threshold. Only rootMargin
+// varies, so charts with identical options can share one observer.
+type VisibilityPool = {
+  observer: IntersectionObserver;
+  subscribers: Map<Element, (visible: boolean) => void>;
+};
+const visibilityPools = new Map<string, VisibilityPool>();
+
+function observeChartVisibility(
+  element: Element,
+  rootMargin: string,
+  onVisibility: (visible: boolean) => void,
+) {
+  let pool = visibilityPools.get(rootMargin);
+  if (!pool) {
+    const subscribers = new Map<Element, (visible: boolean) => void>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          subscribers.get(entry.target)?.(
+            entry.isIntersecting || entry.intersectionRatio > 0,
+          );
+        }
+      },
+      { root: null, rootMargin, threshold: 0.01 },
+    );
+    pool = { observer, subscribers };
+    visibilityPools.set(rootMargin, pool);
+  }
+  const { observer, subscribers } = pool;
+  subscribers.set(element, onVisibility);
+  observer.observe(element);
+  return () => {
+    subscribers.delete(element);
+    observer.unobserve(element);
+    if (subscribers.size === 0) {
+      observer.disconnect();
+      visibilityPools.delete(rootMargin);
+    }
+  };
+}
+
 export function useChartVisibility(rootMargin = "120px 0px") {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isVisible, setIsVisible] = useState(false);
@@ -15,26 +57,10 @@ export function useChartVisibility(rootMargin = "120px 0px") {
       return;
     }
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0];
-        const nextVisible = Boolean(
-          entry?.isIntersecting || (entry?.intersectionRatio ?? 0) > 0,
-        );
-        setIsVisible(nextVisible);
-        setHasMeasuredVisibility(true);
-      },
-      {
-        root: null,
-        rootMargin,
-        threshold: 0.01,
-      },
-    );
-
-    observer.observe(container);
-    return () => {
-      observer.disconnect();
-    };
+    return observeChartVisibility(container, rootMargin, (nextVisible) => {
+      setIsVisible(nextVisible);
+      setHasMeasuredVisibility(true);
+    });
   }, [rootMargin]);
 
   return {

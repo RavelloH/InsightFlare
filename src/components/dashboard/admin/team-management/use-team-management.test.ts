@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   useQuery: vi.fn(),
-  useDashboardQuery: vi.fn(),
+  useDashboardTimeWindow: vi.fn(),
   useRouter: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@tanstack/react-query", () => ({ useQuery: mocks.useQuery }));
 vi.mock("@/components/dashboard/shell/dashboard-query-provider", () => ({
-  useDashboardQuery: mocks.useDashboardQuery,
+  useDashboardTimeWindow: mocks.useDashboardTimeWindow,
 }));
 vi.mock("@/lib/router", () => ({ useRouter: mocks.useRouter }));
 vi.mock("sonner", () => ({
@@ -152,7 +152,7 @@ beforeEach(() => {
   dashboardQueryData = undefined;
   dashboardQueryPending = true;
   mocks.useQuery.mockReset();
-  mocks.useDashboardQuery.mockReset();
+  mocks.useDashboardTimeWindow.mockReset();
   mocks.useRouter.mockReset();
   mocks.toastError.mockReset();
   mocks.toastSuccess.mockReset();
@@ -177,7 +177,7 @@ beforeEach(() => {
       ? query
       : { data: dashboardQueryData, isPending: dashboardQueryPending },
   );
-  mocks.useDashboardQuery.mockReturnValue({ window });
+  mocks.useDashboardTimeWindow.mockReturnValue(window);
   mocks.useRouter.mockReturnValue(router);
   mocks.postJson.mockImplementation(async (route: string) => {
     if (route === "sites")

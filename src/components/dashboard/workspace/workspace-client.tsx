@@ -45,7 +45,7 @@ import {
 } from "@/components/dashboard/analytics-time-tooltip";
 import { getAnalyticsSectionIcon } from "@/components/dashboard/common/analytics-tabs";
 import { SiteBrandIcon } from "@/components/dashboard/common/site-brand-icon";
-import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useDashboardTimeQuery } from "@/components/dashboard/shell/dashboard-query-provider";
 import {
   readWorkspaceSites,
   type WorkspaceSiteVisit,
@@ -138,7 +138,7 @@ export function WorkspaceClient({
   const copy = messages.workspace;
   const { user, teams: allTeams, unreadAttentionCount = 0 } = dashboard;
   const teams = useMemo(() => allTeams.slice(0, TEAM_LIMIT), [allTeams]);
-  const { window: queryWindow, range, queryReady } = useDashboardQuery();
+  const { window: queryWindow, range, queryReady } = useDashboardTimeQuery();
   const window = useMemo(
     () => ({
       from: queryWindow.from,

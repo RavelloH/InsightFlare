@@ -24,7 +24,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useDashboardTimeZone } from "@/components/dashboard/shell/dashboard-query-provider";
 import { shortDateTime } from "@/lib/dashboard/format";
 import type { AdminTeamsInitialData } from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
@@ -46,7 +46,7 @@ export function AdminTeamsManagementClient({
   messages,
   initialData = null,
 }: AdminTeamsManagementClientProps) {
-  const { timeZone } = useDashboardQueryControls();
+  const timeZone = useDashboardTimeZone();
   const router = useRouter();
   const t = messages.adminTeams;
   const [submitting, setSubmitting] = useState(false);

@@ -12,7 +12,7 @@ import { RiPulseLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
 import { JourneyDetailStateSwitch } from "@/components/dashboard/journeys/journey-detail-state";
-import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
+import { useDashboardTimeWindow } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import { EventFieldsCard } from "@/components/dashboard/site-pages/events/fields-card";
 import { createEventMetricItems } from "@/components/dashboard/site-pages/events/metrics-components";
 import { EventPageHeader } from "@/components/dashboard/site-pages/events/page-header";
@@ -244,9 +244,7 @@ export const EventTypeDetailClientPage = memo(
     const modalClose = useDetailModalClose();
     const liveSearchParams = useLiveSearchParams();
     const labels = messages.events;
-    const { window } = useDashboardQuery() as {
-      window: TimeWindow;
-    };
+    const window = useDashboardTimeWindow();
     const eventsPath = pathname.replace(/\/detail$/, "");
     const siteBasePath = eventsPath.replace(/\/events$/, "");
     const liveSearchParamsKey = liveSearchParams.toString();

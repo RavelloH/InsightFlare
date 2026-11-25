@@ -11,14 +11,12 @@ import { getMessages } from "@/lib/i18n/messages";
 const NOW = Date.UTC(2026, 10, 22, 6, 0);
 
 vi.mock("@/components/dashboard/shell/dashboard-query-provider", () => ({
-  useDashboardQuery: () => ({
-    window: {
-      preset: "24h",
-      from: NOW - 86_400_000,
-      to: NOW,
-      interval: "hour",
-      timeZone: "UTC",
-    },
+  useDashboardTimeWindow: () => ({
+    preset: "24h",
+    from: NOW - 86_400_000,
+    to: NOW,
+    interval: "hour",
+    timeZone: "UTC",
   }),
 }));
 vi.mock("@/lib/dashboard-api/client/admin-service", () => ({

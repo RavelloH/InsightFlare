@@ -19,7 +19,7 @@ import { RiAddLine, RiFileList3Line, RiLineChartLine } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useDashboardTimeZone } from "@/components/dashboard/shell/dashboard-query-provider";
 import { shortDateTime } from "@/lib/dashboard/format";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import type { SiteData, TeamData } from "@/lib/dashboard-api/client/edge";
@@ -61,7 +61,7 @@ export function AdminSitesManagementClient({
   activeTeam,
   initialSites = null,
 }: AdminSitesManagementClientProps) {
-  const { timeZone } = useDashboardQueryControls();
+  const timeZone = useDashboardTimeZone();
   const router = useRouter();
   const t = messages.adminSites;
   const [submitting, setSubmitting] = useState(false);

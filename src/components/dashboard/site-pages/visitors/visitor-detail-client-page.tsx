@@ -3,7 +3,10 @@ import { Card, CardContent } from "@insightflare/ui/card";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { JourneyDetailStateSwitch } from "@/components/dashboard/journeys/journey-detail-state";
-import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
+import {
+  useDashboardTimeWindow,
+  useDashboardTimeZone,
+} from "@/components/dashboard/shell/dashboard-query-provider";
 import {
   fetchVisitorDetail,
   fetchVisitorEvents,
@@ -24,7 +27,8 @@ export const VisitorDetailClientPage = memo(function VisitorDetailClientPage({
   onOpenSession,
 }: VisitorDetailClientPageProps) {
   const labels = messages.visitorDetail;
-  const { timeZone, window } = useDashboardQueryControls();
+  const timeZone = useDashboardTimeZone();
+  const window = useDashboardTimeWindow();
   const requestKey = useMemo(
     () => [siteId, visitorId, timeZone, window.from, window.to].join(":"),
     [siteId, timeZone, visitorId, window.from, window.to],

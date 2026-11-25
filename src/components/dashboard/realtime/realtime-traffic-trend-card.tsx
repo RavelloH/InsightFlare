@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useState } from "react";
 import type { TrafficPairDataPoint } from "@insightflare/product-ui/charts";
 
 import { RealtimeRollingTrendChartIsland } from "@/components/dashboard/realtime/realtime-rolling-trend-chart-island";
-import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useDashboardTimeZone } from "@/components/dashboard/shell/dashboard-query-provider";
 import {
   createChartAxisDateFormatter,
   createChartTooltipDateFormatter,
@@ -70,7 +70,7 @@ export const RealtimeTrafficTrendCard = memo(function RealtimeTrafficTrendCard({
   hasConnected,
   events,
 }: RealtimeTrafficTrendCardProps) {
-  const { timeZone } = useDashboardQueryControls();
+  const timeZone = useDashboardTimeZone();
   const [now, setNow] = useState(() => floorToMinute(Date.now()));
 
   useEffect(() => {

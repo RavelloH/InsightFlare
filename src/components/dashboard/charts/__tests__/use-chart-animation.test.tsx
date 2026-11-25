@@ -12,11 +12,28 @@ let container: HTMLDivElement | null = null;
 class MockIntersectionObserver {
   readonly observe = vi.fn();
   readonly disconnect = vi.fn();
+  readonly unobserve = vi.fn();
 
   constructor(
     readonly callback: (entries: Array<IntersectionObserverEntry>) => void,
     readonly options: IntersectionObserverInit,
   ) {}
+}
+
+function visibilityEntry(
+  target: Element,
+  isIntersecting: boolean,
+  intersectionRatio: number,
+): IntersectionObserverEntry {
+  return {
+    target,
+    isIntersecting,
+    intersectionRatio,
+    boundingClientRect: target.getBoundingClientRect(),
+    intersectionRect: target.getBoundingClientRect(),
+    rootBounds: null,
+    time: 0,
+  };
 }
 
 function render(element: React.ReactNode) {
@@ -75,46 +92,83 @@ describe("useChartVisibility", () => {
     const observer = observers[0];
     expect(observer?.options.rootMargin).toBe("0px");
     expect(observer?.observe).toHaveBeenCalledTimes(1);
+    const target = observer!.observe.mock.calls[0]![0] as Element;
     expect(visibility.current?.hasMeasuredVisibility).toBe(false);
 
     act(() => {
-      observer?.callback([
-        {
-          isIntersecting: true,
-          intersectionRatio: 1,
-        } as IntersectionObserverEntry,
-      ]);
+      observer?.callback([visibilityEntry(target, true, 1)]);
     });
     expect(visibility.current?.isVisible).toBe(true);
     expect(visibility.current?.hasMeasuredVisibility).toBe(true);
 
     act(() => {
-      observer?.callback([
-        {
-          isIntersecting: false,
-          intersectionRatio: 1,
-        } as IntersectionObserverEntry,
-      ]);
+      observer?.callback([visibilityEntry(target, false, 1)]);
     });
     expect(visibility.current?.isVisible).toBe(true);
 
     act(() => {
       observer?.callback([]);
     });
-    expect(visibility.current?.isVisible).toBe(false);
+    expect(visibility.current?.isVisible).toBe(true);
 
     act(() => {
-      observer?.callback([
-        {
-          isIntersecting: false,
-          intersectionRatio: 0,
-        } as IntersectionObserverEntry,
-      ]);
+      observer?.callback([visibilityEntry(target, false, 0)]);
     });
     expect(visibility.current?.isVisible).toBe(false);
 
     act(() => root?.unmount());
     expect(observer?.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares observers by margin, routes entries independently and releases the last subscriber", () => {
+    const observers: MockIntersectionObserver[] = [];
+    class TestIntersectionObserver extends MockIntersectionObserver {
+      constructor(
+        callback: (entries: Array<IntersectionObserverEntry>) => void,
+        options: IntersectionObserverInit,
+      ) {
+        super(callback, options);
+        observers.push(this);
+      }
+    }
+    vi.stubGlobal("IntersectionObserver", TestIntersectionObserver);
+    const values = new Map<string, boolean>();
+    function Probe({ id, margin }: { id: string; margin: string }) {
+      const visibility = useChartVisibility(margin);
+      values.set(id, visibility.isVisible);
+      return <div id={id} ref={visibility.containerRef} />;
+    }
+    const sample = (second = true, first = true) => (
+      <>
+        {first && <Probe key="a" id="a" margin="80px 0px" />}
+        {second && <Probe key="b" id="b" margin="80px 0px" />}
+        <Probe key="c" id="c" margin="0px" />
+      </>
+    );
+    render(sample());
+    expect(observers).toHaveLength(2);
+    const shared = observers[0]!;
+    expect(shared.observe).toHaveBeenCalledTimes(2);
+    const a = document.getElementById("a")!;
+    const b = document.getElementById("b")!;
+    act(() =>
+      shared.callback([
+        visibilityEntry(a, true, 1),
+        visibilityEntry(b, false, 0),
+      ]),
+    );
+    expect(values.get("a")).toBe(true);
+    expect(values.get("b")).toBe(false);
+    expect(values.get("c")).toBe(false);
+    render(sample(false));
+    expect(shared.unobserve).toHaveBeenCalledWith(b);
+    expect(shared.disconnect).not.toHaveBeenCalled();
+    render(sample(false, false));
+    expect(shared.unobserve).toHaveBeenCalledWith(a);
+    expect(shared.disconnect).toHaveBeenCalledTimes(1);
+    render(sample());
+    expect(observers).toHaveLength(3);
+    expect(observers[2]?.observe).toHaveBeenCalledTimes(2);
   });
 
   it("treats visibility as available without IntersectionObserver", () => {

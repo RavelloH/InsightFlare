@@ -5,7 +5,7 @@ import { MetricSummaryGrid } from "@insightflare/ui/metric-summary-grid";
 import { useQuery } from "@tanstack/react-query";
 
 import { DETAIL_QUERY_PARAM } from "@/components/dashboard/site-pages/common/detail-query-param";
-import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
+import { useDashboardTimeWindow } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import { EventTypeDetailClientPage } from "@/components/dashboard/site-pages/events/event-type-detail-client-page";
 import {
   createEventMetricItems,
@@ -170,9 +170,7 @@ export function EventsClientPage({
   const searchParams = useLiveSearchParams();
   const detailEventName = searchParams.get(DETAIL_QUERY_PARAM)?.trim() || "";
   const openedDetailFromListRef = useRef(false);
-  const { window: timeWindow } = useDashboardQuery() as {
-    window: TimeWindow;
-  };
+  const timeWindow = useDashboardTimeWindow();
   const searchParamsKey = searchParams.toString();
   const filters = useMemo(
     () => parseOverviewCardFilters(new URLSearchParams(searchParamsKey)),

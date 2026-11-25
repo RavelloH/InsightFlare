@@ -32,7 +32,7 @@ import {
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useDashboardTimeZone } from "@/components/dashboard/shell/dashboard-query-provider";
 import { numberFormat, shortDateTimeWithSeconds } from "@/lib/dashboard/format";
 import type { ScheduledTasksInitialData } from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
@@ -113,7 +113,7 @@ export function ScheduledTasksClient({
   initialData = null,
 }: ScheduledTasksClientProps) {
   const t = messages.managementPages.scheduledTasks;
-  const { timeZone } = useDashboardQueryControls();
+  const timeZone = useDashboardTimeZone();
   const [status, setStatus] = useState("all");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);

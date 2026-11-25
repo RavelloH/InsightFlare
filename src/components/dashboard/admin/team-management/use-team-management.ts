@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useDashboardTimeWindow } from "@/components/dashboard/shell/dashboard-query-provider";
 import { useHydrated } from "@/hooks/use-hydrated";
 import { intlLocale } from "@/lib/dashboard/format";
 import type {
@@ -49,7 +49,7 @@ export function useTeamManagement({
   const router = useRouter();
   const hydrated = useHydrated();
 
-  const { window: selectedWindow } = useDashboardQuery();
+  const selectedWindow = useDashboardTimeWindow();
 
   const canUseInitialSnapshotWindow =
     teamDashboardSnapshot &&

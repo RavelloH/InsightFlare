@@ -14,7 +14,7 @@ import {
   AnalyticsTooltipTarget,
 } from "@/components/dashboard/analytics-time-tooltip";
 import { SiteBrandIcon } from "@/components/dashboard/common/site-brand-icon";
-import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useDashboardTimeQuery } from "@/components/dashboard/shell/dashboard-query-provider";
 import { numberFormat } from "@/lib/dashboard/format";
 import {
   buildSidebarSiteTrends,
@@ -212,7 +212,7 @@ export const SidebarSiteDetails = memo(function SidebarSiteDetails({
   labels,
 }: SidebarSiteDetailsProps) {
   const { state: sidebarState, isMobile } = useSidebar();
-  const { window, queryReady } = useDashboardQuery();
+  const { window, queryReady } = useDashboardTimeQuery();
   const [shouldRenderCharts, setShouldRenderCharts] = useState(
     isMobile || sidebarState !== "collapsed",
   );

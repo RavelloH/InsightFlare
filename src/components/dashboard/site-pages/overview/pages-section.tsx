@@ -23,7 +23,7 @@ import {
   DeviceMeta,
   InlineMeta,
 } from "@/components/dashboard/journeys/journey-display";
-import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useDashboardTimeWindow } from "@/components/dashboard/shell/dashboard-query-provider";
 import { PageDetailDrawer } from "@/components/dashboard/site-pages/pages/page-detail-drawer";
 import {
   fetchOverviewClientDimensionTab,
@@ -148,7 +148,7 @@ export function OverviewPagesSection({
   const searchParams = useLiveSearchParams();
   const livePathname = usePathname() || pathname;
   const [pageDetailPath, setPageDetailPath] = useState<string | null>(null);
-  const { window } = useDashboardQuery();
+  const window = useDashboardTimeWindow();
   const comparisonQuery = useOverviewComparisonQuery(
     window,
     filters,

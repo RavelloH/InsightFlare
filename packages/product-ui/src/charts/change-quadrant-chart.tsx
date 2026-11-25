@@ -161,9 +161,10 @@ export const ChangeQuadrantChart = memo(function ChangeQuadrantChart({
     ...logTicks(Math.max(1, xMin - 1), xMax - 1).map((value) => value + 1),
   ].filter((value) => value >= xMin && value <= xMax);
   const clippedUpper = plot.some((point) => point.change > Y_LIMIT);
-  const config = {
-    value: { label: labels.value, color: TONE_COLORS.steady },
-  } satisfies ChartConfig;
+  const config = useMemo<ChartConfig>(
+    () => ({ value: { label: labels.value, color: TONE_COLORS.steady } }),
+    [labels.value],
+  );
 
   if (!plot.length) {
     return (
