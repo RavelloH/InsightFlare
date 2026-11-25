@@ -29,15 +29,22 @@ it("keeps native overflow during hydration and enhances only when needed", () =>
   const root = createRoot(container);
   document.documentElement.dataset.scrollbarMode = "overlay";
   const frames: FrameRequestCallback[] = [];
-  const idle: Array<(deadline: IdleDeadline) => void> = [];
+  const idle = vi.fn();
+  const tasks: Array<() => void> = [];
   const resize: Array<() => void> = [];
   const disconnect = vi.fn();
   vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) =>
     frames.push(fn),
   );
-  vi.stubGlobal("requestIdleCallback", (fn: (deadline: IdleDeadline) => void) =>
-    idle.push(fn),
-  );
+  vi.stubGlobal("requestIdleCallback", idle);
+  const nativeSetTimeout = window.setTimeout.bind(window);
+  vi.spyOn(window, "setTimeout").mockImplementation((fn, delay, ...args) => {
+    if (delay === 0 && typeof fn === "function") {
+      tasks.push(() => fn(...args));
+      return 1;
+    }
+    return nativeSetTimeout(fn, delay, ...args);
+  });
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -50,10 +57,10 @@ it("keeps native overflow during hydration and enhances only when needed", () =>
       }
     },
   );
-  function flushEnhancement(budget = 50) {
+  function flushEnhancement() {
     act(() => {
       frames.shift()?.(0);
-      idle.shift()?.({ didTimeout: false, timeRemaining: () => budget });
+      tasks.shift()?.();
     });
   }
   try {
@@ -76,11 +83,10 @@ it("keeps native overflow during hydration and enhances only when needed", () =>
     });
     const updated = vi.fn();
     viewport.addEventListener(SCROLLBAR_UPDATED_EVENT, updated);
-    resize.forEach((fn) => fn());
-    expect(mocks.initialize).not.toHaveBeenCalled();
-    flushEnhancement(0);
+    viewport.dispatchEvent(new Event("scroll"));
     expect(mocks.initialize).not.toHaveBeenCalled();
     flushEnhancement();
+    expect(idle).not.toHaveBeenCalled();
     expect(mocks.initialize).toHaveBeenCalledTimes(1);
     expect(updated).toHaveBeenCalledTimes(1);
     expect(disconnect).toHaveBeenCalled();
@@ -88,6 +94,7 @@ it("keeps native overflow during hydration and enhances only when needed", () =>
     act(() => root.unmount());
     container.remove();
     delete document.documentElement.dataset.scrollbarMode;
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   }
   expect(mocks.instance.destroy).toHaveBeenCalledTimes(1);
