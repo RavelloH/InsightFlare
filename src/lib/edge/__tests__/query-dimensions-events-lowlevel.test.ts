@@ -216,8 +216,13 @@ describe("edge query dimensions low-level coverage", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0].sql).toContain("ranked_session_visits AS");
     expect(calls[0].sql).toContain("ROW_NUMBER() OVER");
-    expect(calls[0].sql).toContain("latest_rank = 1");
+    expect(calls[0].sql).toContain("LAST_VALUE(");
+    expect(calls[0].sql).toContain("last_path AS value");
+    expect(calls[0].sql).toContain(
+      "ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING",
+    );
     expect(calls[1].sql).toContain("first_rank = 1");
+    expect(calls[1].sql).not.toContain("LAST_VALUE(");
     expect(calls[0].sql).not.toContain("SELECT COALESCE(fv2.pathname");
     expect(calls[0].sql).toContain("WHERE TRIM(value) != ''");
     expect(calls[0].bindings).toEqual([
@@ -1787,6 +1792,6 @@ describe("edge paginated dimensions low-level coverage", () => {
       items: [],
       pagination: { returned: 0, hasMore: false, nextCursor: null },
     });
-    expect(exit.calls[0].sql).toContain("latest_rank");
+    expect(exit.calls[0].sql).toContain("last_path AS value");
   });
 });

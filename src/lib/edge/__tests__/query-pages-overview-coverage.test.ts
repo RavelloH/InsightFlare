@@ -26,6 +26,10 @@ import {
   mapDimensionRows,
   type QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
+import {
+  querySessionPathDimensionFromD1,
+  querySessionPathDimensionPageFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/dimensions";
 import { queryRetentionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-retention";
 import {
   queryLatestSiteActivity,
@@ -443,6 +447,100 @@ describe("edge pages D1 queries", () => {
         ],
         exit: [{ value: "/pricing", views: 2, sessions: 2, visitors: 2 }],
       });
+    } finally {
+      close();
+    }
+  });
+
+  it("keeps deterministic session edges and the first valid visit's visitor in every reader", async () => {
+    const { env, database, close } = createScopedOverviewSqliteEnv();
+    const insert = database.prepare(`
+      INSERT INTO visits (
+        visit_id, site_id, visitor_id, session_id, status, started_at,
+        last_activity_at, pathname, hostname, title, query_string, hash_fragment
+      ) VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, ?, ?, '', '')
+    `);
+    try {
+      const add = (
+        id: string,
+        visitor: string,
+        session: string,
+        at: number,
+        path: string,
+      ) =>
+        insert.run(
+          id,
+          siteId,
+          visitor,
+          session,
+          at,
+          at,
+          path,
+          "example.test",
+          "Page",
+        );
+      // Blank paths are ignored, tied timestamps use the visit ID, and
+      // visitor attribution belongs to the first *valid* pathname.
+      add("a-blank", "ignored", "s1", baseMs, "   ");
+      add("c-exit", "changed-1", "s1", baseMs + 1, "/exit");
+      add("b-entry", "shared", "s1", baseMs + 1, " /entry ");
+      add("d-blank", "ignored-late", "s1", baseMs + 2, "");
+      add("e-entry", "shared", "s2", baseMs, "/entry");
+      add("f-exit", "changed-2", "s2", baseMs + 2, "/exit");
+      add("g-empty-session", "ignored", "", baseMs + 1, "/ignored");
+      add("h-single", "single", "s3", baseMs + 3, "/single");
+      add("i-outside", "outside", "s1", window.endExclusiveMs, "/outside");
+      const expected = {
+        entry: [
+          { value: "/entry", views: 2, sessions: 2, visitors: 1 },
+          { value: "/single", views: 1, sessions: 1, visitors: 1 },
+        ],
+        exit: [
+          { value: "/exit", views: 2, sessions: 2, visitors: 1 },
+          { value: "/single", views: 1, sessions: 1, visitors: 1 },
+        ],
+      };
+      const tabs = await queryPageTabsAggregate(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        10,
+      );
+      const combined = await queryPagesWithTabsFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        10,
+        false,
+      );
+      for (const kind of ["entry", "exit"] as const) {
+        expect(tabs[kind]).toEqual(expected[kind]);
+        expect(combined.tabs[kind]).toEqual(expected[kind]);
+        expect(
+          await querySessionPathDimensionFromD1(
+            env,
+            siteId,
+            window,
+            EMPTY_FILTER_DOCUMENT,
+            10,
+            kind,
+          ),
+        ).toEqual(expected[kind]);
+        expect(
+          (
+            await querySessionPathDimensionPageFromD1(
+              env,
+              siteId,
+              window,
+              EMPTY_FILTER_DOCUMENT,
+              10,
+              kind,
+            )
+          ).items,
+        ).toEqual(expected[kind]);
+      }
     } finally {
       close();
     }

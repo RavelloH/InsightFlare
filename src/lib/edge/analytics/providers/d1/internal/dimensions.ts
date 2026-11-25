@@ -396,6 +396,27 @@ export async function decodeDimensionCursor(
   );
 }
 
+/** Entry-only reads need just one ranking window. Exit and combined reads
+ * share that order and take the final pathname while retaining the first
+ * visit's visitor identity.
+ */
+export function sessionEdgeRankingSql(includeExit: boolean): string {
+  const first = `ROW_NUMBER() OVER (
+      PARTITION BY vs.session_id
+      ORDER BY vs.started_at ASC, vs.visit_id ASC
+    ) AS first_rank`;
+  if (!includeExit) return first;
+  return (
+    first +
+    `,
+    LAST_VALUE(TRIM(COALESCE(vs.pathname, ''))) OVER (
+      PARTITION BY vs.session_id
+      ORDER BY vs.started_at ASC, vs.visit_id ASC
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    ) AS last_path`
+  );
+}
+
 export async function querySessionPathDimensionFromD1(
   env: Env,
   siteId: string,
@@ -425,7 +446,7 @@ export async function querySessionPathDimensionFromD1(
   const primary = effectiveSortBy;
   const secondary = effectiveSortBy === "visitors" ? "views" : null;
   const limitClause = limit > 0 ? "\nLIMIT ?" : "";
-  const boundaryRank = kind === "entry" ? "first_rank" : "latest_rank";
+  const boundaryPath = kind === "entry" ? "pathname" : "last_path";
   const visitSource = buildVisitSourceCte().replace(
     "visit_source AS (",
     "visit_source AS MATERIALIZED (",
@@ -448,24 +469,14 @@ ranked_session_visits AS (
     vs.session_id,
     vs.visitor_id,
     TRIM(COALESCE(vs.pathname, '')) AS pathname,
-    ROW_NUMBER() OVER (
-      PARTITION BY vs.session_id
-      ORDER BY vs.started_at ASC, vs.visit_id ASC
-    ) AS first_rank,
-    ROW_NUMBER() OVER (
-      PARTITION BY vs.session_id
-      ORDER BY vs.started_at DESC, vs.visit_id DESC
-    ) AS latest_rank
+    ${sessionEdgeRankingSql(kind === "exit")}
   FROM filtered_visits vs
   WHERE vs.session_id != '' AND TRIM(COALESCE(vs.pathname, '')) != ''
 ),
 session_edges AS (
-  SELECT
-    session_id,
-    MAX(CASE WHEN first_rank = 1 THEN visitor_id END) AS visitor_id,
-    MAX(CASE WHEN ${boundaryRank} = 1 THEN pathname END) AS value
+  SELECT session_id, visitor_id, ${boundaryPath} AS value
   FROM ranked_session_visits
-  GROUP BY session_id
+  WHERE first_rank = 1
 )
 SELECT
   value,
@@ -540,7 +551,7 @@ export async function querySessionPathDimensionPageFromD1(
     : buildVisitFilterSql(filters, "visit_source", { window });
   const effectiveSortBy = dimensionSortKey(sortBy);
   const effectiveSortDirection = sortDirection === "asc" ? "asc" : "desc";
-  const boundaryRank = kind === "entry" ? "first_rank" : "latest_rank";
+  const boundaryPath = kind === "entry" ? "pathname" : "last_path";
   const visitSource = buildVisitSourceCte().replace(
     "visit_source AS (",
     "visit_source AS MATERIALIZED (",
@@ -575,24 +586,14 @@ ranked_session_visits AS (
     vs.session_id,
     vs.visitor_id,
     TRIM(COALESCE(vs.pathname, '')) AS pathname,
-    ROW_NUMBER() OVER (
-      PARTITION BY vs.session_id
-      ORDER BY vs.started_at ASC, vs.visit_id ASC
-    ) AS first_rank,
-    ROW_NUMBER() OVER (
-      PARTITION BY vs.session_id
-      ORDER BY vs.started_at DESC, vs.visit_id DESC
-    ) AS latest_rank
+    ${sessionEdgeRankingSql(kind === "exit")}
   FROM filtered_visits vs
   WHERE vs.session_id != '' AND TRIM(COALESCE(vs.pathname, '')) != ''
 ),
 session_edges AS (
-  SELECT
-    session_id,
-    MAX(CASE WHEN first_rank = 1 THEN visitor_id END) AS visitor_id,
-    MAX(CASE WHEN ${boundaryRank} = 1 THEN pathname END) AS value
+  SELECT session_id, visitor_id, ${boundaryPath} AS value
   FROM ranked_session_visits
-  GROUP BY session_id
+  WHERE first_rank = 1
 ),
 session_path_rollup AS (
   SELECT
@@ -852,25 +853,14 @@ ranked_session_visits AS (
     vs.session_id,
     vs.visitor_id,
     TRIM(COALESCE(vs.pathname, '')) AS pathname,
-    ROW_NUMBER() OVER (
-      PARTITION BY vs.session_id
-      ORDER BY vs.started_at ASC, vs.visit_id ASC
-    ) AS first_rank,
-    ROW_NUMBER() OVER (
-      PARTITION BY vs.session_id
-      ORDER BY vs.started_at DESC, vs.visit_id DESC
-    ) AS latest_rank
+    ${sessionEdgeRankingSql(true)}
   FROM ${edgeVisitRelation} vs
   WHERE vs.session_id != '' AND TRIM(COALESCE(vs.pathname, '')) != ''
 ),
 session_edges AS (
-  SELECT
-    session_id,
-    MAX(CASE WHEN first_rank = 1 THEN visitor_id END) AS visitor_id,
-    MAX(CASE WHEN first_rank = 1 THEN pathname END) AS entry,
-    MAX(CASE WHEN latest_rank = 1 THEN pathname END) AS exit
+  SELECT session_id, visitor_id, pathname AS entry, last_path AS exit
   FROM ranked_session_visits
-  GROUP BY session_id
+  WHERE first_rank = 1
 ),
 card_rows AS (
   SELECT

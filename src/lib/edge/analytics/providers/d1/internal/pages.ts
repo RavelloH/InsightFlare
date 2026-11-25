@@ -29,7 +29,11 @@ import {
   visitSourceBindings,
 } from "./core";
 import type { D1ReadDiagnostics } from "./diagnostics";
-import { queryPageTabsFromD1, queryVisitDimensionFromD1 } from "./dimensions";
+import {
+  queryPageTabsFromD1,
+  queryVisitDimensionFromD1,
+  sessionEdgeRankingSql,
+} from "./dimensions";
 import { type PageDashboardCursor } from "./pages-dashboard";
 import {
   decodePageCursor,
@@ -438,25 +442,14 @@ ranked_session_visits AS (
     vs.session_id,
     vs.visitor_id,
     TRIM(COALESCE(vs.pathname, '')) AS pathname,
-    ROW_NUMBER() OVER (
-      PARTITION BY vs.session_id
-      ORDER BY vs.started_at ASC, vs.visit_id ASC
-    ) AS first_rank,
-    ROW_NUMBER() OVER (
-      PARTITION BY vs.session_id
-      ORDER BY vs.started_at DESC, vs.visit_id DESC
-    ) AS latest_rank
+    ${sessionEdgeRankingSql(true)}
   FROM ${edgeVisitRelation} vs
   WHERE vs.session_id != '' AND TRIM(COALESCE(vs.pathname, '')) != ''
 ),
 session_edges AS (
-  SELECT
-    session_id,
-    MAX(CASE WHEN first_rank = 1 THEN visitor_id END) AS visitor_id,
-    MAX(CASE WHEN first_rank = 1 THEN pathname END) AS entry,
-    MAX(CASE WHEN latest_rank = 1 THEN pathname END) AS exit
+  SELECT session_id, visitor_id, pathname AS entry, last_path AS exit
   FROM ranked_session_visits
-  GROUP BY session_id
+  WHERE first_rank = 1
 ),
 card_rows AS (
   SELECT
