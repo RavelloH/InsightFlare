@@ -220,12 +220,60 @@ scope_final_events(event_pk, event_id, site_pk, session_id, visitor_id, occurred
     );
     expect(plan.sql).toContain("candidate.session_id = previous.session_id");
     expect(plan.sql).toContain("candidate.source_id > previous.last_source_id");
-    expect(plan.sql).toContain("FROM funnel_step_0_sessions");
-    expect(plan.sql).toContain("FROM funnel_step_0_visitors");
+    expect(plan.sql).toContain("FROM funnel_step_0_matched_visits");
+    expect(plan.sql).toContain("FROM funnel_step_0_matched_events");
+    expect(plan.sql).not.toContain("FROM funnel_step_0_sessions");
+    expect(plan.sql).not.toContain("FROM funnel_step_0_visitors");
+    expect(plan.sql).toContain("COALESCE(SUM(sessions), 0) AS sessions");
+    expect(plan.sql).toContain("COALESCE(SUM(visitors), 0) AS visitors");
     expect(plan.bindings.map((binding) => binding.value).slice(-2)).toEqual([
       "landing",
       "signup",
     ]);
+  });
+
+  it("counts step-zero identities independently and keeps sites distinct", () => {
+    const mixedDataset: ScopedDatasetSql = {
+      ...dataset,
+      ctes: `
+scope_final_visits(site_pk, session_id, visitor_id, started_at, visit_id, pathname) AS (
+  VALUES
+    (1, 'shared', 'shared', 100, 'v1', '/landing'),
+    (1, 'shared', 'shared', 110, 'v2', '/landing'),
+    (2, 'shared', 'shared', 100, 'v3', '/landing'),
+    (1, 'session-only', ' ', 120, 'v4', '/landing'),
+    (1, NULL, 'visitor-only', 130, 'v5', '/landing'),
+    (1, 'no-witness', 'no-witness', NULL, '', '/landing'),
+    (NULL, 'excluded', 'excluded', 100, 'v6', '/landing')
+),
+scope_final_events(event_pk, event_id, site_pk, session_id, visitor_id, occurred_at, sequence, event_name, pathname) AS (
+  VALUES
+    (1, 'e1', 1, 'shared', 'shared', 150, 0, 'signup', '/landing'),
+    (2, 'e2', 2, 'shared', 'shared', 150, 0, 'signup', '/landing'),
+    (3, 'e3', 1, 'event-only', '', 140, 0, 'other', '/landing')
+)`,
+    };
+    for (const scope of ["session", "visitor"] as const) {
+      const rows = runPlan(
+        buildFunnelSqlPlan(
+          config(
+            [
+              step("landing", 'page.path eq "/landing"'),
+              step("signup", 'event.name eq "signup"'),
+              step("missing", 'event.name eq "absent"'),
+            ],
+            scope,
+            scope === "visitor" ? 1000 : null,
+          ),
+          mixedDataset,
+        ),
+      );
+      expect(rows).toEqual([
+        { stepIndex: 0, stepId: "landing", sessions: 5, visitors: 4 },
+        { stepIndex: 1, stepId: "signup", sessions: 2, visitors: 2 },
+        { stepIndex: 2, stepId: "missing", sessions: 0, visitors: 0 },
+      ]);
+    }
   });
 
   it("does not let one observation complete two steps", () => {

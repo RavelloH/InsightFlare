@@ -281,36 +281,35 @@ reached_${stepIndex} AS (
   WHERE ranked.reached_rank = 1
 )`;
 }
-function countRelation(
-  reached: string,
-  column: "session_id" | "visitor_id",
-): string {
-  return `(SELECT COUNT(*)
-    FROM (
-      SELECT DISTINCT site_pk, ${column}
-      FROM ${reached}
-      WHERE site_pk IS NOT NULL
-        AND TRIM(COALESCE(${column}, '')) != ''
-    ))`;
-}
 function resultSql(
   steps: readonly FunnelStepV2[],
   firstFilter: ScopedObservationFilterSql,
 ): string {
+  // Step zero counts all matched observations, independently of whether the
+  // other identity or the witness ordering fields are valid. Later steps
+  // count reached progressions only. Group by site to keep composite identity
+  // semantics without rescanning either source for the second metric.
+  const firstObservations = `(
+    SELECT site_pk, session_id, visitor_id FROM ${firstFilter.matchedVisitRelation}
+    UNION ALL
+    SELECT site_pk, session_id, visitor_id FROM ${firstFilter.matchedEventRelation}
+  )`;
   return steps
     .map(
       (_step, index) => `
 SELECT
   ${index} AS stepIndex,
   ? AS stepId,
-  ${countRelation(
-    index === 0 ? firstFilter.sessionRelation : `reached_${index}`,
-    "session_id",
-  )} AS sessions,
-  ${countRelation(
-    index === 0 ? firstFilter.visitorRelation : `reached_${index}`,
-    "visitor_id",
-  )} AS visitors`,
+  COALESCE(SUM(sessions), 0) AS sessions,
+  COALESCE(SUM(visitors), 0) AS visitors
+FROM (
+  SELECT site_pk,
+    COUNT(DISTINCT CASE WHEN TRIM(COALESCE(session_id, '')) != '' THEN session_id END) AS sessions,
+    COUNT(DISTINCT CASE WHEN TRIM(COALESCE(visitor_id, '')) != '' THEN visitor_id END) AS visitors
+  FROM ${index === 0 ? firstObservations : `reached_${index}`}
+  WHERE site_pk IS NOT NULL
+  GROUP BY site_pk
+)`,
     )
     .join("\nUNION ALL\n")
     .concat("\nORDER BY stepIndex ASC");
