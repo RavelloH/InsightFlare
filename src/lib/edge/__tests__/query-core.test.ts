@@ -1242,8 +1242,11 @@ describe("edge query core SQL helpers", () => {
       logicalPrepared.filters!,
     );
     expect(logicalDataset).not.toBeNull();
-    expect(logicalDataset!.ctes).toContain("NOT EXISTS");
-    expect(logicalDataset!.ctes).toContain("UNION");
+    expect(logicalDataset!.ctes).toContain("scope_membership_evidence AS");
+    expect(logicalDataset!.ctes).toContain(
+      "HAVING (NOT (MAX(evidence_0) = 1) OR MAX(evidence_1) = 1)",
+    );
+    expect(logicalDataset!.ctes).toContain("UNION ALL");
     expect(logicalDataset!.ctes).toContain(
       "matching_entities.entity_id = rv.visitor_id",
     );

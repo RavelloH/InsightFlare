@@ -782,11 +782,119 @@ function compileObservationRelation(
     compiled.bindings,
   );
 }
+// Membership is existential per condition, not per observation: different
+// observations of the same entity may satisfy different AND operands.
+// Aggregate evidence independently before combining the Boolean expression.
+function compileSharedEntityMembership(
+  expression: EntitySetExpression,
+  entityKind: ScopedFactKind,
+): MembershipSql | null {
+  const conditions: FilterCondition[] = [];
+  let hasNegation = false;
+  let hasConjunction = false;
+  const compile = (node: EntitySetExpression): string | null => {
+    if (node.kind === "condition") {
+      if (!isVisitContextPredicate(node.condition)) return null;
+      const index = conditions.push(node.condition) - 1;
+      return `MAX(evidence_${index}) = 1`;
+    }
+    if (node.kind === "not") {
+      hasNegation = true;
+      const child = compile(node.child);
+      return child === null ? null : `NOT (${child})`;
+    }
+    if (node.kind === "and") hasConjunction = true;
+    const children = node.children.map(compile);
+    if (children.some((child) => child === null)) return null;
+    return `(${children.join(node.kind === "and" ? " AND " : " OR ")})`;
+  };
+  const predicate = compile(expression);
+  if (predicate === null || conditions.length < 2) return null;
+  const column = entityColumn(entityKind);
+  const bindings: Array<string | number> = [];
+  const relation = "scope_shared_membership";
+  if (!hasNegation) {
+    // A union of existential conditions is itself existential. Combine
+    // pure OR branches before deduplication. Positive conjunctions may
+    // have highly selective operands, so keep the original set joins.
+    if (hasConjunction) return null;
+    const document: FilterDocument = {
+      version: 1,
+      root: { kind: "or", children: conditions },
+    };
+    const source = (sourceRelation: string, alias: string) => {
+      const compiled = compileFilterDocument(document, {
+        alias,
+        eventAlias: alias,
+        sessionSource: "scope_raw_visits",
+      });
+      bindings.push(...compiled.bindings);
+      return `SELECT ${alias}.site_pk, ${alias}.${column} AS entity_id
+        FROM ${sourceRelation} ${alias}
+        ${compiled.clause}
+        AND TRIM(COALESCE(${alias}.${column}, '')) != ''`;
+    };
+    const sql = [
+      source("scope_raw_visits", "v"),
+      source("scope_raw_events", "e"),
+    ].join("\n  UNION\n  ");
+    return {
+      relation,
+      ctes: [boundCte(relation, `${relation} AS (\n  ${sql}\n)`, bindings)],
+    };
+  }
+  const source = (relation: string, alias: string) => {
+    const evidence = conditions.map((condition, index) => {
+      const compiled = compileFilterDocument(conditionDocument(condition), {
+        alias,
+        eventAlias: alias,
+        sessionSource: "scope_raw_visits",
+      });
+      bindings.push(...compiled.bindings);
+      return `MAX(CASE WHEN ${compiled.clause.slice("WHERE ".length)} THEN 1 ELSE 0 END) AS evidence_${index}`;
+    });
+    return `SELECT ${alias}.site_pk, ${alias}.${column} AS entity_id,
+      ${evidence.join(",\n      ")}
+    FROM ${relation} ${alias}
+    WHERE TRIM(COALESCE(${alias}.${column}, '')) != ''
+    GROUP BY ${alias}.site_pk, ${alias}.${column}`;
+  };
+  const evidenceSql = [
+    source("scope_raw_visits", "v"),
+    source("scope_raw_events", "e"),
+  ].join("\n  UNION ALL\n  ");
+  return {
+    relation,
+    ctes: [
+      boundCte(
+        "scope_membership_evidence",
+        `scope_membership_evidence AS (
+  ${evidenceSql}
+)`,
+        bindings,
+      ),
+      boundCte(
+        relation,
+        `${relation} AS (
+  SELECT site_pk, entity_id
+  FROM scope_membership_evidence
+  GROUP BY site_pk, entity_id
+  HAVING ${predicate}
+)`,
+      ),
+    ],
+  };
+}
+
 function compileEntityMembership(
   expression: EntitySetExpression | null,
   entityKind: ScopedFactKind,
   factKinds: ReadonlySet<ScopedFactKind>,
 ): MembershipSql {
+  if (expression && factKinds.size === 0) {
+    const shared = compileSharedEntityMembership(expression, entityKind);
+    if (shared) return shared;
+  }
   const column = entityColumn(entityKind);
   // Existing fact builders emit several adjacent top-level CTEs. Keep
   // their current SQL unchanged while assigning each definition an identity.
