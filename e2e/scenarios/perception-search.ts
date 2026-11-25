@@ -114,6 +114,10 @@ export function registerPerceptionScenarios(context: E2eContext) {
     await expect(search).toBeVisible();
     await expect(page.getByRole("group", { name: "指标" })).toBeVisible();
     await expect(page.getByRole("group", { name: "数据" })).toHaveCount(0);
+    await search.click();
+    await expect(search).toBeFocused();
+    await page.keyboard.type("bounce");
+    await expect(search).toHaveValue("bounce");
     await search.fill("跳出率");
     await expect(page.getByRole("option").first()).toBeVisible();
     await search.fill("event:" + "a".repeat(513));

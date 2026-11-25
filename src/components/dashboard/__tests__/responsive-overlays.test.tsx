@@ -174,6 +174,40 @@ describe("responsive overlay controls", () => {
     ).not.toBeNull();
   });
 
+  it("keeps keyboard focus inside a search drawer opened from a sidebar", async () => {
+    await render(
+      375,
+      <Sheet open>
+        <SheetContent side="left">
+          <SheetTitle>Sidebar</SheetTitle>
+          <SheetDescription>Navigation</SheetDescription>
+          <ResponsiveSearchablePopover>
+            <ResponsiveSearchablePopoverTrigger>
+              Search
+            </ResponsiveSearchablePopoverTrigger>
+            <ResponsiveSearchablePopoverContent searchPlaceholder="Find field">
+              <button type="button">Field</button>
+            </ResponsiveSearchablePopoverContent>
+          </ResponsiveSearchablePopover>
+        </SheetContent>
+      </Sheet>,
+    );
+    const trigger = document.querySelector<HTMLButtonElement>(
+      '[data-slot="drawer-trigger"]',
+    )!;
+    expect(trigger).not.toBeNull();
+    await act(async () => {
+      trigger.focus();
+      trigger.click();
+    });
+    const input = document.querySelector<HTMLInputElement>(
+      '[data-slot="drawer-content"] input',
+    )!;
+    expect(input).not.toBeNull();
+    await act(async () => input.focus());
+    expect(document.activeElement).toBe(input);
+  });
+
   it("places responsive search inside a drawer on mobile", async () => {
     await render(
       375,

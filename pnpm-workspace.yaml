@@ -9,6 +9,7 @@ allowBuilds:
 linkWorkspacePackages: true
 
 overrides:
+  vaul>@radix-ui/react-dialog: 1.3.1
   body-parser@>=2.0.0 <2.4.0: 2.4.0
   brace-expansion@<1.1.21: 1.1.21
   brace-expansion@>=4.0.0 <5.0.12: 5.0.12
