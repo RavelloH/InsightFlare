@@ -30,3 +30,8 @@ export function withSiteId(
   if (!siteId) return resourceNotFound(c);
   return handler(siteId);
 }
+
+/** Only internally dispatched batch children receive the parent's clock. */
+export function apiQueryCapturedAtMs(c: Context<AppEnv>): number {
+  return c.get("apiBatchCapturedAtMs") ?? Date.now();
+}

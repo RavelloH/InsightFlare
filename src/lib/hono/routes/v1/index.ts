@@ -17,6 +17,7 @@ import {
   TypedBatchRequestSchema,
   TypedBatchValidationError,
 } from "@/lib/api-v1";
+import { runWithDimensionPageBatch } from "@/lib/edge/analytics/composition";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 import { authenticateApiKeyMiddleware } from "@/lib/hono/middleware/api-key";
 import { registerV1CoreRoutes } from "@/lib/hono/routes/v1/core";
@@ -32,19 +33,26 @@ import { executionContext } from "@/lib/hono/utils/context";
 export const v1Routes = new Hono<AppEnv>();
 // Batch children are routed through the same Hono registration without a
 // second API-key lookup. The map is request-local and never crosses the edge.
-const internalBatchPrincipals = new WeakMap<Request, ApiKeyPrincipal>();
+const internalBatchPrincipals = new WeakMap<
+  Request,
+  { principal: ApiKeyPrincipal; capturedAtMs: number }
+>();
 async function dispatchTypedBatchRequest(
   request: Request,
   env: AppEnv["Bindings"],
   ctx: ExecutionContext,
   apiPrincipal: ApiKeyPrincipal,
+  capturedAtMs: number,
 ): Promise<Response> {
   const source = new URL(request.url);
   const mountedPath = source.pathname.replace(/^\/api\/v1(?=\/|$)/, "") || "/";
   const routedUrl = new URL(source);
   routedUrl.pathname = mountedPath;
   const routedRequest = new Request(routedUrl, request);
-  internalBatchPrincipals.set(routedRequest, apiPrincipal);
+  internalBatchPrincipals.set(routedRequest, {
+    principal: apiPrincipal,
+    capturedAtMs,
+  });
   try {
     return await v1Routes.fetch(routedRequest, env, ctx);
   } finally {
@@ -61,7 +69,8 @@ v1Routes.get("/", (c) =>
 v1Routes.use("/*", async (c, next) => {
   const internalPrincipal = internalBatchPrincipals.get(c.req.raw);
   if (internalPrincipal) {
-    c.set("apiPrincipal", internalPrincipal);
+    c.set("apiPrincipal", internalPrincipal.principal);
+    c.set("apiBatchCapturedAtMs", internalPrincipal.capturedAtMs);
     await next();
     return;
   }
@@ -180,11 +189,8 @@ v1Routes.post("/batch", async (c) => {
     }
   }
   try {
-    const result = await executeTypedBatch(
-      c.req.raw,
-      principal(c),
-      parsed.data,
-      {
+    const result = await runWithDimensionPageBatch(() =>
+      executeTypedBatch(c.req.raw, principal(c), parsed.data, {
         signal: c.req.raw.signal,
         dispatch: (_item, context) =>
           dispatchTypedBatchRequest(
@@ -192,8 +198,9 @@ v1Routes.post("/batch", async (c) => {
             c.env,
             executionContext(c),
             context.principal,
+            context.capturedAtMs,
           ),
-      },
+      }),
     );
     return jsonSuccess(
       { responses: result.responses },

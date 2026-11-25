@@ -1,9 +1,18 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
+import { assertD1StatementBudget } from "@/lib/db";
 import {
   analyticsFilterRegistry,
   effectiveScopeForPagination,
   filterFingerprint,
   type QueryAudience,
 } from "@/lib/edge/analytics/contract";
+import {
+  currentHotspotCollector,
+  type DimensionBatchOutcome,
+  type HotspotCollector,
+} from "@/lib/edge/analytics-engine/hotspot-collector";
+import { currentInvocationLogger } from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -229,31 +238,47 @@ ${limitClause}
   }));
 }
 
-/** Keyset-paginated variant for browsable dimension values. */
-export async function queryDimensionPageFromD1(
-  env: Env,
+type DimensionPageOptions = {
+  excludeEmpty?: boolean;
+  search?: string;
+  sortBy?: DimensionPageSortKey;
+  sortDirection?: "asc" | "desc";
+};
+type DimensionBinding = string | number | null;
+type DimensionRawRow = Record<string, unknown>;
+
+interface DimensionPagePlan {
+  readonly sourceCtes: string;
+  readonly sourceRelation: string;
+  readonly sourceWhere: string;
+  readonly sourceBindings: DimensionBinding[];
+  readonly selectExpr: string;
+  readonly pageWhere: string;
+  readonly pageBindings: DimensionBinding[];
+  readonly orderBy: string;
+  readonly primary: DimensionPageSortKey;
+  readonly secondary: DimensionPageSortKey;
+  readonly sortDirection: "asc" | "desc";
+  readonly limit: number;
+}
+
+function dimensionPagePlan(
   siteId: string,
   window: QueryWindow,
   filters: FilterDocument,
   limit: number,
   selectExpr: string,
-  options?: {
-    excludeEmpty?: boolean;
-    search?: string;
-    sortBy?: DimensionPageSortKey;
-    sortDirection?: "asc" | "desc";
-  },
+  options?: DimensionPageOptions,
   cursor?: DimensionAggregateCursor | null,
-  diagnostics?: D1ReadDiagnostics,
-  audience: QueryAudience = "private-dashboard",
-): Promise<PageResult<DimensionRow>> {
-  const scopedDataset = scopedVisitDataset(siteId, window, filters);
-  const sortBy = dimensionSortKey(options?.sortBy);
-  const filter = scopedDataset
+): { plan: DimensionPagePlan; dataset: ScopedDatasetSql | null } {
+  const dataset = scopedVisitDataset(siteId, window, filters);
+  const filter = dataset
     ? null
     : buildVisitFilterSql(filters, "visit_source", { window });
   const sortDirection = dimensionSortDirection(options?.sortDirection);
-  const { primary, secondary } = dimensionSortColumns(sortBy);
+  const { primary, secondary } = dimensionSortColumns(
+    dimensionSortKey(options?.sortBy),
+  );
   const operator = sortDirection === "asc" ? ">" : "<";
   const cursorClause = cursor
     ? `
@@ -263,71 +288,305 @@ AND (
   OR (${primary} = ? AND ${secondary} = ? AND value > ?)
 )`
     : "";
-  const sql = `
-WITH
-${scopedDataset?.ctes ?? buildVisitSourceCte()},
-filtered_visits AS (
+  return {
+    dataset,
+    plan: {
+      sourceCtes: dataset?.ctes ?? buildVisitSourceCte(),
+      sourceRelation: dataset?.visitRelation ?? "visit_source",
+      sourceWhere: filter?.clause ?? "",
+      sourceBindings: dataset
+        ? dataset.bindings.map((binding) => binding.value)
+        : [...visitSourceBindings(siteId, window), ...(filter?.bindings ?? [])],
+      selectExpr,
+      pageWhere: `WHERE 1 = 1
+${options?.excludeEmpty ? "AND TRIM(value) != ''" : ""}
+${options?.search ? "AND LOWER(value) LIKE ? ESCAPE '\\'" : ""}
+${cursorClause}`,
+      pageBindings: [
+        ...(options?.search
+          ? [
+              `%${options.search.trim().toLowerCase().replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`,
+            ]
+          : []),
+        ...(cursor
+          ? [
+              cursor.primary,
+              cursor.primary,
+              cursor.secondary,
+              cursor.primary,
+              cursor.secondary,
+              cursor.value,
+            ]
+          : []),
+        limit + 1,
+      ],
+      orderBy: `${primary} ${sortDirection}, ${secondary} ${sortDirection}, value ASC`,
+      primary,
+      secondary,
+      sortDirection,
+      limit,
+    },
+  };
+}
+
+function dimensionPageSource(plan: DimensionPagePlan, shared = false): string {
+  return `WITH
+${plan.sourceCtes},
+filtered_visits AS ${shared ? "NOT MATERIALIZED " : ""}(
   SELECT *
-  FROM ${scopedDataset?.visitRelation ?? "visit_source"}
-  ${filter?.clause ?? ""}
-),
-dimension_rollup AS (
+  FROM ${plan.sourceRelation}
+  ${plan.sourceWhere}
+)`;
+}
+
+function dimensionPageRollup(plan: DimensionPagePlan, name: string): string {
+  return `${name} AS (
   SELECT
-    COALESCE(${selectExpr}, '') AS value,
+    COALESCE(${plan.selectExpr}, '') AS value,
     count(*) AS views,
     count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
     count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
   FROM filtered_visits
   GROUP BY value
-)
-SELECT value, views, sessions, visitors
-FROM dimension_rollup
-WHERE 1 = 1
-${options?.excludeEmpty ? "AND TRIM(value) != ''" : ""}
-${options?.search ? "AND LOWER(value) LIKE ? ESCAPE '\\'" : ""}
-${cursorClause}
-ORDER BY views DESC, sessions DESC, value ASC
-LIMIT ?
-`;
-  const orderedSql = sql.replace(
-    "ORDER BY views DESC, sessions DESC, value ASC",
-    `ORDER BY ${primary} ${sortDirection}, ${secondary} ${sortDirection}, value ASC`,
+)`;
+}
+
+function dimensionPageSelect(plan: DimensionPagePlan, name: string): string {
+  return `SELECT value, views, sessions, visitors
+FROM ${name}
+${plan.pageWhere}
+ORDER BY ${plan.orderBy}
+LIMIT ?`;
+}
+
+interface PendingDimensionPage {
+  readonly plan: DimensionPagePlan;
+  readonly signal?: AbortSignal;
+  readonly resolve: (rows: DimensionRawRow[] | undefined) => void;
+}
+interface DimensionPageGroup {
+  readonly env: Env;
+  readonly entries: PendingDimensionPage[];
+  readonly collector?: HotspotCollector;
+  timer?: ReturnType<typeof setTimeout>;
+}
+const dimensionPageBatch = new AsyncLocalStorage<{
+  groups: Map<string, DimensionPageGroup>;
+  collector?: HotspotCollector;
+}>();
+const MAX_DIMENSION_BATCH_SIZE = 4;
+const MAX_DIMENSION_BATCH_PAGE_LIMIT = 50;
+
+/** Only the authenticated API batch entry point opens this request-local scope. */
+export function runWithDimensionPageBatch<T>(
+  action: () => Promise<T>,
+): Promise<T> {
+  return dimensionPageBatch.run(
+    {
+      groups: new Map(),
+      collector: currentHotspotCollector(currentInvocationLogger()),
+    },
+    action,
   );
-  const cursorBindings = cursor
-    ? [
-        cursor.primary,
-        cursor.primary,
-        cursor.secondary,
-        cursor.primary,
-        cursor.secondary,
-        cursor.value,
-      ]
-    : [];
-  const rows = await queryD1All<Record<string, unknown>>(
+}
+
+async function flushDimensionPageGroup(
+  group: DimensionPageGroup,
+): Promise<void> {
+  const active = group.entries.filter((entry) => !entry.signal?.aborted);
+  for (const entry of group.entries) {
+    if (entry.signal?.aborted) {
+      group.collector?.recordDimensionBatch("cancelled");
+      entry.resolve(undefined);
+    }
+  }
+  if (active.length < 2) {
+    for (const entry of active) {
+      group.collector?.recordDimensionBatch("singleton");
+      entry.resolve(undefined);
+    }
+    return;
+  }
+  let fallback: DimensionBatchOutcome = "budgetFallback";
+  try {
+    const first = active[0]!.plan;
+    const ctes = active.flatMap(({ plan }, index) => [
+      dimensionPageRollup(plan, `dimension_rollup_${index}`),
+      `dimension_page_${index} AS (${dimensionPageSelect(plan, `dimension_rollup_${index}`)})`,
+    ]);
+    const union = active
+      .map(
+        (_, index) =>
+          `SELECT ${index} AS slot, value, views, sessions, visitors FROM dimension_page_${index}`,
+      )
+      .join("\nUNION ALL\n");
+    // Each page has already applied its own cursor, ORDER BY and LIMIT.
+    // The outer order must reproduce that page's order, not the first card's.
+    // COUNT metrics are nonnegative integers, so negation preserves descending
+    // order without relying on JS string collation or unstable SQL row order.
+    const uniform = active.every(({ plan }) => plan.orderBy === first.orderBy);
+    const sortCase = (key: "primary" | "secondary") =>
+      `CASE slot ${active.map(({ plan }, index) => `WHEN ${index} THEN ${plan.sortDirection === "desc" ? "-" : ""}${plan[key]}`).join(" ")} END`;
+    const sql = `${dimensionPageSource(first, true)},
+${ctes.join(",\n")}
+${uniform ? `${union}\nORDER BY slot ASC, ${first.orderBy}` : `SELECT slot, value, views, sessions, visitors FROM (\n${union}\n)\nORDER BY slot ASC, ${sortCase("primary")} ASC, ${sortCase("secondary")} ASC, value ASC`}`;
+    const bindings = [
+      ...first.sourceBindings,
+      ...active.flatMap(({ plan }) => plan.pageBindings),
+    ];
+    assertD1StatementBudget({ sql, bindings });
+    fallback = "queryFallback";
+    const rows = await queryD1All<DimensionRawRow>(
+      group.env,
+      sql,
+      bindings,
+      undefined,
+      { id: "analytics.dimension.batch", variant: "raw.filtered" },
+    );
+    fallback = "resultFallback";
+    const pages = active.map(() => [] as DimensionRawRow[]);
+    for (const row of rows) {
+      const slot = row.slot;
+      if (
+        typeof slot !== "number" ||
+        !Number.isInteger(slot) ||
+        slot < 0 ||
+        slot >= active.length
+      ) {
+        throw new Error("invalid_dimension_batch_slot");
+      }
+      const page = pages[slot]!;
+      if (page.length >= active[slot]!.plan.limit + 1)
+        throw new Error("invalid_dimension_batch_size");
+      page.push(row);
+    }
+    group.collector?.recordDimensionBatch(
+      active.length === 2
+        ? "merged2"
+        : active.length === 3
+          ? "merged3"
+          : "merged4",
+      active.length,
+    );
+    active.forEach((entry, index) => entry.resolve(pages[index]!));
+  } catch {
+    group.collector?.recordDimensionBatch(fallback, active.length);
+    // Retry independently in each caller's own query context. No completed
+    // child is executed twice.
+    for (const entry of active) entry.resolve(undefined);
+  }
+}
+
+function enqueueDimensionPage(
+  env: Env,
+  key: string,
+  plan: DimensionPagePlan,
+  signal?: AbortSignal,
+): Promise<DimensionRawRow[] | undefined> | undefined {
+  const scope = dimensionPageBatch.getStore();
+  if (!scope || signal?.aborted) return undefined;
+  let group = scope.groups.get(key);
+  if (group && group.env.DB !== env.DB) {
+    scope.collector?.recordDimensionBatch("dbMismatch");
+    return undefined;
+  }
+  if (!group) {
+    group = { env, entries: [], collector: scope.collector };
+    scope.groups.set(key, group);
+    const pending = group;
+    group.timer = setTimeout(() => {
+      scope.groups.delete(key);
+      void flushDimensionPageGroup(pending);
+    }, 5);
+  }
+  const pending = group;
+  const result = new Promise<DimensionRawRow[] | undefined>((resolve) => {
+    pending.entries.push({ plan, signal, resolve });
+  });
+  if (pending.entries.length === MAX_DIMENSION_BATCH_SIZE) {
+    clearTimeout(pending.timer);
+    scope.groups.delete(key);
+    void flushDimensionPageGroup(pending);
+  }
+  return result;
+}
+
+/** Keyset-paginated variant for browsable dimension values. */
+export async function queryDimensionPageFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  limit: number,
+  selectExpr: string,
+  options?: DimensionPageOptions,
+  cursor?: DimensionAggregateCursor | null,
+  diagnostics?: D1ReadDiagnostics,
+  audience: QueryAudience = "private-dashboard",
+  batch?: { readonly signal?: AbortSignal },
+): Promise<PageResult<DimensionRow>> {
+  const { plan, dataset } = dimensionPagePlan(
+    siteId,
+    window,
+    filters,
+    limit,
+    selectExpr,
+    options,
+    cursor,
+  );
+  let rows: DimensionRawRow[] | undefined;
+  const batchScope = batch ? dimensionPageBatch.getStore() : undefined;
+  if (batchScope) {
+    const skipped: DimensionBatchOutcome | undefined = batch?.signal?.aborted
+      ? "cancelled"
+      : diagnostics
+        ? "diagnostics"
+        : audience !== "api-v1"
+          ? "audience"
+          : !filters.root
+            ? "unfiltered"
+            : !dataset
+              ? "unprepared"
+              : dataset.scope === "event"
+                ? "eventScope"
+                : !Number.isInteger(limit) ||
+                    limit < 1 ||
+                    limit > MAX_DIMENSION_BATCH_PAGE_LIMIT
+                  ? "pageLimit"
+                  : undefined;
+    if (skipped) batchScope.collector?.recordDimensionBatch(skipped);
+    else {
+      const key = JSON.stringify([
+        siteId,
+        audience,
+        window.startMs,
+        window.endExclusiveMs,
+        window.timeZone,
+        dataset!.scope,
+        filterFingerprint(filters, analyticsFilterRegistry),
+        plan.sourceCtes,
+        plan.sourceRelation,
+        plan.sourceWhere,
+        plan.sourceBindings,
+      ]);
+      const pending = enqueueDimensionPage(env, key, plan, batch?.signal);
+      if (pending) rows = await pending;
+    }
+  }
+  if (batch?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  rows ??= await queryD1All<DimensionRawRow>(
     env,
-    orderedSql,
-    [
-      ...(scopedDataset
-        ? scopedDataset.bindings.map((binding) => binding.value)
-        : [
-            ...visitSourceBindings(siteId, window),
-            ...(filter?.bindings ?? []),
-          ]),
-      ...(options?.search
-        ? [
-            `%${options.search
-              .trim()
-              .toLowerCase()
-              .replaceAll("\\", "\\\\")
-              .replaceAll("%", "\\%")
-              .replaceAll("_", "\\_")}%`,
-          ]
-        : []),
-      ...cursorBindings,
-      limit + 1,
-    ],
+    `${dimensionPageSource(plan)},
+${dimensionPageRollup(plan, "dimension_rollup")}
+${dimensionPageSelect(plan, "dimension_rollup")}`,
+    [...plan.sourceBindings, ...plan.pageBindings],
     diagnostics,
   );
+  if (batch?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  const sortBy = dimensionSortKey(options?.sortBy);
+  const sortDirection = dimensionSortDirection(options?.sortDirection);
+  const { primary, secondary } = dimensionSortColumns(sortBy);
+
   const mapped = rows.map((row) => ({
     value: String(row.value ?? ""),
     views: Number(row.views ?? 0),

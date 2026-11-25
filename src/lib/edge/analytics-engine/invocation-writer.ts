@@ -685,6 +685,9 @@ export function encodeInvocationMetricsPointV2(
   const details = {
     v: 2,
     ...(diagnostics ? { errorDiagnostics: diagnostics } : {}),
+    ...(metrics.dimensionBatch
+      ? { dimensionBatch: metrics.dimensionBatch }
+      : {}),
     hotBasis: hot ? basis : "unavailable",
     rankingCoverage:
       metrics.droppedQueries > 0
@@ -793,6 +796,9 @@ export function encodeInvocationMetricsPointV2(
     json = JSON.stringify({
       v: 2,
       ...(diagnostics ? { errorDiagnostics: diagnostics } : {}),
+      ...(metrics.dimensionBatch
+        ? { dimensionBatch: metrics.dimensionBatch }
+        : {}),
       truncation: details.truncation,
     });
   }

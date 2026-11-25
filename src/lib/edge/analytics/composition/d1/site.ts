@@ -568,7 +568,7 @@ export function registerSiteContractProviders(
   registry
     .register(
       "dimension",
-      typedQueryProviderFor("dimension", async (input) => {
+      typedQueryProviderFor("dimension", async (input, execution) => {
         const request = input;
         if (request.mode === "overview-tab") {
           return { value: await overviewTabData(options, request) };
@@ -659,6 +659,7 @@ export function registerSiteContractProviders(
             cursor,
             undefined,
             request.context.policy.audience,
+            { signal: execution?.signal },
           );
           return {
             value: {

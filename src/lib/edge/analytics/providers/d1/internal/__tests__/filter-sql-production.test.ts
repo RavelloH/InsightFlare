@@ -26,7 +26,13 @@ import { queryChannelAggregate } from "@/lib/edge/analytics/providers/d1/interna
 import { resolveCrossBreakdownDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
 import { VISIT_SOURCE_COLUMNS } from "@/lib/edge/analytics/providers/d1/internal/core-sources";
 import { DEFAULT_EVENT_RECORD_SORT } from "@/lib/edge/analytics/providers/d1/internal/core-types";
-import { queryDimensionFromD1 } from "@/lib/edge/analytics/providers/d1/internal/dimensions";
+import {
+  decodeDimensionCursor,
+  type DimensionAggregateCursor,
+  queryDimensionFromD1,
+  queryDimensionPageFromD1,
+  runWithDimensionPageBatch,
+} from "@/lib/edge/analytics/providers/d1/internal/dimensions";
 import { queryEventAnalyticsContextCardsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-context";
 import {
   queryEventFieldsPageFromD1,
@@ -76,7 +82,13 @@ import { queryBrowserRadarFromD1 } from "@/lib/edge/analytics/providers/d1/inter
 import { queryReferrerTrendFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/share-trend";
 import { readSiteVisitorSessions } from "@/lib/edge/analytics/providers/d1/operations/site-journeys";
 import { readTeamSites } from "@/lib/edge/analytics/providers/d1/operations/team-sites";
+import { registerHotspotCollector } from "@/lib/edge/analytics-engine/hotspot-collector";
+import { currentQueryIdentity } from "@/lib/edge/analytics-engine/query-registry";
 import { expandCustomEventData } from "@/lib/edge/ingest/custom-event-json";
+import {
+  createInvocationLogger,
+  runWithInvocationLogger,
+} from "@/lib/edge/observability/logger";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 import { applyFiltersToUrl } from "@/lib/filter-contract/filter-codec";
 import { filterDocumentUsesAdvancedExpressions } from "@/lib/filter-contract/filter-types";
@@ -1343,6 +1355,433 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     return { db, env: { DB: createSqliteD1Database(db) } as never };
   }
 
+  it("merges authorized canonical API dimension queries without merging denied children", async () => {
+    const db = sqlitePayloadFixture();
+    try {
+      db.exec(
+        "UPDATE visits SET country='US' WHERE site_pk=1 AND visit_id='v-new'",
+      );
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const identities: string[] = [];
+      const real = createSqliteD1Database(db, trace);
+      const env = {
+        DB: {
+          prepare(sql: string) {
+            identities.push(currentQueryIdentity().id);
+            return real.prepare(sql);
+          },
+        },
+        DAILY_SALT_SECRET: "test-secret",
+      } as never;
+      const context = siteQueryContext("site-a", "api-v1");
+      const filters = parseFilterDsl(
+        'geo.country eq "US"',
+        analyticsFilterRegistry,
+      );
+      const denied = {
+        ...context,
+        policy: { ...context.policy, allowedOperations: new Set<never>() },
+      };
+      const read = (dimension: string, policy = context) =>
+        executeApiV1Query(
+          undefined,
+          {
+            operation: "site.analytics.breakdown",
+            executor: createEdgeSiteAnalyticsRuntime({ env, siteId: "site-a" }),
+            context: policy,
+            query: {
+              siteId: "site-a",
+              dimension,
+              startMs: 100,
+              endExclusiveMs: 300,
+              timeZone: "UTC",
+              filters,
+              scopePreference: "session",
+              limit: 1,
+            },
+          } as never,
+          { capturedAtMs: 400 },
+        );
+      const separate = await Promise.all([
+        read("page.path"),
+        read("geo.country"),
+      ]);
+      expect(separate.every((result) => result.ok)).toBe(true);
+      trace.preparedSql.length = 0;
+      identities.length = 0;
+      const results = await runWithDimensionPageBatch(() =>
+        Promise.all([
+          read("page.path"),
+          read("geo.country"),
+          read("client.browser", denied),
+        ]),
+      );
+      expect(results.slice(0, 2)).toEqual(separate);
+      expect(results[2]).toMatchObject({
+        ok: false,
+        error: { kind: "operation-not-allowed" },
+      });
+      expect(trace.preparedSql).toHaveLength(1);
+      expect(identities).toEqual(["analytics.dimension.batch"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("shares compatible prepared dimension pages with independent ordering, cursors and limits", async () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const collector = registerHotspotCollector(logger);
+    const db = sqlitePayloadFixture();
+    try {
+      db.exec(
+        "UPDATE visits SET country='US', browser='Chrome' WHERE site_pk=1 AND visit_id='v-new'",
+      );
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const env = {
+        DB: createSqliteD1Database(db, trace),
+        DAILY_SALT_SECRET: "test-secret",
+      } as never;
+      const doc = parseFilterDsl(
+        'geo.country eq "US"',
+        analyticsFilterRegistry,
+      );
+      const plan = createScopedFilterPlan("dimension", doc, "session")!;
+      const filters = attachScopedFilterMetadata(doc, {
+        requestedScope: "session",
+        resolvedScope: plan.scope,
+        plan,
+        time: createQueryTime(100, 300, "UTC", 400),
+        siteIds: ["site-a"],
+      });
+      const request = (
+        expression: string,
+        limit: number,
+        search?: string,
+        cursor?: DimensionAggregateCursor | null,
+        sortBy: "views" | "sessions" | "visitors" = "views",
+        sortDirection: "asc" | "desc" = "desc",
+      ) =>
+        queryDimensionPageFromD1(
+          env,
+          "site-a",
+          WINDOW,
+          filters,
+          limit,
+          expression,
+          { search, excludeEmpty: false, sortBy, sortDirection },
+          cursor,
+          undefined,
+          "api-v1",
+          {},
+        );
+      const baseline = await Promise.all([
+        request("pathname", 1),
+        request("country", 2, undefined, null, "sessions", "asc"),
+        request("browser", 3, "chr", null, "visitors", "desc"),
+      ]);
+      expect(baseline[0]?.items.length).toBeGreaterThan(0);
+      const cursor = await decodeDimensionCursor(
+        env,
+        "site-a",
+        WINDOW,
+        filters,
+        "pathname",
+        undefined,
+        baseline[0]?.pagination.nextCursor,
+        "api-v1",
+      );
+      const expected = await request("pathname", 1, undefined, cursor);
+      trace.preparedSql.length = 0;
+      const result = await runWithInvocationLogger(logger, () =>
+        runWithDimensionPageBatch(() =>
+          Promise.all([
+            request("pathname", 1),
+            request("country", 2, undefined, null, "sessions", "asc"),
+            request("browser", 3, "chr", null, "visitors", "desc"),
+            request("pathname", 1, undefined, cursor),
+          ]),
+        ),
+      );
+      expect(collector.snapshot().dimensionBatch).toEqual({
+        merged4: { events: 1, items: 4 },
+      });
+      expect(result).toEqual([...baseline, expected]);
+      expect(trace.preparedSql).toHaveLength(1);
+      expect(trace.preparedSql[0]).toContain(
+        "filtered_visits AS NOT MATERIALIZED",
+      );
+      expect(trace.preparedSql[0]).toContain("dimension_page_3");
+      expect(trace.preparedSql[0]).toContain(
+        "CASE slot WHEN 0 THEN -views WHEN 1 THEN sessions",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("falls back before issuing a combined statement above the D1 binding budget", async () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const collector = registerHotspotCollector(logger);
+    const calls: number[] = [];
+    const env = {
+      DB: {
+        prepare(sql: string) {
+          expect(sql).not.toContain("dimension_page_1");
+          return {
+            bind(...bindings: unknown[]) {
+              calls.push(bindings.length);
+              return { all: async () => ({ results: [] }) };
+            },
+          };
+        },
+      },
+      DAILY_SALT_SECRET: "test-secret",
+    } as never;
+    const expression = Array.from(
+      { length: 40 },
+      (_, i) =>
+        'page.path contains "' +
+        String.fromCharCode(65 + Math.floor(i / 26), 65 + (i % 26)) +
+        '"',
+    ).join(" and ");
+    const doc = parseFilterDsl(expression, analyticsFilterRegistry);
+    const plan = createScopedFilterPlan("dimension", doc, "session")!;
+    const filters = attachScopedFilterMetadata(doc, {
+      requestedScope: "session",
+      resolvedScope: plan.scope,
+      plan,
+      time: createQueryTime(100, 300, "UTC", 400),
+      siteIds: ["site-a"],
+    });
+    const results = await runWithInvocationLogger(logger, () =>
+      runWithDimensionPageBatch(() =>
+        Promise.all(
+          ["pathname", "country", "browser", "referrer_host"].map((dimension) =>
+            queryDimensionPageFromD1(
+              env,
+              "site-a",
+              WINDOW,
+              filters,
+              2,
+              dimension,
+              { search: "a" },
+              { primary: 1, secondary: 1, value: "A" },
+              undefined,
+              "api-v1",
+              {},
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(collector.snapshot().dimensionBatch).toEqual({
+      budgetFallback: { events: 1, items: 4 },
+    });
+    expect(results.every((page) => page.items.length === 0)).toBe(true);
+    expect(calls).toEqual([94, 94, 94, 94]);
+  });
+
+  it("keeps incompatible batches isolated and retries failed shared SQL independently", async () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const collector = registerHotspotCollector(logger);
+    const db = sqlitePayloadFixture();
+    try {
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const real = createSqliteD1Database(db, trace);
+      let failures = 0;
+      const env = {
+        DB: {
+          prepare(sql: string) {
+            if (sql.includes("dimension_page_1")) {
+              failures++;
+              throw new Error("shared query failure");
+            }
+            return real.prepare(sql);
+          },
+        },
+        DAILY_SALT_SECRET: "test-secret",
+      } as never;
+      const doc = parseFilterDsl(
+        'page.path contains "/"',
+        analyticsFilterRegistry,
+      );
+      const plan = createScopedFilterPlan("dimension", doc, "visitor")!;
+      const filters = attachScopedFilterMetadata(doc, {
+        requestedScope: "visitor",
+        resolvedScope: plan.scope,
+        plan,
+        time: createQueryTime(100, 300, "UTC", 400),
+        siteIds: ["site-a"],
+      });
+      const read = (site: string, expression: string, signal?: AbortSignal) =>
+        queryDimensionPageFromD1(
+          env,
+          site,
+          WINDOW,
+          filters,
+          2,
+          expression,
+          undefined,
+          null,
+          undefined,
+          "api-v1",
+          { signal },
+        );
+      const baseline = await Promise.all([
+        read("site-a", "pathname"),
+        read("site-a", "country"),
+        read("site-b", "pathname"),
+      ]);
+      trace.preparedSql.length = 0;
+      expect(
+        await runWithInvocationLogger(logger, () =>
+          runWithDimensionPageBatch(() =>
+            Promise.all([
+              read("site-a", "pathname"),
+              read("site-a", "country"),
+              read("site-b", "pathname"),
+            ]),
+          ),
+        ),
+      ).toEqual(baseline);
+      expect(collector.snapshot().dimensionBatch).toEqual({
+        queryFallback: { events: 1, items: 2 },
+        singleton: { events: 1, items: 1 },
+      });
+      expect(failures).toBe(1);
+      expect(trace.preparedSql).toHaveLength(3);
+      trace.preparedSql.length = 0;
+      await Promise.all([
+        runWithDimensionPageBatch(() => read("site-a", "pathname")),
+        runWithDimensionPageBatch(() => read("site-a", "country")),
+      ]);
+      expect(failures).toBe(1);
+      expect(trace.preparedSql).toHaveLength(2);
+      const controller = new AbortController();
+      trace.preparedSql.length = 0;
+      const cancelled = await runWithInvocationLogger(logger, () =>
+        runWithDimensionPageBatch(async () => {
+          const first = read("site-a", "pathname", controller.signal);
+          const second = read("site-a", "country");
+          controller.abort();
+          return Promise.allSettled([first, second]);
+        }),
+      );
+      expect(collector.snapshot().dimensionBatch).toEqual({
+        queryFallback: { events: 1, items: 2 },
+        singleton: { events: 2, items: 2 },
+        cancelled: { events: 1, items: 1 },
+      });
+      expect(cancelled[0]).toMatchObject({
+        status: "rejected",
+        reason: { name: "AbortError" },
+      });
+      expect(cancelled[1]).toMatchObject({
+        status: "fulfilled",
+        value: baseline[1],
+      });
+      expect(trace.preparedSql).toHaveLength(1);
+      expect(failures).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("distinguishes rejected shared results from intentionally independent pages", async () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const collector = registerHotspotCollector(logger);
+    const calls: string[] = [];
+    const env = {
+      DB: {
+        prepare(sql: string) {
+          calls.push(sql);
+          return {
+            bind() {
+              return {
+                all: async () => ({
+                  results: sql.includes("dimension_page_1")
+                    ? [{ slot: 99 }]
+                    : [],
+                }),
+              };
+            },
+          };
+        },
+      },
+      DAILY_SALT_SECRET: "test-secret",
+    } as never;
+    const doc = parseFilterDsl('geo.country eq "US"', analyticsFilterRegistry);
+    const prepared = (scope: "session" | "event") => {
+      const plan = createScopedFilterPlan("dimension", doc, scope)!;
+      return attachScopedFilterMetadata(doc, {
+        requestedScope: scope,
+        resolvedScope: plan.scope,
+        plan,
+        time: createQueryTime(100, 300, "UTC", 400),
+        siteIds: ["site-a"],
+      });
+    };
+    const filters = prepared("session");
+    const read = (
+      dimension: string,
+      filter = filters,
+      limit = 2,
+      audience: "api-v1" | "private-dashboard" = "api-v1",
+    ) =>
+      queryDimensionPageFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        filter,
+        limit,
+        dimension,
+        undefined,
+        null,
+        undefined,
+        audience,
+        {},
+      );
+    await runWithInvocationLogger(logger, () => read("pathname"));
+    expect(collector.snapshot().dimensionBatch).toBeUndefined();
+    calls.length = 0;
+    const result = await runWithInvocationLogger(logger, () =>
+      runWithDimensionPageBatch(() =>
+        Promise.all([
+          read("pathname"),
+          read("country"),
+          read("browser"),
+          read("pathname", EMPTY_FILTER_DOCUMENT),
+          read("country", prepared("event")),
+          read("pathname", filters, 51),
+          read("country", filters, 2, "private-dashboard"),
+        ]),
+      ),
+    );
+    expect(result.every((page) => page.items.length === 0)).toBe(true);
+    expect(
+      calls.filter((sql) => sql.includes("dimension_page_1")),
+    ).toHaveLength(1);
+    expect(calls).toHaveLength(8);
+    expect(collector.snapshot().dimensionBatch).toEqual({
+      resultFallback: { events: 1, items: 3 },
+      unfiltered: { events: 1, items: 1 },
+      eventScope: { events: 1, items: 1 },
+      pageLimit: { events: 1, items: 1 },
+      audience: { events: 1, items: 1 },
+    });
+  });
   it("Dimension and CrossDimension return only the scoped Page/browser cells", async () => {
     const { db, env } = runFixture();
     try {

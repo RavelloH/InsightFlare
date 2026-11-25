@@ -73,6 +73,33 @@ describe("executeTypedBatch", () => {
     expect(dispatch.mock.calls[0]?.[1].principal).toBe(principal);
   });
 
+  it("captures a single query clock even when children run in different waves", async () => {
+    let clock = Date.UTC(2026, 10, 25, 12);
+    const captured = clock;
+    const dispatch = vi.fn(
+      async (_item: TypedBatchItem, context: TypedBatchDispatchContext) => {
+        clock += 250;
+        return new Response(
+          JSON.stringify({ capturedAtMs: context.capturedAtMs }),
+        );
+      },
+    );
+    const result = await executeTypedBatch(
+      new Request("https://app.test/api/v1/batch"),
+      principal,
+      input,
+      {
+        dispatch,
+        maxConcurrency: 1,
+        now: () => clock,
+      },
+    );
+    expect(result.responses.map((item) => item.body)).toEqual([
+      { capturedAtMs: captured },
+      { capturedAtMs: captured },
+    ]);
+    expect(clock).toBe(captured + 500);
+  });
   it("rejects nested batch, legacy mutation paths, and unregistered GET children before dispatch", async () => {
     const dispatch = vi.fn();
     await expect(
