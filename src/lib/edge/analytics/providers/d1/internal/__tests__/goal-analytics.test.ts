@@ -321,8 +321,8 @@ describe("Goal D1 analytics", () => {
       },
     ]);
     expect(d1.calls).toHaveLength(1);
-    expect(d1.calls[0]).toContain("base_bucket_observations");
-    expect(d1.calls[0]).toContain("goal_bucket_observations");
+    expect(d1.calls[0]).toContain("bucketed_observations AS MATERIALIZED");
+    expect(d1.calls[0]).toContain("entity_counts AS");
   });
 
   it("keeps a non-empty unprepared global filter from bypassing the scoped dataset", async () => {
@@ -448,6 +448,43 @@ describe("Goal D1 analytics", () => {
       totalVisitors: 2,
       convertedVisitors: 2,
     });
+  });
+
+  it("counts each site-local identity once per bucket even with repeated goal observations", async () => {
+    const d1 = new SqliteD1Database();
+    try {
+      const result = await queryGoalTimeseriesFromD1(
+        { DB: d1 } as never,
+        "site-1",
+        window,
+        "minute",
+        emptyFilter,
+        dsl('page.path eq "/"'),
+        compositeIdentityDataset(),
+      );
+      expect(result).toEqual([
+        {
+          bucket: 0,
+          totalSessions: 2,
+          convertedSessions: 2,
+          totalVisitors: 2,
+          convertedVisitors: 2,
+        },
+        ...[1, 2].map((bucket) => ({
+          bucket,
+          totalSessions: 0,
+          convertedSessions: 0,
+          totalVisitors: 0,
+          convertedVisitors: 0,
+        })),
+      ]);
+      expect(d1.calls).toHaveLength(1);
+      expect(d1.calls[0]).toContain("SELECT DISTINCT");
+      expect(d1.calls[0]).toContain("GROUP BY bucket, site_pk, session_id");
+      expect(d1.calls[0]).toContain("GROUP BY bucket, site_pk, visitor_id");
+    } finally {
+      d1.database.close();
+    }
   });
 
   it("uses half-open, bucket-local identity sets, including a parent visit outside the window", async () => {

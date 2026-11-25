@@ -168,8 +168,8 @@ describe("Goal D1 performance fixture", () => {
     expect(elapsedMs).toBeGreaterThanOrEqual(0);
     expect(d1.calls).toHaveLength(4);
     expect(d1.calls[0]!.sql).toContain("SELECT COUNT(*) FROM goal_sessions");
-    expect(d1.calls[2]!.sql).toContain("base_bucket_observations");
-    expect(d1.calls[2]!.sql).toContain("goal_bucket_observations");
+    expect(d1.calls[2]!.sql).toContain("bucketed_observations AS MATERIALIZED");
+    expect(d1.calls[2]!.sql).toContain("entity_counts AS");
     expect(d1.calls[0]!.bindings.length).toBeLessThan(20);
     expect(d1.calls[1]!.bindings.length).toBeGreaterThan(
       d1.calls[0]!.bindings.length,
