@@ -36,9 +36,13 @@ import { queryEventTypeOverviewFromD1 } from "@/lib/edge/analytics/providers/d1/
 import { queryEventRecordPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-records";
 import {
   queryEventsSummaryFromD1,
+  queryEventTotalFromD1,
   queryEventTypePageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
-import { queryEventsTrendFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-trend";
+import {
+  queryEventsTrendFromD1,
+  queryEventTotalsTrendFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/events-trend";
 import { queryFilterValuesPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/filter-values";
 import { queryFunnelAnalysis } from "@/lib/edge/analytics/providers/d1/internal/funnels";
 import { queryGoalSummaryFromD1 } from "@/lib/edge/analytics/providers/d1/internal/goal-summary";
@@ -1964,6 +1968,53 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
+  it("matches complete event trend totals without computing named series", async () => {
+    const { db } = runFixture();
+    try {
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const env = { DB: createSqliteD1Database(db, trace) } as never;
+      for (const filters of [
+        EMPTY_FILTER_DOCUMENT,
+        ready("comparison"),
+        ready("comparison", 'event.name eq "not-present"'),
+      ]) {
+        const expected = await queryEventsTrendFromD1(
+          env,
+          "site-a",
+          WINDOW,
+          "minute",
+          filters,
+          1,
+        );
+        const before = trace.preparedSql.length;
+        const totals = await queryEventTotalsTrendFromD1(
+          env,
+          "site-a",
+          WINDOW,
+          "minute",
+          filters,
+        );
+        expect(totals).toEqual(
+          expected.data.map(({ bucket, timestampMs, totalEvents }) => ({
+            bucket,
+            timestampMs,
+            totalEvents,
+          })),
+        );
+        expect(trace.preparedSql.length - before).toBe(1);
+        expect(trace.preparedSql[before]).not.toContain("GROUP BY event_name");
+        expect(
+          await queryEventTotalFromD1(env, "site-a", WINDOW, filters),
+        ).toBe(expected.data.reduce((sum, row) => sum + row.totalEvents, 0));
+      }
+      expect(
+        await queryEventTotalFromD1(env, "site-b", WINDOW, ready("comparison")),
+      ).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it("Comparison overview and breakdown providers return the real selected Event and Visit metrics", async () => {
     const { db, env } = runFixture();
     try {
@@ -1974,7 +2025,7 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         context,
         current: query,
         reference: query,
-        metrics: ["views" as const],
+        metrics: ["views", "events"] as const,
       };
       const provider = createComparisonProviders({ env, siteId: "site-a" });
       const overview = await provider.overview({

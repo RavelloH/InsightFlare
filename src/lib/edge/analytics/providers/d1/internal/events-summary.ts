@@ -244,6 +244,23 @@ export async function decodeEventTypeCursor(
   );
 }
 
+/** Total-only reader for comparison projections; no unused distinct counts. */
+export async function queryEventTotalFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+): Promise<number> {
+  const source = buildEventFilteredSourceCte(siteId, window, filters);
+  const [row] = await queryD1All<{ events: number }>(
+    env,
+    `${source.cte}
+SELECT count(*) AS events FROM filtered_events`,
+    source.bindings,
+  );
+  return Number(row?.events ?? 0);
+}
+
 export async function queryEventSummaryMetricsFromD1(
   env: Env,
   siteId: string,

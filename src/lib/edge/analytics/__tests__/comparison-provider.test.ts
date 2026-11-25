@@ -17,8 +17,8 @@ import type { Env } from "@/lib/edge/types";
 
 const mocks = vi.hoisted(() => ({
   createOverviewReader: vi.fn(),
-  queryEventSummaryMetricsFromD1: vi.fn(),
-  queryEventsTrendFromD1: vi.fn(),
+  queryEventTotalFromD1: vi.fn(),
+  queryEventTotalsTrendFromD1: vi.fn(),
   listTeamSites: vi.fn(),
   readSiteBreakdown: vi.fn(),
 }));
@@ -27,10 +27,10 @@ vi.mock("@/lib/edge/analytics/providers/d1/operations/overview-reader", () => ({
   createOverviewReader: mocks.createOverviewReader,
 }));
 vi.mock("@/lib/edge/analytics/providers/d1/internal/events-summary", () => ({
-  queryEventSummaryMetricsFromD1: mocks.queryEventSummaryMetricsFromD1,
+  queryEventTotalFromD1: mocks.queryEventTotalFromD1,
 }));
 vi.mock("@/lib/edge/analytics/providers/d1/internal/events-trend", () => ({
-  queryEventsTrendFromD1: mocks.queryEventsTrendFromD1,
+  queryEventTotalsTrendFromD1: mocks.queryEventTotalsTrendFromD1,
 }));
 vi.mock("@/lib/edge/analytics/providers/d1/internal/team", () => ({
   listTeamSites: mocks.listTeamSites,
@@ -99,10 +99,10 @@ beforeEach(() => {
   mocks.createOverviewReader.mockImplementation((_, siteId: string) =>
     readerFor(siteId),
   );
-  mocks.queryEventSummaryMetricsFromD1.mockResolvedValue({ events: 7 });
-  mocks.queryEventsTrendFromD1.mockResolvedValue({
-    data: [{ bucket: 0, timestampMs: time.range.startMs, totalEvents: 9 }],
-  });
+  mocks.queryEventTotalFromD1.mockResolvedValue(7);
+  mocks.queryEventTotalsTrendFromD1.mockResolvedValue([
+    { bucket: 0, timestampMs: time.range.startMs, totalEvents: 9 },
+  ]);
   mocks.listTeamSites.mockResolvedValue([{ id: "site-1" }, { id: "site-2" }]);
   mocks.readSiteBreakdown.mockImplementation(({ siteId }: { siteId: string }) =>
     Promise.resolve({
@@ -191,6 +191,52 @@ describe("comparison providers", () => {
       } satisfies ComparisonTrendQuery,
     });
     expect(trend.value.points[0]).toMatchObject({ views: 300 });
+  });
+
+  it("only reads events for requested comparison projections", async () => {
+    for (const [options, context] of [
+      [{ env, siteId: "site-1" }, siteContext],
+      [{ env, teamId: "team-1", allowedSiteIds: ["site-1"] }, teamContext],
+    ] as const) {
+      vi.clearAllMocks();
+      const providers = createComparisonProviders(options);
+      const comparison = {
+        ...providerQuery(context),
+        metrics: ["views", "bounceRate"] as const,
+      };
+      const overview = await providers.overview({
+        side: "current",
+        context,
+        query: comparison.current,
+        comparison,
+      });
+      expect(overview.value.views).toBe(100);
+      expect(mocks.queryEventTotalFromD1).not.toHaveBeenCalled();
+      const trend = await providers.trend({
+        side: "reference",
+        context,
+        query: comparison.reference,
+        comparison: {
+          ...comparison,
+          metrics: ["events"],
+          interval: "day",
+          trendMetrics: ["views"],
+        },
+      });
+      expect(trend.value.points[0]?.views).toBe(100);
+      expect(mocks.queryEventTotalsTrendFromD1).not.toHaveBeenCalled();
+      await providers.trend({
+        side: "current",
+        context,
+        query: comparison.current,
+        comparison: {
+          ...comparison,
+          interval: "day",
+          trendMetrics: ["events"],
+        },
+      });
+      expect(mocks.queryEventTotalsTrendFromD1).toHaveBeenCalledTimes(1);
+    }
   });
 
   it("merges complete breakdowns across sites without a per-site limit", async () => {

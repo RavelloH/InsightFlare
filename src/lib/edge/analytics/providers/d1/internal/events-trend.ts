@@ -19,6 +19,42 @@ import {
   timeBucketCase,
 } from "./core";
 
+/** Comparison needs bucket totals, not the top-event series or Other identities. */
+export async function queryEventTotalsTrendFromD1(
+  env: Env,
+  siteId: string,
+  window: QueryWindow,
+  interval: Interval,
+  filters: FilterDocument,
+): Promise<
+  readonly { bucket: number; timestampMs: number; totalEvents: number }[]
+> {
+  const source = buildEventFilteredSourceCte(siteId, window, filters);
+  const buckets = buildTimeBuckets(window, interval);
+  const bucket = timeBucketCase(buckets, "occurred_at");
+  const rows = await queryD1All<{ bucket: number; events: number }>(
+    env,
+    `${source.cte},
+bucketed AS (
+  SELECT ${bucket.sql} AS bucket, count(*) AS events
+  FROM filtered_events
+  GROUP BY bucket
+)
+SELECT bucket, events FROM bucketed
+WHERE bucket IS NOT NULL
+ORDER BY bucket ASC`,
+    [...source.bindings, ...bucket.bindings],
+  );
+  const totals = new Map(
+    rows.map((row) => [Number(row.bucket), Number(row.events ?? 0)]),
+  );
+  return buckets.map((item) => ({
+    bucket: item.index,
+    timestampMs: item.timestampMs,
+    totalEvents: totals.get(item.index) ?? 0,
+  }));
+}
+
 export async function queryEventsTrendFromD1(
   env: Env,
   siteId: string,

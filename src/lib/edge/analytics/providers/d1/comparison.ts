@@ -14,8 +14,8 @@ import {
   type QueryTime,
 } from "@/lib/edge/analytics/contract";
 import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/core";
-import { queryEventSummaryMetricsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
-import { queryEventsTrendFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-trend";
+import { queryEventTotalFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-summary";
+import { queryEventTotalsTrendFromD1 } from "@/lib/edge/analytics/providers/d1/internal/events-trend";
 import { listTeamSites } from "@/lib/edge/analytics/providers/d1/internal/team";
 import { createOverviewReader } from "@/lib/edge/analytics/providers/d1/operations/overview-reader";
 import { readSiteBreakdown } from "@/lib/edge/analytics/providers/d1/operations/site-breakdown";
@@ -73,19 +73,22 @@ async function readSiteMetrics(
   options: ComparisonProviderOptions,
   time: QueryTime,
   filters: FilterDocument,
+  includeEvents: boolean,
 ) {
   const reader = createOverviewReader(options.env, options.siteId!);
   const [overview, events] = await Promise.all([
     reader.readOverview(filtersOf(time, filters)),
-    queryEventSummaryMetricsFromD1(
-      options.env,
-      options.siteId!,
-      windowOf(time),
-      filters,
-    ),
+    includeEvents
+      ? queryEventTotalFromD1(
+          options.env,
+          options.siteId!,
+          windowOf(time),
+          filters,
+        )
+      : Promise.resolve(0),
   ]);
   return {
-    data: { ...overview.value, events: events.events },
+    data: { ...overview.value, events },
     source: overview.source ?? "raw",
     approximateVisitors: Boolean(overview.approximateVisitors),
   };
@@ -95,6 +98,7 @@ async function readTeamMetrics(
   options: ComparisonProviderOptions,
   time: QueryTime,
   filters: FilterDocument,
+  includeEvents: boolean,
 ) {
   const sites = await siteIdsForTeam(options);
   const results = await Promise.all(
@@ -103,12 +107,9 @@ async function readTeamMetrics(
         createOverviewReader(options.env, site.id).readOverview(
           filtersOf(time, filters),
         ),
-        queryEventSummaryMetricsFromD1(
-          options.env,
-          site.id,
-          windowOf(time),
-          filters,
-        ),
+        includeEvents
+          ? queryEventTotalFromD1(options.env, site.id, windowOf(time), filters)
+          : Promise.resolve(0),
       ]),
     ),
   );
@@ -120,7 +121,7 @@ async function readTeamMetrics(
       bounces: total.bounces + overview.value.bounces,
       totalDurationMs: total.totalDurationMs + overview.value.totalDurationMs,
       durationViews: total.durationViews + overview.value.durationViews,
-      events: total.events + events.events,
+      events: total.events + events,
     }),
     emptyMetrics(),
   );
@@ -181,26 +182,28 @@ async function readSiteTrend(
   time: QueryTime,
   filters: FilterDocument,
   interval: ComparisonTrendQuery["interval"],
+  includeEvents: boolean,
 ) {
   const reader = createOverviewReader(options.env, options.siteId!);
   const window = windowOf(time);
   const [trend, events] = await Promise.all([
     reader.readTrend({ ...filtersOf(time, filters), interval }),
-    queryEventsTrendFromD1(
-      options.env,
-      options.siteId!,
-      window,
-      interval,
-      filters,
-      1,
-    ),
+    includeEvents
+      ? queryEventTotalsTrendFromD1(
+          options.env,
+          options.siteId!,
+          window,
+          interval,
+          filters,
+        )
+      : Promise.resolve([]),
   ]);
   return {
     data: completePoints(
       time,
       interval,
       trend.value,
-      new Map(events.data.map((point) => [point.bucket, point.totalEvents])),
+      new Map(events.map((point) => [point.bucket, point.totalEvents])),
     ),
     source: trend.source ?? "raw",
     approximateVisitors: Boolean(trend.approximateVisitors),
@@ -212,6 +215,7 @@ async function readTeamTrend(
   time: QueryTime,
   filters: FilterDocument,
   interval: ComparisonTrendQuery["interval"],
+  includeEvents: boolean,
 ) {
   const sites = await siteIdsForTeam(options);
   const results = await Promise.all(
@@ -220,14 +224,15 @@ async function readTeamTrend(
       const window = windowOf(time);
       const [trend, events] = await Promise.all([
         reader.readTrend({ ...filtersOf(time, filters), interval }),
-        queryEventsTrendFromD1(
-          options.env,
-          site.id,
-          window,
-          interval,
-          filters,
-          1,
-        ),
+        includeEvents
+          ? queryEventTotalsTrendFromD1(
+              options.env,
+              site.id,
+              window,
+              interval,
+              filters,
+            )
+          : Promise.resolve([]),
       ]);
       return { trend, events };
     }),
@@ -267,7 +272,7 @@ async function readTeamTrend(
       current.durationViews += point.durationViews;
       totals.set(point.bucket, current);
     }
-    for (const point of events.data) {
+    for (const point of events) {
       const current = totals.get(point.bucket);
       if (current) current.events += point.totalEvents;
       else {
@@ -355,17 +360,20 @@ export function createComparisonProviders(options: ComparisonProviderOptions) {
   const overview: ComparisonProvider<
     ComparisonRawMetrics,
     ComparisonQuery
-  > = async ({ query }) => {
+  > = async ({ query, comparison }) => {
+    const includeEvents = comparison.metrics.includes("events");
     const result = options.siteId
       ? await readSiteMetrics(
           options,
           query.time,
           query.filters ?? EMPTY_FILTER,
+          includeEvents,
         )
       : await readTeamMetrics(
           options,
           query.time,
           query.filters ?? EMPTY_FILTER,
+          includeEvents,
         );
     return {
       value: result.data,
@@ -377,18 +385,21 @@ export function createComparisonProviders(options: ComparisonProviderOptions) {
     ComparisonRawTrendResult,
     ComparisonTrendQuery
   > = async ({ query, comparison }) => {
+    const includeEvents = comparison.trendMetrics.includes("events");
     const result = options.siteId
       ? await readSiteTrend(
           options,
           query.time,
           query.filters ?? EMPTY_FILTER,
           comparison.interval,
+          includeEvents,
         )
       : await readTeamTrend(
           options,
           query.time,
           query.filters ?? EMPTY_FILTER,
           comparison.interval,
+          includeEvents,
         );
     return {
       value: result.data,
