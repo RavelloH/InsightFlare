@@ -17,7 +17,8 @@ export const FUNNEL_SQL_STRUCTURAL_BUDGET: FunnelSqlStructuralBudget =
   Object.freeze({
     maxSteps: MAX_FUNNEL_STEPS,
     maxStagedCtes: MAX_FUNNEL_STEPS,
-    maxFunnelCtes: MAX_FUNNEL_STEPS * FUNNEL_SQL_CTES_PER_STEP + 1,
+    // Long plans add one scalar count CTE per stage, plus stage and visitor-window CTEs.
+    maxFunnelCtes: MAX_FUNNEL_STEPS * (FUNNEL_SQL_CTES_PER_STEP + 1) + 2,
     maxSqlLength: FUNNEL_SQL_MAX_LENGTH,
     maxBindings: FUNNEL_SQL_MAX_BINDINGS,
   });

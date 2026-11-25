@@ -483,6 +483,99 @@ scope_final_events(event_pk, event_id, site_pk, session_id, visitor_id, occurred
     ).toThrow("session_funnel_conversion_window_must_be_null");
   });
 
+  it("keeps short funnels inline and materializes only reused long intermediates", () => {
+    for (const n of [3, 4, 10]) {
+      const plan = buildFunnelSqlPlan(
+        config(
+          Array.from({ length: n }, (_, i) =>
+            step("step-" + i, 'page.path eq "/landing"'),
+          ),
+        ),
+        dataset,
+      );
+      expect(plan.sql.includes("reached_1 AS MATERIALIZED")).toBe(n >= 4);
+      expect(plan.sql).not.toContain("reached_" + (n - 1) + " AS MATERIALIZED");
+      expect(plan.sql.includes("CROSS JOIN counted_0")).toBe(n >= 6);
+      const rows = runPlan(plan);
+      expect(rows.map((row) => row.sessions)).toEqual([
+        2,
+        2,
+        1,
+        ...Array(n - 3).fill(0),
+      ]);
+      expect(rows.map((row) => row.visitors)).toEqual([
+        2,
+        2,
+        1,
+        ...Array(n - 3).fill(0),
+      ]);
+      expect(rows.map((row) => row.stepId)).toEqual(
+        Array.from({ length: n }, (_, i) => "step-" + i),
+      );
+    }
+  });
+
+  it("keeps long visitor windows and historical funnel stages exact", () => {
+    for (const n of [10, 12]) {
+      const plan = buildFunnelSqlPlan(
+        config(
+          Array.from({ length: n }, (_, index) =>
+            step("step-" + index, 'page.path eq "/landing"'),
+          ),
+          "visitor",
+          60,
+        ),
+        dataset,
+        { allowHistoricalOverLimit: n > 10 },
+      );
+      const rows = runPlan(plan);
+      expect(rows.map((row) => row.sessions)).toEqual([
+        2,
+        2,
+        ...Array(n - 2).fill(0),
+      ]);
+      expect(rows.map((row) => row.visitors)).toEqual([
+        2,
+        2,
+        ...Array(n - 2).fill(0),
+      ]);
+      expect(plan.shape.bindingCount).toBe(3 * n + 1);
+    }
+  });
+
+  it("keeps converted and drop-off membership exact for long funnels", () => {
+    const funnel = config(
+      Array.from({ length: 10 }, (_, index) =>
+        step("step-" + index, 'page.path eq "/landing"'),
+      ),
+    );
+    const database = new DatabaseSync(":memory:");
+    try {
+      for (const [outcome, site] of [
+        ["converted", 1],
+        ["dropoff", 2],
+      ] as const) {
+        const plan = buildFunnelMembershipSqlPlan(funnel, dataset, 2, {
+          outcome,
+        });
+        const sql =
+          "WITH " +
+          dataset.ctes +
+          "," +
+          plan.ctes +
+          " SELECT site_pk, session_id FROM " +
+          plan.relation +
+          " ORDER BY site_pk, session_id";
+        const rows = database
+          .prepare(sql)
+          .all(...plan.bindings.map((binding) => binding.value));
+        expect(rows).toEqual([{ site_pk: site, session_id: "session-1" }]);
+      }
+    } finally {
+      database.close();
+    }
+  });
+
   it("reports the ten-step structural shape and catches explicit overages", () => {
     const tenStepPlan = buildFunnelSqlPlan(
       config(
@@ -495,7 +588,7 @@ scope_final_events(event_pk, event_id, site_pk, session_id, visitor_id, occurred
 
     expect(tenStepPlan.shape.stagedCteCount).toBe(10);
     expect(tenStepPlan.shape.funnelCteCount).toBe(
-      10 * FUNNEL_SQL_CTES_PER_STEP,
+      10 * FUNNEL_SQL_CTES_PER_STEP + 11,
     );
     expect(tenStepPlan.sql.match(/\breached_\d+\s+AS/giu)).toHaveLength(10);
     expect(tenStepPlan.shape.sqlLength).toBe(tenStepPlan.sql.length);

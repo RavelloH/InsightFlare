@@ -30,7 +30,8 @@ export const FUNNEL_SQL_HISTORICAL_STRUCTURAL_BUDGET: FunnelSqlStructuralBudget 
   Object.freeze({
     maxSteps: MAX_HISTORICAL_FUNNEL_STEPS,
     maxStagedCtes: MAX_HISTORICAL_FUNNEL_STEPS,
-    maxFunnelCtes: MAX_HISTORICAL_FUNNEL_STEPS * FUNNEL_SQL_CTES_PER_STEP + 1,
+    maxFunnelCtes:
+      MAX_HISTORICAL_FUNNEL_STEPS * (FUNNEL_SQL_CTES_PER_STEP + 1) + 2,
     maxSqlLength: FUNNEL_SQL_MAX_LENGTH,
     maxBindings: FUNNEL_SQL_MAX_BINDINGS,
   });
@@ -119,7 +120,22 @@ function identityPredicate(
 ): string {
   return `TRIM(COALESCE(${alias}.${identity}, '')) != ''`;
 }
-function observationAfter(candidate: string, previous: string): string {
+function observationAfter(
+  candidate: string,
+  previous: string,
+  compact: boolean,
+): string {
+  if (compact) {
+    // The JOIN accepts only TRUE; a row-value comparison preserves the
+    // lexicographic ordering (including NULL) without the deep OR tree.
+    return `(
+      ${candidate}.observed_at, ${candidate}.observation_rank,
+      ${candidate}.sequence, ${candidate}.source_id
+    ) > (
+      ${previous}.last_observed_at, ${previous}.last_observation_rank,
+      ${previous}.last_sequence, ${previous}.last_source_id
+    )`;
+  }
   return `(
     ${candidate}.observed_at > ${previous}.last_observed_at
     OR (
@@ -237,6 +253,8 @@ function reachedNextCte(
   filter: string,
   identity: "session_id" | "visitor_id",
   visitorWindow: boolean,
+  materialize: boolean,
+  compactOrdering: boolean,
 ): string {
   const windowClause = visitorWindow
     ? `
@@ -244,7 +262,7 @@ function reachedNextCte(
           + (SELECT conversion_window_ms FROM funnel_params)`
     : "";
   return `
-reached_${stepIndex} AS (
+reached_${stepIndex} AS ${materialize ? "MATERIALIZED " : ""}(
   SELECT
     ranked.site_pk,
     ranked.session_id,
@@ -271,20 +289,26 @@ reached_${stepIndex} AS (
                  candidate.sequence ASC,
                  candidate.source_id ASC
       ) AS reached_rank
-    FROM reached_${stepIndex - 1} previous
+    FROM ${previous} previous
     INNER JOIN ${filter} candidate
       ON candidate.site_pk = previous.site_pk
      AND candidate.${identity} = previous.${identity}
-     AND ${observationAfter("candidate", "previous")}
+     AND ${observationAfter("candidate", "previous", compactOrdering)}
      ${windowClause}
   ) ranked
   WHERE ranked.reached_rank = 1
 )`;
 }
+const COMPACT_RESULT_MIN_STEPS = 6;
+
+function resultCteCount(stepCount: number): number {
+  return stepCount >= COMPACT_RESULT_MIN_STEPS ? stepCount + 1 : 0;
+}
+
 function resultSql(
   steps: readonly FunnelStepV2[],
   firstFilter: ScopedObservationFilterSql,
-): string {
+): { ctes: readonly string[]; sql: string } {
   // Step zero counts all matched observations, independently of whether the
   // other identity or the witness ordering fields are valid. Later steps
   // count reached progressions only. Group by site to keep composite identity
@@ -294,9 +318,8 @@ function resultSql(
     UNION ALL
     SELECT site_pk, session_id, visitor_id FROM ${firstFilter.matchedEventRelation}
   )`;
-  return steps
-    .map(
-      (_step, index) => `
+  const counts = steps.map(
+    (_step, index) => `
 SELECT
   ${index} AS stepIndex,
   ? AS stepId,
@@ -310,9 +333,31 @@ FROM (
   WHERE site_pk IS NOT NULL
   GROUP BY site_pk
 )`,
-    )
-    .join("\nUNION ALL\n")
-    .concat("\nORDER BY stepIndex ASC");
+  );
+  if (steps.length < COMPACT_RESULT_MIN_STEPS) {
+    return {
+      ctes: [],
+      sql: counts.join("\nUNION ALL\n").concat("\nORDER BY stepIndex ASC"),
+    };
+  }
+
+  // D1 expands the UNION of long, nested progression chains beyond its
+  // compound-SELECT limit. Each count is exactly one row (including zero).
+  // Join those scalar aggregates once, then project one row per stage.
+  const names = steps.map((_, index) => `counted_${index}`);
+  const fields = ["stepId", "sessions", "visitors"].map(
+    (field) =>
+      `CASE stage.stepIndex ${names.map((name, index) => `WHEN ${index} THEN ${name}.${field}`).join(" ")} END AS ${field}`,
+  );
+  return {
+    ctes: [
+      ...counts.map((count, index) => `${names[index]} AS (${count})`),
+      `stage(stepIndex) AS (VALUES ${steps.map((_, index) => `(${index})`).join(",")})`,
+    ],
+    sql: `SELECT stage.stepIndex, ${fields.join(", ")}
+FROM stage ${names.map((name) => `CROSS JOIN ${name}`).join(" ")}
+ORDER BY stage.stepIndex ASC`,
+  };
 }
 interface FunnelCteParts {
   readonly funnelCtes: readonly string[];
@@ -324,7 +369,10 @@ interface FunnelCteParts {
 function buildFunnelCteParts(
   config: FunnelConfigV2,
   dataset: ScopedDatasetSql,
-  options: { readonly allowHistoricalOverLimit?: boolean } = {},
+  options: {
+    readonly allowHistoricalOverLimit?: boolean;
+    readonly analysis?: boolean;
+  } = {},
 ): FunnelCteParts {
   if (options.allowHistoricalOverLimit) {
     assertHistoricalConfigShape(config);
@@ -363,6 +411,11 @@ function buildFunnelCteParts(
             witnesses,
             identity,
             visitorWindow,
+            (options.analysis
+              ? config.steps.length >= 4
+              : config.steps.length >= COMPACT_RESULT_MIN_STEPS) &&
+              stepIndex < config.steps.length - 1,
+            config.steps.length >= COMPACT_RESULT_MIN_STEPS,
           ),
     );
     layers.push({
@@ -388,7 +441,8 @@ export function assertFunnelStructuralBudget(stepCount: number): void {
   if (stepCount > MAX_FUNNEL_STEPS) {
     throw new Error("funnel_sql_step_limit_exceeded");
   }
-  const estimatedCtes = stepCount * FUNNEL_SQL_CTES_PER_STEP + 1;
+  const estimatedCtes =
+    stepCount * FUNNEL_SQL_CTES_PER_STEP + resultCteCount(stepCount) + 1;
   if (estimatedCtes > FUNNEL_SQL_STRUCTURAL_BUDGET.maxFunnelCtes) {
     throw new Error("funnel_sql_cte_limit_exceeded");
   }
@@ -428,7 +482,8 @@ function assertHistoricalConfigShape(config: FunnelConfigV2): void {
 }
 /**
  * Build one D1 statement for a Funnel v2 config over a prepared dataset.
- * Every step owns an independent observation-filter bundle.  The progression
+ * Every step owns an independent observation-filter bundle. Long analyses
+ * additionally use one scalar count CTE per step and a stage relation. The progression
  * CTEs consume only those bundles' final matched relations and never access
  * raw tables or alter the dataset window.
  */
@@ -437,13 +492,17 @@ export function buildFunnelSqlPlan(
   dataset: ScopedDatasetSql,
   options: { readonly allowHistoricalOverLimit?: boolean } = {},
 ): FunnelSqlPlan {
-  const parts = buildFunnelCteParts(config, dataset, options);
+  const parts = buildFunnelCteParts(config, dataset, {
+    ...options,
+    analysis: true,
+  });
   const visitorWindow = config.progressionScope === "visitor";
+  const result = resultSql(config.steps, parts.firstFilter);
 
   const sql = `WITH
 ${dataset.ctes.trim()},
-${parts.funnelCtes.join(",\n")}
-${resultSql(config.steps, parts.firstFilter)}`;
+${[...parts.funnelCtes, ...result.ctes].join(",\n")}
+${result.sql}`;
   const bindings: SqlBinding[] = [
     ...dataset.bindings,
     ...(visitorWindow ? [{ value: config.conversionWindowMs! }] : []),
@@ -455,7 +514,9 @@ ${resultSql(config.steps, parts.firstFilter)}`;
     bindings,
     stepCount: config.steps.length,
     funnelCteCount:
-      config.steps.length * FUNNEL_SQL_CTES_PER_STEP + (visitorWindow ? 1 : 0),
+      config.steps.length * FUNNEL_SQL_CTES_PER_STEP +
+      result.ctes.length +
+      (visitorWindow ? 1 : 0),
   });
   assertFunnelSqlShapeWithinBudget(
     shape,
