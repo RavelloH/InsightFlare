@@ -62,6 +62,7 @@ function fixture() {
   write("dist/server/assets/module.js", "export const x = 1;");
   write("dist/client/index.html", "<html></html>");
   write("migrations/0001_initial.sql", "SELECT 1;");
+  write("docs/schema.sql", "CREATE TABLE example (id INTEGER);");
   const run = () =>
     spawnSync(process.execPath, [packager, sha, "--root=" + root], {
       encoding: "utf8",
@@ -96,6 +97,7 @@ describe("Nightly deploy artifact", () => {
     const files = manifest().files.map((file) => file.path);
     expect(files).not.toContain("asset/_headers");
     expect(files).toContain("worker/index.js");
+    expect(files).toContain("database/schema.sql");
     expect(files).toContain("worker/assets/module.js");
     for (const asset of assets) {
       expect(files).toContain("asset/assets/" + asset);

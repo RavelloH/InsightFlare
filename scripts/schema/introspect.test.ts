@@ -1,8 +1,9 @@
+import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it } from "vitest";
 
-import { createMigratedDatabase } from "./database";
+import { createMigratedDatabase, loadMigrations } from "./database";
 import { generateSchemaSql } from "./generate-sql";
 import { generateSchemaTypes } from "./generate-types";
 import { introspectSchema } from "./introspect";
@@ -108,7 +109,120 @@ describe("SQLite schema introspection", () => {
       expect(generateSchemaTypes(schema)).toBe(
         generateSchemaTypes(introspectSchema(db)),
       );
-      expect(generateSchemaSql(db, schema)).toBe(generateSchemaSql(db, schema));
+      const names = loadMigrations().map(({ file }) => file);
+      const sql = generateSchemaSql(db, schema, names);
+      const fresh = createMigratedDatabase();
+      const initialized = new DatabaseSync(":memory:");
+      try {
+        expect(sql).toBe(
+          generateSchemaSql(fresh, introspectSchema(fresh), names),
+        );
+        expect(sql + "\n").toBe(
+          readFileSync("docs/schema.sql", "utf8").replaceAll("\r\n", "\n"),
+        );
+        initialized.exec(sql);
+        db.exec(
+          "CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)",
+        );
+        for (const name of names)
+          db.prepare("INSERT INTO d1_migrations(name) VALUES (?)").run(name);
+        expect(introspectSchema(initialized)).toEqual(introspectSchema(db));
+        const objects = (database: DatabaseSync) =>
+          database
+            .prepare(
+              "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name",
+            )
+            .all()
+            .map((row) => ({
+              ...row,
+              sql: String(row.sql)
+                .replace(/\s+/g, " ")
+                .replace(/\s*([(),])\s*/g, "$1")
+                .trim(),
+            }));
+        expect(objects(initialized)).toEqual(objects(db));
+        for (const table of introspectSchema(db).filter(
+          (item) => item.kind === "table",
+        )) {
+          const name = '"' + table.name.replaceAll('"', '""') + '"';
+          const rows = (database: DatabaseSync) =>
+            database
+              .prepare(`SELECT * FROM ${name}`)
+              .all()
+              .map((row) => {
+                if (
+                  table.name === "scheduled_task_schedule_state" ||
+                  table.name === "d1_migrations"
+                ) {
+                  const field =
+                    table.name === "d1_migrations"
+                      ? "applied_at"
+                      : "updated_at";
+                  const value = row[field];
+                  const seconds =
+                    typeof value === "number"
+                      ? value
+                      : Date.parse(String(value) + "Z") / 1000;
+                  expect(Math.abs(Date.now() / 1000 - seconds)).toBeLessThan(
+                    60,
+                  );
+                  return { ...row, [field]: "initialization time" };
+                }
+                return row;
+              })
+              .map((row) => JSON.stringify(row))
+              .sort();
+          expect(rows(initialized)).toEqual(rows(db));
+        }
+        expect(
+          initialized
+            .prepare("SELECT * FROM sqlite_sequence ORDER BY name")
+            .all(),
+        ).toEqual(
+          db.prepare("SELECT * FROM sqlite_sequence ORDER BY name").all(),
+        );
+        expect(initialized.prepare("PRAGMA foreign_key_check").all()).toEqual(
+          [],
+        );
+        expect(initialized.prepare("PRAGMA integrity_check").get()).toEqual({
+          integrity_check: "ok",
+        });
+        for (const database of [db, initialized]) {
+          database.exec(
+            "ALTER TABLE scheduled_task_schedule_state ADD COLUMN test_revision INTEGER NOT NULL DEFAULT 0",
+          );
+          database.exec(
+            "UPDATE scheduled_task_schedule_state SET test_revision=1 WHERE task_key='notification_tick'",
+          );
+          database
+            .prepare("INSERT INTO d1_migrations(name) VALUES (?)")
+            .run("9999_test.sql");
+        }
+        expect(objects(initialized)).toEqual(objects(db));
+        expect(
+          initialized
+            .prepare("SELECT id,name FROM d1_migrations ORDER BY id")
+            .all(),
+        ).toEqual(
+          db.prepare("SELECT id,name FROM d1_migrations ORDER BY id").all(),
+        );
+        expect(
+          initialized
+            .prepare(
+              "SELECT task_key,test_revision FROM scheduled_task_schedule_state ORDER BY task_key",
+            )
+            .all(),
+        ).toEqual(
+          db
+            .prepare(
+              "SELECT task_key,test_revision FROM scheduled_task_schedule_state ORDER BY task_key",
+            )
+            .all(),
+        );
+      } finally {
+        fresh.close();
+        initialized.close();
+      }
     } finally {
       db.close();
     }

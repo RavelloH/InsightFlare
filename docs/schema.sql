@@ -1,6 +1,6 @@
 -- D1 schema (generated). Do not edit by hand; run `pnpm run generate:schema`
 
--- Regenerates the current table structure by replaying migrations/.
+-- Complete initialization for a new empty D1 database, including seed data and migration history.
 
 CREATE TABLE account_action_tokens (
   id TEXT PRIMARY KEY,
@@ -579,3 +579,57 @@ CREATE TABLE widgets (
 );
 
 CREATE INDEX idx_widgets_site_type ON widgets(site_id, type);
+
+INSERT INTO "scheduled_task_schedule_state" ("task_key", "enabled", "next_run_at", "last_run_at", "claim_token", "claim_expires_at", "last_error") VALUES ('database_maintenance', 1, 0, NULL, NULL, NULL, NULL);
+
+INSERT INTO "scheduled_task_schedule_state" ("task_key", "enabled", "next_run_at", "last_run_at", "claim_token", "claim_expires_at", "last_error") VALUES ('notification_tick', 1, 0, NULL, NULL, NULL, NULL);
+
+INSERT INTO "scheduled_task_schedule_state" ("task_key", "enabled", "next_run_at", "last_run_at", "claim_token", "claim_expires_at", "last_error") VALUES ('visit_hourly_rollup', 1, 0, NULL, NULL, NULL, NULL);
+
+CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
+
+INSERT INTO d1_migrations (name) VALUES
+  ('0001_initial.sql'),
+  ('0002_archive_objects.sql'),
+  ('0003_account_system.sql'),
+  ('0004_team_owner_consistency.sql'),
+  ('0005_remove_pageviews_ip_extra_json.sql'),
+  ('0006_remove_pageviews_bot_columns.sql'),
+  ('0007_remove_pageviews_colo.sql'),
+  ('0008_rebuild_analytics.sql'),
+  ('0009_reduce_write_indexes.sql'),
+  ('0010_drop_session_visitor_indexes.sql'),
+  ('0011_minimize_custom_event_context.sql'),
+  ('0012_create_widgets.sql'),
+  ('0013_add_visit_performance_metrics.sql'),
+  ('0014_restore_detail_target_indexes.sql'),
+  ('0015_user_timezone_preference.sql'),
+  ('0016_team_member_roles.sql'),
+  ('0017_structured_custom_events.sql'),
+  ('0019_add_user_identity.sql'),
+  ('0020_create_analysis_definitions.sql'),
+  ('0021_visit_hourly_rollups.sql'),
+  ('0022_drop_visits_archive.sql'),
+  ('0023_visit_rollup_open_index.sql'),
+  ('0024_scheduled_task_runs.sql'),
+  ('0025_visit_visitor_last_activity_index.sql'),
+  ('0026_api_keys.sql'),
+  ('0027_notification_rules_messages.sql'),
+  ('0028_user_preferred_locale.sql'),
+  ('0029_notification_rule_state.sql'),
+  ('0030_account_action_tokens.sql'),
+  ('0031_team_member_site_access.sql'),
+  ('0032_visit_open_last_activity_index.sql'),
+  ('0033_performance_foundation_controls.sql'),
+  ('0034_retire_performance_foundation.sql'),
+  ('0035_system_performance_created_at_indexes.sql'),
+  ('0036_create_saved_filters.sql'),
+  ('0037_remove_redundant_indexes.sql'),
+  ('0038_drop_remaining_redundant_indexes.sql'),
+  ('0039_site_identity_keys.sql'),
+  ('0040_switch_site_identity_indexes.sql'),
+  ('0041_contract_site_identity_keys.sql'),
+  ('0042_internal_scheduled_tasks.sql'),
+  ('0043_add_saved_filter_scope_preference.sql'),
+  ('0044_migrate_legacy_bot_analytics_config.sql'),
+  ('0045_team_owner_lookup_index.sql');

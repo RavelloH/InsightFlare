@@ -65,6 +65,7 @@ function pushTable(
 export function generateSchemaSql(
   db: DatabaseSync,
   schema: readonly SchemaObject[],
+  migrationNames: readonly string[],
 ): string {
   const sections: string[] = [];
   for (const object of schema) {
@@ -92,6 +93,39 @@ export function generateSchemaSql(
     );
   }
 
+  // Seed data comes from a replay of the canonical migrations. Fail closed
+  // on new seed tables until their initialization semantics are reviewed.
+  for (const object of schema) {
+    if (object.kind !== "table") continue;
+    const identifier = '"' + object.name.replaceAll('"', '""') + '"';
+    const count = db
+      .prepare(`SELECT count(*) AS n FROM ${identifier}`)
+      .get()?.n;
+    if (count === 0) continue;
+    if (object.name !== "scheduled_task_schedule_state") {
+      throw new Error(`Unreviewed seed data in ${object.name}`);
+    }
+    const columns = object.columns.filter(
+      (column) =>
+        !column.generated &&
+        column.hidden === 0 &&
+        column.sqlName !== "updated_at",
+    );
+    const names = columns.map(
+      (column) => '"' + column.sqlName.replaceAll('"', '""') + '"',
+    );
+    const rows = db
+      .prepare(
+        `SELECT ${names.map((name, index) => `quote(${name}) AS v${index}`).join(", ")} FROM ${identifier} ORDER BY task_key`,
+      )
+      .all();
+    for (const row of rows) {
+      sections.push(
+        `INSERT INTO ${identifier} (${names.join(", ")}) VALUES (${names.map((_, index) => row[`v${index}`]).join(", ")});`,
+      );
+    }
+  }
+
   const triggers = db
     .prepare(
       "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name NOT LIKE 'sqlite_%' ORDER BY name",
@@ -104,9 +138,18 @@ export function generateSchemaSql(
       .map((sql) => `${sql};`),
   );
 
+  sections.push(
+    "CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);",
+    "INSERT INTO d1_migrations (name) VALUES\n" +
+      migrationNames
+        .map((name) => "  ('" + name.replaceAll("'", "''") + "')")
+        .join(",\n") +
+      ";",
+  );
+
   return [
     "-- D1 schema (generated). Do not edit by hand; run `pnpm run generate:schema`",
-    "-- Regenerates the current table structure by replaying migrations/.",
+    "-- Complete initialization for a new empty D1 database, including seed data and migration history.",
     ...sections,
   ].join("\n\n");
 }
