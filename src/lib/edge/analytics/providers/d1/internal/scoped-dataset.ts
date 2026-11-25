@@ -1433,6 +1433,51 @@ function isVisitContextPredicate(expression: FilterExpression): boolean {
 }
 
 /**
+ * Membership commutes with restriction to one identity only when every
+ * predicate reads evidence local to that identity. Keep explicit strategies
+ * for observations and facts; do not infer locality from a field prefix.
+ * Pure positive Event predicates can already be cheaper on sparse sites.
+ */
+function targetMembershipEvidence(
+  expression: FilterExpression,
+  kind: ScopedFactKind,
+): { local: boolean; broad: boolean } {
+  if (isVisitContextPredicate(expression)) return { local: true, broad: true };
+  if (expression.kind === "not") {
+    const child = targetMembershipEvidence(expression.child, kind);
+    return { local: child.local, broad: true };
+  }
+  if (expression.kind !== "condition") {
+    const children = expression.children.map((child) =>
+      targetMembershipEvidence(child, kind),
+    );
+    return {
+      local: children.every((child) => child.local),
+      broad: children.some((child) => child.broad),
+    };
+  }
+  const target = expression.target;
+  if (
+    target.kind === "event-payload" ||
+    (target.kind === "field" && target.field === "event.name")
+  )
+    return { local: true, broad: false };
+  const fields =
+    kind === "session"
+      ? [
+          "session.views",
+          "session.durationMs",
+          "session.events",
+          "session.bounce",
+        ]
+      : ["visitor.views", "visitor.sessions", "visitor.events"];
+  const sameGrain =
+    target.kind === "field" &&
+    fields.includes(target.field) &&
+    factKindForCondition(expression) === kind;
+  return { local: sameGrain, broad: sameGrain };
+}
+/**
  * Compile the one relation bundle consumed by historical D1 providers.
  * Raw sources, entity universes, and membership sets stay inside this
  * compiler; the returned relations are already resolved to one scope.
@@ -1542,9 +1587,12 @@ scope_final_events AS (
     ON matching_events.site_pk = re.site_pk
    AND matching_events.event_id = re.event_id
 )`;
-  // Only same-grain, Visit-context membership is local to the target.
   // Cross-entity facts and advanced time domains still require the full
   // authorized universe; a target must never narrow their evidence.
+  const targetEvidence =
+    input.target && input.filters.root && !domains
+      ? targetMembershipEvidence(input.filters.root, input.target.type)
+      : null;
   const target =
     input.target &&
     input.siteIds.length === 1 &&
@@ -1554,7 +1602,12 @@ scope_final_events AS (
     input.plan.membership.entityKind === input.target.type &&
     input.filters.root !== null &&
     !domains &&
-    isVisitContextPredicate(input.filters.root)
+    targetEvidence?.local &&
+    targetEvidence.broad &&
+    !compilePositiveEventCountMembership(
+      input.plan.membership.expression,
+      input.target.type,
+    )
       ? input.target
       : undefined;
   const definitions: BoundCteDefinition[] = [

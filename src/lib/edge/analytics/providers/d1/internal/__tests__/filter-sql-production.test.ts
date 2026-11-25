@@ -2760,7 +2760,7 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
-  it("restricts only same-entity Visit-context journey qualification and preserves event-only rows and pagination", async () => {
+  it("restricts only same-entity local journey qualification and preserves event-only rows and pagination", async () => {
     const { db } = runFixture();
     try {
       db.exec(
@@ -2792,6 +2792,15 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           'page.path contains "/"',
           'NOT (page.path eq "/missing")',
           'page.path eq "/home" OR geo.country eq "ZZ"',
+          'NOT (event.name eq "missing")',
+          'event.name eq "purchase" OR page.path eq "/docs"',
+          'event.payload("/items/1/sku") eq "B" AND page.path eq "/home"',
+          kind + ".views gte 1",
+          kind + ".events eq 0",
+          kind + ".views gte 1 AND " + kind + ".events gte 0",
+          kind === "session"
+            ? "session.durationMs gte 1 AND session.bounce eq true"
+            : "visitor.sessions gte 1",
         ]) {
           const { filters, plan } = prepare(expression, kind);
           const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
@@ -2888,7 +2897,9 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
             kind === "session" ? "visitor" : "session",
           ],
           ['event.name eq "purchase"', kind],
-          ["session.views gt 0", kind],
+          [(kind === "session" ? "visitor" : "session") + ".views gt 0", kind],
+          [kind + ".events gt 0", kind],
+          ['event.payload("/items/1/sku") eq "B"', kind],
           ['first(EVENT).name eq "signup"', kind],
         ] as const) {
           const { filters, plan } = prepare(expression, scope);
