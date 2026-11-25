@@ -109,16 +109,17 @@ it("shares AutoResizer observation, measures only enabled axes, and releases the
       { id: "width", axis: "width" },
     ]);
     const heightContent = host.querySelector("#height")!.parentElement!;
+    const entry: ResizeObserverEntry = {
+      target: heightContent,
+      contentRect: heightContent.getBoundingClientRect(),
+      borderBoxSize: [],
+      contentBoxSize: [],
+      devicePixelContentBoxSize: [],
+    };
     reads.length = 0;
     await act(async () => {
-      observer.callback(
-        [{ target: heightContent } as ResizeObserverEntry],
-        observer as unknown as ResizeObserver,
-      );
-      observer.callback(
-        [{ target: heightContent } as ResizeObserverEntry],
-        observer as unknown as ResizeObserver,
-      );
+      observer.callback([entry], observer as unknown as ResizeObserver);
+      observer.callback([entry], observer as unknown as ResizeObserver);
       await new Promise<void>((resolve) =>
         requestAnimationFrame(() => resolve()),
       );
