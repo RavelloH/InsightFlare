@@ -497,9 +497,12 @@ describe("edge query performance D1 helpers", () => {
       },
     });
     expect(calls[0]?.sql).toContain("path_views AS");
+    expect(calls[0]?.sql).toContain("top_metric_visits AS MATERIALIZED");
     expect(calls[0]?.sql).toContain(
-      "WHERE metric_visits.pathname IN (SELECT pathname FROM path_views)",
+      "WHERE pathname IN (SELECT pathname FROM path_views)",
     );
+    expect(calls[0]?.sql).toContain("AND has_any_performance = 1");
+    expect(calls[0]?.sql).toContain("FROM top_metric_visits");
     expect(calls[0]?.sql).toContain("LIMIT ?");
     expect(calls[0]?.bindings).toEqual([
       ...visitBindings,
@@ -653,6 +656,11 @@ describe("edge query performance D1 helpers", () => {
       },
     });
     expect(calls[0]?.sql).toContain("country_views AS");
+    expect(calls[0]?.sql).toContain("top_metric_visits AS MATERIALIZED");
+    expect(calls[0]?.sql).toContain(
+      "WHERE country IN (SELECT country FROM country_views)",
+    );
+    expect(calls[0]?.sql).toContain("AND has_any_performance = 1");
     expect(calls[0]?.sql).toContain("UPPER(TRIM(COALESCE(country, '')))");
     expect(calls[0]?.bindings).toEqual([
       ...visitBindings,
@@ -1058,6 +1066,119 @@ describe("edge query performance D1 helpers", () => {
         p95: null,
         samples: 0,
       });
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("ranks top dimensions by all views before filtering metric samples", async () => {
+    const { env, d1 } = createSqlitePerformanceEnv();
+    try {
+      const insert = d1.database.prepare(
+        "INSERT INTO visits (visit_id, site_id, started_at, pathname, country, perf_lcp_ms, perf_cls) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      );
+      // Most popular dimension has no metrics and must not be backfilled.
+      for (let i = 0; i < 4; i++) {
+        insert.run(
+          "empty-" + i,
+          siteId,
+          window.startMs + i,
+          "/empty",
+          "US",
+          null,
+          null,
+        );
+      }
+      insert.run("top-metric", siteId, window.startMs, "/mixed", "CA", null, 0);
+      insert.run(
+        "top-lcp",
+        siteId,
+        window.startMs + 1,
+        "/mixed",
+        "CA",
+        120,
+        null,
+      );
+      insert.run(
+        "top-null",
+        siteId,
+        window.startMs + 2,
+        "/mixed",
+        "CA",
+        null,
+        null,
+      );
+      insert.run("outside-top", siteId, window.startMs, "/small", "GB", 999, 1);
+      insert.run(
+        "blank-country",
+        siteId,
+        window.startMs,
+        "/small",
+        " ",
+        100,
+        0.5,
+      );
+      for (const limit of [1, 2]) {
+        const routes = await queryPerformanceRoutesFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          limit,
+        );
+        const countries = await queryPerformanceCountriesFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          limit,
+        );
+        expect(routes.map((r) => [r.pathname, r.views])).toEqual(
+          limit === 1 ? [] : [["/mixed", 3]],
+        );
+        expect(countries.map((r) => [r.country, r.views])).toEqual(
+          limit === 1 ? [] : [["CA", 3]],
+        );
+        if (limit === 2) {
+          expect(routes[0]?.metrics.lcp).toEqual({
+            avg: 120,
+            p50: 120,
+            p75: 120,
+            p95: 120,
+            samples: 1,
+          });
+          expect(countries[0]?.metrics.cls).toEqual({
+            avg: 0,
+            p50: 0,
+            p75: 0,
+            p95: 0,
+            samples: 1,
+          });
+        }
+      }
+      await queryPerformanceRoutesFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        2,
+        "lcp",
+      );
+      await queryPerformanceCountriesFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        2,
+        "lcp",
+      );
+      expect(
+        d1.calls
+          .slice(-2)
+          .every(
+            (call) => !call.sql.includes("top_metric_visits AS MATERIALIZED"),
+          ),
+      ).toBe(true);
     } finally {
       d1.close();
     }
