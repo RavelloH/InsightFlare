@@ -114,7 +114,9 @@ function scheduleNextEnhancement() {
   if (enhancementScheduled || enhancements.size === 0) return;
   enhancementScheduled = true;
   window.requestAnimationFrame(() => {
-    const run = () => {
+    // An idle deadline is not guaranteed on a busy page. Yield the frame
+    // before initializing one host, but never wait for an idle budget.
+    window.setTimeout(() => {
       enhancementScheduled = false;
       const next = enhancements.values().next().value;
       if (next) {
@@ -122,21 +124,7 @@ function scheduleNextEnhancement() {
         next();
       }
       scheduleNextEnhancement();
-    };
-    if (typeof window.requestIdleCallback === "function") {
-      window.requestIdleCallback((deadline) => {
-        // This work is optional and must not compete with input or a busy
-        // hydration commit. Keep the native scrollbar if no idle budget exists.
-        if (deadline.timeRemaining() < 8) {
-          enhancementScheduled = false;
-          scheduleNextEnhancement();
-          return;
-        }
-        run();
-      });
-    } else {
-      window.setTimeout(run, 0);
-    }
+    }, 0);
   });
 }
 
@@ -209,10 +197,13 @@ export function useReactOverlayScrollbar({
       // the viewport actually needs one.
       if (!hasScrollableOverflow(viewport, optionsRef.current)) return;
       initialize({ target: host, elements: { viewport, content } });
-      instance = getInstance();
+      const candidate = getInstance();
+      instance =
+        candidate && OverlayScrollbars.valid(candidate) ? candidate : null;
       instanceRef.current = instance;
       if (instance) {
         observer?.disconnect();
+        viewport.removeEventListener("scroll", queue);
         instance.on("updated", notify);
         notify();
       }
@@ -226,11 +217,13 @@ export function useReactOverlayScrollbar({
       observer.observe(viewport);
       observer.observe(content);
     }
+    viewport.addEventListener("scroll", queue, { passive: true });
     queue();
 
     return () => {
       cancelled = true;
       cancelQueued?.();
+      viewport.removeEventListener("scroll", queue);
       observer?.disconnect();
       if (instance && OverlayScrollbars.valid(instance)) {
         instance.off("updated", notify);
