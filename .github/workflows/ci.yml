@@ -418,7 +418,11 @@ jobs:
   publish-nightly:
     name: Publish Nightly
     needs: [gate, deploy-artifact]
-    if: github.repository == 'RavelloH/InsightFlare' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: >-
+      !cancelled() && needs.gate.result == 'success' &&
+      needs.deploy-artifact.result == 'success' &&
+      github.repository == 'RavelloH/InsightFlare' &&
+      github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     permissions:
       contents: write
     uses: ./.github/workflows/publish-nightly-artifact.yml
@@ -426,7 +430,11 @@ jobs:
   publish-release:
     name: Publish Release
     needs: [gate, release-plan]
-    if: github.repository == 'RavelloH/InsightFlare' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.release-plan.outputs.version != ''
+    if: >-
+      !cancelled() && needs.gate.result == 'success' &&
+      needs.release-plan.result == 'success' && needs.release-plan.outputs.version != '' &&
+      github.repository == 'RavelloH/InsightFlare' &&
+      github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     permissions:
       contents: write
     uses: ./.github/workflows/release.yml
