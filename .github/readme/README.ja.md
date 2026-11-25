@@ -22,23 +22,17 @@
 
 <a href="https://demo.insightflare.net/ja/app/xeoos-team/dailypulse-news?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=demo&amp;utm_content=readme_screenshot"><img src="/.github/screenshot/001.webp" alt="InsightFlare dashboard" width="100%"></a>
 
-| **&lt; 4 KB** | ```mermaid
-flowchart TD
-  B["訪問者のブラウザー"] --> W
-  subgraph CF["Cloudflare"]
-    W["Workers：計測・ダッシュボード・API"] --> DO["Durable Objects：バッファー・リアルタイム"]
-    DO --> D1["D1：分析とクエリ"]
-    W --> D1
-    W --> KV["KV：サイト設定"]
-    W -.-> AE["Analytics Engine：観測（任意）"]
-    W -.-> R2["R2：アーカイブ（任意）"]
-  end
-  U["あなたと AI エージェント"] --> W
-```
+<div align="center">
 
-**10,000+** | **$0** |
-| :---: | :---: | :---: |
-| トラッキングスクリプト | 無料アカウントでの1日あたり実測イベント数 | ソフトウェア利用料 |
+<table>
+  <tr>
+    <td width="33%" align="center"><img src="/public/images/readme/script.svg" alt="&lt; 4 KB" width="220"><br>トラッキングスクリプト</td>
+    <td width="33%" align="center"><img src="/public/images/readme/events.svg" alt="10,000+" width="220"><br>無料アカウントでの1日あたり実測イベント数</td>
+    <td width="33%" align="center"><img src="/public/images/readme/license.svg" alt="$0" width="220"><br>ソフトウェア利用料</td>
+  </tr>
+</table>
+
+</div>
 
 ## InsightFlare を選ぶ理由
 
@@ -248,25 +242,54 @@ https://your-instance.example.com/.well-known/skills.json を読み、この分�
 
 Cloudflare Workers、Durable Objects、D1、KV 上で稼働し、Analytics Engine と R2 はオプションです。書き込みをバッファリングして一括処理し、エッジネットワークで計測とダッシュボードを提供します。
 
-**無料 Cloudflare アカウントで1日1万件以上のイベントを計測できた実績。** 容量を保証するものではなく、実際の使用量はトラフィック、クエリ頻度、データ規模、プラン制限に依存します。InsightFlare 自体は無料ですが、Cloudflare の利用料金が発生する場合があります。
+```mermaid
+flowchart TD
+  B["訪問者のブラウザー"] --> W
+  subgraph CF["Cloudflare"]
+    W["Workers：計測・ダッシュボード・API"] --> DO["Durable Objects：バッファー・リアルタイム"]
+    DO --> D1["D1：分析とクエリ"]
+    W --> D1
+    W --> KV["KV：サイト設定"]
+    W -.-> AE["Analytics Engine：観測（任意）"]
+    W -.-> R2["R2：アーカイブ（任意）"]
+  end
+  U["あなたと AI エージェント"] --> W
+```
+
+**無料 Cloudflare アカウントで1日1万件以上のイベントを計測できた実績。** 実際の使用量はトラフィック、クエリ頻度、データ規模、プラン制限に依存します。
 
 [デプロイ構成・性能・コストについて](https://insightflare.net/ja/self-hosting?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_cost)
 
 ## プライバシーとデータ所有
 
-トラッカーは Cookie を設定・読み取りしません。通常の訪問記録に生の IP アドレスは保存されませんが、Analytics Engine を有効にすると、ボットと判定されブロックされたリクエストの IP が調査のため記録される場合があります。法令への適合はデプロイ、設定、適用法によります。
+トラッカーは Cookie を設定・読み取りしません。通常の訪問記録に生の IP アドレスは保存されませんが、Analytics Engine を有効にすると、ボットと判定されブロックされたリクエストの IP が調査のため記録される場合があります。サイト設定でトラッキングモードを変更し、適用される法令に合わせることもできます。
 
 [コストとプライバシー](https://insightflare.net/ja/docs/getting-started/cost-and-privacy?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [訪問者の識別](https://insightflare.net/ja/docs/tracking/privacy?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
 
 ## ドキュメント
 
-| | |
-| --- | --- |
-| **はじめに** | [クイックスタート](https://insightflare.net/ja/docs/getting-started/quick-start?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [計測スクリプト](https://insightflare.net/ja/docs/tracking?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [コストとプライバシー](https://insightflare.net/ja/docs/getting-started/cost-and-privacy?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
-| **データ分析** | [高度なフィルター](https://insightflare.net/ja/docs/usage/filters?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [ファネルと目標](https://insightflare.net/ja/docs/usage/funnels-and-goals?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [リテンション](https://insightflare.net/ja/docs/usage/retention?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
-| **トラッキング** | [カスタムイベント](https://insightflare.net/ja/docs/tracking/custom-events?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [ユーザー識別](https://insightflare.net/ja/docs/tracking/identify?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [トラッキング設定](https://insightflare.net/ja/docs/tracking/tracking-settings?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
-| **デプロイと運用** | [アップデート](https://insightflare.net/ja/docs/deployment/updating?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Analytics Engine](https://insightflare.net/ja/docs/deployment/analytics-engine?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [手動デプロイ](https://insightflare.net/ja/docs/deployment/manual-deployment?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
-| **連携と開発** | [エージェント接続](https://insightflare.net/ja/docs/ai-and-api/connect-an-agent?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [API リファレンス](https://insightflare.net/ja/docs/api?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [ローカル開発](https://insightflare.net/ja/docs/deployment/local-development?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
+<table>
+  <tr>
+    <td><strong>はじめに</strong></td>
+    <td><a href="https://insightflare.net/ja/docs/getting-started/quick-start?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">クイックスタート</a> · <a href="https://insightflare.net/ja/docs/tracking?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">計測スクリプト</a> · <a href="https://insightflare.net/ja/docs/getting-started/cost-and-privacy?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">コストとプライバシー</a></td>
+  </tr>
+  <tr>
+    <td><strong>データ分析</strong></td>
+    <td><a href="https://insightflare.net/ja/docs/usage/filters?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">高度なフィルター</a> · <a href="https://insightflare.net/ja/docs/usage/funnels-and-goals?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">ファネルと目標</a> · <a href="https://insightflare.net/ja/docs/usage/retention?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">リテンション</a></td>
+  </tr>
+  <tr>
+    <td><strong>トラッキング</strong></td>
+    <td><a href="https://insightflare.net/ja/docs/tracking/custom-events?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">カスタムイベント</a> · <a href="https://insightflare.net/ja/docs/tracking/identify?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">ユーザー識別</a> · <a href="https://insightflare.net/ja/docs/tracking/tracking-settings?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">トラッキング設定</a></td>
+  </tr>
+  <tr>
+    <td><strong>デプロイと運用</strong></td>
+    <td><a href="https://insightflare.net/ja/docs/deployment/updating?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">アップデート</a> · <a href="https://insightflare.net/ja/docs/deployment/analytics-engine?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Analytics Engine</a> · <a href="https://insightflare.net/ja/docs/deployment/manual-deployment?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">手動デプロイ</a></td>
+  </tr>
+  <tr>
+    <td><strong>連携と開発</strong></td>
+    <td><a href="https://insightflare.net/ja/docs/ai-and-api/connect-an-agent?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">エージェント接続</a> · <a href="https://insightflare.net/ja/docs/api?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">API リファレンス</a> · <a href="https://insightflare.net/ja/docs/deployment/local-development?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">ローカル開発</a></td>
+  </tr>
+</table>
 
 [設定リファレンス](https://insightflare.net/ja/docs/reference/configuration?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [R2 アーカイブ](https://insightflare.net/ja/docs/deployment/r2-archive?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [コマンド](https://insightflare.net/ja/docs/reference/commands?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [FAQ](https://insightflare.net/ja/docs/reference/faq?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
 
@@ -298,14 +321,32 @@ UI のみの開発では `pnpm run dev:ui` で Demo Mode を起動できます�
 
 組織と作者がメンテナンスする関連オープンソースプロジェクトは、単独でも利用できます。
 
-| | |
-| --- | --- |
-| [**Deploy**](https://github.com/InsightFlare/deploy) | ワンクリックインストールと更新。 |
-| [**asn-blocklist**](https://github.com/InsightFlare/asn-blocklist) | PeeringDB に基づく ASN 分類。 |
-| [**map-relay**](https://github.com/InsightFlare/map-relay) | CARTO ベクターベースマップのプロキシ。 |
-| [**can-i-use-api**](https://github.com/RavelloH/can-i-use-api) | Can I Use の静的互換性 API。 |
-| [**iso-3166-2-locale**](https://github.com/RavelloH/iso-3166-2-locale) | 多言語の地名辞書。 |
-| [**meta**](https://gist.github.com/RavelloH/08cdb1493d09d2ad1eb0cf17d06e3078) | ウェブページのメタデータ取得（Gist）。 |
+<table>
+  <tr>
+    <td><a href="https://github.com/InsightFlare/deploy"><strong>Deploy</strong></a></td>
+    <td>ワンクリックインストールと更新。</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/InsightFlare/asn-blocklist"><strong>asn-blocklist</strong></a></td>
+    <td>PeeringDB に基づく ASN 分類。</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/InsightFlare/map-relay"><strong>map-relay</strong></a></td>
+    <td>CARTO ベクターベースマップのプロキシ。</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/RavelloH/can-i-use-api"><strong>can-i-use-api</strong></a></td>
+    <td>Can I Use の静的互換性 API。</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/RavelloH/iso-3166-2-locale"><strong>iso-3166-2-locale</strong></a></td>
+    <td>多言語の地名辞書。</td>
+  </tr>
+  <tr>
+    <td><a href="https://gist.github.com/RavelloH/08cdb1493d09d2ad1eb0cf17d06e3078"><strong>meta</strong></a></td>
+    <td>ウェブページのメタデータ取得（Gist）。</td>
+  </tr>
+</table>
 
 [関連オープンソースプロジェクト](https://insightflare.net/ja/open-source?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_ecosystem)
 

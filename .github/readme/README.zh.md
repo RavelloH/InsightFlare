@@ -22,23 +22,17 @@
 
 <a href="https://demo.insightflare.net/zh/app/xeoos-team/dailypulse-news?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=demo&amp;utm_content=readme_screenshot"><img src="/.github/screenshot/001.webp" alt="InsightFlare dashboard" width="100%"></a>
 
-| **&lt; 4 KB** | ```mermaid
-flowchart TD
-  B["访客浏览器"] --> W
-  subgraph CF["Cloudflare"]
-    W["Workers：采集、仪表盘、API"] --> DO["Durable Objects：缓冲与实时数据"]
-    DO --> D1["D1：分析与查询"]
-    W --> D1
-    W --> KV["KV：站点配置"]
-    W -.-> AE["Analytics Engine：观测（可选）"]
-    W -.-> R2["R2：归档（可选）"]
-  end
-  U["你和你的智能体"] --> W
-```
+<div align="center">
 
-**10,000+** | **$0** |
-| :---: | :---: | :---: |
-| 采集脚本大小 | 免费账户实测每日事件量 | 软件授权费用 |
+<table>
+  <tr>
+    <td width="33%" align="center"><img src="/public/images/readme/script.svg" alt="&lt; 4 KB" width="220"><br>采集脚本大小</td>
+    <td width="33%" align="center"><img src="/public/images/readme/events.svg" alt="10,000+" width="220"><br>免费账户实测每日事件量</td>
+    <td width="33%" align="center"><img src="/public/images/readme/license.svg" alt="$0" width="220"><br>软件授权费用</td>
+  </tr>
+</table>
+
+</div>
 
 ## 为什么选择 InsightFlare？
 
@@ -248,25 +242,54 @@ flowchart TD
 
 InsightFlare 运行在 Cloudflare Workers、Durable Objects、D1 和 KV 上，Analytics Engine 与 R2 为可选项。采集数据经过缓冲和批量写入，采集与仪表盘由边缘网络提供服务。
 
-**免费 Cloudflare 账户实测每日 10,000+ 事件。** 这不是容量保证：实际用量取决于流量、查询频率、数据规模和套餐限制。InsightFlare 软件免费，Cloudflare 用量可能产生费用。
+```mermaid
+flowchart TD
+  B["访客浏览器"] --> W
+  subgraph CF["Cloudflare"]
+    W["Workers：采集、仪表盘、API"] --> DO["Durable Objects：缓冲与实时数据"]
+    DO --> D1["D1：分析与查询"]
+    W --> D1
+    W --> KV["KV：站点配置"]
+    W -.-> AE["Analytics Engine：观测（可选）"]
+    W -.-> R2["R2：归档（可选）"]
+  end
+  U["你和你的智能体"] --> W
+```
+
+**免费 Cloudflare 账户实测每日 10,000+ 事件。** 实际用量取决于流量、查询频率、数据规模和套餐限制。
 
 [了解部署架构、性能与成本](https://insightflare.net/zh/self-hosting?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_cost)
 
 ## 隐私与数据自主
 
-追踪器不设置也不读取 Cookie，正常访客的原始 IP 不随访问记录保存。启用 Analytics Engine 后，被判定为机器人且遭到拦截的请求可能记录 IP，以便排查。合规性取决于部署方式、配置及适用法律。
+追踪器不设置也不读取 Cookie，正常访客的原始 IP 不随访问记录保存。启用 Analytics Engine 后，被判定为机器人且遭到拦截的请求可能记录 IP，以便排查。您也可以在站点设置内更改追踪模式，来适配适用法规。
 
 [成本与隐私](https://insightflare.net/zh/docs/getting-started/cost-and-privacy?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [访客识别机制](https://insightflare.net/zh/docs/tracking/privacy?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
 
 ## 使用文档
 
-| | |
-| --- | --- |
-| **开始使用** | [快速开始](https://insightflare.net/zh/docs/getting-started/quick-start?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [安装脚本](https://insightflare.net/zh/docs/tracking?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [成本与隐私](https://insightflare.net/zh/docs/getting-started/cost-and-privacy?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
-| **数据分析** | [高级筛选](https://insightflare.net/zh/docs/usage/filters?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [漏斗与目标](https://insightflare.net/zh/docs/usage/funnels-and-goals?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [留存分析](https://insightflare.net/zh/docs/usage/retention?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
-| **数据采集** | [自定义事件](https://insightflare.net/zh/docs/tracking/custom-events?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [用户识别](https://insightflare.net/zh/docs/tracking/identify?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [跟踪设置](https://insightflare.net/zh/docs/tracking/tracking-settings?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
-| **部署与运维** | [更新指南](https://insightflare.net/zh/docs/deployment/updating?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Analytics Engine](https://insightflare.net/zh/docs/deployment/analytics-engine?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [手动部署](https://insightflare.net/zh/docs/deployment/manual-deployment?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
-| **集成与开发** | [智能体接入](https://insightflare.net/zh/docs/ai-and-api/connect-an-agent?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [API 参考](https://insightflare.net/zh/docs/api?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [本地开发](https://insightflare.net/zh/docs/deployment/local-development?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
+<table>
+  <tr>
+    <td><strong>开始使用</strong></td>
+    <td><a href="https://insightflare.net/zh/docs/getting-started/quick-start?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">快速开始</a> · <a href="https://insightflare.net/zh/docs/tracking?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">安装脚本</a> · <a href="https://insightflare.net/zh/docs/getting-started/cost-and-privacy?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">成本与隐私</a></td>
+  </tr>
+  <tr>
+    <td><strong>数据分析</strong></td>
+    <td><a href="https://insightflare.net/zh/docs/usage/filters?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">高级筛选</a> · <a href="https://insightflare.net/zh/docs/usage/funnels-and-goals?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">漏斗与目标</a> · <a href="https://insightflare.net/zh/docs/usage/retention?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">留存分析</a></td>
+  </tr>
+  <tr>
+    <td><strong>数据采集</strong></td>
+    <td><a href="https://insightflare.net/zh/docs/tracking/custom-events?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">自定义事件</a> · <a href="https://insightflare.net/zh/docs/tracking/identify?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">用户识别</a> · <a href="https://insightflare.net/zh/docs/tracking/tracking-settings?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">跟踪设置</a></td>
+  </tr>
+  <tr>
+    <td><strong>部署与运维</strong></td>
+    <td><a href="https://insightflare.net/zh/docs/deployment/updating?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">更新指南</a> · <a href="https://insightflare.net/zh/docs/deployment/analytics-engine?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Analytics Engine</a> · <a href="https://insightflare.net/zh/docs/deployment/manual-deployment?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">手动部署</a></td>
+  </tr>
+  <tr>
+    <td><strong>集成与开发</strong></td>
+    <td><a href="https://insightflare.net/zh/docs/ai-and-api/connect-an-agent?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">智能体接入</a> · <a href="https://insightflare.net/zh/docs/api?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">API 参考</a> · <a href="https://insightflare.net/zh/docs/deployment/local-development?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">本地开发</a></td>
+  </tr>
+</table>
 
 [配置参考](https://insightflare.net/zh/docs/reference/configuration?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [R2 归档](https://insightflare.net/zh/docs/deployment/r2-archive?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [命令参考](https://insightflare.net/zh/docs/reference/commands?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [常见问题](https://insightflare.net/zh/docs/reference/faq?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
 
@@ -298,14 +321,32 @@ pnpm run dev
 
 InsightFlare 的配套开源项目由组织及作者维护，也可以独立使用。
 
-| | |
-| --- | --- |
-| [**Deploy**](https://github.com/InsightFlare/deploy) | 一键安装与更新。 |
-| [**asn-blocklist**](https://github.com/InsightFlare/asn-blocklist) | 基于 PeeringDB 的 ASN 分类。 |
-| [**map-relay**](https://github.com/InsightFlare/map-relay) | CARTO 矢量底图代理。 |
-| [**can-i-use-api**](https://github.com/RavelloH/can-i-use-api) | Can I Use 静态兼容性 API。 |
-| [**iso-3166-2-locale**](https://github.com/RavelloH/iso-3166-2-locale) | 多语言地名词典。 |
-| [**meta**](https://gist.github.com/RavelloH/08cdb1493d09d2ad1eb0cf17d06e3078) | 网页元数据提取（Gist）。 |
+<table>
+  <tr>
+    <td><a href="https://github.com/InsightFlare/deploy"><strong>Deploy</strong></a></td>
+    <td>一键安装与更新。</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/InsightFlare/asn-blocklist"><strong>asn-blocklist</strong></a></td>
+    <td>基于 PeeringDB 的 ASN 分类。</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/InsightFlare/map-relay"><strong>map-relay</strong></a></td>
+    <td>CARTO 矢量底图代理。</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/RavelloH/can-i-use-api"><strong>can-i-use-api</strong></a></td>
+    <td>Can I Use 静态兼容性 API。</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/RavelloH/iso-3166-2-locale"><strong>iso-3166-2-locale</strong></a></td>
+    <td>多语言地名词典。</td>
+  </tr>
+  <tr>
+    <td><a href="https://gist.github.com/RavelloH/08cdb1493d09d2ad1eb0cf17d06e3078"><strong>meta</strong></a></td>
+    <td>网页元数据提取（Gist）。</td>
+  </tr>
+</table>
 
 [了解配套开源项目](https://insightflare.net/zh/open-source?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_ecosystem)
 

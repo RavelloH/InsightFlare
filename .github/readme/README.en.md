@@ -22,23 +22,17 @@ A script under 4 KB brings traffic, visitor journeys, funnels, retention and beh
 
 <a href="https://demo.insightflare.net/en/app/xeoos-team/dailypulse-news?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=demo&amp;utm_content=readme_screenshot"><img src="/.github/screenshot/001.webp" alt="InsightFlare dashboard" width="100%"></a>
 
-| **&lt; 4 KB** | ```mermaid
-flowchart TD
-  B["Visitor browser"] --> W
-  subgraph CF["Cloudflare"]
-    W["Workers: collection, dashboard, API"] --> DO["Durable Objects: buffer, real time"]
-    DO --> D1["D1: analytics and queries"]
-    W --> D1
-    W --> KV["KV: site settings"]
-    W -.-> AE["Analytics Engine: observation (optional)"]
-    W -.-> R2["R2: archive (optional)"]
-  end
-  U["You and your agents"] --> W
-```
+<div align="center">
 
-**10,000+** | **$0** |
-| :---: | :---: | :---: |
-| Tracking script | Daily events on a free account (tested) | Software license fee |
+<table>
+  <tr>
+    <td width="33%" align="center"><img src="/public/images/readme/script.svg" alt="&lt; 4 KB" width="220"><br>Tracking script</td>
+    <td width="33%" align="center"><img src="/public/images/readme/events.svg" alt="10,000+" width="220"><br>Daily events on a free account (tested)</td>
+    <td width="33%" align="center"><img src="/public/images/readme/license.svg" alt="$0" width="220"><br>Software license fee</td>
+  </tr>
+</table>
+
+</div>
 
 ## Why InsightFlare?
 
@@ -248,25 +242,54 @@ Read https://your-instance.example.com/.well-known/skills.json, connect to this 
 
 InsightFlare runs on Cloudflare Workers, Durable Objects, D1 and KV. Analytics Engine and R2 are optional. Writes are buffered and batched; the edge network serves collection and dashboards.
 
-**10,000+ events per day on a free Cloudflare account**, as reported by our website's test. Actual capacity depends on traffic, query frequency, data size and plan limits; this is not a guarantee. InsightFlare has no software fee, but Cloudflare usage may incur charges.
+```mermaid
+flowchart TD
+  B["Visitor browser"] --> W
+  subgraph CF["Cloudflare"]
+    W["Workers: collection, dashboard, API"] --> DO["Durable Objects: buffer, real time"]
+    DO --> D1["D1: analytics and queries"]
+    W --> D1
+    W --> KV["KV: site settings"]
+    W -.-> AE["Analytics Engine: observation (optional)"]
+    W -.-> R2["R2: archive (optional)"]
+  end
+  U["You and your agents"] --> W
+```
+
+**10,000+ events per day on a free Cloudflare account**, as reported by our website's test. Actual usage depends on traffic, query frequency, data size and plan limits.
 
 [Deployment, architecture & cost](https://insightflare.net/en/self-hosting?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_cost)
 
 ## Privacy & data ownership
 
-The tracker does not set or read cookies. Raw IP addresses are not stored with normal visitor records; when Analytics Engine is enabled, IPs of requests classified as bots and blocked may be recorded for investigation. Compliance depends on deployment, settings and applicable law.
+The tracker does not set or read cookies. Raw IP addresses are not stored with normal visitor records; when Analytics Engine is enabled, IPs of requests classified as bots and blocked may be recorded for investigation. You can also change the tracking mode in site settings to adapt to applicable regulations.
 
 [Cost & privacy](https://insightflare.net/en/docs/getting-started/cost-and-privacy?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Visitor identification](https://insightflare.net/en/docs/tracking/privacy?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
 
 ## Documentation
 
-| | |
-| --- | --- |
-| **Getting started** | [Quick start](https://insightflare.net/en/docs/getting-started/quick-start?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Install tracking](https://insightflare.net/en/docs/tracking?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Cost & privacy](https://insightflare.net/en/docs/getting-started/cost-and-privacy?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
-| **Analytics** | [Advanced filters](https://insightflare.net/en/docs/usage/filters?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Funnels & goals](https://insightflare.net/en/docs/usage/funnels-and-goals?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Retention](https://insightflare.net/en/docs/usage/retention?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
-| **Tracking** | [Custom events](https://insightflare.net/en/docs/tracking/custom-events?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Identify users](https://insightflare.net/en/docs/tracking/identify?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Tracking settings](https://insightflare.net/en/docs/tracking/tracking-settings?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
-| **Deployment & operations** | [Updates](https://insightflare.net/en/docs/deployment/updating?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Analytics Engine](https://insightflare.net/en/docs/deployment/analytics-engine?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Manual deployment](https://insightflare.net/en/docs/deployment/manual-deployment?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
-| **Integration & development** | [Agent access](https://insightflare.net/en/docs/ai-and-api/connect-an-agent?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [API reference](https://insightflare.net/en/docs/api?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Local development](https://insightflare.net/en/docs/deployment/local-development?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
+<table>
+  <tr>
+    <td><strong>Getting started</strong></td>
+    <td><a href="https://insightflare.net/en/docs/getting-started/quick-start?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Quick start</a> · <a href="https://insightflare.net/en/docs/tracking?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Install tracking</a> · <a href="https://insightflare.net/en/docs/getting-started/cost-and-privacy?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Cost &amp; privacy</a></td>
+  </tr>
+  <tr>
+    <td><strong>Analytics</strong></td>
+    <td><a href="https://insightflare.net/en/docs/usage/filters?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Advanced filters</a> · <a href="https://insightflare.net/en/docs/usage/funnels-and-goals?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Funnels &amp; goals</a> · <a href="https://insightflare.net/en/docs/usage/retention?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Retention</a></td>
+  </tr>
+  <tr>
+    <td><strong>Tracking</strong></td>
+    <td><a href="https://insightflare.net/en/docs/tracking/custom-events?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Custom events</a> · <a href="https://insightflare.net/en/docs/tracking/identify?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Identify users</a> · <a href="https://insightflare.net/en/docs/tracking/tracking-settings?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Tracking settings</a></td>
+  </tr>
+  <tr>
+    <td><strong>Deployment & operations</strong></td>
+    <td><a href="https://insightflare.net/en/docs/deployment/updating?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Updates</a> · <a href="https://insightflare.net/en/docs/deployment/analytics-engine?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Analytics Engine</a> · <a href="https://insightflare.net/en/docs/deployment/manual-deployment?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Manual deployment</a></td>
+  </tr>
+  <tr>
+    <td><strong>Integration & development</strong></td>
+    <td><a href="https://insightflare.net/en/docs/ai-and-api/connect-an-agent?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Agent access</a> · <a href="https://insightflare.net/en/docs/api?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">API reference</a> · <a href="https://insightflare.net/en/docs/deployment/local-development?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Local development</a></td>
+  </tr>
+</table>
 
 [Configuration](https://insightflare.net/en/docs/reference/configuration?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [R2 archive](https://insightflare.net/en/docs/deployment/r2-archive?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Commands](https://insightflare.net/en/docs/reference/commands?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [FAQ](https://insightflare.net/en/docs/reference/faq?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
 
@@ -298,14 +321,32 @@ For UI-only work, run `pnpm run dev:ui` in Demo Mode without a database or secre
 
 InsightFlare is supported by independent open-source projects maintained in the organization and by its author.
 
-| | |
-| --- | --- |
-| [**Deploy**](https://github.com/InsightFlare/deploy) | One-click installation and updates. |
-| [**asn-blocklist**](https://github.com/InsightFlare/asn-blocklist) | ASN classification from PeeringDB. |
-| [**map-relay**](https://github.com/InsightFlare/map-relay) | CARTO vector basemap proxy. |
-| [**can-i-use-api**](https://github.com/RavelloH/can-i-use-api) | Static Can I Use compatibility API. |
-| [**iso-3166-2-locale**](https://github.com/RavelloH/iso-3166-2-locale) | Multilingual geographical names. |
-| [**meta**](https://gist.github.com/RavelloH/08cdb1493d09d2ad1eb0cf17d06e3078) | Webpage metadata extraction (Gist). |
+<table>
+  <tr>
+    <td><a href="https://github.com/InsightFlare/deploy"><strong>Deploy</strong></a></td>
+    <td>One-click installation and updates.</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/InsightFlare/asn-blocklist"><strong>asn-blocklist</strong></a></td>
+    <td>ASN classification from PeeringDB.</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/InsightFlare/map-relay"><strong>map-relay</strong></a></td>
+    <td>CARTO vector basemap proxy.</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/RavelloH/can-i-use-api"><strong>can-i-use-api</strong></a></td>
+    <td>Static Can I Use compatibility API.</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/RavelloH/iso-3166-2-locale"><strong>iso-3166-2-locale</strong></a></td>
+    <td>Multilingual geographical names.</td>
+  </tr>
+  <tr>
+    <td><a href="https://gist.github.com/RavelloH/08cdb1493d09d2ad1eb0cf17d06e3078"><strong>meta</strong></a></td>
+    <td>Webpage metadata extraction (Gist).</td>
+  </tr>
+</table>
 
 [Explore the open-source ecosystem](https://insightflare.net/en/open-source?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_ecosystem)
 
