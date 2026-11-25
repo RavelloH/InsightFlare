@@ -6,6 +6,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DashboardQueryProvider,
   useDashboardQuery,
+  useDashboardQueryControls,
+  useDashboardQueryReady,
+  useDashboardScopePreference,
+  useDashboardTimeQuery,
+  useDashboardTimeWindow,
+  useDashboardTimeZone,
 } from "@/components/dashboard/shell/dashboard-query-provider";
 import { TimeZoneProvider } from "@/components/time-zone-provider";
 import {
@@ -68,6 +74,95 @@ describe("DashboardQueryProvider", () => {
   afterEach(() => {
     act(() => root?.unmount());
     container.remove();
+  });
+
+  it("isolates editable DSL and filters from unrelated read-only subscribers", async () => {
+    const counts = {
+      query: 0,
+      window: 0,
+      zone: 0,
+      ready: 0,
+      time: 0,
+      scope: 0,
+      controls: 0,
+    };
+    let controls!: ReturnType<typeof useDashboardQueryControls>;
+    let query!: ReturnType<typeof useDashboardQuery>;
+    function QueryProbe() {
+      query = useDashboardQuery();
+      counts.query++;
+      return null;
+    }
+    function TimeProbe() {
+      useDashboardTimeQuery();
+      counts.time++;
+      return null;
+    }
+    function WindowOnly() {
+      useDashboardTimeWindow();
+      counts.window++;
+      return null;
+    }
+    function ZoneOnly() {
+      useDashboardTimeZone();
+      counts.zone++;
+      return null;
+    }
+    function ReadyOnly() {
+      useDashboardQueryReady();
+      counts.ready++;
+      return null;
+    }
+    function ScopeOnly() {
+      useDashboardScopePreference();
+      counts.scope++;
+      return null;
+    }
+    function Controls() {
+      controls = useDashboardQueryControls();
+      counts.controls++;
+      return null;
+    }
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <App>
+          <QueryProbe />
+          <TimeProbe />
+          <WindowOnly />
+          <ZoneOnly />
+          <ReadyOnly />
+          <ScopeOnly />
+          <Controls />
+        </App>,
+      );
+    });
+    expect(query.filters.root).toBeTruthy();
+    const initial = { ...counts };
+    const firstQuery = query;
+    await act(async () =>
+      controls.setUiFilters(controls.uiFilters, "page.path = /docs"),
+    );
+    expect(controls.uiFilterDsl).toBe("page.path = /docs");
+    expect(query).toBe(firstQuery);
+    expect(counts).toEqual({ ...initial, controls: initial.controls + 1 });
+    const afterDsl = { ...counts };
+    await act(async () => controls.clearUiFilters());
+    expect(query.filters.root).toBeFalsy();
+    expect(counts.query).toBeGreaterThan(afterDsl.query);
+    expect(counts.window).toBe(afterDsl.window);
+    expect(counts.time).toBe(afterDsl.time);
+    expect(counts.ready).toBe(afterDsl.ready);
+    expect(counts.zone).toBe(afterDsl.zone);
+    const afterClear = { ...counts };
+    const nextRange = query.range === "30d" ? "7d" : "30d";
+    await act(async () => controls.setRange(nextRange));
+    expect(query.range).toBe(nextRange);
+    expect(counts.window).toBeGreaterThan(afterClear.window);
+    expect(counts.time).toBeGreaterThan(afterClear.time);
+    expect(counts.zone).toBe(afterClear.zone);
+    expect(counts.ready).toBe(afterClear.ready);
+    expect(counts.scope).toBe(afterClear.scope);
   });
 
   it("reuses the updated server window on a later route without remounting the provider", async () => {

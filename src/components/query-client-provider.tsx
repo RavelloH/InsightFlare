@@ -17,10 +17,16 @@ function createQueryClient(): QueryClient {
 
 let browserQueryClient: QueryClient | undefined;
 
-function getQueryClient(): QueryClient {
-  if (typeof window === "undefined") return createQueryClient();
+export function getBrowserQueryClient(): QueryClient {
+  if (typeof window === "undefined")
+    throw new Error("Browser query client unavailable");
   browserQueryClient ??= createQueryClient();
   return browserQueryClient;
+}
+function getQueryClient(): QueryClient {
+  return typeof window === "undefined"
+    ? createQueryClient()
+    : getBrowserQueryClient();
 }
 
 export function AppQueryProvider({ children }: { children: ReactNode }) {

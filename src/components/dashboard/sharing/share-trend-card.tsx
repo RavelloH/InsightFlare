@@ -20,7 +20,7 @@ import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,
 } from "@/components/dashboard/comparison/use-dashboard-comparison-query";
-import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useDashboardQueryReady } from "@/components/dashboard/shell/dashboard-query-provider";
 import {
   addZonedInterval,
   startOfZonedInterval,
@@ -565,7 +565,7 @@ export const ShareTrendCard = memo(function ShareTrendCard({
   formatSeriesLabel,
   resolveSeriesIcon,
 }: ShareTrendCardProps) {
-  const { queryReady } = useDashboardQuery();
+  const queryReady = useDashboardQueryReady();
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const comparisonQuery = useDashboardComparisonQuery(window, filters);
   const comparisonFiltersKey = useMemo(

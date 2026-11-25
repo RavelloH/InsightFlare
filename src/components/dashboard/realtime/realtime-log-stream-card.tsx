@@ -6,7 +6,7 @@ import {
 } from "@insightflare/product-ui/realtime";
 import { useReducedMotion } from "motion/react";
 
-import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useDashboardTimeZone } from "@/components/dashboard/shell/dashboard-query-provider";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/sessions/session-detail-client-page";
 import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitors/visitor-detail-client-page";
 import { intlLocale, shortDateTime } from "@/lib/dashboard/format";
@@ -31,7 +31,7 @@ export const RealtimeLogStreamCard = memo(function RealtimeLogStreamCard({
   siteId,
   pathname,
 }: RealtimeLogStreamCardProps) {
-  const { timeZone } = useDashboardQueryControls();
+  const timeZone = useDashboardTimeZone();
   const reduceLogItemMotion = useReducedMotion() ?? false;
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_EVENTS);
   const [selectedEvent, setSelectedEvent] = useState<RealtimeEvent | null>(

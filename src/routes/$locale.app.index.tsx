@@ -10,11 +10,63 @@ import { RiLoginBoxLine, RiTeamLine } from "@remixicon/react";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { LogoutActionButton } from "@/components/auth/logout-action-button";
-import { WorkspaceClient } from "@/components/dashboard/workspace/workspace-client";
+import {
+  WorkspaceClient,
+  workspaceInventoryQueryOptions,
+} from "@/components/dashboard/workspace/workspace-client";
+import { getBrowserQueryClient } from "@/components/query-client-provider";
+import { resolveReportingTimeZone } from "@/lib/analytics/time-zone";
+import {
+  loadTeamDashboardSnapshot,
+  loadWorkspaceSiteInventory,
+  WORKSPACE_TEAM_LIMIT,
+} from "@/lib/dashboard/route-data";
+import { teamDashboardQueryOptions } from "@/lib/dashboard/team-dashboard-query";
+import { browserTimeZone } from "@/lib/dashboard/time-zone";
 import { dashboardPageTitle } from "@/lib/page-title";
 import Link from "@/lib/router";
 
 export const Route = createFileRoute("/$locale/app/")({
+  loader: ({ context }) => {
+    const { dashboardRoot, initialDashboardWindow } = context;
+    if (!dashboardRoot) return { snapshots: {}, inventory: null };
+    const teamIds = dashboardRoot.teams
+      .slice(0, WORKSPACE_TEAM_LIMIT)
+      .map((team) => team.id);
+    if (typeof window === "undefined") {
+      return {
+        snapshots: Object.fromEntries(
+          teamIds.map((teamId) => [
+            teamId,
+            loadTeamDashboardSnapshot({ data: { teamId } }).catch(() => null),
+          ]),
+        ),
+        inventory: loadWorkspaceSiteInventory({ data: { teamIds } }).catch(
+          () => null,
+        ),
+      };
+    }
+    const queryClient = getBrowserQueryClient();
+    void queryClient.prefetchQuery(
+      workspaceInventoryQueryOptions(dashboardRoot.user.id, teamIds),
+    );
+    if (
+      initialDashboardWindow.timeZone ===
+      resolveReportingTimeZone(dashboardRoot.user.timeZone, browserTimeZone())
+    ) {
+      for (const teamId of teamIds) {
+        void queryClient.prefetchQuery(
+          teamDashboardQueryOptions({
+            teamId,
+            window: initialDashboardWindow,
+            range: initialDashboardWindow.preset,
+            retainInFlight: true,
+          }),
+        );
+      }
+    }
+    return { snapshots: {}, inventory: null };
+  },
   head: ({ match }) => ({
     meta: [
       {
@@ -33,8 +85,9 @@ function AppIndexPage() {
     locale,
     messages: t,
     dashboardRoot,
-    workspaceSnapshots,
+    initialDashboardWindow,
   } = Route.useRouteContext();
+  const { snapshots, inventory } = Route.useLoaderData();
   if (dashboardRoot) {
     return (
       <WorkspaceClient
@@ -42,7 +95,9 @@ function AppIndexPage() {
         locale={locale}
         messages={t}
         dashboard={dashboardRoot}
-        snapshots={workspaceSnapshots ?? {}}
+        deferredSnapshots={snapshots}
+        deferredWindow={initialDashboardWindow}
+        deferredInventory={inventory}
       />
     );
   }

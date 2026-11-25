@@ -51,13 +51,13 @@ export function TeamManagementPageContent() {
                   <span className="inline-flex items-center gap-[var(--button-content-gap)]">
                     {copy.stats.sites}:
                     <AutoResizer
-                      initial
+                      initial={false}
                       animateWidth
                       animateHeight={false}
                       className="inline-flex items-center"
                     >
                       <AutoTransition
-                        initial
+                        initial={false}
                         className="inline-flex items-center"
                       >
                         {isPageDataLoading ? (
@@ -81,13 +81,13 @@ export function TeamManagementPageContent() {
                   <span className="inline-flex items-center gap-[var(--button-content-gap)]">
                     {copy.stats.members}:
                     <AutoResizer
-                      initial
+                      initial={false}
                       animateWidth
                       animateHeight={false}
                       className="inline-flex items-center"
                     >
                       <AutoTransition
-                        initial
+                        initial={false}
                         className="inline-flex items-center"
                       >
                         {isPageDataLoading ? (

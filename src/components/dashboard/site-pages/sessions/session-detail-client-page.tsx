@@ -5,7 +5,10 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { JourneyDetailStateSwitch } from "@/components/dashboard/journeys/journey-detail-state";
 import { JourneyGeoLocationCard } from "@/components/dashboard/journeys/journey-geo-location-card";
-import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
+import {
+  useDashboardTimeWindow,
+  useDashboardTimeZone,
+} from "@/components/dashboard/shell/dashboard-query-provider";
 import { EventDetailDrawer } from "@/components/dashboard/site-pages/events/event-detail-drawer";
 import { PageDetailDrawer } from "@/components/dashboard/site-pages/pages/page-detail-drawer";
 import {
@@ -240,7 +243,8 @@ export const SessionDetailClientPage = memo(function SessionDetailClientPage({
   onOpenVisitor,
 }: SessionDetailClientPageProps) {
   const labels = messages.sessionDetail;
-  const { timeZone, window } = useDashboardQueryControls();
+  const timeZone = useDashboardTimeZone();
+  const window = useDashboardTimeWindow();
   const requestKey = useMemo(
     () => [siteId, sessionId, timeZone, window.from, window.to].join(":"),
     [sessionId, siteId, timeZone, window.from, window.to],

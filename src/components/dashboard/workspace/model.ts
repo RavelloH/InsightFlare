@@ -9,13 +9,14 @@ import {
   buildTeamSiteTrends,
   type TeamDashboardWindow,
 } from "@/lib/dashboard/team-dashboard-query";
-import type { TeamData } from "@/lib/dashboard-api/client/edge";
+import type { SiteData, TeamData } from "@/lib/dashboard-api/client/edge";
 
 /** Visitor change (in percent) that counts as a notable movement. */
 export const NOTABLE_CHANGE_PERCENT = 30;
 
 export interface WorkspaceSiteRow {
-  site: TeamDashboardSite;
+  site: SiteData;
+  metricsStatus?: "pending" | "unavailable";
   team: TeamData;
   slug: string;
   visitors: number;
@@ -132,6 +133,8 @@ export function sortRows(
   const value = (row: WorkspaceSiteRow) =>
     sort === "change" ? row.visitorsChange : row[sort];
   return [...rows].sort((left, right) => {
+    if (Boolean(left.metricsStatus) !== Boolean(right.metricsStatus))
+      return left.metricsStatus ? 1 : -1;
     const a = value(left);
     const b = value(right);
     if (a === null && b !== null) return 1;
@@ -164,6 +167,8 @@ export function deriveWorkspaceData(
   teams: readonly TeamData[],
   data: readonly (TeamDashboardData | undefined)[],
   window: TeamDashboardWindow,
+  inventory: Readonly<Record<string, readonly SiteData[] | null>> = {},
+  failed: readonly boolean[] = [],
 ) {
   const dataByTeam = new Map<string, TeamDashboardData>();
   teams.forEach((team, index) => {
@@ -178,13 +183,42 @@ export function deriveWorkspaceData(
     window,
   );
   const rows = buildWorkspaceRows(teams, dataByTeam, trendBySite);
+  teams.forEach((team, index) => {
+    if (dataByTeam.has(team.id)) return;
+    for (const site of inventory[team.id] ?? []) {
+      rows.push({
+        site,
+        team,
+        slug: getSiteSlug(site),
+        metricsStatus: failed[index] ? "unavailable" : "pending",
+        visitors: 0,
+        views: 0,
+        sessions: 0,
+        bounceRate: 0,
+        visitorsChange: null,
+        viewsChange: null,
+        trend: [],
+      });
+    }
+  });
+  // For an unbounded time range the actual start is not yet known.
+  const initialBuckets =
+    !sites.length && rows.length && window.from > 0
+      ? (
+          buildTeamSiteTrends([rows[0]!.site.id], [], window)[
+            rows[0]!.site.id
+          ] ?? []
+        ).map((point) => point.timestampMs)
+      : [];
   return {
     rows,
-    siteCount: sites.length,
+    siteCount: rows.length,
     totals: buildWorkspaceTotals(sites),
-    bucketStarts: (trendBySite[sites[0]?.id ?? ""] ?? []).map(
-      (point) => point.timestampMs,
-    ),
+    bucketStarts: sites.length
+      ? (trendBySite[sites[0]?.id ?? ""] ?? []).map(
+          (point) => point.timestampMs,
+        )
+      : initialBuckets,
     rowsById: new Map(rows.map((row) => [row.site.id, row])),
     changePoints: rows.flatMap((row) =>
       row.visitorsChange === null

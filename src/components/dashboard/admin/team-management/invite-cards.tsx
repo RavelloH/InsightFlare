@@ -54,6 +54,8 @@ export function TeamInviteCreateCard() {
     inviteRole,
     inviteSiteIds,
     latestInviteUrl,
+    loading,
+    managementUnavailable,
     setInviteEmail,
     setInviteExpiresInHours,
     setInviteRole,
@@ -87,7 +89,7 @@ export function TeamInviteCreateCard() {
               value={inviteEmail}
               onChange={(event) => setInviteEmail(event.target.value)}
               placeholder={copy.members.inviteEmailPlaceholder}
-              disabled={!canManage}
+              disabled={!canManage || loading || managementUnavailable}
             />
           </div>
           <div className="grid gap-4 md:grid-cols-2">
@@ -100,7 +102,7 @@ export function TeamInviteCreateCard() {
                   setInviteRole(nextRole);
                   if (nextRole === "admin") setInviteSiteIds([]);
                 }}
-                disabled={!canManage}
+                disabled={!canManage || loading || managementUnavailable}
               >
                 <SelectTrigger id="invite-role" className="w-full">
                   <SelectValue />
@@ -126,7 +128,7 @@ export function TeamInviteCreateCard() {
                   setInviteExpiresInHours(event.target.value)
                 }
                 inputMode="numeric"
-                disabled={!canManage}
+                disabled={!canManage || loading || managementUnavailable}
               />
             </div>
           </div>
@@ -136,7 +138,7 @@ export function TeamInviteCreateCard() {
               <Button
                 type="button"
                 variant="outline"
-                disabled={!canManage}
+                disabled={!canManage || loading || managementUnavailable}
                 className="w-full justify-between"
                 onClick={() => setInviteSiteAccessDialogOpen(true)}
               >
@@ -210,6 +212,7 @@ export function TeamInviteLinksCard() {
     handleCopyInviteUrl,
     invites,
     loading,
+    managementUnavailable,
     locale,
     messages,
     revokingInviteId,
@@ -231,7 +234,11 @@ export function TeamInviteLinksCard() {
           loading={loading}
           hasContent={invites.length > 0}
           loadingLabel={messages.common.loading}
-          emptyLabel={copy.members.noInvites}
+          emptyLabel={
+            managementUnavailable
+              ? messages.adminTeams.loadFailed
+              : copy.members.noInvites
+          }
           colSpan={9}
           header={
             <TableRow>
@@ -359,6 +366,7 @@ export function TeamMembersTableCard() {
     currentUserId,
     handleChangeMemberRole,
     loading,
+    managementUnavailable,
     locale,
     members,
     messages,
@@ -378,7 +386,11 @@ export function TeamMembersTableCard() {
           loading={loading}
           hasContent={members.length > 0}
           loadingLabel={messages.common.loading}
-          emptyLabel={copy.members.noMembers}
+          emptyLabel={
+            managementUnavailable
+              ? messages.adminTeams.loadFailed
+              : copy.members.noMembers
+          }
           colSpan={7}
           header={
             <TableRow>

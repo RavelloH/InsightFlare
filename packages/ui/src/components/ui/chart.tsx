@@ -70,6 +70,7 @@ function ChartContainer({
   const uniqueId = React.useId();
   const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`;
   const chartRef = React.useRef<HTMLDivElement>(null);
+  const contextValue = React.useMemo(() => ({ config }), [config]);
 
   React.useEffect(() => {
     if (!onChartResize) return;
@@ -80,7 +81,7 @@ function ChartContainer({
   }, [onChartResize]);
 
   return (
-    <ChartContext.Provider value={{ config }}>
+    <ChartContext.Provider value={contextValue}>
       <div
         ref={chartRef}
         data-slot="chart"

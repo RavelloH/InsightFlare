@@ -239,3 +239,64 @@ describe("workspace derived data", () => {
     expect(empty.changePoints).toEqual([]);
   });
 });
+
+describe("workspace streaming inventory", () => {
+  const second = { ...team, id: "team-b", name: "Team B" };
+  const window = {
+    from: 86400000,
+    to: 3 * 86400000,
+    interval: "day" as const,
+    timeZone: "UTC",
+  };
+  const a = site("a", { visitors: 10 }, { visitors: 20 });
+  const b = { ...site("b", {}), teamId: second.id };
+  const inventory = { [team.id]: [a], [second.id]: [b] };
+  it("keeps authorized rows without treating unknown metrics as actual traffic", () => {
+    const pending = deriveWorkspaceData(
+      [team, second],
+      [undefined, undefined],
+      window,
+      inventory,
+    );
+    expect(pending.rows.map((row) => row.metricsStatus)).toEqual([
+      "pending",
+      "pending",
+    ]);
+    expect(pending.bucketStarts.length).toBeGreaterThan(0);
+    expect(pending.changePoints).toEqual([]);
+    const partial = deriveWorkspaceData(
+      [team, second],
+      [{ sites: [a], trend: [] }, undefined],
+      window,
+      inventory,
+    );
+    expect(partial.siteCount).toBe(2);
+    expect(partial.rowsById.get("a")?.metricsStatus).toBeUndefined();
+    expect(partial.rowsById.get("b")?.metricsStatus).toBe("pending");
+    expect(partial.totals.visitors).toBe(10);
+    expect(partial.changePoints.map((point) => point.id)).toEqual(["a"]);
+    expect(
+      sortRows(partial.rows, "visitors", "asc").map((row) => row.site.id),
+    ).toEqual(["a", "b"]);
+    const failed = deriveWorkspaceData(
+      [team, second],
+      [{ sites: [a], trend: [] }, undefined],
+      window,
+      inventory,
+      [false, true],
+    );
+    expect(failed.rowsById.get("b")?.metricsStatus).toBe("unavailable");
+    expect(failed.totals.visitors).toBe(10);
+    const ready = deriveWorkspaceData(
+      [team, second],
+      [
+        { sites: [], trend: [] },
+        { sites: [b], trend: [] },
+      ],
+      window,
+      inventory,
+    );
+    expect(ready.rows.map((row) => row.site.id)).toEqual(["b"]);
+    expect(ready.rows[0]?.metricsStatus).toBeUndefined();
+  });
+});

@@ -66,6 +66,30 @@ describe("demo admin route dispatch", () => {
     expect(call("/not-an-admin-route")).toBeUndefined();
   });
 
+  it("filters demo inbox messages by rule without changing the account attention count", () => {
+    const messages = generateDemoNotificationMessages(teamId, "en");
+    const ruleId = messages.find((message) => message.ruleId)?.ruleId;
+    expect(ruleId).toBeTruthy();
+    const attention = messages.filter(
+      (message) => message.requiresAttention && message.readAt === null,
+    ).length;
+    expect(
+      call("/api/private/notifications", "GET", {}, { ruleId: ruleId! }),
+    ).toMatchObject({
+      ok: true,
+      data: {
+        messages: messages.filter((message) => message.ruleId === ruleId),
+        unreadAttentionCount: attention,
+      },
+    });
+    expect(
+      call("/api/private/notifications", "GET", {}, { ruleId: "not-found" }),
+    ).toMatchObject({
+      ok: true,
+      data: { messages: [], unreadAttentionCount: attention },
+    });
+  });
+
   it("handles scheduled tasks, config changes, funnels, goals, and profile updates", () => {
     expect(
       call("/api/private/admin/scheduled-tasks", "PATCH", {

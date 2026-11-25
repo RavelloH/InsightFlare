@@ -5,6 +5,8 @@ import { expect, it, vi } from "vitest";
 
 import { AutoResizer } from "../src/components/ui/auto-resizer";
 import { AutoTransition } from "../src/components/ui/auto-transition";
+import { DataTableSwitch } from "../src/components/ui/data-table-switch";
+import { TableCell, TableHead, TableRow } from "../src/components/ui/table";
 
 it("honors initial=false on SSR without hiding initial content", () => {
   expect(
@@ -142,3 +144,51 @@ it("shares AutoResizer observation, measures only enabled axes, and releases the
     host.remove();
   }
 });
+
+it.each([
+  { loading: true, hasContent: false, text: "Loading table" },
+  { loading: false, hasContent: false, text: "Empty table" },
+  { loading: false, hasContent: true, text: "Loaded row" },
+])(
+  "renders the initial management table visibly on SSR: $text",
+  ({ loading, hasContent, text }) => {
+    const markup = renderToStaticMarkup(
+      <DataTableSwitch
+        loading={loading}
+        hasContent={hasContent}
+        loadingLabel="Loading table"
+        emptyLabel="Empty table"
+        colSpan={1}
+        header={
+          <TableRow>
+            <TableHead>Name</TableHead>
+          </TableRow>
+        }
+        rows={
+          <TableRow>
+            <TableCell>Loaded row</TableCell>
+          </TableRow>
+        }
+      />,
+    );
+    const host = document.createElement("div");
+    host.innerHTML = markup;
+    const resizer = host.querySelector<HTMLElement>(
+      '[data-slot="auto-resizer"]',
+    );
+    expect(resizer).not.toBeNull();
+    expect(resizer?.style.height).not.toBe("0px");
+    const table = host.querySelector("table");
+    expect(table?.textContent).toContain(text);
+    expect(table?.textContent).toContain("Name");
+    // A spinner can exist in the DOM but still be invisible until hydration.
+    for (
+      let element: HTMLElement | null = table;
+      element;
+      element = element.parentElement
+    ) {
+      expect(element.style.opacity).not.toBe("0");
+      expect(element.style.height).not.toBe("0px");
+    }
+  },
+);
