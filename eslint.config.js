@@ -110,15 +110,7 @@ export default [
     files: ["**/*.{ts,tsx,mts}"],
     languageOptions: {
       parserOptions: {
-        projectService: {
-          allowDefaultProject: [
-            "packages/ui/tests/*.ts",
-            "packages/ui/tests/*.tsx",
-            "packages/product-ui/src/*/*.test.ts",
-            "packages/product-ui/src/*/*.test.tsx",
-          ],
-          defaultProject: "packages/ui/tsconfig.json",
-        },
+        projectService: true,
         tsconfigRootDir: import.meta.dirname,
       },
     },
