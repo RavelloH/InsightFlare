@@ -102,7 +102,16 @@ const en = {
   embedCaution:
     "Published widget data is accessible without signing in. The origin allowlist restricts iframe embedding, not direct access.",
   embedSizeGuide:
-    "The optional script resizes the iframe to fit its content. Without it, the suggested height applies; adjust iframe width and height for your layout.",
+    "Paste the code where the widget should appear. The iframe is enough on its own; the script only adjusts its height.",
+  embedFrameTitle: "Widget iframe",
+  embedFrameHint:
+    "Shows the widget. Place it where the card should appear. On its own it uses the suggested height below; adjust width and height for your layout.",
+  embedLoaderTitle: "Auto-height script",
+  embedLoaderHint:
+    "Resizes the iframe to fit its content so there is no inner scrollbar or empty space. Add it once per page; it serves every widget on that page. Omit it where scripts are not allowed.",
+  embedRequired: "Required",
+  embedOptional: "Optional",
+  copyPart: "Copy",
   height: "Recommended height",
   previousHeight: "Previous recommended height",
   updated: "Updated",
@@ -283,7 +292,16 @@ const labels: Record<Locale, WidgetLabels> = {
     embedCaution:
       "已发布的小组件汇总数据无需登录即可访问；来源白名单仅限制 iframe 嵌入，不阻止直接访问。",
     embedSizeGuide:
-      "附带的脚本会让 iframe 高度随内容自适应；不使用脚本时保持建议高度，可按页面布局自行调整 iframe 的宽度与高度。",
+      "将代码粘贴到要显示小组件的位置。iframe 单独使用即可显示，脚本只负责调整高度。",
+    embedFrameTitle: "小组件 iframe",
+    embedFrameHint:
+      "负责显示小组件，放在页面中希望出现卡片的位置。单独使用时采用下方的建议高度，可按页面布局调整宽度与高度。",
+    embedLoaderTitle: "自适应高度脚本",
+    embedLoaderHint:
+      "让 iframe 高度随内容自动调整，避免出现内部滚动条或多余留白。每个页面引入一次即可，同一页面上的所有小组件共用；不允许插入脚本的平台可以省略。",
+    embedRequired: "必需",
+    embedOptional: "可选",
+    copyPart: "复制",
     height: "建议高度",
     previousHeight: "之前的建议高度",
     updated: "更新时间",
@@ -457,7 +475,16 @@ const labels: Record<Locale, WidgetLabels> = {
     embedCaution:
       "已發佈的小工具彙總資料無須登入即可存取；來源白名單只限制 iframe 嵌入。",
     embedSizeGuide:
-      "附帶的指令碼會讓 iframe 高度隨內容自適應；不使用指令碼時保持建議高度，可依版型自行調整 iframe 尺寸。",
+      "將程式碼貼到要顯示小工具的位置。iframe 單獨使用即可顯示，指令碼只負責調整高度。",
+    embedFrameTitle: "小工具 iframe",
+    embedFrameHint:
+      "負責顯示小工具，放在頁面中希望出現卡片的位置。單獨使用時採用下方的建議高度，可依版型調整寬度與高度。",
+    embedLoaderTitle: "自適應高度指令碼",
+    embedLoaderHint:
+      "讓 iframe 高度隨內容自動調整，避免出現內部捲軸或多餘留白。每個頁面引入一次即可，同一頁面上的所有小工具共用；不允許插入指令碼的平台可以省略。",
+    embedRequired: "必要",
+    embedOptional: "選用",
+    copyPart: "複製",
     height: "建議高度",
     previousHeight: "先前建議高度",
     updated: "更新時間",
@@ -635,7 +662,16 @@ const labels: Record<Locale, WidgetLabels> = {
     embedCaution:
       "公開した集計データはログインせずに閲覧できます。オリジン制限は iframe の埋め込み先のみを制御します。",
     embedSizeGuide:
-      "付属のスクリプトで iframe の高さが内容に合わせて自動調整されます。スクリプトを使わない場合は推奨高さが適用され、レイアウトに合わせて幅と高さを調整できます。",
+      "ウィジェットを表示したい場所にコードを貼り付けます。iframe だけでも表示でき、スクリプトは高さの調整のみを行います。",
+    embedFrameTitle: "ウィジェット iframe",
+    embedFrameHint:
+      "ウィジェットを表示します。カードを置きたい位置に貼り付けてください。単体では下記の推奨高さを使い、幅と高さはレイアウトに合わせて調整できます。",
+    embedLoaderTitle: "高さ自動調整スクリプト",
+    embedLoaderHint:
+      "iframe の高さを内容に合わせて調整し、内部のスクロールバーや余白を防ぎます。ページごとに 1 回読み込めば、そのページのすべてのウィジェットに適用されます。スクリプトを使えない環境では省略できます。",
+    embedRequired: "必須",
+    embedOptional: "任意",
+    copyPart: "コピー",
     height: "推奨高さ",
     previousHeight: "変更前の推奨高さ",
     updated: "更新日時",

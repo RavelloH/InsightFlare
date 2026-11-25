@@ -64,9 +64,11 @@ export const GEO_CLIENT_FRAGMENT =
     var max = Math.max(1, ...points.map(function (p) { return p.value; }));
     function project(lon, lat) {
       if (!globe) {
+        // Keep the equirectangular aspect (360 x 142 degrees), centered.
+        var scale = Math.min(width / 360, height / 142);
         return {
-          x: (lon + 180) / 360 * width,
-          y: (80 - lat) / 142 * height,
+          x: (width - 360 * scale) / 2 + (lon + 180) * scale,
+          y: (height - 142 * scale) / 2 + (80 - lat) * scale,
           front: true
         };
       }
@@ -94,7 +96,7 @@ export const GEO_CLIENT_FRAGMENT =
       }
       ctx.globalAlpha = globe ? 0.4 : 0.28;
       ctx.fillStyle = ink;
-      var dotRadius = globe ? 0.8 : Math.max(0.5, Math.min(1.1, width / 420));
+      var dotRadius = globe ? 0.8 : Math.max(0.5, Math.min(1.1, Math.min(width, height * 360 / 142) / 420));
       for (var i = 0; i < landPoints.length; i++) {
         var location = project(landPoints[i][0], landPoints[i][1]);
         if (!location.front || location.y < 0 || location.y > height) continue;

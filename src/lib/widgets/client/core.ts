@@ -52,11 +52,14 @@ export const WIDGET_CLIENT_CORE = String.raw`
     if (href) { el.href = href; el.target = "_blank"; el.rel = "noopener noreferrer"; }
     return el;
   }
+  // Match the dashboard: grouped full numbers, compact only from a million.
   function formatNumber(value) {
-    return new Intl.NumberFormat(localeTag(), {
-      notation: "compact",
-      maximumFractionDigits: 1,
-    }).format(value);
+    return new Intl.NumberFormat(
+      localeTag(),
+      Math.abs(value) >= 1000000
+        ? { notation: "compact", maximumFractionDigits: 1 }
+        : { maximumFractionDigits: 1 },
+    ).format(value);
   }
   function formatDuration(value) { var seconds = Math.round(Math.max(0, value)/1000); return Math.floor(seconds/60) + ":" + String(seconds%60).padStart(2, "0"); }
   function formatDate(value) {
@@ -122,9 +125,9 @@ export const WIDGET_CLIENT_CORE = String.raw`
       if (typeof data.change === "number" && Number.isFinite(data.change)) {
         change.dataset.direction =
           data.change > 0 ? "up" : data.change < 0 ? "down" : "flat";
-        change.textContent = new Intl.NumberFormat(localeTag(), {
+        change.textContent = (data.change > 0 ? "↑ " : data.change < 0 ? "↓ " : "") + new Intl.NumberFormat(localeTag(), {
           style: "percent",
-          signDisplay: "always",
+          signDisplay: "exceptZero",
           maximumFractionDigits: 1,
         }).format(data.change);
       } else change.textContent = "—";
@@ -133,8 +136,18 @@ export const WIDGET_CLIENT_CORE = String.raw`
     content.appendChild(line);
   }
   // Rounded axis maxima keep the three tick labels short and readable.
+  var NICE_STEPS = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+  function niceStep(raw) {
+    if (!(raw > 0)) return 1;
+    var power = Math.pow(10, Math.floor(Math.log10(raw)));
+    for (var i = 0; i < NICE_STEPS.length; i++) {
+      if (raw / power <= NICE_STEPS[i] + 1e-9) return NICE_STEPS[i] * power;
+    }
+    return 10 * power;
+  }
+  // Two equal, round intervals (e.g. 0 / 600 / 1,200) for count axes.
   function countAxisMax(max) {
-    return Math.max(1, Math.ceil(max / 2)) * 2;
+    return Math.max(1, Math.ceil(niceStep(max / 2))) * 2;
   }
   function rateAxisMax(max) {
     return Math.min(1, Math.max(0.02, Math.ceil(max * 50) / 50));
@@ -250,10 +263,7 @@ export const WIDGET_CLIENT_CORE = String.raw`
       svg.appendChild(area);
     }
     svg.appendChild(polyline);
-    var unit = document.createElement("div");
-    unit.className = "widget__unit";
-    unit.textContent = metricLabel[data.metric];
-    content.appendChild(unit);
+    content.appendChild(legendFor([{ label: metricLabel[data.metric], color: "var(--primary)" }]));
     content.appendChild(
       chartWithAxis(svg, high, formatNumber, points[0].timestampMs, points[points.length - 1].timestampMs),
     );
@@ -286,6 +296,22 @@ export const WIDGET_CLIENT_CORE = String.raw`
     svg.appendChild(path);
     return svg;
   }
+  function legendFor(items) {
+    var legend = document.createElement("div");
+    legend.className = "widget__legend";
+    items.forEach(function (entry) {
+      var item = document.createElement("span");
+      item.className = "widget__legend-item";
+      var swatch = document.createElement("span");
+      swatch.className = "widget__legend-swatch";
+      swatch.style.background = entry.color;
+      var name = document.createElement("span");
+      name.textContent = entry.label;
+      item.append(swatch, name);
+      legend.appendChild(item);
+    });
+    return legend;
+  }
   function renderMultiTrend(data) {
     var series = data.series.filter(function (item) {
       return item && Array.isArray(item.points) && item.points.length > 0 &&
@@ -294,16 +320,9 @@ export const WIDGET_CLIENT_CORE = String.raw`
     if (!series.length) { setStatus(messages.noData); return; }
     var colors = series.map(function(_, i) { return paletteColor(i, series.length); });
     var max = countAxisMax(Math.max(0, ...series.flatMap(function (s) { return s.points.map(function (p) { return p.value; }); })));
-    var legend = document.createElement("div"); legend.className = "widget__legend";
-    series.forEach(function (item, index) {
-      var label = document.createElement("span"); label.className = "widget__legend-item";
-      var mark = document.createElement("span"); mark.className = "widget__legend-swatch";
-      mark.style.background = colors[index];
-      var name = document.createElement("span");
-      name.textContent = metricLabel[item.metric] || item.metric;
-      label.append(mark, name); legend.appendChild(label);
-    });
-    content.appendChild(legend);
+    content.appendChild(legendFor(series.map(function (item, index) {
+      return { label: metricLabel[item.metric] || item.metric, color: colors[index] };
+    })));
     var svg = chartSvg(series[0].points, function (p) { return p.value; }, colors[0], max);
     series.slice(1).forEach(function (item, index) {
       var second = chartSvg(item.points, function (p) { return p.value; }, colors[index + 1], max);
@@ -390,18 +409,15 @@ export const WIDGET_CLIENT_CORE = String.raw`
     if (root.dataset.rankingStyle === "bars") { renderBars(rows, false); return; }
     var list = document.createElement("ol");
     list.className = "widget__list";
-    rows
-      .slice(0, Number(root.dataset.limit) || 10)
-      .forEach(function (row, index) {
+    var shown = rows.slice(0, Number(root.dataset.limit) || 10);
+    var top = Math.max(1, ...shown.map(function (row) { return row.value; }));
+    shown.forEach(function (row) {
         var item = document.createElement("li");
         item.className = "widget__row";
+        // Same proportional row background as the dashboard tables.
+        item.style.setProperty("--widget-share", Math.max(0, Math.min(100, row.value / top * 100)) + "%");
         var ranked = document.createElement("span");
         ranked.className = "widget__ranked-label";
-        var rank = document.createElement("span");
-        rank.className = "widget__rank";
-        rank.setAttribute("aria-hidden", "true");
-        rank.textContent = String(index + 1);
-        ranked.appendChild(rank);
         var displayLabel = formatRankingLabel(row.label);
         var label = makePathLabel(row.label,displayLabel);
         ranked.appendChild(label);

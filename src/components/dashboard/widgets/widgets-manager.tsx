@@ -10,6 +10,7 @@ import {
   AlertDialogTitle,
 } from "@insightflare/ui/alert-dialog";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Badge } from "@insightflare/ui/badge";
 import { Button } from "@insightflare/ui/button";
 import { Card, CardContent } from "@insightflare/ui/card";
@@ -605,197 +606,214 @@ export function WidgetsManager({ locale, teamId, sites }: WidgetsManagerProps) {
         </div>
 
         <AutoResizer className="w-full" duration={0.24}>
-          {sites.length === 0 ? (
-            <Card>
-              <CardContent className="flex min-h-56 flex-col items-center justify-center gap-3 text-center">
-                <RiLineChartLine
-                  className="size-8 text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <p className="max-w-md text-sm text-muted-foreground">
-                  {copy.noSites}
-                </p>
-              </CardContent>
-            </Card>
-          ) : loading ? (
-            <Card>
-              <CardContent className="flex min-h-44 items-center justify-center gap-2 text-sm text-muted-foreground">
-                <RiLoader4Line
-                  className="size-4 animate-spin"
-                  aria-hidden="true"
-                />
-                {copy.loading}
-              </CardContent>
-            </Card>
-          ) : listError ? (
-            <Card>
-              <CardContent className="flex min-h-44 flex-col items-center justify-center gap-3 text-center">
-                <p className="text-sm text-destructive">{listError}</p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void loadRecords()}
-                >
-                  <RiRestartLine className="size-4" aria-hidden="true" />
-                  {copy.retry}
-                </Button>
-              </CardContent>
-            </Card>
-          ) : visibleRecords.length === 0 ? (
-            <Card>
-              <CardContent className="flex min-h-44 flex-col items-center justify-center gap-3 text-center">
-                <RiLineChartLine
-                  className="size-8 text-muted-foreground/70"
-                  aria-hidden="true"
-                />
-                <p className="text-sm text-muted-foreground">
-                  {copy.noWidgets}
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <>
-              <div className="grid auto-rows-[8px] grid-flow-row-dense grid-cols-[repeat(auto-fit,minmax(min(100%,22rem),1fr))] gap-x-4">
-                {visibleRecords.map((record) => {
-                  const site = siteById.get(record.siteId);
-                  const activeConfig = record.published ?? record.draft;
-                  const TypeIcon = widgetTypeIcons[activeConfig.type];
-                  return (
-                    <MasonryItem key={record.uuid}>
-                      <Card className="w-full min-w-0 gap-0 py-0 transition-colors hover:border-foreground/20">
-                        <CardContent className="flex w-full min-w-0 flex-col gap-2.5 p-3.5">
-                          <header className="flex min-w-0 items-start gap-2.5">
-                            <div className="min-w-0 flex-1 space-y-0.5">
-                              <p className="flex min-w-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
-                                <TypeIcon
-                                  className="size-[1em] shrink-0"
-                                  aria-hidden="true"
-                                />
-                                <span className="truncate">
-                                  {displayType(activeConfig.type, copy)}
-                                  {" · "}
-                                  {activeConfig.type === "realtime"
-                                    ? "30s"
-                                    : activeConfig.range === "7d"
-                                      ? copy.sevenDays
-                                      : copy.thirtyDays}
-                                </span>
-                              </p>
-                              <h3
-                                className="truncate text-[13px] font-semibold leading-5"
-                                title={activeConfig.title}
-                              >
-                                {activeConfig.title ||
-                                  displayType(activeConfig.type, copy)}
-                              </h3>
-                              <p
-                                className="truncate text-[11px] text-muted-foreground"
-                                title={site ? site.domain : undefined}
-                              >
-                                {site?.name ?? copy.site}
-                                {site?.domain ? ` · ${site.domain}` : ""}
-                              </p>
-                            </div>
-                            <Badge className="shrink-0" variant="secondary">
-                              {statusLabel(record.status, copy)}
-                            </Badge>
-                          </header>
-                          <div
-                            className="min-w-0"
-                            title={widgetParameters(activeConfig, copy)}
-                          >
-                            <WidgetListPreview
-                              record={record}
-                              basePath={basePath}
-                              copy={copy}
-                              locale={locale}
-                              siteOrigin={
-                                defaultAllowedOrigin(site?.domain ?? "")[0]
-                              }
-                            />
-                          </div>
-                          <div className="flex min-w-0 items-center gap-1 border-t pt-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openEdit(record)}
-                            >
-                              <RiSettings3Line
-                                className="size-4"
-                                aria-hidden="true"
-                              />
-                              {copy.edit}
-                            </Button>
-                            {record.status === "published" ? (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => openEmbed(record)}
-                              >
-                                <RiCodeLine
-                                  className="size-4"
-                                  aria-hidden="true"
-                                />
-                                {copy.embedCode}
-                              </Button>
-                            ) : null}
-                            <div className="ml-auto flex items-center gap-0.5">
-                              {record.status === "published" ? (
-                                <Button
-                                  variant="ghost"
-                                  size="icon-sm"
-                                  aria-label={copy.unpublish}
-                                  title={copy.unpublish}
-                                  onClick={() =>
-                                    startConfirm("unpublish", record)
-                                  }
-                                >
-                                  <RiPauseCircleLine
-                                    className="size-4"
-                                    aria-hidden="true"
-                                  />
-                                </Button>
-                              ) : null}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-muted-foreground hover:text-destructive"
-                                onClick={() => startConfirm("delete", record)}
-                              >
-                                <RiDeleteBinLine
-                                  className="size-4"
-                                  aria-hidden="true"
-                                />
-                                {copy.delete}
-                              </Button>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </MasonryItem>
-                  );
-                })}
-              </div>
-              {cursor ? (
-                <div className="flex justify-center pt-2">
+          <AutoTransition
+            transitionKey={
+              sites.length === 0
+                ? "no-sites"
+                : loading
+                  ? "loading"
+                  : listError
+                    ? "error"
+                    : `${visibleRecords.length === 0 ? "empty" : "list"}:${siteFilter}:${typeFilter}`
+            }
+            initial={false}
+            duration={0.18}
+            type="fade"
+            presenceMode="wait"
+            className="w-full min-w-0"
+          >
+            {sites.length === 0 ? (
+              <Card>
+                <CardContent className="flex min-h-56 flex-col items-center justify-center gap-3 text-center">
+                  <RiLineChartLine
+                    className="size-8 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <p className="max-w-md text-sm text-muted-foreground">
+                    {copy.noSites}
+                  </p>
+                </CardContent>
+              </Card>
+            ) : loading ? (
+              <Card>
+                <CardContent className="flex min-h-44 items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <RiLoader4Line
+                    className="size-4 animate-spin"
+                    aria-hidden="true"
+                  />
+                  {copy.loading}
+                </CardContent>
+              </Card>
+            ) : listError ? (
+              <Card>
+                <CardContent className="flex min-h-44 flex-col items-center justify-center gap-3 text-center">
+                  <p className="text-sm text-destructive">{listError}</p>
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={loadingMore}
-                    onClick={() => void loadRecords(cursor, true)}
+                    onClick={() => void loadRecords()}
                   >
-                    {loadingMore ? (
-                      <RiLoader4Line
-                        className="size-4 animate-spin"
-                        aria-hidden="true"
-                      />
-                    ) : null}
-                    {copy.more}
+                    <RiRestartLine className="size-4" aria-hidden="true" />
+                    {copy.retry}
                   </Button>
+                </CardContent>
+              </Card>
+            ) : visibleRecords.length === 0 ? (
+              <Card>
+                <CardContent className="flex min-h-44 flex-col items-center justify-center gap-3 text-center">
+                  <RiLineChartLine
+                    className="size-8 text-muted-foreground/70"
+                    aria-hidden="true"
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    {copy.noWidgets}
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                <div className="grid auto-rows-[8px] grid-flow-row-dense grid-cols-[repeat(auto-fit,minmax(min(100%,22rem),1fr))] gap-x-4">
+                  {visibleRecords.map((record) => {
+                    const site = siteById.get(record.siteId);
+                    const activeConfig = record.published ?? record.draft;
+                    const TypeIcon = widgetTypeIcons[activeConfig.type];
+                    return (
+                      <MasonryItem key={record.uuid}>
+                        <Card className="w-full min-w-0 gap-0 py-0 transition-colors hover:border-foreground/20">
+                          <CardContent className="flex w-full min-w-0 flex-col gap-2.5 p-3.5">
+                            <header className="flex min-w-0 items-start gap-2.5">
+                              <div className="min-w-0 flex-1 space-y-0.5">
+                                <p className="flex min-w-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                                  <TypeIcon
+                                    className="size-[1em] shrink-0"
+                                    aria-hidden="true"
+                                  />
+                                  <span className="truncate">
+                                    {displayType(activeConfig.type, copy)}
+                                    {" · "}
+                                    {activeConfig.type === "realtime"
+                                      ? "30s"
+                                      : activeConfig.range === "7d"
+                                        ? copy.sevenDays
+                                        : copy.thirtyDays}
+                                  </span>
+                                </p>
+                                <h3
+                                  className="truncate text-[13px] font-semibold leading-5"
+                                  title={activeConfig.title}
+                                >
+                                  {activeConfig.title ||
+                                    displayType(activeConfig.type, copy)}
+                                </h3>
+                                <p
+                                  className="truncate text-[11px] text-muted-foreground"
+                                  title={site ? site.domain : undefined}
+                                >
+                                  {site?.name ?? copy.site}
+                                  {site?.domain ? ` · ${site.domain}` : ""}
+                                </p>
+                              </div>
+                              <Badge className="shrink-0" variant="secondary">
+                                {statusLabel(record.status, copy)}
+                              </Badge>
+                            </header>
+                            <div
+                              className="min-w-0"
+                              title={widgetParameters(activeConfig, copy)}
+                            >
+                              <WidgetListPreview
+                                record={record}
+                                basePath={basePath}
+                                copy={copy}
+                                locale={locale}
+                                siteOrigin={
+                                  defaultAllowedOrigin(site?.domain ?? "")[0]
+                                }
+                              />
+                            </div>
+                            <div className="flex min-w-0 items-center gap-1 border-t pt-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openEdit(record)}
+                              >
+                                <RiSettings3Line
+                                  className="size-4"
+                                  aria-hidden="true"
+                                />
+                                {copy.edit}
+                              </Button>
+                              {record.status === "published" ? (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => openEmbed(record)}
+                                >
+                                  <RiCodeLine
+                                    className="size-4"
+                                    aria-hidden="true"
+                                  />
+                                  {copy.embedCode}
+                                </Button>
+                              ) : null}
+                              <div className="ml-auto flex items-center gap-0.5">
+                                {record.status === "published" ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    aria-label={copy.unpublish}
+                                    title={copy.unpublish}
+                                    onClick={() =>
+                                      startConfirm("unpublish", record)
+                                    }
+                                  >
+                                    <RiPauseCircleLine
+                                      className="size-4"
+                                      aria-hidden="true"
+                                    />
+                                  </Button>
+                                ) : null}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-muted-foreground hover:text-destructive"
+                                  onClick={() => startConfirm("delete", record)}
+                                >
+                                  <RiDeleteBinLine
+                                    className="size-4"
+                                    aria-hidden="true"
+                                  />
+                                  {copy.delete}
+                                </Button>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </MasonryItem>
+                    );
+                  })}
                 </div>
-              ) : null}
-            </>
-          )}
+                {cursor ? (
+                  <div className="flex justify-center pt-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={loadingMore}
+                      onClick={() => void loadRecords(cursor, true)}
+                    >
+                      {loadingMore ? (
+                        <RiLoader4Line
+                          className="size-4 animate-spin"
+                          aria-hidden="true"
+                        />
+                      ) : null}
+                      {copy.more}
+                    </Button>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </AutoTransition>
         </AutoResizer>
       </section>
 
