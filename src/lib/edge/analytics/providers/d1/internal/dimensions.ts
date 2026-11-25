@@ -7,6 +7,12 @@ import {
   filterFingerprint,
   type QueryAudience,
 } from "@/lib/edge/analytics/contract";
+import {
+  currentHotspotCollector,
+  type DimensionBatchOutcome,
+  type HotspotCollector,
+} from "@/lib/edge/analytics-engine/hotspot-collector";
+import { currentInvocationLogger } from "@/lib/edge/observability/logger";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -361,11 +367,13 @@ interface PendingDimensionPage {
 interface DimensionPageGroup {
   readonly env: Env;
   readonly entries: PendingDimensionPage[];
+  readonly collector?: HotspotCollector;
   timer?: ReturnType<typeof setTimeout>;
 }
-const dimensionPageBatch = new AsyncLocalStorage<
-  Map<string, DimensionPageGroup>
->();
+const dimensionPageBatch = new AsyncLocalStorage<{
+  groups: Map<string, DimensionPageGroup>;
+  collector?: HotspotCollector;
+}>();
 const MAX_DIMENSION_BATCH_SIZE = 4;
 const MAX_DIMENSION_BATCH_PAGE_LIMIT = 50;
 
@@ -373,7 +381,13 @@ const MAX_DIMENSION_BATCH_PAGE_LIMIT = 50;
 export function runWithDimensionPageBatch<T>(
   action: () => Promise<T>,
 ): Promise<T> {
-  return dimensionPageBatch.run(new Map(), action);
+  return dimensionPageBatch.run(
+    {
+      groups: new Map(),
+      collector: currentHotspotCollector(currentInvocationLogger()),
+    },
+    action,
+  );
 }
 
 async function flushDimensionPageGroup(
@@ -381,12 +395,19 @@ async function flushDimensionPageGroup(
 ): Promise<void> {
   const active = group.entries.filter((entry) => !entry.signal?.aborted);
   for (const entry of group.entries) {
-    if (entry.signal?.aborted) entry.resolve(undefined);
+    if (entry.signal?.aborted) {
+      group.collector?.recordDimensionBatch("cancelled");
+      entry.resolve(undefined);
+    }
   }
   if (active.length < 2) {
-    for (const entry of active) entry.resolve(undefined);
+    for (const entry of active) {
+      group.collector?.recordDimensionBatch("singleton");
+      entry.resolve(undefined);
+    }
     return;
   }
+  let fallback: DimensionBatchOutcome = "budgetFallback";
   try {
     const first = active[0]!.plan;
     const ctes = active.flatMap(({ plan }, index) => [
@@ -414,6 +435,7 @@ ${uniform ? `${union}\nORDER BY slot ASC, ${first.orderBy}` : `SELECT slot, valu
       ...active.flatMap(({ plan }) => plan.pageBindings),
     ];
     assertD1StatementBudget({ sql, bindings });
+    fallback = "queryFallback";
     const rows = await queryD1All<DimensionRawRow>(
       group.env,
       sql,
@@ -421,6 +443,7 @@ ${uniform ? `${union}\nORDER BY slot ASC, ${first.orderBy}` : `SELECT slot, valu
       undefined,
       { id: "analytics.dimension.batch", variant: "raw.filtered" },
     );
+    fallback = "resultFallback";
     const pages = active.map(() => [] as DimensionRawRow[]);
     for (const row of rows) {
       const slot = row.slot;
@@ -437,8 +460,17 @@ ${uniform ? `${union}\nORDER BY slot ASC, ${first.orderBy}` : `SELECT slot, valu
         throw new Error("invalid_dimension_batch_size");
       page.push(row);
     }
+    group.collector?.recordDimensionBatch(
+      active.length === 2
+        ? "merged2"
+        : active.length === 3
+          ? "merged3"
+          : "merged4",
+      active.length,
+    );
     active.forEach((entry, index) => entry.resolve(pages[index]!));
   } catch {
+    group.collector?.recordDimensionBatch(fallback, active.length);
     // Retry independently in each caller's own query context. No completed
     // child is executed twice.
     for (const entry of active) entry.resolve(undefined);
@@ -453,14 +485,17 @@ function enqueueDimensionPage(
 ): Promise<DimensionRawRow[] | undefined> | undefined {
   const scope = dimensionPageBatch.getStore();
   if (!scope || signal?.aborted) return undefined;
-  let group = scope.get(key);
-  if (group && group.env.DB !== env.DB) return undefined;
+  let group = scope.groups.get(key);
+  if (group && group.env.DB !== env.DB) {
+    scope.collector?.recordDimensionBatch("dbMismatch");
+    return undefined;
+  }
   if (!group) {
-    group = { env, entries: [] };
-    scope.set(key, group);
+    group = { env, entries: [], collector: scope.collector };
+    scope.groups.set(key, group);
     const pending = group;
     group.timer = setTimeout(() => {
-      scope.delete(key);
+      scope.groups.delete(key);
       void flushDimensionPageGroup(pending);
     }, 5);
   }
@@ -470,7 +505,7 @@ function enqueueDimensionPage(
   });
   if (pending.entries.length === MAX_DIMENSION_BATCH_SIZE) {
     clearTimeout(pending.timer);
-    scope.delete(key);
+    scope.groups.delete(key);
     void flushDimensionPageGroup(pending);
   }
   return result;
@@ -500,33 +535,43 @@ export async function queryDimensionPageFromD1(
     cursor,
   );
   let rows: DimensionRawRow[] | undefined;
-  if (
-    batch &&
-    dimensionPageBatch.getStore() !== undefined &&
-    !diagnostics &&
-    audience === "api-v1" &&
-    filters.root &&
-    dataset &&
-    dataset.scope !== "event" &&
-    Number.isInteger(limit) &&
-    limit > 0 &&
-    limit <= MAX_DIMENSION_BATCH_PAGE_LIMIT
-  ) {
-    const key = JSON.stringify([
-      siteId,
-      audience,
-      window.startMs,
-      window.endExclusiveMs,
-      window.timeZone,
-      dataset.scope,
-      filterFingerprint(filters, analyticsFilterRegistry),
-      plan.sourceCtes,
-      plan.sourceRelation,
-      plan.sourceWhere,
-      plan.sourceBindings,
-    ]);
-    const pending = enqueueDimensionPage(env, key, plan, batch.signal);
-    if (pending) rows = await pending;
+  const batchScope = batch ? dimensionPageBatch.getStore() : undefined;
+  if (batchScope) {
+    const skipped: DimensionBatchOutcome | undefined = batch?.signal?.aborted
+      ? "cancelled"
+      : diagnostics
+        ? "diagnostics"
+        : audience !== "api-v1"
+          ? "audience"
+          : !filters.root
+            ? "unfiltered"
+            : !dataset
+              ? "unprepared"
+              : dataset.scope === "event"
+                ? "eventScope"
+                : !Number.isInteger(limit) ||
+                    limit < 1 ||
+                    limit > MAX_DIMENSION_BATCH_PAGE_LIMIT
+                  ? "pageLimit"
+                  : undefined;
+    if (skipped) batchScope.collector?.recordDimensionBatch(skipped);
+    else {
+      const key = JSON.stringify([
+        siteId,
+        audience,
+        window.startMs,
+        window.endExclusiveMs,
+        window.timeZone,
+        dataset!.scope,
+        filterFingerprint(filters, analyticsFilterRegistry),
+        plan.sourceCtes,
+        plan.sourceRelation,
+        plan.sourceWhere,
+        plan.sourceBindings,
+      ]);
+      const pending = enqueueDimensionPage(env, key, plan, batch?.signal);
+      if (pending) rows = await pending;
+    }
   }
   if (batch?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
   rows ??= await queryD1All<DimensionRawRow>(

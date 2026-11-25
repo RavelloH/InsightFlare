@@ -1,4 +1,8 @@
 import {
+  DIMENSION_BATCH_OUTCOMES,
+  type DimensionBatchSummary,
+} from "@/lib/edge/analytics-engine/hotspot-collector";
+import {
   v2BooleanFlag,
   type V2Coverage,
 } from "@/lib/edge/analytics-engine/invocation-schema-v2";
@@ -144,6 +148,7 @@ export type InvocationSafePhase =
 export interface InvocationSafeDetails {
   version: 2;
   errorDiagnostics?: ErrorDiagnostics;
+  dimensionBatch?: DimensionBatchSummary;
   phases: Array<{ id: InvocationSafePhase; count: number; wallMs: number }>;
   queries: Array<{
     id: string;
@@ -495,6 +500,50 @@ function safeCoverage(value: unknown): V2Coverage | null {
     ? value
     : null;
 }
+function safeDimensionBatch(value: unknown): DimensionBatchSummary | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return undefined;
+  const input = value as Record<string, unknown>;
+  const output: DimensionBatchSummary = {};
+  for (const outcome of DIMENSION_BATCH_OUTCOMES) {
+    const counter = input[outcome];
+    if (
+      typeof counter !== "object" ||
+      counter === null ||
+      Array.isArray(counter)
+    )
+      continue;
+    const { events, items } = counter as Record<string, unknown>;
+    if (
+      typeof events !== "number" ||
+      typeof items !== "number" ||
+      !Number.isSafeInteger(events) ||
+      !Number.isSafeInteger(items) ||
+      events < 1 ||
+      items < events ||
+      items > events * 4 ||
+      items > 1_000_000_000
+    )
+      continue;
+    const size =
+      outcome === "merged2"
+        ? 2
+        : outcome === "merged3"
+          ? 3
+          : outcome === "merged4"
+            ? 4
+            : undefined;
+    if (size !== undefined && items !== events * size) continue;
+    if (
+      outcome.endsWith("Fallback")
+        ? items < events * 2
+        : size === undefined && items !== events
+    )
+      continue;
+    output[outcome] = { events, items };
+  }
+  return Object.keys(output).length ? output : undefined;
+}
 function safeDetails(value: unknown): InvocationSafeDetails | null {
   if (
     typeof value !== "string" ||
@@ -626,9 +675,11 @@ function safeDetails(value: unknown): InvocationSafeDetails | null {
       /* omit malformed detail */
     }
   }
+  const dimensionBatch = safeDimensionBatch(input.dimensionBatch);
   const output: InvocationSafeDetails = {
     version: 2,
     ...(errorDiagnostics ? { errorDiagnostics } : {}),
+    ...(dimensionBatch ? { dimensionBatch } : {}),
     phases,
     queries,
     coverage,

@@ -37,6 +37,34 @@ export type QueryHotspotSummary = {
   attemptsObserved: number;
   readonly filter?: SafeFilterShape;
 };
+/** Fixed outcome keys only: no site IDs, filter values or SQL text. */
+export const DIMENSION_BATCH_OUTCOMES = [
+  "merged2",
+  "merged3",
+  "merged4",
+  "budgetFallback",
+  "queryFallback",
+  "resultFallback",
+  "singleton",
+  "cancelled",
+  "unfiltered",
+  "eventScope",
+  "unprepared",
+  "pageLimit",
+  "diagnostics",
+  "audience",
+  "dbMismatch",
+] as const;
+export type DimensionBatchOutcome = (typeof DIMENSION_BATCH_OUTCOMES)[number];
+export type DimensionBatchSummary = Partial<
+  Record<
+    DimensionBatchOutcome,
+    {
+      events: number;
+      items: number;
+    }
+  >
+>;
 export type InvocationHotspots = {
   readonly queries: readonly QueryHotspotSummary[];
   readonly queryCount: number;
@@ -46,6 +74,7 @@ export type InvocationHotspots = {
   readonly d1ApiCallCount: number;
   readonly filter?: SafeFilterShape;
   readonly filterAmbiguous: boolean;
+  readonly dimensionBatch?: DimensionBatchSummary;
 };
 
 const collectors = new WeakMap<InvocationLogger, HotspotCollector>();
@@ -68,6 +97,7 @@ export class HotspotCollector {
   private apiCalls = 0;
   private filter?: SafeFilterShape;
   private filterAmbiguous = false;
+  private dimensionBatch?: DimensionBatchSummary;
 
   setFilter(shape: SafeFilterShape): void {
     if (this.filterAmbiguous) return;
@@ -146,6 +176,20 @@ export class HotspotCollector {
     this.apiWall += finite(ms) ?? 0;
   }
 
+  /** One decision per group or skipped item; independent of D1 SQL metrics. */
+  recordDimensionBatch(outcome: DimensionBatchOutcome, items = 1): void {
+    if (
+      !DIMENSION_BATCH_OUTCOMES.includes(outcome) ||
+      !Number.isInteger(items) ||
+      items < 1 ||
+      items > 4
+    )
+      return;
+    const summary = (this.dimensionBatch ??= {});
+    const counter = (summary[outcome] ??= { events: 0, items: 0 });
+    counter.events++;
+    counter.items += items;
+  }
   snapshot(): InvocationHotspots {
     return {
       queries: [...this.queries.values()].map((q) => ({
@@ -156,6 +200,9 @@ export class HotspotCollector {
       unknownCount: this.unknown,
       droppedQueries: this.dropped,
       filterAmbiguous: this.filterAmbiguous,
+      ...(this.dimensionBatch
+        ? { dimensionBatch: structuredClone(this.dimensionBatch) }
+        : {}),
       d1ApiWallSumMs: this.apiWall,
       d1ApiCallCount: this.apiCalls,
       ...(this.filter ? { filter: this.filter } : {}),

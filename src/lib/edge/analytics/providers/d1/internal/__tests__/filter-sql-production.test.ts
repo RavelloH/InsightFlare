@@ -82,8 +82,13 @@ import { queryBrowserRadarFromD1 } from "@/lib/edge/analytics/providers/d1/inter
 import { queryReferrerTrendFromD1 } from "@/lib/edge/analytics/providers/d1/internal/technology/share-trend";
 import { readSiteVisitorSessions } from "@/lib/edge/analytics/providers/d1/operations/site-journeys";
 import { readTeamSites } from "@/lib/edge/analytics/providers/d1/operations/team-sites";
+import { registerHotspotCollector } from "@/lib/edge/analytics-engine/hotspot-collector";
 import { currentQueryIdentity } from "@/lib/edge/analytics-engine/query-registry";
 import { expandCustomEventData } from "@/lib/edge/ingest/custom-event-json";
+import {
+  createInvocationLogger,
+  runWithInvocationLogger,
+} from "@/lib/edge/observability/logger";
 import { analyticsFilterRegistry, parseFilterDsl } from "@/lib/filter-contract";
 import { applyFiltersToUrl } from "@/lib/filter-contract/filter-codec";
 import { filterDocumentUsesAdvancedExpressions } from "@/lib/filter-contract/filter-types";
@@ -1424,6 +1429,11 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
   });
 
   it("shares compatible prepared dimension pages with independent ordering, cursors and limits", async () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const collector = registerHotspotCollector(logger);
     const db = sqlitePayloadFixture();
     try {
       db.exec(
@@ -1485,14 +1495,19 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       );
       const expected = await request("pathname", 1, undefined, cursor);
       trace.preparedSql.length = 0;
-      const result = await runWithDimensionPageBatch(() =>
-        Promise.all([
-          request("pathname", 1),
-          request("country", 2, undefined, null, "sessions", "asc"),
-          request("browser", 3, "chr", null, "visitors", "desc"),
-          request("pathname", 1, undefined, cursor),
-        ]),
+      const result = await runWithInvocationLogger(logger, () =>
+        runWithDimensionPageBatch(() =>
+          Promise.all([
+            request("pathname", 1),
+            request("country", 2, undefined, null, "sessions", "asc"),
+            request("browser", 3, "chr", null, "visitors", "desc"),
+            request("pathname", 1, undefined, cursor),
+          ]),
+        ),
       );
+      expect(collector.snapshot().dimensionBatch).toEqual({
+        merged4: { events: 1, items: 4 },
+      });
       expect(result).toEqual([...baseline, expected]);
       expect(trace.preparedSql).toHaveLength(1);
       expect(trace.preparedSql[0]).toContain(
@@ -1508,6 +1523,11 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
   });
 
   it("falls back before issuing a combined statement above the D1 binding budget", async () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const collector = registerHotspotCollector(logger);
     const calls: number[] = [];
     const env = {
       DB: {
@@ -1539,30 +1559,40 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       time: createQueryTime(100, 300, "UTC", 400),
       siteIds: ["site-a"],
     });
-    const results = await runWithDimensionPageBatch(() =>
-      Promise.all(
-        ["pathname", "country", "browser", "referrer_host"].map((dimension) =>
-          queryDimensionPageFromD1(
-            env,
-            "site-a",
-            WINDOW,
-            filters,
-            2,
-            dimension,
-            { search: "a" },
-            { primary: 1, secondary: 1, value: "A" },
-            undefined,
-            "api-v1",
-            {},
+    const results = await runWithInvocationLogger(logger, () =>
+      runWithDimensionPageBatch(() =>
+        Promise.all(
+          ["pathname", "country", "browser", "referrer_host"].map((dimension) =>
+            queryDimensionPageFromD1(
+              env,
+              "site-a",
+              WINDOW,
+              filters,
+              2,
+              dimension,
+              { search: "a" },
+              { primary: 1, secondary: 1, value: "A" },
+              undefined,
+              "api-v1",
+              {},
+            ),
           ),
         ),
       ),
     );
+    expect(collector.snapshot().dimensionBatch).toEqual({
+      budgetFallback: { events: 1, items: 4 },
+    });
     expect(results.every((page) => page.items.length === 0)).toBe(true);
     expect(calls).toEqual([94, 94, 94, 94]);
   });
 
   it("keeps incompatible batches isolated and retries failed shared SQL independently", async () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const collector = registerHotspotCollector(logger);
     const db = sqlitePayloadFixture();
     try {
       const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
@@ -1613,14 +1643,20 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       ]);
       trace.preparedSql.length = 0;
       expect(
-        await runWithDimensionPageBatch(() =>
-          Promise.all([
-            read("site-a", "pathname"),
-            read("site-a", "country"),
-            read("site-b", "pathname"),
-          ]),
+        await runWithInvocationLogger(logger, () =>
+          runWithDimensionPageBatch(() =>
+            Promise.all([
+              read("site-a", "pathname"),
+              read("site-a", "country"),
+              read("site-b", "pathname"),
+            ]),
+          ),
         ),
       ).toEqual(baseline);
+      expect(collector.snapshot().dimensionBatch).toEqual({
+        queryFallback: { events: 1, items: 2 },
+        singleton: { events: 1, items: 1 },
+      });
       expect(failures).toBe(1);
       expect(trace.preparedSql).toHaveLength(3);
       trace.preparedSql.length = 0;
@@ -1632,11 +1668,18 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       expect(trace.preparedSql).toHaveLength(2);
       const controller = new AbortController();
       trace.preparedSql.length = 0;
-      const cancelled = await runWithDimensionPageBatch(async () => {
-        const first = read("site-a", "pathname", controller.signal);
-        const second = read("site-a", "country");
-        controller.abort();
-        return Promise.allSettled([first, second]);
+      const cancelled = await runWithInvocationLogger(logger, () =>
+        runWithDimensionPageBatch(async () => {
+          const first = read("site-a", "pathname", controller.signal);
+          const second = read("site-a", "country");
+          controller.abort();
+          return Promise.allSettled([first, second]);
+        }),
+      );
+      expect(collector.snapshot().dimensionBatch).toEqual({
+        queryFallback: { events: 1, items: 2 },
+        singleton: { events: 2, items: 2 },
+        cancelled: { events: 1, items: 1 },
       });
       expect(cancelled[0]).toMatchObject({
         status: "rejected",
@@ -1653,6 +1696,92 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
+  it("distinguishes rejected shared results from intentionally independent pages", async () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const collector = registerHotspotCollector(logger);
+    const calls: string[] = [];
+    const env = {
+      DB: {
+        prepare(sql: string) {
+          calls.push(sql);
+          return {
+            bind() {
+              return {
+                all: async () => ({
+                  results: sql.includes("dimension_page_1")
+                    ? [{ slot: 99 }]
+                    : [],
+                }),
+              };
+            },
+          };
+        },
+      },
+      DAILY_SALT_SECRET: "test-secret",
+    } as never;
+    const doc = parseFilterDsl('geo.country eq "US"', analyticsFilterRegistry);
+    const prepared = (scope: "session" | "event") => {
+      const plan = createScopedFilterPlan("dimension", doc, scope)!;
+      return attachScopedFilterMetadata(doc, {
+        requestedScope: scope,
+        resolvedScope: plan.scope,
+        plan,
+        time: createQueryTime(100, 300, "UTC", 400),
+        siteIds: ["site-a"],
+      });
+    };
+    const filters = prepared("session");
+    const read = (
+      dimension: string,
+      filter = filters,
+      limit = 2,
+      audience: "api-v1" | "private-dashboard" = "api-v1",
+    ) =>
+      queryDimensionPageFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        filter,
+        limit,
+        dimension,
+        undefined,
+        null,
+        undefined,
+        audience,
+        {},
+      );
+    await runWithInvocationLogger(logger, () => read("pathname"));
+    expect(collector.snapshot().dimensionBatch).toBeUndefined();
+    calls.length = 0;
+    const result = await runWithInvocationLogger(logger, () =>
+      runWithDimensionPageBatch(() =>
+        Promise.all([
+          read("pathname"),
+          read("country"),
+          read("browser"),
+          read("pathname", EMPTY_FILTER_DOCUMENT),
+          read("country", prepared("event")),
+          read("pathname", filters, 51),
+          read("country", filters, 2, "private-dashboard"),
+        ]),
+      ),
+    );
+    expect(result.every((page) => page.items.length === 0)).toBe(true);
+    expect(
+      calls.filter((sql) => sql.includes("dimension_page_1")),
+    ).toHaveLength(1);
+    expect(calls).toHaveLength(8);
+    expect(collector.snapshot().dimensionBatch).toEqual({
+      resultFallback: { events: 1, items: 3 },
+      unfiltered: { events: 1, items: 1 },
+      eventScope: { events: 1, items: 1 },
+      pageLimit: { events: 1, items: 1 },
+      audience: { events: 1, items: 1 },
+    });
+  });
   it("Dimension and CrossDimension return only the scoped Page/browser cells", async () => {
     const { db, env } = runFixture();
     try {

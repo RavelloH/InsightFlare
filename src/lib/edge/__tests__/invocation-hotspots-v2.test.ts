@@ -401,6 +401,45 @@ describe("review R1 F1: real D1 proxy preserves each statement's Filter Shape", 
   });
 });
 
+describe("v2 dimension batch decisions", () => {
+  it("preserves batch outcomes without adding fictitious SQL costs", () => {
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const collector = new HotspotCollector();
+    const invocation = logger.snapshot();
+    const before = encodeInvocationMetricsPointV2(
+      invocation,
+      collector.snapshot(),
+    );
+    expect(JSON.parse(before.blobs[18]).dimensionBatch).toBeUndefined();
+    collector.recordDimensionBatch("merged2", 2);
+    collector.recordDimensionBatch("merged3", 3);
+    collector.recordDimensionBatch("merged4", 4);
+    collector.recordDimensionBatch("queryFallback", 3);
+    collector.recordDimensionBatch("singleton");
+    collector.recordDimensionBatch("unfiltered");
+    collector.recordDimensionBatch("pageLimit", 0);
+    collector.recordDimensionBatch("CANARY_private_filter" as never);
+    const snapshot = collector.snapshot();
+    collector.recordDimensionBatch("merged2", 2);
+    const after = encodeInvocationMetricsPointV2(invocation, snapshot);
+    expect(after.doubles.slice(0, 18)).toEqual(before.doubles.slice(0, 18));
+    expect(JSON.parse(after.blobs[18]).dimensionBatch).toEqual({
+      merged2: { events: 1, items: 2 },
+      merged3: { events: 1, items: 3 },
+      merged4: { events: 1, items: 4 },
+      queryFallback: { events: 1, items: 3 },
+      singleton: { events: 1, items: 1 },
+      unfiltered: { events: 1, items: 1 },
+    });
+    expect(JSON.stringify(after)).not.toContain("CANARY");
+    expect(
+      new TextEncoder().encode(after.blobs[18]).byteLength,
+    ).toBeLessThanOrEqual(4096);
+  });
+});
 describe("v2 bounded Hot/Scan Query ranking", () => {
   it("retains a different slowest and largest-scan ID", () => {
     const logger = createInvocationLogger({

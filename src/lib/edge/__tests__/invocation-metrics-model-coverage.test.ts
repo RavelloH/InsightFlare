@@ -383,6 +383,16 @@ describe("AE v2 reader normalization with real coverage and trust boundaries", (
   it("decodes bounded, whitelisted sample phases, queries, coverage and truncation", () => {
     const details = JSON.stringify({
       v: 2,
+      dimensionBatch: {
+        merged3: { events: 2, items: 6 },
+        budgetFallback: { events: 1, items: 4 },
+        singleton: { events: 2, items: 2 },
+        merged4: { events: 1, items: 3 },
+        queryFallback: { events: 1, items: 1 },
+        cancelled: { events: -1, items: -1 },
+        diagnostics: { events: 1, items: "1" },
+        CANARY_private_filter: { events: 1, items: 1 },
+      },
       phases: [
         { id: "route.handler", count: 1, wallMs: 12 },
         { id: "private.user.data", count: 1, wallMs: 100 },
@@ -447,6 +457,11 @@ describe("AE v2 reader normalization with real coverage and trust boundaries", (
     });
     expect(parsed.details).toMatchObject({
       version: 2,
+      dimensionBatch: {
+        merged3: { events: 2, items: 6 },
+        budgetFallback: { events: 1, items: 4 },
+        singleton: { events: 2, items: 2 },
+      },
       phases: [{ id: "route.handler", count: 1, wallMs: 12 }],
       coverage: {
         query: "complete",
@@ -455,6 +470,11 @@ describe("AE v2 reader normalization with real coverage and trust boundaries", (
         familyStatements: 0,
       },
       truncation: { queriesDropped: 1, phasesDropped: 2, signalsDropped: 0 },
+    });
+    expect(parsed.details?.dimensionBatch).toEqual({
+      merged3: { events: 2, items: 6 },
+      budgetFallback: { events: 1, items: 4 },
+      singleton: { events: 2, items: 2 },
     });
     expect(parsed.details?.queries).toHaveLength(2);
     expect(parsed.details?.queries[0]).toMatchObject({
