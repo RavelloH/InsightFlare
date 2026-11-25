@@ -1,9 +1,10 @@
 // @vitest-environment node
 import { DatabaseSync } from "node:sqlite";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { executeApiV1Query } from "@/lib/api-v1/analytics/query-application";
+import { startSiteOverviewStream } from "@/lib/dashboard/server/query";
 import { SYSTEM_FILTER_PRESETS } from "@/lib/dashboard/system-filter-presets";
 import {
   createSqliteD1Database,
@@ -89,6 +90,7 @@ import { readSiteVisitorSessions } from "@/lib/edge/analytics/providers/d1/opera
 import { readTeamSites } from "@/lib/edge/analytics/providers/d1/operations/team-sites";
 import { registerHotspotCollector } from "@/lib/edge/analytics-engine/hotspot-collector";
 import { currentQueryIdentity } from "@/lib/edge/analytics-engine/query-registry";
+import * as siteAccess from "@/lib/edge/auth/site-access";
 import { expandCustomEventData } from "@/lib/edge/ingest/custom-event-json";
 import { instrumentEnv } from "@/lib/edge/observability/bindings";
 import {
@@ -1518,6 +1520,122 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         unfiltered: { events: 1, items: 1 },
       });
     } finally {
+      db.close();
+    }
+  });
+
+  it("uses the existing dimension batch from the SSR overview planner, including geography isolation", async () => {
+    const db = sqlitePayloadFixture();
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const collector = registerHotspotCollector(logger);
+    const acl = vi.spyOn(siteAccess, "resolvePrivateSite").mockResolvedValue({
+      id: "site-a",
+      name: "A",
+      domain: "a.test",
+      canManage: true,
+    } as never);
+    try {
+      db.exec(
+        "UPDATE visits SET country='US',browser='Chrome' WHERE site_pk=1 AND visit_id='v-new'; UPDATE visits SET country='CA',browser='Firefox' WHERE site_pk=1 AND visit_id='v-docs'",
+      );
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const env = instrumentEnv(
+        {
+          DB: createSqliteD1Database(db, trace),
+          DAILY_SALT_SECRET: "test-secret",
+        } as never,
+        logger,
+      );
+      const window = {
+        preset: "custom" as const,
+        from: 100,
+        to: 300,
+        interval: "day" as const,
+        timeZone: "UTC",
+      };
+      const request = new Request("https://app.test/en/app/team/site");
+      const reads = await runWithInvocationLogger(logger, () =>
+        startSiteOverviewStream({
+          request,
+          env,
+          siteId: "site-a",
+          window,
+          search: "scope=session&filter[page.path]=/home",
+        }),
+      );
+      const entries = Object.entries(reads).filter(([key]) =>
+        /overview-(?:page-path|client-browser|geo-country)\?/.test(key),
+      );
+      expect(entries).toHaveLength(3);
+      const results = await Promise.all(
+        entries.map(async ([key, promise]) => {
+          const value = await promise;
+          expect(value).not.toBeNull();
+          const url = new URL(key, request.url);
+          const standalone = await executePrivateQuery({
+            env,
+            siteId: "site-a",
+            pathname: url.pathname.replace("/api/private/", ""),
+            url,
+            request: new Request(url),
+            dashboardMode: true,
+          });
+          expect(standalone.status).toBe(200);
+          const baseline = (await standalone.json()) as { data: unknown };
+          expect(value?.value).toMatchObject({ ok: true, data: baseline.data });
+          return value;
+        }),
+      );
+      expect(results).toHaveLength(3);
+      await Promise.all(Object.values(reads));
+      expect(collector.snapshot().dimensionBatch).toMatchObject({
+        merged3: { events: 1, items: 3 },
+      });
+      expect(
+        trace.preparedSql.filter((sql) => sql.includes("dimension_page_2")),
+      ).toHaveLength(1);
+      const geo = await runWithInvocationLogger(logger, () =>
+        startSiteOverviewStream({
+          request,
+          env,
+          siteId: "site-a",
+          window,
+          search: "scope=session&filter[geo.country]=US",
+        }),
+      );
+      const geoEntries = Object.entries(geo).filter(([key]) =>
+        /overview-(?:page-path|client-browser|geo-country)\?/.test(key),
+      );
+      for (const [key, deferred] of geoEntries) {
+        const result = await deferred;
+        expect(result).not.toBeNull();
+        const url = new URL(key, request.url);
+        const standalone = await executePrivateQuery({
+          env,
+          siteId: "site-a",
+          pathname: url.pathname.replace("/api/private/", ""),
+          url,
+          request: new Request(url),
+          dashboardMode: true,
+        });
+        expect(standalone.status).toBe(200);
+        expect(result?.value).toMatchObject({
+          ok: true,
+          data: ((await standalone.json()) as { data: unknown }).data,
+        });
+      }
+      await Promise.all(Object.values(geo));
+      await logger.emitWhenComplete();
+      expect(collector.snapshot().dimensionBatch).toMatchObject({
+        merged3: { events: 1, items: 3 },
+        merged2: { events: 1, items: 2 },
+        unfiltered: { events: 1, items: 1 },
+      });
+    } finally {
+      acl.mockRestore();
       db.close();
     }
   });

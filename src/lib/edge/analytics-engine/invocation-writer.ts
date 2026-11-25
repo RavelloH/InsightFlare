@@ -46,6 +46,7 @@ const SAFE_OPERATIONS = new Set([
   "dashboard.bootstrap",
   "dashboard.profile",
   "dashboard.team_snapshot",
+  "dashboard.ssr.analytics",
   "do.fetch.handler",
   "do.schema_ready",
   "do.maintenance",

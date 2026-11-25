@@ -51,7 +51,16 @@ import {
   toQueryString,
   withFilters,
 } from "@/lib/dashboard/client/data";
-import { fetchPrivateJson } from "@/lib/dashboard/client/request";
+import { startOverviewInitialReads } from "@/lib/dashboard/client/data/overview";
+import type {
+  PrivateReadTransport,
+  PrivateRequestParams,
+} from "@/lib/dashboard/client/data/types";
+import {
+  createDeferredPrivateReadTransport,
+  fetchPrivateJson,
+  privateReadIdentity,
+} from "@/lib/dashboard/client/request";
 import { withComparison } from "@/lib/dashboard/client/utils";
 import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
 import { isErrorEnvelope } from "@/lib/demo/realtime/envelope";
@@ -664,6 +673,153 @@ describe("Dashboard Client Data Processing Utilities", () => {
     afterAll(() => {
       globalThis.fetch = realFetch;
       process.off("unhandledRejection", suppressUnhandled);
+    });
+
+    it("consumes the exact streamed request once, including concurrent readers, and preserves subsequent network refresh", async () => {
+      const params = {
+        siteId: "site-stream",
+        from: 100,
+        to: 200,
+        timeZone: "UTC",
+        limit: 100,
+        sort: "views",
+      };
+      const path = "/api/private/overview-page-path";
+      const key = privateReadIdentity(path, params);
+      let finish!: (value: { value: { ok: boolean } }) => void;
+      const deferred = new Promise<{ value: { ok: boolean } }>((resolve) => {
+        finish = resolve;
+      });
+      const transport = createDeferredPrivateReadTransport({ [key]: deferred });
+      const network = vi.fn(async () => freshJsonResponse({ ok: false }));
+      globalThis.fetch = network as typeof fetch;
+      const a = fetchPrivateJson(path, params, { transport });
+      const b = fetchPrivateJson(path, { ...params }, { transport });
+      expect(network).not.toHaveBeenCalled();
+      finish({ value: { ok: true } });
+      await expect(Promise.all([a, b])).resolves.toEqual([
+        { ok: true },
+        { ok: true },
+      ]);
+      expect(network).not.toHaveBeenCalled();
+      await expect(
+        fetchPrivateJson(path, params, { transport }),
+      ).resolves.toEqual({ ok: false });
+      expect(network).toHaveBeenCalledTimes(1);
+    });
+
+    it("never consumes a stale or cancelled streamed result; different filters and cursors fall through", async () => {
+      const path = "/api/private/overview-page-path";
+      const params = {
+        siteId: "site-stream",
+        from: 100,
+        to: 200,
+        scope: "session",
+        "filter[page.path]": "/home",
+      };
+      const key = privateReadIdentity(path, params);
+      let finish!: (value: { value: { ok: boolean } }) => void;
+      const deferred = new Promise<{ value: { ok: boolean } }>((resolve) => {
+        finish = resolve;
+      });
+      const transport = createDeferredPrivateReadTransport({ [key]: deferred });
+      const network = vi.fn(async () => freshJsonResponse({ ok: false }));
+      globalThis.fetch = network as typeof fetch;
+      const controller = new AbortController();
+      const aborted = fetchPrivateJson(path, params, {
+        transport,
+        signal: controller.signal,
+      });
+      controller.abort();
+      await expect(aborted).rejects.toMatchObject({ name: "AbortError" });
+      await expect(
+        fetchPrivateJson(
+          path,
+          { ...params, "filter[page.path]": "/other" },
+          { transport },
+        ),
+      ).resolves.toEqual({ ok: false });
+      await expect(
+        fetchPrivateJson(path, { ...params, cursor: "next" }, { transport }),
+      ).resolves.toEqual({ ok: false });
+      finish({ value: { ok: true } });
+      await expect(
+        fetchPrivateJson(path, params, { transport }),
+      ).resolves.toEqual({ ok: true });
+      expect(network).toHaveBeenCalledTimes(2);
+      const failed = createDeferredPrivateReadTransport({
+        [key]: Promise.resolve(null),
+      });
+      await expect(
+        fetchPrivateJson(path, params, { transport: failed }),
+      ).resolves.toEqual({ ok: false });
+      expect(network).toHaveBeenCalledTimes(3);
+    });
+
+    it("plans only the visible overview reads and opens the existing batch scope for the three eligible dimensions", async () => {
+      const calls: {
+        path: string;
+        params?: PrivateRequestParams;
+        inBatch: boolean;
+      }[] = [];
+      let inBatch = false;
+      const transport: PrivateReadTransport = async <T>(
+        path: string,
+        params?: PrivateRequestParams,
+      ) => {
+        calls.push({ path, params, inBatch });
+        return {
+          ok: true,
+          data: {
+            items: [],
+            pagination: {
+              limit: 100,
+              returned: 0,
+              hasMore: false,
+              nextCursor: null,
+            },
+          },
+        } as T;
+      };
+      const batch = vi.fn(async (action: () => Promise<unknown>) => {
+        inBatch = true;
+        const result = action();
+        inBatch = false;
+        return result;
+      });
+      startOverviewInitialReads(
+        "site-stream",
+        mockWindow,
+        new URLSearchParams("scope=session&filter[page.path]=/home"),
+        transport,
+        batch,
+      );
+      expect(calls).toHaveLength(6);
+      expect(batch).toHaveBeenCalledOnce();
+      expect(
+        calls.filter((call) => call.inBatch).map((call) => call.path),
+      ).toEqual([
+        "/api/private/overview-page-path",
+        "/api/private/overview-client-browser",
+        "/api/private/overview-geo-country",
+      ]);
+      expect(
+        calls
+          .filter((call) => call.inBatch)
+          .every(
+            (call) =>
+              call.params?.limit === 100 &&
+              call.params?.sort === "views" &&
+              call.params?.direction === "desc",
+          ),
+      ).toBe(true);
+      expect(
+        calls.find((call) => call.path.endsWith("overview"))?.params,
+      ).toMatchObject({ includeChange: 1, includeDetail: 1 });
+      expect(
+        calls.find((call) => call.path.endsWith("overview-geo-points"))?.params
+          ?.limit,
+      ).toBe(5000);
     });
 
     function freshJsonResponse(body: unknown, status = 200): Response {

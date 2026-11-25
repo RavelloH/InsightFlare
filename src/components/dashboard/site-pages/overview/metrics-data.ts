@@ -107,7 +107,12 @@ export function useOverviewSummaryQuery({
   window: timeWindow,
   filters,
   comparisonQuery,
-}: Pick<OverviewDataSectionProps, "siteId" | "window" | "filters"> & {
+  transport,
+  queryEnabled = true,
+}: Pick<
+  OverviewDataSectionProps,
+  "siteId" | "window" | "filters" | "transport" | "queryEnabled"
+> & {
   comparisonQuery: DashboardComparisonQuery | null;
 }) {
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
@@ -140,11 +145,11 @@ export function useOverviewSummaryQuery({
       };
     }
 
-    return fetchTrend(siteId, trendWindow, trendFilters, { signal }).catch(
-      (error) =>
-        fallbackUnlessAborted(error, () =>
-          emptyTrendData(trendWindow.interval),
-        ),
+    return fetchTrend(siteId, trendWindow, trendFilters, {
+      signal,
+      ...(transport ? { transport } : {}),
+    }).catch((error) =>
+      fallbackUnlessAborted(error, () => emptyTrendData(trendWindow.interval)),
     );
   };
 
@@ -168,6 +173,7 @@ export function useOverviewSummaryQuery({
             includeChange: false,
             includeDetail: true,
             signal,
+            ...(transport ? { transport } : {}),
           }).catch((error) => fallbackUnlessAborted(error, emptyOverviewData)),
           fetchOverview(
             siteId,
@@ -177,6 +183,7 @@ export function useOverviewSummaryQuery({
               includeChange: false,
               includeDetail: true,
               signal,
+              ...(transport ? { transport } : {}),
             },
           ).catch((error) => fallbackUnlessAborted(error, emptyOverviewData)),
         ]);
@@ -209,6 +216,7 @@ export function useOverviewSummaryQuery({
         includeChange: true,
         includeDetail: true,
         signal,
+        ...(transport ? { transport } : {}),
       }).catch((error) => fallbackUnlessAborted(error, emptyOverviewData));
       const previousTo = Math.max(timeWindow.from - 1, 0);
       const previousFrom = Math.max(
@@ -226,8 +234,11 @@ export function useOverviewSummaryQuery({
               ok: current.ok,
               data: current.previousData,
             } as OverviewData)
-          : fetchOverview(siteId, previousWindow, filters, { signal }).catch(
-              (error) => fallbackUnlessAborted(error, emptyOverviewData),
+          : fetchOverview(siteId, previousWindow, filters, {
+              signal,
+              ...(transport ? { transport } : {}),
+            }).catch((error) =>
+              fallbackUnlessAborted(error, emptyOverviewData),
             ),
         current.detail
           ? Promise.resolve({
@@ -235,7 +246,10 @@ export function useOverviewSummaryQuery({
               interval: current.detail.interval,
               data: current.detail.data,
             } as TrendData)
-          : fetchTrend(siteId, timeWindow, filters, { signal }).catch((error) =>
+          : fetchTrend(siteId, timeWindow, filters, {
+              signal,
+              ...(transport ? { transport } : {}),
+            }).catch((error) =>
               fallbackUnlessAborted(error, () =>
                 emptyTrendData(timeWindow.interval),
               ),
@@ -254,7 +268,7 @@ export function useOverviewSummaryQuery({
         },
       };
     },
-    enabled: typeof window !== "undefined",
+    enabled: typeof window !== "undefined" && queryEnabled,
     placeholderData: keepPreviousData,
   });
 }

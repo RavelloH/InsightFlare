@@ -2,6 +2,8 @@ import { type MetricAreaPoint } from "@insightflare/product-ui/charts";
 
 import { type TrafficChannelId } from "@/lib/analytics/traffic-channel-rules";
 import { type OverviewTabRows } from "@/lib/dashboard/client/data/index";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
+import type { DeferredPrivateReads } from "@/lib/dashboard/client/request";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { OverviewTabData } from "@/lib/dashboard-api/client/edge";
 import { type FilterScope } from "@/lib/filter-contract/index";
@@ -16,6 +18,9 @@ export interface OverviewClientPageProps {
   siteDomain: string;
   pathname: string;
   showSourceLinkTab?: boolean;
+  deferredReads?: DeferredPrivateReads | null;
+  transport?: PrivateReadTransport;
+  queryEnabled?: boolean;
 }
 
 export type PageCardTab =
@@ -220,6 +225,8 @@ export interface OverviewPagesSectionProps extends OverviewClientPageProps {
 }
 
 export interface OverviewDataSectionProps {
+  transport?: PrivateReadTransport;
+  queryEnabled?: boolean;
   locale: Locale;
   messages: AppMessages;
   siteId: string;

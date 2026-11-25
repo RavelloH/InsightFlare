@@ -3,6 +3,7 @@ import { PageHeading } from "@insightflare/ui/page-heading";
 
 import { OverviewGeoPointsMapCard } from "@/components/dashboard/geo/overview-geo-points-map-card";
 import {
+  useDashboardQueryReady,
   useDashboardScopePreference,
   useDashboardTimeWindow,
 } from "@/components/dashboard/shell/dashboard-query-provider";
@@ -10,6 +11,7 @@ import {
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/dashboard/client/history";
+import { createDeferredPrivateReadTransport } from "@/lib/dashboard/client/request";
 import {
   dashboardFilterValue,
   serializeDashboardSearchParams,
@@ -34,7 +36,16 @@ export function OverviewClientPage({
   siteDomain,
   pathname,
   showSourceLinkTab,
+  deferredReads,
 }: OverviewClientPageProps) {
+  const queryEnabled = useDashboardQueryReady();
+  const transport = useMemo(
+    () =>
+      deferredReads
+        ? createDeferredPrivateReadTransport(deferredReads)
+        : undefined,
+    [deferredReads],
+  );
   const searchParams = useLiveSearchParams();
   const livePathname = usePathname() || pathname;
   const window = useDashboardTimeWindow();
@@ -104,6 +115,8 @@ export function OverviewClientPage({
         siteId={siteId}
         window={window}
         filters={resolvedRequestFilters}
+        transport={transport}
+        queryEnabled={queryEnabled}
       />
       <OverviewTrendSection
         locale={locale}
@@ -111,6 +124,8 @@ export function OverviewClientPage({
         siteId={siteId}
         window={window}
         filters={resolvedRequestFilters}
+        transport={transport}
+        queryEnabled={queryEnabled}
       />
       <OverviewPagesSection
         locale={locale}
@@ -119,6 +134,8 @@ export function OverviewClientPage({
         siteDomain={siteDomain}
         pathname={pathname}
         filters={resolvedRequestFilters}
+        transport={transport}
+        queryEnabled={queryEnabled}
         resolvedScope={resolvedScope ?? undefined}
         showSourceLinkTab={showSourceLinkTab}
       />
@@ -128,6 +145,8 @@ export function OverviewClientPage({
         siteId={siteId}
         window={window}
         filters={resolvedRequestFilters}
+        transport={transport}
+        queryEnabled={queryEnabled}
         resolvedScope={resolvedScope ?? undefined}
         selectedCountryCode={selectedGeoCountry}
         onCountrySelect={handleMapCountrySelect}

@@ -67,6 +67,7 @@ vi.mock("@/lib/dashboard/query-preferences", () => ({
 }));
 vi.mock("@/lib/dashboard/server/query", () => ({
   resolveTeamDashboardRequest: vi.fn(),
+  startSiteOverviewStream: vi.fn(),
 }));
 vi.mock("@/lib/edge/analytics/composition/ssr-query-runtime", () => ({
   createTeamDashboardQueryRuntime: vi.fn(() => ({
@@ -105,6 +106,7 @@ import {
   loadScheduledTasksInitialData,
   loadShareSite,
   loadSiteConfigSnapshot,
+  loadSiteOverviewStream,
   loadSiteSettingsInitialData,
   loadSiteSnippetSnapshot,
   loadSystemSettingsInitialData,
@@ -122,7 +124,10 @@ import {
   getDashboardTeamContext,
   readDashboardAdmin,
 } from "@/lib/dashboard/server";
-import { resolveTeamDashboardRequest } from "@/lib/dashboard/server/query";
+import {
+  resolveTeamDashboardRequest,
+  startSiteOverviewStream,
+} from "@/lib/dashboard/server/query";
 import {
   fetchPublicSite,
   normalizeNotificationPreferencesData,
@@ -869,6 +874,39 @@ describe("Dashboard route data loaders", () => {
         limit: 50,
       });
     });
+  });
+});
+
+describe("site overview stream setup", () => {
+  it("returns unresolved per-read promises without awaiting the slow read", async () => {
+    let resolve!: (value: { value: { ok: boolean } }) => void;
+    const deferred = new Promise<{ value: { ok: boolean } }>((done) => {
+      resolve = done;
+    });
+    vi.mocked(startSiteOverviewStream).mockResolvedValueOnce({
+      overview: deferred,
+    });
+    vi.mocked(getDashboardRuntime).mockResolvedValueOnce({
+      request: new Request("https://app.test/en/app/team/site"),
+      env: {} as never,
+      url: new URL("https://app.test/en/app/team/site"),
+    });
+    vi.mocked(getRequest).mockReturnValueOnce(
+      new Request("https://app.test/en/app/team/site"),
+    );
+    vi.mocked(resolveDashboardInitialWindow).mockReturnValueOnce({
+      preset: "custom",
+      from: 100,
+      to: 300,
+      timeZone: "UTC",
+      interval: "day",
+    });
+    const reads = await loadSiteOverviewStream({
+      data: { siteId: "site-a", search: "" },
+    });
+    expect(reads.overview).toBe(deferred);
+    resolve({ value: { ok: true } });
+    await expect(reads.overview).resolves.toEqual({ value: { ok: true } });
   });
 });
 

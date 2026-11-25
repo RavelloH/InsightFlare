@@ -1,8 +1,10 @@
 import type {
   FetchPrivateJsonOptions,
+  PrivateReadTransport,
   PrivateRequestParams,
 } from "@/lib/dashboard/client/data/types";
 import { toQueryString } from "@/lib/dashboard/client/utils";
+import type { ManagementJsonValue } from "@/lib/dashboard/management-data";
 import {
   analyticsFilterRegistry,
   filterDocumentHasSimpleEventFacts,
@@ -240,6 +242,62 @@ function queuePrivateOverviewRead<T>(
   });
 }
 
+/** The exact URL identity is shared by the SSR planner and existing query functions.
+ * No filter, sort, comparison, cursor or time field is omitted. */
+export function privateReadIdentity(
+  path: string,
+  params?: PrivateRequestParams,
+): string {
+  const query = new URLSearchParams(toQueryString(params));
+  query.sort();
+  return path + "?" + query.toString();
+}
+export type DeferredPrivateReads = Record<
+  string,
+  Promise<{ value: ManagementJsonValue } | null>
+>;
+const consumedPrivateReads = new WeakSet<object>();
+
+/** Reuse the streamed response inside the normal React Query queryFn. The
+ * query cache retains its existing normalized result/key, not a second cache.
+ * A cancelled observer cannot install data from a stale navigation. */
+export function createDeferredPrivateReadTransport(
+  reads: DeferredPrivateReads,
+): PrivateReadTransport {
+  return async <T>(
+    path: string,
+    params?: PrivateRequestParams,
+    options?: FetchPrivateJsonOptions,
+  ): Promise<T> => {
+    const signal = options?.signal;
+    if (signal?.aborted) throwAbortError();
+    const deferred = reads[privateReadIdentity(path, params)];
+    if (deferred && !consumedPrivateReads.has(deferred)) {
+      let abort: (() => void) | undefined;
+      try {
+        const result = await (signal
+          ? Promise.race([
+              deferred.catch(() => null),
+              new Promise<never>((_, reject) => {
+                abort = () => reject(abortError());
+                signal.addEventListener("abort", abort, { once: true });
+              }),
+            ])
+          : deferred.catch(() => null));
+        if (signal?.aborted) throwAbortError();
+        consumedPrivateReads.add(deferred);
+        if (result) return result.value as T;
+      } finally {
+        if (abort) signal?.removeEventListener("abort", abort);
+      }
+    }
+    return fetchPrivateJson<T>(path, params, {
+      ...options,
+      transport: undefined,
+    });
+  };
+}
+
 export async function fetchPrivateJson<T>(
   path: string,
   params?: PrivateRequestParams,
@@ -248,6 +306,7 @@ export async function fetchPrivateJson<T>(
   if (options?.signal?.aborted) {
     throwAbortError();
   }
+  if (options?.transport) return options.transport<T>(path, params, options);
   const publicSlug = publicSlugFromParams(params);
   const requestPath = publicSlug
     ? publicPathForPrivateRequest(path, publicSlug)

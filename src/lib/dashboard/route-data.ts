@@ -29,7 +29,10 @@ import {
   getTeamSiteContext,
   readDashboardAdmin,
 } from "@/lib/dashboard/server";
-import { resolveTeamDashboardRequest } from "@/lib/dashboard/server/query";
+import {
+  resolveTeamDashboardRequest,
+  startSiteOverviewStream,
+} from "@/lib/dashboard/server/query";
 import type { TeamDashboardSnapshot } from "@/lib/dashboard/team-dashboard-query";
 import { normalizeNotificationPreferencesData } from "@/lib/dashboard-api/client/edge";
 import { fetchPublicSite } from "@/lib/dashboard-api/client/edge";
@@ -99,6 +102,31 @@ function readInitialWindow(): Promise<TimeWindow> {
       : resolveDashboardInitialWindow(cookie);
   });
 }
+/** Server-only initial overview reads. The leaf loader awaits only the
+ * authorization/setup, never the analytics promises in this returned map. */
+export const loadSiteOverviewStream = createServerFn({ method: "GET" })
+  .validator((data: { siteId: string; search: string }) => {
+    if (
+      typeof data.siteId !== "string" ||
+      typeof data.search !== "string" ||
+      data.search.length > 8192
+    )
+      throw new Error("invalid_ssr_overview");
+    return data;
+  })
+  .handler(async ({ data }) => {
+    const [runtime, window] = await Promise.all([
+      getDashboardRuntime(),
+      readInitialWindow(),
+    ]);
+    return startSiteOverviewStream({
+      ...runtime,
+      siteId: data.siteId,
+      window,
+      search: data.search,
+    });
+  });
+
 /** Provides the SSR-safe initial query window to the dashboard shell. */
 export const loadDashboardInitialWindow = createServerFn({
   method: "GET",

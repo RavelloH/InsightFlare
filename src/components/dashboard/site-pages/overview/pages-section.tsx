@@ -122,6 +122,8 @@ export function OverviewPagesSection({
   pathname,
   filters,
   resolvedScope,
+  transport,
+  queryEnabled,
   cardDataOverride,
   comparisonEnabled = true,
   tableContentTransitionKey,
@@ -785,7 +787,12 @@ export function OverviewPagesSection({
                   requestedWindow,
                   tab,
                   requestedFilters,
-                  { ...options, resolvedScope: scope, batchOverview: true },
+                  {
+                    ...options,
+                    resolvedScope: scope,
+                    batchOverview: true,
+                    ...(transport ? { transport } : {}),
+                  },
                 ))
             )(siteId, window, filters, resolvedScope, {
               limit,
@@ -833,6 +840,7 @@ export function OverviewPagesSection({
       comparisonQuery,
       pageComparisonMetric,
       resolvedScope,
+      transport,
       siteId,
       window,
     ],
@@ -892,7 +900,12 @@ export function OverviewPagesSection({
                   requestedWindow,
                   tab,
                   requestedFilters,
-                  { ...options, resolvedScope: scope, batchOverview: true },
+                  {
+                    ...options,
+                    resolvedScope: scope,
+                    batchOverview: true,
+                    ...(transport ? { transport } : {}),
+                  },
                 ))
             )(siteId, window, filters, resolvedScope, {
               limit,
@@ -931,6 +944,7 @@ export function OverviewPagesSection({
       comparisonQuery,
       sourceComparisonMetric,
       resolvedScope,
+      transport,
       siteId,
       sourceCardDirectLabel,
       sourceCardFetchers,
@@ -992,7 +1006,12 @@ export function OverviewPagesSection({
                   requestedWindow,
                   tab,
                   requestedFilters,
-                  { ...options, resolvedScope: scope, batchOverview: true },
+                  {
+                    ...options,
+                    resolvedScope: scope,
+                    batchOverview: true,
+                    ...(transport ? { transport } : {}),
+                  },
                 ))
             )(siteId, window, filters, resolvedScope, {
               limit,
@@ -1028,6 +1047,7 @@ export function OverviewPagesSection({
       comparisonQuery,
       clientComparisonMetric,
       resolvedScope,
+      transport,
       siteId,
       window,
     ],
@@ -1086,7 +1106,12 @@ export function OverviewPagesSection({
                   requestedWindow,
                   tab,
                   requestedFilters,
-                  { ...options, resolvedScope: scope, batchOverview: true },
+                  {
+                    ...options,
+                    resolvedScope: scope,
+                    batchOverview: true,
+                    ...(transport ? { transport } : {}),
+                  },
                 ))
             )(siteId, window, filters, resolvedScope, {
               limit,
@@ -1122,6 +1147,7 @@ export function OverviewPagesSection({
       locale,
       messages,
       resolvedScope,
+      transport,
       siteId,
       timezoneReferenceTimestampMs,
       window,
@@ -1647,6 +1673,7 @@ export function OverviewPagesSection({
             <TabbedDataTableCard<PageCardTab, PageCardRow, PageCardSortKey>
               tabs={pageCardTableTabs}
               loader={pageCardLoader}
+              queryEnabled={queryEnabled}
               contentTransitionKey={tableContentTransitionKey}
               defaultSort={
                 comparisonQuery
@@ -1683,6 +1710,7 @@ export function OverviewPagesSection({
             <TabbedDataTableCard<SourceCardTab, SourceCardRow, PageCardSortKey>
               tabs={sourceCardTableTabs}
               loader={sourceCardLoader}
+              queryEnabled={queryEnabled}
               contentTransitionKey={tableContentTransitionKey}
               defaultSort={
                 comparisonQuery
@@ -1727,6 +1755,7 @@ export function OverviewPagesSection({
             >
               tabs={clientDimensionCardTableTabs}
               loader={clientDimensionCardLoader}
+              queryEnabled={queryEnabled}
               contentTransitionKey={tableContentTransitionKey}
               defaultSort={
                 comparisonQuery
@@ -1771,6 +1800,7 @@ export function OverviewPagesSection({
             >
               tabs={geoDimensionCardTableTabs}
               loader={geoDimensionCardLoader}
+              queryEnabled={queryEnabled}
               contentTransitionKey={tableContentTransitionKey}
               defaultSort={
                 comparisonQuery

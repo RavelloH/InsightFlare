@@ -99,6 +99,7 @@ function TabbedDataTableCardDataControllerImpl<
   renderLabel,
   loader,
   limit = 100,
+  queryEnabled = true,
   normalizeRows = defaultNormalizeRows,
   filterRows,
   value,
@@ -308,7 +309,8 @@ function TabbedDataTableCardDataControllerImpl<
         ? previousData
         : undefined;
     },
-    enabled: typeof window !== "undefined" && completedRows === null,
+    enabled:
+      typeof window !== "undefined" && queryEnabled && completedRows === null,
   });
   const {
     fetchNextPage,

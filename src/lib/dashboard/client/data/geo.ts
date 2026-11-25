@@ -18,7 +18,12 @@ import type {
   OverviewGeoPointsData,
   OverviewGeoTabData,
 } from "@/lib/dashboard-api/client/edge";
-import type { FilterDocument, FilterScope } from "@/lib/filter-contract";
+import {
+  attachFilterScopePreference,
+  type FilterDocument,
+  type FilterScope,
+  filterScopePreferenceFromDocument,
+} from "@/lib/filter-contract";
 function emptyGeoPointsUnlessAborted(error: unknown): OverviewGeoPointsData {
   if (error instanceof Error && error.name === "AbortError") throw error;
   return emptyOverviewGeoPoints();
@@ -41,6 +46,21 @@ function normalizeGeoDimensionLabel(
       .split("::")
       .map((segment) => segment.trim())
       .filter((segment) => segment.length > 0)[segmentIndex] || fallback
+  );
+}
+export function overviewGeoPointsFilters(
+  filters: FilterDocument,
+): FilterDocument {
+  return attachFilterScopePreference(
+    {
+      ...filters,
+      country: undefined,
+      geo: undefined,
+      geoContinent: undefined,
+      geoTimezone: undefined,
+      geoOrganization: undefined,
+    } as FilterDocument,
+    filterScopePreferenceFromDocument(filters) ?? "auto",
   );
 }
 export async function fetchOverviewGeoPoints(
@@ -73,7 +93,7 @@ export async function fetchOverviewGeoPoints(
         sortBy: options?.comparisonSortBy,
       },
     ),
-    { signal: options?.signal },
+    { signal: options?.signal, transport: options?.transport },
   )
     .then((payload) => ({
       ok: payload.ok,
@@ -180,7 +200,11 @@ export async function fetchOverviewGeoDimensionTabPage(
         sortBy: options?.comparisonSortBy,
       },
     ),
-    { signal: options?.signal, batchOverview: options?.batchOverview },
+    {
+      signal: options?.signal,
+      batchOverview: options?.batchOverview,
+      transport: options?.transport,
+    },
   ).catch(emptyGeoTabUnlessAborted);
   const rows = normalizePaginatedCollection<
     OverviewGeoTabData["data"]["items"][number]
