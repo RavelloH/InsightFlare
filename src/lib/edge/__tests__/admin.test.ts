@@ -2305,13 +2305,17 @@ describe("private admin edge handler", () => {
           domain: "docs.example.test",
         },
       ];
-      const { env } = createEnv([
+      const { env, prepare } = createEnv([
         statement({ first: userRow({ id: "user-1", system_role: "user" }) }),
-        statement({ first: { id: "team-1", ownerUserId: "owner-1" } }),
-        statement({ first: { role: "member" } }),
+        statement({
+          first: {
+            id: "team-1",
+            ownerUserId: "owner-1",
+            role: "member",
+            siteIdsJson: "[]",
+          },
+        }),
         statement({ all: rows }),
-        statement({ first: { id: "team-1", ownerUserId: "owner-1" } }),
-        statement({ first: { role: "member", siteIdsJson: "[]" } }),
       ]);
 
       const response = await dispatch(
@@ -2321,14 +2325,21 @@ describe("private admin edge handler", () => {
 
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ ok: true, data: rows });
+      expect(prepare).toHaveBeenCalledTimes(3);
     });
 
     it("denies site listing when the team is not readable", async () => {
       setSession(userSession);
       const { env } = createEnv([
         statement({ first: userRow({ id: "user-1", system_role: "user" }) }),
-        statement({ first: { id: "team-1", ownerUserId: "owner-1" } }),
-        statement({ first: null }),
+        statement({
+          first: {
+            id: "team-1",
+            ownerUserId: "owner-1",
+            role: null,
+            siteIdsJson: null,
+          },
+        }),
       ]);
 
       const response = await dispatch(
@@ -2341,6 +2352,46 @@ describe("private admin edge handler", () => {
         ok: false,
         error: { message: "Team access denied" },
       });
+    });
+
+    it("lists only allowed sites for a restricted member with a single team ACL query", async () => {
+      setSession(userSession);
+      const rows = [
+        {
+          id: "site-1",
+          teamId: "team-1",
+          name: "Docs",
+          domain: "docs.example.test",
+        },
+        {
+          id: "site-2",
+          teamId: "team-1",
+          name: "Other",
+          domain: "other.example.test",
+        },
+      ];
+      const { env, prepare } = createEnv([
+        statement({ first: userRow({ id: "user-1", system_role: "user" }) }),
+        statement({
+          first: {
+            id: "team-1",
+            ownerUserId: "owner-1",
+            role: "member",
+            siteIdsJson: '["site-1"]',
+          },
+        }),
+        statement({ all: rows }),
+      ]);
+      const response = await dispatch(
+        "/api/private/admin/sites?teamId=team-1",
+        env,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        ok: true,
+        data: [rows[0]],
+      });
+      expect(prepare).toHaveBeenCalledTimes(3);
     });
 
     it("creates sites and initializes script settings", async () => {
