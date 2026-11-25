@@ -1112,7 +1112,7 @@ export function DashboardShell({
                             </SidebarGroup>
                           </>
                         )}
-                        {helpMenu}
+                        {routeState.mode === "team" ? helpMenu : null}
                       </SidebarMenuStage>
                     </>
                   )}
