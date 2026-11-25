@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { SiteTrafficStackChart } from "@insightflare/product-ui/charts";
 import { TrafficPairBarChart } from "@insightflare/product-ui/charts";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   Card,
   CardContent,
@@ -8,6 +9,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@insightflare/ui/card";
+import { Skeleton } from "@insightflare/ui/skeleton";
+import { Spinner } from "@insightflare/ui/spinner";
 import {
   RiArrowDownLine,
   RiArrowRightSLine,
@@ -31,7 +34,13 @@ import {
   SITE_CARD_MAX_TREND_POINTS,
 } from "./model";
 
-function DeferredSiteChart({ children }: { children: ReactNode }) {
+function DeferredSiteChart({
+  children,
+  loadingLabel,
+}: {
+  children: ReactNode;
+  loadingLabel: string;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
 
@@ -56,8 +65,48 @@ function DeferredSiteChart({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <div ref={containerRef} className="h-[180px] w-full">
-      {ready ? children : null}
+    <div ref={containerRef} className="relative h-[180px] w-full">
+      {ready ? (
+        children
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
+          <Spinner className="size-5" aria-label={loadingLabel} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SiteMetricValue({
+  pending,
+  unavailable,
+  children,
+  loadingLabel,
+}: {
+  pending: boolean;
+  unavailable: boolean;
+  children: ReactNode;
+  loadingLabel: string;
+}) {
+  return (
+    <div className="h-4">
+      <AutoTransition
+        as="span"
+        initial={false}
+        duration={0.2}
+        transitionKey={
+          pending ? "loading" : unavailable ? "unavailable" : "ready"
+        }
+        className="inline-flex h-4 items-end gap-1.5 font-mono text-base leading-none"
+      >
+        {pending ? (
+          <Spinner className="size-4" aria-label={loadingLabel} />
+        ) : unavailable ? (
+          "—"
+        ) : (
+          children
+        )}
+      </AutoTransition>
     </div>
   );
 }
@@ -70,6 +119,8 @@ export function TeamManagementSitesPanel() {
     aggregateChartSites,
     copy,
     dashboardQuery,
+    dashboardMetricsPending,
+    dashboardMetricsUnavailable,
     dashboardSites,
     dashboardWindow,
     locale,
@@ -126,11 +177,15 @@ export function TeamManagementSitesPanel() {
               visitorsLabel={messages.common.visitors}
               messages={messages}
               axisDateFormat="regular"
-              loading={dashboardQuery.isFetching}
+              loading={dashboardMetricsPending || dashboardQuery.isFetching}
+              metricsPending={dashboardMetricsPending}
+              metricsUnavailable={dashboardMetricsUnavailable}
             />
           </div>
 
-          {!dashboardQuery.isPending && dashboardSites.length === 0 ? (
+          {!dashboardMetricsPending &&
+          !dashboardMetricsUnavailable &&
+          dashboardSites.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               {copy.sites.noSites}
             </p>
@@ -140,10 +195,16 @@ export function TeamManagementSitesPanel() {
 
       {siteDashboardCards.length > 0 ? (
         <div className="grid gap-4 lg:grid-cols-2">
+          {/* These are anonymous chart slots before the analytics result
+              determines the site order. Keep initialized charts at their
+              visual positions rather than moving them out of the viewport. */}
           {siteDashboardCards.map(
-            ({ site, overview, pagesPerSession, changeRates, trend }) => (
+            (
+              { site, overview, pagesPerSession, changeRates, trend },
+              index,
+            ) => (
               <Link
-                key={site.id}
+                key={index}
                 href={buildSitePath(locale, activeTeam.slug, site.slug)}
                 className="group block h-full cursor-pointer outline-none transition-transform hover:-translate-y-0.5 active:translate-y-0 focus-visible:ring-1 focus-visible:ring-ring/60"
                 aria-label={`${copy.sites.openAnalytics}: ${site.name}`}
@@ -153,18 +214,50 @@ export function TeamManagementSitesPanel() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex min-w-0 items-start gap-2.5">
                         <div className="min-w-0 space-y-1">
-                          <CardTitle className="flex items-center gap-2 truncate text-base">
-                            <SiteBrandIcon
-                              siteId={site.id}
-                              siteName={site.name}
-                              domain={site.domain}
-                              iconSrc={site.iconPath}
-                              size="md"
-                            />
-                            {site.name}
+                          <CardTitle className="flex h-6 items-center gap-2 truncate text-base">
+                            <AutoTransition
+                              initial={false}
+                              transitionKey={
+                                dashboardMetricsPending ? "loading" : site.id
+                              }
+                              duration={0.2}
+                              className="flex h-6 min-w-0 items-center gap-2"
+                            >
+                              {dashboardMetricsPending ? (
+                                <>
+                                  <Skeleton className="size-5 shrink-0" />
+                                  <Skeleton className="h-4 w-28 max-w-full" />
+                                </>
+                              ) : (
+                                <>
+                                  <SiteBrandIcon
+                                    key={site.id}
+                                    siteId={site.id}
+                                    siteName={site.name}
+                                    domain={site.domain}
+                                    iconSrc={site.iconPath}
+                                    size="md"
+                                  />
+                                  <span className="truncate">{site.name}</span>
+                                </>
+                              )}
+                            </AutoTransition>
                           </CardTitle>
-                          <CardDescription className="truncate font-mono text-xs">
-                            {site.domain}
+                          <CardDescription className="flex h-[1.21875rem] items-center truncate font-mono text-xs">
+                            <AutoTransition
+                              initial={false}
+                              transitionKey={
+                                dashboardMetricsPending ? "loading" : site.id
+                              }
+                              duration={0.2}
+                              className="flex h-full min-w-0 items-center"
+                            >
+                              {dashboardMetricsPending ? (
+                                <Skeleton className="h-3 w-36 max-w-full" />
+                              ) : (
+                                <span className="truncate">{site.domain}</span>
+                              )}
+                            </AutoTransition>
                           </CardDescription>
                         </div>
                       </div>
@@ -175,7 +268,7 @@ export function TeamManagementSitesPanel() {
                   </CardHeader>
 
                   <CardContent className="space-y-4">
-                    <DeferredSiteChart>
+                    <DeferredSiteChart loadingLabel={messages.common.loading}>
                       <TrafficPairBarChart
                         data={trend}
                         locale={locale}
@@ -185,7 +278,9 @@ export function TeamManagementSitesPanel() {
                         visitorsLabel={messages.common.visitors}
                         axisDateFormat="compact"
                         maxPoints={SITE_CARD_MAX_TREND_POINTS}
-                        loading={dashboardQuery.isFetching}
+                        loading={
+                          dashboardMetricsPending || dashboardQuery.isFetching
+                        }
                         range={dashboardWindow}
                       />
                     </DeferredSiteChart>
@@ -195,60 +290,84 @@ export function TeamManagementSitesPanel() {
                         <p className="text-muted-foreground">
                           {messages.common.views}
                         </p>
-                        <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                        <SiteMetricValue
+                          pending={dashboardMetricsPending}
+                          unavailable={dashboardMetricsUnavailable}
+                          loadingLabel={messages.common.loading}
+                        >
                           {numberFormat(locale, overview.views)}
                           <ChangeRateInline value={changeRates.views} />
-                        </p>
+                        </SiteMetricValue>
                       </div>
                       <div className="space-y-1">
                         <p className="text-muted-foreground">
                           {messages.common.visitors}
                         </p>
-                        <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                        <SiteMetricValue
+                          pending={dashboardMetricsPending}
+                          unavailable={dashboardMetricsUnavailable}
+                          loadingLabel={messages.common.loading}
+                        >
                           {numberFormat(locale, overview.visitors)}
                           <ChangeRateInline value={changeRates.visitors} />
-                        </p>
+                        </SiteMetricValue>
                       </div>
                       <div className="space-y-1">
                         <p className="text-muted-foreground">
                           {messages.common.sessions}
                         </p>
-                        <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                        <SiteMetricValue
+                          pending={dashboardMetricsPending}
+                          unavailable={dashboardMetricsUnavailable}
+                          loadingLabel={messages.common.loading}
+                        >
                           {numberFormat(locale, overview.sessions)}
                           <ChangeRateInline value={changeRates.sessions} />
-                        </p>
+                        </SiteMetricValue>
                       </div>
                       <div className="space-y-1">
                         <p className="text-muted-foreground">
                           {messages.common.bounceRate}
                         </p>
-                        <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                        <SiteMetricValue
+                          pending={dashboardMetricsPending}
+                          unavailable={dashboardMetricsUnavailable}
+                          loadingLabel={messages.common.loading}
+                        >
                           {percentFormat(locale, overview.bounceRate)}
                           <ChangeRateInline
                             value={changeRates.bounceRate}
                             lowerIsBetter
                           />
-                        </p>
+                        </SiteMetricValue>
                       </div>
                       <div className="space-y-1">
                         <p className="text-muted-foreground">
                           {copy.sites.pagesPerSession}
                         </p>
-                        <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                        <SiteMetricValue
+                          pending={dashboardMetricsPending}
+                          unavailable={dashboardMetricsUnavailable}
+                          loadingLabel={messages.common.loading}
+                        >
                           {pagesPerSessionFormatter.format(pagesPerSession)}
                           <ChangeRateInline
                             value={changeRates.pagesPerSession}
                           />
-                        </p>
+                        </SiteMetricValue>
                       </div>
                       <div className="space-y-1">
                         <p className="text-muted-foreground">
                           {messages.common.avgDuration}
                         </p>
-                        <p className="inline-flex items-end gap-1.5 font-mono text-base leading-none">
+                        <SiteMetricValue
+                          pending={dashboardMetricsPending}
+                          unavailable={dashboardMetricsUnavailable}
+                          loadingLabel={messages.common.loading}
+                        >
                           {durationFormat(locale, overview.avgDurationMs)}
                           <ChangeRateInline value={changeRates.avgDurationMs} />
-                        </p>
+                        </SiteMetricValue>
                       </div>
                     </div>
                   </CardContent>

@@ -164,11 +164,11 @@ export function ScheduledRunRowSkeleton({ index }: { index: number }) {
     "w-32",
     "w-16",
     "w-20",
-    "w-20",
-    "w-20",
+    "w-14",
     "w-24",
-    "w-16",
-    "w-20",
+    "w-8",
+    "w-10",
+    "w-4",
   ];
   return (
     <>
@@ -177,10 +177,17 @@ export function ScheduledRunRowSkeleton({ index }: { index: number }) {
           key={`${index}-${cellIndex}`}
           className={cn(
             cellIndex === 0 && "pl-4",
+            [5, 7, 8, 9].includes(cellIndex) && "text-right",
             cellIndex === widths.length - 1 && "pr-4",
           )}
         >
-          <Skeleton className={cn("h-4", width)} />
+          <Skeleton
+            className={cn(
+              "h-4",
+              width,
+              [5, 7, 8, 9].includes(cellIndex) && "ml-auto",
+            )}
+          />
         </TableCell>
       ))}
     </>

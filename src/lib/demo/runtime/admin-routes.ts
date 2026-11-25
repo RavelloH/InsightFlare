@@ -522,10 +522,13 @@ export function handleDemoAdminRoutes(
       teamId || getDemoTeams()[0].id,
       locale,
     );
+    const ruleId = String(params.ruleId ?? "").trim();
     return {
       ok: true,
       data: {
-        messages,
+        messages: ruleId
+          ? messages.filter((message) => message.ruleId === ruleId)
+          : messages,
         unreadAttentionCount: messages.filter(
           (message) => message.requiresAttention && message.readAt === null,
         ).length,

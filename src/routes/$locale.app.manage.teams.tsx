@@ -1,12 +1,24 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { AdminTeamsManagementClient } from "@/components/dashboard/admin/admin-teams-management-client";
+import {
+  AdminTeamsManagementClient,
+  adminTeamsQueryOptions,
+} from "@/components/dashboard/admin/admin-teams-management-client";
+import { getBrowserQueryClient } from "@/components/query-client-provider";
 import { loadAdminTeamsInitialData } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 export const Route = createFileRoute("/$locale/app/manage/teams")({
-  beforeLoad: async ({ context }) => {
+  beforeLoad: ({ context }) => {
     if (context.dashboardRoot?.user.systemRole !== "admin") throw notFound();
-    return { adminTeamsInitialData: await loadAdminTeamsInitialData() };
+  },
+  loader: ({ context }) => {
+    if (!context.dashboardRoot) throw notFound();
+    if (typeof window === "undefined")
+      return { deferred: loadAdminTeamsInitialData().catch(() => null) };
+    void getBrowserQueryClient().prefetchQuery(
+      adminTeamsQueryOptions(context.dashboardRoot.user.id, null, true),
+    );
+    return { deferred: null };
   },
   head: ({ match }) => ({
     meta: [
@@ -21,12 +33,16 @@ export const Route = createFileRoute("/$locale/app/manage/teams")({
   component: Page,
 });
 function Page() {
-  const { locale, messages, adminTeamsInitialData } = Route.useRouteContext();
+  const { locale, messages, dashboardRoot } = Route.useRouteContext();
+  const { deferred } = Route.useLoaderData();
+  if (!dashboardRoot) throw notFound();
   return (
     <AdminTeamsManagementClient
+      key={dashboardRoot.user.id}
       locale={locale}
       messages={messages}
-      initialData={adminTeamsInitialData}
+      userId={dashboardRoot.user.id}
+      deferredData={deferred}
     />
   );
 }

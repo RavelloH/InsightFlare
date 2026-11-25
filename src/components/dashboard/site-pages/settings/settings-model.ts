@@ -41,6 +41,15 @@ export interface SiteSettingsClientPageProps {
     "id" | "name" | "domain" | "publicEnabled" | "publicSlug"
   >;
   initialData?: SiteSettingsInitialData | null;
+  userId?: string;
+  deferredConfig?: Promise<Pick<
+    SiteSettingsInitialData,
+    "config" | "fetchedAt"
+  > | null> | null;
+  deferredSnippet?: Promise<Pick<
+    SiteSettingsInitialData,
+    "scriptSnippet" | "fetchedAt"
+  > | null> | null;
 }
 function safeSlug(value: string): string {
   return value

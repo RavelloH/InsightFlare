@@ -39,7 +39,7 @@ import {
   formatDateSpan,
   toDateRange,
 } from "@/components/dashboard/shell/dashboard-header-controls/range";
-import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
+import { useDashboardTimeWindow } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import { writeDashboardQueryPreferences } from "@/lib/dashboard/query-preferences";
 import {
   normalizeCustomDateRange,
@@ -210,7 +210,7 @@ export function GlobalPerceptionSearch({
   const navigationController = useRef<AbortController | null>(null);
   const id = useId();
   useSyncExternalStore(subscribePerception, getPerceptionVersion, () => "0:0");
-  const { window: dashboardWindow } = useDashboardQuery();
+  const dashboardWindow = useDashboardTimeWindow();
   const range = override ?? dashboardWindow;
   const auth = getPerceptionAuthorization();
   const activeSite = auth?.activeSiteId;

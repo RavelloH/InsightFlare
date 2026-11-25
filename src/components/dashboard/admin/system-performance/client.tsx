@@ -14,7 +14,7 @@ import { Spinner } from "@insightflare/ui/spinner";
 import { RiRefreshLine } from "@remixicon/react";
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 
-import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useDashboardTimeWindow } from "@/components/dashboard/shell/dashboard-query-provider";
 import { useLiveSearchParams } from "@/lib/dashboard/client/history";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -66,7 +66,7 @@ export function SystemPerformanceClient({
 }) {
   const copy = messages.systemPerformance;
   const queryClient = useQueryClient();
-  const { window: timeWindow } = useDashboardQuery();
+  const timeWindow = useDashboardTimeWindow();
   const searchParams = useLiveSearchParams();
   const state = readPerformanceState(searchParams);
   const { tab } = state;

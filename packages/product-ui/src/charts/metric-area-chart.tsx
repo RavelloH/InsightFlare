@@ -112,6 +112,13 @@ export const MetricAreaChart = memo(function MetricAreaChart({
     () => createChartTooltipDateFormatter(locale, interval, timeZone),
     [locale, interval, timeZone],
   );
+  const chartConfig = useMemo(
+    () => ({
+      value: { label, color },
+      comparisonValue: { label: comparisonLabel, color: comparisonColor },
+    }),
+    [label, color, comparisonLabel, comparisonColor],
+  );
   const chartData = useMemo(() => {
     const normalized = points.map((point, index) => ({
       index,
@@ -166,13 +173,7 @@ export const MetricAreaChart = memo(function MetricAreaChart({
       <div className="relative h-full w-full">
         <ChartContainer
           className="h-full w-full aspect-auto"
-          config={{
-            value: { label, color },
-            comparisonValue: {
-              label: comparisonLabel,
-              color: comparisonColor,
-            },
-          }}
+          config={chartConfig}
         >
           <AreaChart
             data={chartDataWithComparison}

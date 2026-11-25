@@ -48,6 +48,10 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import {
+  managementQueryOptions,
+  type TeamNotificationsInitialData,
+} from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import {
   type MemberData,
@@ -80,38 +84,15 @@ import {
   type TeamNotificationsClientProps,
 } from "./model";
 import { RuleFormFields } from "./rule-form";
-export function TeamNotificationsClient({
-  locale,
-  messages,
-  teamId,
-  teamSlug,
-  currentUserId,
-  initialData = null,
-}: TeamNotificationsClientProps) {
-  const copy = messages.teamManagement.notifications;
-  const queryClient = useQueryClient();
-  const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [previewingId, setPreviewingId] = useState("");
-  const [runningId, setRunningId] = useState("");
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [testDialogOpen, setTestDialogOpen] = useState(false);
-  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
-  const [previewRule, setPreviewRule] = useState<NotificationRuleData | null>(
-    null,
-  );
-  const [previewResult, setPreviewResult] =
-    useState<NotificationRuleEvaluationData | null>(null);
-  const [form, setForm] = useState<RuleFormState>(EMPTY_FORM);
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const rulesQueryKey = [
-    "dashboard",
-    "team-notification-rules",
-    teamId,
-  ] as const;
-  const rulesQuery = useQuery({
-    queryKey: rulesQueryKey,
-    queryFn: async ({ signal }) => {
+export function teamNotificationsQueryOptions(
+  userId: string,
+  teamId: string,
+  deferred?: Promise<TeamNotificationsInitialData | null> | null,
+  retainInFlight = false,
+) {
+  return managementQueryOptions(
+    ["dashboard", "team-notification-rules", teamId, userId],
+    async (signal) => {
       const [rules, sites, members, emailConfig] = await Promise.all([
         requestAdminService<NotificationRuleData[]>("notification-rules", {
           params: { teamId },
@@ -134,13 +115,58 @@ export function TeamNotificationsClient({
         rules,
         sites,
         members,
-        emailConfigured:
+        emailConfigured: Boolean(
           emailConfig?.enabled &&
           emailConfig.provider === "resend" &&
-          Boolean(emailConfig.fromEmail) &&
+          emailConfig.fromEmail &&
           emailConfig.resend.configured,
+        ),
       };
     },
+    (snapshot: TeamNotificationsInitialData) => ({
+      rules: snapshot.rules as NotificationRuleData[],
+      sites: snapshot.sites,
+      members: snapshot.members,
+      emailConfigured: snapshot.emailConfigured,
+    }),
+    deferred,
+    retainInFlight,
+  );
+}
+
+export function TeamNotificationsClient({
+  locale,
+  messages,
+  teamId,
+  teamSlug,
+  currentUserId,
+  initialData = null,
+  deferredData,
+}: TeamNotificationsClientProps) {
+  const copy = messages.teamManagement.notifications;
+  const queryClient = useQueryClient();
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [previewingId, setPreviewingId] = useState("");
+  const [runningId, setRunningId] = useState("");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [testDialogOpen, setTestDialogOpen] = useState(false);
+  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
+  const [previewRule, setPreviewRule] = useState<NotificationRuleData | null>(
+    null,
+  );
+  const [previewResult, setPreviewResult] =
+    useState<NotificationRuleEvaluationData | null>(null);
+  const [form, setForm] = useState<RuleFormState>(EMPTY_FORM);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const rulesQueryKey = [
+    "dashboard",
+    "team-notification-rules",
+    teamId,
+    currentUserId,
+  ] as const;
+  const rulesQuery = useQuery({
+    ...teamNotificationsQueryOptions(currentUserId, teamId, deferredData),
     initialData: initialData
       ? {
           rules: initialData.rules,
@@ -170,7 +196,7 @@ export function TeamNotificationsClient({
     () => rules.filter((rule) => rule.enabled).length,
     [rules],
   );
-  const canCreateRule = sites.length > 0;
+  const canCreateRule = !loading && !rulesQuery.isError && sites.length > 0;
 
   useEffect(() => {
     if (rulesQuery.isError) toast.error(copy.loadRulesFailed);
@@ -346,6 +372,7 @@ export function TeamNotificationsClient({
               type="button"
               variant="outline"
               onClick={() => setTestDialogOpen(true)}
+              disabled={loading || rulesQuery.isError}
             >
               <RiMailSendLine data-icon="inline-start" />
               <span>{copy.sendTestNotification}</span>
@@ -370,16 +397,50 @@ export function TeamNotificationsClient({
               {copy.rulesTitle}
             </CardTitle>
             <CardDescription>
-              {formatI18nTemplate(copy.enabledCount, {
-                count: enabledCount,
-              })}
+              <AutoTransition
+                as="span"
+                initial={false}
+                duration={0.2}
+                transitionKey={
+                  loading
+                    ? "loading"
+                    : rulesQuery.isError && !rulesQuery.data
+                      ? "error"
+                      : "ready"
+                }
+                className="inline-flex min-h-4 items-center gap-1"
+              >
+                {loading ? (
+                  <>
+                    <span>{String(copy.enabledCount).split("{count}")[0]}</span>
+                    <Spinner
+                      className="size-4"
+                      aria-label={messages.common.loading}
+                    />
+                    <span>{String(copy.enabledCount).split("{count}")[1]}</span>
+                  </>
+                ) : (
+                  formatI18nTemplate(copy.enabledCount, {
+                    count:
+                      rulesQuery.isError && !rulesQuery.data
+                        ? "—"
+                        : enabledCount,
+                  })
+                )}
+              </AutoTransition>
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <AutoResizer initial>
+            <AutoResizer initial={false}>
               <AutoTransition
                 transitionKey={
-                  loading ? "loading" : rules.length === 0 ? "empty" : "data"
+                  loading
+                    ? "loading"
+                    : rulesQuery.isError && !rulesQuery.data
+                      ? "error"
+                      : rules.length === 0
+                        ? "empty"
+                        : "data"
                 }
                 initial={false}
                 duration={0.18}
@@ -393,6 +454,10 @@ export function TeamNotificationsClient({
                   >
                     <Spinner className="mr-2 size-4" />
                     {copy.loadingRules}
+                  </div>
+                ) : rulesQuery.isError && !rulesQuery.data ? (
+                  <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+                    {copy.loadRulesFailed}
                   </div>
                 ) : rules.length === 0 ? (
                   <div

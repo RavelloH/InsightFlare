@@ -64,6 +64,8 @@ export interface SiteTrafficStackChartProps {
   messages: AppMessages;
   axisDateFormat?: ChartAxisDateFormat;
   loading?: boolean;
+  metricsPending?: boolean;
+  metricsUnavailable?: boolean;
   className?: string;
 }
 interface SiteTrafficSeriesItem {
@@ -713,6 +715,8 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
   messages,
   axisDateFormat = "regular",
   loading = false,
+  metricsPending = false,
+  metricsUnavailable = false,
   className,
 }: SiteTrafficStackChartProps) {
   const cachedSiteOrderRef = useRef<string[] | null>(null);
@@ -966,17 +970,35 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
                 </div>
                 <AutoTransition>
                   <div
-                    className="flex shrink-0 items-baseline gap-1.5 text-xs"
-                    key={`${views}/${visitors}`}
+                    className="flex h-4 shrink-0 items-baseline gap-1.5 text-xs"
+                    key={
+                      metricsPending
+                        ? "loading"
+                        : metricsUnavailable
+                          ? "unavailable"
+                          : `${views}/${visitors}`
+                    }
                   >
                     <span className="font-mono tabular-nums text-foreground font-semibold">
-                      {numberFormat(locale, views)}
+                      {metricsPending ? (
+                        <Spinner className="size-3" />
+                      ) : metricsUnavailable ? (
+                        "—"
+                      ) : (
+                        numberFormat(locale, views)
+                      )}
                     </span>
                     <span className="text-[10px] text-muted-foreground font-light">
                       /
                     </span>
                     <span className="font-mono tabular-nums text-muted-foreground">
-                      {visitors === null ? "—" : numberFormat(locale, visitors)}
+                      {metricsPending ? (
+                        <Spinner className="size-3" />
+                      ) : metricsUnavailable || visitors === null ? (
+                        "—"
+                      ) : (
+                        numberFormat(locale, visitors)
+                      )}
                     </span>
                   </div>
                 </AutoTransition>

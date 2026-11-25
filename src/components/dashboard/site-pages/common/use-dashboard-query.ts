@@ -1,1 +1,4 @@
-export { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
+export {
+  useDashboardQuery,
+  useDashboardTimeWindow,
+} from "@/components/dashboard/shell/dashboard-query-provider";

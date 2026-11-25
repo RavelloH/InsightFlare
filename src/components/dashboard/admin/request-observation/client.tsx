@@ -30,7 +30,7 @@ import {
   type AsyncDimensionBreakdownTab,
 } from "@/components/dashboard/common/async-dimension-breakdown-card";
 import { GeoPointsMapIsland } from "@/components/dashboard/geo/geo-points-map-island";
-import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useDashboardTimeWindow } from "@/components/dashboard/shell/dashboard-query-provider";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import { formatI18nTemplate } from "@/lib/i18n/template";
 import Link from "@/lib/router";
@@ -77,7 +77,7 @@ export function RequestObservationClient({
 }: RequestObservationClientProps) {
   const copy = messages.requestObservation;
   const queryClient = useQueryClient();
-  const { window: timeWindow } = useDashboardQuery();
+  const timeWindow = useDashboardTimeWindow();
   const searchParams = useSearchParams();
   const activeTab = normalizeRequestObservationTab(
     searchParams.get("requestTab"),

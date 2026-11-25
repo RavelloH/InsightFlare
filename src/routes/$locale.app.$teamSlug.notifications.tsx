@@ -7,22 +7,31 @@ import {
 import { RiNotification3Line } from "@remixicon/react";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { TeamNotificationsClient } from "@/components/dashboard/admin/team-notifications/client";
+import {
+  TeamNotificationsClient,
+  teamNotificationsQueryOptions,
+} from "@/components/dashboard/admin/team-notifications/client";
+import { getBrowserQueryClient } from "@/components/query-client-provider";
 import { canManageTeam } from "@/lib/dashboard/permissions";
 import { loadTeamNotificationsInitialData } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 
 export const Route = createFileRoute("/$locale/app/$teamSlug/notifications")({
-  beforeLoad: async ({ context }) => {
+  loader: ({ context }) => {
     const c = context.teamContext;
-    if (!canManageTeam(c.activeTeam.membershipRole, c.user.systemRole)) {
-      return { teamNotificationsInitialData: null };
-    }
-    return {
-      teamNotificationsInitialData: await loadTeamNotificationsInitialData({
-        data: { teamId: c.activeTeam.id },
-      }),
-    };
+    if (!canManageTeam(c.activeTeam.membershipRole, c.user.systemRole))
+      return { deferred: null };
+    const teamId = c.activeTeam.id;
+    if (typeof window === "undefined")
+      return {
+        deferred: loadTeamNotificationsInitialData({ data: { teamId } }).catch(
+          () => null,
+        ),
+      };
+    void getBrowserQueryClient().prefetchQuery(
+      teamNotificationsQueryOptions(c.user.id, teamId, null, true),
+    );
+    return { deferred: null };
   },
   head: ({ match }) => ({
     meta: [
@@ -37,12 +46,8 @@ export const Route = createFileRoute("/$locale/app/$teamSlug/notifications")({
   component: Page,
 });
 function Page() {
-  const {
-    locale,
-    messages,
-    teamContext: c,
-    teamNotificationsInitialData,
-  } = Route.useRouteContext();
+  const { locale, messages, teamContext: c } = Route.useRouteContext();
+  const { deferred } = Route.useLoaderData();
   if (!canManageTeam(c.activeTeam.membershipRole, c.user.systemRole)) {
     return (
       <Card>
@@ -62,12 +67,13 @@ function Page() {
   }
   return (
     <TeamNotificationsClient
+      key={JSON.stringify([c.user.id, c.activeTeam.id])}
       locale={locale}
       messages={messages}
       teamId={c.activeTeam.id}
       teamSlug={c.activeTeam.slug}
       currentUserId={c.user.id}
-      initialData={teamNotificationsInitialData}
+      deferredData={deferred}
     />
   );
 }

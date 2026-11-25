@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { Spinner } from "@insightflare/ui/spinner";
 
 import { cn } from "../utils/cn";
 import { numberFormat } from "./chart-format";
@@ -24,6 +25,7 @@ export interface SitePulseHeatmapRow {
   values: readonly number[];
   /** Marks the row, e.g. a starred site. */
   highlighted?: boolean;
+  metricsStatus?: "pending" | "unavailable";
 }
 
 export interface SitePulseHeatmapLabels {
@@ -46,6 +48,7 @@ export interface SitePulseHeatmapProps {
   /** Wider ranges are merged into at most this many columns. */
   maxColumns?: number;
   loading?: boolean;
+  loadingLabel?: string;
   emptyLabel?: string;
   className?: string;
 }
@@ -215,18 +218,25 @@ const PulseGridRow = memo(function PulseGridRow({
             key={cell.timestamp}
             role="gridcell"
             aria-label={cell.label}
+            aria-busy={row.metricsStatus === "pending" || undefined}
+            data-slot={row.metricsStatus === "pending" ? "skeleton" : undefined}
             className={cn(
-              "h-full shrink-0 cursor-pointer",
-              activeColumn === column && "outline outline-1 outline-foreground",
+              "h-full shrink-0 transition-colors duration-300 motion-reduce:transition-none",
+              row.metricsStatus === "pending" && "skeleton-loading",
+              !row.metricsStatus && "cursor-pointer",
+              !row.metricsStatus &&
+                activeColumn === column &&
+                "outline outline-1 outline-foreground",
             )}
             style={{
-              background: cell.background,
+              backgroundColor: cell.background,
               ...(cellWidth ? { width: cellWidth } : {}),
             }}
             onMouseEnter={(event) =>
+              !row.metricsStatus &&
               onHover(rowIndex, column, event.currentTarget)
             }
-            onClick={() => onSelect?.(row.id)}
+            onClick={() => !row.metricsStatus && onSelect?.(row.id)}
           />
         ))}
       </div>
@@ -244,6 +254,7 @@ export const SitePulseHeatmap = memo(function SitePulseHeatmap({
   onRowSelect,
   maxColumns = 60,
   loading = false,
+  loadingLabel,
   emptyLabel,
   className,
 }: SitePulseHeatmapProps) {
@@ -294,25 +305,39 @@ export const SitePulseHeatmap = memo(function SitePulseHeatmap({
       tooltipFormatter.format(new Date(timestamp)),
     );
     return merged.rows.map((row, rowIndex) =>
-      row.values.map((value, column) => ({
-        timestamp: merged.starts[column]!,
-        label: `${row.label} ${dateLabels[column]}: ${numberFormat(locale, value)}`,
-        background: cellColor(
-          pulseLevel(
-            value,
-            (usual[rowIndex] ?? 0) *
-              Math.max(
-                0,
-                Math.min(
-                  merged.size,
-                  bucketStarts.length - column * merged.size,
+      merged.starts.map((timestamp, column) => ({
+        timestamp,
+        label: row.metricsStatus
+          ? `${row.label} ${dateLabels[column]}: ${row.metricsStatus === "pending" ? (loadingLabel ?? "") : "—"}`
+          : `${row.label} ${dateLabels[column]}: ${numberFormat(locale, row.values[column] ?? 0)}`,
+        background:
+          row.metricsStatus === "pending"
+            ? "var(--color-muted)"
+            : row.metricsStatus === "unavailable"
+              ? "transparent"
+              : cellColor(
+                  pulseLevel(
+                    row.values[column] ?? 0,
+                    (usual[rowIndex] ?? 0) *
+                      Math.max(
+                        0,
+                        Math.min(
+                          merged.size,
+                          bucketStarts.length - column * merged.size,
+                        ),
+                      ),
+                  ),
                 ),
-              ),
-          ),
-        ),
       })),
     );
-  }, [merged, tooltipFormatter, locale, usual, bucketStarts.length]);
+  }, [
+    merged,
+    tooltipFormatter,
+    locale,
+    usual,
+    bucketStarts.length,
+    loadingLabel,
+  ]);
   const onCellHover = useCallback(
     (row: number, column: number, element: HTMLDivElement) => {
       const box = container.current?.getBoundingClientRect();
@@ -351,7 +376,11 @@ export const SitePulseHeatmap = memo(function SitePulseHeatmap({
           className,
         )}
       >
-        {loading ? null : emptyLabel}
+        {loading ? (
+          <Spinner className="size-5" aria-label={loadingLabel} />
+        ) : (
+          emptyLabel
+        )}
       </div>
     );
   }
@@ -370,7 +399,7 @@ export const SitePulseHeatmap = memo(function SitePulseHeatmap({
       data-slot="chart"
       className={cn(
         "relative w-full transition-opacity",
-        loading && "opacity-60",
+        loading && !rows.some((row) => row.metricsStatus) && "opacity-60",
         className,
       )}
       ref={container}
@@ -445,7 +474,10 @@ export const SitePulseHeatmap = memo(function SitePulseHeatmap({
         <span>{labels.above}</span>
       </div>
 
-      {hover && hovered ? (
+      {hover &&
+      hovered &&
+      !hovered.metricsStatus &&
+      merged.starts[hover.column] !== undefined ? (
         <div
           data-chart-tooltip-active=""
           className="pointer-events-none absolute z-10 grid min-w-40 gap-1 border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl"

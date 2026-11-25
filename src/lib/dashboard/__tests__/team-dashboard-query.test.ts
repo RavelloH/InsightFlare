@@ -248,6 +248,97 @@ describe("team dashboard query helpers", () => {
     });
   });
 
+  it("joins a matching streamed snapshot without duplicating the private API request", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    const snapshot = {
+      data: { sites: [], trend: [] },
+      window,
+      range: "7d" as const,
+      fetchedAt: 123,
+    };
+    let resolve!: (value: typeof snapshot) => void;
+    const stream = new Promise<typeof snapshot>((finish) => {
+      resolve = finish;
+    });
+    const options = teamDashboardQueryOptions({
+      teamId: "team-1",
+      window,
+      readDeferredSnapshot: () => stream,
+    });
+    const result = options.queryFn!({
+      signal: new AbortController().signal,
+    } as never);
+    expect(fetchMock).not.toHaveBeenCalled();
+    resolve(snapshot);
+    await expect(result).resolves.toBe(snapshot);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps route prefetch alive through temporary observer detach", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({ ok: true, data: { sites: [], trend: [] } }),
+          ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const signal = new AbortController().signal;
+    const readSignal = vi.fn(() => signal);
+    const context = {
+      get signal() {
+        return readSignal();
+      },
+    };
+    const options = teamDashboardQueryOptions({
+      teamId: "team-1",
+      window,
+      retainInFlight: true,
+    });
+    await options.queryFn!(context as never);
+    expect(readSignal).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeUndefined();
+    const normal = teamDashboardQueryOptions({ teamId: "team-1", window });
+    await normal.queryFn!(context as never);
+    expect(readSignal).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[1]?.[1]?.signal).toBe(signal);
+  });
+
+  it("falls back to the authenticated API when streamed data is missing, rejected or mismatched", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({ ok: true, data: { sites: [], trend: [] } }),
+          ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    for (const readDeferredSnapshot of [
+      () => Promise.resolve(null),
+      () => Promise.reject(new Error("stream failed")),
+      () =>
+        Promise.resolve({
+          data: { sites: [], trend: [] },
+          window: { ...window, timeZone: "Asia/Tokyo" },
+          range: "7d" as const,
+          fetchedAt: 123,
+        }),
+    ]) {
+      const options = teamDashboardQueryOptions({
+        teamId: "team-1",
+        window,
+        readDeferredSnapshot,
+      });
+      await expect(
+        options.queryFn!({ signal: new AbortController().signal } as never),
+      ).resolves.toMatchObject({ window });
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it("adds default and requested ranges when executing a dashboard query", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

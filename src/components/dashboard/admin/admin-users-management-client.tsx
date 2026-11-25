@@ -43,9 +43,12 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { useDashboardQueryControls } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useDashboardTimeZone } from "@/components/dashboard/shell/dashboard-query-provider";
 import { shortDateTime } from "@/lib/dashboard/format";
-import type { AdminUsersInitialData } from "@/lib/dashboard/management-data";
+import {
+  type AdminUsersInitialData,
+  managementQueryOptions,
+} from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import type { AccountUserData } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";
@@ -53,8 +56,10 @@ import type { AppMessages } from "@/lib/i18n/messages";
 interface AdminUsersManagementClientProps {
   locale: Locale;
   messages: AppMessages;
+  userId: string;
   currentUserId?: string;
   initialData?: AdminUsersInitialData | null;
+  deferredData?: Promise<AdminUsersInitialData | null> | null;
 }
 interface CreatedAccountLink {
   url: string;
@@ -69,13 +74,28 @@ async function getUsers(signal?: AbortSignal): Promise<AccountUserData[]> {
 function formatDefaultTeamName(template: string, name: string) {
   return template.replace("{name}", name);
 }
+export function adminUsersQueryOptions(
+  userId: string,
+  deferred?: Promise<AdminUsersInitialData | null> | null,
+  retainInFlight = false,
+) {
+  return managementQueryOptions(
+    ["dashboard", "admin-users", userId],
+    getUsers,
+    (snapshot: AdminUsersInitialData) => snapshot.users,
+    deferred,
+    retainInFlight,
+  );
+}
 export function AdminUsersManagementClient({
   locale,
   messages,
+  userId,
   currentUserId,
   initialData = null,
+  deferredData,
 }: AdminUsersManagementClientProps) {
-  const { timeZone } = useDashboardQueryControls();
+  const timeZone = useDashboardTimeZone();
   const t = messages.adminUsers;
   const defaultTeamNameTemplate = t.defaultTeamName;
   const [submitting, setSubmitting] = useState(false);
@@ -100,8 +120,7 @@ export function AdminUsersManagementClient({
   );
   const [deleteUserDialogOpen, setDeleteUserDialogOpen] = useState(false);
   const usersQuery = useQuery({
-    queryKey: ["dashboard", "admin-users"],
-    queryFn: ({ signal }) => getUsers(signal),
+    ...adminUsersQueryOptions(userId, deferredData),
     initialData: initialData?.users,
     initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
@@ -136,6 +155,7 @@ export function AdminUsersManagementClient({
   }
 
   async function handleCreateUser() {
+    if (loading) return;
     const normalizedUsername = username.trim();
     const normalizedEmail = email.trim();
     const normalizedTeamName =
@@ -347,8 +367,11 @@ export function AdminUsersManagementClient({
               />
             </div>
             <div className="md:col-span-2">
-              <Button type="submit" disabled={submitting}>
-                <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
+              <Button type="submit" disabled={submitting || loading}>
+                <AutoTransition
+                  initial={false}
+                  className="inline-flex items-center gap-[var(--button-content-gap)]"
+                >
                   {submitting ? (
                     <span
                       key="creating"
@@ -413,7 +436,7 @@ export function AdminUsersManagementClient({
             loading={loading}
             hasContent={users.length > 0}
             loadingLabel={messages.common.loading}
-            emptyLabel={noDataText}
+            emptyLabel={usersQuery.isError ? t.loadFailed : noDataText}
             colSpan={7}
             header={
               <TableRow>

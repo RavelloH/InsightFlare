@@ -75,6 +75,25 @@ const DEFAULT_RANGE: RangePreset = DEFAULT_RANGE_PRESET;
 const DashboardQueryContext = createContext<DashboardQueryContextValue | null>(
   null,
 );
+type DashboardQueryData = Pick<
+  DashboardQueryContextValue,
+  "range" | "queryReady" | "window" | "filters" | "scopePreference"
+>;
+type DashboardTimeQuery = Pick<
+  DashboardQueryData,
+  "range" | "queryReady" | "window"
+>;
+const DashboardQueryDataContext = createContext<DashboardQueryData | null>(
+  null,
+);
+const DashboardTimeQueryContext = createContext<DashboardTimeQuery | null>(
+  null,
+);
+const DashboardWindowContext = createContext<TimeWindow | null>(null);
+const DashboardTimeZoneContext = createContext<string | null>(null);
+const DashboardReadyContext = createContext<boolean | null>(null);
+const DashboardScopeContext = createContext<FilterScopePreference | null>(null);
+
 function normalizeFilters(
   filters: FilterDocument | undefined | null,
 ): FilterDocument {
@@ -372,7 +391,9 @@ export function DashboardQueryProvider({
     const nextDocumentKey = filterDocumentKey(nextFilters);
 
     setScopePreferenceState(nextScopePreference);
-    setUiFiltersState(nextFilters);
+    setUiFiltersState((current) =>
+      filterDocumentKey(current) === nextDocumentKey ? current : nextFilters,
+    );
     if (uiFilterDslDocumentKey !== nextDocumentKey) {
       setUiFilterDslState(undefined);
       setUiFilterDslDocumentKey(undefined);
@@ -446,7 +467,9 @@ export function DashboardQueryProvider({
         filterScopePreferenceFromDocument(next) ?? scopePreference;
       const scoped = attachFilterScopePreference(normalized, nextScope);
       const nextKey = filterDocumentKey(scoped);
-      setUiFiltersState(scoped);
+      setUiFiltersState((current) =>
+        filterDocumentKey(current) === nextKey ? current : scoped,
+      );
       if (rawDsl !== undefined) {
         const persisted = persistedRawDsl(rawDsl);
         setUiFilterDslState(persisted);
@@ -474,12 +497,21 @@ export function DashboardQueryProvider({
     [windowState.from, windowState.to],
   );
 
+  const filters = useMemo(() => normalizeFilters(uiFilters), [uiFilters]);
+  const timeQuery = useMemo<DashboardTimeQuery>(
+    () => ({ range, queryReady, window: windowState }),
+    [range, queryReady, windowState],
+  );
+  const queryData = useMemo<DashboardQueryData>(
+    () => ({ ...timeQuery, filters, scopePreference }),
+    [timeQuery, filters, scopePreference],
+  );
   const contextValue = useMemo<DashboardQueryContextValue>(
     () => ({
       range,
       queryReady,
       window: windowState,
-      filters: normalizeFilters(uiFilters),
+      filters,
       uiFilters,
       uiFilterDsl,
       scopePreference,
@@ -498,6 +530,7 @@ export function DashboardQueryProvider({
       range,
       queryReady,
       windowState,
+      filters,
       uiFilters,
       uiFilterDsl,
       scopePreference,
@@ -516,7 +549,19 @@ export function DashboardQueryProvider({
 
   return (
     <DashboardQueryContext.Provider value={contextValue}>
-      {children}
+      <DashboardQueryDataContext.Provider value={queryData}>
+        <DashboardTimeQueryContext.Provider value={timeQuery}>
+          <DashboardWindowContext.Provider value={windowState}>
+            <DashboardTimeZoneContext.Provider value={timeZone}>
+              <DashboardReadyContext.Provider value={queryReady}>
+                <DashboardScopeContext.Provider value={scopePreference}>
+                  {children}
+                </DashboardScopeContext.Provider>
+              </DashboardReadyContext.Provider>
+            </DashboardTimeZoneContext.Provider>
+          </DashboardWindowContext.Provider>
+        </DashboardTimeQueryContext.Provider>
+      </DashboardQueryDataContext.Provider>
     </DashboardQueryContext.Provider>
   );
 }
@@ -546,15 +591,40 @@ function useDashboardQueryContext(): DashboardQueryContextValue {
   }
   return context;
 }
-export function useDashboardQuery() {
-  const context = useDashboardQueryContext();
+export function useDashboardQuery(): DashboardQueryData {
+  const context = useContext(DashboardQueryDataContext);
+  if (context) return context;
   return {
-    range: context.range,
-    queryReady: context.queryReady,
-    filters: context.filters,
-    window: context.window,
-    scopePreference: context.scopePreference,
+    range: DEFAULT_RANGE,
+    queryReady: !import.meta.env.SSR,
+    filters: EMPTY_FILTERS,
+    window: resolveTimeWindow(DEFAULT_RANGE),
+    scopePreference: "auto",
   };
+}
+export function useDashboardTimeQuery(): DashboardTimeQuery {
+  return (
+    useContext(DashboardTimeQueryContext) ?? {
+      range: DEFAULT_RANGE,
+      queryReady: !import.meta.env.SSR,
+      window: resolveTimeWindow(DEFAULT_RANGE),
+    }
+  );
+}
+export function useDashboardTimeWindow(): TimeWindow {
+  return useContext(DashboardWindowContext) ?? resolveTimeWindow(DEFAULT_RANGE);
+}
+export function useDashboardTimeZone(): string {
+  return (
+    useContext(DashboardTimeZoneContext) ??
+    resolveTimeWindow(DEFAULT_RANGE).timeZone
+  );
+}
+export function useDashboardQueryReady(): boolean {
+  return useContext(DashboardReadyContext) ?? !import.meta.env.SSR;
+}
+export function useDashboardScopePreference(): FilterScopePreference {
+  return useContext(DashboardScopeContext) ?? "auto";
 }
 export function useDashboardQueryControls() {
   return useDashboardQueryContext();

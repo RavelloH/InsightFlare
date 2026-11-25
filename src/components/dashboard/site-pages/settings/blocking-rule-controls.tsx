@@ -387,6 +387,10 @@ export function BlockingRuleEditorCard({
   locale,
   saveLabel,
   savingLabel,
+  loading = false,
+  unavailable = false,
+  loadingLabel,
+  unavailableLabel,
 }: {
   copy: BlockingRuleFieldCopy;
   dialogCopy: BlockingRuleDialogCopy;
@@ -402,6 +406,10 @@ export function BlockingRuleEditorCard({
   locale: Locale;
   saveLabel: string;
   savingLabel: string;
+  loading?: boolean;
+  unavailable?: boolean;
+  loadingLabel?: string;
+  unavailableLabel?: string;
 }) {
   const inputId = `site-settings-blocking-${field}`;
   const statusId = `${inputId}-status`;
@@ -448,137 +456,171 @@ export function BlockingRuleEditorCard({
         </CardTitle>
       </CardHeader>
       <CardContent className="flex h-full flex-col gap-4">
-        <div className="space-y-2">
-          <Label htmlFor={inputId}>{copy.label}</Label>
-          <textarea
-            id={inputId}
-            ref={textareaRef}
-            defaultValue={value}
-            onInput={(event) => {
-              const nextValue = event.currentTarget.value;
-              lastEmittedValueRef.current = nextValue;
-              onChange(nextValue);
-            }}
-            placeholder={copy.placeholder}
-            rows={4}
-            aria-invalid={errors.length > 0}
-            aria-describedby={[statusId, errors.length > 0 ? errorId : null]
-              .filter((id): id is string => id !== null)
-              .join(" ")}
-            disabled={disabled}
-            className="min-h-24 w-full rounded-none border border-input bg-transparent px-2.5 py-1.5 text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80"
-          />
-          <AutoResizer>
-            <AutoTransition
-              transitionKey={statusTransitionKey}
-              initial={false}
-              duration={0.15}
-            >
-              <div className="space-y-2">
-                <p
-                  id={statusId}
-                  role="status"
-                  className={cn("text-xs", statusClassName)}
-                >
-                  {statusMessage}
-                </p>
-                {errors.length > 0 ? (
-                  <ul
-                    id={errorId}
-                    className="space-y-1 text-xs text-destructive"
+        <AutoResizer initial={false}>
+          <AutoTransition
+            initial={false}
+            duration={0.2}
+            transitionKey={
+              loading ? "loading" : unavailable ? "error" : "ready"
+            }
+          >
+            {loading || unavailable ? (
+              <div className="flex h-28 items-center justify-center text-sm text-muted-foreground">
+                {unavailable ? (
+                  unavailableLabel
+                ) : (
+                  <Spinner className="size-5" aria-label={loadingLabel} />
+                )}
+              </div>
+            ) : (
+              <div className="flex h-full flex-col gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor={inputId}>{copy.label}</Label>
+                  <textarea
+                    id={inputId}
+                    ref={textareaRef}
+                    defaultValue={value}
+                    onInput={(event) => {
+                      const nextValue = event.currentTarget.value;
+                      lastEmittedValueRef.current = nextValue;
+                      onChange(nextValue);
+                    }}
+                    placeholder={copy.placeholder}
+                    rows={4}
+                    aria-invalid={errors.length > 0}
+                    aria-describedby={[
+                      statusId,
+                      errors.length > 0 ? errorId : null,
+                    ]
+                      .filter((id): id is string => id !== null)
+                      .join(" ")}
+                    disabled={disabled}
+                    className="min-h-24 w-full rounded-none border border-input bg-transparent px-2.5 py-1.5 text-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 dark:bg-input/30 dark:disabled:bg-input/80"
+                  />
+                  <AutoResizer>
+                    <AutoTransition
+                      transitionKey={statusTransitionKey}
+                      initial={false}
+                      duration={0.15}
+                    >
+                      <div className="space-y-2">
+                        <p
+                          id={statusId}
+                          role="status"
+                          className={cn("text-xs", statusClassName)}
+                        >
+                          {statusMessage}
+                        </p>
+                        {errors.length > 0 ? (
+                          <ul
+                            id={errorId}
+                            className="space-y-1 text-xs text-destructive"
+                          >
+                            {errors.map((error, index) => (
+                              <li
+                                key={`${error.code}-${error.line ?? "x"}-${index}`}
+                              >
+                                {blockingRuleErrorMessage(
+                                  error,
+                                  copy,
+                                  dialogCopy,
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    </AutoTransition>
+                  </AutoResizer>
+                </div>
+                <div className="mt-auto flex flex-wrap items-center justify-between gap-2">
+                  <Button
+                    type="button"
+                    onClick={onSave}
+                    disabled={disabled || !changed || errors.length > 0}
                   >
-                    {errors.map((error, index) => (
-                      <li key={`${error.code}-${error.line ?? "x"}-${index}`}>
-                        {blockingRuleErrorMessage(error, copy, dialogCopy)}
-                      </li>
-                    ))}
-                  </ul>
+                    <AutoTransition
+                      initial={false}
+                      className="inline-flex items-center gap-[var(--button-content-gap)]"
+                    >
+                      {saving ? (
+                        <span className="inline-flex items-center gap-[var(--button-content-gap)]">
+                          <Spinner data-icon="inline-start" />
+                          {savingLabel}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-[var(--button-content-gap)]">
+                          <RiSave3Line data-icon="inline-start" />
+                          {saveLabel}
+                        </span>
+                      )}
+                    </AutoTransition>
+                  </Button>
+                  <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+                    {field === "countries" || field === "regions" ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setSearchOpen(true)}
+                      >
+                        <RiSearchLine data-icon="inline-start" />
+                        <span>{dialogCopy.searchButton}</span>
+                      </Button>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setTestOpen(true)}
+                    >
+                      <RiTestTubeLine data-icon="inline-start" />
+                      <span>{dialogCopy.testButton}</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setHelpOpen(true)}
+                    >
+                      <RiQuestionLine data-icon="inline-start" />
+                      <span>{dialogCopy.helpButton}</span>
+                    </Button>
+                  </div>
+                </div>
+                <BlockingRuleTestDialog
+                  field={field}
+                  copy={copy}
+                  dialogCopy={dialogCopy}
+                  value={value}
+                  errors={errors}
+                  open={testOpen}
+                  onOpenChange={setTestOpen}
+                />
+                <BlockingRuleHelpDialog
+                  copy={copy}
+                  dialogCopy={dialogCopy}
+                  open={helpOpen}
+                  onOpenChange={setHelpOpen}
+                />
+                {field === "countries" || field === "regions" ? (
+                  <BlockingRuleGeoSearchDialog
+                    field={field}
+                    title={copy.title}
+                    locale={locale}
+                    copy={dialogCopy}
+                    open={searchOpen}
+                    onOpenChange={setSearchOpen}
+                    onSelect={(selectedValue) => {
+                      const lines = blockingEditorLines(value);
+                      const nextLines = lines.includes(selectedValue)
+                        ? lines
+                        : [...lines, selectedValue];
+                      onChange(nextLines.join("\n"));
+                    }}
+                  />
                 ) : null}
               </div>
-            </AutoTransition>
-          </AutoResizer>
-        </div>
-        <div className="mt-auto flex flex-wrap items-center justify-between gap-2">
-          <Button
-            type="button"
-            onClick={onSave}
-            disabled={disabled || !changed || errors.length > 0}
-          >
-            <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
-              {saving ? (
-                <span className="inline-flex items-center gap-[var(--button-content-gap)]">
-                  <Spinner data-icon="inline-start" />
-                  {savingLabel}
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-[var(--button-content-gap)]">
-                  <RiSave3Line data-icon="inline-start" />
-                  {saveLabel}
-                </span>
-              )}
-            </AutoTransition>
-          </Button>
-          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-            {field === "countries" || field === "regions" ? (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setSearchOpen(true)}
-              >
-                <RiSearchLine data-icon="inline-start" />
-                <span>{dialogCopy.searchButton}</span>
-              </Button>
-            ) : null}
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setTestOpen(true)}
-            >
-              <RiTestTubeLine data-icon="inline-start" />
-              <span>{dialogCopy.testButton}</span>
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setHelpOpen(true)}
-            >
-              <RiQuestionLine data-icon="inline-start" />
-              <span>{dialogCopy.helpButton}</span>
-            </Button>
-          </div>
-        </div>
-        <BlockingRuleTestDialog
-          field={field}
-          copy={copy}
-          dialogCopy={dialogCopy}
-          value={value}
-          errors={errors}
-          open={testOpen}
-          onOpenChange={setTestOpen}
-        />
-        <BlockingRuleHelpDialog
-          copy={copy}
-          dialogCopy={dialogCopy}
-          open={helpOpen}
-          onOpenChange={setHelpOpen}
-        />
-        {field === "countries" || field === "regions" ? (
-          <BlockingRuleGeoSearchDialog
-            field={field}
-            title={copy.title}
-            locale={locale}
-            copy={dialogCopy}
-            open={searchOpen}
-            onOpenChange={setSearchOpen}
-            onSelect={(selectedValue) => {
-              const lines = blockingEditorLines(value);
-              const nextLines = lines.includes(selectedValue)
-                ? lines
-                : [...lines, selectedValue];
-              onChange(nextLines.join("\n"));
-            }}
-          />
-        ) : null}
+            )}
+          </AutoTransition>
+        </AutoResizer>
       </CardContent>
     </Card>
   );

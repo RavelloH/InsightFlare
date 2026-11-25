@@ -47,7 +47,10 @@ import {
   supportedTimeZones,
 } from "@/lib/analytics/time-zone";
 import { intlLocale } from "@/lib/dashboard/format";
-import type { AccountNotificationPreferencesInitialData } from "@/lib/dashboard/management-data";
+import {
+  type AccountNotificationPreferencesInitialData,
+  managementQueryOptions,
+} from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import {
   type AccountUserData,
@@ -63,6 +66,7 @@ interface AccountSettingsClientProps {
   messages: AppMessages;
   user: AccountUserData;
   initialData?: AccountNotificationPreferencesInitialData | null;
+  deferredData?: Promise<AccountNotificationPreferencesInitialData | null> | null;
 }
 type TimeZoneMode = "browser" | "custom";
 type PreferredLocale = "" | Locale;
@@ -85,11 +89,30 @@ function sameNotificationPreferences(
       normalizedRight.attention.alertsCreateUnread
   );
 }
+export function accountPreferencesQueryOptions(
+  userId: string,
+  deferred?: Promise<AccountNotificationPreferencesInitialData | null> | null,
+  retainInFlight = false,
+) {
+  return managementQueryOptions(
+    ["dashboard", "notification-preferences", userId],
+    (signal) =>
+      requestAdminService<NotificationPreferencesData>(
+        "notifications/preferences",
+        { signal },
+      ).then(normalizeNotificationPreferencesData),
+    (snapshot: AccountNotificationPreferencesInitialData) =>
+      snapshot.preferences,
+    deferred,
+    retainInFlight,
+  );
+}
 export function AccountSettingsClient({
   locale,
   messages,
   user,
   initialData = null,
+  deferredData,
 }: AccountSettingsClientProps) {
   const copy = messages.accountSettings;
   const notificationCopy = messages.notificationCenter;
@@ -125,12 +148,7 @@ export function AccountSettingsClient({
     useState(false);
   const appliedNotificationPreferencesUserIdRef = useRef<string | null>(null);
   const notificationPreferencesQuery = useQuery({
-    queryKey: ["dashboard", "notification-preferences", user.id],
-    queryFn: ({ signal }) =>
-      requestAdminService<NotificationPreferencesData>(
-        "notifications/preferences",
-        { signal },
-      ).then(normalizeNotificationPreferencesData),
+    ...accountPreferencesQueryOptions(user.id, deferredData),
     initialData: initialData?.preferences,
     initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
@@ -222,7 +240,6 @@ export function AccountSettingsClient({
     }
     if (notificationPreferencesQuery.isError) {
       toast.error(notificationCopy.preferencesSaveFailed);
-      appliedNotificationPreferencesUserIdRef.current = user.id;
       return;
     }
     const normalized = normalizeNotificationPreferencesData(
@@ -642,21 +659,43 @@ export function AccountSettingsClient({
             </CardDescription>
           </CardHeader>
           <CardContent className="flex h-full flex-col">
-            <AutoResizer initial duration={0.28} ease={[0.22, 1, 0.36, 1]}>
+            <AutoResizer
+              initial={false}
+              duration={0.28}
+              ease={[0.22, 1, 0.36, 1]}
+            >
               <AutoTransition
                 initial={false}
                 duration={0.2}
                 type="fade"
                 presenceMode="wait"
                 transitionKey={
-                  notificationPreferencesLoading ||
+                  notificationPreferencesQuery.isError &&
                   !draftNotificationPreferences
-                    ? "loading"
-                    : "preferences"
+                    ? "error"
+                    : notificationPreferencesLoading ||
+                        !draftNotificationPreferences
+                      ? "loading"
+                      : "preferences"
                 }
               >
-                {notificationPreferencesLoading ||
+                {notificationPreferencesQuery.isError &&
                 !draftNotificationPreferences ? (
+                  <div className="flex h-32 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <span>{notificationCopy.preferencesSaveFailed}</span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        void notificationPreferencesQuery.refetch()
+                      }
+                    >
+                      {notificationCopy.refresh}
+                    </Button>
+                  </div>
+                ) : notificationPreferencesLoading ||
+                  !draftNotificationPreferences ? (
                   <div
                     key="loading"
                     className="flex h-32 items-center justify-center text-sm text-muted-foreground"

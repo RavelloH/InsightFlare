@@ -1,9 +1,11 @@
 import { memo, useMemo } from "react";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   type ChartConfig,
   ChartContainer,
   ChartTooltip,
 } from "@insightflare/ui/chart";
+import { Spinner } from "@insightflare/ui/spinner";
 import {
   CartesianGrid,
   ReferenceArea,
@@ -44,6 +46,8 @@ export interface ChangeQuadrantChartProps {
   threshold?: number;
   onPointSelect?: (id: string) => void;
   emptyLabel?: string;
+  loading?: boolean;
+  loadingLabel?: string;
   className?: string;
 }
 
@@ -117,6 +121,8 @@ export const ChangeQuadrantChart = memo(function ChangeQuadrantChart({
   threshold = 30,
   onPointSelect,
   emptyLabel,
+  loading = false,
+  loadingLabel,
   className,
 }: ChangeQuadrantChartProps) {
   const plot = useMemo<PlotPoint[]>(() => {
@@ -154,136 +160,149 @@ export const ChangeQuadrantChart = memo(function ChangeQuadrantChart({
   const yTicks = [...new Set([-100, -threshold, 0, threshold, upperTick])].sort(
     (a, b) => a - b,
   );
-  const xMin = Math.max(0.8, Math.min(...plot.map((point) => point.x)) / 1.5);
+  const xMin = plot.length
+    ? Math.max(0.8, Math.min(...plot.map((point) => point.x)) / 1.5)
+    : 0.8;
   const xMax = Math.max(10, ...plot.map((point) => point.x)) * 1.5;
   const xTicks = [
     ...(xMin <= 1 ? [1] : []),
     ...logTicks(Math.max(1, xMin - 1), xMax - 1).map((value) => value + 1),
   ].filter((value) => value >= xMin && value <= xMax);
   const clippedUpper = plot.some((point) => point.change > Y_LIMIT);
-  const config = {
-    value: { label: labels.value, color: TONE_COLORS.steady },
-  } satisfies ChartConfig;
-
-  if (!plot.length) {
-    return (
-      <div
-        className={cn(
-          "flex h-60 items-center justify-center text-xs text-muted-foreground",
-          className,
-        )}
-      >
-        {emptyLabel}
-      </div>
-    );
-  }
+  const config = useMemo<ChartConfig>(
+    () => ({ value: { label: labels.value, color: TONE_COLORS.steady } }),
+    [labels.value],
+  );
 
   return (
-    <ChartContainer
-      config={config}
-      className={cn("aspect-auto h-64 w-full", className)}
-    >
-      <ScatterChart margin={{ top: 8, right: 24, bottom: 4, left: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" />
-        <ReferenceArea
-          y1={lowerExtent}
-          y2={-threshold}
-          fill="var(--color-chart-secondary-3)"
-          fillOpacity={0.06}
-          ifOverflow="hidden"
-        />
-        <ReferenceArea
-          y1={threshold}
-          y2={upperExtent}
-          fill="var(--color-chart-4)"
-          fillOpacity={0.06}
-          ifOverflow="hidden"
-        />
-        <ReferenceLine y={0} stroke="var(--color-border)" />
-        <XAxis
-          type="number"
-          dataKey="x"
-          scale="log"
-          domain={[xMin, xMax]}
-          ticks={xTicks}
-          allowDataOverflow
-          tickLine={false}
-          axisLine={false}
-          tickFormatter={(value) =>
-            new Intl.NumberFormat(locale, { notation: "compact" }).format(
-              Math.max(0, Number(value) - 1),
-            )
-          }
-          name={labels.value}
-        />
-        <YAxis
-          type="number"
-          dataKey="y"
-          domain={[lowerExtent, upperExtent]}
-          ticks={yTicks}
-          tickLine={false}
-          axisLine={false}
-          width={48}
-          tickFormatter={(value) => {
-            const number = Math.round(Number(value));
-            return `${number === Y_LIMIT && clippedUpper ? "≥" : ""}${number > 0 ? "+" : ""}${number}%`;
-          }}
-          name={labels.change}
-        />
-        <ZAxis type="number" dataKey="z" range={[40, 300]} />
-        <ChartTooltip
-          cursor={false}
-          content={({ active, payload }) => {
-            const point = payload?.[0]?.payload as PlotPoint | undefined;
-            if (!active || !point) return null;
-            return (
-              <div className="grid min-w-36 gap-1 border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
-                <div className="font-medium">{point.label}</div>
-                <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">{labels.value}</span>
-                  <span className="font-mono tabular-nums">
-                    {numberFormat(locale, point.value)}
-                  </span>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">{labels.change}</span>
-                  <span
-                    className="font-mono tabular-nums"
-                    style={{
-                      color:
-                        point.tone === "steady"
-                          ? undefined
-                          : TONE_COLORS[point.tone],
-                    }}
-                  >
-                    {formatChange(point.change)}
-                  </span>
-                </div>
-                {labels.weight && point.weight !== undefined ? (
+    <div className={cn("relative h-64 w-full", className)}>
+      <ChartContainer
+        config={config}
+        className={cn(
+          "aspect-auto h-full w-full transition-opacity",
+          !plot.length && "opacity-0",
+        )}
+      >
+        <ScatterChart margin={{ top: 8, right: 24, bottom: 4, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <ReferenceArea
+            y1={lowerExtent}
+            y2={-threshold}
+            fill="var(--color-chart-secondary-3)"
+            fillOpacity={0.06}
+            ifOverflow="hidden"
+          />
+          <ReferenceArea
+            y1={threshold}
+            y2={upperExtent}
+            fill="var(--color-chart-4)"
+            fillOpacity={0.06}
+            ifOverflow="hidden"
+          />
+          <ReferenceLine y={0} stroke="var(--color-border)" />
+          <XAxis
+            type="number"
+            dataKey="x"
+            scale="log"
+            domain={[xMin, xMax]}
+            ticks={xTicks}
+            allowDataOverflow
+            tickLine={false}
+            axisLine={false}
+            tickFormatter={(value) =>
+              new Intl.NumberFormat(locale, { notation: "compact" }).format(
+                Math.max(0, Number(value) - 1),
+              )
+            }
+            name={labels.value}
+          />
+          <YAxis
+            type="number"
+            dataKey="y"
+            domain={[lowerExtent, upperExtent]}
+            ticks={yTicks}
+            tickLine={false}
+            axisLine={false}
+            width={48}
+            tickFormatter={(value) => {
+              const number = Math.round(Number(value));
+              return `${number === Y_LIMIT && clippedUpper ? "≥" : ""}${number > 0 ? "+" : ""}${number}%`;
+            }}
+            name={labels.change}
+          />
+          <ZAxis type="number" dataKey="z" range={[40, 300]} />
+          <ChartTooltip
+            cursor={false}
+            content={({ active, payload }) => {
+              const point = payload?.[0]?.payload as PlotPoint | undefined;
+              if (!active || !point) return null;
+              return (
+                <div className="grid min-w-36 gap-1 border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
+                  <div className="font-medium">{point.label}</div>
                   <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">
-                      {labels.weight}
+                      {labels.value}
                     </span>
                     <span className="font-mono tabular-nums">
-                      {numberFormat(locale, point.weight)}
+                      {numberFormat(locale, point.value)}
                     </span>
                   </div>
-                ) : null}
-              </div>
-            );
-          }}
-        />
-        <Scatter
-          data={plot}
-          isAnimationActive={false}
-          shape={(props: unknown) => (
-            <QuadrantDot
-              {...(props as Parameters<typeof QuadrantDot>[0])}
-              onSelect={onPointSelect}
-            />
-          )}
-        />
-      </ScatterChart>
-    </ChartContainer>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">
+                      {labels.change}
+                    </span>
+                    <span
+                      className="font-mono tabular-nums"
+                      style={{
+                        color:
+                          point.tone === "steady"
+                            ? undefined
+                            : TONE_COLORS[point.tone],
+                      }}
+                    >
+                      {formatChange(point.change)}
+                    </span>
+                  </div>
+                  {labels.weight && point.weight !== undefined ? (
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">
+                        {labels.weight}
+                      </span>
+                      <span className="font-mono tabular-nums">
+                        {numberFormat(locale, point.weight)}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            }}
+          />
+          <Scatter
+            data={plot}
+            isAnimationActive={false}
+            shape={(props: unknown) => (
+              <QuadrantDot
+                {...(props as Parameters<typeof QuadrantDot>[0])}
+                onSelect={onPointSelect}
+              />
+            )}
+          />
+        </ScatterChart>
+      </ChartContainer>
+      <AutoTransition
+        initial={false}
+        duration={0.2}
+        transitionKey={
+          loading && !plot.length ? "loading" : !plot.length ? "empty" : "ready"
+        }
+        className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted-foreground"
+      >
+        {loading && !plot.length ? (
+          <Spinner className="size-5" aria-label={loadingLabel} />
+        ) : !plot.length ? (
+          emptyLabel
+        ) : null}
+      </AutoTransition>
+    </div>
   );
 });

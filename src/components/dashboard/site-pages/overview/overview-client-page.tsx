@@ -2,7 +2,10 @@ import { useCallback, useMemo } from "react";
 import { PageHeading } from "@insightflare/ui/page-heading";
 
 import { OverviewGeoPointsMapCard } from "@/components/dashboard/geo/overview-geo-points-map-card";
-import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
+import {
+  useDashboardScopePreference,
+  useDashboardTimeWindow,
+} from "@/components/dashboard/shell/dashboard-query-provider";
 import {
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
@@ -34,7 +37,8 @@ export function OverviewClientPage({
 }: OverviewClientPageProps) {
   const searchParams = useLiveSearchParams();
   const livePathname = usePathname() || pathname;
-  const { window, scopePreference } = useDashboardQuery();
+  const window = useDashboardTimeWindow();
+  const scopePreference = useDashboardScopePreference();
   const resolvedScope = useMemo(
     () => resolveFilterScope("overview", scopePreference),
     [scopePreference],
