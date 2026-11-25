@@ -30,8 +30,6 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      INSIGHTFLARE_CI_PREPARE: skip
     steps:
       - uses: actions/checkout@v6
         with:
@@ -185,10 +183,14 @@ jobs:
           node-version: 24.17.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Runner resources and worker budget
+        run: |
+          node -e 'const os=require("node:os"); console.log(JSON.stringify({availableParallelism:os.availableParallelism(),logicalCPUs:os.cpus().length,memoryGiB:os.totalmem()/2**30,sqlite:process.versions.sqlite}))'
+          free -h
       - name: Run coverage shard
         # Thresholds apply to the merged coverage map, not an individual shard.
         run: >-
-          pnpm exec vitest run --shard=${{ matrix.shard }}/4 --reporter=blob --reporter=default --coverage --silent=passed-only
+          pnpm exec vitest run --shard=${{ matrix.shard }}/4 --reporter=blob --reporter=default --coverage --silent=passed-only --maxWorkers=100%
           --coverage.reporter=json-summary
           --coverage.thresholds.lines=0 --coverage.thresholds.statements=0
           --coverage.thresholds.branches=0 --coverage.thresholds.functions=0
@@ -259,7 +261,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Tracker coverage
-        run: pnpm run test:coverage:tracker
+        run: pnpm run test:coverage:tracker --maxWorkers=100%
       - uses: actions/upload-artifact@v4
         if: always()
         with:
