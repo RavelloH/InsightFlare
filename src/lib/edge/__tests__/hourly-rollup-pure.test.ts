@@ -240,6 +240,120 @@ describe("queryTrendForSitesFromHourlyRollups", () => {
   });
 });
 describe("queryOverviewAndTrendForSitesFromHourlyRollupsPartial", () => {
+  it.each(["overview", "trend", "both"] as const)(
+    "reads only the metrics used by %s, preserving hot/cold identity deduplication",
+    async (mode) => {
+      const hour = 60 * 60 * 1000;
+      const window = {
+        startMs: hour,
+        endExclusiveMs: 3 * hour,
+        nowMs: 4 * hour,
+        timeZone: "UTC",
+      };
+      const db = makeDbMock();
+      db.all
+        .mockResolvedValueOnce({
+          results: [{ siteId: "site-1", aggregatedUntilHour: 1 }],
+        })
+        .mockResolvedValueOnce({
+          results: [
+            {
+              siteId: "site-1",
+              hourBucket: 1,
+              views: 2,
+              durationMsSum: 100,
+              durationMsCount: 2,
+              visitorSetJson: '["u1"]',
+              sessionCountsJson: '[["s1",2]]',
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          results: [
+            {
+              siteId: "site-1",
+              startedAt: 2 * hour,
+              visitorId: "u1",
+              sessionId: "s1",
+              durationMs: 50,
+            },
+            {
+              siteId: "site-1",
+              startedAt: 2 * hour + 100,
+              visitorId: "u2",
+              sessionId: "s2",
+              durationMs: null,
+            },
+          ],
+        });
+      const env = { DB: db } as unknown as Env;
+      const expectedOverview = {
+        views: 4,
+        sessions: 2,
+        visitors: 2,
+        bounces: 1,
+        totalDuration: 150,
+        durationViews: 3,
+      };
+      const expectedTrend = [
+        {
+          siteId: "site-1",
+          bucket: 0,
+          timestampMs: hour,
+          views: 2,
+          visitors: 1,
+          sessions: 1,
+          bounces: 0,
+          totalDuration: 100,
+          durationViews: 2,
+        },
+        {
+          siteId: "site-1",
+          bucket: 1,
+          timestampMs: 2 * hour,
+          views: 2,
+          visitors: 2,
+          sessions: 1,
+          bounces: 1,
+          totalDuration: 50,
+          durationViews: 1,
+        },
+      ];
+      if (mode === "overview") {
+        expect(
+          await queryOverviewForSitesFromHourlyRollups(env, ["site-1"], window),
+        ).toEqual(new Map([["site-1", expectedOverview]]));
+      } else if (mode === "trend") {
+        expect(
+          await queryTrendForSitesFromHourlyRollups(
+            env,
+            ["site-1"],
+            window,
+            "hour",
+          ),
+        ).toEqual(expectedTrend);
+      } else {
+        expect(
+          await queryOverviewAndTrendForSitesFromHourlyRollupsPartial(
+            env,
+            ["site-1"],
+            window,
+            "hour",
+          ),
+        ).toEqual({
+          overview: new Map([["site-1", expectedOverview]]),
+          trend: new Map([["site-1", expectedTrend]]),
+        });
+      }
+      const sql = db.prepare.mock.calls.map((call) => String(call[0]));
+      expect(sql).toHaveLength(3);
+      expect(sql[1]).toContain("visitor_set_json AS visitorSetJson");
+      expect(sql[1]).toContain("session_counts_json AS sessionCountsJson");
+      expect(sql[1]).not.toMatch(/\b(?:sessions|visitors|bounces)\s*,/);
+      expect(sql[1]).not.toContain("perf_");
+      expect(sql[2]).not.toContain("perf_");
+    },
+  );
   it("returns empty aggregates for an empty site list", async () => {
     const env = { DB: makeDbMock() } as unknown as Env;
 
