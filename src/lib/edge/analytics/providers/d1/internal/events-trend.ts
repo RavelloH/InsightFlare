@@ -1,3 +1,5 @@
+import { D1_MAX_BOUND_PARAMETERS, D1_MAX_SQL_UTF8_BYTES } from "@/lib/db";
+import { scopedFilterMetadata } from "@/lib/edge/analytics/contract";
 import type { Env } from "@/lib/edge/types";
 
 import type {
@@ -55,6 +57,73 @@ ORDER BY bucket ASC`,
   }));
 }
 
+type EventTrendRows = {
+  seriesRows: EventTrendSeriesRow[];
+  trendRows: EventTrendPointRow[];
+  otherSeriesRow?: EventTrendSeriesRow;
+};
+
+async function querySharedEventTrendRows(
+  env: Env,
+  source: ReturnType<typeof buildEventFilteredSourceCte>,
+  bucket: ReturnType<typeof timeBucketCase>,
+  limit: number,
+): Promise<EventTrendRows | null> {
+  const sql = `${source.cte},
+trend_observations AS MATERIALIZED (
+  SELECT event_name, session_id, visitor_id, occurred_at FROM filtered_events
+),
+top_rows AS MATERIALIZED (
+  SELECT event_name AS eventName, count(*) AS events,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
+  FROM trend_observations
+  GROUP BY event_name
+  ORDER BY events DESC, sessions DESC, eventName ASC
+  LIMIT ?
+),
+bucketed AS (
+  SELECT ${bucket.sql} AS bucket,
+    CASE WHEN event_name IN (SELECT eventName FROM top_rows) THEN event_name
+      ELSE '${SHARE_TREND_OTHER_TOKEN}' END AS seriesKey,
+    count(*) AS events
+  FROM trend_observations
+  GROUP BY bucket, seriesKey
+),
+other_counts AS (
+  SELECT count(*) AS events,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
+  FROM trend_observations
+  WHERE event_name NOT IN (SELECT eventName FROM top_rows)
+  HAVING count(*) > 0
+)
+SELECT 'top' AS rowType, eventName, NULL AS bucket, events, sessions, visitors FROM top_rows
+UNION ALL SELECT 'bucket', seriesKey, bucket, events, NULL, NULL FROM bucketed WHERE bucket IS NOT NULL
+UNION ALL SELECT 'other', '${SHARE_TREND_OTHER_TOKEN}', NULL, events, sessions, visitors FROM other_counts
+ORDER BY rowType, events DESC, sessions DESC, eventName ASC, bucket ASC`;
+  const bindings = [...source.bindings, limit, ...bucket.bindings];
+  if (
+    bindings.length > D1_MAX_BOUND_PARAMETERS ||
+    new TextEncoder().encode(sql).byteLength > D1_MAX_SQL_UTF8_BYTES
+  )
+    return null;
+  const rows = await queryD1All<
+    EventTrendSeriesRow & { rowType: string; bucket: number | null }
+  >(env, sql, bindings);
+  return {
+    seriesRows: rows.filter((row) => row.rowType === "top"),
+    trendRows: rows
+      .filter((row) => row.rowType === "bucket")
+      .map((row) => ({
+        bucket: row.bucket!,
+        seriesKey: row.eventName,
+        events: row.events,
+      })),
+    otherSeriesRow: rows.find((row) => row.rowType === "other"),
+  };
+}
+
 export async function queryEventsTrendFromD1(
   env: Env,
   siteId: string,
@@ -70,10 +139,26 @@ export async function queryEventsTrendFromD1(
     filters,
     eventName,
   );
-  const baseCte = source.cte;
-  const seriesRows = await queryD1All<EventTrendSeriesRow>(
-    env,
-    `${baseCte}
+  const buckets = buildTimeBuckets(window, interval);
+  const bucket = timeBucketCase(buckets, "occurred_at");
+  const scope = scopedFilterMetadata(filters)?.plan.scope;
+  // Nonempty entity scopes repeat costly membership qualification. For
+  // empty/observation scopes and named-event reads, retain the cheap path.
+  const shared =
+    filters.root !== null &&
+    (scope === "session" || scope === "visitor") &&
+    eventName === undefined &&
+    limit > 0
+      ? await querySharedEventTrendRows(env, source, bucket, limit)
+      : null;
+  let result: EventTrendRows;
+  if (shared) {
+    result = shared;
+  } else {
+    const baseCte = source.cte;
+    const seriesRows = await queryD1All<EventTrendSeriesRow>(
+      env,
+      `${baseCte}
 SELECT
   event_name AS eventName,
   count(*) AS events,
@@ -84,26 +169,16 @@ GROUP BY event_name
 ORDER BY events DESC, sessions DESC, eventName ASC
 LIMIT ?
 `,
-    [...source.bindings, limit],
-  );
-  const buckets = buildTimeBuckets(window, interval);
-  const bucket = timeBucketCase(buckets, "occurred_at");
-  const seriesKeyByName = new Map<string, string>();
-  const usedKeys = new Set<string>();
-  for (const row of seriesRows) {
-    seriesKeyByName.set(
-      row.eventName,
-      shareTrendSeriesKey(row.eventName, usedKeys, "event"),
+      [...source.bindings, limit],
     );
-  }
-  const seriesNames = seriesRows.map((row) => row.eventName);
-  const namesClause =
-    seriesNames.length > 0
-      ? `CASE WHEN event_name IN (${seriesNames.map(() => "?").join(", ")}) THEN event_name ELSE ? END`
-      : "?";
-  const trendRows = await queryD1All<EventTrendPointRow>(
-    env,
-    `${baseCte},
+    const seriesNames = seriesRows.map((row) => row.eventName);
+    const namesClause =
+      seriesNames.length > 0
+        ? `CASE WHEN event_name IN (${seriesNames.map(() => "?").join(", ")}) THEN event_name ELSE ? END`
+        : "?";
+    const trendRows = await queryD1All<EventTrendPointRow>(
+      env,
+      `${baseCte},
 bucketed AS (
   SELECT
     ${bucket.sql} AS bucket,
@@ -120,15 +195,15 @@ FROM bucketed
 WHERE bucket IS NOT NULL
 ORDER BY bucket ASC
 `,
-    [...source.bindings, ...seriesNames, SHARE_TREND_OTHER_TOKEN],
-  );
-  const hasOther = trendRows.some(
-    (row) => String(row.seriesKey) === SHARE_TREND_OTHER_TOKEN,
-  );
-  const [otherSeriesRow] = hasOther
-    ? await queryD1All<EventTrendSeriesRow>(
-        env,
-        `${baseCte}
+      [...source.bindings, ...seriesNames, SHARE_TREND_OTHER_TOKEN],
+    );
+    const hasOther = trendRows.some(
+      (row) => String(row.seriesKey) === SHARE_TREND_OTHER_TOKEN,
+    );
+    const [otherSeriesRow] = hasOther
+      ? await queryD1All<EventTrendSeriesRow>(
+          env,
+          `${baseCte}
 SELECT
   ? AS eventName,
   count(*) AS events,
@@ -136,10 +211,25 @@ SELECT
   count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
 FROM filtered_events
 ${seriesNames.length > 0 ? `WHERE event_name NOT IN (${seriesNames.map(() => "?").join(", ")})` : ""}
-`,
-        [...source.bindings, SHARE_TREND_OTHER_LABEL, ...seriesNames],
-      )
-    : [];
+  `,
+          [...source.bindings, SHARE_TREND_OTHER_LABEL, ...seriesNames],
+        )
+      : [];
+
+    result = { seriesRows, trendRows, otherSeriesRow };
+  }
+  const { seriesRows, trendRows, otherSeriesRow } = result;
+  const hasOther = trendRows.some(
+    (row) => String(row.seriesKey) === SHARE_TREND_OTHER_TOKEN,
+  );
+  const seriesKeyByName = new Map<string, string>();
+  const usedKeys = new Set<string>();
+  for (const row of seriesRows) {
+    seriesKeyByName.set(
+      row.eventName,
+      shareTrendSeriesKey(row.eventName, usedKeys, "event"),
+    );
+  }
   const series: Array<{
     key: string;
     eventName: string;

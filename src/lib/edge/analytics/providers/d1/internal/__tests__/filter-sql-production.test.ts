@@ -1836,6 +1836,103 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
+  it("shares prepared entity event trends without changing top order or Other distinct identities", async () => {
+    const { db } = runFixture();
+    try {
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const env = { DB: createSqliteD1Database(db, trace) } as never;
+      // A third name shares the first session/visitor with signup and purchase.
+      db.exec(
+        "INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at) VALUES(105,1,'site-a','e-view-home','v-new',3,170)",
+      );
+      for (const scope of ["session", "visitor"] as const) {
+        for (const expression of [
+          'page.path eq "/home"',
+          'page.path eq "/not-present"',
+        ]) {
+          const doc = parseFilterDsl(expression, analyticsFilterRegistry);
+          const plan = createScopedFilterPlan("event-trend", doc, scope)!;
+          const filters = attachScopedFilterMetadata(doc, {
+            requestedScope: scope,
+            resolvedScope: plan.scope,
+            plan,
+            time: createQueryTime(100, 300, "UTC", 400),
+            siteIds: ["site-a"],
+          });
+          for (const limit of [1, 10]) {
+            const before = trace.preparedSql.length;
+            const result = await queryEventsTrendFromD1(
+              env,
+              "site-a",
+              WINDOW,
+              "minute",
+              filters,
+              limit,
+            );
+            expect(trace.preparedSql.length - before).toBe(1);
+            expect(trace.preparedSql[before]).toContain(
+              "trend_observations AS MATERIALIZED",
+            );
+            if (expression.includes("not-present")) {
+              expect(result.series).toEqual([]);
+              expect(
+                result.data.every((point) => point.totalEvents === 0),
+              ).toBe(true);
+            } else {
+              expect(
+                result.data.reduce((sum, point) => sum + point.totalEvents, 0),
+              ).toBe(3);
+              if (limit === 1) {
+                expect(result.series).toEqual([
+                  expect.objectContaining({
+                    eventName: "purchase",
+                    events: 1,
+                    sessions: 1,
+                    visitors: 1,
+                  }),
+                  expect.objectContaining({
+                    isOther: true,
+                    events: 2,
+                    sessions: 1,
+                    visitors: 1,
+                  }),
+                ]);
+              } else {
+                expect(result.series.map((row) => row.eventName)).toEqual([
+                  "purchase",
+                  "signup",
+                  "view",
+                ]);
+                expect(
+                  result.series.every(
+                    (row) =>
+                      row.events === 1 &&
+                      row.sessions === 1 &&
+                      row.visitors === 1,
+                  ),
+                ).toBe(true);
+              }
+            }
+            const isolated = await queryEventsTrendFromD1(
+              env,
+              "site-b",
+              WINDOW,
+              "minute",
+              filters,
+              limit,
+            );
+            // The independent site's valid data must not include site-a identities.
+            expect(
+              isolated.data.reduce((sum, point) => sum + point.totalEvents, 0),
+            ).toBe(expression.includes("not-present") ? 0 : 1);
+          }
+        }
+      }
+    } finally {
+      db.close();
+    }
+  });
+
   it("EventFields, FieldValues and Context calculate typed JSON and source cards from actual matches", async () => {
     const { db, env } = runFixture();
     try {
