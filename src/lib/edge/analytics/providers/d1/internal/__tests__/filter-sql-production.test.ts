@@ -953,6 +953,55 @@ describe("P5 Scoped Dataset integration: SQL-only advanced qualification", () =>
     }
   });
 
+  it("qualifies positive event counts directly but retains zero-count and cross-grain membership", () => {
+    const db = sqliteFixture();
+    try {
+      for (const scope of ["session", "visitor"] as const) {
+        const column = scope === "session" ? "session_id" : "visitor_id";
+        for (const predicate of [
+          "gte 1",
+          "eq 1",
+          "gt 0",
+          "gt 1",
+          "eq 0",
+          "gte 0",
+          "lte 1",
+        ]) {
+          const expression = `${scope}.events ${predicate}`;
+          const result = dataset(expression, scope);
+          const direct = ["gte 1", "eq 1", "gt 0", "gt 1"].includes(predicate);
+          expect(result.ctes.includes("HAVING COUNT(*)"), expression).toBe(
+            direct,
+          );
+          expect(
+            result.ctes.includes(`scope_${scope}_facts AS (`),
+            expression,
+          ).toBe(!direct);
+          const read = (compiled: ReturnType<typeof dataset>) =>
+            select(
+              db,
+              `WITH ${compiled.ctes} SELECT DISTINCT site_pk,${column} AS entity_id
+              FROM ${scope === "session" ? compiled.sessionRelation : compiled.visitorRelation}
+              ORDER BY site_pk,entity_id`,
+              compiled.bindings.map((b) => b.value),
+            );
+          // A redundant, always-true nonnegative count comparison forces the
+          // legacy fact path without altering the membership.
+          const legacy = dataset(
+            `${expression} and ${scope}.events gte 0`,
+            scope,
+          );
+          expect(legacy.ctes).toContain(`scope_${scope}_facts AS (`);
+          expect(read(result), expression).toEqual(read(legacy));
+        }
+      }
+      const cross = dataset("session.events gte 1", "visitor");
+      expect(cross.ctes).toContain("scope_session_facts AS (");
+    } finally {
+      db.close();
+    }
+  });
+
   it("runs a complex Selector/Count Filter without any advanced JS match IDs", () => {
     const db = sqliteFixture();
     try {

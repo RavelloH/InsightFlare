@@ -918,11 +918,69 @@ function canShareFactAggregation(
   return fields.includes(condition.target.field);
 }
 
+/**
+ * A positive event-count predicate cannot match an entity with zero events.
+ * Qualify it directly from the event grain instead of building every fact
+ * row in the visit/event universe. Preserve the old site_id grouping and
+ * DISTINCT membership key; cross-grain and zero-matching predicates fall back.
+ */
+function compilePositiveEventCountMembership(
+  expression: EntitySetExpression | null,
+  entityKind: ScopedFactKind,
+): MembershipSql | null {
+  if (expression?.kind !== "condition") return null;
+  const { condition } = expression;
+  if (
+    condition.target.kind !== "field" ||
+    condition.target.field !== `${entityKind}.events` ||
+    typeof condition.value !== "number" ||
+    !Number.isFinite(condition.value)
+  )
+    return null;
+  const value = condition.value;
+  const operator =
+    condition.operator === "gt" && value >= 0
+      ? ">"
+      : condition.operator === "gte" && value > 0
+        ? ">="
+        : condition.operator === "eq" && value > 0
+          ? "="
+          : null;
+  if (!operator) return null;
+  const column = entityColumn(entityKind);
+  const relation = "scope_membership_0";
+  return {
+    relation,
+    ctes: [
+      boundCte(
+        relation,
+        `${relation} AS (
+  SELECT DISTINCT site_pk, entity_id
+  FROM (
+    SELECT site_pk, ${column} AS entity_id
+    FROM scope_raw_events
+    WHERE site_pk IS NOT NULL AND site_id IS NOT NULL
+      AND TRIM(COALESCE(${column}, '')) != ''
+    GROUP BY site_pk, site_id, ${column}
+    HAVING COUNT(*) ${operator} ?
+  )
+)`,
+        [value],
+      ),
+    ],
+  };
+}
+
 function compileEntityMembership(
   expression: EntitySetExpression | null,
   entityKind: ScopedFactKind,
   factKinds: ReadonlySet<ScopedFactKind>,
 ): MembershipSql {
+  const positiveEvents = compilePositiveEventCountMembership(
+    expression,
+    entityKind,
+  );
+  if (positiveEvents) return positiveEvents;
   if (expression && factKinds.size === 0) {
     const shared = compileSharedEntityMembership(expression, entityKind);
     if (shared) return shared;
