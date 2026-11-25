@@ -22,7 +22,9 @@ import {
 import { resolveDashboardInitialWindow } from "@/lib/dashboard/query-preferences";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import {
+  getDashboardProfile,
   getDashboardRootContext,
+  getDashboardRuntime,
   getDashboardTeamContext,
   getDashboardTeamSites,
   getTeamSiteContext,
@@ -42,7 +44,10 @@ import {
   parseFilterUrlForAudience,
   teamQueryContext,
 } from "@/lib/edge/analytics/contract";
-import { resolveEdgeRuntime } from "@/lib/edge/runtime";
+import {
+  enableRequestReadCache,
+  memoizeRequestRead,
+} from "@/lib/edge/runtime/request-read-cache";
 import type { Locale } from "@/lib/i18n/config";
 import { DEFAULT_RETENTION_CONFIG } from "@/lib/retention";
 import type { ScheduledTasksData } from "@/lib/scheduled-tasks";
@@ -81,12 +86,17 @@ function serializeScheduledTasksData(
 export const loadDashboardRoot = createServerFn({ method: "GET" }).handler(() =>
   getDashboardRootContext(),
 );
+function readInitialWindow(): Promise<TimeWindow> {
+  const request = getRequest();
+  enableRequestReadCache(request);
+  return memoizeRequestRead(request, "dashboard:window", async () =>
+    resolveDashboardInitialWindow(request.headers.get("cookie")),
+  );
+}
 /** Provides the SSR-safe initial query window to the dashboard shell. */
 export const loadDashboardInitialWindow = createServerFn({
   method: "GET",
-}).handler((): TimeWindow =>
-  resolveDashboardInitialWindow(getRequest().headers.get("cookie")),
-);
+}).handler(() => readInitialWindow());
 export const loadDashboardTeam = createServerFn({ method: "GET" })
   .validator((data: { teamSlug: string }) => data)
   .handler(({ data }) => getDashboardTeamContext(data.teamSlug));
@@ -95,17 +105,17 @@ async function readTeamDashboardSnapshot(data: {
   teamId: string;
 }): Promise<TeamDashboardSnapshot | null> {
   const request = getRequest();
-  const runtime = await resolveEdgeRuntime(request);
-  const resolved = await resolveTeamDashboardRequest({
-    request,
-    env: runtime.env,
-    teamId: data.teamId,
-  });
+  const runtime = await getDashboardRuntime();
+  const [resolved, preloadedSites, window] = await Promise.all([
+    resolveTeamDashboardRequest({
+      request: runtime.request,
+      env: runtime.env,
+      teamId: data.teamId,
+    }),
+    getDashboardTeamSites(data.teamId),
+    readInitialWindow(),
+  ]);
   if (resolved instanceof Response) return null;
-
-  const preloadedSites = await getDashboardTeamSites(data.teamId);
-
-  const window = resolveDashboardInitialWindow(request.headers.get("cookie"));
   const filters = parseFilterUrlForAudience("private-dashboard", request.url);
   const teamDashboardRuntime = createTeamDashboardQueryRuntime({
     env: resolved.env,
@@ -161,21 +171,79 @@ export const loadWorkspaceSnapshots = createServerFn({ method: "GET" })
       ? [...new Set(data.teamIds.map(String))].slice(0, WORKSPACE_TEAM_LIMIT)
       : [],
   }))
+  .handler(({ data }) => readWorkspaceSnapshots(data.teamIds));
+
+async function readWorkspaceSnapshots(teamIds: string[]) {
+  const entries = await Promise.all(
+    teamIds.map(async (teamId) => {
+      try {
+        return [teamId, await readTeamDashboardSnapshot({ teamId })] as const;
+      } catch {
+        return [teamId, null] as const;
+      }
+    }),
+  );
+  return Object.fromEntries(entries) as Record<
+    string,
+    TeamDashboardSnapshot | null
+  >;
+}
+
+/** One authenticated RPC for the shell and the matched team's initial page.
+ * The client supplies route identifiers only; team IDs and ACLs are resolved here. */
+export const loadDashboardBootstrap = createServerFn({ method: "GET" })
+  .validator((data: { teamSlug?: string; page?: "workspace" | "team" }) => ({
+    teamSlug:
+      typeof data?.teamSlug === "string"
+        ? data.teamSlug.slice(0, 120)
+        : undefined,
+    page:
+      data?.page === "workspace" || data?.page === "team"
+        ? data.page
+        : undefined,
+  }))
   .handler(async ({ data }) => {
-    const entries = await Promise.all(
-      data.teamIds.map(async (teamId) => {
-        try {
-          return [teamId, await readTeamDashboardSnapshot({ teamId })] as const;
-        } catch {
-          return [teamId, null] as const;
-        }
-      }),
-    );
-    return Object.fromEntries(entries) as Record<
-      string,
-      TeamDashboardSnapshot | null
-    >;
+    const initialWindow = readInitialWindow();
+    const root = getDashboardRootContext();
+    const team = data.teamSlug
+      ? getDashboardTeamContext(data.teamSlug)
+      : Promise.resolve(null);
+    const snapshots = (async () => {
+      const profile = await getDashboardProfile();
+      if (!profile)
+        return { workspaceSnapshots: null, teamDashboardSnapshot: null };
+      if (data.page === "workspace") {
+        return {
+          workspaceSnapshots: await readWorkspaceSnapshots(
+            profile.teams.slice(0, WORKSPACE_TEAM_LIMIT).map((item) => item.id),
+          ),
+          teamDashboardSnapshot: null,
+        };
+      }
+      const active =
+        data.page === "team" &&
+        profile.teams.find((item) => item.slug === data.teamSlug);
+      return {
+        workspaceSnapshots: null,
+        teamDashboardSnapshot: active
+          ? await readTeamDashboardSnapshot({ teamId: active.id })
+          : null,
+      };
+    })();
+    const [
+      dashboardRoot,
+      initialDashboardWindow,
+      bootstrapTeamContext,
+      initialSnapshots,
+    ] = await Promise.all([root, initialWindow, team, snapshots]);
+    return {
+      dashboardRoot,
+      initialDashboardWindow,
+      bootstrapTeamContext,
+      ...initialSnapshots,
+    };
   });
+
 function safeInvite(invite: {
   id: string;
   email: string;

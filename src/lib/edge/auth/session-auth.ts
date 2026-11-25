@@ -1,4 +1,5 @@
 import { appNow } from "@/lib/edge/runtime/e2e-clock";
+import { memoizeRequestRead } from "@/lib/edge/runtime/request-read-cache";
 import type { Env } from "@/lib/edge/types";
 import { dashboardSessionSecret } from "@/lib/secrets";
 
@@ -157,5 +158,7 @@ export async function requireSession(
 ): Promise<EdgeSessionClaims | null> {
   const token = extractSessionToken(request);
   if (!token) return null;
-  return verifySessionToken(token, env);
+  return memoizeRequestRead(request, "auth:session", () =>
+    verifySessionToken(token, env),
+  );
 }

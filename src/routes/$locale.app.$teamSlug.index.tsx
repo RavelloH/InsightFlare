@@ -1,15 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { TeamManagementClient } from "@/components/dashboard/admin/team-management-client";
-import { loadTeamDashboardSnapshot } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 
 export const Route = createFileRoute("/$locale/app/$teamSlug/")({
-  beforeLoad: async ({ context }) => ({
-    teamDashboardSnapshot: await loadTeamDashboardSnapshot({
-      data: { teamId: context.teamContext.activeTeam.id },
-    }),
-  }),
   head: ({ match }) => ({
     meta: [
       {

@@ -105,3 +105,22 @@ export async function readAdminService<K extends keyof AdminServiceReadMap>(
     return null;
   }
 }
+
+/** Count-only SSR read; use the same authenticated actor as the admin API. */
+export async function readAdminUnreadAttentionCount(
+  input: Omit<AdminServiceRequest, "route">,
+): Promise<number> {
+  if (import.meta.env.VITE_DEMO_MODE === "1") {
+    const url = new URL(input.url);
+    url.searchParams.set("limit", "1");
+    const result = await readAdminService({
+      ...input,
+      url,
+      route: "notifications",
+    });
+    return result?.unreadAttentionCount ?? 0;
+  }
+  const { readRealAdminUnreadAttentionCount } =
+    await import("@/lib/edge/admin/service/real");
+  return readRealAdminUnreadAttentionCount(input);
+}

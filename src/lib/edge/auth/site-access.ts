@@ -19,6 +19,7 @@ import {
   type EdgeSessionClaims,
   requireSession,
 } from "@/lib/edge/auth/session-auth";
+import { memoizeRequestRead } from "@/lib/edge/runtime/request-read-cache";
 import type { Env } from "@/lib/edge/types";
 function normalizeFilterValue(value: string | null): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -191,58 +192,78 @@ export async function resolvePrivateTeamForSession(
   const teamId = normalizeFilterValue(url.searchParams.get("teamId"));
   if (!teamId) return badRequest("teamId is required", undefined, request);
 
-  if (session.systemRole === "admin") {
-    const teams = scan(schema.teams);
-    const matchingTeams = filter(teams, eq(teams.columns.id, param(teamId)));
-    const team = await database(env).first(
-      compileD1Query(
-        limit(project(matchingTeams, { id: matchingTeams.columns.id }), 1),
-        { tag: "auth.teams.first" },
-      ),
-    );
-    return team?.id
-      ? { id: team.id }
-      : notFound("Team not found", undefined, request);
-  }
-
-  const teams = scan(schema.teams);
-  const members = scan(schema.team_members);
-  const teamMembers = join(
-    teams,
-    members,
-    and(
-      eq(teams.columns.id, members.columns.team_id),
-      eq(members.columns.user_id, param(session.userId)),
-    ),
-    "left",
-  );
-  const matchingTeams = filter(
-    teamMembers,
-    eq(teamMembers.columns.left_id, param(teamId)),
-  );
-  const teamQuery = limit(
-    project(matchingTeams, {
-      id: matchingTeams.columns.left_id,
-      ownerUserId: matchingTeams.columns.left_owner_user_id,
-      role: matchingTeams.columns.right_role,
-      siteIdsJson: matchingTeams.columns.right_site_ids_json,
-    }),
-    1,
-  );
-  const teamRow = await database(env).first(
-    compileD1Query(teamQuery, { tag: "auth.teams.first" }),
-  );
-  if (!teamRow || teamRow.id === null)
-    return notFound("Team not found", undefined, request);
-  const team = { ...teamRow, id: teamRow.id };
-  if (team.ownerUserId === session.userId) return { id: team.id };
-  if (team.role === "owner" || team.role === "admin") return { id: team.id };
-  if (!team.role) return notFound("Team not found", undefined, request);
-  return {
-    id: team.id,
-    allowedSiteIds: parseMemberSiteIdsJson(team.siteIdsJson),
-  };
+  const scope = await readTeamAccessForIdentity(request, env, teamId, session);
+  return scope ?? notFound("Team not found", undefined, request);
 }
+
+/** Shared team ACL for already authenticated identities. Empty member scopes
+ * are intentionally preserved; each caller applies its existing semantics. */
+export async function readTeamAccessForIdentity(
+  request: Request,
+  env: Env,
+  teamId: string,
+  identity: Pick<EdgeSessionClaims, "userId" | "systemRole">,
+): Promise<{ id: string; allowedSiteIds?: string[] } | null> {
+  return memoizeRequestRead(
+    request,
+    JSON.stringify(["auth:team", identity.userId, identity.systemRole, teamId]),
+    async () => {
+      if (identity.systemRole === "admin") {
+        const teams = scan(schema.teams);
+        const matchingTeams = filter(
+          teams,
+          eq(teams.columns.id, param(teamId)),
+        );
+        const team = await database(env).first(
+          compileD1Query(
+            limit(project(matchingTeams, { id: matchingTeams.columns.id }), 1),
+            { tag: "auth.teams.first" },
+          ),
+        );
+        return team?.id ? { id: team.id } : null;
+      }
+
+      const teams = scan(schema.teams);
+      const members = scan(schema.team_members);
+      const teamMembers = join(
+        teams,
+        members,
+        and(
+          eq(teams.columns.id, members.columns.team_id),
+          eq(members.columns.user_id, param(identity.userId)),
+        ),
+        "left",
+      );
+      const matchingTeams = filter(
+        teamMembers,
+        eq(teamMembers.columns.left_id, param(teamId)),
+      );
+      const teamQuery = limit(
+        project(matchingTeams, {
+          id: matchingTeams.columns.left_id,
+          ownerUserId: matchingTeams.columns.left_owner_user_id,
+          role: matchingTeams.columns.right_role,
+          siteIdsJson: matchingTeams.columns.right_site_ids_json,
+        }),
+        1,
+      );
+      const teamRow = await database(env).first(
+        compileD1Query(teamQuery, { tag: "auth.teams.first" }),
+      );
+      if (!teamRow || teamRow.id === null) return null;
+      const team = { ...teamRow, id: teamRow.id };
+      if (team.ownerUserId === identity.userId) return { id: team.id };
+      if (team.role === "owner" || team.role === "admin")
+        return { id: team.id };
+      if (!team.role) return null;
+      return {
+        id: team.id,
+        allowedSiteIds: parseMemberSiteIdsJson(team.siteIdsJson),
+      };
+    },
+  );
+}
+
 export async function fetchPublicSite(
   env: Env,
   url: URL,

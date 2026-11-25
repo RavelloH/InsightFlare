@@ -10,9 +10,11 @@ import {
 import type { EdgeSessionClaims } from "@/lib/edge/auth/session-auth";
 import {
   fetchPublicSite,
+  readTeamAccessForIdentity,
   resolvePrivateSiteForSession,
   resolvePrivateTeamForSession,
 } from "@/lib/edge/auth/site-access";
+import { enableRequestReadCache } from "@/lib/edge/runtime/request-read-cache";
 import type { Env } from "@/lib/edge/types";
 
 const adminSession: EdgeSessionClaims = {
@@ -187,6 +189,35 @@ describe("typed site access DAL", () => {
     expect(unrelated).toBeInstanceOf(Response);
     expect((unrelated as Response).status).toBe(404);
     expect(trace.preparedSql).toHaveLength(5);
+  });
+
+  it("coalesces concurrent management and analytics ACL reads only within the enabled request", async () => {
+    const request = new Request("https://app.test/app");
+    const url = new URL("https://app.test/?teamId=team-1");
+    enableRequestReadCache(request);
+    const [management, analytics] = await Promise.all([
+      readTeamAccessForIdentity(request, env, "team-1", memberSession),
+      resolvePrivateTeamForSession(request, env, url, memberSession),
+    ]);
+    expect(management).toEqual({ id: "team-1", allowedSiteIds: ["site-1"] });
+    expect(analytics).toEqual(management);
+    expect(trace.preparedSql).toHaveLength(1);
+    expect(
+      await readTeamAccessForIdentity(
+        request,
+        env,
+        "team-1",
+        limitedMemberSession,
+      ),
+    ).toEqual({ id: "team-1", allowedSiteIds: ["site-2"] });
+    expect(
+      await readTeamAccessForIdentity(request, env, "team-1", unrelatedSession),
+    ).toBeNull();
+    expect(trace.preparedSql).toHaveLength(3);
+    const nextRequest = new Request(request.url);
+    enableRequestReadCache(nextRequest);
+    await resolvePrivateTeamForSession(nextRequest, env, url, memberSession);
+    expect(trace.preparedSql).toHaveLength(4);
   });
 
   it("returns not found for missing sites and teams", async () => {

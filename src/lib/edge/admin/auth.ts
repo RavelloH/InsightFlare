@@ -32,6 +32,7 @@ import type { AnyExpression, SqlExpression } from "@/lib/db/query/expression";
 import type { Relation } from "@/lib/db/query/plan";
 import { uniqueTeamSlug } from "@/lib/edge/admin/access";
 import { requireSession } from "@/lib/edge/auth/session-auth";
+import { memoizeRequestRead } from "@/lib/edge/runtime/request-read-cache";
 import type { Env } from "@/lib/edge/types";
 import { clampString } from "@/lib/edge/utils";
 import { isValidLocale } from "@/lib/i18n/config";
@@ -452,13 +453,15 @@ export async function requireActor(
   env: Env,
   req: Request,
 ): Promise<Actor | Response> {
-  const session = await requireSession(req, env);
-  if (!session) return una();
-  const uid = clampString(session.userId, 120);
-  if (!uid) return una();
-  const user = await byId(env, uid);
-  if (!user) return una("User not found");
-  return { user, isAdmin: user.system_role === "admin" };
+  return memoizeRequestRead(req, "auth:actor", async () => {
+    const session = await requireSession(req, env);
+    if (!session) return una();
+    const uid = clampString(session.userId, 120);
+    if (!uid) return una();
+    const user = await byId(env, uid);
+    if (!user) return una("User not found");
+    return { user, isAdmin: user.system_role === "admin" };
+  });
 }
 
 export async function teamsFor(
@@ -578,7 +581,7 @@ export async function teamGroupsForSession(
     siteCount: siteCountFor(createdMatching.columns.left_id),
     memberCount: memberCountFor(createdMatching.columns.left_id),
   });
-  const createdRows = await database(env).all(
+  const createdRowsPromise = database(env).all(
     compileD1Query(orderedTeams(createdSelected), { tag: "admin.sites.all" }),
   );
 
@@ -606,7 +609,7 @@ export async function teamGroupsForSession(
     siteCount: siteCountFor(managedMatching.columns.left_id),
     memberCount: memberCountFor(managedMatching.columns.left_id),
   });
-  const managedRows = await database(env).all(
+  const managedRowsPromise = database(env).all(
     compileD1Query(orderedTeams(managedSelected), {
       tag: "admin.sites.all",
     }),
@@ -637,11 +640,12 @@ export async function teamGroupsForSession(
     siteCount: siteCountFor(memberMatching.columns.left_id),
     memberCount: memberCountFor(memberMatching.columns.left_id),
   });
-  const memberRows = await database(env).all(
+  const memberRowsPromise = database(env).all(
     compileD1Query(orderedTeams(memberSelected), { tag: "admin.sites.all" }),
   );
 
-  let systemRows: { results: Record<string, unknown>[] } = { results: [] };
+  let systemRowsPromise: Promise<{ results: Record<string, unknown>[] }> =
+    Promise.resolve({ results: [] });
   if (actor.isAdmin) {
     const systemJoined = join(
       teams,
@@ -663,13 +667,19 @@ export async function teamGroupsForSession(
       siteCount: siteCountFor(systemJoined.columns.left_id),
       memberCount: memberCountFor(systemJoined.columns.left_id),
     });
-    systemRows = await database(env).all(
+    systemRowsPromise = database(env).all(
       compileD1Query(orderedTeams(systemSelected), {
         tag: "admin.sites.all",
       }),
     );
   }
 
+  const [createdRows, managedRows, memberRows, systemRows] = await Promise.all([
+    createdRowsPromise,
+    managedRowsPromise,
+    memberRowsPromise,
+    systemRowsPromise,
+  ]);
   const teamGroups: SessionTeamGroups = {
     created: mapTeamRows(createdRows.results),
     managed: mapTeamRows(managedRows.results),

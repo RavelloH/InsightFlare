@@ -22,12 +22,9 @@ import {
   canManageSite,
   canManageTeam,
   canReadSite,
-  canReadTeam,
-  teamById,
-  teamMembershipAccess,
   toSlug,
 } from "@/lib/edge/admin/access";
-import { type Actor, requireActor } from "@/lib/edge/admin/auth";
+import { requireActor } from "@/lib/edge/admin/auth";
 import {
   bad,
   bool,
@@ -38,6 +35,7 @@ import {
   nf,
   parseJson,
 } from "@/lib/edge/admin/response";
+import { readTeamAccessForIdentity } from "@/lib/edge/auth/site-access";
 import {
   deleteSiteScriptSettings,
   readSiteTrackingConfig,
@@ -129,22 +127,6 @@ export async function createSiteWithDefaultSettings(
   }
   return siteId;
 }
-async function filterReadableSitesForActor<T extends { id: string }>(
-  env: Env,
-  actor: Actor,
-  teamId: string,
-  sites: T[],
-): Promise<T[]> {
-  if (actor.isAdmin) return sites;
-  const team = await teamById(env, teamId);
-  if (team?.ownerUserId === actor.user.id) return sites;
-  const membership = await teamMembershipAccess(env, teamId, actor.user.id);
-  if (!membership) return [];
-  if (membership.role === "owner" || membership.role === "admin") return sites;
-  if (membership.siteIds.length === 0) return sites;
-  const allowed = new Set(membership.siteIds);
-  return sites.filter((site) => allowed.has(site.id));
-}
 export async function deleteSiteData(env: Env, siteId: string): Promise<void> {
   const client = database(env);
   for (const mutation of siteDeletionMutations(siteId))
@@ -165,8 +147,18 @@ export async function handleSitesAdmin(
   if (req.method === "GET") {
     const teamId = clampString(url.searchParams.get("teamId") || "", 120);
     if (!teamId) return bad("Missing teamId", undefined, req);
-    if (!(await canReadTeam(env, a, teamId)))
-      return forb("Team access denied", undefined, req);
+    // Admins historically receive an empty list for nonexistent teams. Members
+    // retain the management API's empty-scope-means-all semantics.
+    const scope = a.isAdmin
+      ? undefined
+      : await readTeamAccessForIdentity(req, env, teamId, {
+          userId: a.user.id,
+          systemRole: "user",
+        });
+    if (scope === null) return forb("Team access denied", undefined, req);
+    const allowed = scope?.allowedSiteIds?.length
+      ? new Set(scope.allowedSiteIds)
+      : null;
     const sites = scan(schema.sites);
     const matching = filter(sites, eq(sites.columns.team_id, param(teamId)));
     const selected = project(matching, {
@@ -193,7 +185,9 @@ export async function handleSitesAdmin(
     });
     return jsonResponseFor(req, {
       ok: true,
-      data: await filterReadableSitesForActor(env, a, teamId, siteRows),
+      data: allowed
+        ? siteRows.filter((site) => allowed.has(site.id))
+        : siteRows,
     });
   }
   if (req.method === "POST") {

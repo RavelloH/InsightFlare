@@ -1,4 +1,3 @@
-import type * as ReactModule from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -19,6 +18,13 @@ vi.mock("@/lib/dashboard-api/client/edge", () => ({
 }));
 vi.mock("@/lib/edge/admin/service/index", () => ({
   readAdminService: adminServiceMocks.readAdminService,
+  readAdminUnreadAttentionCount: vi.fn(async () => {
+    const response = (await adminServiceMocks.readAdminService({
+      route: "notifications",
+      url: new URL("https://app.test/?limit=1"),
+    })) as { unreadAttentionCount?: number } | null;
+    return response?.unreadAttentionCount ?? 0;
+  }),
 }));
 vi.mock("@/lib/edge/runtime", () => ({
   resolveEdgeRuntime: adminServiceMocks.resolveEdgeRuntime,
@@ -26,13 +32,6 @@ vi.mock("@/lib/edge/runtime", () => ({
 vi.mock("@tanstack/react-start/server", () => ({
   getRequest: adminServiceMocks.getRequest,
 }));
-vi.mock("react", async (importOriginal) => {
-  const actual = await importOriginal<typeof ReactModule>();
-  return {
-    ...actual,
-    cache: <T extends (...args: never[]) => unknown>(fn: T) => fn,
-  };
-});
 const fetchAdminMeMock = vi.mocked(fetchAdminMe);
 const fetchAdminSitesMock = vi.mocked(fetchAdminSites);
 const fetchNotificationMessagesMock = vi.mocked(fetchNotificationMessages);
@@ -70,6 +69,10 @@ function site(
 }
 describe("dashboard server helpers", () => {
   beforeEach(() => {
+    adminServiceMocks.getRequest
+      .mockReset()
+      .mockImplementation(() => new Request("https://app.test/app"));
+    resolveEdgeRuntimeMock.mockClear();
     fetchAdminMeMock.mockReset();
     fetchAdminSitesMock.mockReset();
     fetchNotificationMessagesMock.mockReset();
@@ -129,6 +132,9 @@ describe("dashboard server helpers", () => {
   });
 
   it("returns dashboard team and site contexts when data matches slugs", async () => {
+    adminServiceMocks.getRequest.mockReturnValue(
+      new Request("https://app.test/app"),
+    );
     fetchAdminMeMock.mockResolvedValue({
       user: {
         id: "user-1",
@@ -168,6 +174,16 @@ describe("dashboard server helpers", () => {
       },
     );
     expect(fetchAdminSitesMock).toHaveBeenCalledWith("team-1");
+    expect(fetchAdminSitesMock).toHaveBeenCalledTimes(1);
+    expect(fetchAdminMeMock).toHaveBeenCalledTimes(1);
+    expect(fetchNotificationMessagesMock).toHaveBeenCalledTimes(1);
+    expect(resolveEdgeRuntimeMock).toHaveBeenCalledTimes(1);
+    adminServiceMocks.getRequest.mockReturnValue(
+      new Request("https://app.test/app"),
+    );
+    fetchAdminMeMock.mockResolvedValue(null as never);
+    await expect(getDashboardProfile()).resolves.toBeNull();
+    expect(fetchAdminMeMock).toHaveBeenCalledTimes(2);
   });
 
   it("returns root context and falls back when notification counts fail", async () => {

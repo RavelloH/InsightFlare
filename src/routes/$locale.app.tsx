@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import {
   createFileRoute,
   Outlet,
@@ -5,27 +6,44 @@ import {
 } from "@tanstack/react-router";
 
 import { DashboardShell } from "@/components/dashboard/shell/dashboard-shell";
-import {
-  loadDashboardInitialWindow,
-  loadDashboardRoot,
-} from "@/lib/dashboard/route-data";
+import { loadDashboardBootstrap } from "@/lib/dashboard/route-data";
 import type {
   DashboardContext,
   DashboardTeamContext,
 } from "@/lib/dashboard/server";
 import { buildManagementSections } from "@/lib/dashboard/team-sections";
 import { usePathname } from "@/lib/router";
+// Keep this callback independent of the globally registered route union:
+// the root route itself is part of that union.
+async function bootstrapRoute(
+  options: unknown,
+): Promise<Awaited<ReturnType<typeof loadDashboardBootstrap>>> {
+  const { matches } = options as {
+    matches: Array<{ routeId: string; params: Record<string, unknown> }>;
+  };
+  const teamMatch = matches.find(
+    (match) => match.routeId === "/$locale/app/$teamSlug",
+  );
+  const page = matches.some((match) => match.routeId === "/$locale/app/")
+    ? "workspace"
+    : matches.some((match) => match.routeId === "/$locale/app/$teamSlug/")
+      ? "team"
+      : undefined;
+  return loadDashboardBootstrap({
+    data: {
+      teamSlug:
+        typeof teamMatch?.params.teamSlug === "string"
+          ? teamMatch.params.teamSlug
+          : undefined,
+      page,
+    },
+  });
+}
 export const Route = createFileRoute("/$locale/app")({
-  beforeLoad: async () => {
-    const [dashboardRoot, initialDashboardWindow] = await Promise.all([
-      loadDashboardRoot(),
-      loadDashboardInitialWindow(),
-    ]);
-    return { dashboardRoot, initialDashboardWindow };
-  },
+  beforeLoad: bootstrapRoute,
   component: AppLayout,
 });
-function AppLayout() {
+function AppLayout(): JSX.Element {
   const { locale, messages, dashboardRoot, initialDashboardWindow } =
     Route.useRouteContext();
   const pathname = usePathname();
@@ -53,9 +71,9 @@ function AppLayout() {
       user={shellContext.user}
       teams={shellContext.teams}
       teamGroups={shellContext.teamGroups}
-      activeTeamSlug={dashboardRoot ? undefined : teamContext?.activeTeam.slug}
+      activeTeamSlug={teamContext?.activeTeam.slug}
       authorizedActiveSite={authorizedActiveSite}
-      sites={dashboardRoot ? undefined : teamContext?.sites}
+      sites={teamContext?.sites}
       unreadAttentionCount={shellContext.unreadAttentionCount}
       initialQueryWindow={initialDashboardWindow}
       managementSections={

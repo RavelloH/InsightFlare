@@ -54,6 +54,8 @@ vi.mock("@tanstack/react-start/server", async (importOriginal) => {
 });
 vi.mock("@/lib/dashboard/server", () => ({
   getDashboardRootContext: vi.fn(),
+  getDashboardProfile: vi.fn(),
+  getDashboardRuntime: vi.fn(),
   getDashboardTeamSites: vi.fn(),
   getDashboardTeamContext: vi.fn(),
   getTeamSiteContext: vi.fn(),
@@ -88,6 +90,7 @@ import {
   loadAdminTeamsInitialData,
   loadAdminUsersInitialData,
   loadApiKeysInitialData,
+  loadDashboardBootstrap,
   loadDashboardInitialWindow,
   loadDashboardRoot,
   loadDashboardSite,
@@ -105,6 +108,10 @@ import {
   WORKSPACE_TEAM_LIMIT,
 } from "@/lib/dashboard/route-data";
 import {
+  getDashboardProfile,
+  getDashboardRootContext,
+  getDashboardRuntime,
+  getDashboardTeamContext,
   getDashboardTeamSites,
   readDashboardAdmin,
 } from "@/lib/dashboard/server";
@@ -141,6 +148,10 @@ describe("Dashboard route data loaders", () => {
       id: "site-1",
       name: "Site",
       domain: "app.test",
+    } as never);
+    vi.mocked(getDashboardRuntime).mockResolvedValue({
+      request: getRequest(),
+      env: { DB: {} },
     } as never);
     vi.mocked(resolveEdgeRuntime).mockResolvedValue({
       env: { DB: {} },
@@ -210,8 +221,8 @@ describe("Dashboard route data loaders", () => {
     });
   });
 
-  it("derives the initial dashboard window from the request cookie", () => {
-    const window = loadDashboardInitialWindow();
+  it("derives the initial dashboard window from the request cookie", async () => {
+    const window = await loadDashboardInitialWindow();
     expect(resolveDashboardInitialWindow).toHaveBeenCalledWith(null);
     expect(window).toMatchObject({
       preset: "7d",
@@ -238,6 +249,36 @@ describe("Dashboard route data loaders", () => {
         loadShareSite({ data: { slug: "missing" } } as never),
       ).resolves.toBeNull();
     });
+  });
+
+  it("coalesces bootstrap window resolution and starts independent root/team/snapshot reads", async () => {
+    const profile = {
+      user: { id: "user" },
+      teams: [{ id: "team-a", slug: "acme" }],
+    };
+    vi.mocked(getDashboardProfile).mockResolvedValue(profile as never);
+    vi.mocked(getDashboardTeamContext).mockResolvedValue({
+      activeTeam: profile.teams[0],
+      sites: [],
+    } as never);
+    let finishRoot!: (value: never) => void;
+    vi.mocked(getDashboardRootContext).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishRoot = resolve;
+        }),
+    );
+    const result = loadDashboardBootstrap({
+      data: { teamSlug: "acme", page: "team" },
+    });
+    await vi.waitFor(() => expect(teamDashboardExecute).toHaveBeenCalled());
+    expect(getDashboardTeamContext).toHaveBeenCalledWith("acme");
+    finishRoot(profile as never);
+    const bootstrap = await result;
+    expect(bootstrap.initialDashboardWindow).toMatchObject(
+      bootstrap.teamDashboardSnapshot?.window ?? {},
+    );
+    expect(resolveDashboardInitialWindow).toHaveBeenCalledTimes(1);
   });
 
   describe("dashboard context loaders", () => {

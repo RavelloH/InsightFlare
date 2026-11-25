@@ -1,8 +1,8 @@
 import "@tanstack/react-start/server-only";
 
-import { cache } from "react";
 import { getRequest } from "@tanstack/react-start/server";
 
+import { dashboardSiteContext } from "@/lib/dashboard/site-context";
 import {
   type AccountUserData,
   type SessionTeamGroups,
@@ -12,8 +12,13 @@ import {
 import {
   type AdminServiceReadMap,
   readAdminService,
+  readAdminUnreadAttentionCount,
 } from "@/lib/edge/admin/service/index";
 import { resolveEdgeRuntime } from "@/lib/edge/runtime";
+import {
+  enableRequestReadCache,
+  memoizeRequestRead,
+} from "@/lib/edge/runtime/request-read-cache";
 export { buildSitePath } from "@/lib/dashboard/paths";
 export interface SiteWithSlug extends SiteData {
   slug: string;
@@ -59,28 +64,40 @@ function withSiteSlug(site: SiteData): SiteWithSlug {
     slug: getSiteSlug(site),
   };
 }
-function findSiteBySlug(
-  sites: SiteWithSlug[],
-  siteSlug: string,
-): SiteWithSlug | null {
-  const bySlug = sites.find((site) => site.slug === siteSlug);
-  if (bySlug) return bySlug;
-  const byId = sites.find((site) => site.id === siteSlug);
-  return byId ?? null;
+function requestMemo<Args extends string[], T>(
+  name: string,
+  read: (...args: Args) => Promise<T>,
+) {
+  return (...args: Args): Promise<T> => {
+    const request = getRequest();
+    enableRequestReadCache(request);
+    return memoizeRequestRead(
+      request,
+      JSON.stringify(["dashboard", name, ...args]),
+      () => read(...args),
+    );
+  };
 }
-const getMe = cache(async () => {
+const getMe = requestMemo("profile", async () => {
   try {
     return await readAdmin("session");
   } catch {
     return null;
   }
 });
-const getUnreadAttentionCount = cache(async (): Promise<number> => {
-  const notifications = await readAdmin("notifications", { limit: 1 });
-  return notifications?.unreadAttentionCount ?? 0;
-});
-const getAdminRuntime = cache(async () => {
+const getUnreadAttentionCount = requestMemo(
+  "unread",
+  async (): Promise<number> => {
+    try {
+      return await readAdminUnreadAttentionCount(await getDashboardRuntime());
+    } catch {
+      return 0;
+    }
+  },
+);
+export const getDashboardRuntime = requestMemo("runtime", async () => {
   const runtime = await resolveEdgeRuntime(getRequest());
+  enableRequestReadCache(runtime.request);
   return {
     request: runtime.request,
     env: runtime.env,
@@ -92,7 +109,7 @@ async function readAdmin<K extends keyof AdminServiceReadMap>(
   params?: Record<string, string | number>,
 ): Promise<AdminServiceReadMap[K] | null> {
   try {
-    const runtime = await getAdminRuntime();
+    const runtime = await getDashboardRuntime();
     const url = new URL(runtime.url);
     for (const [key, value] of Object.entries(params ?? {})) {
       url.searchParams.set(key, String(value));
@@ -128,15 +145,17 @@ function teamGroupsForProfile(
     }
   );
 }
-export const getDashboardProfile = cache(async () => {
+export const getDashboardProfile = requestMemo("profile-context", async () => {
   return getMe();
 });
-export const getDashboardRootContext = cache(
+export const getDashboardRootContext = requestMemo(
+  "root",
   async (): Promise<DashboardRootContext | null> => {
-    const me = await getMe();
+    const [me, unreadAttentionCount] = await Promise.all([
+      getMe(),
+      getUnreadAttentionCount(),
+    ]);
     if (!me) return null;
-
-    const unreadAttentionCount = await getUnreadAttentionCount();
 
     return {
       user: me.user,
@@ -146,7 +165,8 @@ export const getDashboardRootContext = cache(
     };
   },
 );
-export const getDashboardTeamSites = cache(
+export const getDashboardTeamSites = requestMemo(
+  "sites",
   async (teamId: string): Promise<SiteWithSlug[]> => {
     try {
       const sites = await readAdmin("sites", { teamId });
@@ -157,7 +177,8 @@ export const getDashboardTeamSites = cache(
     }
   },
 );
-export const getDashboardTeamContext = cache(
+export const getDashboardTeamContext = requestMemo(
+  "team",
   async (teamSlug: string): Promise<DashboardTeamContext | null> => {
     const me = await getMe();
     if (!me) return null;
@@ -180,7 +201,8 @@ export const getDashboardTeamContext = cache(
     };
   },
 );
-export const getTeamSiteContext = cache(
+export const getTeamSiteContext = requestMemo(
+  "site",
   async (
     teamSlug: string,
     siteSlug: string,
@@ -188,20 +210,12 @@ export const getTeamSiteContext = cache(
     const teamContext = await getDashboardTeamContext(teamSlug);
     if (!teamContext) return null;
 
-    const activeSite = findSiteBySlug(teamContext.sites, siteSlug);
-    if (!activeSite) return null;
-
-    return {
-      user: teamContext.user,
-      teams: teamContext.teams,
-      teamGroups: teamContext.teamGroups,
-      activeTeam: teamContext.activeTeam,
-      sites: teamContext.sites,
-      activeSite,
-    };
+    return dashboardSiteContext(teamContext, siteSlug);
   },
 );
-export const getDefaultTeamSite = cache(
+
+export const getDefaultTeamSite = requestMemo(
+  "default",
   async (): Promise<{ teamSlug: string; siteSlug: string } | null> => {
     const me = await getMe();
     if (!me || me.teams.length === 0) return null;
@@ -218,7 +232,8 @@ export const getDefaultTeamSite = cache(
     };
   },
 );
-export const getTeamDefaultSite = cache(
+export const getTeamDefaultSite = requestMemo(
+  "team-default",
   async (
     teamSlug: string,
   ): Promise<{ teamSlug: string; siteSlug: string } | null> => {

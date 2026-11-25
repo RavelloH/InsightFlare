@@ -295,7 +295,9 @@ export function DashboardQueryProvider({
     [range, maxRangeDays, customRange, interval, timeZone],
   );
   const windowState = useMemo(() => {
-    const snapshot = initialWindowRef.current;
+    // Navigation can supply a newer canonical server window. Reuse it
+    // only when the current selection still matches.
+    const snapshot = initialWindow;
     const initialCustomRange =
       snapshot?.preset === "custom"
         ? { from: snapshot.from, to: snapshot.to }
@@ -307,7 +309,7 @@ export function DashboardQueryProvider({
       timeZone === snapshot.timeZone &&
       JSON.stringify(customRange) === JSON.stringify(initialCustomRange);
     return isInitialSelection ? snapshot : resolvedWindow;
-  }, [customRange, interval, range, resolvedWindow, timeZone]);
+  }, [customRange, initialWindow, interval, range, resolvedWindow, timeZone]);
 
   useEffect(() => {
     const clamped = clampIntervalForRange(

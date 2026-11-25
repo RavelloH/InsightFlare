@@ -123,3 +123,13 @@ export async function executeRealAdminService(
       return nf();
   }
 }
+
+export async function readRealAdminUnreadAttentionCount(
+  input: Omit<AdminServiceRequest, "route">,
+): Promise<number> {
+  const actor = await requireActor(input.env, input.request);
+  if (actor instanceof Response) return 0;
+  const { countUnreadAttentionMessages } =
+    await import("@/lib/notifications/edge/message-store");
+  return countUnreadAttentionMessages(input.env, actor.user.id);
+}

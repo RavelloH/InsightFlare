@@ -11,18 +11,10 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { LogoutActionButton } from "@/components/auth/logout-action-button";
 import { WorkspaceClient } from "@/components/dashboard/workspace/workspace-client";
-import { loadWorkspaceSnapshots } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 import Link from "@/lib/router";
 
 export const Route = createFileRoute("/$locale/app/")({
-  beforeLoad: async ({ context }) => ({
-    workspaceSnapshots: context.dashboardRoot
-      ? await loadWorkspaceSnapshots({
-          data: { teamIds: context.dashboardRoot.teams.map((team) => team.id) },
-        })
-      : null,
-  }),
   head: ({ match }) => ({
     meta: [
       {
