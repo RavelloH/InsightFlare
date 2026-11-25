@@ -660,6 +660,7 @@ export async function queryPageCardMetricsFromD1(
   const filteredClause = appendSqlConditions(filter?.clause ?? "", [
     `TRIM(COALESCE(pathname, '')) != ''`,
     pathnameCondition,
+    options?.search?.trim() ? "LOWER(pathname) LIKE ? ESCAPE '\\'" : "",
   ]);
   const hasLimit = typeof options?.limit === "number";
   const cursor = options?.cursor;
@@ -678,9 +679,6 @@ export async function queryPageCardMetricsFromD1(
   };
   const { primary, secondary } = sortColumns[sort];
   const operator = direction === "asc" ? ">" : "<";
-  const searchClause = options?.search?.trim()
-    ? `AND LOWER(pr.pathname) LIKE ? ESCAPE '\\'`
-    : "";
   const cursorClause = cursor
     ? `AND (
         pr.${primary} ${operator} ?
@@ -755,7 +753,6 @@ SELECT
   pr.durationViews AS durationViews
 FROM path_metrics pr
 WHERE 1 = 1
-${searchClause}
 ${cursorClause}
 ORDER BY pr.${primary} ${direction}, pr.${secondary} ${direction}, pr.pathname ASC
 ${hasLimit ? "LIMIT ?" : ""}

@@ -1608,6 +1608,98 @@ describe("edge paginated page and referrer readers", () => {
     expect(changeSecond.calls[0].sql).toContain("change_class");
   });
 
+  it("pushes literal page search into both comparison windows without losing reference-only paths", async () => {
+    const sqlite = createScopedOverviewSqliteEnv();
+    const env = { ...sqlite.env, DAILY_SALT_SECRET: "test-secret" };
+    const hour = 60 * 60 * 1000;
+    const previous = {
+      ...window,
+      startMs: window.startMs - 2 * hour,
+      endExclusiveMs: window.startMs,
+    };
+    try {
+      const insert = sqlite.database.prepare(`
+        INSERT INTO visits (visit_id, site_id, visitor_id, session_id, status,
+          started_at, last_activity_at, pathname, hostname, country, duration_ms)
+        VALUES (?, ?, ?, ?, 'closed', ?, ?, ?, 'example.test', ?, 20)
+      `);
+      const add = (id: string, at: number, path: string, country: string) =>
+        insert.run(id, siteId, id, id, at, at, path, country);
+      add("c1", baseMs + 1, "/keep%_shared", "US");
+      add("c2", baseMs + 2, "/keep%_current", "US");
+      add("c3", baseMs + 3, "/keepXX", "US");
+      add("c4", baseMs + 4, "/keep%_excluded", "CA");
+      add("r1", baseMs - hour, "/keep%_shared", "CA");
+      add("r2", baseMs - hour + 1, "/keep%_reference", "CA");
+      add("r3", baseMs - hour + 2, "/keep%_excluded", "US");
+      const time = (w: QueryWindow) =>
+        createQueryTime(w.startMs, w.endExclusiveMs, w.timeZone, w.nowMs);
+      const current = filterFixture({ country: "US" });
+      const reference = filterFixture({ country: "CA" });
+      const prepared = (w: QueryWindow, filters: FilterDocument) =>
+        prepareScopedQuery("pages", {
+          context: siteQueryContext(siteId, "private-dashboard"),
+          time: time(w),
+          filters,
+          scopePreference: "event",
+        }).filters!;
+      for (const scoped of [false, true]) {
+        const f = scoped ? prepared(window, current) : current;
+        const r = scoped ? prepared(previous, reference) : reference;
+        const input = {
+          window,
+          filters: f,
+          interval: "hour" as const,
+          search: "%_",
+          comparison: {
+            current: { time: time(window), filters: f },
+            reference: { time: time(previous), filters: r },
+            metric: "views" as const,
+            sortBy: "current" as const,
+            direction: "desc" as const,
+          },
+        };
+        const result = await queryPagesDashboard(env, siteId, {
+          ...input,
+          page: { limit: 1, cursor: null },
+        });
+        expect(result.items).toHaveLength(1);
+        expect(result.items[0]).toMatchObject({
+          pathname: "/keep%_shared",
+          metrics: { views: 1 },
+          reference: { views: 1 },
+        });
+        const rest = await queryPagesDashboard(env, siteId, {
+          ...input,
+          page: { limit: 10, cursor: result.pagination.nextCursor },
+        });
+        expect(
+          rest.items.map((row) => ({
+            path: row.pathname,
+            current: row.metrics.views,
+            reference: row.reference?.views,
+          })),
+        ).toEqual([
+          { path: "/keep%_current", current: 1, reference: 0 },
+          { path: "/keep%_reference", current: 0, reference: 1 },
+        ]);
+        const direct = await queryPageCardMetricsFromD1(
+          env,
+          siteId,
+          window,
+          f,
+          { search: "%_", limit: 10 },
+        );
+        expect(direct.map((row) => row.pathname)).toEqual([
+          "/keep%_current",
+          "/keep%_shared",
+        ]);
+      }
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it("supports page dashboard metric and comparison ordering variants", async () => {
     const comparisonBase = {
       current: {
@@ -1654,7 +1746,7 @@ describe("edge paginated page and referrer readers", () => {
       "avgDurationMs",
     ] as const) {
       for (const sortBy of ["current", "reference", "change"] as const) {
-        const { env } = createD1Env([[row], []]);
+        const { env, calls } = createD1Env([[row], []]);
         await queryPagesDashboard(env, siteId, {
           window,
           filters: EMPTY_FILTER_DOCUMENT,
@@ -1663,6 +1755,8 @@ describe("edge paginated page and referrer readers", () => {
           page: { limit: 1, cursor: null },
           comparison: { ...comparisonBase, metric, sortBy },
         });
+        expect(calls[0].sql.match(/LOWER\(pathname\) LIKE/g)).toHaveLength(2);
+        expect(calls[0].bindings.slice(-3)).toEqual(["%docs%", "%docs%", 2]);
       }
     }
     const normalRow = {
@@ -1698,7 +1792,10 @@ describe("edge paginated page and referrer readers", () => {
         sort: { key, direction: "asc" },
         page: { limit: 1, cursor: null },
       });
-      expect(normal.calls[0].sql).toContain("LOWER(pr.pathname) LIKE");
+      expect(normal.calls[0].sql).toContain("LOWER(pathname) LIKE");
+      expect(normal.calls[0].sql.indexOf("LOWER(pathname) LIKE")).toBeLessThan(
+        normal.calls[0].sql.indexOf("path_rollup AS"),
+      );
       expect(normal.calls[0].sql).toContain(`ORDER BY pr.${key} asc`);
     }
   });
