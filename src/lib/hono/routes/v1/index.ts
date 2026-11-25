@@ -17,6 +17,7 @@ import {
   TypedBatchRequestSchema,
   TypedBatchValidationError,
 } from "@/lib/api-v1";
+import { runWithDimensionPageBatch } from "@/lib/edge/analytics/composition";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
 import { authenticateApiKeyMiddleware } from "@/lib/hono/middleware/api-key";
 import { registerV1CoreRoutes } from "@/lib/hono/routes/v1/core";
@@ -180,11 +181,8 @@ v1Routes.post("/batch", async (c) => {
     }
   }
   try {
-    const result = await executeTypedBatch(
-      c.req.raw,
-      principal(c),
-      parsed.data,
-      {
+    const result = await runWithDimensionPageBatch(() =>
+      executeTypedBatch(c.req.raw, principal(c), parsed.data, {
         signal: c.req.raw.signal,
         dispatch: (_item, context) =>
           dispatchTypedBatchRequest(
@@ -193,7 +191,7 @@ v1Routes.post("/batch", async (c) => {
             executionContext(c),
             context.principal,
           ),
-      },
+      }),
     );
     return jsonSuccess(
       { responses: result.responses },

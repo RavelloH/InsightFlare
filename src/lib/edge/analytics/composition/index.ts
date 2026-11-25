@@ -14,3 +14,4 @@ export {
 } from "./query-diagnostics";
 export { createSiteAnalyticsRuntime } from "./site-runtime";
 export { createTeamAnalyticsRuntime } from "./team-runtime";
+export { runWithDimensionPageBatch } from "@/lib/edge/analytics/providers/d1/internal/dimensions";

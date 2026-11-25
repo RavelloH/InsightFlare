@@ -73,6 +73,11 @@ const PROVIDER_TEMPLATE_OWNERS: Partial<Record<QueryOperation, string>> = {
  */
 const STATIC_SQL_TEMPLATES = [
   {
+    id: "analytics.dimension.batch",
+    ownerModule: "src/lib/edge/analytics/providers/d1/internal/dimensions.ts",
+    variants: ["raw.filtered"],
+  },
+  {
     id: "analytics.overview.raw.summary",
     ownerModule: "src/lib/edge/analytics/providers/d1/internal/overview.ts",
     variants: ["raw.filtered", "raw.unfiltered"],
