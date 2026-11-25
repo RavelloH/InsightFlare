@@ -219,6 +219,11 @@ export async function queryPerformanceSummariesFromD1(
   filters: FilterDocument,
 ): Promise<Record<PerformanceMetricKey, PerformanceSummaryRow>> {
   const source = performanceVisitSource(siteId, window, filters);
+  // Neither query counts page views. Prune observations without any
+  // metrics before materialization, without changing the scoped eligibility.
+  const filteredClause = appendSqlConditions(source.filterClause, [
+    "(" + performanceMetricPresenceSql() + ")",
+  ]);
   const sql = `
 WITH
 ${source.ctes},
@@ -230,7 +235,7 @@ filtered_visits AS MATERIALIZED (
     perf_cls,
     perf_inp_ms
   FROM ${source.relation}
-  ${source.filterClause}
+  ${filteredClause}
 ),
 metric_visits AS (
   ${performanceMetricVisitsSql("filtered_visits")}
@@ -323,6 +328,11 @@ export async function queryAllPerformanceTrendsFromD1(
   const source = performanceVisitSource(siteId, window, filters);
   const buckets = buildTimeBuckets(window, interval);
   const bucket = timeBucketCase(buckets, "started_at");
+  // Neither query counts page views. Prune observations without any
+  // metrics before materialization, without changing the scoped eligibility.
+  const filteredClause = appendSqlConditions(source.filterClause, [
+    "(" + performanceMetricPresenceSql() + ")",
+  ]);
   const sql = `
 WITH
 ${source.ctes},
@@ -335,7 +345,7 @@ bucketed_visits AS MATERIALIZED (
     perf_cls,
     perf_inp_ms
   FROM ${source.relation}
-  ${source.filterClause}
+  ${filteredClause}
 ),
 metric_visits AS (
   ${performanceMetricVisitsSql("bucketed_visits", ["bucket"])}

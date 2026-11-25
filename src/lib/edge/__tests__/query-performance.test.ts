@@ -1129,6 +1129,98 @@ describe("edge query performance D1 helpers", () => {
     }
   });
 
+  it("prunes entirely missing metrics before materializing summary and trend inputs", async () => {
+    const { env, d1 } = createSqlitePerformanceEnv();
+    try {
+      const insert = d1.database.prepare(
+        "INSERT INTO visits (visit_id, site_id, started_at, pathname, country, perf_lcp_ms, perf_cls) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      );
+      insert.run("null", siteId, window.startMs, "/first", "US", null, null);
+      insert.run("zero", siteId, window.startMs + 1, "/first", "US", null, 0);
+      insert.run("lcp", siteId, window.startMs + 2, "/first", "US", 120, null);
+      insert.run(
+        "other-country",
+        siteId,
+        window.startMs + 3,
+        "/first",
+        "CA",
+        900,
+        0.5,
+      );
+      insert.run(
+        "outside",
+        siteId,
+        window.endExclusiveMs,
+        "/first",
+        "US",
+        999,
+        1,
+      );
+      const filters = filterFixture({ country: "US" });
+      const summary = await queryPerformanceSummariesFromD1(
+        env,
+        siteId,
+        window,
+        filters,
+      );
+      const trends = await queryAllPerformanceTrendsFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        filters,
+      );
+      expect(summary.lcp).toEqual({
+        avg: 120,
+        p50: 120,
+        p75: 120,
+        p95: 120,
+        samples: 1,
+      });
+      expect(summary.cls).toEqual({
+        avg: 0,
+        p50: 0,
+        p75: 0,
+        p95: 0,
+        samples: 1,
+      });
+      expect(summary.inp.samples).toBe(0);
+      expect(trends.lcp).toEqual([
+        {
+          bucket: 0,
+          timestampMs: Date.UTC(2026, 0, 2, 1),
+          avg: 120,
+          p50: 120,
+          p75: 120,
+          p95: 120,
+          samples: 1,
+        },
+      ]);
+      expect(trends.cls[0]?.samples).toBe(1);
+      expect(trends.cls[0]?.p95).toBe(0);
+      expect(trends.inp).toEqual([]);
+      for (const call of d1.calls) {
+        expect(call.sql).toMatch(
+          /(?:filtered_visits|bucketed_visits) AS MATERIALIZED \([\s\S]*?\(perf_ttfb_ms IS NOT NULL OR perf_fcp_ms IS NOT NULL OR perf_lcp_ms IS NOT NULL OR perf_cls IS NOT NULL OR perf_inp_ms IS NOT NULL\)\s*\),/,
+        );
+      }
+      // The dashboard still counts all eligible views, including null metrics.
+      const dashboard = await queryPerformanceDashboardFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        filters,
+        10,
+      );
+      expect(dashboard.summaries).toEqual(summary);
+      expect(dashboard.trends).toEqual(trends);
+      expect(dashboard.routes[0]?.views).toBe(3);
+    } finally {
+      d1.close();
+    }
+  });
+
   it("keeps dashboard percentiles and sample counts identical to independent readers", async () => {
     const { env, d1 } = createSqlitePerformanceEnv();
     try {
