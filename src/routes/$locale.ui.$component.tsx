@@ -32,7 +32,7 @@ import {
 } from "@/components/ui-gallery/registry";
 import { createUiGallerySource } from "@/components/ui-gallery/source-code";
 import { resolveLocale } from "@/lib/i18n/config";
-import { getMessages } from "@/lib/i18n/messages";
+import { getRuntimeMessages } from "@/lib/i18n/runtime-messages";
 import { dashboardPageTitle } from "@/lib/page-title";
 import Link from "@/lib/router";
 
@@ -198,18 +198,18 @@ function LiveTabbedTablePreview({
 }
 
 export const Route = createFileRoute("/$locale/ui/$component")({
-  beforeLoad: ({ params }) => {
-    if (!findUiGalleryEntry(params.component)) throw notFound();
+  // Load the registry only while entering a gallery route, never from the
+  // application entry. Validation also warms the detail component's import.
+  beforeLoad: async ({ params }): Promise<{ galleryTitle: string }> => {
+    const { findUiGalleryEntry } =
+      await import("@/components/ui-gallery/registry");
+    const entry = findUiGalleryEntry(params.component);
+    if (!entry) throw notFound();
+    return { galleryTitle: entry.contract.title };
   },
-  head: ({ params }) => ({
+  head: ({ match }) => ({
     meta: [
-      {
-        title: dashboardPageTitle(
-          findUiGalleryEntry(params.component)?.contract.title ??
-            "UI Components",
-          {},
-        ),
-      },
+      { title: dashboardPageTitle(match.context.galleryTitle, {}) },
       { name: "robots", content: "noindex,nofollow" },
     ],
   }),
@@ -228,7 +228,7 @@ function UiGalleryDetail() {
     Math.floor(entry.maxValuesPerRow ?? MAX_PROP_VALUES_PER_ROW),
   );
   const copy = getUiGalleryCopy(entry, locale);
-  const messages = getMessages(locale).uiGallery;
+  const messages = getRuntimeMessages(locale).uiGallery;
   const installPackage =
     entry.packageType === "ui"
       ? "@insightflare/ui"

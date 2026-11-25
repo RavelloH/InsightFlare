@@ -1,5 +1,4 @@
 import { memo } from "react";
-import { Icon } from "@iconify/react";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
@@ -14,6 +13,7 @@ import { RiGlobalLine, RiPulseLine } from "@remixicon/react";
 import Avatar from "boring-avatars";
 import { AnimatePresence, motion } from "motion/react";
 
+import { FlagIcon } from "../flag-icon";
 import { resolveBrowserIconUrl, resolveOsIconUrl } from "./icon-assets";
 import {
   BROWSER_APPLE_ICON_KEYS,
@@ -154,7 +154,7 @@ const RealtimeLogStreamItemCard = memo(
         <MetaItem
           icon={
             countryFlagCode ? (
-              <Icon
+              <FlagIcon
                 icon={`flagpack:${countryFlagCode.toLowerCase()}`}
                 style={{ width: 16, height: 12 }}
                 className="block shrink-0"

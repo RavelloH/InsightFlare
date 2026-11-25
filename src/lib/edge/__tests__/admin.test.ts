@@ -962,6 +962,7 @@ describe("private admin edge handler", () => {
           name: "Team",
           slug: "team",
           membershipRole: "owner",
+          ownerUserId: actor.id,
           siteCount: 1,
           memberCount: 1,
         },
@@ -972,6 +973,7 @@ describe("private admin edge handler", () => {
           name: "Other",
           slug: "other",
           membershipRole: "admin",
+          ownerUserId: "other-owner",
           siteCount: 0,
           memberCount: 2,
         },
@@ -982,6 +984,7 @@ describe("private admin edge handler", () => {
           name: "Member",
           slug: "member",
           membershipRole: "bogus",
+          ownerUserId: "other-owner",
           siteCount: 0,
           memberCount: 3,
         },
@@ -995,15 +998,13 @@ describe("private admin edge handler", () => {
           name: "System",
           slug: "system",
           membershipRole: null,
+          ownerUserId: "other-owner",
           siteCount: 0,
           memberCount: 1,
         },
       ];
       const { env } = createEnv([
         statement({ first: actor }),
-        statement({ all: createdTeams }),
-        statement({ all: managedTeams }),
-        statement({ all: memberTeams }),
         statement({ all: systemTeams }),
       ]);
 

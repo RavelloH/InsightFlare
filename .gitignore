@@ -36,3 +36,9 @@ output/
 
 # Generated translation implementation (edit src/i18n/*.yaml)
 /src/lib/i18n/generated/
+
+# Generated, versioned Flagpack SVG assets.
+/public/images/flagpack/
+
+# Generated static asset cache configuration.
+/public/_headers

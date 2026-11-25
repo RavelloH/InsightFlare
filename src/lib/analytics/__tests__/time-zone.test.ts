@@ -127,6 +127,36 @@ describe("Timezone & Calendar Calculation Utilities", () => {
     });
   });
 
+  it("matches ICU UTC aliases for modern dates, fractional timestamps and calendar rollovers", () => {
+    const timestamps = [
+      0,
+      123.75,
+      Date.UTC(2024, 1, 29, 23, 59, 59, 999),
+      Date.UTC(2026, 11, 31, 23, 59),
+    ];
+    for (const timestamp of timestamps) {
+      expect(zonedParts(timestamp, "UTC")).toEqual(
+        zonedParts(timestamp, "Etc/UTC"),
+      );
+      for (const interval of [
+        "minute",
+        "hour",
+        "day",
+        "week",
+        "month",
+      ] as const) {
+        expect(startOfZonedInterval(timestamp, interval, "UTC")).toBe(
+          startOfZonedInterval(timestamp, interval, "Etc/UTC"),
+        );
+        for (const amount of [-2, 1, 3]) {
+          expect(addZonedInterval(timestamp, interval, "UTC", amount)).toBe(
+            addZonedInterval(timestamp, interval, "Etc/UTC", amount),
+          );
+        }
+      }
+    }
+  });
+
   describe("addCalendarDays & addCalendarMonths", () => {
     it("should correctly handle calendar day additions crossing month boundaries", () => {
       const start = { year: 2026, month: 5, day: 31 };

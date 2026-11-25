@@ -5,6 +5,7 @@ import {
   resolveDashboardInitialWindow,
 } from "@/lib/dashboard/query-preferences";
 import {
+  buildSidebarSiteTrends,
   buildTeamAggregateTrend,
   buildTeamSiteTrends,
   fetchTeamDashboard,
@@ -38,6 +39,39 @@ describe("team dashboard query helpers", () => {
     expect(
       sameTeamDashboardWindow(window, { ...window, timeZone: "Asia/Tokyo" }),
     ).toBe(false);
+  });
+
+  it("only materializes buckets for visible compact charts with actual traffic", () => {
+    const trend = [
+      {
+        bucket: 0,
+        timestampMs: window.from,
+        sites: [
+          { siteId: "active", views: 10, visitors: 3 },
+          { siteId: "empty", views: 0, visitors: 0 },
+          { siteId: "unrelated", views: 50, visitors: 20 },
+        ],
+      },
+      {
+        bucket: 2,
+        timestampMs: window.to,
+        sites: [
+          { siteId: "active", views: 5, visitors: 2 },
+          { siteId: "empty", views: -1, visitors: Number.NaN },
+        ],
+      },
+    ];
+    const ids = ["active", "empty", "missing"];
+    const pending = buildSidebarSiteTrends(ids, undefined, window, true);
+    expect(pending).toEqual({});
+    expect(buildSidebarSiteTrends(ids, trend, window, false)).toBe(pending);
+    expect(buildSidebarSiteTrends(["empty"], trend, window, true)).toBe(
+      pending,
+    );
+    expect(buildSidebarSiteTrends([], trend, window, true)).toBe(pending);
+    expect(buildSidebarSiteTrends(ids, trend, window, true)).toEqual({
+      active: buildTeamSiteTrends(ids, trend, window).active,
+    });
   });
 
   it("fills missing buckets without clearing the previous snapshot data", () => {
@@ -302,5 +336,24 @@ describe("dashboard query preferences", () => {
     expect(
       readDashboardQueryPreferences("insightflare-dashboard-query=%ZZ"),
     ).toEqual({ range: "30d", customRange: null });
+  });
+  it("prefers an explicitly configured reporting timezone over a missing or stale cookie", () => {
+    const now = Date.UTC(2026, 0, 10);
+    expect(
+      resolveDashboardInitialWindow(null, now, "Asia/Tokyo").timeZone,
+    ).toBe("Asia/Tokyo");
+    expect(
+      resolveDashboardInitialWindow(
+        "insightflare-reporting-time-zone=UTC",
+        now,
+        "Asia/Tokyo",
+      ).timeZone,
+    ).toBe("Asia/Tokyo");
+    expect(
+      resolveDashboardInitialWindow(
+        "insightflare-reporting-time-zone=Asia%2FShanghai",
+        now,
+      ).timeZone,
+    ).toBe("Asia/Shanghai");
   });
 });

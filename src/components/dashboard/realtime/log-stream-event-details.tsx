@@ -1,5 +1,5 @@
 import { type ReactNode, useMemo } from "react";
-import { Icon } from "@iconify/react";
+import { FlagIcon } from "@insightflare/product-ui/flag-icon";
 import {
   BROWSER_APPLE_ICON_KEYS,
   BROWSER_ICON_DIR,
@@ -712,7 +712,7 @@ export function RealtimeLogEventDetailsDrawer({
         <RealtimeEventDetailValue
           icon={
             countryFlagCode ? (
-              <Icon
+              <FlagIcon
                 icon={`flagpack:${countryFlagCode.toLowerCase()}`}
                 style={{ width: 16, height: 12 }}
                 className="block shrink-0"

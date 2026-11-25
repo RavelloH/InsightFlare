@@ -120,6 +120,9 @@ export type InvocationSafePhase =
   | "page.handler"
   | "page.middleware"
   | "server_function.handler"
+  | "dashboard.bootstrap"
+  | "dashboard.profile"
+  | "dashboard.team_snapshot"
   | "do.fetch.handler"
   | "do.schema_ready"
   | "do.maintenance"
@@ -239,6 +242,9 @@ const SAFE_PHASES = new Set<InvocationSafePhase>([
   "page.handler",
   "page.middleware",
   "server_function.handler",
+  "dashboard.bootstrap",
+  "dashboard.profile",
+  "dashboard.team_snapshot",
   "do.fetch.handler",
   "do.schema_ready",
   "do.maintenance",

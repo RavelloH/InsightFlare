@@ -15,9 +15,10 @@ import {
 } from "@/components/dashboard/analytics-time-tooltip";
 import { SiteBrandIcon } from "@/components/dashboard/common/site-brand-icon";
 import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useHydrated } from "@/hooks/use-hydrated";
 import { numberFormat } from "@/lib/dashboard/format";
 import {
-  buildTeamSiteTrends,
+  buildSidebarSiteTrends,
   teamDashboardQueryOptions,
   type TeamDashboardWindow,
   type TeamTrafficPoint,
@@ -46,6 +47,7 @@ interface SidebarSiteDetailsProps {
   };
 }
 const SIDEBAR_EXPAND_CHART_DELAY_MS = 380;
+const EMPTY_TREND: TeamTrafficPoint[] = [];
 const SITE_ROW_DETAIL_CLASS =
   "grid min-w-0 max-w-[20rem] flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-2 overflow-hidden transition-[max-width,opacity,transform] duration-[380ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none group-data-[collapsible=icon]:pointer-events-none group-data-[collapsible=icon]:max-w-0 group-data-[collapsible=icon]:translate-x-1 group-data-[collapsible=icon]:opacity-0";
 function buildSitePath(
@@ -118,8 +120,9 @@ const SidebarSiteRow = memo(function SidebarSiteRow({
     sidebarState === "collapsed"
       ? `sidebar-site:${site.id}:collapsed`
       : `sidebar-site:${site.id}:expanded:${metrics?.views ?? "pending"}:${metrics?.visitors ?? "pending"}`;
+  const hasChartData = shouldRenderCharts && trend.length > 0;
   const chartTransitionKey = useMemo(() => {
-    if (!shouldRenderCharts) return "hidden";
+    if (!hasChartData) return "hidden";
 
     const trendKey = trend
       .map(({ timestampMs, views, visitors }) =>
@@ -139,7 +142,7 @@ const SidebarSiteRow = memo(function SidebarSiteRow({
     dashboardWindow.interval,
     dashboardWindow.timeZone,
     dashboardWindow.to,
-    shouldRenderCharts,
+    hasChartData,
     trend,
   ]);
 
@@ -164,7 +167,7 @@ const SidebarSiteRow = memo(function SidebarSiteRow({
               duration={0.2}
               className="h-4 w-full"
             >
-              {shouldRenderCharts ? (
+              {hasChartData ? (
                 <div className="h-4 w-full">
                   <TrafficPairBarChart
                     data={trend}
@@ -211,6 +214,7 @@ export const SidebarSiteDetails = memo(function SidebarSiteDetails({
 }: SidebarSiteDetailsProps) {
   const { state: sidebarState, isMobile } = useSidebar();
   const { window } = useDashboardQuery();
+  const hydrated = useHydrated();
   const [shouldRenderCharts, setShouldRenderCharts] = useState(
     isMobile || sidebarState !== "collapsed",
   );
@@ -219,7 +223,8 @@ export const SidebarSiteDetails = memo(function SidebarSiteDetails({
       teamId,
       window,
       range: window.preset,
-      enabled: Boolean(teamId) && sites.length > 0 && shouldRenderCharts,
+      enabled:
+        hydrated && Boolean(teamId) && sites.length > 0 && shouldRenderCharts,
     }),
   );
   const dashboardSnapshot = teamDashboardQuery.data;
@@ -243,13 +248,18 @@ export const SidebarSiteDetails = memo(function SidebarSiteDetails({
     return () => clearTimeout(timeout);
   }, [sidebarState, isMobile]);
 
-  const siteTrendById = useMemo(() => {
-    return buildTeamSiteTrends(
-      sites.map((site) => site.id),
-      dashboardSnapshot?.data.trend ?? [],
-      dashboardWindow,
-    );
-  }, [dashboardSnapshot?.data.trend, dashboardWindow, sites]);
+  const trendData = dashboardSnapshot?.data.trend;
+  const siteIds = useMemo(() => sites.map((site) => site.id), [sites]);
+  const siteTrendById = useMemo(
+    () =>
+      buildSidebarSiteTrends(
+        siteIds,
+        trendData,
+        dashboardWindow,
+        shouldRenderCharts,
+      ),
+    [trendData, dashboardWindow, siteIds, shouldRenderCharts],
+  );
 
   const siteMetricsById = useMemo(
     () =>
@@ -269,7 +279,7 @@ export const SidebarSiteDetails = memo(function SidebarSiteDetails({
     () =>
       sites.map((site) => ({
         site,
-        trend: siteTrendById[site.id] ?? [],
+        trend: siteTrendById[site.id] ?? EMPTY_TREND,
       })),
     [sites, siteTrendById],
   );

@@ -137,7 +137,7 @@ const config = defineConfig({
         "src/**/analytics.ts",
         "src/**/management.ts",
         "src/lib/i18n/messages.ts",
-        "src/lib/i18n/generated/messages.ts",
+        "src/lib/i18n/generated/**",
         "src/tracker/*.min.ts",
         "src/tracker/sdk.no-perf.min.ts",
         "src/lib/dashboard-api/contract/types/**",

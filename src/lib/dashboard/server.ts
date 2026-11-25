@@ -14,6 +14,7 @@ import {
   readAdminService,
   readAdminUnreadAttentionCount,
 } from "@/lib/edge/admin/service/index";
+import { currentInvocationLogger } from "@/lib/edge/observability/logger";
 import { resolveEdgeRuntime } from "@/lib/edge/runtime";
 import {
   enableRequestReadCache,
@@ -80,7 +81,10 @@ function requestMemo<Args extends string[], T>(
 }
 const getMe = requestMemo("profile", async () => {
   try {
-    return await readAdmin("session");
+    const logger = currentInvocationLogger();
+    return logger
+      ? await logger.measure("dashboard.profile", () => readAdmin("session"))
+      : await readAdmin("session");
   } catch {
     return null;
   }

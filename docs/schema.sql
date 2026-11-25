@@ -433,6 +433,8 @@ CREATE TABLE teams (
   FOREIGN KEY (owner_user_id) REFERENCES users(id)
 );
 
+CREATE INDEX idx_teams_owner_user ON teams(owner_user_id);
+
 CREATE TABLE users (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,

@@ -1,5 +1,5 @@
 import { memo, type ReactNode, useCallback, useMemo } from "react";
-import { Icon } from "@iconify/react";
+import { FlagIcon } from "@insightflare/product-ui/flag-icon";
 
 import {
   TabbedDataTableCard,
@@ -143,7 +143,7 @@ const LabelWithLeadingIcon = memo(function LabelWithLeadingIcon({
     <span className="relative inline-block max-w-full break-words pl-6">
       <span className="pointer-events-none absolute inset-y-0 left-0 inline-flex w-4 items-center justify-center">
         {isFlag ? (
-          <Icon
+          <FlagIcon
             icon={iconName}
             style={{
               width: 16,

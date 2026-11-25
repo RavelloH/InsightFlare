@@ -3776,6 +3776,12 @@ export const schema = {
     primaryKey: ["id"],
     indexes: [
       {
+        name: "idx_teams_owner_user",
+        unique: false,
+        columns: ["owner_user_id"],
+        partial: false,
+      },
+      {
         name: "sqlite_autoindex_teams_1",
         unique: true,
         columns: ["id"],

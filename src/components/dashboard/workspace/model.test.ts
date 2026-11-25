@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildWorkspaceRows,
   buildWorkspaceTotals,
+  combineWorkspaceQueries,
+  deriveWorkspaceData,
   mergeTeamTrends,
   sortRows,
 } from "@/components/dashboard/workspace/model";
@@ -191,5 +193,49 @@ describe("workspace rows", () => {
       "a",
       "c",
     ]);
+  });
+});
+
+describe("workspace derived data", () => {
+  it("keeps status separate from data and preserves team alignment", () => {
+    const item: TeamDashboardData = {
+      sites: [site("a", { visitors: 10 }, { visitors: 20 })],
+      trend: [],
+    };
+    const results = combineWorkspaceQueries([
+      {
+        data: { data: item },
+        isPending: false,
+        isFetching: true,
+        isError: false,
+      },
+      { isPending: true, isFetching: false, isError: true },
+    ]);
+    expect(results).toEqual({
+      data: [item, undefined],
+      loading: true,
+      fetching: true,
+      failed: [false, true],
+    });
+    const derived = deriveWorkspaceData(
+      [team, { ...team, id: "team-b" }],
+      results.data,
+      { from: 0, to: 86400000, interval: "day", timeZone: "UTC" },
+    );
+    expect(derived.rows).toHaveLength(1);
+    expect(derived.rowsById.get("a")).toBe(derived.rows[0]);
+    expect(derived.totals.visitors).toBe(10);
+    expect(derived.changePoints).toEqual([
+      { id: "a", label: "A", value: 10, change: 20, weight: 0 },
+    ]);
+    const empty = deriveWorkspaceData([team], [undefined], {
+      from: 0,
+      to: 86400000,
+      interval: "day",
+      timeZone: "UTC",
+    });
+    expect(empty.rows).toEqual([]);
+    expect(empty.bucketStarts).toEqual([]);
+    expect(empty.changePoints).toEqual([]);
   });
 });

@@ -36,7 +36,8 @@ import type {
 } from "@/lib/dashboard-api/client/edge";
 import type { FilterDocument } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
-import { type AppMessages, getMessages } from "@/lib/i18n/messages";
+import type { AppMessages } from "@/lib/i18n/messages";
+import { getRuntimeMessages } from "@/lib/i18n/runtime-messages";
 
 import {
   FunnelChangeRateInline,
@@ -642,7 +643,7 @@ function FunnelDetailContent({
             siteId={siteId}
             pathname={pathname}
             locale={locale}
-            messages={getMessages(locale)}
+            messages={getRuntimeMessages(locale)}
             window={window}
             filters={filters}
             analysisContext={{

@@ -50,6 +50,7 @@ import {
   readWorkspaceSites,
   type WorkspaceSiteVisit,
 } from "@/components/dashboard/shell/dashboard-shell/navigation";
+import { useHydrated } from "@/hooks/use-hydrated";
 import {
   durationFormat,
   numberFormat,
@@ -58,8 +59,6 @@ import {
 import { buildSitePath } from "@/lib/dashboard/paths";
 import type { DashboardRootContext } from "@/lib/dashboard/server";
 import {
-  buildTeamSiteTrends,
-  type TeamDashboardData,
   teamDashboardQueryOptions,
   type TeamDashboardSnapshot,
 } from "@/lib/dashboard/team-dashboard-query";
@@ -72,9 +71,8 @@ import Link, { useRouter } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 import {
-  buildWorkspaceRows,
-  buildWorkspaceTotals,
-  mergeTeamTrends,
+  combineWorkspaceQueries,
+  deriveWorkspaceData,
   NOTABLE_CHANGE_PERCENT,
   sortRows,
   type WorkspaceSiteRow,
@@ -136,9 +134,10 @@ export function WorkspaceClient({
   dashboard: DashboardRootContext;
   snapshots: Record<string, TeamDashboardSnapshot | null>;
 }) {
+  const hydrated = useHydrated();
   const copy = messages.workspace;
   const { user, teams: allTeams, unreadAttentionCount = 0 } = dashboard;
-  const teams = allTeams.slice(0, TEAM_LIMIT);
+  const teams = useMemo(() => allTeams.slice(0, TEAM_LIMIT), [allTeams]);
   const { window: queryWindow, range } = useDashboardQuery();
   const window = useMemo(
     () => ({
@@ -161,32 +160,26 @@ export function WorkspaceClient({
         window,
         range,
         snapshot: snapshots[team.id] ?? null,
+        enabled: hydrated && Boolean(team.id),
       }),
     ),
+    combine: combineWorkspaceQueries,
   });
   const router = useRouter();
-  const loading = results.some((result) => result.isPending);
-  const fetching = results.some((result) => result.isFetching);
+  const { loading, fetching, data, failed } = results;
   const analyticsLoading = loading || fetching;
-  const failedTeams = teams.filter((_, index) => results[index]?.isError);
-  const dataByTeam = new Map<string, TeamDashboardData>();
-  teams.forEach((team, index) => {
-    const data = results[index]?.data?.data;
-    if (data) dataByTeam.set(team.id, data);
-  });
-  const allData = [...dataByTeam.values()];
-  const sites = allData.flatMap((data) => data.sites);
-  const trendBySite = buildTeamSiteTrends(
-    sites.map((site) => site.id),
-    mergeTeamTrends(allData),
-    window,
+  const failedTeams = useMemo(
+    () => teams.filter((_, index) => failed[index]),
+    [teams, failed],
   );
-  const rows = buildWorkspaceRows(teams, dataByTeam, trendBySite);
-  const totals = buildWorkspaceTotals(sites);
+  // useQueries combines with structural sharing, preserving the data array
+  // across status-only changes. Input and sorting never rebuild time buckets.
+  const { rows, siteCount, totals, bucketStarts, rowsById, changePoints } =
+    useMemo(
+      () => deriveWorkspaceData(teams, data, window),
+      [teams, data, window],
+    );
   const waitingForSites = analyticsLoading && !rows.length;
-  const bucketStarts = (trendBySite[sites[0]?.id ?? ""] ?? []).map(
-    (point) => point.timestampMs,
-  );
 
   const [visits, setVisits] = useState<WorkspaceSiteVisit[]>([]);
   const [search, setSearch] = useState("");
@@ -204,30 +197,36 @@ export function WorkspaceClient({
     queryKey: ["workspace", "attention", user.id, locale],
     queryFn: ({ signal }) =>
       fetchNotificationMessages({ unread: true, limit: 30, locale, signal }),
-    enabled: typeof globalThis.window !== "undefined",
+    enabled: hydrated,
     staleTime: 60_000,
   });
   const attention = (notifications.data?.messages ?? [])
     .filter((message) => message.requiresAttention)
     .slice(0, 5);
 
-  const teamsById = new Map(allTeams.map((team) => [team.id, team]));
-  const rowsById = new Map(rows.map((row) => [row.site.id, row]));
+  const teamsById = useMemo(
+    () => new Map(allTeams.map((team) => [team.id, team])),
+    [allTeams],
+  );
   const recent = visits.flatMap((visit) => {
     const team = teamsById.get(visit.teamId);
     return team ? [{ visit, team }] : [];
   });
   const term = search.trim().toLocaleLowerCase();
-  const visibleRows = sortRows(
-    term
-      ? rows.filter((row) =>
-          [row.site.name, row.site.domain, row.team.name].some((value) =>
-            value.toLocaleLowerCase().includes(term),
-          ),
-        )
-      : rows,
-    sort.key,
-    sort.direction,
+  const visibleRows = useMemo(
+    () =>
+      sortRows(
+        term
+          ? rows.filter((row) =>
+              [row.site.name, row.site.domain, row.team.name].some((value) =>
+                value.toLocaleLowerCase().includes(term),
+              ),
+            )
+          : rows,
+        sort.key,
+        sort.direction,
+      ),
+    [term, rows, sort.key, sort.direction],
   );
   const siteHref = (row: WorkspaceSiteRow) =>
     buildSitePath(locale, row.team.slug, row.slug);
@@ -235,31 +234,22 @@ export function WorkspaceClient({
     const row = rowsById.get(siteId);
     if (row) navigateWithTransition(router, siteHref(row));
   };
-  const pulseRows = sortRows(rows, "visitors").map((row) => ({
-    id: row.site.id,
-    label: row.site.name,
-    icon: (
-      <SiteBrandIcon
-        siteId={row.site.id}
-        siteName={row.site.name}
-        domain={row.site.domain}
-        iconSrc={row.site.iconPath}
-      />
-    ),
-    values: row.trend.map((point) => point.visitors),
-  }));
-  const changePoints = rows.flatMap((row) =>
-    row.visitorsChange === null
-      ? []
-      : [
-          {
-            id: row.site.id,
-            label: row.site.name,
-            value: row.visitors,
-            change: row.visitorsChange,
-            weight: row.views,
-          },
-        ],
+  const pulseRows = useMemo(
+    () =>
+      sortRows(rows, "visitors").map((row) => ({
+        id: row.site.id,
+        label: row.site.name,
+        icon: (
+          <SiteBrandIcon
+            siteId={row.site.id}
+            siteName={row.site.name}
+            domain={row.site.domain}
+            iconSrc={row.site.iconPath}
+          />
+        ),
+        values: row.trend.map((point) => point.visitors),
+      })),
+    [rows],
   );
   const sortHead = (
     key: WorkspaceSort,
@@ -345,7 +335,7 @@ export function WorkspaceClient({
               greeting(copy.greetings, now, user.name || user.username),
               formatI18nTemplate(copy.summary, {
                 teams: allTeams.length,
-                sites: sites.length,
+                sites: siteCount,
               }),
             ]
               .filter(Boolean)

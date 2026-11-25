@@ -44,6 +44,7 @@ import {
   parseFilterUrlForAudience,
   teamQueryContext,
 } from "@/lib/edge/analytics/contract";
+import { currentInvocationLogger } from "@/lib/edge/observability/logger";
 import {
   enableRequestReadCache,
   memoizeRequestRead,
@@ -89,9 +90,14 @@ export const loadDashboardRoot = createServerFn({ method: "GET" }).handler(() =>
 function readInitialWindow(): Promise<TimeWindow> {
   const request = getRequest();
   enableRequestReadCache(request);
-  return memoizeRequestRead(request, "dashboard:window", async () =>
-    resolveDashboardInitialWindow(request.headers.get("cookie")),
-  );
+  return memoizeRequestRead(request, "dashboard:window", async () => {
+    const profile = await getDashboardProfile();
+    const cookie = request.headers.get("cookie");
+    const timeZone = profile?.user.timeZone;
+    return timeZone
+      ? resolveDashboardInitialWindow(cookie, undefined, timeZone)
+      : resolveDashboardInitialWindow(cookie);
+  });
 }
 /** Provides the SSR-safe initial query window to the dashboard shell. */
 export const loadDashboardInitialWindow = createServerFn({
@@ -102,6 +108,17 @@ export const loadDashboardTeam = createServerFn({ method: "GET" })
   .handler(({ data }) => getDashboardTeamContext(data.teamSlug));
 /** Loads the first team-dashboard snapshot on the server for a stable hydrate. */
 async function readTeamDashboardSnapshot(data: {
+  teamId: string;
+}): Promise<TeamDashboardSnapshot | null> {
+  const logger = currentInvocationLogger();
+  return logger
+    ? logger.measure("dashboard.team_snapshot", () =>
+        executeTeamDashboardSnapshot(data),
+      )
+    : executeTeamDashboardSnapshot(data);
+}
+
+async function executeTeamDashboardSnapshot(data: {
   teamId: string;
 }): Promise<TeamDashboardSnapshot | null> {
   const request = getRequest();
@@ -203,46 +220,68 @@ export const loadDashboardBootstrap = createServerFn({ method: "GET" })
         : undefined,
   }))
   .handler(async ({ data }) => {
-    const initialWindow = readInitialWindow();
-    const root = getDashboardRootContext();
-    const team = data.teamSlug
-      ? getDashboardTeamContext(data.teamSlug)
-      : Promise.resolve(null);
-    const snapshots = (async () => {
-      const profile = await getDashboardProfile();
-      if (!profile)
-        return { workspaceSnapshots: null, teamDashboardSnapshot: null };
-      if (data.page === "workspace") {
-        return {
-          workspaceSnapshots: await readWorkspaceSnapshots(
-            profile.teams.slice(0, WORKSPACE_TEAM_LIMIT).map((item) => item.id),
-          ),
-          teamDashboardSnapshot: null,
-        };
-      }
-      const active =
-        data.page === "team" &&
-        profile.teams.find((item) => item.slug === data.teamSlug);
-      return {
-        workspaceSnapshots: null,
-        teamDashboardSnapshot: active
-          ? await readTeamDashboardSnapshot({ teamId: active.id })
-          : null,
-      };
-    })();
-    const [
-      dashboardRoot,
-      initialDashboardWindow,
-      bootstrapTeamContext,
-      initialSnapshots,
-    ] = await Promise.all([root, initialWindow, team, snapshots]);
-    return {
-      dashboardRoot,
-      initialDashboardWindow,
-      bootstrapTeamContext,
-      ...initialSnapshots,
-    };
+    const logger = currentInvocationLogger();
+    if (logger) {
+      // Only fixed, low-cardinality identifiers; no slug, user or search data.
+      const serverFn = new URL(getRequest().url).pathname.startsWith(
+        "/_serverFn",
+      );
+      logger.setRouteKey(
+        serverFn
+          ? "server_function.dashboard.bootstrap"
+          : "page.dashboard." + (data.page ?? "other"),
+      );
+      return logger.measure("dashboard.bootstrap", () =>
+        readDashboardBootstrap(data),
+      );
+    }
+    return readDashboardBootstrap(data);
   });
+
+async function readDashboardBootstrap(data: {
+  teamSlug?: string;
+  page?: "workspace" | "team";
+}) {
+  const initialWindow = readInitialWindow();
+  const root = getDashboardRootContext();
+  const team = data.teamSlug
+    ? getDashboardTeamContext(data.teamSlug)
+    : Promise.resolve(null);
+  const snapshots = (async () => {
+    const profile = await getDashboardProfile();
+    if (!profile)
+      return { workspaceSnapshots: null, teamDashboardSnapshot: null };
+    if (data.page === "workspace") {
+      return {
+        workspaceSnapshots: await readWorkspaceSnapshots(
+          profile.teams.slice(0, WORKSPACE_TEAM_LIMIT).map((item) => item.id),
+        ),
+        teamDashboardSnapshot: null,
+      };
+    }
+    const active =
+      data.page === "team" &&
+      profile.teams.find((item) => item.slug === data.teamSlug);
+    return {
+      workspaceSnapshots: null,
+      teamDashboardSnapshot: active
+        ? await readTeamDashboardSnapshot({ teamId: active.id })
+        : null,
+    };
+  })();
+  const [
+    dashboardRoot,
+    initialDashboardWindow,
+    bootstrapTeamContext,
+    initialSnapshots,
+  ] = await Promise.all([root, initialWindow, team, snapshots]);
+  return {
+    dashboardRoot,
+    initialDashboardWindow,
+    bootstrapTeamContext,
+    ...initialSnapshots,
+  };
+}
 
 function safeInvite(invite: {
   id: string;

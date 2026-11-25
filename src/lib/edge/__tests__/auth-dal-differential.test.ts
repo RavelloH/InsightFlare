@@ -403,7 +403,7 @@ describe("admin auth Typed DAL differential checks", () => {
     expectIndexSearch(plan, "sqlite_autoindex_team_members_1");
   });
 
-  it("matches all session groups and keeps the non-admin query count", async () => {
+  it("matches all session groups in one indexed query", async () => {
     const { database, env, trace } = createFixture();
     const admin = legacyById(database, "actor");
     if (!admin) throw new Error("test actor missing");
@@ -411,14 +411,21 @@ describe("admin auth Typed DAL differential checks", () => {
     await expect(teamGroupsForSession(env, actorFor(admin))).resolves.toEqual(
       legacyTeamGroups(database, actorFor(admin)),
     );
-    expect(trace.preparedSql).toHaveLength(4);
+    expect(trace.preparedSql).toHaveLength(1);
 
     trace.preparedSql.length = 0;
     trace.bindings.length = 0;
     await expect(
       teamGroupsForSession(env, actorFor(admin, false)),
     ).resolves.toEqual(legacyTeamGroups(database, actorFor(admin, false)));
-    expect(trace.preparedSql).toHaveLength(3);
+    expect(trace.preparedSql).toHaveLength(1);
+    const plan = explainQueryPlan(database, {
+      sql: trace.preparedSql[0]!,
+      bindings: trace.bindings[0]!,
+    });
+    expectIndexSearch(plan, "idx_teams_owner_user");
+    expectIndexSearch(plan, "idx_team_members_user");
+    expectIndexSearch(plan, "idx_sites_team");
   });
 
   it("matches existing-team owner upsert and keeps it to two statements", async () => {

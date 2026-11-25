@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { Icon } from "@iconify/react";
+import { FlagIcon } from "@insightflare/product-ui/flag-icon";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
@@ -69,7 +69,7 @@ export function CountryLabelWithFlag({
 
   return (
     <span className="inline-flex min-w-0 items-center gap-2">
-      <Icon
+      <FlagIcon
         icon={iconName}
         style={{ width: 16, height: 12 }}
         className="block shrink-0"

@@ -1,10 +1,4 @@
-import {
-  type ReactNode,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useState,
-} from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useMemo } from "react";
 import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
@@ -67,10 +61,8 @@ import {
   type TimeWindow,
 } from "@/lib/dashboard/query-state";
 import { buildTeamSections } from "@/lib/dashboard/team-sections";
-import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import {
   type SessionTeamGroups,
-  type SiteData,
   type TeamData,
 } from "@/lib/dashboard-api/client/edge";
 import {
@@ -115,7 +107,6 @@ import {
   rememberWorkspaceSite,
   SIDEBAR_COLLAPSE_SECTION_CLASS,
   SIDEBAR_COLLAPSE_SEPARATOR_CLASS,
-  toSidebarSite,
   VALID_ANALYTICS_SECTIONS,
 } from "./dashboard-shell/navigation";
 interface DashboardShellProps {
@@ -150,7 +141,7 @@ export function DashboardShell({
   teamGroups,
   activeTeamSlug,
   authorizedActiveSite,
-  sites = [],
+  sites,
   unreadAttentionCount = 0,
   teamSections,
   managementSections,
@@ -158,9 +149,6 @@ export function DashboardShell({
   children,
 }: DashboardShellProps) {
   useAccountTimeZonePreference(user.timeZone);
-  const [clientSitesByTeam, setClientSitesByTeam] = useState<
-    Record<string, SidebarSite[]>
-  >({});
   const livePathname = usePathname() || pathname;
   const routeSearchParams = useSearchParams();
   const initialFilters = parseFilterDocumentFromSearchParams(routeSearchParams);
@@ -171,17 +159,14 @@ export function DashboardShell({
     ? teams.find((team) => team.slug === liveActiveTeamSlug)
     : undefined;
   const activeTeamId = activeTeam?.id || "";
+  // The matched team route is the authority for its site list. During a
+  // navigation the URL may advance before its context, so never issue a second
+  // request using a pathname-derived team or reuse another team's sites.
   const resolvedSites =
-    sites.length > 0
-      ? sites
-      : activeTeamId
-        ? (clientSitesByTeam[activeTeamId] ?? [])
-        : [];
-  const isSidebarSitesLoading = Boolean(
-    activeTeamId &&
-    sites.length === 0 &&
-    !Object.prototype.hasOwnProperty.call(clientSitesByTeam, activeTeamId),
-  );
+    activeTeamSlug && activeTeamSlug === liveActiveTeamSlug
+      ? (sites ?? [])
+      : [];
+  const isSidebarSitesLoading = Boolean(activeTeamId && sites === undefined);
   const resolvedTeamSections = useMemo(() => {
     if (teamSections) return teamSections;
     if (!liveActiveTeamSlug || !activeTeam) return undefined;
@@ -783,34 +768,6 @@ export function DashboardShell({
       </SidebarGroupContent>
     </SidebarGroup>
   );
-  useEffect(() => {
-    if (!activeTeamId || sites.length > 0 || clientSitesByTeam[activeTeamId]) {
-      return;
-    }
-
-    let active = true;
-    requestAdminService<SiteData[]>("sites", {
-      params: { teamId: activeTeamId },
-    })
-      .then((nextSites) => {
-        if (!active) return;
-        setClientSitesByTeam((current) => ({
-          ...current,
-          [activeTeamId]: nextSites.map(toSidebarSite),
-        }));
-      })
-      .catch(() => {
-        if (!active) return;
-        setClientSitesByTeam((current) => ({
-          ...current,
-          [activeTeamId]: [],
-        }));
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [activeTeamId, clientSitesByTeam, sites.length]);
 
   return (
     <DashboardQueryProvider

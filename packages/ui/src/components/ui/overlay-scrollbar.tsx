@@ -2,7 +2,6 @@ import {
   type ComponentPropsWithoutRef,
   type Ref,
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -10,9 +9,6 @@ import { OverlayScrollbars, type PartialOptions } from "overlayscrollbars";
 import { useOverlayScrollbars } from "overlayscrollbars-react";
 
 import { cn } from "../../lib/utils";
-
-const useClientLayoutEffect =
-  typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 export const HORIZONTAL_SCROLLBAR_OPTIONS = {
   overflow: {
@@ -105,6 +101,67 @@ export function shouldUseNativeScrollbars(): boolean {
   );
 }
 
+export const SCROLLBAR_UPDATED_EVENT = "insightflare:scrollbar-updated";
+
+/**
+ * Enhancement is visual only: native overflow works before it starts. Run
+ * at most one costly initialization per frame, outside React's layout commit.
+ */
+const enhancements = new Set<() => void>();
+let enhancementScheduled = false;
+
+function scheduleNextEnhancement() {
+  if (enhancementScheduled || enhancements.size === 0) return;
+  enhancementScheduled = true;
+  window.requestAnimationFrame(() => {
+    const run = () => {
+      enhancementScheduled = false;
+      const next = enhancements.values().next().value;
+      if (next) {
+        enhancements.delete(next);
+        next();
+      }
+      scheduleNextEnhancement();
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback((deadline) => {
+        // This work is optional and must not compete with input or a busy
+        // hydration commit. Keep the native scrollbar if no idle budget exists.
+        if (deadline.timeRemaining() < 8) {
+          enhancementScheduled = false;
+          scheduleNextEnhancement();
+          return;
+        }
+        run();
+      });
+    } else {
+      window.setTimeout(run, 0);
+    }
+  });
+}
+
+function enqueueEnhancement(job: () => void) {
+  enhancements.add(job);
+  scheduleNextEnhancement();
+  return () => enhancements.delete(job);
+}
+
+function hasScrollableOverflow(
+  viewport: HTMLDivElement,
+  options: PartialOptions,
+) {
+  const x = options.overflow?.x;
+  const y = options.overflow?.y;
+  return (
+    (x !== "hidden" &&
+      x !== "visible" &&
+      viewport.scrollWidth > viewport.clientWidth + 1) ||
+    (y !== "hidden" &&
+      y !== "visible" &&
+      viewport.scrollHeight > viewport.clientHeight + 1)
+  );
+}
+
 interface OverlayScrollbarNodes {
   hostRef: { current: HTMLDivElement | null };
   viewportRef: { current: HTMLDivElement | null };
@@ -128,7 +185,10 @@ export function useReactOverlayScrollbar({
   const [initialize, getInstance] = useOverlayScrollbars({ options });
   const instanceRef = useRef<OverlayScrollbars | null>(null);
 
-  useClientLayoutEffect(() => {
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+
+  useEffect(() => {
     if (!enabled || shouldUseNativeScrollbars()) return;
 
     const host = hostRef.current;
@@ -136,12 +196,46 @@ export function useReactOverlayScrollbar({
     const content = contentRef.current;
     if (!host || !viewport || !content) return;
 
-    initialize({ target: host, elements: { viewport, content } });
-    const instance = getInstance();
-    instanceRef.current = instance;
+    let cancelled = false;
+    let instance: OverlayScrollbars | null = null;
+    let cancelQueued: (() => void) | null = null;
+    let observer: ResizeObserver | null = null;
+    const notify = () =>
+      viewport.dispatchEvent(new Event(SCROLLBAR_UPDATED_EVENT));
+    const enhance = () => {
+      cancelQueued = null;
+      if (cancelled || instance || !host.isConnected) return;
+      // The outer shell often has no overflow; don't build a scrollbar until
+      // the viewport actually needs one.
+      if (!hasScrollableOverflow(viewport, optionsRef.current)) return;
+      initialize({ target: host, elements: { viewport, content } });
+      instance = getInstance();
+      instanceRef.current = instance;
+      if (instance) {
+        observer?.disconnect();
+        instance.on("updated", notify);
+        notify();
+      }
+    };
+    const queue = () => {
+      if (!cancelled && !instance && !cancelQueued)
+        cancelQueued = enqueueEnhancement(enhance);
+    };
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(queue);
+      observer.observe(viewport);
+      observer.observe(content);
+    }
+    queue();
 
     return () => {
-      if (instance && OverlayScrollbars.valid(instance)) instance.destroy();
+      cancelled = true;
+      cancelQueued?.();
+      observer?.disconnect();
+      if (instance && OverlayScrollbars.valid(instance)) {
+        instance.off("updated", notify);
+        instance.destroy();
+      }
       instanceRef.current = null;
     };
   }, [enabled, getInstance, hostRef, initialize, viewportRef, contentRef]);
@@ -215,7 +309,6 @@ export function OverlayScrollbar({
 
     const viewport = viewportRef.current;
     if (!viewport) return;
-    const instance = scrollbarRef.current;
     const tracksHorizontal = axis === "horizontal" || axis === "both";
     const tracksVertical = axis === "vertical" || axis === "both";
     const sync = () => {
@@ -248,7 +341,7 @@ export function OverlayScrollbar({
     };
 
     viewport.addEventListener("scroll", sync, { passive: true });
-    instance?.on("updated", sync);
+    viewport.addEventListener(SCROLLBAR_UPDATED_EVENT, sync);
     const resizeObserver = new ResizeObserver(sync);
     resizeObserver.observe(viewport);
     if (contentRef.current) resizeObserver.observe(contentRef.current);
@@ -257,7 +350,7 @@ export function OverlayScrollbar({
 
     return () => {
       viewport.removeEventListener("scroll", sync);
-      instance?.off("updated", sync);
+      viewport.removeEventListener(SCROLLBAR_UPDATED_EVENT, sync);
       resizeObserver.disconnect();
       window.cancelAnimationFrame(frameId);
     };

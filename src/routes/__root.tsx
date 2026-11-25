@@ -1,6 +1,6 @@
-import "@/lib/iconify";
-
+import { lazy, Suspense } from "react";
 import jetBrainsMonoLatinUrl from "@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2?url";
+import { FlagAssetProvider } from "@insightflare/product-ui/flag-icon";
 import { Badge } from "@insightflare/ui/badge";
 import { Button } from "@insightflare/ui/button";
 import {
@@ -25,7 +25,6 @@ import {
 
 import globalStylesheetUrl from "@/app/globals.css?url";
 import { AppToaster } from "@/components/app-toaster";
-import { LayerSystemFixture } from "@/components/dashboard/site-pages/overview/layer-system-fixture";
 import { GlobalScrollbars } from "@/components/global-scrollbars";
 import { AppQueryProvider } from "@/components/query-client-provider";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -33,14 +32,51 @@ import { TimeZoneProvider } from "@/components/time-zone-provider";
 import { APP_NAME } from "@/lib/constants";
 import { setExternalServices } from "@/lib/external-services";
 import { loadExternalServices } from "@/lib/external-services.functions";
+import { createFlagAssetResolver, type FlagAssets } from "@/lib/flag-assets";
 import { localeToHtmlLang, resolveLocale } from "@/lib/i18n/config";
-import { getMessages } from "@/lib/i18n/messages";
+import errorPages from "@/lib/i18n/generated/error-pages";
+import type { AppMessages } from "@/lib/i18n/messages";
+import { preloadPathMessages } from "@/lib/i18n/runtime-messages";
 import Link from "@/lib/router";
+// Stress fixtures are exclusively for development / E2E. They must never
+// pull event detail drawers into the production root chunk.
+const DevLayerFixture = import.meta.env.DEV
+  ? lazy(() =>
+      import("@/components/dashboard/site-pages/overview/layer-system-fixture").then(
+        (module) => ({ default: module.LayerSystemFixture }),
+      ),
+    )
+  : null;
+
+function DevelopmentFixtures() {
+  const search = useLocation({ select: (location) => location.searchStr });
+  if (!DevLayerFixture || !new URLSearchParams(search).has("__layerFixture"))
+    return null;
+  return (
+    <Suspense fallback={null}>
+      <DevLayerFixture />
+    </Suspense>
+  );
+}
+const flagAssetResolver = createFlagAssetResolver(
+  JSON.parse(
+    import.meta.env.VITE_FLAG_ASSETS || '{"base":"","names":[]}',
+  ) as FlagAssets,
+);
 const THEME_INIT_SCRIPT = `(function(){try{var k='insightflare-theme';var q=new URLSearchParams(location.search).get('theme');var t=q==='light'||q==='dark'?q:localStorage.getItem(k)||'system';var d=t==='dark'||(t==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d);document.documentElement.style.colorScheme=d?'dark':'light'}catch(e){}})()`;
 const ESBUILD_NAME_HELPER_SCRIPT = `(function(){if(typeof globalThis.__name!=="function"){globalThis.__name=function(target){return target}}})()`;
 const DEMO_ANALYTICS_SCRIPT_SRC =
   "https://insight.ravelloh.com/script.js?siteId=04de9d96-fcec-41b1-b259-56e0dbaa2c5e";
+// Context callbacks are synchronous, so preload before entering locale routes.
+async function preloadRouteLanguage({
+  location,
+}: {
+  location: { pathname: string };
+}): Promise<void> {
+  await preloadPathMessages(location.pathname);
+}
 export const Route = createRootRoute({
+  beforeLoad: preloadRouteLanguage,
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -86,19 +122,21 @@ function RootDocument() {
       <body className="antialiased font-mono">
         <GlobalScrollbars>
           <ScriptOnce>{ESBUILD_NAME_HELPER_SCRIPT}</ScriptOnce>
-          <LayerManagerProvider>
-            <LayerSystemFixture />
-            <AppQueryProvider>
-              <TimeZoneProvider>
-                <ThemeProvider>
-                  <TooltipProvider>
-                    <Outlet />
-                  </TooltipProvider>
-                  <AppToaster />
-                </ThemeProvider>
-              </TimeZoneProvider>
-            </AppQueryProvider>
-          </LayerManagerProvider>
+          <FlagAssetProvider resolve={flagAssetResolver}>
+            <LayerManagerProvider>
+              {import.meta.env.DEV && <DevelopmentFixtures />}
+              <AppQueryProvider>
+                <TimeZoneProvider>
+                  <ThemeProvider>
+                    <TooltipProvider>
+                      <Outlet />
+                    </TooltipProvider>
+                    <AppToaster />
+                  </ThemeProvider>
+                </TimeZoneProvider>
+              </AppQueryProvider>
+            </LayerManagerProvider>
+          </FlagAssetProvider>
         </GlobalScrollbars>
         {import.meta.env.VITE_DEMO_MODE === "1" ? (
           <script defer src={DEMO_ANALYTICS_SCRIPT_SRC} />
@@ -111,8 +149,7 @@ function RootDocument() {
 export function NotFoundPage() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const locale = resolveLocale(pathname.split("/")[1]);
-  const messages = getMessages(locale);
-  const copy = messages.errorPage;
+  const copy = errorPages[locale];
   const reportUrl = buildErrorReportUrl({
     pathname,
     status: 404,
@@ -123,7 +160,7 @@ export function NotFoundPage() {
     <ErrorPageLayout
       locale={locale}
       pathname={pathname || "/"}
-      messages={messages}
+      copy={copy}
       status={404}
       eyebrow={copy.notFoundEyebrow}
       title={copy.notFoundTitle}
@@ -137,8 +174,7 @@ export function NotFoundPage() {
 export function ErrorPage({ error }: { error: unknown }) {
   const pathname = useLocation({ select: (location) => location.pathname });
   const locale = resolveLocale(pathname.split("/")[1]);
-  const messages = getMessages(locale);
-  const copy = messages.errorPage;
+  const copy = errorPages[locale];
   const errorName = error instanceof Error ? error.name : "Error";
   const errorMessage =
     error instanceof Error ? error.message : "Unexpected application error";
@@ -154,7 +190,7 @@ export function ErrorPage({ error }: { error: unknown }) {
     <ErrorPageLayout
       locale={locale}
       pathname={pathname || "/"}
-      messages={messages}
+      copy={copy}
       status={500}
       eyebrow={copy.errorEyebrow}
       title={copy.errorTitle}
@@ -199,7 +235,7 @@ function buildErrorReportUrl({
 function ErrorPageLayout({
   locale,
   pathname,
-  messages,
+  copy,
   status,
   eyebrow,
   title,
@@ -210,7 +246,7 @@ function ErrorPageLayout({
 }: {
   locale: string;
   pathname: string;
-  messages: ReturnType<typeof getMessages>;
+  copy: AppMessages["errorPage"];
   status: 404 | 500;
   eyebrow: string;
   title: string;
@@ -219,7 +255,6 @@ function ErrorPageLayout({
   reportUrl: string;
   details: { errorName: string; errorMessage: string } | null;
 }) {
-  const copy = messages.errorPage;
   const rows = [
     [copy.statusLabel, String(status)],
     [copy.reasonLabel, reason],

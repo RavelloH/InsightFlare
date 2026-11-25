@@ -11,7 +11,11 @@ const packageJson = JSON.parse(
 );
 const sourceEntries = Object.values(packageJson.exports)
   .map((entry) => entry?.development)
-  .filter((entry) => typeof entry === "string" && entry.endsWith(".ts"))
+  .filter(
+    (entry) =>
+      typeof entry === "string" &&
+      (entry.endsWith(".ts") || entry.endsWith(".tsx")),
+  )
   .map((entry) => path.join(packageRoot, entry));
 
 await rm(path.join(packageRoot, "dist"), { recursive: true, force: true });

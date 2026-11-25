@@ -37,7 +37,8 @@ import type {
 } from "@/lib/dashboard-api/client/edge";
 import type { FilterDocument } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
-import { type AppMessages, getMessages } from "@/lib/i18n/messages";
+import type { AppMessages } from "@/lib/i18n/messages";
+import { getRuntimeMessages } from "@/lib/i18n/runtime-messages";
 
 import { goalFilterSummary, goalSummaryQueryKey } from "./goal-card";
 import { GoalTimeseriesChart } from "./goal-timeseries-chart";
@@ -331,8 +332,8 @@ export function GoalDetail({
   const comparisonLoading =
     Boolean(comparisonQuery) &&
     (comparisonSummary.isFetching || !comparisonSummary.data);
-  const filterDescriptionMessages = messages ?? getMessages(locale);
-  const fullMessages = getMessages(locale);
+  const filterDescriptionMessages = messages ?? getRuntimeMessages(locale);
+  const fullMessages = getRuntimeMessages(locale);
   const metricLoading = summary.isFetching || !summary.data;
   const comparisonDetail = (value: string) =>
     comparisonGoalSummary && comparisonLabel

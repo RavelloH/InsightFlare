@@ -86,12 +86,16 @@ export function readDashboardQueryPreferences(
 export function resolveDashboardInitialWindow(
   cookieHeader: string | null,
   now = Date.now(),
+  accountTimeZone?: string,
 ): TimeWindow {
   const preferences = readDashboardQueryPreferences(cookieHeader);
   return resolveTimeWindow(preferences.range, now, {
     interval: preferences.interval,
     customRange: preferences.customRange ?? undefined,
-    timeZone: readReportingTimeZoneFromCookie(cookieHeader),
+    timeZone: resolveReportingTimeZone(
+      accountTimeZone,
+      readReportingTimeZoneFromCookie(cookieHeader),
+    ),
   });
 }
 /** Persists only range controls. Filters remain represented by the URL. */

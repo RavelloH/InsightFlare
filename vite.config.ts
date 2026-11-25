@@ -8,8 +8,37 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 import { parse } from "yaml";
 
+import productUiPackage from "./packages/product-ui/package.json" with { type: "json" };
+import uiPackage from "./packages/ui/package.json" with { type: "json" };
+import { generateFlagAssets } from "./scripts/generate-flag-assets";
+import { generateStaticHeaders } from "./scripts/generate-static-headers";
 import { regenerateAppMessages } from "./scripts/i18n-check/prune";
 import packageJson from "./package.json" with { type: "json" };
+
+// The application can tree-shake the original modules instead of consuming
+// esbuild's pre-bundled package chunks, which mix gallery fixtures with UI.
+// Restrict this to workspace exports; published package entrypoints are unchanged.
+function workspaceUiAliases() {
+  return [uiPackage, productUiPackage].flatMap((pkg) =>
+    Object.entries(pkg.exports).flatMap(([subpath, entry]) => {
+      if (typeof entry !== "object" || !("development" in entry)) return [];
+      const specifier = pkg.name + subpath.slice(1);
+      return [
+        {
+          find: new RegExp(
+            "^" + specifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$",
+          ),
+          replacement: path.resolve(
+            import.meta.dirname,
+            "packages",
+            pkg.name.split("/")[1]!,
+            entry.development,
+          ),
+        },
+      ];
+    }),
+  );
+}
 
 // Vite watches the project root. Keep generated state, reports, and repository
 // metadata out of chokidar so Cloudflare/TanStack SSR restarts do not traverse
@@ -95,6 +124,9 @@ function ssrMapStubs() {
 
 export default defineConfig(async ({ mode }) => {
   await regenerateAppMessages();
+  const publicDir = path.resolve(import.meta.dirname, "public");
+  const flagAssets = await generateFlagAssets(publicDir);
+  await generateStaticHeaders(publicDir);
   const env = loadEnv(mode, process.cwd(), "");
   const isE2E = process.env.INSIGHTFLARE_E2E === "1";
   const e2eGithubApiBase = process.env.INSIGHTFLARE_E2E_GITHUB_API_BASE;
@@ -123,6 +155,9 @@ export default defineConfig(async ({ mode }) => {
 
   return {
     define: {
+      "import.meta.env.VITE_FLAG_ASSETS": JSON.stringify(
+        JSON.stringify(flagAssets),
+      ),
       "import.meta.env.VITE_APP_VERSION": JSON.stringify(packageJson.version),
       "import.meta.env.VITE_COMMIT_SHA": JSON.stringify(resolveCommitSha()),
       "import.meta.env.VITE_DEMO_MODE": JSON.stringify(demoMode),
@@ -138,9 +173,10 @@ export default defineConfig(async ({ mode }) => {
         JSON.stringify("0"),
     },
     resolve: {
-      alias: {
-        "@": path.resolve(import.meta.dirname, "./src"),
-      },
+      alias: [
+        { find: "@", replacement: path.resolve(import.meta.dirname, "./src") },
+        ...workspaceUiAliases(),
+      ],
     },
     plugins: [
       {

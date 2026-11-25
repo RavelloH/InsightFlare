@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState } from "react";
-import { Icon } from "@iconify/react";
+import { FlagIcon } from "@insightflare/product-ui/flag-icon";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 
 import { intlLocale } from "@/lib/dashboard/format";
@@ -268,7 +268,7 @@ export const LabelWithLeadingIcon = memo(function LabelWithLeadingIcon({
       <span className="pointer-events-none absolute inset-y-0 left-0 inline-flex w-4 items-center justify-center">
         <span className="inline-flex size-4 items-center justify-center">
           {isFlag ? (
-            <Icon
+            <FlagIcon
               icon={iconName}
               style={{
                 width: 16,

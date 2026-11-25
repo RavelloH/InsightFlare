@@ -121,6 +121,10 @@ import {
   normalizeNotificationPreferencesData,
 } from "@/lib/dashboard-api/client/edge";
 import { createTeamDashboardQueryRuntime } from "@/lib/edge/analytics/composition/ssr-query-runtime";
+import {
+  createInvocationLogger,
+  runWithInvocationLogger,
+} from "@/lib/edge/observability/logger";
 import { resolveEdgeRuntime } from "@/lib/edge/runtime";
 function headersOf(init: Record<string, string>, url = "https://app.test/") {
   return {
@@ -141,6 +145,7 @@ function mockAdminReads(reads: Record<string, unknown>) {
 describe("Dashboard route data loaders", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getDashboardProfile).mockReset().mockResolvedValue(null);
     vi.mocked(getRequest).mockReturnValue(
       headersOf({ host: "app.test" }) as never,
     );
@@ -231,6 +236,19 @@ describe("Dashboard route data loaders", () => {
     });
   });
 
+  it("uses the authenticated account timezone for the canonical SSR window", async () => {
+    vi.mocked(getDashboardProfile).mockResolvedValue({
+      user: { timeZone: "Asia/Tokyo" },
+      teams: [],
+    } as never);
+    await loadDashboardInitialWindow();
+    expect(resolveDashboardInitialWindow).toHaveBeenCalledWith(
+      null,
+      undefined,
+      "Asia/Tokyo",
+    );
+  });
+
   describe("loadShareSite", () => {
     it("returns the site and public id on success", async () => {
       const result = (await loadShareSite({
@@ -279,6 +297,66 @@ describe("Dashboard route data loaders", () => {
       bootstrap.teamDashboardSnapshot?.window ?? {},
     );
     expect(resolveDashboardInitialWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it("records dashboard page and server function phases for actual bootstrap reads", async () => {
+    const profile = {
+      user: { id: "user" },
+      teams: [{ id: "team-a", slug: "acme" }],
+    };
+    vi.mocked(getDashboardProfile).mockResolvedValue(profile as never);
+    vi.mocked(getDashboardRootContext).mockResolvedValue(profile as never);
+    for (const [url, expected] of [
+      ["https://app.test/zh/app", "page.dashboard.workspace"],
+      [
+        "https://app.test/_serverFn/bootstrap",
+        "server_function.dashboard.bootstrap",
+      ],
+    ]) {
+      const request = headersOf({}, url);
+      vi.mocked(getRequest).mockReturnValue(request);
+      vi.mocked(getDashboardRuntime).mockResolvedValue({
+        request,
+        env: { DB: {} },
+      } as never);
+      const logger = createInvocationLogger({
+        source: "worker",
+        trigger: "request",
+      });
+      const result = await runWithInvocationLogger(logger, () =>
+        loadDashboardBootstrap({ data: { page: "workspace" } }),
+      );
+      expect(result.workspaceSnapshots?.["team-a"]).not.toBeNull();
+      const snapshot = logger.snapshot();
+      expect(snapshot.routeKey).toBe(expected);
+      expect(
+        snapshot.operations.find((op) => op.name === "dashboard.bootstrap")
+          ?.count,
+      ).toBe(1);
+      expect(
+        snapshot.operations.find((op) => op.name === "dashboard.team_snapshot")
+          ?.count,
+      ).toBe(1);
+    }
+  });
+
+  it("does not fetch snapshots for unauthenticated or unrelated team routes", async () => {
+    vi.mocked(getDashboardRootContext).mockResolvedValue(null);
+    const missing = await loadDashboardBootstrap({
+      data: { page: "workspace" },
+    });
+    expect(missing.workspaceSnapshots).toBeNull();
+    expect(missing.teamDashboardSnapshot).toBeNull();
+    expect(teamDashboardExecute).not.toHaveBeenCalled();
+    vi.mocked(getDashboardProfile).mockResolvedValue({
+      user: { id: "user" },
+      teams: [],
+    } as never);
+    const unrelated = await loadDashboardBootstrap({
+      data: { page: "team", teamSlug: "unrelated" },
+    });
+    expect(unrelated.teamDashboardSnapshot).toBeNull();
+    expect(teamDashboardExecute).not.toHaveBeenCalled();
   });
 
   describe("dashboard context loaders", () => {
