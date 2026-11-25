@@ -431,7 +431,7 @@ export function TeamNotificationsClient({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <AutoResizer initial>
+            <AutoResizer initial={false}>
               <AutoTransition
                 transitionKey={
                   loading

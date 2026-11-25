@@ -552,7 +552,7 @@ export function NotificationCenterClient({
                 {loading ? <Spinner /> : <RiRefreshLine />}
               </span>
               <AutoResizer
-                initial
+                initial={false}
                 animateWidth
                 animateHeight={false}
                 className="inline-flex shrink-0 items-center"
@@ -622,7 +622,7 @@ export function NotificationCenterClient({
         </Card>
       ) : null}
 
-      <AutoResizer initial>
+      <AutoResizer initial={false}>
         <AutoTransition
           transitionKey={bodyState}
           initial={false}

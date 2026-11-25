@@ -347,7 +347,7 @@ export function ApiKeysClient({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <AutoResizer initial>
+          <AutoResizer initial={false}>
             <AutoTransition
               transitionKey={
                 loading

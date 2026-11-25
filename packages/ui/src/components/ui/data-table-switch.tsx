@@ -88,8 +88,10 @@ export function DataTableSwitch({
   if (!animate) return table;
 
   return (
-    <AutoResizer initial>
-      <AutoTransition initial>{table}</AutoTransition>
+    <AutoResizer initial={false}>
+      {/* The SSR loading state must be visible before hydration. Animate
+          subsequent state changes, not the first paint. */}
+      <AutoTransition initial={false}>{table}</AutoTransition>
     </AutoResizer>
   );
 }

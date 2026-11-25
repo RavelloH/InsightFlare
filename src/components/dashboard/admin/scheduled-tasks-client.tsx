@@ -325,7 +325,7 @@ export function ScheduledTasksClient({
                 {replacingRows ? <Spinner /> : <RiRefreshLine />}
               </span>
               <AutoResizer
-                initial
+                initial={false}
                 animateWidth
                 animateHeight={false}
                 className="inline-flex shrink-0 items-center"

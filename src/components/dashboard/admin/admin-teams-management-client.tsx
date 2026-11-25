@@ -168,7 +168,10 @@ export function AdminTeamsManagementClient({
             </div>
             <div className="md:col-span-2">
               <Button type="submit" disabled={submitting || loading}>
-                <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
+                <AutoTransition
+                  initial={false}
+                  className="inline-flex items-center gap-[var(--button-content-gap)]"
+                >
                   {submitting ? (
                     <span
                       key="creating"
