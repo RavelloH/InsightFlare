@@ -76,9 +76,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Full typed lint
         env:
-          NODE_OPTIONS: --max-old-space-size=6144
+          NODE_OPTIONS: --max-old-space-size=8192
         # Typed lint depends on other files and their types. Never reuse per-file results across CI snapshots.
-        run: /usr/bin/time -v pnpm exec eslint --no-cache --concurrency 2 --max-warnings 0 .
+        # Two lint threads were slower on the hosted 4-core runner and duplicated TypeScript programs.
+        run: /usr/bin/time -v pnpm exec eslint --no-cache --concurrency off --max-warnings 0 .
 
   contracts:
     name: Contracts and generated specifications
