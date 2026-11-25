@@ -253,6 +253,7 @@ export const SitePulseHeatmap = memo(function SitePulseHeatmap({
 
   return (
     <div
+      data-slot="chart"
       className={cn(
         "relative w-full transition-opacity",
         loading && "opacity-60",
@@ -383,6 +384,7 @@ export const SitePulseHeatmap = memo(function SitePulseHeatmap({
 
       {hover && hovered ? (
         <div
+          data-chart-tooltip-active=""
           className="pointer-events-none absolute z-10 grid min-w-40 gap-1 border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl"
           style={{
             top: hover.y - 6,

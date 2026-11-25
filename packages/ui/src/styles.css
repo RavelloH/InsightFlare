@@ -5,6 +5,34 @@
 @import "../styles/index.css";
 @import "overlayscrollbars/styles/overlayscrollbars.css";
 
+/* Charts render their tooltip inside the chart DOM (Recharts 2 and custom
+   chart tooltips). Only while a tooltip is open, let it escape card and
+   height-animation boundaries. Keep normal content clipping for transitions.
+   Recharts 2 exposes the tooltip's active state via inline visibility. */
+:is([data-slot="auto-resizer"], [data-slot="card"]):has(
+  [data-slot="chart"]
+    :is(
+      [data-chart-tooltip-active],
+      .recharts-tooltip-wrapper[style*="visibility: visible"]
+    )
+) {
+  overflow: visible !important;
+}
+
+/* Lift the active card above adjacent cards without promoting ordinary cards. */
+@layer utilities {
+  :where([data-slot="card"]):has(
+    [data-slot="chart"]
+      :is(
+        [data-chart-tooltip-active],
+        .recharts-tooltip-wrapper[style*="visibility: visible"]
+      )
+  ) {
+    position: relative;
+    z-index: 10;
+  }
+}
+
 .os-scrollbar-host[data-scrollbar-axis="vertical"] {
   overflow: hidden;
 }

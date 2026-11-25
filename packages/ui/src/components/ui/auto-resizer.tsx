@@ -108,6 +108,7 @@ export function AutoResizer({
 
   return (
     <motion.div
+      data-slot="auto-resizer"
       className={className}
       style={{
         alignItems: animateWidth ? "flex-start" : undefined,
