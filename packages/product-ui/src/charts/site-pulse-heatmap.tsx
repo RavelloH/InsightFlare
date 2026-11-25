@@ -1,6 +1,7 @@
 import {
   memo,
   type ReactNode,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -161,6 +162,78 @@ function mergeColumns(
   };
 }
 
+type PulseCellModel = {
+  timestamp: number;
+  label: string;
+  background: string;
+};
+
+const PulseGridRow = memo(function PulseGridRow({
+  row,
+  rowIndex,
+  cells,
+  columns,
+  cellWidth,
+  activeColumn,
+  onHover,
+  onSelect,
+}: {
+  row: SitePulseHeatmapRow;
+  rowIndex: number;
+  cells: readonly PulseCellModel[];
+  columns: number;
+  cellWidth: number;
+  activeColumn: number | null;
+  onHover: (row: number, column: number, cell: HTMLDivElement) => void;
+  onSelect?: (id: string) => void;
+}) {
+  return (
+    <div role="row" className="contents">
+      <button
+        type="button"
+        role="rowheader"
+        className={cn(
+          "flex min-w-0 items-center gap-1.5 text-left text-xs text-muted-foreground hover:text-foreground",
+          row.highlighted && "text-foreground",
+          !onSelect && "cursor-default",
+        )}
+        onClick={() => onSelect?.(row.id)}
+      >
+        {row.icon}
+        <span className="truncate">{row.label}</span>
+      </button>
+      <div
+        className={cellWidth ? "flex h-6" : "grid h-6 gap-px"}
+        style={
+          cellWidth
+            ? { columnGap: CELL_GAP }
+            : { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }
+        }
+      >
+        {cells.map((cell, column) => (
+          <div
+            key={cell.timestamp}
+            role="gridcell"
+            aria-label={cell.label}
+            className={cn(
+              "h-full shrink-0 cursor-pointer",
+              activeColumn === column && "outline outline-1 outline-foreground",
+            )}
+            style={{
+              background: cell.background,
+              ...(cellWidth ? { width: cellWidth } : {}),
+            }}
+            onMouseEnter={(event) =>
+              onHover(rowIndex, column, event.currentTarget)
+            }
+            onClick={() => onSelect?.(row.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+});
+
 export const SitePulseHeatmap = memo(function SitePulseHeatmap({
   rows,
   bucketStarts,
@@ -214,6 +287,47 @@ export const SitePulseHeatmap = memo(function SitePulseHeatmap({
   const tooltipFormatter = useMemo(
     () => createChartTooltipDateFormatter(locale, interval, timeZone),
     [locale, interval, timeZone],
+  );
+  // Dates and statistical colors depend on data, not pointer position.
+  const cellModels = useMemo(() => {
+    const dateLabels = merged.starts.map((timestamp) =>
+      tooltipFormatter.format(new Date(timestamp)),
+    );
+    return merged.rows.map((row, rowIndex) =>
+      row.values.map((value, column) => ({
+        timestamp: merged.starts[column]!,
+        label: `${row.label} ${dateLabels[column]}: ${numberFormat(locale, value)}`,
+        background: cellColor(
+          pulseLevel(
+            value,
+            (usual[rowIndex] ?? 0) *
+              Math.max(
+                0,
+                Math.min(
+                  merged.size,
+                  bucketStarts.length - column * merged.size,
+                ),
+              ),
+          ),
+        ),
+      })),
+    );
+  }, [merged, tooltipFormatter, locale, usual, bucketStarts.length]);
+  const onCellHover = useCallback(
+    (row: number, column: number, element: HTMLDivElement) => {
+      const box = container.current?.getBoundingClientRect();
+      if (!box) return;
+      const cell = element.getBoundingClientRect();
+      const x = cell.left - box.left + cell.width / 2;
+      setHover({
+        row,
+        column,
+        x,
+        y: cell.top - box.top,
+        flip: x > box.width * 0.6,
+      });
+    },
+    [],
   );
   const columns = merged.starts.length;
   // Whole-pixel cells; until measured, fall back to fractional columns.
@@ -270,68 +384,17 @@ export const SitePulseHeatmap = memo(function SitePulseHeatmap({
         style={{ gridTemplateColumns: "minmax(7rem, 11rem) minmax(0, 1fr)" }}
       >
         {merged.rows.map((row, rowIndex) => (
-          <div key={row.id} role="row" className="contents">
-            <button
-              type="button"
-              role="rowheader"
-              className={cn(
-                "flex min-w-0 items-center gap-1.5 text-left text-xs text-muted-foreground hover:text-foreground",
-                row.highlighted && "text-foreground",
-                !onRowSelect && "cursor-default",
-              )}
-              onClick={() => onRowSelect?.(row.id)}
-            >
-              {row.icon}
-              <span className="truncate">{row.label}</span>
-            </button>
-            <div
-              className={cellWidth ? "flex h-6" : "grid h-6 gap-px"}
-              style={
-                cellWidth
-                  ? { columnGap: CELL_GAP }
-                  : {
-                      gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-                    }
-              }
-            >
-              {row.values.map((value, column) => {
-                const level = pulseLevel(value, usualAt(rowIndex, column));
-                const active =
-                  hover?.row === rowIndex && hover.column === column;
-                return (
-                  <div
-                    key={merged.starts[column]}
-                    role="gridcell"
-                    aria-label={`${row.label} ${tooltipFormatter.format(
-                      new Date(merged.starts[column]!),
-                    )}: ${numberFormat(locale, value)}`}
-                    className={cn(
-                      "h-full shrink-0 cursor-pointer",
-                      active && "outline outline-1 outline-foreground",
-                    )}
-                    style={{
-                      background: cellColor(level),
-                      ...(cellWidth ? { width: cellWidth } : {}),
-                    }}
-                    onMouseEnter={(event) => {
-                      const box = container.current?.getBoundingClientRect();
-                      const cell = event.currentTarget.getBoundingClientRect();
-                      if (!box) return;
-                      const x = cell.left - box.left + cell.width / 2;
-                      setHover({
-                        row: rowIndex,
-                        column,
-                        x,
-                        y: cell.top - box.top,
-                        flip: x > box.width * 0.6,
-                      });
-                    }}
-                    onClick={() => onRowSelect?.(row.id)}
-                  />
-                );
-              })}
-            </div>
-          </div>
+          <PulseGridRow
+            key={row.id}
+            row={row}
+            rowIndex={rowIndex}
+            cells={cellModels[rowIndex]!}
+            columns={columns}
+            cellWidth={cellWidth}
+            activeColumn={hover?.row === rowIndex ? hover.column : null}
+            onHover={onCellHover}
+            onSelect={onRowSelect}
+          />
         ))}
         <div />
         <div

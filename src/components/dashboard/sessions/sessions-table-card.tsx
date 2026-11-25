@@ -1,12 +1,4 @@
-import {
-  Fragment,
-  memo,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { Fragment, memo, type ReactNode, useCallback, useMemo } from "react";
 import type { AnalyticsTableColumnDefinition } from "@insightflare/product-ui/tables";
 import { ClickableTableCell } from "@insightflare/ui/clickable-table-cell";
 import { Skeleton } from "@insightflare/ui/skeleton";
@@ -28,6 +20,7 @@ import {
   formatScreen,
   OsMeta,
   ReferrerMeta,
+  useRelativeTimeSelection,
   VisitorAvatar,
   visitorDisplayName,
 } from "@/components/dashboard/journeys/journey-display";
@@ -267,12 +260,44 @@ function isSessionActive(row: JourneySession, now: number): boolean {
   if (typeof row.active === "boolean") return row.active;
   return row.endedAt > now - 5 * 60 * 1000;
 }
+const SessionTimeCell = memo(function SessionTimeCell({
+  locale,
+  timestamp,
+  row,
+  onClick,
+}: {
+  locale: Locale;
+  timestamp: number;
+  row: JourneySession;
+  onClick: () => void;
+}) {
+  const active = useRelativeTimeSelection((now) => isSessionActive(row, now));
+  const label = useRelativeTimeSelection((now) =>
+    formatRelativeTime(locale, timestamp, now),
+  );
+  return (
+    <ClickableTableCell
+      onClick={onClick}
+      className={cn(
+        "text-center font-mono",
+        active ? "text-foreground" : "text-muted-foreground",
+      )}
+    >
+      <AnalyticsTimeTooltipTarget
+        className="block"
+        locale={locale}
+        timestamp={timestamp}
+      >
+        {label}
+      </AnalyticsTimeTooltipTarget>
+    </ClickableTableCell>
+  );
+});
 const SessionTableRowContent = memo(function SessionTableRowContent({
   locale,
   messages,
   labels,
   row,
-  now,
   onOpenSession,
   onOpenVisitor,
   columns,
@@ -281,12 +306,10 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
   messages: AppMessages;
   labels: SessionsTableLabels;
   row: JourneySession;
-  now: number;
   onOpenSession: (sessionId: string) => void;
   onOpenVisitor?: (visitorId: string) => void;
   columns: readonly SessionTableColumnId[];
 }) {
-  const active = isSessionActive(row, now);
   const openSession = () => onOpenSession(row.sessionId);
   const sessionId = row.sessionId.trim();
   const visitorId = row.visitorId.trim();
@@ -419,21 +442,12 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
       </ClickableTableCell>
     ),
     started: (
-      <ClickableTableCell
+      <SessionTimeCell
+        locale={locale}
+        timestamp={row.startedAt}
+        row={row}
         onClick={openSession}
-        className={cn(
-          "text-center font-mono",
-          active ? "text-foreground" : "text-muted-foreground",
-        )}
-      >
-        <AnalyticsTimeTooltipTarget
-          className="block"
-          locale={locale}
-          timestamp={row.startedAt}
-        >
-          {formatRelativeTime(locale, row.startedAt, now)}
-        </AnalyticsTimeTooltipTarget>
-      </ClickableTableCell>
+      />
     ),
     duration: (
       <ClickableTableCell
@@ -587,21 +601,12 @@ const SessionTableRowContent = memo(function SessionTableRowContent({
       </ClickableTableCell>
     ),
     exitTime: (
-      <ClickableTableCell
+      <SessionTimeCell
+        locale={locale}
+        timestamp={row.endedAt}
+        row={row}
         onClick={openSession}
-        className={cn(
-          "text-center font-mono",
-          active ? "text-foreground" : "text-muted-foreground",
-        )}
-      >
-        <AnalyticsTimeTooltipTarget
-          className="block"
-          locale={locale}
-          timestamp={row.endedAt}
-        >
-          {formatRelativeTime(locale, row.endedAt, now)}
-        </AnalyticsTimeTooltipTarget>
-      </ClickableTableCell>
+      />
     ),
   };
 
@@ -631,13 +636,6 @@ export const SessionsTableCard = memo(function SessionsTableCard({
   onLoadMore,
   visibleColumnIds = SESSION_TABLE_COLUMN_IDS,
 }: SessionsTableCardProps) {
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    const interval = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(interval);
-  }, []);
-
   const headers = useMemo<Record<SessionTableColumnId, ReactNode>>(
     () => ({
       visitor: <TableHead className="w-32 pl-4">{labels.visitor}</TableHead>,
@@ -718,7 +716,6 @@ export const SessionsTableCard = memo(function SessionsTableCard({
           messages={messages}
           labels={labels}
           row={row}
-          now={now}
           onOpenSession={onOpenSession}
           onOpenVisitor={onOpenVisitor}
           columns={visibleColumnIds}
@@ -729,15 +726,7 @@ export const SessionsTableCard = memo(function SessionsTableCard({
         className: "cursor-pointer",
       },
     }),
-    [
-      labels,
-      locale,
-      messages,
-      now,
-      onOpenSession,
-      onOpenVisitor,
-      visibleColumnIds,
-    ],
+    [labels, locale, messages, onOpenSession, onOpenVisitor, visibleColumnIds],
   );
   const renderSkeletonRow = useCallback(
     (index: number) => (

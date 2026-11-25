@@ -61,25 +61,39 @@
   overflow: auto;
 }
 
+/* Hide the native track from the first paint in overlay mode, without
+   disabling native wheel/touch/keyboard scrolling before enhancement. */
 html[data-scrollbar-mode="overlay"]
-  .os-scrollbar-viewport:not([data-overlayscrollbars-viewport]) {
+  .os-scrollbar-viewport:not([data-overlayscrollbars-viewport]):not(
+    [data-scrollbar-fallback]
+  ) {
+  scrollbar-width: none;
+}
+
+html[data-scrollbar-mode="overlay"]
+  .os-scrollbar-viewport:not([data-overlayscrollbars-viewport]):not(
+    [data-scrollbar-fallback]
+  )::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+html[data-scrollbar-mode="overlay"]
+  .os-scrollbar-viewport[data-scrollbar-fallback] {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 html[data-scrollbar-mode="overlay"]
-  .os-scrollbar-viewport:not(
-    [data-overlayscrollbars-viewport]
-  )::-webkit-scrollbar {
+  .os-scrollbar-viewport[data-scrollbar-fallback]::-webkit-scrollbar {
   display: block;
   width: 8px;
   height: 8px;
 }
 
 html[data-scrollbar-mode="overlay"]
-  .os-scrollbar-viewport:not(
-    [data-overlayscrollbars-viewport]
-  )::-webkit-scrollbar-thumb {
+  .os-scrollbar-viewport[data-scrollbar-fallback]::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
   border-radius: 999px;
 }

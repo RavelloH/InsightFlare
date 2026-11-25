@@ -4,7 +4,6 @@ import {
   memo,
   type ReactNode,
   useCallback,
-  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -24,7 +23,7 @@ import {
 import { AnalyticsDataTable } from "@/components/dashboard/common/analytics-data-table";
 import {
   CountryRegionMeta,
-  formatRelativeTime,
+  RelativeTimeValue,
   VisitorAvatar,
 } from "@/components/dashboard/journeys/journey-display";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -81,7 +80,6 @@ export const IncludedRequestsTable = memo(function IncludedRequestsTable({
     null,
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
   const selectedEventId = selectedEvent
     ? requestObservationDetailId(selectedEvent)
     : "";
@@ -119,11 +117,6 @@ export const IncludedRequestsTable = memo(function IncludedRequestsTable({
       ? detailQuery.error.message
       : "load_request_observation_detail_failed"
     : null;
-
-  useEffect(() => {
-    const interval = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(interval);
-  }, []);
 
   const title = ui.recentIncludedTitle;
   const description = ui.recentIncludedDescription;
@@ -262,7 +255,7 @@ export const IncludedRequestsTable = memo(function IncludedRequestsTable({
               locale={locale}
               timestamp={event.receivedAt}
             >
-              {formatRelativeTime(locale, event.receivedAt, now)}
+              <RelativeTimeValue locale={locale} timestamp={event.receivedAt} />
             </AnalyticsTimeTooltipTarget>
           </TableCell>
         ),
@@ -514,15 +507,7 @@ export const IncludedRequestsTable = memo(function IncludedRequestsTable({
         },
       };
     },
-    [
-      copy,
-      handleKeyDown,
-      locale,
-      messages,
-      now,
-      openEvent,
-      tableColumns.visibleIds,
-    ],
+    [copy, handleKeyDown, locale, messages, openEvent, tableColumns.visibleIds],
   );
   const renderSkeletonRow = useCallback(
     (index: number) => (

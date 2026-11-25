@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChangeQuadrantChart,
   SitePulseHeatmap,
@@ -228,12 +228,35 @@ export function WorkspaceClient({
       ),
     [term, rows, sort.key, sort.direction],
   );
-  const siteHref = (row: WorkspaceSiteRow) =>
-    buildSitePath(locale, row.team.slug, row.slug);
-  const openSite = (siteId: string) => {
-    const row = rowsById.get(siteId);
-    if (row) navigateWithTransition(router, siteHref(row));
-  };
+  const siteHref = useCallback(
+    (row: WorkspaceSiteRow) => buildSitePath(locale, row.team.slug, row.slug),
+    [locale],
+  );
+  const openSite = useCallback(
+    (siteId: string) => {
+      const row = rowsById.get(siteId);
+      if (row) navigateWithTransition(router, siteHref(row));
+    },
+    [rowsById, router, siteHref],
+  );
+  const pulseLabels = useMemo(
+    () => ({
+      value: messages.common.visitors,
+      usual: copy.pulse.usual,
+      above: copy.pulse.above,
+      below: copy.pulse.below,
+      versusUsual: copy.pulse.versusUsual,
+    }),
+    [messages.common.visitors, copy.pulse],
+  );
+  const quadrantLabels = useMemo(
+    () => ({
+      value: messages.common.visitors,
+      change: copy.columns.change,
+      weight: messages.common.views,
+    }),
+    [messages.common.visitors, messages.common.views, copy.columns.change],
+  );
   const pulseRows = useMemo(
     () =>
       sortRows(rows, "visitors").map((row) => ({
@@ -482,13 +505,7 @@ export function WorkspaceClient({
                       locale={locale}
                       timeZone={window.timeZone}
                       interval={window.interval}
-                      labels={{
-                        value: messages.common.visitors,
-                        usual: copy.pulse.usual,
-                        above: copy.pulse.above,
-                        below: copy.pulse.below,
-                        versusUsual: copy.pulse.versusUsual,
-                      }}
+                      labels={pulseLabels}
                       emptyLabel={copy.noSites}
                       loading={fetching}
                       onRowSelect={openSite}
@@ -811,11 +828,7 @@ export function WorkspaceClient({
                   ) : (
                     <ChangeQuadrantChart
                       points={changePoints}
-                      labels={{
-                        value: messages.common.visitors,
-                        change: copy.columns.change,
-                        weight: messages.common.views,
-                      }}
+                      labels={quadrantLabels}
                       locale={locale}
                       threshold={NOTABLE_CHANGE_PERCENT}
                       onPointSelect={openSite}

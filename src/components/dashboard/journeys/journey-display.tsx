@@ -3,8 +3,10 @@ import {
   memo,
   type ReactNode,
   type SyntheticEvent,
+  useCallback,
   useEffect,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { FlagIcon } from "@insightflare/product-ui/flag-icon";
 import {
@@ -658,6 +660,61 @@ export function formatRelativeTime(
   if (Math.abs(diffHours) < 24) return formatter.format(diffHours, "hour");
   return formatter.format(Math.round(diffHours / 24), "day");
 }
+// A single browser timer serves mounted relative-time cells. Select primitive
+// snapshots so old records whose labels are unchanged do not rerender.
+const relativeTimeListeners = new Set<() => void>();
+let relativeTimeNow: number | undefined;
+let relativeTimeTimer: number | undefined;
+
+function subscribeRelativeTime(listener: () => void) {
+  relativeTimeListeners.add(listener);
+  if (relativeTimeTimer === undefined) {
+    relativeTimeNow = Date.now();
+    relativeTimeTimer = window.setInterval(() => {
+      relativeTimeNow = Date.now();
+      for (const notify of relativeTimeListeners) notify();
+    }, 30_000);
+  }
+  return () => {
+    relativeTimeListeners.delete(listener);
+    if (relativeTimeListeners.size === 0) {
+      window.clearInterval(relativeTimeTimer);
+      relativeTimeTimer = undefined;
+      relativeTimeNow = undefined;
+    }
+  };
+}
+
+export function useRelativeTimeSelection<T extends string | boolean>(
+  select: (now: number) => T,
+): T {
+  const [initialNow] = useState(() => Date.now());
+  const getSnapshot = useCallback(
+    () => select(relativeTimeNow ?? initialNow),
+    [select, initialNow],
+  );
+  const getServerSnapshot = useCallback(
+    () => select(initialNow),
+    [select, initialNow],
+  );
+  return useSyncExternalStore(
+    subscribeRelativeTime,
+    getSnapshot,
+    getServerSnapshot,
+  );
+}
+
+export const RelativeTimeValue = memo(function RelativeTimeValue({
+  locale,
+  timestamp,
+}: {
+  locale: Locale;
+  timestamp: number;
+}) {
+  return useRelativeTimeSelection((now) =>
+    formatRelativeTime(locale, timestamp, now),
+  );
+});
 export function formatShortDateTime(
   locale: Locale,
   timestamp: number,

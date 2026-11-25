@@ -2,6 +2,30 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { type Easing, motion } from "motion/react";
 
+// All AutoResizer content nodes use the same ResizeObserver. Each subscriber
+// retains its own measurement frame and animation state.
+const resizeSubscribers = new Map<Element, () => void>();
+let sharedResizeObserver: ResizeObserver | null = null;
+
+function observeContentResize(element: Element, onResize: () => void) {
+  if (!sharedResizeObserver) {
+    sharedResizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) resizeSubscribers.get(entry.target)?.();
+    });
+  }
+  const observer = sharedResizeObserver;
+  resizeSubscribers.set(element, onResize);
+  observer.observe(element);
+  return () => {
+    resizeSubscribers.delete(element);
+    observer.unobserve(element);
+    if (resizeSubscribers.size === 0) {
+      observer.disconnect();
+      sharedResizeObserver = null;
+    }
+  };
+}
+
 export interface AutoResizerProps {
   children: ReactNode;
   className?: string;
@@ -39,15 +63,16 @@ export function AutoResizer({
   );
 
   useEffect(() => {
-    if (!contentRef.current) return;
+    if (!contentRef.current || (!animateHeight && !animateWidth)) return;
     const measureContent = (element: HTMLElement) => {
-      const nextHeight = element.scrollHeight;
-      const nextWidth = element.scrollWidth;
-      const targetHeight =
-        maxHeight === undefined ? nextHeight : Math.min(nextHeight, maxHeight);
       let changed = false;
 
       if (animateHeight) {
+        const nextHeight = element.scrollHeight;
+        const targetHeight =
+          maxHeight === undefined
+            ? nextHeight
+            : Math.min(nextHeight, maxHeight);
         if (heightRef.current !== targetHeight) {
           heightRef.current = targetHeight;
           setHeight(targetHeight);
@@ -55,6 +80,7 @@ export function AutoResizer({
         }
       }
       if (animateWidth) {
+        const nextWidth = element.scrollWidth;
         if (widthRef.current !== nextWidth) {
           widthRef.current = nextWidth;
           setWidth(nextWidth);
@@ -75,9 +101,10 @@ export function AutoResizer({
       });
     };
 
-    const resizeObserver = new ResizeObserver(scheduleMeasure);
-
-    resizeObserver.observe(contentRef.current);
+    const stopObserving = observeContentResize(
+      contentRef.current,
+      scheduleMeasure,
+    );
 
     const mutationObserver =
       animateWidth && typeof MutationObserver !== "undefined"
@@ -90,7 +117,7 @@ export function AutoResizer({
     });
 
     return () => {
-      resizeObserver.disconnect();
+      stopObserving();
       mutationObserver?.disconnect();
       if (frameId !== null) window.cancelAnimationFrame(frameId);
     };

@@ -35,10 +35,10 @@ import {
   BrowserMeta,
   CountryRegionMeta,
   DeviceMeta,
-  formatRelativeTime,
   formatScreen,
   OsMeta,
   ReferrerMeta,
+  RelativeTimeValue,
   VisitorAvatar,
   visitorDisplayName,
 } from "@/components/dashboard/journeys/journey-display";
@@ -267,7 +267,6 @@ const VisitorTableRowContent = memo(function VisitorTableRowContent({
   messages,
   labels,
   row,
-  now,
   onOpenDetail,
   columns,
 }: {
@@ -275,7 +274,6 @@ const VisitorTableRowContent = memo(function VisitorTableRowContent({
   messages: AppMessages;
   labels: AppMessages["visitors"];
   row: VisitorRow;
-  now: number;
   onOpenDetail: (visitorId: string) => void;
   columns: readonly VisitorTableColumnId[];
 }) {
@@ -410,7 +408,7 @@ const VisitorTableRowContent = memo(function VisitorTableRowContent({
           locale={locale}
           timestamp={row.firstSeenAt}
         >
-          {formatRelativeTime(locale, row.firstSeenAt, now)}
+          <RelativeTimeValue locale={locale} timestamp={row.firstSeenAt} />
         </AnalyticsTimeTooltipTarget>
       </ClickableTableCell>
     ),
@@ -424,7 +422,7 @@ const VisitorTableRowContent = memo(function VisitorTableRowContent({
           locale={locale}
           timestamp={row.lastSeenAt}
         >
-          {formatRelativeTime(locale, row.lastSeenAt, now)}
+          <RelativeTimeValue locale={locale} timestamp={row.lastSeenAt} />
         </AnalyticsTimeTooltipTarget>
       </ClickableTableCell>
     ),
@@ -566,7 +564,6 @@ export const VisitorAnalyticsTable = memo(function VisitorAnalyticsTable({
   messages,
   labels,
   rows,
-  now,
   columns,
   sort,
   onToggleSort,
@@ -585,7 +582,6 @@ export const VisitorAnalyticsTable = memo(function VisitorAnalyticsTable({
   messages: AppMessages;
   labels: AppMessages["visitors"];
   rows: readonly VisitorRow[];
-  now: number;
   columns: readonly VisitorTableColumnId[];
   sort: VisitorSortState;
   onToggleSort: (key: VisitorSortKey) => void;
@@ -694,14 +690,13 @@ export const VisitorAnalyticsTable = memo(function VisitorAnalyticsTable({
           messages={messages}
           labels={labels}
           row={row}
-          now={now}
           onOpenDetail={onOpenDetail}
           columns={columns}
         />
       ),
       props: { className: "cursor-pointer" },
     }),
-    [columns, labels, locale, messages, now, onOpenDetail],
+    [columns, labels, locale, messages, onOpenDetail],
   );
   const renderSkeletonRow = useCallback(
     (index: number) => (
@@ -760,18 +755,12 @@ export function VisitorsClientPage({
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [sort, setSort] = useState<VisitorSortState>(DEFAULT_VISITOR_SORT);
-  const [now, setNow] = useState(() => Date.now());
   const searchParams = useLiveSearchParams();
   const detailVisitorId = searchParams.get(DETAIL_QUERY_PARAM)?.trim() || "";
   const [nestedDetails, setNestedDetails] = useState<NestedJourneyDetail[]>([]);
   const nestedDetailKeyRef = useRef(0);
   const openedDetailFromListRef = useRef(false);
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(interval);
-  }, []);
 
   useEffect(() => {
     if (!detailVisitorId) {
@@ -960,7 +949,6 @@ export function VisitorsClientPage({
         messages={messages}
         labels={labels}
         rows={rows}
-        now={now}
         columns={visitorColumns.visibleIds}
         sort={sort}
         onToggleSort={toggleSort}

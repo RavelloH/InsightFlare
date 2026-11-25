@@ -114,7 +114,6 @@ export function AnalysisJourneyTable({
     key: "startedAt",
     direction: "desc",
   });
-  const [now, setNow] = useState(() => Date.now());
   const [nestedDetails, setNestedDetails] = useState<NestedJourneyDetail[]>([]);
   const nestedDetailKeyRef = useRef(0);
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
@@ -151,11 +150,6 @@ export function AnalysisJourneyTable({
     storageKey: SESSION_TABLE_COLUMNS_STORAGE_KEY,
     columns: sessionColumnDefinitions,
   });
-
-  useEffect(() => {
-    const interval = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(interval);
-  }, []);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(
@@ -396,7 +390,6 @@ export function AnalysisJourneyTable({
             messages={messages}
             labels={visitorLabels}
             rows={visitorRows}
-            now={now}
             columns={visitorColumns.visibleIds}
             sort={visitorSort}
             onToggleSort={toggleVisitorSort}
