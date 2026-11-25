@@ -785,7 +785,7 @@ export function OverviewPagesSection({
                   requestedWindow,
                   tab,
                   requestedFilters,
-                  { ...options, resolvedScope: scope },
+                  { ...options, resolvedScope: scope, batchOverview: true },
                 ))
             )(siteId, window, filters, resolvedScope, {
               limit,
@@ -892,7 +892,7 @@ export function OverviewPagesSection({
                   requestedWindow,
                   tab,
                   requestedFilters,
-                  { ...options, resolvedScope: scope },
+                  { ...options, resolvedScope: scope, batchOverview: true },
                 ))
             )(siteId, window, filters, resolvedScope, {
               limit,
@@ -992,7 +992,7 @@ export function OverviewPagesSection({
                   requestedWindow,
                   tab,
                   requestedFilters,
-                  { ...options, resolvedScope: scope },
+                  { ...options, resolvedScope: scope, batchOverview: true },
                 ))
             )(siteId, window, filters, resolvedScope, {
               limit,
@@ -1086,7 +1086,7 @@ export function OverviewPagesSection({
                   requestedWindow,
                   tab,
                   requestedFilters,
-                  { ...options, resolvedScope: scope },
+                  { ...options, resolvedScope: scope, batchOverview: true },
                 ))
             )(siteId, window, filters, resolvedScope, {
               limit,

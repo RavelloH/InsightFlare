@@ -78,7 +78,7 @@ export async function fetchOverviewPageCardTab(
         sortBy: options?.comparisonSortBy,
       },
     ),
-    { signal: options?.signal },
+    { signal: options?.signal, batchOverview: options?.batchOverview },
   ).catch(emptyOverviewTabUnlessAborted);
   const data = normalizePaginatedCollection<
     OverviewTabData["data"]["items"][number]
@@ -185,7 +185,7 @@ export async function fetchOverviewSourceCardTab(
         sortBy: options?.comparisonSortBy,
       },
     ),
-    { signal: options?.signal },
+    { signal: options?.signal, batchOverview: options?.batchOverview },
   ).catch(emptyOverviewTabUnlessAborted);
   const data = normalizePaginatedCollection<
     OverviewTabData["data"]["items"][number]
@@ -258,7 +258,7 @@ export async function fetchOverviewClientDimensionTab(
         sortBy: options?.comparisonSortBy,
       },
     ),
-    { signal: options?.signal },
+    { signal: options?.signal, batchOverview: options?.batchOverview },
   ).catch(emptyOverviewTabUnlessAborted);
   const data = normalizePaginatedCollection<
     OverviewTabData["data"]["items"][number]

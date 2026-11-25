@@ -372,18 +372,21 @@ interface DimensionPageGroup {
 }
 const dimensionPageBatch = new AsyncLocalStorage<{
   groups: Map<string, DimensionPageGroup>;
+  audience: "api-v1" | "private-dashboard";
   collector?: HotspotCollector;
 }>();
 const MAX_DIMENSION_BATCH_SIZE = 4;
 const MAX_DIMENSION_BATCH_PAGE_LIMIT = 50;
 
-/** Only the authenticated API batch entry point opens this request-local scope. */
+/** Only authenticated, explicitly bounded batch entry points open this scope. */
 export function runWithDimensionPageBatch<T>(
   action: () => Promise<T>,
+  audience: "api-v1" | "private-dashboard" = "api-v1",
 ): Promise<T> {
   return dimensionPageBatch.run(
     {
       groups: new Map(),
+      audience,
       collector: currentHotspotCollector(currentInvocationLogger()),
     },
     action,
@@ -562,7 +565,7 @@ export async function queryDimensionPageFromD1(
       ? "cancelled"
       : diagnostics
         ? "diagnostics"
-        : audience !== "api-v1"
+        : audience !== batchScope.audience
           ? "audience"
           : !filters.root
             ? "unfiltered"
@@ -572,7 +575,10 @@ export async function queryDimensionPageFromD1(
                 ? "eventScope"
                 : !Number.isInteger(limit) ||
                     limit < 1 ||
-                    limit > MAX_DIMENSION_BATCH_PAGE_LIMIT
+                    limit >
+                      (batchScope.audience === "private-dashboard"
+                        ? 100
+                        : MAX_DIMENSION_BATCH_PAGE_LIMIT)
                   ? "pageLimit"
                   : undefined;
     if (skipped) batchScope.collector?.recordDimensionBatch(skipped);

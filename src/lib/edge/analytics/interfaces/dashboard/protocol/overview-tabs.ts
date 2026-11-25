@@ -51,8 +51,9 @@ export async function handleOverviewTabContract(
   tab: OverviewTab,
   ctx?: ResponseContext,
   queryContext = siteQueryContext(siteId, "private-dashboard"),
+  execution?: { readonly capturedAtMs?: number; readonly signal?: AbortSignal },
 ): Promise<Response> {
-  const window = parseWindow(url);
+  const window = parseWindow(url, execution?.capturedAtMs);
   if (!window) return badRequest("Invalid time window");
   const rawFilters = parseFilterUrlForAudience(
     queryContext.policy.audience,
@@ -157,11 +158,17 @@ export async function handleOverviewTabContract(
   const runtime = createEdgeSiteAnalyticsRuntime({ env, siteId });
   const result =
     tab === "source.channel"
-      ? await runtime.execute("channels", {
-          ...query,
-          tab: "source.channel",
-        } satisfies CanonicalChannelsQuery)
-      : await runtime.execute("dimension", query);
+      ? await runtime.execute(
+          "channels",
+          {
+            ...query,
+            tab: "source.channel",
+          } satisfies CanonicalChannelsQuery,
+          { signal: execution?.signal },
+        )
+      : await runtime.execute("dimension", query, {
+          signal: execution?.signal,
+        });
   if (!result.ok) return queryErrorResponse(result.error);
   const data = result.data as OverviewTabResult;
   return jsonResponseWith(ctx!, { ok: true, ...data });

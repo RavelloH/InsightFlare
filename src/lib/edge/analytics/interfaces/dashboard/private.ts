@@ -44,6 +44,10 @@ export interface PrivateQueryAdapterInput {
   readonly url: URL;
   readonly request?: Request;
   readonly dashboardMode?: boolean;
+  readonly batchExecution?: {
+    readonly capturedAtMs: number;
+    readonly signal?: AbortSignal;
+  };
   readonly deferJsonSerialization?: boolean;
 }
 export interface PrivateTeamDashboardAdapterInput {
@@ -566,6 +570,7 @@ export function executePrivateQuery(
           overviewTab,
           ctx,
           queryContext,
+          input.batchExecution,
         ),
     );
   }

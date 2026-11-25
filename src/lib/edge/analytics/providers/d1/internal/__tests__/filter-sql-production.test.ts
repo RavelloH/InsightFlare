@@ -1429,6 +1429,94 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
+  it("shares real private overview adapter reads while preserving geography filter semantics", async () => {
+    const db = sqlitePayloadFixture();
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const collector = registerHotspotCollector(logger);
+    try {
+      db.exec(
+        "UPDATE visits SET country='US', browser='Chrome' WHERE site_pk=1 AND visit_id='v-new'; UPDATE visits SET country='CA', browser='Firefox' WHERE site_pk=1 AND visit_id='v-docs'",
+      );
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const env = instrumentEnv(
+        {
+          DB: createSqliteD1Database(db, trace),
+          DAILY_SALT_SECRET: "test-secret",
+        } as never,
+        logger,
+      );
+      const paths = [
+        "overview-page-path",
+        "overview-client-browser",
+        "overview-geo-country",
+      ];
+      const read = async (
+        pathname: string,
+        field = "page.path",
+        value = "/home",
+      ) => {
+        const url = new URL("https://app.test/api/private/" + pathname);
+        for (const [key, val] of Object.entries({
+          siteId: "site-a",
+          from: "100",
+          to: "300",
+          timeZone: "UTC",
+          scope: "session",
+          limit: "100",
+          ["filter[" + field + "]"]: value,
+        }))
+          url.searchParams.set(key, val);
+        const response = await executePrivateQuery({
+          env,
+          siteId: "site-a",
+          pathname,
+          url,
+          request: new Request(url),
+          dashboardMode: true,
+          batchExecution: { capturedAtMs: 400 },
+        });
+        expect(response.status).toBe(200);
+        return ((await response.json()) as { data: unknown }).data;
+      };
+      const baseline = await Promise.all(paths.map((path) => read(path)));
+      trace.preparedSql.length = 0;
+      const batched = await runWithInvocationLogger(logger, () =>
+        runWithDimensionPageBatch(
+          () => Promise.all(paths.map((path) => read(path))),
+          "private-dashboard",
+        ),
+      );
+      expect(batched).toEqual(baseline);
+      expect(trace.preparedSql).toHaveLength(1);
+      expect(trace.preparedSql[0]).toContain("dimension_page_2");
+      expect(collector.snapshot().dimensionBatch).toEqual({
+        merged3: { events: 1, items: 3 },
+      });
+      const geoBaseline = await Promise.all(
+        paths.map((path) => read(path, "geo.country", "US")),
+      );
+      trace.preparedSql.length = 0;
+      const geoBatched = await runWithInvocationLogger(logger, () =>
+        runWithDimensionPageBatch(
+          () =>
+            Promise.all(paths.map((path) => read(path, "geo.country", "US"))),
+          "private-dashboard",
+        ),
+      );
+      expect(geoBatched).toEqual(geoBaseline);
+      expect(trace.preparedSql).toHaveLength(2);
+      expect(collector.snapshot().dimensionBatch).toMatchObject({
+        merged2: { events: 1, items: 2 },
+        unfiltered: { events: 1, items: 1 },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("shares compatible prepared dimension pages with independent ordering, cursors and limits", async () => {
     const logger = createInvocationLogger({
       source: "worker",

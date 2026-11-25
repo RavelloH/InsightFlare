@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { withDashboardCache } from "@/lib/edge/analytics/composition/dashboard-cache";
 import type * as PrivateQueryAdapter from "@/lib/edge/analytics/interfaces/dashboard/private";
-import { executePrivateTeamDashboard } from "@/lib/edge/analytics/interfaces/dashboard/private";
+import {
+  executePrivateQuery,
+  executePrivateTeamDashboard,
+} from "@/lib/edge/analytics/interfaces/dashboard/private";
 import { handleOverviewContract } from "@/lib/edge/analytics/interfaces/dashboard/protocol/overview";
 import type * as SiteAccessModule from "@/lib/edge/auth/site-access";
 import {
@@ -41,7 +44,11 @@ vi.mock(
   "@/lib/edge/analytics/interfaces/dashboard/private",
   async (importOriginal) => {
     const actual = await importOriginal<typeof PrivateQueryAdapter>();
-    return { ...actual, executePrivateTeamDashboard: vi.fn() };
+    return {
+      ...actual,
+      executePrivateQuery: vi.fn(actual.executePrivateQuery),
+      executePrivateTeamDashboard: vi.fn(),
+    };
   },
 );
 vi.mock("@/lib/edge/analytics/interfaces/dashboard/protocol/funnels", () => ({
@@ -153,6 +160,133 @@ describe("Hono private query routes", () => {
     await expect(response.text()).resolves.toBe("denied");
     expect(withDashboardCache).not.toHaveBeenCalled();
     expect(dispatchQueryRoute).not.toHaveBeenCalled();
+  });
+
+  it("authorizes one site and preserves per-item cache identity and captured clock", async () => {
+    vi.mocked(executePrivateQuery)
+      .mockResolvedValueOnce(Response.json({ ok: true, data: { items: [] } }))
+      .mockResolvedValueOnce(Response.json({ ok: false }, { status: 400 }));
+    const query = "siteId=site-1&from=100&to=200&limit=100&scope=session";
+    const response = await createApp().fetch(
+      request("/api/private/query-batch?siteId=site-1", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          items: [
+            { path: "overview-page-path", query },
+            { path: "overview-client-browser", query },
+          ],
+        }),
+      }),
+      env as never,
+      ctx,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      items: [
+        { status: 200, body: { ok: true, data: { items: [] } } },
+        { status: 400, body: { ok: false } },
+      ],
+    });
+    expect(resolvePrivateSiteForSession).toHaveBeenCalledTimes(1);
+    expect(withDashboardCache).toHaveBeenCalledTimes(2);
+    expect(
+      vi
+        .mocked(withDashboardCache)
+        .mock.calls.map((call) => call[3]?.identity?.route),
+    ).toEqual(["overview-page-path", "overview-client-browser"]);
+    const calls = vi.mocked(executePrivateQuery).mock.calls;
+    expect(calls[0]?.[0].batchExecution?.capturedAtMs).toEqual(
+      expect.any(Number),
+    );
+    expect(calls[0]?.[0].batchExecution?.capturedAtMs).toBe(
+      calls[1]?.[0].batchExecution?.capturedAtMs,
+    );
+  });
+
+  it.each([
+    ["goals", "site-1", 100],
+    ["overview-page-path", "site-2", 100],
+    ["overview-page-path", "site-1", 101],
+  ])(
+    "rejects unsupported batch items before querying: %s %s %s",
+    async (path, site, limit) => {
+      const response = await createApp().fetch(
+        request("/api/private/query-batch?siteId=site-1", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            items: [
+              {
+                path: "overview-client-browser",
+                query: "siteId=site-1&from=100&to=200&limit=100",
+              },
+              {
+                path,
+                query: "siteId=" + site + "&from=100&to=200&limit=" + limit,
+              },
+            ],
+          }),
+        }),
+        env as never,
+        ctx,
+      );
+      expect(response.status).toBe(400);
+      expect(withDashboardCache).not.toHaveBeenCalled();
+      expect(executePrivateQuery).not.toHaveBeenCalled();
+    },
+  );
+
+  it("denies the entire private batch before any cache access when the parent site is not readable", async () => {
+    vi.mocked(resolvePrivateSiteForSession).mockResolvedValueOnce(
+      new Response("denied", { status: 404 }),
+    );
+    const query = "siteId=site-1&from=100&to=200&limit=100";
+    const response = await createApp().fetch(
+      request("/api/private/query-batch?siteId=site-1", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          items: [
+            { path: "overview-page-path", query },
+            { path: "overview-client-browser", query },
+          ],
+        }),
+      }),
+      env as never,
+      ctx,
+    );
+    expect(response.status).toBe(404);
+    expect(withDashboardCache).not.toHaveBeenCalled();
+    expect(executePrivateQuery).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized and non-JSON private batches before dispatch", async () => {
+    const app = createApp();
+    const path = "/api/private/query-batch?siteId=site-1";
+    const oversized = await app.fetch(
+      request(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: " ".repeat(48 * 1024 + 1),
+      }),
+      env as never,
+      ctx,
+    );
+    const nonJson = await app.fetch(
+      request(path, {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: "{}",
+      }),
+      env as never,
+      ctx,
+    );
+    expect(oversized.status).toBe(413);
+    expect(nonJson.status).toBe(415);
+    expect(withDashboardCache).not.toHaveBeenCalled();
+    expect(executePrivateQuery).not.toHaveBeenCalled();
   });
 
   it("keeps non-funnel mutations out of private query routes", async () => {

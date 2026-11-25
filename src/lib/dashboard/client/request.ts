@@ -36,6 +36,183 @@ function paramsWithoutSiteId(
 export function publicDashboardSiteId(slug: string): string {
   return `${PUBLIC_SITE_ID_PREFIX}${slug}`;
 }
+type QueuedPrivateRead = {
+  path: string;
+  query: string;
+  signal?: AbortSignal;
+  single: () => Promise<unknown>;
+  resolve: (value: unknown) => void;
+  reject: (error: unknown) => void;
+};
+type PrivateReadGroup = {
+  items: QueuedPrivateRead[];
+  timer?: ReturnType<typeof setTimeout>;
+};
+const privateReadGroups = new Map<string, PrivateReadGroup>();
+const PRIVATE_BATCH_SIZE = 4;
+function batchableOverviewPath(path: string): boolean {
+  return /^(?:page-query|overview-page-(?:path|title|hostname)|overview-source-channel|overview-client-(?:browser|os-version|device-type|language|screen-size)|overview-geo-(?:country|region|city|continent|timezone|organization))$/.test(
+    path,
+  );
+}
+function abortError(): Error {
+  const error = new Error("Aborted");
+  error.name = "AbortError";
+  return error;
+}
+async function flushPrivateReads(
+  key: string,
+  group: PrivateReadGroup,
+  siteId: string,
+) {
+  if (privateReadGroups.get(key) !== group) return;
+  privateReadGroups.delete(key);
+  clearTimeout(group.timer);
+  const items = group.items.filter((item) => {
+    if (!item.signal?.aborted) return true;
+    item.reject(abortError());
+    return false;
+  });
+  if (items.length < 2) {
+    for (const item of items) item.single().then(item.resolve, item.reject);
+    return;
+  }
+  const controller = new AbortController();
+  const onAbort = () => {
+    for (const item of items) {
+      if (item.signal?.aborted) item.reject(abortError());
+    }
+    if (items.every((item) => item.signal?.aborted)) controller.abort();
+  };
+  for (const item of items)
+    item.signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    const response = await fetch(
+      "/api/private/query-batch" + toQueryString({ siteId }),
+      {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          items: items.map(({ path, query }) => ({ path, query })),
+        }),
+        signal: controller.signal,
+      },
+    );
+    if (response.status === 401 || response.status === 403) {
+      for (const item of items)
+        item.reject(
+          new Error(
+            "Request failed (" + response.status + " /api/private/query-batch)",
+          ),
+        );
+      return;
+    }
+    if (!response.ok) throw new Error("Batch unavailable");
+    const payload = (await response.json()) as {
+      ok?: boolean;
+      items?: { status?: number; body?: unknown }[];
+    };
+    if (
+      payload.ok !== true ||
+      !Array.isArray(payload.items) ||
+      payload.items.length !== items.length ||
+      payload.items.some(
+        (item) =>
+          !item ||
+          typeof item !== "object" ||
+          !Number.isInteger(item.status) ||
+          !("body" in item),
+      )
+    ) {
+      throw new Error("Invalid batch response");
+    }
+    items.forEach((item, i) => {
+      const result = payload.items![i]!;
+      if (item.signal?.aborted) item.reject(abortError());
+      else if (result.status! >= 200 && result.status! < 300)
+        item.resolve(result.body);
+      else
+        item.reject(
+          new Error(
+            "Request failed (" +
+              result.status +
+              " /api/private/" +
+              item.path +
+              ")",
+          ),
+        );
+    });
+  } catch {
+    // Rolling deployments and transport failures may leave the batch endpoint
+    // unavailable. Only retry independent reads, never mutations.
+    for (const item of items) {
+      if (item.signal?.aborted) item.reject(abortError());
+      else item.single().then(item.resolve, item.reject);
+    }
+  } finally {
+    for (const item of items)
+      item.signal?.removeEventListener("abort", onAbort);
+  }
+}
+function queuePrivateOverviewRead<T>(
+  path: string,
+  params: PrivateRequestParams | undefined,
+  options: FetchPrivateJsonOptions | undefined,
+  single: () => Promise<T>,
+): Promise<T> | undefined {
+  const endpoint = path.replace(/^\/api\/private\//, "");
+  const siteId = params?.siteId;
+  if (
+    typeof window === "undefined" ||
+    !options?.batchOverview ||
+    typeof siteId !== "string" ||
+    siteId.startsWith(PUBLIC_SITE_ID_PREFIX) ||
+    import.meta.env.VITE_DEMO_MODE === "1" ||
+    !batchableOverviewPath(endpoint) ||
+    !params ||
+    (params.scope !== "session" && params.scope !== "visitor") ||
+    !Object.keys(params).some((key) => key.startsWith("filter[")) ||
+    params.compare != null ||
+    params.cursor ||
+    params.search ||
+    !Number.isInteger(Number(params.limit)) ||
+    Number(params.limit) < 1 ||
+    Number(params.limit) > 100 ||
+    params.from == null ||
+    params.to == null
+  )
+    return undefined;
+  const query = toQueryString(params);
+  if (query.length > 8192) return undefined;
+  const shared = new URLSearchParams(query);
+  for (const name of ["limit", "sort", "direction"]) shared.delete(name);
+  shared.sort();
+  const key = shared.toString();
+  return new Promise<T>((resolve, reject) => {
+    let group = privateReadGroups.get(key);
+    if (!group) {
+      group = { items: [] };
+      privateReadGroups.set(key, group);
+      const current = group;
+      current.timer = setTimeout(() => {
+        void flushPrivateReads(key, current, siteId);
+      }, 5);
+    }
+    group.items.push({
+      path: endpoint,
+      query,
+      signal: options.signal,
+      single,
+      resolve: (value) => resolve(value as T),
+      reject,
+    });
+    if (group.items.length === PRIVATE_BATCH_SIZE)
+      void flushPrivateReads(key, group, siteId);
+  });
+}
+
 export async function fetchPrivateJson<T>(
   path: string,
   params?: PrivateRequestParams,
@@ -55,7 +232,7 @@ export async function fetchPrivateJson<T>(
     ? (inflightPrivateRequests.get(url) as Promise<T> | undefined)
     : undefined;
   if (existing) return existing;
-  const promise = (async () => {
+  const single = async () => {
     const res = await fetch(url, {
       method: "GET",
       credentials: publicSlug ? "omit" : "include",
@@ -66,7 +243,9 @@ export async function fetchPrivateJson<T>(
       throw new Error(`Request failed (${res.status} ${requestPath}): ${text}`);
     }
     return (await res.json()) as T;
-  })();
+  };
+  const promise =
+    queuePrivateOverviewRead(path, params, options, single) ?? single();
   if (shouldDedupe) {
     inflightPrivateRequests.set(url, promise);
     void promise
