@@ -429,7 +429,7 @@ describe("Goal D1 analytics", () => {
       convertedVisitors: 2,
     });
     expect(d1.calls).toHaveLength(1);
-    expect(d1.calls[0]).toContain("SELECT COUNT(*) FROM goal_sessions");
+    expect(d1.calls[0]).toContain("site_counts AS (");
   });
 
   it("keeps identical session and visitor ids separate across site identities", async () => {

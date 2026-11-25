@@ -90,12 +90,35 @@ export async function queryGoalSummaryFromD1(
     env,
     `WITH
 ${dataset.ctes.trim()},
-${goal.ctes.trim()}
+${goal.ctes.trim()},
+source_observations AS (
+  SELECT 0 AS is_goal, site_pk, session_id, visitor_id
+  FROM ${dataset.visitRelation}
+  UNION ALL
+  SELECT 0, site_pk, session_id, visitor_id
+  FROM ${dataset.eventRelation}
+  UNION ALL
+  SELECT 1, site_pk, session_id, visitor_id
+  FROM ${goal.matchedVisitRelation}
+  UNION ALL
+  SELECT 1, site_pk, session_id, visitor_id
+  FROM ${goal.matchedEventRelation}
+),
+site_counts AS (
+  SELECT site_pk,
+    COUNT(DISTINCT CASE WHEN is_goal = 0 AND TRIM(COALESCE(session_id, '')) != '' THEN session_id END) AS totalSessions,
+    COUNT(DISTINCT CASE WHEN is_goal = 1 AND site_pk IS NOT NULL AND TRIM(COALESCE(session_id, '')) != '' THEN session_id END) AS convertedSessions,
+    COUNT(DISTINCT CASE WHEN is_goal = 0 AND TRIM(COALESCE(visitor_id, '')) != '' THEN visitor_id END) AS totalVisitors,
+    COUNT(DISTINCT CASE WHEN is_goal = 1 AND site_pk IS NOT NULL AND TRIM(COALESCE(visitor_id, '')) != '' THEN visitor_id END) AS convertedVisitors
+  FROM source_observations
+  GROUP BY site_pk
+)
 SELECT
-  (SELECT COUNT(*) FROM ${dataset.sessionRelation}) AS totalSessions,
-  (SELECT COUNT(*) FROM ${goal.sessionRelation}) AS convertedSessions,
-  (SELECT COUNT(*) FROM ${dataset.visitorRelation}) AS totalVisitors,
-  (SELECT COUNT(*) FROM ${goal.visitorRelation}) AS convertedVisitors
+  COALESCE(SUM(totalSessions), 0) AS totalSessions,
+  COALESCE(SUM(convertedSessions), 0) AS convertedSessions,
+  COALESCE(SUM(totalVisitors), 0) AS totalVisitors,
+  COALESCE(SUM(convertedVisitors), 0) AS convertedVisitors
+FROM site_counts
 `,
     [
       ...dataset.bindings.map((binding) => binding.value),
