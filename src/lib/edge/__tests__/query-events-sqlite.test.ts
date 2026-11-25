@@ -1697,6 +1697,18 @@ describe("event detail D1 SQL", () => {
           "page_metrics AS NOT MATERIALIZED (",
         );
         expect(boundary).toBeGreaterThan(0);
+        const pageProjection = captured.sql.slice(
+          boundary,
+          captured.sql.indexOf("page_entities AS MATERIALIZED (", boundary),
+        );
+        expect(pageProjection).toContain("MAX(started_at) AS lastSeenAt");
+        expect(pageProjection.includes("MIN(started_at) AS firstSeenAt")).toBe(
+          sort.key === "firstSeenAt",
+        );
+        expect(pageProjection.includes("AS views")).toBe(sort.key === "views");
+        expect(pageProjection.includes("COUNT(DISTINCT")).toBe(
+          sort.key === "sessions",
+        );
         const baseline =
           captured.sql.slice(0, boundary) +
           buildVisitorAggregationSql({
@@ -1746,6 +1758,15 @@ describe("event detail D1 SQL", () => {
           "page_metrics AS NOT MATERIALIZED (",
         );
         expect(boundary).toBeGreaterThan(0);
+        const pageProjection = captured.sql.slice(
+          boundary,
+          captured.sql.indexOf("page_entities AS MATERIALIZED (", boundary),
+        );
+        expect(pageProjection).toContain("MIN(started_at) AS startedAt");
+        expect(pageProjection.includes("AS totalDurationMs")).toBe(
+          sort.key === "durationMs",
+        );
+        expect(pageProjection.includes("AS views")).toBe(sort.key === "views");
         const baseline =
           captured.sql.slice(0, boundary) +
           buildSessionAggregationSql({

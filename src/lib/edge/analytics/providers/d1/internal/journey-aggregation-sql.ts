@@ -1,4 +1,7 @@
+import type { SessionListSortKey, VisitorListSortKey } from "./core";
+
 interface VisitorAggregationOptions {
+  pageSortKey?: VisitorListSortKey;
   searchWhere?: string;
   browserVersionExpression?: string;
   orderBy: string;
@@ -8,6 +11,7 @@ interface VisitorAggregationOptions {
 }
 
 interface SessionAggregationOptions {
+  pageSortKey?: SessionListSortKey;
   searchWhere?: string;
   browserVersionExpression?: string;
   orderBy: string;
@@ -217,15 +221,30 @@ function buildPageEntityCtes(
   const id = entity === "visitor" ? "visitor_id" : "session_id";
   const alias = entity === "visitor" ? "vm" : "sm";
   const key = entity === "visitor" ? "visitorId" : "sessionId";
-  const metrics =
+  // The first page only needs the primary sort and its stable time tie-break.
+  // Full metrics are still calculated from the selected entities below.
+  const sortKey = options.pageSortKey;
+  const allMetrics =
     entity === "visitor"
-      ? `MIN(started_at) AS firstSeenAt,
-      MAX(started_at) AS lastSeenAt,
-      COUNT(CASE WHEN is_visit_observation = 1 THEN 1 END) AS views,
-      COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions`
-      : `MIN(started_at) AS startedAt,
-      SUM(COALESCE(duration_ms, 0)) AS totalDurationMs,
-      COUNT(CASE WHEN is_visit_observation = 1 THEN 1 END) AS views`;
+      ? {
+          firstSeenAt: "MIN(started_at) AS firstSeenAt",
+          lastSeenAt: "MAX(started_at) AS lastSeenAt",
+          views:
+            "COUNT(CASE WHEN is_visit_observation = 1 THEN 1 END) AS views",
+          sessions:
+            "COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions",
+        }
+      : {
+          startedAt: "MIN(started_at) AS startedAt",
+          durationMs: "SUM(COALESCE(duration_ms, 0)) AS totalDurationMs",
+          views:
+            "COUNT(CASE WHEN is_visit_observation = 1 THEN 1 END) AS views",
+        };
+  const tieBreak = entity === "visitor" ? "lastSeenAt" : "startedAt";
+  const metrics = Object.entries(allMetrics)
+    .filter(([key]) => !sortKey || key === sortKey || key === tieBreak)
+    .map(([, expression]) => expression)
+    .join(",\n      ");
   return `
 page_metrics AS NOT MATERIALIZED (
   SELECT fv.${id}, ${metrics}
