@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   durationFormat,
@@ -108,6 +108,87 @@ describe("Dashboard Format Utilities", () => {
       expect(shortDate("en", isoStr, "UTC")).toContain("May");
       expect(shortDateTime("en", isoStr, "UTC")).toContain("43");
       expect(shortDateTimeWithSeconds("en", isoStr, "UTC")).toContain("43");
+    });
+
+    it("reuses explicit-zone formatters without mixing locales, zones, years or precision", () => {
+      const timestamp = Date.UTC(2026, 2, 8, 10, 31, 29);
+      const expected = new Intl.DateTimeFormat("ja-JP", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        timeZone: "America/Los_Angeles",
+      }).format(timestamp);
+      const NativeDateTimeFormat = Intl.DateTimeFormat;
+      const constructor = vi
+        .spyOn(Intl, "DateTimeFormat")
+        .mockImplementation(function (locales, options) {
+          return new NativeDateTimeFormat(locales, options);
+        });
+      try {
+        for (let index = 0; index < 10; index++) {
+          expect(
+            shortDateTimeWithSeconds("ja", timestamp, "America/Los_Angeles", {
+              year: "numeric",
+            }),
+          ).toBe(expected);
+        }
+        expect(constructor).toHaveBeenCalledTimes(1);
+        expect(
+          shortDateTimeWithSeconds("ja", timestamp, "America/Los_Angeles"),
+        ).not.toBe(expected);
+        expect(
+          shortDateTimeWithSeconds("ja", timestamp, "Asia/Tokyo", {
+            year: "numeric",
+          }),
+        ).not.toBe(expected);
+        expect(
+          shortDateTimeWithSeconds("en", timestamp, "America/Los_Angeles", {
+            year: "numeric",
+          }),
+        ).not.toBe(expected);
+        expect(constructor).toHaveBeenCalledTimes(4);
+      } finally {
+        constructor.mockRestore();
+      }
+    });
+
+    it("evicts old explicit-zone formatters and preserves uncached default-zone behavior", () => {
+      const timestamp = Date.UTC(2026, 10, 1, 5, 30);
+      const zones = Intl.supportedValuesOf("timeZone").slice(0, 129);
+      expect(zones).toHaveLength(129);
+      const NativeDateTimeFormat = Intl.DateTimeFormat;
+      const constructor = vi
+        .spyOn(Intl, "DateTimeFormat")
+        .mockImplementation(function (locales, options) {
+          return new NativeDateTimeFormat(locales, options);
+        });
+      try {
+        const first = shortDateTimeWithSeconds("zh-tw", timestamp, zones[0], {
+          year: "2-digit",
+        });
+        for (const zone of zones.slice(1)) {
+          shortDateTimeWithSeconds("zh-tw", timestamp, zone, {
+            year: "2-digit",
+          });
+        }
+        constructor.mockClear();
+        expect(
+          shortDateTimeWithSeconds("zh-tw", timestamp, zones[0], {
+            year: "2-digit",
+          }),
+        ).toBe(first);
+        expect(constructor).toHaveBeenCalledTimes(1);
+        constructor.mockClear();
+        expect(shortDateTime("ja", timestamp)).toBe(
+          shortDateTime("ja", timestamp),
+        );
+        expect(constructor).toHaveBeenCalledTimes(2);
+      } finally {
+        constructor.mockRestore();
+      }
     });
 
     it("should format without a timezone override when one is not provided", () => {

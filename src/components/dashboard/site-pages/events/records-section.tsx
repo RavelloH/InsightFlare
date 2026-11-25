@@ -35,9 +35,9 @@ import {
   CountryRegionMeta,
   DeviceMeta,
   formatPath,
-  formatRelativeTime,
   OsMeta,
   ReferrerMeta,
+  RelativeTimeValue,
   VisitorAvatar,
 } from "@/components/dashboard/journeys/journey-display";
 import { EventDetailDrawer } from "@/components/dashboard/site-pages/events/event-detail-drawer";
@@ -205,14 +205,12 @@ const EventRecordTableRowContent = memo(function EventRecordTableRowContent({
   messages,
   labels,
   row,
-  now,
   columns,
 }: {
   locale: Locale;
   messages: AppMessages;
   labels: EventPageCopy;
   row: EventRecord;
-  now: number;
   columns: readonly EventRecordTableColumnId[];
 }) {
   const visitorDisplayId = row.visitorId || row.sessionId || row.visitId;
@@ -300,7 +298,7 @@ const EventRecordTableRowContent = memo(function EventRecordTableRowContent({
           locale={locale}
           timestamp={row.occurredAt}
         >
-          {formatRelativeTime(locale, row.occurredAt, now)}
+          <RelativeTimeValue locale={locale} timestamp={row.occurredAt} />
         </AnalyticsTimeTooltipTarget>
       </TableCell>
     ),
@@ -470,13 +468,6 @@ const EventRecordsTable = memo(function EventRecordsTable({
   onLoadMore: () => void;
   visibleColumnIds: readonly EventRecordTableColumnId[];
 }) {
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    const interval = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(interval);
-  }, []);
-
   const headers = useMemo<Record<EventRecordTableColumnId, ReactNode>>(
     () => ({
       visitor: <TableHead className="pl-4">{labels.visitor}</TableHead>,
@@ -548,7 +539,6 @@ const EventRecordsTable = memo(function EventRecordsTable({
           messages={messages}
           labels={labels}
           row={row}
-          now={now}
           columns={visibleColumnIds}
         />
       ),
@@ -565,7 +555,7 @@ const EventRecordsTable = memo(function EventRecordsTable({
         },
       },
     }),
-    [labels, locale, messages, now, onOpenRecord, visibleColumnIds],
+    [labels, locale, messages, onOpenRecord, visibleColumnIds],
   );
   const renderSkeletonRow = useCallback(
     (index: number) => (

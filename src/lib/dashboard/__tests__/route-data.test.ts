@@ -56,7 +56,6 @@ vi.mock("@/lib/dashboard/server", () => ({
   getDashboardRootContext: vi.fn(),
   getDashboardProfile: vi.fn(),
   getDashboardRuntime: vi.fn(),
-  getDashboardTeamSites: vi.fn(),
   getDashboardTeamContext: vi.fn(),
   getTeamSiteContext: vi.fn(),
   readDashboardAdmin: vi.fn(),
@@ -112,7 +111,6 @@ import {
   getDashboardRootContext,
   getDashboardRuntime,
   getDashboardTeamContext,
-  getDashboardTeamSites,
   readDashboardAdmin,
 } from "@/lib/dashboard/server";
 import { resolveTeamDashboardRequest } from "@/lib/dashboard/server/query";
@@ -178,7 +176,7 @@ describe("Dashboard route data loaders", () => {
       data: { sites: [], trend: [] },
       meta: { source: "raw", approximateVisitors: false },
     });
-    vi.mocked(getDashboardTeamSites).mockResolvedValue([]);
+    mockAdminReads({ sites: [] });
   });
 
   describe("loadRequestOrigin", () => {
@@ -402,6 +400,43 @@ describe("Dashboard route data loaders", () => {
             range: { startMs: 100, endExclusiveMs: 200 },
             reportingTimeZone: "Asia/Tokyo",
           }),
+        }),
+      );
+    });
+
+    it("reuses nonempty site data with the analytics reader's public flag", async () => {
+      const site = {
+        id: "site-1",
+        teamId: "team-1",
+        name: "Site",
+        domain: "example.test",
+        publicEnabled: true,
+        publicSlug: null,
+        createdAt: 100,
+        updatedAt: 200,
+      };
+      mockAdminReads({ sites: [site] });
+      await loadTeamDashboardSnapshot({
+        data: { teamId: "team-1" },
+      });
+      expect(createTeamDashboardQueryRuntime).toHaveBeenCalledWith(
+        expect.objectContaining({
+          allowedSiteIds: ["site-1"],
+          preloadedSites: [{ ...site, publicEnabled: 1 }],
+        }),
+      );
+    });
+
+    it("falls back to the authorized site query if the management read fails", async () => {
+      mockAdminReads({ sites: null });
+      await loadTeamDashboardSnapshot({
+        data: { teamId: "team-requested" },
+      });
+      expect(createTeamDashboardQueryRuntime).toHaveBeenCalledWith(
+        expect.objectContaining({
+          teamId: "team-1",
+          allowedSiteIds: ["site-1"],
+          preloadedSites: undefined,
         }),
       );
     });

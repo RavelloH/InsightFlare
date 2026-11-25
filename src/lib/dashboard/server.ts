@@ -134,7 +134,16 @@ export async function readDashboardAdmin<K extends keyof AdminServiceReadMap>(
   route: K,
   params?: Record<string, string | number>,
 ): Promise<AdminServiceReadMap[K] | null> {
-  return readAdmin(route, params);
+  const request = getRequest();
+  enableRequestReadCache(request);
+  const entries = Object.entries(params ?? {})
+    .map(([key, value]) => [key, String(value)] as const)
+    .sort(([left], [right]) => left.localeCompare(right));
+  return memoizeRequestRead(
+    request,
+    JSON.stringify(["dashboard", "admin-read", route, entries]),
+    () => readAdmin(route, Object.fromEntries(entries)),
+  );
 }
 function teamGroupsForProfile(
   me: Awaited<ReturnType<typeof readAdmin<"session">>>,
@@ -173,7 +182,7 @@ export const getDashboardTeamSites = requestMemo(
   "sites",
   async (teamId: string): Promise<SiteWithSlug[]> => {
     try {
-      const sites = await readAdmin("sites", { teamId });
+      const sites = await readDashboardAdmin("sites", { teamId });
       if (!sites) return [];
       return sites.map(withSiteSlug);
     } catch {

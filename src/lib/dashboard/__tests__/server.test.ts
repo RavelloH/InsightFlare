@@ -186,6 +186,47 @@ describe("dashboard server helpers", () => {
     expect(fetchAdminMeMock).toHaveBeenCalledTimes(2);
   });
 
+  it("shares a site read between route loaders but isolates teams and requests", async () => {
+    adminServiceMocks.getRequest.mockReturnValue(
+      new Request("https://app.test/app"),
+    );
+    fetchAdminSitesMock.mockResolvedValue([site({ id: "site-1" })]);
+    const { getDashboardTeamSites, readDashboardAdmin } =
+      await loadServerModule();
+
+    const [sidebar, management] = await Promise.all([
+      getDashboardTeamSites("team-1"),
+      readDashboardAdmin("sites", { teamId: "team-1" }),
+    ]);
+    expect(sidebar).toEqual([
+      expect.objectContaining({ id: "site-1", slug: "docs-example-test" }),
+    ]);
+    expect(management).toEqual([site({ id: "site-1" })]);
+    expect(fetchAdminSitesMock).toHaveBeenCalledTimes(1);
+
+    await readDashboardAdmin("sites", { teamId: "team-2" });
+    expect(fetchAdminSitesMock).toHaveBeenCalledTimes(2);
+    adminServiceMocks.getRequest.mockReturnValue(
+      new Request("https://app.test/app"),
+    );
+    await readDashboardAdmin("sites", { teamId: "team-1" });
+    expect(fetchAdminSitesMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("normalizes query parameters for the same request read", async () => {
+    adminServiceMocks.getRequest.mockReturnValue(
+      new Request("https://app.test/app"),
+    );
+    const { readDashboardAdmin } = await loadServerModule();
+    await Promise.all([
+      readDashboardAdmin("notifications", { limit: 1, unread: "true" }),
+      readDashboardAdmin("notifications", { unread: "true", limit: "1" }),
+    ]);
+    expect(fetchNotificationMessagesMock).toHaveBeenCalledTimes(1);
+    await readDashboardAdmin("notifications", { limit: 2, unread: "true" });
+    expect(fetchNotificationMessagesMock).toHaveBeenCalledTimes(2);
+  });
+
   it("returns root context and falls back when notification counts fail", async () => {
     fetchAdminMeMock.mockResolvedValue({
       user: {

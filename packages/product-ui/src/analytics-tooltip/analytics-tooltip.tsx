@@ -46,6 +46,7 @@ interface AnalyticsTooltipContextValue {
     contentKey: string | undefined,
     clientX: number,
   ) => void;
+  move: AnalyticsTooltipContextValue["show"];
   hide: () => void;
   cancelHide: () => void;
 }
@@ -101,6 +102,10 @@ export function AnalyticsTooltipProvider({
     clientX: number;
     clientY: number;
   } | null>(null);
+  const targetMoveFrameRef = useRef<number | null>(null);
+  const latestTargetMoveRef = useRef<Parameters<
+    AnalyticsTooltipContextValue["show"]
+  > | null>(null);
   const shouldAnimatePositionRef = useRef(false);
   const tooltipContentRef = useRef<HTMLDivElement | null>(null);
 
@@ -141,22 +146,32 @@ export function AnalyticsTooltipProvider({
     [],
   );
 
+  const cancelTargetMove = useCallback(() => {
+    if (targetMoveFrameRef.current !== null) {
+      window.cancelAnimationFrame(targetMoveFrameRef.current);
+      targetMoveFrameRef.current = null;
+    }
+    latestTargetMoveRef.current = null;
+  }, []);
+
   const hide = useCallback(() => {
+    cancelTargetMove();
     if (hideTimerRef.current !== null) {
       window.clearTimeout(hideTimerRef.current);
       hideTimerRef.current = null;
     }
     activeRef.current = null;
     setActive(null);
-  }, []);
+  }, [cancelTargetMove]);
 
   const scheduleHide = useCallback(() => {
+    cancelTargetMove();
     if (hideTimerRef.current !== null) return;
     hideTimerRef.current = window.setTimeout(() => {
       hideTimerRef.current = null;
       hide();
     }, TOOLTIP_HIDE_DELAY_MS);
-  }, [hide]);
+  }, [cancelTargetMove, hide]);
 
   const cancelHide = useCallback(() => {
     if (hideTimerRef.current === null) return;
@@ -171,10 +186,34 @@ export function AnalyticsTooltipProvider({
       contentKey: string | undefined,
       clientX: number,
     ) => {
+      cancelTargetMove();
       cancelHide();
       updateActive(target, nextContent, contentKey, clientX);
     },
-    [cancelHide, updateActive],
+    [cancelTargetMove, cancelHide, updateActive],
+  );
+
+  // Entering a different target is immediate. Repeated moves inside the
+  // same target need at most one geometry read per animation frame.
+  const move = useCallback<AnalyticsTooltipContextValue["move"]>(
+    (...args) => {
+      if (activeRef.current?.target !== args[0]) {
+        show(...args);
+        return;
+      }
+      cancelHide();
+      latestTargetMoveRef.current = args;
+      if (targetMoveFrameRef.current !== null) return;
+      targetMoveFrameRef.current = window.requestAnimationFrame(() => {
+        targetMoveFrameRef.current = null;
+        const latest = latestTargetMoveRef.current;
+        latestTargetMoveRef.current = null;
+        if (latest && activeRef.current?.target === latest[0]) {
+          updateActive(...latest);
+        }
+      });
+    },
+    [cancelHide, show, updateActive],
   );
 
   const isWithinRetentionZone = useCallback(
@@ -266,20 +305,22 @@ export function AnalyticsTooltipProvider({
 
   useEffect(() => {
     return () => {
+      cancelTargetMove();
       if (hideTimerRef.current !== null) {
         window.clearTimeout(hideTimerRef.current);
       }
     };
-  }, []);
+  }, [cancelTargetMove]);
 
   const contextValue = useMemo<AnalyticsTooltipContextValue>(
     () => ({
       cancelHide,
       groupId,
       hide: scheduleHide,
+      move,
       show,
     }),
-    [cancelHide, groupId, scheduleHide, show],
+    [cancelHide, groupId, move, scheduleHide, show],
   );
 
   const anchor = active ?? content;
@@ -384,7 +425,9 @@ export function AnalyticsTooltipTarget({
       data-analytics-tooltip-group={context.groupId}
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}
-      onMouseMove={showTooltip}
+      onMouseMove={(event) =>
+        context.move(event.currentTarget, content, contentKey, event.clientX)
+      }
     >
       {children}
     </span>

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import {
   AnalyticsTooltipProvider as ProductAnalyticsTooltipProvider,
   AnalyticsTooltipTarget as ProductAnalyticsTooltipTarget,
@@ -179,17 +179,22 @@ function AnalyticsTimeTooltipContent({
 }) {
   const [now, setNow] = useState(() => Date.now());
   const localTimeZone = appContext.browserTimeZone || "UTC";
-  const localTimeZoneLabel = formatTimeZoneShortName(
-    locale,
-    timestamp,
-    localTimeZone,
+  const { localTimeZoneLabel, utcTime, localTime } = useMemo(
+    () => ({
+      localTimeZoneLabel: formatTimeZoneShortName(
+        locale,
+        timestamp,
+        localTimeZone,
+      ),
+      utcTime: shortDateTimeWithSeconds(locale, timestamp, "UTC", {
+        year: "numeric",
+      }),
+      localTime: shortDateTimeWithSeconds(locale, timestamp, localTimeZone, {
+        year: "numeric",
+      }),
+    }),
+    [locale, timestamp, localTimeZone],
   );
-  const utcTime = shortDateTimeWithSeconds(locale, timestamp, "UTC", {
-    year: "numeric",
-  });
-  const localTime = shortDateTimeWithSeconds(locale, timestamp, localTimeZone, {
-    year: "numeric",
-  });
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 1_000);
@@ -305,20 +310,26 @@ export function AnalyticsTimeTooltipProvider({
   retentionMode?: "table-column" | "target";
 }) {
   const { browserTimeZone } = useReportingTimeZone();
-  const tooltipMessages = messages
-    ? { copyValue: messages.events.copyValue }
-    : DEFAULT_MESSAGES;
-  const onCopyResult = messages
-    ? (success: boolean) => {
-        if (success) toast.success(messages.events.copiedValue);
-        else toast.error(messages.events.copyValueFailed);
-      }
-    : undefined;
+  const copyValue = messages?.events.copyValue;
+  const copiedValue = messages?.events.copiedValue;
+  const copyValueFailed = messages?.events.copyValueFailed;
+  const appContext = useMemo<AnalyticsTooltipAppContextValue>(
+    () => ({
+      browserTimeZone,
+      messages: copyValue === undefined ? DEFAULT_MESSAGES : { copyValue },
+      onCopyResult:
+        copiedValue === undefined || copyValueFailed === undefined
+          ? undefined
+          : (success: boolean) => {
+              if (success) toast.success(copiedValue);
+              else toast.error(copyValueFailed);
+            },
+    }),
+    [browserTimeZone, copyValue, copiedValue, copyValueFailed],
+  );
 
   return (
-    <AnalyticsTooltipAppContext.Provider
-      value={{ browserTimeZone, messages: tooltipMessages, onCopyResult }}
-    >
+    <AnalyticsTooltipAppContext.Provider value={appContext}>
       <ProductAnalyticsTooltipProvider retentionMode={retentionMode}>
         {children}
       </ProductAnalyticsTooltipProvider>

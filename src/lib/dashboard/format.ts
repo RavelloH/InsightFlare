@@ -42,6 +42,8 @@ const DURATION_UNITS: Record<
   },
 };
 
+const DATE_FORMATTERS = new Map<string, Intl.DateTimeFormat>();
+const MAX_DATE_FORMATTERS = 128;
 const NUMBER_FORMATTERS = new Map<string, Intl.NumberFormat>();
 const PERCENT_FORMATTERS = new Map<string, Intl.NumberFormat>();
 const PERCENT_ONE_DECIMAL_FORMATTERS = new Map<string, Intl.NumberFormat>();
@@ -142,10 +144,23 @@ function formatDate(
   const date = toValidDate(value);
   if (!date) return "--";
 
-  return new Intl.DateTimeFormat(intlLocale(locale), {
-    ...options,
-    ...(timeZone ? { timeZone } : {}),
-  }).format(date);
+  // Do not retain implicit local-zone formatters across a system zone change.
+  if (!timeZone)
+    return new Intl.DateTimeFormat(intlLocale(locale), options).format(date);
+  const key = JSON.stringify([locale, timeZone, options]);
+  let formatter = DATE_FORMATTERS.get(key);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(intlLocale(locale), {
+      ...options,
+      timeZone,
+    });
+    if (DATE_FORMATTERS.size >= MAX_DATE_FORMATTERS) {
+      const oldest = DATE_FORMATTERS.keys().next().value;
+      if (oldest !== undefined) DATE_FORMATTERS.delete(oldest);
+    }
+    DATE_FORMATTERS.set(key, formatter);
+  }
+  return formatter.format(date);
 }
 
 export function shortDateTime(
