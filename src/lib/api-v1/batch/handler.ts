@@ -18,6 +18,7 @@ export type {
 } from "@/lib/api-v1/contract/dto/batch";
 export interface TypedBatchDispatchContext {
   readonly request: Request;
+  readonly capturedAtMs: number;
   readonly principal: ApiKeyPrincipal;
   readonly signal: AbortSignal;
 }
@@ -174,6 +175,7 @@ export async function executeTypedBatch(
       });
       const response = await options.dispatch(item, {
         request: childRequest,
+        capturedAtMs: now,
         principal,
         signal,
       });

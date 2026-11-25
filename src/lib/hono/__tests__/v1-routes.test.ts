@@ -1,7 +1,10 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { handlePlannedResourceRoute } from "@/lib/api-v1";
+import {
+  handlePlannedResourceRoute,
+  handlePlannedSiteBreakdown,
+} from "@/lib/api-v1";
 import type * as SiteListHandlerModule from "@/lib/api-v1/analytics/site-list";
 import type * as ApiKeyAuthModule from "@/lib/edge/auth/api-key-auth";
 import { authenticateApiKey } from "@/lib/edge/auth/api-key-auth";
@@ -753,6 +756,71 @@ describe("Hono API v1 routes", () => {
     expect(authenticateApiKey).toHaveBeenCalledOnce();
   });
 
+  it("passes one trusted clock to all batch children, not to separate requests", async () => {
+    let clock = Date.UTC(2026, 10, 25, 12);
+    const original = Date.now;
+    const spy = vi.spyOn(Date, "now").mockImplementation(() => clock++);
+    const app = createApp();
+    const path = "/api/v1/sites/site-1/analytics/breakdowns/page.path";
+    try {
+      const body = {
+        timeRange: { kind: "preset", preset: "today", timeZone: "UTC" },
+      };
+      const response = await app.fetch(
+        request("/api/v1/batch", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            requests: [
+              { id: "path", method: "POST", path, body },
+              {
+                id: "country",
+                method: "POST",
+                path: path.replace("page.path", "geo.country"),
+                body,
+              },
+            ],
+          }),
+        }),
+        env as never,
+        ctx,
+      );
+      expect(response.status).toBe(200);
+      const calls = vi.mocked(handlePlannedSiteBreakdown).mock.calls;
+      expect(calls).toHaveLength(2);
+      const clocks = calls.map(
+        (args) =>
+          args.find(
+            (arg) =>
+              typeof arg === "object" && arg !== null && "capturedAtMs" in arg,
+          ) as { capturedAtMs: number },
+      );
+      expect(clocks[0]?.capturedAtMs).toEqual(expect.any(Number));
+      expect(clocks[1]?.capturedAtMs).toBe(clocks[0]?.capturedAtMs);
+      await app.fetch(
+        request(path, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-insightflare-captured-at": "1",
+          },
+          body: JSON.stringify(body),
+        }),
+        env as never,
+        ctx,
+      );
+      const last = calls
+        .at(-1)
+        ?.find(
+          (arg) =>
+            typeof arg === "object" && arg !== null && "capturedAtMs" in arg,
+        ) as { capturedAtMs: number };
+      expect(last.capturedAtMs).toBeGreaterThan(clocks[0]!.capturedAtMs);
+    } finally {
+      spy.mockRestore();
+      Date.now = original;
+    }
+  });
   it("returns 405 and Allow: POST for non-POST batch requests", async () => {
     const response = await createApp().fetch(
       request("/api/v1/batch"),

@@ -831,7 +831,10 @@ async function reportHandler(
       interval,
       trendMetrics(input),
       operation,
-      { ...executionContextFor(request), cost },
+      {
+        ...executionContextFor(request, sides.current.time.capturedAtMs),
+        cost,
+      },
       cacheKey,
     );
   } catch {
@@ -874,8 +877,9 @@ async function reportHandler(
 }
 function executionContextFor(
   request: Request,
+  capturedAtMs = Date.now(),
 ): QueryExecutionContext & { readonly request: Request } {
-  return { request, signal: request.signal, capturedAtMs: Date.now() };
+  return { request, signal: request.signal, capturedAtMs };
 }
 async function breakdownHandler(
   request: Request,
@@ -938,7 +942,10 @@ async function breakdownHandler(
       input.limit,
       input.sort,
       operation,
-      { ...executionContextFor(request), cost },
+      {
+        ...executionContextFor(request, sides.current.time.capturedAtMs),
+        cost,
+      },
       cacheKey,
     );
   } catch {
@@ -1011,6 +1018,7 @@ export async function handleSiteComparison(
   runtime: ComparisonQueryRuntime,
   siteId: string,
   definitions?: AnalysisDefinitionReader,
+  capturedAtMs?: number,
 ): Promise<Response> {
   const parsed = await parseBody<SiteReportInput>(
     request,
@@ -1022,7 +1030,7 @@ export async function handleSiteComparison(
     principal,
     siteId,
     definitions,
-    executionContextFor(request),
+    executionContextFor(request, capturedAtMs),
   );
   if (!prepared.ok) return prepared.response;
   return reportHandler(
@@ -1038,6 +1046,7 @@ export async function handleTeamComparison(
   request: Request,
   principal: ApiKeyPrincipal,
   runtime: ComparisonQueryRuntime,
+  capturedAtMs?: number,
 ): Promise<Response> {
   const parsed = await parseBody<TeamReportInput>(
     request,
@@ -1047,7 +1056,7 @@ export async function handleTeamComparison(
   const prepared = prepareTeamSides(
     parsed,
     principal,
-    executionContextFor(request),
+    executionContextFor(request, capturedAtMs),
   );
   if (!prepared.ok)
     return errorResponse(prepared.error, request, prepared.issues);
@@ -1067,6 +1076,7 @@ export async function handleSiteComparisonBreakdown(
   siteId: string,
   dimension: string,
   definitions?: AnalysisDefinitionReader,
+  capturedAtMs?: number,
 ): Promise<Response> {
   const parsed = await parseBody<SiteBreakdownInput>(
     request,
@@ -1078,7 +1088,7 @@ export async function handleSiteComparisonBreakdown(
     principal,
     siteId,
     definitions,
-    executionContextFor(request),
+    executionContextFor(request, capturedAtMs),
   );
   if (!prepared.ok) return prepared.response;
   return breakdownHandler(
@@ -1096,6 +1106,7 @@ export async function handleTeamComparisonBreakdown(
   principal: ApiKeyPrincipal,
   runtime: ComparisonQueryRuntime,
   dimension: string,
+  capturedAtMs?: number,
 ): Promise<Response> {
   const parsed = await parseBody<TeamBreakdownInput>(
     request,
@@ -1105,7 +1116,7 @@ export async function handleTeamComparisonBreakdown(
   const prepared = prepareTeamSides(
     parsed,
     principal,
-    executionContextFor(request),
+    executionContextFor(request, capturedAtMs),
   );
   if (!prepared.ok)
     return errorResponse(prepared.error, request, prepared.issues);

@@ -250,6 +250,9 @@ interface DimensionPagePlan {
   readonly pageWhere: string;
   readonly pageBindings: DimensionBinding[];
   readonly orderBy: string;
+  readonly primary: DimensionPageSortKey;
+  readonly secondary: DimensionPageSortKey;
+  readonly sortDirection: "asc" | "desc";
   readonly limit: number;
 }
 
@@ -312,6 +315,9 @@ ${cursorClause}`,
         limit + 1,
       ],
       orderBy: `${primary} ${sortDirection}, ${secondary} ${sortDirection}, value ASC`,
+      primary,
+      secondary,
+      sortDirection,
       limit,
     },
   };
@@ -387,10 +393,22 @@ async function flushDimensionPageGroup(
       dimensionPageRollup(plan, `dimension_rollup_${index}`),
       `dimension_page_${index} AS (${dimensionPageSelect(plan, `dimension_rollup_${index}`)})`,
     ]);
+    const union = active
+      .map(
+        (_, index) =>
+          `SELECT ${index} AS slot, value, views, sessions, visitors FROM dimension_page_${index}`,
+      )
+      .join("\nUNION ALL\n");
+    // Each page has already applied its own cursor, ORDER BY and LIMIT.
+    // The outer order must reproduce that page's order, not the first card's.
+    // COUNT metrics are nonnegative integers, so negation preserves descending
+    // order without relying on JS string collation or unstable SQL row order.
+    const uniform = active.every(({ plan }) => plan.orderBy === first.orderBy);
+    const sortCase = (key: "primary" | "secondary") =>
+      `CASE slot ${active.map(({ plan }, index) => `WHEN ${index} THEN ${plan.sortDirection === "desc" ? "-" : ""}${plan[key]}`).join(" ")} END`;
     const sql = `${dimensionPageSource(first, true)},
 ${ctes.join(",\n")}
-${active.map((_, index) => `SELECT ${index} AS slot, value, views, sessions, visitors FROM dimension_page_${index}`).join("\nUNION ALL\n")}
-ORDER BY slot ASC, ${first.orderBy}`;
+${uniform ? `${union}\nORDER BY slot ASC, ${first.orderBy}` : `SELECT slot, value, views, sessions, visitors FROM (\n${union}\n)\nORDER BY slot ASC, ${sortCase("primary")} ASC, ${sortCase("secondary")} ASC, value ASC`}`;
     const bindings = [
       ...first.sourceBindings,
       ...active.flatMap(({ plan }) => plan.pageBindings),
@@ -506,7 +524,6 @@ export async function queryDimensionPageFromD1(
       plan.sourceRelation,
       plan.sourceWhere,
       plan.sourceBindings,
-      plan.orderBy,
     ]);
     const pending = enqueueDimensionPage(env, key, plan, batch.signal);
     if (pending) rows = await pending;

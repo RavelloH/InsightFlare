@@ -36,6 +36,7 @@ export type HonoVariables = {
   site?: HonoSite;
   publicSite?: HonoPublicSite;
   apiPrincipal?: ApiKeyPrincipal;
+  apiBatchCapturedAtMs?: number;
   apiSite?: HonoApiSite;
 };
 

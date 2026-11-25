@@ -48,6 +48,7 @@ import {
 } from "@/lib/api-v1";
 import { createEdgeSiteAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
+import { apiQueryCapturedAtMs } from "@/lib/hono/routes/v1/shared";
 import type { AppEnv } from "@/lib/hono/types";
 interface SiteAnalyticsRouteDependencies {
   readonly resolvePrincipal: (c: Context<AppEnv>) => ApiKeyPrincipal;
@@ -75,6 +76,7 @@ export function registerV1SiteAnalyticsRoutes(
       analyticsRuntime(c, siteId),
       siteId,
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
+      apiQueryCapturedAtMs(c),
     );
   });
   routes.post(
@@ -90,6 +92,7 @@ export function registerV1SiteAnalyticsRoutes(
         siteId,
         dimension,
         createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
+        apiQueryCapturedAtMs(c),
       );
     },
   );
@@ -101,7 +104,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -144,7 +147,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -158,7 +161,7 @@ export function registerV1SiteAnalyticsRoutes(
       siteId,
       dimension,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -170,7 +173,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -182,7 +185,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -194,7 +197,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -206,7 +209,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -218,7 +221,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -230,7 +233,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -243,7 +246,7 @@ export function registerV1SiteAnalyticsRoutes(
       siteId,
       queryExecutor(c, siteId),
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
     );
   });
   routes.post("/sites/:siteId/analytics/goals/summary", (c) => {
@@ -257,7 +260,7 @@ export function registerV1SiteAnalyticsRoutes(
       siteId,
       runtime,
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       runtime.resources.goals,
     );
   });
@@ -272,7 +275,7 @@ export function registerV1SiteAnalyticsRoutes(
       siteId,
       runtime,
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       runtime.resources.goals,
     );
   });
@@ -284,7 +287,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -296,7 +299,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -327,7 +330,7 @@ export function registerV1SiteAnalyticsRoutes(
         deps.resolvePrincipal(c),
         siteId,
         queryExecutor(c, siteId),
-        { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+        { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
         createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
         parsedDimension.data,
       );
@@ -341,7 +344,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -353,7 +356,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -365,7 +368,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -377,7 +380,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -389,7 +392,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -401,7 +404,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -413,7 +416,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -425,7 +428,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
     );
   });
   routes.post("/sites/:siteId/analytics/journey-events/detail", (c) => {
@@ -436,7 +439,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
     );
   });
   routes.post("/sites/:siteId/analytics/realtime/snapshot", (c) => {
@@ -447,7 +450,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
     );
   });
   routes.post("/sites/:siteId/analytics/realtime/active-visitors", (c) => {
@@ -458,7 +461,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
     );
   });
   routes.post("/sites/:siteId/analytics/realtime/events", (c) => {
@@ -469,7 +472,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
     );
   });
   routes.post("/sites/:siteId/analytics/realtime/sessions", (c) => {
@@ -480,7 +483,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
     );
   });
   routes.post("/sites/:siteId/analytics/visitors/detail", (c) => {
@@ -491,7 +494,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
     );
   });
   routes.post("/sites/:siteId/analytics/sessions/detail", (c) => {
@@ -502,7 +505,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
     );
   });
   routes.post("/sites/:siteId/analytics/visitors/search", (c) => {
@@ -513,7 +516,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -525,7 +528,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -537,7 +540,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -549,7 +552,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });
@@ -561,7 +564,7 @@ export function registerV1SiteAnalyticsRoutes(
       deps.resolvePrincipal(c),
       siteId,
       queryExecutor(c, siteId),
-      { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+      { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
       createAnalysisDefinitionReader(c.env, deps.resolvePrincipal(c)),
     );
   });

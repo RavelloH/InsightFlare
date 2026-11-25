@@ -12,6 +12,7 @@ import {
 } from "@/lib/api-v1";
 import { createEdgeTeamAnalyticsRuntime } from "@/lib/edge/analytics/composition";
 import type { ApiKeyPrincipal } from "@/lib/edge/auth/api-key-auth";
+import { apiQueryCapturedAtMs } from "@/lib/hono/routes/v1/shared";
 import type { AppEnv } from "@/lib/hono/types";
 interface TeamAnalyticsRouteDependencies {
   readonly resolvePrincipal: (c: Context<AppEnv>) => ApiKeyPrincipal;
@@ -33,7 +34,7 @@ function typedTeamOverview(
     c.req.raw,
     principal,
     analyticsRuntime(c, principal),
-    { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+    { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
   );
 }
 function typedTeamTimeseries(
@@ -45,7 +46,7 @@ function typedTeamTimeseries(
     c.req.raw,
     principal,
     analyticsRuntime(c, principal),
-    { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+    { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
   );
 }
 function typedTeamSites(
@@ -57,7 +58,7 @@ function typedTeamSites(
     c.req.raw,
     principal,
     analyticsRuntime(c, principal),
-    { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+    { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
   );
 }
 function typedTeamBreakdown(
@@ -72,7 +73,7 @@ function typedTeamBreakdown(
     principal,
     dimension,
     analyticsRuntime(c, principal),
-    { signal: c.req.raw.signal, capturedAtMs: Date.now() },
+    { signal: c.req.raw.signal, capturedAtMs: apiQueryCapturedAtMs(c) },
   );
 }
 export function registerV1TeamAnalyticsRoutes(
@@ -88,6 +89,7 @@ export function registerV1TeamAnalyticsRoutes(
       c.req.raw,
       principal,
       analyticsRuntime(c, principal),
+      apiQueryCapturedAtMs(c),
     );
   });
   routes.post("/team/analytics/comparison/breakdowns/:dimension", (c) => {
@@ -99,6 +101,7 @@ export function registerV1TeamAnalyticsRoutes(
       principal,
       analyticsRuntime(c, principal),
       dimension,
+      apiQueryCapturedAtMs(c),
     );
   });
   routes.post("/team/analytics/overview", (c) => typedTeamOverview(c, deps));

@@ -1451,6 +1451,8 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         limit: number,
         search?: string,
         cursor?: DimensionAggregateCursor | null,
+        sortBy: "views" | "sessions" | "visitors" = "views",
+        sortDirection: "asc" | "desc" = "desc",
       ) =>
         queryDimensionPageFromD1(
           env,
@@ -1459,7 +1461,7 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           filters,
           limit,
           expression,
-          { search, excludeEmpty: false },
+          { search, excludeEmpty: false, sortBy, sortDirection },
           cursor,
           undefined,
           "api-v1",
@@ -1467,8 +1469,8 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         );
       const baseline = await Promise.all([
         request("pathname", 1),
-        request("country", 2),
-        request("browser", 3, "chr"),
+        request("country", 2, undefined, null, "sessions", "asc"),
+        request("browser", 3, "chr", null, "visitors", "desc"),
       ]);
       expect(baseline[0]?.items.length).toBeGreaterThan(0);
       const cursor = await decodeDimensionCursor(
@@ -1486,8 +1488,8 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       const result = await runWithDimensionPageBatch(() =>
         Promise.all([
           request("pathname", 1),
-          request("country", 2),
-          request("browser", 3, "chr"),
+          request("country", 2, undefined, null, "sessions", "asc"),
+          request("browser", 3, "chr", null, "visitors", "desc"),
           request("pathname", 1, undefined, cursor),
         ]),
       );
@@ -1497,6 +1499,9 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         "filtered_visits AS NOT MATERIALIZED",
       );
       expect(trace.preparedSql[0]).toContain("dimension_page_3");
+      expect(trace.preparedSql[0]).toContain(
+        "CASE slot WHEN 0 THEN -views WHEN 1 THEN sessions",
+      );
     } finally {
       db.close();
     }
