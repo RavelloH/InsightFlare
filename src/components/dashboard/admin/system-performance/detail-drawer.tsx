@@ -169,6 +169,99 @@ function SampleBody({
           ]}
         />
       ) : null}
+      {details?.errorDiagnostics ? (
+        <Section title={copy.detail.errorDiagnostics}>
+          <DetailList
+            items={[
+              {
+                label: copy.detail.diagnosticId,
+                value: details.errorDiagnostics.diagnosticId,
+                mono: true,
+              },
+            ]}
+          />
+          <InlineNote>{copy.detail.diagnosticHint}</InlineNote>
+          <ul className="divide-y border-y">
+            {details.errorDiagnostics.errors.map((error, index) => (
+              <li
+                key={`${error.fingerprint}:${index}`}
+                className="space-y-2 py-3"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="destructive">{error.name}</Badge>
+                  <span className="break-all font-mono text-xs">
+                    {error.code}
+                  </span>
+                  {error.count > 1 ? (
+                    <span className="text-xs text-muted-foreground">
+                      ×{error.count}
+                    </span>
+                  ) : null}
+                </div>
+                <p className="break-words text-sm">
+                  {error.message ?? copy.detail.errorMessageUnavailable}
+                </p>
+                <DetailList
+                  items={[
+                    {
+                      label: copy.detail.fingerprint,
+                      value: error.fingerprint,
+                      mono: true,
+                    },
+                    ...(error.operation
+                      ? [
+                          {
+                            label: copy.columns.operation,
+                            value: error.operation,
+                            mono: true,
+                          },
+                        ]
+                      : []),
+                    ...Object.entries(error.context).map(([label, value]) => ({
+                      label,
+                      value: String(value),
+                      mono: true,
+                    })),
+                  ]}
+                />
+                {error.stack.length ? (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      {copy.detail.errorStack}
+                    </p>
+                    <ol className="space-y-1 rounded-md bg-muted p-2 font-mono text-xs">
+                      {error.stack.map((frame, frameIndex) => (
+                        <li key={frameIndex} className="break-all">
+                          {frame.file}:{frame.line}:{frame.column}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : null}
+                {error.causes.length ? (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      {copy.detail.errorCauses}
+                    </p>
+                    <ol className="list-decimal space-y-1 pl-5 text-sm">
+                      {error.causes.map((cause, causeIndex) => (
+                        <li key={causeIndex}>{cause}</li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          {details.errorDiagnostics.dropped > 0 ? (
+            <InlineNote>
+              {template(copy.detail.truncated, {
+                count: details.errorDiagnostics.dropped,
+              })}
+            </InlineNote>
+          ) : null}
+        </Section>
+      ) : null}
       <Section title={copy.detail.phases}>
         {phases.length ? (
           <>

@@ -8,6 +8,12 @@ import {
   type QueryVariant,
   UNKNOWN_QUERY_ID,
 } from "@/lib/edge/analytics-engine/query-registry";
+import {
+  decodeErrorDiagnostics,
+  ERROR_DETAILS_BYTES,
+  type ErrorDiagnostics,
+  NORMAL_DETAILS_BYTES,
+} from "@/lib/edge/observability/error-diagnostics";
 
 import {
   HOTSPOT_KINDS,
@@ -134,6 +140,7 @@ export type InvocationSafePhase =
 
 export interface InvocationSafeDetails {
   version: 2;
+  errorDiagnostics?: ErrorDiagnostics;
   phases: Array<{ id: InvocationSafePhase; count: number; wallMs: number }>;
   queries: Array<{
     id: string;
@@ -483,7 +490,10 @@ function safeCoverage(value: unknown): V2Coverage | null {
     : null;
 }
 function safeDetails(value: unknown): InvocationSafeDetails | null {
-  if (typeof value !== "string" || utf8.encode(value).byteLength > 4096)
+  if (
+    typeof value !== "string" ||
+    utf8.encode(value).byteLength > ERROR_DETAILS_BYTES
+  )
     return null;
   let parsed: unknown;
   try {
@@ -495,6 +505,9 @@ function safeDetails(value: unknown): InvocationSafeDetails | null {
     return null;
   const input = parsed as Record<string, unknown>;
   if (input.v !== 2) return null;
+  const errorDiagnostics = decodeErrorDiagnostics(input.errorDiagnostics);
+  const budget = errorDiagnostics ? ERROR_DETAILS_BYTES : NORMAL_DETAILS_BYTES;
+  if (utf8.encode(value).byteLength > budget) return null;
   const phases: InvocationSafeDetails["phases"] = [];
   if (Array.isArray(input.phases)) {
     for (const item of input.phases.slice(0, 6)) {
@@ -609,12 +622,15 @@ function safeDetails(value: unknown): InvocationSafeDetails | null {
   }
   const output: InvocationSafeDetails = {
     version: 2,
+    ...(errorDiagnostics ? { errorDiagnostics } : {}),
     phases,
     queries,
     coverage,
     truncation,
   };
-  return utf8.encode(JSON.stringify(output)).byteLength <= 4096 ? output : null;
+  return utf8.encode(JSON.stringify(output)).byteLength <= budget
+    ? output
+    : null;
 }
 function sample(sourceRow: Record<string, unknown>): InvocationSample {
   const dims = dimensions(sourceRow);

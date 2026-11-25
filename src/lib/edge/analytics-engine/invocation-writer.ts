@@ -1,5 +1,10 @@
 import { isAnalyticsEngineDisabled } from "@/lib/edge/analytics-engine/config";
 import { QUERY_REGISTRY } from "@/lib/edge/analytics-engine/query-registry";
+import {
+  decodeErrorDiagnostics,
+  ERROR_DETAILS_BYTES,
+  NORMAL_DETAILS_BYTES,
+} from "@/lib/edge/observability/error-diagnostics";
 import type {
   InvocationLogger,
   InvocationSafeErrorSignal,
@@ -520,15 +525,18 @@ export function registerInvocationMetrics(
   installed.add(logger);
   const collector = registerHotspotCollector(logger);
   const dataset = env.INVOCATION_METRICS;
-  logger.onComplete((snapshot) => {
-    try {
-      dataset.writeDataPoint(
-        encodeInvocationMetricsPointV2(snapshot, collector.snapshot()),
-      );
-    } catch {
-      // AE is strictly best effort and must not recurse into Workers Logs.
-    }
-  });
+  logger.onComplete(
+    (snapshot) => {
+      try {
+        dataset.writeDataPoint(
+          encodeInvocationMetricsPointV2(snapshot, collector.snapshot()),
+        );
+      } catch {
+        // AE is strictly best effort and must not recurse into Workers Logs.
+      }
+    },
+    { includeErrorDiagnostics: true },
+  );
 }
 
 /** Encode v2 from the same trusted v1-safe snapshot, never raw request data. */
@@ -669,8 +677,11 @@ export function encodeInvocationMetricsPointV2(
     metrics.droppedQueries === 0 &&
     metrics.queryCount === snapshot.sql.statements &&
     templateStatements === metrics.queryCount;
+  const diagnostics = decodeErrorDiagnostics(snapshot.errorDiagnostics);
+  const budget = diagnostics ? ERROR_DETAILS_BYTES : NORMAL_DETAILS_BYTES;
   const details = {
     v: 2,
+    ...(diagnostics ? { errorDiagnostics: diagnostics } : {}),
     hotBasis: hot ? basis : "unavailable",
     rankingCoverage:
       metrics.droppedQueries > 0
@@ -736,28 +747,55 @@ export function encodeInvocationMetricsPointV2(
   const utf8 = new TextEncoder();
   const size = (s: string) => utf8.encode(s).length;
   let json = JSON.stringify(details);
-  while (size(json) > 4096 && details.queries.length > 0) {
+  while (size(json) > budget && details.queries.length > 0) {
     details.queries.pop();
     details.truncation.queriesDropped++;
     details.coverage.queryDetails = "partial";
     json = JSON.stringify(details);
   }
-  while (size(json) > 4096 && details.phases.length > 0) {
+  while (size(json) > budget && details.phases.length > 0) {
     details.phases.pop();
     details.truncation.phasesDropped++;
     json = JSON.stringify(details);
   }
-  if (size(json) > 4096) {
+  if (size(json) > budget) {
     details.truncation.signalsDropped += details.signals.length;
     details.signals.length = 0;
     json = JSON.stringify(details);
   }
-  if (size(json) > 4096)
-    json =
-      '{"v":2,"truncation":{"queriesDropped":999,"phasesDropped":999,"signalsDropped":999}}';
-  const truncated = Object.values(details.truncation).some(
-    (value) => value > 0,
-  );
+  if (diagnostics) {
+    while (size(json) > budget && diagnostics.errors.length > 1) {
+      const removed = diagnostics.errors.pop()!;
+      diagnostics.dropped = Math.min(
+        1_000_000_000,
+        diagnostics.dropped + removed.count,
+      );
+      json = JSON.stringify(details);
+    }
+  }
+  if (size(json) > budget) {
+    // Preserve the correlation ID even if the remaining diagnostic is too large.
+    if (diagnostics) {
+      diagnostics.dropped = Math.min(
+        1_000_000_000,
+        diagnostics.dropped +
+          diagnostics.errors.reduce((sum, error) => sum + error.count, 0),
+      );
+      diagnostics.errors.length = 0;
+    }
+    details.truncation.queriesDropped = Math.max(
+      details.truncation.queriesDropped,
+      999,
+    );
+    json = JSON.stringify({
+      v: 2,
+      ...(diagnostics ? { errorDiagnostics: diagnostics } : {}),
+      truncation: details.truncation,
+    });
+  }
+  const truncated =
+    (diagnostics?.dropped ?? 0) > 0 ||
+    Object.values(details.truncation).some((value) => value > 0);
   let flags = 0;
   for (const [name, present] of [
     ["handlerPresent", snapshot.handlerDurationMs !== undefined],

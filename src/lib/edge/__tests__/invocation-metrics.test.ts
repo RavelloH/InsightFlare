@@ -603,6 +603,7 @@ describe("AE invocation recording v1 compatibility and v2 production", () => {
     const parsed = JSON.parse(point.blobs[18]) as Record<string, unknown>;
     expect(Object.keys(parsed).sort()).toEqual([
       "coverage",
+      "errorDiagnostics",
       "hotBasis",
       "phases",
       "queries",

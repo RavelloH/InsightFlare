@@ -139,7 +139,7 @@ describe("AE invocation SQL fixed-query builder and read isolation", () => {
     expect(sql).toContain(`blob14 = '${queryId}'`);
     expect(sql).toContain(`blob17 = '${queryId}'`);
     expect(sql).toContain("blob12 = 'd1_query_failed'");
-    expect(sql).toContain("substring(blob19, 1, 4097) AS details");
+    expect(sql).toContain("substring(blob19, 1, 8193) AS details");
     expect(sql).toContain("ORDER BY timestampSeconds DESC LIMIT 20");
     expect(sql).not.toContain("JSONExtract");
     const scan = statements({

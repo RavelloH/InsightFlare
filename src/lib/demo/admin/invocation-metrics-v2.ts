@@ -660,6 +660,34 @@ function sampleDetails(
   if (!route.phases.length && !route.queries.length) return null;
   return {
     version: 2,
+    ...(failingQuery
+      ? {
+          errorDiagnostics: {
+            version: 1 as const,
+            diagnosticId: `00000000-0000-4000-8000-${Math.floor(
+              seed * 1_000_000_000,
+            )
+              .toString(16)
+              .padStart(12, "0")}`,
+            dropped: 0,
+            errors: [
+              {
+                category: "database",
+                code: "d1_operation_failed",
+                operation: "d1.all",
+                name: "Error",
+                message: "Missing database column",
+                messageRedacted: true as const,
+                stack: [{ file: "worker.js", line: 128, column: 17 }],
+                causes: [],
+                context: {},
+                fingerprint: "b97de89a",
+                count: 1,
+              },
+            ],
+          },
+        }
+      : {}),
     phases: route.phases.map(([id, wallMs]) => ({
       id,
       count:

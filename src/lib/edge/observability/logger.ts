@@ -1,6 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import {
+  appendErrorDiagnostic,
+  captureErrorDiagnostic,
+  type ErrorDiagnostics,
+} from "./error-diagnostics";
+import {
   appendSqlSemanticObservation,
   normalizeSqlSemanticObservation,
   type SqlSemanticFieldPolicy,
@@ -292,6 +297,15 @@ export function errorLogData(error: unknown): InvocationLogData {
   const details = error as Error & { cause?: unknown; code?: unknown };
   if (details.cause !== undefined) {
     data.errorCause = errorMessage(details.cause);
+    const seen = new Set<unknown>([error]);
+    let cause: unknown = details.cause;
+    for (let depth = 2; depth <= 3; depth++) {
+      if (!(cause instanceof Error) || seen.has(cause)) break;
+      seen.add(cause);
+      cause = Object.getOwnPropertyDescriptor(cause, "cause")?.value;
+      if (cause === undefined || seen.has(cause)) break;
+      data[`errorCause${depth}`] = errorMessage(cause);
+    }
   }
   if (typeof details.code === "string" || typeof details.code === "number") {
     data.errorCode = String(details.code);
@@ -337,6 +351,8 @@ export interface InvocationLogRecord {
   source: InvocationSource;
   trigger: InvocationTrigger;
   traceId?: string;
+  /** Server-generated identifier for this failing invocation only. */
+  diagnosticId?: string;
   startedAt: string;
   request?: InvocationRequest;
   performance: InvocationPerformance;
@@ -358,6 +374,8 @@ export type InvocationCompletionConsumer = (
 export interface InvocationCompletionOptions {
   /** Only explicitly authorized consumers receive query candidate site metadata. */
   readonly includeSqlSemantics?: boolean;
+  /** Opt-in: only the AE writer needs the bounded error projection. */
+  readonly includeErrorDiagnostics?: boolean;
 }
 
 export interface CreateInvocationLoggerOptions {
@@ -522,6 +540,15 @@ export function createInvocationLogger(
   let request: InvocationRequest | undefined;
   let routeKey: string | undefined;
   const safeErrors: InvocationSafeErrorSignal[] = [];
+  let errorDiagnostics: ErrorDiagnostics | undefined;
+  function ensureErrorDiagnostics(): ErrorDiagnostics {
+    return (errorDiagnostics ??= {
+      version: 1,
+      diagnosticId: crypto.randomUUID(),
+      errors: [],
+      dropped: 0,
+    });
+  }
   let performance: InvocationPerformancePatch = {};
   let doSqlCompleted = 0;
   let doSqlRowsReadAvailable = 0;
@@ -531,6 +558,7 @@ export function createInvocationLogger(
   const consumers = new Set<{
     callback: InvocationCompletionConsumer;
     includeSqlSemantics: boolean;
+    includeErrorDiagnostics: boolean;
   }>();
   const sqlObservations = new Map<string, SqlSemanticObservation>();
   const background = new Set<Promise<unknown>>();
@@ -582,6 +610,16 @@ export function createInvocationLogger(
     // a critical classification merely because ordinary logs filled the buffer.
     if (level === "error") {
       const signal = trustedErrorSignal(message);
+      // Capture before log quotas. A diagnostic failure must never change the
+      // invocation's outcome, even if the platform cannot generate an ID.
+      try {
+        appendErrorDiagnostic(
+          ensureErrorDiagnostics(),
+          captureErrorDiagnostic(signal, data),
+        );
+      } catch {
+        // Best effort.
+      }
       if (signal && !safeErrors.some((item) => item.code === signal.code)) {
         if (safeErrors.length >= 3) safeErrors.shift();
         safeErrors.push(Object.freeze(signal));
@@ -685,11 +723,24 @@ export function createInvocationLogger(
   }
 
   function build(): InvocationLogRecord {
+    if (
+      (request?.status ?? 0) >= 500 ||
+      (performance.failedStatements ?? 0) > 0
+    ) {
+      try {
+        ensureErrorDiagnostics();
+      } catch {
+        // Best effort.
+      }
+    }
     const record: InvocationLogRecord = {
       v: OBSERVABILITY_LOG_VERSION,
       source: options.source,
       trigger: options.trigger,
       ...(traceId ? { traceId } : {}),
+      ...(errorDiagnostics
+        ? { diagnosticId: errorDiagnostics.diagnosticId }
+        : {}),
       startedAt,
       ...(request ? { request: { ...request } } : {}),
       performance: {
@@ -874,6 +925,9 @@ export function createInvocationLogger(
       const base = toInvocationSnapshot(emitted ?? build(), {
         routeKey,
         safeErrors,
+        ...(completionOptions?.includeErrorDiagnostics
+          ? { errorDiagnostics }
+          : {}),
       });
       return completionOptions?.includeSqlSemantics
         ? withSqlSemanticObservations(base, [...sqlObservations.values()])
@@ -914,6 +968,8 @@ export function createInvocationLogger(
       const registration = {
         callback: consumer,
         includeSqlSemantics: completionOptions?.includeSqlSemantics === true,
+        includeErrorDiagnostics:
+          completionOptions?.includeErrorDiagnostics === true,
       };
       consumers.add(registration);
       return () => {
@@ -931,10 +987,30 @@ export function createInvocationLogger(
           safeErrors,
         });
         const listeners = [...consumers];
+        const diagnosticSnapshot = listeners.some(
+          (listener) => listener.includeErrorDiagnostics,
+        )
+          ? toInvocationSnapshot(emitted, {
+              routeKey,
+              safeErrors,
+              errorDiagnostics,
+            })
+          : snapshot;
+        const observations = listeners.some(
+          (listener) => listener.includeSqlSemantics,
+        )
+          ? [...sqlObservations.values()]
+          : [];
         const semanticSnapshot = listeners.some(
           (listener) => listener.includeSqlSemantics,
         )
-          ? withSqlSemanticObservations(snapshot, [...sqlObservations.values()])
+          ? withSqlSemanticObservations(snapshot, observations)
+          : undefined;
+        const diagnosticSemanticSnapshot = listeners.some(
+          (listener) =>
+            listener.includeSqlSemantics && listener.includeErrorDiagnostics,
+        )
+          ? withSqlSemanticObservations(diagnosticSnapshot, observations)
           : undefined;
         consumers.clear();
         // A listener never runs inside the original logging scope. Each
@@ -944,7 +1020,13 @@ export function createInvocationLogger(
             Promise.resolve().then(() =>
               outsideInvocationContext(() =>
                 listener.callback(
-                  listener.includeSqlSemantics ? semanticSnapshot! : snapshot,
+                  listener.includeErrorDiagnostics
+                    ? listener.includeSqlSemantics
+                      ? diagnosticSemanticSnapshot!
+                      : diagnosticSnapshot
+                    : listener.includeSqlSemantics
+                      ? semanticSnapshot!
+                      : snapshot,
                 ),
               ),
             ),

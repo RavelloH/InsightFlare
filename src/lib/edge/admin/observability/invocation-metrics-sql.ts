@@ -197,7 +197,7 @@ export function buildInvocationStatements(
       statements = [
         statement(
           "samples",
-          `toUnixTimestamp(timestamp) AS timestampSeconds, ${dimensions}, blob6 AS resultClass, blob11 AS category, blob12 AS code, blob13 AS operation, blob14 AS hotQueryId, blob15 AS variant, blob16 AS filterShape, blob17 AS scanQueryId, blob18 AS dominantPhase, substring(blob19, 1, 4097) AS details, blob20 AS filterFamily, ${weight} AS sampleInterval, double1 AS invocationWallMs, double2 AS handlerWallMs, double18 AS httpStatus, double19 AS flags`,
+          `toUnixTimestamp(timestamp) AS timestampSeconds, ${dimensions}, blob6 AS resultClass, blob11 AS category, blob12 AS code, blob13 AS operation, blob14 AS hotQueryId, blob15 AS variant, blob16 AS filterShape, blob17 AS scanQueryId, blob18 AS dominantPhase, substring(blob19, 1, 8193) AS details, blob20 AS filterFamily, ${weight} AS sampleInterval, double1 AS invocationWallMs, double2 AS handlerWallMs, double18 AS httpStatus, double19 AS flags`,
           limit,
           "ORDER BY timestampSeconds DESC",
           sampleWhere,
