@@ -76,4 +76,9 @@ export const BREAKDOWN_CLIENT_FRAGMENT = String.raw`
     });
     wrap.append(track,breakdownLegend(d));content.appendChild(wrap);
   }
+  renderers.distribution = function (data) {
+    if (root.dataset.distributionStyle === "donut") renderDonut(data);
+    else if (root.dataset.distributionStyle === "ratio") renderRatio(data);
+    else renderBars(data.rows, true);
+  };
 `;

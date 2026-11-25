@@ -10,8 +10,12 @@ import { readSiteTrackingConfig } from "@/lib/edge/sites/settings-store";
 import type { Env } from "@/lib/edge/types";
 import type { AppEnv } from "@/lib/hono/types";
 import { executionContext } from "@/lib/hono/utils/context";
-import { isValidLocale } from "@/lib/i18n/config";
-import type { WidgetConfig } from "@/lib/widgets/contract";
+import { isValidLocale, type Locale } from "@/lib/i18n/config";
+import {
+  widgetAssetResponse,
+  widgetDocumentAssets,
+  widgetEmbedLoaderResponse,
+} from "@/lib/widgets/assets";
 import {
   normalizeWidgetOrigin,
   widgetUuidSchema,
@@ -21,7 +25,8 @@ import {
   renderWidgetPlaceholder,
   widgetDocumentCsp,
 } from "@/lib/widgets/embed";
-import { readWidget, widgetSiteBelongsToTeam } from "@/lib/widgets/store";
+import { cachedWidgetSiteBelongsToTeam } from "@/lib/widgets/ownership-cache";
+import { readWidget } from "@/lib/widgets/store";
 import { localeCookie, requestLocale } from "@/middleware";
 
 const isDemoBuild = import.meta.env.VITE_DEMO_MODE === "1";
@@ -37,7 +42,11 @@ publicWidgetDataRoutes.onError((error, c) => {
   return c.json({ error: "unavailable" }, 503, { "cache-control": "no-store" });
 });
 
-async function resolveWidget(env: Env, identifier: string) {
+async function resolveWidget(
+  env: Env,
+  identifier: string,
+  ctx?: Pick<ExecutionContext, "waitUntil">,
+) {
   const uuid = widgetUuidSchema.safeParse(identifier);
   if (!uuid.success) return { status: "not-found" } as const;
   const widget = isDemoBuild
@@ -52,7 +61,12 @@ async function resolveWidget(env: Env, identifier: string) {
           widget.teamId,
           widget.siteId,
         )
-      : await widgetSiteBelongsToTeam(env, widget.teamId, widget.siteId))
+      : await cachedWidgetSiteBelongsToTeam(
+          env,
+          widget.teamId,
+          widget.siteId,
+          ctx,
+        ))
   ) {
     return { status: "not-found" } as const;
   }
@@ -95,18 +109,13 @@ function embeddingOrigin(request: Request): string | null {
   }
 }
 
-function widgetHtml(
-  body: string,
-  status: number,
-  ancestorPolicy = "*",
-  type?: WidgetConfig["type"],
-) {
+function widgetHtml(body: string, status: number, ancestorPolicy = "*") {
   return new Response(body, {
     status,
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
-      "content-security-policy": widgetDocumentCsp(ancestorPolicy, type),
+      "content-security-policy": widgetDocumentCsp(ancestorPolicy),
       "referrer-policy": "same-origin",
       "strict-transport-security": "max-age=31536000; includeSubDomains",
       "permissions-policy":
@@ -115,6 +124,17 @@ function widgetHtml(
       "x-robots-tag": "noindex, nofollow",
     },
   });
+}
+
+async function placeholderHtml(
+  status: Parameters<typeof renderWidgetPlaceholder>[0],
+  httpStatus: number,
+  locale?: Locale,
+) {
+  return widgetHtml(
+    renderWidgetPlaceholder(status, locale, await widgetDocumentAssets(null)),
+    httpStatus,
+  );
 }
 
 widgetPageRoutes.get("/:uuid", async (c) => {
@@ -135,29 +155,30 @@ widgetPageRoutes.get("/:uuid", async (c) => {
       },
     });
   }
-  const resolved = await resolveWidget(c.env, c.req.param("uuid")).catch(
-    (error: unknown) => {
-      c.get("observabilityLogger")?.error(
-        "widget.page.unavailable",
-        errorLogData(error),
-      );
-      return null;
-    },
-  );
-  if (!resolved)
-    return widgetHtml(renderWidgetPlaceholder("unavailable", locale), 503);
+  const resolved = await resolveWidget(
+    c.env,
+    c.req.param("uuid"),
+    executionContext(c),
+  ).catch((error: unknown) => {
+    c.get("observabilityLogger")?.error(
+      "widget.page.unavailable",
+      errorLogData(error),
+    );
+    return null;
+  });
+  if (!resolved) return placeholderHtml("unavailable", 503, locale);
   if (resolved.status === "not-found") {
-    return widgetHtml(renderWidgetPlaceholder("not-found", locale), 404);
+    return placeholderHtml("not-found", 404, locale);
   }
   if (resolved.status === "unpublished") {
-    return widgetHtml(renderWidgetPlaceholder("unpublished", locale), 410);
+    return placeholderHtml("unpublished", 410, locale);
   }
   const { widget, config } = resolved;
   let ancestors = "*";
   if (config.embedMode === "restricted") {
     const source = embeddingOrigin(c.req.raw);
     if (source && !config.allowedOrigins.includes(source)) {
-      return widgetHtml(renderWidgetPlaceholder("domain-denied", locale), 403);
+      return placeholderHtml("domain-denied", 403, locale);
     }
     ancestors = config.allowedOrigins.join(" ");
   }
@@ -174,19 +195,34 @@ widgetPageRoutes.get("/:uuid", async (c) => {
         : null,
       themeOverride,
       revision: widget.revision,
+      assets: await widgetDocumentAssets(config.type),
     }),
     200,
     ancestors,
-    config.type,
   );
 });
 
-widgetPageRoutes.get("*", () =>
-  widgetHtml(renderWidgetPlaceholder("not-found"), 404),
-);
+widgetPageRoutes.get("*", () => placeholderHtml("not-found", 404));
+
+// Registered before "/:uuid/data" so asset names never reach the widget lookup.
+publicWidgetDataRoutes.get("/embed.js", () => widgetEmbedLoaderResponse());
+publicWidgetDataRoutes.get("/assets/:file", async (c) => {
+  const response = await widgetAssetResponse(c.req.param("file"));
+  return (
+    response ??
+    new Response("Not found", {
+      status: 404,
+      headers: { "cache-control": "no-store" },
+    })
+  );
+});
 
 publicWidgetDataRoutes.get("/:uuid/data", async (c) => {
-  const resolved = await resolveWidget(c.env, c.req.param("uuid"));
+  const resolved = await resolveWidget(
+    c.env,
+    c.req.param("uuid"),
+    executionContext(c),
+  );
   if (resolved.status !== "published") {
     return c.json(
       { error: resolved.status },
