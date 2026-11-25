@@ -138,7 +138,7 @@ export function WorkspaceClient({
   const copy = messages.workspace;
   const { user, teams: allTeams, unreadAttentionCount = 0 } = dashboard;
   const teams = useMemo(() => allTeams.slice(0, TEAM_LIMIT), [allTeams]);
-  const { window: queryWindow, range } = useDashboardQuery();
+  const { window: queryWindow, range, queryReady } = useDashboardQuery();
   const window = useMemo(
     () => ({
       from: queryWindow.from,
@@ -160,7 +160,7 @@ export function WorkspaceClient({
         window,
         range,
         snapshot: snapshots[team.id] ?? null,
-        enabled: hydrated && Boolean(team.id),
+        enabled: queryReady && Boolean(team.id),
       }),
     ),
     combine: combineWorkspaceQueries,

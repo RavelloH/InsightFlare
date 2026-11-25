@@ -30,3 +30,39 @@
     background-position: -120% 0;
   }
 }
+
+/* During hydration, keep a small shimmer cue. After commit, visible rows
+   resume the original gradient while offscreen rows retain their full size. */
+tr[data-skeleton-motion="static"]:not([data-skeleton-visible="true"])
+  .skeleton-loading,
+tr[data-skeleton-motion="active"]:not([data-skeleton-visible="true"])
+  > td:not(:first-child)
+  .skeleton-loading,
+tr[data-skeleton-motion][data-skeleton-visible="false"] .skeleton-loading {
+  animation: none;
+  background-image: none;
+}
+
+/* Suspend decorative work during scroll/input without resetting the shimmer
+   position or altering the placeholder geometry. */
+table[data-skeleton-paused] tr[data-skeleton-motion] .skeleton-loading {
+  animation-play-state: paused;
+}
+
+/* Table-row opacity is not consistently composited by browsers; fade cells instead. */
+@keyframes analytics-data-row-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-analytics-row-enter] > td {
+    animation: analytics-data-row-fade-in 480ms ease-out both;
+    animation-delay: var(--analytics-data-row-delay, 0ms);
+  }
+}

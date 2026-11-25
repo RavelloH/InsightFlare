@@ -1,4 +1,4 @@
-import { act, createElement, type ReactNode } from "react";
+import { act, createElement, type ReactNode, useEffect } from "react";
 import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -87,6 +87,36 @@ describe("DashboardQueryProvider", () => {
     expect(container.textContent).toBe(String(first.to));
     await act(async () => root.render(<WindowApp initialWindow={second} />));
     expect(container.textContent).toBe(String(second.to));
+  });
+
+  it("does not enable a request with a stale SSR time zone", async () => {
+    const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const staleZone = browserZone === "Asia/Tokyo" ? "UTC" : "Asia/Tokyo";
+    const initialWindow = resolveTimeWindow("7d", Date.UTC(2026, 10, 25), {
+      timeZone: staleZone,
+    });
+    const requested: string[] = [];
+    function ReadyProbe() {
+      const { window, queryReady } = useDashboardQuery();
+      useEffect(() => {
+        if (queryReady) requested.push(window.timeZone);
+      }, [queryReady, window.timeZone]);
+      return <span>{window.timeZone}</span>;
+    }
+    const app = (
+      <TimeZoneProvider>
+        <DashboardQueryProvider initialWindow={initialWindow}>
+          <ReadyProbe />
+        </DashboardQueryProvider>
+      </TimeZoneProvider>
+    );
+    container.innerHTML = renderToString(app);
+    await act(async () => {
+      root = hydrateRoot(container, app);
+    });
+    expect(requested.length).toBeGreaterThan(0);
+    expect(requested.every((zone) => zone !== staleZone)).toBe(true);
+    expect(requested.at(-1)).toBe(browserZone);
   });
 
   it("hydrates the initial filter document from the browser URL", async () => {

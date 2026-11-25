@@ -20,6 +20,7 @@ import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,
 } from "@/components/dashboard/comparison/use-dashboard-comparison-query";
+import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
 import {
   addZonedInterval,
   startOfZonedInterval,
@@ -564,6 +565,7 @@ export const ShareTrendCard = memo(function ShareTrendCard({
   formatSeriesLabel,
   resolveSeriesIcon,
 }: ShareTrendCardProps) {
+  const { queryReady } = useDashboardQuery();
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const comparisonQuery = useDashboardComparisonQuery(window, filters);
   const comparisonFiltersKey = useMemo(
@@ -640,7 +642,7 @@ export const ShareTrendCard = memo(function ShareTrendCard({
         comparisonDataWindow,
       };
     },
-    enabled: !import.meta.env.SSR,
+    enabled: queryReady,
     placeholderData: keepPreviousData,
   });
   const loading = isPending || isFetching;

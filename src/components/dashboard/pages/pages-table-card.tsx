@@ -327,6 +327,8 @@ function PageSkeletonRow({
     </>
   );
 }
+const getPageRowKey = (row: PagesDashboardRow) => row.pathname;
+
 export function PagesTableCard({
   locale,
   messages,
@@ -630,6 +632,11 @@ export function PagesTableCard({
     ],
   );
 
+  const renderSkeletonRow = useCallback(
+    () => <PageSkeletonRow columnIds={visibleColumnIds} />,
+    [visibleColumnIds],
+  );
+
   const toolbar = (
     <div className="flex w-full min-w-0 items-center justify-end gap-2">
       <div className="relative min-w-0 flex-1 sm:w-80 sm:flex-none">
@@ -660,10 +667,8 @@ export function PagesTableCard({
         header={headers}
         rows={rows}
         renderRow={renderRow}
-        renderSkeletonRow={() => (
-          <PageSkeletonRow columnIds={visibleColumnIds} />
-        )}
-        getRowKey={(row) => row.pathname}
+        renderSkeletonRow={renderSkeletonRow}
+        getRowKey={getPageRowKey}
         skeletonRows={skeletonRows}
         columnCount={visibleColumnIds.length}
         loading={loading}

@@ -15,7 +15,6 @@ import {
 } from "@/components/dashboard/analytics-time-tooltip";
 import { SiteBrandIcon } from "@/components/dashboard/common/site-brand-icon";
 import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
-import { useHydrated } from "@/hooks/use-hydrated";
 import { numberFormat } from "@/lib/dashboard/format";
 import {
   buildSidebarSiteTrends,
@@ -213,8 +212,7 @@ export const SidebarSiteDetails = memo(function SidebarSiteDetails({
   labels,
 }: SidebarSiteDetailsProps) {
   const { state: sidebarState, isMobile } = useSidebar();
-  const { window } = useDashboardQuery();
-  const hydrated = useHydrated();
+  const { window, queryReady } = useDashboardQuery();
   const [shouldRenderCharts, setShouldRenderCharts] = useState(
     isMobile || sidebarState !== "collapsed",
   );
@@ -224,7 +222,7 @@ export const SidebarSiteDetails = memo(function SidebarSiteDetails({
       window,
       range: window.preset,
       enabled:
-        hydrated && Boolean(teamId) && sites.length > 0 && shouldRenderCharts,
+        queryReady && Boolean(teamId) && sites.length > 0 && shouldRenderCharts,
     }),
   );
   const dashboardSnapshot = teamDashboardQuery.data;

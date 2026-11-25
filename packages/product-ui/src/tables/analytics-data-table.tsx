@@ -4,6 +4,7 @@ import {
   type Key,
   memo,
   type ReactNode,
+  useRef,
 } from "react";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Table, TableCell, TableHeader } from "@insightflare/ui/table";
@@ -11,6 +12,7 @@ import { Table, TableCell, TableHeader } from "@insightflare/ui/table";
 import { cn } from "../utils/cn";
 import { AnalyticsTableCard } from "./analytics-table-card";
 import { useInfiniteTableSentinel } from "./use-infinite-table-sentinel";
+import { useSkeletonRowMotion } from "./use-skeleton-row-motion";
 type AnalyticsDataTableRowProps = Pick<
   ComponentPropsWithoutRef<"tr">,
   | "aria-hidden"
@@ -135,13 +137,8 @@ const AnalyticsDataTableAnimatedRow = memo(
     const { className: rowClassName, ...rowProps } = rendered.props ?? {};
 
     return (
-      <AutoTransition
-        as="tr"
+      <tr
         key={`row-${rowKey}`}
-        transitionKey={`row-${rowKey}`}
-        initial
-        duration={0.18}
-        type="fade"
         style={
           {
             "--analytics-data-row-delay": `${
@@ -155,7 +152,7 @@ const AnalyticsDataTableAnimatedRow = memo(
         className={cn(TABLE_ROW_CLASS_NAME, rowClassName)}
       >
         {rendered.children}
-      </AutoTransition>
+      </tr>
     );
   },
   (previous, next) =>
@@ -206,18 +203,15 @@ const AnalyticsDataTableBody = memo(function AnalyticsDataTableBody<TRow>({
     >
       {loading
         ? Array.from({ length: skeletonRows }, (_, index) => (
-            <AutoTransition
-              as="tr"
+            <tr
               key={`skeleton-${index}`}
-              transitionKey={`skeleton-${index}`}
-              duration={0.18}
-              type="fade"
               aria-hidden="true"
               data-slot="table-row"
+              data-skeleton-motion={index === 0 ? "active" : "static"}
               className={TABLE_ROW_CLASS_NAME}
             >
               {renderSkeletonRow(index)}
-            </AutoTransition>
+            </tr>
           ))
         : error
           ? renderStateRow("error", errorContent, columnCount)
@@ -248,19 +242,18 @@ const AnalyticsDataTableBody = memo(function AnalyticsDataTableBody<TRow>({
                     ]
                   : hasMore
                     ? Array.from({ length: skeletonRows }, (_, index) => (
-                        <AutoTransition
-                          as="tr"
+                        <tr
                           key={`skeleton-more-${index}`}
-                          transitionKey={`skeleton-more-${index}`}
-                          duration={0.18}
-                          type="fade"
                           ref={sentinelRef}
                           aria-hidden="true"
                           data-slot="table-row"
+                          data-skeleton-motion={
+                            index === 0 ? "active" : "static"
+                          }
                           className={TABLE_ROW_CLASS_NAME}
                         >
                           {renderSkeletonRow(index)}
-                        </AutoTransition>
+                        </tr>
                       ))
                     : []),
               ]}
@@ -290,6 +283,8 @@ export function AnalyticsDataTable<TRow>({
   tableBodyClassName,
   className,
 }: AnalyticsDataTableProps<TRow>) {
+  const tableRef = useRef<HTMLTableElement>(null);
+  useSkeletonRowMotion(tableRef, loading || hasMore);
   const loadMore = onLoadMore ?? NOOP;
   const sentinelRef = useInfiniteTableSentinel({
     enabled:
@@ -305,7 +300,7 @@ export function AnalyticsDataTable<TRow>({
   const table = (
     <AnalyticsTableCard minTableWidth={minTableWidth} className={className}>
       {toolbar ? <div className="border-b px-4 py-3">{toolbar}</div> : null}
-      <Table className={tableClassName}>
+      <Table ref={tableRef} className={tableClassName}>
         <TableHeader>{header}</TableHeader>
         <AnalyticsDataTableBody
           rows={rows}
