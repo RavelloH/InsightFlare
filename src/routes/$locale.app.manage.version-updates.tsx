@@ -29,6 +29,8 @@ import {
 import Link from "@/lib/router";
 import { cn } from "@/lib/utils";
 const DEPLOY_ORIGIN = "https://deploy.insightflare.net";
+const DEPLOY_UTM =
+  "utm_source=insightflare_app&utm_medium=product&utm_campaign=deploy&utm_content=version_updates";
 const IS_DEMO = import.meta.env.VITE_DEMO_MODE === "1";
 const REPO_RELEASES_URL = "https://github.com/RavelloH/InsightFlare/releases";
 const CURRENT_VERSION = import.meta.env.VITE_APP_VERSION || "0.0.0";
@@ -150,7 +152,7 @@ function Page() {
   const updateButton = !IS_DEMO ? (
     <Button asChild>
       <Link
-        href={`${DEPLOY_ORIGIN}/${resolvedLocale}`}
+        href={`${DEPLOY_ORIGIN}/${resolvedLocale}?${DEPLOY_UTM}`}
         target="_blank"
         rel="noreferrer"
         title={labels.oneClickUpdateHint}
