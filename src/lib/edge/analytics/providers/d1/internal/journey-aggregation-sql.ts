@@ -227,7 +227,7 @@ function buildPageEntityCtes(
       SUM(COALESCE(duration_ms, 0)) AS totalDurationMs,
       COUNT(CASE WHEN is_visit_observation = 1 THEN 1 END) AS views`;
   return `
-page_metrics AS (
+page_metrics AS NOT MATERIALIZED (
   SELECT fv.${id}, ${metrics}
   FROM filtered_visits fv
   WHERE fv.${id} != ''

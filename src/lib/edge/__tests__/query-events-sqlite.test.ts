@@ -1328,7 +1328,7 @@ describe("event detail D1 SQL", () => {
       const sessionBaseline =
         sessionQuery.sql.slice(
           0,
-          sessionQuery.sql.indexOf("page_metrics AS ("),
+          sessionQuery.sql.indexOf("page_metrics AS NOT MATERIALIZED ("),
         ) +
         buildSessionAggregationSql({
           browserVersionExpression: browserMajorVersionExpr(),
@@ -1358,7 +1358,7 @@ describe("event detail D1 SQL", () => {
       const visitorBaseline =
         visitorQuery.sql.slice(
           0,
-          visitorQuery.sql.indexOf("page_metrics AS ("),
+          visitorQuery.sql.indexOf("page_metrics AS NOT MATERIALIZED ("),
         ) +
         buildVisitorAggregationSql({
           browserVersionExpression: browserMajorVersionExpr(),
@@ -1593,7 +1593,7 @@ describe("event detail D1 SQL", () => {
       expect(sessions.rows).toHaveLength(1);
       const s = d1.calls.at(-1)!;
       const oldSessions =
-        s.sql.slice(0, s.sql.indexOf("page_metrics AS (")) +
+        s.sql.slice(0, s.sql.indexOf("page_metrics AS NOT MATERIALIZED (")) +
         buildSessionAggregationSql({
           searchWhere:
             "AND fv.session_id IN (SELECT session_id FROM session_search_entities)",
@@ -1622,7 +1622,7 @@ describe("event detail D1 SQL", () => {
       expect(visitors.rows).toHaveLength(1);
       const v = d1.calls.at(-1)!;
       const oldVisitors =
-        v.sql.slice(0, v.sql.indexOf("page_metrics AS (")) +
+        v.sql.slice(0, v.sql.indexOf("page_metrics AS NOT MATERIALIZED (")) +
         buildVisitorAggregationSql({
           searchWhere:
             "AND fv.visitor_id IN (SELECT visitor_id FROM visitor_search_entities)",
@@ -1693,7 +1693,9 @@ describe("event detail D1 SQL", () => {
           sort,
         );
         const captured = d1.calls.at(-1)!;
-        const boundary = captured.sql.indexOf("page_metrics AS (");
+        const boundary = captured.sql.indexOf(
+          "page_metrics AS NOT MATERIALIZED (",
+        );
         expect(boundary).toBeGreaterThan(0);
         const baseline =
           captured.sql.slice(0, boundary) +
@@ -1740,7 +1742,9 @@ describe("event detail D1 SQL", () => {
           sort,
         );
         const captured = d1.calls.at(-1)!;
-        const boundary = captured.sql.indexOf("page_metrics AS (");
+        const boundary = captured.sql.indexOf(
+          "page_metrics AS NOT MATERIALIZED (",
+        );
         expect(boundary).toBeGreaterThan(0);
         const baseline =
           captured.sql.slice(0, boundary) +
