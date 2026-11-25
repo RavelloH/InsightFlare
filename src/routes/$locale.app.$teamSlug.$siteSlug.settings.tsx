@@ -1,23 +1,44 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
-import { SettingsClientPage } from "@/components/dashboard/site-pages/settings/settings-client-page";
+import {
+  SettingsClientPage,
+  siteConfigQueryOptions,
+  siteSnippetQueryOptions,
+} from "@/components/dashboard/site-pages/settings/settings-client-page";
+import { getBrowserQueryClient } from "@/components/query-client-provider";
 import { canManageTeam } from "@/lib/dashboard/permissions";
-import { loadSiteSettingsInitialData } from "@/lib/dashboard/route-data";
+import {
+  loadSiteConfigSnapshot,
+  loadSiteSnippetSnapshot,
+} from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 
 export const Route = createFileRoute(
   "/$locale/app/$teamSlug/$siteSlug/settings",
 )({
-  beforeLoad: async ({ context }) => {
+  beforeLoad: ({ context }) => {
     const c = context.siteContext;
-    if (!canManageTeam(c.activeTeam.membershipRole, c.user.systemRole)) {
+    if (!canManageTeam(c.activeTeam.membershipRole, c.user.systemRole))
       throw notFound();
-    }
-    return {
-      siteSettingsInitialData: await loadSiteSettingsInitialData({
-        data: { siteId: c.activeSite.id },
-      }),
-    };
+  },
+  loader: ({ context }) => {
+    const c = context.siteContext;
+    const siteId = c.activeSite.id;
+    if (typeof window === "undefined")
+      return {
+        config: loadSiteConfigSnapshot({ data: { siteId } }).catch(() => null),
+        snippet: loadSiteSnippetSnapshot({ data: { siteId } }).catch(
+          () => null,
+        ),
+      };
+    const queryClient = getBrowserQueryClient();
+    void queryClient.prefetchQuery(
+      siteConfigQueryOptions(c.user.id, siteId, null, true),
+    );
+    void queryClient.prefetchQuery(
+      siteSnippetQueryOptions(c.user.id, siteId, null, true),
+    );
+    return { config: null, snippet: null };
   },
   head: ({ match }) => ({
     meta: [
@@ -32,12 +53,8 @@ export const Route = createFileRoute(
   component: Page,
 });
 function Page() {
-  const {
-    locale,
-    messages,
-    siteContext: c,
-    siteSettingsInitialData,
-  } = Route.useRouteContext();
+  const { locale, messages, siteContext: c } = Route.useRouteContext();
+  const { config, snippet } = Route.useLoaderData();
   return (
     <SettingsClientPage
       locale={locale}
@@ -57,7 +74,10 @@ function Page() {
         publicEnabled: c.activeSite.publicEnabled,
         publicSlug: c.activeSite.publicSlug,
       }}
-      initialData={siteSettingsInitialData}
+      key={JSON.stringify([c.user.id, c.activeSite.id])}
+      userId={c.user.id}
+      deferredConfig={config}
+      deferredSnippet={snippet}
     />
   );
 }

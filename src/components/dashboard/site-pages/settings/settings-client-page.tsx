@@ -68,12 +68,15 @@ import {
   type BlockingRuleSyntaxError,
   validateBlockingRules,
 } from "@/lib/blocking";
+import {
+  managementQueryOptions,
+  type SiteSettingsInitialData,
+} from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import type { SiteData } from "@/lib/dashboard-api/client/edge";
 import { navigateWithTransition } from "@/lib/page-transition";
 import { useRouter } from "@/lib/router";
 import {
-  DEFAULT_SITE_SCRIPT_SETTINGS,
   normalizeSiteScriptSettings,
   type SiteSettingsConfig,
   type TrackingStrength,
@@ -130,6 +133,47 @@ function SettingsSection({
     </section>
   );
 }
+export function siteConfigQueryOptions(
+  userId: string,
+  siteId: string,
+  deferred?: SiteSettingsClientPageProps["deferredConfig"],
+  retainInFlight = false,
+) {
+  return managementQueryOptions(
+    ["dashboard", "site-config", siteId, userId],
+    (signal) =>
+      requestAdminService<SiteSettingsConfig>("site-config", {
+        params: { siteId },
+        signal,
+      }),
+    (snapshot: Pick<SiteSettingsInitialData, "config" | "fetchedAt">) =>
+      snapshot.config,
+    deferred,
+    retainInFlight,
+  );
+}
+export function siteSnippetQueryOptions(
+  userId: string,
+  siteId: string,
+  deferred?: SiteSettingsClientPageProps["deferredSnippet"],
+  retainInFlight = false,
+) {
+  return managementQueryOptions(
+    ["dashboard", "site-script-snippet", siteId, userId],
+    async (signal) =>
+      (
+        await requestAdminService<{
+          siteId: string;
+          src: string;
+          snippet: string;
+        }>("script-snippet", { params: { siteId }, signal })
+      ).snippet,
+    (snapshot: Pick<SiteSettingsInitialData, "scriptSnippet" | "fetchedAt">) =>
+      snapshot.scriptSnippet,
+    deferred,
+    retainInFlight,
+  );
+}
 export function SettingsClientPage({
   locale,
   messages,
@@ -139,6 +183,9 @@ export function SettingsClientPage({
   teams,
   site,
   initialData = null,
+  userId = "",
+  deferredConfig,
+  deferredSnippet,
 }: SiteSettingsClientPageProps) {
   const router = useRouter();
   const copy = messages.siteSettings;
@@ -291,34 +338,23 @@ export function SettingsClientPage({
   }
 
   const siteConfigQuery = useQuery({
-    queryKey: ["dashboard", "site-config", site.id],
-    queryFn: ({ signal }) =>
-      requestAdminService<SiteSettingsConfig>("site-config", {
-        params: { siteId: site.id },
-        signal,
-      }),
+    ...siteConfigQueryOptions(userId, site.id, deferredConfig),
     initialData: initialData?.config,
     initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
   });
   const scriptSnippetQuery = useQuery({
-    queryKey: ["dashboard", "site-script-snippet", site.id],
-    queryFn: async ({ signal }) => {
-      const data = await requestAdminService<{
-        siteId: string;
-        src: string;
-        snippet: string;
-      }>("script-snippet", {
-        params: { siteId: site.id },
-        signal,
-      });
-      return data.snippet;
-    },
+    ...siteSnippetQueryOptions(userId, site.id, deferredSnippet),
     initialData: initialData?.scriptSnippet,
     initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
   });
-  const loadingSettings = siteConfigQuery.isPending;
+  const [configApplied, setConfigApplied] = useState(
+    Boolean(initialData?.config),
+  );
+  const loadingSettings = !configApplied && !siteConfigQuery.isError;
+  const settingsUnavailable = !configApplied && siteConfigQuery.isError;
+  const settingsLocked = !configApplied;
   const loadingScript = scriptSnippetQuery.isPending;
   const scriptSnippet = scriptSnippetQuery.data ?? "";
 
@@ -333,9 +369,14 @@ export function SettingsClientPage({
     ) {
       return;
     }
-    applyTrackerSettings(siteConfigQuery.data ?? DEFAULT_SITE_SCRIPT_SETTINGS);
+    if (siteConfigQuery.isError && !siteConfigQuery.data) {
+      toast.error(copy.toasts.settingsLoadFailed);
+      return;
+    }
+    if (!siteConfigQuery.data) return;
+    applyTrackerSettings(siteConfigQuery.data);
     appliedConfigSiteIdRef.current = site.id;
-    if (siteConfigQuery.isError) toast.error(copy.toasts.settingsLoadFailed);
+    setConfigApplied(true);
   }, [
     copy.toasts.settingsLoadFailed,
     site.id,
@@ -465,6 +506,7 @@ export function SettingsClientPage({
   }
 
   async function handleSaveTrackingStrength() {
+    if (settingsLocked) return;
     if (!hasTrackingStrengthChanges) return;
     setSavingTrackingStrength(true);
     try {
@@ -481,6 +523,7 @@ export function SettingsClientPage({
   }
 
   async function handleSaveBotProtection() {
+    if (settingsLocked) return;
     if (!hasBotProtectionChanges) return;
     const pendingHostingProxyBlocking = hostingProxyBlockingEnabled;
     setSavingBotProtection(true);
@@ -499,6 +542,7 @@ export function SettingsClientPage({
   }
 
   async function handleSaveHostingProxyBlocking() {
+    if (settingsLocked) return;
     if (!hasHostingProxyBlockingChanges) return;
     const pendingBotProtection = botProtectionEnabled;
     setSavingHostingProxyBlocking(true);
@@ -517,6 +561,7 @@ export function SettingsClientPage({
   }
 
   async function handleSaveQueryHash() {
+    if (settingsLocked) return;
     if (!hasQueryHashChanges) return;
     setSavingQueryHash(true);
     try {
@@ -535,6 +580,7 @@ export function SettingsClientPage({
   }
 
   async function handleSaveAutoTracking() {
+    if (settingsLocked) return;
     if (!hasAutoTrackingChanges) return;
     setSavingAutoTracking(true);
     try {
@@ -551,6 +597,7 @@ export function SettingsClientPage({
   }
 
   async function handleSavePerformanceTracking() {
+    if (settingsLocked) return;
     if (!hasPerformanceTrackingChanges) return;
     setSavingPerformanceTracking(true);
     try {
@@ -567,6 +614,7 @@ export function SettingsClientPage({
   }
 
   async function handleSaveBlockingField(field: BlockingFieldId) {
+    if (settingsLocked) return;
     if (blockingInputs[field] === persistedBlockingInputs[field]) return;
     const errors = blockingValidation[field];
     if (errors.length > 0) {
@@ -689,6 +737,22 @@ export function SettingsClientPage({
 
   return (
     <div className="space-y-6">
+      {settingsUnavailable ? (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-2 border p-3 text-sm text-muted-foreground"
+        >
+          <span>{copy.toasts.settingsLoadFailed}</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void siteConfigQuery.refetch()}
+          >
+            {messages.notificationCenter.refresh}
+          </Button>
+        </div>
+      ) : null}
       <PageHeading title={copy.title} subtitle={copy.subtitle} />
 
       <SettingsSection
@@ -720,11 +784,7 @@ export function SettingsClientPage({
                   onChange={(event) => setName(event.target.value)}
                   minLength={2}
                   disabled={
-                    saving ||
-                    trackingSaving ||
-                    transferring ||
-                    deleting ||
-                    loadingSettings
+                    saving || trackingSaving || transferring || deleting
                   }
                   required
                 />
@@ -738,11 +798,7 @@ export function SettingsClientPage({
                   onChange={(event) => setDomain(event.target.value)}
                   minLength={3}
                   disabled={
-                    saving ||
-                    trackingSaving ||
-                    transferring ||
-                    deleting ||
-                    loadingSettings
+                    saving || trackingSaving || transferring || deleting
                   }
                   required
                 />
@@ -756,11 +812,13 @@ export function SettingsClientPage({
                   trackingSaving ||
                   transferring ||
                   deleting ||
-                  loadingSettings ||
                   !hasSiteInfoChanges
                 }
               >
-                <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
+                <AutoTransition
+                  initial={false}
+                  className="inline-flex items-center gap-[var(--button-content-gap)]"
+                >
                   {saving ? (
                     <span
                       key="saving"
@@ -849,7 +907,11 @@ export function SettingsClientPage({
               </p>
             </div>
 
-            <AutoResizer initial duration={0.24} ease={[0.22, 1, 0.36, 1]}>
+            <AutoResizer
+              initial={false}
+              duration={0.24}
+              ease={[0.22, 1, 0.36, 1]}
+            >
               <AutoTransition
                 initial={false}
                 duration={0.18}
@@ -913,7 +975,10 @@ export function SettingsClientPage({
                 !hasPublicSharingChanges
               }
             >
-              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
+              <AutoTransition
+                initial={false}
+                className="inline-flex items-center gap-[var(--button-content-gap)]"
+              >
                 {savingPublicSharing ? (
                   <span
                     key="saving-public-sharing"
@@ -946,31 +1011,39 @@ export function SettingsClientPage({
           </CardHeader>
           <CardContent className="flex h-full flex-col gap-3">
             <p className="text-xs text-muted-foreground">{copy.scriptHint}</p>
-            <div className="border bg-muted/30 p-3">
-              {loadingScript ? (
-                <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                  <Spinner className="size-4" />
-                  {copy.loadingScript}
-                </div>
-              ) : (
-                <OverlayScrollbar
-                  axis="horizontal"
-                  className="text-xs leading-relaxed text-foreground"
-                  contentClassName="w-max min-w-full"
-                >
-                  {scriptSnippet ? (
-                    <HighlightedCode
-                      source={scriptSnippet}
-                      className="font-mono whitespace-pre"
-                    />
+            <AutoResizer initial={false}>
+              <AutoTransition
+                initial={false}
+                transitionKey={loadingScript ? "loading" : "snippet"}
+                duration={0.2}
+              >
+                <div className="min-h-10 border bg-muted/30 p-3">
+                  {loadingScript ? (
+                    <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                      <Spinner className="size-4" />
+                      {copy.loadingScript}
+                    </div>
                   ) : (
-                    <code className="font-mono whitespace-pre">
-                      {copy.scriptUnavailable}
-                    </code>
+                    <OverlayScrollbar
+                      axis="horizontal"
+                      className="text-xs leading-relaxed text-foreground"
+                      contentClassName="w-max min-w-full"
+                    >
+                      {scriptSnippet ? (
+                        <HighlightedCode
+                          source={scriptSnippet}
+                          className="font-mono whitespace-pre"
+                        />
+                      ) : (
+                        <code className="font-mono whitespace-pre">
+                          {copy.scriptUnavailable}
+                        </code>
+                      )}
+                    </OverlayScrollbar>
                   )}
-                </OverlayScrollbar>
-              )}
-            </div>
+                </div>
+              </AutoTransition>
+            </AutoResizer>
             <Button
               type="button"
               variant="outline"
@@ -1003,108 +1076,136 @@ export function SettingsClientPage({
             </CardDescription>
           </CardHeader>
           <CardContent className="flex h-full flex-col gap-4">
-            {loadingSettings ? (
-              <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                <Spinner className="size-4" />
-                {copy.loadingSettings}
-              </div>
-            ) : null}
-            <RadioGroup
-              aria-label={copy.trackingStrengthLabel}
-              value={trackingStrength}
-              onValueChange={(value) => {
-                setTrackingStrength(value as TrackingStrength);
-              }}
-              disabled={
-                saving ||
-                trackingSaving ||
-                transferring ||
-                deleting ||
-                loadingSettings
-              }
-              className="gap-2"
-            >
-              {[
-                {
-                  value: "strong" as const,
-                  label: copy.trackingStrengthStrong,
-                  description: copy.trackingStrengthStrongDescription,
-                },
-                {
-                  value: "smart" as const,
-                  label: copy.trackingStrengthSmart,
-                  description: copy.trackingStrengthSmartDescription,
-                },
-                {
-                  value: "weak" as const,
-                  label: copy.trackingStrengthWeak,
-                  description: copy.trackingStrengthWeakDescription,
-                },
-              ].map((item) => {
-                const id = `site-settings-tracking-strength-${item.value}`;
-                return (
-                  <FieldLabel
-                    key={item.value}
-                    htmlFor={id}
-                    className="cursor-pointer"
-                  >
-                    <Field
-                      orientation="horizontal"
-                      className={cn(
-                        trackingStrength === item.value
-                          ? "border-foreground/30 bg-muted/30"
-                          : "border-border hover:bg-muted/20",
-                      )}
-                    >
-                      <FieldContent>
-                        <FieldTitle>{item.label}</FieldTitle>
-                        <FieldDescription>{item.description}</FieldDescription>
-                      </FieldContent>
-                      <RadioGroupItem
-                        id={id}
-                        value={item.value}
-                        className="mt-0.5"
+            <AutoResizer initial={false}>
+              <AutoTransition
+                initial={false}
+                duration={0.2}
+                transitionKey={
+                  loadingSettings
+                    ? "loading"
+                    : settingsUnavailable
+                      ? "error"
+                      : "ready"
+                }
+              >
+                {settingsLocked ? (
+                  <div className="flex h-28 items-center justify-center gap-2 text-sm text-muted-foreground">
+                    {settingsUnavailable ? (
+                      copy.toasts.settingsLoadFailed
+                    ) : (
+                      <Spinner
+                        className="size-5"
+                        aria-label={messages.common.loading}
                       />
-                    </Field>
-                  </FieldLabel>
-                );
-              })}
-            </RadioGroup>
-            <Button
-              type="button"
-              className="mt-auto self-start"
-              onClick={() => {
-                void handleSaveTrackingStrength();
-              }}
-              disabled={
-                saving ||
-                trackingSaving ||
-                transferring ||
-                deleting ||
-                loadingSettings ||
-                !hasTrackingStrengthChanges
-              }
-            >
-              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
-                {savingTrackingStrength ? (
-                  <span
-                    key="saving-strength"
-                    className="inline-flex items-center gap-[var(--button-content-gap)]"
-                  >
-                    <Spinner data-icon="inline-start" />
-                    {copy.savingTracking}
-                  </span>
+                    )}
+                  </div>
                 ) : (
-                  <span
-                    key="save-strength"
-                    className="inline-flex items-center gap-[var(--button-content-gap)]"
-                  >
-                    <RiSave3Line data-icon="inline-start" />
-                    {copy.saveTracking}
-                  </span>
+                  <div className="flex h-full flex-col gap-4">
+                    <RadioGroup
+                      aria-label={copy.trackingStrengthLabel}
+                      value={trackingStrength}
+                      onValueChange={(value) => {
+                        setTrackingStrength(value as TrackingStrength);
+                      }}
+                      disabled={
+                        saving ||
+                        trackingSaving ||
+                        transferring ||
+                        deleting ||
+                        settingsLocked
+                      }
+                      className="gap-2"
+                    >
+                      {[
+                        {
+                          value: "strong" as const,
+                          label: copy.trackingStrengthStrong,
+                          description: copy.trackingStrengthStrongDescription,
+                        },
+                        {
+                          value: "smart" as const,
+                          label: copy.trackingStrengthSmart,
+                          description: copy.trackingStrengthSmartDescription,
+                        },
+                        {
+                          value: "weak" as const,
+                          label: copy.trackingStrengthWeak,
+                          description: copy.trackingStrengthWeakDescription,
+                        },
+                      ].map((item) => {
+                        const id = `site-settings-tracking-strength-${item.value}`;
+                        return (
+                          <FieldLabel
+                            key={item.value}
+                            htmlFor={id}
+                            className="cursor-pointer"
+                          >
+                            <Field
+                              orientation="horizontal"
+                              className={cn(
+                                trackingStrength === item.value
+                                  ? "border-foreground/30 bg-muted/30"
+                                  : "border-border hover:bg-muted/20",
+                              )}
+                            >
+                              <FieldContent>
+                                <FieldTitle>{item.label}</FieldTitle>
+                                <FieldDescription>
+                                  {item.description}
+                                </FieldDescription>
+                              </FieldContent>
+                              <RadioGroupItem
+                                id={id}
+                                value={item.value}
+                                className="mt-0.5"
+                              />
+                            </Field>
+                          </FieldLabel>
+                        );
+                      })}
+                    </RadioGroup>
+                    <Button
+                      type="button"
+                      className="mt-auto self-start"
+                      onClick={() => {
+                        void handleSaveTrackingStrength();
+                      }}
+                      disabled={
+                        saving ||
+                        trackingSaving ||
+                        transferring ||
+                        deleting ||
+                        settingsLocked ||
+                        !hasTrackingStrengthChanges
+                      }
+                    >
+                      <AutoTransition
+                        initial={false}
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
+                      >
+                        {savingTrackingStrength ? (
+                          <span
+                            key="saving-strength"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
+                          >
+                            <Spinner data-icon="inline-start" />
+                            {copy.savingTracking}
+                          </span>
+                        ) : (
+                          <span
+                            key="save-strength"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
+                          >
+                            <RiSave3Line data-icon="inline-start" />
+                            {copy.saveTracking}
+                          </span>
+                        )}
+                      </AutoTransition>
+                    </Button>
+                  </div>
                 )}
               </AutoTransition>
-            </Button>
+            </AutoResizer>
           </CardContent>
         </Card>
 
@@ -1117,122 +1218,166 @@ export function SettingsClientPage({
             <CardDescription>{copy.queryHashGroupDescription}</CardDescription>
           </CardHeader>
           <CardContent className="flex h-full flex-col gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="site-settings-track-query">
-                {copy.trackQueryParamsLabel}
-              </Label>
-              <Select
-                value={trackQueryParams ? "true" : "false"}
-                onValueChange={(value) => {
-                  setTrackQueryParams(value === "true");
-                }}
-                disabled={
-                  saving ||
-                  trackingSaving ||
-                  transferring ||
-                  deleting ||
+            <AutoResizer initial={false}>
+              <AutoTransition
+                initial={false}
+                duration={0.2}
+                transitionKey={
                   loadingSettings
+                    ? "loading"
+                    : settingsUnavailable
+                      ? "error"
+                      : "ready"
                 }
               >
-                <SelectTrigger
-                  id="site-settings-track-query"
-                  className="w-full"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="true">{copy.booleanOn}</SelectItem>
-                  <SelectItem value="false">{copy.booleanOff}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="site-settings-track-hash">
-                {copy.trackHashLabel}
-              </Label>
-              <Select
-                value={trackHash ? "true" : "false"}
-                onValueChange={(value) => {
-                  setTrackHash(value === "true");
-                }}
-                disabled={
-                  saving ||
-                  trackingSaving ||
-                  transferring ||
-                  deleting ||
-                  loadingSettings
-                }
-              >
-                <SelectTrigger id="site-settings-track-hash" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="true">{copy.booleanOn}</SelectItem>
-                  <SelectItem value="false">{copy.booleanOff}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="site-settings-ignore-dnt">
-                {copy.ignoreDoNotTrackLabel}
-              </Label>
-              <Select
-                value={ignoreDoNotTrack ? "true" : "false"}
-                onValueChange={(value) => {
-                  setIgnoreDoNotTrack(value === "true");
-                }}
-                disabled={
-                  saving ||
-                  trackingSaving ||
-                  transferring ||
-                  deleting ||
-                  loadingSettings
-                }
-              >
-                <SelectTrigger id="site-settings-ignore-dnt" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="true">{copy.booleanOn}</SelectItem>
-                  <SelectItem value="false">{copy.booleanOff}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <Button
-              type="button"
-              className="mt-auto self-start"
-              onClick={() => {
-                void handleSaveQueryHash();
-              }}
-              disabled={
-                saving ||
-                trackingSaving ||
-                transferring ||
-                deleting ||
-                loadingSettings ||
-                !hasQueryHashChanges
-              }
-            >
-              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
-                {savingQueryHash ? (
-                  <span
-                    key="saving-query-hash"
-                    className="inline-flex items-center gap-[var(--button-content-gap)]"
-                  >
-                    <Spinner data-icon="inline-start" />
-                    {copy.savingTracking}
-                  </span>
+                {settingsLocked ? (
+                  <div className="flex h-28 items-center justify-center gap-2 text-sm text-muted-foreground">
+                    {settingsUnavailable ? (
+                      copy.toasts.settingsLoadFailed
+                    ) : (
+                      <Spinner
+                        className="size-5"
+                        aria-label={messages.common.loading}
+                      />
+                    )}
+                  </div>
                 ) : (
-                  <span
-                    key="save-query-hash"
-                    className="inline-flex items-center gap-[var(--button-content-gap)]"
-                  >
-                    <RiSave3Line data-icon="inline-start" />
-                    {copy.saveTracking}
-                  </span>
+                  <div className="flex h-full flex-col gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="site-settings-track-query">
+                        {copy.trackQueryParamsLabel}
+                      </Label>
+                      <Select
+                        value={trackQueryParams ? "true" : "false"}
+                        onValueChange={(value) => {
+                          setTrackQueryParams(value === "true");
+                        }}
+                        disabled={
+                          saving ||
+                          trackingSaving ||
+                          transferring ||
+                          deleting ||
+                          settingsLocked
+                        }
+                      >
+                        <SelectTrigger
+                          id="site-settings-track-query"
+                          className="w-full"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="true">{copy.booleanOn}</SelectItem>
+                          <SelectItem value="false">
+                            {copy.booleanOff}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="site-settings-track-hash">
+                        {copy.trackHashLabel}
+                      </Label>
+                      <Select
+                        value={trackHash ? "true" : "false"}
+                        onValueChange={(value) => {
+                          setTrackHash(value === "true");
+                        }}
+                        disabled={
+                          saving ||
+                          trackingSaving ||
+                          transferring ||
+                          deleting ||
+                          settingsLocked
+                        }
+                      >
+                        <SelectTrigger
+                          id="site-settings-track-hash"
+                          className="w-full"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="true">{copy.booleanOn}</SelectItem>
+                          <SelectItem value="false">
+                            {copy.booleanOff}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="site-settings-ignore-dnt">
+                        {copy.ignoreDoNotTrackLabel}
+                      </Label>
+                      <Select
+                        value={ignoreDoNotTrack ? "true" : "false"}
+                        onValueChange={(value) => {
+                          setIgnoreDoNotTrack(value === "true");
+                        }}
+                        disabled={
+                          saving ||
+                          trackingSaving ||
+                          transferring ||
+                          deleting ||
+                          settingsLocked
+                        }
+                      >
+                        <SelectTrigger
+                          id="site-settings-ignore-dnt"
+                          className="w-full"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="true">{copy.booleanOn}</SelectItem>
+                          <SelectItem value="false">
+                            {copy.booleanOff}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button
+                      type="button"
+                      className="mt-auto self-start"
+                      onClick={() => {
+                        void handleSaveQueryHash();
+                      }}
+                      disabled={
+                        saving ||
+                        trackingSaving ||
+                        transferring ||
+                        deleting ||
+                        settingsLocked ||
+                        !hasQueryHashChanges
+                      }
+                    >
+                      <AutoTransition
+                        initial={false}
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
+                      >
+                        {savingQueryHash ? (
+                          <span
+                            key="saving-query-hash"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
+                          >
+                            <Spinner data-icon="inline-start" />
+                            {copy.savingTracking}
+                          </span>
+                        ) : (
+                          <span
+                            key="save-query-hash"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
+                          >
+                            <RiSave3Line data-icon="inline-start" />
+                            {copy.saveTracking}
+                          </span>
+                        )}
+                      </AutoTransition>
+                    </Button>
+                  </div>
                 )}
               </AutoTransition>
-            </Button>
+            </AutoResizer>
           </CardContent>
         </Card>
 
@@ -1245,73 +1390,107 @@ export function SettingsClientPage({
             <CardDescription>{copy.autoTrackGroupDescription}</CardDescription>
           </CardHeader>
           <CardContent className="flex h-full flex-col gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="site-settings-auto-track-outbound">
-                {copy.autoTrackOutboundLinksLabel}
-              </Label>
-              <Select
-                value={autoTrackOutboundLinks ? "true" : "false"}
-                onValueChange={(value) => {
-                  setAutoTrackOutboundLinks(value === "true");
-                }}
-                disabled={
-                  saving ||
-                  trackingSaving ||
-                  transferring ||
-                  deleting ||
+            <AutoResizer initial={false}>
+              <AutoTransition
+                initial={false}
+                duration={0.2}
+                transitionKey={
                   loadingSettings
+                    ? "loading"
+                    : settingsUnavailable
+                      ? "error"
+                      : "ready"
                 }
               >
-                <SelectTrigger
-                  id="site-settings-auto-track-outbound"
-                  className="w-full"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="true">{copy.booleanOn}</SelectItem>
-                  <SelectItem value="false">{copy.booleanOff}</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                {copy.autoTrackOutboundLinksHint}
-              </p>
-            </div>
-            <Button
-              type="button"
-              className="mt-auto self-start"
-              onClick={() => {
-                void handleSaveAutoTracking();
-              }}
-              disabled={
-                saving ||
-                trackingSaving ||
-                transferring ||
-                deleting ||
-                loadingSettings ||
-                !hasAutoTrackingChanges
-              }
-            >
-              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
-                {savingAutoTracking ? (
-                  <span
-                    key="saving-auto-tracking"
-                    className="inline-flex items-center gap-[var(--button-content-gap)]"
-                  >
-                    <Spinner data-icon="inline-start" />
-                    {copy.savingTracking}
-                  </span>
+                {settingsLocked ? (
+                  <div className="flex h-28 items-center justify-center gap-2 text-sm text-muted-foreground">
+                    {settingsUnavailable ? (
+                      copy.toasts.settingsLoadFailed
+                    ) : (
+                      <Spinner
+                        className="size-5"
+                        aria-label={messages.common.loading}
+                      />
+                    )}
+                  </div>
                 ) : (
-                  <span
-                    key="save-auto-tracking"
-                    className="inline-flex items-center gap-[var(--button-content-gap)]"
-                  >
-                    <RiSave3Line data-icon="inline-start" />
-                    {copy.saveTracking}
-                  </span>
+                  <div className="flex h-full flex-col gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="site-settings-auto-track-outbound">
+                        {copy.autoTrackOutboundLinksLabel}
+                      </Label>
+                      <Select
+                        value={autoTrackOutboundLinks ? "true" : "false"}
+                        onValueChange={(value) => {
+                          setAutoTrackOutboundLinks(value === "true");
+                        }}
+                        disabled={
+                          saving ||
+                          trackingSaving ||
+                          transferring ||
+                          deleting ||
+                          settingsLocked
+                        }
+                      >
+                        <SelectTrigger
+                          id="site-settings-auto-track-outbound"
+                          className="w-full"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="true">{copy.booleanOn}</SelectItem>
+                          <SelectItem value="false">
+                            {copy.booleanOff}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        {copy.autoTrackOutboundLinksHint}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      className="mt-auto self-start"
+                      onClick={() => {
+                        void handleSaveAutoTracking();
+                      }}
+                      disabled={
+                        saving ||
+                        trackingSaving ||
+                        transferring ||
+                        deleting ||
+                        settingsLocked ||
+                        !hasAutoTrackingChanges
+                      }
+                    >
+                      <AutoTransition
+                        initial={false}
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
+                      >
+                        {savingAutoTracking ? (
+                          <span
+                            key="saving-auto-tracking"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
+                          >
+                            <Spinner data-icon="inline-start" />
+                            {copy.savingTracking}
+                          </span>
+                        ) : (
+                          <span
+                            key="save-auto-tracking"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
+                          >
+                            <RiSave3Line data-icon="inline-start" />
+                            {copy.saveTracking}
+                          </span>
+                        )}
+                      </AutoTransition>
+                    </Button>
+                  </div>
                 )}
               </AutoTransition>
-            </Button>
+            </AutoResizer>
           </CardContent>
         </Card>
 
@@ -1326,76 +1505,110 @@ export function SettingsClientPage({
             </CardDescription>
           </CardHeader>
           <CardContent className="flex h-full flex-col gap-4">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <Label htmlFor="site-settings-performance-sample-rate">
-                  {copy.performanceSampleRateLabel}
-                </Label>
-                <span className="text-xs tabular-nums text-muted-foreground">
-                  {formatSampleRateValue(normalizedPerformanceSampleRate)}
-                </span>
-              </div>
-              <Slider
-                id="site-settings-performance-sample-rate"
-                min={0}
-                max={100}
-                step={1}
-                value={[normalizedPerformanceSampleRate]}
-                onValueChange={(value) => {
-                  setPerformanceSampleRate(value[0] ?? 0);
-                }}
-                aria-label={copy.performanceSampleRateLabel}
-                disabled={
-                  saving ||
-                  trackingSaving ||
-                  transferring ||
-                  deleting ||
+            <AutoResizer initial={false}>
+              <AutoTransition
+                initial={false}
+                duration={0.2}
+                transitionKey={
                   loadingSettings
+                    ? "loading"
+                    : settingsUnavailable
+                      ? "error"
+                      : "ready"
                 }
-              />
-              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                <span>0%</span>
-                <span>100%</span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {copy.performanceSampleRateHint}
-              </p>
-            </div>
-            <Button
-              type="button"
-              className="mt-auto self-start"
-              onClick={() => {
-                void handleSavePerformanceTracking();
-              }}
-              disabled={
-                saving ||
-                trackingSaving ||
-                transferring ||
-                deleting ||
-                loadingSettings ||
-                !hasPerformanceTrackingChanges
-              }
-            >
-              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
-                {savingPerformanceTracking ? (
-                  <span
-                    key="saving-performance"
-                    className="inline-flex items-center gap-[var(--button-content-gap)]"
-                  >
-                    <Spinner data-icon="inline-start" />
-                    {copy.savingTracking}
-                  </span>
+              >
+                {settingsLocked ? (
+                  <div className="flex h-28 items-center justify-center gap-2 text-sm text-muted-foreground">
+                    {settingsUnavailable ? (
+                      copy.toasts.settingsLoadFailed
+                    ) : (
+                      <Spinner
+                        className="size-5"
+                        aria-label={messages.common.loading}
+                      />
+                    )}
+                  </div>
                 ) : (
-                  <span
-                    key="save-performance"
-                    className="inline-flex items-center gap-[var(--button-content-gap)]"
-                  >
-                    <RiSave3Line data-icon="inline-start" />
-                    {copy.saveTracking}
-                  </span>
+                  <div className="flex h-full flex-col gap-4">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label htmlFor="site-settings-performance-sample-rate">
+                          {copy.performanceSampleRateLabel}
+                        </Label>
+                        <span className="text-xs tabular-nums text-muted-foreground">
+                          {formatSampleRateValue(
+                            normalizedPerformanceSampleRate,
+                          )}
+                        </span>
+                      </div>
+                      <Slider
+                        id="site-settings-performance-sample-rate"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={[normalizedPerformanceSampleRate]}
+                        onValueChange={(value) => {
+                          setPerformanceSampleRate(value[0] ?? 0);
+                        }}
+                        aria-label={copy.performanceSampleRateLabel}
+                        disabled={
+                          saving ||
+                          trackingSaving ||
+                          transferring ||
+                          deleting ||
+                          settingsLocked
+                        }
+                      />
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span>0%</span>
+                        <span>100%</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {copy.performanceSampleRateHint}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      className="mt-auto self-start"
+                      onClick={() => {
+                        void handleSavePerformanceTracking();
+                      }}
+                      disabled={
+                        saving ||
+                        trackingSaving ||
+                        transferring ||
+                        deleting ||
+                        settingsLocked ||
+                        !hasPerformanceTrackingChanges
+                      }
+                    >
+                      <AutoTransition
+                        initial={false}
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
+                      >
+                        {savingPerformanceTracking ? (
+                          <span
+                            key="saving-performance"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
+                          >
+                            <Spinner data-icon="inline-start" />
+                            {copy.savingTracking}
+                          </span>
+                        ) : (
+                          <span
+                            key="save-performance"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
+                          >
+                            <RiSave3Line data-icon="inline-start" />
+                            {copy.saveTracking}
+                          </span>
+                        )}
+                      </AutoTransition>
+                    </Button>
+                  </div>
                 )}
               </AutoTransition>
-            </Button>
+            </AutoResizer>
           </CardContent>
         </Card>
       </SettingsSection>
@@ -1413,6 +1626,10 @@ export function SettingsClientPage({
             locale={locale}
             copy={copy.blockingRulesFields[field]}
             dialogCopy={copy.blockingRulesDialogs}
+            loading={loadingSettings}
+            unavailable={settingsUnavailable}
+            loadingLabel={messages.common.loading}
+            unavailableLabel={copy.toasts.settingsLoadFailed}
             value={blockingInputs[field]}
             errors={blockingValidation[field]}
             disabled={
@@ -1420,7 +1637,7 @@ export function SettingsClientPage({
               trackingSaving ||
               transferring ||
               deleting ||
-              loadingSettings
+              settingsLocked
             }
             saving={savingBlockingField === field}
             changed={blockingInputs[field] !== persistedBlockingInputs[field]}
@@ -1450,76 +1667,104 @@ export function SettingsClientPage({
             <CardDescription>{copy.botProtectionEnabledHint}</CardDescription>
           </CardHeader>
           <CardContent className="flex h-full flex-col gap-4">
-            {loadingSettings ? (
-              <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                <Spinner className="size-4" />
-                {copy.loadingSettings}
-              </div>
-            ) : null}
-            <div className="space-y-2">
-              <Label htmlFor="site-settings-bot-protection">
-                {copy.botProtectionEnabledLabel}
-              </Label>
-              <Select
-                value={botProtectionEnabled ? "true" : "false"}
-                onValueChange={(value) => {
-                  setBotProtectionEnabled(value === "true");
-                }}
-                disabled={
-                  saving ||
-                  trackingSaving ||
-                  transferring ||
-                  deleting ||
+            <AutoResizer initial={false}>
+              <AutoTransition
+                initial={false}
+                duration={0.2}
+                transitionKey={
                   loadingSettings
+                    ? "loading"
+                    : settingsUnavailable
+                      ? "error"
+                      : "ready"
                 }
               >
-                <SelectTrigger
-                  id="site-settings-bot-protection"
-                  className="w-full"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="true">{copy.booleanOn}</SelectItem>
-                  <SelectItem value="false">{copy.booleanOff}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <Button
-              type="button"
-              className="mt-auto self-start"
-              onClick={() => {
-                void handleSaveBotProtection();
-              }}
-              disabled={
-                saving ||
-                trackingSaving ||
-                transferring ||
-                deleting ||
-                loadingSettings ||
-                !hasBotProtectionChanges
-              }
-            >
-              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
-                {savingBotProtection ? (
-                  <span
-                    key="saving-bot-protection"
-                    className="inline-flex items-center gap-[var(--button-content-gap)]"
-                  >
-                    <Spinner data-icon="inline-start" />
-                    {copy.savingTracking}
-                  </span>
+                {settingsLocked ? (
+                  <div className="flex h-28 items-center justify-center gap-2 text-sm text-muted-foreground">
+                    {settingsUnavailable ? (
+                      copy.toasts.settingsLoadFailed
+                    ) : (
+                      <Spinner
+                        className="size-5"
+                        aria-label={messages.common.loading}
+                      />
+                    )}
+                  </div>
                 ) : (
-                  <span
-                    key="save-bot-protection"
-                    className="inline-flex items-center gap-[var(--button-content-gap)]"
-                  >
-                    <RiSave3Line data-icon="inline-start" />
-                    {copy.saveTracking}
-                  </span>
+                  <div className="flex h-full flex-col gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="site-settings-bot-protection">
+                        {copy.botProtectionEnabledLabel}
+                      </Label>
+                      <Select
+                        value={botProtectionEnabled ? "true" : "false"}
+                        onValueChange={(value) => {
+                          setBotProtectionEnabled(value === "true");
+                        }}
+                        disabled={
+                          saving ||
+                          trackingSaving ||
+                          transferring ||
+                          deleting ||
+                          settingsLocked
+                        }
+                      >
+                        <SelectTrigger
+                          id="site-settings-bot-protection"
+                          className="w-full"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="true">{copy.booleanOn}</SelectItem>
+                          <SelectItem value="false">
+                            {copy.booleanOff}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button
+                      type="button"
+                      className="mt-auto self-start"
+                      onClick={() => {
+                        void handleSaveBotProtection();
+                      }}
+                      disabled={
+                        saving ||
+                        trackingSaving ||
+                        transferring ||
+                        deleting ||
+                        settingsLocked ||
+                        !hasBotProtectionChanges
+                      }
+                    >
+                      <AutoTransition
+                        initial={false}
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
+                      >
+                        {savingBotProtection ? (
+                          <span
+                            key="saving-bot-protection"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
+                          >
+                            <Spinner data-icon="inline-start" />
+                            {copy.savingTracking}
+                          </span>
+                        ) : (
+                          <span
+                            key="save-bot-protection"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
+                          >
+                            <RiSave3Line data-icon="inline-start" />
+                            {copy.saveTracking}
+                          </span>
+                        )}
+                      </AutoTransition>
+                    </Button>
+                  </div>
                 )}
               </AutoTransition>
-            </Button>
+            </AutoResizer>
           </CardContent>
         </Card>
 
@@ -1534,76 +1779,104 @@ export function SettingsClientPage({
             </CardDescription>
           </CardHeader>
           <CardContent className="flex h-full flex-col gap-4">
-            {loadingSettings ? (
-              <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                <Spinner className="size-4" />
-                {copy.loadingSettings}
-              </div>
-            ) : null}
-            <div className="space-y-2">
-              <Label htmlFor="site-settings-hosting-proxy-blocking">
-                {copy.hostingProxyBlockingEnabledLabel}
-              </Label>
-              <Select
-                value={hostingProxyBlockingEnabled ? "true" : "false"}
-                onValueChange={(value) => {
-                  setHostingProxyBlockingEnabled(value === "true");
-                }}
-                disabled={
-                  saving ||
-                  trackingSaving ||
-                  transferring ||
-                  deleting ||
+            <AutoResizer initial={false}>
+              <AutoTransition
+                initial={false}
+                duration={0.2}
+                transitionKey={
                   loadingSettings
+                    ? "loading"
+                    : settingsUnavailable
+                      ? "error"
+                      : "ready"
                 }
               >
-                <SelectTrigger
-                  id="site-settings-hosting-proxy-blocking"
-                  className="w-full"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="true">{copy.booleanOn}</SelectItem>
-                  <SelectItem value="false">{copy.booleanOff}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <Button
-              type="button"
-              className="mt-auto self-start"
-              onClick={() => {
-                void handleSaveHostingProxyBlocking();
-              }}
-              disabled={
-                saving ||
-                trackingSaving ||
-                transferring ||
-                deleting ||
-                loadingSettings ||
-                !hasHostingProxyBlockingChanges
-              }
-            >
-              <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
-                {savingHostingProxyBlocking ? (
-                  <span
-                    key="saving-hosting-proxy-blocking"
-                    className="inline-flex items-center gap-[var(--button-content-gap)]"
-                  >
-                    <Spinner data-icon="inline-start" />
-                    {copy.savingTracking}
-                  </span>
+                {settingsLocked ? (
+                  <div className="flex h-28 items-center justify-center gap-2 text-sm text-muted-foreground">
+                    {settingsUnavailable ? (
+                      copy.toasts.settingsLoadFailed
+                    ) : (
+                      <Spinner
+                        className="size-5"
+                        aria-label={messages.common.loading}
+                      />
+                    )}
+                  </div>
                 ) : (
-                  <span
-                    key="save-hosting-proxy-blocking"
-                    className="inline-flex items-center gap-[var(--button-content-gap)]"
-                  >
-                    <RiSave3Line data-icon="inline-start" />
-                    {copy.saveTracking}
-                  </span>
+                  <div className="flex h-full flex-col gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="site-settings-hosting-proxy-blocking">
+                        {copy.hostingProxyBlockingEnabledLabel}
+                      </Label>
+                      <Select
+                        value={hostingProxyBlockingEnabled ? "true" : "false"}
+                        onValueChange={(value) => {
+                          setHostingProxyBlockingEnabled(value === "true");
+                        }}
+                        disabled={
+                          saving ||
+                          trackingSaving ||
+                          transferring ||
+                          deleting ||
+                          settingsLocked
+                        }
+                      >
+                        <SelectTrigger
+                          id="site-settings-hosting-proxy-blocking"
+                          className="w-full"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="true">{copy.booleanOn}</SelectItem>
+                          <SelectItem value="false">
+                            {copy.booleanOff}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button
+                      type="button"
+                      className="mt-auto self-start"
+                      onClick={() => {
+                        void handleSaveHostingProxyBlocking();
+                      }}
+                      disabled={
+                        saving ||
+                        trackingSaving ||
+                        transferring ||
+                        deleting ||
+                        settingsLocked ||
+                        !hasHostingProxyBlockingChanges
+                      }
+                    >
+                      <AutoTransition
+                        initial={false}
+                        className="inline-flex items-center gap-[var(--button-content-gap)]"
+                      >
+                        {savingHostingProxyBlocking ? (
+                          <span
+                            key="saving-hosting-proxy-blocking"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
+                          >
+                            <Spinner data-icon="inline-start" />
+                            {copy.savingTracking}
+                          </span>
+                        ) : (
+                          <span
+                            key="save-hosting-proxy-blocking"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
+                          >
+                            <RiSave3Line data-icon="inline-start" />
+                            {copy.saveTracking}
+                          </span>
+                        )}
+                      </AutoTransition>
+                    </Button>
+                  </div>
                 )}
               </AutoTransition>
-            </Button>
+            </AutoResizer>
           </CardContent>
         </Card>
       </SettingsSection>
@@ -1665,7 +1938,10 @@ export function SettingsClientPage({
                   transferTeamId === activeTeamId
                 }
               >
-                <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
+                <AutoTransition
+                  initial={false}
+                  className="inline-flex items-center gap-[var(--button-content-gap)]"
+                >
                   {transferring ? (
                     <span
                       key="transferring"
@@ -1713,7 +1989,10 @@ export function SettingsClientPage({
                     saving || trackingSaving || transferring || deleting
                   }
                 >
-                  <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
+                  <AutoTransition
+                    initial={false}
+                    className="inline-flex items-center gap-[var(--button-content-gap)]"
+                  >
                     {deleting ? (
                       <span
                         key="deleting"

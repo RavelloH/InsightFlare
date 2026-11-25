@@ -16,6 +16,7 @@ import {
 } from "@insightflare/ui/card";
 import { Input } from "@insightflare/ui/input";
 import { PageHeading } from "@insightflare/ui/page-heading";
+import { Skeleton } from "@insightflare/ui/skeleton";
 import { Spinner } from "@insightflare/ui/spinner";
 import {
   Table,
@@ -123,7 +124,7 @@ function WorkspaceMetric({
         className="inline-flex h-4 items-center"
       >
         {status === "pending" ? (
-          <Spinner className="size-4" aria-label={label} />
+          <Skeleton role="status" aria-label={label} className="h-3 w-9" />
         ) : status === "unavailable" ? (
           "—"
         ) : (
@@ -808,14 +809,15 @@ export function WorkspaceClient({
                                       maxPoints={36}
                                       className="h-4"
                                     />
-                                    {row.metricsStatus ? (
-                                      <div className="absolute inset-0 flex items-center justify-center">
-                                        <WorkspaceMetric
-                                          status={row.metricsStatus}
-                                          label={messages.common.loading}
-                                        >
-                                          {null}
-                                        </WorkspaceMetric>
+                                    {row.metricsStatus === "pending" ? (
+                                      <Skeleton
+                                        role="status"
+                                        aria-label={messages.common.loading}
+                                        className="absolute inset-0 h-full w-full"
+                                      />
+                                    ) : row.metricsStatus === "unavailable" ? (
+                                      <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
+                                        —
                                       </div>
                                     ) : null}
                                   </div>

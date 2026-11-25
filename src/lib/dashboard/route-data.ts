@@ -328,6 +328,45 @@ export const loadTeamManagementInitialData = createServerFn({ method: "GET" })
       fetchedAt: Date.now(),
     };
   });
+/** Each card can receive its snapshot independently, using the same ACL reads. */
+export const loadSiteConfigSnapshot = createServerFn({ method: "GET" })
+  .validator((data: { siteId: string }) => data)
+  .handler(
+    async ({
+      data,
+    }): Promise<Pick<
+      SiteSettingsInitialData,
+      "config" | "fetchedAt"
+    > | null> => {
+      const config = await readDashboardAdmin("site-config", {
+        siteId: data.siteId,
+      });
+      return config
+        ? {
+            config: { ...config, ...normalizeSiteScriptSettings(config) },
+            fetchedAt: Date.now(),
+          }
+        : null;
+    },
+  );
+export const loadSiteSnippetSnapshot = createServerFn({ method: "GET" })
+  .validator((data: { siteId: string }) => data)
+  .handler(
+    async ({
+      data,
+    }): Promise<Pick<
+      SiteSettingsInitialData,
+      "scriptSnippet" | "fetchedAt"
+    > | null> => {
+      const snippet = await readDashboardAdmin("script-snippet", {
+        siteId: data.siteId,
+      });
+      return snippet
+        ? { scriptSnippet: snippet.snippet, fetchedAt: Date.now() }
+        : null;
+    },
+  );
+
 /** Loads tracker settings and the install snippet for site settings SSR. */
 export const loadSiteSettingsInitialData = createServerFn({ method: "GET" })
   .validator((data: { siteId: string }) => data)
@@ -422,6 +461,51 @@ export const loadAdminUsersInitialData = createServerFn({
   const users = await readDashboardAdmin("users");
   return users ? { users, fetchedAt: Date.now() } : null;
 });
+export const loadAnalyticsEngineSnapshot = createServerFn({
+  method: "GET",
+}).handler(
+  async (): Promise<Pick<
+    SystemSettingsInitialData,
+    "analyticsEngine" | "fetchedAt"
+  > | null> => {
+    const config = await readDashboardAdmin("analytics-engine-config");
+    return config ? { analyticsEngine: config, fetchedAt: Date.now() } : null;
+  },
+);
+export const loadLoginTurnstileSnapshot = createServerFn({
+  method: "GET",
+}).handler(
+  async (): Promise<Pick<
+    SystemSettingsInitialData,
+    "loginTurnstile" | "fetchedAt"
+  > | null> => {
+    const config = await readDashboardAdmin("login-turnstile");
+    return config ? { loginTurnstile: config, fetchedAt: Date.now() } : null;
+  },
+);
+export const loadNotificationEmailSnapshot = createServerFn({
+  method: "GET",
+}).handler(
+  async (): Promise<Pick<
+    SystemSettingsInitialData,
+    "notificationEmail" | "fetchedAt"
+  > | null> => {
+    const config = await readDashboardAdmin("notification-email");
+    return config ? { notificationEmail: config, fetchedAt: Date.now() } : null;
+  },
+);
+export const loadRetentionSnapshot = createServerFn({ method: "GET" }).handler(
+  async (): Promise<Pick<
+    SystemSettingsInitialData,
+    "scheduledTaskRetention" | "fetchedAt"
+  > | null> => {
+    const config = (await readDashboardAdmin("scheduled-tasks", { limit: 1 }))
+      ?.retention;
+    return config
+      ? { scheduledTaskRetention: config, fetchedAt: Date.now() }
+      : null;
+  },
+);
 export const loadSystemSettingsInitialData = createServerFn({
   method: "GET",
 }).handler(async (): Promise<SystemSettingsInitialData | null> => {

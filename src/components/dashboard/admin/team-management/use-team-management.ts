@@ -5,9 +5,11 @@ import { toast } from "sonner";
 import { useDashboardTimeQuery } from "@/components/dashboard/shell/dashboard-query-provider";
 import { useHydrated } from "@/hooks/use-hydrated";
 import { intlLocale } from "@/lib/dashboard/format";
-import type {
-  CreatedTeamInviteData,
-  TeamInviteData,
+import {
+  type CreatedTeamInviteData,
+  managementQueryOptions,
+  type TeamInviteData,
+  type TeamManagementInitialData,
 } from "@/lib/dashboard/management-data";
 import { canAdministerTeam, canManageTeam } from "@/lib/dashboard/permissions";
 import {
@@ -39,6 +41,28 @@ import {
   withSiteSlug,
 } from "./model";
 import type { TeamManagementClientProps } from "./types";
+export function teamManagementQueryOptions(
+  userId: string,
+  teamId: string,
+  canManage: boolean,
+  deferred?: Promise<TeamManagementInitialData | null> | null,
+  retainInFlight = false,
+) {
+  return managementQueryOptions(
+    ["dashboard", "team-management-data", teamId, canManage, userId],
+    async (signal) => {
+      const [members, invites, sites] = await Promise.all([
+        fetchTeamMembers(teamId, signal),
+        canManage ? fetchTeamInvites(teamId, signal) : Promise.resolve([]),
+        canManage ? fetchTeamSites(teamId, signal) : Promise.resolve([]),
+      ]);
+      return { members, invites, sites, fetchedAt: Date.now() };
+    },
+    (snapshot: TeamManagementInitialData) => snapshot,
+    deferred,
+    retainInFlight,
+  );
+}
 export function useTeamManagement({
   locale,
   messages,
@@ -50,6 +74,7 @@ export function useTeamManagement({
   authorizedSites,
   deferredDashboardSnapshot,
   teamManagementInitialData = null,
+  deferredManagementData,
 }: TeamManagementClientProps) {
   const router = useRouter();
   const hydrated = useHydrated();
@@ -80,7 +105,9 @@ export function useTeamManagement({
   const siteCreateCopy = messages.adminSites;
 
   const [sites, setSites] = useState<Array<SiteData & { slug: string }>>(() =>
-    (teamManagementInitialData?.sites ?? []).map(withSiteSlug),
+    (teamManagementInitialData?.sites ?? authorizedSites ?? []).map(
+      withSiteSlug,
+    ),
   );
 
   const [members, setMembers] = useState<MemberData[]>(
@@ -173,21 +200,20 @@ export function useTeamManagement({
   const previousTeamIdRef = useRef<string | null>(null);
 
   const managementDataQuery = useQuery({
-    queryKey: ["dashboard", "team-management-data", activeTeam.id, canManage],
-    queryFn: async ({ signal }) => {
-      const [members, invites, sites] = await Promise.all([
-        fetchTeamMembers(activeTeam.id, signal),
-        canManage
-          ? fetchTeamInvites(activeTeam.id, signal)
-          : Promise.resolve([]),
-        canManage ? fetchTeamSites(activeTeam.id, signal) : Promise.resolve([]),
-      ]);
-      return { members, invites, sites, fetchedAt: Date.now() };
-    },
+    ...teamManagementQueryOptions(
+      currentUserId,
+      activeTeam.id,
+      canManage,
+      deferredManagementData,
+    ),
     enabled: hydrated && (activeTab === "settings" || activeTab === "members"),
     initialData: teamManagementInitialData ?? undefined,
     initialDataUpdatedAt: teamManagementInitialData?.fetchedAt,
   });
+
+  const managementUnavailable = Boolean(
+    managementDataQuery.isError && !managementDataQuery.data,
+  );
 
   const dashboardQuery = useQuery(
     teamDashboardQueryOptions({
@@ -238,7 +264,7 @@ export function useTeamManagement({
   useEffect(() => {
     if (activeTab !== "settings" && activeTab !== "members") return;
     setLoading(managementDataQuery.isPending);
-    if (managementDataQuery.isPending) return;
+    if (managementDataQuery.isPending || !managementDataQuery.data) return;
     const data = managementDataQuery.data;
     setMembers(data?.members ?? []);
     setInvites(data?.invites ?? []);
@@ -384,6 +410,7 @@ export function useTeamManagement({
   }
 
   async function handleCreateInvite() {
+    if (loading || managementUnavailable) return;
     const email = inviteEmail.trim();
     const expiresInHours = Number(inviteExpiresInHours);
     if (email.length > 0 && !email.includes("@")) {
@@ -490,6 +517,7 @@ export function useTeamManagement({
   }
 
   async function handleTransferOwner() {
+    if (loading || managementUnavailable) return;
     if (!transferTargetId) {
       toast.error(copy.toasts.invalidTransferTarget);
       return;
@@ -730,6 +758,7 @@ export function useTeamManagement({
     inviteSiteIds,
     latestInviteUrl,
     loading,
+    managementUnavailable,
     memberCount,
     members,
     pagesPerSessionFormatter,

@@ -13,7 +13,10 @@ const mocks = vi.hoisted(() => ({
   refetch: vi.fn(),
 }));
 
-vi.mock("@tanstack/react-query", () => ({ useQuery: mocks.useQuery }));
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: mocks.useQuery,
+  queryOptions: (options: unknown) => options,
+}));
 vi.mock("@/components/dashboard/shell/dashboard-query-provider", () => ({
   useDashboardTimeQuery: mocks.useDashboardTimeQuery,
 }));

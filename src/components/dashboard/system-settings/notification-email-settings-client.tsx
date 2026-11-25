@@ -10,6 +10,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@insightflare/ui/alert-dialog";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Button } from "@insightflare/ui/button";
 import {
@@ -39,7 +40,10 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import type { SystemSettingsInitialData } from "@/lib/dashboard/management-data";
+import {
+  managementQueryOptions,
+  type SystemSettingsInitialData,
+} from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -55,6 +59,11 @@ interface NotificationEmailSettingsClientProps {
   currentUserEmail: string;
   showHeading?: boolean;
   initialData?: SystemSettingsInitialData | null;
+  userId?: string;
+  deferredData?: Promise<Pick<
+    SystemSettingsInitialData,
+    "notificationEmail" | "fetchedAt"
+  > | null> | null;
 }
 interface TestEmailResponse {
   provider: "resend";
@@ -117,11 +126,34 @@ async function sendTestEmail(to: string): Promise<TestEmailResponse> {
     body,
   });
 }
+export function emailSettingsQueryOptions(
+  userId: string,
+  deferred?: Promise<Pick<
+    SystemSettingsInitialData,
+    "notificationEmail" | "fetchedAt"
+  > | null> | null,
+  retainInFlight = false,
+) {
+  return managementQueryOptions(
+    ["dashboard", "notification-email-config", userId],
+    fetchEmailConfig,
+    (
+      snapshot: Pick<
+        SystemSettingsInitialData,
+        "notificationEmail" | "fetchedAt"
+      >,
+    ) => snapshot.notificationEmail,
+    deferred,
+    retainInFlight,
+  );
+}
 export function NotificationEmailSettingsClient({
   messages,
   currentUserEmail,
   showHeading = true,
   initialData = null,
+  userId = "",
+  deferredData,
 }: NotificationEmailSettingsClientProps) {
   const copy = messages.systemSettings;
   const [config, setConfig] = useState<PublicNotificationEmailConfig>(
@@ -137,15 +169,19 @@ export function NotificationEmailSettingsClient({
   const [testing, setTesting] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingConfig, setDeletingConfig] = useState(false);
-  const configAppliedRef = useRef(false);
+  const configAppliedRef = useRef(Boolean(initialData?.notificationEmail));
   const configQuery = useQuery({
-    queryKey: ["dashboard", "notification-email-config"],
-    queryFn: ({ signal }) => fetchEmailConfig(signal),
+    ...emailSettingsQueryOptions(userId, deferredData),
     initialData: initialData?.notificationEmail,
     initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
   });
-  const loading = configQuery.isPending;
+  const [configApplied, setConfigApplied] = useState(
+    Boolean(initialData?.notificationEmail),
+  );
+  const loading = !configApplied && !configQuery.isError;
+  const unavailable = !configApplied && configQuery.isError;
+  const lockedUntilReady = !configApplied;
 
   const hasChanges = useMemo(() => {
     const persisted = toFormState(config);
@@ -170,10 +206,12 @@ export function NotificationEmailSettingsClient({
   useEffect(() => {
     if (configQuery.isPending || configAppliedRef.current) return;
     if (configQuery.isError) toast.error(copy.loadFailed);
-    const nextConfig = configQuery.data ?? defaultConfig();
+    if (!configQuery.data) return;
+    const nextConfig = configQuery.data;
     setConfig(nextConfig);
     setForm(toFormState(nextConfig));
     configAppliedRef.current = true;
+    setConfigApplied(true);
   }, [
     copy.loadFailed,
     configQuery.data,
@@ -186,6 +224,7 @@ export function NotificationEmailSettingsClient({
   }
 
   async function handleSave() {
+    if (lockedUntilReady) return;
     const nextApiKey = apiKey.trim();
     const body: Record<string, unknown> = {
       enabled: form.enabled,
@@ -212,6 +251,7 @@ export function NotificationEmailSettingsClient({
   }
 
   async function handleDeleteConfig() {
+    if (lockedUntilReady) return;
     setDeletingConfig(true);
     try {
       const reset = await deleteEmailConfig();
@@ -229,6 +269,7 @@ export function NotificationEmailSettingsClient({
   }
 
   async function handleSendTest() {
+    if (lockedUntilReady) return;
     setTesting(true);
     try {
       const result = await sendTestEmail(testRecipient.trim());
@@ -261,287 +302,337 @@ export function NotificationEmailSettingsClient({
           <CardDescription>{copy.notificationEmailDescription}</CardDescription>
         </CardHeader>
         <CardContent>
-          <form
-            className="grid gap-5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void handleSave();
-            }}
-          >
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="system-email-enabled">
-                  {copy.enabledLabel}
-                </Label>
-                <Select
-                  value={form.enabled ? "true" : "false"}
-                  onValueChange={(value) =>
-                    updateForm("enabled", value === "true")
-                  }
-                  disabled={loading || saving}
+          <AutoResizer initial={false}>
+            <AutoTransition
+              initial={false}
+              duration={0.2}
+              transitionKey={
+                loading ? "loading" : unavailable ? "error" : "ready"
+              }
+            >
+              {loading ? (
+                <div className="flex h-28 items-center justify-center">
+                  <Spinner
+                    className="size-6"
+                    aria-label={messages.common.loading}
+                  />
+                </div>
+              ) : unavailable ? (
+                <div
+                  role="alert"
+                  className="flex h-28 flex-col items-center justify-center gap-2 text-sm text-muted-foreground"
                 >
-                  <SelectTrigger id="system-email-enabled" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="true">{copy.enabledOn}</SelectItem>
-                    <SelectItem value="false">{copy.enabledOff}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="system-email-provider">
-                  {copy.providerLabel}
-                </Label>
-                <Select
-                  value={form.provider}
-                  onValueChange={(value) =>
-                    updateForm("provider", value as NotificationEmailProvider)
-                  }
-                  disabled={loading || saving}
-                >
-                  <SelectTrigger id="system-email-provider" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="resend">
-                      {copy.providerResend}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="system-email-from-name">
-                  {copy.fromNameLabel}
-                </Label>
-                <Input
-                  id="system-email-from-name"
-                  value={form.fromName}
-                  maxLength={120}
-                  disabled={loading || saving}
-                  onChange={(event) =>
-                    updateForm("fromName", event.target.value)
-                  }
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="system-email-from-email">
-                  {copy.fromEmailLabel}
-                </Label>
-                <Input
-                  id="system-email-from-email"
-                  type="email"
-                  value={form.fromEmail}
-                  disabled={loading || saving}
-                  onChange={(event) =>
-                    updateForm("fromEmail", event.target.value)
-                  }
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="system-email-reply-to">
-                  {copy.replyToLabel}
-                </Label>
-                <Input
-                  id="system-email-reply-to"
-                  type="email"
-                  value={form.replyTo}
-                  placeholder={copy.replyToPlaceholder}
-                  disabled={loading || saving}
-                  onChange={(event) =>
-                    updateForm("replyTo", event.target.value)
-                  }
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="system-email-resend-api-key">
-                  {copy.resendApiKeyLabel}
-                </Label>
-                <Input
-                  id="system-email-resend-api-key"
-                  type={showSavedApiKey ? "text" : "password"}
-                  value={apiKeyDisplayValue}
-                  placeholder={copy.resendApiKeyPlaceholder}
-                  disabled={loading || saving || deletingConfig}
-                  onFocus={() => {
-                    if (!showSavedApiKey) return;
-                    setApiKeyDirty(true);
-                    setApiKey("");
-                  }}
-                  onBlur={() => {
-                    if (!apiKey.trim()) setApiKeyDirty(false);
-                  }}
-                  onChange={(event) => {
-                    setApiKeyDirty(true);
-                    setApiKey(event.target.value);
-                  }}
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-3 border-t pt-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-              <div className="space-y-2">
-                <Label htmlFor="system-email-test-recipient">
-                  {copy.testRecipientLabel}
-                </Label>
-                <Input
-                  id="system-email-test-recipient"
-                  type="email"
-                  value={testRecipient}
-                  disabled={loading || testing}
-                  onChange={(event) => setTestRecipient(event.target.value)}
-                />
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={loading || saving || testing}
-                onClick={() => {
-                  void handleSendTest();
-                }}
-              >
-                <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
-                  {testing ? (
-                    <span
-                      key="testing"
-                      className="inline-flex items-center gap-[var(--button-content-gap)]"
-                    >
-                      <Spinner data-icon="inline-start" />
-                      {copy.testing}
-                    </span>
-                  ) : (
-                    <span
-                      key="test"
-                      className="inline-flex items-center gap-[var(--button-content-gap)]"
-                    >
-                      <RiSendPlane2Line data-icon="inline-start" />
-                      {copy.test}
-                    </span>
-                  )}
-                </AutoTransition>
-              </Button>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Button type="submit" disabled={loading || saving || !hasChanges}>
-                <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
-                  {saving ? (
-                    <span
-                      key="saving"
-                      className="inline-flex items-center gap-[var(--button-content-gap)]"
-                    >
-                      <Spinner data-icon="inline-start" />
-                      {copy.saving}
-                    </span>
-                  ) : (
-                    <span
-                      key="save"
-                      className="inline-flex items-center gap-[var(--button-content-gap)]"
-                    >
-                      <RiSave3Line data-icon="inline-start" />
-                      {copy.save}
-                    </span>
-                  )}
-                </AutoTransition>
-              </Button>
-
-              <AlertDialog
-                open={deleteDialogOpen}
-                onOpenChange={(open) => {
-                  if (deletingConfig) return;
-                  setDeleteDialogOpen(open);
-                }}
-              >
-                <AlertDialogTrigger asChild>
+                  {copy.loadFailed}
                   <Button
                     type="button"
-                    variant="destructive"
-                    disabled={
-                      loading ||
-                      saving ||
-                      deletingConfig ||
-                      config.updatedAt === 0
-                    }
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void configQuery.refetch()}
                   >
-                    <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
-                      {deletingConfig ? (
-                        <span
-                          key="deleting-config"
-                          className="inline-flex items-center gap-[var(--button-content-gap)]"
-                        >
-                          <Spinner data-icon="inline-start" />
-                          {copy.deleting}
-                        </span>
-                      ) : (
-                        <span
-                          key="delete-config"
-                          className="inline-flex items-center gap-[var(--button-content-gap)]"
-                        >
-                          <RiDeleteBinLine data-icon="inline-start" />
-                          {copy.delete}
-                        </span>
-                      )}
-                    </AutoTransition>
+                    {messages.notificationCenter.refresh}
                   </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent size="sm">
-                  <AlertDialogHeader>
-                    <AlertDialogTitle icon={RiDeleteBinLine}>
-                      {copy.delete}
-                    </AlertDialogTitle>
-                    <AlertDialogDescription>
-                      {copy.deleteConfirm}
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel disabled={deletingConfig}>
-                      <RiCloseLine className="size-4" />
-                      <span>{messages.teamSelect.cancel}</span>
-                    </AlertDialogCancel>
-                    <AlertDialogAction
-                      variant="destructive"
-                      disabled={deletingConfig}
-                      onClick={(event) => {
-                        event.preventDefault();
-                        void handleDeleteConfig();
+                </div>
+              ) : (
+                <form
+                  className="grid gap-5"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void handleSave();
+                  }}
+                >
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="system-email-enabled">
+                        {copy.enabledLabel}
+                      </Label>
+                      <Select
+                        value={form.enabled ? "true" : "false"}
+                        onValueChange={(value) =>
+                          updateForm("enabled", value === "true")
+                        }
+                        disabled={loading || saving}
+                      >
+                        <SelectTrigger
+                          id="system-email-enabled"
+                          className="w-full"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="true">{copy.enabledOn}</SelectItem>
+                          <SelectItem value="false">
+                            {copy.enabledOff}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="system-email-provider">
+                        {copy.providerLabel}
+                      </Label>
+                      <Select
+                        value={form.provider}
+                        onValueChange={(value) =>
+                          updateForm(
+                            "provider",
+                            value as NotificationEmailProvider,
+                          )
+                        }
+                        disabled={loading || saving}
+                      >
+                        <SelectTrigger
+                          id="system-email-provider"
+                          className="w-full"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="resend">
+                            {copy.providerResend}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="system-email-from-name">
+                        {copy.fromNameLabel}
+                      </Label>
+                      <Input
+                        id="system-email-from-name"
+                        value={form.fromName}
+                        maxLength={120}
+                        disabled={loading || saving}
+                        onChange={(event) =>
+                          updateForm("fromName", event.target.value)
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="system-email-from-email">
+                        {copy.fromEmailLabel}
+                      </Label>
+                      <Input
+                        id="system-email-from-email"
+                        type="email"
+                        value={form.fromEmail}
+                        disabled={loading || saving}
+                        onChange={(event) =>
+                          updateForm("fromEmail", event.target.value)
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="system-email-reply-to">
+                        {copy.replyToLabel}
+                      </Label>
+                      <Input
+                        id="system-email-reply-to"
+                        type="email"
+                        value={form.replyTo}
+                        placeholder={copy.replyToPlaceholder}
+                        disabled={loading || saving}
+                        onChange={(event) =>
+                          updateForm("replyTo", event.target.value)
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="system-email-resend-api-key">
+                        {copy.resendApiKeyLabel}
+                      </Label>
+                      <Input
+                        id="system-email-resend-api-key"
+                        type={showSavedApiKey ? "text" : "password"}
+                        value={apiKeyDisplayValue}
+                        placeholder={copy.resendApiKeyPlaceholder}
+                        disabled={loading || saving || deletingConfig}
+                        onFocus={() => {
+                          if (!showSavedApiKey) return;
+                          setApiKeyDirty(true);
+                          setApiKey("");
+                        }}
+                        onBlur={() => {
+                          if (!apiKey.trim()) setApiKeyDirty(false);
+                        }}
+                        onChange={(event) => {
+                          setApiKeyDirty(true);
+                          setApiKey(event.target.value);
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 border-t pt-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                    <div className="space-y-2">
+                      <Label htmlFor="system-email-test-recipient">
+                        {copy.testRecipientLabel}
+                      </Label>
+                      <Input
+                        id="system-email-test-recipient"
+                        type="email"
+                        value={testRecipient}
+                        disabled={loading || testing}
+                        onChange={(event) =>
+                          setTestRecipient(event.target.value)
+                        }
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={loading || saving || testing}
+                      onClick={() => {
+                        void handleSendTest();
                       }}
                     >
-                      <AutoTransition className="inline-flex items-center gap-2">
-                        {deletingConfig ? (
+                      <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
+                        {testing ? (
                           <span
-                            key="deleting-config-dialog"
-                            className="inline-flex items-center gap-2"
+                            key="testing"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
                           >
-                            <Spinner className="size-4" />
-                            {copy.deleting}
+                            <Spinner data-icon="inline-start" />
+                            {copy.testing}
                           </span>
                         ) : (
                           <span
-                            key="confirm-delete-config"
-                            className="inline-flex items-center gap-2"
+                            key="test"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
                           >
-                            <RiDeleteBinLine className="size-4" />
-                            {copy.delete}
+                            <RiSendPlane2Line data-icon="inline-start" />
+                            {copy.test}
                           </span>
                         )}
                       </AutoTransition>
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-              <SystemSettingsGuideDialog
-                triggerLabel={copy.guide}
-                title={copy.notificationEmailGuideTitle}
-                description={copy.notificationEmailGuideDescription}
-                steps={copy.notificationEmailGuideSteps}
-              />
-            </div>
-          </form>
+                    </Button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="submit"
+                      disabled={loading || saving || !hasChanges}
+                    >
+                      <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
+                        {saving ? (
+                          <span
+                            key="saving"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
+                          >
+                            <Spinner data-icon="inline-start" />
+                            {copy.saving}
+                          </span>
+                        ) : (
+                          <span
+                            key="save"
+                            className="inline-flex items-center gap-[var(--button-content-gap)]"
+                          >
+                            <RiSave3Line data-icon="inline-start" />
+                            {copy.save}
+                          </span>
+                        )}
+                      </AutoTransition>
+                    </Button>
+
+                    <AlertDialog
+                      open={deleteDialogOpen}
+                      onOpenChange={(open) => {
+                        if (deletingConfig) return;
+                        setDeleteDialogOpen(open);
+                      }}
+                    >
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          disabled={
+                            loading ||
+                            saving ||
+                            deletingConfig ||
+                            config.updatedAt === 0
+                          }
+                        >
+                          <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
+                            {deletingConfig ? (
+                              <span
+                                key="deleting-config"
+                                className="inline-flex items-center gap-[var(--button-content-gap)]"
+                              >
+                                <Spinner data-icon="inline-start" />
+                                {copy.deleting}
+                              </span>
+                            ) : (
+                              <span
+                                key="delete-config"
+                                className="inline-flex items-center gap-[var(--button-content-gap)]"
+                              >
+                                <RiDeleteBinLine data-icon="inline-start" />
+                                {copy.delete}
+                              </span>
+                            )}
+                          </AutoTransition>
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent size="sm">
+                        <AlertDialogHeader>
+                          <AlertDialogTitle icon={RiDeleteBinLine}>
+                            {copy.delete}
+                          </AlertDialogTitle>
+                          <AlertDialogDescription>
+                            {copy.deleteConfirm}
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel disabled={deletingConfig}>
+                            <RiCloseLine className="size-4" />
+                            <span>{messages.teamSelect.cancel}</span>
+                          </AlertDialogCancel>
+                          <AlertDialogAction
+                            variant="destructive"
+                            disabled={deletingConfig}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              void handleDeleteConfig();
+                            }}
+                          >
+                            <AutoTransition className="inline-flex items-center gap-2">
+                              {deletingConfig ? (
+                                <span
+                                  key="deleting-config-dialog"
+                                  className="inline-flex items-center gap-2"
+                                >
+                                  <Spinner className="size-4" />
+                                  {copy.deleting}
+                                </span>
+                              ) : (
+                                <span
+                                  key="confirm-delete-config"
+                                  className="inline-flex items-center gap-2"
+                                >
+                                  <RiDeleteBinLine className="size-4" />
+                                  {copy.delete}
+                                </span>
+                              )}
+                            </AutoTransition>
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                    <SystemSettingsGuideDialog
+                      triggerLabel={copy.guide}
+                      title={copy.notificationEmailGuideTitle}
+                      description={copy.notificationEmailGuideDescription}
+                      steps={copy.notificationEmailGuideSteps}
+                    />
+                  </div>
+                </form>
+              )}
+            </AutoTransition>
+          </AutoResizer>
         </CardContent>
       </Card>
     </div>

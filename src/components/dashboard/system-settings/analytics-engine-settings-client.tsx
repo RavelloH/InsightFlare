@@ -39,7 +39,10 @@ import {
   REQUEST_ANALYTICS_DATASET,
   TRAFFIC_ANALYTICS_DATASET,
 } from "@/lib/analytics-engine-config";
-import type { SystemSettingsInitialData } from "@/lib/dashboard/management-data";
+import {
+  managementQueryOptions,
+  type SystemSettingsInitialData,
+} from "@/lib/dashboard/management-data";
 import { requestAdminService } from "@/lib/dashboard-api/client/admin-service";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
@@ -48,6 +51,11 @@ import { SystemSettingsGuideDialog } from "./system-settings-guide-dialog";
 interface AnalyticsEngineSettingsClientProps {
   messages: AppMessages;
   initialData?: SystemSettingsInitialData | null;
+  userId?: string;
+  deferredData?: Promise<Pick<
+    SystemSettingsInitialData,
+    "analyticsEngine" | "fetchedAt"
+  > | null> | null;
 }
 type FormState = Pick<PublicAnalyticsEngineConfig, "accountId">;
 function defaultConfig(): PublicAnalyticsEngineConfig {
@@ -98,9 +106,32 @@ async function deleteConfig(): Promise<PublicAnalyticsEngineConfig> {
     },
   );
 }
+export function analyticsEngineSettingsQueryOptions(
+  userId: string,
+  deferred?: Promise<Pick<
+    SystemSettingsInitialData,
+    "analyticsEngine" | "fetchedAt"
+  > | null> | null,
+  retainInFlight = false,
+) {
+  return managementQueryOptions(
+    ["dashboard", "analytics-engine-config", userId],
+    fetchConfig,
+    (
+      snapshot: Pick<
+        SystemSettingsInitialData,
+        "analyticsEngine" | "fetchedAt"
+      >,
+    ) => snapshot.analyticsEngine,
+    deferred,
+    retainInFlight,
+  );
+}
 export function AnalyticsEngineSettingsClient({
   messages,
   initialData = null,
+  userId = "",
+  deferredData,
 }: AnalyticsEngineSettingsClientProps) {
   const copy = messages.systemSettings;
   const [config, setConfig] = useState<PublicAnalyticsEngineConfig>(
@@ -116,17 +147,22 @@ export function AnalyticsEngineSettingsClient({
   // so a background refetch cannot reset a user's input during hydration.
   const configAppliedRef = useRef(Boolean(initialData?.analyticsEngine));
   const configQuery = useQuery({
-    queryKey: ["dashboard", "analytics-engine-config"],
-    queryFn: ({ signal }) => fetchConfig(signal),
+    ...analyticsEngineSettingsQueryOptions(userId, deferredData),
     initialData: initialData?.analyticsEngine,
     initialDataUpdatedAt: initialData?.fetchedAt,
     enabled: typeof window !== "undefined",
   });
-  const loading = configQuery.isPending;
+  const [configApplied, setConfigApplied] = useState(
+    Boolean(initialData?.analyticsEngine),
+  );
+  const loading = !configApplied && !configQuery.isError;
+  const unavailable = !configApplied && configQuery.isError;
+  const lockedUntilReady = !configApplied;
   const analyticsEngineDisabled = config.analyticsEngineDisabled;
   // Deployment-managed reader (INSIGHTFLARE_AE_* Worker variables): shown, not editable.
   const managedByEnvironment = config.managedByEnvironment;
-  const locked = analyticsEngineDisabled || managedByEnvironment;
+  const locked =
+    lockedUntilReady || analyticsEngineDisabled || managedByEnvironment;
   const showSavedApiToken =
     !apiTokenDirty && config.apiTokenConfigured && Boolean(config.apiTokenHint);
   const apiTokenDisplayValue = showSavedApiToken
@@ -145,10 +181,12 @@ export function AnalyticsEngineSettingsClient({
           : copy.loadFailed,
       );
     }
-    const next = configQuery.data ?? defaultConfig();
+    if (!configQuery.data) return;
+    const next = configQuery.data;
     setConfig(next);
     setForm(toFormState(next));
     configAppliedRef.current = true;
+    setConfigApplied(true);
   }, [
     copy.loadFailed,
     configQuery.data,
@@ -165,6 +203,7 @@ export function AnalyticsEngineSettingsClient({
   );
 
   async function handleSave() {
+    if (lockedUntilReady) return;
     if (locked) return;
     setSaving(true);
     try {
@@ -187,6 +226,7 @@ export function AnalyticsEngineSettingsClient({
   }
 
   async function handleDelete() {
+    if (lockedUntilReady) return;
     if (locked) return;
     setDeleting(true);
     try {
@@ -224,15 +264,33 @@ export function AnalyticsEngineSettingsClient({
         </div>
       </CardHeader>
       <CardContent>
-        <AutoResizer initial duration={0.24}>
+        <AutoResizer initial={false} duration={0.24}>
           <AutoTransition
-            transitionKey={loading ? "loading" : "ready"}
+            initial={false}
+            transitionKey={
+              loading ? "loading" : unavailable ? "error" : "ready"
+            }
             type="fade"
             duration={0.2}
           >
             {loading ? (
               <div className="flex h-28 items-center justify-center">
                 <Spinner className="size-6" />
+              </div>
+            ) : unavailable ? (
+              <div
+                role="alert"
+                className="flex h-28 flex-col items-center justify-center gap-2 text-sm text-muted-foreground"
+              >
+                {copy.loadFailed}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void configQuery.refetch()}
+                >
+                  {messages.notificationCenter.refresh}
+                </Button>
               </div>
             ) : (
               <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">

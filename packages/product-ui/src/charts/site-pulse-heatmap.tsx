@@ -7,7 +7,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Spinner } from "@insightflare/ui/spinner";
 
 import { cn } from "../utils/cn";
@@ -179,7 +178,6 @@ const PulseGridRow = memo(function PulseGridRow({
   columns,
   cellWidth,
   activeColumn,
-  loadingLabel,
   onHover,
   onSelect,
 }: {
@@ -189,7 +187,6 @@ const PulseGridRow = memo(function PulseGridRow({
   columns: number;
   cellWidth: number;
   activeColumn: number | null;
-  loadingLabel?: string;
   onHover: (row: number, column: number, cell: HTMLDivElement) => void;
   onSelect?: (id: string) => void;
 }) {
@@ -208,52 +205,41 @@ const PulseGridRow = memo(function PulseGridRow({
         {row.icon}
         <span className="truncate">{row.label}</span>
       </button>
-      {row.metricsStatus ? (
-        <div className="h-6">
-          <AutoTransition
-            initial={false}
-            duration={0.2}
-            transitionKey={row.metricsStatus}
-            className="flex h-6 items-center justify-center text-muted-foreground"
-          >
-            {row.metricsStatus === "pending" ? (
-              <Spinner className="size-4" aria-label={loadingLabel} />
-            ) : (
-              "—"
-            )}
-          </AutoTransition>
-        </div>
-      ) : (
-        <div
-          className={cellWidth ? "flex h-6" : "grid h-6 gap-px"}
-          style={
-            cellWidth
-              ? { columnGap: CELL_GAP }
-              : { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }
-          }
-        >
-          {cells.map((cell, column) => (
-            <div
-              key={cell.timestamp}
-              role="gridcell"
-              aria-label={cell.label}
-              className={cn(
-                "h-full shrink-0 cursor-pointer",
+      <div
+        className={cellWidth ? "flex h-6" : "grid h-6 gap-px"}
+        style={
+          cellWidth
+            ? { columnGap: CELL_GAP }
+            : { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }
+        }
+      >
+        {cells.map((cell, column) => (
+          <div
+            key={cell.timestamp}
+            role="gridcell"
+            aria-label={cell.label}
+            aria-busy={row.metricsStatus === "pending" || undefined}
+            data-slot={row.metricsStatus === "pending" ? "skeleton" : undefined}
+            className={cn(
+              "h-full shrink-0 transition-colors duration-300 motion-reduce:transition-none",
+              row.metricsStatus === "pending" && "skeleton-loading",
+              !row.metricsStatus && "cursor-pointer",
+              !row.metricsStatus &&
                 activeColumn === column &&
-                  "outline outline-1 outline-foreground",
-              )}
-              style={{
-                background: cell.background,
-                ...(cellWidth ? { width: cellWidth } : {}),
-              }}
-              onMouseEnter={(event) =>
-                onHover(rowIndex, column, event.currentTarget)
-              }
-              onClick={() => onSelect?.(row.id)}
-            />
-          ))}
-        </div>
-      )}
+                "outline outline-1 outline-foreground",
+            )}
+            style={{
+              backgroundColor: cell.background,
+              ...(cellWidth ? { width: cellWidth } : {}),
+            }}
+            onMouseEnter={(event) =>
+              !row.metricsStatus &&
+              onHover(rowIndex, column, event.currentTarget)
+            }
+            onClick={() => !row.metricsStatus && onSelect?.(row.id)}
+          />
+        ))}
+      </div>
     </div>
   );
 });
@@ -319,25 +305,39 @@ export const SitePulseHeatmap = memo(function SitePulseHeatmap({
       tooltipFormatter.format(new Date(timestamp)),
     );
     return merged.rows.map((row, rowIndex) =>
-      row.values.map((value, column) => ({
-        timestamp: merged.starts[column]!,
-        label: `${row.label} ${dateLabels[column]}: ${numberFormat(locale, value)}`,
-        background: cellColor(
-          pulseLevel(
-            value,
-            (usual[rowIndex] ?? 0) *
-              Math.max(
-                0,
-                Math.min(
-                  merged.size,
-                  bucketStarts.length - column * merged.size,
+      merged.starts.map((timestamp, column) => ({
+        timestamp,
+        label: row.metricsStatus
+          ? `${row.label} ${dateLabels[column]}: ${row.metricsStatus === "pending" ? (loadingLabel ?? "") : "—"}`
+          : `${row.label} ${dateLabels[column]}: ${numberFormat(locale, row.values[column] ?? 0)}`,
+        background:
+          row.metricsStatus === "pending"
+            ? "var(--color-muted)"
+            : row.metricsStatus === "unavailable"
+              ? "transparent"
+              : cellColor(
+                  pulseLevel(
+                    row.values[column] ?? 0,
+                    (usual[rowIndex] ?? 0) *
+                      Math.max(
+                        0,
+                        Math.min(
+                          merged.size,
+                          bucketStarts.length - column * merged.size,
+                        ),
+                      ),
+                  ),
                 ),
-              ),
-          ),
-        ),
       })),
     );
-  }, [merged, tooltipFormatter, locale, usual, bucketStarts.length]);
+  }, [
+    merged,
+    tooltipFormatter,
+    locale,
+    usual,
+    bucketStarts.length,
+    loadingLabel,
+  ]);
   const onCellHover = useCallback(
     (row: number, column: number, element: HTMLDivElement) => {
       const box = container.current?.getBoundingClientRect();
@@ -421,7 +421,6 @@ export const SitePulseHeatmap = memo(function SitePulseHeatmap({
             columns={columns}
             cellWidth={cellWidth}
             activeColumn={hover?.row === rowIndex ? hover.column : null}
-            loadingLabel={loadingLabel}
             onHover={onCellHover}
             onSelect={onRowSelect}
           />

@@ -32,4 +32,5 @@ export interface TeamManagementClientProps {
     window: TeamDashboardWindow;
   };
   teamManagementInitialData?: TeamManagementInitialData | null;
+  deferredManagementData?: Promise<TeamManagementInitialData | null> | null;
 }

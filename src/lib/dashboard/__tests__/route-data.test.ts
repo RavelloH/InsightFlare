@@ -90,17 +90,23 @@ import {
   loadAccountNotificationPreferences,
   loadAdminTeamsInitialData,
   loadAdminUsersInitialData,
+  loadAnalyticsEngineSnapshot,
   loadApiKeysInitialData,
   loadDashboardBootstrap,
   loadDashboardInitialWindow,
   loadDashboardRoot,
   loadDashboardSite,
   loadDashboardTeam,
+  loadLoginTurnstileSnapshot,
   loadNotificationCenterInitialData,
+  loadNotificationEmailSnapshot,
   loadRequestOrigin,
+  loadRetentionSnapshot,
   loadScheduledTasksInitialData,
   loadShareSite,
+  loadSiteConfigSnapshot,
   loadSiteSettingsInitialData,
+  loadSiteSnippetSnapshot,
   loadSystemSettingsInitialData,
   loadTeamDashboardSnapshot,
   loadTeamManagementInitialData,
@@ -782,6 +788,39 @@ describe("Dashboard route data loaders", () => {
         loginTurnstile: { enabled: true },
         notificationEmail: { enabled: true },
         fetchedAt: expect.any(Number),
+      });
+    });
+
+    it("streams settings cards independently and never returns a fabricated retention configuration", async () => {
+      mockAdminReads({
+        "analytics-engine-config": { enabled: true },
+        "login-turnstile": { enabled: false },
+        "notification-email": { enabled: true },
+        "site-config": { trackingStrength: "balanced" },
+        "script-snippet": { snippet: "<script></script>" },
+      });
+      await expect(loadAnalyticsEngineSnapshot()).resolves.toMatchObject({
+        analyticsEngine: { enabled: true },
+      });
+      expect(readDashboardAdmin).toHaveBeenCalledTimes(1);
+      await expect(loadLoginTurnstileSnapshot()).resolves.toMatchObject({
+        loginTurnstile: { enabled: false },
+      });
+      await expect(loadNotificationEmailSnapshot()).resolves.toMatchObject({
+        notificationEmail: { enabled: true },
+      });
+      await expect(loadRetentionSnapshot()).resolves.toBeNull();
+      await expect(
+        loadSiteConfigSnapshot({ data: { siteId: "site-a" } }),
+      ).resolves.toHaveProperty("config");
+      await expect(
+        loadSiteSnippetSnapshot({ data: { siteId: "site-a" } }),
+      ).resolves.toMatchObject({ scriptSnippet: "<script></script>" });
+      expect(readDashboardAdmin).toHaveBeenCalledWith("site-config", {
+        siteId: "site-a",
+      });
+      expect(readDashboardAdmin).toHaveBeenCalledWith("script-snippet", {
+        siteId: "site-a",
       });
     });
 

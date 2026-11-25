@@ -158,25 +158,38 @@ export function localizedTaskInfo(
   };
 }
 export function ScheduledRunRowSkeleton({ index }: { index: number }) {
-  const textWidths = ["w-32", "w-32", "w-32", "w-16", "w-20"];
+  const widths = [
+    "w-32",
+    "w-32",
+    "w-32",
+    "w-16",
+    "w-20",
+    "w-14",
+    "w-24",
+    "w-8",
+    "w-10",
+    "w-4",
+  ];
   return (
     <>
-      {textWidths.map((width, cellIndex) => (
+      {widths.map((width, cellIndex) => (
         <TableCell
           key={`${index}-${cellIndex}`}
-          className={cellIndex === 0 ? "pl-4" : undefined}
+          className={cn(
+            cellIndex === 0 && "pl-4",
+            [5, 7, 8, 9].includes(cellIndex) && "text-right",
+            cellIndex === widths.length - 1 && "pr-4",
+          )}
         >
-          <Skeleton className={cn("h-4", width)} />
+          <Skeleton
+            className={cn(
+              "h-4",
+              width,
+              [5, 7, 8, 9].includes(cellIndex) && "ml-auto",
+            )}
+          />
         </TableCell>
       ))}
-      <TableCell
-        colSpan={RUN_TABLE_COLUMN_COUNT - textWidths.length}
-        className="pr-4 text-center"
-      >
-        <span className="inline-flex h-4 items-center justify-center text-muted-foreground">
-          <Spinner className="size-4" />
-        </span>
-      </TableCell>
     </>
   );
 }
