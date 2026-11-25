@@ -1,12 +1,16 @@
 <div align="center">
 
+<a href="https://insightflare.net/en?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=website&amp;utm_content=readme_logo"><img src="/public/icon-1024.png" alt="InsightFlare" width="88"></a>
+
 # InsightFlare
 
-### Own your analytics. Run it on Cloudflare.
+### Light as web analytics. Deep as product analytics.
 
-Privacy-aware, open-source web analytics with real-time insights, user journeys, funnels, and AI-agent access — on infrastructure you control.
+A script under 4 KB brings traffic, visitor journeys, funnels, retention and behavior-based audiences into one dashboard. Deploy on your own Cloudflare account, without maintaining servers.
 
-[**Live demo**](https://insight-demo.ravelloh.com/) &nbsp;·&nbsp; [**Deploy to Cloudflare**](https://deploy.insightflare.net/en) &nbsp;·&nbsp; [**Source code**](https://github.com/RavelloH/InsightFlare)
+[Website](https://insightflare.net/en?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_header) · [Documentation](https://insightflare.net/en/docs?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_header) · [Live demo](https://demo.insightflare.net/en/app/xeoos-team/dailypulse-news?utm_source=github&utm_medium=referral&utm_campaign=demo&utm_content=readme_header)
+
+[![Deploy InsightFlare to Cloudflare](/.github/readme/deploy-insightflare.svg)](https://deploy.insightflare.net/en?utm_source=github&utm_medium=referral&utm_campaign=deploy&utm_content=readme_hero)
 
 [![GitHub stars](https://img.shields.io/github/stars/RavelloH/InsightFlare?style=flat-square&logo=github)](https://github.com/RavelloH/InsightFlare/stargazers) [![Latest release](https://img.shields.io/github/v/release/RavelloH/InsightFlare?style=flat-square)](https://github.com/RavelloH/InsightFlare/releases) [![License: MIT](https://img.shields.io/github/license/RavelloH/InsightFlare?style=flat-square)](/LICENSE)
 
@@ -16,37 +20,73 @@ Privacy-aware, open-source web analytics with real-time insights, user journeys,
 
 </div>
 
-<a href="https://insight-demo.ravelloh.com/"><img src="/.github/screenshot/001.webp" alt="InsightFlare analytics dashboard" width="100%"></a>
+<a href="https://demo.insightflare.net/en/app/xeoos-team/dailypulse-news?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=demo&amp;utm_content=readme_screenshot"><img src="/.github/screenshot/001.webp" alt="InsightFlare dashboard" width="100%"></a>
+
+| **&lt; 4 KB** | ```mermaid
+flowchart TD
+  B["Visitor browser"] --> W
+  subgraph CF["Cloudflare"]
+    W["Workers: collection, dashboard, API"] --> DO["Durable Objects: buffer, real time"]
+    DO --> D1["D1: analytics and queries"]
+    W --> D1
+    W --> KV["KV: site settings"]
+    W -.-> AE["Analytics Engine: observation (optional)"]
+    W -.-> R2["R2: archive (optional)"]
+  end
+  U["You and your agents"] --> W
+```
+
+**10,000+** | **$0** |
+| :---: | :---: | :---: |
+| Tracking script | Daily events on a free account (tested) | Software license fee |
 
 ## Why InsightFlare?
 
-Go beyond pageview counts without outsourcing your analytics. InsightFlare runs on your own Cloudflare account and brings website traffic, user behavior, and operational visibility together in one dashboard.
+- **Your infrastructure, your data.** Self-host on your own Cloudflare account.
+- **Deep product analytics.** Funnels, retention, custom events and behavioral filters, without per-event or per-seat software fees.
+- **Lightweight and edge-native.** A tracker under 4 KB and automatically scaling Workers.
+- **Privacy-aware.** Cookieless tracking and configurable visitor identification.
+- **Agent-ready.** Published Skills, versioned OpenAPI and scoped API keys.
+- **Open source.** MIT licensed, with no paid feature gates in the self-hosted software.
 
-- **Your infrastructure, your data.** Self-host on Cloudflare Workers with D1 and Durable Objects. No third-party analytics dashboard account required.
-- **Understand what visitors do.** Inspect sessions, journeys, funnels, custom events, UTM campaigns, and traffic-source quality.
-- **See what's happening now.** Follow real-time activity, site performance, geography, browsers, and devices.
-- **Filter out the noise.** Investigate bots, abnormal requests, and the difference between traffic volume and useful visits.
-- **Bring your AI agent.** Connect through the published Skills endpoint and scoped APIs to ask questions about your analytics.
-- **Start small, grow as needed.** One-click deployment, multiple sites and teams, optional R2 archiving, and flexible configuration.
+## Quick start
 
-**Privacy & pricing:** The tracker is designed to be cookieless and does not store raw IP addresses. Regulatory requirements and Cloudflare usage costs depend on your deployment, settings, traffic, and jurisdiction.
+Install the latest official build without forking, compiling or installing Wrangler.
 
-## Explore the dashboard
+[![Deploy InsightFlare to Cloudflare](/.github/readme/deploy-insightflare.svg)](https://deploy.insightflare.net/en?utm_source=github&utm_medium=referral&utm_campaign=deploy&utm_content=readme_quick_start)
+
+1. Connect to Cloudflare, select an account and review the deployment plan.
+2. Choose an address and administrator password, then install.
+3. Sign in, create a site and paste its tracking snippet into your pages.
+4. Visit your site and confirm activity in the real-time view.
+
+[Quick start](https://insightflare.net/en/docs/getting-started/quick-start?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Manual deployment](https://insightflare.net/en/docs/deployment/manual-deployment?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
+
+## Explore features
 
 <table>
   <tr>
-    <td width="33%" align="center"><a href="/.github/screenshot/004.webp"><img src="/.github/screenshot/004.webp" alt="Real-time activity" width="100%"><br><strong>Real-time activity</strong></a></td>
-    <td width="33%" align="center"><a href="/.github/screenshot/018.webp"><img src="/.github/screenshot/018.webp" alt="Visitor sessions" width="100%"><br><strong>Visitor sessions</strong></a></td>
-    <td width="33%" align="center"><a href="/.github/screenshot/054.webp"><img src="/.github/screenshot/054.webp" alt="Event funnels" width="100%"><br><strong>Event funnels</strong></a></td>
+    <td width="50%" valign="top"><a href="https://insightflare.net/en/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_traffic"><img src="/.github/screenshot/004.webp" alt="Traffic &amp; acquisition" width="100%"><br><strong>Traffic &amp; acquisition</strong></a><br>Live traffic, pages, referrers and campaigns.</td>
+    <td width="50%" valign="top"><a href="https://insightflare.net/en/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_journeys"><img src="/.github/screenshot/018.webp" alt="Sessions &amp; visitor journeys" width="100%"><br><strong>Sessions &amp; visitor journeys</strong></a><br>Trace visits and custom events.</td>
   </tr>
   <tr>
-    <td width="33%" align="center"><a href="/.github/screenshot/010.webp"><img src="/.github/screenshot/010.webp" alt="Traffic sources" width="100%"><br><strong>Traffic sources</strong></a></td>
-    <td width="33%" align="center"><a href="/.github/screenshot/026.webp"><img src="/.github/screenshot/026.webp" alt="Geography" width="100%"><br><strong>Geography</strong></a></td>
-    <td width="33%" align="center"><a href="/.github/screenshot/058.webp"><img src="/.github/screenshot/058.webp" alt="Bot observability" width="100%"><br><strong>Bot observability</strong></a></td>
+    <td width="50%" valign="top"><a href="https://insightflare.net/en/features/funnels?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_funnels"><img src="/.github/screenshot/054.webp" alt="Funnels &amp; goals" width="100%"><br><strong>Funnels &amp; goals</strong></a><br>Find drop-off by session or visitor.</td>
+    <td width="50%" valign="top"><a href="https://insightflare.net/en/features/retention?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_retention"><img src="/.github/screenshot/024.webp" alt="Retention" width="100%"><br><strong>Retention</strong></a><br>See who returns, grouped by first visit.</td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><a href="https://insightflare.net/en/features/filters?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_filters"><img src="/.github/screenshot/049.webp" alt="Custom event analysis" width="100%"><br><strong>Advanced filters & custom events</strong></a><br>Describe audiences by behavior, attributes and sequence.</td>
+    <td width="50%" valign="top"><a href="https://insightflare.net/en/features/experience?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_experience"><img src="/.github/screenshot/007.webp" alt="Real user experience" width="100%"><br><strong>Real user experience</strong></a><br>Core Web Vitals, browsers and devices.</td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><a href="https://insightflare.net/en/features/geo?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_geo"><img src="/.github/screenshot/026.webp" alt="Geo intelligence" width="100%"><br><strong>Geo intelligence</strong></a><br>Drill down from countries to cities.</td>
+    <td width="50%" valign="top"><a href="https://insightflare.net/en/features/operations?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_operations"><img src="/.github/screenshot/058.webp" alt="Observability &amp; protection" width="100%"><br><strong>Observability &amp; protection</strong></a><br>Request observation, bot rules and operational visibility.</td>
   </tr>
 </table>
 
-## Feature gallery
+[Explore all features](https://insightflare.net/en/features?utm_source=github&utm_medium=referral&utm_campaign=features&utm_content=readme_gallery)
+
+<details>
+<summary>Full feature gallery (62 screenshots)</summary>
 
 ### Traffic overview & acquisition
 
@@ -188,254 +228,101 @@ Go beyond pageview counts without outsourcing your analytics. InsightFlare runs 
   </tr>
 </table>
 
----
+</details>
 
-## Quick Start
+## AI agents & API
 
-[![Deploy InsightFlare to Cloudflare](/.github/readme/deploy-insightflare.svg)](https://deploy.insightflare.net/en)
+Let Claude Code, Codex, OpenClaw or your own tools explore analytics through published Skills and scoped API keys. Send your agent the instruction below, replacing the domain:
 
-Deploy the latest official InsightFlare build to your own Cloudflare account. No GitHub fork, Wrangler installation or manual resource configuration is needed.
-
-1. Connect to Cloudflare and select your account.
-2. Review the deployment plan, choose a default or custom domain, and set an administrator password (or generate one automatically).
-3. Select **Install InsightFlare** and wait for deployment to complete.
-
-Open your instance and sign in as `admin` with the administrator password. Save the generated password before leaving the completion page.
-
-> For request observability and other Analytics Engine features, enable Analytics Engine when prompted and grant API token management permission so Deploy can configure a read-only token. Core analytics work without it; you can configure it later.
-
-If you lose access to an existing administrator account, changing `BOOTSTRAP_ADMIN_PASSWORD` will not reset it. From an interactive terminal with the repository dependencies installed and Cloudflare authentication configured, run `pnpm run ops:admin:reset-password -- --user <username>`. Use `pnpm run ops:admin:reset-password -- --help` for options, including the `cf` CLI.
-
----
-
-## Advanced Configuration
-
-### Enable Analytics Engine for Deep Analysis
-
-If you use Deploy, enable Analytics Engine and grant API token management permission during authorization. Deploy can create and configure an account-scoped read-only token. For an existing instance, return to Deploy and apply the update or configuration. Manual setup is also supported.
-
-Analytics Engine is InsightFlare's optional high-throughput analytical layer. It keeps request observability and future traffic/event projections separate from the primary database:
-
-- `REQUEST_ANALYTICS` → request observation and abnormal traffic
-- `TRAFFIC_ANALYTICS` → sampled traffic facts
-- `EVENT_ANALYTICS` → sampled custom-event facts
-
-This requires enabling Analytics Engine manually. Open the [Cloudflare Dashboard](https://dash.cloudflare.com/?to=/:account/workers/analytics-engine) and click the "Enable" button on the right. After that, InsightFlare will automatically bind Analytics Engine to your Cloudflare account during deployment.
-
-Once enabled, InsightFlare writes the three datasets above. The current version uses the new `REQUEST_ANALYTICS` dataset for the Request Observation page; the Traffic and Event datasets are accumulated for future Analytics Engine providers. Reading the datasets requires an API Token. In system settings, enter your Cloudflare Account ID and an API Token with the "Account Analytics" read permission. Reader configuration remains in the primary D1 database. See the "Guide" button in the InsightFlare dashboard settings page for details.
-
-### Connect AI Agents for Analysis
-
-InsightFlare exposes Skills for AI Agents. You can connect your InsightFlare deployment to agents such as OpenClaw, Codex, Claude Code, and others, so they can access InsightFlare data directly for analysis and report generation.  
-Send the following instruction to your Agent, replacing the domain with your deployed InsightFlare instance. Your Agent will guide you to the dashboard to create a dedicated API key for accessing InsightFlare data.
-
-```txt
-Read https://<your InsightFlare domain>/.well-known/skills.json, connect to this web analytics system, and guide me through authorization.
+```text
+Read https://your-instance.example.com/.well-known/skills.json, connect to this analytics system, and guide me through authorization.
 ```
 
-Then you can ask your Agent questions in natural language, for example:
-
-```txt
-"How did my site perform last month? Where did most visitors come from among the highest-traffic sites? Which pages were the most popular?"
-```
-
-### Override Wrangler Configuration with Cloudflare Variables
-
-In Cloudflare build environments, you can use project variables and secrets to override deployment-specific values from `wrangler.toml`. `build:pre` reads these values before deployment, writes them into the active Wrangler config, and the following `wrangler deploy` uses the resolved config.
-
-Common variables:
-
-| Name                                       | Overrides                             |
-| -------------------------------------      | ------------------------------------- |
-| `INSIGHTFLARE_WORKER_NAME`                 | Worker name                           |
-| `INSIGHTFLARE_D1_DATABASE`                 | D1 database name                      |
-| `INSIGHTFLARE_D1_DATABASE_ID`              | D1 database ID for the `DB` binding   |
-| `INSIGHTFLARE_SITE_SETTINGS_KV_ID`         | KV namespace ID for `SITE_SETTINGS_KV`|
-| `INSIGHTFLARE_ARCHIVE_BUCKET_NAME`         | R2 bucket for `ARCHIVE_BUCKET`        |
-| `INSIGHTFLARE_ARCHIVE_PREVIEW_BUCKET_NAME` | R2 preview bucket                     |
-| `SESSION_WINDOW_MINUTES`                   | Session window in minutes             |
-| `SCRIPT_CACHE_TTL_SECONDS`                 | `/script.js` CDN cache TTL            |
-| `PARQUET_WASM_URL`                         | Parquet wasm URL                      |
-| `INSIGHTFLARE_EDGE_URL`                    | InsightFlare service base URL         |
-
-You can also write arbitrary `[vars]` entries with `INSIGHTFLARE_VAR_<NAME>`. For example, `INSIGHTFLARE_VAR_FEATURE_FLAG=1` becomes `FEATURE_FLAG = "1"`. When deploying with `--env production`, environment-specific names such as `INSIGHTFLARE_PRODUCTION_D1_DATABASE_ID` and `INSIGHTFLARE_PRODUCTION_VAR_INSIGHTFLARE_EDGE_URL` target `[env.production]`.
-
-### Configure an R2 Bucket for Cold Archive
-
-You only need to manually create an R2 bucket if you want to enable cold archive to R2. By default, traffic data is retained for 1 year. Expired data is compressed and retained so trends and data can still be viewed, but it cannot be filtered. R2 is optional, and InsightFlare Deploy does not require an R2 binding by default. After R2 is enabled, you can run detailed queries on data older than 1 year.
-
-Create a bucket named `insightflare-archive` in Cloudflare. Then uncomment `[[r2_buckets]]` in `wrangler.toml` as shown below:
-
-```toml
-[[r2_buckets]]
-binding = "ARCHIVE_BUCKET"
-bucket_name = "insightflare-archive"
-preview_bucket_name = "insightflare-archive-preview"
-```
-
-### Stay Updated
-
-Open [InsightFlare Deploy](https://deploy.insightflare.net/en), or select **One-click update** on the application's Version Updates page. Connect to Cloudflare, select the account containing your instance, review the plan and confirm the update. Deploy uses the latest official main build, preserves existing bindings and secrets, and applies pending D1 migrations. A Worker rollback does not undo database migrations; back up before upgrading.
-
-For custom forks or repository-managed deployments, you can still use [InsightFlare Sync](https://github.com/apps/insightflare-sync/installations/new) or your own CI/CD. Avoid using both deployment channels to manage the same Worker.
-
-### Custom Event Reporting
-
-The InsightFlare frontend SDK supports reporting custom events either through manual calls or automatically through DOM attributes.
-
-#### Manual Calls
-
-```html
-<script defer src="/script.js?siteId=YOUR_SITE_ID"></script>
-<script>
-  window.addEventListener("DOMContentLoaded", () => {
-    window.insightflare.track("signup_click", {
-      plan: "pro",
-      source: "pricing",
-    });
-  });
-</script>
-```
-
-Available methods:
-
-- `track(eventName, eventData?)`: Report a custom event.
-- `trackOnce(eventName, eventData?)`: Report the same event name only once during the current page lifecycle.
-- `setGlobalProperties(props)`: Add shared properties to subsequent events.
-- `clearGlobalProperties()`: Clear shared properties.
-
-#### Identify Users
-
-Associate the current visit with a signed-in user without changing the anonymous visitor boundary:
-
-```html
-<script>
-  window.insightflare.identify("user-123", { name: "Alice" });
-</script>
-```
-
-Call `identify` after sign-in so the current and subsequent visits can be analyzed together. Calling it before the first page view is also supported. On logout, call `reset()` to end the current identity, create a new anonymous visitor boundary, and prevent later events from inheriting the old account:
-
-```js
-window.insightflare.reset();
-window.insightflare.identify("user-456", { name: "Bob" });
-```
-
-Use `reset()` before switching accounts. Calling `identify("user-456")` alone does not create a new visitor boundary.
-
-#### Automatic Reporting via DOM Attributes
-
-```html
-<!-- 1. Default click trigger -->
-<button data-insightflare-event="signup_click">Sign up now</button>
-<!-- This reports: { eventName: "signup_click" } -->
-
-<!-- 2. Click trigger with extra fields through data-insightflare-event-* -->
-<button
-  data-insightflare-event="signup_click"
-  data-insightflare-event-plan="pro"
-  data-insightflare-event-source="pricing"
+> **Which device converts better from pricing to deployment, and where do mobile visitors drop off?**
 >
-  Sign up now
-</button>
-<!-- This reports: { eventName: "signup_click", eventData: { plan: "pro", source: "pricing" } } -->
+> An agent can compare device funnels, inspect performance and traffic sources, and save a funnel for later comparison with the appropriate permissions.
 
-<!-- 3. Click trigger with JSON extra fields -->
-<button
-  data-insightflare-event="signup_click"
-  data-insightflare-event-data='{"plan":"pro","source":"pricing"}'
->
-  Sign up now
-</button>
-<!-- This reports: { eventName: "signup_click", eventData: { plan: "pro", source: "pricing" } } -->
+[Agent access](https://insightflare.net/en/docs/ai-and-api/connect-an-agent?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [API reference](https://insightflare.net/en/docs/api?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
 
-<!-- 4. Form submit trigger -->
-<form
-  data-insightflare-event="contact_submit"
-  data-insightflare-event-trigger="submit"
-  data-insightflare-event-data='{"plan":"pro","source":"landing"}'
->
-  ...
-</form>
+## Self-hosting & cost
 
+InsightFlare runs on Cloudflare Workers, Durable Objects, D1 and KV. Analytics Engine and R2 are optional. Writes are buffered and batched; the edge network serves collection and dashboards.
+
+**10,000+ events per day on a free Cloudflare account**, as reported by our website's test. Actual capacity depends on traffic, query frequency, data size and plan limits; this is not a guarantee. InsightFlare has no software fee, but Cloudflare usage may incur charges.
+
+[Deployment, architecture & cost](https://insightflare.net/en/self-hosting?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_cost)
+
+## Privacy & data ownership
+
+The tracker does not set or read cookies. Raw IP addresses are not stored with normal visitor records; when Analytics Engine is enabled, IPs of requests classified as bots and blocked may be recorded for investigation. Compliance depends on deployment, settings and applicable law.
+
+[Cost & privacy](https://insightflare.net/en/docs/getting-started/cost-and-privacy?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Visitor identification](https://insightflare.net/en/docs/tracking/privacy?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
+
+## Documentation
+
+| | |
+| --- | --- |
+| **Getting started** | [Quick start](https://insightflare.net/en/docs/getting-started/quick-start?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Install tracking](https://insightflare.net/en/docs/tracking?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Cost & privacy](https://insightflare.net/en/docs/getting-started/cost-and-privacy?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
+| **Analytics** | [Advanced filters](https://insightflare.net/en/docs/usage/filters?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Funnels & goals](https://insightflare.net/en/docs/usage/funnels-and-goals?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Retention](https://insightflare.net/en/docs/usage/retention?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
+| **Tracking** | [Custom events](https://insightflare.net/en/docs/tracking/custom-events?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Identify users](https://insightflare.net/en/docs/tracking/identify?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Tracking settings](https://insightflare.net/en/docs/tracking/tracking-settings?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
+| **Deployment & operations** | [Updates](https://insightflare.net/en/docs/deployment/updating?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Analytics Engine](https://insightflare.net/en/docs/deployment/analytics-engine?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Manual deployment](https://insightflare.net/en/docs/deployment/manual-deployment?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
+| **Integration & development** | [Agent access](https://insightflare.net/en/docs/ai-and-api/connect-an-agent?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [API reference](https://insightflare.net/en/docs/api?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Local development](https://insightflare.net/en/docs/deployment/local-development?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) |
+
+[Configuration](https://insightflare.net/en/docs/reference/configuration?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [R2 archive](https://insightflare.net/en/docs/deployment/r2-archive?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Commands](https://insightflare.net/en/docs/reference/commands?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [FAQ](https://insightflare.net/en/docs/reference/faq?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
+
+## Development
+
+**TypeScript · React · TanStack Start · Cloudflare Workers · D1 · Durable Objects**
+
+Requires Node.js 24 and pnpm 10.33. Configure .dev.vars according to the local development guide.
+
+```bash
+git clone https://github.com/RavelloH/InsightFlare
+cd InsightFlare
+pnpm install
+pnpm run db:migrate:local
+cp .dev.vars.example .dev.vars
 ```
 
-## Tech Stack
+After configuring the environment, run:
 
-| Layer    | Technologies                                                                                                                  |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Frontend | TanStack Start 1, TanStack Router, Vite 8, React 19, Tailwind CSS 4, Radix UI, shadcn, Recharts, deck.gl, maplibre-gl, Motion |
-| Backend  | Cloudflare Workers, Durable Objects, D1, R2, KV                                                                               |
-| Build    | Cloudflare Vite Plugin, Wrangler 4, TypeScript 5                                                                              |
+```bash
+pnpm run dev
+```
 
----
+For UI-only work, run `pnpm run dev:ui` in Demo Mode without a database or secrets.
 
-## Manual Deployment
+[Local development](https://insightflare.net/en/docs/deployment/local-development?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [Contributing guide](/CONTRIBUTING.md)
 
-For custom forks or manual deployments without InsightFlare Deploy, follow these steps:
+## Community & ecosystem
 
-1. Fork or clone this repository to your GitHub account
-2. Create the following resources in Cloudflare:
-   - D1 database
-   - KV namespace
-   - R2 bucket (optional, only required for cold archive to R2)
-3. Edit `wrangler.toml` and bind the D1 and KV resources to the Worker
-4. Fill in environment variables by referring to `.dev.vars.example`
-5. Import this repository from the Worker page
+InsightFlare is supported by independent open-source projects maintained in the organization and by its author.
 
-### Local Development
+| | |
+| --- | --- |
+| [**Deploy**](https://github.com/InsightFlare/deploy) | One-click installation and updates. |
+| [**asn-blocklist**](https://github.com/InsightFlare/asn-blocklist) | ASN classification from PeeringDB. |
+| [**map-relay**](https://github.com/InsightFlare/map-relay) | CARTO vector basemap proxy. |
+| [**can-i-use-api**](https://github.com/RavelloH/can-i-use-api) | Static Can I Use compatibility API. |
+| [**iso-3166-2-locale**](https://github.com/RavelloH/iso-3166-2-locale) | Multilingual geographical names. |
+| [**meta**](https://gist.github.com/RavelloH/08cdb1493d09d2ad1eb0cf17d06e3078) | Webpage metadata extraction (Gist). |
 
-1. Clone this repository locally: `git clone https://github.com/RavelloH/InsightFlare`
-2. Install dependencies: `pnpm install`
-3. Create the local database: `pnpm run db:migrate:local`
-4. Set environment variables by referring to `.dev.vars.example`
-5. Start the development server: `pnpm run dev`
+[Explore the open-source ecosystem](https://insightflare.net/en/open-source?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_ecosystem)
 
-`pnpm run dev:ui` starts the Vite development server in Demo Mode and uses frontend mock data for UI testing. To enable Demo Mode with `pnpm run dev`, set `DEMO_MODE=1`.
-
-## Common Commands
-
-| Command                                       | Purpose                                                                       |
-| --------------------------------------------- | ----------------------------------------------------------------------------- |
-| `pnpm run dev`                                 | Vite + Cloudflare Workers local development (use `http://localhost:3000`)     |
-| `pnpm run dev:ui`                              | Start the Vite dashboard development server in Demo Mode                      |
-| `pnpm run preview:local`                       | Build with local resources and run Wrangler preview                           |
-| `pnpm run build`                               | Cloudflare managed build entrypoint                                           |
-| `pnpm run build:local`                         | Local precheck + local D1 migration + build                                   |
-| `pnpm run build:demo`                          | Demo build without resource bindings                                          |
-| `pnpm run deploy`                              | Cloudflare managed deploy entrypoint                                          |
-| `pnpm run publish`                             | Build and publish from an allowed Cloudflare environment                      |
-| `pnpm run publish:demo`                        | Build and publish the demo Worker                                             |
-| `pnpm run check`                               | Auto-fix format/lint, then run build + typecheck + i18n + tests + spec checks |
-| `pnpm run check:verify`                        | Run the full check suite without automatic fixes                              |
-| `pnpm run typecheck`                           | TypeScript type checking                                                      |
-| `pnpm run lint` / `lint:fix`                   | ESLint                                                                        |
-| `pnpm run format` / `format:check`             | Prettier                                                                      |
-| `pnpm run check:i18n`                          | Validate translation key completeness                                         |
-| `pnpm run db:migrate:local`                    | Local D1 migration                                                            |
-| `pnpm run db:migrate:cf`                       | Cloudflare D1 migration                                                       |
-| `pnpm run db:migration:create`                 | Create a new migration file                                                   |
-| `pnpm run ops:secret:main`                     | Set the `MAIN_SECRET` Worker secret                                           |
-| `pnpm run ops:secret:bootstrap-admin-password` | Set the bootstrap admin password secret                                       |
-| `pnpm run ops:tail`                            | View online Worker logs                                                       |
-
----
-
-## Key Configuration
-
-| Name                                | Meaning                                  |
-| ----------------------------------- | ---------------------------------------- |
-| `SESSION_WINDOW_MINUTES`            | Session window in minutes (default `30`) |
-| `SCRIPT_CACHE_TTL_SECONDS`          | CDN cache TTL for `/script.js`           |
-| `PARQUET_WASM_URL`                  | Parquet wasm download URL                |
-| `INSIGHTFLARE_EDGE_URL`             | InsightFlare service base URL            |
-| `MAIN_SECRET` (Secret)              | Root secret for derived security keys    |
-| `BOOTSTRAP_ADMIN_PASSWORD` (Secret) | Initial administrator password           |
-| `DAILY_SALT_SECRET` (Secret)        | Legacy fallback for `MAIN_SECRET`        |
-| `DASHBOARD_SESSION_SECRET` (Secret) | Optional session signing override        |
-
----
+[Organization](https://github.com/InsightFlare) · [Report an issue](https://github.com/RavelloH/InsightFlare/issues) · [Contributing guide](/CONTRIBUTING.md) · [Releases](https://github.com/RavelloH/InsightFlare/releases)
 
 ## License
 
 [MIT](/LICENSE) Copyright 2026 RavelloH
+
+---
+
+<div align="center">
+
+### Start understanding your audience.
+
+[![Deploy InsightFlare to Cloudflare](/.github/readme/deploy-insightflare.svg)](https://deploy.insightflare.net/en?utm_source=github&utm_medium=referral&utm_campaign=deploy&utm_content=readme_footer)
+
+[Website](https://insightflare.net/en?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_footer) · [Live demo](https://demo.insightflare.net/en/app/xeoos-team/dailypulse-news?utm_source=github&utm_medium=referral&utm_campaign=demo&utm_content=readme_footer)
+
+</div>
