@@ -1693,6 +1693,11 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       `);
       const cases = [
         {
+          expression: "",
+          key: "countryCounts",
+          item: { country: "US" },
+        },
+        {
           expression: 'page.path contains "/"',
           key: "countryCounts",
           item: { country: "US" },
@@ -1711,16 +1716,29 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       for (const test of cases) {
         const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
         const env = { DB: createSqliteD1Database(db, trace) } as never;
+        const doc = { ...EMPTY_FILTER_DOCUMENT };
+        const emptyPlan = createScopedFilterPlan("geo-points", doc, "event")!;
+        const filters = test.expression
+          ? ready("geo-points", test.expression)
+          : attachScopedFilterMetadata(doc, {
+              requestedScope: "event",
+              resolvedScope: emptyPlan.scope,
+              plan: emptyPlan,
+              time: createQueryTime(100, 300, "UTC", 400),
+              siteIds: ["site-a"],
+            });
         const result = await queryGeoPointAggregate(
           env,
           "site-a",
           WINDOW,
-          ready("geo-points", test.expression),
+          filters,
           1,
         );
         expect(trace.preparedSql).toHaveLength(1);
         expect(trace.preparedSql[0]).toContain(
-          "shared_geo_visits AS MATERIALIZED",
+          test.expression
+            ? "shared_geo_visits AS MATERIALIZED"
+            : "shared_geo_visits AS NOT MATERIALIZED",
         );
         expect(result.points).toEqual([
           expect.objectContaining({

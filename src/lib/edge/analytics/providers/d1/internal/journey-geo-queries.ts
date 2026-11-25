@@ -169,12 +169,16 @@ LIMIT ${countLimit}
 `;
   let pointRows: Record<string, unknown>[];
   let countRows: Record<string, unknown>[];
-  // Prepared filters can require expensive entity qualification. Materialize
-  // their final authorized visits only once, without filtering out invalid
-  // coordinates from the independent country/region/city totals.
-  // Keep the direct compatibility reader separate: for empty unprepared
-  // filters, materializing the extra relation can increase billed reads.
+  // Prepared filters can require expensive entity qualification. Reuse the
+  // authorized visits without excluding invalid coordinates from the totals.
+  // Empty Event scope has a direct source scan, so let each branch inline its
+  // projection instead of writing and rereading a shared intermediate table.
+  // Keep the direct compatibility reader separate.
   if (scopedDataset) {
+    const materialization =
+      scopedDataset.scope === "event" && filters.root === null
+        ? "NOT MATERIALIZED"
+        : "MATERIALIZED";
     const countRegion =
       level === "country" ? "NULL, NULL" : "region, regionCode";
     const countCity = level === "city" ? "city" : "NULL";
@@ -183,7 +187,7 @@ LIMIT ${countLimit}
       `
 WITH
 ${scopedDataset.ctes},
-shared_geo_visits AS MATERIALIZED (
+shared_geo_visits AS ${materialization} (
   SELECT latitude, longitude, country, region, region_code,
     region_code AS regionCode, city, started_at,
     session_id AS sessionId, visitor_id AS visitorId

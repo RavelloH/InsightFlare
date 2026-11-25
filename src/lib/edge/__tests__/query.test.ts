@@ -371,7 +371,7 @@ function sessionRow(overrides: Record<string, unknown> = {}) {
 function commonQueryMatches(): SqlMatch[] {
   return [
     allMatch(
-      ["shared_geo_visits AS MATERIALIZED"],
+      ["shared_geo_visits AS"],
       [
         {
           rowKind: "point",
