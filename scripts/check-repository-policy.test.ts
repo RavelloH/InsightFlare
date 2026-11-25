@@ -87,6 +87,7 @@ describe("public repository file policy", { timeout: 20000 }, () => {
     ".github/engineering/audit.md",
     ".github/ENGINEERING/audit.md",
     ".github/readme/guide.md",
+    ".github/readme/unapproved.svg",
     ".github/releases/i18n/ja/audit.md",
     "changelog/observability-core.md",
     "changelog/v1.md",
@@ -112,6 +113,9 @@ describe("public repository file policy", { timeout: 20000 }, () => {
     for (const file of [
       "README.md",
       ".github/readme/README.zh.md",
+      ".github/readme/events.svg",
+      ".github/readme/license.svg",
+      ".github/readme/script.svg",
       ".github/ISSUE_TEMPLATE/bug_report.md",
       "changelog/v1.2.3.md",
       ".github/releases/i18n/ja/v1.2.3.md",

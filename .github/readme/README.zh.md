@@ -1,12 +1,16 @@
 <div align="center">
 
+<a href="https://insightflare.net/zh?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=website&amp;utm_content=readme_logo"><img src="/public/icon-1024.png" alt="InsightFlare" width="88"></a>
+
 # InsightFlare
 
-### 数据属于你，分析运行在自己的 Cloudflare 上。
+### 网站统计的轻，产品分析的深。
 
-兼顾隐私与分析深度的开源网站统计平台：实时流量、访客旅程、转化漏斗，以及 AI Agent 数据分析。
+一段不到 4 KB 的脚本，在同一个仪表盘中了解流量、访客旅程、漏斗、留存和按行为划分的人群。部署在你自己的 Cloudflare 账户中，无需维护服务器。
 
-[**在线体验**](https://insight-demo.ravelloh.com/) &nbsp;·&nbsp; [**一键部署到 Cloudflare**](https://deploy.insightflare.net/zh) &nbsp;·&nbsp; [**源代码**](https://github.com/RavelloH/InsightFlare)
+[官方网站](https://insightflare.net/zh?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_header) · [使用文档](https://insightflare.net/zh/docs?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_header) · [在线演示](https://demo.insightflare.net/zh/app/xeoos-team/dailypulse-news?utm_source=github&utm_medium=referral&utm_campaign=demo&utm_content=readme_header)
+
+[![Deploy InsightFlare to Cloudflare](/.github/readme/deploy-insightflare.svg)](https://deploy.insightflare.net/zh?utm_source=github&utm_medium=referral&utm_campaign=deploy&utm_content=readme_hero)
 
 [![GitHub stars](https://img.shields.io/github/stars/RavelloH/InsightFlare?style=flat-square&logo=github)](https://github.com/RavelloH/InsightFlare/stargazers) [![Latest release](https://img.shields.io/github/v/release/RavelloH/InsightFlare?style=flat-square)](https://github.com/RavelloH/InsightFlare/releases) [![License: MIT](https://img.shields.io/github/license/RavelloH/InsightFlare?style=flat-square)](/LICENSE)
 
@@ -16,37 +20,72 @@
 
 </div>
 
-<a href="https://insight-demo.ravelloh.com/"><img src="/.github/screenshot/001.webp" alt="InsightFlare analytics dashboard" width="100%"></a>
+<a href="https://demo.insightflare.net/zh/app/xeoos-team/dailypulse-news?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=demo&amp;utm_content=readme_screenshot"><img src="/.github/screenshot/001.webp" alt="InsightFlare dashboard" width="100%"></a>
 
-## 为什么选择 InsightFlare？
-
-不止于访问量统计，也不必将分析数据交给第三方平台。InsightFlare 运行在你自己的 Cloudflare 账户中，将流量、访客行为和运行观测整合在一个仪表盘里。
-
-- **自己的基础设施，自己的数据。** 基于 Cloudflare Workers、D1 和 Durable Objects 自托管，无需注册第三方分析 SaaS。
-- **看懂访客行为。** 分析会话、访问旅程、漏斗、自定义事件、UTM 活动和流量来源质量。
-- **实时掌握网站动态。** 观察实时访问、性能指标、地理分布、浏览器和设备。
-- **辨别无效流量。** 通过机器人防护和异常请求观测，区分纯粹的访问量与真实有价值的访问。
-- **让 AI Agent 帮忙分析。** 借助 Skills 入口和具备权限控制的 API，自然语言查询访问数据。
-- **从小规模开始，按需扩展。** 支持一键部署、多站点与团队、可选的 R2 归档及灵活配置。
-
-**隐私与费用说明：** 追踪器采用无 Cookie 设计，不保存原始 IP。具体法律合规要求与 Cloudflare 费用取决于部署配置、流量和适用地区。
-
-## 界面预览
+<div align="center">
 
 <table>
   <tr>
-    <td width="33%" align="center"><a href="/.github/screenshot/004.webp"><img src="/.github/screenshot/004.webp" alt="实时访问" width="100%"><br><strong>实时访问</strong></a></td>
-    <td width="33%" align="center"><a href="/.github/screenshot/018.webp"><img src="/.github/screenshot/018.webp" alt="访客会话" width="100%"><br><strong>访客会话</strong></a></td>
-    <td width="33%" align="center"><a href="/.github/screenshot/054.webp"><img src="/.github/screenshot/054.webp" alt="事件漏斗" width="100%"><br><strong>事件漏斗</strong></a></td>
-  </tr>
-  <tr>
-    <td width="33%" align="center"><a href="/.github/screenshot/010.webp"><img src="/.github/screenshot/010.webp" alt="来源分析" width="100%"><br><strong>来源分析</strong></a></td>
-    <td width="33%" align="center"><a href="/.github/screenshot/026.webp"><img src="/.github/screenshot/026.webp" alt="地理分布" width="100%"><br><strong>地理分布</strong></a></td>
-    <td width="33%" align="center"><a href="/.github/screenshot/058.webp"><img src="/.github/screenshot/058.webp" alt="机器人观测" width="100%"><br><strong>机器人观测</strong></a></td>
+    <td width="33%" align="center"><img src="/.github/readme/script.svg" alt="&lt; 4 KB" width="220"><br>采集脚本大小</td>
+    <td width="33%" align="center"><img src="/.github/readme/events.svg" alt="10,000+" width="220"><br>免费账户实测每日事件量</td>
+    <td width="33%" align="center"><img src="/.github/readme/license.svg" alt="$0" width="220"><br>软件授权费用</td>
   </tr>
 </table>
 
-## 完整功能预览
+</div>
+
+## 为什么选择 InsightFlare？
+
+- **添加一段脚本，自动开始统计。** 不到 4 KB 的无 Cookie 脚本自动采集页面浏览、来源、UTM、设备、地区和 Core Web Vitals；修改追踪设置无需重新发布前端。
+- **从同一份数据看见全貌。** 在同一个仪表盘中了解实时访客、页面、推广渠道与真实用户性能。
+- **每张报表都能直接对比。** 指标卡、趋势图、表格、漏斗与留存均可在原位置展示对比数据；为对比设置独立筛选条件，直接比较两群访客。
+- **产品分析功能，不按事件收取软件费用。** 从带属性的自定义事件，到转化漏斗、目标和群组留存，无需另行订阅产品分析平台。
+- **用高级筛选精确圈定人群。** 按访客做过什么、做了几次、顺序如何、间隔多久来筛选。通过可视化构建器或表达式组合嵌套 AND / OR / NOT、事件属性、聚合与有序行为序列；圈定后，从趋势到留存的适用报表均聚焦这群人。
+- **每位访客，一条完整的时间线。** 打开任意访客，按时间顺序查看会话、来源、浏览页面、事件和完整事件属性。
+- **让 AI 智能体查询你的数据。** 通过 Skills、带版本的 OpenAPI 和限定权限的 API 密钥，让智能体分析数据，并在授权范围内管理已保存的分析。
+- **自己的基础设施，自己的数据。** 一键部署至自己的 Cloudflare 账户，Workers 自动扩展，访客识别可配置，自托管软件采用 MIT 开源许可证。
+- **为团队协作而设计。** 管理多个团队与站点、分享只读报表、配置通知，并单独观测机器人流量。
+
+[在线体验真实高级筛选引擎](https://insightflare.net/zh/features/filters?utm_source=github&utm_medium=referral&utm_campaign=features&utm_content=readme_why_filters) · [了解周期与人群对比](https://insightflare.net/zh/docs/usage/comparison?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_why_compare)
+
+## 快速开始
+
+安装最新官方构建，无需 Fork、编译或安装 Wrangler。
+
+[![Deploy InsightFlare to Cloudflare](/.github/readme/deploy-insightflare.svg)](https://deploy.insightflare.net/zh?utm_source=github&utm_medium=referral&utm_campaign=deploy&utm_content=readme_quick_start)
+
+1. 连接 Cloudflare，选择账户并确认部署方案。
+2. 选择访问地址和管理员密码，完成安装。
+3. 登录实例，添加站点，将统计脚本添加到网页。
+4. 访问你的网站，在实时页面确认数据到达。
+
+[快速开始](https://insightflare.net/zh/docs/getting-started/quick-start?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [手动部署](https://insightflare.net/zh/docs/deployment/manual-deployment?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
+
+## 探索功能
+
+<table>
+  <tr>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_traffic"><img src="/.github/screenshot/004.webp" alt="流量与获客" width="100%"><br><strong>流量与获客</strong></a><br>实时流量、页面、来源与推广活动。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_journeys"><img src="/.github/screenshot/018.webp" alt="会话与访客旅程" width="100%"><br><strong>会话与访客旅程</strong></a><br>追踪访问路径和自定义事件。</td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh/features/funnels?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_funnels"><img src="/.github/screenshot/054.webp" alt="漏斗与目标" width="100%"><br><strong>漏斗与目标</strong></a><br>按会话或访客衡量转化，定位流失。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh/features/retention?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_retention"><img src="/.github/screenshot/024.webp" alt="留存与回访" width="100%"><br><strong>留存与回访</strong></a><br>按首次访问时间分组，了解谁回来了。</td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh/features/filters?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_filters"><img src="/.github/screenshot/049.webp" alt="自定义事件分析" width="100%"><br><strong>高级筛选与自定义事件</strong></a><br>通过行为、属性和顺序描述一群用户。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh/features/experience?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_experience"><img src="/.github/screenshot/007.webp" alt="真实用户体验" width="100%"><br><strong>真实用户体验</strong></a><br>Core Web Vitals、浏览器与设备。</td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh/features/geo?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_geo"><img src="/.github/screenshot/026.webp" alt="地理情报" width="100%"><br><strong>地理情报</strong></a><br>从国家到城市逐级下钻。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh/features/operations?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_operations"><img src="/.github/screenshot/058.webp" alt="可观测性与防护" width="100%"><br><strong>可观测性与防护</strong></a><br>请求观测、机器人规则及运行状态。</td>
+  </tr>
+</table>
+
+[探索全部功能](https://insightflare.net/zh/features?utm_source=github&utm_medium=referral&utm_campaign=features&utm_content=readme_gallery)
+
+<details>
+<summary>完整功能截图画廊（62 张截图）</summary>
 
 ### 流量概览与来源分析
 
@@ -188,255 +227,148 @@
   </tr>
 </table>
 
----
+</details>
 
-## 快速开始
+## 让 AI 智能体理解你的数据
 
-[![Deploy InsightFlare to Cloudflare](/.github/readme/deploy-insightflare.svg)](https://deploy.insightflare.net/zh)
+通过 Skills 和限定权限的 API 密钥，让 Claude Code、Codex、OpenClaw 或自己的程序探索分析数据。将以下指令发送给智能体，替换为你的实例域名：
 
-通过 InsightFlare Deploy，将最新官方构建一键安装到你自己的 Cloudflare 账号。无需 Fork 仓库、安装 Wrangler 或手动配置资源。
-
-1. 连接 Cloudflare 并选择要部署的账号。
-2. 确认部署方案，选择默认访问地址或自定义域名，并设置管理员密码（也可自动生成）。
-3. 点击**安装 InsightFlare**，等待资源创建和部署完成。
-
-打开你的 InsightFlare 实例，使用 `admin` 和管理员密码登录。若密码由系统生成，请在完成页面妥善保存。
-
-> 如需启用请求观测等高级分析功能，请按部署向导提示启用 Analytics Engine，并在授权时允许 API 令牌管理，以便自动配置只读分析令牌。未启用时仍可完成基础安装，之后也可补充配置。
-
-如果无法登录现有管理员账号，修改 `BOOTSTRAP_ADMIN_PASSWORD` 不会重置该账号。在已安装仓库依赖并配置 Cloudflare 身份验证的交互终端中运行 `pnpm run ops:admin:reset-password -- --user <username>`。包括 `cf` CLI 在内的更多参数可通过 `pnpm run ops:admin:reset-password -- --help` 查看。
-
----
-
-## 进阶配置
-
-### 启用分析引擎来进行深度分析
-
-使用 Deploy 时，请启用 Analytics Engine，并在授权时允许 API 令牌管理。Deploy 可以自动创建和配置限定于当前账号的只读令牌。已有实例可返回 Deploy 执行更新或应用配置，也可以按下文手动配置。
-
-Analytics Engine 是 InsightFlare 可选的高吞吐分析层，用于将请求观测以及未来的流量、事件分析投影与主数据库解耦：
-
-- `REQUEST_ANALYTICS` → 请求观测和异常流量
-- `TRAFFIC_ANALYTICS` → 采样后的流量事实
-- `EVENT_ANALYTICS` → 采样后的自定义事件事实
-
-但是，这需要您手动开启 Analytics Engine。您只需要前往 [Cloudflare Dashboard](
-https://dash.cloudflare.com/?to=/:account/workers/analytics-engine) 并点击右侧的“启用”按钮即可。之后部署 InsightFlare 时，系统会自动将 Analytics Engine 与您的 Cloudflare 账户绑定。
-
-启用后，InsightFlare 会写入以上三个数据集。当前版本的“请求观测”页面已经使用新的 `REQUEST_ANALYTICS` 数据集查询；`TRAFFIC_ANALYTICS` 和 `EVENT_ANALYTICS` 会持续积累数据，供后续 Analytics Engine Provider 使用。读取数据集需要 API Token，请在系统设置中填写 Cloudflare Account ID 和具备“账户分析”读取权限的 API Token。Reader 配置仍保存在主数据库 D1 中，详见 InsightFlare 后台设置页面的“教程”按钮。
-
-### 接入 AI Agents 进行分析
-
-我们开放了用于 AI Agents 的 Skills，您可以选择将 InsightFlare 接入您的 Agents，例如 OpenClaw、Codex、Claude Code 等, 让 Agents 能够直接访问 InsightFlare 的数据，进行分析和报告生成。  
-请直接发送下面的指令给您的 Agent，您需要域名换成您部署的 InsightFlare 实例。您的 Agents 会指引您前往仪表盘为其创建一个专用 API 密钥，便于其访问 InsightFlare 的数据。
-
-```txt
-阅读 https://<您的 InsightFlare 域名>/.well-known/skills.json，接入这个访问分析系统，并指引我进行授权。
+```text
+阅读 https://your-instance.example.com/.well-known/skills.json，连接这个网站分析系统，并引导我完成授权。
 ```
 
-随后，您可以以任意自然语言向 Agent 提问，例如：
-
-```txt
-“上个月，我的站点的访问情况如何？访问量最高的站点中，访客大都是来自哪里的？哪些页面最受欢迎？”
-```
-
-### 使用 Cloudflare 变量覆盖 Wrangler 配置
-
-在 Cloudflare 的构建环境中，可以通过「变量和密钥」覆盖 `wrangler.toml` 中需要因部署而变化的配置。`build:pre` 会在部署前读取这些变量并写入当前 Wrangler 配置，随后 `wrangler deploy` 会使用覆盖后的配置。
-
-常用变量：
-
-| 名称                                       | 覆盖目标                              |
-| -------------------------------------      | ------------------------------------- |
-| `INSIGHTFLARE_WORKER_NAME`                 | Worker 名称                           |
-| `INSIGHTFLARE_D1_DATABASE`                 | D1 数据库名称                         |
-| `INSIGHTFLARE_D1_DATABASE_ID`              | `DB` 绑定的 D1 数据库 ID              |
-| `INSIGHTFLARE_SITE_SETTINGS_KV_ID`         | `SITE_SETTINGS_KV` 绑定的 KV 命名空间 |
-| `INSIGHTFLARE_ARCHIVE_BUCKET_NAME`         | `ARCHIVE_BUCKET` 绑定的 R2 存储桶     |
-| `INSIGHTFLARE_ARCHIVE_PREVIEW_BUCKET_NAME` | R2 预览存储桶                         |
-| `SESSION_WINDOW_MINUTES`                   | 会话窗口分钟数                        |
-| `SCRIPT_CACHE_TTL_SECONDS`                 | `/script.js` CDN 缓存秒数             |
-| `PARQUET_WASM_URL`                         | Parquet wasm 下载地址                 |
-| `INSIGHTFLARE_EDGE_URL`                    | InsightFlare 服务基准 URL             |
-
-也可以使用 `INSIGHTFLARE_VAR_变量名` 写入任意 `[vars]` 项。例如 `INSIGHTFLARE_VAR_FEATURE_FLAG=1` 会生成 `FEATURE_FLAG = "1"`。如果使用 `--env production`，可使用 `INSIGHTFLARE_PRODUCTION_D1_DATABASE_ID`、`INSIGHTFLARE_PRODUCTION_VAR_INSIGHTFLARE_EDGE_URL` 这类环境专属变量覆盖 `[env.production]` 下的配置。
-
-### 配置 R2 存储桶用于冷归档
-
-只有需要启用冷归档到 R2 时，才需要手动创建 R2 bucket。默认情况下，访问数据保存 1 年，超时的数据将被压缩保存（可查看访问趋势、数据，但无法进行筛选）。R2 是可选项，InsightFlare Deploy 默认不会要求绑定 R2。启用 R2 后，可对超出 1 年的数据进行详细查询。
-
-在 Cloudflare 内创建名为 `insightflare-archive` 的存储桶。并在 `wrangler.toml` 中取消 `[[r2_buckets]]` 的注释即可，如下所示：
-
-```toml
-[[r2_buckets]]
-binding = "ARCHIVE_BUCKET"
-bucket_name = "insightflare-archive"
-preview_bucket_name = "insightflare-archive-preview"
-```
-
-### 保持更新
-
-访问 [InsightFlare Deploy](https://deploy.insightflare.net/zh)，或在应用的版本更新页面点击**一键更新**。连接 Cloudflare，选择已有实例所在账号，确认方案并执行更新。Deploy 使用最新 main 官方构建，保留已有绑定与密钥，并执行待处理的 D1 迁移。Worker 回滚不会撤销数据库迁移，请在升级前做好备份。
-
-自行修改源码或使用仓库部署的用户仍可使用 [InsightFlare Sync](https://github.com/apps/insightflare-sync/installations/new) 或自己的 CI/CD。请避免两种部署渠道同时管理同一个 Worker。
-
-### 自定义事件上报
-
-InsightFlare 的前端 SDK 支持以手动调用的方式上报自定义事件，或者通过 DOM 属性自动上报事件。
-
-#### 手动调用
-
-```html
-<script defer src="/script.js?siteId=YOUR_SITE_ID"></script>
-<script>
-  window.addEventListener("DOMContentLoaded", () => {
-    window.insightflare.track("signup_click", {
-      plan: "pro",
-      source: "pricing",
-    });
-  });
-</script>
-```
-
-可用的方法：
-
-- `track(eventName, eventData?)`：上报一个自定义事件。
-- `trackOnce(eventName, eventData?)`：同一个事件名在当前页面生命周期内只上报一次。
-- `setGlobalProperties(props)`：为后续事件追加公共字段。
-- `clearGlobalProperties()`：清除公共字段。
-
-#### 用户身份识别
-
-使用 `identify` 将当前访问与登录用户关联，同时保留原有的匿名访客边界：
-
-```html
-<script>
-  window.insightflare.identify("user-123", { name: "Alice" });
-</script>
-```
-
-用户登录后调用 `identify`，即可将当前及后续访问按用户统一分析。首次页面访问前调用也受支持。用户退出登录时调用 `reset()`，结束当前身份、创建新的匿名访客边界，并避免后续事件继承旧账号：
-
-```js
-window.insightflare.reset();
-window.insightflare.identify("user-456", { name: "Bob" });
-```
-
-切换账号前请先调用 `reset()`。单独调用 `identify("user-456")` 不会创建新的访客边界。
-
-#### DOM 属性自动上报
-
-```html
-<!-- 1. 默认点击触发 -->
-<button data-insightflare-event="signup_click">立即注册</button>
-<!-- 这会上报：{ eventName: "signup_click" } -->
-
-<!-- 2. 点击触发，并通过 data-insightflare-event-* 附加字段 -->
-<button
-  data-insightflare-event="signup_click"
-  data-insightflare-event-plan="pro"
-  data-insightflare-event-source="pricing"
+> **从定价页到部署，哪种设备转化更好？移动端具体在哪一步流失？**
 >
-  立即注册
-</button>
-<!-- 这会上报：{ eventName: "signup_click", eventData: { plan: "pro", source: "pricing" } } -->
+> 智能体可以对比设备漏斗、检查性能与流量来源，并在具备相应权限时保存漏斗，以便后续对比。
 
-<!-- 3. 点击触发，并通过 JSON 附加字段 -->
-<button
-  data-insightflare-event="signup_click"
-  data-insightflare-event-data='{"plan":"pro","source":"pricing"}'
->
-  立即注册
-</button>
-<!-- 这会上报：{ eventName: "signup_click", eventData: { plan: "pro", source: "pricing" } } -->
+[智能体接入](https://insightflare.net/zh/docs/ai-and-api/connect-an-agent?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [API 参考](https://insightflare.net/zh/docs/api?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
 
-<!-- 4. 表单 submit 触发 -->
-<form
-  data-insightflare-event="contact_submit"
-  data-insightflare-event-trigger="submit"
-  data-insightflare-event-data='{"plan":"pro","source":"landing"}'
->
-  ...
-</form>
+## 自托管与成本
 
+InsightFlare 运行在 Cloudflare Workers、Durable Objects、D1 和 KV 上，Analytics Engine 与 R2 为可选项。采集数据经过缓冲和批量写入，采集与仪表盘由边缘网络提供服务。
+
+```mermaid
+flowchart TD
+  B["访客浏览器"] --> W
+  subgraph CF["Cloudflare"]
+    W["Workers：采集、仪表盘、API"] --> DO["Durable Objects：缓冲与实时数据"]
+    DO --> D1["D1：分析与查询"]
+    W --> D1
+    W --> KV["KV：站点配置"]
+    W -.-> AE["Analytics Engine：观测（可选）"]
+    W -.-> R2["R2：归档（可选）"]
+  end
+  U["你和你的智能体"] --> W
 ```
 
-## 技术栈
+**免费 Cloudflare 账户实测每日 10,000+ 事件。** 实际用量取决于流量、查询频率、数据规模和套餐限制。
 
-| 层   | 技术                                                                                                                          |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------- |
-| 前端 | TanStack Start 1、TanStack Router、Vite 8、React 19、Tailwind CSS 4、Radix UI、shadcn、Recharts、deck.gl、maplibre-gl、Motion |
-| 后端 | Cloudflare Workers、Durable Objects、D1、R2、KV                                                                               |
-| 构建 | Cloudflare Vite Plugin、Wrangler 4、TypeScript 5                                                                              |
+[了解部署架构、性能与成本](https://insightflare.net/zh/self-hosting?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_cost)
+
+## 隐私与数据自主
+
+追踪器不设置也不读取 Cookie，正常访客的原始 IP 不随访问记录保存。启用 Analytics Engine 后，被判定为机器人且遭到拦截的请求可能记录 IP，以便排查。您也可以在站点设置内更改追踪模式，来适配适用法规。
+
+[成本与隐私](https://insightflare.net/zh/docs/getting-started/cost-and-privacy?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [访客识别机制](https://insightflare.net/zh/docs/tracking/privacy?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
+
+## 使用文档
+
+<table>
+  <tr>
+    <td><strong>开始使用</strong></td>
+    <td><a href="https://insightflare.net/zh/docs/getting-started/quick-start?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">快速开始</a> · <a href="https://insightflare.net/zh/docs/tracking?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">安装脚本</a> · <a href="https://insightflare.net/zh/docs/getting-started/cost-and-privacy?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">成本与隐私</a></td>
+  </tr>
+  <tr>
+    <td><strong>数据分析</strong></td>
+    <td><a href="https://insightflare.net/zh/docs/usage/filters?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">高级筛选</a> · <a href="https://insightflare.net/zh/docs/usage/funnels-and-goals?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">漏斗与目标</a> · <a href="https://insightflare.net/zh/docs/usage/retention?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">留存分析</a></td>
+  </tr>
+  <tr>
+    <td><strong>数据采集</strong></td>
+    <td><a href="https://insightflare.net/zh/docs/tracking/custom-events?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">自定义事件</a> · <a href="https://insightflare.net/zh/docs/tracking/identify?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">用户识别</a> · <a href="https://insightflare.net/zh/docs/tracking/tracking-settings?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">跟踪设置</a></td>
+  </tr>
+  <tr>
+    <td><strong>部署与运维</strong></td>
+    <td><a href="https://insightflare.net/zh/docs/deployment/updating?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">更新指南</a> · <a href="https://insightflare.net/zh/docs/deployment/analytics-engine?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Analytics Engine</a> · <a href="https://insightflare.net/zh/docs/deployment/manual-deployment?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">手动部署</a></td>
+  </tr>
+  <tr>
+    <td><strong>集成与开发</strong></td>
+    <td><a href="https://insightflare.net/zh/docs/ai-and-api/connect-an-agent?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">智能体接入</a> · <a href="https://insightflare.net/zh/docs/api?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">API 参考</a> · <a href="https://insightflare.net/zh/docs/deployment/local-development?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">本地开发</a></td>
+  </tr>
+</table>
+
+[配置参考](https://insightflare.net/zh/docs/reference/configuration?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [R2 归档](https://insightflare.net/zh/docs/deployment/r2-archive?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [命令参考](https://insightflare.net/zh/docs/reference/commands?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [常见问题](https://insightflare.net/zh/docs/reference/faq?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
+
+## 本地开发
+
+**TypeScript · React · TanStack Start · Cloudflare Workers · D1 · Durable Objects**
+
+环境要求：Node.js 24、pnpm 10.33。启动前按本地开发指南配置 .dev.vars。
+
+```bash
+git clone https://github.com/RavelloH/InsightFlare
+cd InsightFlare
+pnpm install
+pnpm run db:migrate:local
+cp .dev.vars.example .dev.vars
+```
+
+配置环境变量后运行：
+
+```bash
+pnpm run dev
+```
+
+仅开发 UI 时，可运行 `pnpm run dev:ui` 使用 Demo Mode，无需数据库和密钥。
+
+[本地开发](https://insightflare.net/zh/docs/deployment/local-development?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [贡献指南](/CONTRIBUTING.md)
+
+## 社区与生态
+
+InsightFlare 的配套开源项目由组织及作者维护，也可以独立使用。
+
+<table>
+  <tr>
+    <td><a href="https://github.com/InsightFlare/deploy"><strong>Deploy</strong></a></td>
+    <td>一键安装与更新。</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/InsightFlare/asn-blocklist"><strong>asn-blocklist</strong></a></td>
+    <td>基于 PeeringDB 的 ASN 分类。</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/InsightFlare/map-relay"><strong>map-relay</strong></a></td>
+    <td>CARTO 矢量底图代理。</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/RavelloH/can-i-use-api"><strong>can-i-use-api</strong></a></td>
+    <td>Can I Use 静态兼容性 API。</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/RavelloH/iso-3166-2-locale"><strong>iso-3166-2-locale</strong></a></td>
+    <td>多语言地名词典。</td>
+  </tr>
+  <tr>
+    <td><a href="https://gist.github.com/RavelloH/08cdb1493d09d2ad1eb0cf17d06e3078"><strong>meta</strong></a></td>
+    <td>网页元数据提取（Gist）。</td>
+  </tr>
+</table>
+
+[了解配套开源项目](https://insightflare.net/zh/open-source?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_ecosystem)
+
+[官方组织](https://github.com/InsightFlare) · [报告问题](https://github.com/RavelloH/InsightFlare/issues) · [贡献指南](/CONTRIBUTING.md) · [版本发布](https://github.com/RavelloH/InsightFlare/releases)
+
+## 许可证
+
+[MIT](/LICENSE) Copyright 2026 RavelloH
 
 ---
 
-## 手动部署
+<div align="center">
 
-如果维护自己的 Fork 或不使用 InsightFlare Deploy，可以按以下步骤手动部署：
+### 开始了解你的用户。
 
-1. Fork 或者 Clone 这个仓库到你的 GitHub 账号下
-2. 在 Cloudflare 中创建以下资源：
-   - D1 数据库
-   - KV Namespace
-   - R2 存储桶（可选，仅冷归档到 R2 时需要）
-3. 编辑 `wrangler.toml`，将 D1 和 KV 资源绑定到 Worker 上
-4. 填写环境变量（参照 `.dev.vars.example`）
-5. 在 Worker 页面导入这个仓库
+[![Deploy InsightFlare to Cloudflare](/.github/readme/deploy-insightflare.svg)](https://deploy.insightflare.net/zh?utm_source=github&utm_medium=referral&utm_campaign=deploy&utm_content=readme_footer)
 
-### 本地开发
+[官方网站](https://insightflare.net/zh?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_footer) · [在线演示](https://demo.insightflare.net/zh/app/xeoos-team/dailypulse-news?utm_source=github&utm_medium=referral&utm_campaign=demo&utm_content=readme_footer)
 
-1. 克隆这个仓库到本地 : `git clone https://github.com/RavelloH/InsightFlare`
-2. 安装依赖 : `pnpm install`
-3. 创建本地数据库 : `pnpm run db:migrate:local`
-4. 设置环境变量：（参照 `.dev.vars.example`）
-5. 运行开发服务器 : `pnpm run dev`
-
-`pnpm run dev:ui` 会以 Demo 模式启动 Vite 开发服务器，使用前端模拟数据进行 UI 测试。若通过 `pnpm run dev` 启动，可设置 `DEMO_MODE=1` 启用 Demo 模式。
-
-## 常用命令
-
-| 命令                                          | 用途                                                                    |
-| --------------------------------------------- | ----------------------------------------------------------------------- |
-| `pnpm run dev`                                 | Vite + Cloudflare Workers 本地开发（使用 `http://localhost:3000`）      |
-| `pnpm run dev:ui`                              | 以 Demo 模式启动 Vite 仪表板开发服务器                                  |
-| `pnpm run preview:local`                       | 使用本地资源构建并启动 Wrangler 预览                                    |
-| `pnpm run build`                               | Cloudflare 托管构建入口                                                 |
-| `pnpm run build:local`                         | 本地预检 + 本地 D1 迁移 + 构建                                          |
-| `pnpm run build:demo`                          | 无资源绑定的 Demo 构建                                                  |
-| `pnpm run deploy`                              | Cloudflare 托管部署入口                                                 |
-| `pnpm run publish`                             | 在允许的 Cloudflare 环境中构建并主动发布                                |
-| `pnpm run publish:demo`                        | 构建并发布 Demo Worker                                                  |
-| `pnpm run check`                               | 自动修复格式和 lint，并执行 build + typecheck + i18n + test + spec 检查 |
-| `pnpm run check:verify`                        | 严格执行完整检查，不自动修复                                            |
-| `pnpm run typecheck`                           | TypeScript 类型检查                                                     |
-| `pnpm run lint` / `lint:fix`                   | ESLint                                                                  |
-| `pnpm run format` / `format:check`             | Prettier                                                                |
-| `pnpm run check:i18n`                          | 校验翻译键的完整性                                                      |
-| `pnpm run db:migrate:local`                    | 本地 D1 迁移                                                            |
-| `pnpm run db:migrate:cf`                       | Cloudflare D1 迁移                                                      |
-| `pnpm run db:migration:create`                 | 新建迁移文件                                                            |
-| `pnpm run ops:secret:main`                     | 设置 `MAIN_SECRET` Worker Secret                                        |
-| `pnpm run ops:secret:bootstrap-admin-password` | 设置初始化管理员密码 Secret                                             |
-| `pnpm run ops:tail`                            | 查看线上 Worker 日志                                                    |
-
----
-
-## 关键配置项
-
-| 名称                                 | 含义                                  |
-| ------------------------------------ | ---------------------------           |
-| `SESSION_WINDOW_MINUTES`             | 会话窗口分钟数（默认 `30`）           |
-| `SCRIPT_CACHE_TTL_SECONDS`           | `/script.js` CDN 缓存秒数             |
-| `PARQUET_WASM_URL`                   | Parquet wasm 下载地址                 |
-| `INSIGHTFLARE_EDGE_URL`              | InsightFlare 服务基准 URL             |
-| `MAIN_SECRET`（Secret）              | 派生安全密钥的根密钥                  |
-| `BOOTSTRAP_ADMIN_PASSWORD`（Secret） | 初始化管理员密码                      |
-| `DAILY_SALT_SECRET`（Secret）        | `MAIN_SECRET` 未设置时的兼容 fallback |
-| `DASHBOARD_SESSION_SECRET`（Secret） | 可选的会话签名覆盖项                  |
-
----
-
-## License
-
-[MIT](/LICENSE) © 2026 RavelloH
+</div>

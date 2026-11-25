@@ -1,12 +1,16 @@
 <div align="center">
 
+<a href="https://insightflare.net/ja?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=website&amp;utm_content=readme_logo"><img src="/public/icon-1024.png" alt="InsightFlare" width="88"></a>
+
 # InsightFlare
 
-### 分析データは自分のもの。Cloudflare 上でセルフホスト。
+### ウェブ解析の手軽さ。プロダクト分析の深さ。
 
-プライバシーに配慮したオープンソース Web アナリティクス。リアルタイム分析、訪問経路、ファネル、AI エージェント連携をひとつに。
+4 KB 未満のスクリプトで、トラフィック、訪問経路、ファネル、リテンション、行動別オーディエンスを一つのダッシュボードに。自分の Cloudflare アカウントにデプロイでき、サーバーの管理は不要です。
 
-[**ライブデモ**](https://insight-demo.ravelloh.com/) &nbsp;·&nbsp; [**Cloudflare にデプロイ**](https://deploy.insightflare.net/ja) &nbsp;·&nbsp; [**ソースコード**](https://github.com/RavelloH/InsightFlare)
+[公式サイト](https://insightflare.net/ja?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_header) · [ドキュメント](https://insightflare.net/ja/docs?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_header) · [ライブデモ](https://demo.insightflare.net/ja/app/xeoos-team/dailypulse-news?utm_source=github&utm_medium=referral&utm_campaign=demo&utm_content=readme_header)
+
+[![Deploy InsightFlare to Cloudflare](/.github/readme/deploy-insightflare.svg)](https://deploy.insightflare.net/ja?utm_source=github&utm_medium=referral&utm_campaign=deploy&utm_content=readme_hero)
 
 [![GitHub stars](https://img.shields.io/github/stars/RavelloH/InsightFlare?style=flat-square&logo=github)](https://github.com/RavelloH/InsightFlare/stargazers) [![Latest release](https://img.shields.io/github/v/release/RavelloH/InsightFlare?style=flat-square)](https://github.com/RavelloH/InsightFlare/releases) [![License: MIT](https://img.shields.io/github/license/RavelloH/InsightFlare?style=flat-square)](/LICENSE)
 
@@ -16,37 +20,72 @@
 
 </div>
 
-<a href="https://insight-demo.ravelloh.com/"><img src="/.github/screenshot/001.webp" alt="InsightFlare analytics dashboard" width="100%"></a>
+<a href="https://demo.insightflare.net/ja/app/xeoos-team/dailypulse-news?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=demo&amp;utm_content=readme_screenshot"><img src="/.github/screenshot/001.webp" alt="InsightFlare dashboard" width="100%"></a>
 
-## InsightFlare を選ぶ理由
-
-ページビュー数だけでは見えない訪問者の行動を把握。InsightFlare は自分の Cloudflare アカウント上で動作し、トラフィック分析、行動分析、運用状況をひとつのダッシュボードにまとめます。
-
-- **インフラもデータも自分で管理。** Cloudflare Workers、D1、Durable Objects 上にセルフホスト。別の分析 SaaS アカウントは不要です。
-- **訪問者の行動を理解。** セッション、訪問経路、ファネル、カスタムイベント、UTM、流入元の品質を分析します。
-- **リアルタイムで状況を把握。** 現在のアクセス、パフォーマンス、地域、ブラウザー、デバイスを確認できます。
-- **不要なトラフィックを見分ける。** ボット対策と異常リクエストの観測機能を備えています。
-- **AI エージェントと連携。** Skills エンドポイントと権限付き API を通じて自然言語で分析できます。
-- **小さく始めて拡張。** ワンクリックデプロイ、複数サイト・チーム、任意の R2 アーカイブに対応します。
-
-**プライバシーと料金：** トラッカーは Cookie を使用しない設計で、生の IP アドレスを保存しません。法令への適合性と Cloudflare の利用料金は、設定・トラフィック・地域によって異なります。
-
-## ダッシュボードのプレビュー
+<div align="center">
 
 <table>
   <tr>
-    <td width="33%" align="center"><a href="/.github/screenshot/004.webp"><img src="/.github/screenshot/004.webp" alt="リアルタイム" width="100%"><br><strong>リアルタイム</strong></a></td>
-    <td width="33%" align="center"><a href="/.github/screenshot/018.webp"><img src="/.github/screenshot/018.webp" alt="訪問セッション" width="100%"><br><strong>訪問セッション</strong></a></td>
-    <td width="33%" align="center"><a href="/.github/screenshot/054.webp"><img src="/.github/screenshot/054.webp" alt="イベントファネル" width="100%"><br><strong>イベントファネル</strong></a></td>
-  </tr>
-  <tr>
-    <td width="33%" align="center"><a href="/.github/screenshot/010.webp"><img src="/.github/screenshot/010.webp" alt="流入元分析" width="100%"><br><strong>流入元分析</strong></a></td>
-    <td width="33%" align="center"><a href="/.github/screenshot/026.webp"><img src="/.github/screenshot/026.webp" alt="地域分布" width="100%"><br><strong>地域分布</strong></a></td>
-    <td width="33%" align="center"><a href="/.github/screenshot/058.webp"><img src="/.github/screenshot/058.webp" alt="ボット観測" width="100%"><br><strong>ボット観測</strong></a></td>
+    <td width="33%" align="center"><img src="/.github/readme/script.svg" alt="&lt; 4 KB" width="220"><br>トラッキングスクリプト</td>
+    <td width="33%" align="center"><img src="/.github/readme/events.svg" alt="10,000+" width="220"><br>無料アカウントでの1日あたり実測イベント数</td>
+    <td width="33%" align="center"><img src="/.github/readme/license.svg" alt="$0" width="220"><br>ソフトウェア利用料</td>
   </tr>
 </table>
 
-## すべての機能をプレビュー
+</div>
+
+## InsightFlare を選ぶ理由
+
+- **スクリプトをひとつ追加するだけ。** 4 KB 未満の Cookie を使わないスクリプトでページビュー、流入元、UTM、端末、地域、Core Web Vitals を自動計測。フロントエンドを再デプロイせずに計測設定を変更できます。
+- **同じデータから全体像を把握。** リアルタイムの訪問者、ページ、流入経路、実ユーザーのパフォーマンスを一つのダッシュボードで確認できます。
+- **期間やオーディエンスをレポート上で比較。** 指標カード、トレンド、表、ファネル、リテンションに比較データを表示。比較側に独立したフィルターを設定して二つの訪問者グループを直接比較できます。
+- **イベント数によるソフトウェア課金なしでプロダクト分析。** 属性付きカスタムイベント、コンバージョンファネル、目標、コホート別リテンションまで、別の分析サービスを契約する必要はありません。
+- **高度なフィルターでオーディエンスを正確に絞り込む。** 訪問者の行動、回数、順序、時間間隔で抽出。ビジュアルビルダーや式でネストした AND / OR / NOT、イベント属性、集計、順序付きシーケンスを組み合わせ、トレンドからリテンションまで対象レポートを絞り込めます。
+- **訪問者ごとの完全なタイムライン。** セッション、流入元、閲覧ページ、イベントとその属性を時系列で確認できます。
+- **AI エージェントにデータを問い合わせる。** Skills、バージョン付き OpenAPI、権限を限定した API キーで分析や保存済み分析の管理ができます。
+- **自分のインフラ、自分のデータ。** 自分の Cloudflare アカウントへワンクリックでデプロイ。Workers の自動拡張、設定可能な訪問者識別、MIT ライセンスのセルフホスト版。
+- **チームでの利用にも対応。** 複数のチームとサイト、読み取り専用リンク、通知設定、ボットトラフィックの個別観測を利用できます。
+
+[実際の高度なフィルターエンジンを試す](https://insightflare.net/ja/features/filters?utm_source=github&utm_medium=referral&utm_campaign=features&utm_content=readme_why_filters) · [期間とオーディエンスの比較](https://insightflare.net/ja/docs/usage/comparison?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_why_compare)
+
+## クイックスタート
+
+Fork、ビルド、Wrangler のインストールなしで最新の公式ビルドを導入できます。
+
+[![Deploy InsightFlare to Cloudflare](/.github/readme/deploy-insightflare.svg)](https://deploy.insightflare.net/ja?utm_source=github&utm_medium=referral&utm_campaign=deploy&utm_content=readme_quick_start)
+
+1. Cloudflare に接続し、アカウントを選択してデプロイ計画を確認します。
+2. アクセス先と管理者パスワードを選び、インストールします。
+3. ログインしてサイトを追加し、計測スクリプトをページに貼り付けます。
+4. サイトにアクセスし、リアルタイム画面でデータの到着を確認します。
+
+[クイックスタート](https://insightflare.net/ja/docs/getting-started/quick-start?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [手動デプロイ](https://insightflare.net/ja/docs/deployment/manual-deployment?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
+
+## 機能を探索
+
+<table>
+  <tr>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/ja/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_traffic"><img src="/.github/screenshot/004.webp" alt="トラフィックと流入" width="100%"><br><strong>トラフィックと流入</strong></a><br>リアルタイム、ページ、流入元、キャンペーン。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/ja/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_journeys"><img src="/.github/screenshot/018.webp" alt="セッションと訪問経路" width="100%"><br><strong>セッションと訪問経路</strong></a><br>訪問経路とカスタムイベント。</td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/ja/features/funnels?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_funnels"><img src="/.github/screenshot/054.webp" alt="ファネルと目標" width="100%"><br><strong>ファネルと目標</strong></a><br>セッションまたは訪問者単位で離脱を分析。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/ja/features/retention?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_retention"><img src="/.github/screenshot/024.webp" alt="リテンション" width="100%"><br><strong>リテンション</strong></a><br>初回訪問日ごとに再訪を分析。</td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/ja/features/filters?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_filters"><img src="/.github/screenshot/049.webp" alt="カスタムイベント分析" width="100%"><br><strong>高度なフィルターとカスタムイベント</strong></a><br>行動、属性、順序でオーディエンスを定義。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/ja/features/experience?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_experience"><img src="/.github/screenshot/007.webp" alt="実ユーザー体験" width="100%"><br><strong>実ユーザー体験</strong></a><br>Core Web Vitals、ブラウザー、端末。</td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/ja/features/geo?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_geo"><img src="/.github/screenshot/026.webp" alt="地域分析" width="100%"><br><strong>地域分析</strong></a><br>国から都市まで掘り下げる地域分析。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/ja/features/operations?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_operations"><img src="/.github/screenshot/058.webp" alt="可観測性と保護" width="100%"><br><strong>可観測性と保護</strong></a><br>リクエスト観測、ボット対策、運用状況。</td>
+  </tr>
+</table>
+
+[すべての機能を見る](https://insightflare.net/ja/features?utm_source=github&utm_medium=referral&utm_campaign=features&utm_content=readme_gallery)
+
+<details>
+<summary>全機能スクリーンショット（62 枚）</summary>
 
 ### トラフィック概要と流入元
 
@@ -188,242 +227,148 @@
   </tr>
 </table>
 
----
+</details>
 
-## クイックスタート
+## AI エージェントでデータを分析
 
-[![Deploy InsightFlare to Cloudflare](/.github/readme/deploy-insightflare.svg)](https://deploy.insightflare.net/ja)
+公開 Skills と権限を限定した API キーを使い、Claude Code、Codex、OpenClaw や独自のプログラムで分析できます。ドメインを自分のものに置き換え、以下をエージェントに送ってください。
 
-InsightFlare Deploy を使って、最新の公式ビルドを自分の Cloudflare アカウントにインストールできます。GitHub のフォーク、Wrangler のインストール、リソースの手動設定は不要です。
-
-1. Cloudflare に接続し、デプロイ先のアカウントを選択します。
-2. デプロイ内容を確認し、既定の URL またはカスタムドメインと管理者パスワード（自動生成も可能）を設定します。
-3. **InsightFlare をインストール**を選択し、デプロイが完了するまで待ちます。
-
-インスタンスを開き、`admin` と管理者パスワードでサインインします。自動生成されたパスワードは完了画面で保存してください。
-
-> リクエスト監視などの高度な機能を利用する場合は、案内に従って Analytics Engine を有効にし、認可時に API トークン管理を許可してください。読み取り専用トークンを自動設定できます。基本的な分析機能はこれらの設定なしでも利用でき、後から設定できます。
-
-既存の管理者アカウントにサインインできない場合、`BOOTSTRAP_ADMIN_PASSWORD` を変更してもそのアカウントのパスワードはリセットされません。リポジトリの依存関係をインストールし、Cloudflare の認証を設定した対話型ターミナルで `pnpm run ops:admin:reset-password -- --user <username>` を実行してください。`cf` CLI を含む各オプションは `pnpm run ops:admin:reset-password -- --help` で確認できます。
-
----
-
-## 高度な設定
-
-### Analytics Engine を有効にして詳細分析を行う
-
-Deploy を使う場合は Analytics Engine を有効にし、認可時に API トークン管理を許可してください。アカウント限定の読み取り専用トークンを自動作成・設定できます。既存インスタンスの場合は Deploy から更新または設定を適用できます。以下の手動設定も利用できます。
-
-Analytics Engine は InsightFlare のオプションの高スループット分析層です。リクエスト監視と、将来のトラフィック・イベント分析の投影を主データベースから分離します。
-
-- `REQUEST_ANALYTICS` → リクエスト監視と異常トラフィック
-- `TRAFFIC_ANALYTICS` → サンプリングされたトラフィック事実
-- `EVENT_ANALYTICS` → サンプリングされたカスタムイベント事実
-
-使用するには Analytics Engine を手動で有効にしてください。[Cloudflare Dashboard](https://dash.cloudflare.com/?to=/:account/workers/analytics-engine) を開き、右側の「Enable」ボタンをクリックします。その後のデプロイ時に、InsightFlare が Analytics Engine を Cloudflare アカウントへ自動的にバインドします。
-
-有効化後、InsightFlare は上記 3 データセットへ書き込みます。現在のバージョンでは「リクエスト監視」ページが新しい `REQUEST_ANALYTICS` データセットを読み取ります。`TRAFFIC_ANALYTICS` と `EVENT_ANALYTICS` は将来の Analytics Engine Provider 用に蓄積されます。データセットの読み取りには API トークンが必要です。システム設定で Cloudflare Account ID と「Account Analytics」の読み取り権限を持つ API トークンを入力してください。Reader 設定は引き続き主データベースの D1 に保存されます。詳細はダッシュボード設定ページの「Guide」ボタンをご覧ください。
-
-### AI エージェントを接続して分析する
-
-InsightFlare は AI エージェント向けの Skills を公開しています。InsightFlare のデプロイを OpenClaw、Codex、Claude Code などのエージェントに接続すると、データへの直接アクセス、分析、レポート作成を行えます。次の指示をエージェントに送り、ドメインを実際の InsightFlare インスタンスに置き換えてください。エージェントが、データアクセス用の専用 API キーをダッシュボードで作成する手順を案内します。
-
-```txt
-Read https://<your InsightFlare domain>/.well-known/skills.json, connect to this web analytics system, and guide me through authorization.
+```text
+https://your-instance.example.com/.well-known/skills.json を読み、この分析システムに接続し、認証手順を案内してください。
 ```
 
-その後は、たとえば次のように自然言語で質問できます。
-
-```txt
-「先月のサイトのパフォーマンスはどうでしたか。アクセス数の多い流入元のうち、訪問者が最も多かったのはどこですか。最も人気のあったページはどれですか。」
-```
-
-### Cloudflare 変数で Wrangler 設定を上書きする
-
-Cloudflare のビルド環境では、プロジェクト変数とシークレットで `wrangler.toml` 内のデプロイ環境固有の値を上書きできます。`build:pre` はデプロイ前にこれらの値を読み取り、使用中の Wrangler 設定へ書き込みます。続く `wrangler deploy` は解決済み設定を使用します。
-
-主な変数:
-
-| 名前 | 上書き対象 |
-| --- | --- |
-| `INSIGHTFLARE_WORKER_NAME` | Worker 名 |
-| `INSIGHTFLARE_D1_DATABASE` | D1 データベース名 |
-| `INSIGHTFLARE_D1_DATABASE_ID` | `DB` バインディングの D1 データベース ID |
-| `INSIGHTFLARE_SITE_SETTINGS_KV_ID` | `SITE_SETTINGS_KV` の KV 名前空間 ID |
-| `INSIGHTFLARE_ARCHIVE_BUCKET_NAME` | `ARCHIVE_BUCKET` の R2 バケット |
-| `INSIGHTFLARE_ARCHIVE_PREVIEW_BUCKET_NAME` | R2 プレビュー用バケット |
-| `SESSION_WINDOW_MINUTES` | セッションウィンドウ（分） |
-| `SCRIPT_CACHE_TTL_SECONDS` | `/script.js` の CDN キャッシュ TTL |
-| `PARQUET_WASM_URL` | Parquet WASM の URL |
-| `INSIGHTFLARE_EDGE_URL` | InsightFlare サービスのベース URL |
-
-`INSIGHTFLARE_VAR_<NAME>` により、任意の `[vars]` エントリも設定できます。たとえば `INSIGHTFLARE_VAR_FEATURE_FLAG=1` は `FEATURE_FLAG = "1"` になります。`--env production` でデプロイする場合、`INSIGHTFLARE_PRODUCTION_D1_DATABASE_ID` や `INSIGHTFLARE_PRODUCTION_VAR_INSIGHTFLARE_EDGE_URL` のような環境固有の名前は `[env.production]` を対象にします。
-
-### コールドアーカイブ用の R2 バケットを設定する
-
-R2 へのコールドアーカイブを有効にする場合にのみ、R2 バケットを手動で作成する必要があります。既定ではトラフィックデータを 1 年間保持します。期限切れのデータは圧縮して保存されるため傾向やデータを表示できますが、フィルタリングはできません。R2 は任意であり、InsightFlare Deploy では既定で R2 バインディングを必要としません。R2 を有効にすると、1 年より古いデータに対して詳細なクエリを実行できます。
-
-Cloudflare で `insightflare-archive` という名前のバケットを作成し、次のように `wrangler.toml` の `[[r2_buckets]]` を有効化してください。
-
-```toml
-[[r2_buckets]]
-binding = "ARCHIVE_BUCKET"
-bucket_name = "insightflare-archive"
-preview_bucket_name = "insightflare-archive-preview"
-```
-
-### 最新の状態を保つ
-
-[InsightFlare Deploy](https://deploy.insightflare.net/ja) を開くか、アプリのバージョン更新ページで**ワンクリック更新**を選択します。Cloudflare に接続し、既存インスタンスのアカウントを選び、内容を確認して更新します。Deploy は最新の main の公式ビルドを使用し、既存のバインディングとシークレットを保持し、未適用の D1 マイグレーションを実行します。Worker のロールバックではデータベースの変更は戻らないため、事前にバックアップしてください。
-
-独自のフォークやリポジトリからデプロイしている場合は、[InsightFlare Sync](https://github.com/apps/insightflare-sync/installations/new) や独自の CI/CD も利用できます。同じ Worker を二つの方法で同時に管理しないでください。
-
-### カスタムイベントの送信
-
-InsightFlare のフロントエンド SDK は、手動呼び出しと DOM 属性による自動送信の両方をサポートします。
-
-#### 手動呼び出し
-
-```html
-<script defer src="/script.js?siteId=YOUR_SITE_ID"></script>
-<script>
-  window.addEventListener("DOMContentLoaded", () => {
-    window.insightflare.track("signup_click", {
-      plan: "pro",
-      source: "pricing",
-    });
-  });
-</script>
-```
-
-利用できるメソッド:
-
-- `track(eventName, eventData?)`: カスタムイベントを送信します。
-- `trackOnce(eventName, eventData?)`: 現在のページライフサイクルで、同じイベント名を一度だけ送信します。
-- `setGlobalProperties(props)`: 以降のイベントに共通プロパティを追加します。
-- `clearGlobalProperties()`: 共通プロパティをクリアします。
-
-#### ユーザー識別
-
-`identify` を使うと、匿名の訪問者境界を変えずに現在の訪問をログインユーザーへ関連付けられます。
-
-```html
-<script>
-  window.insightflare.identify("user-123", { name: "Alice" });
-</script>
-```
-
-ログイン後に `identify` を呼び出すと、現在および以後の訪問をユーザー単位で分析できます。最初のページビューより前に呼び出すこともできます。ログアウト時は `reset()` を呼び出して現在の識別情報を終了し、新しい匿名訪問者境界を作成して、以後のイベントが以前のアカウントを引き継がないようにします。
-
-```js
-window.insightflare.reset();
-window.insightflare.identify("user-456", { name: "Bob" });
-```
-
-アカウントを切り替える前に `reset()` を呼び出してください。`identify("user-456")` だけでは新しい訪問者境界は作成されません。
-
-#### DOM 属性による自動送信
-
-```html
-<!-- 1. 既定のクリックトリガー -->
-<button data-insightflare-event="signup_click">今すぐ登録</button>
-<!-- 送信内容: { eventName: "signup_click" } -->
-
-<!-- 2. data-insightflare-event-* で追加フィールドを渡すクリックトリガー -->
-<button
-  data-insightflare-event="signup_click"
-  data-insightflare-event-plan="pro"
-  data-insightflare-event-source="pricing"
+> **料金ページからデプロイまで、どの端末のコンバージョンが高い？ モバイルの離脱はどこ？**
 >
-  今すぐ登録
-</button>
-<!-- 送信内容: { eventName: "signup_click", eventData: { plan: "pro", source: "pricing" } } -->
+> エージェントは端末別ファネルやパフォーマンス、流入元を比較し、適切な権限があれば後で比較するためのファネルを保存できます。
 
-<!-- 3. JSON の追加フィールドを持つクリックトリガー -->
-<button
-  data-insightflare-event="signup_click"
-  data-insightflare-event-data='{"plan":"pro","source":"pricing"}'
->
-  今すぐ登録
-</button>
-<!-- 送信内容: { eventName: "signup_click", eventData: { plan: "pro", source: "pricing" } } -->
+[エージェント接続](https://insightflare.net/ja/docs/ai-and-api/connect-an-agent?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [API リファレンス](https://insightflare.net/ja/docs/api?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
 
-<!-- 4. フォーム送信トリガー -->
-<form
-  data-insightflare-event="contact_submit"
-  data-insightflare-event-trigger="submit"
-  data-insightflare-event-data='{"plan":"pro","source":"landing"}'
->
-  ...
-</form>
+## セルフホストとコスト
 
+Cloudflare Workers、Durable Objects、D1、KV 上で稼働し、Analytics Engine と R2 はオプションです。書き込みをバッファリングして一括処理し、エッジネットワークで計測とダッシュボードを提供します。
+
+```mermaid
+flowchart TD
+  B["訪問者のブラウザー"] --> W
+  subgraph CF["Cloudflare"]
+    W["Workers：計測・ダッシュボード・API"] --> DO["Durable Objects：バッファー・リアルタイム"]
+    DO --> D1["D1：分析とクエリ"]
+    W --> D1
+    W --> KV["KV：サイト設定"]
+    W -.-> AE["Analytics Engine：観測（任意）"]
+    W -.-> R2["R2：アーカイブ（任意）"]
+  end
+  U["あなたと AI エージェント"] --> W
 ```
 
-## 技術スタック
+**無料 Cloudflare アカウントで1日1万件以上のイベントを計測できた実績。** 実際の使用量はトラフィック、クエリ頻度、データ規模、プラン制限に依存します。
 
-| レイヤー | 技術 |
-| --- | --- |
-| フロントエンド | TanStack Start 1、TanStack Router、Vite 8、React 19、Tailwind CSS 4、Radix UI、shadcn、Recharts、deck.gl、maplibre-gl、Motion |
-| バックエンド | Cloudflare Workers、Durable Objects、D1、R2、KV |
-| ビルド | Cloudflare Vite Plugin、Wrangler 4、TypeScript 5 |
+[デプロイ構成・性能・コストについて](https://insightflare.net/ja/self-hosting?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_cost)
 
----
+## プライバシーとデータ所有
 
-## 手動デプロイ
+トラッカーは Cookie を設定・読み取りしません。通常の訪問記録に生の IP アドレスは保存されませんが、Analytics Engine を有効にすると、ボットと判定されブロックされたリクエストの IP が調査のため記録される場合があります。サイト設定でトラッキングモードを変更し、適用される法令に合わせることもできます。
 
-独自のフォークを管理する場合や InsightFlare Deploy を利用しない場合は、次の手順で手動デプロイできます。
+[コストとプライバシー](https://insightflare.net/ja/docs/getting-started/cost-and-privacy?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [訪問者の識別](https://insightflare.net/ja/docs/tracking/privacy?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
 
-1. このリポジトリを GitHub アカウントへ fork または clone します。
-2. Cloudflare で D1 データベース、KV 名前空間、必要に応じて R2 バケットを作成します。
-3. `wrangler.toml` を編集し、D1 と KV を Worker にバインドします。
-4. `.dev.vars.example` を参照して環境変数を設定します。
-5. Worker の画面からこのリポジトリをインポートします。
+## ドキュメント
 
-### ローカル開発
+<table>
+  <tr>
+    <td><strong>はじめに</strong></td>
+    <td><a href="https://insightflare.net/ja/docs/getting-started/quick-start?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">クイックスタート</a> · <a href="https://insightflare.net/ja/docs/tracking?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">計測スクリプト</a> · <a href="https://insightflare.net/ja/docs/getting-started/cost-and-privacy?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">コストとプライバシー</a></td>
+  </tr>
+  <tr>
+    <td><strong>データ分析</strong></td>
+    <td><a href="https://insightflare.net/ja/docs/usage/filters?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">高度なフィルター</a> · <a href="https://insightflare.net/ja/docs/usage/funnels-and-goals?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">ファネルと目標</a> · <a href="https://insightflare.net/ja/docs/usage/retention?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">リテンション</a></td>
+  </tr>
+  <tr>
+    <td><strong>トラッキング</strong></td>
+    <td><a href="https://insightflare.net/ja/docs/tracking/custom-events?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">カスタムイベント</a> · <a href="https://insightflare.net/ja/docs/tracking/identify?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">ユーザー識別</a> · <a href="https://insightflare.net/ja/docs/tracking/tracking-settings?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">トラッキング設定</a></td>
+  </tr>
+  <tr>
+    <td><strong>デプロイと運用</strong></td>
+    <td><a href="https://insightflare.net/ja/docs/deployment/updating?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">アップデート</a> · <a href="https://insightflare.net/ja/docs/deployment/analytics-engine?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">Analytics Engine</a> · <a href="https://insightflare.net/ja/docs/deployment/manual-deployment?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">手動デプロイ</a></td>
+  </tr>
+  <tr>
+    <td><strong>連携と開発</strong></td>
+    <td><a href="https://insightflare.net/ja/docs/ai-and-api/connect-an-agent?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">エージェント接続</a> · <a href="https://insightflare.net/ja/docs/api?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">API リファレンス</a> · <a href="https://insightflare.net/ja/docs/deployment/local-development?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=docs&amp;utm_content=readme_guide">ローカル開発</a></td>
+  </tr>
+</table>
 
-1. `git clone https://github.com/RavelloH/InsightFlare`
-2. `pnpm install`
-3. `pnpm run db:migrate:local`
-4. `.dev.vars.example` を参照して環境変数を設定します。
-5. `pnpm run dev`
+[設定リファレンス](https://insightflare.net/ja/docs/reference/configuration?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [R2 アーカイブ](https://insightflare.net/ja/docs/deployment/r2-archive?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [コマンド](https://insightflare.net/ja/docs/reference/commands?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [FAQ](https://insightflare.net/ja/docs/reference/faq?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide)
 
-`pnpm run dev:ui` はデモモードで Vite 開発サーバーを起動します。通常の `pnpm run dev` でデモモードを有効にするには、`DEMO_MODE=1` を設定してください。
+## ローカル開発
 
-## 主なコマンド
+**TypeScript · React · TanStack Start · Cloudflare Workers · D1 · Durable Objects**
 
-| コマンド | 説明 |
-| --- | --- |
-| `pnpm run dev` | Vite と Cloudflare Workers によるローカル開発 |
-| `pnpm run dev:ui` | デモモードでダッシュボード開発サーバーを起動 |
-| `pnpm run build` | Cloudflare 管理ビルドのエントリポイント |
-| `pnpm run build:local` | ローカル事前確認、D1 マイグレーション、ビルド |
-| `pnpm run build:demo` | リソースバインドなしのデモビルド |
-| `pnpm run deploy` | Cloudflare 管理デプロイのエントリポイント |
-| `pnpm run publish` | 許可された Cloudflare 環境からビルドして公開 |
-| `pnpm run check` | format と lint を自動修正してから、build、型、i18n、テスト、仕様をチェック |
-| `pnpm run check:verify` | 自動修正なしで完全なチェックを実行 |
-| `pnpm run typecheck` | TypeScript の型チェック |
-| `pnpm run lint` / `lint:fix` | ESLint |
-| `pnpm run format` / `format:check` | Prettier |
-| `pnpm run check:i18n` | 翻訳キーの完全性を検証 |
+Node.js 24、pnpm 10.33 が必要です。起動前にローカル開発ガイドに従って .dev.vars を設定してください。
 
----
+```bash
+git clone https://github.com/RavelloH/InsightFlare
+cd InsightFlare
+pnpm install
+pnpm run db:migrate:local
+cp .dev.vars.example .dev.vars
+```
 
-## 主要設定
+環境変数を設定してから実行します。
 
-| 名前 | 意味 |
-| --- | --- |
-| `SESSION_WINDOW_MINUTES` | セッションウィンドウ（既定値 `30` 分） |
-| `SCRIPT_CACHE_TTL_SECONDS` | `/script.js` の CDN キャッシュ TTL |
-| `PARQUET_WASM_URL` | Parquet WASM のダウンロード URL |
-| `INSIGHTFLARE_EDGE_URL` | InsightFlare サービスのベース URL |
-| `MAIN_SECRET`（Secret） | ルートシークレット |
-| `BOOTSTRAP_ADMIN_PASSWORD`（Secret） | 初期管理者パスワード |
-| `DAILY_SALT_SECRET`（Secret） | `MAIN_SECRET` の旧来フォールバック |
-| `DASHBOARD_SESSION_SECRET`（Secret） | 任意のセッション署名オーバーライド |
+```bash
+pnpm run dev
+```
 
----
+UI のみの開発では `pnpm run dev:ui` で Demo Mode を起動できます。データベースやシークレットは不要です。
+
+[ローカル開発](https://insightflare.net/ja/docs/deployment/local-development?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_guide) · [コントリビューションガイド](/CONTRIBUTING.md)
+
+## コミュニティとエコシステム
+
+組織と作者がメンテナンスする関連オープンソースプロジェクトは、単独でも利用できます。
+
+<table>
+  <tr>
+    <td><a href="https://github.com/InsightFlare/deploy"><strong>Deploy</strong></a></td>
+    <td>ワンクリックインストールと更新。</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/InsightFlare/asn-blocklist"><strong>asn-blocklist</strong></a></td>
+    <td>PeeringDB に基づく ASN 分類。</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/InsightFlare/map-relay"><strong>map-relay</strong></a></td>
+    <td>CARTO ベクターベースマップのプロキシ。</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/RavelloH/can-i-use-api"><strong>can-i-use-api</strong></a></td>
+    <td>Can I Use の静的互換性 API。</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/RavelloH/iso-3166-2-locale"><strong>iso-3166-2-locale</strong></a></td>
+    <td>多言語の地名辞書。</td>
+  </tr>
+  <tr>
+    <td><a href="https://gist.github.com/RavelloH/08cdb1493d09d2ad1eb0cf17d06e3078"><strong>meta</strong></a></td>
+    <td>ウェブページのメタデータ取得（Gist）。</td>
+  </tr>
+</table>
+
+[関連オープンソースプロジェクト](https://insightflare.net/ja/open-source?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_ecosystem)
+
+[公式組織](https://github.com/InsightFlare) · [問題を報告](https://github.com/RavelloH/InsightFlare/issues) · [コントリビューションガイド](/CONTRIBUTING.md) · [リリース](https://github.com/RavelloH/InsightFlare/releases)
 
 ## ライセンス
 
 [MIT](/LICENSE) Copyright 2026 RavelloH
+
+---
+
+<div align="center">
+
+### ユーザーをもっと理解しよう。
+
+[![Deploy InsightFlare to Cloudflare](/.github/readme/deploy-insightflare.svg)](https://deploy.insightflare.net/ja?utm_source=github&utm_medium=referral&utm_campaign=deploy&utm_content=readme_footer)
+
+[公式サイト](https://insightflare.net/ja?utm_source=github&utm_medium=referral&utm_campaign=website&utm_content=readme_footer) · [ライブデモ](https://demo.insightflare.net/ja/app/xeoos-team/dailypulse-news?utm_source=github&utm_medium=referral&utm_campaign=demo&utm_content=readme_footer)
+
+</div>
