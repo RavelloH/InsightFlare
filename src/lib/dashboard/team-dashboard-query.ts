@@ -155,7 +155,10 @@ export function teamDashboardQueryOptions(input: {
   window: TeamDashboardWindow;
   range?: RangePreset;
   snapshot?: TeamDashboardSnapshot | null;
+  readDeferredSnapshot?: () =>
+    Promise<TeamDashboardSnapshot | null> | undefined;
   enabled?: boolean;
+  retainInFlight?: boolean;
 }) {
   const initialSnapshot =
     input.snapshot &&
@@ -164,12 +167,28 @@ export function teamDashboardQueryOptions(input: {
       : null;
   return queryOptions({
     queryKey: teamDashboardQueryKey(input.teamId, input.window),
-    queryFn: async ({ signal }) => ({
-      data: await fetchTeamDashboard(input.teamId, input.window, signal),
-      window: input.window,
-      range: input.range ?? "30d",
-      fetchedAt: Date.now(),
-    }),
+    queryFn: async (context) => {
+      const deferred = input.readDeferredSnapshot?.();
+      if (deferred) {
+        const snapshot = await deferred.catch(() => null);
+        if (
+          snapshot &&
+          sameTeamDashboardWindow(snapshot.window, input.window)
+        ) {
+          return snapshot;
+        }
+      }
+      // Route prefetch should survive transient observer detach/reattach
+      // during navigation. Do not consume the query abort signal while
+      // joining an already-running server snapshot, either.
+      const signal = input.retainInFlight ? undefined : context.signal;
+      return {
+        data: await fetchTeamDashboard(input.teamId, input.window, signal),
+        window: input.window,
+        range: input.range ?? "30d",
+        fetchedAt: Date.now(),
+      };
+    },
     enabled: input.enabled ?? Boolean(input.teamId),
     initialData: initialSnapshot ?? undefined,
     initialDataUpdatedAt: initialSnapshot?.fetchedAt,

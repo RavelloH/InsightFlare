@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { useDashboardTimeWindow } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useDashboardTimeQuery } from "@/components/dashboard/shell/dashboard-query-provider";
 import { useHydrated } from "@/hooks/use-hydrated";
 import { intlLocale } from "@/lib/dashboard/format";
 import type {
@@ -13,7 +13,10 @@ import { canAdministerTeam, canManageTeam } from "@/lib/dashboard/permissions";
 import {
   buildTeamAggregateTrend,
   buildTeamSiteTrends,
+  sameTeamDashboardWindow,
   teamDashboardQueryOptions,
+  type TeamDashboardSite,
+  type TeamDashboardSnapshot,
 } from "@/lib/dashboard/team-dashboard-query";
 import type {
   MemberData,
@@ -44,12 +47,17 @@ export function useTeamManagement({
   systemRole,
   currentUserId,
   teamDashboardSnapshot = null,
+  authorizedSites,
+  deferredDashboardSnapshot,
   teamManagementInitialData = null,
 }: TeamManagementClientProps) {
   const router = useRouter();
   const hydrated = useHydrated();
 
-  const selectedWindow = useDashboardTimeWindow();
+  const { window: selectedWindow, queryReady } = useDashboardTimeQuery();
+  const consumedDeferred = useRef<Promise<TeamDashboardSnapshot | null> | null>(
+    null,
+  );
 
   const canUseInitialSnapshotWindow =
     teamDashboardSnapshot &&
@@ -187,7 +195,18 @@ export function useTeamManagement({
       window,
       range: selectedWindow.preset,
       snapshot: teamDashboardSnapshot,
-      enabled: hydrated && activeTab === "sites",
+      enabled: hydrated && queryReady && activeTab === "sites",
+      readDeferredSnapshot: () => {
+        const deferred = deferredDashboardSnapshot;
+        if (
+          !deferred ||
+          consumedDeferred.current === deferred.promise ||
+          !sameTeamDashboardWindow(deferred.window, window)
+        )
+          return undefined;
+        consumedDeferred.current = deferred.promise;
+        return deferred.promise;
+      },
     }),
   );
 
@@ -197,11 +216,19 @@ export function useTeamManagement({
 
   const dashboardWindow = dashboardSnapshot?.window ?? window;
 
-  const dashboardSites = useMemo(
-    () =>
-      sortSitesForInitialOrder((dashboardData?.sites ?? []).map(withSiteSlug)),
-    [dashboardData?.sites],
-  );
+  const dashboardSites = useMemo(() => {
+    const sites: readonly TeamDashboardSite[] =
+      dashboardData?.sites ??
+      (authorizedSites ?? []).map((site) => ({
+        ...site,
+        overview: emptyOverviewMetrics(),
+        changeRates: emptySiteMetricChangeRates(),
+      }));
+    return sortSitesForInitialOrder(sites.map((site) => withSiteSlug(site)));
+  }, [dashboardData?.sites, authorizedSites]);
+  const dashboardMetricsPending = !dashboardData && dashboardQuery.isPending;
+  const dashboardMetricsUnavailable =
+    !dashboardData && !dashboardQuery.isPending;
 
   const transferableMembers = useMemo(
     () => members.filter((m) => m.userId !== activeTeam.ownerUserId),
@@ -582,12 +609,14 @@ export function useTeamManagement({
 
   const siteTrendById = useMemo(
     () =>
-      buildTeamSiteTrends(
-        dashboardSites.map((site) => site.id),
-        dashboardData?.trend ?? [],
-        dashboardWindow,
-      ),
-    [dashboardData?.trend, dashboardSites, dashboardWindow],
+      dashboardData
+        ? buildTeamSiteTrends(
+            dashboardSites.map((site) => site.id),
+            dashboardData?.trend ?? [],
+            dashboardWindow,
+          )
+        : {},
+    [dashboardData, dashboardSites, dashboardWindow],
   );
 
   const siteDashboardCards = useMemo(
@@ -673,6 +702,8 @@ export function useTeamManagement({
     creatingSite,
     currentTeamName,
     dashboardQuery,
+    dashboardMetricsPending,
+    dashboardMetricsUnavailable,
     dashboardSites,
     dashboardWindow,
     deleteTeamDialogOpen,

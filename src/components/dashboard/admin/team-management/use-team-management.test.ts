@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   useQuery: vi.fn(),
-  useDashboardTimeWindow: vi.fn(),
+  useDashboardTimeQuery: vi.fn(),
   useRouter: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@tanstack/react-query", () => ({ useQuery: mocks.useQuery }));
 vi.mock("@/components/dashboard/shell/dashboard-query-provider", () => ({
-  useDashboardTimeWindow: mocks.useDashboardTimeWindow,
+  useDashboardTimeQuery: mocks.useDashboardTimeQuery,
 }));
 vi.mock("@/lib/router", () => ({ useRouter: mocks.useRouter }));
 vi.mock("sonner", () => ({
@@ -28,6 +28,7 @@ vi.mock("@/lib/dashboard/team-dashboard-query", () => ({
   buildTeamAggregateTrend: vi.fn(() => undefined),
   buildTeamSiteTrends: vi.fn(() => ({})),
   teamDashboardQueryOptions: vi.fn(() => ({ queryKey: ["dashboard", "team"] })),
+  sameTeamDashboardWindow: vi.fn(() => true),
 }));
 vi.mock("./model", () => ({
   buildSitePath: vi.fn(
@@ -152,7 +153,7 @@ beforeEach(() => {
   dashboardQueryData = undefined;
   dashboardQueryPending = true;
   mocks.useQuery.mockReset();
-  mocks.useDashboardTimeWindow.mockReset();
+  mocks.useDashboardTimeQuery.mockReset();
   mocks.useRouter.mockReset();
   mocks.toastError.mockReset();
   mocks.toastSuccess.mockReset();
@@ -177,7 +178,7 @@ beforeEach(() => {
       ? query
       : { data: dashboardQueryData, isPending: dashboardQueryPending },
   );
-  mocks.useDashboardTimeWindow.mockReturnValue(window);
+  mocks.useDashboardTimeQuery.mockReturnValue({ window, queryReady: true });
   mocks.useRouter.mockReturnValue(router);
   mocks.postJson.mockImplementation(async (route: string) => {
     if (route === "sites")
@@ -250,6 +251,29 @@ describe("useTeamManagement", () => {
     await invoke(() =>
       result!.handleCopyInviteUrl({ url: "https://example.com/two" } as never),
     );
+  });
+
+  it("reserves cards from authorized inventory before metrics arrive", async () => {
+    hookProps = {
+      ...props,
+      activeTab: "sites",
+      authorizedSites: [
+        { id: "site-a", name: "A", domain: "a.example.com" },
+        { id: "site-b", name: "B", domain: "b.example.com" },
+      ],
+    };
+    await renderHook();
+    expect(result!.dashboardMetricsPending).toBe(true);
+    expect(result!.siteDashboardCards.map((card) => card.site.id)).toEqual([
+      "site-a",
+      "site-b",
+    ]);
+    expect(result!.aggregateChartSites).toHaveLength(2);
+    expect(result!.aggregateChartRenderData).toBeUndefined();
+    expect(
+      result!.siteDashboardCards.every((card) => card.trend.length === 0),
+    ).toBe(true);
+    expect(result!.siteCount).toBe(2);
   });
 
   it("uses matching dashboard snapshots and builds site cards from query data", async () => {

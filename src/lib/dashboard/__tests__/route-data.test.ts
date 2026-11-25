@@ -267,7 +267,7 @@ describe("Dashboard route data loaders", () => {
     });
   });
 
-  it("coalesces bootstrap window resolution and starts independent root/team/snapshot reads", async () => {
+  it("returns team bootstrap without awaiting or starting analytics snapshots", async () => {
     const profile = {
       user: { id: "user" },
       teams: [{ id: "team-a", slug: "acme" }],
@@ -287,13 +287,15 @@ describe("Dashboard route data loaders", () => {
     const result = loadDashboardBootstrap({
       data: { teamSlug: "acme", page: "team" },
     });
-    await vi.waitFor(() => expect(teamDashboardExecute).toHaveBeenCalled());
+    await vi.waitFor(() =>
+      expect(getDashboardTeamContext).toHaveBeenCalledWith("acme"),
+    );
     expect(getDashboardTeamContext).toHaveBeenCalledWith("acme");
     finishRoot(profile as never);
     const bootstrap = await result;
-    expect(bootstrap.initialDashboardWindow).toMatchObject(
-      bootstrap.teamDashboardSnapshot?.window ?? {},
-    );
+    expect(bootstrap.teamDashboardSnapshot).toBeNull();
+    expect(teamDashboardExecute).not.toHaveBeenCalled();
+    expect(bootstrap.bootstrapTeamContext?.activeTeam.id).toBe("team-a");
     expect(resolveDashboardInitialWindow).toHaveBeenCalledTimes(1);
   });
 

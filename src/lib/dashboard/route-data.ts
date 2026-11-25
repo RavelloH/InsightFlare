@@ -258,15 +258,7 @@ async function readDashboardBootstrap(data: {
         teamDashboardSnapshot: null,
       };
     }
-    const active =
-      data.page === "team" &&
-      profile.teams.find((item) => item.slug === data.teamSlug);
-    return {
-      workspaceSnapshots: null,
-      teamDashboardSnapshot: active
-        ? await readTeamDashboardSnapshot({ teamId: active.id })
-        : null,
-    };
+    return { workspaceSnapshots: null, teamDashboardSnapshot: null };
   })();
   const [
     dashboardRoot,
