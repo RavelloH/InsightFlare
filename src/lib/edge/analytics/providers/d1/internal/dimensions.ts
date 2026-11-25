@@ -409,12 +409,33 @@ async function flushDimensionPageGroup(
   }
   let fallback: DimensionBatchOutcome = "budgetFallback";
   try {
-    const first = active[0]!.plan;
-    const ctes = active.flatMap(({ plan }, index) => [
+    // Source compatibility has already been established by the group key.
+    // Reuse only byte-equivalent page plans; each caller still maps and signs
+    // its own response. No materialization or cross-request caching is needed.
+    const unique: PendingDimensionPage[] = [];
+    const slots = new Map<string, number>();
+    const entrySlots = active.map((entry) => {
+      const { plan } = entry;
+      const key = JSON.stringify([
+        plan.selectExpr,
+        plan.pageWhere,
+        plan.pageBindings,
+        plan.orderBy,
+        plan.limit,
+      ]);
+      const existing = slots.get(key);
+      if (existing !== undefined) return existing;
+      const slot = unique.length;
+      slots.set(key, slot);
+      unique.push(entry);
+      return slot;
+    });
+    const first = unique[0]!.plan;
+    const ctes = unique.flatMap(({ plan }, index) => [
       dimensionPageRollup(plan, `dimension_rollup_${index}`),
       `dimension_page_${index} AS (${dimensionPageSelect(plan, `dimension_rollup_${index}`)})`,
     ]);
-    const union = active
+    const union = unique
       .map(
         (_, index) =>
           `SELECT ${index} AS slot, value, views, sessions, visitors FROM dimension_page_${index}`,
@@ -424,15 +445,15 @@ async function flushDimensionPageGroup(
     // The outer order must reproduce that page's order, not the first card's.
     // COUNT metrics are nonnegative integers, so negation preserves descending
     // order without relying on JS string collation or unstable SQL row order.
-    const uniform = active.every(({ plan }) => plan.orderBy === first.orderBy);
+    const uniform = unique.every(({ plan }) => plan.orderBy === first.orderBy);
     const sortCase = (key: "primary" | "secondary") =>
-      `CASE slot ${active.map(({ plan }, index) => `WHEN ${index} THEN ${plan.sortDirection === "desc" ? "-" : ""}${plan[key]}`).join(" ")} END`;
+      `CASE slot ${unique.map(({ plan }, index) => `WHEN ${index} THEN ${plan.sortDirection === "desc" ? "-" : ""}${plan[key]}`).join(" ")} END`;
     const sql = `${dimensionPageSource(first, true)},
 ${ctes.join(",\n")}
 ${uniform ? `${union}\nORDER BY slot ASC, ${first.orderBy}` : `SELECT slot, value, views, sessions, visitors FROM (\n${union}\n)\nORDER BY slot ASC, ${sortCase("primary")} ASC, ${sortCase("secondary")} ASC, value ASC`}`;
     const bindings = [
       ...first.sourceBindings,
-      ...active.flatMap(({ plan }) => plan.pageBindings),
+      ...unique.flatMap(({ plan }) => plan.pageBindings),
     ];
     assertD1StatementBudget({ sql, bindings });
     fallback = "queryFallback";
@@ -444,19 +465,19 @@ ${uniform ? `${union}\nORDER BY slot ASC, ${first.orderBy}` : `SELECT slot, valu
       { id: "analytics.dimension.batch", variant: "raw.filtered" },
     );
     fallback = "resultFallback";
-    const pages = active.map(() => [] as DimensionRawRow[]);
+    const pages = unique.map(() => [] as DimensionRawRow[]);
     for (const row of rows) {
       const slot = row.slot;
       if (
         typeof slot !== "number" ||
         !Number.isInteger(slot) ||
         slot < 0 ||
-        slot >= active.length
+        slot >= unique.length
       ) {
         throw new Error("invalid_dimension_batch_slot");
       }
       const page = pages[slot]!;
-      if (page.length >= active[slot]!.plan.limit + 1)
+      if (page.length >= unique[slot]!.plan.limit + 1)
         throw new Error("invalid_dimension_batch_size");
       page.push(row);
     }
@@ -468,7 +489,7 @@ ${uniform ? `${union}\nORDER BY slot ASC, ${first.orderBy}` : `SELECT slot, valu
           : "merged4",
       active.length,
     );
-    active.forEach((entry, index) => entry.resolve(pages[index]!));
+    active.forEach((entry, index) => entry.resolve(pages[entrySlots[index]!]!));
   } catch {
     group.collector?.recordDimensionBatch(fallback, active.length);
     // Retry independently in each caller's own query context. No completed

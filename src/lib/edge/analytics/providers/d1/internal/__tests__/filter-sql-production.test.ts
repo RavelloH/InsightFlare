@@ -85,6 +85,7 @@ import { readTeamSites } from "@/lib/edge/analytics/providers/d1/operations/team
 import { registerHotspotCollector } from "@/lib/edge/analytics-engine/hotspot-collector";
 import { currentQueryIdentity } from "@/lib/edge/analytics-engine/query-registry";
 import { expandCustomEventData } from "@/lib/edge/ingest/custom-event-json";
+import { instrumentEnv } from "@/lib/edge/observability/bindings";
 import {
   createInvocationLogger,
   runWithInvocationLogger,
@@ -1437,13 +1438,17 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     const db = sqlitePayloadFixture();
     try {
       db.exec(
-        "UPDATE visits SET country='US', browser='Chrome' WHERE site_pk=1 AND visit_id='v-new'",
+        "UPDATE visits SET country='US', browser='Chrome' WHERE site_pk=1 AND visit_id IN ('v-new','v-docs')",
       );
       const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
-      const env = {
-        DB: createSqliteD1Database(db, trace),
-        DAILY_SALT_SECRET: "test-secret",
-      } as never;
+      const env = instrumentEnv(
+        {
+          DB: createSqliteD1Database(db, trace),
+          DAILY_SALT_SECRET: "test-secret",
+        } as never,
+        logger,
+      );
+      expect(env.DB).toBe(env.DB);
       const doc = parseFilterDsl(
         'geo.country eq "US"',
         analyticsFilterRegistry,
@@ -1493,7 +1498,10 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         baseline[0]?.pagination.nextCursor,
         "api-v1",
       );
+      expect(cursor).not.toBeNull();
       const expected = await request("pathname", 1, undefined, cursor);
+      expect(expected.items).toHaveLength(1);
+      expect(expected.items).not.toEqual(baseline[0]!.items);
       trace.preparedSql.length = 0;
       const result = await runWithInvocationLogger(logger, () =>
         runWithDimensionPageBatch(() =>
@@ -1517,6 +1525,35 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       expect(trace.preparedSql[0]).toContain(
         "CASE slot WHEN 0 THEN -views WHEN 1 THEN sessions",
       );
+      trace.preparedSql.length = 0;
+      const duplicates = await runWithInvocationLogger(logger, () =>
+        runWithDimensionPageBatch(() =>
+          Promise.all([
+            request("pathname", 1),
+            request("pathname", 1),
+            request("country", 2, undefined, null, "sessions", "asc"),
+            request("pathname", 1, undefined, cursor),
+          ]),
+        ),
+      );
+      expect(duplicates).toEqual([
+        baseline[0],
+        baseline[0],
+        baseline[1],
+        expected,
+      ]);
+      expect(trace.preparedSql).toHaveLength(1);
+      expect(trace.preparedSql[0]).toContain("dimension_page_2");
+      expect(trace.preparedSql[0]).not.toContain("dimension_page_3");
+      expect(duplicates[0]).not.toBe(duplicates[1]);
+      trace.preparedSql.length = 0;
+      expect(
+        await runWithDimensionPageBatch(() =>
+          Promise.all([request("pathname", 1), request("pathname", 1)]),
+        ),
+      ).toEqual([baseline[0], baseline[0]]);
+      expect(trace.preparedSql).toHaveLength(1);
+      expect(trace.preparedSql[0]).not.toContain("dimension_page_1");
     } finally {
       db.close();
     }

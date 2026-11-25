@@ -39,6 +39,29 @@ function wrap(
   );
 }
 
+describe("request-local D1 binding identity", () => {
+  it("reuses the proxy within an invocation but not across invocations or changed bindings", () => {
+    const db = mockDatabase([]);
+    const raw = { DB: db } as Parameters<typeof instrumentEnv>[0];
+    const logger = createInvocationLogger({
+      source: "worker",
+      trigger: "request",
+    });
+    const observed = instrumentEnv(raw, logger);
+    const first = observed.DB;
+    expect(first).not.toBe(db);
+    expect(observed.DB).toBe(first);
+    expect(instrumentEnv(observed, logger).DB).toBe(first);
+    const other = instrumentEnv(
+      raw,
+      createInvocationLogger({ source: "worker", trigger: "request" }),
+    );
+    expect(other.DB).not.toBe(first);
+    raw.DB = mockDatabase([]);
+    expect(observed.DB).not.toBe(first);
+    expect(observed.DB).toBe(observed.DB);
+  });
+});
 describe("minimal invocation SQL cost snapshot", () => {
   it("is an allowlisted, deeply frozen projection and never exposes identity or raw values", () => {
     const logger = createInvocationLogger({
