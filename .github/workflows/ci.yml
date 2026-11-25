@@ -43,6 +43,8 @@ jobs:
         run: pnpm run format:check
 
       - name: Lint
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
         run: pnpm run lint
 
       - name: Check architecture

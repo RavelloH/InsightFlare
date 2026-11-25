@@ -129,18 +129,32 @@ export async function packageDeployArtifact({
     files.push({ path: output, size: bytes.byteLength, sha256: digest(bytes) });
   }
 
-  const server = (await walk(serverDir)).filter(name => {
-    if (name === "wrangler.json" || name.startsWith(".vite/") ||
-      name.endsWith(".map") || name.endsWith(".css") || name.endsWith(".woff") || name.endsWith(".woff2")) return false;
-    assert(/\.(?:js|mjs|wasm)$/.test(name), "unexpected Worker output " + name);
-    return true;
-  });
   const assets = (await walk(clientDir)).filter(name => {
-    if (name === ".assetsignore" || name.endsWith(".map") ||
+    // Wrangler interprets _headers itself; the deploy API accepts only
+    // ordinary static asset bytes, not Wrangler's control files.
+    if (name === ".assetsignore" || name === "_headers" || name.endsWith(".map") ||
       name.split("/").some(part => part.startsWith("."))) return false;
     assert(ALLOWED_ASSET_EXTENSIONS.has(path.posix.extname(name)), "unknown asset extension " + name);
     return true;
   });
+  const assetNames = new Set(assets);
+  const server = [];
+  for (const name of await walk(serverDir)) {
+    if (name === "wrangler.json" || name.startsWith(".vite/") || name.endsWith(".map")) continue;
+    if (/\.(?:css|woff2?|svg)$/.test(name)) {
+      // Vite emits these public assets in both SSR and client output.
+      // Only omit a server copy when the packaged client file is identical.
+      assert(assetNames.has(name), "missing client copy of Worker asset " + name);
+      const [serverBytes, clientBytes] = await Promise.all([
+        readFile(path.join(serverDir, name)),
+        readFile(path.join(clientDir, name))
+      ]);
+      assert(digest(serverBytes) === digest(clientBytes), "different client copy of Worker asset " + name);
+      continue;
+    }
+    assert(/\.(?:js|mjs|wasm)$/.test(name), "unexpected Worker output " + name);
+    server.push(name);
+  }
   const migrations = (await walk(migrationDir)).filter(name => {
     assert(name.endsWith(".sql") && !name.includes("/"), "unexpected D1 migration path " + name);
     return true;
