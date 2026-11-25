@@ -62,6 +62,8 @@ const config = defineConfig({
         test: {
           name: "node",
           environment: "node",
+          // Isolate native node:sqlite and V8 coverage from shared worker threads on Windows.
+          pool: process.platform === "win32" ? "forks" : "threads",
           include: NODE_TEST_FILES,
         },
       },
