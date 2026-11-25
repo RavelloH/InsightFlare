@@ -51,6 +51,7 @@ import {
   toQueryString,
   withFilters,
 } from "@/lib/dashboard/client/data";
+import { fetchPrivateJson } from "@/lib/dashboard/client/request";
 import { withComparison } from "@/lib/dashboard/client/utils";
 import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
 import { isErrorEnvelope } from "@/lib/demo/realtime/envelope";
@@ -831,6 +832,288 @@ describe("Dashboard Client Data Processing Utilities", () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(a).toBeDefined();
       expect(b).toBeDefined();
+    });
+
+    it("batches eligible browser overview reads without changing page size", async () => {
+      vi.stubGlobal("window", {});
+      try {
+        const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+          freshJsonResponse({
+            ok: true,
+            items: [
+              { status: 200, body: { data: "page" } },
+              { status: 200, body: { data: "browser" } },
+            ],
+          }),
+        );
+        globalThis.fetch = fetchMock as typeof fetch;
+        const params = {
+          siteId: "batch-site",
+          from: 100,
+          to: 200,
+          limit: 100,
+          scope: "session",
+          "filter[page.path]": "/docs",
+        };
+        const options = { batchOverview: true };
+        const results = await Promise.all([
+          fetchPrivateJson("/api/private/overview-page-path", params, options),
+          fetchPrivateJson(
+            "/api/private/overview-client-browser",
+            params,
+            options,
+          ),
+        ]);
+        expect(results).toEqual([{ data: "page" }, { data: "browser" }]);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock.mock.calls[0]![0]).toBe(
+          "/api/private/query-batch?siteId=batch-site",
+        );
+        const init = fetchMock.mock.calls[0]![1]!;
+        expect(init.method).toBe("POST");
+        const body = JSON.parse(String(init.body));
+        expect(body.items).toHaveLength(2);
+        expect(new URLSearchParams(body.items[0].query).get("limit")).toBe(
+          "100",
+        );
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("falls back to individual reads when the batch route is unavailable", async () => {
+      vi.stubGlobal("window", {});
+      try {
+        const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+          init?.method === "POST"
+            ? freshJsonResponse({}, 404)
+            : freshJsonResponse({ data: "single" }),
+        );
+        globalThis.fetch = fetchMock as typeof fetch;
+        const params = {
+          siteId: "fallback-batch",
+          from: 100,
+          to: 200,
+          limit: 100,
+          scope: "visitor",
+          "filter[page.path]": "/docs",
+        };
+        const results = await Promise.all([
+          fetchPrivateJson("/api/private/overview-page-path", params, {
+            batchOverview: true,
+          }),
+          fetchPrivateJson("/api/private/overview-client-browser", params, {
+            batchOverview: true,
+          }),
+        ]);
+        expect(results).toEqual([{ data: "single" }, { data: "single" }]);
+        expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual([
+          "POST",
+          "GET",
+          "GET",
+        ]);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("isolates cancelled batch items and avoids batching a lone remaining item", async () => {
+      vi.stubGlobal("window", {});
+      try {
+        const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+          freshJsonResponse({ data: "single" }),
+        );
+        globalThis.fetch = fetchMock as typeof fetch;
+        const params = {
+          siteId: "abort-batch",
+          from: 100,
+          to: 200,
+          limit: 100,
+          scope: "session",
+          "filter[page.path]": "/docs",
+        };
+        const controller = new AbortController();
+        const first = fetchPrivateJson(
+          "/api/private/overview-page-path",
+          params,
+          { batchOverview: true, signal: controller.signal },
+        );
+        const second = fetchPrivateJson(
+          "/api/private/overview-client-browser",
+          params,
+          { batchOverview: true },
+        );
+        const settled = Promise.allSettled([first, second]);
+        controller.abort();
+        expect(await settled).toEqual([
+          {
+            status: "rejected",
+            reason: expect.objectContaining({ name: "AbortError" }),
+          },
+          { status: "fulfilled", value: { data: "single" } },
+        ]);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock.mock.calls[0]![1]?.method).toBe("GET");
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("keeps remaining cards alive when one in-flight batch item is cancelled", async () => {
+      vi.stubGlobal("window", {});
+      try {
+        let complete!: (response: Response) => void;
+        let started!: () => void;
+        const sent = new Promise<void>((resolve) => {
+          started = resolve;
+        });
+        const fetchMock = vi.fn((_url: string, _init?: RequestInit) => {
+          started();
+          return new Promise<Response>((resolve) => {
+            complete = resolve;
+          });
+        });
+        globalThis.fetch = fetchMock as typeof fetch;
+        const params = {
+          siteId: "inflight-abort-batch",
+          from: 100,
+          to: 200,
+          limit: 100,
+          scope: "session",
+          "filter[page.path]": "/docs",
+        };
+        const firstController = new AbortController();
+        const secondController = new AbortController();
+        const first = fetchPrivateJson(
+          "/api/private/overview-page-path",
+          params,
+          { batchOverview: true, signal: firstController.signal },
+        );
+        const second = fetchPrivateJson(
+          "/api/private/overview-client-browser",
+          params,
+          { batchOverview: true, signal: secondController.signal },
+        );
+        const firstResult = expect(first).rejects.toMatchObject({
+          name: "AbortError",
+        });
+        await sent;
+        firstController.abort();
+        await firstResult;
+        expect(fetchMock.mock.calls[0]![1]?.signal?.aborted).toBe(false);
+        complete(
+          freshJsonResponse({
+            ok: true,
+            items: [
+              { status: 200, body: { data: "cancelled" } },
+              { status: 200, body: { data: "browser" } },
+            ],
+          }),
+        );
+        await expect(second).resolves.toEqual({ data: "browser" });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("keeps a successful batch item when another item returns an error", async () => {
+      vi.stubGlobal("window", {});
+      try {
+        const fetchMock = vi.fn(async () =>
+          freshJsonResponse({
+            ok: true,
+            items: [
+              { status: 400, body: { ok: false } },
+              { status: 200, body: { data: "browser" } },
+            ],
+          }),
+        );
+        globalThis.fetch = fetchMock as typeof fetch;
+        const params = {
+          siteId: "mixed-result-batch",
+          from: 100,
+          to: 200,
+          limit: 100,
+          scope: "visitor",
+          "filter[page.path]": "/docs",
+        };
+        const results = await Promise.allSettled([
+          fetchPrivateJson("/api/private/overview-page-path", params, {
+            batchOverview: true,
+          }),
+          fetchPrivateJson("/api/private/overview-client-browser", params, {
+            batchOverview: true,
+          }),
+        ]);
+        expect(results).toEqual([
+          { status: "rejected", reason: expect.any(Error) },
+          { status: "fulfilled", value: { data: "browser" } },
+        ]);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("does not collect unfiltered, event-scope or interactive overview reads into batches", async () => {
+      vi.stubGlobal("window", {});
+      try {
+        const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+          freshJsonResponse({ data: "single" }),
+        );
+        globalThis.fetch = fetchMock as typeof fetch;
+        const params = {
+          siteId: "excluded-batch",
+          from: 100,
+          to: 200,
+          limit: 100,
+          scope: "session",
+          "filter[page.path]": "/docs",
+        };
+        await Promise.all([
+          fetchPrivateJson(
+            "/api/private/overview-page-path",
+            { ...params, scope: "event" },
+            { batchOverview: true },
+          ),
+          fetchPrivateJson(
+            "/api/private/overview-client-browser",
+            { ...params, scope: "event" },
+            { batchOverview: true },
+          ),
+          fetchPrivateJson(
+            "/api/private/overview-page-path",
+            { ...params, search: "docs" },
+            { batchOverview: true },
+          ),
+          fetchPrivateJson(
+            "/api/private/overview-client-browser",
+            { ...params, cursor: "cursor" },
+            { batchOverview: true },
+          ),
+          fetchPrivateJson(
+            "/api/private/overview-page-path",
+            {
+              siteId: params.siteId,
+              from: 100,
+              to: 200,
+              limit: 100,
+              scope: "session",
+            },
+            { batchOverview: true },
+          ),
+        ]);
+        expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual([
+          "GET",
+          "GET",
+          "GET",
+          "GET",
+          "GET",
+        ]);
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
 
     it("should NOT dedupe distinct URLs", async () => {

@@ -50,6 +50,7 @@ export type EventRecordSortKey = "occurredAt" | "eventName" | "pathname";
 export type RetentionGranularity = TimeWindow["interval"];
 export type PrivateRequestParams = Record<string, string | number>;
 export type DashboardListRequestOptions = {
+  batchOverview?: boolean;
   limit?: number;
   cursor?: string | null;
   search?: string;
@@ -72,6 +73,7 @@ export type PagesDashboardListRequestOptions = Omit<
   comparisonMetric?: PagesDashboardMetric;
 };
 export type FetchPrivateJsonOptions = {
+  batchOverview?: boolean;
   signal?: AbortSignal;
   dedupe?: boolean;
 };
