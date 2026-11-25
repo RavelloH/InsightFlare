@@ -59,6 +59,8 @@ export interface ScopedDatasetSql {
   readonly scope: FilterScope;
   /** True only for the canonical materialized legacy Event qualification path. */
   readonly materializedEventFacts?: boolean;
+  /** Canonical primary-key observations, with no amplifying qualification joins. */
+  readonly uniqueObservationIds?: boolean;
 }
 import { buildScopedFactsCtes, type ScopedFactKind } from "./scoped-facts";
 type ScopedDatasetTarget = {
@@ -1782,6 +1784,8 @@ scope_final_visitors AS (
     sessionRelation: "scope_final_sessions",
     visitorRelation: "scope_final_visitors",
     scope: input.plan.scope,
+    uniqueObservationIds:
+      allowSourceInlining && !input.compatibilityEventSource,
     materializedEventFacts:
       input.plan.scope === "event" &&
       !allowSourceInlining &&
