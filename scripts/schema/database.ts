@@ -9,7 +9,7 @@ export function loadMigrations(root = resolve(import.meta.dirname, "../..")) {
     .sort()
     .map((file) => ({
       file,
-      sql: readFileSync(join(directory, file), "utf8"),
+      sql: readFileSync(join(directory, file), "utf8").replaceAll("\r\n", "\n"),
     }));
 }
 
