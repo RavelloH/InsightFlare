@@ -34,7 +34,13 @@ import {
   SITE_CARD_MAX_TREND_POINTS,
 } from "./model";
 
-function DeferredSiteChart({ children }: { children: ReactNode }) {
+function DeferredSiteChart({
+  children,
+  loadingLabel,
+}: {
+  children: ReactNode;
+  loadingLabel: string;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
 
@@ -59,8 +65,14 @@ function DeferredSiteChart({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <div ref={containerRef} className="h-[180px] w-full">
-      {ready ? children : null}
+    <div ref={containerRef} className="relative h-[180px] w-full">
+      {ready ? (
+        children
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
+          <Spinner className="size-5" aria-label={loadingLabel} />
+        </div>
+      )}
     </div>
   );
 }
@@ -183,10 +195,16 @@ export function TeamManagementSitesPanel() {
 
       {siteDashboardCards.length > 0 ? (
         <div className="grid gap-4 lg:grid-cols-2">
+          {/* These are anonymous chart slots before the analytics result
+              determines the site order. Keep initialized charts at their
+              visual positions rather than moving them out of the viewport. */}
           {siteDashboardCards.map(
-            ({ site, overview, pagesPerSession, changeRates, trend }) => (
+            (
+              { site, overview, pagesPerSession, changeRates, trend },
+              index,
+            ) => (
               <Link
-                key={site.id}
+                key={index}
                 href={buildSitePath(locale, activeTeam.slug, site.slug)}
                 className="group block h-full cursor-pointer outline-none transition-transform hover:-translate-y-0.5 active:translate-y-0 focus-visible:ring-1 focus-visible:ring-ring/60"
                 aria-label={`${copy.sites.openAnalytics}: ${site.name}`}
@@ -200,7 +218,7 @@ export function TeamManagementSitesPanel() {
                             <AutoTransition
                               initial={false}
                               transitionKey={
-                                dashboardMetricsPending ? "loading" : "ready"
+                                dashboardMetricsPending ? "loading" : site.id
                               }
                               duration={0.2}
                               className="flex h-6 min-w-0 items-center gap-2"
@@ -213,6 +231,7 @@ export function TeamManagementSitesPanel() {
                               ) : (
                                 <>
                                   <SiteBrandIcon
+                                    key={site.id}
                                     siteId={site.id}
                                     siteName={site.name}
                                     domain={site.domain}
@@ -228,7 +247,7 @@ export function TeamManagementSitesPanel() {
                             <AutoTransition
                               initial={false}
                               transitionKey={
-                                dashboardMetricsPending ? "loading" : "ready"
+                                dashboardMetricsPending ? "loading" : site.id
                               }
                               duration={0.2}
                               className="flex h-full min-w-0 items-center"
@@ -249,7 +268,7 @@ export function TeamManagementSitesPanel() {
                   </CardHeader>
 
                   <CardContent className="space-y-4">
-                    <DeferredSiteChart>
+                    <DeferredSiteChart loadingLabel={messages.common.loading}>
                       <TrafficPairBarChart
                         data={trend}
                         locale={locale}
