@@ -201,6 +201,9 @@ describe("edge query performance D1 helpers", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.sql).toContain("GROUP BY metric");
     expect(calls[0]?.sql).toContain("MAX(sampleCount) AS samples");
+    expect(calls[0]?.sql).toContain(
+      "ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING",
+    );
     expect(calls[0]?.sql).not.toContain("metric_thresholds AS");
     expect(calls[0]?.sql).toContain("FROM visits");
     expect(calls[0]?.sql).toContain("perf_cls AS metricValue");
@@ -495,6 +498,9 @@ describe("edge query performance D1 helpers", () => {
       },
     });
     expect(calls[0]?.sql).toContain("path_views AS");
+    expect(calls[0]?.sql).toContain(
+      "WHERE metric_visits.pathname IN (SELECT pathname FROM path_views)",
+    );
     expect(calls[0]?.sql).toContain("LIMIT ?");
     expect(calls[0]?.bindings).toEqual([
       ...visitBindings,
@@ -1110,6 +1116,20 @@ describe("edge query performance D1 helpers", () => {
         null,
         null,
       );
+      // Empty countries must not appear in the country rollup, but their
+      // observations still contribute to the page and global metrics.
+      insert.run(
+        "missing-country",
+        siteId,
+        window.startMs + 1,
+        "/other",
+        " ",
+        10,
+        null,
+        100,
+        0,
+        null,
+      );
       insert.run(
         "outside-window",
         siteId,
@@ -1133,7 +1153,26 @@ describe("edge query performance D1 helpers", () => {
       expect(d1.calls).toHaveLength(1);
       const sql = d1.calls[0]?.sql ?? "";
       expect(sql).not.toContain("_thresholds AS");
+      expect(
+        sql.match(/ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING/g),
+      ).toHaveLength(4);
       expect(sql).not.toContain("JOIN summary_ordered_values");
+      expect(sql).toContain(
+        "WHERE metric_visits.pathname IN (SELECT pathname FROM path_views)",
+      );
+      expect(sql).toContain("WHERE metric_visits.country != ''");
+      expect(sql).toContain(
+        "JOIN path_views ON path_views.pathname = route_rows.pathname",
+      );
+      expect(sql).toContain(
+        "JOIN country_views ON country_views.country = country_rows.country",
+      );
+      expect(sql).not.toContain(
+        "JOIN path_views ON path_views.pathname = ordered.pathname",
+      );
+      expect(sql).not.toContain(
+        "JOIN country_views ON country_views.country = ordered.country",
+      );
       expect(dashboard.summaries).toEqual(
         await queryPerformanceSummariesFromD1(
           env,

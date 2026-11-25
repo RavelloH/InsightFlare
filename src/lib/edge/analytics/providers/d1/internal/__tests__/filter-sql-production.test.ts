@@ -1466,6 +1466,111 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
+  it("shares entity membership evidence without narrowing cross-observation AND or losing Event-only entities", () => {
+    const db = sqlitePayloadFixture();
+    try {
+      db.exec(`
+        UPDATE visits SET country='CA', browser='Chrome'
+          WHERE site_pk=1 AND visit_id='v-old';
+        UPDATE visits SET country='US', browser='Firefox'
+          WHERE site_pk=1 AND visit_id='v-new';
+        UPDATE visits SET country='CA', browser=NULL
+          WHERE site_pk=1 AND visit_id='v-docs';
+        UPDATE visits SET country='CA', browser='Chrome'
+          WHERE site_pk=2;
+        UPDATE custom_events SET occurred_at=150 WHERE event_pk=101;
+        INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms,country,browser)
+          VALUES(1,'site-a','v-event-only','s-event','u-event','/historical',20,10,'GB',NULL),
+                (1,'site-a','v-empty','','','/anonymous',180,10,'US','Chrome'),
+                (1,'site-a','v-whitespace',' ',' ','/anonymous',185,10,'CA',NULL),
+                (1,'site-a','v-null',NULL,NULL,'/anonymous',190,10,'CA',NULL);
+        INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at)
+          VALUES(105,1,'site-a','e-event-only','v-event-only',3,170);
+      `);
+      const cases = [
+        {
+          expression: 'geo.country eq "US" or client.browser eq "Chrome"',
+          shared: true,
+          evidence: false,
+          visits: [
+            { site_pk: 1, visit_id: "v-new" },
+            { site_pk: 2, visit_id: "v-new" },
+          ],
+          events: [101, 102, 103, 201],
+        },
+        {
+          expression: 'not (geo.country eq "US" or client.browser eq "Chrome")',
+          shared: true,
+          evidence: true,
+          visits: [{ site_pk: 1, visit_id: "v-docs" }],
+          events: [104, 105],
+        },
+        {
+          expression:
+            'geo.country eq "US" and client.browser eq "Chrome" and not (page.path eq "/docs")',
+          shared: true,
+          evidence: true,
+          visits: [{ site_pk: 1, visit_id: "v-new" }],
+          events: [101, 102, 103],
+        },
+        {
+          expression:
+            '(geo.country eq "US" or client.browser eq "Chrome") and not (page.path eq "/old")',
+          shared: true,
+          evidence: true,
+          visits: [{ site_pk: 2, visit_id: "v-new" }],
+          events: [201],
+        },
+        {
+          expression: 'geo.country eq "US" and client.browser eq "Chrome"',
+          shared: false,
+          evidence: false,
+          visits: [{ site_pk: 1, visit_id: "v-new" }],
+          events: [101, 102, 103],
+        },
+        {
+          expression: 'event.name eq "purchase" or geo.country eq "US"',
+          shared: false,
+          evidence: false,
+          visits: [
+            { site_pk: 1, visit_id: "v-new" },
+            { site_pk: 2, visit_id: "v-new" },
+          ],
+          events: [101, 102, 103, 201],
+        },
+      ];
+      for (const scope of ["session", "visitor"] as const) {
+        for (const item of cases) {
+          const compiled = dataset(item.expression, scope);
+          expect(compiled.ctes.includes("scope_shared_membership AS")).toBe(
+            item.shared,
+          );
+          expect(compiled.ctes.includes("scope_membership_evidence AS")).toBe(
+            item.evidence,
+          );
+          const run = (sql: string) =>
+            select(
+              db,
+              `WITH ${compiled.ctes} ${sql}`,
+              compiled.bindings.map((b) => b.value),
+            );
+          expect(
+            run(
+              `SELECT site_pk, visit_id FROM ${compiled.visitRelation} ORDER BY site_pk, visit_id`,
+            ),
+          ).toEqual(item.visits);
+          expect(
+            run(
+              `SELECT event_pk FROM ${compiled.eventRelation} ORDER BY event_pk`,
+            ),
+          ).toEqual(item.events.map((event_pk) => ({ event_pk })));
+        }
+      }
+    } finally {
+      db.close();
+    }
+  });
+
   it("pushes visit-context predicates into both observation sources without losing cross-window Events", () => {
     const db = sqlitePayloadFixture();
     try {

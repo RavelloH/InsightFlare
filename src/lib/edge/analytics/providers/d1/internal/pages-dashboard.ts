@@ -95,7 +95,8 @@ interface PageDashboardComparisonSide {
   readonly ctes: string;
   readonly relation: string;
   readonly filterClause: string;
-  readonly bindings: readonly (string | number | null)[];
+  readonly sourceBindings: readonly (string | number | null)[];
+  readonly filterBindings: readonly (string | number | null)[];
 }
 function renamedPageDashboardScopedDataset(
   dataset: ReturnType<typeof scopedDatasetFor>,
@@ -110,7 +111,8 @@ function renamedPageDashboardScopedDataset(
     ctes: rename(dataset.ctes),
     relation: rename(dataset.visitRelation),
     filterClause: "",
-    bindings: dataset.bindings.map((binding) => binding.value),
+    sourceBindings: dataset.bindings.map((binding) => binding.value),
+    filterBindings: [],
   };
 }
 function pageDashboardComparisonSide(
@@ -130,7 +132,8 @@ function pageDashboardComparisonSide(
     ctes: buildVisitSourceCte().replace(/\bvisit_source\b/g, relation),
     relation,
     filterClause: filter.clause,
-    bindings: [...visitSourceBindings(siteId, window), ...filter.bindings],
+    sourceBindings: visitSourceBindings(siteId, window),
+    filterBindings: filter.bindings,
   };
 }
 function pageDashboardMetricColumn(
@@ -284,6 +287,7 @@ ${prefix}_visits AS MATERIALIZED (
   FROM ${side.relation}
   ${side.filterClause || "WHERE 1 = 1"}
   AND TRIM(COALESCE(pathname, '')) != ''
+  ${searchClause}
 ),
 ${prefix}_path_rollup AS (
   SELECT pathname,
@@ -361,7 +365,6 @@ projected AS (
 )
 SELECT * FROM projected
 WHERE 1 = 1
-${searchClause}
 ${cursorClause}
 ORDER BY ${orderExpression}
 LIMIT ?
@@ -395,8 +398,11 @@ LIMIT ?
         ]
     : [];
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
-    ...currentSide.bindings,
-    ...referenceSide.bindings,
+    ...currentSide.sourceBindings,
+    ...referenceSide.sourceBindings,
+    ...currentSide.filterBindings,
+    ...searchBindings,
+    ...referenceSide.filterBindings,
     ...searchBindings,
     ...cursorBindings,
     limit + 1,

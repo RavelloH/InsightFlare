@@ -237,7 +237,11 @@ ordered_values AS (
     metric,
     metricValue,
     ROW_NUMBER() OVER (PARTITION BY metric ORDER BY metricValue ASC) AS rowNum,
-    COUNT(*) OVER (PARTITION BY metric) AS sampleCount
+    COUNT(*) OVER (
+      PARTITION BY metric
+      ORDER BY metricValue ASC
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    ) AS sampleCount
   FROM metric_visits
 )
 SELECT
@@ -284,7 +288,11 @@ ordered_values AS (
     bucket,
     metricValue,
     ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY metricValue ASC) AS rowNum,
-    COUNT(*) OVER (PARTITION BY bucket) AS sampleCount
+    COUNT(*) OVER (
+      PARTITION BY bucket
+      ORDER BY metricValue ASC
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    ) AS sampleCount
   FROM metric_visits
 )
 SELECT
@@ -348,7 +356,11 @@ ordered_values AS (
       PARTITION BY metric, bucket
       ORDER BY metricValue ASC
     ) AS rowNum,
-    COUNT(*) OVER (PARTITION BY metric, bucket) AS sampleCount
+    COUNT(*) OVER (
+      PARTITION BY metric, bucket
+      ORDER BY metricValue ASC
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    ) AS sampleCount
   FROM metric_visits
 )
 SELECT
@@ -405,7 +417,7 @@ metric_visits AS (
 scoped_metric_visits AS (
   SELECT metric_visits.*
   FROM metric_visits
-  JOIN path_views ON path_views.pathname = metric_visits.pathname
+  WHERE metric_visits.pathname IN (SELECT pathname FROM path_views)
 ),
 ordered_values AS (
   SELECT
@@ -413,7 +425,11 @@ ordered_values AS (
     metric,
     metricValue,
     ROW_NUMBER() OVER (PARTITION BY pathname, metric ORDER BY metricValue ASC) AS rowNum,
-    COUNT(*) OVER (PARTITION BY pathname, metric) AS sampleCount
+    COUNT(*) OVER (
+      PARTITION BY pathname, metric
+      ORDER BY metricValue ASC
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    ) AS sampleCount
   FROM scoped_metric_visits
 ),
 metric_aggregates AS (
@@ -487,7 +503,7 @@ metric_visits AS (
 scoped_metric_visits AS (
   SELECT metric_visits.*
   FROM metric_visits
-  JOIN country_views ON country_views.country = metric_visits.country
+  WHERE metric_visits.country IN (SELECT country FROM country_views)
 ),
 ordered_values AS (
   SELECT
@@ -495,7 +511,11 @@ ordered_values AS (
     metric,
     metricValue,
     ROW_NUMBER() OVER (PARTITION BY country, metric ORDER BY metricValue ASC) AS rowNum,
-    COUNT(*) OVER (PARTITION BY country, metric) AS sampleCount
+    COUNT(*) OVER (
+      PARTITION BY country, metric
+      ORDER BY metricValue ASC
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    ) AS sampleCount
   FROM scoped_metric_visits
 ),
 metric_aggregates AS (
@@ -584,7 +604,11 @@ summary_ordered_values AS (
     metric,
     metricValue,
     ROW_NUMBER() OVER (PARTITION BY metric ORDER BY metricValue ASC) AS rowNum,
-    COUNT(*) OVER (PARTITION BY metric) AS sampleCount
+    COUNT(*) OVER (
+      PARTITION BY metric
+      ORDER BY metricValue ASC
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    ) AS sampleCount
   FROM metric_visits
 ),
 summary_rows AS (
@@ -605,7 +629,11 @@ trend_ordered_values AS (
       PARTITION BY metric, bucket
       ORDER BY metricValue ASC
     ) AS rowNum,
-    COUNT(*) OVER (PARTITION BY metric, bucket) AS sampleCount
+    COUNT(*) OVER (
+      PARTITION BY metric, bucket
+      ORDER BY metricValue ASC
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    ) AS sampleCount
   FROM metric_visits
 ),
 trend_rows AS (
@@ -636,21 +664,21 @@ route_ordered_values AS (
     ) AS rowNum,
     COUNT(*) OVER (
       PARTITION BY metric_visits.pathname, metric_visits.metric
+      ORDER BY metric_visits.metricValue ASC
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
     ) AS sampleCount
   FROM metric_visits
-  JOIN path_views ON path_views.pathname = metric_visits.pathname
+  WHERE metric_visits.pathname IN (SELECT pathname FROM path_views)
 ),
 route_rows AS (
   SELECT
     ordered.pathname,
     ordered.metric,
-    path_views.views AS views,
     MAX(ordered.sampleCount) AS samples,
     AVG(ordered.metricValue) AS avgValue,
     ${performancePercentileValuesSql("ordered")}
   FROM route_ordered_values ordered
-  JOIN path_views ON path_views.pathname = ordered.pathname
-  GROUP BY ordered.pathname, ordered.metric, path_views.views
+  GROUP BY ordered.pathname, ordered.metric
 ),
 country_views AS (
   SELECT country, count(*) AS views
@@ -669,21 +697,21 @@ country_ordered_values AS (
     ) AS rowNum,
     COUNT(*) OVER (
       PARTITION BY metric_visits.country, metric_visits.metric
+      ORDER BY metric_visits.metricValue ASC
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
     ) AS sampleCount
   FROM metric_visits
-  JOIN country_views ON country_views.country = metric_visits.country
+  WHERE metric_visits.country != ''
 ),
 country_rows AS (
   SELECT
     ordered.country,
     ordered.metric,
-    country_views.views AS views,
     MAX(ordered.sampleCount) AS samples,
     AVG(ordered.metricValue) AS avgValue,
     ${performancePercentileValuesSql("ordered")}
   FROM country_ordered_values ordered
-  JOIN country_views ON country_views.country = ordered.country
-  GROUP BY ordered.country, ordered.metric, country_views.views
+  GROUP BY ordered.country, ordered.metric
 ),
 tagged_rows AS (
   SELECT
@@ -718,29 +746,31 @@ tagged_rows AS (
     'route' AS rowType,
     metric,
     NULL AS bucket,
-    pathname,
+    route_rows.pathname,
     NULL AS country,
-    views,
+    path_views.views AS views,
     samples,
     avgValue,
     p50,
     p75,
     p95
   FROM route_rows
+  JOIN path_views ON path_views.pathname = route_rows.pathname
   UNION ALL
   SELECT
     'country' AS rowType,
     metric,
     NULL AS bucket,
     NULL AS pathname,
-    country,
-    views,
+    country_rows.country,
+    country_views.views AS views,
     samples,
     avgValue,
     p50,
     p75,
     p95
   FROM country_rows
+  JOIN country_views ON country_views.country = country_rows.country
 )
 SELECT
   rowType,

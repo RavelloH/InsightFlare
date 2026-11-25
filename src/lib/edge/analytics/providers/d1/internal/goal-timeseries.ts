@@ -63,9 +63,9 @@ function countValue(value: unknown): number {
 /**
  * Build the single-statement Goal timeseries plan.  Visit and event rows are
  * first reduced to one observation stream for the base and matched datasets.
- * Session and visitor identities are then independently deduplicated by
- * bucket/site in SQL, so an identity can count once in every bucket while
- * still being counted only once inside a bucket.
+ * Deduplicate bucketed observations once, then independently group sessions
+ * and visitors by bucket and site with base/goal presence flags. This retains
+ * exact identity counts without separate sets and joins for all four metrics.
  */
 export async function queryGoalTimeseriesFromD1(
   env: Env,
@@ -95,7 +95,7 @@ export async function queryGoalTimeseriesFromD1(
     `WITH
 ${dataset.ctes.trim()},
 ${goal.ctes.trim()},
-source_observations AS MATERIALIZED (
+source_observations AS (
   SELECT 0 AS is_goal, site_pk, started_at AS observed_at, session_id, visitor_id
   FROM ${dataset.visitRelation}
   UNION ALL
@@ -109,7 +109,7 @@ source_observations AS MATERIALIZED (
   FROM ${goal.matchedEventRelation}
 ),
 bucketed_observations AS MATERIALIZED (
-  SELECT
+  SELECT DISTINCT
     ${observationBucket.sql} AS bucket,
     is_goal,
     site_pk,
@@ -118,91 +118,34 @@ bucketed_observations AS MATERIALIZED (
   FROM source_observations AS observations
   WHERE site_pk IS NOT NULL
 ),
-base_bucket_observations AS MATERIALIZED (
-  SELECT DISTINCT bucket, site_pk, session_id, visitor_id
+entity_counts AS (
+  SELECT bucket, site_pk, session_id AS entity_id, 0 AS kind,
+    MAX(CASE WHEN is_goal = 0 THEN 1 ELSE 0 END) AS is_base,
+    MAX(is_goal) AS is_goal
   FROM bucketed_observations
-  WHERE is_goal = 0 AND bucket IS NOT NULL
-),
-goal_bucket_observations AS MATERIALIZED (
-  SELECT DISTINCT bucket, site_pk, session_id, visitor_id
+  WHERE bucket IS NOT NULL AND TRIM(COALESCE(session_id, '')) != ''
+  GROUP BY bucket, site_pk, session_id
+  UNION ALL
+  SELECT bucket, site_pk, visitor_id AS entity_id, 1 AS kind,
+    MAX(CASE WHEN is_goal = 0 THEN 1 ELSE 0 END) AS is_base,
+    MAX(is_goal) AS is_goal
   FROM bucketed_observations
-  WHERE is_goal = 1 AND bucket IS NOT NULL
+  WHERE bucket IS NOT NULL AND TRIM(COALESCE(visitor_id, '')) != ''
+  GROUP BY bucket, site_pk, visitor_id
 ),
-base_bucket_sessions AS (
-  SELECT DISTINCT bucket, site_pk, session_id
-  FROM base_bucket_observations
-  WHERE TRIM(COALESCE(session_id, '')) != ''
-),
-base_bucket_visitors AS (
-  SELECT DISTINCT bucket, site_pk, visitor_id
-  FROM base_bucket_observations
-  WHERE TRIM(COALESCE(visitor_id, '')) != ''
-),
-goal_bucket_sessions AS (
-  SELECT DISTINCT bucket, site_pk, session_id
-  FROM goal_bucket_observations
-  WHERE TRIM(COALESCE(session_id, '')) != ''
-),
-goal_bucket_visitors AS (
-  SELECT DISTINCT bucket, site_pk, visitor_id
-  FROM goal_bucket_observations
-  WHERE TRIM(COALESCE(visitor_id, '')) != ''
-),
-base_session_counts AS (
-  SELECT bucket, COUNT(*) AS totalSessions
-  FROM base_bucket_sessions
+counts AS (
+  SELECT bucket,
+    SUM(CASE WHEN kind = 0 THEN is_base ELSE 0 END) AS totalSessions,
+    SUM(CASE WHEN kind = 0 THEN is_goal ELSE 0 END) AS convertedSessions,
+    SUM(CASE WHEN kind = 1 THEN is_base ELSE 0 END) AS totalVisitors,
+    SUM(CASE WHEN kind = 1 THEN is_goal ELSE 0 END) AS convertedVisitors
+  FROM entity_counts
   GROUP BY bucket
-),
-base_visitor_counts AS (
-  SELECT bucket, COUNT(*) AS totalVisitors
-  FROM base_bucket_visitors
-  GROUP BY bucket
-),
-base_counts AS (
-  SELECT
-    buckets.bucket,
-    COALESCE(sessions.totalSessions, 0) AS totalSessions,
-    COALESCE(visitors.totalVisitors, 0) AS totalVisitors
-  FROM (
-    SELECT bucket FROM base_bucket_sessions
-    UNION
-    SELECT bucket FROM base_bucket_visitors
-  ) buckets
-  LEFT JOIN base_session_counts sessions ON sessions.bucket = buckets.bucket
-  LEFT JOIN base_visitor_counts visitors ON visitors.bucket = buckets.bucket
-),
-goal_session_counts AS (
-  SELECT bucket, COUNT(*) AS convertedSessions
-  FROM goal_bucket_sessions
-  GROUP BY bucket
-),
-goal_visitor_counts AS (
-  SELECT bucket, COUNT(*) AS convertedVisitors
-  FROM goal_bucket_visitors
-  GROUP BY bucket
-),
-goal_counts AS (
-  SELECT
-    buckets.bucket,
-    COALESCE(sessions.convertedSessions, 0) AS convertedSessions,
-    COALESCE(visitors.convertedVisitors, 0) AS convertedVisitors
-  FROM (
-    SELECT bucket FROM goal_bucket_sessions
-    UNION
-    SELECT bucket FROM goal_bucket_visitors
-  ) buckets
-  LEFT JOIN goal_session_counts sessions ON sessions.bucket = buckets.bucket
-  LEFT JOIN goal_visitor_counts visitors ON visitors.bucket = buckets.bucket
 )
-SELECT
-  base.bucket,
-  base.totalSessions,
-  COALESCE(goal.convertedSessions, 0) AS convertedSessions,
-  base.totalVisitors,
-  COALESCE(goal.convertedVisitors, 0) AS convertedVisitors
-FROM base_counts base
-LEFT JOIN goal_counts goal ON goal.bucket = base.bucket
-ORDER BY base.bucket ASC
+SELECT bucket, totalSessions, convertedSessions, totalVisitors, convertedVisitors
+FROM counts
+WHERE totalSessions > 0 OR totalVisitors > 0
+ORDER BY bucket ASC
 `,
     [
       ...dataset.bindings.map((binding) => binding.value),
