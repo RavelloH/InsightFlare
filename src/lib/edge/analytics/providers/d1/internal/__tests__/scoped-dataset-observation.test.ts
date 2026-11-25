@@ -160,6 +160,49 @@ ORDER BY sf.site_pk, sf.session_id`;
     }
   });
 
+  it("shared fact aggregation preserves all metrics including event-only and invalid identities", () => {
+    const database = new DatabaseSync(":memory:");
+    const options = {
+      visitsRelation: "raw_visits",
+      eventsRelation: "raw_events",
+    };
+    const source = `WITH raw_visits(site_pk, site_id, session_id, visitor_id, duration_ms) AS (
+      VALUES (1,'a','s','v',100), (1,'a','s','v',NULL),
+        (1,'a','s2','v',30), (2,'b','s','v',9),
+        (1,'a',' ','blank-session',2), (1,'a','s3',' ',3),
+        (NULL,'a','s','v',42), (3,NULL,'s','v',44)
+    ), raw_events(site_pk,site_id,session_id,visitor_id) AS (
+      VALUES (1,'a','s','v'), (1,'a','s','v'),
+        (1,'a','only-event','v'), (1,'a','only-event','v'),
+        (1,'a','other','event-only'), (2,'b','s','v'),
+        (1,'a',NULL,'v'), (1,'a','s3',NULL),
+        (NULL,'a','s','v'), (3,NULL,'s','v')
+    )`;
+    try {
+      for (const [builder, kind] of [
+        [buildSessionFactsSql, "session"],
+        [buildVisitorFactsSql, "visitor"],
+      ] as const) {
+        const read = (shared: boolean) =>
+          database
+            .prepare(
+              source +
+                "," +
+                builder(options, shared) +
+                " SELECT * FROM scope_" +
+                kind +
+                "_facts ORDER BY site_pk,site_id," +
+                kind +
+                "_id",
+            )
+            .all();
+        expect(read(true)).toEqual(read(false));
+      }
+    } finally {
+      database.close();
+    }
+  });
+
   it("returns no fact entities for an empty scoped dataset", () => {
     const database = new DatabaseSync(":memory:");
     try {

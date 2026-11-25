@@ -12,6 +12,7 @@ export type ScopedFactKind = "session" | "visitor";
  */
 export function buildScopedFactsCtes(
   requiredKinds: ReadonlySet<ScopedFactKind>,
+  sharedKind?: ScopedFactKind,
 ): readonly string[] {
   const options = {
     visitsRelation: "scope_raw_visits",
@@ -19,10 +20,10 @@ export function buildScopedFactsCtes(
   } as const;
   const ctes: string[] = [];
   if (requiredKinds.has("session")) {
-    ctes.push(buildSessionFactsSql(options));
+    ctes.push(buildSessionFactsSql(options, sharedKind === "session"));
   }
   if (requiredKinds.has("visitor")) {
-    ctes.push(buildVisitorFactsSql(options));
+    ctes.push(buildVisitorFactsSql(options, sharedKind === "visitor"));
   }
   return ctes;
 }

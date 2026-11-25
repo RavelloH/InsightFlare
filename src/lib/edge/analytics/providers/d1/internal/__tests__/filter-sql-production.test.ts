@@ -879,6 +879,28 @@ describe("P5 execution matrix across 35 operation scope contracts", () => {
 });
 
 describe("P5 Scoped Dataset integration: SQL-only advanced qualification", () => {
+  it("shares only same-grain non-event fact predicates and preserves other strategies", () => {
+    for (const [scope, expression, shared] of [
+      ["session", "session.views gte 2", true],
+      ["session", "session.durationMs gte 0 and session.views gte 2", true],
+      ["visitor", "visitor.sessions gte 2", true],
+      ["visitor", "visitor.views gte 0 and visitor.sessions gte 2", true],
+      ["session", "session.events gte 1", false],
+      ["visitor", "visitor.events gte 1", false],
+      ["session", "session.views gte 1 or session.events gte 1", false],
+      ["visitor", "not (visitor.sessions gte 2)", false],
+      ["visitor", "session.views gte 1", false],
+    ] as const) {
+      const result = dataset(expression, scope);
+      const optimized =
+        scope === "session"
+          ? result.ctes.includes("scope_session_totals AS (")
+          : result.ctes.includes("scope_visitor_facts AS (") &&
+            !result.ctes.includes("scope_visitor_visit_facts AS (");
+      expect(optimized, expression).toBe(shared);
+    }
+  });
+
   it("runs a complex Selector/Count Filter without any advanced JS match IDs", () => {
     const db = sqliteFixture();
     try {

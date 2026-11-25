@@ -886,6 +886,38 @@ function compileSharedEntityMembership(
   };
 }
 
+/**
+ * Only use the shared fact aggregate for the measured same-grain positive
+ * conjunctions. Event-count, cross-grain, OR/NOT and advanced collections
+ * retain the separate fact path, whose selectivity can be substantially better.
+ */
+function canShareFactAggregation(
+  expression: EntitySetExpression | null,
+  entityKind: ScopedFactKind,
+): boolean {
+  if (!expression) return false;
+  if (expression.kind === "and") {
+    return (
+      expression.children.length > 0 &&
+      expression.children.every((child) =>
+        canShareFactAggregation(child, entityKind),
+      )
+    );
+  }
+  if (expression.kind !== "condition") return false;
+  const { condition } = expression;
+  if (
+    condition.target.kind !== "field" ||
+    factKindForCondition(condition) !== entityKind
+  )
+    return false;
+  const fields =
+    entityKind === "session"
+      ? ["session.views", "session.durationMs", "session.bounce"]
+      : ["visitor.views", "visitor.sessions"];
+  return fields.includes(condition.target.field);
+}
+
 function compileEntityMembership(
   expression: EntitySetExpression | null,
   entityKind: ScopedFactKind,
@@ -896,17 +928,24 @@ function compileEntityMembership(
     if (shared) return shared;
   }
   const column = entityColumn(entityKind);
-  // Existing fact builders emit several adjacent top-level CTEs. Keep
-  // their current SQL unchanged while assigning each definition an identity.
-  const factCtes = buildScopedFactsCtes(factKinds).flatMap((definition) => {
-    const sections = definition.trim().split(/\),\s*(?=scope_[a-z_]+ AS \()/g);
-    return sections.map((section, index) => {
-      const sql = index < sections.length - 1 ? `${section})` : section;
-      const name = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s+AS\s*\(/.exec(sql)?.[1];
-      if (!name) throw new TypeError("Invalid fact CTE definition.");
-      return boundCte(name, sql);
-    });
-  });
+  // Fact builders may emit several adjacent top-level CTEs. Assign each
+  // definition an identity before composing the qualification plan.
+  const sharedKind = canShareFactAggregation(expression, entityKind)
+    ? entityKind
+    : undefined;
+  const factCtes = buildScopedFactsCtes(factKinds, sharedKind).flatMap(
+    (definition) => {
+      const sections = definition
+        .trim()
+        .split(/\),\s*(?=scope_[a-z_]+ AS \()/g);
+      return sections.map((section, index) => {
+        const sql = index < sections.length - 1 ? `${section})` : section;
+        const name = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s+AS\s*\(/.exec(sql)?.[1];
+        if (!name) throw new TypeError("Invalid fact CTE definition.");
+        return boundCte(name, sql);
+      });
+    },
+  );
   const ctes: BoundCteDefinition[] = [
     ...factCtes,
     boundCte(

@@ -27,9 +27,42 @@ export interface ScopedFactsSqlOptions {
  * here makes the fact predicates use the same duration/views/events/bounce
  * semantics as the journey session list.
  */
-export function buildSessionFactsSql(options: ScopedFactsSqlOptions): string {
+export function buildSessionFactsSql(
+  options: ScopedFactsSqlOptions,
+  shared = false,
+): string {
   const visits = options.visitsRelation;
   const events = options.eventsRelation;
+  if (shared) {
+    // The separate path can be cheaper for selective event-count predicates.
+    // The shared path preserves event-only entities and site-local identities.
+    return `
+scope_session_totals AS (
+  SELECT site_pk, site_id, session_id,
+    SUM(duration) AS duration, SUM(views) AS views, SUM(events) AS events
+  FROM (
+    SELECT site_pk, site_id, session_id,
+      SUM(COALESCE(duration_ms, 0)) AS duration, COUNT(*) AS views, 0 AS events
+    FROM ${visits}
+    WHERE TRIM(COALESCE(session_id, '')) != ''
+    GROUP BY site_pk, site_id, session_id
+    UNION ALL
+    SELECT site_pk, site_id, session_id, 0, 0, COUNT(*)
+    FROM ${events}
+    WHERE TRIM(COALESCE(session_id, '')) != ''
+    GROUP BY site_pk, site_id, session_id
+  )
+  GROUP BY site_pk, site_id, session_id
+),
+scope_session_facts AS (
+  SELECT site_pk, site_id, session_id,
+    CASE WHEN site_pk IS NOT NULL AND site_id IS NOT NULL THEN duration ELSE 0 END AS session_duration_ms,
+    CASE WHEN site_pk IS NOT NULL AND site_id IS NOT NULL THEN views ELSE 0 END AS session_views,
+    CASE WHEN site_pk IS NOT NULL AND site_id IS NOT NULL THEN events ELSE 0 END AS session_events,
+    CASE WHEN site_pk IS NOT NULL AND site_id IS NOT NULL AND views = 1 THEN 1 ELSE 0 END AS session_bounce
+  FROM scope_session_totals
+)`;
+  }
   return `
 scope_session_visit_facts AS (
   SELECT
@@ -82,9 +115,34 @@ scope_session_facts AS (
  * sessions represented only by an in-window event, matching the existing
  * event-only journey expansion.
  */
-export function buildVisitorFactsSql(options: ScopedFactsSqlOptions): string {
+export function buildVisitorFactsSql(
+  options: ScopedFactsSqlOptions,
+  shared = false,
+): string {
   const visits = options.visitsRelation;
   const events = options.eventsRelation;
+  if (shared) {
+    // Keep exact distinct sessions across both observation types, including
+    // sessions represented only by an event. UNION ALL retains event counts.
+    return `
+scope_visitor_facts AS (
+  SELECT site_pk, site_id, visitor_id,
+    COUNT(DISTINCT CASE WHEN site_pk IS NOT NULL AND site_id IS NOT NULL
+      AND TRIM(COALESCE(session_id, '')) != '' THEN session_id END) AS visitor_sessions,
+    COUNT(CASE WHEN site_pk IS NOT NULL AND site_id IS NOT NULL AND is_visit = 1 THEN 1 END) AS visitor_views,
+    COUNT(CASE WHEN site_pk IS NOT NULL AND site_id IS NOT NULL AND is_visit = 0 THEN 1 END) AS visitor_events
+  FROM (
+    SELECT site_pk, site_id, visitor_id, session_id, 1 AS is_visit
+    FROM ${visits}
+    WHERE TRIM(COALESCE(visitor_id, '')) != ''
+    UNION ALL
+    SELECT site_pk, site_id, visitor_id, session_id, 0 AS is_visit
+    FROM ${events}
+    WHERE TRIM(COALESCE(visitor_id, '')) != ''
+  )
+  GROUP BY site_pk, site_id, visitor_id
+)`;
+  }
   return `
 scope_visitor_visit_facts AS (
   SELECT site_pk, site_id, visitor_id, COUNT(*) AS visitor_views
