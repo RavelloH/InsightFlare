@@ -214,10 +214,12 @@ export async function queryShareTrendFromD1(
   const buckets = buildTimeBuckets(window, interval);
   const bucket = timeBucketCase(buckets, "started_at");
   const normalizedLimit = Math.min(Math.max(1, limit), 12);
+  // The input has a single consumer (the ranked visits). Reuse the top
+  // aggregates for named series; only Other needs cross-label identity counts.
   const sql = `
 WITH
 ${source.ctes},
-filtered_visits AS MATERIALIZED (
+filtered_visits AS NOT MATERIALIZED (
   SELECT
     ${bucket.sql} AS bucket,
     visit_id AS visitId,
@@ -269,15 +271,20 @@ top_rows AS (
   LIMIT ?
 ),
 series_rows AS (
+  SELECT label, views, visitors, sessions
+  FROM top_rows
+  WHERE label != '${SHARE_TREND_OTHER_TOKEN}'
+  UNION ALL
   SELECT
-    COALESCE(top_rows.label, '${SHARE_TREND_OTHER_TOKEN}') AS label,
+    '${SHARE_TREND_OTHER_TOKEN}' AS label,
     count(*) AS views,
     count(DISTINCT ranked_visits.visitorId) AS visitors,
     count(DISTINCT CASE WHEN ranked_visits.sessionId != '' THEN ranked_visits.sessionId ELSE NULL END) AS sessions
   FROM ranked_visits
   LEFT JOIN top_rows
     ON top_rows.label = ranked_visits.globalLabel
-  GROUP BY label
+  WHERE top_rows.label IS NULL OR top_rows.label = '${SHARE_TREND_OTHER_TOKEN}'
+  HAVING count(*) > 0
 ),
 bucket_rows AS (
   SELECT
@@ -357,7 +364,7 @@ export async function queryReferrerAndChannelTrendFromD1(
   const sql = `
 WITH
 ${source.ctes},
-filtered_visits AS MATERIALIZED (
+filtered_visits AS NOT MATERIALIZED (
   SELECT
     ${bucket.sql} AS bucket,
     visit_id AS visitId,
@@ -418,15 +425,20 @@ source_top_rows AS (
   LIMIT ?
 ),
 source_series_rows AS (
+  SELECT label, views, visitors, sessions
+  FROM source_top_rows
+  WHERE label != '${SHARE_TREND_OTHER_TOKEN}'
+  UNION ALL
   SELECT
-    COALESCE(source_top_rows.label, '${SHARE_TREND_OTHER_TOKEN}') AS label,
+    '${SHARE_TREND_OTHER_TOKEN}' AS label,
     count(*) AS views,
     count(DISTINCT ranked_visits.visitorId) AS visitors,
     count(DISTINCT CASE WHEN ranked_visits.sessionId != '' THEN ranked_visits.sessionId ELSE NULL END) AS sessions
   FROM ranked_visits
   LEFT JOIN source_top_rows
     ON source_top_rows.label = ranked_visits.sourceGlobalLabel
-  GROUP BY label
+  WHERE source_top_rows.label IS NULL OR source_top_rows.label = '${SHARE_TREND_OTHER_TOKEN}'
+  HAVING count(*) > 0
 ),
 source_bucket_rows AS (
   SELECT
@@ -464,15 +476,20 @@ channel_top_rows AS (
   LIMIT ?
 ),
 channel_series_rows AS (
+  SELECT label, views, visitors, sessions
+  FROM channel_top_rows
+  WHERE label != '${SHARE_TREND_OTHER_TOKEN}'
+  UNION ALL
   SELECT
-    COALESCE(channel_top_rows.label, '${SHARE_TREND_OTHER_TOKEN}') AS label,
+    '${SHARE_TREND_OTHER_TOKEN}' AS label,
     count(*) AS views,
     count(DISTINCT ranked_visits.visitorId) AS visitors,
     count(DISTINCT CASE WHEN ranked_visits.sessionId != '' THEN ranked_visits.sessionId ELSE NULL END) AS sessions
   FROM ranked_visits
   LEFT JOIN channel_top_rows
     ON channel_top_rows.label = ranked_visits.channelGlobalLabel
-  GROUP BY label
+  WHERE channel_top_rows.label IS NULL OR channel_top_rows.label = '${SHARE_TREND_OTHER_TOKEN}'
+  HAVING count(*) > 0
 ),
 channel_bucket_rows AS (
   SELECT

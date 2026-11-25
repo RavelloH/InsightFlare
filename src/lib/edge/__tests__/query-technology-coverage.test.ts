@@ -1164,7 +1164,7 @@ describe("edge technology query coverage", () => {
     expect(calls[0].sql).toContain(buildTrafficChannelSqlExpression());
     expect(calls[0].sql).not.toContain("CROSS JOIN source_bucket_rows");
     expect(calls[0].sql).toContain("json_group_array");
-    expect(calls[0].sql).not.toContain("UNION ALL");
+    expect(calls[0].sql.match(/UNION ALL/g)).toHaveLength(2);
   });
 
   it("returns independent empty source and channel results", async () => {

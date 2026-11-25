@@ -8,6 +8,7 @@ import type { QueryWindow } from "@/lib/edge/analytics/providers/d1/internal/cor
 import {
   BROWSER_VERSION_UNKNOWN_TOKEN,
   clientDimensionDefinition,
+  SHARE_TREND_OTHER_KEY,
   SHARE_TREND_OTHER_LABEL,
   SHARE_TREND_OTHER_TOKEN,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
@@ -387,6 +388,50 @@ describe("edge query technology D1 mapping", () => {
       expect(d1.calls[0].sql).not.toContain("visitor_latest AS");
       expect(d1.calls[0].sql).not.toContain("assigned_visits AS");
       expect(d1.calls[0].sql).not.toContain("bucket_visitor_latest AS");
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("reuses top counts while deduplicating Other sessions across distinct labels", async () => {
+    const { env, d1 } = createSqliteTrendEnv();
+    const window = queryWindow();
+    const insert = d1.database.prepare(
+      "INSERT INTO visits (visit_id, site_id, visitor_id, session_id, started_at, browser) VALUES (?, 'site-1', ?, ?, ?, ?)",
+    );
+    const at = (minute: number) => Date.UTC(2026, 0, 1, 0, minute);
+    try {
+      insert.run("top-a", "a", "a", at(11), "Chrome");
+      insert.run("top-b", "b", "b", at(12), "Chrome");
+      insert.run("other-c", "c", "shared-session", at(13), "Safari");
+      insert.run("other-d", "d", "shared-session", at(14), "Firefox");
+      insert.run("other-empty", "e", "", at(15), "");
+      const result = await queryShareTrendFromD1(
+        env,
+        "site-1",
+        window,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+        1,
+        "TRIM(COALESCE(browser, ''))",
+        "browser",
+      );
+      expect(result.series).toEqual([
+        { key: "chrome", label: "Chrome", views: 2, visitors: 2, sessions: 2 },
+        {
+          key: SHARE_TREND_OTHER_KEY,
+          label: SHARE_TREND_OTHER_LABEL,
+          views: 3,
+          visitors: 3,
+          sessions: 1,
+          isOther: true,
+        },
+      ]);
+      expect(result.data[0]?.visitorsBySeries).toEqual({ chrome: 2, other: 3 });
+      expect(d1.calls).toHaveLength(1);
+      expect(d1.calls[0]?.sql).toContain("filtered_visits AS NOT MATERIALIZED");
+      expect(d1.calls[0]?.sql).toContain("FROM top_rows");
+      expect(d1.calls[0]?.sql).toContain("WHERE top_rows.label IS NULL");
     } finally {
       d1.close();
     }
