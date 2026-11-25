@@ -7,7 +7,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { format } from "prettier";
 
-import { createMigratedDatabase } from "./schema/database";
+import { createMigratedDatabase, loadMigrations } from "./schema/database";
 import { generateSchemaSql } from "./schema/generate-sql";
 import { generateSchemaTypes } from "./schema/generate-types";
 import type { SchemaObject } from "./schema/introspect";
@@ -22,7 +22,12 @@ const OUTPUTS: readonly {
 }[] = [
   {
     path: resolve(ROOT, "docs", "schema.sql"),
-    build: (db, schema) => generateSchemaSql(db, schema),
+    build: (db, schema) =>
+      generateSchemaSql(
+        db,
+        schema,
+        loadMigrations(ROOT).map(({ file }) => file),
+      ),
   },
   {
     path: resolve(ROOT, "src", "lib", "db", "schema", "generated.ts"),
