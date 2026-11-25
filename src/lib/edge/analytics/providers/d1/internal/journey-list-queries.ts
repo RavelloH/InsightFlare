@@ -736,7 +736,7 @@ export async function queryJourneyEventsPageFromD1(
   limit: number,
   cursor?: JourneyEventCursor | null,
 ): Promise<JourneyEventPage> {
-  const scopedDataset = scopedDatasetFor(siteId, window, filters);
+  const scopedDataset = scopedDatasetFor(siteId, window, filters, target);
   const filter = scopedDataset
     ? null
     : buildVisitFilterSql(filters, "visit_source", { window });
@@ -853,8 +853,7 @@ custom_event_rows AS (
     es.visit_id AS visitId,
     ${customEventProjection}
   FROM event_source es
-  ${scopedDataset ? "LEFT JOIN" : "INNER JOIN"} filtered_visits fv
-    ON fv.visit_id = es.visit_id
+  ${scopedDataset ? "" : "INNER JOIN filtered_visits fv ON fv.visit_id = es.visit_id"}
   ${eventTargetClause}
 )
 SELECT *
