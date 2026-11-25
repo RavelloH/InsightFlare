@@ -26,9 +26,9 @@ A script under 4 KB brings traffic, visitor journeys, funnels, retention and beh
 
 <table>
   <tr>
-    <td width="33%" align="center"><img src="/public/images/readme/script.svg" alt="&lt; 4 KB" width="220"><br>Tracking script</td>
-    <td width="33%" align="center"><img src="/public/images/readme/events.svg" alt="10,000+" width="220"><br>Daily events on a free account (tested)</td>
-    <td width="33%" align="center"><img src="/public/images/readme/license.svg" alt="$0" width="220"><br>Software license fee</td>
+    <td width="33%" align="center"><img src="/.github/readme/script.svg" alt="&lt; 4 KB" width="220"><br>Tracking script</td>
+    <td width="33%" align="center"><img src="/.github/readme/events.svg" alt="10,000+" width="220"><br>Daily events on a free account (tested)</td>
+    <td width="33%" align="center"><img src="/.github/readme/license.svg" alt="$0" width="220"><br>Software license fee</td>
   </tr>
 </table>
 

@@ -26,9 +26,9 @@
 
 <table>
   <tr>
-    <td width="33%" align="center"><img src="/public/images/readme/script.svg" alt="&lt; 4 KB" width="220"><br>追蹤指令碼大小</td>
-    <td width="33%" align="center"><img src="/public/images/readme/events.svg" alt="10,000+" width="220"><br>免費帳戶實測每日事件量</td>
-    <td width="33%" align="center"><img src="/public/images/readme/license.svg" alt="$0" width="220"><br>軟體授權費用</td>
+    <td width="33%" align="center"><img src="/.github/readme/script.svg" alt="&lt; 4 KB" width="220"><br>追蹤指令碼大小</td>
+    <td width="33%" align="center"><img src="/.github/readme/events.svg" alt="10,000+" width="220"><br>免費帳戶實測每日事件量</td>
+    <td width="33%" align="center"><img src="/.github/readme/license.svg" alt="$0" width="220"><br>軟體授權費用</td>
   </tr>
 </table>
 

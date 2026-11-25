@@ -26,9 +26,9 @@
 
 <table>
   <tr>
-    <td width="33%" align="center"><img src="/public/images/readme/script.svg" alt="&lt; 4 KB" width="220"><br>トラッキングスクリプト</td>
-    <td width="33%" align="center"><img src="/public/images/readme/events.svg" alt="10,000+" width="220"><br>無料アカウントでの1日あたり実測イベント数</td>
-    <td width="33%" align="center"><img src="/public/images/readme/license.svg" alt="$0" width="220"><br>ソフトウェア利用料</td>
+    <td width="33%" align="center"><img src="/.github/readme/script.svg" alt="&lt; 4 KB" width="220"><br>トラッキングスクリプト</td>
+    <td width="33%" align="center"><img src="/.github/readme/events.svg" alt="10,000+" width="220"><br>無料アカウントでの1日あたり実測イベント数</td>
+    <td width="33%" align="center"><img src="/.github/readme/license.svg" alt="$0" width="220"><br>ソフトウェア利用料</td>
   </tr>
 </table>
 
