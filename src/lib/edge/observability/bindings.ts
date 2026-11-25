@@ -288,7 +288,14 @@ async function measureD1<T>(
     markUnobservedD1Results(logger, statementCount);
     logger.increment("d1SettledOperations");
     logger.increment("failedStatements", statementCount);
-    span.fail({ statementCount, ...errorLogData(error) });
+    span.fail({
+      statementCount,
+      // A rejected batch does not identify which statement failed.
+      ...(!resultIsBatch
+        ? { queryId: identity.id, variant: identity.variant }
+        : {}),
+      ...errorLogData(error),
+    });
     throw error;
   }
 }

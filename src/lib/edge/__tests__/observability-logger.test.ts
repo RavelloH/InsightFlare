@@ -95,11 +95,13 @@ describe("edge observability logger", () => {
     const second = logger.emit();
 
     expect(second).toBe(first);
+    expect(first.diagnosticId).toMatch(/^[0-9a-f-]{36}$/);
     expect(console.error).toHaveBeenCalledOnce();
     expect(console.error).toHaveBeenCalledWith({
       v: 1,
       source: "do",
       trigger: "alarm",
+      diagnosticId: first.diagnosticId,
       startedAt: expect.any(String),
       performance: { durationMs: 42, failedStatements: 1 },
       logs: [{ timeMs: 0, level: "error", message: "flush.failed" }],

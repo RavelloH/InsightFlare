@@ -1,3 +1,7 @@
+import {
+  decodeErrorDiagnostics,
+  type ErrorDiagnostics,
+} from "./error-diagnostics";
 import type {
   InvocationCacheState,
   InvocationD1RowsCoverage,
@@ -93,6 +97,8 @@ export interface InvocationSnapshot {
   readonly resources: InvocationResourceSummary;
   /** Only fixed, typed event classifications (no message, stack, user payload). */
   readonly safeErrors: readonly InvocationSafeErrorSignal[];
+  /** Explicit opt-in, closed-vocabulary diagnostics; never raw logs or trace IDs. */
+  readonly errorDiagnostics?: ErrorDiagnostics;
   readonly operations: readonly InvocationSafeOperation[];
   /** Privileged opt-in only; never part of the default safe snapshot. */
   readonly sqlObservations?: readonly SqlSemanticObservation[];
@@ -204,6 +210,7 @@ export function toInvocationSnapshot(
   trusted: {
     routeKey?: string;
     safeErrors?: readonly InvocationSafeErrorSignal[];
+    errorDiagnostics?: ErrorDiagnostics;
   } = {},
 ): InvocationSnapshot {
   const perf = record.performance;
@@ -267,6 +274,7 @@ export function toInvocationSnapshot(
     Number.isFinite(perf.webSocketDurationMs)
       ? perf.webSocketDurationMs
       : undefined;
+  const diagnostics = decodeErrorDiagnostics(trusted.errorDiagnostics);
   return Object.freeze({
     version: 1 as const,
     source: record.source,
@@ -296,6 +304,7 @@ export function toInvocationSnapshot(
       : {}),
     resources,
     safeErrors: Object.freeze([...(trusted.safeErrors ?? [])]),
+    ...(diagnostics ? { errorDiagnostics: diagnostics } : {}),
     operations: Object.freeze(operations),
   });
 }

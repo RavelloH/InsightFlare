@@ -133,6 +133,26 @@ const sample = {
   dominantPhase: "route.handler",
   details: {
     version: 2,
+    errorDiagnostics: {
+      version: 1,
+      diagnosticId: "00000000-0000-4000-8000-000000000001",
+      errors: [
+        {
+          category: "database",
+          code: "d1_operation_failed",
+          operation: "d1.all",
+          name: "Error",
+          message: "Missing database column",
+          messageRedacted: true,
+          stack: [{ file: "worker.js", line: 12, column: 3 }],
+          causes: ["Operation timed out"],
+          context: { queryId, variant: "raw.filtered" },
+          fingerprint: "abcd0123",
+          count: 2,
+        },
+      ],
+      dropped: 1,
+    },
     phases: [{ id: "route.handler", count: 1, wallMs: 31 }],
     queries: [
       {
@@ -362,6 +382,12 @@ describe("system performance page", () => {
     );
     await act(async () => findRow("api:/v1/analytics/overview")!.click());
     expect(host.textContent).toContain(copy.detail.phases);
+    expect(host.textContent).toContain(copy.detail.errorDiagnostics);
+    expect(host.textContent).toContain("00000000-0000-4000-8000-000000000001");
+    expect(host.textContent).toContain("Missing database column");
+    expect(host.textContent).toContain("worker.js:12:3");
+    expect(host.textContent).toContain("Operation timed out");
+    expect(host.textContent).toContain("abcd0123");
     expect(host.textContent).toContain("route.handler");
     expect(host.textContent).toContain("≥ 480");
     expect(host.textContent).toContain("×9");
