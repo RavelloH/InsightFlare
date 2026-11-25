@@ -2,7 +2,6 @@ import { RiArrowDownLine, RiArrowUpLine } from "@remixicon/react";
 
 import { epochSecondsToMs } from "@/components/dashboard/admin/team-management/model";
 import { intlLocale } from "@/lib/dashboard/format";
-import type { TeamTrafficPoint } from "@/lib/dashboard/team-dashboard-query";
 import type { NotificationMessageData } from "@/lib/dashboard-api/client/edge";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -28,41 +27,6 @@ export function ChangeText({ value }: { value: number | null }) {
       <Icon className="size-3.5" />
       {Math.abs(value).toFixed(1)}%
     </span>
-  );
-}
-
-/** Visitors per bucket as a compact bar strip, like the sidebar's site rows. */
-export function TrendStrip({
-  points,
-  className = "h-5 w-24",
-}: {
-  points: readonly TeamTrafficPoint[];
-  className?: string;
-}) {
-  const recent = points.slice(-30);
-  if (!recent.length) return null;
-  const max = Math.max(1, ...recent.map((point) => point.visitors));
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox={`0 0 ${recent.length * 3} 20`}
-      preserveAspectRatio="none"
-      className={cn("shrink-0", className)}
-    >
-      {recent.map((point, index) => {
-        const height = Math.max(1, (point.visitors / max) * 20);
-        return (
-          <rect
-            key={point.timestampMs}
-            x={index * 3}
-            y={20 - height}
-            width={2}
-            height={height}
-            fill="var(--color-chart-1)"
-          />
-        );
-      })}
-    </svg>
   );
 }
 

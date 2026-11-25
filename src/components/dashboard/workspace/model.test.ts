@@ -181,5 +181,15 @@ describe("workspace rows", () => {
     expect(ids("visitors")).toEqual(["c", "a", "b"]);
     expect(ids("views")).toEqual(["a", "b", "c"]);
     expect(ids("change")).toEqual(["a", "b", "c"]);
+    expect(sortRows(rows, "views", "asc").map((row) => row.site.id)).toEqual([
+      "c",
+      "b",
+      "a",
+    ]);
+    expect(sortRows(rows, "change", "asc").map((row) => row.site.id)).toEqual([
+      "b",
+      "a",
+      "c",
+    ]);
   });
 });

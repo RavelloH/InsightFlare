@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ChangeQuadrantChart,
   SitePulseHeatmap,
+  TrafficPairBarChart,
 } from "@insightflare/product-ui/charts";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
 import {
   Card,
   CardAction,
@@ -13,7 +16,7 @@ import {
 } from "@insightflare/ui/card";
 import { Input } from "@insightflare/ui/input";
 import { PageHeading } from "@insightflare/ui/page-heading";
-import { Skeleton } from "@insightflare/ui/skeleton";
+import { Spinner } from "@insightflare/ui/spinner";
 import {
   Table,
   TableBody,
@@ -23,8 +26,9 @@ import {
   TableRow,
 } from "@insightflare/ui/table";
 import {
-  RiArrowDownLine,
+  RiArrowDownSLine,
   RiArrowRightSLine,
+  RiArrowUpSLine,
   RiBarChartBoxLine,
   RiFlashlightLine,
   RiHistoryLine,
@@ -35,6 +39,10 @@ import {
 } from "@remixicon/react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 
+import {
+  AnalyticsDetailsTooltipTarget,
+  AnalyticsTimeTooltipProvider,
+} from "@/components/dashboard/analytics-time-tooltip";
 import { getAnalyticsSectionIcon } from "@/components/dashboard/common/analytics-tabs";
 import { SiteBrandIcon } from "@/components/dashboard/common/site-brand-icon";
 import { useDashboardQuery } from "@/components/dashboard/shell/dashboard-query-provider";
@@ -71,10 +79,51 @@ import {
   sortRows,
   type WorkspaceSiteRow,
   type WorkspaceSort,
+  type WorkspaceSortDirection,
 } from "./model";
-import { AttentionRow, ChangeText, greeting, TrendStrip } from "./parts";
+import { AttentionRow, ChangeText, greeting } from "./parts";
 
 const TEAM_LIMIT = 20;
+
+function WorkspaceLoading({
+  label,
+  className,
+}: {
+  label: string;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-center gap-2 text-xs text-muted-foreground",
+        className,
+      )}
+    >
+      <Spinner className="size-4" aria-label={label} />
+      <span aria-hidden="true">{label}</span>
+    </div>
+  );
+}
+
+function WorkspaceRefreshIndicator({
+  loading,
+  label,
+}: {
+  loading: boolean;
+  label: string;
+}) {
+  return (
+    <AutoTransition
+      as="span"
+      className="inline-flex shrink-0 items-center"
+      initial={false}
+      duration={0.2}
+      transitionKey={loading ? "loading" : "idle"}
+    >
+      {loading ? <Spinner aria-label={label} /> : null}
+    </AutoTransition>
+  );
+}
 
 export function WorkspaceClient({
   locale,
@@ -118,6 +167,7 @@ export function WorkspaceClient({
   const router = useRouter();
   const loading = results.some((result) => result.isPending);
   const fetching = results.some((result) => result.isFetching);
+  const analyticsLoading = loading || fetching;
   const failedTeams = teams.filter((_, index) => results[index]?.isError);
   const dataByTeam = new Map<string, TeamDashboardData>();
   teams.forEach((team, index) => {
@@ -133,13 +183,17 @@ export function WorkspaceClient({
   );
   const rows = buildWorkspaceRows(teams, dataByTeam, trendBySite);
   const totals = buildWorkspaceTotals(sites);
+  const waitingForSites = analyticsLoading && !rows.length;
   const bucketStarts = (trendBySite[sites[0]?.id ?? ""] ?? []).map(
     (point) => point.timestampMs,
   );
 
   const [visits, setVisits] = useState<WorkspaceSiteVisit[]>([]);
   const [search, setSearch] = useState("");
-  const [sort, setSort] = useState<WorkspaceSort>("visitors");
+  const [sort, setSort] = useState<{
+    key: WorkspaceSort;
+    direction: WorkspaceSortDirection;
+  }>({ key: "visitors", direction: "desc" });
   const [now, setNow] = useState(0);
   useEffect(() => {
     setVisits(readWorkspaceSites(user.id));
@@ -172,7 +226,8 @@ export function WorkspaceClient({
           ),
         )
       : rows,
-    sort,
+    sort.key,
+    sort.direction,
   );
   const siteHref = (row: WorkspaceSiteRow) =>
     buildSitePath(locale, row.team.slug, row.slug);
@@ -193,19 +248,67 @@ export function WorkspaceClient({
     ),
     values: row.trend.map((point) => point.visitors),
   }));
-  const sortHead = (key: WorkspaceSort, label: string) => (
-    <TableHead className="text-right">
+  const changePoints = rows.flatMap((row) =>
+    row.visitorsChange === null
+      ? []
+      : [
+          {
+            id: row.site.id,
+            label: row.site.name,
+            value: row.visitors,
+            change: row.visitorsChange,
+            weight: row.views,
+          },
+        ],
+  );
+  const sortHead = (
+    key: WorkspaceSort,
+    label: string,
+    className?: string,
+    centered = false,
+  ) => (
+    <TableHead
+      aria-sort={
+        sort.key === key
+          ? sort.direction === "asc"
+            ? "ascending"
+            : "descending"
+          : "none"
+      }
+      className={cn(centered ? "text-center" : "text-right", className)}
+    >
       <button
         type="button"
-        aria-pressed={sort === key}
         className={cn(
-          "inline-flex items-center gap-0.5 hover:text-foreground",
-          sort === key && "text-foreground",
+          "inline-flex items-center gap-1 whitespace-nowrap transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+          sort.key === key ? "text-foreground" : "text-muted-foreground",
         )}
-        onClick={() => setSort(key)}
+        onClick={() =>
+          setSort((previous) => ({
+            key,
+            direction:
+              previous.key === key && previous.direction === "desc"
+                ? "asc"
+                : "desc",
+          }))
+        }
       >
         {label}
-        {sort === key ? <RiArrowDownLine className="size-3" /> : null}
+        {sort.key === key ? (
+          sort.direction === "asc" ? (
+            <RiArrowUpSLine className="size-3.5" aria-hidden="true" />
+          ) : (
+            <RiArrowDownSLine className="size-3.5" aria-hidden="true" />
+          )
+        ) : (
+          <span
+            aria-hidden="true"
+            className="inline-flex flex-col leading-none text-muted-foreground"
+          >
+            <RiArrowUpSLine className="-mb-1 size-3.5" />
+            <RiArrowDownSLine className="-mt-1 size-3.5" />
+          </span>
+        )}
       </button>
     </TableHead>
   );
@@ -234,91 +337,121 @@ export function WorkspaceClient({
 
   return (
     <div className="space-y-4">
-      <PageHeading
-        title={copy.title}
-        subtitle={[
-          greeting(copy.greetings, now, user.name || user.username),
-          formatI18nTemplate(copy.summary, {
-            teams: allTeams.length,
-            sites: sites.length,
-          }),
-        ]
-          .filter(Boolean)
-          .join(" · ")}
-      />
+      <div>
+        <AutoResizer>
+          <PageHeading
+            title={copy.title}
+            subtitle={[
+              greeting(copy.greetings, now, user.name || user.username),
+              formatI18nTemplate(copy.summary, {
+                teams: allTeams.length,
+                sites: sites.length,
+              }),
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          />
+        </AutoResizer>
 
-      {failedTeams.length || allTeams.length > TEAM_LIMIT ? (
-        <p className="border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-          {[
-            failedTeams.length
-              ? formatI18nTemplate(copy.partial, {
-                  teams: failedTeams.map((team) => team.name).join(", "),
-                })
-              : "",
-            allTeams.length > TEAM_LIMIT
-              ? formatI18nTemplate(copy.limited, { count: TEAM_LIMIT })
-              : "",
-          ]
-            .filter(Boolean)
-            .join(" ")}
-        </p>
-      ) : null}
-
-      {recent.length ? (
-        <section aria-labelledby="workspace-recent" className="space-y-2">
-          <h2
-            id="workspace-recent"
-            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
+        <AutoResizer>
+          <AutoTransition
+            initial={false}
+            duration={0.2}
+            className={
+              failedTeams.length || allTeams.length > TEAM_LIMIT
+                ? "pt-4"
+                : undefined
+            }
+            transitionKey={
+              failedTeams.length || allTeams.length > TEAM_LIMIT
+                ? "warning"
+                : "empty"
+            }
           >
-            <RiHistoryLine className="size-3.5" />
-            {copy.recentSites}
-          </h2>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
-            {recent.map(({ visit, team }) => {
-              const SectionIcon = getAnalyticsSectionIcon(
-                visit.section || "overview",
-              );
-              const row = rowsById.get(visit.siteId);
-              return (
-                <Link
-                  key={visit.siteId}
-                  href={buildSitePath(
-                    locale,
-                    team.slug,
-                    visit.siteSlug,
-                    visit.section || undefined,
-                  )}
-                  className="group flex min-w-0 items-center gap-2.5 border border-foreground/10 bg-card px-3 py-2.5 transition-colors hover:bg-muted/50"
+            {failedTeams.length || allTeams.length > TEAM_LIMIT ? (
+              <p className="border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                {[
+                  failedTeams.length
+                    ? formatI18nTemplate(copy.partial, {
+                        teams: failedTeams.map((team) => team.name).join(", "),
+                      })
+                    : "",
+                  allTeams.length > TEAM_LIMIT
+                    ? formatI18nTemplate(copy.limited, { count: TEAM_LIMIT })
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              </p>
+            ) : null}
+          </AutoTransition>
+        </AutoResizer>
+
+        <AutoResizer>
+          <AutoTransition
+            initial={false}
+            duration={0.2}
+            className={recent.length ? "pt-4" : undefined}
+            transitionKey={recent.length ? "recent" : "empty"}
+          >
+            {recent.length ? (
+              <section aria-labelledby="workspace-recent" className="space-y-2">
+                <h2
+                  id="workspace-recent"
+                  className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
                 >
-                  {row ? (
-                    <SiteBrandIcon
-                      siteId={row.site.id}
-                      siteName={row.site.name}
-                      domain={row.site.domain}
-                      iconSrc={row.site.iconPath}
-                      size="md"
-                    />
-                  ) : null}
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-medium">
-                      {visit.name}
-                    </span>
-                    <span className="flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
-                      <SectionIcon className="size-3 shrink-0" />
-                      <span className="shrink-0">
-                        {messages.navigation[visit.section || "overview"]}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span className="truncate">{team.name}</span>
-                    </span>
-                  </span>
-                  <RiArrowRightSLine className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-                </Link>
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
+                  <RiHistoryLine className="size-3.5" />
+                  {copy.recentSites}
+                </h2>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+                  {recent.map(({ visit, team }) => {
+                    const SectionIcon = getAnalyticsSectionIcon(
+                      visit.section || "overview",
+                    );
+                    const row = rowsById.get(visit.siteId);
+                    return (
+                      <Link
+                        key={visit.siteId}
+                        href={buildSitePath(
+                          locale,
+                          team.slug,
+                          visit.siteSlug,
+                          visit.section || undefined,
+                        )}
+                        className="group flex min-w-0 items-center gap-2.5 border border-foreground/10 bg-card px-3 py-2.5 transition-colors hover:bg-muted/50"
+                      >
+                        {row ? (
+                          <SiteBrandIcon
+                            siteId={row.site.id}
+                            siteName={row.site.name}
+                            domain={row.site.domain}
+                            iconSrc={row.site.iconPath}
+                            size="md"
+                          />
+                        ) : null}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs font-medium">
+                            {visit.name}
+                          </span>
+                          <span className="flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
+                            <SectionIcon className="size-3 shrink-0" />
+                            <span className="shrink-0">
+                              {messages.navigation[visit.section || "overview"]}
+                            </span>
+                            <span aria-hidden="true">·</span>
+                            <span className="truncate">{team.name}</span>
+                          </span>
+                        </span>
+                        <RiArrowRightSLine className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                      </Link>
+                    );
+                  })}
+                </div>
+              </section>
+            ) : null}
+          </AutoTransition>
+        </AutoResizer>
+      </div>
 
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="min-w-0 space-y-4">
@@ -327,35 +460,52 @@ export function WorkspaceClient({
               <CardTitle className="inline-flex items-center gap-2">
                 <RiPulseLine className="size-4" />
                 {copy.pulseTitle}
+                <WorkspaceRefreshIndicator
+                  loading={analyticsLoading && !waitingForSites}
+                  label={messages.common.loading}
+                />
               </CardTitle>
               <CardDescription>{copy.pulseHint}</CardDescription>
             </CardHeader>
             <CardContent>
-              {loading && !rows.length ? (
-                <div className="space-y-1">
-                  {[0, 1, 2, 3, 4].map((item) => (
-                    <Skeleton key={item} className="h-6 w-full" />
-                  ))}
-                </div>
-              ) : (
-                <SitePulseHeatmap
-                  rows={pulseRows}
-                  bucketStarts={bucketStarts}
-                  locale={locale}
-                  timeZone={window.timeZone}
-                  interval={window.interval}
-                  labels={{
-                    value: messages.common.visitors,
-                    usual: copy.pulse.usual,
-                    above: copy.pulse.above,
-                    below: copy.pulse.below,
-                    versusUsual: copy.pulse.versusUsual,
-                  }}
-                  emptyLabel={copy.noSites}
-                  loading={fetching}
-                  onRowSelect={openSite}
-                />
-              )}
+              <AutoResizer>
+                <AutoTransition
+                  initial={false}
+                  duration={0.2}
+                  transitionKey={
+                    waitingForSites
+                      ? "loading"
+                      : pulseRows.length && bucketStarts.length
+                        ? "pulse"
+                        : "empty"
+                  }
+                >
+                  {waitingForSites ? (
+                    <WorkspaceLoading
+                      label={messages.common.loading}
+                      className="h-40"
+                    />
+                  ) : (
+                    <SitePulseHeatmap
+                      rows={pulseRows}
+                      bucketStarts={bucketStarts}
+                      locale={locale}
+                      timeZone={window.timeZone}
+                      interval={window.interval}
+                      labels={{
+                        value: messages.common.visitors,
+                        usual: copy.pulse.usual,
+                        above: copy.pulse.above,
+                        below: copy.pulse.below,
+                        versusUsual: copy.pulse.versusUsual,
+                      }}
+                      emptyLabel={copy.noSites}
+                      loading={fetching}
+                      onRowSelect={openSite}
+                    />
+                  )}
+                </AutoTransition>
+              </AutoResizer>
             </CardContent>
           </Card>
 
@@ -364,104 +514,204 @@ export function WorkspaceClient({
               <CardTitle className="inline-flex items-center gap-2">
                 <RiWindow2Line className="size-4" />
                 {copy.allSitesTitle}
+                <WorkspaceRefreshIndicator
+                  loading={analyticsLoading && !waitingForSites}
+                  label={messages.common.loading}
+                />
               </CardTitle>
               <CardAction>
                 <label className="relative block">
                   <RiSearchLine
                     aria-hidden="true"
-                    className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                    className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
                   />
                   <Input
                     value={search}
                     aria-label={copy.searchSites}
                     placeholder={copy.searchSites}
-                    className="h-7 w-44 pl-7 text-xs"
+                    className="h-8 w-36 pl-8 text-xs sm:w-52"
                     onChange={(event) => setSearch(event.target.value)}
                   />
                 </label>
               </CardAction>
             </CardHeader>
             <CardContent className="px-0">
-              {loading && !rows.length ? (
-                <div className="space-y-2 px-4 pb-4">
-                  {[0, 1, 2, 3].map((item) => (
-                    <Skeleton key={item} className="h-9 w-full" />
-                  ))}
-                </div>
-              ) : visibleRows.length ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="pl-4">
-                        {copy.columns.site}
-                      </TableHead>
-                      <TableHead className="hidden md:table-cell">
-                        {copy.columns.team}
-                      </TableHead>
-                      {sortHead("visitors", messages.common.visitors)}
-                      {sortHead("views", messages.common.views)}
-                      <TableHead className="hidden text-right lg:table-cell">
-                        {messages.common.bounceRate}
-                      </TableHead>
-                      {sortHead("change", copy.columns.change)}
-                      <TableHead className="hidden pr-4 sm:table-cell">
-                        {copy.columns.trend}
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {visibleRows.map((row) => {
-                      return (
-                        <TableRow key={row.site.id}>
-                          <TableCell className="max-w-0 min-w-40 pl-4">
-                            <Link
-                              href={siteHref(row)}
-                              className="flex min-w-0 items-center gap-2 hover:underline"
-                            >
-                              <SiteBrandIcon
-                                siteId={row.site.id}
-                                siteName={row.site.name}
-                                domain={row.site.domain}
-                                iconSrc={row.site.iconPath}
-                              />
-                              <span className="min-w-0">
-                                <span className="block truncate">
-                                  {row.site.name}
-                                </span>
-                                <span className="block truncate font-mono text-[11px] text-muted-foreground">
-                                  {row.site.domain}
-                                </span>
-                              </span>
-                            </Link>
-                          </TableCell>
-                          <TableCell className="hidden text-muted-foreground md:table-cell">
-                            {row.team.name}
-                          </TableCell>
-                          <TableCell className="text-right font-mono tabular-nums">
-                            {numberFormat(locale, row.visitors)}
-                          </TableCell>
-                          <TableCell className="text-right font-mono tabular-nums">
-                            {numberFormat(locale, row.views)}
-                          </TableCell>
-                          <TableCell className="hidden text-right font-mono tabular-nums lg:table-cell">
-                            {percentFormat(locale, row.bounceRate)}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <ChangeText value={row.visitorsChange} />
-                          </TableCell>
-                          <TableCell className="hidden pr-4 sm:table-cell">
-                            <TrendStrip points={row.trend} />
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              ) : (
-                <p className="px-4 pb-6 text-xs text-muted-foreground">
-                  {rows.length ? copy.noMatch : copy.noSites}
-                </p>
-              )}
+              <AutoResizer>
+                <AutoTransition
+                  initial={false}
+                  duration={0.2}
+                  transitionKey={
+                    waitingForSites
+                      ? "loading"
+                      : visibleRows.length
+                        ? "table"
+                        : rows.length
+                          ? "no-match"
+                          : "empty"
+                  }
+                >
+                  {waitingForSites ? (
+                    <WorkspaceLoading
+                      label={messages.common.loading}
+                      className="min-h-24 px-4 pb-4"
+                    />
+                  ) : visibleRows.length ? (
+                    <AnalyticsTimeTooltipProvider messages={messages}>
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="hover:bg-transparent">
+                            <TableHead className="pl-4">
+                              {copy.columns.site}
+                            </TableHead>
+                            <TableHead className="hidden md:table-cell">
+                              {copy.columns.team}
+                            </TableHead>
+                            {sortHead("visitors", messages.common.visitors)}
+                            {sortHead("views", messages.common.views)}
+                            {sortHead(
+                              "bounceRate",
+                              messages.common.bounceRate,
+                              "hidden lg:table-cell",
+                              true,
+                            )}
+                            {sortHead(
+                              "change",
+                              copy.columns.change,
+                              undefined,
+                              true,
+                            )}
+                            <TableHead className="hidden w-28 text-center sm:table-cell xl:w-40">
+                              {copy.columns.trend}
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {visibleRows.map((row) => {
+                            return (
+                              <TableRow
+                                key={row.site.id}
+                                className="group cursor-pointer focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring/70"
+                                onClick={(event) => {
+                                  if (
+                                    event.defaultPrevented ||
+                                    event.button !== 0 ||
+                                    event.ctrlKey ||
+                                    event.metaKey ||
+                                    event.shiftKey ||
+                                    event.altKey
+                                  )
+                                    return;
+                                  if (
+                                    event.target instanceof Element &&
+                                    event.target.closest(
+                                      "a,button,input,[role='button']",
+                                    )
+                                  )
+                                    return;
+                                  navigateWithTransition(router, siteHref(row));
+                                }}
+                              >
+                                <TableCell className="max-w-0 min-w-40 pl-4">
+                                  <AnalyticsDetailsTooltipTarget
+                                    className="block min-w-0"
+                                    locale={locale}
+                                    request={{
+                                      key: JSON.stringify([
+                                        row.site.id,
+                                        row.site.name,
+                                        row.site.domain,
+                                        row.team.name,
+                                      ]),
+                                      items: [
+                                        {
+                                          label: copy.columns.site,
+                                          value: row.site.name,
+                                          copyValue: row.site.name,
+                                        },
+                                        {
+                                          label: messages.common.hostname,
+                                          value: row.site.domain,
+                                          copyValue: row.site.domain,
+                                        },
+                                        {
+                                          label: copy.columns.team,
+                                          value: row.team.name,
+                                          copyValue: row.team.name,
+                                        },
+                                      ],
+                                    }}
+                                  >
+                                    <Link
+                                      href={siteHref(row)}
+                                      className="flex min-w-0 items-center gap-2 focus-visible:outline-none"
+                                    >
+                                      <SiteBrandIcon
+                                        siteId={row.site.id}
+                                        siteName={row.site.name}
+                                        domain={row.site.domain}
+                                        iconSrc={row.site.iconPath}
+                                      />
+                                      <span className="min-w-0">
+                                        <span className="block truncate font-medium">
+                                          {row.site.name}
+                                        </span>
+                                        <span className="block truncate font-mono text-[11px] text-muted-foreground">
+                                          {row.site.domain}
+                                        </span>
+                                      </span>
+                                    </Link>
+                                  </AnalyticsDetailsTooltipTarget>
+                                </TableCell>
+                                <TableCell className="hidden max-w-32 text-muted-foreground md:table-cell">
+                                  <span
+                                    className="block truncate"
+                                    title={row.team.name}
+                                  >
+                                    {row.team.name}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-right font-mono tabular-nums">
+                                  {numberFormat(locale, row.visitors)}
+                                </TableCell>
+                                <TableCell className="text-right font-mono tabular-nums">
+                                  {numberFormat(locale, row.views)}
+                                </TableCell>
+                                <TableCell className="hidden text-center font-mono tabular-nums lg:table-cell">
+                                  {percentFormat(locale, row.bounceRate)}
+                                </TableCell>
+                                <TableCell className="text-center font-mono tabular-nums">
+                                  <ChangeText value={row.visitorsChange} />
+                                </TableCell>
+                                <TableCell className="hidden w-28 max-w-40 px-3 sm:table-cell xl:w-40">
+                                  <div className="mx-auto w-full max-w-40 overflow-hidden">
+                                    <TrafficPairBarChart
+                                      data={row.trend}
+                                      locale={locale}
+                                      timeZone={window.timeZone}
+                                      interval={window.interval}
+                                      range={window}
+                                      viewsLabel={messages.common.views}
+                                      visitorsLabel={messages.common.visitors}
+                                      compact
+                                      dataIsComplete
+                                      maxPoints={36}
+                                      className="h-4"
+                                    />
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </AnalyticsTimeTooltipProvider>
+                  ) : (
+                    <p className="px-4 pb-6 text-xs text-muted-foreground">
+                      {rows.length ? copy.noMatch : copy.noSites}
+                    </p>
+                  )}
+                </AutoTransition>
+              </AutoResizer>
             </CardContent>
           </Card>
         </div>
@@ -477,35 +727,53 @@ export function WorkspaceClient({
                     {numberFormat(locale, unreadAttentionCount)}
                   </span>
                 ) : null}
+                <WorkspaceRefreshIndicator
+                  loading={notifications.isFetching && !notifications.isPending}
+                  label={messages.common.loading}
+                />
               </CardTitle>
             </CardHeader>
             <CardContent className="px-0">
-              {notifications.isPending ? (
-                <div className="space-y-2 px-4 pb-4">
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                </div>
-              ) : attention.length ? (
-                <ul className="divide-y border-t">
-                  {attention.map((message) => (
-                    <AttentionRow
-                      key={message.id}
-                      locale={locale}
-                      message={message}
-                      siteName={
-                        message.siteId
-                          ? rowsById.get(message.siteId)?.site.name
-                          : undefined
-                      }
-                      now={now}
+              <AutoResizer>
+                <AutoTransition
+                  initial={false}
+                  duration={0.2}
+                  transitionKey={
+                    notifications.isPending
+                      ? "loading"
+                      : attention.length
+                        ? "attention"
+                        : "empty"
+                  }
+                >
+                  {notifications.isPending ? (
+                    <WorkspaceLoading
+                      label={messages.common.loading}
+                      className="min-h-16 px-4 pb-4"
                     />
-                  ))}
-                </ul>
-              ) : (
-                <p className="px-4 pb-4 text-xs text-muted-foreground">
-                  {copy.noAttention}
-                </p>
-              )}
+                  ) : attention.length ? (
+                    <ul className="divide-y border-t">
+                      {attention.map((message) => (
+                        <AttentionRow
+                          key={message.id}
+                          locale={locale}
+                          message={message}
+                          siteName={
+                            message.siteId
+                              ? rowsById.get(message.siteId)?.site.name
+                              : undefined
+                          }
+                          now={now}
+                        />
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="px-4 pb-4 text-xs text-muted-foreground">
+                      {copy.noAttention}
+                    </p>
+                  )}
+                </AutoTransition>
+              </AutoResizer>
               <Link
                 href={`/${locale}/app/inbox`}
                 className="flex h-9 items-center justify-between border-t px-4 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
@@ -521,6 +789,10 @@ export function WorkspaceClient({
               <CardTitle className="inline-flex items-center gap-2">
                 <RiFlashlightLine className="size-4" />
                 {copy.changesTitle}
+                <WorkspaceRefreshIndicator
+                  loading={analyticsLoading && !waitingForSites}
+                  label={messages.common.loading}
+                />
               </CardTitle>
               <CardDescription>
                 {formatI18nTemplate(copy.changesHint, {
@@ -529,34 +801,39 @@ export function WorkspaceClient({
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {loading && !rows.length ? (
-                <Skeleton className="h-64 w-full" />
-              ) : (
-                <ChangeQuadrantChart
-                  points={rows.flatMap((row) =>
-                    row.visitorsChange === null
-                      ? []
-                      : [
-                          {
-                            id: row.site.id,
-                            label: row.site.name,
-                            value: row.visitors,
-                            change: row.visitorsChange,
-                            weight: row.views,
-                          },
-                        ],
+              <AutoResizer>
+                <AutoTransition
+                  initial={false}
+                  duration={0.2}
+                  transitionKey={
+                    waitingForSites
+                      ? "loading"
+                      : changePoints.length
+                        ? "chart"
+                        : "empty"
+                  }
+                >
+                  {waitingForSites ? (
+                    <WorkspaceLoading
+                      label={messages.common.loading}
+                      className="h-60"
+                    />
+                  ) : (
+                    <ChangeQuadrantChart
+                      points={changePoints}
+                      labels={{
+                        value: messages.common.visitors,
+                        change: copy.columns.change,
+                        weight: messages.common.views,
+                      }}
+                      locale={locale}
+                      threshold={NOTABLE_CHANGE_PERCENT}
+                      onPointSelect={openSite}
+                      emptyLabel={copy.noChanges}
+                    />
                   )}
-                  labels={{
-                    value: messages.common.visitors,
-                    change: copy.columns.change,
-                    weight: messages.common.views,
-                  }}
-                  locale={locale}
-                  threshold={NOTABLE_CHANGE_PERCENT}
-                  onPointSelect={openSite}
-                  emptyLabel={copy.noChanges}
-                />
-              )}
+                </AutoTransition>
+              </AutoResizer>
             </CardContent>
           </Card>
 
@@ -575,19 +852,38 @@ export function WorkspaceClient({
                     <dt className="text-[11px] text-muted-foreground">
                       {label}
                     </dt>
-                    <dd className="flex flex-wrap items-end gap-x-1.5 gap-y-1">
-                      {loading && !rows.length ? (
-                        <Skeleton className="h-5 w-16" />
-                      ) : (
-                        <>
-                          <span className="font-mono text-base leading-none tabular-nums">
-                            {value}
-                          </span>
-                          <span className="text-[11px] leading-none">
-                            <ChangeText value={change} />
-                          </span>
-                        </>
-                      )}
+                    <dd>
+                      <AutoResizer initial={false}>
+                        <AutoTransition
+                          transitionKey={
+                            analyticsLoading
+                              ? "loading"
+                              : JSON.stringify([value, change])
+                          }
+                          initial={false}
+                          duration={0.2}
+                          type="fade"
+                          presenceMode="wait"
+                        >
+                          {analyticsLoading ? (
+                            <div className="flex min-h-5 items-center">
+                              <Spinner
+                                className="size-5"
+                                aria-label={messages.common.loading}
+                              />
+                            </div>
+                          ) : (
+                            <div className="flex min-h-5 flex-wrap items-end gap-x-1.5 gap-y-1">
+                              <span className="font-mono text-base leading-none tabular-nums">
+                                {value}
+                              </span>
+                              <span className="text-[11px] leading-none">
+                                <ChangeText value={change} />
+                              </span>
+                            </div>
+                          )}
+                        </AutoTransition>
+                      </AutoResizer>
                     </dd>
                   </div>
                 ))}

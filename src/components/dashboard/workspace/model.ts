@@ -118,15 +118,23 @@ export function mergeTeamTrends(
 
 export type WorkspaceSort = "visitors" | "views" | "bounceRate" | "change";
 
+export type WorkspaceSortDirection = "asc" | "desc";
+
 export function sortRows(
   rows: readonly WorkspaceSiteRow[],
   sort: WorkspaceSort,
+  direction: WorkspaceSortDirection = "desc",
 ) {
   const value = (row: WorkspaceSiteRow) =>
-    sort === "change" ? (row.visitorsChange ?? -Infinity) : row[sort];
-  return [...rows].sort(
-    (left, right) =>
-      value(right) - value(left) ||
-      left.site.name.localeCompare(right.site.name),
-  );
+    sort === "change" ? row.visitorsChange : row[sort];
+  return [...rows].sort((left, right) => {
+    const a = value(left);
+    const b = value(right);
+    if (a === null && b !== null) return 1;
+    if (b === null && a !== null) return -1;
+    return (
+      (a !== null && b !== null ? (direction === "asc" ? a - b : b - a) : 0) ||
+      left.site.name.localeCompare(right.site.name)
+    );
+  });
 }
