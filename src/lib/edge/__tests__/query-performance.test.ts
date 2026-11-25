@@ -1110,6 +1110,20 @@ describe("edge query performance D1 helpers", () => {
         null,
         null,
       );
+      // Empty countries must not appear in the country rollup, but their
+      // observations still contribute to the page and global metrics.
+      insert.run(
+        "missing-country",
+        siteId,
+        window.startMs + 1,
+        "/other",
+        " ",
+        10,
+        null,
+        100,
+        0,
+        null,
+      );
       insert.run(
         "outside-window",
         siteId,
@@ -1134,6 +1148,22 @@ describe("edge query performance D1 helpers", () => {
       const sql = d1.calls[0]?.sql ?? "";
       expect(sql).not.toContain("_thresholds AS");
       expect(sql).not.toContain("JOIN summary_ordered_values");
+      expect(sql).toContain(
+        "WHERE metric_visits.pathname IN (SELECT pathname FROM path_views)",
+      );
+      expect(sql).toContain("WHERE metric_visits.country != ''");
+      expect(sql).toContain(
+        "JOIN path_views ON path_views.pathname = route_rows.pathname",
+      );
+      expect(sql).toContain(
+        "JOIN country_views ON country_views.country = country_rows.country",
+      );
+      expect(sql).not.toContain(
+        "JOIN path_views ON path_views.pathname = ordered.pathname",
+      );
+      expect(sql).not.toContain(
+        "JOIN country_views ON country_views.country = ordered.country",
+      );
       expect(dashboard.summaries).toEqual(
         await queryPerformanceSummariesFromD1(
           env,
