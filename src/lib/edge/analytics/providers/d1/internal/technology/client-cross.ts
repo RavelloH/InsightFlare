@@ -7,6 +7,7 @@ import type {
   QueryWindow,
 } from "@/lib/edge/analytics/providers/d1/internal/core";
 import {
+  appendSqlConditions,
   CLIENT_CROSS_OTHER_PRIMARY_TOKEN,
   CLIENT_CROSS_OTHER_SECONDARY_TOKEN,
   CLIENT_CROSS_UNKNOWN_TOKEN,
@@ -39,6 +40,12 @@ export async function queryCrossDimensionFromD1(
   const primaryExpr = primaryDimension.labelExpr;
   const normalizedSecondaryExpr = `CASE WHEN ${secondaryDimension.labelExpr} != '' THEN ${secondaryDimension.labelExpr} ELSE '${CLIENT_CROSS_UNKNOWN_TOKEN}' END`;
 
+  // Every aggregate excludes an empty primary label. Apply that predicate
+  // before materializing the shared observations, particularly for sparse UTM
+  // and query-string dimensions. Secondary unknowns still participate.
+  const filterClause = appendSqlConditions(source.filterClause, [
+    `(${primaryExpr}) != ''`,
+  ]);
   const sql = `
 WITH
 ${source.ctes},
@@ -49,7 +56,7 @@ filtered_visits AS MATERIALIZED (
     visitor_id AS visitorId,
     session_id AS sessionId
   FROM ${source.relation}
-  ${source.filterClause}
+  ${filterClause}
 ),
 top_primary_aggregate AS (
   SELECT
@@ -58,7 +65,6 @@ top_primary_aggregate AS (
     count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
     count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
   FROM filtered_visits
-  WHERE primaryValue != ''
   GROUP BY primaryValue
 ),
 top_primary_rows AS (
@@ -81,7 +87,6 @@ top_secondary_aggregate AS (
     count(DISTINCT CASE WHEN visitorId != '' THEN visitorId ELSE NULL END) AS visitors,
     count(DISTINCT CASE WHEN sessionId != '' THEN sessionId ELSE NULL END) AS sessions
   FROM filtered_visits
-  WHERE primaryValue != ''
   GROUP BY secondaryValue
 ),
 top_secondary_rows AS (
@@ -118,7 +123,6 @@ normalized_visits AS (
     visitorId,
     sessionId
   FROM filtered_visits
-  WHERE primaryValue != ''
 ),
 pair_rows AS (
   SELECT

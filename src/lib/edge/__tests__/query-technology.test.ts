@@ -575,6 +575,18 @@ describe("edge query technology D1 mapping", () => {
       "desktop",
     );
 
+    // Empty primary labels must not contribute to secondary top-N or pair totals.
+    insert.run("blank-primary-1", "blank-1", "blank-1", at(36), "", "mobile");
+    insert.run(
+      "blank-primary-2",
+      "blank-2",
+      "blank-2",
+      at(37),
+      "   ",
+      "mobile",
+    );
+    insert.run("blank-primary-3", "blank-3", "blank-3", at(38), "", "mobile");
+
     try {
       await expect(
         queryCrossDimensionFromD1(
@@ -683,6 +695,12 @@ describe("edge query technology D1 mapping", () => {
         totalVisitors: 5,
       });
 
+      expect(d1.calls[0].sql).toContain(
+        "WHERE (TRIM(COALESCE(browser, ''))) != ''",
+      );
+      expect(d1.calls[0].sql).not.toContain(
+        "FROM filtered_visits\n  WHERE primaryValue != ''",
+      );
       expect(d1.calls).toHaveLength(1);
       const plan = d1.database
         .prepare(`EXPLAIN QUERY PLAN ${d1.calls[0].sql}`)
