@@ -412,12 +412,12 @@ export function TeamNotificationsClient({
               >
                 {loading ? (
                   <>
-                    <span>{copy.enabledCount.split("{count}")[0]}</span>
+                    <span>{String(copy.enabledCount).split("{count}")[0]}</span>
                     <Spinner
                       className="size-4"
                       aria-label={messages.common.loading}
                     />
-                    <span>{copy.enabledCount.split("{count}")[1]}</span>
+                    <span>{String(copy.enabledCount).split("{count}")[1]}</span>
                   </>
                 ) : (
                   formatI18nTemplate(copy.enabledCount, {
