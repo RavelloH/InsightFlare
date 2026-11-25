@@ -5,6 +5,7 @@ import path from "path";
 import { defineConfig } from "vitest/config";
 import { parse } from "yaml";
 
+import { BalancedCISequencer } from "./scripts/ci-test-sequencer";
 import { regenerateAppMessages } from "./scripts/i18n-check/prune";
 
 // Keep the test pool bounded on high-core machines.  V8 coverage writes one
@@ -89,6 +90,9 @@ const config = defineConfig({
     globals: true,
     pool: "threads",
     maxWorkers: VITEST_MAX_WORKERS,
+    ...(process.env.INSIGHTFLARE_CI_BALANCED_SHARDS === "1"
+      ? { sequence: { sequencer: BalancedCISequencer } }
+      : {}),
     alias: {
       "@": path.resolve(__dirname, "./src"),
       "cloudflare:workers": path.resolve(

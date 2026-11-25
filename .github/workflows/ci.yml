@@ -25,34 +25,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  policy:
-    name: Repository Policy
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-      - name: Check every introduced commit
-        env:
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD: ${{ github.event.pull_request.head.sha }}
-          PUSH_BEFORE: ${{ github.event.before }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -n "$PR_BASE" ]]; then
-            node scripts/check-repository-policy.mjs --range "$PR_BASE" "$PR_HEAD"
-            node scripts/check-repository-policy.mjs --commit HEAD
-          elif [[ -n "$PUSH_BEFORE" && ! "$PUSH_BEFORE" =~ ^0+$ ]]; then
-            node scripts/check-repository-policy.mjs --range "$PUSH_BEFORE" HEAD
-          else
-            node scripts/check-repository-policy.mjs --commit HEAD
-          fi
 
   format:
     name: Format
@@ -70,8 +42,21 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Restore content-addressed formatting cache
+        id: format-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/prettier
+          key: prettier-v1-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'package.json', 'packages/*/package.json', 'prettier.config.js', '.prettierignore', '.gitignore', '.editorconfig') }}-${{ github.sha }}
+          restore-keys: prettier-v1-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'package.json', 'packages/*/package.json', 'prettier.config.js', '.prettierignore', '.gitignore', '.editorconfig') }}-
       - name: Check formatting
         run: pnpm run format:check
+      - name: Save formatting cache from verified formatting on main
+        if: success() && steps.format-cache.outputs.cache-hit != 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/prettier
+          key: prettier-v1-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'package.json', 'packages/*/package.json', 'prettier.config.js', '.prettierignore', '.gitignore', '.editorconfig') }}-${{ github.sha }}
 
   lint:
     name: Lint
@@ -92,10 +77,12 @@ jobs:
       - name: Full typed lint
         env:
           NODE_OPTIONS: --max-old-space-size=8192
-        run: pnpm run lint
+        # Typed lint depends on other files and their types. Never reuse per-file results across CI snapshots.
+        # Two lint threads were slower on the hosted 4-core runner and duplicated TypeScript programs.
+        run: /usr/bin/time -v pnpm exec eslint --no-cache --concurrency off --max-warnings 0 .
 
   contracts:
-    name: Contracts
+    name: Contracts and generated specifications
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -113,12 +100,23 @@ jobs:
       - name: Architecture
         run: pnpm run check:architecture
       - name: Layer contract
+        if: ${{ !cancelled() }}
         run: pnpm run check:layer
       - name: UI contracts
+        if: ${{ !cancelled() }}
         run: pnpm run check:ui-contracts
+      - name: Verify OpenAPI and Skills
+        if: ${{ !cancelled() }}
+        run: pnpm run check:openapi
+      - name: Verify schema
+        if: ${{ !cancelled() }}
+        run: pnpm run check:schema
+      - name: Verify product labels
+        if: ${{ !cancelled() }}
+        run: pnpm run check:labels
 
   typecheck:
-    name: Typecheck
+    name: Typecheck and UI package audit
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -133,10 +131,17 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Typecheck application and build packages
-        run: pnpm run typecheck
+      - name: Build UI packages once
+        id: packages
+        run: pnpm run build:packages
+      - name: Typecheck application
+        run: pnpm exec tsc --noEmit -p tsconfig.json
       - name: Typecheck package tests
+        if: ${{ !cancelled() && steps.packages.outcome == 'success' }}
         run: pnpm run typecheck:packages
+      - name: Audit package archives
+        if: ${{ !cancelled() && steps.packages.outcome == 'success' }}
+        run: node scripts/publish-ui-packages.mjs --audit
 
   translations:
     name: Translations
@@ -157,71 +162,16 @@ jobs:
       - name: Check translations
         run: pnpm run check:i18n
 
-  spec:
-    name: OpenAPI and Skills
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10.33.0
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Verify OpenAPI and Skills
-        run: pnpm run check:openapi
-
-  schema:
-    name: Schema
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10.33.0
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Verify schema
-        run: pnpm run check:schema
-
-  labels:
-    name: Labels
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10.33.0
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Verify product labels
-        run: pnpm run check:labels
-
   core-shards:
-    name: Core tests (${{ matrix.shard }}/4)
+    env:
+      INSIGHTFLARE_CI_BALANCED_SHARDS: "1"
+    name: Core tests (${{ matrix.shard }}/6)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -234,10 +184,14 @@ jobs:
           node-version: 24.17.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Runner resources and worker budget
+        run: |
+          node -e 'const os=require("node:os"); console.log(JSON.stringify({availableParallelism:os.availableParallelism(),logicalCPUs:os.cpus().length,memoryGiB:os.totalmem()/2**30,sqlite:process.versions.sqlite}))'
+          free -h
       - name: Run coverage shard
         # Thresholds apply to the merged coverage map, not an individual shard.
         run: >-
-          pnpm exec vitest run --shard=${{ matrix.shard }}/4 --reporter=blob --reporter=default --coverage --silent=passed-only
+          pnpm exec vitest run --shard=${{ matrix.shard }}/6 --reporter=blob --reporter=default --coverage --silent=passed-only --maxWorkers=100%
           --coverage.reporter=json-summary
           --coverage.thresholds.lines=0 --coverage.thresholds.statements=0
           --coverage.thresholds.branches=0 --coverage.thresholds.functions=0
@@ -256,6 +210,9 @@ jobs:
     needs: [core-shards]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Native merge loads its config and regenerates messages; it does not run tests or the tracker SDK.
+      INSIGHTFLARE_CI_PREPARE: skip
     steps:
       - uses: actions/checkout@v6
         with:
@@ -273,12 +230,12 @@ jobs:
           pattern: core-blob-*
           path: .vitest-reports
           merge-multiple: true
-      - name: Verify all four reports exist
+      - name: Verify all six reports exist
         shell: bash
         run: |
           set -euo pipefail
-          for shard in 1 2 3 4; do test -s ".vitest-reports/blob-$shard-4.json"; done
-          test "$(find .vitest-reports -maxdepth 1 -type f | wc -l)" -eq 4
+          for shard in 1 2 3 4 5 6; do test -s ".vitest-reports/blob-$shard-6.json"; done
+          test "$(find .vitest-reports -maxdepth 1 -type f | wc -l)" -eq 6
       - name: Merge coverage and enforce global thresholds
         run: pnpm exec vitest --merge-reports --coverage --coverage.reporter=text-summary --coverage.reporter=json-summary --coverage.reporter=html --coverage.reportsDirectory=coverage/core
       - uses: actions/upload-artifact@v4
@@ -305,7 +262,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Tracker coverage
-        run: pnpm run test:coverage:tracker
+        run: pnpm run test:coverage:tracker --maxWorkers=100%
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -332,33 +289,12 @@ jobs:
       - name: Build Demo
         run: pnpm run build:demo
 
-  ui-packages:
-    name: UI package audit
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10.33.0
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Build UI packages
-        run: pnpm run build:packages
-      - name: Audit package archives
-        run: node scripts/publish-ui-packages.mjs --audit
-
   deploy-artifact:
     name: Deploy artifact
     uses: ./.github/workflows/build-deploy-artifact.yml
 
   release-plan:
-    name: Release plan
+    name: Repository policy and release plan
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -372,7 +308,24 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+      - name: Check every introduced commit
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$PR_BASE" ]]; then
+            node scripts/check-repository-policy.mjs --range "$PR_BASE" "$PR_HEAD"
+            node scripts/check-repository-policy.mjs --commit HEAD
+          elif [[ -n "$PUSH_BEFORE" && ! "$PUSH_BEFORE" =~ ^0+$ ]]; then
+            node scripts/check-repository-policy.mjs --range "$PUSH_BEFORE" HEAD
+          else
+            node scripts/check-repository-policy.mjs --commit HEAD
+          fi
       - id: plan
+        if: ${{ !cancelled() }}
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           RELEASE_VERSION: ${{ inputs.release_version }}
@@ -393,7 +346,7 @@ jobs:
   gate:
     name: CI Gate
     if: always()
-    needs: [policy, format, lint, contracts, typecheck, translations, spec, schema, labels, core-shards, core-coverage, tracker, demo, deploy-artifact, ui-packages, release-plan, release-e2e, readme]
+    needs: [format, lint, contracts, typecheck, translations, core-shards, core-coverage, tracker, demo, deploy-artifact, release-plan, release-e2e, readme]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -404,15 +357,20 @@ jobs:
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
+          import { appendFileSync } from "node:fs";
           const results = JSON.parse(process.env.RESULTS);
+          const summary = ["## CI Gate", "", "| Check | Result |", "| --- | --- |"];
           const release = results["release-plan"];
           for (const [name, value] of Object.entries(results)) {
             const optional = release.result === "success" && ((name === "release-e2e" && !release.outputs.version) || (name === "readme" && release.outputs.readme !== "true"));
-            if (value.result !== (optional ? "skipped" : "success")) {
+            const expected = optional ? "skipped" : "success";
+            summary.push("| " + name + " | " + value.result + (optional ? " (optional)" : "") + " |");
+            if (value.result !== expected) {
               console.error(name + ": " + value.result);
               process.exitCode = 1;
             }
           }
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary.join("\n") + "\n");
           NODE
 
   publish-nightly:
