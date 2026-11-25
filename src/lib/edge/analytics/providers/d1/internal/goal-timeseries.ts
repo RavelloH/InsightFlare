@@ -13,8 +13,8 @@ import {
 } from "./core-time";
 import type { Interval, QueryWindow } from "./core-types";
 import {
+  compileMarkedObservationSource,
   compileScopedDatasetSql,
-  executeObservationFilterOnScopedDataset,
   scopedDatasetFor,
   type ScopedDatasetSql,
 } from "./scoped-dataset";
@@ -82,11 +82,7 @@ export async function queryGoalTimeseriesFromD1(
     globalFilters,
     preparedDataset,
   );
-  const goal = executeObservationFilterOnScopedDataset(
-    dataset,
-    goalFilter,
-    "goal",
-  );
+  const goal = compileMarkedObservationSource(dataset, goalFilter, true);
   const buckets = buildTimeBuckets(window, interval);
   const observationBucket = timeBucketCase(buckets, "observations.observed_at");
 
@@ -94,20 +90,7 @@ export async function queryGoalTimeseriesFromD1(
     env,
     `WITH
 ${dataset.ctes.trim()},
-${goal.ctes.trim()},
-source_observations AS (
-  SELECT 0 AS is_goal, site_pk, started_at AS observed_at, session_id, visitor_id
-  FROM ${dataset.visitRelation}
-  UNION ALL
-  SELECT 0 AS is_goal, site_pk, occurred_at AS observed_at, session_id, visitor_id
-  FROM ${dataset.eventRelation}
-  UNION ALL
-  SELECT 1 AS is_goal, site_pk, started_at AS observed_at, session_id, visitor_id
-  FROM ${goal.matchedVisitRelation}
-  UNION ALL
-  SELECT 1 AS is_goal, site_pk, occurred_at AS observed_at, session_id, visitor_id
-  FROM ${goal.matchedEventRelation}
-),
+${goal.cte},
 bucketed_observations AS MATERIALIZED (
   SELECT DISTINCT
     ${observationBucket.sql} AS bucket,
@@ -120,14 +103,14 @@ bucketed_observations AS MATERIALIZED (
 ),
 entity_counts AS (
   SELECT bucket, site_pk, session_id AS entity_id, 0 AS kind,
-    MAX(CASE WHEN is_goal = 0 THEN 1 ELSE 0 END) AS is_base,
+    1 AS is_base,
     MAX(is_goal) AS is_goal
   FROM bucketed_observations
   WHERE bucket IS NOT NULL AND TRIM(COALESCE(session_id, '')) != ''
   GROUP BY bucket, site_pk, session_id
   UNION ALL
   SELECT bucket, site_pk, visitor_id AS entity_id, 1 AS kind,
-    MAX(CASE WHEN is_goal = 0 THEN 1 ELSE 0 END) AS is_base,
+    1 AS is_base,
     MAX(is_goal) AS is_goal
   FROM bucketed_observations
   WHERE bucket IS NOT NULL AND TRIM(COALESCE(visitor_id, '')) != ''

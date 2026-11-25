@@ -18,7 +18,11 @@ import {
   queryGoalTimeseriesFromD1,
   withGoalTimeseriesTimestamps,
 } from "@/lib/edge/analytics/providers/d1/internal/goal-timeseries";
-import type { ScopedDatasetSql } from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
+import {
+  compileMarkedObservationSource,
+  executeObservationFilterOnScopedDataset,
+  type ScopedDatasetSql,
+} from "@/lib/edge/analytics/providers/d1/internal/scoped-dataset";
 import { parseFilterDsl } from "@/lib/filter-contract";
 
 type Binding = string | number | null;
@@ -264,6 +268,54 @@ describe("Goal D1 analytics", () => {
     ]);
   });
 
+  it("marks each base observation once with exactly the shared predicate truth", () => {
+    const d1 = new SqliteD1Database();
+    try {
+      const prepared = truthDataset();
+      for (const filter of [
+        emptyFilter,
+        dsl('page.path eq "/checkout"'),
+        dsl('event.name eq "purchase"'),
+        dsl('event.payload("/plan") eq "pro"'),
+        dsl('NOT event.name eq "purchase"'),
+        dsl('page.path eq "/pricing" OR event.name eq "purchase"'),
+        dsl('event.payload("/plan") eq "pro" AND page.path eq "/checkout"'),
+        dsl('event.name eq "absent"'),
+      ]) {
+        const matched = executeObservationFilterOnScopedDataset(
+          prepared,
+          filter,
+          "expected",
+        );
+        const marked = compileMarkedObservationSource(prepared, filter, true);
+        const old = d1.database
+          .prepare(
+            `WITH ${prepared.ctes},${matched.ctes}
+          SELECT site_pk,started_at AS observed_at,session_id,visitor_id FROM ${matched.matchedVisitRelation}
+          UNION ALL SELECT site_pk,occurred_at,session_id,visitor_id FROM ${matched.matchedEventRelation}
+          ORDER BY site_pk,observed_at,session_id,visitor_id`,
+          )
+          .all(...matched.bindings.map((b) => b.value));
+        const actual = d1.database
+          .prepare(
+            `WITH ${prepared.ctes},${marked.cte}
+          SELECT site_pk,observed_at,session_id,visitor_id FROM source_observations
+          WHERE is_goal=1 ORDER BY site_pk,observed_at,session_id,visitor_id`,
+          )
+          .all(...marked.bindings.map((b) => b.value));
+        expect(actual).toEqual(old);
+        const totals = d1.database
+          .prepare(
+            `WITH ${prepared.ctes},${marked.cte}
+          SELECT COUNT(*) AS total FROM source_observations`,
+          )
+          .get(...marked.bindings.map((b) => b.value));
+        expect(totals?.total).toBe(11);
+      }
+    } finally {
+      d1.database.close();
+    }
+  });
   it("returns one summary row with unique identities and empty identities excluded", async () => {
     const d1 = new SqliteD1Database();
     const result = await queryGoalSummaryFromD1(
@@ -282,7 +334,9 @@ describe("Goal D1 analytics", () => {
       convertedVisitors: 2,
     });
     expect(d1.calls).toHaveLength(1);
-    expect(d1.calls[0]).toContain("goal_matched_visits");
+    expect(d1.calls[0]).toContain("source_observations AS (");
+    expect(d1.calls[0]).not.toContain("goal_matched_visits");
+    expect(d1.calls[0]).toContain("CASE WHEN");
   });
 
   it("deduplicates session and visitor independently in every bucket", async () => {
