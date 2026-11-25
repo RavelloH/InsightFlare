@@ -24,7 +24,7 @@ import {
 import { AnalyticsDataTable } from "@/components/dashboard/common/analytics-data-table";
 import {
   CountryRegionMeta,
-  formatRelativeTime,
+  RelativeTimeValue,
   VisitorAvatar,
 } from "@/components/dashboard/journeys/journey-display";
 import { numberFormat } from "@/lib/dashboard/format";
@@ -87,7 +87,6 @@ export const BlockedRequestsTable = memo(function BlockedRequestsTable({
   const searchParams = useSearchParams();
   const [selectedEvent, setSelectedEvent] = useState<BotEvent | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
   const [detailParam, setDetailParam] = useState(
     () => searchParams.get("detail")?.trim() || "",
   );
@@ -141,11 +140,6 @@ export const BlockedRequestsTable = memo(function BlockedRequestsTable({
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(interval);
   }, []);
 
   const updateDetailParam = useCallback(
@@ -348,7 +342,7 @@ export const BlockedRequestsTable = memo(function BlockedRequestsTable({
               locale={locale}
               timestamp={event.receivedAt}
             >
-              {formatRelativeTime(locale, event.receivedAt, now)}
+              <RelativeTimeValue locale={locale} timestamp={event.receivedAt} />
             </AnalyticsTimeTooltipTarget>
           </TableCell>
         ),
@@ -597,15 +591,7 @@ export const BlockedRequestsTable = memo(function BlockedRequestsTable({
         },
       };
     },
-    [
-      copy,
-      handleKeyDown,
-      locale,
-      messages,
-      now,
-      openEvent,
-      tableColumns.visibleIds,
-    ],
+    [copy, handleKeyDown, locale, messages, openEvent, tableColumns.visibleIds],
   );
   const renderSkeletonRow = useCallback(
     (index: number) => (

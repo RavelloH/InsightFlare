@@ -177,14 +177,19 @@ export function useReactOverlayScrollbar({
   optionsRef.current = options;
 
   useEffect(() => {
-    if (!enabled || shouldUseNativeScrollbars()) return;
+    if (shouldUseNativeScrollbars()) return;
 
     const host = hostRef.current;
     const viewport = viewportRef.current;
     const content = contentRef.current;
     if (!host || !viewport || !content) return;
+    if (!enabled) {
+      viewport.setAttribute("data-scrollbar-fallback", "");
+      return () => viewport.removeAttribute("data-scrollbar-fallback");
+    }
 
     let cancelled = false;
+    let failed = false;
     let instance: OverlayScrollbars | null = null;
     let cancelQueued: (() => void) | null = null;
     let observer: ResizeObserver | null = null;
@@ -192,24 +197,33 @@ export function useReactOverlayScrollbar({
       viewport.dispatchEvent(new Event(SCROLLBAR_UPDATED_EVENT));
     const enhance = () => {
       cancelQueued = null;
-      if (cancelled || instance || !host.isConnected) return;
+      if (cancelled || failed || instance || !host.isConnected) return;
       // The outer shell often has no overflow; don't build a scrollbar until
       // the viewport actually needs one.
       if (!hasScrollableOverflow(viewport, optionsRef.current)) return;
-      initialize({ target: host, elements: { viewport, content } });
-      const candidate = getInstance();
-      instance =
-        candidate && OverlayScrollbars.valid(candidate) ? candidate : null;
+      try {
+        initialize({ target: host, elements: { viewport, content } });
+        const candidate = getInstance();
+        instance =
+          candidate && OverlayScrollbars.valid(candidate) ? candidate : null;
+      } catch {
+        // Keep the original viewport scrollable if enhancement fails.
+      }
       instanceRef.current = instance;
       if (instance) {
         observer?.disconnect();
         viewport.removeEventListener("scroll", queue);
         instance.on("updated", notify);
-        notify();
+      } else {
+        failed = true;
+        observer?.disconnect();
+        viewport.removeEventListener("scroll", queue);
+        viewport.setAttribute("data-scrollbar-fallback", "");
       }
+      notify();
     };
     const queue = () => {
-      if (!cancelled && !instance && !cancelQueued)
+      if (!cancelled && !failed && !instance && !cancelQueued)
         cancelQueued = enqueueEnhancement(enhance);
     };
     if (typeof ResizeObserver !== "undefined") {
@@ -229,6 +243,7 @@ export function useReactOverlayScrollbar({
         instance.off("updated", notify);
         instance.destroy();
       }
+      viewport.removeAttribute("data-scrollbar-fallback");
       instanceRef.current = null;
     };
   }, [enabled, getInstance, hostRef, initialize, viewportRef, contentRef]);

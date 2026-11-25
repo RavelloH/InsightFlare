@@ -26,7 +26,6 @@ import {
   getDashboardRootContext,
   getDashboardRuntime,
   getDashboardTeamContext,
-  getDashboardTeamSites,
   getTeamSiteContext,
   readDashboardAdmin,
 } from "@/lib/dashboard/server";
@@ -129,7 +128,7 @@ async function executeTeamDashboardSnapshot(data: {
       env: runtime.env,
       teamId: data.teamId,
     }),
-    getDashboardTeamSites(data.teamId),
+    readDashboardAdmin("sites", { teamId: data.teamId }),
     readInitialWindow(),
   ]);
   if (resolved instanceof Response) return null;
@@ -145,7 +144,7 @@ async function executeTeamDashboardSnapshot(data: {
     },
     interval: window.interval,
     allowedSiteIds: resolved.allowedSiteIds,
-    preloadedSites: preloadedSites.map(({ slug: _slug, ...site }) => ({
+    preloadedSites: preloadedSites?.map((site) => ({
       ...site,
       publicEnabled: Number(Boolean(site.publicEnabled)),
     })),
