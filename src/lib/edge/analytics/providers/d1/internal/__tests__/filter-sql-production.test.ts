@@ -901,6 +901,58 @@ describe("P5 Scoped Dataset integration: SQL-only advanced qualification", () =>
     }
   });
 
+  it("combines same-grain fact AND evidence once without changing membership intersections", () => {
+    const db = sqliteFixture();
+    try {
+      for (const [scope, predicates] of [
+        [
+          "session",
+          [
+            "session.views gte 1",
+            "session.durationMs gte 0",
+            "session.bounce eq true",
+          ],
+        ],
+        [
+          "visitor",
+          [
+            "visitor.views gte 1",
+            "visitor.sessions gte 1",
+            "visitor.views lt 100",
+          ],
+        ],
+        ["session", ["session.views gte 100000", "session.durationMs gte 0"]],
+        ["visitor", ["visitor.sessions gte 100000", "visitor.views gte 0"]],
+      ] as const) {
+        const combined = dataset(predicates.join(" and "), scope);
+        expect(combined.ctes).toContain("scope_shared_fact_membership AS (");
+        expect(combined.ctes).not.toContain("first_child");
+        const column = scope === "session" ? "session_id" : "visitor_id";
+        const read = (expression: string) => {
+          const result = dataset(expression, scope);
+          return select(
+            db,
+            `WITH ${result.ctes} SELECT DISTINCT site_pk,${column} AS entity_id FROM ${scope === "session" ? result.sessionRelation : result.visitorRelation} ORDER BY site_pk,entity_id`,
+            result.bindings.map((b) => b.value),
+          );
+        };
+        const sets = predicates.map((p) =>
+          read(p).map((row) => JSON.stringify(row)),
+        );
+        const expected = sets[0].filter((row) =>
+          sets.slice(1).every((set) => set.includes(row)),
+        );
+        expect(
+          read(predicates.join(" and ")).map((row) => JSON.stringify(row)),
+        ).toEqual(expected);
+      }
+      const mixed = dataset("session.views gte 1 and session.events gte 1");
+      expect(mixed.ctes).not.toContain("scope_shared_fact_membership AS (");
+    } finally {
+      db.close();
+    }
+  });
+
   it("runs a complex Selector/Count Filter without any advanced JS match IDs", () => {
     const db = sqliteFixture();
     try {

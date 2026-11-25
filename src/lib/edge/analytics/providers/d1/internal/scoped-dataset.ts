@@ -962,6 +962,41 @@ scope_universe AS (
 )`,
     ),
   ];
+  // Each old AND operand is an existential fact membership set. Group
+  // by the actual membership key, not site_id, so even inconsistent legacy
+  // fact rows cannot change intersection semantics.
+  if (sharedKind && expression?.kind === "and") {
+    const conditions: FilterCondition[] = [];
+    const collect = (node: EntitySetExpression) => {
+      if (node.kind === "condition") conditions.push(node.condition);
+      else if (node.kind === "and") node.children.forEach(collect);
+      else throw new TypeError("Expected a same-grain fact conjunction.");
+    };
+    collect(expression);
+    if (conditions.length > 1) {
+      const alias = sharedKind === "session" ? "sf" : "vf";
+      const bindings: Array<string | number> = [];
+      const evidence = conditions.map(
+        (condition) =>
+          `MAX(CASE WHEN (${compileFactPredicate(condition, alias, bindings)}) THEN 1 ELSE 0 END) = 1`,
+      );
+      const relation = "scope_shared_fact_membership";
+      ctes.push(
+        boundCte(
+          relation,
+          `${relation} AS (
+  SELECT ${alias}.site_pk, ${alias}.${column} AS entity_id
+  FROM scope_${sharedKind}_facts ${alias}
+  WHERE ${alias}.site_pk IS NOT NULL
+  GROUP BY ${alias}.site_pk, ${alias}.${column}
+  HAVING ${evidence.join(" AND ")}
+)`,
+          bindings,
+        ),
+      );
+      return { relation, ctes };
+    }
+  }
   let index = 0;
 
   const compile = (node: EntitySetExpression | null): string => {
