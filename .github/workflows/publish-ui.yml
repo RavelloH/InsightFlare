@@ -1,18 +1,10 @@
 name: Publish InsightFlare UI packages
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-    paths:
-      - ".github/workflows/publish-ui.yml"
-      - "packages/ui/**"
-      - "packages/product-ui/**"
-      - "scripts/publish-ui-packages.mjs"
-      - "scripts/smoke-packages.ts"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,28 +16,53 @@ concurrency:
 
 jobs:
   publish:
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.repository == 'RavelloH/InsightFlare' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - name: Check source is still current main
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          echo "publish=$([[ "$(git rev-parse HEAD)" == "$current" ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       - uses: pnpm/action-setup@v6
+        if: steps.current.outputs.publish == 'true'
         with:
           version: 10.33.0
       - uses: actions/setup-node@v6
+        if: steps.current.outputs.publish == 'true'
         with:
           node-version: 24
           package-manager-cache: false
       - name: Install dependencies
+        if: steps.current.outputs.publish == 'true'
         run: pnpm install --frozen-lockfile
       # Product UI resolves @insightflare/ui types from dist on a fresh checkout.
       - name: Build UI packages
+        if: steps.current.outputs.publish == 'true'
         run: pnpm run build:packages
       - name: Typecheck UI packages
+        if: steps.current.outputs.publish == 'true'
         run: pnpm run typecheck:packages
       - name: Audit npm archives and published versions
+        if: steps.current.outputs.publish == 'true'
         run: node scripts/publish-ui-packages.mjs --check
       - name: Enable modern npm OIDC support
+        if: steps.current.outputs.publish == 'true'
         run: npm install -g "npm@11.6.0"
       - name: Publish unpublished UI package versions
+        if: steps.current.outputs.publish == 'true'
         run: node scripts/publish-ui-packages.mjs --publish

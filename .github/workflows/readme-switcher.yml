@@ -1,21 +1,10 @@
 name: README i18n switcher
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - README.md
-      - .github/readme/README.*.md
-      - .github/workflows/readme-switcher.yml
-  pull_request:
-    branches: [main]
-    paths:
-      - README.md
-      - .github/readme/README.*.md
-      - .github/workflows/readme-switcher.yml
+  workflow_call:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   switcher:
@@ -25,7 +14,6 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-
       - id: switcher
         uses: n9gc/auto-readme-i18n-switcher@v2.0.1
         with:
@@ -33,11 +21,5 @@ jobs:
             .github/readme
           repoReadme: ".github/readme/README.en.md"
           switcherBody: "\n| {{lines}} |\n"
-
-      - name: Push README switcher changes
-        if: github.event_name == 'push' && steps.switcher.outputs.switcher_changed == 'true'
-        uses: actions-js/push@master
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: main
-          message: "docs: update README i18n switcher"
+      - name: Require committed README switcher updates
+        run: git diff --exit-code -- README.md .github/readme

@@ -1,76 +1,32 @@
 name: Publish Nightly Deploy Artifact
 
-# One rolling prerelease, not a formal version. Each main commit is compiled
-# independently, and only the newest fully uploaded commit is advertised.
-# Publishing is NOT enabled until this workflow is merged into upstream main.
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: write
 
-# Serialize publication to avoid races between push and manual runs.
 concurrency:
   group: insightflare-rolling-nightly
   cancel-in-progress: false
 
 jobs:
   nightly:
-    name: Compile exact main SHA and update rolling nightly
-    if: github.repository == 'RavelloH/InsightFlare' && github.ref == 'refs/heads/main'
+    name: Publish verified exact main SHA
+    if: github.repository == 'RavelloH/InsightFlare' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      CI: "true"
-      WORKERS_CI: "1"
-      WRANGLER_SEND_METRICS: "false"
-      DO_NOT_TRACK: "1"
-
+    timeout-minutes: 15
     steps:
-      - name: Checkout exact source commit
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
-          fetch-depth: 0
-
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10.33.0
-
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
-
-      - name: Install locked dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build Cloudflare Worker and static assets without remote database access
-        run: pnpm exec tsx scripts/build.ts --target cf --skip-prebuild
-
-      - name: Package SHA-addressed worker, assets and migrations
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/package-deploy-artifact.mjs "$GITHUB_SHA" --archive
-          base=".tmp/deploy-release/insightflare-deploy-$GITHUB_SHA"
-          test -s "$base.tar.gz"
-          test -s "$base.json"
-          tar -tzf "$base.tar.gz" > "$RUNNER_TEMP/nightly-contents.txt"
-          node --input-type=module <<'NODE'
-          import { readFileSync } from "node:fs";
-          const sha = process.env.GITHUB_SHA;
-          const m = JSON.parse(readFileSync(".tmp/deploy-release/insightflare-deploy-" + sha + ".json", "utf8"));
-          if (m.schemaVersion !== 1 || m.source.repository !== "RavelloH/InsightFlare" ||
-              m.source.sha !== sha || m.totals.modules < 100 || m.totals.assets < 100 ||
-              m.totals.migrations < 1 || !/^[a-f0-9]{64}$/.test(m.artifactDigest)) {
-            throw new Error("Incomplete or mismatched nightly build.");
-          }
-          console.log("Verified source SHA", sha, "artifact digest", m.artifactDigest);
-          NODE
-
+      - uses: actions/download-artifact@v4
+        with:
+          name: deploy-${{ github.sha }}
+          path: .tmp/deploy-release
       - name: Publish one verified nightly tar.gz attachment
         shell: bash
         env:

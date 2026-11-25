@@ -23,25 +23,21 @@ At minimum, local secret-backed flows need `MAIN_SECRET` and `BOOTSTRAP_ADMIN_PA
 
 ## Quality Checks
 
-Before opening a pull request, run:
+Before opening or updating a pull request, run the fast incremental check:
 
 ```bash
-pnpm run check
+pnpm check
 ```
 
-This runs the same core checks expected by CI:
+Use `pnpm check:fix` for safe formatting and lightweight lint fixes. Run
+targeted tests and other relevant checks for your changes. For a complete local
+validation, use `pnpm check:verify` (strict) or `pnpm check:full` (with
+automatic fixes).
 
-- TypeScript type checking
-- ESLint
-- Prettier format check
-- i18n key validation
-- Vitest tests
-
-For build-related changes, also run:
-
-```bash
-pnpm run build:demo
-```
+The required CI Gate verifies the complete project, including typed ESLint,
+TypeScript, contracts, translations, specs, schema, labels, tests and coverage,
+Demo build, and deploy artifact packaging. Pre-commit and pre-push retain the
+repository admission policy; never bypass those hooks to publish files.
 
 ## Pull Requests
 
@@ -53,6 +49,20 @@ Keep pull requests small and focused. A good PR should include:
 - Screenshots or recordings for UI changes when useful
 
 Avoid mixing unrelated refactors with feature or bug-fix changes.
+
+Use a feature branch rather than pushing development changes directly to main.
+Fix failed checks in the same PR. Enable auto-merge after review, when appropriate;
+the required CI Gate must pass before merging.
+
+## Releases
+
+Prepare the version bump, changelog, generated OpenAPI and Skills documents,
+and release index together in a release PR. Commit the changelog before running
+`pnpm generate:release-index` so the generator has Git metadata. Preserve the
+changelog commit in the main history (use a merge commit for release PRs).
+The release PR runs full E2E. Publishing uses the verified main SHA and never
+commits generated files back to main. To retry a release, dispatch CI on main
+with the matching `release_version` input.
 
 ## Tests
 

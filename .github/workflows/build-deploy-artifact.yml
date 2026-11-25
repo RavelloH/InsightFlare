@@ -1,0 +1,73 @@
+name: Build deploy artifact
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify SHA-addressed artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      HUSKY: "0"
+      WORKERS_CI: "1"
+      WRANGLER_SEND_METRICS: "false"
+      DO_NOT_TRACK: "1"
+    steps:
+      - name: Checkout exact source commit
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Cloudflare Worker and static assets without remote database access
+        run: pnpm exec tsx scripts/build.ts --target cf --skip-prebuild
+
+      - name: Package SHA-addressed worker, assets and migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/package-deploy-artifact.mjs "$GITHUB_SHA" --archive
+          base=".tmp/deploy-release/insightflare-deploy-$GITHUB_SHA"
+          test -s "$base.tar.gz"
+          test -s "$base.json"
+          tar -tzf "$base.tar.gz" > "$RUNNER_TEMP/nightly-contents.txt"
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+          const sha = process.env.GITHUB_SHA;
+          const m = JSON.parse(readFileSync(".tmp/deploy-release/insightflare-deploy-" + sha + ".json", "utf8"));
+          if (m.schemaVersion !== 1 || m.source.repository !== "RavelloH/InsightFlare" ||
+              m.source.sha !== sha || m.totals.modules < 100 || m.totals.assets < 100 ||
+              m.totals.migrations < 1 || !/^[a-f0-9]{64}$/.test(m.artifactDigest)) {
+            throw new Error("Incomplete or mismatched nightly build.");
+          }
+          console.log("Verified source SHA", sha, "artifact digest", m.artifactDigest);
+          NODE
+
+      - name: Upload verified deploy artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-${{ github.sha }}
+          path: |
+            .tmp/deploy-release/insightflare-deploy-*.tar.gz
+            .tmp/deploy-release/insightflare-deploy-*.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: true

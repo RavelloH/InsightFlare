@@ -1,174 +1,37 @@
 name: Release
 
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+  workflow_call:
     inputs:
       version:
-        description: Release version to publish, for example v0.7.1
-        required: true
         type: string
+        required: true
 
 permissions:
   contents: write
 
 jobs:
   release:
-    name: Create GitHub Release
+    name: Publish verified release
+    if: github.repository == 'RavelloH/InsightFlare' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
-          fetch-depth: 0
-
-      - name: Detect new changelog
-        id: changelog
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION_INPUT="${{ inputs.version }}"
-            if [[ ! "$VERSION_INPUT" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "::error::Invalid release version: $VERSION_INPUT"
-              exit 1
-            fi
-
-            VERSION_INPUT="${VERSION_INPUT#v}"
-            NEW_FILE="changelog/v${VERSION_INPUT}.md"
-            if [ ! -f "$NEW_FILE" ]; then
-              echo "::error::Changelog file not found: $NEW_FILE"
-              exit 1
-            fi
-          else
-            BEFORE_SHA="${{ github.event.before }}"
-            if [ -z "$BEFORE_SHA" ] || [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
-              BEFORE_SHA="HEAD^"
-            fi
-
-            NEW_FILE="$(git diff --name-status "$BEFORE_SHA" "${{ github.sha }}" | awk '$1 == "A" {print $2}' | grep -E '^changelog/v[0-9]+\.[0-9]+\.[0-9]+.*\.md$' | head -n 1 || true)"
-          fi
-
-          if [ -z "$NEW_FILE" ]; then
-            echo "has_release=false" >> "$GITHUB_OUTPUT"
-            echo "version=" >> "$GITHUB_OUTPUT"
-            echo "file_path=" >> "$GITHUB_OUTPUT"
-            echo "No new changelog file found."
-            exit 0
-          fi
-
-          VERSION="$(basename "$NEW_FILE" .md)"
-          echo "has_release=true" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "file_path=$NEW_FILE" >> "$GITHUB_OUTPUT"
-          echo "Detected release changelog: $NEW_FILE"
-
-      - name: Setup pnpm
-        if: steps.changelog.outputs.has_release == 'true'
-        uses: pnpm/action-setup@v6
-        with:
-          version: 10.33.0
-
-      - name: Setup Node.js
-        if: steps.changelog.outputs.has_release == 'true'
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install dependencies
-        if: steps.changelog.outputs.has_release == 'true'
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Chromium for E2E
-        if: steps.changelog.outputs.has_release == 'true'
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Run full E2E gate
-        if: steps.changelog.outputs.has_release == 'true'
-        run: pnpm run test:e2e
-
-      - name: Upload E2E diagnostics
-        if: failure() && steps.changelog.outputs.has_release == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-diagnostics
-          path: |
-            .tmp/e2e/
-            logs/e2e.log
-          if-no-files-found: ignore
-
-      - name: Sync release artifacts
-        if: steps.changelog.outputs.has_release == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          TARGET_VERSION="${{ steps.changelog.outputs.version }}"
-          TARGET_VERSION="${TARGET_VERSION#v}"
-
-          node - <<'NODE' "$TARGET_VERSION"
-          const fs = require("node:fs");
-          const version = process.argv[2];
-
-          function updatePackageJson(filePath) {
-            const raw = fs.readFileSync(filePath, "utf8");
-            const json = JSON.parse(raw);
-            json.version = version;
-            fs.writeFileSync(filePath, JSON.stringify(json, null, 2) + "\n");
-          }
-
-          updatePackageJson("package.json");
-          NODE
-
-          pnpm run generate:openapi
-          pnpm run generate:release-index
-          pnpm run generate:skills
-          pnpm exec tsx scripts/check-openapi-contract.ts
-
-          git diff --exit-code -- pnpm-lock.yaml
-
-          git add package.json .github/releases/version.json scripts/skills-template.json docs/openapi.json docs/openapi.yaml docs/skills.json
-
-          if git diff --cached --quiet; then
-            echo "Release artifacts are already up to date."
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore(release): sync release artifacts to ${{ steps.changelog.outputs.version }} [skip ci]"
-          HUSKY=0 git push origin HEAD:${{ github.ref_name }}
-
-      - name: Finalize release commit
-        id: finalize
-        if: steps.changelog.outputs.has_release == 'true'
-        shell: bash
-        run: |
-          echo "build_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Generate release notes
-        if: steps.changelog.outputs.has_release == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          FILE_PATH="${{ steps.changelog.outputs.file_path }}"
-
-          cat "$FILE_PATH" > release.md
-
-      - name: Create release
-        if: steps.changelog.outputs.has_release == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.changelog.outputs.version }}
-          name: Release ${{ steps.changelog.outputs.version }}
-          body_path: release.md
-          target_commitish: ${{ steps.finalize.outputs.build_sha }}
-          fail_on_unmatched_files: true
+          persist-credentials: false
+      - name: Verify exact version and publish without modifying main
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test -f "changelog/$VERSION.md"
+          [[ "v$(node -p 'require("./package.json").version')" == "$VERSION" ]]
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release already exists: $VERSION"
+            exit 0
+          fi
+          gh release create "$VERSION" --target "$GITHUB_SHA" --title "Release $VERSION" --notes-file "changelog/$VERSION.md"

@@ -24,8 +24,8 @@
     "build:packages": "pnpm run build:package:ui && pnpm run build:package:product-ui",
     "build:package:ui": "pnpm --filter @insightflare/ui build",
     "build:package:product-ui": "pnpm --filter @insightflare/product-ui build",
-    "typecheck:packages": "pnpm --filter @insightflare/ui typecheck && pnpm --filter @insightflare/product-ui typecheck",
-    "check:packages": "pnpm run typecheck:packages && pnpm run build:packages",
+    "typecheck:packages": "pnpm --filter @insightflare/ui exec tsc --noEmit -p tsconfig.json && pnpm --filter @insightflare/product-ui exec tsc --noEmit -p tsconfig.json",
+    "check:packages": "pnpm run build:packages && pnpm run typecheck:packages",
     "pack:packages": "pnpm run build:packages && pnpm --filter @insightflare/ui pack && pnpm --filter @insightflare/product-ui pack",
     "smoke:packages": "pnpm run build:packages && tsx scripts/smoke-packages.ts",
     "build:tracker-sdk": "tsx scripts/build-tracker-sdk.ts",
@@ -46,13 +46,13 @@
     "generate:labels": "pnpm run generate:messages && tsx scripts/generate-product-ui-labels.ts",
     "check:labels": "pnpm run generate:labels && git diff --exit-code packages/product-ui/src/labels/generated.ts",
     "check:labels:fix": "pnpm run generate:labels",
-    "check": "pnpm run generate:messages && tsx scripts/check.ts",
+    "check": "node scripts/check-changed.mjs",
     "check:architecture": "tsx scripts/check-architecture.ts",
     "check:ui-contracts": "tsx scripts/check-ui-contracts.ts",
     "check:layer": "tsx scripts/check-layer-contract.ts",
     "measure:db-bundle": "tsx scripts/measure-db-bundle.ts",
     "check:verify": "pnpm run generate:messages && tsx scripts/check.ts --verify",
-    "check:e2e": "pnpm run check && pnpm run test:e2e",
+    "check:e2e": "pnpm run check:full && pnpm run test:e2e",
     "check:verbose": "pnpm run generate:messages && tsx scripts/check.ts --verbose",
     "preview:local": "tsx scripts/preview.ts --target local",
     "prepare": "pnpm run generate:messages && tsx scripts/build-tracker-sdk.ts && husky",
@@ -88,7 +88,11 @@
     "db:migrate:local": "tsx scripts/db.ts --target local --action migrate",
     "db:migrate:cf": "tsx scripts/db.ts --target cf --action migrate",
     "db:migration:create": "tsx scripts/db.ts --target local --action migration:create",
-    "generate:messages": "tsx scripts/generate-messages.ts"
+    "generate:messages": "tsx scripts/generate-messages.ts",
+    "check:full": "pnpm run generate:messages && tsx scripts/check.ts",
+    "check:fix": "node scripts/check-changed.mjs --fix",
+    "check:changed": "node scripts/check-changed.mjs",
+    "lint:fast": "eslint --config scripts/eslint-fast.config.mjs --max-warnings 0"
   },
   "dependencies": {
     "@deck.gl/core": "^9.4.0",
@@ -192,8 +196,8 @@
     }
   },
   "lint-staged": {
-    "*.{js,jsx,ts,tsx}": [
-      "eslint --fix --max-warnings 0 --no-warn-ignored",
+    "*.{js,jsx,ts,tsx,mjs,mts}": [
+      "eslint --config scripts/eslint-fast.config.mjs --fix --max-warnings 0 --no-warn-ignored",
       "prettier --write"
     ],
     "*.css": "prettier --write"

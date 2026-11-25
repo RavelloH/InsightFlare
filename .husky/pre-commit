@@ -1,3 +1,4 @@
 #!/bin/sh
-node scripts/check-repository-policy.mjs --staged || exit $?
-npx lint-staged
+set -e
+node scripts/check-repository-policy.mjs --staged
+pnpm exec lint-staged
