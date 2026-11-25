@@ -102,7 +102,7 @@ const en = {
   embedCaution:
     "Published widget data is accessible without signing in. The origin allowlist restricts iframe embedding, not direct access.",
   embedSizeGuide:
-    "The snippet uses a suggested height. Adjust iframe width and height for your layout; its content remains responsive.",
+    "The optional script resizes the iframe to fit its content. Without it, the suggested height applies; adjust iframe width and height for your layout.",
   height: "Recommended height",
   previousHeight: "Previous recommended height",
   updated: "Updated",
@@ -283,7 +283,7 @@ const labels: Record<Locale, WidgetLabels> = {
     embedCaution:
       "已发布的小组件汇总数据无需登录即可访问；来源白名单仅限制 iframe 嵌入，不阻止直接访问。",
     embedSizeGuide:
-      "代码使用建议高度，可按页面布局调整 iframe 的宽度与高度；组件内部会自适应。",
+      "附带的脚本会让 iframe 高度随内容自适应；不使用脚本时保持建议高度，可按页面布局自行调整 iframe 的宽度与高度。",
     height: "建议高度",
     previousHeight: "之前的建议高度",
     updated: "更新时间",
@@ -457,7 +457,7 @@ const labels: Record<Locale, WidgetLabels> = {
     embedCaution:
       "已發佈的小工具彙總資料無須登入即可存取；來源白名單只限制 iframe 嵌入。",
     embedSizeGuide:
-      "程式碼使用建議高度，可依版型調整 iframe 尺寸；內容會自適應。",
+      "附帶的指令碼會讓 iframe 高度隨內容自適應；不使用指令碼時保持建議高度，可依版型自行調整 iframe 尺寸。",
     height: "建議高度",
     previousHeight: "先前建議高度",
     updated: "更新時間",
@@ -635,7 +635,7 @@ const labels: Record<Locale, WidgetLabels> = {
     embedCaution:
       "公開した集計データはログインせずに閲覧できます。オリジン制限は iframe の埋め込み先のみを制御します。",
     embedSizeGuide:
-      "コードには推奨高さが含まれます。レイアウトに合わせて iframe の幅と高さを調整できます。",
+      "付属のスクリプトで iframe の高さが内容に合わせて自動調整されます。スクリプトを使わない場合は推奨高さが適用され、レイアウトに合わせて幅と高さを調整できます。",
     height: "推奨高さ",
     previousHeight: "変更前の推奨高さ",
     updated: "更新日時",

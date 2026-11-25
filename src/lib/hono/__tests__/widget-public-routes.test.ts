@@ -11,6 +11,7 @@ import {
 } from "@/lib/hono/routes/public/widgets";
 import type { AppEnv } from "@/lib/hono/types";
 import { widgetConfigSchema, type WidgetRecord } from "@/lib/widgets/contract";
+import { clearWidgetOwnershipMemo } from "@/lib/widgets/ownership-cache";
 import { readWidget, widgetSiteBelongsToTeam } from "@/lib/widgets/store";
 
 vi.mock("@/lib/widgets/store");
@@ -84,6 +85,7 @@ describe("published widgets", () => {
     vi.clearAllMocks();
     vi.mocked(readWidget).mockResolvedValue(widget);
     vi.mocked(widgetSiteBelongsToTeam).mockResolvedValue(true);
+    clearWidgetOwnershipMemo();
     vi.mocked(readSiteTrackingConfig).mockResolvedValue({
       siteId: "site",
       siteDomain: "site.test",
@@ -135,7 +137,17 @@ describe("published widgets", () => {
     expect(response.headers.get("content-security-policy")).toContain(
       "frame-ancestors https://site.test",
     );
+    expect(response.headers.get("content-security-policy")).toContain(
+      "script-src 'self'",
+    );
     const html = await response.text();
+    expect(html).toMatch(
+      /<link rel="stylesheet" href="\/api\/public\/widgets\/assets\/widget\.[0-9a-f]{16}\.css">/,
+    );
+    expect(html).toMatch(
+      /<script src="\/api\/public\/widgets\/assets\/widget-base\.[0-9a-f]{16}\.js"><\/script>/,
+    );
+    expect(html).not.toContain("<script>");
     expect(html).toContain('<html lang="zh"');
     expect(html).toContain('data-locale="zh"');
     expect(html).toContain("最近 7 天");
@@ -199,6 +211,8 @@ describe("published widgets", () => {
     expect((await request(`${dataPath}?revision=1`)).status).toBe(409);
     expect(withDashboardCache).not.toHaveBeenCalled();
     vi.mocked(widgetSiteBelongsToTeam).mockResolvedValue(false);
+    // The public path reuses a short-lived ownership result.
+    clearWidgetOwnershipMemo();
     expect((await request(dataPath)).status).toBe(404);
     expect((await request(documentPath)).status).toBe(404);
     expect(withDashboardCache).not.toHaveBeenCalled();
@@ -238,6 +252,7 @@ describe("public widget resilience, cache isolation and unsafe input handling", 
     vi.resetAllMocks();
     vi.mocked(readWidget).mockResolvedValue(widget);
     vi.mocked(widgetSiteBelongsToTeam).mockResolvedValue(true);
+    clearWidgetOwnershipMemo();
     vi.mocked(readSiteTrackingConfig).mockResolvedValue({
       siteId: "site",
       siteDomain: "site.test",
@@ -419,5 +434,89 @@ describe("public widget resilience, cache isolation and unsafe input handling", 
     expect(await allowed.text()).toContain('data-theme="dark"');
     const denied = await request(documentPath + "?theme=../../secret");
     expect(await denied.text()).not.toContain('data-theme="../../secret"');
+  });
+});
+
+describe("widget static assets", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(readWidget).mockResolvedValue(widget);
+    vi.mocked(widgetSiteBelongsToTeam).mockResolvedValue(true);
+    clearWidgetOwnershipMemo();
+  });
+
+  async function assetPaths() {
+    const html = await (await request(documentPath)).text();
+    const stylesheet = /href="([^"]+\.css)"/.exec(html)?.[1];
+    const script = /<script src="([^"]+\.js)"/.exec(html)?.[1];
+    expect(stylesheet).toBeTruthy();
+    expect(script).toBeTruthy();
+    return { stylesheet: stylesheet!, script: script! };
+  }
+
+  it("serves the referenced content-hashed files as immutable", async () => {
+    const { stylesheet, script } = await assetPaths();
+    const css = await request(stylesheet);
+    expect(css.status).toBe(200);
+    expect(css.headers.get("content-type")).toBe("text/css; charset=utf-8");
+    expect(css.headers.get("cache-control")).toBe(
+      "public, max-age=31536000, immutable",
+    );
+    expect(css.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(await css.text()).toContain("@font-face");
+    const js = await request(script);
+    expect(js.headers.get("content-type")).toBe(
+      "text/javascript; charset=utf-8",
+    );
+    expect(await js.text()).toContain("renderers[data.type]");
+    // Asset routes never touch widget storage.
+    expect(readWidget).toHaveBeenCalledTimes(1);
+  });
+
+  it("picks the script variant from the widget type", async () => {
+    vi.mocked(readWidget).mockResolvedValue({
+      ...widget,
+      published: { ...widget.draft, type: "geo", metric: "visitors" },
+    });
+    const { script } = await assetPaths();
+    expect(script).toMatch(/widget-geo\.[0-9a-f]{16}\.js$/);
+    expect(await (await request(script)).text()).toContain("var geoLand");
+  });
+
+  it("serves a different deployment's hash uncached and rejects unknown names", async () => {
+    const mismatch = await request(
+      "/api/public/widgets/assets/widget-base.0000000000000000.js",
+    );
+    expect(mismatch.status).toBe(200);
+    expect(mismatch.headers.get("cache-control")).toBe("no-store");
+    for (const file of [
+      "widget-evil.0000000000000000.js",
+      "widget.css",
+      "..%2Fsecret.0000000000000000.js",
+    ]) {
+      const response = await request(`/api/public/widgets/assets/${file}`);
+      expect(response.status).toBe(404);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+    }
+  });
+
+  it("serves the host-page auto-height loader at a stable URL", async () => {
+    const response = await request("/api/public/widgets/embed.js");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(
+      "text/javascript; charset=utf-8",
+    );
+    expect(response.headers.get("cache-control")).toContain("max-age=3600");
+    expect(await response.text()).toContain("iframe[data-insightflare-widget]");
+    expect(readWidget).not.toHaveBeenCalled();
+  });
+
+  it("styles placeholders through the same-origin stylesheet", async () => {
+    vi.mocked(readWidget).mockResolvedValue(null);
+    const response = await request(documentPath);
+    expect(response.status).toBe(404);
+    const html = await response.text();
+    expect(html).toContain('<link rel="stylesheet"');
+    expect(html).not.toContain("<style>");
   });
 });

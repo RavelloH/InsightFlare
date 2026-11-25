@@ -54,7 +54,6 @@ export const REALTIME_CLIENT_FRAGMENT = String.raw`
         var frame = document.createElementNS(glyph.namespaceURI, "rect");
         frame.setAttribute("x", "2.5"); frame.setAttribute("y", "3.5");
         frame.setAttribute("width", "15"); frame.setAttribute("height", "13");
-        frame.setAttribute("rx", "1.5");
         var line = document.createElementNS(glyph.namespaceURI, "path");
         line.setAttribute("d", "M5 13l3.5-4 3 2.5L15 7");
         glyph.append(frame, line);
@@ -122,4 +121,8 @@ export const REALTIME_CLIENT_FRAGMENT = String.raw`
     }
     throw new Error("Unknown realtime Widget layout");
   }
+  renderers.realtime = renderRealtime;
+  // Realtime cards update counters and bars in place between refreshes.
+  incrementalRenderers.realtime = true;
+  refreshIntervalMs = 30000;
 `;

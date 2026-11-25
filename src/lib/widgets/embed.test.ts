@@ -1,6 +1,4 @@
 // @vitest-environment node
-import { createHash } from "node:crypto";
-
 import { describe, expect, it } from "vitest";
 
 import type { WidgetConfig, WidgetData } from "@/lib/widgets/contract";
@@ -9,6 +7,7 @@ import {
   renderWidgetPlaceholder,
   widgetDocumentCsp,
 } from "@/lib/widgets/embed";
+import { widgetStylesheet } from "@/lib/widgets/embed-style";
 
 const config: WidgetConfig = {
   title: "Test widget",
@@ -68,12 +67,16 @@ describe("widget preview auto-height", () => {
       autoHeight: true,
       previewData,
     });
-    expect(html).toContain("insightflare-widget-preview-height");
-    expect(html).toContain("new ResizeObserver(reportHeight).observe(widget)");
-    expect(html).toContain("html, body, .widget, .widget__inner");
+    expect(html).toContain(
+      '<html lang="en" data-theme="auto" data-auto-height="true">',
+    );
+    expect(html).toContain('data-preview="true" data-auto-height="true"');
+    expect(html).toContain("insightflare-widget-height");
+    expect(html).toContain("new ResizeObserver(reportHeight).observe(root)");
+    expect(html).toContain('html[data-auto-height="true"] .widget__inner');
   });
 
-  it("does not add resize messages to ordinary or public widget documents", () => {
+  it("does not opt ordinary or public widget documents into intrinsic height", () => {
     for (const input of [
       { preview: true, previewData },
       { preview: false, autoHeight: true },
@@ -84,8 +87,9 @@ describe("widget preview auto-height", () => {
         config,
         ...input,
       });
-      expect(html).not.toContain("insightflare-widget-preview-height");
-      expect(html).not.toContain("new ResizeObserver(reportHeight)");
+      expect(html).not.toMatch(/<html[^>]*data-auto-height/);
+      expect(html).not.toContain('data-preview="true" data-auto-height');
+      expect(html).not.toContain('data-preview="false" data-auto-height');
     }
   });
 });
@@ -132,12 +136,31 @@ describe("refined widget visuals", () => {
     expect(config.locale).toBe("en");
   });
 
-  it("still includes the webfont in the real public embed", () => {
+  it("references cacheable same-origin assets in the real public embed", () => {
     const html = renderWidgetDocument({
       uuid: "11111111-1111-4111-8111-111111111111",
       config,
+      assets: { stylesheet: "/assets/widget.css", script: "/assets/widget.js" },
     });
-    expect(html).toContain("@font-face");
+    expect(html).toContain('<link rel="stylesheet" href="/assets/widget.css">');
+    expect(html).toContain('<script src="/assets/widget.js"></script>');
+    expect(html).not.toContain("<style>");
+    expect(html).not.toContain("<script>");
+    expect(widgetStylesheet({ webfont: true })).toContain("@font-face");
+    expect(widgetStylesheet({ webfont: false })).not.toContain("@font-face");
+  });
+
+  it("keeps previews self-contained even when assets are supplied", () => {
+    const html = renderWidgetDocument({
+      uuid: "11111111-1111-4111-8111-111111111111",
+      config,
+      preview: true,
+      previewData,
+      assets: { stylesheet: "/assets/widget.css", script: "/assets/widget.js" },
+    });
+    expect(html).not.toContain("/assets/widget.");
+    expect(html).toContain("<style>");
+    expect(html).toContain("<script>");
   });
 });
 
@@ -159,30 +182,27 @@ describe("geographic widget rendering and CSP isolation", () => {
       uuid: "11111111-1111-4111-8111-111111111111",
       config,
     });
-    expect(normal).not.toContain("widget-geo-land");
+    expect(normal).not.toContain("var geoLand");
     expect(normal).not.toContain("function renderGeo(data)");
-    expect(widgetDocumentCsp("*")).toContain("script-src 'sha256-");
+    expect(widgetDocumentCsp("*")).toContain("script-src 'self'");
+    expect(widgetDocumentCsp("*")).toContain("style-src 'self'");
+    expect(widgetDocumentCsp("*")).not.toContain("unsafe-inline");
   });
 
-  it("renders only one self-contained country map script under the strict CSP", () => {
+  it("renders only one self-contained country map script", () => {
     const html = renderWidgetDocument({
       uuid: "11111111-1111-4111-8111-111111111111",
       config: geoConfig,
       preview: true,
       previewData: geoData,
     });
-    expect(html).toContain('id="widget-geo-land"');
+    expect(html).toContain("var geoLand = {");
     expect(html).toContain('data-geo-projection="flat"');
     expect(html).toContain("function renderGeo(data)");
     expect(html).not.toContain("widget__geo-summary");
     expect(html).not.toContain("widget__geo-note");
     expect(html).toContain("widget__geo-tooltip");
-    const executable = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
-    expect(executable).toBeTruthy();
-    const expected = createHash("sha256").update(executable!).digest("base64");
-    expect(widgetDocumentCsp("*", "geo")).toContain(
-      `script-src 'sha256-${expected}'`,
-    );
+    expect(html.match(/<script>/g)).toHaveLength(1);
   });
 
   it("renders the globe mode with the same country data without external map scripts", () => {
@@ -193,7 +213,7 @@ describe("geographic widget rendering and CSP isolation", () => {
       previewData: geoData,
     });
     expect(html).toContain('data-geo-projection="globe"');
-    expect(html).toContain("widget-geo-land");
+    expect(html).toContain("var geoLand");
     expect(html).not.toContain("maplibre");
     expect(html).not.toContain("deck.gl");
   });
@@ -229,11 +249,7 @@ describe("realtime iframe presentation", () => {
     expect(html).toContain('data-realtime-layout="badge"');
     expect(html).toContain("widget__realtime-badge");
     expect(html).toContain("function renderRealtime(data)");
-    expect(html).toContain("realtimeInViewport");
-    const executable = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
-    expect(widgetDocumentCsp("*", "realtime")).toContain(
-      `script-src 'sha256-${createHash("sha256").update(executable).digest("base64")}'`,
-    );
+    expect(html).toContain("refreshIntervalMs = 30000");
   });
   it("supports the 30-bar chart, map and page layouts without changing the active count", () => {
     for (const layout of ["trend", "map", "pages"] as const) {
@@ -245,7 +261,7 @@ describe("realtime iframe presentation", () => {
       });
       expect(html).toContain(`data-realtime-layout="${layout}"`);
       expect(html).toContain("renderRealtime(data)");
-      expect(html.includes('id="widget-geo-land"')).toBe(layout === "map");
+      expect(html).toContain("renderers.geo = renderGeo");
     }
   });
 });
@@ -260,7 +276,7 @@ describe("lightweight chart widgets", () => {
     ],
   };
 
-  it("renders donut and ratio layouts using the shared distribution payload and isolated CSP", () => {
+  it("renders donut and ratio layouts using the shared distribution payload", () => {
     for (const distributionStyle of ["donut", "ratio", "bars"] as const) {
       const html = renderWidgetDocument({
         uuid: "11111111-1111-4111-8111-111111111111",
@@ -272,11 +288,6 @@ describe("lightweight chart widgets", () => {
       expect(html).toContain("function renderDonut(data)");
       expect(html).toContain("function renderRatio(data)");
       expect(html).not.toContain("function renderGeo(data)");
-      const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
-      const hash = createHash("sha256").update(script).digest("base64");
-      expect(widgetDocumentCsp("*", "distribution")).toContain(
-        `script-src 'sha256-${hash}'`,
-      );
     }
   });
 

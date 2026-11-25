@@ -141,7 +141,7 @@ function TemplateDrawing({ type }: { type: WidgetTemplateId }) {
         aria-hidden="true"
         className="flex h-[76px] items-center justify-center"
       >
-        <div className="inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 font-mono">
+        <div className="inline-flex items-center gap-1.5 border bg-card px-3 py-1.5 font-mono">
           <span className="size-1.5 rounded-full bg-primary" />
           <span className="text-[16px] font-semibold leading-none tracking-tight">
             42
@@ -155,7 +155,7 @@ function TemplateDrawing({ type }: { type: WidgetTemplateId }) {
             className="size-3 text-muted-foreground"
             aria-hidden="true"
           >
-            <rect x="2.5" y="3.5" width="15" height="13" rx="1.5" />
+            <rect x="2.5" y="3.5" width="15" height="13" />
             <path d="M5 13l3.5-4 3 2.5L15 7" />
           </svg>
         </div>

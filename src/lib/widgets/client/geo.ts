@@ -1,26 +1,37 @@
+import { GEO_LAND_DOTS } from "@/lib/widgets/geo-data";
+
 /**
  * Optional lightweight Canvas renderer injected only into geo widgets.
  * Reuses the website's public-domain Natural Earth dot mask. Never renders
  * an individual's coordinates: every marker is a country label anchor.
  */
-export const GEO_CLIENT_FRAGMENT = String.raw`
-  var geoDispose = null;
-  function renderGeo(data) {
-    if (geoDispose) geoDispose();
-    var mask = document.getElementById("widget-geo-land");
-    if (!mask) throw new Error("Missing world map data");
-    var land = JSON.parse(mask.textContent || "null");
+export const GEO_CLIENT_FRAGMENT =
+  `
+  var geoLand = ${JSON.stringify(GEO_LAND_DOTS)};
+` +
+  String.raw`
+  var geoDispose = null, geoLandPoints = null;
+  // Decoded once: realtime maps re-render on every refresh.
+  function decodeGeoLand() {
+    if (geoLandPoints) return geoLandPoints;
+    var land = geoLand;
     if (!land || land.cols !== 240 || land.rows !== 92 || typeof land.bits !== "string")
       throw new Error("Invalid world map");
-    var bytes = atob(land.bits), landPoints = [];
+    var bytes = atob(land.bits), decoded = [];
     for (var row = 0; row < land.rows; row++) {
       for (var col = 0; col < land.cols; col++) {
         var bit = row * land.cols + col;
         if (bytes.charCodeAt(bit >> 3) & (1 << (bit & 7))) {
-          landPoints.push([land.lonStart + col * land.step, land.latStart - row * land.step]);
+          decoded.push([land.lonStart + col * land.step, land.latStart - row * land.step]);
         }
       }
     }
+    geoLandPoints = decoded;
+    return decoded;
+  }
+  function renderGeo(data) {
+    if (geoDispose) geoDispose();
+    var landPoints = decodeGeoLand();
     var points = (Array.isArray(data.points) ? data.points : []).filter(function (point) {
       return point && /^[A-Z]{2}$/.test(point.country) &&
         Number.isFinite(point.lat) && Number.isFinite(point.lon) &&
@@ -187,4 +198,5 @@ export const GEO_CLIENT_FRAGMENT = String.raw`
       intersectObserver.disconnect();
     };
   }
+  renderers.geo = renderGeo;
 `;
