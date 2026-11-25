@@ -70,3 +70,5 @@ export function FlagIcon({
     />
   );
 }
+
+export { flagIconContract } from "./flag-icon.contract";

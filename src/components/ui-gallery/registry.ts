@@ -29,6 +29,7 @@ import {
   eventMetricsContract,
   eventTrendCardContract,
 } from "@insightflare/product-ui/events";
+import { flagIconContract } from "@insightflare/product-ui/flag-icon";
 import { funnelVisualizationContract } from "@insightflare/product-ui/funnel";
 import {
   goalTimeseriesContract,
@@ -2306,6 +2307,13 @@ const galleryContracts = {
         onChange: () => {},
       }),
   ),
+  flagIcon: registerPropCards(flagIconContract, [
+    propCard("icon", [
+      propValue("flagpack:us"),
+      propValue("flagpack:jp"),
+      propValue("flagpack:cn"),
+    ]),
+  ]),
   analyticsTooltip: registerPropCards(analyticsTooltipContract, [
     propCard("retentionMode", [propValue("target"), propValue("table-column")]),
   ]),
@@ -2921,6 +2929,13 @@ export const uiGalleryRegistry: readonly UiGalleryEntry[] = [
     apiEntry: "@insightflare/product-ui/site-scope-selector",
     previewAlignment: "start",
     contract: galleryContracts.siteScopeSelector,
+  },
+  {
+    slug: "flag-icon",
+    packageType: "product-ui",
+    apiEntry: "@insightflare/product-ui/flag-icon",
+    maxValuesPerRow: 3,
+    contract: galleryContracts.flagIcon,
   },
   {
     slug: "analytics-tooltip",

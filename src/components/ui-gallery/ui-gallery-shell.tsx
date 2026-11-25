@@ -127,6 +127,7 @@ const uiEntryIcons: Record<string, RemixiconComponentType> = {
   "analytics-table-column-settings": RiLayoutColumnLine,
   "detail-drawer": RiSideBarLine,
   "site-scope-selector": RiGlobalLine,
+  "flag-icon": RiGlobalLine,
   "analytics-tooltip": RiQuestionLine,
   "tabbed-table": RiTableLine,
   "clickable-table-cell": RiCursorLine,

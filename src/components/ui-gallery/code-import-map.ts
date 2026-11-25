@@ -3,6 +3,7 @@ import * as productAnalyticsTooltip from "@insightflare/product-ui/analytics-too
 import * as productCharts from "@insightflare/product-ui/charts";
 import * as productDetailDrawer from "@insightflare/product-ui/detail-drawer";
 import * as productEvents from "@insightflare/product-ui/events";
+import * as productFlagIcon from "@insightflare/product-ui/flag-icon";
 import * as productFunnel from "@insightflare/product-ui/funnel";
 import * as productGoals from "@insightflare/product-ui/goals";
 import * as productOverview from "@insightflare/product-ui/overview";
@@ -152,6 +153,7 @@ const sourceModules: readonly {
   { source: "@insightflare/product-ui/sharing", exports: productSharing },
   { source: "@insightflare/product-ui/charts", exports: productCharts },
   { source: "@insightflare/product-ui/tables", exports: productTables },
+  { source: "@insightflare/product-ui/flag-icon", exports: productFlagIcon },
   {
     source: "@insightflare/product-ui/detail-drawer",
     exports: productDetailDrawer,
