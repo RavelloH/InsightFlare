@@ -25,6 +25,7 @@ import {
   addZonedInterval,
   startOfZonedInterval,
 } from "@/lib/analytics/time-zone";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type {
   DashboardInterval,
@@ -66,6 +67,7 @@ export type ShareTrendFetcher = (
   options?: {
     limit?: number;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
   },
 ) => Promise<BrowserTrendData>;
 interface ShareTrendCardProps {
@@ -77,6 +79,7 @@ interface ShareTrendCardProps {
   queryKey: readonly unknown[];
   title: string;
   fetchTrend: ShareTrendFetcher;
+  transport?: PrivateReadTransport;
   limit?: number;
   otherLabel?: string;
   headerBelow?: ReactNode;
@@ -541,6 +544,7 @@ function areShareTrendCardPropsEqual(
     previous.filters === next.filters &&
     previous.title === next.title &&
     previous.fetchTrend === next.fetchTrend &&
+    previous.transport === next.transport &&
     previous.limit === next.limit &&
     previous.otherLabel === next.otherLabel &&
     previous.headerBelow === next.headerBelow &&
@@ -559,6 +563,7 @@ export const ShareTrendCard = memo(function ShareTrendCard({
   queryKey,
   title,
   fetchTrend,
+  transport,
   limit = 5,
   otherLabel = messages.browsers.otherLabel,
   headerBelow,
@@ -624,6 +629,7 @@ export const ShareTrendCard = memo(function ShareTrendCard({
         fetchTrend(siteId, requestedWindow, requestedFilters, {
           limit,
           signal,
+          ...(transport ? { transport } : {}),
         }).catch((error) =>
           fallbackUnlessAborted(error, () =>
             emptyTrendData(requestedWindow.interval),

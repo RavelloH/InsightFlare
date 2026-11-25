@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 
 import { executeApiV1Query } from "@/lib/api-v1/analytics/query-application";
-import { startSiteOverviewStream } from "@/lib/dashboard/server/query";
+import { startSiteAnalyticsStream } from "@/lib/dashboard/server/query";
 import { SYSTEM_FILTER_PRESETS } from "@/lib/dashboard/system-filter-presets";
 import {
   createSqliteD1Database,
@@ -1558,7 +1558,7 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       };
       const request = new Request("https://app.test/en/app/team/site");
       const reads = await runWithInvocationLogger(logger, () =>
-        startSiteOverviewStream({
+        startSiteAnalyticsStream({
           request,
           env,
           siteId: "site-a",
@@ -1598,7 +1598,7 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         trace.preparedSql.filter((sql) => sql.includes("dimension_page_2")),
       ).toHaveLength(1);
       const geo = await runWithInvocationLogger(logger, () =>
-        startSiteOverviewStream({
+        startSiteAnalyticsStream({
           request,
           env,
           siteId: "site-a",

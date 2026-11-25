@@ -67,7 +67,7 @@ vi.mock("@/lib/dashboard/query-preferences", () => ({
 }));
 vi.mock("@/lib/dashboard/server/query", () => ({
   resolveTeamDashboardRequest: vi.fn(),
-  startSiteOverviewStream: vi.fn(),
+  startSiteAnalyticsStream: vi.fn(),
 }));
 vi.mock("@/lib/edge/analytics/composition/ssr-query-runtime", () => ({
   createTeamDashboardQueryRuntime: vi.fn(() => ({
@@ -105,8 +105,8 @@ import {
   loadRetentionSnapshot,
   loadScheduledTasksInitialData,
   loadShareSite,
+  loadSiteAnalyticsStream,
   loadSiteConfigSnapshot,
-  loadSiteOverviewStream,
   loadSiteSettingsInitialData,
   loadSiteSnippetSnapshot,
   loadSystemSettingsInitialData,
@@ -126,7 +126,7 @@ import {
 } from "@/lib/dashboard/server";
 import {
   resolveTeamDashboardRequest,
-  startSiteOverviewStream,
+  startSiteAnalyticsStream,
 } from "@/lib/dashboard/server/query";
 import {
   fetchPublicSite,
@@ -426,7 +426,7 @@ describe("Dashboard route data loaders", () => {
         window: {
           startMs: 100,
           endExclusiveMs: 200,
-          nowMs: 200,
+          nowMs: expect.any(Number),
           timeZone: "Asia/Tokyo",
         },
         interval: "day",
@@ -525,7 +525,7 @@ describe("Dashboard route data loaders", () => {
       expect(teamDashboardExecute).toHaveBeenCalled();
     });
 
-    it("passes URL filters to the SSR team dashboard reader", async () => {
+    it("does not carry stale site URL filters into unfiltered team snapshots", async () => {
       vi.mocked(getRequest).mockReturnValue(
         headersOf(
           { host: "app.test" },
@@ -542,12 +542,7 @@ describe("Dashboard route data loaders", () => {
         expect.objectContaining({
           filters: {
             version: 1,
-            root: {
-              kind: "condition",
-              target: { kind: "field", field: "page.path" },
-              operator: "eq",
-              value: "/docs",
-            },
+            root: null,
           },
         }),
       );
@@ -883,7 +878,7 @@ describe("site overview stream setup", () => {
     const deferred = new Promise<{ value: { ok: boolean } }>((done) => {
       resolve = done;
     });
-    vi.mocked(startSiteOverviewStream).mockResolvedValueOnce({
+    vi.mocked(startSiteAnalyticsStream).mockResolvedValueOnce({
       overview: deferred,
     });
     vi.mocked(getDashboardRuntime).mockResolvedValueOnce({
@@ -901,7 +896,7 @@ describe("site overview stream setup", () => {
       timeZone: "UTC",
       interval: "day",
     });
-    const reads = await loadSiteOverviewStream({
+    const reads = await loadSiteAnalyticsStream({
       data: { siteId: "site-a", search: "" },
     });
     expect(reads.overview).toBe(deferred);

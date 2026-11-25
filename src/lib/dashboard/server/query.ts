@@ -2,6 +2,7 @@ import "@tanstack/react-start/server-only";
 
 import { readBoundedBody } from "@/lib/api-v1";
 import { startOverviewInitialReads } from "@/lib/dashboard/client/data/overview";
+import { startPagesInitialReads } from "@/lib/dashboard/client/data/pages";
 import type {
   PrivateReadTransport,
   PrivateRequestParams,
@@ -67,14 +68,16 @@ export async function resolveTeamDashboardRequest(input: {
  * contains independent promises; Start may stream each as soon as it settles.
  * Register reads (and cache writes) before the Worker returns its response,
  * so its existing emitWhenComplete drains the real work exactly once. */
-export async function startSiteOverviewStream(input: {
+export type SiteAnalyticsInitialPage = "overview" | "pages";
+export async function startSiteAnalyticsStream(input: {
   request: Request;
   env: Env;
   siteId: string;
   window: TimeWindow;
   search: string;
+  page?: SiteAnalyticsInitialPage;
 }): Promise<DeferredPrivateReads> {
-  const { request, env, siteId, window, search } = input;
+  const { request, env, siteId, window, search, page = "overview" } = input;
   const authUrl = new URL(request.url);
   authUrl.searchParams.set("siteId", siteId);
   const demoSession =
@@ -96,14 +99,18 @@ export async function startSiteOverviewStream(input: {
         },
       } as ExecutionContext)
     : undefined;
-  const allowedPaths = new Set([
-    "overview",
-    "overview-page-path",
-    "overview-source-domain",
-    "overview-client-browser",
-    "overview-geo-country",
-    "overview-geo-points",
-  ]);
+  const allowedPaths = new Set(
+    page === "pages"
+      ? ["pages-dashboard", "trend"]
+      : [
+          "overview",
+          "overview-page-path",
+          "overview-source-domain",
+          "overview-client-browser",
+          "overview-geo-country",
+          "overview-geo-points",
+        ],
+  );
   const transport: PrivateReadTransport = <T>(
     path: string,
     params?: PrivateRequestParams,
@@ -162,6 +169,15 @@ export async function startSiteOverviewStream(input: {
     reads[key] = logger ? logger.track(deferred) : deferred;
     return promise as Promise<T>;
   };
+  if (page === "pages") {
+    startPagesInitialReads(
+      site.id,
+      window,
+      new URLSearchParams(search),
+      transport,
+    );
+    return reads;
+  }
   startOverviewInitialReads(
     site.id,
     window,

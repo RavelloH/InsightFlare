@@ -22,11 +22,18 @@ import {
   type PagesDashboardRow,
 } from "@/lib/dashboard/client/data/index";
 import {
+  PAGE_LIST_PAGE_SIZE,
+  resolvePagesListComparisonQuery,
+} from "@/lib/dashboard/client/data/pages";
+import {
   pushUrlWithoutNavigation,
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/dashboard/client/history";
-import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
+import {
+  createDeferredPrivateReadTransport,
+  type DeferredPrivateReads,
+} from "@/lib/dashboard/client/request";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import {
@@ -42,7 +49,6 @@ import {
   capturePerceptionGuard,
   observeLoadedDimension,
 } from "@/lib/perception-search/runtime";
-const PAGE_LIST_PAGE_SIZE = 25;
 function moveTrendAfterPage(ids: readonly string[]): string[] {
   const withoutTrend = ids.filter((id) => id !== "trend");
   const pageIndex = withoutTrend.indexOf("page");
@@ -103,6 +109,7 @@ interface PagesClientPageProps {
   siteDomain?: string;
   pathname: string;
   sitePathname?: string;
+  deferredReads?: DeferredPrivateReads | null;
 }
 function pageDetailQueryTarget(
   pathname: string,
@@ -121,21 +128,25 @@ export function PagesClientPage({
   siteDomain,
   pathname,
   sitePathname,
+  deferredReads,
 }: PagesClientPageProps) {
   const { filters, window, queryReady } = useDashboardQuery() as {
     queryReady: boolean;
     filters: FilterDocument;
     window: TimeWindow;
   };
+  const transport = useMemo(
+    () =>
+      deferredReads
+        ? createDeferredPrivateReadTransport(deferredReads)
+        : undefined,
+    [deferredReads],
+  );
   const globalComparisonQuery = useDashboardComparisonQuery(window, filters);
   const comparisonQuery = useMemo(
     () =>
       globalComparisonQuery ??
-      resolveDashboardComparisonQuery(
-        new URLSearchParams("compare=previous"),
-        window,
-        filters,
-      ),
+      resolvePagesListComparisonQuery(new URLSearchParams(), window, filters),
     [
       filters,
       globalComparisonQuery,
@@ -222,6 +233,7 @@ export function PagesClientPage({
         comparisonMetric: sort.key,
         comparisonSortBy: "current",
         signal,
+        ...(transport ? { transport } : {}),
       });
       if (!signal.aborted) {
         observeLoadedDimension(
@@ -321,6 +333,7 @@ export function PagesClientPage({
         siteId={siteId}
         window={window}
         filters={filters}
+        transport={transport}
       />
 
       <PagesTableCard

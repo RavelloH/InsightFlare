@@ -52,6 +52,7 @@ import {
   withFilters,
 } from "@/lib/dashboard/client/data";
 import { startOverviewInitialReads } from "@/lib/dashboard/client/data/overview";
+import { startPagesInitialReads } from "@/lib/dashboard/client/data/pages";
 import type {
   PrivateReadTransport,
   PrivateRequestParams,
@@ -820,6 +821,92 @@ describe("Dashboard Client Data Processing Utilities", () => {
         calls.find((call) => call.path.endsWith("overview-geo-points"))?.params
           ?.limit,
       ).toBe(5000);
+    });
+
+    it("plans the page list with its default previous comparison and the separate current-only share trend", () => {
+      const calls: Array<{ path: string; params?: PrivateRequestParams }> = [];
+      const transport: PrivateReadTransport = async <T>(
+        path: string,
+        params?: PrivateRequestParams,
+      ) => {
+        calls.push({ path, params });
+        return {} as T;
+      };
+      startPagesInitialReads(
+        "site-stream",
+        mockWindow,
+        new URLSearchParams("scope=session&filter[page.path]=/home"),
+        transport,
+      );
+      expect(calls).toHaveLength(3);
+      expect(calls[0]).toMatchObject({
+        path: "/api/private/pages-dashboard",
+        params: {
+          limit: 25,
+          sort: "views",
+          direction: "desc",
+          compare: "previous",
+          metric: "views",
+          sortBy: "current",
+          scope: "session",
+          "filter[page.path]": "/home",
+        },
+      });
+      expect(calls[1]).toMatchObject({
+        path: "/api/private/pages-dashboard",
+        params: { limit: 5, scope: "session", "filter[page.path]": "/home" },
+      });
+      expect(calls[1]?.params).not.toHaveProperty("compare");
+      expect(calls[2]).toMatchObject({
+        path: "/api/private/trend",
+        params: {
+          scope: "session",
+          "filter[page.path]": "/home",
+          interval: mockWindow.interval,
+        },
+      });
+      expect(
+        calls.every(
+          (call) =>
+            call.params?.siteId === "site-stream" &&
+            call.params?.timeZone === mockWindow.timeZone,
+        ),
+      ).toBe(true);
+    });
+
+    it("plans explicit comparison share reads with the reference window and filters", () => {
+      const calls: Array<{ path: string; params?: PrivateRequestParams }> = [];
+      const transport: PrivateReadTransport = async <T>(
+        path: string,
+        params?: PrivateRequestParams,
+      ) => {
+        calls.push({ path, params });
+        return {} as T;
+      };
+      startPagesInitialReads(
+        "site-stream",
+        mockWindow,
+        new URLSearchParams(
+          "compare=previous&filter[page.path]=/home&compareFilter[page.path]=/docs",
+        ),
+        transport,
+      );
+      expect(calls).toHaveLength(5);
+      expect(calls[0]?.params).toMatchObject({
+        limit: 25,
+        compare: "previous",
+        "compareFilter[page.path]": "/docs",
+      });
+      expect(calls[3]?.params).toMatchObject({
+        limit: 5,
+        to: mockWindow.from - 1,
+        "filter[page.path]": "/docs",
+      });
+      expect(calls[4]?.params).toMatchObject({
+        to: mockWindow.from - 1,
+        "filter[page.path]": "/docs",
+      });
+      expect(calls[3]?.params?.from).toBe(calls[4]?.params?.from);
     });
 
     function freshJsonResponse(body: unknown, status = 200): Response {

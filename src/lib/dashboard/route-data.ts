@@ -31,7 +31,8 @@ import {
 } from "@/lib/dashboard/server";
 import {
   resolveTeamDashboardRequest,
-  startSiteOverviewStream,
+  type SiteAnalyticsInitialPage,
+  startSiteAnalyticsStream,
 } from "@/lib/dashboard/server/query";
 import type { TeamDashboardSnapshot } from "@/lib/dashboard/team-dashboard-query";
 import { normalizeNotificationPreferencesData } from "@/lib/dashboard-api/client/edge";
@@ -48,6 +49,7 @@ import {
   teamQueryContext,
 } from "@/lib/edge/analytics/contract";
 import { currentInvocationLogger } from "@/lib/edge/observability/logger";
+import { appNow } from "@/lib/edge/runtime/e2e-clock";
 import {
   enableRequestReadCache,
   memoizeRequestRead,
@@ -102,28 +104,38 @@ function readInitialWindow(): Promise<TimeWindow> {
       : resolveDashboardInitialWindow(cookie);
   });
 }
-/** Server-only initial overview reads. The leaf loader awaits only the
+/** Server-only initial analytics reads. The leaf loader awaits only the
  * authorization/setup, never the analytics promises in this returned map. */
-export const loadSiteOverviewStream = createServerFn({ method: "GET" })
-  .validator((data: { siteId: string; search: string }) => {
-    if (
-      typeof data.siteId !== "string" ||
-      typeof data.search !== "string" ||
-      data.search.length > 8192
-    )
-      throw new Error("invalid_ssr_overview");
-    return data;
-  })
+export const loadSiteAnalyticsStream = createServerFn({ method: "GET" })
+  .validator(
+    (data: {
+      siteId: string;
+      search: string;
+      page?: SiteAnalyticsInitialPage;
+    }) => {
+      if (
+        typeof data.siteId !== "string" ||
+        typeof data.search !== "string" ||
+        data.search.length > 8192 ||
+        (data.page !== undefined &&
+          data.page !== "overview" &&
+          data.page !== "pages")
+      )
+        throw new Error("invalid_ssr_analytics");
+      return data;
+    },
+  )
   .handler(async ({ data }) => {
     const [runtime, window] = await Promise.all([
       getDashboardRuntime(),
       readInitialWindow(),
     ]);
-    return startSiteOverviewStream({
+    return startSiteAnalyticsStream({
       ...runtime,
       siteId: data.siteId,
       window,
       search: data.search,
+      page: data.page,
     });
   });
 
@@ -149,7 +161,6 @@ async function readTeamDashboardSnapshot(data: {
 async function executeTeamDashboardSnapshot(data: {
   teamId: string;
 }): Promise<TeamDashboardSnapshot | null> {
-  const request = getRequest();
   const runtime = await getDashboardRuntime();
   const [resolved, preloadedSites, window] = await Promise.all([
     resolveTeamDashboardRequest({
@@ -161,14 +172,18 @@ async function executeTeamDashboardSnapshot(data: {
     readInitialWindow(),
   ]);
   if (resolved instanceof Response) return null;
-  const filters = parseFilterUrlForAudience("private-dashboard", request.url);
+  // Team overview/workspace do not expose site filters. Match the URL sent
+  // by fetchTeamDashboard, not stale site filters carried in the page URL.
+  const queryUrl = new URL("/api/private/team-dashboard", runtime.request.url);
+  const filters = parseFilterUrlForAudience("private-dashboard", queryUrl);
+  const capturedAtMs = appNow();
   const teamDashboardRuntime = createTeamDashboardQueryRuntime({
     env: resolved.env,
     teamId: resolved.teamId,
     window: {
       startMs: window.from,
       endExclusiveMs: window.to,
-      nowMs: window.to,
+      nowMs: capturedAtMs,
       timeZone: window.timeZone,
     },
     interval: window.interval,
@@ -184,7 +199,12 @@ async function executeTeamDashboardSnapshot(data: {
       "private-dashboard",
       resolved.allowedSiteIds,
     ),
-    time: createQueryTime(window.from, window.to, window.timeZone, window.to),
+    time: createQueryTime(
+      window.from,
+      window.to,
+      window.timeZone,
+      capturedAtMs,
+    ),
     filters,
   });
   if (!result.ok) throw new Error(result.error.kind);

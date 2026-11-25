@@ -48,7 +48,7 @@ vi.mock(
     executePrivateQuery: vi.fn(),
   }),
 );
-const { startSiteOverviewStream } =
+const { startSiteAnalyticsStream } =
   await import("@/lib/dashboard/server/query");
 const { resolvePrivateSite } = await import("@/lib/edge/auth/site-access");
 const { executePrivateQuery } =
@@ -164,10 +164,10 @@ describe("actual Worker top-level invocation entrypoints", () => {
         },
       });
     });
-    let reads: Awaited<ReturnType<typeof startSiteOverviewStream>> | undefined;
+    let reads: Awaited<ReturnType<typeof startSiteAnalyticsStream>> | undefined;
     vi.mocked(startHandler.fetch).mockImplementationOnce(
       async (request, options) => {
-        reads = await startSiteOverviewStream({
+        reads = await startSiteAnalyticsStream({
           request,
           env: options!.context!.env,
           siteId: "site-a",
@@ -213,7 +213,7 @@ describe("actual Worker top-level invocation entrypoints", () => {
     vi.mocked(resolvePrivateSite).mockResolvedValueOnce(
       new Response(null, { status: 404 }),
     );
-    const reads = await startSiteOverviewStream({
+    const reads = await startSiteAnalyticsStream({
       request: new Request("https://app.test/en/app/team/site"),
       env: setup().env,
       siteId: "forbidden",
