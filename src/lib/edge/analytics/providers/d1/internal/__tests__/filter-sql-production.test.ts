@@ -2900,13 +2900,166 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           [(kind === "session" ? "visitor" : "session") + ".views gt 0", kind],
           [kind + ".events gt 0", kind],
           ['event.payload("/items/1/sku") eq "B"', kind],
-          ['first(EVENT).name eq "signup"', kind],
+          [
+            'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
+            kind,
+          ],
         ] as const) {
           const { filters, plan } = prepare(expression, scope);
           const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
           expect(compileScopedDatasetSql({ ...input, target })).toEqual(
             compileScopedDatasetSql(input),
           );
+        }
+      }
+    } finally {
+      db.close();
+    }
+  });
+  it("narrows local advanced occurrence relations without narrowing Q/F/R time domains", async () => {
+    const { db, env } = runFixture();
+    try {
+      const base = createQueryTime(100, 300, "UTC", 400);
+      for (const kind of ["session", "visitor"] as const) {
+        const column = kind + "_id";
+        for (const [expression, time, expected] of [
+          ["count(PAGE) gte 1", base, true],
+          ["count(EVENT) eq 2", base, true],
+          ['count(EVENT { $.name eq "purchase" }) eq 1', base, true],
+          [
+            'count(EVENT { $.payload("/items/1/sku") eq "B" }) eq 1',
+            base,
+            true,
+          ],
+          [
+            'first(EVENT).name eq "purchase"',
+            { ...base, fullHistory: true },
+            true,
+          ],
+          [
+            'first(EVENT).name eq "signup"',
+            { ...base, fullHistory: true },
+            false,
+          ],
+          [
+            'first(EVENT).name eq "signup"',
+            {
+              ...base,
+              fullHistory: true,
+              filterRange: { startMs: 100, endExclusiveMs: 300 },
+            },
+            true,
+          ],
+          [
+            'first(PAGE).path eq "/old"',
+            { ...base, readRange: { startMs: 0, endExclusiveMs: 300 } },
+            true,
+          ],
+          ["count(PAGE) eq 1 AND NOT (count(EVENT) eq 0)", base, true],
+        ] as const) {
+          const doc = parseFilterDsl(expression, analyticsFilterRegistry);
+          const plan = createScopedFilterPlan(
+            (kind + "-events") as "session-events" | "visitor-events",
+            doc,
+            kind,
+          )!;
+          const filters = attachScopedFilterMetadata(doc, {
+            requestedScope: kind,
+            resolvedScope: plan.scope,
+            plan,
+            time,
+            siteIds: ["site-a"],
+          });
+          const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
+          const original = compileScopedDatasetSql(input);
+          for (const value of [
+            kind === "session" ? "s1" : "u1",
+            kind === "session" ? "s2" : "u2",
+            "missing",
+          ]) {
+            const target = { type: kind, value };
+            const restricted = compileScopedDatasetSql({ ...input, target });
+            expect(restricted.ctes).toContain("AND " + column + " = ?");
+            expect(restricted.ctes).toContain("AND v." + column + " = ?");
+            if ("fullHistory" in time || "readRange" in time) {
+              expect(
+                restricted.ctes.match(
+                  new RegExp("AND " + column + " = \\?", "g"),
+                ),
+              ).toHaveLength(2);
+            }
+            for (const relation of [
+              "visitRelation",
+              "eventRelation",
+            ] as const) {
+              const read = (
+                dataset: ReturnType<typeof compileScopedDatasetSql>,
+              ) =>
+                db
+                  .prepare(
+                    `WITH ${dataset.ctes} SELECT * FROM ${dataset[relation]} WHERE ${column} = ? ORDER BY ${relation === "visitRelation" ? "visit_id" : "event_id"}`,
+                  )
+                  .all(...dataset.bindings.map((b) => b.value), value);
+              expect(read(restricted)).toEqual(read(original));
+            }
+            const all = await queryJourneyEventsPageFromD1(
+              env,
+              "site-a",
+              WINDOW,
+              filters,
+              target,
+              100,
+            );
+            if (value === (kind === "session" ? "s1" : "u1"))
+              expect(all.items.length > 0).toBe(expected);
+            const first = await queryJourneyEventsPageFromD1(
+              env,
+              "site-a",
+              WINDOW,
+              filters,
+              target,
+              1,
+            );
+            expect(first.items).toEqual(all.items.slice(0, 1));
+            if (first.pagination.nextCursor) {
+              const next = await queryJourneyEventsPageFromD1(
+                env,
+                "site-a",
+                WINDOW,
+                filters,
+                target,
+                100,
+                first.pagination.nextCursor,
+              );
+              expect(next.items).toEqual(all.items.slice(1));
+            }
+          }
+        }
+        for (const expression of [
+          "count(VISITOR) gte 1",
+          "count(SESSION) gte 1",
+          'sequence([PAGE { $.path eq "/home" }, EVENT { $.name eq "signup" }]) exists',
+        ]) {
+          const doc = parseFilterDsl(expression, analyticsFilterRegistry);
+          const plan = createScopedFilterPlan(
+            (kind + "-events") as "session-events" | "visitor-events",
+            doc,
+            kind,
+          )!;
+          const filters = attachScopedFilterMetadata(doc, {
+            requestedScope: kind,
+            resolvedScope: plan.scope,
+            plan,
+            time: base,
+            siteIds: ["site-a"],
+          });
+          const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
+          expect(
+            compileScopedDatasetSql({
+              ...input,
+              target: { type: kind, value: kind === "session" ? "s1" : "u1" },
+            }),
+          ).toEqual(compileScopedDatasetSql(input));
         }
       }
     } finally {

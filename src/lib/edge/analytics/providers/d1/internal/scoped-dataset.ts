@@ -24,6 +24,7 @@ import {
   filterDocumentHasSimpleEventFacts,
   filterDocumentUsesAdvancedExpressions,
 } from "@/lib/filter-contract/filter-types";
+import type { FilterTargetExpression } from "@/lib/filter-contract/filters";
 import type { FilterScope } from "@/lib/filter-contract/scope-preference";
 
 import { buildVisitFilterSql } from "./core-filters";
@@ -1169,6 +1170,7 @@ interface FilterSqlDomains {
 function buildFilterSqlDomains(
   input: ScopedDatasetCompilerInput,
   time: QueryTime,
+  target?: ScopedDatasetTarget,
 ): FilterSqlDomains {
   const queryStart = input.window.startMs;
   const queryEnd = input.window.endExclusiveMs;
@@ -1223,19 +1225,33 @@ function buildFilterSqlDomains(
     definitions.push(
       boundCte(
         readVisits,
-        visitSource(input.siteIds).replace(
+        visitSource(input.siteIds, target).replace(
           "scope_raw_visits AS MATERIALIZED",
           `${readVisits} AS MATERIALIZED`,
         ),
-        [...input.siteIds, readStart, readEnd],
+        [
+          ...input.siteIds,
+          readStart,
+          readEnd,
+          ...(target ? [target.value] : []),
+        ],
       ),
       boundCte(
         readEvents,
-        eventSource(input.siteIds, input.compatibilityEventSource).replace(
+        eventSource(
+          input.siteIds,
+          input.compatibilityEventSource,
+          target,
+        ).replace(
           "scope_raw_events AS MATERIALIZED",
           `${readEvents} AS MATERIALIZED`,
         ),
-        [...input.siteIds, readStart, readEnd],
+        [
+          ...input.siteIds,
+          readStart,
+          readEnd,
+          ...(target ? [target.value] : []),
+        ],
       ),
     );
   }
@@ -1478,6 +1494,100 @@ function targetMembershipEvidence(
   return { local: sameGrain, broad: sameGrain };
 }
 /**
+ * A deliberately small proof of locality for advanced collection predicates.
+ * Page/Event roots stay correlated to the original entity anchor; selectors
+ * over Session/Visitor could change that anchor and must not be narrowed.
+ * Preserve the full authorized time domains even when narrowing identity.
+ */
+type LocalOccurrenceKind = "page" | "event";
+function localOccurrenceCollection(
+  target: FilterTargetExpression,
+): LocalOccurrenceKind | null {
+  if (target.kind === "entity-root")
+    return target.entity === "page" || target.entity === "event"
+      ? target.entity
+      : null;
+  if (target.kind === "selector") {
+    const kind = localOccurrenceCollection(target.collection);
+    return kind && localRelationExpression(target.predicate, kind)
+      ? kind
+      : null;
+  }
+  return null;
+}
+function localRelationTarget(
+  target: FilterTargetExpression,
+  current: LocalOccurrenceKind | null,
+): boolean {
+  switch (target.kind) {
+    case "entity-root":
+    case "selector":
+      return localOccurrenceCollection(target) !== null;
+    case "event-payload":
+    case "current-payload":
+      return current === "event";
+    case "field":
+      return (
+        current !== null &&
+        (target.field === "event.name" ||
+          isVisitContextPredicate({
+            kind: "condition",
+            target,
+            operator: "exists",
+          }))
+      );
+    case "reducer":
+      return (
+        target.reducer === "count" &&
+        localOccurrenceCollection(target.input) !== null
+      );
+    case "member": {
+      const root = target.object;
+      const kind =
+        root.kind === "context-root" && root.context === "current"
+          ? current
+          : root.kind === "reducer" &&
+              ["first", "last", "nth"].includes(root.reducer)
+            ? localOccurrenceCollection(root.input)
+            : null;
+      return (
+        kind !== null &&
+        ((target.member === "time" && root.kind === "context-root") ||
+          (kind === "event" && target.member === "name") ||
+          (kind === "page" && target.member === "path"))
+      );
+    }
+    case "occurrence-time":
+      return (
+        target.input.kind === "reducer" &&
+        ["first", "last", "nth"].includes(target.input.reducer) &&
+        localOccurrenceCollection(target.input.input) !== null
+      );
+    case "arithmetic":
+      return (
+        localRelationTarget(target.left, current) &&
+        localRelationTarget(target.right, current)
+      );
+    case "time-anchor":
+    case "duration":
+      return true;
+    default:
+      return false;
+  }
+}
+function localRelationExpression(
+  expression: FilterExpression,
+  current: LocalOccurrenceKind | null = null,
+): boolean {
+  if (expression.kind === "not")
+    return localRelationExpression(expression.child, current);
+  if (expression.kind !== "condition")
+    return expression.children.every((child) =>
+      localRelationExpression(child, current),
+    );
+  return localRelationTarget(expression.target, current);
+}
+/**
  * Compile the one relation bundle consumed by historical D1 providers.
  * Raw sources, entity universes, and membership sets stay inside this
  * compiler; the returned relations are already resolved to one scope.
@@ -1498,10 +1608,35 @@ export function compileScopedDatasetSql(
     throw new Error("scoped_dataset_metadata_required");
   }
 
-  const domains =
-    input.filters.root && filterDocumentUsesAdvancedExpressions(input.filters)
-      ? buildFilterSqlDomains(input, metadata!.time)
+  const advanced =
+    input.filters.root !== null &&
+    filterDocumentUsesAdvancedExpressions(input.filters);
+  const targetEvidence =
+    input.target && input.filters.root && !advanced
+      ? targetMembershipEvidence(input.filters.root, input.target.type)
+      : null;
+  const target =
+    input.target &&
+    input.siteIds.length === 1 &&
+    input.plan.scope === input.target.type &&
+    input.plan.mode === "entity" &&
+    input.plan.membership.kind === "entity" &&
+    input.plan.membership.entityKind === input.target.type &&
+    input.filters.root !== null &&
+    (advanced
+      ? !input.compatibilityEventSource &&
+        localRelationExpression(input.filters.root)
+      : targetEvidence?.local &&
+        targetEvidence.broad &&
+        !compilePositiveEventCountMembership(
+          input.plan.membership.expression,
+          input.target.type,
+        ))
+      ? input.target
       : undefined;
+  const domains = advanced
+    ? buildFilterSqlDomains(input, metadata!.time, target)
+    : undefined;
   // Both observation predicates read the same linked Visit columns. An
   // Event matching such a predicate cannot qualify a nonmatching in-window
   // Visit. Events outside the Visit window still remain independently
@@ -1587,29 +1722,6 @@ scope_final_events AS (
     ON matching_events.site_pk = re.site_pk
    AND matching_events.event_id = re.event_id
 )`;
-  // Cross-entity facts and advanced time domains still require the full
-  // authorized universe; a target must never narrow their evidence.
-  const targetEvidence =
-    input.target && input.filters.root && !domains
-      ? targetMembershipEvidence(input.filters.root, input.target.type)
-      : null;
-  const target =
-    input.target &&
-    input.siteIds.length === 1 &&
-    input.plan.scope === input.target.type &&
-    input.plan.mode === "entity" &&
-    input.plan.membership.kind === "entity" &&
-    input.plan.membership.entityKind === input.target.type &&
-    input.filters.root !== null &&
-    !domains &&
-    targetEvidence?.local &&
-    targetEvidence.broad &&
-    !compilePositiveEventCountMembership(
-      input.plan.membership.expression,
-      input.target.type,
-    )
-      ? input.target
-      : undefined;
   const definitions: BoundCteDefinition[] = [
     boundCte(
       "scope_raw_visits",
