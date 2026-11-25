@@ -351,35 +351,37 @@ export async function queryJourneyTargetExistsFromD1(
   target: { readonly type: "visitor" | "session"; readonly value: string },
   window: QueryWindow,
 ): Promise<boolean> {
+  const targetColumn = target.type === "visitor" ? "visitor_id" : "session_id";
   const rows = await queryD1All<{ present: number }>(
     env,
     `
-WITH entity_universe AS (
-  SELECT ${target.type === "visitor" ? "visitor_id" : "session_id"} AS entity_id
+SELECT 1 AS present
+WHERE EXISTS (
+  SELECT 1
   FROM visits
   WHERE site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
+    AND ${targetColumn} = ?
     AND started_at >= ? AND started_at < ?
-  UNION
-  SELECT v.${target.type === "visitor" ? "visitor_id" : "session_id"} AS entity_id
-  FROM custom_events ce
-  INNER JOIN visits v
-    ON v.site_pk = ce.site_pk AND v.visit_id = ce.visit_id
-  WHERE ce.site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
+)
+OR EXISTS (
+  SELECT 1
+  FROM visits v
+  INNER JOIN custom_events ce
+    ON ce.site_pk = v.site_pk AND ce.visit_id = v.visit_id
+  WHERE v.site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
+    AND v.${targetColumn} = ?
     AND ce.occurred_at >= ? AND ce.occurred_at < ?
 )
-SELECT 1 AS present
-FROM entity_universe
-WHERE entity_id = ?
-LIMIT 1
 `,
     [
       siteId,
+      target.value,
       window.startMs,
       window.endExclusiveMs,
       siteId,
+      target.value,
       window.startMs,
       window.endExclusiveMs,
-      target.value,
     ],
   );
   return rows.length > 0;
