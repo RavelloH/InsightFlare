@@ -76,6 +76,38 @@ function performanceMetricVisitsSql(
     })
     .join("\n  UNION ALL\n  ");
 }
+/** Keep ranking and all-visit view counts independent of metric sampling. */
+function performanceDimensionMetricVisitsSql(
+  dimension: "pathname" | "country",
+  views: "path_views" | "country_views",
+  metrics: readonly PerformanceMetricKey[],
+): string {
+  if (metrics.length === 1) {
+    return `metric_visits AS (
+  ${performanceMetricVisitsSql("filtered_visits", [dimension], metrics)}
+),
+scoped_metric_visits AS (
+  SELECT metric_visits.*
+  FROM metric_visits
+  WHERE metric_visits.${dimension} IN (SELECT ${dimension} FROM ${views})
+)`;
+  }
+
+  // Restrict the shared input before the five metric scans. Visits with no
+  // samples still count towards the original top-N view ranking above.
+  return `top_metric_visits AS MATERIALIZED (
+  SELECT *
+  FROM filtered_visits
+  WHERE ${dimension} IN (SELECT ${dimension} FROM ${views})
+    AND has_any_performance = 1
+),
+metric_visits AS (
+  ${performanceMetricVisitsSql("top_metric_visits", [dimension], metrics)}
+),
+scoped_metric_visits AS (
+  SELECT * FROM metric_visits
+)`;
+}
 function performanceMetricPresenceSql(): string {
   return PERFORMANCE_METRIC_KEYS.map(
     (metric) => `${PERFORMANCE_METRIC_COLUMNS[metric]} IS NOT NULL`,
@@ -219,6 +251,11 @@ export async function queryPerformanceSummariesFromD1(
   filters: FilterDocument,
 ): Promise<Record<PerformanceMetricKey, PerformanceSummaryRow>> {
   const source = performanceVisitSource(siteId, window, filters);
+  // Neither query counts page views. Prune observations without any
+  // metrics before materialization, without changing the scoped eligibility.
+  const filteredClause = appendSqlConditions(source.filterClause, [
+    "(" + performanceMetricPresenceSql() + ")",
+  ]);
   const sql = `
 WITH
 ${source.ctes},
@@ -230,7 +267,7 @@ filtered_visits AS MATERIALIZED (
     perf_cls,
     perf_inp_ms
   FROM ${source.relation}
-  ${source.filterClause}
+  ${filteredClause}
 ),
 metric_visits AS (
   ${performanceMetricVisitsSql("filtered_visits")}
@@ -323,6 +360,11 @@ export async function queryAllPerformanceTrendsFromD1(
   const source = performanceVisitSource(siteId, window, filters);
   const buckets = buildTimeBuckets(window, interval);
   const bucket = timeBucketCase(buckets, "started_at");
+  // Neither query counts page views. Prune observations without any
+  // metrics before materialization, without changing the scoped eligibility.
+  const filteredClause = appendSqlConditions(source.filterClause, [
+    "(" + performanceMetricPresenceSql() + ")",
+  ]);
   const sql = `
 WITH
 ${source.ctes},
@@ -335,7 +377,7 @@ bucketed_visits AS MATERIALIZED (
     perf_cls,
     perf_inp_ms
   FROM ${source.relation}
-  ${source.filterClause}
+  ${filteredClause}
 ),
 metric_visits AS (
   ${performanceMetricVisitsSql("bucketed_visits", ["bucket"])}
@@ -396,14 +438,7 @@ path_views AS (
   ORDER BY views DESC, pathname ASC
   LIMIT ?
 ),
-metric_visits AS (
-  ${performanceMetricVisitsSql("filtered_visits", ["pathname"], selectedMetrics)}
-),
-scoped_metric_visits AS (
-  SELECT metric_visits.*
-  FROM metric_visits
-  WHERE metric_visits.pathname IN (SELECT pathname FROM path_views)
-),
+${performanceDimensionMetricVisitsSql("pathname", "path_views", selectedMetrics)},
 ordered_values AS (
   SELECT
     pathname,
@@ -477,14 +512,7 @@ country_views AS (
   ORDER BY views DESC, country ASC
   LIMIT ?
 ),
-metric_visits AS (
-  ${performanceMetricVisitsSql("filtered_visits", ["country"], selectedMetrics)}
-),
-scoped_metric_visits AS (
-  SELECT metric_visits.*
-  FROM metric_visits
-  WHERE metric_visits.country IN (SELECT country FROM country_views)
-),
+${performanceDimensionMetricVisitsSql("country", "country_views", selectedMetrics)},
 ordered_values AS (
   SELECT
     country,

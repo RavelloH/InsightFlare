@@ -497,9 +497,12 @@ describe("edge query performance D1 helpers", () => {
       },
     });
     expect(calls[0]?.sql).toContain("path_views AS");
+    expect(calls[0]?.sql).toContain("top_metric_visits AS MATERIALIZED");
     expect(calls[0]?.sql).toContain(
-      "WHERE metric_visits.pathname IN (SELECT pathname FROM path_views)",
+      "WHERE pathname IN (SELECT pathname FROM path_views)",
     );
+    expect(calls[0]?.sql).toContain("AND has_any_performance = 1");
+    expect(calls[0]?.sql).toContain("FROM top_metric_visits");
     expect(calls[0]?.sql).toContain("LIMIT ?");
     expect(calls[0]?.bindings).toEqual([
       ...visitBindings,
@@ -653,6 +656,11 @@ describe("edge query performance D1 helpers", () => {
       },
     });
     expect(calls[0]?.sql).toContain("country_views AS");
+    expect(calls[0]?.sql).toContain("top_metric_visits AS MATERIALIZED");
+    expect(calls[0]?.sql).toContain(
+      "WHERE country IN (SELECT country FROM country_views)",
+    );
+    expect(calls[0]?.sql).toContain("AND has_any_performance = 1");
     expect(calls[0]?.sql).toContain("UPPER(TRIM(COALESCE(country, '')))");
     expect(calls[0]?.bindings).toEqual([
       ...visitBindings,
@@ -1063,6 +1071,119 @@ describe("edge query performance D1 helpers", () => {
     }
   });
 
+  it("ranks top dimensions by all views before filtering metric samples", async () => {
+    const { env, d1 } = createSqlitePerformanceEnv();
+    try {
+      const insert = d1.database.prepare(
+        "INSERT INTO visits (visit_id, site_id, started_at, pathname, country, perf_lcp_ms, perf_cls) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      );
+      // Most popular dimension has no metrics and must not be backfilled.
+      for (let i = 0; i < 4; i++) {
+        insert.run(
+          "empty-" + i,
+          siteId,
+          window.startMs + i,
+          "/empty",
+          "US",
+          null,
+          null,
+        );
+      }
+      insert.run("top-metric", siteId, window.startMs, "/mixed", "CA", null, 0);
+      insert.run(
+        "top-lcp",
+        siteId,
+        window.startMs + 1,
+        "/mixed",
+        "CA",
+        120,
+        null,
+      );
+      insert.run(
+        "top-null",
+        siteId,
+        window.startMs + 2,
+        "/mixed",
+        "CA",
+        null,
+        null,
+      );
+      insert.run("outside-top", siteId, window.startMs, "/small", "GB", 999, 1);
+      insert.run(
+        "blank-country",
+        siteId,
+        window.startMs,
+        "/small",
+        " ",
+        100,
+        0.5,
+      );
+      for (const limit of [1, 2]) {
+        const routes = await queryPerformanceRoutesFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          limit,
+        );
+        const countries = await queryPerformanceCountriesFromD1(
+          env,
+          siteId,
+          window,
+          EMPTY_FILTER_DOCUMENT,
+          limit,
+        );
+        expect(routes.map((r) => [r.pathname, r.views])).toEqual(
+          limit === 1 ? [] : [["/mixed", 3]],
+        );
+        expect(countries.map((r) => [r.country, r.views])).toEqual(
+          limit === 1 ? [] : [["CA", 3]],
+        );
+        if (limit === 2) {
+          expect(routes[0]?.metrics.lcp).toEqual({
+            avg: 120,
+            p50: 120,
+            p75: 120,
+            p95: 120,
+            samples: 1,
+          });
+          expect(countries[0]?.metrics.cls).toEqual({
+            avg: 0,
+            p50: 0,
+            p75: 0,
+            p95: 0,
+            samples: 1,
+          });
+        }
+      }
+      await queryPerformanceRoutesFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        2,
+        "lcp",
+      );
+      await queryPerformanceCountriesFromD1(
+        env,
+        siteId,
+        window,
+        EMPTY_FILTER_DOCUMENT,
+        2,
+        "lcp",
+      );
+      expect(
+        d1.calls
+          .slice(-2)
+          .every(
+            (call) => !call.sql.includes("top_metric_visits AS MATERIALIZED"),
+          ),
+      ).toBe(true);
+    } finally {
+      d1.close();
+    }
+  });
+
   it("rejects invalid handlePerformance windows before querying D1", async () => {
     const { env, prepare } = createD1Env();
 
@@ -1124,6 +1245,98 @@ describe("edge query performance D1 helpers", () => {
         10,
       );
       expect(dashboard.summaries).toEqual(summaries);
+    } finally {
+      d1.close();
+    }
+  });
+
+  it("prunes entirely missing metrics before materializing summary and trend inputs", async () => {
+    const { env, d1 } = createSqlitePerformanceEnv();
+    try {
+      const insert = d1.database.prepare(
+        "INSERT INTO visits (visit_id, site_id, started_at, pathname, country, perf_lcp_ms, perf_cls) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      );
+      insert.run("null", siteId, window.startMs, "/first", "US", null, null);
+      insert.run("zero", siteId, window.startMs + 1, "/first", "US", null, 0);
+      insert.run("lcp", siteId, window.startMs + 2, "/first", "US", 120, null);
+      insert.run(
+        "other-country",
+        siteId,
+        window.startMs + 3,
+        "/first",
+        "CA",
+        900,
+        0.5,
+      );
+      insert.run(
+        "outside",
+        siteId,
+        window.endExclusiveMs,
+        "/first",
+        "US",
+        999,
+        1,
+      );
+      const filters = filterFixture({ country: "US" });
+      const summary = await queryPerformanceSummariesFromD1(
+        env,
+        siteId,
+        window,
+        filters,
+      );
+      const trends = await queryAllPerformanceTrendsFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        filters,
+      );
+      expect(summary.lcp).toEqual({
+        avg: 120,
+        p50: 120,
+        p75: 120,
+        p95: 120,
+        samples: 1,
+      });
+      expect(summary.cls).toEqual({
+        avg: 0,
+        p50: 0,
+        p75: 0,
+        p95: 0,
+        samples: 1,
+      });
+      expect(summary.inp.samples).toBe(0);
+      expect(trends.lcp).toEqual([
+        {
+          bucket: 0,
+          timestampMs: Date.UTC(2026, 0, 2, 1),
+          avg: 120,
+          p50: 120,
+          p75: 120,
+          p95: 120,
+          samples: 1,
+        },
+      ]);
+      expect(trends.cls[0]?.samples).toBe(1);
+      expect(trends.cls[0]?.p95).toBe(0);
+      expect(trends.inp).toEqual([]);
+      for (const call of d1.calls) {
+        expect(call.sql).toMatch(
+          /(?:filtered_visits|bucketed_visits) AS MATERIALIZED \([\s\S]*?\(perf_ttfb_ms IS NOT NULL OR perf_fcp_ms IS NOT NULL OR perf_lcp_ms IS NOT NULL OR perf_cls IS NOT NULL OR perf_inp_ms IS NOT NULL\)\s*\),/,
+        );
+      }
+      // The dashboard still counts all eligible views, including null metrics.
+      const dashboard = await queryPerformanceDashboardFromD1(
+        env,
+        siteId,
+        window,
+        "hour",
+        filters,
+        10,
+      );
+      expect(dashboard.summaries).toEqual(summary);
+      expect(dashboard.trends).toEqual(trends);
+      expect(dashboard.routes[0]?.views).toBe(3);
     } finally {
       d1.close();
     }
