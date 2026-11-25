@@ -20,7 +20,10 @@ import {
   SITE_PK_FROM_SITE_ID_SQL,
   sitePksFromSiteIdsSql,
 } from "@/lib/edge/sites/identity-sql";
-import { filterDocumentUsesAdvancedExpressions } from "@/lib/filter-contract/filter-types";
+import {
+  filterDocumentHasSimpleEventFacts,
+  filterDocumentUsesAdvancedExpressions,
+} from "@/lib/filter-contract/filter-types";
 import type { FilterScope } from "@/lib/filter-contract/scope-preference";
 
 import { buildVisitFilterSql } from "./core-filters";
@@ -54,6 +57,8 @@ export interface ScopedDatasetSql {
   readonly sessionRelation: string;
   readonly visitorRelation: string;
   readonly scope: FilterScope;
+  /** True only for the canonical materialized legacy Event qualification path. */
+  readonly materializedEventFacts?: boolean;
 }
 import { buildScopedFactsCtes, type ScopedFactKind } from "./scoped-facts";
 export interface ScopedDatasetCompilerInput {
@@ -1611,5 +1616,9 @@ scope_final_visitors AS (
     sessionRelation: "scope_final_sessions",
     visitorRelation: "scope_final_visitors",
     scope: input.plan.scope,
+    materializedEventFacts:
+      input.plan.scope === "event" &&
+      !allowSourceInlining &&
+      filterDocumentHasSimpleEventFacts(input.filters),
   };
 }
