@@ -36,12 +36,17 @@
 
 ## 為什麼選擇 InsightFlare？
 
-- **你的基礎設施，你的資料。** 自行託管在自己的 Cloudflare 帳戶中。
-- **深度產品分析。** 漏斗、留存、自訂事件與行為篩選，不按事件或席位收取軟體費用。
-- **輕量追蹤，邊緣運行。** 不到 4 KB 的指令碼，Workers 隨請求自動擴展。
-- **重視隱私。** 不使用 Cookie，訪客識別策略可設定。
-- **面向 AI 代理。** 發布 Skills、版本化 OpenAPI 與限定權限的 API 金鑰。
-- **完全開源。** MIT 授權，自行託管軟體沒有付費功能門檻。
+- **新增一段指令碼，自動開始統計。** 不到 4 KB 的無 Cookie 指令碼自動採集網頁瀏覽、來源、UTM、裝置、地區及 Core Web Vitals；修改追蹤設定無須重新發布前端。
+- **從同一份資料看見全貌。** 在同一個儀表板中了解即時訪客、網頁、行銷管道與真實使用者效能。
+- **每張報表都能直接比較。** 指標卡、趨勢圖、表格、漏斗與留存均可在原位置顯示比較資料；為比較設定獨立篩選條件，直接比較兩群訪客。
+- **產品分析功能，不按事件收取軟體費用。** 從帶屬性的自訂事件，到轉換漏斗、目標及群組留存，無須另外訂閱產品分析平台。
+- **用進階篩選精確圈定受眾。** 依訪客做過什麼、做了幾次、順序與間隔來篩選。透過視覺化建構器或運算式組合巢狀 AND / OR / NOT、事件屬性、聚合與有序行為序列；篩選後，從趨勢到留存的適用報表皆聚焦這群人。
+- **每位訪客，一條完整的時間軸。** 開啟任意訪客，依時間順序查看工作階段、來源、瀏覽網頁、事件與完整事件屬性。
+- **讓 AI 代理查詢你的資料。** 透過 Skills、版本化 OpenAPI 與限定權限的 API 金鑰，讓代理分析資料並在授權範圍內管理已儲存的分析。
+- **自己的基礎設施，自己的資料。** 一鍵部署至自己的 Cloudflare 帳戶，Workers 自動擴展，訪客識別可設定，自行託管軟體採用 MIT 開源授權。
+- **為團隊協作而設計。** 管理多個團隊與網站、分享唯讀報表、設定通知，並單獨觀測機器人流量。
+
+[線上體驗真實進階篩選引擎](https://insightflare.net/zh-tw/features/filters?utm_source=github&utm_medium=referral&utm_campaign=features&utm_content=readme_why_filters) · [了解週期與受眾比較](https://insightflare.net/zh-tw/docs/usage/comparison?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_why_compare)
 
 ## 快速開始
 
@@ -60,20 +65,20 @@
 
 <table>
   <tr>
-    <td width="50%" valign="top"><a href="https://insightflare.net/zh-tw/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_traffic"><img src="/.github/screenshot/004.webp" alt="流量與獲客" width="100%"><br><strong>流量與獲客</strong></a><br>即時流量、網頁、來源與行銷活動。</td>
-    <td width="50%" valign="top"><a href="https://insightflare.net/zh-tw/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_journeys"><img src="/.github/screenshot/018.webp" alt="工作階段與訪客旅程" width="100%"><br><strong>工作階段與訪客旅程</strong></a><br>追蹤瀏覽路徑與自訂事件。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh-tw/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_traffic"><img src="/.github/screenshot/004.webp" alt="流量與獲客" width="100%"><br><strong>流量與獲客</strong></a><br>即時流量、網頁、來源與行銷活動。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh-tw/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_journeys"><img src="/.github/screenshot/018.webp" alt="工作階段與訪客旅程" width="100%"><br><strong>工作階段與訪客旅程</strong></a><br>追蹤瀏覽路徑與自訂事件。</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><a href="https://insightflare.net/zh-tw/features/funnels?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_funnels"><img src="/.github/screenshot/054.webp" alt="漏斗與目標" width="100%"><br><strong>漏斗與目標</strong></a><br>依工作階段或訪客衡量轉換，找出流失。</td>
-    <td width="50%" valign="top"><a href="https://insightflare.net/zh-tw/features/retention?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_retention"><img src="/.github/screenshot/024.webp" alt="留存與回訪" width="100%"><br><strong>留存與回訪</strong></a><br>按首次造訪時間分組，了解誰回來了。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh-tw/features/funnels?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_funnels"><img src="/.github/screenshot/054.webp" alt="漏斗與目標" width="100%"><br><strong>漏斗與目標</strong></a><br>依工作階段或訪客衡量轉換，找出流失。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh-tw/features/retention?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_retention"><img src="/.github/screenshot/024.webp" alt="留存與回訪" width="100%"><br><strong>留存與回訪</strong></a><br>按首次造訪時間分組，了解誰回來了。</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><a href="https://insightflare.net/zh-tw/features/filters?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_filters"><img src="/.github/screenshot/049.webp" alt="自訂事件分析" width="100%"><br><strong>進階篩選與自訂事件</strong></a><br>透過行為、屬性及順序描述受眾。</td>
-    <td width="50%" valign="top"><a href="https://insightflare.net/zh-tw/features/experience?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_experience"><img src="/.github/screenshot/007.webp" alt="真實使用者體驗" width="100%"><br><strong>真實使用者體驗</strong></a><br>Core Web Vitals、瀏覽器與裝置。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh-tw/features/filters?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_filters"><img src="/.github/screenshot/049.webp" alt="自訂事件分析" width="100%"><br><strong>進階篩選與自訂事件</strong></a><br>透過行為、屬性及順序描述受眾。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh-tw/features/experience?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_experience"><img src="/.github/screenshot/007.webp" alt="真實使用者體驗" width="100%"><br><strong>真實使用者體驗</strong></a><br>Core Web Vitals、瀏覽器與裝置。</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><a href="https://insightflare.net/zh-tw/features/geo?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_geo"><img src="/.github/screenshot/026.webp" alt="地理情報" width="100%"><br><strong>地理情報</strong></a><br>從國家到城市逐層深入。</td>
-    <td width="50%" valign="top"><a href="https://insightflare.net/zh-tw/features/operations?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_operations"><img src="/.github/screenshot/058.webp" alt="可觀測性與防護" width="100%"><br><strong>可觀測性與防護</strong></a><br>請求觀測、機器人規則與運作狀態。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh-tw/features/geo?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_geo"><img src="/.github/screenshot/026.webp" alt="地理情報" width="100%"><br><strong>地理情報</strong></a><br>從國家到城市逐層深入。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh-tw/features/operations?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_operations"><img src="/.github/screenshot/058.webp" alt="可觀測性與防護" width="100%"><br><strong>可觀測性與防護</strong></a><br>請求觀測、機器人規則與運作狀態。</td>
   </tr>
 </table>
 

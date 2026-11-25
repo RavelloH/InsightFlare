@@ -36,12 +36,17 @@
 
 ## InsightFlare を選ぶ理由
 
-- **自分のインフラ、自分のデータ。** Cloudflare アカウント上でセルフホスト。
-- **深いプロダクト分析。** ファネル、リテンション、カスタムイベント、行動フィルター。イベント数や席数によるソフトウェア課金なし。
-- **軽量でエッジネイティブ。** 4 KB 未満のスクリプトと自動拡張する Workers。
-- **プライバシー重視。** Cookie を使わず、訪問者識別方式を設定可能。
-- **AI エージェント対応。** Skills、バージョン付き OpenAPI、権限を限定した API キー。
-- **オープンソース。** MIT ライセンス。セルフホスト版に有料機能の制限はありません。
+- **スクリプトをひとつ追加するだけ。** 4 KB 未満の Cookie を使わないスクリプトでページビュー、流入元、UTM、端末、地域、Core Web Vitals を自動計測。フロントエンドを再デプロイせずに計測設定を変更できます。
+- **同じデータから全体像を把握。** リアルタイムの訪問者、ページ、流入経路、実ユーザーのパフォーマンスを一つのダッシュボードで確認できます。
+- **期間やオーディエンスをレポート上で比較。** 指標カード、トレンド、表、ファネル、リテンションに比較データを表示。比較側に独立したフィルターを設定して二つの訪問者グループを直接比較できます。
+- **イベント数によるソフトウェア課金なしでプロダクト分析。** 属性付きカスタムイベント、コンバージョンファネル、目標、コホート別リテンションまで、別の分析サービスを契約する必要はありません。
+- **高度なフィルターでオーディエンスを正確に絞り込む。** 訪問者の行動、回数、順序、時間間隔で抽出。ビジュアルビルダーや式でネストした AND / OR / NOT、イベント属性、集計、順序付きシーケンスを組み合わせ、トレンドからリテンションまで対象レポートを絞り込めます。
+- **訪問者ごとの完全なタイムライン。** セッション、流入元、閲覧ページ、イベントとその属性を時系列で確認できます。
+- **AI エージェントにデータを問い合わせる。** Skills、バージョン付き OpenAPI、権限を限定した API キーで分析や保存済み分析の管理ができます。
+- **自分のインフラ、自分のデータ。** 自分の Cloudflare アカウントへワンクリックでデプロイ。Workers の自動拡張、設定可能な訪問者識別、MIT ライセンスのセルフホスト版。
+- **チームでの利用にも対応。** 複数のチームとサイト、読み取り専用リンク、通知設定、ボットトラフィックの個別観測を利用できます。
+
+[実際の高度なフィルターエンジンを試す](https://insightflare.net/ja/features/filters?utm_source=github&utm_medium=referral&utm_campaign=features&utm_content=readme_why_filters) · [期間とオーディエンスの比較](https://insightflare.net/ja/docs/usage/comparison?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_why_compare)
 
 ## クイックスタート
 
@@ -60,20 +65,20 @@ Fork、ビルド、Wrangler のインストールなしで最新の公式ビル�
 
 <table>
   <tr>
-    <td width="50%" valign="top"><a href="https://insightflare.net/ja/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_traffic"><img src="/.github/screenshot/004.webp" alt="トラフィックと流入" width="100%"><br><strong>トラフィックと流入</strong></a><br>リアルタイム、ページ、流入元、キャンペーン。</td>
-    <td width="50%" valign="top"><a href="https://insightflare.net/ja/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_journeys"><img src="/.github/screenshot/018.webp" alt="セッションと訪問経路" width="100%"><br><strong>セッションと訪問経路</strong></a><br>訪問経路とカスタムイベント。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/ja/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_traffic"><img src="/.github/screenshot/004.webp" alt="トラフィックと流入" width="100%"><br><strong>トラフィックと流入</strong></a><br>リアルタイム、ページ、流入元、キャンペーン。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/ja/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_journeys"><img src="/.github/screenshot/018.webp" alt="セッションと訪問経路" width="100%"><br><strong>セッションと訪問経路</strong></a><br>訪問経路とカスタムイベント。</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><a href="https://insightflare.net/ja/features/funnels?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_funnels"><img src="/.github/screenshot/054.webp" alt="ファネルと目標" width="100%"><br><strong>ファネルと目標</strong></a><br>セッションまたは訪問者単位で離脱を分析。</td>
-    <td width="50%" valign="top"><a href="https://insightflare.net/ja/features/retention?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_retention"><img src="/.github/screenshot/024.webp" alt="リテンション" width="100%"><br><strong>リテンション</strong></a><br>初回訪問日ごとに再訪を分析。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/ja/features/funnels?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_funnels"><img src="/.github/screenshot/054.webp" alt="ファネルと目標" width="100%"><br><strong>ファネルと目標</strong></a><br>セッションまたは訪問者単位で離脱を分析。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/ja/features/retention?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_retention"><img src="/.github/screenshot/024.webp" alt="リテンション" width="100%"><br><strong>リテンション</strong></a><br>初回訪問日ごとに再訪を分析。</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><a href="https://insightflare.net/ja/features/filters?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_filters"><img src="/.github/screenshot/049.webp" alt="カスタムイベント分析" width="100%"><br><strong>高度なフィルターとカスタムイベント</strong></a><br>行動、属性、順序でオーディエンスを定義。</td>
-    <td width="50%" valign="top"><a href="https://insightflare.net/ja/features/experience?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_experience"><img src="/.github/screenshot/007.webp" alt="実ユーザー体験" width="100%"><br><strong>実ユーザー体験</strong></a><br>Core Web Vitals、ブラウザー、端末。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/ja/features/filters?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_filters"><img src="/.github/screenshot/049.webp" alt="カスタムイベント分析" width="100%"><br><strong>高度なフィルターとカスタムイベント</strong></a><br>行動、属性、順序でオーディエンスを定義。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/ja/features/experience?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_experience"><img src="/.github/screenshot/007.webp" alt="実ユーザー体験" width="100%"><br><strong>実ユーザー体験</strong></a><br>Core Web Vitals、ブラウザー、端末。</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><a href="https://insightflare.net/ja/features/geo?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_geo"><img src="/.github/screenshot/026.webp" alt="地域分析" width="100%"><br><strong>地域分析</strong></a><br>国から都市まで掘り下げる地域分析。</td>
-    <td width="50%" valign="top"><a href="https://insightflare.net/ja/features/operations?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_operations"><img src="/.github/screenshot/058.webp" alt="可観測性と保護" width="100%"><br><strong>可観測性と保護</strong></a><br>リクエスト観測、ボット対策、運用状況。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/ja/features/geo?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_geo"><img src="/.github/screenshot/026.webp" alt="地域分析" width="100%"><br><strong>地域分析</strong></a><br>国から都市まで掘り下げる地域分析。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/ja/features/operations?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_operations"><img src="/.github/screenshot/058.webp" alt="可観測性と保護" width="100%"><br><strong>可観測性と保護</strong></a><br>リクエスト観測、ボット対策、運用状況。</td>
   </tr>
 </table>
 

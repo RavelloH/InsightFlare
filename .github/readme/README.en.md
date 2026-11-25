@@ -36,12 +36,17 @@ A script under 4 KB brings traffic, visitor journeys, funnels, retention and beh
 
 ## Why InsightFlare?
 
-- **Your infrastructure, your data.** Self-host on your own Cloudflare account.
-- **Deep product analytics.** Funnels, retention, custom events and behavioral filters, without per-event or per-seat software fees.
-- **Lightweight and edge-native.** A tracker under 4 KB and automatically scaling Workers.
-- **Privacy-aware.** Cookieless tracking and configurable visitor identification.
-- **Agent-ready.** Published Skills, versioned OpenAPI and scoped API keys.
-- **Open source.** MIT licensed, with no paid feature gates in the self-hosted software.
+- **Start with one lightweight script.** Automatically collect page views, referrers, UTM campaigns, devices, locations and Core Web Vitals with a cookie-free script under 4 KB. Change tracking settings without redeploying your website.
+- **See the whole picture.** Follow live visitors and traffic, then explore pages, acquisition channels and real-user performance in the same dashboard.
+- **Compare periods or audiences in place.** Overlay comparison data on metric cards, trends, tables, funnels and retention reports. Give the comparison its own filter to compare two groups of visitors directly.
+- **Go deeper without per-event software fees.** Analyze custom events and their properties, conversion funnels, goals and cohort retention; no separate product analytics subscription is needed.
+- **Ask precise questions with advanced filters.** Define audiences by what visitors did, how often, in what order and within what time window. Combine nested AND/OR/NOT conditions, event properties, aggregations and ordered sequences in a visual builder or expression. Every applicable report then focuses on the selected audience.
+- **Understand every visitor.** Open a visitor's timeline to inspect sessions, referrers, pages and events with their full payloads.
+- **Let AI agents query your data.** Published Skills, versioned OpenAPI and scoped API keys allow agents to investigate data and manage saved analyses with appropriate permissions.
+- **Own your infrastructure and data.** One-click deployment to your Cloudflare account, automatically scaling Workers, configurable visitor identification and MIT-licensed self-hosted software.
+- **Work together and stay informed.** Manage multiple sites and teams, share read-only reports, configure notifications and inspect bot traffic.
+
+[Try advanced filters with the real engine](https://insightflare.net/en/features/filters?utm_source=github&utm_medium=referral&utm_campaign=features&utm_content=readme_why_filters) · [Compare periods and audiences](https://insightflare.net/en/docs/usage/comparison?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_why_compare)
 
 ## Quick start
 
@@ -60,20 +65,20 @@ Install the latest official build without forking, compiling or installing Wrang
 
 <table>
   <tr>
-    <td width="50%" valign="top"><a href="https://insightflare.net/en/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_traffic"><img src="/.github/screenshot/004.webp" alt="Traffic &amp; acquisition" width="100%"><br><strong>Traffic &amp; acquisition</strong></a><br>Live traffic, pages, referrers and campaigns.</td>
-    <td width="50%" valign="top"><a href="https://insightflare.net/en/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_journeys"><img src="/.github/screenshot/018.webp" alt="Sessions &amp; visitor journeys" width="100%"><br><strong>Sessions &amp; visitor journeys</strong></a><br>Trace visits and custom events.</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/en/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_traffic"><img src="/.github/screenshot/004.webp" alt="Traffic &amp; acquisition" width="100%"><br><strong>Traffic &amp; acquisition</strong></a><br>Live traffic, pages, referrers and campaigns.</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/en/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_journeys"><img src="/.github/screenshot/018.webp" alt="Sessions &amp; visitor journeys" width="100%"><br><strong>Sessions &amp; visitor journeys</strong></a><br>Trace visits and custom events.</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><a href="https://insightflare.net/en/features/funnels?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_funnels"><img src="/.github/screenshot/054.webp" alt="Funnels &amp; goals" width="100%"><br><strong>Funnels &amp; goals</strong></a><br>Find drop-off by session or visitor.</td>
-    <td width="50%" valign="top"><a href="https://insightflare.net/en/features/retention?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_retention"><img src="/.github/screenshot/024.webp" alt="Retention" width="100%"><br><strong>Retention</strong></a><br>See who returns, grouped by first visit.</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/en/features/funnels?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_funnels"><img src="/.github/screenshot/054.webp" alt="Funnels &amp; goals" width="100%"><br><strong>Funnels &amp; goals</strong></a><br>Find drop-off by session or visitor.</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/en/features/retention?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_retention"><img src="/.github/screenshot/024.webp" alt="Retention" width="100%"><br><strong>Retention</strong></a><br>See who returns, grouped by first visit.</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><a href="https://insightflare.net/en/features/filters?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_filters"><img src="/.github/screenshot/049.webp" alt="Custom event analysis" width="100%"><br><strong>Advanced filters & custom events</strong></a><br>Describe audiences by behavior, attributes and sequence.</td>
-    <td width="50%" valign="top"><a href="https://insightflare.net/en/features/experience?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_experience"><img src="/.github/screenshot/007.webp" alt="Real user experience" width="100%"><br><strong>Real user experience</strong></a><br>Core Web Vitals, browsers and devices.</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/en/features/filters?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_filters"><img src="/.github/screenshot/049.webp" alt="Custom event analysis" width="100%"><br><strong>Advanced filters & custom events</strong></a><br>Describe audiences by behavior, attributes and sequence.</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/en/features/experience?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_experience"><img src="/.github/screenshot/007.webp" alt="Real user experience" width="100%"><br><strong>Real user experience</strong></a><br>Core Web Vitals, browsers and devices.</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><a href="https://insightflare.net/en/features/geo?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_geo"><img src="/.github/screenshot/026.webp" alt="Geo intelligence" width="100%"><br><strong>Geo intelligence</strong></a><br>Drill down from countries to cities.</td>
-    <td width="50%" valign="top"><a href="https://insightflare.net/en/features/operations?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_operations"><img src="/.github/screenshot/058.webp" alt="Observability &amp; protection" width="100%"><br><strong>Observability &amp; protection</strong></a><br>Request observation, bot rules and operational visibility.</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/en/features/geo?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_geo"><img src="/.github/screenshot/026.webp" alt="Geo intelligence" width="100%"><br><strong>Geo intelligence</strong></a><br>Drill down from countries to cities.</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/en/features/operations?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_operations"><img src="/.github/screenshot/058.webp" alt="Observability &amp; protection" width="100%"><br><strong>Observability &amp; protection</strong></a><br>Request observation, bot rules and operational visibility.</td>
   </tr>
 </table>
 

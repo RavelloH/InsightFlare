@@ -36,12 +36,17 @@
 
 ## 为什么选择 InsightFlare？
 
-- **你的基础设施，你的数据。** 自托管在自己的 Cloudflare 账户中。
-- **深度产品分析。** 漏斗、留存、自定义事件与行为筛选，不按事件或席位收取软件费用。
-- **轻量采集，边缘运行。** 不到 4 KB 的追踪脚本，Workers 按请求自动扩展。
-- **为隐私而设计。** 无 Cookie 追踪，访客识别策略可配置。
-- **面向 AI 智能体。** 发布 Skills、带版本的 OpenAPI 和限定权限的 API 密钥。
-- **完全开源。** MIT 许可证，自托管软件无付费功能门槛。
+- **添加一段脚本，自动开始统计。** 不到 4 KB 的无 Cookie 脚本自动采集页面浏览、来源、UTM、设备、地区和 Core Web Vitals；修改追踪设置无需重新发布前端。
+- **从同一份数据看见全貌。** 在同一个仪表盘中了解实时访客、页面、推广渠道与真实用户性能。
+- **每张报表都能直接对比。** 指标卡、趋势图、表格、漏斗与留存均可在原位置展示对比数据；为对比设置独立筛选条件，直接比较两群访客。
+- **产品分析功能，不按事件收取软件费用。** 从带属性的自定义事件，到转化漏斗、目标和群组留存，无需另行订阅产品分析平台。
+- **用高级筛选精确圈定人群。** 按访客做过什么、做了几次、顺序如何、间隔多久来筛选。通过可视化构建器或表达式组合嵌套 AND / OR / NOT、事件属性、聚合与有序行为序列；圈定后，从趋势到留存的适用报表均聚焦这群人。
+- **每位访客，一条完整的时间线。** 打开任意访客，按时间顺序查看会话、来源、浏览页面、事件和完整事件属性。
+- **让 AI 智能体查询你的数据。** 通过 Skills、带版本的 OpenAPI 和限定权限的 API 密钥，让智能体分析数据，并在授权范围内管理已保存的分析。
+- **自己的基础设施，自己的数据。** 一键部署至自己的 Cloudflare 账户，Workers 自动扩展，访客识别可配置，自托管软件采用 MIT 开源许可证。
+- **为团队协作而设计。** 管理多个团队与站点、分享只读报表、配置通知，并单独观测机器人流量。
+
+[在线体验真实高级筛选引擎](https://insightflare.net/zh/features/filters?utm_source=github&utm_medium=referral&utm_campaign=features&utm_content=readme_why_filters) · [了解周期与人群对比](https://insightflare.net/zh/docs/usage/comparison?utm_source=github&utm_medium=referral&utm_campaign=docs&utm_content=readme_why_compare)
 
 ## 快速开始
 
@@ -60,20 +65,20 @@
 
 <table>
   <tr>
-    <td width="50%" valign="top"><a href="https://insightflare.net/zh/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_traffic"><img src="/.github/screenshot/004.webp" alt="流量与获客" width="100%"><br><strong>流量与获客</strong></a><br>实时流量、页面、来源与推广活动。</td>
-    <td width="50%" valign="top"><a href="https://insightflare.net/zh/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_journeys"><img src="/.github/screenshot/018.webp" alt="会话与访客旅程" width="100%"><br><strong>会话与访客旅程</strong></a><br>追踪访问路径和自定义事件。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_traffic"><img src="/.github/screenshot/004.webp" alt="流量与获客" width="100%"><br><strong>流量与获客</strong></a><br>实时流量、页面、来源与推广活动。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh/features?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_journeys"><img src="/.github/screenshot/018.webp" alt="会话与访客旅程" width="100%"><br><strong>会话与访客旅程</strong></a><br>追踪访问路径和自定义事件。</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><a href="https://insightflare.net/zh/features/funnels?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_funnels"><img src="/.github/screenshot/054.webp" alt="漏斗与目标" width="100%"><br><strong>漏斗与目标</strong></a><br>按会话或访客衡量转化，定位流失。</td>
-    <td width="50%" valign="top"><a href="https://insightflare.net/zh/features/retention?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_retention"><img src="/.github/screenshot/024.webp" alt="留存与回访" width="100%"><br><strong>留存与回访</strong></a><br>按首次访问时间分组，了解谁回来了。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh/features/funnels?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_funnels"><img src="/.github/screenshot/054.webp" alt="漏斗与目标" width="100%"><br><strong>漏斗与目标</strong></a><br>按会话或访客衡量转化，定位流失。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh/features/retention?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_retention"><img src="/.github/screenshot/024.webp" alt="留存与回访" width="100%"><br><strong>留存与回访</strong></a><br>按首次访问时间分组，了解谁回来了。</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><a href="https://insightflare.net/zh/features/filters?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_filters"><img src="/.github/screenshot/049.webp" alt="自定义事件分析" width="100%"><br><strong>高级筛选与自定义事件</strong></a><br>通过行为、属性和顺序描述一群用户。</td>
-    <td width="50%" valign="top"><a href="https://insightflare.net/zh/features/experience?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_experience"><img src="/.github/screenshot/007.webp" alt="真实用户体验" width="100%"><br><strong>真实用户体验</strong></a><br>Core Web Vitals、浏览器与设备。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh/features/filters?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_filters"><img src="/.github/screenshot/049.webp" alt="自定义事件分析" width="100%"><br><strong>高级筛选与自定义事件</strong></a><br>通过行为、属性和顺序描述一群用户。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh/features/experience?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_experience"><img src="/.github/screenshot/007.webp" alt="真实用户体验" width="100%"><br><strong>真实用户体验</strong></a><br>Core Web Vitals、浏览器与设备。</td>
   </tr>
   <tr>
-    <td width="50%" valign="top"><a href="https://insightflare.net/zh/features/geo?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_geo"><img src="/.github/screenshot/026.webp" alt="地理情报" width="100%"><br><strong>地理情报</strong></a><br>从国家到城市逐级下钻。</td>
-    <td width="50%" valign="top"><a href="https://insightflare.net/zh/features/operations?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_operations"><img src="/.github/screenshot/058.webp" alt="可观测性与防护" width="100%"><br><strong>可观测性与防护</strong></a><br>请求观测、机器人规则及运行状态。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh/features/geo?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_geo"><img src="/.github/screenshot/026.webp" alt="地理情报" width="100%"><br><strong>地理情报</strong></a><br>从国家到城市逐级下钻。</td>
+    <td width="50%" valign="top" align="center"><a href="https://insightflare.net/zh/features/operations?utm_source=github&amp;utm_medium=referral&amp;utm_campaign=features&amp;utm_content=readme_operations"><img src="/.github/screenshot/058.webp" alt="可观测性与防护" width="100%"><br><strong>可观测性与防护</strong></a><br>请求观测、机器人规则及运行状态。</td>
   </tr>
 </table>
 
