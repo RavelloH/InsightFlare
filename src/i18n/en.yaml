@@ -233,6 +233,8 @@ conditionDescription:
   filterIsEmpty: "{field} is empty"
   filterNotEmpty: "{field} is not empty"
 filterBuilder:
+  valueLocale: "en"
+  countrySearchPlaceholder: "Search by country name or code"
   fieldGroups:
     advanced: Advanced
     page: Page

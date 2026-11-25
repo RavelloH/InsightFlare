@@ -233,6 +233,8 @@ conditionDescription:
   filterIsEmpty: "{field} は空"
   filterNotEmpty: "{field} は空ではない"
 filterBuilder:
+  valueLocale: "ja"
+  countrySearchPlaceholder: "国・地域名またはコードで検索"
   fieldGroups:
     advanced: 高度なフィルター
     page: ページ

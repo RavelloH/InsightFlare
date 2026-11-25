@@ -233,6 +233,8 @@ conditionDescription:
   filterIsEmpty: "{field} 为空"
   filterNotEmpty: "{field} 不为空"
 filterBuilder:
+  valueLocale: "zh"
+  countrySearchPlaceholder: "搜索国家/地区名称或代码"
   fieldGroups:
     advanced: 高级
     page: 页面

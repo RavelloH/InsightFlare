@@ -57,6 +57,26 @@ describe("FilterEditor advanced visual integration", () => {
     host.remove();
   });
 
+  it.each([
+    ['geo.country eq "US"', "United States"],
+    ['geo.country in ["US", "JP"]', "United States, Japan"],
+    ['first(PAGE).geo.country eq "JP"', "Japan"],
+  ])(
+    "displays country names and retains original codes for %s",
+    async (source, label) => {
+      const onApply = await mount(source);
+      expect(
+        Array.from(host.querySelectorAll("button")).some(
+          (button) => button.textContent?.trim() === label,
+        ),
+      ).toBe(true);
+      await apply();
+      expect(
+        parseFilterDsl(onApply.mock.calls[0]![0], analyticsFilterRegistry),
+      ).toEqual(parseFilterDsl(source, analyticsFilterRegistry));
+    },
+  );
+
   it("round-trips an aggregate with a nested selector from the visual editor", async () => {
     const source =
       'sum(EVENT { $.name eq "purchase" } -> payload("/amount")) gt 1000';

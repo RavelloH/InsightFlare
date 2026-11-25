@@ -38,6 +38,11 @@ import {
   fetchEventTypeFieldValues,
   fetchFilterValues,
 } from "@/lib/dashboard/client/data/index";
+import {
+  countryFilterLabel,
+  countryFilterOptions,
+  countryFilterSelection,
+} from "@/lib/dashboard/filter-country-values";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { EventField } from "@/lib/dashboard-api/client/edge";
 import { type RegisteredFilterField } from "@/lib/filter-contract/filter-registry";
@@ -48,6 +53,7 @@ import {
   type FilterValue,
   type FilterValueKind,
 } from "@/lib/filter-contract/index";
+import { resolveLocale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
 import { isSafeField } from "@/lib/perception-search/index";
@@ -322,6 +328,8 @@ export function SearchableValueInput({
   const [searchToken, setSearchToken] = useState("");
   const deferredSearchToken = useDeferredValue(searchToken);
   const isPayload = condition.field === "event.payload";
+  const isCountry = condition.field === "geo.country";
+  const locale = resolveLocale(messages.filterBuilder.valueLocale);
   const definition = isPayload
     ? undefined
     : (analyticsFilterRegistry.get(condition.field) as
@@ -358,7 +366,7 @@ export function SearchableValueInput({
         ? [eventName, condition.payloadPath, condition.scalarKind]
         : [condition.field]),
       suggestionMode,
-      deferredSearchToken,
+      isCountry ? "" : deferredSearchToken,
       resolvedScope ?? "unresolved",
       suggestionFilters,
     ],
@@ -395,9 +403,9 @@ export function SearchableValueInput({
         condition.field as DashboardFilterOptionKey,
         suggestionFilters,
         {
-          limit: 12,
+          limit: isCountry ? 200 : 12,
           cursor: pageParam as string | null,
-          search: deferredSearchToken,
+          search: isCountry ? "" : deferredSearchToken,
           signal,
           resolvedScope,
         },
@@ -419,8 +427,25 @@ export function SearchableValueInput({
     getNextPageParam: (lastPage) =>
       lastPage.pagination?.hasMore ? lastPage.pagination.nextCursor : undefined,
   });
-  const suggestions =
+  const observedSuggestions =
     suggestionsQuery.data?.pages.flatMap((page) => page.items) ?? [];
+  const countryOptions = isCountry
+    ? countryFilterOptions(
+        locale,
+        observedSuggestions,
+        isList
+          ? selectedValues.filter(
+              (value): value is string => typeof value === "string",
+            )
+          : [condition.valueText],
+        deferredSearchToken,
+      )
+    : [];
+  const suggestions = isCountry ? countryOptions : observedSuggestions;
+  const displayLabel = (value: FilterValue) =>
+    isCountry && typeof value === "string"
+      ? countryFilterLabel(value, locale)
+      : filterValueText(value);
   // Synchronous local suggestions even when the existing scoped server picker is loading.
   const inputMode =
     valueKind === "number" || condition.scalarKind === "number"
@@ -462,17 +487,20 @@ export function SearchableValueInput({
         numberUnit,
         displayUnit,
       )
-    : condition.valueText;
+    : isCountry
+      ? countryFilterLabel(condition.valueText, locale)
+      : condition.valueText;
   const canonicalTextFromDisplay = (valueText: string) =>
     numberUnit
       ? convertDisplayTextToCanonical(valueText, displayUnit, numberUnit)
       : valueText;
 
-  const menuState = suggestionsQuery.isFetching
-    ? "loading"
-    : suggestions.length > 0
-      ? "suggestions"
-      : "empty";
+  const menuState =
+    !isCountry && suggestionsQuery.isFetching
+      ? "loading"
+      : suggestions.length > 0
+        ? "suggestions"
+        : "empty";
 
   useEffect(() => {
     if (open) setSearchToken("");
@@ -560,7 +588,7 @@ export function SearchableValueInput({
                             numberUnit,
                             displayUnit,
                           )
-                        : filterValueText(value),
+                        : displayLabel(value),
                     )
                     .join(", ") || messages.filterBuilder.valueUnset
                 : displayValueText || messages.filterBuilder.valueUnset}
@@ -573,9 +601,11 @@ export function SearchableValueInput({
           sideOffset={4}
           searchValue={searchToken}
           searchPlaceholder={
-            isList
-              ? messages.filterBuilder.valueListPlaceholder
-              : messages.filterBuilder.valueSearchPlaceholder
+            isCountry
+              ? messages.filterBuilder.countrySearchPlaceholder
+              : isList
+                ? messages.filterBuilder.valueListPlaceholder
+                : messages.filterBuilder.valueSearchPlaceholder
           }
           searchInputProps={{
             autoFocus: true,
@@ -586,6 +616,30 @@ export function SearchableValueInput({
             max: displayMetadata?.max ?? numberMetadata?.max,
             step: displayMetadata?.step ?? numberMetadata?.step,
             onKeyDown: (event) => {
+              if (isCountry && event.key === "Enter") {
+                event.preventDefault();
+                const selected = countryFilterSelection(
+                  countryFilterOptions(
+                    locale,
+                    observedSuggestions,
+                    isList
+                      ? selectedValues.filter(
+                          (value): value is string => typeof value === "string",
+                        )
+                      : [condition.valueText],
+                    searchToken,
+                  ),
+                  searchToken,
+                );
+                if (selected) {
+                  if (isList) addListValue(selected.value, true);
+                  else {
+                    onChange(selected.value);
+                    setOpen(false);
+                  }
+                }
+                return;
+              }
               if (isList && event.key === "Enter") {
                 event.preventDefault();
                 addListValue(searchToken);
@@ -596,7 +650,7 @@ export function SearchableValueInput({
           syncKey={suggestions.length}
           onSearchValueChange={(next) => {
             setSearchToken(next);
-            if (!isList) onChange(canonicalTextFromDisplay(next));
+            if (!isList && !isCountry) onChange(canonicalTextFromDisplay(next));
           }}
           header={
             isList && selectedValues.length > 0 ? (
@@ -609,7 +663,7 @@ export function SearchableValueInput({
                           numberUnit,
                           displayUnit,
                         )
-                      : filterValueText(value);
+                      : displayLabel(value);
                   const removeValueLabel = formatI18nTemplate(
                     messages.filterBuilder.removeValue,
                     { value: displayText },
@@ -645,7 +699,7 @@ export function SearchableValueInput({
         >
           <AutoResizer className="min-h-0 flex-1" initial duration={0.18}>
             <AutoTransition transitionKey={menuState} duration={0.18}>
-              {suggestionsQuery.isFetching ? (
+              {!isCountry && suggestionsQuery.isFetching ? (
                 <div className="flex min-h-10 items-center justify-center text-muted-foreground">
                   <Spinner aria-label={messages.filterBuilder.valueLoading} />
                 </div>
@@ -692,10 +746,21 @@ export function SearchableValueInput({
                         }}
                       >
                         <span className="min-w-0 truncate">
-                          {label ?? filterValueText(value)}
+                          {isCountry
+                            ? displayLabel(value)
+                            : (label ?? filterValueText(value))}
+                          {isCountry &&
+                            typeof value === "string" &&
+                            displayLabel(value) !== value && (
+                              <span className="ml-2 font-mono text-muted-foreground">
+                                {value}
+                              </span>
+                            )}
                         </span>
                         <span className="shrink-0 text-xs text-muted-foreground">
-                          {item.occurrences ?? 0}
+                          {isCountry
+                            ? item.occurrences
+                            : (item.occurrences ?? 0)}
                         </span>
                       </button>
                     );

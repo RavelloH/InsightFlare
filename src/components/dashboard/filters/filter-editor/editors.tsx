@@ -964,10 +964,23 @@ function ConditionEditor({
             .join(", ")
         : editorTextFromFilterValue(literalValue)
     : condition.valueText;
+  // A country-valued member of a single activity uses the same country picker
+  // as the registered field, without changing the advanced target AST.
+  const isCountryMember = (() => {
+    if (advancedTarget?.kind !== "member" || editorValueKind !== "enum")
+      return false;
+    const path: string[] = [];
+    let member: FilterTargetExpression = advancedTarget;
+    while (member.kind === "member") {
+      path.unshift(member.member);
+      member = member.object;
+    }
+    return path.join(".") === "geo.country";
+  })();
   const controlCondition: EditorCondition = advancedCondition
     ? {
         ...condition,
-        field,
+        field: isCountryMember ? "geo.country" : field,
         operator,
         value: literalValue,
         listValues,

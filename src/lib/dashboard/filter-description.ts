@@ -1,3 +1,4 @@
+import { countryFilterLabel } from "@/lib/dashboard/filter-country-values";
 import {
   type FilterComparisonValue,
   type FilterCondition,
@@ -11,6 +12,7 @@ import {
   inferFilterTargetType,
   resolveEntityMember,
 } from "@/lib/filter-contract";
+import { resolveLocale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import { formatI18nTemplate } from "@/lib/i18n/template";
 
@@ -479,7 +481,13 @@ export function describeFilterExpression(
         : phrase("negate", {
             description: phrase("nested", { description: field }),
           });
-    const format = (v: FilterComparisonValue) => value(v, context, unit);
+    const format = (v: FilterComparisonValue) =>
+      id === "geo.country" && typeof v === "string"
+        ? countryFilterLabel(
+            v,
+            resolveLocale(messages.filterBuilder.valueLocale),
+          )
+        : value(v, context, unit);
     const v = operand as FilterConditionValue | undefined;
     const list = Array.isArray(v)
       ? (v as readonly FilterComparisonValue[])
