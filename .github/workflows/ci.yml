@@ -76,9 +76,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Full typed lint
         env:
-          NODE_OPTIONS: --max-old-space-size=8192
+          NODE_OPTIONS: --max-old-space-size=6144
         # Typed lint depends on other files and their types. Never reuse per-file results across CI snapshots.
-        run: pnpm exec eslint --no-cache --max-warnings 0 .
+        run: /usr/bin/time -v pnpm exec eslint --no-cache --concurrency 2 --max-warnings 0 .
 
   contracts:
     name: Contracts and generated specifications
@@ -164,13 +164,13 @@ jobs:
   core-shards:
     env:
       INSIGHTFLARE_CI_BALANCED_SHARDS: "1"
-    name: Core tests (${{ matrix.shard }}/4)
+    name: Core tests (${{ matrix.shard }}/6)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -190,7 +190,7 @@ jobs:
       - name: Run coverage shard
         # Thresholds apply to the merged coverage map, not an individual shard.
         run: >-
-          pnpm exec vitest run --shard=${{ matrix.shard }}/4 --reporter=blob --reporter=default --coverage --silent=passed-only --maxWorkers=100%
+          pnpm exec vitest run --shard=${{ matrix.shard }}/6 --reporter=blob --reporter=default --coverage --silent=passed-only --maxWorkers=100%
           --coverage.reporter=json-summary
           --coverage.thresholds.lines=0 --coverage.thresholds.statements=0
           --coverage.thresholds.branches=0 --coverage.thresholds.functions=0
@@ -229,12 +229,12 @@ jobs:
           pattern: core-blob-*
           path: .vitest-reports
           merge-multiple: true
-      - name: Verify all four reports exist
+      - name: Verify all six reports exist
         shell: bash
         run: |
           set -euo pipefail
-          for shard in 1 2 3 4; do test -s ".vitest-reports/blob-$shard-4.json"; done
-          test "$(find .vitest-reports -maxdepth 1 -type f | wc -l)" -eq 4
+          for shard in 1 2 3 4 5 6; do test -s ".vitest-reports/blob-$shard-6.json"; done
+          test "$(find .vitest-reports -maxdepth 1 -type f | wc -l)" -eq 6
       - name: Merge coverage and enforce global thresholds
         run: pnpm exec vitest --merge-reports --coverage --coverage.reporter=text-summary --coverage.reporter=json-summary --coverage.reporter=html --coverage.reportsDirectory=coverage/core
       - uses: actions/upload-artifact@v4
