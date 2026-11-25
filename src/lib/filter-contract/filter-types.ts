@@ -1167,3 +1167,23 @@ export function filterDocumentUsesAdvancedExpressions(
   if (document.root) expressionVisit(document.root);
   return advanced;
 }
+
+/** Legacy Event predicates require Event qualification rather than just Visit
+ * context. Advanced Relation expressions have a separate execution strategy. */
+export function filterDocumentHasSimpleEventFacts(
+  document: FilterDocument,
+): boolean {
+  if (!document.root || filterDocumentUsesAdvancedExpressions(document))
+    return false;
+  const contains = (expression: FilterExpression): boolean => {
+    if (expression.kind === "not") return contains(expression.child);
+    if (expression.kind !== "condition")
+      return expression.children.some(contains);
+    const target = expression.target;
+    return (
+      target.kind === "event-payload" ||
+      (target.kind === "field" && target.field === "event.name")
+    );
+  };
+  return contains(document.root);
+}

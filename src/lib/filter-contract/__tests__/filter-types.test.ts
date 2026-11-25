@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   analyticsFilterRegistry,
   analyzeFilterDocument,
+  filterDocumentHasSimpleEventFacts,
   legacyConditionValue,
   normalizeFilterDocument,
   parseFilterDsl,
@@ -23,6 +24,23 @@ function validate(source: string): void {
 }
 
 describe("Filter v1 expression types", () => {
+  it.each([
+    ['event.name eq "purchase"', true],
+    ['event.payload("/id") exists', true],
+    ['NOT (event.name eq "purchase") OR page.path contains "/"', true],
+    ['page.path contains "/"', false],
+    ['first(EVENT).name eq "signup"', false],
+    ['event.name eq "purchase" OR first(EVENT).name eq "signup"', false],
+  ] as const)(
+    "classifies simple event fact predicates without broadening relation expressions: %s",
+    (source, expected) => {
+      expect(
+        filterDocumentHasSimpleEventFacts(
+          parseFilterDsl(source, analyticsFilterRegistry),
+        ),
+      ).toBe(expected);
+    },
+  );
   it("keeps dynamic JSON scalar distinct from an unknown value and narrows contextually", () => {
     const source = parseFilterDsl(
       'min(EVENT -> payload("/value")) gt 15',

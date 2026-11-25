@@ -1517,6 +1517,86 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
+  it.each([
+    'event.name eq "purchase"',
+    'event.payload("/items/1/sku") eq "B"',
+    'event.name eq "purchase" OR page.path contains "/"',
+  ])(
+    "shares materialized legacy Event qualification for %s",
+    async (expression) => {
+      const logger = createInvocationLogger({
+        source: "worker",
+        trigger: "request",
+      });
+      const collector = registerHotspotCollector(logger);
+      const db = sqlitePayloadFixture();
+      try {
+        db.exec(
+          "UPDATE visits SET country='US',browser='Chrome' WHERE site_pk=1 AND visit_id='v-new'",
+        );
+        const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+        const env = instrumentEnv(
+          {
+            DB: createSqliteD1Database(db, trace),
+            DAILY_SALT_SECRET: "test-secret",
+          } as never,
+          logger,
+        );
+        const doc = parseFilterDsl(expression, analyticsFilterRegistry);
+        const plan = createScopedFilterPlan("dimension", doc, "event")!;
+        const filters = attachScopedFilterMetadata(doc, {
+          requestedScope: "event",
+          resolvedScope: plan.scope,
+          plan,
+          time: createQueryTime(100, 300, "UTC", 400),
+          siteIds: ["site-a"],
+        });
+        const dataset = compileScopedDatasetSql({
+          filters,
+          plan,
+          siteIds: ["site-a"],
+          window: WINDOW,
+        });
+        expect(dataset.scope).toBe("event");
+        expect(dataset.materializedEventFacts).toBe(true);
+        const dims = ["pathname", "country", "browser"];
+        const read = (dim: string) =>
+          queryDimensionPageFromD1(
+            env,
+            "site-a",
+            WINDOW,
+            filters,
+            100,
+            dim,
+            { excludeEmpty: true },
+            null,
+            undefined,
+            "private-dashboard",
+            {},
+          );
+        const separate = await Promise.all(dims.map(read));
+        expect(separate[0]!.items.length).toBeGreaterThan(0);
+        trace.preparedSql.length = 0;
+        const merged = await runWithInvocationLogger(logger, () =>
+          runWithDimensionPageBatch(
+            () => Promise.all(dims.map(read)),
+            "private-dashboard",
+          ),
+        );
+        expect(merged).toEqual(separate);
+        expect(trace.preparedSql).toHaveLength(1);
+        expect(trace.preparedSql[0]).toContain(
+          "filtered_visits AS NOT MATERIALIZED",
+        );
+        expect(collector.snapshot().dimensionBatch).toEqual({
+          merged3: { events: 1, items: 3 },
+        });
+      } finally {
+        db.close();
+      }
+    },
+  );
+
   it("shares compatible prepared dimension pages with independent ordering, cursors and limits", async () => {
     const logger = createInvocationLogger({
       source: "worker",

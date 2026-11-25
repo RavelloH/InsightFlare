@@ -3,6 +3,11 @@ import type {
   PrivateRequestParams,
 } from "@/lib/dashboard/client/data/types";
 import { toQueryString } from "@/lib/dashboard/client/utils";
+import {
+  analyticsFilterRegistry,
+  filterDocumentHasSimpleEventFacts,
+  parseFilterParams,
+} from "@/lib/filter-contract";
 // Concurrent identical GET requests share a single in-flight promise so a
 // dashboard page mounting many cards at once does not fan out into multiple
 // fetches for the same URL. The map is cleared as soon as the request
@@ -172,7 +177,6 @@ function queuePrivateOverviewRead<T>(
     import.meta.env.VITE_DEMO_MODE === "1" ||
     !batchableOverviewPath(endpoint) ||
     !params ||
-    (params.scope !== "session" && params.scope !== "visitor") ||
     !Object.keys(params).some((key) => key.startsWith("filter[")) ||
     params.compare != null ||
     params.cursor ||
@@ -186,6 +190,29 @@ function queuePrivateOverviewRead<T>(
     return undefined;
   const query = toQueryString(params);
   if (query.length > 8192) return undefined;
+  if (params.scope !== "session" && params.scope !== "visitor") {
+    if (
+      params.scope != null &&
+      params.scope !== "event" &&
+      params.scope !== "auto"
+    )
+      return undefined;
+    try {
+      if (
+        !filterDocumentHasSimpleEventFacts(
+          parseFilterParams(
+            new URLSearchParams(query),
+            analyticsFilterRegistry,
+          ),
+        )
+      )
+        return undefined;
+    } catch {
+      // The original GET adapter owns validation; do not turn malformed input
+      // into a different client-side error.
+      return undefined;
+    }
+  }
   const shared = new URLSearchParams(query);
   for (const name of ["limit", "sort", "direction"]) shared.delete(name);
   shared.sort();

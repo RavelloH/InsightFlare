@@ -571,7 +571,7 @@ export async function queryDimensionPageFromD1(
             ? "unfiltered"
             : !dataset
               ? "unprepared"
-              : dataset.scope === "event"
+              : dataset.scope === "event" && !dataset.materializedEventFacts
                 ? "eventScope"
                 : !Number.isInteger(limit) ||
                     limit < 1 ||

@@ -56,7 +56,11 @@ import { withComparison } from "@/lib/dashboard/client/utils";
 import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
 import { isErrorEnvelope } from "@/lib/demo/realtime/envelope";
 import { handleDemoRequest } from "@/lib/demo/runtime";
-import { attachFilterScopePreference } from "@/lib/filter-contract";
+import {
+  analyticsFilterRegistry,
+  attachFilterScopePreference,
+  parseFilterDsl,
+} from "@/lib/filter-contract";
 describe("Dashboard Client Data Processing Utilities", () => {
   const emptyPaginatedCollection = {
     items: [],
@@ -1056,6 +1060,80 @@ describe("Dashboard Client Data Processing Utilities", () => {
       }
     });
 
+    it.each(["event", "auto", undefined])(
+      "collects legacy Event facts with %s scope",
+      async (scope) => {
+        vi.stubGlobal("window", {});
+        try {
+          const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+            freshJsonResponse({
+              ok: true,
+              items: [
+                { status: 200, body: { data: "path" } },
+                { status: 200, body: { data: "browser" } },
+              ],
+            }),
+          );
+          globalThis.fetch = fetchMock as typeof fetch;
+          const params = {
+            siteId: "event-fact-batch",
+            from: 100,
+            to: 200,
+            limit: 100,
+            ...(scope ? { scope } : {}),
+            "filter[event.name]": "purchase",
+          };
+          const results = await Promise.all([
+            fetchPrivateJson("/api/private/overview-page-path", params, {
+              batchOverview: true,
+            }),
+            fetchPrivateJson("/api/private/overview-client-browser", params, {
+              batchOverview: true,
+            }),
+          ]);
+          expect(results).toEqual([{ data: "path" }, { data: "browser" }]);
+          expect(fetchMock).toHaveBeenCalledTimes(1);
+          expect(fetchMock.mock.calls[0]![1]?.method).toBe("POST");
+        } finally {
+          vi.unstubAllGlobals();
+        }
+      },
+    );
+
+    it("collects serialized legacy Payload filters in automatic scope", async () => {
+      vi.stubGlobal("window", {});
+      try {
+        const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+          freshJsonResponse({
+            ok: true,
+            items: [
+              { status: 200, body: { data: "path" } },
+              { status: 200, body: { data: "browser" } },
+            ],
+          }),
+        );
+        globalThis.fetch = fetchMock as typeof fetch;
+        const params = withFilters(
+          { siteId: "event-payload-batch", from: 100, to: 200, limit: 100 },
+          parseFilterDsl(
+            'event.payload("/id") exists',
+            analyticsFilterRegistry,
+          ),
+        );
+        await Promise.all([
+          fetchPrivateJson("/api/private/overview-page-path", params, {
+            batchOverview: true,
+          }),
+          fetchPrivateJson("/api/private/overview-client-browser", params, {
+            batchOverview: true,
+          }),
+        ]);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock.mock.calls[0]![1]?.method).toBe("POST");
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
     it("does not collect unfiltered, event-scope or interactive overview reads into batches", async () => {
       vi.stubGlobal("window", {});
       try {
