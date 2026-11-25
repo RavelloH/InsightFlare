@@ -2760,6 +2760,159 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
+  it("restricts only same-entity local journey qualification and preserves event-only rows and pagination", async () => {
+    const { db } = runFixture();
+    try {
+      db.exec(
+        "UPDATE visits SET session_id='s-event-only', visitor_id='u-event-only' WHERE site_pk=1 AND visit_id='v-old'; UPDATE custom_events SET occurred_at=170 WHERE event_pk=101",
+      );
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const env = { DB: createSqliteD1Database(db, trace) } as never;
+      for (const kind of ["session", "visitor"] as const) {
+        const target = { type: kind, value: kind === "session" ? "s1" : "u1" };
+        const prepare = (expression: string, scope: "session" | "visitor") => {
+          const doc = parseFilterDsl(expression, analyticsFilterRegistry);
+          const plan = createScopedFilterPlan(
+            kind === "session" ? "session-events" : "visitor-events",
+            doc,
+            scope,
+          )!;
+          return {
+            filters: attachScopedFilterMetadata(doc, {
+              requestedScope: scope,
+              resolvedScope: plan.scope,
+              plan,
+              time: createQueryTime(100, 300, "UTC", 400),
+              siteIds: ["site-a"],
+            }),
+            plan,
+          };
+        };
+        for (const expression of [
+          'page.path contains "/"',
+          'NOT (page.path eq "/missing")',
+          'page.path eq "/home" OR geo.country eq "ZZ"',
+          'NOT (event.name eq "missing")',
+          'event.name eq "purchase" OR page.path eq "/docs"',
+          'event.payload("/items/1/sku") eq "B" AND page.path eq "/home"',
+          kind + ".views gte 1",
+          kind + ".events eq 0",
+          kind + ".views gte 1 AND " + kind + ".events gte 0",
+          kind === "session"
+            ? "session.durationMs gte 1 AND session.bounce eq true"
+            : "visitor.sessions gte 1",
+        ]) {
+          const { filters, plan } = prepare(expression, kind);
+          const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
+          const unrestricted = compileScopedDatasetSql(input);
+          const restricted = compileScopedDatasetSql({ ...input, target });
+          const column = kind + "_id";
+          expect(restricted.ctes).toContain("AND " + column + " = ?");
+          expect(restricted.ctes).toContain("AND v." + column + " = ?");
+          for (const relation of ["visitRelation", "eventRelation"] as const) {
+            const query = (
+              dataset: ReturnType<typeof compileScopedDatasetSql>,
+            ) =>
+              db
+                .prepare(
+                  "WITH " +
+                    dataset.ctes +
+                    " SELECT * FROM " +
+                    dataset[relation] +
+                    " WHERE " +
+                    column +
+                    " = ? ORDER BY " +
+                    (relation === "visitRelation" ? "visit_id" : "event_id"),
+                )
+                .all(...dataset.bindings.map((b) => b.value), target.value);
+            expect(query(restricted)).toEqual(query(unrestricted));
+          }
+          const all = await queryJourneyEventsPageFromD1(
+            env,
+            "site-a",
+            WINDOW,
+            filters,
+            target,
+            100,
+          );
+          const first = await queryJourneyEventsPageFromD1(
+            env,
+            "site-a",
+            WINDOW,
+            filters,
+            target,
+            1,
+          );
+          expect(first.items).toEqual(all.items.slice(0, 1));
+          expect(trace.preparedSql.at(-1)).not.toContain(
+            "LEFT JOIN filtered_visits",
+          );
+          if (first.pagination.nextCursor) {
+            const second = await queryJourneyEventsPageFromD1(
+              env,
+              "site-a",
+              WINDOW,
+              filters,
+              target,
+              100,
+              first.pagination.nextCursor,
+            );
+            expect(second.items).toEqual(all.items.slice(1));
+          }
+        }
+        const eventOnly = {
+          type: kind,
+          value: kind === "session" ? "s-event-only" : "u-event-only",
+        };
+        const historical = prepare('page.path eq "/old"', kind);
+        const historicalPage = await queryJourneyEventsPageFromD1(
+          env,
+          "site-a",
+          WINDOW,
+          historical.filters,
+          eventOnly,
+          100,
+        );
+        expect(
+          historicalPage.items.map((item) => ({
+            id: item.id,
+            kind: item.kind,
+          })),
+        ).toEqual([{ id: "e-old", kind: "custom" }]);
+        expect(
+          (
+            await queryJourneyEventsPageFromD1(
+              env,
+              "site-b",
+              WINDOW,
+              historical.filters,
+              eventOnly,
+              100,
+            )
+          ).items,
+        ).toEqual([]);
+        for (const [expression, scope] of [
+          [
+            'page.path contains "/"',
+            kind === "session" ? "visitor" : "session",
+          ],
+          ['event.name eq "purchase"', kind],
+          [(kind === "session" ? "visitor" : "session") + ".views gt 0", kind],
+          [kind + ".events gt 0", kind],
+          ['event.payload("/items/1/sku") eq "B"', kind],
+          ['first(EVENT).name eq "signup"', kind],
+        ] as const) {
+          const { filters, plan } = prepare(expression, scope);
+          const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
+          expect(compileScopedDatasetSql({ ...input, target })).toEqual(
+            compileScopedDatasetSql(input),
+          );
+        }
+      }
+    } finally {
+      db.close();
+    }
+  });
   it("EventRecords and visitor/session Journey read only authorized Event membership", async () => {
     const { db, env } = runFixture();
     try {

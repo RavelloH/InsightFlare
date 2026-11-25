@@ -143,6 +143,7 @@ export function buildEventAnalyticsSourceCte(options?: {
   eventNames?: string[];
   cteName?: string;
   selectColumns?: string;
+  visitTarget?: "session" | "visitor";
 }): string {
   const cteName = options?.cteName ?? "event_source";
   const selectColumns =
@@ -231,6 +232,7 @@ ${cteName} AS (
    AND v.visit_id = ce.visit_id
   WHERE ${eventNamePredicate} ce.site_pk = ${SITE_PK_FROM_SITE_ID_SQL}
     AND ce.occurred_at >= ? AND ce.occurred_at < ?
+    ${options?.visitTarget ? "AND v." + (options.visitTarget === "session" ? "session_id" : "visitor_id") + " = ?" : ""}
 )`;
 }
 export function buildEventFilteredSourceCte(

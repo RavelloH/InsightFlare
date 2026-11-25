@@ -61,7 +61,14 @@ export interface ScopedDatasetSql {
   readonly materializedEventFacts?: boolean;
 }
 import { buildScopedFactsCtes, type ScopedFactKind } from "./scoped-facts";
+type ScopedDatasetTarget = {
+  readonly type: "session" | "visitor";
+  readonly value: string;
+};
+
 export interface ScopedDatasetCompilerInput {
+  /** Optional restriction for a reader of one entity, not a user filter. */
+  readonly target?: ScopedDatasetTarget;
   readonly filters: FilterDocument;
   readonly plan: ScopedFilterPlan;
   readonly siteIds: readonly string[];
@@ -79,6 +86,7 @@ export function scopedDatasetFor(
   siteId: string,
   window: QueryWindow,
   filters: FilterDocument,
+  target?: ScopedDatasetTarget,
 ): ScopedDatasetSql | null {
   const metadata = scopedFilterMetadata(filters);
   return metadata
@@ -87,6 +95,7 @@ export function scopedDatasetFor(
         plan: metadata.plan,
         siteIds: [siteId],
         window,
+        target,
       })
     : null;
 }
@@ -296,23 +305,29 @@ function siteIdsSql(siteIds: readonly string[]): string {
   if (siteIds.length === 0) throw new Error("scoped_dataset_requires_site");
   return sitePksFromSiteIdsSql(siteIds.length);
 }
-function visitSource(siteIds: readonly string[]): string {
+function visitSource(
+  siteIds: readonly string[],
+  target?: ScopedDatasetTarget,
+): string {
   return `
 scope_raw_visits AS MATERIALIZED (
   SELECT ${VISIT_SOURCE_COLUMNS}
   FROM visits
   WHERE site_pk IN ${siteIdsSql(siteIds)}
     AND started_at >= ? AND started_at < ?
+    ${target ? "AND " + entityColumn(target.type) + " = ?" : ""}
 )`;
 }
 function eventSource(
   siteIds: readonly string[],
   compatibility = false,
+  target?: ScopedDatasetTarget,
 ): string {
   // Custom events are windowed by occurred_at. The linked visit supplies
   // identity and context even when that visit started outside the window.
   return buildEventAnalyticsSourceCte({
     cteName: "scope_raw_events",
+    ...(target ? { visitTarget: target.type } : {}),
     ...(compatibility
       ? {
           selectColumns: `
@@ -1418,6 +1433,51 @@ function isVisitContextPredicate(expression: FilterExpression): boolean {
 }
 
 /**
+ * Membership commutes with restriction to one identity only when every
+ * predicate reads evidence local to that identity. Keep explicit strategies
+ * for observations and facts; do not infer locality from a field prefix.
+ * Pure positive Event predicates can already be cheaper on sparse sites.
+ */
+function targetMembershipEvidence(
+  expression: FilterExpression,
+  kind: ScopedFactKind,
+): { local: boolean; broad: boolean } {
+  if (isVisitContextPredicate(expression)) return { local: true, broad: true };
+  if (expression.kind === "not") {
+    const child = targetMembershipEvidence(expression.child, kind);
+    return { local: child.local, broad: true };
+  }
+  if (expression.kind !== "condition") {
+    const children = expression.children.map((child) =>
+      targetMembershipEvidence(child, kind),
+    );
+    return {
+      local: children.every((child) => child.local),
+      broad: children.some((child) => child.broad),
+    };
+  }
+  const target = expression.target;
+  if (
+    target.kind === "event-payload" ||
+    (target.kind === "field" && target.field === "event.name")
+  )
+    return { local: true, broad: false };
+  const fields =
+    kind === "session"
+      ? [
+          "session.views",
+          "session.durationMs",
+          "session.events",
+          "session.bounce",
+        ]
+      : ["visitor.views", "visitor.sessions", "visitor.events"];
+  const sameGrain =
+    target.kind === "field" &&
+    fields.includes(target.field) &&
+    factKindForCondition(expression) === kind;
+  return { local: sameGrain, broad: sameGrain };
+}
+/**
  * Compile the one relation bundle consumed by historical D1 providers.
  * Raw sources, entity universes, and membership sets stay inside this
  * compiler; the returned relations are already resolved to one scope.
@@ -1527,26 +1587,63 @@ scope_final_events AS (
     ON matching_events.site_pk = re.site_pk
    AND matching_events.event_id = re.event_id
 )`;
+  // Cross-entity facts and advanced time domains still require the full
+  // authorized universe; a target must never narrow their evidence.
+  const targetEvidence =
+    input.target && input.filters.root && !domains
+      ? targetMembershipEvidence(input.filters.root, input.target.type)
+      : null;
+  const target =
+    input.target &&
+    input.siteIds.length === 1 &&
+    input.plan.scope === input.target.type &&
+    input.plan.mode === "entity" &&
+    input.plan.membership.kind === "entity" &&
+    input.plan.membership.entityKind === input.target.type &&
+    input.filters.root !== null &&
+    !domains &&
+    targetEvidence?.local &&
+    targetEvidence.broad &&
+    !compilePositiveEventCountMembership(
+      input.plan.membership.expression,
+      input.target.type,
+    )
+      ? input.target
+      : undefined;
   const definitions: BoundCteDefinition[] = [
     boundCte(
       "scope_raw_visits",
       allowSourceInlining
-        ? visitSource(input.siteIds).replace(
+        ? visitSource(input.siteIds, target).replace(
             "scope_raw_visits AS MATERIALIZED (",
             "scope_raw_visits AS (",
           )
-        : visitSource(input.siteIds),
-      [...input.siteIds, input.window.startMs, input.window.endExclusiveMs],
+        : visitSource(input.siteIds, target),
+      [
+        ...input.siteIds,
+        input.window.startMs,
+        input.window.endExclusiveMs,
+        ...(target ? [target.value] : []),
+      ],
     ),
     boundCte(
       "scope_raw_events",
       allowSourceInlining
-        ? eventSource(input.siteIds, input.compatibilityEventSource).replace(
+        ? eventSource(
+            input.siteIds,
+            input.compatibilityEventSource,
+            target,
+          ).replace(
             "scope_raw_events AS MATERIALIZED (",
             "scope_raw_events AS (",
           )
-        : eventSource(input.siteIds, input.compatibilityEventSource),
-      [...input.siteIds, input.window.startMs, input.window.endExclusiveMs],
+        : eventSource(input.siteIds, input.compatibilityEventSource, target),
+      [
+        ...input.siteIds,
+        input.window.startMs,
+        input.window.endExclusiveMs,
+        ...(target ? [target.value] : []),
+      ],
     ),
     boundCte(
       "visit_source",

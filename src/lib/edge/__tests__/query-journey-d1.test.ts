@@ -22,7 +22,10 @@ import {
   buildSessionAggregationSql,
   buildVisitorAggregationSql,
 } from "@/lib/edge/analytics/providers/d1/internal/journey-aggregation-sql";
-import { querySessionsFromD1 } from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
+import {
+  queryJourneyTargetExistsFromD1,
+  querySessionsFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/journey-list-queries";
 import {
   queryGeoPointAggregate,
   queryGeoPointsFromD1,
@@ -858,6 +861,54 @@ describe("edge journey detail D1 queries", () => {
           0,
         );
 
+      for (const target of [
+        { type: "session" as const, value: "event-only-session" },
+        { type: "visitor" as const, value: "event-only-visitor" },
+      ]) {
+        await expect(
+          queryJourneyTargetExistsFromD1(
+            sqlite.env,
+            siteId,
+            target,
+            targetWindow,
+          ),
+        ).resolves.toBe(true);
+        await expect(
+          queryJourneyTargetExistsFromD1(sqlite.env, siteId, target, {
+            ...targetWindow,
+            endExclusiveMs: eventAt,
+          }),
+        ).resolves.toBe(false);
+        await expect(
+          queryJourneyTargetExistsFromD1(sqlite.env, siteId, target, {
+            ...targetWindow,
+            startMs: eventAt,
+          }),
+        ).resolves.toBe(true);
+        await expect(
+          queryJourneyTargetExistsFromD1(
+            sqlite.env,
+            "another-site",
+            target,
+            targetWindow,
+          ),
+        ).resolves.toBe(false);
+        await expect(
+          queryJourneyTargetExistsFromD1(
+            sqlite.env,
+            siteId,
+            { ...target, value: "missing" },
+            targetWindow,
+          ),
+        ).resolves.toBe(false);
+        await expect(
+          queryJourneyTargetExistsFromD1(sqlite.env, siteId, target, {
+            ...targetWindow,
+            startMs: baseMs - 60 * 60 * 1000,
+            endExclusiveMs: baseMs,
+          }),
+        ).resolves.toBe(true);
+      }
       const eventFilter = condition("event.name", "signup");
       const sessionRows = await querySessionsFromD1(
         sqlite.env,
