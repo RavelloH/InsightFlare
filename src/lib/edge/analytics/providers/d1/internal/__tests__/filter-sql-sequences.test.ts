@@ -455,6 +455,10 @@ describe("P4 complete timeline and relational SQL", () => {
       ] as const;
       const expressions = [
         "sequence([EVENT,EVENT]) exists",
+        'sequence([EVENT { $.name eq "signup" },EVENT { $.name eq "noise" },EVENT { $.name eq "purchase" }]) exists',
+        'sequence([EVENT,EVENT { $.name eq "purchase" },EVENT]) notExists',
+        'sequence([EVENT { $.name eq "signup" },EVENT,EVENT { $.name eq "purchase" },EVENT]) exists',
+        'sequence([EVENT,EVENT { $.payload("/sku") eq "alpha" },EVENT { $.name eq "purchase" },EVENT,EVENT]) notExists',
         "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) lte 10ms } exists",
         "sequence([EVENT,EVENT,EVENT]) { $gap(2,3) gte 0ms } notExists",
         "sequence([EVENT,EVENT,EVENT,EVENT]) { $gap(2,3) lt 1ms } exists",
@@ -512,6 +516,10 @@ describe("P4 complete timeline and relational SQL", () => {
       }
       for (const expression of [
         "sequence([PAGE,EVENT]) exists",
+        "sequence([PAGE,EVENT,EVENT]) exists",
+        'sequence([EVENT,EVENT { $.name eq "purchase" },EVENT]) { $span lte 10ms } exists',
+        'sequence([EVENT,EVENT { $.name eq "purchase" },EVENT,EVENT,EVENT,EVENT]) exists',
+        'count(sequence([EVENT,EVENT { $.name eq "purchase" },EVENT])) eq 1',
         "sequence([PAGE,PAGE]) { $same($.path) } exists",
         "sequence([EVENT,EVENT]) { $same($.name) AND $span lte 10ms } exists",
         'sequence([EVENT,EVENT { $.name eq "signup" },EVENT]) { $same($.name) } exists',
@@ -1002,6 +1010,73 @@ describe("P4 complete timeline and relational SQL", () => {
       }
     },
   );
+  it("propagates strict earliest reachable Event prefixes independently for each entity", () => {
+    const db = fixture();
+    try {
+      const dense = source.replace(
+        "(1,'a',105,'e5'",
+        "(1,'a',107,'e7','v2','s1','u1','/pricing','purchase',35),(1,'a',108,'e8','v2','s1','u1','/pricing','signup',41),(1,'a',105,'e5'",
+      );
+      const variants = [
+        source,
+        dense,
+        dense.replace("'signup',20)", "'signup',30)"),
+        dense.replace("'e7','v2','s1','u1'", "'e7','v2','s3','u1'"),
+        dense.replace("'e7','v2','s1','u1'", "'e7','v2','','u1'"),
+      ];
+      const selectors = [
+        'EVENT { $.name eq "signup" }',
+        'EVENT { $.name eq "purchase" }',
+        "EVENT { $.name exists }",
+        'EVENT { $.name eq "missing" }',
+        'EVENT { $.payload("/sku") eq "alpha" }',
+        "EVENT",
+      ];
+      const sequences = [
+        [0, 1, 1],
+        [1, 0, 1],
+        [0, 2, 1],
+        [2, 0, 2],
+        [0, 3, 1],
+        [4, 2, 1],
+        [0, 1, 1, 1],
+        [2, 0, 1, 2],
+        [0, 2, 4, 1],
+        [2, 0, 2, 1, 2],
+        [0, 1, 1, 0, 1],
+      ];
+      for (const scope of ["session", "visitor"] as const)
+        for (const indices of sequences)
+          for (const operator of ["exists", "notExists"]) {
+            const expression = `sequence([${indices.map((i) => selectors[i]).join(",")}]) ${operator}`;
+            const read = (
+              variant: string,
+              uniqueGlobalOccurrences: boolean,
+            ) => {
+              const plan = compileCollectionSqlQualification(
+                parseFilterDsl(expression, analyticsFilterRegistry),
+                scope,
+                { uniqueGlobalOccurrences },
+              );
+              if (plan.kind !== "entity") throw Error("expected entity");
+              const c = composeBoundCtes(plan.ctes);
+              if (uniqueGlobalOccurrences)
+                expect(c.ctes).toContain("reachable_1 AS");
+              else expect(c.ctes).not.toContain("reachable_1 AS");
+              return db
+                .prepare(
+                  `WITH ${variant}, ${c.ctes} SELECT site_pk,entity_id FROM ${plan.qualifiedEntityRelation} ORDER BY site_pk,entity_id`,
+                )
+                .all(...c.bindings.map((x) => x.value));
+            };
+            for (const variant of variants)
+              expect(read(variant, true)).toEqual(read(variant, false));
+          }
+    } finally {
+      db.close();
+    }
+  });
+
   it("evaluates $span, $gap and $same in a bound Sequence item", () => {
     const db = fixture();
     try {
