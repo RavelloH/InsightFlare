@@ -351,6 +351,76 @@ describe("actual Worker top-level invocation entrypoints", () => {
     expect(executePrivateQuery).toHaveBeenCalledTimes(2);
     expect(resolvePrivateSite).toHaveBeenCalledTimes(1);
   });
+  it("streams event summary and records before a slow failed trend and tracks all work", async () => {
+    const f = setup();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(resolvePrivateSite).mockResolvedValueOnce({
+      id: "site-a",
+      name: "A",
+      domain: "a.test",
+      canManage: true,
+    } as never);
+    vi.mocked(executePrivateQuery).mockImplementation(async (input) => {
+      if (input.pathname === "events-trend") {
+        await gate;
+        return new Response("failed", { status: 500 });
+      }
+      return Response.json({
+        ok: true,
+        data: {
+          items: [],
+          pagination: {
+            limit: 50,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+      });
+    });
+    let reads: Awaited<ReturnType<typeof startSiteAnalyticsStream>> | undefined;
+    vi.mocked(startHandler.fetch).mockImplementationOnce(
+      async (request, options) => {
+        reads = await startSiteAnalyticsStream({
+          request,
+          env: options!.context!.env,
+          siteId: "site-a",
+          page: "events",
+          window: {
+            preset: "custom",
+            from: 100,
+            to: 300,
+            interval: "day",
+            timeZone: "UTC",
+          },
+          search: "detail=clicked",
+        });
+        return new Response("shell");
+      },
+    );
+    const response = await server.fetch(
+      new Request("https://app.test/en/app/team/site/events"),
+      f.env,
+      f.ctx,
+    );
+    expect(await response.text()).toBe("shell");
+    expect(Object.keys(reads!)).toHaveLength(3);
+    const trend = Object.keys(reads!).find((key) =>
+      key.includes("events-trend"),
+    )!;
+    for (const [key, promise] of Object.entries(reads!))
+      if (key !== trend) await expect(promise).resolves.toHaveProperty("value");
+    expect(f.points).toHaveLength(0);
+    release();
+    await expect(reads![trend]).resolves.toBeNull();
+    await f.finish();
+    expect(f.points).toHaveLength(1);
+    expect(executePrivateQuery).toHaveBeenCalledTimes(3);
+    expect(resolvePrivateSite).toHaveBeenCalledTimes(1);
+  });
   it.each([
     "overview",
     "pages",
@@ -360,6 +430,9 @@ describe("actual Worker top-level invocation entrypoints", () => {
     "devices",
     "geo",
     "performance",
+    "events",
+    "visitors",
+    "sessions",
   ] as const)(
     "does not start any analytics for denied SSR site access on %s",
     async (page) => {

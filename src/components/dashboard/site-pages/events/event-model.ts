@@ -1,3 +1,8 @@
+import { EVENT_PAGE_SIZE } from "@/lib/dashboard/client/data/events";
+export {
+  DEFAULT_EVENT_RECORD_SORT,
+  EVENT_PAGE_SIZE,
+} from "@/lib/dashboard/client/data/events";
 import type {
   EventField,
   EventFieldValueStat,
@@ -6,18 +11,12 @@ import type {
 import {
   type EventPayloadFilterRule,
   type EventPayloadFilterValue,
-  type EventRecordSortState,
 } from "./types";
-export const EVENT_PAGE_SIZE = 50;
 export const EVENT_SKELETON_ROWS = EVENT_PAGE_SIZE;
 export const FIELD_TREE_CHILD_TRANSITION = {
   initial: { opacity: 0, y: -6 },
   animate: { opacity: 1, y: 0 },
   exit: { opacity: 0, y: -6 },
-};
-export const DEFAULT_EVENT_RECORD_SORT: EventRecordSortState = {
-  key: "occurredAt",
-  direction: "desc",
 };
 export function normalizeEventFieldPath(path: string): string {
   const normalized = String(path ?? "").trim();

@@ -2,6 +2,7 @@ import "@tanstack/react-start/server-only";
 
 import { readBoundedBody } from "@/lib/api-v1";
 import { startTechnologyInitialReads } from "@/lib/dashboard/client/data/browser";
+import { startEventsInitialReads } from "@/lib/dashboard/client/data/events";
 import { startGeoInitialReads } from "@/lib/dashboard/client/data/geo";
 import { startOverviewInitialReads } from "@/lib/dashboard/client/data/overview";
 import { startPagesInitialReads } from "@/lib/dashboard/client/data/pages";
@@ -10,10 +11,12 @@ import {
   startCampaignsInitialReads,
   startReferrersInitialReads,
 } from "@/lib/dashboard/client/data/referrers";
+import { startSessionsInitialReads } from "@/lib/dashboard/client/data/sessions";
 import type {
   PrivateReadTransport,
   PrivateRequestParams,
 } from "@/lib/dashboard/client/data/types";
+import { startVisitorsInitialReads } from "@/lib/dashboard/client/data/visitors";
 import {
   type DeferredPrivateReads,
   privateReadIdentity,
@@ -83,7 +86,10 @@ export type SiteAnalyticsInitialPage =
   | "browsers"
   | "devices"
   | "geo"
-  | "performance";
+  | "performance"
+  | "events"
+  | "visitors"
+  | "sessions";
 export async function startSiteAnalyticsStream(input: {
   request: Request;
   env: Env;
@@ -115,45 +121,51 @@ export async function startSiteAnalyticsStream(input: {
       } as ExecutionContext)
     : undefined;
   const allowedPaths = new Set(
-    page === "geo"
-      ? [
-          "overview-geo-points",
-          "overview-geo-country",
-          "overview-geo-region",
-          "overview-geo-city",
-        ]
-      : page === "performance"
-        ? ["performance"]
-        : page === "browsers"
-          ? [
-              "browser-trend",
-              "browser-engine-trend",
-              "browser-radar",
-              "browser-version-breakdown",
-              "browser-cross-breakdown",
-            ]
-          : page === "devices"
-            ? ["client-dimension-trend", "client-cross-breakdown"]
-            : page === "campaigns"
-              ? ["utm-dimension-trend", "utm-source", "utm-term"]
-              : page === "pages"
-                ? ["pages-dashboard", "trend"]
-                : page === "referrers"
-                  ? [
-                      "referrer-summary",
-                      "referrer-channel-dimension-trend",
-                      "referrer-radar",
-                      "overview-source-domain",
-                      "overview-source-channel",
-                    ]
-                  : [
-                      "overview",
-                      "overview-page-path",
-                      "overview-source-domain",
-                      "overview-client-browser",
-                      "overview-geo-country",
-                      "overview-geo-points",
-                    ],
+    page === "events"
+      ? ["events-summary", "events-trend", "events-records"]
+      : page === "visitors"
+        ? ["visitors"]
+        : page === "sessions"
+          ? ["sessions"]
+          : page === "geo"
+            ? [
+                "overview-geo-points",
+                "overview-geo-country",
+                "overview-geo-region",
+                "overview-geo-city",
+              ]
+            : page === "performance"
+              ? ["performance"]
+              : page === "browsers"
+                ? [
+                    "browser-trend",
+                    "browser-engine-trend",
+                    "browser-radar",
+                    "browser-version-breakdown",
+                    "browser-cross-breakdown",
+                  ]
+                : page === "devices"
+                  ? ["client-dimension-trend", "client-cross-breakdown"]
+                  : page === "campaigns"
+                    ? ["utm-dimension-trend", "utm-source", "utm-term"]
+                    : page === "pages"
+                      ? ["pages-dashboard", "trend"]
+                      : page === "referrers"
+                        ? [
+                            "referrer-summary",
+                            "referrer-channel-dimension-trend",
+                            "referrer-radar",
+                            "overview-source-domain",
+                            "overview-source-channel",
+                          ]
+                        : [
+                            "overview",
+                            "overview-page-path",
+                            "overview-source-domain",
+                            "overview-client-browser",
+                            "overview-geo-country",
+                            "overview-geo-points",
+                          ],
   );
   const transport: PrivateReadTransport = <T>(
     path: string,
@@ -213,6 +225,16 @@ export async function startSiteAnalyticsStream(input: {
     reads[key] = logger ? logger.track(deferred) : deferred;
     return promise as Promise<T>;
   };
+  if (page === "events" || page === "visitors" || page === "sessions") {
+    const start =
+      page === "events"
+        ? startEventsInitialReads
+        : page === "visitors"
+          ? startVisitorsInitialReads
+          : startSessionsInitialReads;
+    start(site.id, window, new URLSearchParams(search), transport);
+    return reads;
+  }
   if (page === "geo" || page === "performance") {
     const start =
       page === "geo" ? startGeoInitialReads : startPerformanceInitialReads;

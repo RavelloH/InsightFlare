@@ -55,6 +55,7 @@ import {
   withFilters,
 } from "@/lib/dashboard/client/data";
 import { startTechnologyInitialReads } from "@/lib/dashboard/client/data/browser";
+import { startEventsInitialReads } from "@/lib/dashboard/client/data/events";
 import { startGeoInitialReads } from "@/lib/dashboard/client/data/geo";
 import { startOverviewInitialReads } from "@/lib/dashboard/client/data/overview";
 import { startPagesInitialReads } from "@/lib/dashboard/client/data/pages";
@@ -63,10 +64,12 @@ import {
   startCampaignsInitialReads,
   startReferrersInitialReads,
 } from "@/lib/dashboard/client/data/referrers";
+import { startSessionsInitialReads } from "@/lib/dashboard/client/data/sessions";
 import type {
   PrivateReadTransport,
   PrivateRequestParams,
 } from "@/lib/dashboard/client/data/types";
+import { startVisitorsInitialReads } from "@/lib/dashboard/client/data/visitors";
 import {
   createDeferredPrivateReadTransport,
   fetchPrivateJson,
@@ -1419,6 +1422,107 @@ describe("Dashboard Client Data Processing Utilities", () => {
             to: mockWindow.from - 1,
             "filter[page.path]": "/docs",
           });
+      },
+    );
+
+    it.each([false, true])(
+      "plans independent event summary, trend and only the first record page, compare=%s",
+      (compare) => {
+        const calls: Array<{ path: string; params?: PrivateRequestParams }> =
+          [];
+        const transport: PrivateReadTransport = async <T>(
+          path: string,
+          params?: PrivateRequestParams,
+        ) => {
+          calls.push({ path, params });
+          return { ok: true } as T;
+        };
+        const search = new URLSearchParams(
+          "scope=session&filter[page.path]=/home" +
+            (compare
+              ? "&compare=previous&compareFilter[page.path]=/docs"
+              : "") +
+            "&detail=click&eventId=private-record",
+        );
+        startEventsInitialReads("site-stream", mockWindow, search, transport);
+        expect(calls).toHaveLength(compare ? 5 : 3);
+        expect(calls.slice(0, 3).map((x) => x.path)).toEqual([
+          "/api/private/events-summary",
+          "/api/private/events-trend",
+          "/api/private/events-records",
+        ]);
+        expect(calls[1]?.params).toMatchObject({
+          limit: 18,
+          interval: mockWindow.interval,
+        });
+        expect(calls[2]?.params).toMatchObject({
+          limit: 50,
+          sortBy: "occurredAt",
+          sortDir: "desc",
+        });
+        expect(
+          calls
+            .slice(0, 3)
+            .every(
+              (x) =>
+                x.params?.scope === "session" &&
+                x.params?.["filter[page.path]"] === "/home",
+            ),
+        ).toBe(true);
+        expect(
+          calls.every(
+            (x) =>
+              x.params?.siteId === "site-stream" &&
+              x.params?.timeZone === mockWindow.timeZone &&
+              x.params?.cursor === undefined &&
+              x.params?.eventName === undefined &&
+              x.params?.eventId === undefined,
+          ),
+        ).toBe(true);
+        if (compare)
+          expect(
+            calls.slice(3).map((x) => x.params?.["filter[page.path]"]),
+          ).toEqual(["/docs", "/docs"]);
+      },
+    );
+    it.each([
+      ["visitors", startVisitorsInitialReads, "lastSeenAt"],
+      ["sessions", startSessionsInitialReads, "startedAt"],
+    ] as const)(
+      "plans only the first %s page with the existing sort",
+      (page, start, sortBy) => {
+        const calls: Array<{ path: string; params?: PrivateRequestParams }> =
+          [];
+        const transport: PrivateReadTransport = async <T>(
+          path: string,
+          params?: PrivateRequestParams,
+        ) => {
+          calls.push({ path, params });
+          return { ok: true } as T;
+        };
+        start(
+          "site-stream",
+          mockWindow,
+          new URLSearchParams(
+            "scope=visitor&filter[page.path]=/home&compare=previous&detail=private-id&cursor=untrusted&search=other&sortBy=views",
+          ),
+          transport,
+        );
+        expect(calls).toHaveLength(1);
+        expect(calls[0]).toEqual({
+          path: "/api/private/" + page,
+          params: {
+            siteId: "site-stream",
+            from: mockWindow.from,
+            to: mockWindow.to,
+            timeZone: mockWindow.timeZone,
+            limit: 50,
+            sortBy,
+            sortDir: "desc",
+            scope: "visitor",
+            "filter[page.path]": "/home",
+          },
+        });
       },
     );
 

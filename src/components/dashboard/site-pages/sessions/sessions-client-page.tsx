@@ -22,10 +22,18 @@ import { SessionDetailClientPage } from "@/components/dashboard/site-pages/sessi
 import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitors/visitor-detail-client-page";
 import { fetchSessions } from "@/lib/dashboard/client/data/index";
 import {
+  DEFAULT_SESSION_SORT,
+  SESSION_PAGE_SIZE,
+} from "@/lib/dashboard/client/data/sessions";
+import {
   pushUrlWithoutNavigation,
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/dashboard/client/history";
+import {
+  createDeferredPrivateReadTransport,
+  type DeferredPrivateReads,
+} from "@/lib/dashboard/client/request";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -38,13 +46,10 @@ interface SessionsClientPageProps {
   messages: AppMessages;
   siteId: string;
   pathname: string;
+  deferredReads?: DeferredPrivateReads | null;
 }
-const SESSION_PAGE_SIZE = 50;
+
 const SESSION_SKELETON_ROWS = SESSION_PAGE_SIZE;
-const DEFAULT_SESSION_SORT: SessionSortState = {
-  key: "startedAt",
-  direction: "desc",
-};
 type NestedJourneyDetail = {
   kind: "session" | "visitor";
   id: string;
@@ -76,6 +81,7 @@ export function SessionsClientPage({
   messages,
   siteId,
   pathname,
+  deferredReads,
 }: SessionsClientPageProps) {
   const labels = messages.sessions;
   const sessionColumnDefinitions = useMemo(
@@ -86,10 +92,22 @@ export function SessionsClientPage({
     storageKey: SESSION_TABLE_COLUMNS_STORAGE_KEY,
     columns: sessionColumnDefinitions,
   });
-  const { filters, window: timeWindow } = useDashboardQuery() as {
+  const {
+    filters,
+    window: timeWindow,
+    queryReady,
+  } = useDashboardQuery() as {
     filters: FilterDocument;
     window: TimeWindow;
+    queryReady: boolean;
   };
+  const transport = useMemo(
+    () =>
+      deferredReads
+        ? createDeferredPrivateReadTransport(deferredReads)
+        : undefined,
+    [deferredReads],
+  );
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [sort, setSort] = useState<SessionSortState>(DEFAULT_SESSION_SORT);
@@ -144,13 +162,14 @@ export function SessionsClientPage({
         sortDir: sort.direction,
         search: debouncedQuery,
         signal,
+        ...(transport ? { transport } : {}),
       }),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) =>
       lastPage.data.pagination.hasMore
         ? lastPage.data.pagination.nextCursor
         : undefined,
-    enabled: typeof window !== "undefined",
+    enabled: queryReady,
   });
   const rows = useMemo(
     () =>

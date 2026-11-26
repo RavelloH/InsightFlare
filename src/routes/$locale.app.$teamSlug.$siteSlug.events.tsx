@@ -2,10 +2,23 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { EventsClientPage } from "@/components/dashboard/site-pages/events/events-client-page";
 import { buildSitePath } from "@/lib/dashboard/paths";
+import { loadSiteAnalyticsStream } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 
 export const Route = createFileRoute("/$locale/app/$teamSlug/$siteSlug/events")(
   {
+    loader: async ({ context, location }) => {
+      if (typeof window !== "undefined") return { reads: null };
+      return {
+        reads: await loadSiteAnalyticsStream({
+          data: {
+            page: "events",
+            siteId: context.siteContext.activeSite.id,
+            search: location.searchStr,
+          },
+        }).catch(() => ({})),
+      };
+    },
     head: ({ match }) => ({
       meta: [
         {
@@ -21,8 +34,10 @@ export const Route = createFileRoute("/$locale/app/$teamSlug/$siteSlug/events")(
 );
 function Page() {
   const { locale, messages, siteContext: c } = Route.useRouteContext();
+  const { reads } = Route.useLoaderData();
   return (
     <EventsClientPage
+      deferredReads={reads}
       locale={locale}
       messages={messages}
       siteId={c.activeSite.id}

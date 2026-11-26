@@ -3,12 +3,16 @@ import {
   emptyVisitors,
 } from "@/lib/dashboard/client/data/empty";
 import type {
+  PrivateReadTransport,
   SortDirection,
   VisitorListSortKey,
 } from "@/lib/dashboard/client/data/types";
 import { fetchPrivateJson } from "@/lib/dashboard/client/request";
 import { withFilters, withPagination } from "@/lib/dashboard/client/utils";
-import type { TimeWindow } from "@/lib/dashboard/query-state";
+import {
+  parseFilterDocumentFromSearchParams,
+  type TimeWindow,
+} from "@/lib/dashboard/query-state";
 import type {
   JourneyEventsData,
   VisitorDetailData,
@@ -16,7 +20,10 @@ import type {
   VisitorSessionsData,
 } from "@/lib/dashboard-api/client/edge";
 import type { JourneyAnalysisContext } from "@/lib/edge/analytics/contract";
-import type { FilterDocument } from "@/lib/filter-contract";
+import {
+  attachFilterScopePreference,
+  type FilterDocument,
+} from "@/lib/filter-contract";
 function emptyVisitorsUnlessAborted(error: unknown): VisitorsData {
   if (error instanceof Error && error.name === "AbortError") throw error;
   return emptyVisitors();
@@ -33,6 +40,7 @@ export async function fetchVisitors(
     search?: string;
     analysisContext?: JourneyAnalysisContext;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
   },
 ): Promise<VisitorsData> {
   const params: Record<string, string | number> = {
@@ -64,11 +72,13 @@ export async function fetchVisitors(
     },
     filters,
   );
-  const request = options?.signal
-    ? fetchPrivateJson<VisitorsData>("/api/private/visitors", requestParams, {
-        signal: options.signal,
-      })
-    : fetchPrivateJson<VisitorsData>("/api/private/visitors", requestParams);
+  const request =
+    options?.signal || options?.transport
+      ? fetchPrivateJson<VisitorsData>("/api/private/visitors", requestParams, {
+          signal: options.signal,
+          ...(options.transport ? { transport: options.transport } : {}),
+        })
+      : fetchPrivateJson<VisitorsData>("/api/private/visitors", requestParams);
   return request.catch(emptyVisitorsUnlessAborted);
 }
 export async function fetchVisitorDetail(
@@ -151,4 +161,27 @@ export async function fetchVisitorSessions(
     ),
     { signal: options?.signal },
   );
+}
+
+export const VISITOR_PAGE_SIZE = 50;
+export const DEFAULT_VISITOR_SORT = {
+  key: "lastSeenAt",
+  direction: "desc",
+} as const;
+export function startVisitorsInitialReads(
+  siteId: string,
+  window: TimeWindow,
+  search: URLSearchParams,
+  transport: PrivateReadTransport,
+): void {
+  const document = parseFilterDocumentFromSearchParams(search);
+  const filters = document.root
+    ? document
+    : attachFilterScopePreference(document, "auto");
+  void fetchVisitors(siteId, window, filters, {
+    limit: VISITOR_PAGE_SIZE,
+    sortBy: DEFAULT_VISITOR_SORT.key,
+    sortDir: DEFAULT_VISITOR_SORT.direction,
+    transport,
+  }).catch(() => undefined);
 }

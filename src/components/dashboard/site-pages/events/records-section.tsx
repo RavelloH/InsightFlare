@@ -40,11 +40,13 @@ import {
   RelativeTimeValue,
   VisitorAvatar,
 } from "@/components/dashboard/journeys/journey-display";
+import { useDashboardQueryReady } from "@/components/dashboard/shell/dashboard-query-provider";
 import { EventDetailDrawer } from "@/components/dashboard/site-pages/events/event-detail-drawer";
 import {
   fetchEventRecordDetail,
   fetchEventsRecords,
 } from "@/lib/dashboard/client/data/index";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import {
   pushUrlWithoutNavigation,
   replaceUrlWithoutNavigation,
@@ -599,6 +601,7 @@ export const EventRecordsSection = memo(function EventRecordsSection({
   window: timeWindow,
   filters,
   eventName,
+  transport,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -608,7 +611,9 @@ export const EventRecordsSection = memo(function EventRecordsSection({
   window: TimeWindow;
   filters: FilterDocument;
   eventName?: string;
+  transport?: PrivateReadTransport;
 }) {
+  const queryReady = useDashboardQueryReady();
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [sort, setSort] = useState<EventRecordSortState>(
@@ -687,6 +692,7 @@ export const EventRecordsSection = memo(function EventRecordsSection({
         search: debouncedQuery,
         eventName,
         signal,
+        ...(transport ? { transport } : {}),
       }),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => {
@@ -695,7 +701,7 @@ export const EventRecordsSection = memo(function EventRecordsSection({
         ? pagination.nextCursor
         : undefined;
     },
-    enabled: typeof window !== "undefined",
+    enabled: queryReady,
   });
   const rows = useMemo(
     () =>
