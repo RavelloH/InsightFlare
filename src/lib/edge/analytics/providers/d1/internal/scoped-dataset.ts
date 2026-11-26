@@ -1571,29 +1571,72 @@ function targetMembershipEvidence(
  * Preserve the full authorized time domains even when narrowing identity.
  */
 type LocalOccurrenceKind = "page" | "event";
+type LocalRelationGrain = "session" | "visitor";
 function localOccurrenceCollection(
   target: FilterTargetExpression,
+  grain: LocalRelationGrain,
 ): LocalOccurrenceKind | null {
   if (target.kind === "entity-root")
     return target.entity === "page" || target.entity === "event"
       ? target.entity
       : null;
   if (target.kind === "selector") {
-    const kind = localOccurrenceCollection(target.collection);
-    return kind && localRelationExpression(target.predicate, kind)
+    const kind = localOccurrenceCollection(target.collection, grain);
+    return kind && localRelationExpression(target.predicate, grain, kind)
       ? kind
       : null;
   }
+  if (target.kind === "window") {
+    const kind = localOccurrenceCollection(target.collection, grain);
+    const anchor = target.anchor;
+    const localAnchor =
+      anchor.kind === "time-anchor" ||
+      (anchor.kind === "reducer" &&
+        ["first", "last", "nth"].includes(anchor.reducer) &&
+        localOccurrenceCollection(anchor.input, grain) !== null) ||
+      (anchor.kind === "occurrence-time" &&
+        localRelationTarget(anchor, null, grain));
+    return kind && localAnchor ? kind : null;
+  }
   return null;
+}
+function localSequenceCollection(
+  target: FilterTargetExpression,
+  grain: LocalRelationGrain,
+): boolean {
+  if (target.kind === "sequence")
+    return target.steps.every(
+      (step) => localOccurrenceCollection(step, grain) !== null,
+    );
+  if (target.kind === "without")
+    return (
+      localSequenceCollection(target.sequence, grain) &&
+      localOccurrenceCollection(target.excluded, grain) !== null
+    );
+  // Session timeline keys also include sessionless Visit IDs. Removing
+  // those rows could compress positions and change adjacency on collision.
+  if (target.kind === "adjacent")
+    return (
+      grain === "visitor" && localSequenceCollection(target.sequence, grain)
+    );
+  return false;
 }
 function localRelationTarget(
   target: FilterTargetExpression,
   current: LocalOccurrenceKind | null,
+  grain: LocalRelationGrain,
 ): boolean {
   switch (target.kind) {
     case "entity-root":
     case "selector":
-      return localOccurrenceCollection(target) !== null;
+    case "window":
+      return localOccurrenceCollection(target, grain) !== null;
+    case "sequence":
+    case "without":
+    case "adjacent":
+      return localSequenceCollection(target, grain);
+    case "periods":
+      return localOccurrenceCollection(target.collection, grain) !== null;
     case "event-payload":
     case "current-payload":
       return current === "event";
@@ -1610,7 +1653,10 @@ function localRelationTarget(
     case "reducer":
       return (
         target.reducer === "count" &&
-        localOccurrenceCollection(target.input) !== null
+        (localOccurrenceCollection(target.input, grain) !== null ||
+          localSequenceCollection(target.input, grain) ||
+          (target.input.kind === "periods" &&
+            localOccurrenceCollection(target.input.collection, grain) !== null))
       );
     case "member": {
       const root = target.object;
@@ -1619,7 +1665,7 @@ function localRelationTarget(
           ? current
           : root.kind === "reducer" &&
               ["first", "last", "nth"].includes(root.reducer)
-            ? localOccurrenceCollection(root.input)
+            ? localOccurrenceCollection(root.input, grain)
             : null;
       return (
         kind !== null &&
@@ -1632,12 +1678,12 @@ function localRelationTarget(
       return (
         target.input.kind === "reducer" &&
         ["first", "last", "nth"].includes(target.input.reducer) &&
-        localOccurrenceCollection(target.input.input) !== null
+        localOccurrenceCollection(target.input.input, grain) !== null
       );
     case "arithmetic":
       return (
-        localRelationTarget(target.left, current) &&
-        localRelationTarget(target.right, current)
+        localRelationTarget(target.left, current, grain) &&
+        localRelationTarget(target.right, current, grain)
       );
     case "time-anchor":
     case "duration":
@@ -1648,15 +1694,16 @@ function localRelationTarget(
 }
 function localRelationExpression(
   expression: FilterExpression,
+  grain: LocalRelationGrain,
   current: LocalOccurrenceKind | null = null,
 ): boolean {
   if (expression.kind === "not")
-    return localRelationExpression(expression.child, current);
+    return localRelationExpression(expression.child, grain, current);
   if (expression.kind !== "condition")
     return expression.children.every((child) =>
-      localRelationExpression(child, current),
+      localRelationExpression(child, grain, current),
     );
-  return localRelationTarget(expression.target, current);
+  return localRelationTarget(expression.target, current, grain);
 }
 /**
  * Compile the one relation bundle consumed by historical D1 providers.
@@ -1696,7 +1743,7 @@ export function compileScopedDatasetSql(
     input.filters.root !== null &&
     (advanced
       ? !input.compatibilityEventSource &&
-        localRelationExpression(input.filters.root)
+        localRelationExpression(input.filters.root, input.target.type)
       : targetEvidence?.local &&
         targetEvidence.broad &&
         !compilePositiveEventCountMembership(

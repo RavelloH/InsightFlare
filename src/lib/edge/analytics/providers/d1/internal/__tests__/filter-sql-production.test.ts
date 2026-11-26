@@ -2901,10 +2901,7 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           [(kind === "session" ? "visitor" : "session") + ".views gt 0", kind],
           [kind + ".events gt 0", kind],
           ['event.payload("/items/1/sku") eq "B"', kind],
-          [
-            'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
-            kind,
-          ],
+          ["count(VISITOR) gte 1", kind],
         ] as const) {
           const { filters, plan } = prepare(expression, scope);
           const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
@@ -2957,6 +2954,23 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
             true,
           ],
           ["count(PAGE) eq 1 AND NOT (count(EVENT) eq 0)", base, true],
+          [
+            'sequence([EVENT { $.name eq "purchase" }, EVENT { $.name eq "signup" }]) exists',
+            { ...base, fullHistory: true },
+            true,
+          ],
+          [
+            'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
+            base,
+            true,
+          ],
+          [
+            'without(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]), EVENT { $.name eq "view" }) exists',
+            base,
+            true,
+          ],
+          ["count(window(EVENT, @range.start, [0ms, 200ms])) eq 2", base, true],
+          ["count(periods(PAGE, 1d)) eq 1", base, true],
         ] as const) {
           const doc = parseFilterDsl(expression, analyticsFilterRegistry);
           const plan = createScopedFilterPlan(
@@ -3039,7 +3053,7 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         for (const expression of [
           "count(VISITOR) gte 1",
           "count(SESSION) gte 1",
-          'sequence([PAGE { $.path eq "/home" }, EVENT { $.name eq "signup" }]) exists',
+          'SESSION { PAGE { $.path eq "/home" } exists } exists',
         ]) {
           const doc = parseFilterDsl(expression, analyticsFilterRegistry);
           const plan = createScopedFilterPlan(
@@ -3062,6 +3076,57 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
             }),
           ).toEqual(compileScopedDatasetSql(input));
         }
+      }
+    } finally {
+      db.close();
+    }
+  });
+  it("keeps Session adjacency on the full timeline when a sessionless Visit key collides", async () => {
+    const { db, env } = runFixture();
+    try {
+      db.exec(
+        "INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms) VALUES(1,'site-a','s1','','other','/between',140,1)",
+      );
+      const doc = parseFilterDsl(
+        'adjacent(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }])) exists',
+        analyticsFilterRegistry,
+      );
+      for (const kind of ["session", "visitor"] as const) {
+        const plan = createScopedFilterPlan(
+          (kind + "-events") as "session-events" | "visitor-events",
+          doc,
+          kind,
+        )!;
+        const filters = attachScopedFilterMetadata(doc, {
+          requestedScope: kind,
+          resolvedScope: plan.scope,
+          plan,
+          time: createQueryTime(100, 300, "UTC", 400),
+          siteIds: ["site-a"],
+        });
+        const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
+        const target = { type: kind, value: kind === "session" ? "s1" : "u1" };
+        const original = compileScopedDatasetSql(input);
+        const restricted = compileScopedDatasetSql({ ...input, target });
+        if (kind === "session") expect(restricted).toEqual(original);
+        else expect(restricted.ctes).toContain("AND visitor_id = ?");
+        const column = kind + "_id";
+        const read = (dataset: ReturnType<typeof compileScopedDatasetSql>) =>
+          db
+            .prepare(
+              `WITH ${dataset.ctes} SELECT * FROM ${dataset.eventRelation} WHERE ${column}=? ORDER BY event_id`,
+            )
+            .all(...dataset.bindings.map((b) => b.value), target.value);
+        expect(read(restricted)).toEqual(read(original));
+        const result = await queryJourneyEventsPageFromD1(
+          env,
+          "site-a",
+          WINDOW,
+          filters,
+          target,
+          100,
+        );
+        expect(result.items.length > 0).toBe(kind === "visitor");
       }
     } finally {
       db.close();
