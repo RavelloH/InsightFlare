@@ -60,6 +60,8 @@ export interface ScopedDatasetSql {
   readonly scope: FilterScope;
   /** True only for the canonical materialized legacy Event qualification path. */
   readonly materializedEventFacts?: boolean;
+  /** Canonical primary-key observations, with no amplifying qualification joins. */
+  readonly uniqueObservationIds?: boolean;
 }
 import { buildScopedFactsCtes, type ScopedFactKind } from "./scoped-facts";
 type ScopedDatasetTarget = {
@@ -638,6 +640,75 @@ function safeSqlIdentifier(value: string, label: string): string {
 /** Validate and return a CTE prefix before it is interpolated into SQL. */
 export function assertSafeScopedObservationCtePrefix(prefix: string): string {
   return safeSqlIdentifier(prefix, "observation CTE prefix");
+}
+/**
+ * Keep base observations and conversion flags in one stream. Both domains
+ * use the same projected predicates as the matched-relation compiler.
+ * CASE treats SQL NULL exactly like a failed WHERE predicate.
+ */
+export function compileMarkedObservationSource(
+  dataset: ScopedDatasetSql,
+  filter: FilterDocument,
+  includeObservedAt: boolean,
+): { readonly cte: string; readonly bindings: readonly SqlBinding[] } {
+  const visitSource = safeSqlIdentifier(
+    dataset.visitRelation,
+    "scoped visit relation",
+  );
+  const eventSource = safeSqlIdentifier(
+    dataset.eventRelation,
+    "scoped event relation",
+  );
+  const plan = planObservationFilter(filter.root);
+  const bindings: SqlBinding[] = [];
+  const select = (
+    source: string,
+    alias: string,
+    predicate: ObservationPredicatePlan,
+    observedAt: "started_at" | "occurred_at",
+  ) => {
+    let marker = "1";
+    if (predicate.kind === "none") marker = "0";
+    else if (predicate.kind === "expression") {
+      const compiled = compileFilterDocument(
+        { version: 1, root: predicate.expression },
+        { alias, eventAlias: alias, sessionSource: visitSource },
+      );
+      // FilterSql.clause is either empty or starts with the compiler's WHERE.
+      const condition = compiled.clause
+        ? compiled.clause.slice("WHERE ".length)
+        : "1";
+      marker = `CASE WHEN (${condition}) THEN 1 ELSE 0 END`;
+      bindings.push(
+        ...compiled.bindings.map((value): SqlBinding => ({ value })),
+      );
+    }
+    const timestamp = includeObservedAt
+      ? `${alias}.${observedAt} AS observed_at, `
+      : "";
+    return `SELECT ${marker} AS is_goal, ${alias}.site_pk, ${timestamp}${alias}.session_id, ${alias}.visitor_id
+  FROM ${source} ${alias}`;
+  };
+  const visits = select(
+    visitSource,
+    "goal_visit_filter",
+    plan.visit,
+    "started_at",
+  );
+  const events = select(
+    eventSource,
+    "goal_event_filter",
+    plan.event,
+    "occurred_at",
+  );
+  return {
+    cte: `source_observations AS (
+  ${visits}
+  UNION ALL
+  ${events}
+)`,
+    bindings,
+  };
 }
 function scopedObservationRelation(
   relation: string,
@@ -1825,6 +1896,8 @@ scope_final_visitors AS (
     sessionRelation: "scope_final_sessions",
     visitorRelation: "scope_final_visitors",
     scope: input.plan.scope,
+    uniqueObservationIds:
+      allowSourceInlining && !input.compatibilityEventSource,
     materializedEventFacts:
       input.plan.scope === "event" &&
       !allowSourceInlining &&

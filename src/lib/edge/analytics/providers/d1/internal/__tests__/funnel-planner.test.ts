@@ -352,6 +352,59 @@ scope_final_events(event_pk, event_id, site_pk, session_id, visitor_id, occurred
     ]);
   });
 
+  it("skips only redundant source deduplication on proven unique observations", () => {
+    const unique = { ...dataset, uniqueObservationIds: true };
+    for (const scope of ["session", "visitor"] as const) {
+      for (const steps of [
+        [
+          step("landing", 'page.path eq "/landing"'),
+          step("signup", 'event.name eq "signup"'),
+        ],
+        Array.from({ length: 4 }, (_, i) =>
+          step("step-" + i, 'page.path eq "/landing"'),
+        ),
+        Array.from({ length: 6 }, (_, i) =>
+          step("step-" + i, 'page.path eq "/landing"'),
+        ),
+      ]) {
+        const definition = config(
+          steps,
+          scope,
+          scope === "visitor" ? 1000 : null,
+        );
+        const original = buildFunnelSqlPlan(definition, dataset);
+        const optimized = buildFunnelSqlPlan(definition, unique);
+        expect(optimized.sql).not.toContain("source_rank");
+        expect(optimized.sql).toContain("reached_rank");
+        expect(original.sql).toContain("source_rank");
+        expect(runPlan(optimized)).toEqual(runPlan(original));
+        for (const outcome of ["converted", "dropoff"] as const) {
+          for (let index = 0; index < steps.length; index++) {
+            const read = (source: ScopedDatasetSql) => {
+              const db = new DatabaseSync(":memory:");
+              try {
+                const plan = buildFunnelMembershipSqlPlan(
+                  definition,
+                  source,
+                  index,
+                  { outcome },
+                );
+                return db
+                  .prepare(
+                    `WITH ${source.ctes},${plan.ctes}
+                  SELECT * FROM ${plan.relation} ORDER BY site_pk, session_id, visitor_id`,
+                  )
+                  .all(...plan.bindings.map((b) => b.value));
+              } finally {
+                db.close();
+              }
+            };
+            expect(read(unique)).toEqual(read(dataset));
+          }
+        }
+      }
+    }
+  });
   it("deduplicates amplified witnesses by source id in SQL", () => {
     const duplicateSourceDataset: ScopedDatasetSql = {
       ...dataset,
