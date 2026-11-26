@@ -115,6 +115,56 @@ describe("DashboardQueryProvider", () => {
     );
     expect(transport!).toBeUndefined();
   });
+  it("does not re-adopt cached SSR reads after leaving and returning to a page", async () => {
+    const reads = { read: Promise.resolve({ value: { ok: true } }) };
+    const freshReads = { read: Promise.resolve({ value: { ok: true } }) };
+    let transport: ReturnType<typeof useDashboardDeferredReadTransport>;
+    function ReadProbe({ data }: { data: typeof reads | null }) {
+      transport = useDashboardDeferredReadTransport(data);
+      return null;
+    }
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <App>
+          <ReadProbe data={reads} />
+        </App>,
+      );
+    });
+    expect(transport!).toBeTypeOf("function");
+    await act(async () => root.render(<App>{null}</App>));
+    await act(async () =>
+      root.render(
+        <App>
+          <ReadProbe data={reads} />
+        </App>,
+      ),
+    );
+    expect(transport!).toBeUndefined();
+    await act(async () =>
+      root.render(
+        <App>
+          <ReadProbe data={freshReads} />
+        </App>,
+      ),
+    );
+    expect(transport!).toBeTypeOf("function");
+    await act(async () =>
+      root.render(
+        <App>
+          <ReadProbe data={null} />
+        </App>,
+      ),
+    );
+    await act(async () =>
+      root.render(
+        <App>
+          <ReadProbe data={freshReads} />
+        </App>,
+      ),
+    );
+    expect(transport!).toBeUndefined();
+  });
   it("never enables the old site's query with the destination filter during navigation", async () => {
     const seen: Array<{ site: string; scope: string; filtered: boolean }> = [];
     function ReadProbe({ site }: { site: string }) {

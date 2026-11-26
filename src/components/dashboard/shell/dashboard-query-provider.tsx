@@ -629,6 +629,10 @@ export function useDashboardQueryControls() {
   return useDashboardQueryContext();
 }
 
+// Route-loader data can outlive the mounted page. Only its first committed
+// mount may adopt it; a later mount must use the normal query cache or API.
+const mountedDeferredReads = new WeakSet<DeferredPrivateReads>();
+
 /** Bind an SSR handoff to its first hydrated selection. Changing global
  * filters, scope, comparison or time invalidates unused reads permanently
  * for this mounted page, even if the user switches back immediately.
@@ -657,12 +661,16 @@ export function useDashboardDeferredReadTransport(
   const [binding, setBinding] = useState(() => ({
     reads,
     selection,
-    retired: false,
+    retired: Boolean(reads && mountedDeferredReads.has(reads)),
   }));
+  useEffect(() => {
+    if (reads) mountedDeferredReads.add(reads);
+  }, [reads]);
   let active = false;
   if (binding.reads !== reads) {
-    setBinding({ reads, selection, retired: false });
-    active = selection !== null;
+    const retired = Boolean(reads && mountedDeferredReads.has(reads));
+    setBinding({ reads, selection, retired });
+    active = !retired && selection !== null;
   } else if (!binding.retired && selection !== null) {
     if (binding.selection === null) {
       setBinding({ reads, selection, retired: false });
