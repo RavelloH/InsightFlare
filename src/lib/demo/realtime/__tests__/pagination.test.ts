@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   decodeDemoCursor,
+  demoCursorFilterBinding,
+  demoCursorRequestBinding,
   DemoInvalidCursorError,
   demoPage,
   encodeDemoCursor,
@@ -16,6 +18,37 @@ const validateIndex = (value: unknown): value is { index: number } =>
     (value as { index: number }).index >= 0,
   );
 describe("demo pagination cursor helpers", () => {
+  it("keeps effective filter/read windows and excludes only volatile capture metadata", () => {
+    const filters = {
+      capturedAtMs: 100,
+      scope: "visitor" as const,
+      readRange: { startMs: 0, endExclusiveMs: 90 },
+      candidateRange: { startMs: 10, endExclusiveMs: 50 },
+    };
+    expect(demoCursorFilterBinding(filters)).toEqual(
+      demoCursorFilterBinding({ ...filters, capturedAtMs: 200 }),
+    );
+    expect(demoCursorFilterBinding(filters)).not.toEqual(
+      demoCursorFilterBinding({
+        ...filters,
+        readRange: { startMs: 0, endExclusiveMs: 100 },
+      }),
+    );
+    expect(
+      demoCursorRequestBinding({
+        siteId: "a",
+        nowMs: 100,
+        cursor: "x",
+        limit: 5,
+        compare: "previous",
+        "compareFilter[page.path]": "/a",
+      }),
+    ).toEqual({
+      siteId: "a",
+      compare: "previous",
+      "compareFilter[page.path]": "/a",
+    });
+  });
   it("paginates with signed cursors and validates exact keys", () => {
     const first = demoPage(["a", "b", "c"], { limit: 2 }, binding, 2);
     expect(first.items).toEqual(["a", "b"]);

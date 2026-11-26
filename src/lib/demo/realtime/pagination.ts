@@ -1,4 +1,5 @@
 import { fnv1a } from "@/lib/demo/generators/utils";
+import type { DemoQueryFilters } from "@/lib/demo/realtime/types";
 
 const DEMO_CURSOR_VERSION = 1;
 const DEMO_CURSOR_SECRET = "insightflare-demo-pagination-v1";
@@ -122,6 +123,22 @@ function defaultRowComparator<T>(
   };
 }
 
+/** The canonical candidate/filter/read ranges are part of the query
+ * identity. The per-invocation clock is not: fetching another page
+ * necessarily captures a different time. */
+export function demoCursorFilterBinding(filters: DemoQueryFilters) {
+  const { capturedAtMs: _, ...binding } = filters;
+  return binding;
+}
+export function demoCursorRequestBinding(
+  params: Record<string, string | number>,
+) {
+  return Object.fromEntries(
+    Object.entries(params).filter(
+      ([key]) => key !== "cursor" && key !== "nowMs" && key !== "limit",
+    ),
+  );
+}
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (!value || typeof value !== "object") return value;

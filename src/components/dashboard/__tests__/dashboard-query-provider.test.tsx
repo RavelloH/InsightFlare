@@ -115,6 +115,76 @@ describe("DashboardQueryProvider", () => {
     );
     expect(transport!).toBeUndefined();
   });
+  it("never enables the old site's query with the destination filter during navigation", async () => {
+    const seen: Array<{ site: string; scope: string; filtered: boolean }> = [];
+    function ReadProbe({ site }: { site: string }) {
+      const { queryReady, filters, scopePreference } = useDashboardQuery();
+      useEffect(() => {
+        if (queryReady)
+          seen.push({ site, scope: scopePreference, filtered: !!filters.root });
+      }, [site, queryReady, filters, scopePreference]);
+      return null;
+    }
+    function NavigationApp({
+      site,
+      pending,
+    }: {
+      site: string;
+      pending: boolean;
+    }) {
+      return (
+        <TimeZoneProvider>
+          <DashboardQueryProvider scopeKey={site} navigationPending={pending}>
+            <ReadProbe site={site} />
+          </DashboardQueryProvider>
+        </TimeZoneProvider>
+      );
+    }
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<NavigationApp site="old" pending={false} />);
+    });
+    expect(seen.at(-1)).toEqual({
+      site: "old",
+      scope: "visitor",
+      filtered: true,
+    });
+    await act(async () => {
+      root.render(<NavigationApp site="old" pending />);
+      replaceUrlWithoutNavigation("/zh/app/team/new/pages");
+    });
+    expect(seen.every((row) => row.site !== "old" || row.filtered)).toBe(true);
+    await act(async () =>
+      root.render(<NavigationApp site="new" pending={false} />),
+    );
+    expect(seen.filter((row) => row.site === "new")).toEqual([
+      { site: "new", scope: "auto", filtered: false },
+    ]);
+  });
+  it("synchronizes URL filters before a newly mounted observer can read them", async () => {
+    const seen: Array<{ scope: string; filtered: boolean }> = [];
+    function ReadProbe() {
+      const { queryReady, filters, scopePreference } = useDashboardQuery();
+      useEffect(() => {
+        if (queryReady)
+          seen.push({ scope: scopePreference, filtered: !!filters.root });
+      }, [queryReady, filters, scopePreference]);
+      return null;
+    }
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <App>
+          <ReadProbe />
+        </App>,
+      );
+    });
+    expect(seen.at(-1)).toEqual({ scope: "visitor", filtered: true });
+    await act(async () =>
+      replaceUrlWithoutNavigation("/zh/app/team/site/pages"),
+    );
+    expect(seen.slice(1)).toEqual([{ scope: "auto", filtered: false }]);
+  });
   it("isolates editable DSL and filters from unrelated read-only subscribers", async () => {
     const counts = {
       query: 0,

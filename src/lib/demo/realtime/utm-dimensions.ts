@@ -22,7 +22,10 @@ import {
   parseDemoLimit,
   parseDemoNumber,
 } from "@/lib/demo/realtime/filters";
-import { demoPage } from "@/lib/demo/realtime/pagination";
+import {
+  demoCursorFilterBinding,
+  demoPage,
+} from "@/lib/demo/realtime/pagination";
 import {
   buildDemoTrendBuckets,
   createDemoShareTrendSeriesKey,
@@ -282,7 +285,7 @@ export function generateDemoUtmDimension(
       tab,
       from,
       to,
-      filters,
+      filters: demoCursorFilterBinding(filters),
       search: String(params.search ?? "")
         .trim()
         .toLowerCase(),

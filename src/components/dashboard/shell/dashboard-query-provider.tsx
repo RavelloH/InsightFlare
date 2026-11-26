@@ -73,6 +73,7 @@ interface DashboardQueryProviderProps {
   scopeKey?: string;
   maxRangeDays?: number;
   initialWindow?: TimeWindow;
+  navigationPending?: boolean;
   initialFilters?: FilterDocument;
   initialScopePreference?: FilterScopePreference;
 }
@@ -234,6 +235,7 @@ export function DashboardQueryProvider({
   scopeKey = "",
   maxRangeDays,
   initialWindow,
+  navigationPending = false,
   initialFilters,
   initialScopePreference,
 }: DashboardQueryProviderProps) {
@@ -302,15 +304,49 @@ export function DashboardQueryProvider({
   const [uiFilterDslDocumentKey, setUiFilterDslDocumentKey] = useState(() =>
     initial.uiFilterDsl ? filterDocumentKey(initial.uiFilters) : undefined,
   );
-  const previousScopeKeyRef = useRef(scopeKey);
-  const previousRouteSearchParamsKeyRef = useRef(routeSearchParamsKey);
+  const [appliedRoute, setAppliedRoute] = useState(() => ({
+    scopeKey,
+    searchKey: routeSearchParamsKey,
+  }));
+  // Sync selection before children render, not in passive effects. The URL
+  // can already describe the next site while the old outlet is still mounted.
+  const selectionChanged =
+    appliedRoute.scopeKey !== scopeKey ||
+    appliedRoute.searchKey !== routeSearchParamsKey;
+  if (!navigationPending && selectionChanged) {
+    const searchChanged = appliedRoute.searchKey !== routeSearchParamsKey;
+    const realSiteChange =
+      Boolean(appliedRoute.scopeKey) && appliedRoute.scopeKey !== scopeKey;
+    setAppliedRoute({ scopeKey, searchKey: routeSearchParamsKey });
+    if (searchChanged || realSiteChange) {
+      const normalized = searchChanged
+        ? normalizeFilters(routeQueryDocument)
+        : EMPTY_FILTERS;
+      const nextScope = normalized.root
+        ? parseFilterScopePreference(new URLSearchParams(routeSearchParamsKey))
+        : "auto";
+      const nextFilters = attachFilterScopePreference(normalized, nextScope);
+      const nextKey = filterDocumentKey(nextFilters);
+      setScopePreferenceState(nextScope);
+      if (filterDocumentKey(uiFilters) !== nextKey)
+        setUiFiltersState(nextFilters);
+      if (uiFilterDslDocumentKey !== nextKey || realSiteChange) {
+        setUiFilterDslState(undefined);
+        setUiFilterDslDocumentKey(undefined);
+      }
+    }
+  }
 
   useEffect(() => {
     setTimeZone(managedTimeZone);
   }, [managedTimeZone]);
   // The SSR cookie may be stale or absent. Don't start a query with its
   // fallback zone while the client manager is resolving the reporting zone.
-  const queryReady = hydrated && timeZone === managedTimeZone;
+  const queryReady =
+    hydrated &&
+    timeZone === managedTimeZone &&
+    !navigationPending &&
+    !selectionChanged;
 
   const resolvedWindow = useMemo(
     () =>
@@ -364,50 +400,7 @@ export function DashboardQueryProvider({
   }, [range, windowState.interval, customRange]);
 
   useEffect(() => {
-    if (previousScopeKeyRef.current === scopeKey) return;
-    const previousScopeKey = previousScopeKeyRef.current;
-    previousScopeKeyRef.current = scopeKey;
-    // The shell can render before its site list has resolved. Treat the
-    // initial empty-to-site transition as scope initialization so URL filters
-    // are not cleared after the first correctly scoped request completes.
-    if (!previousScopeKey) return;
-    // Site-scoped data filters are easy to carry across sites and cause empty states.
-    setUiFiltersState(EMPTY_FILTERS);
-    setUiFilterDslState(undefined);
-    setUiFilterDslDocumentKey(undefined);
-  }, [scopeKey]);
-
-  useEffect(() => {
-    if (previousRouteSearchParamsKeyRef.current === routeSearchParamsKey) {
-      return;
-    }
-    previousRouteSearchParamsKeyRef.current = routeSearchParamsKey;
-
-    const requestedScopePreference = parseFilterScopePreference(
-      new URLSearchParams(routeSearchParamsKey),
-    );
-    const normalizedFilters = normalizeFilters(routeQueryDocument);
-    const nextScopePreference = normalizedFilters.root
-      ? requestedScopePreference
-      : "auto";
-    const nextFilters = attachFilterScopePreference(
-      normalizedFilters,
-      nextScopePreference,
-    );
-    const nextDocumentKey = filterDocumentKey(nextFilters);
-
-    setScopePreferenceState(nextScopePreference);
-    setUiFiltersState((current) =>
-      filterDocumentKey(current) === nextDocumentKey ? current : nextFilters,
-    );
-    if (uiFilterDslDocumentKey !== nextDocumentKey) {
-      setUiFilterDslState(undefined);
-      setUiFilterDslDocumentKey(undefined);
-    }
-  }, [routeQueryDocument, routeSearchParamsKey, uiFilterDslDocumentKey]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || navigationPending) return;
 
     const params = new URLSearchParams(window.location.search);
     if (!params.has("scope")) return;
@@ -418,7 +411,7 @@ export function DashboardQueryProvider({
     replaceUrlWithoutNavigation(
       `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`,
     );
-  }, [routeSearchParamsKey]);
+  }, [routeSearchParamsKey, navigationPending]);
 
   const setRange = useCallback(
     (next: RangePreset) => {

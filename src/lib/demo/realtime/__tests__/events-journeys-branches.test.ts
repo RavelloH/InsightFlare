@@ -184,6 +184,112 @@ describe("mock events and journeys branch coverage", () => {
     ]);
   });
 
+  it.each([
+    ["visitors", generateDemoVisitors, "visitorId"],
+    ["sessions", generateDemoSessions, "sessionId"],
+  ] as const)(
+    "paginates %s across distinct request capture times",
+    (_name, generate, idKey) => {
+      setFacts(
+        Array.from({ length: 3 }, (_, index) =>
+          makeVisit({
+            visitId: "visit-" + index,
+            visitorId: "visitor-" + index,
+            sessionId: "session-" + index,
+            startedAt: 1000 + index,
+          }),
+        ),
+      );
+      const params = {
+        from: 0,
+        to: 10000,
+        nowMs: 12000,
+        scope: "visitor",
+        "filter[page.path]": "/home",
+        limit: 1,
+      };
+      const first = generate("site", params).data as {
+        items: Array<Record<string, unknown>>;
+        pagination: { nextCursor: string };
+      };
+      expect(first.pagination.nextCursor).toBeTypeOf("string");
+      const second = generate("site", {
+        ...params,
+        nowMs: 16000,
+        cursor: first.pagination.nextCursor,
+      }).data as typeof first;
+      expect(second.items).toHaveLength(1);
+      expect(second.items[0]?.[idKey]).not.toBe(first.items[0]?.[idKey]);
+      expect(() =>
+        generate("site", {
+          ...params,
+          nowMs: 16000,
+          scope: "session",
+          cursor: first.pagination.nextCursor,
+        }),
+      ).toThrow("invalid-cursor");
+      expect(() =>
+        generate("other", {
+          ...params,
+          nowMs: 16000,
+          cursor: first.pagination.nextCursor,
+        }),
+      ).toThrow("invalid-cursor");
+    },
+  );
+  it("keeps the latest identified visit with deterministic ties without scanning other visitors", () => {
+    setFacts([
+      makeVisit({
+        visitId: "older",
+        visitorId: "visitor-a",
+        startedAt: 1000,
+        userId: "older",
+        userName: "Older",
+      }),
+      makeVisit({
+        visitId: "a",
+        visitorId: "visitor-a",
+        startedAt: 2000,
+        userId: "a",
+        userName: "A",
+      }),
+      makeVisit({
+        visitId: "z",
+        visitorId: "visitor-a",
+        startedAt: 2000,
+        userId: "z",
+        userName: "Z",
+      }),
+      makeVisit({
+        visitId: "anonymous",
+        visitorId: "visitor-a",
+        startedAt: 3000,
+        userId: "",
+        userName: "",
+      }),
+      makeVisit({
+        visitId: "other",
+        visitorId: "visitor-b",
+        startedAt: 4000,
+        userId: "b",
+        userName: "B",
+      }),
+    ]);
+    const rows = (
+      generateDemoVisitors("site", { from: 0, to: 10000, limit: 10 }).data as {
+        items: Array<Record<string, unknown>>;
+      }
+    ).items;
+    expect(rows.find((row) => row.visitorId === "visitor-a")).toMatchObject({
+      userId: "z",
+      userName: "Z",
+      lastSeenAt: 3000,
+    });
+    expect(rows.find((row) => row.visitorId === "visitor-b")).toMatchObject({
+      userId: "b",
+      userName: "B",
+    });
+  });
   it("partitions demo journey records by funnel outcome", () => {
     setFacts(
       Array.from({ length: 6 }, (_, index) =>

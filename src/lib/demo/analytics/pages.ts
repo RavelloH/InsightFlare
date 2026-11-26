@@ -18,7 +18,10 @@ import {
   parseDemoQueryLimit,
   withoutDemoGeoFilter,
 } from "@/lib/demo/realtime/filters";
-import { demoPage } from "@/lib/demo/realtime/pagination";
+import {
+  demoCursorFilterBinding,
+  demoPage,
+} from "@/lib/demo/realtime/pagination";
 import {
   buildDemoTrendBuckets,
   parseDemoTimeZone,
@@ -71,7 +74,7 @@ export function generateDemoPages(
       siteId,
       from,
       to,
-      filters,
+      filters: demoCursorFilterBinding(filters),
       search: String(params.search ?? "")
         .trim()
         .toLowerCase(),
@@ -260,7 +263,7 @@ export function generateDemoPagesDashboard(
       to,
       interval,
       timeZone,
-      filters,
+      filters: demoCursorFilterBinding(filters),
       includeDetails: true,
       sort: String(params.sort ?? "views"),
       direction: String(params.direction ?? "desc"),
@@ -419,7 +422,7 @@ export function generateDemoReferrers(
       siteId,
       from,
       to,
-      filters,
+      filters: demoCursorFilterBinding(filters),
       includeFullUrl,
       search: String(params.search ?? "")
         .trim()
@@ -603,7 +606,7 @@ export function generateDemoDimension(
       dimensionType,
       from,
       to,
-      filters,
+      filters: demoCursorFilterBinding(filters),
       compare: params.compare ?? null,
       metric: params.metric ?? null,
       sortBy: params.sortBy ?? null,

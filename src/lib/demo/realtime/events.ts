@@ -44,7 +44,11 @@ import {
   parseDemoLimit,
   parseDemoNumber,
 } from "@/lib/demo/realtime/filters";
-import { demoPage } from "@/lib/demo/realtime/pagination";
+import {
+  demoCursorFilterBinding,
+  demoCursorRequestBinding,
+  demoPage,
+} from "@/lib/demo/realtime/pagination";
 import {
   buildDemoTimeBuckets,
   createDemoShareTrendSeriesKey,
@@ -136,14 +140,7 @@ export function generateDemoEventComparison(
     data: demoPage(
       rows,
       params,
-      [
-        "event-comparison",
-        siteId,
-        tab,
-        Object.entries(params)
-          .filter(([key]) => !["cursor", "nowMs", "limit"].includes(key))
-          .sort(([a], [b]) => a.localeCompare(b)),
-      ],
+      ["event-comparison", siteId, tab, demoCursorRequestBinding(params)],
       100,
       200,
     ),
@@ -292,7 +289,7 @@ export function generateDemoEventsRecords(
       siteId,
       from,
       to,
-      filters,
+      filters: demoCursorFilterBinding(filters),
       eventName,
       search,
       sort: parseDemoEventRecordSort(params),
@@ -492,7 +489,7 @@ export function generateDemoEventFields(
     siteId,
     from,
     to,
-    filters,
+    filters: demoCursorFilterBinding(filters),
     eventName,
     sort: "events:desc,occurrences:desc,path:asc,valueType:asc",
   };
@@ -525,7 +522,7 @@ export function generateDemoEventTypeFieldValues(
     siteId,
     from,
     to,
-    filters,
+    filters: demoCursorFilterBinding(filters),
     eventName,
     fieldPath,
     fieldValueType,

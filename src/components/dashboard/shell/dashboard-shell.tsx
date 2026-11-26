@@ -130,6 +130,7 @@ interface DashboardShellProps {
   teamSections?: TeamSectionNavItem[];
   managementSections?: TeamSectionNavItem[];
   initialQueryWindow?: TimeWindow;
+  navigationPending?: boolean;
   children: ReactNode;
 }
 export function DashboardShell({
@@ -146,6 +147,7 @@ export function DashboardShell({
   teamSections,
   managementSections,
   initialQueryWindow,
+  navigationPending,
   children,
 }: DashboardShellProps) {
   useAccountTimeZonePreference(user.timeZone);
@@ -774,6 +776,7 @@ export function DashboardShell({
       scopeKey={activeSiteId}
       maxRangeDays={isAdminObservabilityRoute ? 90 : undefined}
       initialWindow={initialQueryWindow}
+      navigationPending={navigationPending}
       initialFilters={initialFilters}
       initialScopePreference={initialScopePreference}
     >

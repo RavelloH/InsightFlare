@@ -31,7 +31,10 @@ import {
   summarizeDemoEventDistribution,
   summarizeDemoVisitedPages,
 } from "@/lib/demo/realtime/journey-helpers";
-import { demoPage } from "@/lib/demo/realtime/pagination";
+import {
+  demoCursorFilterBinding,
+  demoPage,
+} from "@/lib/demo/realtime/pagination";
 import {
   demoVisitMatchesJourneySearch,
   parseDemoScreenSize,
@@ -160,6 +163,7 @@ export function generateDemoVisitors(
       events: number;
       firstVisit: DemoVisitFact;
       latestVisit: DemoVisitFact;
+      identityVisit: DemoVisitFact | null;
     }
   >();
   for (const visit of analysisVisits) {
@@ -172,6 +176,7 @@ export function generateDemoVisitors(
       events: 0,
       firstVisit: visit,
       latestVisit: visit,
+      identityVisit: null,
     };
     if (visit.startedAt <= bucket.firstSeenAt) {
       bucket.firstSeenAt = visit.startedAt;
@@ -181,6 +186,14 @@ export function generateDemoVisitors(
       bucket.lastSeenAt = visit.startedAt;
       bucket.latestVisit = visit;
     }
+    if (
+      visit.userId?.trim() &&
+      (!bucket.identityVisit ||
+        visit.startedAt > bucket.identityVisit.startedAt ||
+        (visit.startedAt === bucket.identityVisit.startedAt &&
+          visit.visitId.localeCompare(bucket.identityVisit.visitId) > 0))
+    )
+      bucket.identityVisit = visit;
     bucket.views += dataset.viewWeight;
     bucket.sessions.add(visit.sessionId);
     if (visit.eventType !== "pageview") bucket.events += 1;
@@ -189,9 +202,7 @@ export function generateDemoVisitors(
 
   const rows = Array.from(buckets.entries())
     .map(([visitorId, bucket]) => {
-      const identityVisit = latestDemoIdentityVisit(
-        analysisVisits.filter((visit) => visit.visitorId === visitorId),
-      );
+      const identityVisit = bucket.identityVisit;
       return {
         visitorId,
         sessionId: bucket.latestVisit.sessionId,
@@ -237,7 +248,7 @@ export function generateDemoVisitors(
       siteId,
       from,
       to,
-      filters,
+      filters: demoCursorFilterBinding(filters),
       search,
       sort: { key: sort.key, direction: sort.direction },
     },
@@ -297,7 +308,7 @@ export function generateDemoSessions(
       siteId,
       from,
       to,
-      filters,
+      filters: demoCursorFilterBinding(filters),
       search,
       sort: { key: sort.key, direction: sort.direction },
     },
