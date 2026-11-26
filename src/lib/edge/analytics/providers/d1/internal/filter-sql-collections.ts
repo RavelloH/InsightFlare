@@ -925,8 +925,9 @@ class SqlCollectionCompiler {
     const identical = steps.every(
       (step) => JSON.stringify(step) === JSON.stringify(steps[0]),
     );
-    if (!identical && count !== 2) return null;
     const bound = target.kind === "selector" ? target.predicate : null;
+    const multiStage = !identical && count > 2;
+    if (multiStage && (bound || count > 5)) return null;
     const same =
       bound?.kind === "condition" &&
       bound.target.kind === "context-intrinsic" &&
@@ -968,7 +969,10 @@ class SqlCollectionCompiler {
       (bound.operator === "lt" || bound.operator === "lte");
     const identity =
       frame.anchorKind === "session" ? "session_id" : "visitor_id";
-    const compileStep = (step: FilterTargetExpression) => {
+    const compileStep = (
+      step: FilterTargetExpression,
+      sharedAlias?: string,
+    ) => {
       const root = step.kind === "selector" ? step.collection : step;
       if (
         root.kind !== "entity-root" ||
@@ -1006,7 +1010,7 @@ class SqlCollectionCompiler {
       };
       if (step.kind === "selector" && !localPredicate(step.predicate))
         return null;
-      const item = this.alias();
+      const item = sharedAlias ?? this.alias();
       const predicate =
         step.kind === "selector"
           ? onlyApplicable(
@@ -1022,6 +1026,8 @@ class SqlCollectionCompiler {
         item,
         kind,
         bindings: predicate.bindings,
+        predicate: predicate.sql,
+        relation,
         from: `FROM ${relation} ${item}
           WHERE ${item}.site_pk IS NOT NULL
             AND TRIM(COALESCE(${item}.${identity}, '')) != ''
@@ -1042,7 +1048,48 @@ class SqlCollectionCompiler {
             this.clock,
           )
         : null;
-    if (same) {
+    if (multiStage) {
+      if (first.kind !== "event") return null;
+      const matched = steps
+        .slice(1)
+        .map((step) => compileStep(step, first.item));
+      if (matched.some((step) => !step || step.kind !== "event")) return null;
+      const stages = [first, ...matched] as (typeof first)[];
+      // The earliest reachable occurrence of each prefix dominates every
+      // later witness for plain existence. Reuse one ordered Event source
+      // and propagate the minimum rank, never materialize combinations.
+      const partition = "PARTITION BY site_pk, entity_id";
+      const projections = stages.map(
+        (step, index) =>
+          `CASE WHEN (${step.predicate}) THEN 1 ELSE 0 END AS match_${index}`,
+      );
+      const ctes = [
+        `ranked AS (
+        SELECT ${first.key},
+          ROW_NUMBER() OVER (PARTITION BY ${first.item}.site_pk, ${first.item}.${identity}
+            ORDER BY ${first.item}.occurred_at, ${first.item}.event_id COLLATE BINARY) AS position,
+          ${projections.join(", ")}
+        FROM ${first.relation} ${first.item}
+        WHERE ${first.item}.site_pk IS NOT NULL
+          AND TRIM(COALESCE(${first.item}.${identity}, '')) != ''
+      )`,
+      ];
+      let previous = "ranked";
+      for (let index = 0; index < count - 1; index++) {
+        const name = `reachable_${index}`;
+        ctes.push(`${name} AS (
+          SELECT *, MIN(CASE WHEN match_${index} = 1 THEN position END)
+            OVER (${partition}) AS reached_${index}
+          FROM ${previous}
+          ${index === 0 ? "" : `WHERE position > reached_${index - 1}`}
+        )`);
+        previous = name;
+      }
+      sql = `WITH ${ctes.join(", ")}
+        SELECT DISTINCT site_pk, entity_id FROM ${previous}
+        WHERE match_${count - 1} = 1 AND position > reached_${count - 2}`;
+      bindings.push(...stages.slice(1).flatMap((step) => step.bindings));
+    } else if (same) {
       if (first.kind !== "event") return null;
       const token = (step: typeof first): SqlFragment => {
         if (same.kind === "current-payload")
