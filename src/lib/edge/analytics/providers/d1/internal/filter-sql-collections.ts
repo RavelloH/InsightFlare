@@ -989,13 +989,11 @@ class SqlCollectionCompiler {
     )
       return null;
     const sequenceSteps = target.collection.steps;
-    if (
-      !sequenceSteps.every(
-        (step) => JSON.stringify(step) === JSON.stringify(sequenceSteps[0]),
-      )
-    )
-      return null;
+    const identical = sequenceSteps.every(
+      (step) => JSON.stringify(step) === JSON.stringify(sequenceSteps[0]),
+    );
     const count = sequenceSteps.length;
+    if (!identical && count !== 2) return null;
     const predicate = target.predicate;
     const intrinsic = predicate.target;
     if (
@@ -1004,12 +1002,70 @@ class SqlCollectionCompiler {
       (intrinsic.intrinsic !== "span" &&
         !(
           intrinsic.intrinsic === "gap" &&
-          intrinsic.from === 1 &&
-          intrinsic.to === count
+          intrinsic.from >= 1 &&
+          intrinsic.from < intrinsic.to &&
+          intrinsic.to <= count
         )) ||
       !["lt", "lte", "gt", "gte"].includes(predicate.operator)
     )
       return null;
+    if (!identical) {
+      const steps = sequenceSteps.map((step) =>
+        this.collection(step, frame, !this.clock?.filterRangeExplicit),
+      );
+      if (
+        steps.some(
+          (step) => step.entityKind !== "event" && step.entityKind !== "page",
+        )
+      )
+        return null;
+      const upper = predicate.operator === "lt" || predicate.operator === "lte";
+      const firstKind = steps[0]!.entityKind;
+      const lastKind = steps[1]!.entityKind;
+      // Mixed sources and distinct Page selectors can cost more than
+      // the existing enumerator when a selector is highly selective.
+      if (firstKind !== "event" || lastKind !== "event") return null;
+      const projection = (step: SqlCollectionRef, index: number) => {
+        const item = this.alias();
+        return `SELECT ${item}.occurred_at AS activity_time,
+          ${item}.event_id COLLATE BINARY AS activity_id,
+          ${index} AS step_index FROM (${step.sql}) ${item}`;
+      };
+      const first = projection(steps[0]!, 0);
+      const last = projection(steps[1]!, 1);
+      const compared = compareScalar(
+        { sql: "span_delta", bindings: [] },
+        predicate.operator,
+        predicate.value,
+        this.clock,
+      );
+      // Peer groups represent the very same occurrence, including when it
+      // matches both selectors. Exclude the entire peer group, not just
+      // the previous row, to retain strict original timeline ordering.
+      const found = upper
+        ? `EXISTS (SELECT 1 FROM (
+          SELECT step_index, activity_time - MAX(CASE WHEN step_index = 0 THEN activity_time END)
+            OVER (ORDER BY activity_time, activity_id COLLATE BINARY
+              GROUPS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS span_delta
+          FROM (${first} UNION ALL ${last})
+        ) WHERE step_index = 1 AND ${compared.sql})`
+        : `EXISTS (SELECT 1 FROM (
+          SELECT b.activity_time - a.activity_time AS span_delta
+          FROM (SELECT * FROM (${first}) ORDER BY activity_time, activity_id COLLATE BINARY LIMIT 1) a
+          CROSS JOIN (SELECT * FROM (${last}) ORDER BY activity_time DESC, activity_id COLLATE BINARY DESC LIMIT 1) b
+          WHERE (a.activity_time, a.activity_id COLLATE BINARY)
+            < (b.activity_time, b.activity_id COLLATE BINARY)
+        ) WHERE ${compared.sql})`;
+      return {
+        sql: condition.operator === "notExists" ? `NOT ${found}` : found,
+        bindings: [
+          ...steps[0]!.bindings,
+          ...steps[1]!.bindings,
+          ...compared.bindings,
+        ],
+        applicable: true,
+      };
+    }
     const step = this.collection(
       target.collection.steps[0]!,
       frame,
@@ -1019,6 +1075,45 @@ class SqlCollectionCompiler {
     const item = this.alias();
     const time = step.entityKind === "event" ? "occurred_at" : "started_at";
     const upper = predicate.operator === "lt" || predicate.operator === "lte";
+    if (
+      intrinsic.intrinsic === "gap" &&
+      (intrinsic.from !== 1 || intrinsic.to !== count)
+    ) {
+      // Page lower bounds can stop earlier in the existing enumerator.
+      if (!upper && step.entityKind === "page") return null;
+      const from = intrinsic.from;
+      const to = intrinsic.to;
+      const suffix = count - to;
+      const distance = to - from;
+      // A valid pair must leave enough matching occurrences for the
+      // preceding and following sequence steps. For an upper bound,
+      // consecutive positions separated by distance minimize the gap.
+      // For a lower bound, the first and last feasible endpoints maximize it.
+      const compared = compareScalar(
+        { sql: "span_delta", bindings: [] },
+        predicate.operator,
+        predicate.value,
+        this.clock,
+      );
+      const ranked = `SELECT ${time} AS activity_time,
+        ROW_NUMBER() OVER (ORDER BY ${time}) AS position,
+        COUNT(*) OVER () AS total
+        ${upper ? `, ${time} - LAG(${time}, ${distance}) OVER (ORDER BY ${time}) AS span_delta` : ""}
+        FROM (${step.sql}) ${item}`;
+      const found = upper
+        ? `EXISTS (SELECT 1 FROM (${ranked})
+          WHERE position >= ${to} AND position <= total - ${suffix} AND ${compared.sql})`
+        : `EXISTS (SELECT 1 FROM (
+          SELECT MAX(CASE WHEN position <= total - ${suffix} THEN activity_time END)
+            - MIN(CASE WHEN position >= ${from} THEN activity_time END) AS span_delta
+          FROM (${ranked}) HAVING MAX(total) >= ${count}
+        ) WHERE ${compared.sql})`;
+      return {
+        sql: condition.operator === "notExists" ? `NOT ${found}` : found,
+        bindings: [...step.bindings, ...compared.bindings],
+        applicable: true,
+      };
+    }
     const compared = compareScalar(
       {
         sql: upper ? "span_delta" : `MAX(${time}) - MIN(${time})`,
