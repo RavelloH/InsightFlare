@@ -2914,64 +2914,99 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       db.close();
     }
   });
-  it("narrows local advanced occurrence relations without narrowing Q/F/R time domains", async () => {
-    const { db, env } = runFixture();
-    try {
-      const base = createQueryTime(100, 300, "UTC", 400);
-      for (const kind of ["session", "visitor"] as const) {
-        const column = kind + "_id";
-        for (const [expression, time, expected] of [
-          ["count(PAGE) gte 1", base, true],
-          ["count(EVENT) eq 2", base, true],
-          ['count(EVENT { $.name eq "purchase" }) eq 1', base, true],
-          [
-            'count(EVENT { $.payload("/items/1/sku") eq "B" }) eq 1',
-            base,
-            true,
-          ],
-          [
-            'first(EVENT).name eq "purchase"',
-            { ...base, fullHistory: true },
-            true,
-          ],
-          [
-            'first(EVENT).name eq "signup"',
-            { ...base, fullHistory: true },
-            false,
-          ],
-          [
-            'first(EVENT).name eq "signup"',
-            {
-              ...base,
-              fullHistory: true,
-              filterRange: { startMs: 100, endExclusiveMs: 300 },
-            },
-            true,
-          ],
-          [
-            'first(PAGE).path eq "/old"',
-            { ...base, readRange: createTimeRange(0, 300) },
-            true,
-          ],
-          ["count(PAGE) eq 1 AND NOT (count(EVENT) eq 0)", base, true],
-          [
-            'sequence([EVENT { $.name eq "purchase" }, EVENT { $.name eq "signup" }]) exists',
-            { ...base, fullHistory: true },
-            true,
-          ],
-          [
-            'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
-            base,
-            true,
-          ],
-          [
-            'without(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]), EVENT { $.name eq "view" }) exists',
-            base,
-            true,
-          ],
-          ["count(window(EVENT, @range.start, [0ms, 200ms])) eq 2", base, true],
-          ["count(periods(PAGE, 1d)) eq 1", base, true],
-        ] as const) {
+  const localHistoryBase = createQueryTime(100, 300, "UTC", 400);
+  it.each([
+    ["count(PAGE) gte 1", localHistoryBase, true],
+    ["count(EVENT) eq 2", localHistoryBase, true],
+    ['count(EVENT { $.name eq "purchase" }) eq 1', localHistoryBase, true],
+    [
+      'count(EVENT { $.payload("/items/1/sku") eq "B" }) eq 1',
+      localHistoryBase,
+      true,
+    ],
+    [
+      'first(EVENT).name eq "purchase"',
+      { ...localHistoryBase, fullHistory: true },
+      true,
+    ],
+    [
+      'first(EVENT).name eq "signup"',
+      { ...localHistoryBase, fullHistory: true },
+      false,
+    ],
+    [
+      'first(EVENT).name eq "signup"',
+      {
+        ...localHistoryBase,
+        fullHistory: true,
+        filterRange: { startMs: 100, endExclusiveMs: 300 },
+      },
+      true,
+    ],
+    [
+      'first(PAGE).path eq "/old"',
+      { ...localHistoryBase, readRange: createTimeRange(0, 300) },
+      true,
+    ],
+    ["count(PAGE) eq 1 AND NOT (count(EVENT) eq 0)", localHistoryBase, true],
+    [
+      'sequence([EVENT { $.name eq "purchase" }, EVENT { $.name eq "signup" }]) exists',
+      { ...localHistoryBase, fullHistory: true },
+      true,
+    ],
+    [
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
+      localHistoryBase,
+      true,
+    ],
+    [
+      'without(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]), EVENT { $.name eq "view" }) exists',
+      localHistoryBase,
+      true,
+    ],
+    [
+      "count(window(EVENT, @range.start, [0ms, 200ms])) eq 2",
+      localHistoryBase,
+      true,
+    ],
+    ["count(periods(PAGE, 1d)) eq 1", localHistoryBase, true],
+    [
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) { $span lte 40ms AND $gap(1, 2) gte 20ms } exists',
+      localHistoryBase,
+      true,
+    ],
+    [
+      'count(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) { $span lte 20ms }) eq 0',
+      localHistoryBase,
+      true,
+    ],
+    [
+      'sequence([EVENT { $.name eq "purchase" }, EVENT { $.name eq "purchase" }]) { $same($.name) } exists',
+      { ...localHistoryBase, fullHistory: true },
+      true,
+    ],
+    [
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) { $same($.payload("/items/0/sku")) } notExists',
+      localHistoryBase,
+      true,
+    ],
+    [
+      "count(periods(PAGE, 1d) { count($items) eq 1 }) eq 1",
+      localHistoryBase,
+      true,
+    ],
+    [
+      "periods(EVENT, 1d) { count($items) gte 2 AND NOT (count($items) gte 3) } exists",
+      localHistoryBase,
+      true,
+    ],
+  ] as const)(
+    "narrows local advanced occurrence relation %s without narrowing Q/F/R",
+    async (expression, time, expected) => {
+      const { db, env } = runFixture();
+      try {
+        for (const kind of ["session", "visitor"] as const) {
+          const column = kind + "_id";
           const doc = parseFilterDsl(expression, analyticsFilterRegistry);
           const plan = createScopedFilterPlan(
             (kind + "-events") as "session-events" | "visitor-events",
@@ -3050,35 +3085,40 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
             }
           }
         }
-        for (const expression of [
-          "count(VISITOR) gte 1",
-          "count(SESSION) gte 1",
-          'SESSION { PAGE { $.path eq "/home" } exists } exists',
-        ]) {
-          const doc = parseFilterDsl(expression, analyticsFilterRegistry);
-          const plan = createScopedFilterPlan(
-            (kind + "-events") as "session-events" | "visitor-events",
-            doc,
-            kind,
-          )!;
-          const filters = attachScopedFilterMetadata(doc, {
-            requestedScope: kind,
-            resolvedScope: plan.scope,
-            plan,
-            time: base,
-            siteIds: ["site-a"],
-          });
-          const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
-          expect(
-            compileScopedDatasetSql({
-              ...input,
-              target: { type: kind, value: kind === "session" ? "s1" : "u1" },
-            }),
-          ).toEqual(compileScopedDatasetSql(input));
-        }
+      } finally {
+        db.close();
       }
-    } finally {
-      db.close();
+    },
+  );
+  it("retains full qualification for cross-entity advanced relations", () => {
+    const base = localHistoryBase;
+    for (const kind of ["session", "visitor"] as const) {
+      for (const expression of [
+        "count(VISITOR) gte 1",
+        "count(SESSION) gte 1",
+        'SESSION { PAGE { $.path eq "/home" } exists } exists',
+      ]) {
+        const doc = parseFilterDsl(expression, analyticsFilterRegistry);
+        const plan = createScopedFilterPlan(
+          (kind + "-events") as "session-events" | "visitor-events",
+          doc,
+          kind,
+        )!;
+        const filters = attachScopedFilterMetadata(doc, {
+          requestedScope: kind,
+          resolvedScope: plan.scope,
+          plan,
+          time: base,
+          siteIds: ["site-a"],
+        });
+        const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
+        expect(
+          compileScopedDatasetSql({
+            ...input,
+            target: { type: kind, value: kind === "session" ? "s1" : "u1" },
+          }),
+        ).toEqual(compileScopedDatasetSql(input));
+      }
     }
   });
   it("preserves Session adjacency when a sessionless Visit key collides", async () => {

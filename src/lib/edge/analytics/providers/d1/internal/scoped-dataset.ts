@@ -1645,10 +1645,59 @@ function localOccurrenceCollection(
   }
   return null;
 }
+/** Derived selectors cannot change the anchor, but may introduce new evidence.
+ * Admit only intrinsics whose SQL reads the already selected occurrences. */
+function localDerivedPredicate(
+  expression: FilterExpression,
+  kind: "sequence" | "period",
+): boolean {
+  if (expression.kind === "not")
+    return localDerivedPredicate(expression.child, kind);
+  if (expression.kind !== "condition")
+    return expression.children.every((child) =>
+      localDerivedPredicate(child, kind),
+    );
+  const target = expression.target;
+  if (kind === "period")
+    return (
+      target.kind === "reducer" &&
+      target.reducer === "count" &&
+      target.input.kind === "context-intrinsic" &&
+      target.input.intrinsic === "items"
+    );
+  if (target.kind !== "context-intrinsic" || target.context !== "sequence")
+    return false;
+  if (target.intrinsic === "span" || target.intrinsic === "gap") return true;
+  const input = target.input;
+  return (
+    input.kind === "current-payload" ||
+    (input.kind === "member" &&
+      input.object.kind === "context-root" &&
+      input.object.context === "current" &&
+      (input.member === "name" || input.member === "path"))
+  );
+}
+function localPeriodCollection(
+  target: FilterTargetExpression,
+  proof: LocalRelationProof,
+): boolean {
+  if (target.kind === "periods")
+    return localOccurrenceCollection(target.collection, proof) !== null;
+  return (
+    target.kind === "selector" &&
+    localPeriodCollection(target.collection, proof) &&
+    localDerivedPredicate(target.predicate, "period")
+  );
+}
 function localSequenceCollection(
   target: FilterTargetExpression,
   proof: LocalRelationProof,
 ): boolean {
+  if (target.kind === "selector")
+    return (
+      localSequenceCollection(target.collection, proof) &&
+      localDerivedPredicate(target.predicate, "sequence")
+    );
   if (target.kind === "sequence")
     return target.steps.every(
       (step) => localOccurrenceCollection(step, proof) !== null,
@@ -1671,15 +1720,20 @@ function localRelationTarget(
 ): boolean {
   switch (target.kind) {
     case "entity-root":
-    case "selector":
     case "window":
       return localOccurrenceCollection(target, proof) !== null;
+    case "selector":
+      return (
+        localOccurrenceCollection(target, proof) !== null ||
+        localSequenceCollection(target, proof) ||
+        localPeriodCollection(target, proof)
+      );
     case "sequence":
     case "without":
     case "adjacent":
       return localSequenceCollection(target, proof);
     case "periods":
-      return localOccurrenceCollection(target.collection, proof) !== null;
+      return localPeriodCollection(target, proof);
     case "event-payload":
     case "current-payload":
       return current === "event";
@@ -1698,8 +1752,7 @@ function localRelationTarget(
         target.reducer === "count" &&
         (localOccurrenceCollection(target.input, proof) !== null ||
           localSequenceCollection(target.input, proof) ||
-          (target.input.kind === "periods" &&
-            localOccurrenceCollection(target.input.collection, proof) !== null))
+          localPeriodCollection(target.input, proof))
       );
     case "member": {
       const root = target.object;
