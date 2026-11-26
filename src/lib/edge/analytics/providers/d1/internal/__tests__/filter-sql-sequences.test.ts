@@ -473,6 +473,113 @@ describe("P4 complete timeline and relational SQL", () => {
       db.close();
     }
   });
+  it("short-circuits scalar same only for supported local pairs", () => {
+    const db = fixture();
+    try {
+      const expressions = [
+        "sequence([EVENT,EVENT]) { $same($.name) } exists",
+        "sequence([EVENT,EVENT]) { $same($.name) } notExists",
+        'sequence([EVENT { $.name eq "signup" },EVENT { $.name eq "purchase" }]) { $same($.name) } notExists',
+        'sequence([EVENT { $.name exists },EVENT { $.name eq "purchase" }]) { $same($.name) } exists',
+        "sequence([PAGE,PAGE]) { $same($.path) } exists",
+        "sequence([PAGE,PAGE]) { $same($.path) } notExists",
+      ];
+      const sql = (expression: string, unique: boolean) =>
+        composeBoundCtes(
+          compileCollectionSqlQualification(
+            parseFilterDsl(expression, analyticsFilterRegistry),
+            "session",
+            { uniqueLocalOccurrences: unique },
+          ).ctes,
+        ).ctes;
+      for (const expression of expressions) {
+        expect(sql(expression, true)).toMatch(
+          /AS step_index|HAVING COUNT\(\*\) >= 2/,
+        );
+        expect(sql(expression, false)).not.toMatch(
+          /AS step_index|HAVING COUNT\(\*\) >= 2/,
+        );
+        for (const variant of [
+          source,
+          source.replace("'signup',20)", "'signup',30)"),
+          source.replaceAll("'/pricing'", "'/landing'"),
+          source.replaceAll("'/pricing'", "NULL"),
+        ])
+          expect(qualified(db, expression, variant, undefined, true)).toEqual(
+            qualified(db, expression, variant),
+          );
+      }
+      for (const expression of [
+        "count(sequence([EVENT,EVENT]) { $same($.name) }) eq 1",
+        "sequence([EVENT,EVENT,EVENT]) { $same($.name) } exists",
+        "sequence([EVENT,EVENT]) { $same($.name) AND $span lte 10ms } exists",
+      ]) {
+        expect(sql(expression, true)).not.toMatch(
+          /AS step_index|HAVING COUNT\(\*\) >= 2/,
+        );
+        expect(qualified(db, expression, source, undefined, true)).toEqual(
+          qualified(db, expression),
+        );
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("uses filtered time neighbors and extrema for identical two-step time bounds", () => {
+    const db = fixture();
+    try {
+      const expressions = [
+        "sequence([EVENT,EVENT]) { $span lte 5ms } exists",
+        "sequence([EVENT,EVENT]) { $span lt 5ms } notExists",
+        "sequence([EVENT,EVENT]) { $span gte 5ms } exists",
+        "sequence([EVENT,EVENT]) { $span gt 5ms } notExists",
+        "sequence([EVENT,EVENT]) { $gap(1,2) lte 0ms } exists",
+        "sequence([PAGE,PAGE]) { $gap(1,2) gt 10ms } exists",
+        'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "signup" }]) { $span gte 0ms } exists',
+      ];
+      const sql = (expression: string, unique: boolean) =>
+        composeBoundCtes(
+          compileCollectionSqlQualification(
+            parseFilterDsl(expression, analyticsFilterRegistry),
+            "session",
+            { uniqueLocalOccurrences: unique },
+          ).ctes,
+        ).ctes;
+      for (const expression of expressions) {
+        expect(sql(expression, true)).toMatch(
+          /AS span_delta|HAVING COUNT\(\*\) >= 2/,
+        );
+        expect(sql(expression, false)).not.toMatch(
+          /AS span_delta|HAVING COUNT\(\*\) >= 2/,
+        );
+        for (const variant of [
+          source,
+          source.replace("'signup',20)", "'signup',30)"),
+          source.replace("'pricing',1,25)", "'pricing',1,10)"),
+        ])
+          expect(qualified(db, expression, variant, undefined, true)).toEqual(
+            qualified(db, expression, variant),
+          );
+      }
+      for (const expression of [
+        "sequence([PAGE,EVENT]) { $span lte 20ms } exists",
+        "sequence([EVENT,EVENT]) { $span eq 5ms } exists",
+        "count(sequence([EVENT,EVENT]) { $span lte 5ms }) eq 1",
+        "sequence([EVENT,EVENT]) { $span lte 10ms AND $gap(1,2) gt 5ms } exists",
+      ]) {
+        expect(sql(expression, true)).not.toMatch(
+          /AS span_delta|HAVING COUNT\(\*\) >= 2/,
+        );
+        expect(qualified(db, expression, source, undefined, true)).toEqual(
+          qualified(db, expression),
+        );
+      }
+    } finally {
+      db.close();
+    }
+  });
+
   it("evaluates $span, $gap and $same in a bound Sequence item", () => {
     const db = fixture();
     try {

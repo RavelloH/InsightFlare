@@ -746,7 +746,7 @@ class SqlCollectionCompiler {
    * second position for each typed value, not all combinations. Keep the
    * ordinary enumerator for counts, mixed predicates and unproven sources.
    */
-  private localPayloadPairExists(
+  private localSamePairExists(
     condition: FilterCondition,
     frame: SqlFrame,
   ): PredicateFragment | null {
@@ -767,7 +767,6 @@ class SqlCollectionCompiler {
       same.kind !== "context-intrinsic" ||
       same.context !== "sequence" ||
       same.intrinsic !== "same" ||
-      same.input.kind !== "current-payload" ||
       predicate.operator !== "eq" ||
       predicate.value !== true
     )
@@ -775,18 +774,65 @@ class SqlCollectionCompiler {
     const steps = target.collection.steps.map((step) =>
       this.collection(step, frame, !this.clock?.filterRangeExplicit),
     );
-    if (steps.some((step) => step.entityKind !== "event")) return null;
-    const pointer = same.input.path;
-    if (
+    const input = same.input;
+    const identical =
       JSON.stringify(target.collection.steps[0]) ===
-      JSON.stringify(target.collection.steps[1])
-    ) {
-      // Identical steps admit every pair of distinct matching Events in
+      JSON.stringify(target.collection.steps[1]);
+    const payload = input.kind === "current-payload";
+    const member =
+      input.kind === "member" &&
+      input.object.kind === "context-root" &&
+      input.object.context === "current" &&
+      (input.member === "name" || input.member === "path");
+    if (!payload && !member) return null;
+    if (
+      steps.some(
+        (step) =>
+          step.entityKind !== "event" &&
+          !(identical && member && step.entityKind === "page"),
+      )
+    )
+      return null;
+    const token = (step: SqlCollectionRef, item: string): SqlFragment => {
+      if (input.kind === "current-payload")
+        return compileJsonPointerValue(item, input.path);
+      const field =
+        this.currentMember(input, step.entityKind) ??
+        (step.entityKind === "event"
+          ? this.currentMember(input, "page")
+          : null);
+      if (!field) return { sql: "NULL", bindings: [] };
+      const scalar = compileRegisteredFieldScalar(field, item);
+      return {
+        sql: `CASE WHEN ${scalar} IS NOT NULL
+          THEN json_object('t', 1, 'v', ${scalar}) ELSE NULL END`,
+        bindings: [],
+      };
+    };
+    if (identical && member) {
+      const step = steps[0]!;
+      const item = this.alias();
+      const field = this.currentMember(input, step.entityKind);
+      if (!field) return null;
+      const scalar = compileRegisteredFieldScalar(field, item);
+      // Both supported fields are strings. Group directly with binary
+      // collation rather than re-encoding the same scalar as typed JSON.
+      const found = `EXISTS (SELECT 1 FROM (${step.sql}) ${item}
+        WHERE ${scalar} IS NOT NULL
+        GROUP BY ${scalar} COLLATE BINARY HAVING COUNT(*) >= 2)`;
+      return {
+        sql: condition.operator === "notExists" ? `NOT ${found}` : found,
+        bindings: step.bindings,
+        applicable: true,
+      };
+    }
+    if (identical) {
+      // Identical steps admit every pair of distinct matching occurrences in
       // strict timeline order. Each canonical occurrence appears once.
       const step = steps[0]!;
       const item = this.alias();
       const candidates = this.alias();
-      const payload = compileJsonPointerValue(item, pointer);
+      const payload = token(step, item);
       const found = `EXISTS (WITH ${candidates} AS MATERIALIZED (
         SELECT ${item}.site_pk,
           ${item}.${frame.anchorKind === "visitor" ? "visitor_id" : "session_id"} AS anchor_id,
@@ -804,7 +850,7 @@ class SqlCollectionCompiler {
     const bindings: Array<string | number | null> = [];
     const branches = steps.map((step, index) => {
       const item = this.alias();
-      const payload = compileJsonPointerValue(item, pointer);
+      const payload = token(step, item);
       bindings.push(...payload.bindings, ...step.bindings);
       return `SELECT ${index} AS step_index, ${item}.site_pk,
         ${item}.${frame.anchorKind === "visitor" ? "visitor_id" : "session_id"} AS anchor_id,
@@ -916,12 +962,83 @@ class SqlCollectionCompiler {
     };
   }
 
+  /**
+   * For two identical step collections the smallest possible span is
+   * attained by adjacent occurrences within the filtered collection;
+   * the largest is attained by its time extrema. This does not imply
+   * Adjacent on the unfiltered timeline.
+   */
+  private localSequenceSpanExists(
+    condition: FilterCondition,
+    frame: SqlFrame,
+  ): PredicateFragment | null {
+    const target = condition.target;
+    if (
+      !this.sources.uniqueLocalOccurrences ||
+      (frame.anchorKind !== "session" && frame.anchorKind !== "visitor") ||
+      (condition.operator !== "exists" && condition.operator !== "notExists") ||
+      target.kind !== "selector" ||
+      target.collection.kind !== "sequence" ||
+      target.collection.steps.length !== 2 ||
+      target.predicate.kind !== "condition" ||
+      JSON.stringify(target.collection.steps[0]) !==
+        JSON.stringify(target.collection.steps[1])
+    )
+      return null;
+    const predicate = target.predicate;
+    const intrinsic = predicate.target;
+    if (
+      intrinsic.kind !== "context-intrinsic" ||
+      intrinsic.context !== "sequence" ||
+      (intrinsic.intrinsic !== "span" &&
+        !(
+          intrinsic.intrinsic === "gap" &&
+          intrinsic.from === 1 &&
+          intrinsic.to === 2
+        )) ||
+      !["lt", "lte", "gt", "gte"].includes(predicate.operator)
+    )
+      return null;
+    const step = this.collection(
+      target.collection.steps[0]!,
+      frame,
+      !this.clock?.filterRangeExplicit,
+    );
+    if (step.entityKind !== "event" && step.entityKind !== "page") return null;
+    const item = this.alias();
+    const time = step.entityKind === "event" ? "occurred_at" : "started_at";
+    const upper = predicate.operator === "lt" || predicate.operator === "lte";
+    const compared = compareScalar(
+      {
+        sql: upper ? "span_delta" : `MAX(${time}) - MIN(${time})`,
+        bindings: [],
+      },
+      predicate.operator,
+      predicate.value,
+      this.clock,
+    );
+    const found = upper
+      ? `EXISTS (SELECT 1 FROM (
+          SELECT ${time} - LAG(${time}) OVER (ORDER BY ${time}) AS span_delta
+          FROM (${step.sql}) ${item}
+        ) WHERE ${compared.sql})`
+      : `EXISTS (SELECT COUNT(*) FROM (${step.sql}) ${item}
+        HAVING COUNT(*) >= 2 AND ${compared.sql})`;
+    return {
+      sql: condition.operator === "notExists" ? `NOT ${found}` : found,
+      bindings: [...step.bindings, ...compared.bindings],
+      applicable: true,
+    };
+  }
+
   private condition(
     condition: FilterCondition,
     frame: SqlFrame,
   ): PredicateFragment {
-    const optimizedPair = this.localPayloadPairExists(condition, frame);
+    const optimizedPair = this.localSamePairExists(condition, frame);
     if (optimizedPair) return optimizedPair;
+    const optimizedSpan = this.localSequenceSpanExists(condition, frame);
+    if (optimizedSpan) return optimizedSpan;
     const optimizedSequence = this.localSequenceExists(condition, frame);
     if (optimizedSequence) return optimizedSequence;
     const target = condition.target;
