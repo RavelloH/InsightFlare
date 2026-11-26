@@ -1,3 +1,5 @@
+import { infiniteQueryOptions } from "@tanstack/react-query";
+
 import {
   emptySessionDetail,
   emptySessions,
@@ -9,6 +11,7 @@ import type {
 } from "@/lib/dashboard/client/data/types";
 import { fetchPrivateJson } from "@/lib/dashboard/client/request";
 import { withFilters, withPagination } from "@/lib/dashboard/client/utils";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import {
   parseFilterDocumentFromSearchParams,
   type TimeWindow,
@@ -132,6 +135,55 @@ export const DEFAULT_SESSION_SORT = {
   key: "startedAt",
   direction: "desc",
 } as const;
+/** Shared normalized query identity for the route and the mounted list. */
+export function sessionsListQueryOptions(input: {
+  siteId: string;
+  window: TimeWindow;
+  filters: FilterDocument;
+  search?: string;
+  sort?: { key: SessionListSortKey; direction: SortDirection };
+  transport?: PrivateReadTransport;
+  enabled?: boolean;
+}) {
+  const {
+    siteId,
+    window,
+    filters,
+    search = "",
+    sort = DEFAULT_SESSION_SORT,
+    transport,
+  } = input;
+  return infiniteQueryOptions({
+    queryKey: [
+      "dashboard",
+      "sessions",
+      siteId,
+      window.from,
+      window.to,
+      window.timeZone,
+      filterQueryKey(filters),
+      search,
+      sort.key,
+      sort.direction,
+    ],
+    queryFn: ({ pageParam, signal }) =>
+      fetchSessions(siteId, window, filters, {
+        cursor: pageParam,
+        limit: SESSION_PAGE_SIZE,
+        sortBy: sort.key,
+        sortDir: sort.direction,
+        search,
+        signal,
+        transport,
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.data.pagination.hasMore
+        ? lastPage.data.pagination.nextCursor
+        : undefined,
+    enabled: input.enabled ?? true,
+  });
+}
 export function startSessionsInitialReads(
   siteId: string,
   window: TimeWindow,

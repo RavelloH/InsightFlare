@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAnalyticsTableColumns } from "@insightflare/product-ui/tables";
 import { PageHeading } from "@insightflare/ui/page-heading";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { infiniteQueryOptions, useInfiniteQuery } from "@tanstack/react-query";
 
 import {
   dashboardComparisonLabel,
@@ -15,6 +15,7 @@ import {
   type PagesSortState,
   PagesTableCard,
 } from "@/components/dashboard/pages/pages-table-card";
+import { useDashboardDeferredReadTransport } from "@/components/dashboard/shell/dashboard-query-provider";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import { PageDetailDrawer } from "@/components/dashboard/site-pages/pages/page-detail-drawer";
 import {
@@ -25,15 +26,14 @@ import {
   PAGE_LIST_PAGE_SIZE,
   resolvePagesListComparisonQuery,
 } from "@/lib/dashboard/client/data/pages";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import {
   pushUrlWithoutNavigation,
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/dashboard/client/history";
-import {
-  createDeferredPrivateReadTransport,
-  type DeferredPrivateReads,
-} from "@/lib/dashboard/client/request";
+import { type DeferredPrivateReads } from "@/lib/dashboard/client/request";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import {
@@ -121,6 +121,79 @@ function pageDetailQueryTarget(
   const query = serializeDashboardSearchParams(params);
   return query ? `${pathname}?${query}` : pathname;
 }
+export function pagesListQueryOptions(input: {
+  siteId: string;
+  window: TimeWindow;
+  filters: FilterDocument;
+  search?: string;
+  sort?: PagesSortState;
+  comparisonQuery: DashboardComparisonQuery | null;
+  transport?: PrivateReadTransport;
+  enabled?: boolean;
+}) {
+  const {
+    siteId,
+    window,
+    filters,
+    search = "",
+    sort = { key: "views", direction: "desc" },
+    comparisonQuery,
+    transport,
+  } = input;
+  const filtersKey = filterQueryKey(filters);
+  const comparisonFiltersKey = comparisonQuery
+    ? filterQueryKey(comparisonQuery.filters)
+    : "no-comparison";
+  return infiniteQueryOptions({
+    queryKey: [
+      "dashboard",
+      "pages-list",
+      siteId,
+      window.from,
+      window.to,
+      window.interval,
+      window.timeZone,
+      filtersKey,
+      search,
+      sort.key,
+      sort.direction,
+      comparisonQuery?.mode ?? "none",
+      comparisonQuery?.window.from ?? null,
+      comparisonQuery?.window.to ?? null,
+      comparisonFiltersKey,
+    ],
+    queryFn: async ({ pageParam, signal }) => {
+      const guard = capturePerceptionGuard(siteId);
+      const page = await fetchPagesDashboard(siteId, window, filters, {
+        cursor: pageParam,
+        limit: PAGE_LIST_PAGE_SIZE,
+        search,
+        sort: sort.key,
+        direction: sort.direction,
+        comparison: comparisonQuery,
+        comparisonMetric: sort.key,
+        comparisonSortBy: "current",
+        signal,
+        ...(transport ? { transport } : {}),
+      });
+      if (!signal.aborted) {
+        observeLoadedDimension(
+          siteId,
+          "page.path",
+          page.data.items.map((row) => row.pathname),
+          guard,
+        );
+      }
+      return page;
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.data.pagination.hasMore
+        ? lastPage.data.pagination.nextCursor
+        : undefined,
+    enabled: input.enabled ?? true,
+  });
+}
 export function PagesClientPage({
   locale,
   messages,
@@ -135,13 +208,7 @@ export function PagesClientPage({
     filters: FilterDocument;
     window: TimeWindow;
   };
-  const transport = useMemo(
-    () =>
-      deferredReads
-        ? createDeferredPrivateReadTransport(deferredReads)
-        : undefined,
-    [deferredReads],
-  );
+  const transport = useDashboardDeferredReadTransport(deferredReads);
   const globalComparisonQuery = useDashboardComparisonQuery(window, filters);
   const comparisonQuery = useMemo(
     () =>
@@ -179,15 +246,6 @@ export function PagesClientPage({
     searchParams.get(PAGE_DETAIL_QUERY_PARAM),
   );
   const openedDetailFromListRef = useRef(false);
-  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
-  const comparisonFiltersKey = useMemo(
-    () =>
-      comparisonQuery
-        ? filterQueryKey(comparisonQuery.filters)
-        : "no-comparison",
-    [comparisonQuery],
-  );
-
   useEffect(() => {
     const timeoutId = globalThis.setTimeout(() => {
       setDebouncedQuery(query.trim());
@@ -203,55 +261,18 @@ export function PagesClientPage({
     isFetchNextPageError,
     isFetchingNextPage,
     isPending,
-  } = useInfiniteQuery({
-    queryKey: [
-      "dashboard",
-      "pages-list",
+  } = useInfiniteQuery(
+    pagesListQueryOptions({
       siteId,
-      window.from,
-      window.to,
-      window.interval,
-      window.timeZone,
-      filtersKey,
-      debouncedQuery,
-      sort.key,
-      sort.direction,
-      comparisonQuery?.mode ?? "none",
-      comparisonQuery?.window.from ?? null,
-      comparisonQuery?.window.to ?? null,
-      comparisonFiltersKey,
-    ],
-    queryFn: async ({ pageParam, signal }) => {
-      const guard = capturePerceptionGuard(siteId);
-      const page = await fetchPagesDashboard(siteId, window, filters, {
-        cursor: pageParam,
-        limit: PAGE_LIST_PAGE_SIZE,
-        search: debouncedQuery,
-        sort: sort.key,
-        direction: sort.direction,
-        comparison: comparisonQuery,
-        comparisonMetric: sort.key,
-        comparisonSortBy: "current",
-        signal,
-        ...(transport ? { transport } : {}),
-      });
-      if (!signal.aborted) {
-        observeLoadedDimension(
-          siteId,
-          "page.path",
-          page.data.items.map((row) => row.pathname),
-          guard,
-        );
-      }
-      return page;
-    },
-    initialPageParam: null as string | null,
-    getNextPageParam: (lastPage) =>
-      lastPage.data.pagination.hasMore
-        ? lastPage.data.pagination.nextCursor
-        : undefined,
-    enabled: queryReady,
-  });
+      window,
+      filters,
+      search: debouncedQuery,
+      sort,
+      comparisonQuery,
+      transport,
+      enabled: queryReady,
+    }),
+  );
 
   const rows = useMemo(() => {
     const seen = new Set<string>();

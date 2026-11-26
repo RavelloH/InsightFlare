@@ -6,6 +6,7 @@ import {
   useDashboardComparisonQuery,
 } from "@/components/dashboard/comparison/use-dashboard-comparison-query";
 import { GeoCountryStatsPanel } from "@/components/dashboard/geo/geo-country-stats-panel";
+import { useDashboardDeferredReadTransport } from "@/components/dashboard/shell/dashboard-query-provider";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import type { GeoClientMapStageProps } from "@/components/dashboard/site-pages/geo/geo-client-map-stage";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -24,10 +25,7 @@ import {
   pushUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/dashboard/client/history";
-import {
-  createDeferredPrivateReadTransport,
-  type DeferredPrivateReads,
-} from "@/lib/dashboard/client/request";
+import { type DeferredPrivateReads } from "@/lib/dashboard/client/request";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import dynamic from "@/lib/dynamic";
@@ -77,13 +75,7 @@ export function GeoClientPage({
 }: GeoClientPageProps) {
   const isMobile = useIsMobile();
   const { window, filters, queryReady } = useDashboardQuery();
-  const transport = useMemo(
-    () =>
-      deferredReads
-        ? createDeferredPrivateReadTransport(deferredReads)
-        : undefined,
-    [deferredReads],
-  );
+  const transport = useDashboardDeferredReadTransport(deferredReads);
   const comparisonQuery = useDashboardComparisonQuery(window, filters);
   const searchParams = useLiveSearchParams();
   const geoMessages = messages.geo;

@@ -15,6 +15,11 @@ import {
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/dashboard/client/history";
+import {
+  createDeferredPrivateReadTransport,
+  type DeferredPrivateReads,
+} from "@/lib/dashboard/client/request";
+import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { EMPTY_DASHBOARD_FILTER_DOCUMENT } from "@/lib/dashboard/filter-state";
 import {
@@ -629,4 +634,53 @@ export function useDashboardScopePreference(): FilterScopePreference {
 }
 export function useDashboardQueryControls() {
   return useDashboardQueryContext();
+}
+
+/** Bind an SSR handoff to its first hydrated selection. Changing global
+ * filters, scope, comparison or time invalidates unused reads permanently
+ * for this mounted page, even if the user switches back immediately.
+ * Detail drawers and local pagination/sort changes are not global selection.
+ */
+export function useDashboardDeferredReadTransport(
+  reads: DeferredPrivateReads | null | undefined,
+) {
+  const { queryReady, window, filters } = useDashboardQuery();
+  const search = useLiveSearchParams();
+  const selection = useMemo(() => {
+    if (!reads || !queryReady) return null;
+    const urlFilters = parseFilterDocumentFromSearchParams(search);
+    const comparison = resolveDashboardComparisonQuery(search, window, filters);
+    return JSON.stringify([
+      window.from,
+      window.to,
+      window.interval,
+      window.timeZone,
+      filterQueryKey(filters),
+      filterQueryKey(urlFilters),
+      comparison?.mode,
+      comparison ? filterQueryKey(comparison.filters) : null,
+    ]);
+  }, [reads, queryReady, window, filters, search]);
+  const [binding, setBinding] = useState(() => ({
+    reads,
+    selection,
+    retired: false,
+  }));
+  let active = false;
+  if (binding.reads !== reads) {
+    setBinding({ reads, selection, retired: false });
+    active = selection !== null;
+  } else if (!binding.retired && selection !== null) {
+    if (binding.selection === null) {
+      setBinding({ reads, selection, retired: false });
+      active = true;
+    } else if (binding.selection !== selection) {
+      setBinding({ reads, selection: binding.selection, retired: true });
+    } else active = true;
+  }
+  return useMemo(
+    () =>
+      active && reads ? createDeferredPrivateReadTransport(reads) : undefined,
+    [active, reads],
+  );
 }

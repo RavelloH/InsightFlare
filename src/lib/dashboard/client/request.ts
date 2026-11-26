@@ -257,6 +257,21 @@ export type DeferredPrivateReads = Record<
   Promise<{ value: ManagementJsonValue } | null>
 >;
 const consumedPrivateReads = new WeakSet<object>();
+// Match the normalized React Query freshness window. Pending reads can
+// still finish independently; an unused resolved read cannot become a
+// second long-lived cache held by the route loader.
+const DEFERRED_READ_FRESH_MS = 15_000;
+const deferredReadExpiry = new WeakMap<object, number>();
+function trackDeferredReadExpiry(reads: DeferredPrivateReads): void {
+  for (const deferred of Object.values(reads)) {
+    if (deferredReadExpiry.has(deferred)) continue;
+    deferredReadExpiry.set(deferred, Infinity);
+    const settle = () => {
+      deferredReadExpiry.set(deferred, Date.now() + DEFERRED_READ_FRESH_MS);
+    };
+    void deferred.then(settle, settle);
+  }
+}
 
 /** Reuse the streamed response inside the normal React Query queryFn. The
  * query cache retains its existing normalized result/key, not a second cache.
@@ -264,6 +279,7 @@ const consumedPrivateReads = new WeakSet<object>();
 export function createDeferredPrivateReadTransport(
   reads: DeferredPrivateReads,
 ): PrivateReadTransport {
+  trackDeferredReadExpiry(reads);
   return async <T>(
     path: string,
     params?: PrivateRequestParams,
@@ -272,7 +288,11 @@ export function createDeferredPrivateReadTransport(
     const signal = options?.signal;
     if (signal?.aborted) throwAbortError();
     const deferred = reads[privateReadIdentity(path, params)];
-    if (deferred && !consumedPrivateReads.has(deferred)) {
+    if (
+      deferred &&
+      !consumedPrivateReads.has(deferred) &&
+      Date.now() < (deferredReadExpiry.get(deferred) ?? 0)
+    ) {
       let abort: (() => void) | undefined;
       try {
         const result = await (signal

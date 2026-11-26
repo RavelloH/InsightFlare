@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { PageHeading } from "@insightflare/ui/page-heading";
 
 import {
@@ -9,11 +8,9 @@ import { DeviceCrossBreakdownGrid } from "@/components/dashboard/devices/device-
 import { DeviceDimensionTrendCard } from "@/components/dashboard/devices/device-dimension-trend-card";
 import { DeviceScreenBreakdownCard } from "@/components/dashboard/devices/device-screen-breakdown-card";
 import { DeviceShareOverview } from "@/components/dashboard/devices/device-share-overview";
+import { useDashboardDeferredReadTransport } from "@/components/dashboard/shell/dashboard-query-provider";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
-import {
-  createDeferredPrivateReadTransport,
-  type DeferredPrivateReads,
-} from "@/lib/dashboard/client/request";
+import { type DeferredPrivateReads } from "@/lib/dashboard/client/request";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { FilterDocument } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
@@ -37,13 +34,7 @@ export function DevicesClientPage({
     filters: FilterDocument;
     window: TimeWindow;
   };
-  const transport = useMemo(
-    () =>
-      deferredReads
-        ? createDeferredPrivateReadTransport(deferredReads)
-        : undefined,
-    [deferredReads],
-  );
+  const transport = useDashboardDeferredReadTransport(deferredReads);
   const comparisonQuery = useDashboardComparisonQuery(window, filters);
 
   return (

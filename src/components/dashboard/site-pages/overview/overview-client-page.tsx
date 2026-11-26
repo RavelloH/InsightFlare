@@ -2,6 +2,7 @@ import { useCallback, useMemo } from "react";
 import { PageHeading } from "@insightflare/ui/page-heading";
 
 import { OverviewGeoPointsMapCard } from "@/components/dashboard/geo/overview-geo-points-map-card";
+import { useDashboardDeferredReadTransport } from "@/components/dashboard/shell/dashboard-query-provider";
 import {
   useDashboardQueryReady,
   useDashboardScopePreference,
@@ -11,7 +12,6 @@ import {
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/dashboard/client/history";
-import { createDeferredPrivateReadTransport } from "@/lib/dashboard/client/request";
 import {
   dashboardFilterValue,
   serializeDashboardSearchParams,
@@ -39,13 +39,7 @@ export function OverviewClientPage({
   deferredReads,
 }: OverviewClientPageProps) {
   const queryEnabled = useDashboardQueryReady();
-  const transport = useMemo(
-    () =>
-      deferredReads
-        ? createDeferredPrivateReadTransport(deferredReads)
-        : undefined,
-    [deferredReads],
-  );
+  const transport = useDashboardDeferredReadTransport(deferredReads);
   const searchParams = useLiveSearchParams();
   const livePathname = usePathname() || pathname;
   const window = useDashboardTimeWindow();

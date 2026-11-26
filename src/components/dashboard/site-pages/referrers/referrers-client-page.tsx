@@ -20,16 +20,14 @@ import {
   type ReferrerSortKey,
   type ReferrerTab,
 } from "@/components/dashboard/referrers/referrer-utils";
+import { useDashboardDeferredReadTransport } from "@/components/dashboard/shell/dashboard-query-provider";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import {
   fetchOverviewSourceCardTab,
   fetchReferrerSummary,
 } from "@/lib/dashboard/client/data/index";
 import { REFERRER_SUMMARY_TOP_N } from "@/lib/dashboard/client/data/referrers";
-import {
-  createDeferredPrivateReadTransport,
-  type DeferredPrivateReads,
-} from "@/lib/dashboard/client/request";
+import { type DeferredPrivateReads } from "@/lib/dashboard/client/request";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { FilterDocument } from "@/lib/filter-contract/index";
@@ -60,13 +58,7 @@ export function ReferrersClientPage({
     filters: FilterDocument;
     window: TimeWindow;
   };
-  const transport = useMemo(
-    () =>
-      deferredReads
-        ? createDeferredPrivateReadTransport(deferredReads)
-        : undefined,
-    [deferredReads],
-  );
+  const transport = useDashboardDeferredReadTransport(deferredReads);
   const comparisonQuery = useDashboardComparisonQuery(window, filters);
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const comparisonFiltersKey = useMemo(

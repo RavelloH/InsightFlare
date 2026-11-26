@@ -1,3 +1,5 @@
+import { infiniteQueryOptions } from "@tanstack/react-query";
+
 import {
   emptyVisitorDetail,
   emptyVisitors,
@@ -9,6 +11,7 @@ import type {
 } from "@/lib/dashboard/client/data/types";
 import { fetchPrivateJson } from "@/lib/dashboard/client/request";
 import { withFilters, withPagination } from "@/lib/dashboard/client/utils";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import {
   parseFilterDocumentFromSearchParams,
   type TimeWindow,
@@ -168,6 +171,55 @@ export const DEFAULT_VISITOR_SORT = {
   key: "lastSeenAt",
   direction: "desc",
 } as const;
+/** Shared normalized query identity for the route and the mounted list. */
+export function visitorsListQueryOptions(input: {
+  siteId: string;
+  window: TimeWindow;
+  filters: FilterDocument;
+  search?: string;
+  sort?: { key: VisitorListSortKey; direction: SortDirection };
+  transport?: PrivateReadTransport;
+  enabled?: boolean;
+}) {
+  const {
+    siteId,
+    window,
+    filters,
+    search = "",
+    sort = DEFAULT_VISITOR_SORT,
+    transport,
+  } = input;
+  return infiniteQueryOptions({
+    queryKey: [
+      "dashboard",
+      "visitors",
+      siteId,
+      window.from,
+      window.to,
+      window.timeZone,
+      filterQueryKey(filters),
+      search,
+      sort.key,
+      sort.direction,
+    ],
+    queryFn: ({ pageParam, signal }) =>
+      fetchVisitors(siteId, window, filters, {
+        cursor: pageParam,
+        limit: VISITOR_PAGE_SIZE,
+        sortBy: sort.key,
+        sortDir: sort.direction,
+        search,
+        signal,
+        transport,
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.data.pagination.hasMore
+        ? lastPage.data.pagination.nextCursor
+        : undefined,
+    enabled: input.enabled ?? true,
+  });
+}
 export function startVisitorsInitialReads(
   siteId: string,
   window: TimeWindow,

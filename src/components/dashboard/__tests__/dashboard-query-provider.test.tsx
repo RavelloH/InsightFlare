@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   DashboardQueryProvider,
+  useDashboardDeferredReadTransport,
   useDashboardQuery,
   useDashboardQueryControls,
   useDashboardQueryReady,
@@ -78,6 +79,42 @@ describe("DashboardQueryProvider", () => {
     container.remove();
   });
 
+  it("retires an initial handoff after changing the global filter but not opening a detail drawer", async () => {
+    const reads = { read: Promise.resolve({ value: { ok: true } }) };
+    let transport: ReturnType<typeof useDashboardDeferredReadTransport>;
+    function ReadProbe() {
+      transport = useDashboardDeferredReadTransport(reads);
+      return null;
+    }
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <App>
+          <ReadProbe />
+        </App>,
+      );
+    });
+    const initial = transport!;
+    expect(initial).toBeTypeOf("function");
+    await act(async () =>
+      replaceUrlWithoutNavigation(
+        "/zh/app/team/site/pages?scope=visitor&filter%5Bpage.path%5D=%2Fdocs&detail=abc",
+      ),
+    );
+    expect(transport!).toBe(initial);
+    await act(async () =>
+      replaceUrlWithoutNavigation(
+        "/zh/app/team/site/pages?scope=visitor&filter%5Bpage.path%5D=%2Fother",
+      ),
+    );
+    expect(transport!).toBeUndefined();
+    await act(async () =>
+      replaceUrlWithoutNavigation(
+        "/zh/app/team/site/pages?scope=visitor&filter%5Bpage.path%5D=%2Fdocs",
+      ),
+    );
+    expect(transport!).toBeUndefined();
+  });
   it("isolates editable DSL and filters from unrelated read-only subscribers", async () => {
     const counts = {
       query: 0,

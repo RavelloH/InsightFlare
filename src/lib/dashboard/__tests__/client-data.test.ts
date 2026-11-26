@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { deviceCrossBreakdownQueryOptions } from "@/components/dashboard/devices/device-cross-breakdown-grid";
 import { shareTrendQueryOptions } from "@/components/dashboard/sharing/share-trend-card";
+import { pagesListQueryOptions } from "@/components/dashboard/site-pages/pages/pages-client-page";
 import {
   decodeHashLabel,
   decodeQueryLabel,
@@ -64,11 +65,13 @@ import {
   startCampaignsInitialReads,
   startReferrersInitialReads,
 } from "@/lib/dashboard/client/data/referrers";
+import { sessionsListQueryOptions } from "@/lib/dashboard/client/data/sessions";
 import { startSessionsInitialReads } from "@/lib/dashboard/client/data/sessions";
 import type {
   PrivateReadTransport,
   PrivateRequestParams,
 } from "@/lib/dashboard/client/data/types";
+import { visitorsListQueryOptions } from "@/lib/dashboard/client/data/visitors";
 import { startVisitorsInitialReads } from "@/lib/dashboard/client/data/visitors";
 import {
   createDeferredPrivateReadTransport,
@@ -770,6 +773,149 @@ describe("Dashboard Client Data Processing Utilities", () => {
       ).resolves.toEqual({ ok: false });
       expect(network).toHaveBeenCalledTimes(3);
     });
+
+    it("expires unused settled handoffs without resetting the deadline when recreated", async () => {
+      const path = "/api/private/overview-page-path";
+      const params = { siteId: "site-stream", from: 100, to: 200 };
+      const reads = {
+        [privateReadIdentity(path, params)]: Promise.resolve({
+          value: { ok: true },
+        }),
+      };
+      const clock = vi.spyOn(Date, "now").mockReturnValue(1000);
+      try {
+        createDeferredPrivateReadTransport(reads);
+        await Promise.resolve();
+        clock.mockReturnValue(16000);
+        const network = vi.fn(async () => freshJsonResponse({ ok: false }));
+        globalThis.fetch = network as typeof fetch;
+        const transport = createDeferredPrivateReadTransport(reads);
+        await expect(
+          fetchPrivateJson(path, params, { transport }),
+        ).resolves.toEqual({ ok: false });
+        expect(network).toHaveBeenCalledTimes(1);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+    it("joins a pending normalized page-list prefetch and retains fresh data without another HTTP read", async () => {
+      const client = new QueryClient({
+        defaultOptions: { queries: { staleTime: 15000, retry: false } },
+      });
+      const filters = parseFilterDocumentFromSearchParams(
+        new URLSearchParams("scope=session&filter[page.path]=/home"),
+      );
+      const input = {
+        siteId: "site-stream",
+        window: mockWindow,
+        filters,
+        comparisonQuery: null,
+      };
+      let finish!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const network = vi.fn(async () => {
+        await gate;
+        return freshJsonResponse({
+          ok: true,
+          data: {
+            items: [],
+            pagination: {
+              limit: 25,
+              returned: 0,
+              hasMore: false,
+              nextCursor: null,
+            },
+          },
+        });
+      });
+      globalThis.fetch = network as typeof fetch;
+      try {
+        const options = pagesListQueryOptions(input);
+        const prefetch = client.prefetchInfiniteQuery(options);
+        const mounted = client.fetchInfiniteQuery(
+          pagesListQueryOptions({
+            ...input,
+            search: "",
+            sort: { key: "views", direction: "desc" },
+          }),
+        );
+        expect(network).toHaveBeenCalledTimes(1);
+        finish();
+        await prefetch;
+        await expect(mounted).resolves.toMatchObject({ pages: [{ ok: true }] });
+        await client.prefetchInfiniteQuery(options);
+        expect(network).toHaveBeenCalledTimes(1);
+        expect(
+          pagesListQueryOptions({ ...input, search: "other" }).queryKey,
+        ).not.toEqual(options.queryKey);
+        expect(
+          pagesListQueryOptions({
+            ...input,
+            window: { ...mockWindow, timeZone: "Asia/Tokyo" },
+          }).queryKey,
+        ).not.toEqual(options.queryKey);
+      } finally {
+        finish();
+        client.clear();
+      }
+    });
+
+    it.each(["visitors", "sessions"] as const)(
+      "reuses the normalized %s list prefetch without prefetching more pages",
+      async (kind) => {
+        const client = new QueryClient({
+          defaultOptions: { queries: { staleTime: 15000, retry: false } },
+        });
+        const filters = parseFilterDocumentFromSearchParams(
+          new URLSearchParams("scope=visitor&filter[page.path]=/home"),
+        );
+        const input = { siteId: "site-stream", window: mockWindow, filters };
+        const network = vi.fn(async () =>
+          freshJsonResponse({
+            ok: true,
+            data: {
+              items: [],
+              pagination: {
+                limit: 50,
+                returned: 0,
+                hasMore: true,
+                nextCursor: "next",
+              },
+            },
+          }),
+        );
+        globalThis.fetch = network as typeof fetch;
+        try {
+          if (kind === "visitors") {
+            const options = visitorsListQueryOptions(input);
+            await client.prefetchInfiniteQuery(options);
+            await client.fetchInfiniteQuery(visitorsListQueryOptions(input));
+            expect(client.getQueryData(options.queryKey)?.pages).toHaveLength(
+              1,
+            );
+            expect(
+              visitorsListQueryOptions({ ...input, search: "other" }).queryKey,
+            ).not.toEqual(options.queryKey);
+          } else {
+            const options = sessionsListQueryOptions(input);
+            await client.prefetchInfiniteQuery(options);
+            await client.fetchInfiniteQuery(sessionsListQueryOptions(input));
+            expect(client.getQueryData(options.queryKey)?.pages).toHaveLength(
+              1,
+            );
+            expect(
+              sessionsListQueryOptions({ ...input, search: "other" }).queryKey,
+            ).not.toEqual(options.queryKey);
+          }
+          expect(network).toHaveBeenCalledTimes(1);
+        } finally {
+          client.clear();
+        }
+      },
+    );
 
     it("plans only the visible overview reads and opens the existing batch scope for the three eligible dimensions", async () => {
       const calls: {

@@ -1,3 +1,4 @@
+import { useDashboardDeferredReadTransport } from "@/components/dashboard/shell/dashboard-query-provider";
 export {
   DEFAULT_VISITOR_SORT,
   VISITOR_PAGE_SIZE,
@@ -50,21 +51,17 @@ import { DETAIL_QUERY_PARAM } from "@/components/dashboard/site-pages/common/det
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/sessions/session-detail-client-page";
 import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitors/visitor-detail-client-page";
-import { fetchVisitors } from "@/lib/dashboard/client/data/index";
 import {
   DEFAULT_VISITOR_SORT,
   VISITOR_PAGE_SIZE,
+  visitorsListQueryOptions,
 } from "@/lib/dashboard/client/data/visitors";
 import {
   pushUrlWithoutNavigation,
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/dashboard/client/history";
-import {
-  createDeferredPrivateReadTransport,
-  type DeferredPrivateReads,
-} from "@/lib/dashboard/client/request";
-import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
+import { type DeferredPrivateReads } from "@/lib/dashboard/client/request";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import { numberFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -766,13 +763,7 @@ export function VisitorsClientPage({
     window: TimeWindow;
     queryReady: boolean;
   };
-  const transport = useMemo(
-    () =>
-      deferredReads
-        ? createDeferredPrivateReadTransport(deferredReads)
-        : undefined,
-    [deferredReads],
-  );
+  const transport = useDashboardDeferredReadTransport(deferredReads);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [sort, setSort] = useState<VisitorSortState>(DEFAULT_VISITOR_SORT);
@@ -781,7 +772,6 @@ export function VisitorsClientPage({
   const [nestedDetails, setNestedDetails] = useState<NestedJourneyDetail[]>([]);
   const nestedDetailKeyRef = useRef(0);
   const openedDetailFromListRef = useRef(false);
-  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
 
   useEffect(() => {
     if (!detailVisitorId) {
@@ -806,36 +796,17 @@ export function VisitorsClientPage({
     isFetching,
     isFetchingNextPage,
     isPending,
-  } = useInfiniteQuery({
-    queryKey: [
-      "dashboard",
-      "visitors",
+  } = useInfiniteQuery(
+    visitorsListQueryOptions({
       siteId,
-      timeWindow.from,
-      timeWindow.to,
-      timeWindow.timeZone,
-      filtersKey,
-      debouncedQuery,
-      sort.key,
-      sort.direction,
-    ],
-    queryFn: ({ pageParam, signal }) =>
-      fetchVisitors(siteId, timeWindow, filters, {
-        cursor: pageParam,
-        limit: VISITOR_PAGE_SIZE,
-        sortBy: sort.key,
-        sortDir: sort.direction,
-        search: debouncedQuery,
-        signal,
-        ...(transport ? { transport } : {}),
-      }),
-    initialPageParam: null as string | null,
-    getNextPageParam: (lastPage) =>
-      lastPage.data.pagination.hasMore
-        ? lastPage.data.pagination.nextCursor
-        : undefined,
-    enabled: queryReady,
-  });
+      window: timeWindow,
+      filters,
+      search: debouncedQuery,
+      sort,
+      transport,
+      enabled: queryReady,
+    }),
+  );
   const rows = useMemo(
     () =>
       data?.pages.reduce<VisitorRow[]>(

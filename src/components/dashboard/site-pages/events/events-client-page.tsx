@@ -4,6 +4,7 @@ import { DetailModal } from "@insightflare/product-ui/detail-drawer";
 import { MetricSummaryGrid } from "@insightflare/ui/metric-summary-grid";
 import { useQuery } from "@tanstack/react-query";
 
+import { useDashboardDeferredReadTransport } from "@/components/dashboard/shell/dashboard-query-provider";
 import { useDashboardQueryReady } from "@/components/dashboard/shell/dashboard-query-provider";
 import { DETAIL_QUERY_PARAM } from "@/components/dashboard/site-pages/common/detail-query-param";
 import { useDashboardTimeWindow } from "@/components/dashboard/site-pages/common/use-dashboard-query";
@@ -30,10 +31,7 @@ import {
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/dashboard/client/history";
-import {
-  createDeferredPrivateReadTransport,
-  type DeferredPrivateReads,
-} from "@/lib/dashboard/client/request";
+import { type DeferredPrivateReads } from "@/lib/dashboard/client/request";
 import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
@@ -180,13 +178,7 @@ export function EventsClientPage({
   deferredReads,
 }: EventsClientPageProps) {
   const queryReady = useDashboardQueryReady();
-  const transport = useMemo(
-    () =>
-      deferredReads
-        ? createDeferredPrivateReadTransport(deferredReads)
-        : undefined,
-    [deferredReads],
-  );
+  const transport = useDashboardDeferredReadTransport(deferredReads);
   const labels = messages.events;
   const searchParams = useLiveSearchParams();
   const detailEventName = searchParams.get(DETAIL_QUERY_PARAM)?.trim() || "";
