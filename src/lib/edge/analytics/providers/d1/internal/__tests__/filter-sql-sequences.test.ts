@@ -455,6 +455,9 @@ describe("P4 complete timeline and relational SQL", () => {
       ] as const;
       const expressions = [
         "sequence([EVENT,EVENT]) exists",
+        "sequence([EVENT,EVENT]) { $same($.name) } exists",
+        'sequence([EVENT,EVENT]) { $same($.payload("/sku")) } notExists',
+        'sequence([EVENT { $.name eq "signup" },EVENT]) { $same($.payload("/sku")) } exists',
         'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
         'sequence([EVENT { $.name eq "purchase" }, EVENT { $.name eq "signup" }]) notExists',
         'sequence([EVENT, EVENT { $.name eq "signup" }]) exists',
@@ -505,6 +508,10 @@ describe("P4 complete timeline and relational SQL", () => {
       }
       for (const expression of [
         "sequence([PAGE,EVENT]) exists",
+        "sequence([PAGE,PAGE]) { $same($.path) } exists",
+        "sequence([EVENT,EVENT]) { $same($.name) AND $span lte 10ms } exists",
+        'sequence([EVENT,EVENT { $.name eq "signup" },EVENT]) { $same($.name) } exists',
+        "count(sequence([EVENT,EVENT]) { $same($.name) }) eq 1",
         "sequence([PAGE,PAGE]) exists",
         "sequence([PAGE,PAGE]) notExists",
         "count(sequence([EVENT,EVENT])) eq 1",
@@ -570,11 +577,54 @@ describe("P4 complete timeline and relational SQL", () => {
       );
       for (const expression of expressions.slice(5))
         expect(optimizedSql(expression, true)).not.toContain("AS step_index");
+      const globalRead = (
+        expression: string,
+        scope: "session" | "visitor",
+        uniqueGlobalOccurrences: boolean,
+        sourceSql = source,
+      ) => {
+        const compiled = compileCollectionSqlQualification(
+          parseFilterDsl(expression, analyticsFilterRegistry),
+          scope,
+          { uniqueGlobalOccurrences },
+        );
+        if (compiled.kind !== "entity") throw Error("expected entity");
+        const c = composeBoundCtes(compiled.ctes);
+        return db
+          .prepare(
+            `WITH ${sourceSql}, ${c.ctes} SELECT site_pk,entity_id FROM ${compiled.qualifiedEntityRelation} ORDER BY site_pk,entity_id`,
+          )
+          .all(...c.bindings.map((x) => x.value));
+      };
+      const globalExpressions = [
+        ...expressions,
+        "sequence([EVENT,EVENT]) { $same($.name) } exists",
+        "sequence([EVENT,EVENT,EVENT]) { $same($.name) } notExists",
+        "sequence([EVENT { $.name exists },EVENT]) { $same($.name) } exists",
+        'sequence([EVENT { $.name eq "signup" },EVENT]) { $same($.payload("/sku")) } notExists',
+      ];
+      for (const expression of globalExpressions) {
+        const sql = composeBoundCtes(
+          compileCollectionSqlQualification(
+            parseFilterDsl(expression, analyticsFilterRegistry),
+            "session",
+            { uniqueGlobalOccurrences: true },
+          ).ctes,
+        ).ctes;
+        if (expression.startsWith("count(") || expression.includes("AND $span"))
+          expect(sql).not.toContain("scope_global_sequence_0 AS");
+        else expect(sql).toContain("scope_global_sequence_0 AS");
+      }
       const check = () => {
         for (const expression of expressions)
           expect(qualified(db, expression, source, undefined, true)).toEqual(
             qualified(db, expression),
           );
+        for (const scope of ["session", "visitor"] as const)
+          for (const expression of globalExpressions)
+            expect(globalRead(expression, scope, true)).toEqual(
+              globalRead(expression, scope, false),
+            );
       };
       check();
       // Missing, JSON null, containers, and different primitive types must
@@ -600,6 +650,11 @@ describe("P4 complete timeline and relational SQL", () => {
       );
       check();
       const ties = source.replace("'signup',20)", "'signup',30)");
+      for (const scope of ["session", "visitor"] as const)
+        for (const expression of globalExpressions)
+          expect(globalRead(expression, scope, true, ties)).toEqual(
+            globalRead(expression, scope, false, ties),
+          );
       expect(qualified(db, pair + " exists", ties, undefined, true)).toEqual(
         qualified(db, pair + " exists", ties),
       );
