@@ -279,7 +279,7 @@ describe("actual Worker top-level invocation entrypoints", () => {
     expect(executePrivateQuery).toHaveBeenCalledTimes(5);
     expect(resolvePrivateSite).toHaveBeenCalledTimes(1);
   });
-  it.each(["overview", "pages", "referrers"] as const)(
+  it.each(["overview", "pages", "referrers", "campaigns"] as const)(
     "does not start any analytics for denied SSR site access on %s",
     async (page) => {
       vi.mocked(resolvePrivateSite).mockResolvedValueOnce(

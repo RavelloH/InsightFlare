@@ -21,6 +21,10 @@ import {
 } from "@/components/dashboard/comparison/use-dashboard-comparison-query";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import { fetchUtmDimension } from "@/lib/dashboard/client/data/index";
+import {
+  createDeferredPrivateReadTransport,
+  type DeferredPrivateReads,
+} from "@/lib/dashboard/client/request";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { FilterDocument } from "@/lib/filter-contract/index";
@@ -35,6 +39,7 @@ interface CampaignsClientPageProps {
   messages: AppMessages;
   siteId: string;
   pathname: string;
+  deferredReads?: DeferredPrivateReads | null;
 }
 const EMPTY_ROWS: CampaignRawRowsByTab["source"] = [];
 function emptyRowsUnlessAborted(
@@ -47,11 +52,20 @@ export function CampaignsClientPage({
   locale,
   messages,
   siteId,
+  deferredReads,
 }: CampaignsClientPageProps) {
-  const { filters, window } = useDashboardQuery() as {
+  const { filters, window, queryReady } = useDashboardQuery() as {
+    queryReady: boolean;
     filters: FilterDocument;
     window: TimeWindow;
   };
+  const transport = useMemo(
+    () =>
+      deferredReads
+        ? createDeferredPrivateReadTransport(deferredReads)
+        : undefined,
+    [deferredReads],
+  );
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const comparisonQuery = useDashboardComparisonQuery(window, filters);
   const comparisonFiltersKey = useMemo(
@@ -117,6 +131,7 @@ export function CampaignsClientPage({
             limit,
             search,
             signal,
+            ...(transport ? { transport } : {}),
             sort:
               sort.key === "current" ||
               sort.key === "reference" ||
@@ -180,6 +195,7 @@ export function CampaignsClientPage({
       requestFilters,
       requestWindow,
       siteId,
+      transport,
     ],
   );
   const comparisonKey = comparisonQuery
@@ -201,12 +217,14 @@ export function CampaignsClientPage({
         siteId={siteId}
         window={requestWindow}
         filters={requestFilters}
+        transport={transport}
       />
 
       <CampaignBreakdownCard
         locale={locale}
         messages={messages}
         loader={loader}
+        queryEnabled={queryReady}
         comparisonQuery={comparisonQuery}
         comparisonLabel={dashboardComparisonLabel(messages, comparisonQuery)}
         comparisonMetricByGroup={comparisonMetricByGroup}

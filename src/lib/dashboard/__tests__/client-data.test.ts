@@ -53,7 +53,10 @@ import {
 } from "@/lib/dashboard/client/data";
 import { startOverviewInitialReads } from "@/lib/dashboard/client/data/overview";
 import { startPagesInitialReads } from "@/lib/dashboard/client/data/pages";
-import { startReferrersInitialReads } from "@/lib/dashboard/client/data/referrers";
+import {
+  startCampaignsInitialReads,
+  startReferrersInitialReads,
+} from "@/lib/dashboard/client/data/referrers";
 import type {
   PrivateReadTransport,
   PrivateRequestParams,
@@ -994,6 +997,94 @@ describe("Dashboard Client Data Processing Utilities", () => {
             (call) =>
               call.params?.siteId === "site-stream" &&
               call.params?.timeZone === mockWindow.timeZone,
+          ),
+        ).toBe(true);
+      },
+    );
+
+    it.each([false, true])(
+      "plans only default campaign tables and five independent trends, comparison=%s",
+      (compare) => {
+        const calls: Array<{ path: string; params?: PrivateRequestParams }> =
+          [];
+        const transport: PrivateReadTransport = async <T>(
+          path: string,
+          params?: PrivateRequestParams,
+        ) => {
+          calls.push({ path, params });
+          return {
+            ok: true,
+            data: {
+              items: [],
+              pagination: {
+                limit: 100,
+                returned: 0,
+                hasMore: false,
+                nextCursor: null,
+              },
+            },
+          } as T;
+        };
+        startCampaignsInitialReads(
+          "site-stream",
+          mockWindow,
+          new URLSearchParams(
+            "scope=session&filter[page.path]=/home" +
+              (compare
+                ? "&compare=previous&compareFilter[page.path]=/docs"
+                : ""),
+          ),
+          transport,
+        );
+        expect(calls).toHaveLength(compare ? 12 : 7);
+        const trends = calls.filter(
+          (x) => x.path === "/api/private/utm-dimension-trend",
+        );
+        expect(
+          trends
+            .filter((x) => x.params?.from === mockWindow.from)
+            .map((x) => x.params?.dimension),
+        ).toEqual(["source", "medium", "campaign", "term", "content"]);
+        expect(
+          trends.every(
+            (x) =>
+              x.params?.limit === 5 &&
+              x.params?.interval === mockWindow.interval,
+          ),
+        ).toBe(true);
+        if (compare)
+          expect(
+            trends
+              .filter((x) => x.params?.to === mockWindow.from - 1)
+              .map((x) => x.params?.["filter[page.path]"]),
+          ).toEqual(Array(5).fill("/docs"));
+        const tables = calls.slice(-2);
+        expect(tables.map((x) => x.path)).toEqual([
+          "/api/private/utm-source",
+          "/api/private/utm-term",
+        ]);
+        for (const call of tables) {
+          expect(call.params).toMatchObject({
+            limit: 100,
+            sort: "views",
+            direction: "desc",
+            scope: "session",
+            "filter[page.path]": "/home",
+          });
+          if (compare)
+            expect(call.params).toMatchObject({
+              compare: "previous",
+              metric: "views",
+              sortBy: "current",
+              "compareFilter[page.path]": "/docs",
+            });
+          else expect(call.params).not.toHaveProperty("compare");
+        }
+        expect(
+          calls.every(
+            (x) =>
+              x.params?.siteId === "site-stream" &&
+              x.params?.timeZone === mockWindow.timeZone,
           ),
         ).toBe(true);
       },

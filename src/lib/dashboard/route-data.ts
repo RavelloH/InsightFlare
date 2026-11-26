@@ -120,7 +120,8 @@ export const loadSiteAnalyticsStream = createServerFn({ method: "GET" })
         (data.page !== undefined &&
           data.page !== "overview" &&
           data.page !== "pages" &&
-          data.page !== "referrers")
+          data.page !== "referrers" &&
+          data.page !== "campaigns")
       )
         throw new Error("invalid_ssr_analytics");
       return data;

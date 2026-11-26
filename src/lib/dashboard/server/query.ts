@@ -3,7 +3,10 @@ import "@tanstack/react-start/server-only";
 import { readBoundedBody } from "@/lib/api-v1";
 import { startOverviewInitialReads } from "@/lib/dashboard/client/data/overview";
 import { startPagesInitialReads } from "@/lib/dashboard/client/data/pages";
-import { startReferrersInitialReads } from "@/lib/dashboard/client/data/referrers";
+import {
+  startCampaignsInitialReads,
+  startReferrersInitialReads,
+} from "@/lib/dashboard/client/data/referrers";
 import type {
   PrivateReadTransport,
   PrivateRequestParams,
@@ -69,7 +72,8 @@ export async function resolveTeamDashboardRequest(input: {
  * contains independent promises; Start may stream each as soon as it settles.
  * Register reads (and cache writes) before the Worker returns its response,
  * so its existing emitWhenComplete drains the real work exactly once. */
-export type SiteAnalyticsInitialPage = "overview" | "pages" | "referrers";
+export type SiteAnalyticsInitialPage =
+  "overview" | "pages" | "referrers" | "campaigns";
 export async function startSiteAnalyticsStream(input: {
   request: Request;
   env: Env;
@@ -101,24 +105,26 @@ export async function startSiteAnalyticsStream(input: {
       } as ExecutionContext)
     : undefined;
   const allowedPaths = new Set(
-    page === "pages"
-      ? ["pages-dashboard", "trend"]
-      : page === "referrers"
-        ? [
-            "referrer-summary",
-            "referrer-channel-dimension-trend",
-            "referrer-radar",
-            "overview-source-domain",
-            "overview-source-channel",
-          ]
-        : [
-            "overview",
-            "overview-page-path",
-            "overview-source-domain",
-            "overview-client-browser",
-            "overview-geo-country",
-            "overview-geo-points",
-          ],
+    page === "campaigns"
+      ? ["utm-dimension-trend", "utm-source", "utm-term"]
+      : page === "pages"
+        ? ["pages-dashboard", "trend"]
+        : page === "referrers"
+          ? [
+              "referrer-summary",
+              "referrer-channel-dimension-trend",
+              "referrer-radar",
+              "overview-source-domain",
+              "overview-source-channel",
+            ]
+          : [
+              "overview",
+              "overview-page-path",
+              "overview-source-domain",
+              "overview-client-browser",
+              "overview-geo-country",
+              "overview-geo-points",
+            ],
   );
   const transport: PrivateReadTransport = <T>(
     path: string,
@@ -178,6 +184,15 @@ export async function startSiteAnalyticsStream(input: {
     reads[key] = logger ? logger.track(deferred) : deferred;
     return promise as Promise<T>;
   };
+  if (page === "campaigns") {
+    startCampaignsInitialReads(
+      site.id,
+      window,
+      new URLSearchParams(search),
+      transport,
+    );
+    return reads;
+  }
   if (page === "referrers") {
     startReferrersInitialReads(
       site.id,

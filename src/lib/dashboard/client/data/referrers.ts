@@ -121,18 +121,16 @@ export async function fetchUtmDimension(
       sortBy: options?.comparisonSortBy,
     },
   );
-  const response = options?.signal
-    ? fetchPrivateJson<DimensionData>(
-        `/api/private/${utmPathMap[tab]}`,
-        requestParams,
-        {
-          signal: options.signal,
-        },
-      )
-    : fetchPrivateJson<DimensionData>(
-        `/api/private/${utmPathMap[tab]}`,
-        requestParams,
-      );
+  const response = fetchPrivateJson<DimensionData>(
+    `/api/private/${utmPathMap[tab]}`,
+    requestParams,
+    options?.signal || options?.transport
+      ? {
+          signal: options?.signal,
+          ...(options?.transport ? { transport: options.transport } : {}),
+        }
+      : undefined,
+  );
   return response.then((payload) => normalizePaginatedCollection(payload.data));
 }
 export async function fetchUtmTrend(
@@ -143,6 +141,7 @@ export async function fetchUtmTrend(
   options?: {
     limit?: number;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
   },
 ): Promise<BrowserTrendData> {
   return fetchPrivateJson<BrowserTrendData>(
@@ -159,7 +158,10 @@ export async function fetchUtmTrend(
       },
       filters,
     ),
-    { signal: options?.signal },
+    {
+      signal: options?.signal,
+      ...(options?.transport ? { transport: options.transport } : {}),
+    },
   );
 }
 export async function fetchReferrerTrend(
@@ -295,6 +297,60 @@ export function startReferrersInitialReads(
     ignore(
       fetchOverviewSourceCardTab(siteId, window, tab, filters, {
         limit: REFERRER_TABLE_LIMIT,
+        sort: "views",
+        direction: "desc",
+        comparison,
+        comparisonMetric: "views",
+        comparisonSortBy: comparison ? "current" : undefined,
+        transport,
+      }),
+    );
+  }
+}
+
+export const CAMPAIGN_TABLE_LIMIT = 100;
+export const CAMPAIGN_TREND_LIMIT = 5;
+export const CAMPAIGN_INITIAL_TABS = ["source", "term"] as const;
+
+export function startCampaignsInitialReads(
+  siteId: string,
+  window: TimeWindow,
+  search: URLSearchParams,
+  transport: PrivateReadTransport,
+): void {
+  const document = parseFilterDocumentFromSearchParams(search);
+  const filters = document.root
+    ? document
+    : attachFilterScopePreference(document, "auto");
+  const comparison = resolveDashboardComparisonQuery(search, window, filters);
+  const ignore = (promise: Promise<unknown>) => {
+    void promise.catch(() => undefined);
+  };
+  for (const tab of [
+    "source",
+    "medium",
+    "campaign",
+    "term",
+    "content",
+  ] as const) {
+    ignore(
+      fetchUtmTrend(siteId, window, tab, filters, {
+        limit: CAMPAIGN_TREND_LIMIT,
+        transport,
+      }),
+    );
+    if (comparison)
+      ignore(
+        fetchUtmTrend(siteId, comparison.window, tab, comparison.filters, {
+          limit: CAMPAIGN_TREND_LIMIT,
+          transport,
+        }),
+      );
+  }
+  for (const tab of CAMPAIGN_INITIAL_TABS) {
+    ignore(
+      fetchUtmDimension(siteId, window, tab, filters, {
+        limit: CAMPAIGN_TABLE_LIMIT,
         sort: "views",
         direction: "desc",
         comparison,

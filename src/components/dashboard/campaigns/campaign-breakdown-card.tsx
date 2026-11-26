@@ -18,6 +18,10 @@ import {
   type ComparisonTableMetric,
   createComparisonTableColumns,
 } from "@/components/dashboard/comparison/comparison-table";
+import {
+  CAMPAIGN_INITIAL_TABS,
+  CAMPAIGN_TABLE_LIMIT,
+} from "@/lib/dashboard/client/data/referrers";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { numberFormat } from "@/lib/dashboard/format";
 import type { Locale } from "@/lib/i18n/config";
@@ -43,6 +47,7 @@ interface CampaignBreakdownCardProps {
     metric: ComparisonTableMetric,
   ) => void;
   requestKey: string;
+  queryEnabled?: boolean;
 }
 const CAMPAIGN_BREAKDOWN_GROUPS: Array<{
   key: CampaignBreakdownGroupKey;
@@ -50,11 +55,11 @@ const CAMPAIGN_BREAKDOWN_GROUPS: Array<{
 }> = [
   {
     key: "acquisition",
-    tabs: ["source", "medium", "campaign"],
+    tabs: [CAMPAIGN_INITIAL_TABS[0], "medium", "campaign"],
   },
   {
     key: "signals",
-    tabs: ["term", "content"],
+    tabs: [CAMPAIGN_INITIAL_TABS[1], "content"],
   },
 ];
 export const CampaignBreakdownCard = memo(function CampaignBreakdownCard({
@@ -66,6 +71,7 @@ export const CampaignBreakdownCard = memo(function CampaignBreakdownCard({
   comparisonMetricByGroup,
   onComparisonMetricChange,
   requestKey,
+  queryEnabled = true,
 }: CampaignBreakdownCardProps) {
   const tabMeta = useMemo<Record<CampaignTab, TabbedDataTableTab<CampaignTab>>>(
     () => ({
@@ -238,6 +244,8 @@ export const CampaignBreakdownCard = memo(function CampaignBreakdownCard({
               >
                 tabs={groupTabsByKey[group.key]}
                 loader={loader}
+                limit={CAMPAIGN_TABLE_LIMIT}
+                queryEnabled={queryEnabled}
                 requestKey={`${requestKey}:${group.key}:${comparisonMetric}`}
                 defaultSort={
                   comparisonQuery
