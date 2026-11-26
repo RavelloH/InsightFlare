@@ -927,8 +927,29 @@ class SqlCollectionCompiler {
     );
     if (!identical && count !== 2) return null;
     const bound = target.kind === "selector" ? target.predicate : null;
+    const same =
+      bound?.kind === "condition" &&
+      bound.target.kind === "context-intrinsic" &&
+      bound.target.context === "sequence" &&
+      bound.target.intrinsic === "same" &&
+      bound.operator === "eq" &&
+      bound.value === true
+        ? bound.target.input
+        : null;
+    if (
+      same &&
+      !(
+        same.kind === "current-payload" ||
+        (same.kind === "member" &&
+          same.object.kind === "context-root" &&
+          same.object.context === "current" &&
+          same.member === "name")
+      )
+    )
+      return null;
     if (
       bound &&
+      !same &&
       (bound.kind !== "condition" ||
         bound.target.kind !== "context-intrinsic" ||
         bound.target.context !== "sequence" ||
@@ -1012,7 +1033,7 @@ class SqlCollectionCompiler {
     let sql: string;
     const bindings = [...first.bindings];
     const compared =
-      bound?.kind === "condition"
+      bound?.kind === "condition" && !same
         ? compareScalar(
             { sql: "span_delta", bindings: [] },
             bound.operator,
@@ -1020,7 +1041,62 @@ class SqlCollectionCompiler {
             this.clock,
           )
         : null;
-    if (identical && !compared) {
+    if (same) {
+      if (first.kind !== "event") return null;
+      const token = (step: typeof first): SqlFragment => {
+        if (same.kind === "current-payload")
+          return compileJsonPointerValue(step.item, same.path);
+        const field = this.currentMember(same, step.kind);
+        if (!field) return { sql: "NULL", bindings: [] };
+        return {
+          sql: compileRegisteredFieldScalar(field, step.item),
+          bindings: [],
+        };
+      };
+      const valid =
+        same.kind === "current-payload"
+          ? "json_extract(typed_value, '$.t') IN (1, 2, 3)"
+          : "typed_value IS NOT NULL";
+      const firstToken = token(first);
+      if (identical) {
+        // Keep exact typed JSON encoding, including Missing/null exclusion.
+        // Project once before grouping; name uses binary string equality.
+        sql = `WITH candidates AS MATERIALIZED (
+          SELECT ${first.key}, ${firstToken.sql} AS typed_value ${first.from}
+        ) SELECT DISTINCT site_pk, entity_id FROM candidates
+        WHERE ${valid}
+        GROUP BY site_pk, entity_id, typed_value COLLATE BINARY
+        HAVING COUNT(*) >= ${count}`;
+        bindings.unshift(...firstToken.bindings);
+      } else {
+        const last = compileStep(steps[1]!);
+        if (!last || last.kind !== "event") return null;
+        const lastToken = token(last);
+        const projection = (
+          step: typeof first,
+          value: SqlFragment,
+          index: number,
+        ) =>
+          `SELECT ${step.key}, ${step.item}.occurred_at AS activity_time,
+            ${step.item}.event_id COLLATE BINARY AS activity_id,
+            ${index} AS step_index, ${value.sql} AS typed_value ${step.from}`;
+        sql = `WITH candidates AS MATERIALIZED (
+          ${projection(first, firstToken, 0)} UNION ALL ${projection(last, lastToken, 1)}
+        ), by_time AS (
+          SELECT site_pk, entity_id, typed_value COLLATE BINARY AS typed_value, activity_time,
+            MIN(CASE WHEN step_index = 0 THEN activity_id END COLLATE BINARY) AS first_id,
+            MAX(CASE WHEN step_index = 1 THEN activity_id END COLLATE BINARY) AS last_id
+          FROM candidates WHERE ${valid}
+          GROUP BY site_pk, entity_id, typed_value COLLATE BINARY, activity_time
+        ) SELECT DISTINCT site_pk, entity_id FROM by_time
+        GROUP BY site_pk, entity_id, typed_value COLLATE BINARY
+        HAVING MIN(CASE WHEN first_id IS NOT NULL THEN activity_time END) <
+          MAX(CASE WHEN last_id IS NOT NULL THEN activity_time END)
+          OR MAX(first_id COLLATE BINARY < last_id COLLATE BINARY) = 1`;
+        bindings.unshift(...firstToken.bindings);
+        bindings.push(...lastToken.bindings, ...last.bindings);
+      }
+    } else if (identical && !compared) {
       sql = `SELECT ${first.key} ${first.from}
         GROUP BY ${first.item}.site_pk, ${first.item}.${identity}
         HAVING COUNT(*) >= ${count}`;
