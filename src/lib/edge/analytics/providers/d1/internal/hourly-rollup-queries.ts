@@ -33,42 +33,40 @@ interface RollupWindowGroup {
   siteIds: string[];
   split: NonNullable<ReturnType<typeof splitRollupWindow>>;
 }
-interface DetailVisitRow {
+// Read only fields consumed by exact overview and trend aggregation.
+type RollupReadRow = Pick<
+  StoredRollupRow,
+  | "siteId"
+  | "hourBucket"
+  | "views"
+  | "durationMsSum"
+  | "durationMsCount"
+  | "visitorSetJson"
+  | "sessionCountsJson"
+>;
+interface OverviewDetailVisitRow {
   siteId: string;
-  startedAt: number;
   visitorId: string;
   sessionId: string;
   durationMs: number | null;
-  perfTtfbMs: number | null;
-  perfFcpMs: number | null;
-  perfLcpMs: number | null;
-  perfCls: number | null;
-  perfInpMs: number | null;
 }
-interface PerfTotals {
-  ttfbSum: number;
-  ttfbCount: number;
-  fcpSum: number;
-  fcpCount: number;
-  lcpSum: number;
-  lcpCount: number;
-  clsSum: number;
-  clsCount: number;
-  inpSum: number;
-  inpCount: number;
+interface DetailVisitRow extends OverviewDetailVisitRow {
+  startedAt: number;
 }
-interface MetricAccumulator {
+interface ObservationAccumulator {
   views: number;
   durationMsSum: number;
   durationMsCount: number;
   visitors: Set<string>;
-  sessionCounts: Map<string, number>;
-  sessionFirstAt: Map<string, number>;
-  perf: PerfTotals;
 }
-interface BucketAccumulator extends MetricAccumulator {
+interface MetricAccumulator extends ObservationAccumulator {
+  sessionCounts: Map<string, number>;
+}
+interface BucketAccumulator extends ObservationAccumulator {
   bucket: number;
   timestampMs: number;
+  sessions: number;
+  bounces: number;
 }
 interface SiteTrendAccumulator {
   bucketAccumulators: Map<number, BucketAccumulator>;
@@ -78,29 +76,18 @@ interface SiteTrendAccumulator {
 export function hasFilterDocument(filters: FilterDocument): boolean {
   return filters.root !== null;
 }
-function createPerfTotals(): PerfTotals {
-  return {
-    ttfbSum: 0,
-    ttfbCount: 0,
-    fcpSum: 0,
-    fcpCount: 0,
-    lcpSum: 0,
-    lcpCount: 0,
-    clsSum: 0,
-    clsCount: 0,
-    inpSum: 0,
-    inpCount: 0,
-  };
-}
-function createMetricAccumulator(): MetricAccumulator {
+function createObservationAccumulator(): ObservationAccumulator {
   return {
     views: 0,
     durationMsSum: 0,
     durationMsCount: 0,
     visitors: new Set<string>(),
+  };
+}
+function createMetricAccumulator(): MetricAccumulator {
+  return {
+    ...createObservationAccumulator(),
     sessionCounts: new Map<string, number>(),
-    sessionFirstAt: new Map<string, number>(),
-    perf: createPerfTotals(),
   };
 }
 function createBucketAccumulator(
@@ -108,45 +95,21 @@ function createBucketAccumulator(
   timestampMs: number,
 ): BucketAccumulator {
   return {
-    ...createMetricAccumulator(),
+    ...createObservationAccumulator(),
     bucket,
     timestampMs,
+    sessions: 0,
+    bounces: 0,
   };
 }
-function addFiniteMetric(
-  perf: PerfTotals,
-  key: "ttfb" | "fcp" | "lcp" | "cls" | "inp",
-  value: number | null,
+function addOverviewSessionCount(
+  counts: Map<string, number>,
+  sessionId: string,
+  count: number,
 ): void {
-  if (typeof value !== "number" || !Number.isFinite(value)) return;
-  if (key === "ttfb") {
-    perf.ttfbSum += value;
-    perf.ttfbCount += 1;
-  } else if (key === "fcp") {
-    perf.fcpSum += value;
-    perf.fcpCount += 1;
-  } else if (key === "lcp") {
-    perf.lcpSum += value;
-    perf.lcpCount += 1;
-  } else if (key === "cls") {
-    perf.clsSum += value;
-    perf.clsCount += 1;
-  } else {
-    perf.inpSum += value;
-    perf.inpCount += 1;
-  }
-}
-function mergePerf(target: PerfTotals, source: PerfTotals): void {
-  target.ttfbSum += source.ttfbSum;
-  target.ttfbCount += source.ttfbCount;
-  target.fcpSum += source.fcpSum;
-  target.fcpCount += source.fcpCount;
-  target.lcpSum += source.lcpSum;
-  target.lcpCount += source.lcpCount;
-  target.clsSum += source.clsSum;
-  target.clsCount += source.clsCount;
-  target.inpSum += source.inpSum;
-  target.inpCount += source.inpCount;
+  const normalized = sessionId.trim();
+  if (!normalized) return;
+  counts.set(normalized, (counts.get(normalized) ?? 0) + count);
 }
 function addSessionCount(
   counts: Map<string, number>,
@@ -163,26 +126,18 @@ function addSessionCount(
     firstAt.set(normalized, seenAt);
   }
 }
-function addDetailVisit(accumulator: MetricAccumulator, row: DetailVisitRow) {
+function addDetailVisit(
+  accumulator: MetricAccumulator,
+  row: OverviewDetailVisitRow,
+) {
   accumulator.views += 1;
   const visitorId = row.visitorId.trim();
   if (visitorId) accumulator.visitors.add(visitorId);
-  addSessionCount(
-    accumulator.sessionCounts,
-    accumulator.sessionFirstAt,
-    row.sessionId,
-    1,
-    row.startedAt,
-  );
+  addOverviewSessionCount(accumulator.sessionCounts, row.sessionId, 1);
   if (typeof row.durationMs === "number" && row.durationMs >= 0) {
     accumulator.durationMsSum += row.durationMs;
     accumulator.durationMsCount += 1;
   }
-  addFiniteMetric(accumulator.perf, "ttfb", row.perfTtfbMs);
-  addFiniteMetric(accumulator.perf, "fcp", row.perfFcpMs);
-  addFiniteMetric(accumulator.perf, "lcp", row.perfLcpMs);
-  addFiniteMetric(accumulator.perf, "cls", row.perfCls);
-  addFiniteMetric(accumulator.perf, "inp", row.perfInpMs);
 }
 function parseJsonStringArray(value: string): string[] {
   try {
@@ -212,42 +167,20 @@ function parseSessionCountsJson(value: string): Array<[string, number]> {
     return [];
   }
 }
-function rollupPerf(row: StoredRollupRow): PerfTotals {
-  return {
-    ttfbSum: Number(row.perfTtfbSum ?? 0),
-    ttfbCount: Number(row.perfTtfbCount ?? 0),
-    fcpSum: Number(row.perfFcpSum ?? 0),
-    fcpCount: Number(row.perfFcpCount ?? 0),
-    lcpSum: Number(row.perfLcpSum ?? 0),
-    lcpCount: Number(row.perfLcpCount ?? 0),
-    clsSum: Number(row.perfClsSum ?? 0),
-    clsCount: Number(row.perfClsCount ?? 0),
-    inpSum: Number(row.perfInpSum ?? 0),
-    inpCount: Number(row.perfInpCount ?? 0),
-  };
-}
 function addStoredRollup(
   accumulator: MetricAccumulator,
-  row: StoredRollupRow,
+  row: RollupReadRow,
 ): void {
-  const hourStartMs = row.hourBucket * ONE_HOUR_MS;
   accumulator.views += Number(row.views ?? 0);
   accumulator.durationMsSum += Number(row.durationMsSum ?? 0);
   accumulator.durationMsCount += Number(row.durationMsCount ?? 0);
-  mergePerf(accumulator.perf, rollupPerf(row));
   for (const visitorId of parseJsonStringArray(row.visitorSetJson)) {
     accumulator.visitors.add(visitorId);
   }
   for (const [sessionId, count] of parseSessionCountsJson(
     row.sessionCountsJson,
   )) {
-    addSessionCount(
-      accumulator.sessionCounts,
-      accumulator.sessionFirstAt,
-      sessionId,
-      count,
-      hourStartMs,
-    );
+    addOverviewSessionCount(accumulator.sessionCounts, sessionId, count);
   }
 }
 function overviewFromAccumulator(
@@ -273,16 +206,9 @@ function addMetricAccumulator(
   target.views += source.views;
   target.durationMsSum += source.durationMsSum;
   target.durationMsCount += source.durationMsCount;
-  mergePerf(target.perf, source.perf);
   for (const visitorId of source.visitors) target.visitors.add(visitorId);
   for (const [sessionId, count] of source.sessionCounts.entries()) {
-    addSessionCount(
-      target.sessionCounts,
-      target.sessionFirstAt,
-      sessionId,
-      count,
-      source.sessionFirstAt.get(sessionId) ?? 0,
-    );
+    addOverviewSessionCount(target.sessionCounts, sessionId, count);
   }
 }
 function splitRollupWindow(
@@ -396,19 +322,13 @@ async function queryDetailAccumulatorsForSites(
     const result = await runWithStaticSqlTemplate(
       { id: "analytics.rollup.visit_details", variant: "raw.unfiltered" },
       () =>
-        createDatabaseRuntime(env.DB).all<DetailVisitRow>({
+        createDatabaseRuntime(env.DB).all<OverviewDetailVisitRow>({
           sql: `
       SELECT
         site_id AS siteId,
-        started_at AS startedAt,
         COALESCE(visitor_id, '') AS visitorId,
         COALESCE(session_id, '') AS sessionId,
-        duration_ms AS durationMs,
-        perf_ttfb_ms AS perfTtfbMs,
-        perf_fcp_ms AS perfFcpMs,
-        perf_lcp_ms AS perfLcpMs,
-        perf_cls AS perfCls,
-        perf_inp_ms AS perfInpMs
+        duration_ms AS durationMs
       FROM visits
       WHERE site_pk IN ${sitePksFromSiteIdsSql(chunk.length)}
         AND started_at >= ? AND started_at < ?
@@ -434,36 +354,23 @@ async function queryStoredRollupsForSites(
   startHour: number,
   endExclusiveHour: number,
   diagnostics?: D1ReadDiagnostics,
-): Promise<StoredRollupRow[]> {
+): Promise<RollupReadRow[]> {
   if (siteIds.length === 0 || endExclusiveHour <= startHour) return [];
-  const rollups: StoredRollupRow[] = [];
+  const rollups: RollupReadRow[] = [];
   for (const chunk of siteIdChunks(siteIds, 2)) {
     const result = await runWithStaticSqlTemplate(
       { id: "analytics.rollup.hourly_rows", variant: "rollup" },
       () =>
-        createDatabaseRuntime(env.DB).all<StoredRollupRow>({
+        createDatabaseRuntime(env.DB).all<RollupReadRow>({
           sql: `
       SELECT
         site_id AS siteId,
         hour_bucket AS hourBucket,
         views,
-        sessions,
-        visitors,
-        bounces,
         duration_ms_sum AS durationMsSum,
         duration_ms_count AS durationMsCount,
         visitor_set_json AS visitorSetJson,
-        session_counts_json AS sessionCountsJson,
-        perf_ttfb_sum AS perfTtfbSum,
-        perf_ttfb_count AS perfTtfbCount,
-        perf_fcp_sum AS perfFcpSum,
-        perf_fcp_count AS perfFcpCount,
-        perf_lcp_sum AS perfLcpSum,
-        perf_lcp_count AS perfLcpCount,
-        perf_cls_sum AS perfClsSum,
-        perf_cls_count AS perfClsCount,
-        perf_inp_sum AS perfInpSum,
-        perf_inp_count AS perfInpCount
+        session_counts_json AS sessionCountsJson
       FROM visit_hourly_rollups
       WHERE site_pk IN ${sitePksFromSiteIdsSql(chunk.length)}
         AND hour_bucket >= ? AND hour_bucket < ?
@@ -596,7 +503,7 @@ function createSiteTrendAccumulator(): SiteTrendAccumulator {
 }
 function addRollupToTrend(
   trend: SiteTrendAccumulator,
-  rollup: StoredRollupRow,
+  rollup: RollupReadRow,
   buckets: ReturnType<typeof buildTimeBuckets>,
 ): void {
   const hourStartMs = rollup.hourBucket * ONE_HOUR_MS;
@@ -610,7 +517,6 @@ function addRollupToTrend(
   bucketAccumulator.views += Number(rollup.views ?? 0);
   bucketAccumulator.durationMsSum += Number(rollup.durationMsSum ?? 0);
   bucketAccumulator.durationMsCount += Number(rollup.durationMsCount ?? 0);
-  mergePerf(bucketAccumulator.perf, rollupPerf(rollup));
   for (const visitorId of parseJsonStringArray(rollup.visitorSetJson)) {
     bucketAccumulator.visitors.add(visitorId);
   }
@@ -629,18 +535,16 @@ function addRollupToTrend(
 function addStoredRollupToOverviewAndTrend(
   overview: MetricAccumulator,
   trend: SiteTrendAccumulator | null,
-  row: StoredRollupRow,
+  row: RollupReadRow,
   buckets: ReturnType<typeof buildTimeBuckets>,
 ): void {
   const hourStartMs = row.hourBucket * ONE_HOUR_MS;
   const visitors = parseJsonStringArray(row.visitorSetJson);
   const sessions = parseSessionCountsJson(row.sessionCountsJson);
-  const perf = rollupPerf(row);
 
   overview.views += Number(row.views ?? 0);
   overview.durationMsSum += Number(row.durationMsSum ?? 0);
   overview.durationMsCount += Number(row.durationMsCount ?? 0);
-  mergePerf(overview.perf, perf);
 
   let bucketAccumulator: BucketAccumulator | null = null;
   if (trend) {
@@ -654,7 +558,6 @@ function addStoredRollupToOverviewAndTrend(
       bucketAccumulator.views += Number(row.views ?? 0);
       bucketAccumulator.durationMsSum += Number(row.durationMsSum ?? 0);
       bucketAccumulator.durationMsCount += Number(row.durationMsCount ?? 0);
-      mergePerf(bucketAccumulator.perf, perf);
     }
   }
 
@@ -663,13 +566,7 @@ function addStoredRollupToOverviewAndTrend(
     bucketAccumulator?.visitors.add(visitorId);
   }
   for (const [sessionId, count] of sessions) {
-    addSessionCount(
-      overview.sessionCounts,
-      overview.sessionFirstAt,
-      sessionId,
-      count,
-      hourStartMs,
-    );
+    addOverviewSessionCount(overview.sessionCounts, sessionId, count);
     if (trend) {
       addSessionCount(
         trend.sessionCounts,
@@ -700,11 +597,6 @@ function addDetailToTrend(
     bucketAccumulator.durationMsSum += row.durationMs;
     bucketAccumulator.durationMsCount += 1;
   }
-  addFiniteMetric(bucketAccumulator.perf, "ttfb", row.perfTtfbMs);
-  addFiniteMetric(bucketAccumulator.perf, "fcp", row.perfFcpMs);
-  addFiniteMetric(bucketAccumulator.perf, "lcp", row.perfLcpMs);
-  addFiniteMetric(bucketAccumulator.perf, "cls", row.perfCls);
-  addFiniteMetric(bucketAccumulator.perf, "inp", row.perfInpMs);
   addSessionCount(
     trend.sessionCounts,
     trend.sessionFirstAt,
@@ -734,12 +626,7 @@ async function queryDetailVisitsForSites(
         started_at AS startedAt,
         COALESCE(visitor_id, '') AS visitorId,
         COALESCE(session_id, '') AS sessionId,
-        duration_ms AS durationMs,
-        perf_ttfb_ms AS perfTtfbMs,
-        perf_fcp_ms AS perfFcpMs,
-        perf_lcp_ms AS perfLcpMs,
-        perf_cls AS perfCls,
-        perf_inp_ms AS perfInpMs
+        duration_ms AS durationMs
       FROM visits
       WHERE site_pk IN ${sitePksFromSiteIdsSql(chunk.length)}
         AND started_at >= ? AND started_at < ?
@@ -780,22 +667,19 @@ function trendRowsFromAccumulator(
       bucket,
       timeBucketTimestamp(buckets, bucket),
     );
-    bucketAccumulator.sessionCounts.set(sessionId, count);
+    bucketAccumulator.sessions += 1;
+    if (count === 1) bucketAccumulator.bounces += 1;
   }
   const rows: SiteTrendRow[] = [];
   for (const bucketAccumulator of trend.bucketAccumulators.values()) {
-    let bounces = 0;
-    for (const count of bucketAccumulator.sessionCounts.values()) {
-      if (count === 1) bounces += 1;
-    }
     rows.push({
       siteId,
       bucket: bucketAccumulator.bucket,
       timestampMs: bucketAccumulator.timestampMs,
       views: bucketAccumulator.views,
       visitors: bucketAccumulator.visitors.size,
-      sessions: bucketAccumulator.sessionCounts.size,
-      bounces,
+      sessions: bucketAccumulator.sessions,
+      bounces: bucketAccumulator.bounces,
       totalDuration: bucketAccumulator.durationMsSum,
       durationViews: bucketAccumulator.durationMsCount,
     });
