@@ -1,4 +1,4 @@
-import { infiniteQueryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 
 import {
   emptySessionDetail,
@@ -128,6 +128,54 @@ export async function fetchSessionEvents(
     ),
     { signal: options?.signal },
   );
+}
+
+/** The summary and cursor collections have independent server authorization.
+ * Start all first-page reads together for the same ready reporting window. */
+export function sessionDetailQueryOptions(input: {
+  siteId: string;
+  sessionId: string;
+  window: TimeWindow;
+  queryReady: boolean;
+}) {
+  const { siteId, window, queryReady } = input;
+  const sessionId = input.sessionId.trim();
+  const enabled = queryReady && Boolean(siteId && sessionId);
+  const { timeZone, from, to } = window;
+  return {
+    detail: queryOptions({
+      queryKey: [
+        "dashboard",
+        "session-detail",
+        [siteId, sessionId, timeZone, from, to].join(":"),
+      ],
+      queryFn: ({ signal }) =>
+        fetchSessionDetail(siteId, sessionId, timeZone, window, { signal }),
+      enabled,
+    }),
+    events: infiniteQueryOptions({
+      queryKey: [
+        "dashboard",
+        "session-detail-events",
+        siteId,
+        sessionId,
+        timeZone,
+        from,
+        to,
+      ],
+      queryFn: ({ pageParam, signal }) =>
+        fetchSessionEvents(siteId, sessionId, window, {
+          cursor: pageParam,
+          signal,
+        }),
+      initialPageParam: null as string | null,
+      getNextPageParam: (lastPage) =>
+        lastPage.data?.pagination?.hasMore
+          ? lastPage.data.pagination.nextCursor
+          : undefined,
+      enabled,
+    }),
+  };
 }
 
 export const SESSION_PAGE_SIZE = 50;

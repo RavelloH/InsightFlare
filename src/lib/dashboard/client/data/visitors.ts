@@ -1,4 +1,4 @@
-import { infiniteQueryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 
 import {
   emptyVisitorDetail,
@@ -164,6 +164,76 @@ export async function fetchVisitorSessions(
     ),
     { signal: options?.signal },
   );
+}
+
+/** The summary and cursor collections have independent server authorization.
+ * Start all first-page reads together for the same ready reporting window. */
+export function visitorDetailQueryOptions(input: {
+  siteId: string;
+  visitorId: string;
+  window: TimeWindow;
+  queryReady: boolean;
+}) {
+  const { siteId, window, queryReady } = input;
+  const visitorId = input.visitorId.trim();
+  const enabled = queryReady && Boolean(siteId && visitorId);
+  const { timeZone, from, to } = window;
+  return {
+    detail: queryOptions({
+      queryKey: [
+        "dashboard",
+        "visitor-detail",
+        [siteId, visitorId, timeZone, from, to].join(":"),
+      ],
+      queryFn: ({ signal }) =>
+        fetchVisitorDetail(siteId, visitorId, timeZone, window, { signal }),
+      enabled,
+    }),
+    sessions: infiniteQueryOptions({
+      queryKey: [
+        "dashboard",
+        "visitor-detail-sessions",
+        siteId,
+        visitorId,
+        timeZone,
+        from,
+        to,
+      ],
+      queryFn: ({ pageParam, signal }) =>
+        fetchVisitorSessions(siteId, visitorId, window, {
+          cursor: pageParam,
+          signal,
+        }),
+      initialPageParam: null as string | null,
+      getNextPageParam: (lastPage) =>
+        lastPage.data?.pagination?.hasMore
+          ? lastPage.data.pagination.nextCursor
+          : undefined,
+      enabled,
+    }),
+    events: infiniteQueryOptions({
+      queryKey: [
+        "dashboard",
+        "visitor-detail-events",
+        siteId,
+        visitorId,
+        timeZone,
+        from,
+        to,
+      ],
+      queryFn: ({ pageParam, signal }) =>
+        fetchVisitorEvents(siteId, visitorId, window, {
+          cursor: pageParam,
+          signal,
+        }),
+      initialPageParam: null as string | null,
+      getNextPageParam: (lastPage) =>
+        lastPage.data?.pagination?.hasMore
+          ? lastPage.data.pagination.nextCursor
+          : undefined,
+      enabled,
+    }),
+  };
 }
 
 export const VISITOR_PAGE_SIZE = 50;

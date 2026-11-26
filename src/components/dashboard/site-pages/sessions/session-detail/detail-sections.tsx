@@ -506,6 +506,7 @@ export const VisitDetailsTab = memo(function VisitDetailsTab({
   timeZone,
   onOpenEvent,
   loading = false,
+  error = false,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -517,6 +518,7 @@ export const VisitDetailsTab = memo(function VisitDetailsTab({
   timeZone: string;
   onOpenEvent: (event: JourneyEvent) => void;
   loading?: boolean;
+  error?: boolean;
 }) {
   const chronologicalEvents = useMemo(
     () =>
@@ -529,7 +531,7 @@ export const VisitDetailsTab = memo(function VisitDetailsTab({
       }),
     [events],
   );
-  const eventContentKey = loading ? "loading" : "content";
+  const eventContentKey = loading ? "loading" : error ? "error" : "content";
   const loadMoreInFlightRef = useRef(false);
 
   useEffect(() => {
@@ -575,6 +577,8 @@ export const VisitDetailsTab = memo(function VisitDetailsTab({
                   <SessionEventSkeletonCard key={`event-skeleton-${index}`} />
                 ))}
               </div>
+            ) : error ? (
+              <EmptyState key="error">{labels.loadError}</EmptyState>
             ) : chronologicalEvents.length === 0 && !hasMore ? (
               <EmptyState key="empty">{labels.emptyEvents}</EmptyState>
             ) : (
