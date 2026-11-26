@@ -913,8 +913,11 @@ class SqlCollectionCompiler {
       (condition.operator !== "exists" && condition.operator !== "notExists")
     )
       return null;
-    const sequence =
-      target.kind === "sequence"
+    const adjacent =
+      target.kind === "adjacent" && target.sequence.kind === "sequence";
+    const sequence = adjacent
+      ? target.sequence
+      : target.kind === "sequence"
         ? target
         : target.kind === "selector" && target.collection.kind === "sequence"
           ? target.collection
@@ -926,7 +929,19 @@ class SqlCollectionCompiler {
       (step) => JSON.stringify(step) === JSON.stringify(steps[0]),
     );
     const bound = target.kind === "selector" ? target.predicate : null;
-    const multiStage = !identical && count > 2;
+    if (
+      adjacent &&
+      (count > 5 ||
+        (this.clock?.filterRangeExplicit &&
+          (this.source("page") !== this.source("page", true) ||
+            this.source("event") !== this.source("event", true))) ||
+        (this.sources.timelineVisits &&
+          this.sources.timelineVisits !== this.source("page", true)) ||
+        (this.sources.timelineEvents &&
+          this.sources.timelineEvents !== this.source("event", true)))
+    )
+      return null;
+    const multiStage = !adjacent && !identical && count > 2;
     if (multiStage && (bound || count > 5)) return null;
     const same =
       bound?.kind === "condition" &&
@@ -982,6 +997,7 @@ class SqlCollectionCompiler {
       const kind = root.entity;
       if (
         kind === "page" &&
+        !adjacent &&
         (!identical ||
           bound ||
           step.kind !== "selector" ||
@@ -1048,7 +1064,64 @@ class SqlCollectionCompiler {
             this.clock,
           )
         : null;
-    if (multiStage) {
+    if (adjacent) {
+      const matched = identical
+        ? [first]
+        : [
+            first,
+            ...steps.slice(1).map((step) => compileStep(step, first.item)),
+          ];
+      if (matched.some((step) => !step)) return null;
+      const stages = matched as (typeof first)[];
+      // Limit this fast path to the measured Event and mixed-pair families.
+      if (
+        !stages.some((step) => step.kind === "event") ||
+        (count > 2 && stages.some((step) => step.kind === "page"))
+      )
+        return null;
+      const item = first.item;
+      const partitionKey =
+        frame.anchorKind === "session"
+          ? `COALESCE(NULLIF(${item}.session_id, ''), ${item}.visit_id)`
+          : `${item}.visitor_id`;
+      // Do not discard any intervening activity before computing the
+      // window. A sessionless row may share a real session's timeline key
+      // but must never provide a matching stage to that session.
+      const eligible = `TRIM(COALESCE(${item}.${identity}, '')) != ''`;
+      bindings.length = 0;
+      const branches = (["page", "event"] as const).map((kind) => {
+        const flags = stages.map((step, index) => {
+          if (step.kind !== kind) return `0 AS match_${index}`;
+          bindings.push(...step.bindings);
+          return `CASE WHEN ${eligible} AND (${step.predicate}) THEN 1 ELSE 0 END AS match_${index}`;
+        });
+        return `SELECT ${item}.site_pk, ${partitionKey} AS entity_id,
+          ${item}.${kind === "page" ? "started_at" : "occurred_at"} AS activity_time,
+          ${kind === "page" ? 0 : 1} AS kind_rank,
+          ${item}.${kind === "page" ? "visit_id" : "event_id"} AS activity_id,
+          ${flags.join(", ")}
+          FROM ${this.source(kind, true)} ${item}
+          WHERE ${item}.site_pk IS NOT NULL`;
+      });
+      const order =
+        "PARTITION BY site_pk, entity_id ORDER BY activity_time, kind_rank, activity_id COLLATE BINARY";
+      const checks = identical
+        ? [
+            `SUM(match_0) OVER (${order} ROWS BETWEEN CURRENT ROW AND ${count - 1} FOLLOWING) = ${count} AS qualifies`,
+          ]
+        : [
+            `match_0 AND ${stages
+              .slice(1)
+              .map(
+                (_, i) => `LEAD(match_${i + 1}, ${i + 1}) OVER (${order}) = 1`,
+              )
+              .join(" AND ")} AS qualifies`,
+          ];
+      sql = `SELECT DISTINCT site_pk,entity_id FROM (
+        SELECT site_pk,entity_id,${checks.join(", ")}
+        FROM (${branches.join(" UNION ALL ")})
+      ) WHERE qualifies = 1`;
+    } else if (multiStage) {
       if (first.kind !== "event") return null;
       const matched = steps
         .slice(1)
@@ -1804,6 +1877,8 @@ export function compileCollectionSqlQualification(
       filterEvents,
       readVisits,
       readEvents,
+      timelineVisits: sources.timelineVisits,
+      timelineEvents: sources.timelineEvents,
       uniqueLocalOccurrences: sources.uniqueLocalOccurrences,
       uniqueGlobalOccurrences: sources.uniqueGlobalOccurrences,
     },

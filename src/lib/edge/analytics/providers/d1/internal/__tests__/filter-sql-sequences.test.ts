@@ -455,6 +455,10 @@ describe("P4 complete timeline and relational SQL", () => {
       ] as const;
       const expressions = [
         "sequence([EVENT,EVENT]) exists",
+        "adjacent(sequence([EVENT,EVENT])) exists",
+        "adjacent(sequence([PAGE,EVENT])) notExists",
+        'adjacent(sequence([EVENT { $.name eq "signup" },EVENT { $.name eq "purchase" }])) exists',
+        "adjacent(sequence([EVENT,EVENT,EVENT])) notExists",
         'sequence([EVENT { $.name eq "signup" },EVENT { $.name eq "noise" },EVENT { $.name eq "purchase" }]) exists',
         'sequence([EVENT,EVENT { $.name eq "purchase" },EVENT]) notExists',
         'sequence([EVENT { $.name eq "signup" },EVENT,EVENT { $.name eq "purchase" },EVENT]) exists',
@@ -501,7 +505,13 @@ describe("P4 complete timeline and relational SQL", () => {
               if (plan.kind !== "entity")
                 throw Error("expected entity qualification");
               const c = composeBoundCtes(plan.ctes);
-              if (unique)
+              if (
+                unique &&
+                !(
+                  expression.startsWith("adjacent(") &&
+                  variant.clock?.filterRangeExplicit
+                )
+              )
                 expect(c.ctes).toContain("scope_global_sequence_0 AS");
               else expect(c.ctes).not.toContain("scope_global_sequence_0 AS");
               return db
@@ -527,7 +537,8 @@ describe("P4 complete timeline and relational SQL", () => {
         "sequence([PAGE,PAGE]) exists",
         "sequence([PAGE,PAGE]) notExists",
         "count(sequence([EVENT,EVENT])) eq 1",
-        "adjacent(sequence([EVENT,EVENT])) exists",
+        "count(adjacent(sequence([EVENT,EVENT]))) eq 1",
+        "adjacent(sequence([EVENT,EVENT,EVENT,EVENT,EVENT,EVENT])) exists",
         "without(sequence([EVENT,EVENT]), PAGE) exists",
         "sequence([PAGE,PAGE,PAGE]) { $gap(1,2) lte 10ms } exists",
         "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) eq 10ms } exists",
@@ -1063,6 +1074,72 @@ describe("P4 complete timeline and relational SQL", () => {
               if (uniqueGlobalOccurrences)
                 expect(c.ctes).toContain("reachable_1 AS");
               else expect(c.ctes).not.toContain("reachable_1 AS");
+              return db
+                .prepare(
+                  `WITH ${variant}, ${c.ctes} SELECT site_pk,entity_id FROM ${plan.qualifiedEntityRelation} ORDER BY site_pk,entity_id`,
+                )
+                .all(...c.bindings.map((x) => x.value));
+            };
+            for (const variant of variants)
+              expect(read(variant, true)).toEqual(read(variant, false));
+          }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("matches global adjacent stages on the complete ordered timeline", () => {
+    const db = fixture();
+    try {
+      const dense = source.replace(
+        "(1,'a',105,'e5'",
+        "(1,'a',107,'e7','v2','s1','u1','/pricing','purchase',35),(1,'a',108,'e8','v2','s1','u1','/pricing','signup',41),(1,'a',105,'e5'",
+      );
+      const variants = [
+        source,
+        dense,
+        dense.replace("'signup',20)", "'signup',30)"),
+        dense.replace("'e7','v2','s1','u1'", "'e7','v2','s3','u1'"),
+        // A sessionless occurrence whose visit ID collides with a real
+        // session key occupies a timeline position, but cannot qualify it.
+        dense.replace(
+          "(1,'a','v3','s2'",
+          "(1,'a','s1','','u1','/landing',1,33),(1,'a','v3','s2'",
+        ),
+      ];
+      const sequences = [
+        "EVENT,EVENT",
+        "PAGE,PAGE",
+        "EVENT,EVENT,EVENT",
+        "PAGE,EVENT",
+        "EVENT,PAGE",
+        'EVENT { $.name eq "signup" },EVENT { $.name eq "purchase" }',
+        'EVENT { $.name exists },EVENT { $.payload("/sku") eq "alpha" },EVENT',
+        'PAGE { $.path eq "/landing" },EVENT,PAGE,EVENT',
+        "EVENT,EVENT,EVENT,EVENT,EVENT",
+      ];
+      for (const scope of ["session", "visitor"] as const)
+        for (const sequence of sequences)
+          for (const operator of ["exists", "notExists"]) {
+            const expression = `adjacent(sequence([${sequence}])) ${operator}`;
+            const read = (
+              variant: string,
+              uniqueGlobalOccurrences: boolean,
+            ) => {
+              const plan = compileCollectionSqlQualification(
+                parseFilterDsl(expression, analyticsFilterRegistry),
+                scope,
+                { uniqueGlobalOccurrences },
+              );
+              if (plan.kind !== "entity") throw Error("expected entity");
+              const c = composeBoundCtes(plan.ctes);
+              if (
+                uniqueGlobalOccurrences &&
+                sequence.includes("EVENT") &&
+                (sequence.split(",").length === 2 || !sequence.includes("PAGE"))
+              )
+                expect(c.ctes).toContain("scope_global_sequence_0 AS");
+              else expect(c.ctes).not.toContain("scope_global_sequence_0 AS");
               return db
                 .prepare(
                   `WITH ${variant}, ${c.ctes} SELECT site_pk,entity_id FROM ${plan.qualifiedEntityRelation} ORDER BY site_pk,entity_id`,
