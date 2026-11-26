@@ -771,10 +771,10 @@ class SqlCollectionCompiler {
       predicate.value !== true
     )
       return null;
-    const count = target.collection.steps.length;
-    const identical = target.collection.steps.every(
-      (step) =>
-        JSON.stringify(step) === JSON.stringify(target.collection.steps[0]),
+    const sequenceSteps = target.collection.steps;
+    const count = sequenceSteps.length;
+    const identical = sequenceSteps.every(
+      (step) => JSON.stringify(step) === JSON.stringify(sequenceSteps[0]),
     );
     if (!identical && count !== 2) return null;
     const steps = (
@@ -985,14 +985,17 @@ class SqlCollectionCompiler {
       target.kind !== "selector" ||
       target.collection.kind !== "sequence" ||
       target.collection.steps.length < 2 ||
-      target.predicate.kind !== "condition" ||
-      !target.collection.steps.every(
-        (step) =>
-          JSON.stringify(step) === JSON.stringify(target.collection.steps[0]),
+      target.predicate.kind !== "condition"
+    )
+      return null;
+    const sequenceSteps = target.collection.steps;
+    if (
+      !sequenceSteps.every(
+        (step) => JSON.stringify(step) === JSON.stringify(sequenceSteps[0]),
       )
     )
       return null;
-    const count = target.collection.steps.length;
+    const count = sequenceSteps.length;
     const predicate = target.predicate;
     const intrinsic = predicate.target;
     if (
