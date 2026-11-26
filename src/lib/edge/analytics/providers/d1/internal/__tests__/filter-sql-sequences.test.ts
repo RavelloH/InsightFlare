@@ -345,6 +345,53 @@ describe("P4 complete timeline and relational SQL", () => {
     }
   });
 
+  it("uses cardinality and ordering extrema only for eligible plain existential sequences", () => {
+    const db = fixture();
+    try {
+      const expressions = [
+        'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
+        'sequence([EVENT { $.name eq "purchase" }, EVENT { $.name eq "signup" }]) notExists',
+        "sequence([EVENT, EVENT, EVENT, EVENT]) exists",
+        "sequence([EVENT, EVENT, EVENT, EVENT, EVENT]) notExists",
+      ];
+      const sql = (expression: string, unique: boolean) =>
+        composeBoundCtes(
+          compileCollectionSqlQualification(
+            parseFilterDsl(expression, analyticsFilterRegistry),
+            "session",
+            { uniqueLocalOccurrences: unique },
+          ).ctes,
+        ).ctes;
+      const variants = [
+        source,
+        source.replace("'signup',20)", "'signup',30)"),
+        source.replace("'pricing',1,25)", "'pricing',1,20)"),
+      ];
+      for (const expression of expressions) {
+        expect(sql(expression, true)).toMatch(
+          /ORDER BY (occurred_at|started_at) ASC,|LIMIT 1 OFFSET|SELECT MIN\((started_at|occurred_at)\)/,
+        );
+        expect(sql(expression, false)).not.toMatch(
+          /ORDER BY (occurred_at|started_at) ASC,|LIMIT 1 OFFSET|SELECT MIN\((started_at|occurred_at)\)/,
+        );
+        for (const variant of variants)
+          expect(qualified(db, expression, variant, undefined, true)).toEqual(
+            qualified(db, expression, variant),
+          );
+      }
+      for (const expression of [
+        "count(sequence([EVENT,EVENT])) eq 1",
+        "adjacent(sequence([EVENT,EVENT])) exists",
+        "without(sequence([EVENT,EVENT]), PAGE) exists",
+        "sequence([EVENT,EVENT]) { $span lte 10ms } exists",
+      ])
+        expect(sql(expression, true)).not.toMatch(
+          /ORDER BY (occurred_at|started_at) ASC,|LIMIT 1 OFFSET|SELECT MIN\((started_at|occurred_at)\)/,
+        );
+    } finally {
+      db.close();
+    }
+  });
   it("uses typed value extrema for two-step Payload existence only on proven sources", () => {
     const db = fixture();
     try {
