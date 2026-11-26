@@ -89,11 +89,12 @@ function qualified(
   expression: string,
   sourceSql = source,
   clock?: Parameters<typeof compileCollectionSqlQualification>[3],
+  uniqueLocalOccurrences = false,
 ) {
   const qualification = compileCollectionSqlQualification(
     parseFilterDsl(expression, analyticsFilterRegistry),
     "session",
-    {},
+    { uniqueLocalOccurrences },
     clock,
   );
   if (qualification.kind !== "entity")
@@ -344,6 +345,87 @@ describe("P4 complete timeline and relational SQL", () => {
     }
   });
 
+  it("uses typed value extrema for two-step Payload existence only on proven sources", () => {
+    const db = fixture();
+    try {
+      const pair =
+        'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) { $same($.payload("/sku")) }';
+      const expressions = [
+        pair + " exists",
+        pair + " notExists",
+        'sequence([EVENT { $.name eq "purchase" }, EVENT { $.name eq "signup" }]) { $same($.payload("/sku")) } exists',
+        'sequence([EVENT,EVENT]) { $same($.payload("/missing")) } notExists',
+        'sequence([EVENT,EVENT]) { $same($.payload("/sku")) } exists',
+        "count(" + pair + ") eq 1",
+        'sequence([EVENT,EVENT,EVENT]) { $same($.payload("/sku")) } exists',
+        'sequence([EVENT,EVENT]) { $same($.payload("/sku")) AND $span lte 10ms } exists',
+      ];
+      const optimizedSql = (expression: string, unique: boolean) =>
+        composeBoundCtes(
+          compileCollectionSqlQualification(
+            parseFilterDsl(expression, analyticsFilterRegistry),
+            "session",
+            { uniqueLocalOccurrences: unique },
+          ).ctes,
+        ).ctes;
+      expect(optimizedSql(expressions[0]!, true)).toContain("AS step_index");
+      expect(optimizedSql(expressions[4]!, true)).toContain(
+        "HAVING COUNT(*) >= 2",
+      );
+      expect(optimizedSql(expressions[4]!, false)).not.toContain(
+        "HAVING COUNT(*) >= 2",
+      );
+      expect(
+        qualified(
+          db,
+          'sequence([EVENT { $.name eq "signup" },EVENT { $.name eq "signup" }]) { $same($.payload("/sku")) } exists',
+          source,
+          undefined,
+          true,
+        ),
+      ).toEqual([]);
+      expect(optimizedSql(expressions[0]!, false)).not.toContain(
+        "AS step_index",
+      );
+      for (const expression of expressions.slice(5))
+        expect(optimizedSql(expression, true)).not.toContain("AS step_index");
+      const check = () => {
+        for (const expression of expressions)
+          expect(qualified(db, expression, source, undefined, true)).toEqual(
+            qualified(db, expression),
+          );
+      };
+      check();
+      // Missing, JSON null, containers, and different primitive types must
+      // not be conflated with matching typed scalar values.
+      db.exec(
+        "UPDATE custom_event_json_nodes SET value_type=0 WHERE event_pk=101 AND key_id=1",
+      );
+      check();
+      db.exec(
+        "UPDATE custom_event_json_nodes SET value_type=4 WHERE event_pk=101 AND key_id=1",
+      );
+      check();
+      db.exec(
+        "UPDATE custom_event_json_nodes SET value_type=2 WHERE event_pk=101 AND key_id=1; UPDATE custom_event_json_values SET value_type=2,number_value=1 WHERE event_pk=101",
+      );
+      check();
+      db.exec(
+        "UPDATE custom_event_json_nodes SET value_type=3 WHERE event_pk=103 AND key_id=1; UPDATE custom_event_json_values SET value_type=3,boolean_value=1 WHERE event_pk=103",
+      );
+      check();
+      db.exec(
+        "UPDATE custom_event_json_nodes SET value_type=2 WHERE event_pk=103 AND key_id=1; UPDATE custom_event_json_values SET value_type=2,number_value=1 WHERE event_pk=103",
+      );
+      check();
+      const ties = source.replace("'signup',20)", "'signup',30)");
+      expect(qualified(db, pair + " exists", ties, undefined, true)).toEqual(
+        qualified(db, pair + " exists", ties),
+      );
+    } finally {
+      db.close();
+    }
+  });
   it("evaluates $span, $gap and $same in a bound Sequence item", () => {
     const db = fixture();
     try {

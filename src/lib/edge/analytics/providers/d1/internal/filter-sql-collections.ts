@@ -62,6 +62,8 @@ export interface SqlQualificationSources {
   /** Optional complete local timeline, including position-only evidence. */
   readonly timelineVisits?: string;
   readonly timelineEvents?: string;
+  /** Canonical target-local sources have unique occurrence IDs. */
+  readonly uniqueLocalOccurrences?: boolean;
 }
 
 interface SqlFragment {
@@ -739,10 +741,109 @@ class SqlCollectionCompiler {
     };
   }
 
+  /**
+   * Existential two-step equality needs only the earliest first and latest
+   * second position for each typed value, not all combinations. Keep the
+   * ordinary enumerator for counts, mixed predicates and unproven sources.
+   */
+  private localPayloadPairExists(
+    condition: FilterCondition,
+    frame: SqlFrame,
+  ): PredicateFragment | null {
+    const target = condition.target;
+    if (
+      !this.sources.uniqueLocalOccurrences ||
+      (frame.anchorKind !== "session" && frame.anchorKind !== "visitor") ||
+      (condition.operator !== "exists" && condition.operator !== "notExists") ||
+      target.kind !== "selector" ||
+      target.collection.kind !== "sequence" ||
+      target.collection.steps.length !== 2 ||
+      target.predicate.kind !== "condition"
+    )
+      return null;
+    const predicate = target.predicate;
+    const same = predicate.target;
+    if (
+      same.kind !== "context-intrinsic" ||
+      same.context !== "sequence" ||
+      same.intrinsic !== "same" ||
+      same.input.kind !== "current-payload" ||
+      predicate.operator !== "eq" ||
+      predicate.value !== true
+    )
+      return null;
+    const steps = target.collection.steps.map((step) =>
+      this.collection(step, frame, !this.clock?.filterRangeExplicit),
+    );
+    if (steps.some((step) => step.entityKind !== "event")) return null;
+    const pointer = same.input.path;
+    if (
+      JSON.stringify(target.collection.steps[0]) ===
+      JSON.stringify(target.collection.steps[1])
+    ) {
+      // Identical steps admit every pair of distinct matching Events in
+      // strict timeline order. Each canonical occurrence appears once.
+      const step = steps[0]!;
+      const item = this.alias();
+      const candidates = this.alias();
+      const payload = compileJsonPointerValue(item, pointer);
+      const found = `EXISTS (WITH ${candidates} AS MATERIALIZED (
+        SELECT ${item}.site_pk,
+          ${item}.${frame.anchorKind === "visitor" ? "visitor_id" : "session_id"} AS anchor_id,
+          ${payload.sql} AS typed_value FROM (${step.sql}) ${item}
+      )
+      SELECT 1 FROM ${candidates}
+      WHERE json_extract(typed_value, '$.t') IN (1, 2, 3)
+      GROUP BY site_pk, anchor_id, typed_value HAVING COUNT(*) >= 2)`;
+      return {
+        sql: condition.operator === "notExists" ? `NOT ${found}` : found,
+        bindings: [...payload.bindings, ...step.bindings],
+        applicable: true,
+      };
+    }
+    const bindings: Array<string | number | null> = [];
+    const branches = steps.map((step, index) => {
+      const item = this.alias();
+      const payload = compileJsonPointerValue(item, pointer);
+      bindings.push(...payload.bindings, ...step.bindings);
+      return `SELECT ${index} AS step_index, ${item}.site_pk,
+        ${item}.${frame.anchorKind === "visitor" ? "visitor_id" : "session_id"} AS anchor_id,
+        ${item}.occurred_at, ${item}.event_id,
+        ${payload.sql} AS typed_value
+        FROM (${step.sql}) ${item}`;
+    });
+    const candidates = this.alias();
+    const byTime = this.alias();
+    // Both steps are Events. Their strict relative order is exactly the
+    // original timeline's (occurred_at, event_id COLLATE BINARY) order.
+    // Compare IDs only within an equal timestamp; never reuse one event.
+    const found = `EXISTS (WITH ${candidates} AS MATERIALIZED (
+        ${branches.join(" UNION ALL ")}
+      ), ${byTime} AS (
+        SELECT site_pk, anchor_id, typed_value, occurred_at,
+          MIN(CASE WHEN step_index = 0 THEN event_id END COLLATE BINARY) AS first_id,
+          MAX(CASE WHEN step_index = 1 THEN event_id END COLLATE BINARY) AS last_id
+        FROM ${candidates}
+        WHERE json_extract(typed_value, '$.t') IN (1, 2, 3)
+        GROUP BY site_pk, anchor_id, typed_value, occurred_at
+      )
+      SELECT 1 FROM ${byTime}
+      GROUP BY site_pk, anchor_id, typed_value
+      HAVING MIN(CASE WHEN first_id IS NOT NULL THEN occurred_at END) <
+        MAX(CASE WHEN last_id IS NOT NULL THEN occurred_at END)
+        OR MAX(first_id COLLATE BINARY < last_id COLLATE BINARY) = 1)`;
+    return {
+      sql: condition.operator === "notExists" ? `NOT ${found}` : found,
+      bindings,
+      applicable: true,
+    };
+  }
   private condition(
     condition: FilterCondition,
     frame: SqlFrame,
   ): PredicateFragment {
+    const optimizedPair = this.localPayloadPairExists(condition, frame);
+    if (optimizedPair) return optimizedPair;
     const target = condition.target;
     if (target.kind === "context-intrinsic" && target.context === "sequence") {
       if (!frame.sequenceAlias)
@@ -1055,7 +1156,13 @@ export function compileCollectionSqlQualification(
     };
   }
   const compiler = new SqlCollectionCompiler(
-    { filterVisits, filterEvents, readVisits, readEvents },
+    {
+      filterVisits,
+      filterEvents,
+      readVisits,
+      readEvents,
+      uniqueLocalOccurrences: sources.uniqueLocalOccurrences,
+    },
     clock,
   );
   const ctes: BoundCteDefinition[] = [
