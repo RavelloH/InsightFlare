@@ -626,14 +626,24 @@ function applyCanonicalDemoFilters(
   }
 
   const entityIds = new Set<string>();
+  const visitsByEntity = new Map<string, DemoFactDataset["visits"]>();
+  const entityKey = (visit: DemoFactDataset["visits"][number]) =>
+    scope === "session" ? visit.sessionId : visit.visitorId;
+  for (const visit of dataset.visits) {
+    const id = entityKey(visit);
+    const visits = visitsByEntity.get(id) ?? [];
+    visits.push(visit);
+    visitsByEntity.set(id, visits);
+  }
   const entityMap = scope === "session" ? facts.sessions : facts.visitors;
   for (const entityId of entityMap.keys()) {
-    const visits = dataset.visits.filter((visit) =>
-      scope === "session"
-        ? visit.sessionId === entityId
-        : visit.visitorId === entityId,
-    );
-    if (demoExpressionMayMatchForEntity(visits, normalized.root, facts)) {
+    if (
+      demoExpressionMayMatchForEntity(
+        visitsByEntity.get(entityId) ?? [],
+        normalized.root,
+        facts,
+      )
+    ) {
       entityIds.add(entityId);
     }
   }

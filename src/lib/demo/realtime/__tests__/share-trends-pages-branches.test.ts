@@ -527,6 +527,87 @@ describe("mock/analytics-pages branch coverage", () => {
     });
   });
 
+  it("groups scoped visits per path without reapplying the filter to every row or trend", () => {
+    const current = makeDataset([
+      makeVisit({
+        visitId: "a",
+        pathname: "/match",
+        title: "Match",
+        sessionId: "s1",
+        visitorId: "u1",
+        startedAt: BASE_TIME + 1000,
+      }),
+      makeVisit({
+        visitId: "b",
+        pathname: "/other",
+        title: "Other",
+        sessionId: "s1",
+        visitorId: "u1",
+        startedAt: BASE_TIME + 2000,
+      }),
+      makeVisit({
+        visitId: "c",
+        pathname: "/match",
+        title: "Match",
+        sessionId: "s1",
+        visitorId: "u1",
+        startedAt: BASE_TIME + 3000,
+      }),
+    ]);
+    const previous = makeDataset([
+      makeVisit({
+        visitId: "ref",
+        pathname: "/other",
+        sessionId: "s1",
+        visitorId: "u1",
+        startedAt: BASE_TIME - 1000,
+      }),
+    ]);
+    mockBuildDemoFactDataset
+      .mockReturnValueOnce(current)
+      .mockReturnValueOnce(previous);
+    mockApplyDemoFilters.mockImplementation((dataset: DemoFactDataset) =>
+      makeFiltered(dataset.visits),
+    );
+    const result = generateDemoPagesDashboard(SITE_ID, {
+      from: BASE_TIME,
+      to: BASE_TIME + 3600000,
+      scope: "session",
+      "filter[page.path]": "/match",
+      interval: "hour",
+      limit: 25,
+      timeZone: "UTC",
+    });
+    expect(mockApplyDemoFilters).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      data: {
+        items: [
+          expect.objectContaining({
+            pathname: "/match",
+            metrics: expect.objectContaining({
+              views: 2,
+              sessions: 1,
+              pagesPerSession: 2,
+            }),
+            trend: expect.arrayContaining([
+              { timestampMs: BASE_TIME, views: 2, visitors: 1 },
+            ]),
+          }),
+          expect.objectContaining({
+            pathname: "/other",
+            metrics: expect.objectContaining({
+              views: 1,
+              sessions: 1,
+              pagesPerSession: 1,
+            }),
+            trend: expect.arrayContaining([
+              { timestampMs: BASE_TIME, views: 1, visitors: 1 },
+            ]),
+          }),
+        ],
+      },
+    });
+  });
   it("returns server-style comparison rows for demo page dashboards", () => {
     const currentDataset = makeDataset([
       makeVisit({

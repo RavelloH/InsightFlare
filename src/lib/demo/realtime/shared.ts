@@ -12,6 +12,7 @@ import { demoValuesIncludeSearch } from "@/lib/demo/realtime/filters";
 import { demoIntervalStepMs } from "@/lib/demo/realtime/site-curves";
 import type {
   DemoFactDataset,
+  DemoFilteredFacts,
   DemoQueryFilters,
   DemoVisitFact,
 } from "@/lib/demo/realtime/types";
@@ -134,10 +135,11 @@ export function buildDemoTrendBuckets(
   filters: DemoQueryFilters,
   timeZone: string,
   datasetOverride?: DemoFactDataset,
+  filteredOverride?: DemoFilteredFacts,
 ) {
   const buckets = buildDemoTimeBuckets(from, to, interval, timeZone);
   const dataset = datasetOverride ?? buildDemoFactDataset(siteId, from, to);
-  const filtered = applyDemoFilters(dataset, filters);
+  const filtered = filteredOverride ?? applyDemoFilters(dataset, filters);
   const bucketStats = new Map<
     number,
     {
