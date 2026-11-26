@@ -1,4 +1,7 @@
 import { resolveReportingTimeZone } from "@/lib/analytics/time-zone";
+import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
+import { parseFilterDocumentFromSearchParams } from "@/lib/dashboard/query-state";
+import { attachFilterScopePreference } from "@/lib/filter-contract";
 
 import {
   type CustomTimeRange,
@@ -137,4 +140,31 @@ export function canPrefetchAnalyticsNavigation(input: {
       (preferences.customRange?.from === window.from &&
         preferences.customRange?.to === window.to))
   );
+}
+
+export function analyticsNavigationInput(
+  input: Parameters<typeof canPrefetchAnalyticsNavigation>[0] & {
+    siteId: string;
+    search: string;
+    preserveEmptyScope?: boolean;
+  },
+) {
+  if (!canPrefetchAnalyticsNavigation(input)) return null;
+  const search = new URLSearchParams(input.search);
+  const document = parseFilterDocumentFromSearchParams(search);
+  const filters =
+    document.root || input.preserveEmptyScope
+      ? document
+      : attachFilterScopePreference(document, "auto");
+  return {
+    siteId: input.siteId,
+    window: input.window,
+    filters,
+    comparisonQuery: resolveDashboardComparisonQuery(
+      search,
+      input.window,
+      filters,
+    ),
+    search,
+  };
 }

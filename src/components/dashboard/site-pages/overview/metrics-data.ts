@@ -1,6 +1,10 @@
 import { useMemo } from "react";
 import { type MetricAreaPoint } from "@insightflare/product-ui/charts";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  queryOptions,
+  useQuery,
+} from "@tanstack/react-query";
 
 import { fetchOverview, fetchTrend } from "@/lib/dashboard/client/data/index";
 import { useLiveSearchParams } from "@/lib/dashboard/client/history";
@@ -102,7 +106,7 @@ export function useOverviewComparisonQuery(
     ],
   );
 }
-export function useOverviewSummaryQuery({
+export function overviewSummaryQueryOptions({
   siteId,
   window: timeWindow,
   filters,
@@ -115,11 +119,10 @@ export function useOverviewSummaryQuery({
 > & {
   comparisonQuery: DashboardComparisonQuery | null;
 }) {
-  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
-  const comparisonFiltersKey = useMemo(
-    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"),
-    [comparisonQuery],
-  );
+  const filtersKey = filterQueryKey(filters);
+  const comparisonFiltersKey = comparisonQuery
+    ? filterQueryKey(comparisonQuery.filters)
+    : "none";
   const comparisonKey = comparisonQuery
     ? [
         comparisonQuery.mode,
@@ -153,7 +156,7 @@ export function useOverviewSummaryQuery({
     );
   };
 
-  return useQuery({
+  return queryOptions({
     queryKey: [
       "dashboard",
       "overview-summary",
@@ -271,4 +274,10 @@ export function useOverviewSummaryQuery({
     enabled: typeof window !== "undefined" && queryEnabled,
     placeholderData: keepPreviousData,
   });
+}
+
+export function useOverviewSummaryQuery(
+  input: Parameters<typeof overviewSummaryQueryOptions>[0],
+) {
+  return useQuery(overviewSummaryQueryOptions(input));
 }

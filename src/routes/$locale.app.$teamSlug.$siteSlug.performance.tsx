@@ -1,14 +1,32 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+import { performanceQueryOptions } from "@/components/dashboard/site-pages/performance/performance-client-page";
 import { PerformanceClientPage } from "@/components/dashboard/site-pages/performance/performance-client-page";
+import { getBrowserQueryClient } from "@/components/query-client-provider";
+import { analyticsNavigationInput } from "@/lib/dashboard/query-preferences";
 import { loadSiteAnalyticsStream } from "@/lib/dashboard/route-data";
 import { dashboardPageTitle } from "@/lib/page-title";
 
 export const Route = createFileRoute(
   "/$locale/app/$teamSlug/$siteSlug/performance",
 )({
-  loader: async ({ context, location }) => {
-    if (typeof window !== "undefined") return { reads: null };
+  preloadStaleTime: 0,
+  loader: async ({ context, location, preload, cause }) => {
+    if (typeof window !== "undefined") {
+      const input = analyticsNavigationInput({
+        preload,
+        cause,
+        siteId: context.siteContext.activeSite.id,
+        window: context.initialDashboardWindow,
+        accountTimeZone: context.siteContext.user.timeZone,
+        search: location.searchStr,
+      });
+      if (input) {
+        const client = getBrowserQueryClient();
+        void client.prefetchQuery(performanceQueryOptions(input));
+      }
+      return { reads: null };
+    }
     return {
       reads: await loadSiteAnalyticsStream({
         data: {

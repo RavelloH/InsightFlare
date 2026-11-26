@@ -2,7 +2,7 @@ import type { ComponentProps } from "react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { DetailModal } from "@insightflare/product-ui/detail-drawer";
 import { MetricSummaryGrid } from "@insightflare/ui/metric-summary-grid";
-import { useQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 
 import { useDashboardDeferredReadTransport } from "@/components/dashboard/shell/dashboard-query-provider";
 import { useDashboardQueryReady } from "@/components/dashboard/shell/dashboard-query-provider";
@@ -26,12 +26,14 @@ import {
   fetchEventsSummary,
   fetchEventsTrend,
 } from "@/lib/dashboard/client/data/index";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import {
   pushUrlWithoutNavigation,
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/dashboard/client/history";
 import { type DeferredPrivateReads } from "@/lib/dashboard/client/request";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
@@ -40,6 +42,7 @@ import type {
   EventsSummaryData,
   EventsTrendData,
 } from "@/lib/dashboard-api/client/edge";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import {
@@ -169,54 +172,26 @@ function comparisonLabelForEvents(
     : messages.dashboardHeader.compareButton;
 }
 const EMPTY_EVENT_COMPARISON_CARDS = buildEventCardDataOverride([]);
-export function EventsClientPage({
-  locale,
-  messages,
-  siteId,
-  siteDomain,
-  pathname,
-  deferredReads,
-}: EventsClientPageProps) {
-  const queryReady = useDashboardQueryReady();
-  const transport = useDashboardDeferredReadTransport(deferredReads);
-  const labels = messages.events;
-  const searchParams = useLiveSearchParams();
-  const detailEventName = searchParams.get(DETAIL_QUERY_PARAM)?.trim() || "";
-  const openedDetailFromListRef = useRef(false);
-  const timeWindow = useDashboardTimeWindow();
-  const searchParamsKey = searchParams.toString();
-  const filters = useMemo(
-    () => parseOverviewCardFilters(new URLSearchParams(searchParamsKey)),
-    [searchParamsKey],
-  );
-  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
-  const comparisonQuery = useMemo(
-    () =>
-      resolveDashboardComparisonQuery(
-        new URLSearchParams(searchParamsKey),
-        timeWindow,
-        filters,
-      ),
-    [
-      filters,
-      searchParamsKey,
-      timeWindow.from,
-      timeWindow.interval,
-      timeWindow.timeZone,
-      timeWindow.to,
-    ],
-  );
-  const comparisonFiltersKey = useMemo(
-    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"),
-    [comparisonQuery],
-  );
-
-  useEffect(() => {
-    if (!detailEventName) {
-      openedDetailFromListRef.current = false;
-    }
-  }, [detailEventName]);
-
+export function eventsAnalyticsQueryOptions(input: {
+  siteId: string;
+  window: TimeWindow;
+  filters: FilterDocument;
+  comparisonQuery: DashboardComparisonQuery | null;
+  transport?: PrivateReadTransport;
+  enabled?: boolean;
+}) {
+  const {
+    siteId,
+    window: timeWindow,
+    filters,
+    comparisonQuery,
+    transport,
+    enabled: queryReady = true,
+  } = input;
+  const filtersKey = filterQueryKey(filters);
+  const comparisonFiltersKey = comparisonQuery
+    ? filterQueryKey(comparisonQuery.filters)
+    : "none";
   const baseKey = [
     siteId,
     timeWindow.from,
@@ -231,7 +206,7 @@ export function EventsClientPage({
     comparisonQuery?.window.timeZone ?? "none",
     comparisonFiltersKey,
   ];
-  const summaryQuery = useQuery({
+  const summary = queryOptions({
     queryKey: ["dashboard", "events-summary", ...baseKey],
     queryFn: async ({ signal }) => {
       const observationGuard = capturePerceptionGuard(siteId);
@@ -262,7 +237,7 @@ export function EventsClientPage({
     },
     enabled: queryReady,
   });
-  const trendQuery = useQuery({
+  const trend = queryOptions({
     queryKey: ["dashboard", "events-trend", ...baseKey],
     queryFn: async ({ signal }) => {
       const options = {
@@ -285,6 +260,62 @@ export function EventsClientPage({
     },
     enabled: queryReady,
   });
+
+  return { summary, trend };
+}
+export function EventsClientPage({
+  locale,
+  messages,
+  siteId,
+  siteDomain,
+  pathname,
+  deferredReads,
+}: EventsClientPageProps) {
+  const queryReady = useDashboardQueryReady();
+  const transport = useDashboardDeferredReadTransport(deferredReads);
+  const labels = messages.events;
+  const searchParams = useLiveSearchParams();
+  const detailEventName = searchParams.get(DETAIL_QUERY_PARAM)?.trim() || "";
+  const openedDetailFromListRef = useRef(false);
+  const timeWindow = useDashboardTimeWindow();
+  const searchParamsKey = searchParams.toString();
+  const filters = useMemo(
+    () => parseOverviewCardFilters(new URLSearchParams(searchParamsKey)),
+    [searchParamsKey],
+  );
+  const comparisonQuery = useMemo(
+    () =>
+      resolveDashboardComparisonQuery(
+        new URLSearchParams(searchParamsKey),
+        timeWindow,
+        filters,
+      ),
+    [
+      filters,
+      searchParamsKey,
+      timeWindow.from,
+      timeWindow.interval,
+      timeWindow.timeZone,
+      timeWindow.to,
+    ],
+  );
+
+  useEffect(() => {
+    if (!detailEventName) {
+      openedDetailFromListRef.current = false;
+    }
+  }, [detailEventName]);
+
+  const options = eventsAnalyticsQueryOptions({
+    siteId,
+    window: timeWindow,
+    filters,
+    comparisonQuery,
+    transport,
+    enabled: queryReady,
+  });
+  const summaryQuery = useQuery(options.summary);
+  const trendQuery = useQuery(options.trend);
   const summary = summaryQuery.data?.summary ?? EMPTY_SUMMARY;
   const trend = trendQuery.data?.trend ?? emptyTrend(timeWindow.interval);
   const comparisonLabel = comparisonLabelForEvents(

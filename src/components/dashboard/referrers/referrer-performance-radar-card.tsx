@@ -7,7 +7,7 @@ import { AsyncContent as ContentSwitch } from "@insightflare/ui/async-content";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Card, CardContent, CardTitle } from "@insightflare/ui/card";
 import { RiShareForwardLine } from "@remixicon/react";
-import { useQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 
 import {
   dashboardComparisonLabel,
@@ -17,6 +17,7 @@ import { useDashboardQueryReady } from "@/components/dashboard/shell/dashboard-q
 import { fetchReferrerRadar } from "@/lib/dashboard/client/data/index";
 import { REFERRER_RADAR_LIMIT } from "@/lib/dashboard/client/data/referrers";
 import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";
@@ -316,6 +317,79 @@ interface ReferrerPerformanceRadarCardProps {
   filters: FilterDocument;
   transport?: PrivateReadTransport;
 }
+export function referrerRadarQueryOptions(input: {
+  siteId: string;
+  window: TimeWindow;
+  filters: FilterDocument;
+  comparisonQuery: DashboardComparisonQuery | null;
+  transport?: PrivateReadTransport;
+  enabled?: boolean;
+}) {
+  const {
+    siteId,
+    window: tw,
+    filters,
+    comparisonQuery,
+    transport,
+    enabled: queryReady = true,
+  } = input;
+  const filtersKey = filterQueryKey(filters);
+  const comparisonFiltersKey = comparisonQuery
+    ? filterQueryKey(comparisonQuery.filters)
+    : "none";
+  return queryOptions({
+    queryKey: [
+      "dashboard",
+      "referrer-performance-radar",
+      siteId,
+      tw.from,
+      tw.to,
+      tw.timeZone,
+      filtersKey,
+      comparisonQuery?.mode ?? "none",
+      comparisonQuery?.window.from ?? "none",
+      comparisonQuery?.window.to ?? "none",
+      comparisonQuery?.window.interval ?? "none",
+      comparisonQuery?.window.timeZone ?? "none",
+      comparisonFiltersKey,
+    ],
+    queryFn: async ({ signal }) => {
+      const fetchRadarData = async (
+        requestedWindow: TimeWindow,
+        requestedFilters: FilterDocument,
+      ) => {
+        try {
+          const response = await fetchReferrerRadar(
+            siteId,
+            requestedWindow,
+            requestedFilters,
+            {
+              limit: REFERRER_RADAR_LIMIT,
+              signal,
+              ...(transport ? { transport } : {}),
+            },
+          );
+          return Array.isArray(response.data)
+            ? response.data.slice(0, REFERRER_RADAR_LIMIT)
+            : [];
+        } catch (error) {
+          if (error instanceof Error && error.name === "AbortError")
+            throw error;
+          return [] as ReferrerRadarItem[];
+        }
+      };
+
+      const [current, comparison] = await Promise.all([
+        fetchRadarData(tw, filters),
+        comparisonQuery
+          ? fetchRadarData(comparisonQuery.window, comparisonQuery.filters)
+          : Promise.resolve(null),
+      ]);
+      return { current, comparison };
+    },
+    enabled: queryReady,
+  });
+}
 export const ReferrerPerformanceRadarCard = memo(
   function ReferrerPerformanceRadarCard({
     locale,
@@ -330,64 +404,16 @@ export const ReferrerPerformanceRadarCard = memo(
       Record<string, ReferrerMetadata | null | undefined>
     >({});
     const comparisonQuery = useDashboardComparisonQuery(tw, filters);
-    const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
-    const comparisonFiltersKey = useMemo(
-      () =>
-        comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none",
-      [comparisonQuery],
-    );
-    const radarQuery = useQuery({
-      queryKey: [
-        "dashboard",
-        "referrer-performance-radar",
+    const radarQuery = useQuery(
+      referrerRadarQueryOptions({
         siteId,
-        tw.from,
-        tw.to,
-        tw.timeZone,
-        filtersKey,
-        comparisonQuery?.mode ?? "none",
-        comparisonQuery?.window.from ?? "none",
-        comparisonQuery?.window.to ?? "none",
-        comparisonQuery?.window.interval ?? "none",
-        comparisonQuery?.window.timeZone ?? "none",
-        comparisonFiltersKey,
-      ],
-      queryFn: async ({ signal }) => {
-        const fetchRadarData = async (
-          requestedWindow: TimeWindow,
-          requestedFilters: FilterDocument,
-        ) => {
-          try {
-            const response = await fetchReferrerRadar(
-              siteId,
-              requestedWindow,
-              requestedFilters,
-              {
-                limit: REFERRER_RADAR_LIMIT,
-                signal,
-                ...(transport ? { transport } : {}),
-              },
-            );
-            return Array.isArray(response.data)
-              ? response.data.slice(0, REFERRER_RADAR_LIMIT)
-              : [];
-          } catch (error) {
-            if (error instanceof Error && error.name === "AbortError")
-              throw error;
-            return [] as ReferrerRadarItem[];
-          }
-        };
-
-        const [current, comparison] = await Promise.all([
-          fetchRadarData(tw, filters),
-          comparisonQuery
-            ? fetchRadarData(comparisonQuery.window, comparisonQuery.filters)
-            : Promise.resolve(null),
-        ]);
-        return { current, comparison };
-      },
-      enabled: queryReady,
-    });
+        window: tw,
+        filters,
+        comparisonQuery,
+        transport,
+        enabled: queryReady,
+      }),
+    );
     const data = radarQuery.data?.current ?? EMPTY_RADAR_ITEMS;
     const comparisonData = radarQuery.data?.comparison ?? EMPTY_RADAR_ITEMS;
     const loading = radarQuery.isPending;

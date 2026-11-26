@@ -1,5 +1,9 @@
 import { memo, useMemo } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  queryOptions,
+  useQuery,
+} from "@tanstack/react-query";
 
 import {
   dashboardComparisonLabel,
@@ -12,6 +16,7 @@ import type { TrafficChannelId } from "@/lib/analytics/traffic-channel-rules";
 import { fetchReferrerAndChannelTrend } from "@/lib/dashboard/client/data/referrers";
 import { REFERRER_TREND_LIMIT } from "@/lib/dashboard/client/data/referrers";
 import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
@@ -59,51 +64,41 @@ function asBrowserTrendData(
     ...dimension,
   };
 }
-function ReferrerTrendPanel({
-  locale,
-  messages,
-  siteId,
-  window,
-  filters,
-  transport,
-}: ReferrerShareTrendCardProps) {
-  const queryReady = useDashboardQueryReady();
-  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
-  const comparisonQuery = useDashboardComparisonQuery(window, filters);
-  const comparisonFiltersKey = useMemo(
-    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"),
-    [comparisonQuery],
-  );
-  const currentDataWindow = useMemo(
-    () => ({
-      from: window.from,
-      to: window.to,
-      interval: window.interval,
-      timeZone: window.timeZone,
-    }),
-    [window.from, window.interval, window.timeZone, window.to],
-  );
-  const fallbackTrendData = useMemo(
-    () => emptyReferrerTrendData(window.interval),
-    [window.interval],
-  );
-  const comparisonDataWindow = useMemo(
-    () =>
-      comparisonQuery
-        ? {
-            from: comparisonQuery.window.from,
-            to: comparisonQuery.window.to,
-            interval: comparisonQuery.window.interval,
-            timeZone: comparisonQuery.window.timeZone,
-          }
-        : null,
-    [comparisonQuery],
-  );
+export function referrerTrendQueryOptions(input: {
+  siteId: string;
+  window: TimeWindow;
+  filters: FilterDocument;
+  comparisonQuery: DashboardComparisonQuery | null;
+  transport?: PrivateReadTransport;
+  enabled?: boolean;
+}) {
   const {
-    data: trendQueryData,
-    isFetching,
-    isPending,
-  } = useQuery({
+    siteId,
+    window,
+    filters,
+    comparisonQuery,
+    transport,
+    enabled: queryReady = true,
+  } = input;
+  const filtersKey = filterQueryKey(filters);
+  const comparisonFiltersKey = comparisonQuery
+    ? filterQueryKey(comparisonQuery.filters)
+    : "none";
+  const currentDataWindow = {
+    from: window.from,
+    to: window.to,
+    interval: window.interval,
+    timeZone: window.timeZone,
+  };
+  const comparisonDataWindow = comparisonQuery
+    ? {
+        from: comparisonQuery.window.from,
+        to: comparisonQuery.window.to,
+        interval: comparisonQuery.window.interval,
+        timeZone: comparisonQuery.window.timeZone,
+      }
+    : null;
+  return queryOptions({
     queryKey: [
       "dashboard",
       "referrer-channel-trend",
@@ -156,6 +151,56 @@ function ReferrerTrendPanel({
     enabled: queryReady,
     placeholderData: keepPreviousData,
   });
+}
+function ReferrerTrendPanel({
+  locale,
+  messages,
+  siteId,
+  window,
+  filters,
+  transport,
+}: ReferrerShareTrendCardProps) {
+  const queryReady = useDashboardQueryReady();
+  const comparisonQuery = useDashboardComparisonQuery(window, filters);
+  const currentDataWindow = useMemo(
+    () => ({
+      from: window.from,
+      to: window.to,
+      interval: window.interval,
+      timeZone: window.timeZone,
+    }),
+    [window.from, window.interval, window.timeZone, window.to],
+  );
+  const fallbackTrendData = useMemo(
+    () => emptyReferrerTrendData(window.interval),
+    [window.interval],
+  );
+  const comparisonDataWindow = useMemo(
+    () =>
+      comparisonQuery
+        ? {
+            from: comparisonQuery.window.from,
+            to: comparisonQuery.window.to,
+            interval: comparisonQuery.window.interval,
+            timeZone: comparisonQuery.window.timeZone,
+          }
+        : null,
+    [comparisonQuery],
+  );
+  const {
+    data: trendQueryData,
+    isFetching,
+    isPending,
+  } = useQuery(
+    referrerTrendQueryOptions({
+      siteId,
+      window,
+      filters,
+      comparisonQuery,
+      transport,
+      enabled: queryReady,
+    }),
+  );
   const loading = isPending || isFetching;
   const trendData = trendQueryData?.trendData ?? fallbackTrendData;
   const dataWindow = trendQueryData?.dataWindow ?? currentDataWindow;

@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 
 import {
   dashboardComparisonLabel,
@@ -21,14 +21,18 @@ import {
   fetchOverviewGeoPoints,
   type OverviewGeoTabRows,
 } from "@/lib/dashboard/client/data/index";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import {
   pushUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/dashboard/client/history";
 import { type DeferredPrivateReads } from "@/lib/dashboard/client/request";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
+import type { TimeWindow } from "@/lib/dashboard/query-state";
 import dynamic from "@/lib/dynamic";
+import type { FilterDocument } from "@/lib/filter-contract";
 import { resolveCountryLabel } from "@/lib/i18n/code-labels";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -67,29 +71,30 @@ interface GeoClientPageProps {
 }
 // World Bank, World, GDP per capita (current US$), most recent value for 2024.
 
-export function GeoClientPage({
-  locale,
-  messages,
-  siteId,
-  deferredReads,
-}: GeoClientPageProps) {
-  const isMobile = useIsMobile();
-  const { window, filters, queryReady } = useDashboardQuery();
-  const transport = useDashboardDeferredReadTransport(deferredReads);
-  const comparisonQuery = useDashboardComparisonQuery(window, filters);
-  const searchParams = useLiveSearchParams();
-  const geoMessages = messages.geo;
-  const geoInvestigationMessages = geoMessages.investigation;
-  const locationValue = searchParams.get("location");
+export function geoAnalyticsQueryOptions(input: {
+  siteId: string;
+  window: TimeWindow;
+  filters: FilterDocument;
+  comparisonQuery: DashboardComparisonQuery | null;
+  locationValue: string | null;
+  transport?: PrivateReadTransport;
+  enabled?: boolean;
+}) {
+  const {
+    siteId,
+    window,
+    filters,
+    comparisonQuery,
+    locationValue,
+    transport,
+    enabled: queryReady = true,
+  } = input;
   const {
     location: activeLocation,
     filters: requestFilters,
     statsTab,
     comparison: comparisonRequest,
-  } = useMemo(
-    () => resolveGeoPageRequest(filters, comparisonQuery, locationValue),
-    [filters, comparisonQuery, locationValue],
-  );
+  } = resolveGeoPageRequest(filters, comparisonQuery, locationValue);
   const locationKey = activeLocation?.canonical ?? "";
   const requestFiltersKey = filterQueryKey(requestFilters);
   const comparisonFiltersKey = comparisonRequest
@@ -104,7 +109,7 @@ export function GeoClientPage({
     locationKey,
     requestFiltersKey,
   ];
-  const pointsQuery = useQuery({
+  const points = queryOptions({
     queryKey: ["dashboard", "geo-points", ...baseKey],
     queryFn: async ({ signal }) => ({
       siteId,
@@ -122,7 +127,7 @@ export function GeoClientPage({
         : undefined,
     enabled: queryReady,
   });
-  const statsQuery = useQuery({
+  const stats = queryOptions({
     queryKey: [
       "dashboard",
       "geo-stats",
@@ -159,6 +164,39 @@ export function GeoClientPage({
         : undefined,
     enabled: queryReady,
   });
+
+  return { points, stats };
+}
+export function GeoClientPage({
+  locale,
+  messages,
+  siteId,
+  deferredReads,
+}: GeoClientPageProps) {
+  const isMobile = useIsMobile();
+  const { window, filters, queryReady } = useDashboardQuery();
+  const transport = useDashboardDeferredReadTransport(deferredReads);
+  const comparisonQuery = useDashboardComparisonQuery(window, filters);
+  const searchParams = useLiveSearchParams();
+  const geoMessages = messages.geo;
+  const geoInvestigationMessages = geoMessages.investigation;
+  const locationValue = searchParams.get("location");
+  const { location: activeLocation } = useMemo(
+    () => resolveGeoPageRequest(filters, comparisonQuery, locationValue),
+    [filters, comparisonQuery, locationValue],
+  );
+  const locationKey = activeLocation?.canonical ?? "";
+  const options = geoAnalyticsQueryOptions({
+    siteId,
+    window,
+    filters,
+    comparisonQuery,
+    locationValue,
+    transport,
+    enabled: queryReady,
+  });
+  const pointsQuery = useQuery(options.points);
+  const statsQuery = useQuery(options.stats);
   // Locale metadata is public and potentially much slower (e.g. country
   // directories). It enriches analytics, but does not gate their rendering.
   const localeQuery = useQuery({

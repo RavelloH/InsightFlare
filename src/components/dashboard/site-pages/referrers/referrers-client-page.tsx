@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { PageHeading } from "@insightflare/ui/page-heading";
-import { useQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 
 import type { TabbedDataTableLoader } from "@/components/dashboard/common/tabbed-data-table-card";
 import type { ComparisonTableMetric } from "@/components/dashboard/comparison/comparison-table";
@@ -27,7 +27,9 @@ import {
   fetchReferrerSummary,
 } from "@/lib/dashboard/client/data/index";
 import { REFERRER_SUMMARY_TOP_N } from "@/lib/dashboard/client/data/referrers";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import { type DeferredPrivateReads } from "@/lib/dashboard/client/request";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { FilterDocument } from "@/lib/filter-contract/index";
@@ -44,6 +46,70 @@ interface ReferrersClientPageProps {
   pathname: string;
   showSourceLinkTab?: boolean;
   deferredReads?: DeferredPrivateReads | null;
+}
+export function referrerSummaryQueryOptions(input: {
+  siteId: string;
+  window: TimeWindow;
+  filters: FilterDocument;
+  comparisonQuery: DashboardComparisonQuery | null;
+  transport?: PrivateReadTransport;
+  enabled?: boolean;
+}) {
+  const {
+    siteId,
+    window,
+    filters,
+    comparisonQuery,
+    transport,
+    enabled: queryReady = true,
+  } = input;
+  const filtersKey = filterQueryKey(filters);
+  const comparisonFiltersKey = comparisonQuery
+    ? filterQueryKey(comparisonQuery.filters)
+    : "none";
+  const requestWindow = window;
+  const requestFilters = filters;
+  return queryOptions({
+    queryKey: [
+      "dashboard",
+      "referrer-summary",
+      siteId,
+      window.from,
+      window.to,
+      window.interval,
+      window.timeZone,
+      filtersKey,
+      comparisonQuery?.mode ?? "none",
+      comparisonQuery?.window.from ?? "none",
+      comparisonQuery?.window.to ?? "none",
+      comparisonQuery?.window.interval ?? "none",
+      comparisonQuery?.window.timeZone ?? "none",
+      comparisonFiltersKey,
+    ],
+    queryFn: async ({ signal }) => {
+      const [current, comparison] = await Promise.all([
+        fetchReferrerSummary(siteId, requestWindow, requestFilters, {
+          topN: REFERRER_SUMMARY_TOP_N,
+          signal,
+          ...(transport ? { transport } : {}),
+        }),
+        comparisonQuery
+          ? fetchReferrerSummary(
+              siteId,
+              comparisonQuery.window,
+              comparisonQuery.filters,
+              {
+                topN: REFERRER_SUMMARY_TOP_N,
+                signal,
+                ...(transport ? { transport } : {}),
+              },
+            )
+          : Promise.resolve(null),
+      ]);
+      return { current, comparison };
+    },
+    enabled: queryReady,
+  });
 }
 export function ReferrersClientPage({
   locale,
@@ -92,47 +158,16 @@ export function ReferrersClientPage({
     ? `${comparisonQuery.mode}:${comparisonQuery.window.from}:${comparisonQuery.window.to}:${comparisonFiltersKey}`
     : "none";
   const requestKey = `${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${locale}:${filtersKey}:${comparisonKey}`;
-  const summaryQuery = useQuery({
-    queryKey: [
-      "dashboard",
-      "referrer-summary",
+  const summaryQuery = useQuery(
+    referrerSummaryQueryOptions({
       siteId,
-      window.from,
-      window.to,
-      window.interval,
-      window.timeZone,
-      filtersKey,
-      comparisonQuery?.mode ?? "none",
-      comparisonQuery?.window.from ?? "none",
-      comparisonQuery?.window.to ?? "none",
-      comparisonQuery?.window.interval ?? "none",
-      comparisonQuery?.window.timeZone ?? "none",
-      comparisonFiltersKey,
-    ],
-    queryFn: async ({ signal }) => {
-      const [current, comparison] = await Promise.all([
-        fetchReferrerSummary(siteId, requestWindow, requestFilters, {
-          topN: REFERRER_SUMMARY_TOP_N,
-          signal,
-          ...(transport ? { transport } : {}),
-        }),
-        comparisonQuery
-          ? fetchReferrerSummary(
-              siteId,
-              comparisonQuery.window,
-              comparisonQuery.filters,
-              {
-                topN: REFERRER_SUMMARY_TOP_N,
-                signal,
-                ...(transport ? { transport } : {}),
-              },
-            )
-          : Promise.resolve(null),
-      ]);
-      return { current, comparison };
-    },
-    enabled: queryReady,
-  });
+      window: window,
+      filters,
+      comparisonQuery,
+      transport,
+      enabled: queryReady,
+    }),
+  );
   const loader = useCallback<
     TabbedDataTableLoader<
       ReferrerTab,

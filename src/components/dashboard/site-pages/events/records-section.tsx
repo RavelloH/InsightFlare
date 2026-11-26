@@ -23,7 +23,11 @@ import {
   RiFileList3Line,
   RiSearchLine,
 } from "@remixicon/react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import {
+  infiniteQueryOptions,
+  useInfiniteQuery,
+  useQuery,
+} from "@tanstack/react-query";
 
 import {
   AnalyticsDetailsTooltipTarget,
@@ -592,6 +596,63 @@ const EventRecordsTable = memo(function EventRecordsTable({
     />
   );
 });
+export function eventRecordsQueryOptions(input: {
+  siteId: string;
+  window: TimeWindow;
+  filters: FilterDocument;
+  eventName?: string;
+  search?: string;
+  sort?: EventRecordSortState;
+  transport?: PrivateReadTransport;
+  enabled?: boolean;
+}) {
+  const {
+    siteId,
+    window: timeWindow,
+    filters,
+    eventName,
+    search = "",
+    sort = DEFAULT_EVENT_RECORD_SORT,
+    transport,
+    enabled: queryReady = true,
+  } = input;
+  const filtersKey = filterQueryKey(filters);
+  return infiniteQueryOptions({
+    queryKey: [
+      "dashboard",
+      "event-records",
+      siteId,
+      timeWindow.from,
+      timeWindow.to,
+      timeWindow.interval,
+      timeWindow.timeZone,
+      filtersKey,
+      search,
+      sort.key,
+      sort.direction,
+      eventName ?? "",
+    ],
+    queryFn: ({ pageParam, signal }) =>
+      fetchEventsRecords(siteId, timeWindow, filters, {
+        cursor: pageParam,
+        limit: EVENT_PAGE_SIZE,
+        sortBy: sort.key,
+        sortDir: sort.direction,
+        search: search,
+        eventName,
+        signal,
+        ...(transport ? { transport } : {}),
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => {
+      const pagination = lastPage.data?.pagination;
+      return pagination?.hasMore && pagination.nextCursor
+        ? pagination.nextCursor
+        : undefined;
+    },
+    enabled: queryReady,
+  });
+}
 export const EventRecordsSection = memo(function EventRecordsSection({
   locale,
   messages,
@@ -646,7 +707,6 @@ export const EventRecordsSection = memo(function EventRecordsSection({
     storageKey: "insightflare:analytics-table-columns:events",
     columns: eventColumnDefinitions,
   });
-  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
 
   useEffect(() => {
     if (!selectedEventId) openedRecordFromListRef.current = false;
@@ -668,41 +728,18 @@ export const EventRecordsSection = memo(function EventRecordsSection({
     isFetching,
     isFetchingNextPage,
     isPending,
-  } = useInfiniteQuery({
-    queryKey: [
-      "dashboard",
-      "event-records",
+  } = useInfiniteQuery(
+    eventRecordsQueryOptions({
       siteId,
-      timeWindow.from,
-      timeWindow.to,
-      timeWindow.interval,
-      timeWindow.timeZone,
-      filtersKey,
-      debouncedQuery,
-      sort.key,
-      sort.direction,
-      eventName ?? "",
-    ],
-    queryFn: ({ pageParam, signal }) =>
-      fetchEventsRecords(siteId, timeWindow, filters, {
-        cursor: pageParam,
-        limit: EVENT_PAGE_SIZE,
-        sortBy: sort.key,
-        sortDir: sort.direction,
-        search: debouncedQuery,
-        eventName,
-        signal,
-        ...(transport ? { transport } : {}),
-      }),
-    initialPageParam: null as string | null,
-    getNextPageParam: (lastPage) => {
-      const pagination = lastPage.data?.pagination;
-      return pagination?.hasMore && pagination.nextCursor
-        ? pagination.nextCursor
-        : undefined;
-    },
-    enabled: queryReady,
-  });
+      window: timeWindow,
+      filters,
+      eventName,
+      search: debouncedQuery,
+      sort,
+      transport,
+      enabled: queryReady,
+    }),
+  );
   const rows = useMemo(
     () =>
       data?.pages.reduce<EventRecord[]>(

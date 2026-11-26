@@ -11,33 +11,25 @@ import {
   PAGE_SHARE_TREND_LIMIT,
   resolvePagesListComparisonQuery,
 } from "@/lib/dashboard/client/data/pages";
-import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { buildSitePath } from "@/lib/dashboard/paths";
-import { canPrefetchAnalyticsNavigation } from "@/lib/dashboard/query-preferences";
-import { parseFilterDocumentFromSearchParams } from "@/lib/dashboard/query-state";
+import { analyticsNavigationInput } from "@/lib/dashboard/query-preferences";
 import { loadSiteAnalyticsStream } from "@/lib/dashboard/route-data";
-import { attachFilterScopePreference } from "@/lib/filter-contract";
 import { dashboardPageTitle } from "@/lib/page-title";
 
 export const Route = createFileRoute("/$locale/app/$teamSlug/$siteSlug/pages")({
   preloadStaleTime: 0,
   loader: async ({ context, location, preload, cause }) => {
     if (typeof window !== "undefined") {
-      if (
-        canPrefetchAnalyticsNavigation({
-          preload,
-          cause,
-          window: context.initialDashboardWindow,
-          accountTimeZone: context.siteContext.user.timeZone,
-        })
-      ) {
-        const siteId = context.siteContext.activeSite.id;
-        const window = context.initialDashboardWindow;
-        const search = new URLSearchParams(location.searchStr);
-        const document = parseFilterDocumentFromSearchParams(search);
-        const filters = document.root
-          ? document
-          : attachFilterScopePreference(document, "auto");
+      const input = analyticsNavigationInput({
+        preload,
+        cause,
+        siteId: context.siteContext.activeSite.id,
+        window: context.initialDashboardWindow,
+        accountTimeZone: context.siteContext.user.timeZone,
+        search: location.searchStr,
+      });
+      if (input) {
+        const { siteId, window, filters, search, comparisonQuery } = input;
         const client = getBrowserQueryClient();
         const list = pagesListQueryOptions({
           siteId,
@@ -59,11 +51,7 @@ export const Route = createFileRoute("/$locale/app/$teamSlug/$siteSlug/pages")({
             queryKey: ["pages"],
             fetchTrend: fetchPagesShareTrend,
             limit: PAGE_SHARE_TREND_LIMIT,
-            comparisonQuery: resolveDashboardComparisonQuery(
-              search,
-              window,
-              filters,
-            ),
+            comparisonQuery,
           }),
         );
       }
