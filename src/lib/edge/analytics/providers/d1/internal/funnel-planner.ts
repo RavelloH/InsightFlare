@@ -160,31 +160,10 @@ function witnessCte(
   stepIndex: number,
   filter: ScopedObservationFilterSql,
   identity: "session_id" | "visitor_id",
+  uniqueObservationIds: boolean,
 ): string {
   const name = `funnel_step_${stepIndex}_witnesses`;
-  return `
-${name} AS (
-  SELECT
-    deduped.site_pk,
-    deduped.session_id,
-    deduped.visitor_id,
-    deduped.observed_at,
-    deduped.observation_rank,
-    deduped.sequence,
-    deduped.source_id
-  FROM (
-    SELECT
-      candidates.*,
-      ROW_NUMBER() OVER (
-        PARTITION BY candidates.site_pk,
-                     candidates.observation_rank,
-                     candidates.source_id
-        ORDER BY candidates.observed_at ASC,
-                 candidates.observation_rank ASC,
-                 candidates.sequence ASC,
-                 candidates.source_id ASC
-      ) AS source_rank
-    FROM (
+  const candidates = `
       SELECT
         v.site_pk,
         v.session_id,
@@ -212,6 +191,32 @@ ${name} AS (
         AND ${identityPredicate("e", identity)}
         AND e.occurred_at IS NOT NULL
         AND TRIM(COALESCE(CAST(e.event_id AS TEXT), '')) != ''
+`;
+  if (uniqueObservationIds) return `${name} AS (${candidates})`;
+  return `
+${name} AS (
+  SELECT
+    deduped.site_pk,
+    deduped.session_id,
+    deduped.visitor_id,
+    deduped.observed_at,
+    deduped.observation_rank,
+    deduped.sequence,
+    deduped.source_id
+  FROM (
+    SELECT
+      candidates.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY candidates.site_pk,
+                     candidates.observation_rank,
+                     candidates.source_id
+        ORDER BY candidates.observed_at ASC,
+                 candidates.observation_rank ASC,
+                 candidates.sequence ASC,
+                 candidates.source_id ASC
+      ) AS source_rank
+    FROM (
+      ${candidates}
     ) candidates
   ) deduped
   WHERE deduped.source_rank = 1
@@ -401,7 +406,14 @@ function buildFunnelCteParts(
     if (stepIndex === 0) firstFilter = filter;
 
     const witnesses = `funnel_step_${stepIndex}_witnesses`;
-    funnelCtes.push(witnessCte(stepIndex, filter, identity));
+    funnelCtes.push(
+      witnessCte(
+        stepIndex,
+        filter,
+        identity,
+        dataset.uniqueObservationIds === true,
+      ),
+    );
     funnelCtes.push(
       stepIndex === 0
         ? reachedZeroCte(witnesses, identity)

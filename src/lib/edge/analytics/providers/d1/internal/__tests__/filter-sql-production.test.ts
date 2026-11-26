@@ -3148,6 +3148,37 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
+  it("proves source uniqueness only for non-amplifying canonical datasets", () => {
+    for (const [expression, scope, expected] of [
+      ["", "event", true],
+      ["", "session", true],
+      ["", "visitor", true],
+      ['page.path eq "/home"', "event", true],
+      ['page.path eq "/home"', "session", false],
+      ['event.name eq "purchase"', "event", false],
+      ['first(EVENT).name eq "purchase"', "session", false],
+    ] as const) {
+      const doc = expression
+        ? parseFilterDsl(expression, analyticsFilterRegistry)
+        : EMPTY_FILTER_DOCUMENT;
+      const plan = createScopedFilterPlan("funnel-analysis", doc, scope)!;
+      const filters = attachScopedFilterMetadata(doc, {
+        requestedScope: scope,
+        resolvedScope: plan.scope,
+        plan,
+        time: createQueryTime(100, 300, "UTC", 400),
+        siteIds: ["site-a"],
+      });
+      const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
+      expect(compileScopedDatasetSql(input).uniqueObservationIds).toBe(
+        expected,
+      );
+      expect(
+        compileScopedDatasetSql({ ...input, compatibilityEventSource: true })
+          .uniqueObservationIds,
+      ).toBe(false);
+    }
+  });
   it("Funnel SQL distinguishes Event-only and expanded Session scope for signup→purchase", async () => {
     const { db, env } = runFixture();
     try {

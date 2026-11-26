@@ -8,8 +8,8 @@ import type { Env } from "@/lib/edge/types";
 import { queryD1All } from "./core-sources";
 import type { QueryWindow } from "./core-types";
 import {
+  compileMarkedObservationSource,
   compileScopedDatasetSql,
-  executeObservationFilterOnScopedDataset,
   scopedDatasetFor,
   type ScopedDatasetSql,
 } from "./scoped-dataset";
@@ -81,34 +81,17 @@ export async function queryGoalSummaryFromD1(
     globalFilters,
     preparedDataset,
   );
-  const goal = executeObservationFilterOnScopedDataset(
-    dataset,
-    goalFilter,
-    "goal",
-  );
+  const goal = compileMarkedObservationSource(dataset, goalFilter, false);
   const rows = await queryD1All<Record<string, unknown>>(
     env,
     `WITH
 ${dataset.ctes.trim()},
-${goal.ctes.trim()},
-source_observations AS (
-  SELECT 0 AS is_goal, site_pk, session_id, visitor_id
-  FROM ${dataset.visitRelation}
-  UNION ALL
-  SELECT 0, site_pk, session_id, visitor_id
-  FROM ${dataset.eventRelation}
-  UNION ALL
-  SELECT 1, site_pk, session_id, visitor_id
-  FROM ${goal.matchedVisitRelation}
-  UNION ALL
-  SELECT 1, site_pk, session_id, visitor_id
-  FROM ${goal.matchedEventRelation}
-),
+${goal.cte},
 site_counts AS (
   SELECT site_pk,
-    COUNT(DISTINCT CASE WHEN is_goal = 0 AND TRIM(COALESCE(session_id, '')) != '' THEN session_id END) AS totalSessions,
+    COUNT(DISTINCT CASE WHEN TRIM(COALESCE(session_id, '')) != '' THEN session_id END) AS totalSessions,
     COUNT(DISTINCT CASE WHEN is_goal = 1 AND site_pk IS NOT NULL AND TRIM(COALESCE(session_id, '')) != '' THEN session_id END) AS convertedSessions,
-    COUNT(DISTINCT CASE WHEN is_goal = 0 AND TRIM(COALESCE(visitor_id, '')) != '' THEN visitor_id END) AS totalVisitors,
+    COUNT(DISTINCT CASE WHEN TRIM(COALESCE(visitor_id, '')) != '' THEN visitor_id END) AS totalVisitors,
     COUNT(DISTINCT CASE WHEN is_goal = 1 AND site_pk IS NOT NULL AND TRIM(COALESCE(visitor_id, '')) != '' THEN visitor_id END) AS convertedVisitors
   FROM source_observations
   GROUP BY site_pk
