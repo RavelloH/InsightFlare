@@ -563,7 +563,6 @@ describe("P4 complete timeline and relational SQL", () => {
           );
       }
       for (const expression of [
-        "sequence([PAGE,EVENT]) { $span lte 20ms } exists",
         "sequence([EVENT,EVENT]) { $span eq 5ms } exists",
         "count(sequence([EVENT,EVENT]) { $span lte 5ms }) eq 1",
         "sequence([EVENT,EVENT]) { $span lte 10ms AND $gap(1,2) gt 5ms } exists",
@@ -623,7 +622,6 @@ describe("P4 complete timeline and relational SQL", () => {
           );
       }
       for (const expression of [
-        "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) lt 10ms } exists",
         'sequence([EVENT,EVENT { $.name eq "signup" },EVENT]) { $same($.name) } exists',
         "count(sequence([EVENT,EVENT,EVENT]) { $same($.name) }) eq 1",
       ]) {
@@ -638,6 +636,113 @@ describe("P4 complete timeline and relational SQL", () => {
       db.close();
     }
   });
+
+  it("uses strict ordered predecessors and extrema for different two-step time bounds", () => {
+    const db = fixture();
+    try {
+      const pairs = [
+        'EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }',
+        'EVENT { $.name eq "purchase" }, EVENT { $.name eq "signup" }',
+        "EVENT { $.name exists }, EVENT",
+        'EVENT { $.name eq "signup" }, EVENT { $.name eq "missing" }',
+        "PAGE, EVENT",
+        "EVENT, PAGE",
+        "PAGE { $.path exists }, PAGE",
+      ];
+      for (const pair of pairs)
+        for (const constraint of [
+          "$span lte 0ms",
+          "$span lt 10ms",
+          "$span gte 0ms",
+          "$gap(1,2) gt 10ms",
+        ])
+          for (const operator of ["exists", "notExists"]) {
+            const expression = `sequence([${pair}]) { ${constraint} } ${operator}`;
+            const sql = composeBoundCtes(
+              compileCollectionSqlQualification(
+                parseFilterDsl(expression, analyticsFilterRegistry),
+                "session",
+                { uniqueLocalOccurrences: true },
+              ).ctes,
+            ).ctes;
+            const mixed = pair === "PAGE, EVENT" || pair === "EVENT, PAGE";
+            const pagePair = pair.startsWith("PAGE {");
+            if (mixed || pagePair) {
+              expect(sql).not.toContain("AS span_delta");
+            } else {
+              expect(sql).toContain("AS span_delta");
+            }
+            for (const variant of [
+              source,
+              source.replace("'signup',20)", "'signup',30)"),
+              source.replace("'pricing',1,25)", "'pricing',1,20)"),
+            ])
+              expect(
+                qualified(db, expression, variant, undefined, true),
+              ).toEqual(qualified(db, expression, variant));
+          }
+    } finally {
+      db.close();
+    }
+  });
+
+  it.each([
+    { entity: "EVENT", count: 3 },
+    { entity: "EVENT", count: 4 },
+    { entity: "EVENT", count: 5 },
+    { entity: "PAGE", count: 3 },
+    { entity: "PAGE", count: 4 },
+    { entity: "PAGE", count: 5 },
+  ])(
+    "reserves prefix and suffix occurrences for $entity internal gaps with $count identical steps",
+    ({ entity, count }) => {
+      const db = fixture();
+      try {
+        const dense = source
+          .replace(
+            "(1,'a','v3','s2'",
+            "(1,'a','v4','s1','u1','/landing',1,25),(1,'a','v5','s1','u1','/pricing',1,29),(1,'a','v6','s1','u1','/landing',1,50),(1,'a','v3','s2'",
+          )
+          .replace(
+            "(1,'a',105,'e5'",
+            "(1,'a',107,'e7','v4','s1','u1','/landing','purchase',35),(1,'a',108,'e8','v5','s1','u1','/pricing','signup',41),(1,'a',105,'e5'",
+          );
+        for (let from = 1; from < count; from++)
+          for (let to = from + 1; to <= count; to++) {
+            if (from === 1 && to === count) continue;
+            for (const comparison of [
+              "lt 10ms",
+              "lte 0ms",
+              "gte 0ms",
+              "gt 10ms",
+            ])
+              for (const operator of ["exists", "notExists"]) {
+                const expression = `sequence([${Array(count).fill(entity).join(",")}]) { $gap(${from},${to}) ${comparison} } ${operator}`;
+                const sql = composeBoundCtes(
+                  compileCollectionSqlQualification(
+                    parseFilterDsl(expression, analyticsFilterRegistry),
+                    "session",
+                    { uniqueLocalOccurrences: true },
+                  ).ctes,
+                ).ctes;
+                if (entity === "PAGE" && comparison.startsWith("gt"))
+                  expect(sql).not.toContain("AS span_delta");
+                else expect(sql).toContain("AS span_delta");
+                for (const variant of [
+                  source,
+                  dense,
+                  dense.replace("'signup',20)", "'signup',30)"),
+                ])
+                  expect(
+                    qualified(db, expression, variant, undefined, true),
+                  ).toEqual(qualified(db, expression, variant));
+              }
+          }
+      } finally {
+        db.close();
+      }
+    },
+  );
 
   it("evaluates $span, $gap and $same in a bound Sequence item", () => {
     const db = fixture();
