@@ -774,6 +774,43 @@ describe("Dashboard Client Data Processing Utilities", () => {
       expect(network).toHaveBeenCalledTimes(3);
     });
 
+    it("falls back to the network when a streamed promise rejects with or without an observer signal", async () => {
+      const path = "/api/private/overview-page-path";
+      const params = { siteId: "site-rejection", from: 100, to: 200 };
+      const key = privateReadIdentity(path, params);
+      const network = vi.fn(async () => freshJsonResponse({ ok: true }));
+      globalThis.fetch = network as typeof fetch;
+      for (const signal of [undefined, new AbortController().signal]) {
+        const transport = createDeferredPrivateReadTransport({
+          [key]: Promise.reject(new Error("stream disconnected")),
+        });
+        await expect(
+          fetchPrivateJson(path, params, { transport, signal }),
+        ).resolves.toEqual({ ok: true });
+      }
+      expect(network).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not leave unhandled rejections when an overview read or its batch fails", async () => {
+      const transport: PrivateReadTransport = async () => {
+        throw new Error("read unavailable");
+      };
+      const batch = vi.fn(async () => {
+        throw new Error("batch unavailable");
+      });
+      expect(() =>
+        startOverviewInitialReads(
+          "site-stream",
+          mockWindow,
+          new URLSearchParams(),
+          transport,
+          batch,
+        ),
+      ).not.toThrow();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(batch).toHaveBeenCalledTimes(1);
+    });
+
     it("expires unused settled handoffs without resetting the deadline when recreated", async () => {
       const path = "/api/private/overview-page-path";
       const params = { siteId: "site-stream", from: 100, to: 200 };
