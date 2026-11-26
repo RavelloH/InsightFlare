@@ -1428,6 +1428,8 @@ function buildFilterSqlDomains(
       ...(collisionTimeline ? { timelineVisits, timelineEvents } : {}),
       uniqueLocalOccurrences:
         target !== undefined && !input.compatibilityEventSource,
+      uniqueGlobalOccurrences:
+        target === undefined && !input.compatibilityEventSource,
     },
     clock,
   };

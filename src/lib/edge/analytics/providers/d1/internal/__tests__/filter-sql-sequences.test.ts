@@ -392,6 +392,129 @@ describe("P4 complete timeline and relational SQL", () => {
       db.close();
     }
   });
+  it("groups canonical global identical occurrences without losing universe or time range semantics", () => {
+    const db = fixture();
+    try {
+      const base = source
+        .replace("'purchase',30)", "'purchase',35)")
+        .replace("'signup',15)", "'signup',18)")
+        // Sessionless observations may share a timeline key with a real
+        // Session, but must not supply occurrences to its qualification.
+        .replace(
+          "(2,'b','v1','s1','u1','/landing',1,10)",
+          "(2,'b','v1','s1','u1','/landing',1,10), (1,'a','s2','','u2','/landing',1,18)",
+        )
+        .replace(
+          "(2,'b',202,'e2','v1','s1','u1','/landing','purchase',30)",
+          "(2,'b',202,'e2','v1','s1','u1','/landing','purchase',30), (1,'a',107,'e7','s2','','u2','/landing','purchase',18)",
+        );
+      const variants = [
+        { sql: base, sources: {}, clock: undefined },
+        {
+          sql:
+            base +
+            `, scope_filter_f AS (SELECT * FROM scope_raw_events WHERE occurred_at >= 25), scope_filter_u AS (SELECT * FROM scope_raw_visits WHERE started_at >= 20)`,
+          sources: {
+            filterEvents: "scope_filter_f",
+            universeVisits: "scope_filter_u",
+            universeEvents: "scope_filter_f",
+            readEvents: "scope_raw_events",
+          },
+          clock: {
+            nowMs: 50,
+            rangeStartMs: 10,
+            rangeEndExclusiveMs: 50,
+            timeZone: "UTC",
+            filterRangeExplicit: true,
+            filterStartMs: 25,
+            filterEndExclusiveMs: 50,
+            readStartMs: 10,
+            readEndExclusiveMs: 50,
+          },
+        },
+        {
+          sql:
+            base +
+            `, scope_filter_f AS (SELECT * FROM scope_raw_events WHERE occurred_at >= 25)`,
+          sources: {
+            filterEvents: "scope_filter_f",
+            readEvents: "scope_raw_events",
+          },
+          clock: {
+            nowMs: 50,
+            rangeStartMs: 10,
+            rangeEndExclusiveMs: 50,
+            timeZone: "UTC",
+            filterRangeExplicit: false,
+            filterStartMs: 25,
+            filterEndExclusiveMs: 50,
+            readStartMs: 10,
+            readEndExclusiveMs: 50,
+          },
+        },
+      ] as const;
+      const expressions = [
+        "sequence([EVENT,EVENT]) exists",
+        "sequence([EVENT,EVENT,EVENT]) notExists",
+        "sequence([EVENT,EVENT,EVENT,EVENT]) exists",
+        'sequence([EVENT { $.name eq "purchase" OR $.name eq "signup" }, EVENT { $.name eq "purchase" OR $.name eq "signup" }]) exists',
+        'sequence([PAGE { $.path eq "/landing" }, PAGE { $.path eq "/landing" }]) exists',
+        'NOT (sequence([PAGE { $.path eq "/landing" }, PAGE { $.path eq "/landing" }]) exists)',
+        'sequence([EVENT { $.name eq "purchase" }, EVENT { $.name eq "purchase" }]) exists',
+        'sequence([PAGE { $.path eq "/landing" }, PAGE { $.path eq "/landing" }]) notExists',
+        'sequence([EVENT { $.payload("/sku") eq "beta" }, EVENT { $.payload("/sku") eq "beta" }]) exists',
+        'sequence([EVENT { $.name eq "purchase" }, EVENT { $.name eq "purchase" }]) exists OR sequence([PAGE { $.path eq "/landing" }, PAGE { $.path eq "/landing" }]) notExists',
+      ];
+      for (const scope of ["session", "visitor"] as const) {
+        for (const variant of variants) {
+          for (const expression of expressions) {
+            const compile = (uniqueGlobalOccurrences: boolean) =>
+              compileCollectionSqlQualification(
+                parseFilterDsl(expression, analyticsFilterRegistry),
+                scope,
+                { ...variant.sources, uniqueGlobalOccurrences },
+                variant.clock,
+              );
+            const read = (unique: boolean) => {
+              const plan = compile(unique);
+              if (plan.kind !== "entity")
+                throw Error("expected entity qualification");
+              const c = composeBoundCtes(plan.ctes);
+              if (unique)
+                expect(c.ctes).toContain("scope_global_sequence_0 AS");
+              else expect(c.ctes).not.toContain("scope_global_sequence_0 AS");
+              return db
+                .prepare(
+                  `WITH ${variant.sql}, ${c.ctes} SELECT site_pk,entity_id FROM ${plan.qualifiedEntityRelation} ORDER BY site_pk,entity_id`,
+                )
+                .all(...c.bindings.map((x) => x.value));
+            };
+            expect(read(true)).toEqual(read(false));
+          }
+        }
+      }
+      for (const expression of [
+        'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
+        "sequence([PAGE,PAGE]) exists",
+        "sequence([PAGE,PAGE]) notExists",
+        "count(sequence([EVENT,EVENT])) eq 1",
+        "adjacent(sequence([EVENT,EVENT])) exists",
+        "without(sequence([EVENT,EVENT]), PAGE) exists",
+        "sequence([EVENT,EVENT]) { $span lte 10ms } exists",
+      ]) {
+        const sql = composeBoundCtes(
+          compileCollectionSqlQualification(
+            parseFilterDsl(expression, analyticsFilterRegistry),
+            "session",
+            { uniqueGlobalOccurrences: true },
+          ).ctes,
+        ).ctes;
+        expect(sql).not.toContain("scope_global_sequence_0 AS");
+      }
+    } finally {
+      db.close();
+    }
+  });
   it("uses typed value extrema for two-step Payload existence only on proven sources", () => {
     const db = fixture();
     try {

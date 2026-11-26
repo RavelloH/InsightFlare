@@ -64,6 +64,8 @@ export interface SqlQualificationSources {
   readonly timelineEvents?: string;
   /** Canonical target-local sources have unique occurrence IDs. */
   readonly uniqueLocalOccurrences?: boolean;
+  /** Canonical global sources have unique occurrences within the read range. */
+  readonly uniqueGlobalOccurrences?: boolean;
 }
 
 interface SqlFragment {
@@ -304,6 +306,7 @@ function onlyApplicable(expression: PredicateFragment): PredicateFragment {
 
 class SqlCollectionCompiler {
   private aliasIndex = 0;
+  readonly globalSequenceCtes: BoundCteDefinition[] = [];
 
   constructor(
     private readonly sources: SqlQualificationSources,
@@ -890,6 +893,109 @@ class SqlCollectionCompiler {
     };
   }
   /**
+   * A root entity can qualify from one grouped set of identical Page/Event
+   * occurrences instead of enumerating combinations for every candidate.
+   * Only occurrence-local selector predicates are eligible. The universe
+   * still controls which entities can qualify (including negation).
+   */
+  private globalRepeatedSequenceExists(
+    condition: FilterCondition,
+    frame: SqlFrame,
+  ): PredicateFragment | null {
+    const target = condition.target;
+    if (
+      !this.sources.uniqueGlobalOccurrences ||
+      this.sources.uniqueLocalOccurrences ||
+      frame.anchorAlias !== "candidate" ||
+      frame.currentAlias !== frame.anchorAlias ||
+      frame.currentKind !== frame.anchorKind ||
+      (frame.anchorKind !== "session" && frame.anchorKind !== "visitor") ||
+      (condition.operator !== "exists" && condition.operator !== "notExists") ||
+      target.kind !== "sequence" ||
+      target.steps.length < 2 ||
+      !target.steps.every(
+        (step) => JSON.stringify(step) === JSON.stringify(target.steps[0]),
+      )
+    )
+      return null;
+    const step = target.steps[0]!;
+    const root = step.kind === "selector" ? step.collection : step;
+    if (
+      root.kind !== "entity-root" ||
+      (root.entity !== "page" && root.entity !== "event")
+    )
+      return null;
+    const kind = root.entity;
+    // Dense unfiltered Page collections can make shared qualification
+    // more expensive. Only admit measured Page path equality selectors.
+    if (
+      kind === "page" &&
+      (step.kind !== "selector" ||
+        step.predicate.kind !== "condition" ||
+        step.predicate.operator !== "eq" ||
+        step.predicate.target.kind !== "member" ||
+        step.predicate.target.member !== "path" ||
+        step.predicate.target.object.kind !== "context-root" ||
+        step.predicate.target.object.context !== "current")
+    )
+      return null;
+    const localPredicate = (expression: FilterExpression): boolean => {
+      if (expression.kind === "not") return localPredicate(expression.child);
+      if (expression.kind !== "condition")
+        return expression.children.every(localPredicate);
+      const value = expression.target;
+      if (value.kind === "current-payload") return kind === "event";
+      return (
+        value.kind === "member" &&
+        value.object.kind === "context-root" &&
+        value.object.context === "current" &&
+        (value.member === "time" ||
+          (kind === "page" && value.member === "path") ||
+          (kind === "event" && value.member === "name"))
+      );
+    };
+    if (step.kind === "selector" && !localPredicate(step.predicate))
+      return null;
+    const item = this.alias();
+    const predicate =
+      step.kind === "selector"
+        ? onlyApplicable(
+            this.expression(step.predicate, {
+              ...frame,
+              currentAlias: item,
+              currentKind: kind,
+            }),
+          )
+        : { sql: "1", bindings: [], applicable: true };
+    const relation = this.source(kind, !this.clock?.filterRangeExplicit);
+    const identity =
+      frame.anchorKind === "session" ? "session_id" : "visitor_id";
+    const name = `scope_global_sequence_${this.globalSequenceCtes.length}`;
+    this.globalSequenceCtes.push(
+      boundCte(
+        name,
+        `${name} AS (
+      SELECT ${item}.site_pk, ${item}.${identity} AS entity_id
+      FROM ${relation} ${item}
+      WHERE ${item}.site_pk IS NOT NULL
+        AND TRIM(COALESCE(${item}.${identity}, '')) != ''
+        AND (${predicate.sql})
+      GROUP BY ${item}.site_pk, ${item}.${identity}
+      HAVING COUNT(*) >= ${target.steps.length}
+    )`,
+        predicate.bindings,
+      ),
+    );
+    const found = `COALESCE((${frame.anchorAlias}.site_pk, ${frame.anchorAlias}.${identity})
+      IN (SELECT site_pk, entity_id FROM ${name}), 0)`;
+    return {
+      sql: condition.operator === "notExists" ? `NOT (${found})` : found,
+      bindings: [],
+      applicable: true,
+    };
+  }
+
+  /**
    * Identical unconstrained steps need only N distinct occurrences; a
    * two-step sequence can use its first minimum and last maximum.
    * Keep Page-only distinct pairs and other shapes on the full enumerator.
@@ -1141,6 +1247,8 @@ class SqlCollectionCompiler {
     condition: FilterCondition,
     frame: SqlFrame,
   ): PredicateFragment {
+    const globalSequence = this.globalRepeatedSequenceExists(condition, frame);
+    if (globalSequence) return globalSequence;
     const optimizedSame = this.localSameSequenceExists(condition, frame);
     if (optimizedSame) return optimizedSame;
     const optimizedSpan = this.localSequenceSpanExists(condition, frame);
@@ -1465,6 +1573,7 @@ export function compileCollectionSqlQualification(
       readVisits,
       readEvents,
       uniqueLocalOccurrences: sources.uniqueLocalOccurrences,
+      uniqueGlobalOccurrences: sources.uniqueGlobalOccurrences,
     },
     clock,
   );
@@ -1547,9 +1656,10 @@ export function compileCollectionSqlQualification(
     currentKind: scope,
   });
   ctes.push(
+    ...compiler.globalSequenceCtes,
     boundCte(
       "scope_filter_qualified_entities",
-      `scope_filter_qualified_entities AS (
+      `scope_filter_qualified_entities AS ${compiler.globalSequenceCtes.length > 0 ? "MATERIALIZED " : ""}(
     SELECT candidate.site_pk, candidate.${identifier} AS entity_id
     FROM ${relation} candidate WHERE ${predicate.sql}
   )`,
