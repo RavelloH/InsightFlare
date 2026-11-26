@@ -2901,10 +2901,7 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           [(kind === "session" ? "visitor" : "session") + ".views gt 0", kind],
           [kind + ".events gt 0", kind],
           ['event.payload("/items/1/sku") eq "B"', kind],
-          [
-            'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
-            kind,
-          ],
+          ["count(VISITOR) gte 1", kind],
         ] as const) {
           const { filters, plan } = prepare(expression, scope);
           const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
@@ -2917,47 +2914,99 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       db.close();
     }
   });
-  it("narrows local advanced occurrence relations without narrowing Q/F/R time domains", async () => {
-    const { db, env } = runFixture();
-    try {
-      const base = createQueryTime(100, 300, "UTC", 400);
-      for (const kind of ["session", "visitor"] as const) {
-        const column = kind + "_id";
-        for (const [expression, time, expected] of [
-          ["count(PAGE) gte 1", base, true],
-          ["count(EVENT) eq 2", base, true],
-          ['count(EVENT { $.name eq "purchase" }) eq 1', base, true],
-          [
-            'count(EVENT { $.payload("/items/1/sku") eq "B" }) eq 1',
-            base,
-            true,
-          ],
-          [
-            'first(EVENT).name eq "purchase"',
-            { ...base, fullHistory: true },
-            true,
-          ],
-          [
-            'first(EVENT).name eq "signup"',
-            { ...base, fullHistory: true },
-            false,
-          ],
-          [
-            'first(EVENT).name eq "signup"',
-            {
-              ...base,
-              fullHistory: true,
-              filterRange: { startMs: 100, endExclusiveMs: 300 },
-            },
-            true,
-          ],
-          [
-            'first(PAGE).path eq "/old"',
-            { ...base, readRange: createTimeRange(0, 300) },
-            true,
-          ],
-          ["count(PAGE) eq 1 AND NOT (count(EVENT) eq 0)", base, true],
-        ] as const) {
+  const localHistoryBase = createQueryTime(100, 300, "UTC", 400);
+  it.each([
+    ["count(PAGE) gte 1", localHistoryBase, true],
+    ["count(EVENT) eq 2", localHistoryBase, true],
+    ['count(EVENT { $.name eq "purchase" }) eq 1', localHistoryBase, true],
+    [
+      'count(EVENT { $.payload("/items/1/sku") eq "B" }) eq 1',
+      localHistoryBase,
+      true,
+    ],
+    [
+      'first(EVENT).name eq "purchase"',
+      { ...localHistoryBase, fullHistory: true },
+      true,
+    ],
+    [
+      'first(EVENT).name eq "signup"',
+      { ...localHistoryBase, fullHistory: true },
+      false,
+    ],
+    [
+      'first(EVENT).name eq "signup"',
+      {
+        ...localHistoryBase,
+        fullHistory: true,
+        filterRange: { startMs: 100, endExclusiveMs: 300 },
+      },
+      true,
+    ],
+    [
+      'first(PAGE).path eq "/old"',
+      { ...localHistoryBase, readRange: createTimeRange(0, 300) },
+      true,
+    ],
+    ["count(PAGE) eq 1 AND NOT (count(EVENT) eq 0)", localHistoryBase, true],
+    [
+      'sequence([EVENT { $.name eq "purchase" }, EVENT { $.name eq "signup" }]) exists',
+      { ...localHistoryBase, fullHistory: true },
+      true,
+    ],
+    [
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
+      localHistoryBase,
+      true,
+    ],
+    [
+      'without(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]), EVENT { $.name eq "view" }) exists',
+      localHistoryBase,
+      true,
+    ],
+    [
+      "count(window(EVENT, @range.start, [0ms, 200ms])) eq 2",
+      localHistoryBase,
+      true,
+    ],
+    ["count(periods(PAGE, 1d)) eq 1", localHistoryBase, true],
+    [
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) { $span lte 40ms AND $gap(1, 2) gte 20ms } exists',
+      localHistoryBase,
+      true,
+    ],
+    [
+      'count(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) { $span lte 20ms }) eq 0',
+      localHistoryBase,
+      true,
+    ],
+    [
+      'sequence([EVENT { $.name eq "purchase" }, EVENT { $.name eq "purchase" }]) { $same($.name) } exists',
+      { ...localHistoryBase, fullHistory: true },
+      true,
+    ],
+    [
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) { $same($.payload("/items/0/sku")) } notExists',
+      localHistoryBase,
+      true,
+    ],
+    [
+      "count(periods(PAGE, 1d) { count($items) eq 1 }) eq 1",
+      localHistoryBase,
+      true,
+    ],
+    [
+      "periods(EVENT, 1d) { count($items) gte 2 AND NOT (count($items) gte 3) } exists",
+      localHistoryBase,
+      true,
+    ],
+  ] as const)(
+    "narrows local advanced occurrence relation %s without narrowing Q/F/R",
+    async (expression, time, expected) => {
+      const { db, env } = runFixture();
+      try {
+        for (const kind of ["session", "visitor"] as const) {
+          const column = kind + "_id";
           const doc = parseFilterDsl(expression, analyticsFilterRegistry);
           const plan = createScopedFilterPlan(
             (kind + "-events") as "session-events" | "visitor-events",
@@ -3036,32 +3085,145 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
             }
           }
         }
-        for (const expression of [
-          "count(VISITOR) gte 1",
-          "count(SESSION) gte 1",
-          'sequence([PAGE { $.path eq "/home" }, EVENT { $.name eq "signup" }]) exists',
-        ]) {
-          const doc = parseFilterDsl(expression, analyticsFilterRegistry);
-          const plan = createScopedFilterPlan(
-            (kind + "-events") as "session-events" | "visitor-events",
-            doc,
-            kind,
-          )!;
-          const filters = attachScopedFilterMetadata(doc, {
-            requestedScope: kind,
-            resolvedScope: plan.scope,
-            plan,
-            time: base,
-            siteIds: ["site-a"],
-          });
-          const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
-          expect(
-            compileScopedDatasetSql({
-              ...input,
-              target: { type: kind, value: kind === "session" ? "s1" : "u1" },
-            }),
-          ).toEqual(compileScopedDatasetSql(input));
-        }
+      } finally {
+        db.close();
+      }
+    },
+  );
+  it("retains full qualification for cross-entity advanced relations", () => {
+    const base = localHistoryBase;
+    for (const kind of ["session", "visitor"] as const) {
+      for (const expression of [
+        "count(VISITOR) gte 1",
+        "count(SESSION) gte 1",
+        'SESSION { PAGE { $.path eq "/home" } exists } exists',
+      ]) {
+        const doc = parseFilterDsl(expression, analyticsFilterRegistry);
+        const plan = createScopedFilterPlan(
+          (kind + "-events") as "session-events" | "visitor-events",
+          doc,
+          kind,
+        )!;
+        const filters = attachScopedFilterMetadata(doc, {
+          requestedScope: kind,
+          resolvedScope: plan.scope,
+          plan,
+          time: base,
+          siteIds: ["site-a"],
+        });
+        const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
+        expect(
+          compileScopedDatasetSql({
+            ...input,
+            target: { type: kind, value: kind === "session" ? "s1" : "u1" },
+          }),
+        ).toEqual(compileScopedDatasetSql(input));
+      }
+    }
+  });
+  it("preserves Session adjacency when a sessionless Visit key collides", async () => {
+    const { db, env } = runFixture();
+    try {
+      db.exec(
+        "INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms) VALUES(1,'site-a','s1','','other','/between',140,1)",
+      );
+      const doc = parseFilterDsl(
+        'adjacent(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }])) exists',
+        analyticsFilterRegistry,
+      );
+      for (const kind of ["session", "visitor"] as const) {
+        const plan = createScopedFilterPlan(
+          (kind + "-events") as "session-events" | "visitor-events",
+          doc,
+          kind,
+        )!;
+        const filters = attachScopedFilterMetadata(doc, {
+          requestedScope: kind,
+          resolvedScope: plan.scope,
+          plan,
+          time: createQueryTime(100, 300, "UTC", 400),
+          siteIds: ["site-a"],
+        });
+        const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
+        const target = { type: kind, value: kind === "session" ? "s1" : "u1" };
+        const original = compileScopedDatasetSql(input);
+        const restricted = compileScopedDatasetSql({ ...input, target });
+        if (kind === "session") {
+          expect(restricted.ctes).toContain("scope_filter_timeline_visits AS");
+          expect(restricted.ctes).toContain("AND session_id = ?");
+        } else expect(restricted.ctes).toContain("AND visitor_id = ?");
+        const column = kind + "_id";
+        const read = (dataset: ReturnType<typeof compileScopedDatasetSql>) =>
+          db
+            .prepare(
+              `WITH ${dataset.ctes} SELECT * FROM ${dataset.eventRelation} WHERE ${column}=? ORDER BY event_id`,
+            )
+            .all(...dataset.bindings.map((b) => b.value), target.value);
+        expect(read(restricted)).toEqual(read(original));
+        const result = await queryJourneyEventsPageFromD1(
+          env,
+          "site-a",
+          WINDOW,
+          filters,
+          target,
+          100,
+        );
+        expect(result.items.length > 0).toBe(kind === "visitor");
+      }
+    } finally {
+      db.close();
+    }
+  });
+  it("keeps collision events position-only even when their linked visit is outside R", async () => {
+    const { db, env } = runFixture();
+    try {
+      db.exec(
+        "INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms) VALUES(1,'site-a','s1',NULL,'other','/outside',20,1),(2,'site-b','s1','','other','/other-site',140,1); INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at) VALUES(105,1,'site-a','collision-event','s1',3,145)",
+      );
+      const doc = parseFilterDsl(
+        'adjacent(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }])) exists',
+        analyticsFilterRegistry,
+      );
+      const plan = createScopedFilterPlan("session-events", doc, "session")!;
+      const target = { type: "session", value: "s1" } as const;
+      const filters = attachScopedFilterMetadata(doc, {
+        requestedScope: "session",
+        resolvedScope: plan.scope,
+        plan,
+        time: createQueryTime(100, 300, "UTC", 400),
+        siteIds: ["site-a"],
+      });
+      const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
+      const read = (dataset: ReturnType<typeof compileScopedDatasetSql>) =>
+        db
+          .prepare(
+            `WITH ${dataset.ctes} SELECT * FROM ${dataset.eventRelation} WHERE session_id = ? ORDER BY event_id`,
+          )
+          .all(...dataset.bindings.map((b) => b.value), target.value);
+      for (const [eventTime, expected] of [
+        [145, false],
+        [160, false],
+        [300, true],
+      ] as const) {
+        db.prepare(
+          "UPDATE custom_events SET occurred_at=? WHERE event_pk=105",
+        ).run(eventTime);
+        const original = compileScopedDatasetSql(input);
+        const restricted = compileScopedDatasetSql({ ...input, target });
+        expect(read(restricted)).toEqual(read(original));
+        const page = await queryJourneyEventsPageFromD1(
+          env,
+          "site-a",
+          WINDOW,
+          filters,
+          target,
+          100,
+        );
+        // At an equal timestamp, collision-event sorts before e-purchase.
+        expect(page.items.length > 0).toBe(expected);
+        expect(page.items.some((item) => item.id === "collision-event")).toBe(
+          false,
+        );
       }
     } finally {
       db.close();
