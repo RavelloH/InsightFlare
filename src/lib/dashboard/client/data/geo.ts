@@ -1,3 +1,4 @@
+import { parseGeoLocationValue } from "@/lib/analytics/geo-location";
 import {
   emptyOverviewGeoPoints,
   emptyOverviewGeoTab,
@@ -6,6 +7,7 @@ import type {
   DashboardListRequestOptions,
   OverviewGeoDimensionTab,
   OverviewGeoTabRows,
+  PrivateReadTransport,
 } from "@/lib/dashboard/client/data/types";
 import { fetchPrivateJson } from "@/lib/dashboard/client/request";
 import {
@@ -13,7 +15,15 @@ import {
   withComparison,
   withFilters,
 } from "@/lib/dashboard/client/utils";
-import type { TimeWindow } from "@/lib/dashboard/query-state";
+import {
+  type DashboardComparisonQuery,
+  resolveDashboardComparisonQuery,
+} from "@/lib/dashboard/comparison-query";
+import { setDashboardFilterValue } from "@/lib/dashboard/filter-state";
+import {
+  parseFilterDocumentFromSearchParams,
+  type TimeWindow,
+} from "@/lib/dashboard/query-state";
 import type {
   OverviewGeoPointsData,
   OverviewGeoTabData,
@@ -153,6 +163,7 @@ export async function fetchOverviewGeoDimensionTab(
   options?: {
     limit?: number;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
     resolvedScope?: FilterScope;
     comparison?: DashboardListRequestOptions["comparison"];
     comparisonMetric?: DashboardListRequestOptions["comparisonMetric"];
@@ -225,4 +236,68 @@ export async function fetchOverviewGeoDimensionTabPage(
       visitors: Number((row as { visitors?: unknown }).visitors ?? 0),
     })) as OverviewGeoTabRows,
   };
+}
+
+/** A geographic drill-down replaces only the geographic control, in both periods. */
+export function resolveGeoPageRequest(
+  filters: FilterDocument,
+  comparison: DashboardComparisonQuery | null,
+  locationValue: string | null,
+) {
+  const location = parseGeoLocationValue(locationValue);
+  const applyLocation = (document: FilterDocument) =>
+    location
+      ? setDashboardFilterValue(document, "geo", location.canonical)
+      : document;
+  const statsTab: OverviewGeoDimensionTab = location
+    ? location.level === "country"
+      ? "region"
+      : "city"
+    : "country";
+  return {
+    location,
+    filters: applyLocation(filters),
+    statsTab,
+    comparison: comparison
+      ? { ...comparison, filters: applyLocation(comparison.filters) }
+      : null,
+  };
+}
+export const GEO_PAGE_POINT_LIMIT = 5000;
+export function geoPageStatsLimit(tab: OverviewGeoDimensionTab) {
+  return tab === "city" ? 600 : 400;
+}
+export function startGeoInitialReads(
+  siteId: string,
+  window: TimeWindow,
+  search: URLSearchParams,
+  transport: PrivateReadTransport,
+): void {
+  const document = parseFilterDocumentFromSearchParams(search);
+  const filters = document.root
+    ? document
+    : attachFilterScopePreference(document, "auto");
+  const request = resolveGeoPageRequest(
+    filters,
+    resolveDashboardComparisonQuery(search, window, filters),
+    search.get("location"),
+  );
+  void fetchOverviewGeoPoints(siteId, window, request.filters, {
+    limit: GEO_PAGE_POINT_LIMIT,
+    applyGeoFilter: Boolean(request.location),
+    transport,
+  }).catch(() => undefined);
+  void fetchOverviewGeoDimensionTab(
+    siteId,
+    window,
+    request.statsTab,
+    request.filters,
+    {
+      limit: geoPageStatsLimit(request.statsTab),
+      comparison: request.comparison,
+      comparisonMetric: "views",
+      comparisonSortBy: "current",
+      transport,
+    },
+  ).catch(() => undefined);
 }

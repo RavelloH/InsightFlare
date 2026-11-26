@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 
 import {
   dashboardComparisonLabel,
@@ -9,27 +9,28 @@ import { GeoCountryStatsPanel } from "@/components/dashboard/geo/geo-country-sta
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import type { GeoClientMapStageProps } from "@/components/dashboard/site-pages/geo/geo-client-map-stage";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { parentGeoLocationValue } from "@/lib/analytics/geo-location";
 import {
-  parentGeoLocationValue,
-  parseGeoLocationValue,
-} from "@/lib/analytics/geo-location";
+  GEO_PAGE_POINT_LIMIT,
+  geoPageStatsLimit,
+  resolveGeoPageRequest,
+} from "@/lib/dashboard/client/data/geo";
 import {
   fetchOverviewGeoDimensionTab,
   fetchOverviewGeoPoints,
-  type OverviewGeoDimensionTab,
   type OverviewGeoTabRows,
 } from "@/lib/dashboard/client/data/index";
 import {
   pushUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/dashboard/client/history";
-import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import {
-  serializeDashboardSearchParams,
-  setDashboardFilterValue,
-} from "@/lib/dashboard/filter-state";
+  createDeferredPrivateReadTransport,
+  type DeferredPrivateReads,
+} from "@/lib/dashboard/client/request";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
+import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import dynamic from "@/lib/dynamic";
-import type { FilterDocument } from "@/lib/filter-contract/index";
 import { resolveCountryLabel } from "@/lib/i18n/code-labels";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
@@ -58,10 +59,13 @@ import {
   resolveGeoPoints,
   resolveWindowDayCount,
 } from "./geo-client-model";
+const EMPTY_GEO_POINTS = emptyOverviewGeoPoints();
+const EMPTY_GEO_ROWS: OverviewGeoTabRows = [];
 interface GeoClientPageProps {
   locale: Locale;
   messages: AppMessages;
   siteId: string;
+  deferredReads?: DeferredPrivateReads | null;
 }
 // World Bank, World, GDP per capita (current US$), most recent value for 2024.
 
@@ -69,64 +73,68 @@ export function GeoClientPage({
   locale,
   messages,
   siteId,
+  deferredReads,
 }: GeoClientPageProps) {
   const isMobile = useIsMobile();
-  const { window, filters } = useDashboardQuery();
+  const { window, filters, queryReady } = useDashboardQuery();
+  const transport = useMemo(
+    () =>
+      deferredReads
+        ? createDeferredPrivateReadTransport(deferredReads)
+        : undefined,
+    [deferredReads],
+  );
   const comparisonQuery = useDashboardComparisonQuery(window, filters);
   const searchParams = useLiveSearchParams();
   const geoMessages = messages.geo;
   const geoInvestigationMessages = geoMessages.investigation;
-  const requestedLocation = useMemo(
-    () => parseGeoLocationValue(searchParams.get("location")),
-    [searchParams],
+  const locationValue = searchParams.get("location");
+  const {
+    location: activeLocation,
+    filters: requestFilters,
+    statsTab,
+    comparison: comparisonRequest,
+  } = useMemo(
+    () => resolveGeoPageRequest(filters, comparisonQuery, locationValue),
+    [filters, comparisonQuery, locationValue],
   );
-  const requestFilters = useMemo<FilterDocument>(
-    () =>
-      requestedLocation?.canonical
-        ? setDashboardFilterValue(filters, "geo", requestedLocation.canonical)
-        : filters,
-    [filters, requestedLocation?.canonical],
-  );
-  const requestFiltersKey = useMemo(
-    () => filterQueryKey(requestFilters),
-    [requestFilters],
-  );
-  const statsTab: OverviewGeoDimensionTab = requestedLocation
-    ? requestedLocation.level === "country"
-      ? "region"
-      : "city"
-    : "country";
-  const comparisonRequest = useMemo(() => {
-    if (!comparisonQuery) return null;
-    const comparisonFilters = requestedLocation?.canonical
-      ? setDashboardFilterValue(
-          comparisonQuery.filters,
-          "geo",
-          requestedLocation.canonical,
-        )
-      : comparisonQuery.filters;
-    return {
-      ...comparisonQuery,
-      filters: comparisonFilters,
-    };
-  }, [comparisonQuery, requestedLocation?.canonical]);
-  const comparisonFiltersKey = useMemo(
-    () =>
-      comparisonRequest ? filterQueryKey(comparisonRequest.filters) : "none",
-    [comparisonRequest],
-  );
-  const { data: geoData, isFetching: loading } = useQuery({
+  const locationKey = activeLocation?.canonical ?? "";
+  const requestFiltersKey = filterQueryKey(requestFilters);
+  const comparisonFiltersKey = comparisonRequest
+    ? filterQueryKey(comparisonRequest.filters)
+    : "none";
+  const baseKey = [
+    siteId,
+    window.from,
+    window.to,
+    window.interval,
+    window.timeZone,
+    locationKey,
+    requestFiltersKey,
+  ];
+  const pointsQuery = useQuery({
+    queryKey: ["dashboard", "geo-points", ...baseKey],
+    queryFn: async ({ signal }) => ({
+      siteId,
+      locationKey,
+      value: await fetchOverviewGeoPoints(siteId, window, requestFilters, {
+        limit: GEO_PAGE_POINT_LIMIT,
+        applyGeoFilter: Boolean(activeLocation),
+        signal,
+        ...(transport ? { transport } : {}),
+      }),
+    }),
+    placeholderData: (previous) =>
+      previous?.siteId === siteId && previous.locationKey === locationKey
+        ? previous
+        : undefined,
+    enabled: queryReady,
+  });
+  const statsQuery = useQuery({
     queryKey: [
       "dashboard",
-      "geo",
-      siteId,
-      window.from,
-      window.to,
-      window.interval,
-      window.timeZone,
-      locale,
-      requestedLocation?.canonical ?? "",
-      requestFiltersKey,
+      "geo-stats",
+      ...baseKey,
       statsTab,
       comparisonRequest?.mode ?? "none",
       comparisonRequest?.window.from ?? "none",
@@ -135,53 +143,55 @@ export function GeoClientPage({
       comparisonRequest?.window.timeZone ?? "none",
       comparisonFiltersKey,
     ],
-    queryFn: async ({ signal }) => {
-      const [geoPointsData, geoTabRows, geoLocaleBundle] = await Promise.all([
-        fetchOverviewGeoPoints(siteId, window, requestFilters, {
-          limit: 5000,
-          applyGeoFilter: Boolean(requestedLocation?.canonical),
-          signal,
-        }),
-        fetchOverviewGeoDimensionTab(siteId, window, statsTab, requestFilters, {
-          limit: statsTab === "city" ? 600 : 400,
+    queryFn: async ({ signal }) => ({
+      siteId,
+      locationKey,
+      value: await fetchOverviewGeoDimensionTab(
+        siteId,
+        window,
+        statsTab,
+        requestFilters,
+        {
+          limit: geoPageStatsLimit(statsTab),
           comparison: comparisonRequest,
           comparisonMetric: "views",
           comparisonSortBy: "current",
           signal,
-        }),
-        fetchGeoLocaleBundle(
-          requestedLocation,
-          locale,
-          messages.common.unknown,
-          geoMessages,
-        ),
-      ]);
-      return {
-        geoPointsData,
-        geoTabRows,
-        activeLocation: requestedLocation,
-        locationFocus: geoLocaleBundle.focus,
-        geoInvestigation: geoLocaleBundle.investigation,
-        geoDirectoryEntries: geoLocaleBundle.directoryEntries,
-      };
-    },
-    placeholderData: keepPreviousData,
-    enabled: typeof window !== "undefined",
+          ...(transport ? { transport } : {}),
+        },
+      ),
+    }),
+    placeholderData: (previous) =>
+      previous?.siteId === siteId && previous.locationKey === locationKey
+        ? previous
+        : undefined,
+    enabled: queryReady,
   });
-  const geoPointsData = geoData?.geoPointsData ?? emptyOverviewGeoPoints();
-  const geoTabRows = geoData?.geoTabRows ?? [];
-  const activeLocation = geoData?.activeLocation ?? null;
-  const locationFocus = geoData?.locationFocus ?? null;
-  const geoInvestigation = geoData?.geoInvestigation ?? null;
-  const geoDirectoryEntries = geoData?.geoDirectoryEntries ?? null;
+  // Locale metadata is public and potentially much slower (e.g. country
+  // directories). It enriches analytics, but does not gate their rendering.
+  const localeQuery = useQuery({
+    queryKey: ["dashboard", "geo-locale-bundle", locale, locationKey],
+    queryFn: () =>
+      fetchGeoLocaleBundle(
+        activeLocation,
+        locale,
+        messages.common.unknown,
+        geoMessages,
+      ),
+    enabled: queryReady,
+  });
+  const geoPointsData = pointsQuery.data?.value ?? EMPTY_GEO_POINTS;
+  const geoTabRows = statsQuery.data?.value ?? EMPTY_GEO_ROWS;
+  const loading = statsQuery.isPending || statsQuery.isFetching;
+  const locationFocus = localeQuery.data?.focus ?? null;
+  const geoInvestigation = localeQuery.data?.investigation ?? null;
+  const geoDirectoryEntries = localeQuery.data?.directoryEntries ?? null;
   const wikidataId = geoInvestigation?.wikidataId ?? "";
   const { data: geoWikiSummary } = useQuery({
     queryKey: ["dashboard", "geo-wiki-summary", locale, wikidataId],
     queryFn: () => fetchGeoWikiSummary(wikidataId, locale),
     enabled:
-      typeof window !== "undefined" &&
-      Boolean(wikidataId) &&
-      activeLocation?.level !== "country",
+      queryReady && Boolean(wikidataId) && activeLocation?.level !== "country",
   });
 
   const points = useMemo(

@@ -15,6 +15,7 @@ import {
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/dashboard/client/history";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { EMPTY_DASHBOARD_FILTER_DOCUMENT } from "@/lib/dashboard/filter-state";
 import {
   readDashboardQueryPreferences,
@@ -116,7 +117,7 @@ function readInitialScopePreference(): FilterScopePreference {
   return parseFilterScopePreference(window.location.search);
 }
 function filterDocumentKey(filters: FilterDocument): string {
-  return JSON.stringify(normalizeFilters(filters));
+  return filterQueryKey(normalizeFilters(filters));
 }
 function persistedRawDsl(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0

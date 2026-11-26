@@ -1,13 +1,23 @@
 import { emptyPerformance } from "@/lib/dashboard/client/data/empty";
-import type { RetentionGranularity } from "@/lib/dashboard/client/data/types";
+import type {
+  PrivateReadTransport,
+  RetentionGranularity,
+} from "@/lib/dashboard/client/data/types";
 import { fetchPrivateJson } from "@/lib/dashboard/client/request";
 import { withFilters } from "@/lib/dashboard/client/utils";
-import type { TimeWindow } from "@/lib/dashboard/query-state";
+import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
+import {
+  parseFilterDocumentFromSearchParams,
+  type TimeWindow,
+} from "@/lib/dashboard/query-state";
 import type {
   PerformanceData,
   RetentionData,
 } from "@/lib/dashboard-api/client/edge";
-import type { FilterDocument } from "@/lib/filter-contract";
+import {
+  attachFilterScopePreference,
+  type FilterDocument,
+} from "@/lib/filter-contract";
 function fallbackUnlessAborted<T>(error: unknown, fallback: () => T): T {
   if (error instanceof Error && error.name === "AbortError") throw error;
   if (
@@ -23,7 +33,7 @@ export async function fetchPerformance(
   siteId: string,
   window: TimeWindow,
   filters?: FilterDocument,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; transport?: PrivateReadTransport },
 ): Promise<PerformanceData> {
   const requestParams = withFilters(
     {
@@ -35,16 +45,20 @@ export async function fetchPerformance(
     },
     filters,
   );
-  const request = options?.signal
-    ? fetchPrivateJson<PerformanceData>(
-        "/api/private/performance",
-        requestParams,
-        { signal: options.signal },
-      )
-    : fetchPrivateJson<PerformanceData>(
-        "/api/private/performance",
-        requestParams,
-      );
+  const request =
+    options?.signal || options?.transport
+      ? fetchPrivateJson<PerformanceData>(
+          "/api/private/performance",
+          requestParams,
+          {
+            signal: options.signal,
+            ...(options.transport ? { transport: options.transport } : {}),
+          },
+        )
+      : fetchPrivateJson<PerformanceData>(
+          "/api/private/performance",
+          requestParams,
+        );
   return request.catch((error) =>
     fallbackUnlessAborted(error, () => emptyPerformance(window.interval)),
   );
@@ -74,4 +88,25 @@ export async function fetchRetention(
         signal: options.signal,
       })
     : fetchPrivateJson<RetentionData>("/api/private/retention", requestParams);
+}
+
+/** RUM already has a composite dashboard endpoint: do not repeat its SQL for each metric/card. */
+export function startPerformanceInitialReads(
+  siteId: string,
+  window: TimeWindow,
+  search: URLSearchParams,
+  transport: PrivateReadTransport,
+): void {
+  const document = parseFilterDocumentFromSearchParams(search);
+  const filters = document.root
+    ? document
+    : attachFilterScopePreference(document, "auto");
+  const comparison = resolveDashboardComparisonQuery(search, window, filters);
+  void fetchPerformance(siteId, window, filters, { transport }).catch(
+    () => undefined,
+  );
+  if (comparison)
+    void fetchPerformance(siteId, comparison.window, comparison.filters, {
+      transport,
+    }).catch(() => undefined);
 }

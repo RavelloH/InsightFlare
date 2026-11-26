@@ -2,8 +2,10 @@ import "@tanstack/react-start/server-only";
 
 import { readBoundedBody } from "@/lib/api-v1";
 import { startTechnologyInitialReads } from "@/lib/dashboard/client/data/browser";
+import { startGeoInitialReads } from "@/lib/dashboard/client/data/geo";
 import { startOverviewInitialReads } from "@/lib/dashboard/client/data/overview";
 import { startPagesInitialReads } from "@/lib/dashboard/client/data/pages";
+import { startPerformanceInitialReads } from "@/lib/dashboard/client/data/performance";
 import {
   startCampaignsInitialReads,
   startReferrersInitialReads,
@@ -74,7 +76,14 @@ export async function resolveTeamDashboardRequest(input: {
  * Register reads (and cache writes) before the Worker returns its response,
  * so its existing emitWhenComplete drains the real work exactly once. */
 export type SiteAnalyticsInitialPage =
-  "overview" | "pages" | "referrers" | "campaigns" | "browsers" | "devices";
+  | "overview"
+  | "pages"
+  | "referrers"
+  | "campaigns"
+  | "browsers"
+  | "devices"
+  | "geo"
+  | "performance";
 export async function startSiteAnalyticsStream(input: {
   request: Request;
   env: Env;
@@ -106,36 +115,45 @@ export async function startSiteAnalyticsStream(input: {
       } as ExecutionContext)
     : undefined;
   const allowedPaths = new Set(
-    page === "browsers"
+    page === "geo"
       ? [
-          "browser-trend",
-          "browser-engine-trend",
-          "browser-radar",
-          "browser-version-breakdown",
-          "browser-cross-breakdown",
+          "overview-geo-points",
+          "overview-geo-country",
+          "overview-geo-region",
+          "overview-geo-city",
         ]
-      : page === "devices"
-        ? ["client-dimension-trend", "client-cross-breakdown"]
-        : page === "campaigns"
-          ? ["utm-dimension-trend", "utm-source", "utm-term"]
-          : page === "pages"
-            ? ["pages-dashboard", "trend"]
-            : page === "referrers"
-              ? [
-                  "referrer-summary",
-                  "referrer-channel-dimension-trend",
-                  "referrer-radar",
-                  "overview-source-domain",
-                  "overview-source-channel",
-                ]
-              : [
-                  "overview",
-                  "overview-page-path",
-                  "overview-source-domain",
-                  "overview-client-browser",
-                  "overview-geo-country",
-                  "overview-geo-points",
-                ],
+      : page === "performance"
+        ? ["performance"]
+        : page === "browsers"
+          ? [
+              "browser-trend",
+              "browser-engine-trend",
+              "browser-radar",
+              "browser-version-breakdown",
+              "browser-cross-breakdown",
+            ]
+          : page === "devices"
+            ? ["client-dimension-trend", "client-cross-breakdown"]
+            : page === "campaigns"
+              ? ["utm-dimension-trend", "utm-source", "utm-term"]
+              : page === "pages"
+                ? ["pages-dashboard", "trend"]
+                : page === "referrers"
+                  ? [
+                      "referrer-summary",
+                      "referrer-channel-dimension-trend",
+                      "referrer-radar",
+                      "overview-source-domain",
+                      "overview-source-channel",
+                    ]
+                  : [
+                      "overview",
+                      "overview-page-path",
+                      "overview-source-domain",
+                      "overview-client-browser",
+                      "overview-geo-country",
+                      "overview-geo-points",
+                    ],
   );
   const transport: PrivateReadTransport = <T>(
     path: string,
@@ -195,6 +213,12 @@ export async function startSiteAnalyticsStream(input: {
     reads[key] = logger ? logger.track(deferred) : deferred;
     return promise as Promise<T>;
   };
+  if (page === "geo" || page === "performance") {
+    const start =
+      page === "geo" ? startGeoInitialReads : startPerformanceInitialReads;
+    start(site.id, window, new URLSearchParams(search), transport);
+    return reads;
+  }
   if (page === "browsers" || page === "devices") {
     startTechnologyInitialReads(
       page,

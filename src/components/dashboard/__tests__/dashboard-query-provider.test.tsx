@@ -14,10 +14,12 @@ import {
   useDashboardTimeZone,
 } from "@/components/dashboard/shell/dashboard-query-provider";
 import { TimeZoneProvider } from "@/components/time-zone-provider";
+import { replaceUrlWithoutNavigation } from "@/lib/dashboard/client/history";
 import {
   resolveTimeWindow,
   type TimeWindow,
 } from "@/lib/dashboard/query-state";
+import { filterScopePreferenceFromDocument } from "@/lib/filter-contract";
 function Probe() {
   const { filters, scopePreference } = useDashboardQuery();
   return createElement(
@@ -223,6 +225,42 @@ describe("DashboardQueryProvider", () => {
     });
 
     expect(container.textContent).toBe("filtered:visitor");
+  });
+
+  it("keeps the non-enumerable request scope in sync when the URL changes only scope", async () => {
+    const seen: Array<{ scope: string; filterScope: string | undefined }> = [];
+    function ScopeProbe() {
+      const { filters, scopePreference, queryReady } = useDashboardQuery();
+      useEffect(() => {
+        if (queryReady)
+          seen.push({
+            scope: scopePreference,
+            filterScope: filterScopePreferenceFromDocument(filters),
+          });
+      }, [filters, scopePreference, queryReady]);
+      return <span>{scopePreference}</span>;
+    }
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <App>
+          <ScopeProbe />
+        </App>,
+      );
+    });
+    expect(seen.at(-1)).toEqual({ scope: "visitor", filterScope: "visitor" });
+    await act(async () =>
+      replaceUrlWithoutNavigation(
+        "/zh/app/team/site/pages?scope=session&filter%5Bpage.path%5D=%2Fdocs",
+      ),
+    );
+    expect(seen.at(-1)).toEqual({ scope: "session", filterScope: "session" });
+    await act(async () =>
+      replaceUrlWithoutNavigation(
+        "/zh/app/team/site/pages?filter%5Bpage.path%5D=%2Fdocs",
+      ),
+    );
+    expect(seen.at(-1)).toEqual({ scope: "auto", filterScope: "auto" });
   });
 
   it("clears a scope-only URL and falls back to Auto", async () => {

@@ -21,6 +21,7 @@ import {
 } from "@/components/dashboard/comparison/use-dashboard-comparison-query";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import { fetchPerformance } from "@/lib/dashboard/client/data/index";
+import { createDeferredPrivateReadTransport } from "@/lib/dashboard/client/request";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
@@ -75,11 +76,24 @@ export function PerformanceClientPage({
   locale,
   messages,
   siteId,
+  deferredReads,
 }: PerformanceClientPageProps) {
-  const { filters, window: timeWindow } = useDashboardQuery() as {
+  const {
+    filters,
+    window: timeWindow,
+    queryReady,
+  } = useDashboardQuery() as {
     filters: FilterDocument;
+    queryReady: boolean;
     window: TimeWindow;
   };
+  const transport = useMemo(
+    () =>
+      deferredReads
+        ? createDeferredPrivateReadTransport(deferredReads)
+        : undefined,
+    [deferredReads],
+  );
   const [activePanel, setActivePanel] = useState<PerformancePanelKey>("score");
   const comparisonQuery = useDashboardComparisonQuery(timeWindow, filters);
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
@@ -107,13 +121,14 @@ export function PerformanceClientPage({
     queryFn: async ({ signal }) => {
       const currentPromise = fetchPerformance(siteId, timeWindow, filters, {
         signal,
+        ...(transport ? { transport } : {}),
       });
       const comparisonPromise = comparisonQuery
         ? fetchPerformance(
             siteId,
             comparisonQuery.window,
             comparisonQuery.filters,
-            { signal },
+            { signal, ...(transport ? { transport } : {}) },
           )
         : Promise.resolve(null);
       const [performanceData, comparisonData] = await Promise.all([
@@ -141,7 +156,7 @@ export function PerformanceClientPage({
       };
     },
     placeholderData: keepPreviousData,
-    enabled: typeof window !== "undefined",
+    enabled: queryReady,
   });
   const loading = isPending || isPlaceholderData;
   const performanceData =

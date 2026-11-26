@@ -279,6 +279,78 @@ describe("actual Worker top-level invocation entrypoints", () => {
     expect(executePrivateQuery).toHaveBeenCalledTimes(5);
     expect(resolvePrivateSite).toHaveBeenCalledTimes(1);
   });
+  it("streams geo dimension data while points remain pending and tracks late failure", async () => {
+    const f = setup();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(resolvePrivateSite).mockResolvedValueOnce({
+      id: "site-a",
+      name: "A",
+      domain: "a.test",
+      canManage: true,
+    } as never);
+    vi.mocked(executePrivateQuery).mockImplementation(async (input) => {
+      if (input.pathname === "overview-geo-points") {
+        await gate;
+        return new Response("failed", { status: 500 });
+      }
+      return Response.json({
+        ok: true,
+        data: {
+          items: [],
+          pagination: {
+            limit: 400,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+      });
+    });
+    let reads: Awaited<ReturnType<typeof startSiteAnalyticsStream>> | undefined;
+    vi.mocked(startHandler.fetch).mockImplementationOnce(
+      async (request, options) => {
+        reads = await startSiteAnalyticsStream({
+          request,
+          env: options!.context!.env,
+          siteId: "site-a",
+          page: "geo",
+          window: {
+            preset: "custom",
+            from: 100,
+            to: 300,
+            interval: "day",
+            timeZone: "UTC",
+          },
+          search: "location=JP",
+        });
+        return new Response("shell");
+      },
+    );
+    const response = await server.fetch(
+      new Request("https://app.test/en/app/team/site/geo?location=JP"),
+      f.env,
+      f.ctx,
+    );
+    expect(await response.text()).toBe("shell");
+    expect(Object.keys(reads!)).toHaveLength(2);
+    const stats = Object.keys(reads!).find((key) =>
+      key.includes("overview-geo-region"),
+    )!;
+    const points = Object.keys(reads!).find((key) =>
+      key.includes("overview-geo-points"),
+    )!;
+    await expect(reads![stats]).resolves.toHaveProperty("value");
+    expect(f.points).toHaveLength(0);
+    release();
+    await expect(reads![points]).resolves.toBeNull();
+    await f.finish();
+    expect(f.points).toHaveLength(1);
+    expect(executePrivateQuery).toHaveBeenCalledTimes(2);
+    expect(resolvePrivateSite).toHaveBeenCalledTimes(1);
+  });
   it.each([
     "overview",
     "pages",
@@ -286,6 +358,8 @@ describe("actual Worker top-level invocation entrypoints", () => {
     "campaigns",
     "browsers",
     "devices",
+    "geo",
+    "performance",
   ] as const)(
     "does not start any analytics for denied SSR site access on %s",
     async (page) => {

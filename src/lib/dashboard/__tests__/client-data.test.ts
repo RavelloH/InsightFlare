@@ -55,8 +55,10 @@ import {
   withFilters,
 } from "@/lib/dashboard/client/data";
 import { startTechnologyInitialReads } from "@/lib/dashboard/client/data/browser";
+import { startGeoInitialReads } from "@/lib/dashboard/client/data/geo";
 import { startOverviewInitialReads } from "@/lib/dashboard/client/data/overview";
 import { startPagesInitialReads } from "@/lib/dashboard/client/data/pages";
+import { startPerformanceInitialReads } from "@/lib/dashboard/client/data/performance";
 import {
   startCampaignsInitialReads,
   startReferrersInitialReads,
@@ -1304,6 +1306,121 @@ describe("Dashboard Client Data Processing Utilities", () => {
         client.clear();
       }
     });
+
+    it.each([
+      [null, "country", 400],
+      ["JP", "region", 400],
+      ["JP::13::Tokyo", "city", 600],
+      ["JP::13::Tokyo::Shinjuku", "city", 600],
+    ] as const)(
+      "preserves the geo page drill-down request %s",
+      (location, tab, limit) => {
+        const calls: Array<{ path: string; params?: PrivateRequestParams }> =
+          [];
+        const transport: PrivateReadTransport = async <T>(
+          path: string,
+          params?: PrivateRequestParams,
+        ) => {
+          calls.push({ path, params });
+          return {
+            ok: true,
+            data: {
+              items: [],
+              pagination: {
+                limit: 100,
+                returned: 0,
+                hasMore: false,
+                nextCursor: null,
+              },
+            },
+          } as T;
+        };
+        const search = new URLSearchParams(
+          "scope=session&filter[page.path]=/home&filter[geo.country]=de&compare=previous&compareFilter[page.path]=/docs&compareFilter[geo.country]=us",
+        );
+        if (location) search.set("location", location);
+        startGeoInitialReads("site-stream", mockWindow, search, transport);
+        expect(calls).toHaveLength(2);
+        expect(calls.map((x) => x.path)).toEqual([
+          "/api/private/overview-geo-points",
+          "/api/private/overview-geo-" + tab,
+        ]);
+        expect(calls[0]?.params).toMatchObject({
+          limit: 5000,
+          scope: "session",
+          "filter[page.path]": "/home",
+          "filter[geo.country]": location ? "jp" : "de",
+        });
+        expect(calls[1]?.params).toMatchObject({
+          limit,
+          scope: "session",
+          "filter[page.path]": "/home",
+          "filter[geo.country]": location ? "jp" : "de",
+          compare: "previous",
+          metric: "views",
+          sortBy: "current",
+          "compareFilter[geo.country]": location ? "jp" : "us",
+          "compareFilter[page.path]": "/docs",
+        });
+        if (location) expect(calls[0]?.params?.applyGeoFilter).toBe(1);
+        else expect(calls[0]?.params).not.toHaveProperty("applyGeoFilter");
+        expect(calls[0]?.params).not.toHaveProperty("compare");
+        expect(
+          calls.every(
+            (x) =>
+              x.params?.siteId === "site-stream" &&
+              x.params?.timeZone === mockWindow.timeZone,
+          ),
+        ).toBe(true);
+      },
+    );
+
+    it.each([false, true])(
+      "reads the composite RUM endpoint once per requested period, comparison=%s",
+      (compare) => {
+        const calls: Array<{ path: string; params?: PrivateRequestParams }> =
+          [];
+        const transport: PrivateReadTransport = async <T>(
+          path: string,
+          params?: PrivateRequestParams,
+        ) => {
+          calls.push({ path, params });
+          return { ok: true } as T;
+        };
+        startPerformanceInitialReads(
+          "site-stream",
+          mockWindow,
+          new URLSearchParams(
+            "scope=session&filter[page.path]=/home" +
+              (compare
+                ? "&compare=previous&compareFilter[page.path]=/docs"
+                : ""),
+          ),
+          transport,
+        );
+        expect(calls).toHaveLength(compare ? 2 : 1);
+        expect(
+          calls.every(
+            (x) =>
+              x.path === "/api/private/performance" &&
+              x.params?.siteId === "site-stream" &&
+              x.params?.timeZone === mockWindow.timeZone &&
+              x.params?.interval === mockWindow.interval,
+          ),
+        ).toBe(true);
+        expect(calls[0]?.params).toMatchObject({
+          from: mockWindow.from,
+          to: mockWindow.to,
+          scope: "session",
+          "filter[page.path]": "/home",
+        });
+        if (compare)
+          expect(calls[1]?.params).toMatchObject({
+            to: mockWindow.from - 1,
+            "filter[page.path]": "/docs",
+          });
+      },
+    );
 
     function freshJsonResponse(body: unknown, status = 200): Response {
       return new Response(JSON.stringify(body), {
