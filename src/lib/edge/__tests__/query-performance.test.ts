@@ -199,7 +199,10 @@ describe("edge query performance D1 helpers", () => {
       inp: { avg: null, p50: null, p75: null, p95: null, samples: 0 },
     });
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.sql).toContain("GROUP BY metric");
+    expect(calls[0]?.sql).not.toContain("GROUP BY metric");
+    expect(calls[0]?.sql.match(/CUME_DIST\(\) OVER/g)).toHaveLength(5);
+    expect(calls[0]?.sql.match(/HAVING COUNT\(\*\) > 0/g)).toHaveLength(5);
+    expect(calls[0]?.sql).not.toContain("metric_visits AS");
     expect(calls[0]?.sql).toContain("COUNT(*) AS samples");
     expect(calls[0]?.sql).toContain("CUME_DIST() OVER");
     expect(calls[0]?.sql).not.toContain("ROW_NUMBER() OVER");
@@ -1322,7 +1325,7 @@ describe("edge query performance D1 helpers", () => {
       expect(trends.inp).toEqual([]);
       for (const call of d1.calls) {
         expect(call.sql).toMatch(
-          /(?:filtered_visits|bucketed_visits) AS MATERIALIZED \([\s\S]*?\(perf_ttfb_ms IS NOT NULL OR perf_fcp_ms IS NOT NULL OR perf_lcp_ms IS NOT NULL OR perf_cls IS NOT NULL OR perf_inp_ms IS NOT NULL\)\s*\),/,
+          /(?:filtered_visits|bucketed_visits) AS MATERIALIZED \([\s\S]*?\(perf_ttfb_ms IS NOT NULL OR perf_fcp_ms IS NOT NULL OR perf_lcp_ms IS NOT NULL OR perf_cls IS NOT NULL OR perf_inp_ms IS NOT NULL\)\s*\)(?:,|\s*SELECT)/,
         );
       }
       // The dashboard still counts all eligible views, including null metrics.
