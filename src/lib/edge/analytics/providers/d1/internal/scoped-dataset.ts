@@ -2047,8 +2047,21 @@ scope_final_visitors AS (
     sessionRelation: "scope_final_sessions",
     visitorRelation: "scope_final_visitors",
     scope: input.plan.scope,
+    // Canonical raw Visits and Events have unique primary/source IDs.
+    // Observation qualification projects those IDs with WHERE predicates;
+    // matching Visit IDs use UNION. Entity membership leaves deduplicate
+    // their (site_pk, entity_id) keys, AND joins unique sets, OR uses UNION,
+    // and NOT filters a unique universe. Advanced membership likewise
+    // filters a grouped/unioned universe. None of these final joins can
+    // multiply a canonical observation. Stage filters only narrow rows.
+    // Basic entity facts can change the SQLite plan for empty matches.
+    // Keep their conservative path until that cost is independently proven.
+    // Compatibility and externally supplied datasets retain the old guard.
     uniqueObservationIds:
-      allowSourceInlining && !input.compatibilityEventSource,
+      !input.compatibilityEventSource &&
+      (allowSourceInlining ||
+        domains !== undefined ||
+        factEntityKindsForFilter(input.filters.root).size === 0),
     materializedEventFacts:
       input.plan.scope === "event" &&
       !allowSourceInlining &&
