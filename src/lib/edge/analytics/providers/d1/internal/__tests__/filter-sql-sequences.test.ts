@@ -511,7 +511,7 @@ describe("P4 complete timeline and relational SQL", () => {
       }
       for (const expression of [
         "count(sequence([EVENT,EVENT]) { $same($.name) }) eq 1",
-        "sequence([EVENT,EVENT,EVENT]) { $same($.name) } exists",
+        'sequence([EVENT,EVENT { $.name eq "signup" },EVENT]) { $same($.name) } exists',
         "sequence([EVENT,EVENT]) { $same($.name) AND $span lte 10ms } exists",
       ]) {
         expect(sql(expression, true)).not.toMatch(
@@ -570,6 +570,65 @@ describe("P4 complete timeline and relational SQL", () => {
       ]) {
         expect(sql(expression, true)).not.toMatch(
           /AS span_delta|HAVING COUNT\(\*\) >= 2/,
+        );
+        expect(qualified(db, expression, source, undefined, true)).toEqual(
+          qualified(db, expression),
+        );
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("uses one collection for repeated multi-step equality and full-span bounds", () => {
+    const db = fixture();
+    try {
+      const expressions = [
+        "sequence([EVENT,EVENT,EVENT]) { $same($.name) } exists",
+        "sequence([EVENT,EVENT,EVENT,EVENT]) { $same($.name) } notExists",
+        "sequence([PAGE,PAGE,PAGE]) { $same($.path) } notExists",
+        'sequence([EVENT,EVENT,EVENT]) { $same($.payload("/sku")) } exists',
+        'sequence([EVENT,EVENT,EVENT]) { $same($.payload("/missing")) } notExists',
+        "sequence([EVENT,EVENT,EVENT]) { $span lte 10ms } exists",
+        "sequence([EVENT,EVENT,EVENT,EVENT]) { $span gt 5ms } exists",
+        "sequence([EVENT,EVENT,EVENT]) { $gap(1,3) lt 10ms } notExists",
+        "sequence([PAGE,PAGE,PAGE]) { $span gte 0ms } exists",
+      ];
+      const sql = (expression: string, unique: boolean) =>
+        composeBoundCtes(
+          compileCollectionSqlQualification(
+            parseFilterDsl(expression, analyticsFilterRegistry),
+            "session",
+            { uniqueLocalOccurrences: unique },
+          ).ctes,
+        ).ctes;
+      const repeated = source
+        .replaceAll("'noise'", "'signup'")
+        .replaceAll("'purchase'", "'signup'");
+      for (const expression of expressions) {
+        expect(sql(expression, true)).toMatch(
+          /AS span_delta|HAVING COUNT\(\*\) >= [34]/,
+        );
+        expect(sql(expression, false)).not.toMatch(
+          /AS span_delta|HAVING COUNT\(\*\) >= [34]/,
+        );
+        for (const variant of [
+          source,
+          repeated,
+          repeated.replace("'signup',20)", "'signup',30)"),
+          source.replaceAll("'/pricing'", "'/landing'"),
+        ])
+          expect(qualified(db, expression, variant, undefined, true)).toEqual(
+            qualified(db, expression, variant),
+          );
+      }
+      for (const expression of [
+        "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) lt 10ms } exists",
+        'sequence([EVENT,EVENT { $.name eq "signup" },EVENT]) { $same($.name) } exists',
+        "count(sequence([EVENT,EVENT,EVENT]) { $same($.name) }) eq 1",
+      ]) {
+        expect(sql(expression, true)).not.toMatch(
+          /AS span_delta|HAVING COUNT\(\*\) >= [34]/,
         );
         expect(qualified(db, expression, source, undefined, true)).toEqual(
           qualified(db, expression),
