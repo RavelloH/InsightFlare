@@ -289,7 +289,7 @@ export function createDeferredPrivateReadTransport(
     if (signal?.aborted) throwAbortError();
     const deferred = reads[privateReadIdentity(path, params)];
     if (
-      deferred &&
+      deferred !== undefined &&
       !consumedPrivateReads.has(deferred) &&
       Date.now() < (deferredReadExpiry.get(deferred) ?? 0)
     ) {
