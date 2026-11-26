@@ -51,6 +51,10 @@ import {
   queryEventTotalsTrendFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/events-trend";
 import { queryFilterValuesPageFromD1 } from "@/lib/edge/analytics/providers/d1/internal/filter-values";
+import {
+  buildFunnelMembershipSqlPlan,
+  buildFunnelSqlPlan,
+} from "@/lib/edge/analytics/providers/d1/internal/funnel-planner";
 import { queryFunnelAnalysis } from "@/lib/edge/analytics/providers/d1/internal/funnels";
 import { queryGoalSummaryFromD1 } from "@/lib/edge/analytics/providers/d1/internal/goal-summary";
 import { queryGoalTimeseriesFromD1 } from "@/lib/edge/analytics/providers/d1/internal/goal-timeseries";
@@ -3464,37 +3468,119 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
-  it("proves source uniqueness only for non-amplifying canonical datasets", () => {
-    for (const [expression, scope, expected] of [
-      ["", "event", true],
-      ["", "session", true],
-      ["", "visitor", true],
-      ['page.path eq "/home"', "event", true],
-      ['page.path eq "/home"', "session", false],
-      ['event.name eq "purchase"', "event", false],
-      ['first(EVENT).name eq "purchase"', "session", false],
-    ] as const) {
-      const doc = expression
-        ? parseFilterDsl(expression, analyticsFilterRegistry)
-        : EMPTY_FILTER_DOCUMENT;
-      const plan = createScopedFilterPlan("funnel-analysis", doc, scope)!;
-      const filters = attachScopedFilterMetadata(doc, {
-        requestedScope: scope,
-        resolvedScope: plan.scope,
-        plan,
-        time: createQueryTime(100, 300, "UTC", 400),
-        siteIds: ["site-a"],
-      });
-      const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
-      expect(compileScopedDatasetSql(input).uniqueObservationIds).toBe(
-        expected,
-      );
-      expect(
-        compileScopedDatasetSql({ ...input, compatibilityEventSource: true })
-          .uniqueObservationIds,
-      ).toBe(false);
-    }
-  });
+  it.each([
+    ["", "event"],
+    ["", "session"],
+    ["", "visitor"],
+    ['page.path eq "/home"', "event"],
+    ['page.path eq "/home"', "session"],
+    ['event.name eq "purchase"', "event"],
+    ['event.payload("/items/1/sku") eq "B"', "event"],
+    ['page.path eq "/home" AND event.name eq "purchase"', "visitor"],
+    ['page.path eq "/home" OR event.name eq "view"', "session"],
+    ['NOT (page.path eq "/docs")', "visitor"],
+    ["session.views gte 1 AND session.events gte 1", "session"],
+    ["session.views gte 1", "visitor"],
+    ['first(EVENT).name eq "purchase"', "session"],
+    [
+      'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
+      "visitor",
+    ],
+    ['count(EVENT { $.name eq "missing" }) eq 0', "session"],
+  ] as const)(
+    "proves canonical source uniqueness and preserves funnel results for %s (%s)",
+    (expression, scope) => {
+      const { db } = runFixture();
+      try {
+        // A second qualifying Visit and Event share the same entity. Entity
+        // membership and event-to-Visit qualification must not amplify either.
+        db.exec(
+          "INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms) VALUES(1,'site-a','v-repeat','s1','u1','/home',180,15); INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at,sequence) VALUES(105,1,'site-a','e-repeat','v-repeat',1,190,0); UPDATE custom_events SET sequence=0 WHERE sequence IS NULL",
+        );
+        const doc = expression
+          ? parseFilterDsl(expression, analyticsFilterRegistry)
+          : EMPTY_FILTER_DOCUMENT;
+        const plan = createScopedFilterPlan("funnel-analysis", doc, scope)!;
+        const filters = attachScopedFilterMetadata(doc, {
+          requestedScope: scope,
+          resolvedScope: plan.scope,
+          plan,
+          time: createQueryTime(100, 300, "UTC", 400),
+          siteIds: SITES,
+        });
+        const input = { filters, plan, siteIds: SITES, window: WINDOW };
+        const canonical = compileScopedDatasetSql(input);
+        const optimized = !expression.startsWith("session.views");
+        expect(canonical.uniqueObservationIds).toBe(optimized);
+        expect(
+          compileScopedDatasetSql({ ...input, compatibilityEventSource: true })
+            .uniqueObservationIds,
+        ).toBe(false);
+        for (const [relation, id] of [
+          [canonical.visitRelation, "visit_id"],
+          [canonical.eventRelation, "event_id"],
+        ])
+          expect(
+            select(
+              db,
+              `WITH ${canonical.ctes} SELECT site_pk,${id} FROM ${relation} GROUP BY site_pk,${id} HAVING COUNT(*)>1`,
+              canonical.bindings.map((binding) => binding.value),
+            ),
+          ).toEqual([]);
+        const legacy = { ...canonical, uniqueObservationIds: false };
+        for (const progressionScope of ["session", "visitor"] as const) {
+          const config = {
+            filterDslVersion: 1 as const,
+            progressionScope,
+            conversionWindowMs: progressionScope === "visitor" ? 1000 : null,
+            steps: [
+              { id: "page", filterDsl: 'page.path eq "/home"' },
+              { id: "purchase", filterDsl: 'event.name eq "purchase"' },
+              { id: "repeat", filterDsl: 'event.name eq "purchase"' },
+            ],
+          };
+          const oldPlan = buildFunnelSqlPlan(config, legacy);
+          const newPlan = buildFunnelSqlPlan(config, canonical);
+          expect(oldPlan.sql).toContain("source_rank");
+          if (optimized) expect(newPlan.sql).not.toContain("source_rank");
+          else expect(newPlan.sql).toContain("source_rank");
+          expect(
+            select(
+              db,
+              newPlan.sql,
+              newPlan.bindings.map((binding) => binding.value),
+            ),
+          ).toEqual(
+            select(
+              db,
+              oldPlan.sql,
+              oldPlan.bindings.map((binding) => binding.value),
+            ),
+          );
+          for (const outcome of ["converted", "dropoff"] as const) {
+            const read = (source: typeof canonical) => {
+              const membership = buildFunnelMembershipSqlPlan(
+                config,
+                source,
+                2,
+                { outcome },
+              );
+              return select(
+                db,
+                `WITH ${source.ctes},${membership.ctes} SELECT * FROM ${membership.relation} ORDER BY site_pk,session_id,visitor_id`,
+                [...source.bindings, ...membership.bindings].map(
+                  (binding) => binding.value,
+                ),
+              );
+            };
+            expect(read(canonical)).toEqual(read(legacy));
+          }
+        }
+      } finally {
+        db.close();
+      }
+    },
+  );
   it("Funnel SQL distinguishes Event-only and expanded Session scope for signup→purchase", async () => {
     const { db, env } = runFixture();
     try {
