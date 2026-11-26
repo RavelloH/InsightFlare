@@ -455,6 +455,10 @@ describe("P4 complete timeline and relational SQL", () => {
       ] as const;
       const expressions = [
         "sequence([EVENT,EVENT]) exists",
+        "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) lte 10ms } exists",
+        "sequence([EVENT,EVENT,EVENT]) { $gap(2,3) gte 0ms } notExists",
+        "sequence([EVENT,EVENT,EVENT,EVENT]) { $gap(2,3) lt 1ms } exists",
+        'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) { $gap(1,2) gt 1ms } exists',
         "sequence([EVENT,EVENT]) { $same($.name) } exists",
         'sequence([EVENT,EVENT]) { $same($.payload("/sku")) } notExists',
         'sequence([EVENT { $.name eq "signup" },EVENT]) { $same($.payload("/sku")) } exists',
@@ -517,7 +521,9 @@ describe("P4 complete timeline and relational SQL", () => {
         "count(sequence([EVENT,EVENT])) eq 1",
         "adjacent(sequence([EVENT,EVENT])) exists",
         "without(sequence([EVENT,EVENT]), PAGE) exists",
-        "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) lte 10ms } exists",
+        "sequence([PAGE,PAGE,PAGE]) { $gap(1,2) lte 10ms } exists",
+        "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) eq 10ms } exists",
+        "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) lte 10ms AND $span gte 0ms } exists",
         "sequence([EVENT,EVENT]) { $span eq 10ms } exists",
       ]) {
         const sql = composeBoundCtes(
@@ -933,6 +939,69 @@ describe("P4 complete timeline and relational SQL", () => {
     },
   );
 
+  it.each([3, 4, 5])(
+    "uses feasible per-entity ranks for global internal gaps with %s steps",
+    (count) => {
+      const db = fixture();
+      try {
+        const dense = source.replace(
+          "(1,'a',105,'e5'",
+          "(1,'a',107,'e7','v2','s1','u1','/pricing','purchase',35),(1,'a',108,'e8','v2','s1','u1','/pricing','signup',41),(1,'a',105,'e5'",
+        );
+        const split = dense.replace(
+          "'e7','v2','s1','u1'",
+          "'e7','v2','s3','u1'",
+        );
+        const variants = [
+          source,
+          dense,
+          split.replace("'signup',20)", "'signup',30)"),
+        ];
+        for (const scope of ["session", "visitor"] as const) {
+          for (let from = 1; from < count; from++)
+            for (let to = from + 1; to <= count; to++) {
+              if (from === 1 && to === count) continue;
+              for (const comparison of [
+                "lt 10ms",
+                "lte 0ms",
+                "gte 0ms",
+                "gt 10ms",
+              ])
+                for (const operator of ["exists", "notExists"]) {
+                  const expression = `sequence([${Array(count).fill("EVENT").join(",")}]) { $gap(${from},${to}) ${comparison} } ${operator}`;
+                  const read = (
+                    variant: string,
+                    uniqueGlobalOccurrences: boolean,
+                  ) => {
+                    const plan = compileCollectionSqlQualification(
+                      parseFilterDsl(expression, analyticsFilterRegistry),
+                      scope,
+                      { uniqueGlobalOccurrences },
+                    );
+                    if (plan.kind !== "entity") throw Error("expected entity");
+                    const c = composeBoundCtes(plan.ctes);
+                    if (uniqueGlobalOccurrences)
+                      expect(c.ctes).toContain("scope_global_sequence_0 AS");
+                    else
+                      expect(c.ctes).not.toContain(
+                        "scope_global_sequence_0 AS",
+                      );
+                    return db
+                      .prepare(
+                        `WITH ${variant}, ${c.ctes} SELECT site_pk,entity_id FROM ${plan.qualifiedEntityRelation} ORDER BY site_pk,entity_id`,
+                      )
+                      .all(...c.bindings.map((x) => x.value));
+                  };
+                  for (const variant of variants)
+                    expect(read(variant, true)).toEqual(read(variant, false));
+                }
+            }
+        }
+      } finally {
+        db.close();
+      }
+    },
+  );
   it("evaluates $span, $gap and $same in a bound Sequence item", () => {
     const db = fixture();
     try {

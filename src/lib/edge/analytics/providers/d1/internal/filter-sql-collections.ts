@@ -956,8 +956,9 @@ class SqlCollectionCompiler {
         (bound.target.intrinsic !== "span" &&
           !(
             bound.target.intrinsic === "gap" &&
-            bound.target.from === 1 &&
-            bound.target.to === count
+            bound.target.from >= 1 &&
+            bound.target.from < bound.target.to &&
+            bound.target.to <= count
           )) ||
         !["lt", "lte", "gt", "gte"].includes(bound.operator))
     )
@@ -1102,18 +1103,51 @@ class SqlCollectionCompiler {
         HAVING COUNT(*) >= ${count}`;
     } else if (identical && compared) {
       const time = `${first.item}.occurred_at`;
-      sql = upper
-        ? `SELECT DISTINCT site_pk, entity_id FROM (
-        SELECT ${first.key}, ${time} - LAG(${time}, ${count - 1})
-          OVER (PARTITION BY ${first.item}.site_pk, ${first.item}.${identity} ORDER BY ${time}) AS span_delta
-        ${first.from}
-      ) WHERE ${compared.sql}`
-        : `SELECT site_pk, entity_id FROM (
-        SELECT ${first.key}, MAX(${time}) - MIN(${time}) AS span_delta
-        ${first.from}
-        GROUP BY ${first.item}.site_pk, ${first.item}.${identity}
-        HAVING COUNT(*) >= ${count}
-      ) WHERE ${compared.sql}`;
+      const intrinsic = bound?.kind === "condition" ? bound.target : null;
+      const internal =
+        intrinsic?.kind === "context-intrinsic" &&
+        intrinsic.intrinsic === "gap" &&
+        (intrinsic.from !== 1 || intrinsic.to !== count);
+      if (internal) {
+        // An internal pair must reserve its preceding and following
+        // occurrences. For an upper bound the nearest feasible pair is
+        // separated by exactly to-from ranks; for a lower bound the
+        // first and last feasible endpoints attain the maximum gap.
+        const from = intrinsic.from;
+        const to = intrinsic.to;
+        const suffix = count - to;
+        const partition = `PARTITION BY ${first.item}.site_pk, ${first.item}.${identity}`;
+        const order = `ORDER BY ${time}, ${first.item}.event_id COLLATE BINARY`;
+        const ranked = `SELECT ${first.key}, ${time} AS activity_time,
+          ROW_NUMBER() OVER (${partition} ${order}) AS position,
+          COUNT(*) OVER (${partition}) AS total
+          ${upper ? `, ${time} - LAG(${time}, ${to - from}) OVER (${partition} ${order}) AS span_delta` : ""}
+          ${first.from}`;
+        sql = upper
+          ? `SELECT DISTINCT site_pk, entity_id FROM (${ranked})
+            WHERE position >= ${to} AND position <= total - ${suffix}
+              AND ${compared.sql}`
+          : `SELECT site_pk, entity_id FROM (
+            SELECT site_pk, entity_id,
+              MAX(CASE WHEN position <= total - ${suffix} THEN activity_time END)
+              - MIN(CASE WHEN position >= ${from} THEN activity_time END) AS span_delta
+            FROM (${ranked}) GROUP BY site_pk, entity_id
+            HAVING MAX(total) >= ${count}
+          ) WHERE ${compared.sql}`;
+      } else {
+        sql = upper
+          ? `SELECT DISTINCT site_pk, entity_id FROM (
+          SELECT ${first.key}, ${time} - LAG(${time}, ${count - 1})
+            OVER (PARTITION BY ${first.item}.site_pk, ${first.item}.${identity} ORDER BY ${time}) AS span_delta
+          ${first.from}
+        ) WHERE ${compared.sql}`
+          : `SELECT site_pk, entity_id FROM (
+          SELECT ${first.key}, MAX(${time}) - MIN(${time}) AS span_delta
+          ${first.from}
+          GROUP BY ${first.item}.site_pk, ${first.item}.${identity}
+          HAVING COUNT(*) >= ${count}
+        ) WHERE ${compared.sql}`;
+      }
       bindings.push(...compared.bindings);
     } else {
       const last = compileStep(steps[1]!);
