@@ -66,6 +66,7 @@ vi.mock("@/lib/dashboard/query-preferences", () => ({
   resolveDashboardInitialWindow: vi.fn(),
 }));
 vi.mock("@/lib/dashboard/server/query", () => ({
+  readCachedSidebarTeamDashboard: vi.fn(),
   resolveTeamDashboardRequest: vi.fn(),
   startSiteAnalyticsStream: vi.fn(),
 }));
@@ -125,6 +126,7 @@ import {
   readDashboardAdmin,
 } from "@/lib/dashboard/server";
 import {
+  readCachedSidebarTeamDashboard,
   resolveTeamDashboardRequest,
   startSiteAnalyticsStream,
 } from "@/lib/dashboard/server/query";
@@ -443,6 +445,34 @@ describe("Dashboard route data loaders", () => {
           }),
         }),
       );
+    });
+
+    it("uses the authorized cached adapter for sidebar snapshots and omits failed snapshots", async () => {
+      vi.mocked(readCachedSidebarTeamDashboard)
+        .mockResolvedValueOnce({ sites: [], trend: [] })
+        .mockResolvedValueOnce(null);
+      const result = await loadTeamDashboardSnapshot({
+        data: { teamId: "team-requested", sidebar: true },
+      });
+      expect(result).toMatchObject({
+        data: { sites: [], trend: [] },
+        window: { from: 100, to: 200 },
+        range: "7d",
+      });
+      expect(readCachedSidebarTeamDashboard).toHaveBeenCalledWith(
+        expect.objectContaining({
+          teamId: "team-1",
+          allowedSiteIds: ["site-1"],
+        }),
+        expect.objectContaining({ from: 100, to: 200, timeZone: "Asia/Tokyo" }),
+      );
+      expect(teamDashboardExecute).not.toHaveBeenCalled();
+      expect(readDashboardAdmin).not.toHaveBeenCalled();
+      await expect(
+        loadTeamDashboardSnapshot({
+          data: { teamId: "team-requested", sidebar: true },
+        }),
+      ).resolves.toBeNull();
     });
 
     it("reuses nonempty site data with the analytics reader's public flag", async () => {

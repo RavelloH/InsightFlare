@@ -18,6 +18,8 @@ import { useDashboardTimeQuery } from "@/components/dashboard/shell/dashboard-qu
 import { numberFormat } from "@/lib/dashboard/format";
 import {
   buildSidebarSiteTrends,
+  type DeferredSidebarTeamSnapshot,
+  takeSidebarTeamSnapshot,
   teamDashboardQueryOptions,
   type TeamDashboardWindow,
   type TeamTrafficPoint,
@@ -38,6 +40,7 @@ interface SidebarSiteDetailsProps {
   activeSiteSlug?: string;
   currentSection?: string;
   sites: SidebarSiteSummary[];
+  deferredSnapshot?: DeferredSidebarTeamSnapshot | null;
   loading?: boolean;
   loadingLabel: string;
   labels: {
@@ -207,6 +210,7 @@ export const SidebarSiteDetails = memo(function SidebarSiteDetails({
   activeSiteSlug,
   currentSection,
   sites,
+  deferredSnapshot,
   loading = false,
   loadingLabel,
   labels,
@@ -221,6 +225,8 @@ export const SidebarSiteDetails = memo(function SidebarSiteDetails({
       teamId,
       window,
       range: window.preset,
+      readDeferredSnapshot: () =>
+        takeSidebarTeamSnapshot(deferredSnapshot, teamId, window),
       enabled:
         queryReady && Boolean(teamId) && sites.length > 0 && shouldRenderCharts,
     }),

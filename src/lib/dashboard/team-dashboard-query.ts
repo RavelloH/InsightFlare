@@ -54,6 +54,31 @@ export interface TeamDashboardSnapshot {
   range: RangePreset;
   fetchedAt: number;
 }
+export interface DeferredSidebarTeamSnapshot {
+  teamId: string;
+  window: TeamDashboardWindow;
+  promise: Promise<TeamDashboardSnapshot | null>;
+}
+const consumedSidebarSnapshots = new WeakSet<object>();
+/** Route loader data can outlive the page. Only an exact, fresh team/window
+ * may join the streamed snapshot, and a consumed promise cannot be replayed. */
+export function takeSidebarTeamSnapshot(
+  deferred: DeferredSidebarTeamSnapshot | null | undefined,
+  teamId: string,
+  window: TeamDashboardWindow,
+): Promise<TeamDashboardSnapshot | null> | undefined {
+  if (
+    !deferred ||
+    deferred.teamId !== teamId ||
+    !sameTeamDashboardWindow(deferred.window, window) ||
+    consumedSidebarSnapshots.has(deferred.promise)
+  )
+    return undefined;
+  consumedSidebarSnapshots.add(deferred.promise);
+  return deferred.promise.then((snapshot) =>
+    snapshot && Date.now() - snapshot.fetchedAt <= 15_000 ? snapshot : null,
+  );
+}
 export interface TeamTrafficPoint {
   timestampMs: number;
   views: number;

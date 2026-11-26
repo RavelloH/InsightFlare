@@ -46,12 +46,13 @@ vi.mock(
   async (importOriginal) => ({
     ...(await importOriginal<typeof PrivateDashboardModule>()),
     executePrivateQuery: vi.fn(),
+    executePrivateTeamDashboard: vi.fn(),
   }),
 );
-const { startSiteAnalyticsStream } =
+const { readCachedSidebarTeamDashboard, startSiteAnalyticsStream } =
   await import("@/lib/dashboard/server/query");
 const { resolvePrivateSite } = await import("@/lib/edge/auth/site-access");
-const { executePrivateQuery } =
+const { executePrivateQuery, executePrivateTeamDashboard } =
   await import("@/lib/edge/analytics/interfaces/dashboard/private");
 const { default: server } = await import("@/server");
 const { default: startHandler } =
@@ -94,6 +95,78 @@ describe("actual Worker top-level invocation entrypoints", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
   afterEach(() => vi.restoreAllMocks());
+
+  it("shares the HTTP team dashboard cache only with the exact authenticated audience and site ACL", async () => {
+    const f = setup();
+    const { withDashboardCache } =
+      await import("@/lib/edge/analytics/composition/dashboard-cache");
+    const entries = new Map<string, Response>();
+    vi.stubGlobal("caches", {
+      open: async () => ({
+        match: async (request: Request) => entries.get(request.url)?.clone(),
+        put: async (request: Request, response: Response) => {
+          entries.set(request.url, response.clone());
+        },
+      }),
+    });
+    const window = {
+      preset: "custom" as const,
+      from: 100,
+      to: 300,
+      interval: "day" as const,
+      timeZone: "UTC",
+    };
+    const resolved = {
+      env: f.env,
+      request: new Request("https://app.test/en/app/team/site"),
+      session: { userId: "user-a" } as never,
+      teamId: "team-a",
+      allowedSiteIds: ["site-a"],
+      timeZone: "UTC",
+    };
+    const data = { sites: [], trend: [] };
+    try {
+      await withDashboardCache(
+        f.ctx,
+        new URL(
+          "https://app.test/api/private/team-dashboard?teamId=team-a&from=100&to=300&interval=day&timeZone=UTC",
+        ),
+        async () => Response.json({ ok: true, data }),
+        {
+          identity: {
+            scope: "private-team",
+            tenantId: "team-a",
+            route: "team-dashboard",
+            audienceId: "user-a",
+            allowedSiteIds: ["site-a"],
+          },
+        },
+      );
+      await f.finish();
+      await expect(
+        readCachedSidebarTeamDashboard(resolved, window),
+      ).resolves.toEqual(data);
+      expect(executePrivateTeamDashboard).not.toHaveBeenCalled();
+      vi.mocked(executePrivateTeamDashboard)
+        .mockResolvedValueOnce(Response.json({ ok: true, data }))
+        .mockResolvedValueOnce(new Response("forbidden", { status: 403 }));
+      await expect(
+        readCachedSidebarTeamDashboard(
+          { ...resolved, session: { userId: "user-b" } as never },
+          window,
+        ),
+      ).resolves.toEqual(data);
+      await expect(
+        readCachedSidebarTeamDashboard(
+          { ...resolved, allowedSiteIds: ["site-b"] },
+          window,
+        ),
+      ).resolves.toBeNull();
+      expect(executePrivateTeamDashboard).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
   it("records one page invocation for the workspace without a profile dispatch", async () => {
     const f = setup();
@@ -203,6 +276,7 @@ describe("actual Worker top-level invocation entrypoints", () => {
     finish();
     await f.finish();
     expect(f.points).toHaveLength(1);
+    expect(f.points[0]!.blobs[3]).toBe("page.dashboard.analytics.overview");
     expect(f.points[0]!.doubles[3]).toBe(1);
     expect(f.points[0]!.doubles[5]).toBe(7);
     expect(f.points[0]!.doubles[19]).toBe(2);

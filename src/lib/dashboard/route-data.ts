@@ -30,6 +30,7 @@ import {
   readDashboardAdmin,
 } from "@/lib/dashboard/server";
 import {
+  readCachedSidebarTeamDashboard,
   resolveTeamDashboardRequest,
   type SiteAnalyticsInitialPage,
   startSiteAnalyticsStream,
@@ -158,17 +159,21 @@ export const loadDashboardTeam = createServerFn({ method: "GET" })
 /** Loads the first team-dashboard snapshot on the server for a stable hydrate. */
 async function readTeamDashboardSnapshot(data: {
   teamId: string;
+  sidebar?: boolean;
 }): Promise<TeamDashboardSnapshot | null> {
   const logger = currentInvocationLogger();
   return logger
-    ? logger.measure("dashboard.team_snapshot", () =>
-        executeTeamDashboardSnapshot(data),
+    ? logger.track(
+        logger.measure("dashboard.team_snapshot", () =>
+          executeTeamDashboardSnapshot(data),
+        ),
       )
     : executeTeamDashboardSnapshot(data);
 }
 
 async function executeTeamDashboardSnapshot(data: {
   teamId: string;
+  sidebar?: boolean;
 }): Promise<TeamDashboardSnapshot | null> {
   const runtime = await getDashboardRuntime();
   const [resolved, preloadedSites, window] = await Promise.all([
@@ -177,10 +182,18 @@ async function executeTeamDashboardSnapshot(data: {
       env: runtime.env,
       teamId: data.teamId,
     }),
-    readDashboardAdmin("sites", { teamId: data.teamId }),
+    data.sidebar
+      ? Promise.resolve(null)
+      : readDashboardAdmin("sites", { teamId: data.teamId }),
     readInitialWindow(),
   ]);
   if (resolved instanceof Response) return null;
+  if (data.sidebar) {
+    const snapshot = await readCachedSidebarTeamDashboard(resolved, window);
+    return snapshot
+      ? { data: snapshot, window, range: window.preset, fetchedAt: Date.now() }
+      : null;
+  }
   // Team overview/workspace do not expose site filters. Match the URL sent
   // by fetchTeamDashboard, not stale site filters carried in the page URL.
   const queryUrl = new URL("/api/private/team-dashboard", runtime.request.url);
@@ -230,7 +243,7 @@ async function executeTeamDashboardSnapshot(data: {
   };
 }
 export const loadTeamDashboardSnapshot = createServerFn({ method: "GET" })
-  .validator((data: { teamId: string }) => data)
+  .validator((data: { teamId: string; sidebar?: boolean }) => data)
   .handler(({ data }) => readTeamDashboardSnapshot(data));
 /** Most teams the workspace reads on one page load. */
 export const WORKSPACE_TEAM_LIMIT = 20;

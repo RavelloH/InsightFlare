@@ -11,6 +11,7 @@ import {
   buildTeamSiteTrends,
   fetchTeamDashboard,
   sameTeamDashboardWindow,
+  takeSidebarTeamSnapshot,
   teamDashboardQueryKey,
   teamDashboardQueryOptions,
 } from "@/lib/dashboard/team-dashboard-query";
@@ -283,6 +284,57 @@ describe("team dashboard query helpers", () => {
       views: 1,
       visitors: 1,
     });
+  });
+
+  it("consumes only fresh, exact team/window sidebar handoffs once", async () => {
+    const snapshot = {
+      data: { sites: [], trend: [] },
+      window,
+      range: "7d" as const,
+      fetchedAt: Date.now(),
+    };
+    const deferred = {
+      teamId: "team-1",
+      window,
+      promise: Promise.resolve(snapshot),
+    };
+    expect(
+      takeSidebarTeamSnapshot(undefined, "team-1", window),
+    ).toBeUndefined();
+    expect(takeSidebarTeamSnapshot(deferred, "team-2", window)).toBeUndefined();
+    expect(
+      takeSidebarTeamSnapshot(deferred, "team-1", {
+        ...window,
+        to: window.to + 1,
+      }),
+    ).toBeUndefined();
+    await expect(
+      takeSidebarTeamSnapshot(deferred, "team-1", window),
+    ).resolves.toBe(snapshot);
+    expect(takeSidebarTeamSnapshot(deferred, "team-1", window)).toBeUndefined();
+    await expect(
+      takeSidebarTeamSnapshot(
+        {
+          ...deferred,
+          promise: Promise.resolve({
+            ...snapshot,
+            fetchedAt: Date.now() - 16_000,
+          }),
+        },
+        "team-1",
+        window,
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      takeSidebarTeamSnapshot(
+        {
+          ...deferred,
+          promise: Promise.resolve(null),
+        },
+        "team-1",
+        window,
+      ),
+    ).resolves.toBeNull();
   });
 
   it("joins a matching streamed snapshot without duplicating the private API request", async () => {

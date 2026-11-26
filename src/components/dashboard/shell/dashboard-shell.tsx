@@ -93,6 +93,8 @@ import type {
 const sidebarTrailingIconClass =
   "absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground group-data-[collapsible=icon]:hidden";
 
+import type { DeferredSidebarTeamSnapshot } from "@/lib/dashboard/team-dashboard-query";
+
 import {
   analyticsTabLabel,
   buildSitePath,
@@ -130,6 +132,7 @@ interface DashboardShellProps {
   teamSections?: TeamSectionNavItem[];
   managementSections?: TeamSectionNavItem[];
   initialQueryWindow?: TimeWindow;
+  deferredSidebarSnapshot?: DeferredSidebarTeamSnapshot | null;
   navigationPending?: boolean;
   children: ReactNode;
 }
@@ -147,6 +150,7 @@ export function DashboardShell({
   teamSections,
   managementSections,
   initialQueryWindow,
+  deferredSidebarSnapshot,
   navigationPending,
   children,
 }: DashboardShellProps) {
@@ -1064,6 +1068,7 @@ export function DashboardShell({
                                   activeSiteSlug={resolvedActiveSiteSlug}
                                   currentSection={currentAnalyticsSection}
                                   sites={sidebarSites}
+                                  deferredSnapshot={deferredSidebarSnapshot}
                                   loading={isSidebarSitesLoading}
                                   loadingLabel={messages.common.loading}
                                   labels={sidebarLabels}
