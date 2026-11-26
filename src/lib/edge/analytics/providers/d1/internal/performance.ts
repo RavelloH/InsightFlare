@@ -256,6 +256,9 @@ export async function queryPerformanceSummariesFromD1(
   const filteredClause = appendSqlConditions(source.filterClause, [
     "(" + performanceMetricPresenceSql() + ")",
   ]);
+  // Aggregate each metric before UNION ALL: no combined observation
+  // stream needs to be sorted or grouped. Skip empty branches to retain
+  // the existing absent-metric result mapping.
   const sql = `
 WITH
 ${source.ctes},
@@ -268,24 +271,16 @@ filtered_visits AS MATERIALIZED (
     perf_inp_ms
   FROM ${source.relation}
   ${filteredClause}
-),
-metric_visits AS (
-  ${performanceMetricVisitsSql("filtered_visits")}
-),
-ordered_values AS (
-  SELECT
-    metric,
-    metricValue,
-    CUME_DIST() OVER (PARTITION BY metric  ORDER BY metricValue ASC) AS cumulativeFraction
-  FROM metric_visits
 )
-SELECT
-  metric,
-  COUNT(*) AS samples,
-  AVG(metricValue) AS avgValue,
-  ${performancePercentileValuesSql()}
-FROM ordered_values
-GROUP BY metric
+${PERFORMANCE_METRIC_KEYS.map((metric) => {
+  const column = PERFORMANCE_METRIC_COLUMNS[metric];
+  return `SELECT '${metric}' AS metric, COUNT(*) AS samples,
+    AVG(metricValue) AS avgValue, ${performancePercentileValuesSql()}
+    FROM (SELECT ${column} AS metricValue,
+      CUME_DIST() OVER (ORDER BY ${column}) AS cumulativeFraction
+      FROM filtered_visits WHERE ${column} IS NOT NULL)
+    HAVING COUNT(*) > 0`;
+}).join(" UNION ALL ")} ORDER BY metric ASC
 `;
   const rows = await queryD1All<Record<string, unknown>>(env, sql, [
     ...source.bindings,
