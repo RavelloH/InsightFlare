@@ -209,26 +209,100 @@ describe("actual Worker top-level invocation entrypoints", () => {
     expect(vi.mocked(executePrivateQuery)).toHaveBeenCalledTimes(6);
     expect(vi.mocked(resolvePrivateSite)).toHaveBeenCalledTimes(1);
   });
-  it("does not start any analytics for denied SSR site access", async () => {
-    vi.mocked(resolvePrivateSite).mockResolvedValueOnce(
-      new Response(null, { status: 404 }),
-    );
-    const reads = await startSiteAnalyticsStream({
-      request: new Request("https://app.test/en/app/team/site"),
-      env: setup().env,
-      siteId: "forbidden",
-      window: {
-        preset: "custom",
-        from: 100,
-        to: 300,
-        interval: "day",
-        timeZone: "UTC",
-      },
-      search: "",
+  it("streams referrer cards independently and isolates a failed radar", async () => {
+    const f = setup();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
     });
-    expect(reads).toEqual({});
-    expect(executePrivateQuery).not.toHaveBeenCalled();
+    vi.mocked(resolvePrivateSite).mockResolvedValueOnce({
+      id: "site-a",
+      name: "A",
+      domain: "a.test",
+      canManage: true,
+    } as never);
+    vi.mocked(executePrivateQuery).mockImplementation(async (input) => {
+      if (input.pathname === "referrer-radar") {
+        await gate;
+        return new Response("failure", { status: 500 });
+      }
+      return Response.json({
+        ok: true,
+        data: {
+          items: [],
+          pagination: {
+            limit: 100,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+      });
+    });
+    let reads: Awaited<ReturnType<typeof startSiteAnalyticsStream>> | undefined;
+    vi.mocked(startHandler.fetch).mockImplementationOnce(
+      async (request, options) => {
+        reads = await startSiteAnalyticsStream({
+          request,
+          env: options!.context!.env,
+          siteId: "site-a",
+          page: "referrers",
+          window: {
+            preset: "custom",
+            from: 100,
+            to: 300,
+            interval: "day",
+            timeZone: "UTC",
+          },
+          search: "",
+        });
+        return new Response("shell");
+      },
+    );
+    const response = await server.fetch(
+      new Request("https://app.test/en/app/team/site/referrers"),
+      f.env,
+      f.ctx,
+    );
+    expect(await response.text()).toBe("shell");
+    expect(Object.keys(reads!)).toHaveLength(5);
+    const radar = Object.keys(reads!).find((key) =>
+      key.includes("referrer-radar"),
+    )!;
+    for (const [key, promise] of Object.entries(reads!))
+      if (key !== radar) await expect(promise).resolves.toHaveProperty("value");
+    expect(f.points).toHaveLength(0);
+    release();
+    await expect(reads![radar]).resolves.toBeNull();
+    await f.finish();
+    expect(f.points).toHaveLength(1);
+    expect(executePrivateQuery).toHaveBeenCalledTimes(5);
+    expect(resolvePrivateSite).toHaveBeenCalledTimes(1);
   });
+  it.each(["overview", "pages", "referrers"] as const)(
+    "does not start any analytics for denied SSR site access on %s",
+    async (page) => {
+      vi.mocked(resolvePrivateSite).mockResolvedValueOnce(
+        new Response(null, { status: 404 }),
+      );
+      const reads = await startSiteAnalyticsStream({
+        request: new Request("https://app.test/en/app/team/site"),
+        env: setup().env,
+        siteId: "forbidden",
+        page,
+        window: {
+          preset: "custom",
+          from: 100,
+          to: 300,
+          interval: "day",
+          timeZone: "UTC",
+        },
+        search: "",
+      });
+      expect(reads).toEqual({});
+      expect(executePrivateQuery).not.toHaveBeenCalled();
+    },
+  );
 
   it("records an actual external /api request despite forged internal headers", async () => {
     const f = setup();

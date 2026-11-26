@@ -13,7 +13,10 @@ import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,
 } from "@/components/dashboard/comparison/use-dashboard-comparison-query";
+import { useDashboardQueryReady } from "@/components/dashboard/shell/dashboard-query-provider";
 import { fetchReferrerRadar } from "@/lib/dashboard/client/data/index";
+import { REFERRER_RADAR_LIMIT } from "@/lib/dashboard/client/data/referrers";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import { decodeUrlDisplayValue } from "@/lib/dashboard/url-display";
@@ -29,6 +32,7 @@ const CHART_COLORS = [
   "var(--color-chart-4)",
 ] as const;
 const COMPARISON_CHART_COLOR = "var(--color-chart-secondary)";
+const EMPTY_RADAR_ITEMS: ReferrerRadarItem[] = [];
 interface ReferrerMetadata {
   finalUrl?: string;
   canonicalUrl?: string;
@@ -310,6 +314,7 @@ interface ReferrerPerformanceRadarCardProps {
   siteId: string;
   window: TimeWindow;
   filters: FilterDocument;
+  transport?: PrivateReadTransport;
 }
 export const ReferrerPerformanceRadarCard = memo(
   function ReferrerPerformanceRadarCard({
@@ -318,7 +323,9 @@ export const ReferrerPerformanceRadarCard = memo(
     siteId,
     window: tw,
     filters,
+    transport,
   }: ReferrerPerformanceRadarCardProps) {
+    const queryReady = useDashboardQueryReady();
     const [metadataByReferrer, setMetadataByReferrer] = useState<
       Record<string, ReferrerMetadata | null | undefined>
     >({});
@@ -356,12 +363,13 @@ export const ReferrerPerformanceRadarCard = memo(
               requestedWindow,
               requestedFilters,
               {
-                limit: 24,
+                limit: REFERRER_RADAR_LIMIT,
                 signal,
+                ...(transport ? { transport } : {}),
               },
             );
             return Array.isArray(response.data)
-              ? response.data.slice(0, 24)
+              ? response.data.slice(0, REFERRER_RADAR_LIMIT)
               : [];
           } catch (error) {
             if (error instanceof Error && error.name === "AbortError")
@@ -378,10 +386,10 @@ export const ReferrerPerformanceRadarCard = memo(
         ]);
         return { current, comparison };
       },
-      enabled: typeof window !== "undefined",
+      enabled: queryReady,
     });
-    const data = radarQuery.data?.current ?? [];
-    const comparisonData = radarQuery.data?.comparison ?? [];
+    const data = radarQuery.data?.current ?? EMPTY_RADAR_ITEMS;
+    const comparisonData = radarQuery.data?.comparison ?? EMPTY_RADAR_ITEMS;
     const loading = radarQuery.isPending;
     const comparisonLabel = dashboardComparisonLabel(messages, comparisonQuery);
     const comparisonByReferrer = useMemo(
@@ -473,6 +481,7 @@ export const ReferrerPerformanceRadarCard = memo(
           loadingLabel={messages.common.loading}
           emptyContent={<p>{messages.common.noData}</p>}
           minHeightClassName="min-h-[320px]"
+          initial={false}
         >
           <div className="grid gap-4 md:grid-cols-2">
             {data.map((item, index) => {

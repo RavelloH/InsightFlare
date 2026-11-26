@@ -53,6 +53,7 @@ import {
 } from "@/lib/dashboard/client/data";
 import { startOverviewInitialReads } from "@/lib/dashboard/client/data/overview";
 import { startPagesInitialReads } from "@/lib/dashboard/client/data/pages";
+import { startReferrersInitialReads } from "@/lib/dashboard/client/data/referrers";
 import type {
   PrivateReadTransport,
   PrivateRequestParams,
@@ -908,6 +909,95 @@ describe("Dashboard Client Data Processing Utilities", () => {
       });
       expect(calls[3]?.params?.from).toBe(calls[4]?.params?.from);
     });
+
+    it.each([false, true])(
+      "plans only default referrer reads, comparison=%s",
+      (compare) => {
+        const calls: Array<{ path: string; params?: PrivateRequestParams }> =
+          [];
+        const transport: PrivateReadTransport = async <T>(
+          path: string,
+          params?: PrivateRequestParams,
+        ) => {
+          calls.push({ path, params });
+          return {
+            ok: true,
+            data: {
+              items: [],
+              pagination: {
+                limit: 100,
+                returned: 0,
+                hasMore: false,
+                nextCursor: null,
+              },
+            },
+          } as T;
+        };
+        startReferrersInitialReads(
+          "site-stream",
+          mockWindow,
+          new URLSearchParams(
+            "scope=session&filter[page.path]=/home" +
+              (compare
+                ? "&compare=previous&compareFilter[page.path]=/docs"
+                : ""),
+          ),
+          transport,
+        );
+        expect(calls).toHaveLength(compare ? 8 : 5);
+        expect(calls.slice(0, 3).map((call) => call.path)).toEqual([
+          "/api/private/referrer-summary",
+          "/api/private/referrer-channel-dimension-trend",
+          "/api/private/referrer-radar",
+        ]);
+        expect(calls[0]?.params).toMatchObject({
+          topN: 5,
+          scope: "session",
+          "filter[page.path]": "/home",
+        });
+        expect(calls[1]?.params).toMatchObject({
+          limit: 5,
+          interval: mockWindow.interval,
+        });
+        expect(calls[2]?.params).toMatchObject({ limit: 24 });
+        if (compare) {
+          for (const call of calls.slice(3, 6))
+            expect(call.params).toMatchObject({
+              to: mockWindow.from - 1,
+              "filter[page.path]": "/docs",
+            });
+        }
+        const tables = calls.slice(-2);
+        expect(tables.map((call) => call.path)).toEqual([
+          "/api/private/overview-source-domain",
+          "/api/private/overview-source-channel",
+        ]);
+        for (const call of tables) {
+          expect(call.params).toMatchObject({
+            limit: 100,
+            sort: "views",
+            direction: "desc",
+            scope: "session",
+            "filter[page.path]": "/home",
+          });
+          if (compare)
+            expect(call.params).toMatchObject({
+              compare: "previous",
+              metric: "views",
+              sortBy: "current",
+              "compareFilter[page.path]": "/docs",
+            });
+          else expect(call.params).not.toHaveProperty("compare");
+        }
+        expect(
+          calls.every(
+            (call) =>
+              call.params?.siteId === "site-stream" &&
+              call.params?.timeZone === mockWindow.timeZone,
+          ),
+        ).toBe(true);
+      },
+    );
 
     function freshJsonResponse(body: unknown, status = 200): Response {
       return new Response(JSON.stringify(body), {

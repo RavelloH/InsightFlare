@@ -7,8 +7,11 @@ import {
 } from "@/components/dashboard/comparison/use-dashboard-comparison-query";
 import { DIRECT_REFERRER_FILTER_VALUE } from "@/components/dashboard/referrers/referrer-utils";
 import { ShareTrendChartCard } from "@/components/dashboard/sharing/share-trend-card";
+import { useDashboardQueryReady } from "@/components/dashboard/shell/dashboard-query-provider";
 import type { TrafficChannelId } from "@/lib/analytics/traffic-channel-rules";
 import { fetchReferrerAndChannelTrend } from "@/lib/dashboard/client/data/referrers";
+import { REFERRER_TREND_LIMIT } from "@/lib/dashboard/client/data/referrers";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
@@ -24,6 +27,7 @@ interface ReferrerShareTrendCardProps {
   siteId: string;
   window: TimeWindow;
   filters: FilterDocument;
+  transport?: PrivateReadTransport;
 }
 function emptyTrendData(interval: TimeWindow["interval"]): BrowserTrendData {
   return {
@@ -61,7 +65,9 @@ function ReferrerTrendPanel({
   siteId,
   window,
   filters,
+  transport,
 }: ReferrerShareTrendCardProps) {
+  const queryReady = useDashboardQueryReady();
   const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const comparisonQuery = useDashboardComparisonQuery(window, filters);
   const comparisonFiltersKey = useMemo(
@@ -113,7 +119,7 @@ function ReferrerTrendPanel({
       comparisonQuery?.window.interval ?? "none",
       comparisonQuery?.window.timeZone ?? "none",
       comparisonFiltersKey,
-      5,
+      REFERRER_TREND_LIMIT,
     ],
     queryFn: async ({ signal }) => {
       const fetchTrendData = (
@@ -124,7 +130,11 @@ function ReferrerTrendPanel({
           siteId,
           requestedWindow,
           requestedFilters,
-          { limit: 5, signal },
+          {
+            limit: REFERRER_TREND_LIMIT,
+            signal,
+            ...(transport ? { transport } : {}),
+          },
         ).catch((error) =>
           fallbackUnlessAborted(error, () =>
             emptyReferrerTrendData(requestedWindow.interval),
@@ -143,7 +153,7 @@ function ReferrerTrendPanel({
         comparisonDataWindow,
       };
     },
-    enabled: typeof window !== "undefined",
+    enabled: queryReady,
     placeholderData: keepPreviousData,
   });
   const loading = isPending || isFetching;

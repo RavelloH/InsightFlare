@@ -119,7 +119,8 @@ export const loadSiteAnalyticsStream = createServerFn({ method: "GET" })
         data.search.length > 8192 ||
         (data.page !== undefined &&
           data.page !== "overview" &&
-          data.page !== "pages")
+          data.page !== "pages" &&
+          data.page !== "referrers")
       )
         throw new Error("invalid_ssr_analytics");
       return data;

@@ -1,5 +1,7 @@
+import { fetchOverviewSourceCardTab } from "@/lib/dashboard/client/data/tabs";
 import type {
   DashboardListRequestOptions,
+  PrivateReadTransport,
   UtmDimensionTab,
 } from "@/lib/dashboard/client/data/types";
 import { fetchPrivateJson } from "@/lib/dashboard/client/request";
@@ -9,7 +11,11 @@ import {
   withFilters,
   withPagination,
 } from "@/lib/dashboard/client/utils";
-import type { TimeWindow } from "@/lib/dashboard/query-state";
+import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
+import {
+  parseFilterDocumentFromSearchParams,
+  type TimeWindow,
+} from "@/lib/dashboard/query-state";
 import type {
   BrowserTrendData,
   DimensionData,
@@ -18,7 +24,10 @@ import type {
   ReferrersData,
   ReferrerSummaryData,
 } from "@/lib/dashboard-api/client/edge";
-import type { FilterDocument } from "@/lib/filter-contract";
+import {
+  attachFilterScopePreference,
+  type FilterDocument,
+} from "@/lib/filter-contract";
 const utmPathMap: Record<UtmDimensionTab, string> = {
   source: "utm-source",
   medium: "utm-medium",
@@ -58,7 +67,11 @@ export async function fetchReferrerSummary(
   siteId: string,
   window: TimeWindow,
   filters?: FilterDocument,
-  options?: { topN?: number; signal?: AbortSignal },
+  options?: {
+    topN?: number;
+    signal?: AbortSignal;
+    transport?: PrivateReadTransport;
+  },
 ): Promise<ReferrerSummaryData> {
   return fetchPrivateJson<ReferrerSummaryData>(
     "/api/private/referrer-summary",
@@ -72,7 +85,10 @@ export async function fetchReferrerSummary(
       },
       filters,
     ),
-    { signal: options?.signal },
+    {
+      signal: options?.signal,
+      ...(options?.transport ? { transport: options.transport } : {}),
+    },
   );
 }
 export async function fetchUtmDimension(
@@ -178,6 +194,7 @@ export async function fetchReferrerAndChannelTrend(
   options?: {
     limit?: number;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
   },
 ): Promise<ReferrerChannelTrendData> {
   return fetchPrivateJson<ReferrerChannelTrendData>(
@@ -193,7 +210,10 @@ export async function fetchReferrerAndChannelTrend(
       },
       filters,
     ),
-    { signal: options?.signal },
+    {
+      signal: options?.signal,
+      ...(options?.transport ? { transport: options.transport } : {}),
+    },
   );
 }
 export async function fetchReferrerRadar(
@@ -203,6 +223,7 @@ export async function fetchReferrerRadar(
   options?: {
     limit?: number;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
   },
 ): Promise<ReferrerRadarData> {
   return fetchPrivateJson<ReferrerRadarData>(
@@ -217,6 +238,70 @@ export async function fetchReferrerRadar(
       },
       filters,
     ),
-    { signal: options?.signal },
+    {
+      signal: options?.signal,
+      ...(options?.transport ? { transport: options.transport } : {}),
+    },
   );
+}
+
+export const REFERRER_SUMMARY_TOP_N = 5;
+export const REFERRER_TREND_LIMIT = 5;
+export const REFERRER_RADAR_LIMIT = 24;
+export const REFERRER_TABLE_LIMIT = 100;
+
+/** Only the default domain/channel tabs are read. Links and metadata remain
+ * lazy client requests; the reference period is independent for each chart. */
+export function startReferrersInitialReads(
+  siteId: string,
+  window: TimeWindow,
+  search: URLSearchParams,
+  transport: PrivateReadTransport,
+): void {
+  const document = parseFilterDocumentFromSearchParams(search);
+  const filters = document.root
+    ? document
+    : attachFilterScopePreference(document, "auto");
+  const comparison = resolveDashboardComparisonQuery(search, window, filters);
+  const ignore = (promise: Promise<unknown>) => {
+    void promise.catch(() => undefined);
+  };
+  const startPeriod = (
+    requestedWindow: TimeWindow,
+    requestedFilters: FilterDocument,
+  ) => {
+    ignore(
+      fetchReferrerSummary(siteId, requestedWindow, requestedFilters, {
+        topN: REFERRER_SUMMARY_TOP_N,
+        transport,
+      }),
+    );
+    ignore(
+      fetchReferrerAndChannelTrend(siteId, requestedWindow, requestedFilters, {
+        limit: REFERRER_TREND_LIMIT,
+        transport,
+      }),
+    );
+    ignore(
+      fetchReferrerRadar(siteId, requestedWindow, requestedFilters, {
+        limit: REFERRER_RADAR_LIMIT,
+        transport,
+      }),
+    );
+  };
+  startPeriod(window, filters);
+  if (comparison) startPeriod(comparison.window, comparison.filters);
+  for (const tab of ["domain", "channel"] as const) {
+    ignore(
+      fetchOverviewSourceCardTab(siteId, window, tab, filters, {
+        limit: REFERRER_TABLE_LIMIT,
+        sort: "views",
+        direction: "desc",
+        comparison,
+        comparisonMetric: "views",
+        comparisonSortBy: comparison ? "current" : undefined,
+        transport,
+      }),
+    );
+  }
 }
