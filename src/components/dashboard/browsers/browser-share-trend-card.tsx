@@ -2,6 +2,7 @@ import { memo } from "react";
 
 import { ShareTrendCard } from "@/components/dashboard/sharing/share-trend-card";
 import { fetchBrowserTrend } from "@/lib/dashboard/client/data/index";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { FilterDocument } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
@@ -13,6 +14,7 @@ interface BrowserShareTrendCardProps {
   siteId: string;
   window: TimeWindow;
   filters: FilterDocument;
+  transport?: PrivateReadTransport;
 }
 
 export const BrowserShareTrendCard = memo(function BrowserShareTrendCard({
@@ -21,6 +23,7 @@ export const BrowserShareTrendCard = memo(function BrowserShareTrendCard({
   siteId,
   window,
   filters,
+  transport,
 }: BrowserShareTrendCardProps) {
   return (
     <ShareTrendCard
@@ -29,6 +32,7 @@ export const BrowserShareTrendCard = memo(function BrowserShareTrendCard({
       siteId={siteId}
       window={window}
       filters={filters}
+      transport={transport}
       queryKey={["browser"]}
       title={messages.browsers.trendTitle}
       fetchTrend={fetchBrowserTrend}

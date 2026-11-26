@@ -1,9 +1,11 @@
 import { memo, useMemo } from "react";
 import { DeviceCrossBreakdownCardView } from "@insightflare/product-ui/technology";
-import { useQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 
 import { resolveDeviceTypeMeta } from "@/components/dashboard/journeys/journey-display";
+import { useDashboardQueryReady } from "@/components/dashboard/shell/dashboard-query-provider";
 import { fetchClientCrossBreakdown } from "@/lib/dashboard/client/data/index";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -29,6 +31,7 @@ interface DeviceCrossBreakdownGridProps {
   siteId: string;
   window: TimeWindow;
   filters: FilterDocument;
+  transport?: PrivateReadTransport;
   comparisonQuery?: DashboardComparisonQuery | null;
 }
 interface CrossDisplayItem extends BrowserCrossBreakdownItem {
@@ -53,16 +56,6 @@ function emptyDimension(): BrowserCrossBreakdownDimensionData {
     columns: [],
     rows: [],
     totalVisitors: 0,
-  };
-}
-interface CrossBreakdownResponse {
-  browserData: BrowserCrossBreakdownDimensionData;
-  osData: BrowserCrossBreakdownDimensionData;
-}
-function emptyCrossBreakdownResponse(): CrossBreakdownResponse {
-  return {
-    browserData: emptyDimension(),
-    osData: emptyDimension(),
   };
 }
 function crossLabel(
@@ -111,23 +104,23 @@ function buildDisplayDimension(
     })),
   };
 }
-export const DeviceCrossBreakdownGrid = memo(function DeviceCrossBreakdownGrid({
-  locale,
-  messages,
-  siteId,
-  window,
-  filters,
-  comparisonQuery,
-}: DeviceCrossBreakdownGridProps) {
-  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
-  const comparisonFiltersKey = useMemo(
-    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"),
-    [comparisonQuery],
-  );
-  const crossBreakdownQuery = useQuery({
+export function deviceCrossBreakdownQueryOptions(
+  input: Pick<
+    DeviceCrossBreakdownGridProps,
+    "siteId" | "window" | "filters" | "transport" | "comparisonQuery"
+  >,
+  secondaryDimension: "browser" | "operatingSystem",
+) {
+  const { siteId, window, filters, transport, comparisonQuery } = input;
+  const filtersKey = filterQueryKey(filters);
+  const comparisonFiltersKey = comparisonQuery
+    ? filterQueryKey(comparisonQuery.filters)
+    : "none";
+  return queryOptions({
     queryKey: [
       "dashboard",
       "device-cross-breakdown",
+      secondaryDimension,
       siteId,
       window.from,
       window.to,
@@ -142,61 +135,76 @@ export const DeviceCrossBreakdownGrid = memo(function DeviceCrossBreakdownGrid({
       comparisonFiltersKey,
     ],
     queryFn: async ({ signal }) => {
-      const fetchBreakdowns = async (
+      const fetchDimension = (
         requestedWindow: TimeWindow,
         requestedFilters: FilterDocument,
-      ): Promise<CrossBreakdownResponse> => {
-        const fetchDimension = (
-          secondaryDimension: "browser" | "operatingSystem",
-        ) =>
-          fetchClientCrossBreakdown(
-            siteId,
-            requestedWindow,
-            "deviceType",
-            secondaryDimension,
-            requestedFilters,
-            { primaryLimit: 5, secondaryLimit: 6, signal },
-          );
-
-        try {
-          const [browserData, osData] = await Promise.all([
-            fetchDimension("browser"),
-            fetchDimension("operatingSystem"),
-          ]);
-          return { browserData, osData };
-        } catch (error) {
+      ) =>
+        fetchClientCrossBreakdown(
+          siteId,
+          requestedWindow,
+          "deviceType",
+          secondaryDimension,
+          requestedFilters,
+          {
+            primaryLimit: 5,
+            secondaryLimit: 6,
+            signal,
+            ...(transport ? { transport } : {}),
+          },
+        ).catch((error) => {
           if (error instanceof Error && error.name === "AbortError")
             throw error;
-          return emptyCrossBreakdownResponse();
-        }
-      };
-
+          return emptyDimension();
+        });
       const [current, comparison] = await Promise.all([
-        fetchBreakdowns(window, filters),
+        fetchDimension(window, filters),
         comparisonQuery
-          ? fetchBreakdowns(comparisonQuery.window, comparisonQuery.filters)
+          ? fetchDimension(comparisonQuery.window, comparisonQuery.filters)
           : Promise.resolve(null),
       ]);
-
-      return { ...current, comparison };
+      return { current, comparison };
     },
-    enabled: !import.meta.env.SSR,
   });
+}
+export const DeviceCrossBreakdownGrid = memo(function DeviceCrossBreakdownGrid({
+  locale,
+  messages,
+  siteId,
+  window,
+  filters,
+  transport,
+  comparisonQuery,
+}: DeviceCrossBreakdownGridProps) {
+  const queryReady = useDashboardQueryReady();
+  const input = { siteId, window, filters, transport, comparisonQuery };
+  const options = (secondaryDimension: "browser" | "operatingSystem") => ({
+    ...deviceCrossBreakdownQueryOptions(input, secondaryDimension),
+    enabled: queryReady,
+  });
+  const browserQuery = useQuery(options("browser"));
+  const osQuery = useQuery(options("operatingSystem"));
   const browserData = useMemo(
-    () => crossBreakdownQuery.data?.browserData ?? emptyDimension(),
-    [crossBreakdownQuery.data?.browserData],
+    () => browserQuery.data?.current ?? emptyDimension(),
+    [browserQuery.data?.current],
   );
   const osData = useMemo(
-    () => crossBreakdownQuery.data?.osData ?? emptyDimension(),
-    [crossBreakdownQuery.data?.osData],
+    () => osQuery.data?.current ?? emptyDimension(),
+    [osQuery.data?.current],
   );
-  const comparisonBrowserData = comparisonQuery
-    ? (crossBreakdownQuery.data?.comparison?.browserData ?? emptyDimension())
-    : undefined;
-  const comparisonOsData = comparisonQuery
-    ? (crossBreakdownQuery.data?.comparison?.osData ?? emptyDimension())
-    : undefined;
-  const loading = crossBreakdownQuery.isPending;
+  const comparisonBrowserData = useMemo(
+    () =>
+      comparisonQuery
+        ? (browserQuery.data?.comparison ?? emptyDimension())
+        : undefined,
+    [comparisonQuery, browserQuery.data?.comparison],
+  );
+  const comparisonOsData = useMemo(
+    () =>
+      comparisonQuery
+        ? (osQuery.data?.comparison ?? emptyDimension())
+        : undefined,
+    [comparisonQuery, osQuery.data?.comparison],
+  );
 
   const browserDimension = useMemo(
     () =>
@@ -263,7 +271,7 @@ export const DeviceCrossBreakdownGrid = memo(function DeviceCrossBreakdownGrid({
         title={labels.firstTitle}
         dimension={browserDimension}
         comparisonDimension={comparisonBrowserDimension}
-        loading={loading}
+        loading={browserQuery.isPending}
       />
       <DeviceCrossBreakdownCardView
         locale={locale}
@@ -271,7 +279,7 @@ export const DeviceCrossBreakdownGrid = memo(function DeviceCrossBreakdownGrid({
         title={labels.secondTitle}
         dimension={osDimension}
         comparisonDimension={comparisonOsDimension}
-        loading={loading}
+        loading={osQuery.isPending}
       />
     </div>
   );

@@ -6,7 +6,9 @@ import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,
 } from "@/components/dashboard/comparison/use-dashboard-comparison-query";
+import { useDashboardQueryReady } from "@/components/dashboard/shell/dashboard-query-provider";
 import { fetchBrowserRadar } from "@/lib/dashboard/client/data/index";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { BrowserRadarItem } from "@/lib/dashboard-api/client/edge";
@@ -26,6 +28,7 @@ interface BrowserPerformanceRadarCardProps {
   siteId: string;
   window: TimeWindow;
   filters: FilterDocument;
+  transport?: PrivateReadTransport;
 }
 export const BrowserPerformanceRadarCard = memo(
   function BrowserPerformanceRadarCard({
@@ -34,7 +37,9 @@ export const BrowserPerformanceRadarCard = memo(
     siteId,
     window: tw,
     filters,
+    transport,
   }: BrowserPerformanceRadarCardProps) {
+    const queryReady = useDashboardQueryReady();
     const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
     const comparisonQuery = useDashboardComparisonQuery(tw, filters);
     const comparisonFiltersKey = useMemo(
@@ -65,6 +70,7 @@ export const BrowserPerformanceRadarCard = memo(
         ) =>
           fetchBrowserRadar(siteId, requestedWindow, requestedFilters, {
             signal,
+            ...(transport ? { transport } : {}),
           })
             .then((result) =>
               Array.isArray(result.data)
@@ -81,7 +87,7 @@ export const BrowserPerformanceRadarCard = memo(
         ]);
         return { current, comparison };
       },
-      enabled: !import.meta.env.SSR,
+      enabled: queryReady,
     });
     const data = response?.current ?? [];
     const comparisonData = response?.comparison ?? [];

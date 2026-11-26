@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { PageHeading } from "@insightflare/ui/page-heading";
 
 import {
@@ -9,6 +10,10 @@ import { DeviceDimensionTrendCard } from "@/components/dashboard/devices/device-
 import { DeviceScreenBreakdownCard } from "@/components/dashboard/devices/device-screen-breakdown-card";
 import { DeviceShareOverview } from "@/components/dashboard/devices/device-share-overview";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
+import {
+  createDeferredPrivateReadTransport,
+  type DeferredPrivateReads,
+} from "@/lib/dashboard/client/request";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { FilterDocument } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
@@ -19,17 +24,26 @@ interface DevicesClientPageProps {
   siteId: string;
   siteDomain: string;
   pathname: string;
+  deferredReads?: DeferredPrivateReads | null;
 }
 export function DevicesClientPage({
   locale,
   messages,
   siteId,
   siteDomain,
+  deferredReads,
 }: DevicesClientPageProps) {
   const { filters, window } = useDashboardQuery() as {
     filters: FilterDocument;
     window: TimeWindow;
   };
+  const transport = useMemo(
+    () =>
+      deferredReads
+        ? createDeferredPrivateReadTransport(deferredReads)
+        : undefined,
+    [deferredReads],
+  );
   const comparisonQuery = useDashboardComparisonQuery(window, filters);
 
   return (
@@ -45,6 +59,7 @@ export function DevicesClientPage({
         siteId={siteId}
         window={window}
         filters={filters}
+        transport={transport}
         comparisonQuery={comparisonQuery}
         comparisonLabel={dashboardComparisonLabel(messages, comparisonQuery)}
       />
@@ -55,6 +70,7 @@ export function DevicesClientPage({
         siteId={siteId}
         window={window}
         filters={filters}
+        transport={transport}
         dimension="deviceType"
         title={messages.devices.deviceTrendTitle}
       />
@@ -65,6 +81,7 @@ export function DevicesClientPage({
         siteId={siteId}
         window={window}
         filters={filters}
+        transport={transport}
         dimension="operatingSystem"
         title={messages.devices.osTrendTitle}
       />
@@ -76,6 +93,7 @@ export function DevicesClientPage({
         siteDomain={siteDomain}
         window={window}
         filters={filters}
+        transport={transport}
         comparisonQuery={comparisonQuery}
         comparisonLabel={dashboardComparisonLabel(messages, comparisonQuery)}
       />
@@ -86,6 +104,7 @@ export function DevicesClientPage({
         siteId={siteId}
         window={window}
         filters={filters}
+        transport={transport}
         comparisonQuery={comparisonQuery}
       />
     </div>

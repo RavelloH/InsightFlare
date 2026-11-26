@@ -2,7 +2,11 @@ import { memo } from "react";
 
 import { resolveDeviceTypeMeta } from "@/components/dashboard/journeys/journey-display";
 import { ShareTrendCard } from "@/components/dashboard/sharing/share-trend-card";
-import { fetchClientDimensionTrend } from "@/lib/dashboard/client/data/index";
+import {
+  fetchDeviceTypeTrend,
+  fetchOperatingSystemTrend,
+} from "@/lib/dashboard/client/data/browser";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { ClientDimensionKey } from "@/lib/dashboard-api/client/edge";
 import type { FilterDocument } from "@/lib/filter-contract/index";
@@ -15,38 +19,9 @@ interface DeviceDimensionTrendCardProps {
   siteId: string;
   window: TimeWindow;
   filters: FilterDocument;
+  transport?: PrivateReadTransport;
   dimension: Extract<ClientDimensionKey, "deviceType" | "operatingSystem">;
   title: string;
-}
-
-async function fetchDeviceTypeTrend(
-  siteId: string,
-  window: TimeWindow,
-  filters?: FilterDocument,
-  options?: { limit?: number; signal?: AbortSignal },
-) {
-  return fetchClientDimensionTrend(
-    siteId,
-    window,
-    "deviceType",
-    filters,
-    options,
-  );
-}
-
-async function fetchOperatingSystemTrend(
-  siteId: string,
-  window: TimeWindow,
-  filters?: FilterDocument,
-  options?: { limit?: number; signal?: AbortSignal },
-) {
-  return fetchClientDimensionTrend(
-    siteId,
-    window,
-    "operatingSystem",
-    filters,
-    options,
-  );
 }
 
 export const DeviceDimensionTrendCard = memo(function DeviceDimensionTrendCard({
@@ -55,6 +30,7 @@ export const DeviceDimensionTrendCard = memo(function DeviceDimensionTrendCard({
   siteId,
   window,
   filters,
+  transport,
   dimension,
   title,
 }: DeviceDimensionTrendCardProps) {
@@ -71,6 +47,7 @@ export const DeviceDimensionTrendCard = memo(function DeviceDimensionTrendCard({
       siteId={siteId}
       window={window}
       filters={filters}
+      transport={transport}
       queryKey={["device-dimension", dimension]}
       title={title}
       fetchTrend={fetchTrend}

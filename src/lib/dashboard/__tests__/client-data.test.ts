@@ -1,5 +1,8 @@
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { deviceCrossBreakdownQueryOptions } from "@/components/dashboard/devices/device-cross-breakdown-grid";
+import { shareTrendQueryOptions } from "@/components/dashboard/sharing/share-trend-card";
 import {
   decodeHashLabel,
   decodeQueryLabel,
@@ -51,6 +54,7 @@ import {
   toQueryString,
   withFilters,
 } from "@/lib/dashboard/client/data";
+import { startTechnologyInitialReads } from "@/lib/dashboard/client/data/browser";
 import { startOverviewInitialReads } from "@/lib/dashboard/client/data/overview";
 import { startPagesInitialReads } from "@/lib/dashboard/client/data/pages";
 import {
@@ -68,6 +72,7 @@ import {
 } from "@/lib/dashboard/client/request";
 import { withComparison } from "@/lib/dashboard/client/utils";
 import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
+import { parseFilterDocumentFromSearchParams } from "@/lib/dashboard/query-state";
 import { isErrorEnvelope } from "@/lib/demo/realtime/envelope";
 import { handleDemoRequest } from "@/lib/demo/runtime";
 import {
@@ -1089,6 +1094,216 @@ describe("Dashboard Client Data Processing Utilities", () => {
         ).toBe(true);
       },
     );
+
+    it.each(["browsers", "devices"] as const)(
+      "plans distinct technology reads for %s without duplicating overview trends",
+      (page) => {
+        const calls: Array<{ path: string; params?: PrivateRequestParams }> =
+          [];
+        const transport: PrivateReadTransport = async <T>(
+          path: string,
+          params?: PrivateRequestParams,
+        ) => {
+          calls.push({ path, params });
+          return { ok: true, data: [], series: [] } as T;
+        };
+        for (const compare of [false, true]) {
+          calls.length = 0;
+          startTechnologyInitialReads(
+            page,
+            "site-stream",
+            mockWindow,
+            new URLSearchParams(
+              "scope=session&filter[page.path]=/home" +
+                (compare
+                  ? "&compare=previous&compareFilter[page.path]=/docs"
+                  : ""),
+            ),
+            transport,
+          );
+          expect(calls).toHaveLength(
+            page === "browsers" ? (compare ? 11 : 6) : compare ? 10 : 5,
+          );
+          expect(
+            new Set(calls.map((x) => privateReadIdentity(x.path, x.params)))
+              .size,
+          ).toBe(calls.length);
+          expect(
+            calls.every(
+              (x) =>
+                x.params?.siteId === "site-stream" &&
+                x.params?.timeZone === mockWindow.timeZone,
+            ),
+          ).toBe(true);
+          if (compare)
+            expect(
+              calls.filter((x) => x.params?.to === mockWindow.from - 1),
+            ).toHaveLength(5);
+          if (page === "browsers") {
+            expect(
+              calls
+                .filter((x) => x.path.endsWith("browser-version-breakdown"))
+                .map((x) => x.params?.versionLimit),
+            ).toEqual(compare ? [5, 5, 0] : [5, 0]);
+          } else {
+            expect(
+              calls
+                .filter(
+                  (x) =>
+                    x.path.endsWith("client-dimension-trend") &&
+                    x.params?.from === mockWindow.from,
+                )
+                .map((x) => [x.params?.dimension, x.params?.limit]),
+            ).toEqual([
+              ["deviceType", 5],
+              ["operatingSystem", 5],
+              ["screenSize", 10],
+            ]);
+          }
+        }
+      },
+    );
+
+    it("shares the same cancellable trend query between overview and chart and isolates other identities", async () => {
+      const client = new QueryClient({
+        defaultOptions: { queries: { staleTime: 15000, retry: false } },
+      });
+      const document = parseFilterDocumentFromSearchParams(
+        new URLSearchParams("scope=session&filter[page.path]=/home"),
+      );
+      const result = {
+        ok: true as const,
+        interval: mockWindow.interval,
+        series: [],
+        data: [],
+      };
+      const fetchTrend = vi.fn(async () => result);
+      const input = {
+        siteId: "site-stream",
+        window: mockWindow,
+        filters: document,
+        queryKey: ["browser"],
+        fetchTrend,
+        comparisonQuery: null,
+      };
+      try {
+        const a = shareTrendQueryOptions(input);
+        const b = shareTrendQueryOptions({ ...input, queryKey: ["browser"] });
+        expect(a.queryKey).toEqual(b.queryKey);
+        await Promise.all([client.fetchQuery(a), client.fetchQuery(b)]);
+        await client.fetchQuery(b);
+        expect(fetchTrend).toHaveBeenCalledTimes(1);
+        await client.fetchQuery(
+          shareTrendQueryOptions({ ...input, queryKey: ["browser-engine"] }),
+        );
+        await client.fetchQuery(
+          shareTrendQueryOptions({
+            ...input,
+            window: { ...mockWindow, timeZone: "Asia/Shanghai" },
+          }),
+        );
+        expect(fetchTrend).toHaveBeenCalledTimes(3);
+      } finally {
+        client.clear();
+      }
+    });
+
+    it("retains a shared trend until its last observer leaves and then cancels it", async () => {
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      const filters = parseFilterDocumentFromSearchParams(
+        new URLSearchParams(),
+      );
+      let signalSeen: AbortSignal | undefined;
+      const fetchTrend = vi.fn(
+        async (
+          _siteId: string,
+          _window: Parameters<typeof fetchBrowserTrend>[1],
+          _filters?: typeof filters,
+          options?: { signal?: AbortSignal },
+        ) => {
+          signalSeen = options?.signal;
+          return new Promise<Awaited<ReturnType<typeof fetchBrowserTrend>>>(
+            (_resolve, reject) => {
+              signalSeen?.addEventListener(
+                "abort",
+                () => reject(new DOMException("Aborted", "AbortError")),
+                { once: true },
+              );
+            },
+          );
+        },
+      );
+      const opts = shareTrendQueryOptions({
+        siteId: "site-stream",
+        window: mockWindow,
+        filters,
+        queryKey: ["browser"],
+        fetchTrend,
+        comparisonQuery: null,
+      });
+      const a = new QueryObserver(client, opts);
+      const b = new QueryObserver(client, opts);
+      const unsubA = a.subscribe(() => {});
+      const unsubB = b.subscribe(() => {});
+      try {
+        await vi.waitFor(() => expect(signalSeen).toBeDefined());
+        expect(fetchTrend).toHaveBeenCalledTimes(1);
+        unsubA();
+        expect(signalSeen?.aborted).toBe(false);
+        unsubB();
+        expect(signalSeen?.aborted).toBe(true);
+      } finally {
+        unsubA();
+        unsubB();
+        client.clear();
+      }
+    });
+    it("allows the device browser cross card to finish while the OS card is still pending and fail independently", async () => {
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      let rejectOs!: (error: Error) => void;
+      const gate = new Promise<never>((_resolve, reject) => {
+        rejectOs = reject;
+      });
+      const transport: PrivateReadTransport = async <T>(
+        _path: string,
+        params?: PrivateRequestParams,
+      ) => {
+        if (params?.secondaryDimension === "operatingSystem") return gate;
+        return {
+          ok: true,
+          data: { columns: [], rows: [], totalVisitors: 42 },
+        } as T;
+      };
+      const input = {
+        siteId: "site-stream",
+        window: mockWindow,
+        filters: parseFilterDocumentFromSearchParams(new URLSearchParams()),
+        transport,
+        comparisonQuery: null,
+      };
+      try {
+        const browser = deviceCrossBreakdownQueryOptions(input, "browser");
+        const os = deviceCrossBreakdownQueryOptions(input, "operatingSystem");
+        const slow = client.fetchQuery(os);
+        await expect(client.fetchQuery(browser)).resolves.toMatchObject({
+          current: { totalVisitors: 42 },
+        });
+        expect(client.getQueryState(os.queryKey)?.fetchStatus).toBe("fetching");
+        rejectOs(new Error("failed OS query"));
+        await expect(slow).resolves.toMatchObject({
+          current: { totalVisitors: 0 },
+        });
+        expect(client.getQueryData(browser.queryKey)).toMatchObject({
+          current: { totalVisitors: 42 },
+        });
+      } finally {
+        client.clear();
+      }
+    });
 
     function freshJsonResponse(body: unknown, status = 200): Response {
       return new Response(JSON.stringify(body), {

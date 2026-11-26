@@ -35,7 +35,9 @@ import {
   type ComparisonTableMetric,
   createComparisonTableColumns,
 } from "@/components/dashboard/comparison/comparison-table";
+import { useDashboardQueryReady } from "@/components/dashboard/shell/dashboard-query-provider";
 import { fetchClientDimensionTrend } from "@/lib/dashboard/client/data/index";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import {
   aggregateScreenBuckets,
@@ -681,6 +683,7 @@ interface DeviceScreenBreakdownCardProps {
   siteDomain: string;
   window: TimeWindow;
   filters: FilterDocument;
+  transport?: PrivateReadTransport;
   comparisonQuery?: DashboardComparisonQuery | null;
   comparisonLabel?: string;
 }
@@ -692,9 +695,11 @@ export const DeviceScreenBreakdownCard = memo(
     siteDomain,
     window,
     filters,
+    transport,
     comparisonQuery = null,
     comparisonLabel = "",
   }: DeviceScreenBreakdownCardProps) {
+    const queryReady = useDashboardQueryReady();
     const [comparisonMetric, setComparisonMetric] =
       useState<ComparisonTableMetric>("visitors");
     const screenTrendQuery = useQuery({
@@ -719,6 +724,7 @@ export const DeviceScreenBreakdownCard = memo(
             fetchClientDimensionTrend(siteId, window, "screenSize", filters, {
               limit: 10,
               signal,
+              ...(transport ? { transport } : {}),
             }),
             comparisonQuery
               ? fetchClientDimensionTrend(
@@ -726,7 +732,7 @@ export const DeviceScreenBreakdownCard = memo(
                   comparisonQuery.window,
                   "screenSize",
                   comparisonQuery.filters,
-                  { limit: 10, signal },
+                  { limit: 10, signal, ...(transport ? { transport } : {}) },
                 )
               : Promise.resolve(null),
           ]);
@@ -737,7 +743,7 @@ export const DeviceScreenBreakdownCard = memo(
           return { current: EMPTY_TREND, comparison: null };
         }
       },
-      enabled: typeof window !== "undefined",
+      enabled: queryReady,
     });
     const screenTrendData = screenTrendQuery.data ?? {
       current: EMPTY_TREND,

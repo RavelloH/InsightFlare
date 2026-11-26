@@ -1,6 +1,11 @@
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import { fetchPrivateJson } from "@/lib/dashboard/client/request";
 import { withFilters } from "@/lib/dashboard/client/utils";
-import type { TimeWindow } from "@/lib/dashboard/query-state";
+import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
+import {
+  parseFilterDocumentFromSearchParams,
+  type TimeWindow,
+} from "@/lib/dashboard/query-state";
 import type { ClientDimensionKey } from "@/lib/dashboard-api/client/edge";
 import type {
   BrowserCrossBreakdownData,
@@ -10,7 +15,10 @@ import type {
   BrowserVersionBreakdownData,
   ClientCrossBreakdownData,
 } from "@/lib/dashboard-api/client/edge";
-import type { FilterDocument } from "@/lib/filter-contract";
+import {
+  attachFilterScopePreference,
+  type FilterDocument,
+} from "@/lib/filter-contract";
 export async function fetchClientDimensionTrend(
   siteId: string,
   window: TimeWindow,
@@ -19,6 +27,7 @@ export async function fetchClientDimensionTrend(
   options?: {
     limit?: number;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
   },
 ): Promise<BrowserTrendData> {
   return fetchPrivateJson<BrowserTrendData>(
@@ -35,7 +44,10 @@ export async function fetchClientDimensionTrend(
       },
       filters,
     ),
-    { signal: options?.signal },
+    {
+      signal: options?.signal,
+      ...(options?.transport ? { transport: options.transport } : {}),
+    },
   );
 }
 export async function fetchClientCrossBreakdown(
@@ -48,6 +60,7 @@ export async function fetchClientCrossBreakdown(
     primaryLimit?: number;
     secondaryLimit?: number;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
   },
 ): Promise<BrowserCrossBreakdownDimensionData> {
   const response = await fetchPrivateJson<ClientCrossBreakdownData>(
@@ -65,7 +78,10 @@ export async function fetchClientCrossBreakdown(
       },
       filters,
     ),
-    { signal: options?.signal },
+    {
+      signal: options?.signal,
+      ...(options?.transport ? { transport: options.transport } : {}),
+    },
   );
   return response.data;
 }
@@ -76,6 +92,7 @@ export async function fetchBrowserTrend(
   options?: {
     limit?: number;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
   },
 ): Promise<BrowserTrendData> {
   return fetchPrivateJson<BrowserTrendData>(
@@ -91,7 +108,10 @@ export async function fetchBrowserTrend(
       },
       filters,
     ),
-    { signal: options?.signal },
+    {
+      signal: options?.signal,
+      ...(options?.transport ? { transport: options.transport } : {}),
+    },
   );
 }
 export async function fetchBrowserEngineTrend(
@@ -101,6 +121,7 @@ export async function fetchBrowserEngineTrend(
   options?: {
     limit?: number;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
   },
 ): Promise<BrowserTrendData> {
   return fetchPrivateJson<BrowserTrendData>(
@@ -116,7 +137,10 @@ export async function fetchBrowserEngineTrend(
       },
       filters,
     ),
-    { signal: options?.signal },
+    {
+      signal: options?.signal,
+      ...(options?.transport ? { transport: options.transport } : {}),
+    },
   );
 }
 export async function fetchBrowserVersionBreakdown(
@@ -127,6 +151,7 @@ export async function fetchBrowserVersionBreakdown(
     browserLimit?: number;
     versionLimit?: number;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
   },
 ): Promise<BrowserVersionBreakdownData> {
   const requestParams = withFilters(
@@ -140,16 +165,16 @@ export async function fetchBrowserVersionBreakdown(
     },
     filters,
   );
-  return options?.signal
-    ? fetchPrivateJson<BrowserVersionBreakdownData>(
-        "/api/private/browser-version-breakdown",
-        requestParams,
-        { signal: options.signal },
-      )
-    : fetchPrivateJson<BrowserVersionBreakdownData>(
-        "/api/private/browser-version-breakdown",
-        requestParams,
-      );
+  return fetchPrivateJson<BrowserVersionBreakdownData>(
+    "/api/private/browser-version-breakdown",
+    requestParams,
+    options?.signal || options?.transport
+      ? {
+          signal: options?.signal,
+          ...(options?.transport ? { transport: options.transport } : {}),
+        }
+      : undefined,
+  );
 }
 export async function fetchBrowserCrossBreakdown(
   siteId: string,
@@ -160,6 +185,7 @@ export async function fetchBrowserCrossBreakdown(
     osLimit?: number;
     deviceTypeLimit?: number;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
   },
 ): Promise<BrowserCrossBreakdownData> {
   const requestParams = withFilters(
@@ -174,22 +200,22 @@ export async function fetchBrowserCrossBreakdown(
     },
     filters,
   );
-  return options?.signal
-    ? fetchPrivateJson<BrowserCrossBreakdownData>(
-        "/api/private/browser-cross-breakdown",
-        requestParams,
-        { signal: options.signal },
-      )
-    : fetchPrivateJson<BrowserCrossBreakdownData>(
-        "/api/private/browser-cross-breakdown",
-        requestParams,
-      );
+  return fetchPrivateJson<BrowserCrossBreakdownData>(
+    "/api/private/browser-cross-breakdown",
+    requestParams,
+    options?.signal || options?.transport
+      ? {
+          signal: options?.signal,
+          ...(options?.transport ? { transport: options.transport } : {}),
+        }
+      : undefined,
+  );
 }
 export async function fetchBrowserRadar(
   siteId: string,
   window: TimeWindow,
   filters?: FilterDocument,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; transport?: PrivateReadTransport },
 ): Promise<BrowserRadarData> {
   const requestParams = withFilters(
     {
@@ -200,14 +226,109 @@ export async function fetchBrowserRadar(
     },
     filters,
   );
-  return options?.signal
-    ? fetchPrivateJson<BrowserRadarData>(
-        "/api/private/browser-radar",
-        requestParams,
-        { signal: options.signal },
-      )
-    : fetchPrivateJson<BrowserRadarData>(
-        "/api/private/browser-radar",
-        requestParams,
+  return fetchPrivateJson<BrowserRadarData>(
+    "/api/private/browser-radar",
+    requestParams,
+    options?.signal || options?.transport
+      ? {
+          signal: options?.signal,
+          ...(options?.transport ? { transport: options.transport } : {}),
+        }
+      : undefined,
+  );
+}
+
+export function fetchDeviceTypeTrend(
+  siteId: string,
+  window: TimeWindow,
+  filters?: FilterDocument,
+  options?: {
+    limit?: number;
+    signal?: AbortSignal;
+    transport?: PrivateReadTransport;
+  },
+) {
+  return fetchClientDimensionTrend(
+    siteId,
+    window,
+    "deviceType",
+    filters,
+    options,
+  );
+}
+export function fetchOperatingSystemTrend(
+  siteId: string,
+  window: TimeWindow,
+  filters?: FilterDocument,
+  options?: {
+    limit?: number;
+    signal?: AbortSignal;
+    transport?: PrivateReadTransport;
+  },
+) {
+  return fetchClientDimensionTrend(
+    siteId,
+    window,
+    "operatingSystem",
+    filters,
+    options,
+  );
+}
+export function startTechnologyInitialReads(
+  page: "browsers" | "devices",
+  siteId: string,
+  window: TimeWindow,
+  search: URLSearchParams,
+  transport: PrivateReadTransport,
+): void {
+  const document = parseFilterDocumentFromSearchParams(search);
+  const filters = document.root
+    ? document
+    : attachFilterScopePreference(document, "auto");
+  const comparison = resolveDashboardComparisonQuery(search, window, filters);
+  const ignore = (p: Promise<unknown>) => {
+    void p.catch(() => undefined);
+  };
+  const startPeriod = (w: TimeWindow, f: FilterDocument) => {
+    if (page === "browsers") {
+      ignore(fetchBrowserTrend(siteId, w, f, { limit: 5, transport }));
+      ignore(fetchBrowserEngineTrend(siteId, w, f, { limit: 5, transport }));
+      ignore(fetchBrowserRadar(siteId, w, f, { transport }));
+      ignore(
+        fetchBrowserVersionBreakdown(siteId, w, f, {
+          browserLimit: 0,
+          versionLimit: 5,
+          transport,
+        }),
       );
+      ignore(fetchBrowserCrossBreakdown(siteId, w, f, { transport }));
+    } else {
+      ignore(fetchDeviceTypeTrend(siteId, w, f, { limit: 5, transport }));
+      ignore(fetchOperatingSystemTrend(siteId, w, f, { limit: 5, transport }));
+      ignore(
+        fetchClientDimensionTrend(siteId, w, "screenSize", f, {
+          limit: 10,
+          transport,
+        }),
+      );
+      for (const secondary of ["browser", "operatingSystem"] as const)
+        ignore(
+          fetchClientCrossBreakdown(siteId, w, "deviceType", secondary, f, {
+            primaryLimit: 5,
+            secondaryLimit: 6,
+            transport,
+          }),
+        );
+    }
+  };
+  startPeriod(window, filters);
+  if (comparison) startPeriod(comparison.window, comparison.filters);
+  if (page === "browsers")
+    ignore(
+      fetchBrowserVersionBreakdown(siteId, window, filters, {
+        browserLimit: 0,
+        versionLimit: 0,
+        transport,
+      }),
+    );
 }

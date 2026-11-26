@@ -6,7 +6,9 @@ import {
   type DeviceTypeIcon,
   resolveDeviceTypeMeta,
 } from "@/components/dashboard/journeys/journey-display";
+import { useDashboardQueryReady } from "@/components/dashboard/shell/dashboard-query-provider";
 import { fetchBrowserCrossBreakdown } from "@/lib/dashboard/client/data/index";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -32,6 +34,7 @@ interface BrowserCrossBreakdownGridProps {
   siteId: string;
   window: TimeWindow;
   filters: FilterDocument;
+  transport?: PrivateReadTransport;
   comparisonQuery?: DashboardComparisonQuery | null;
 }
 interface BrowserCrossDisplayItem extends BrowserCrossBreakdownItem {
@@ -136,8 +139,10 @@ export const BrowserCrossBreakdownGrid = memo(
     siteId,
     window,
     filters,
+    transport,
     comparisonQuery,
   }: BrowserCrossBreakdownGridProps) {
+    const queryReady = useDashboardQueryReady();
     const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
     const comparisonFiltersKey = useMemo(
       () =>
@@ -170,7 +175,7 @@ export const BrowserCrossBreakdownGrid = memo(
             siteId,
             requestedWindow,
             requestedFilters,
-            { signal },
+            { signal, ...(transport ? { transport } : {}) },
           ).catch(emptyBreakdownUnlessAborted);
 
         const [current, comparison] = await Promise.all([
@@ -182,7 +187,7 @@ export const BrowserCrossBreakdownGrid = memo(
 
         return { current, comparison };
       },
-      enabled: !import.meta.env.SSR,
+      enabled: queryReady,
     });
     const breakdownData = useMemo(
       () => data?.current ?? emptyBrowserCrossBreakdown(),
