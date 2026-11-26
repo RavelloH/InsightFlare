@@ -14,6 +14,7 @@ import {
   attachScopedFilterMetadata,
   createQueryTime,
   createScopedFilterPlan,
+  createTimeRange,
   EMPTY_FILTER_DOCUMENT,
   FILTER_SCOPE_CAPABILITIES,
   type QueryTime,
@@ -2952,7 +2953,7 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           ],
           [
             'first(PAGE).path eq "/old"',
-            { ...base, readRange: { startMs: 0, endExclusiveMs: 300 } },
+            { ...base, readRange: createTimeRange(0, 300) },
             true,
           ],
           ["count(PAGE) eq 1 AND NOT (count(EVENT) eq 0)", base, true],
