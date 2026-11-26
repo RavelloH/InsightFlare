@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { DetailModal } from "@insightflare/product-ui/detail-drawer";
 import { MetricSummaryGrid } from "@insightflare/ui/metric-summary-grid";
@@ -16,7 +17,10 @@ import { EventRecordsSection } from "@/components/dashboard/site-pages/events/re
 import { parseOverviewCardFilters } from "@/components/dashboard/site-pages/overview/overview-filter-model";
 import { OverviewPagesSection } from "@/components/dashboard/site-pages/overview/pages-section";
 import { type OverviewPagesSectionCardData } from "@/components/dashboard/site-pages/overview/types";
-import { EVENT_INITIAL_TREND_LIMIT } from "@/lib/dashboard/client/data/events";
+import {
+  EVENT_INITIAL_TREND_LIMIT,
+  fetchEventComparisonTab,
+} from "@/lib/dashboard/client/data/events";
 import {
   fetchEventsSummary,
   fetchEventsTrend,
@@ -166,6 +170,7 @@ function comparisonLabelForEvents(
     ? messages.dashboardHeader.previousPeriod
     : messages.dashboardHeader.compareButton;
 }
+const EMPTY_EVENT_COMPARISON_CARDS = buildEventCardDataOverride([]);
 export function EventsClientPage({
   locale,
   messages,
@@ -334,6 +339,30 @@ export function EventsClientPage({
     [summary.cards.page],
   );
 
+  const comparisonFetchers = useMemo(() => {
+    type Fetcher = NonNullable<
+      NonNullable<
+        ComponentProps<typeof OverviewPagesSection>["pageCardFetchers"]
+      >["path"]
+    >;
+    const make =
+      (tab: Parameters<typeof fetchEventComparisonTab>[2]): Fetcher =>
+      (id, w, f, scope, options) =>
+        fetchEventComparisonTab(id, w, tab, f, {
+          ...options,
+          resolvedScope: scope,
+          transport,
+        });
+    return {
+      event: { path: make("name") },
+      context: {
+        path: make("path"),
+        title: make("title"),
+        hostname: make("hostname"),
+      },
+    };
+  }, [transport]);
+
   return (
     <div className="space-y-6">
       <EventPageHeader
@@ -380,7 +409,13 @@ export function EventsClientPage({
           queryEnabled={
             queryReady && (Boolean(comparisonQuery) || !initialLoading)
           }
-          cardDataOverride={eventCardDataOverride}
+          cardDataOverride={
+            comparisonQuery
+              ? EMPTY_EVENT_COMPARISON_CARDS
+              : eventCardDataOverride
+          }
+          pageCardFetchers={comparisonFetchers.event}
+          pageCardRequestNamespace="event-name"
           visibleCards={["page"]}
           pageCardTabs={["path"]}
           pageCardTabMetaOverride={{
@@ -414,7 +449,13 @@ export function EventsClientPage({
           queryEnabled={
             queryReady && (Boolean(comparisonQuery) || !initialLoading)
           }
-          cardDataOverride={contextCardDataOverride}
+          cardDataOverride={
+            comparisonQuery
+              ? EMPTY_EVENT_COMPARISON_CARDS
+              : contextCardDataOverride
+          }
+          pageCardFetchers={comparisonFetchers.context}
+          pageCardRequestNamespace="event-context"
           visibleCards={["page"]}
           pageCardTabs={["path", "title", "hostname"]}
           primaryMetricLabel={labels.totalEvents}

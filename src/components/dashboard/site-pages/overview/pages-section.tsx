@@ -127,6 +127,7 @@ export function OverviewPagesSection({
   cardDataOverride,
   comparisonEnabled = true,
   tableContentTransitionKey,
+  pageCardRequestNamespace,
   visibleCards,
   showSourceLinkTab = true,
   pageCardTabs,
@@ -589,8 +590,15 @@ export function OverviewPagesSection({
         comparisonLabel,
         locale,
         messages,
+        resolvedPrimaryMetricLabel,
       ),
-    [comparisonLabel, locale, messages, pageComparisonMetric],
+    [
+      comparisonLabel,
+      locale,
+      messages,
+      pageComparisonMetric,
+      resolvedPrimaryMetricLabel,
+    ],
   );
   const sourceComparisonColumns = useMemo(
     () =>
@@ -1680,7 +1688,7 @@ export function OverviewPagesSection({
                   ? { key: "current", direction: "desc" }
                   : undefined
               }
-              requestKey={`${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${filtersKey}:${comparisonKey}:${locale}:page:${pageComparisonMetric}:${hasCardDataOverride ? cardDataOverrideKey : "remote"}`}
+              requestKey={`${siteId}:${window.from}:${window.to}:${window.interval}:${window.timeZone}:${filtersKey}:${comparisonKey}:${locale}:page:${pageCardRequestNamespace ?? "overview"}:${pageComparisonMetric}:${hasCardDataOverride ? cardDataOverrideKey : "remote"}`}
               columns={pageCardMetricColumns}
               rowAdapter={pageCardRowAdapter}
               filterRows={filterPageCardRows}

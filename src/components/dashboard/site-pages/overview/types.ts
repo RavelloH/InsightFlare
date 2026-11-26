@@ -195,6 +195,7 @@ export interface OverviewPagesSectionProps extends OverviewClientPageProps {
   cardDataOverride?: OverviewPagesSectionCardData | null;
   comparisonEnabled?: boolean;
   tableContentTransitionKey?: string | number;
+  pageCardRequestNamespace?: string;
   visibleCards?: readonly OverviewPagesSectionCardKind[];
   pageCardTabs?: readonly PageCardTab[];
   pageCardTabMetaOverride?: Partial<

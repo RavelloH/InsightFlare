@@ -13,6 +13,7 @@ import {
 import type { Env } from "@/lib/edge/types";
 
 import {
+  buildEventFilteredSourceCte,
   buildVisitFilterSql,
   buildVisitSourceCte,
   queryD1All,
@@ -103,6 +104,37 @@ function comparisonSide(
   };
 }
 
+/** Separate nested WITH scopes keep event-source CTE names and filter bindings
+ * isolated without rewriting SQL identifiers or filter literal values. */
+function eventComparisonSide(
+  siteId: string,
+  window: QueryWindow,
+  filters: FilterDocument,
+  prefix: "current" | "reference",
+): ComparisonDimensionSide {
+  const source = buildEventFilteredSourceCte(siteId, window, filters);
+  const relation = prefix + "_event_facts";
+  return {
+    ctes: `${relation} AS (${source.cte} SELECT * FROM filtered_events)`,
+    relation,
+    filterClause: "",
+    bindings: source.bindings,
+  };
+}
+export const EVENT_COMPARISON_DIMENSIONS = {
+  "event.name": "event_name",
+  "event.page.path": "pathname",
+  "event.page.title": "title",
+  "event.page.hostname": "hostname",
+} as const;
+export function eventComparisonExpression(tab: string): string | null {
+  return Object.prototype.hasOwnProperty.call(EVENT_COMPARISON_DIMENSIONS, tab)
+    ? "event-fact:" +
+        EVENT_COMPARISON_DIMENSIONS[
+          tab as keyof typeof EVENT_COMPARISON_DIMENSIONS
+        ]
+    : null;
+}
 function relativeSql(current: string, reference: string): string {
   return `CASE WHEN ${reference} = 0 THEN CASE WHEN ${current} = 0 THEN 0.0 ELSE NULL END ELSE (${current} - ${reference}) * 1.0 / ${reference} END`;
 }
@@ -274,18 +306,20 @@ export async function queryComparisonDimensionPageFromD1(
     readonly nextCursor: string | null;
   };
 }> {
-  const currentSide = comparisonSide(
-    siteId,
-    current,
-    currentFilters,
-    "current",
-  );
-  const referenceSide = comparisonSide(
-    siteId,
-    reference,
-    referenceFilters,
-    "reference",
-  );
+  const eventFact = selectExpr.startsWith("event-fact:");
+  const expression = eventFact
+    ? selectExpr.slice("event-fact:".length)
+    : selectExpr;
+  if (
+    eventFact &&
+    !Object.values(EVENT_COMPARISON_DIMENSIONS).some(
+      (column) => column === expression,
+    )
+  )
+    throw new Error("invalid_event_comparison_dimension");
+  const side = eventFact ? eventComparisonSide : comparisonSide;
+  const currentSide = side(siteId, current, currentFilters, "current");
+  const referenceSide = side(siteId, reference, referenceFilters, "reference");
   const searchClause = options.search?.trim()
     ? "AND LOWER(key) LIKE ? ESCAPE '\\'"
     : "";
@@ -320,7 +354,7 @@ WITH
 ${currentSide.ctes},
 ${referenceSide.ctes},
 current_rollup AS (
-  SELECT COALESCE(${selectExpr}, '') AS key,
+  SELECT COALESCE(${expression}, '') AS key,
     count(*) AS current_views,
     count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS current_sessions,
     count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS current_visitors
@@ -329,7 +363,7 @@ current_rollup AS (
   GROUP BY key
 ),
 reference_rollup AS (
-  SELECT COALESCE(${selectExpr}, '') AS key,
+  SELECT COALESCE(${expression}, '') AS key,
     count(*) AS reference_views,
     count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS reference_sessions,
     count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS reference_visitors
@@ -356,12 +390,12 @@ joined AS (
 ),
 projected AS (
   SELECT *,
-    ${changeRelative} AS change_relative,
+    COALESCE(${changeRelative}, 0.0) AS change_relative,
     ${changeClass} AS change_class
   FROM joined
 )
 SELECT * FROM projected
-WHERE key != ''
+WHERE ${eventFact ? "TRIM(key)" : "key"} != ''
 ${searchClause}
 ${cursorClause}
 ORDER BY ${ordering.expression}

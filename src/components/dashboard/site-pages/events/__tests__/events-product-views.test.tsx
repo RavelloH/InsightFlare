@@ -11,6 +11,9 @@ import {
 } from "@insightflare/product-ui/events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createOverviewComparisonColumns } from "@/components/dashboard/site-pages/overview/overview-card-data";
+import { getMessages } from "@/lib/i18n/messages";
+
 // happy-dom cannot cancel native animations; motion falls back to JS animations without WAAPI.
 vi.hoisted(() => {
   Reflect.deleteProperty(Element.prototype, "animate");
@@ -80,6 +83,28 @@ describe("events product views", () => {
     container.remove();
   });
 
+  it("labels the comparison count as events, not pageviews", () => {
+    const messages = getMessages("zh");
+    const columns = createOverviewComparisonColumns(
+      "views",
+      "对比",
+      "zh",
+      messages,
+      messages.events.totalEvents,
+    );
+    expect(columns.find((c) => c.key === "current")?.label).toBe(
+      messages.events.totalEvents,
+    );
+    expect(
+      createOverviewComparisonColumns(
+        "visitors",
+        "对比",
+        "zh",
+        messages,
+        messages.events.totalEvents,
+      ).find((c) => c.key === "current")?.label,
+    ).toBe(messages.common.visitors);
+  });
   describe("createEventMetricItems", () => {
     it("falls back to descriptive details without a comparison", () => {
       const items = createEventMetricItems(metricsReady);
@@ -128,6 +153,27 @@ describe("events product views", () => {
       });
     });
 
+    it("compares the displayed session count rather than the average", () => {
+      const items = createEventMetricItems({
+        ...metricsComparison,
+        summary: {
+          ...metricsComparison.summary,
+          sessions: 200,
+          avgEventsPerSession: 0.5,
+        },
+        comparisonSummary: {
+          ...metricsComparison.comparisonSummary!,
+          sessions: 100,
+          avgEventsPerSession: 2,
+        },
+      });
+      expect(items[2]?.value).toBe("200");
+      expect(items[2]?.detail).toBe("Previous period: 100");
+      expect(items[2]?.change).toMatchObject({
+        value: "+100.0%",
+        direction: "up",
+      });
+    });
     it("marks decreases as negative", () => {
       const items = createEventMetricItems({
         ...metricsComparison,

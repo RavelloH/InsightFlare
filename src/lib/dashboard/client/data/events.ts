@@ -8,13 +8,16 @@ import {
   emptyJourneyEventDetail,
 } from "@/lib/dashboard/client/data/empty";
 import type {
+  DashboardListRequestOptions,
   EventRecordSortKey,
   PrivateReadTransport,
   SortDirection,
 } from "@/lib/dashboard/client/data/types";
 import { fetchPrivateJson } from "@/lib/dashboard/client/request";
 import {
+  normalizeOverviewRows,
   normalizePaginatedCollection,
+  withComparison,
   withFilters,
   withPagination,
 } from "@/lib/dashboard/client/utils";
@@ -37,6 +40,7 @@ import type {
   EventTypeFieldsData,
   JourneyEvent,
   JourneyEventDetailData,
+  OverviewTabData,
 } from "@/lib/dashboard-api/client/edge";
 import type { FilterDocument, FilterScope } from "@/lib/filter-contract";
 function fallbackUnlessAborted<T>(error: unknown, fallback: () => T): T {
@@ -442,6 +446,47 @@ export async function fetchJourneyEventDetail(
       );
 }
 
+export type EventComparisonTab = "name" | "path" | "title" | "hostname";
+export async function fetchEventComparisonTab(
+  siteId: string,
+  window: TimeWindow,
+  tab: EventComparisonTab,
+  filters: FilterDocument,
+  options?: DashboardListRequestOptions & { resolvedScope?: FilterScope },
+): Promise<OverviewTabData["data"]> {
+  const payload = await fetchPrivateJson<OverviewTabData>(
+    `/api/private/events-compare-${tab}`,
+    withComparison(
+      withFilters(
+        withPagination(
+          {
+            siteId,
+            from: window.from,
+            to: window.to,
+            timeZone: window.timeZone,
+            ...(options?.search?.trim()
+              ? { search: options.search.trim() }
+              : {}),
+            ...(options?.sort ? { sort: options.sort } : {}),
+            ...(options?.direction ? { direction: options.direction } : {}),
+          },
+          options,
+          100,
+        ),
+        filters,
+        options?.resolvedScope,
+      ),
+      options?.comparison,
+      { metric: options?.comparisonMetric, sortBy: options?.comparisonSortBy },
+    ),
+    { signal: options?.signal, transport: options?.transport },
+  );
+  const data = normalizePaginatedCollection<
+    OverviewTabData["data"]["items"][number]
+  >(payload.data);
+  return { ...data, items: normalizeOverviewRows(data.items) };
+}
+
 export const EVENT_PAGE_SIZE = 50;
 export const DEFAULT_EVENT_RECORD_SORT = {
   key: "occurredAt",
@@ -475,6 +520,18 @@ export function startEventsInitialReads(
     }),
   );
   if (comparison) {
+    for (const tab of ["name", "path"] as const)
+      ignore(
+        fetchEventComparisonTab(siteId, window, tab, filters, {
+          limit: 100,
+          sort: "views",
+          direction: "desc",
+          comparison,
+          comparisonMetric: "views",
+          comparisonSortBy: "current",
+          transport,
+        }),
+      );
     ignore(
       fetchEventsSummary(siteId, comparison.window, comparison.filters, {
         transport,

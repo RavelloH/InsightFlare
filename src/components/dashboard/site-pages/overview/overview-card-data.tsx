@@ -95,6 +95,7 @@ export function createOverviewComparisonColumns(
   comparisonLabel: string,
   locale: Locale,
   messages: AppMessages,
+  primaryMetricLabel = messages.common.views,
 ): readonly TabbedDataTableColumn<PageCardRow, PageCardSortKey, string>[] {
   return [
     {
@@ -106,8 +107,7 @@ export function createOverviewComparisonColumns(
     },
     {
       key: "current",
-      label:
-        metric === "views" ? messages.common.views : messages.common.visitors,
+      label: metric === "views" ? primaryMetricLabel : messages.common.visitors,
       getValue: (row) => row[metric],
       sortValue: (row) => row[metric],
       format: (value) => numberFormat(locale, value),

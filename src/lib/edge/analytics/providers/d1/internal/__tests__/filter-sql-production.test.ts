@@ -25,6 +25,11 @@ import { executePrivateQuery } from "@/lib/edge/analytics/interfaces/dashboard/p
 import { executePublicQuery } from "@/lib/edge/analytics/interfaces/dashboard/public";
 import { createComparisonProviders } from "@/lib/edge/analytics/providers/d1/comparison";
 import { queryChannelAggregate } from "@/lib/edge/analytics/providers/d1/internal/channels";
+import {
+  decodeComparisonDimensionCursor,
+  eventComparisonExpression,
+  queryComparisonDimensionPageFromD1,
+} from "@/lib/edge/analytics/providers/d1/internal/comparison-dimensions";
 import { resolveCrossBreakdownDimension } from "@/lib/edge/analytics/providers/d1/internal/core-dimensions";
 import { VISIT_SOURCE_COLUMNS } from "@/lib/edge/analytics/providers/d1/internal/core-sources";
 import { DEFAULT_EVENT_RECORD_SORT } from "@/lib/edge/analytics/providers/d1/internal/core-types";
@@ -2660,6 +2665,216 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
+  it("compares full event facts beyond the per-period top 100, scopes and cursors stay isolated", async () => {
+    const { db, env: base } = runFixture();
+    const env = {
+      ...(base as object),
+      DAILY_SALT_SECRET: "event-comparison-test",
+    } as Parameters<typeof queryComparisonDimensionPageFromD1>[0];
+    try {
+      const insertName = db.prepare(
+        "INSERT INTO custom_event_names(id,site_pk,name) VALUES (?,1,?)",
+      );
+      const insertEvent = db.prepare(
+        "INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at) VALUES (?,1,'site-a',?,?,?,?)",
+      );
+      let id = 1000;
+      // 105 higher-ranked reference-only names hide the shared event from
+      // a reference Top100, even though it really has a nonzero count.
+      insertName.run(500, "shared");
+      for (let j = 0; j < 3; j++)
+        insertEvent.run(id, "event-" + id++, "v-new", 500, 170);
+      insertEvent.run(id, "event-" + id++, "v-old", 500, 40);
+      for (let n = 0; n < 105; n++) {
+        insertName.run(501 + n, "reference-" + String(n).padStart(3, "0"));
+        for (let j = 0; j < 2; j++)
+          insertEvent.run(id, "event-" + id++, "v-old", 501 + n, 40);
+      }
+      for (let n = 0; n < 3; n++) {
+        insertName.run(800 + n, "new-" + n);
+        insertEvent.run(id, "event-" + id++, "v-new", 800 + n, 170);
+      }
+      const reference = { ...WINDOW, startMs: 0, endExclusiveMs: 100 };
+      const filters = EMPTY_FILTER_DOCUMENT;
+      const expr = eventComparisonExpression("event.name")!;
+      const options = {
+        metric: "views",
+        sortBy: "current",
+        direction: "desc",
+      } as const;
+      const page = await queryComparisonDimensionPageFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        filters,
+        reference,
+        filters,
+        1,
+        expr,
+        options,
+        null,
+        "private-dashboard",
+      );
+      expect(page.items[0]).toMatchObject({
+        key: "shared",
+        views: 3,
+        reference: { views: 1 },
+        change: { views: { absolute: 2, relative: 2 } },
+      });
+      expect(page.pagination.hasMore).toBe(true);
+      const decode = (
+        expression: string,
+        cursor: string | null,
+        sortBy: "current" | "change" = "current",
+      ) =>
+        decodeComparisonDimensionCursor(
+          env,
+          "site-a",
+          WINDOW,
+          filters,
+          reference,
+          filters,
+          expression,
+          undefined,
+          cursor,
+          "private-dashboard",
+          "views",
+          sortBy,
+          "desc",
+        );
+      await expect(
+        decode("event-fact:pathname", page.pagination.nextCursor),
+      ).rejects.toThrow("invalid-cursor");
+      await expect(
+        decode("event_name", page.pagination.nextCursor),
+      ).rejects.toThrow("invalid-cursor");
+      const next = await decode(expr, page.pagination.nextCursor);
+      expect(next).not.toBeNull();
+      const second = await queryComparisonDimensionPageFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        filters,
+        reference,
+        filters,
+        1,
+        expr,
+        options,
+        next,
+        "private-dashboard",
+      );
+      expect(second.items[0]?.key).not.toBe("shared");
+      const change = { ...options, sortBy: "change" } as const;
+      const firstNew = await queryComparisonDimensionPageFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        filters,
+        reference,
+        filters,
+        1,
+        expr,
+        change,
+        null,
+        "private-dashboard",
+      );
+      expect(firstNew.items[0]?.change.views.relative).toBeNull();
+      const changeCursor = await decode(
+        expr,
+        firstNew.pagination.nextCursor,
+        "change",
+      );
+      const secondNew = await queryComparisonDimensionPageFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        filters,
+        reference,
+        filters,
+        1,
+        expr,
+        change,
+        changeCursor,
+        "private-dashboard",
+      );
+      expect(secondNew.items[0]?.change.views.relative).toBeNull();
+      expect(secondNew.items[0]?.key).not.toBe(firstNew.items[0]?.key);
+      const read = async (pathname: string, search: string) => {
+        const url = new URL(
+          "https://edge.test/api/private/" +
+            pathname +
+            "?siteId=site-a&from=100&to=299&timeZone=UTC&" +
+            search,
+        );
+        return executePrivateQuery({
+          env,
+          siteId: "site-a",
+          pathname,
+          url,
+          request: new Request(url),
+          dashboardMode: true,
+          batchExecution: { capturedAtMs: 400 },
+        });
+      };
+      const name = await read(
+        "events-compare-name",
+        "compare=same&filter[event.name]=shared&compareFilter[event.name]=signup&scope=event&limit=10",
+      );
+      expect(name.status).toBe(200);
+      const body = (await name.json()) as { data: { items: unknown[] } };
+      expect(body.data.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            label: "shared",
+            views: 3,
+            reference: expect.objectContaining({ views: 0 }),
+          }),
+          expect.objectContaining({
+            label: "signup",
+            views: 0,
+            reference: expect.objectContaining({ views: 1 }),
+          }),
+        ]),
+      );
+      const path = await read(
+        "events-compare-path",
+        "compare=same&filter[event.name]=shared&compareFilter[event.name]=signup&scope=event&limit=10",
+      );
+      expect(path.status).toBe(200);
+      expect(
+        ((await path.json()) as { data: { items: unknown[] } }).data.items,
+      ).toEqual([
+        expect.objectContaining({
+          label: "/home",
+          views: 3,
+          reference: expect.objectContaining({ views: 1 }),
+        }),
+      ]);
+      expect((await read("events-compare-name", "limit=10")).status).toBe(400);
+      const scoped = await queryComparisonDimensionPageFromD1(
+        env,
+        "site-a",
+        WINDOW,
+        ready("dimension", 'event.name eq "shared"'),
+        reference,
+        filters,
+        10,
+        expr,
+        options,
+        null,
+        "private-dashboard",
+      );
+      expect(scoped.items.find((row) => row.key === "shared")).toMatchObject({
+        views: 3,
+        reference: { views: 1 },
+      });
+      expect(
+        scoped.items.every((row) => row.key === "shared" || row.views === 0),
+      ).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
   it("EventSummary, Trend and EventTypes return only the matching typed Event", async () => {
     const { db, env } = runFixture();
     try {

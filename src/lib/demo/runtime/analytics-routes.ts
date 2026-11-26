@@ -18,6 +18,7 @@ import {
   generateDemoReferrerRadar,
 } from "@/lib/demo/realtime/browser-client";
 import {
+  generateDemoEventComparison,
   generateDemoEventFields,
   generateDemoEventRecordDetail,
   generateDemoEventsRecords,
@@ -321,6 +322,14 @@ export function handleDemoAnalyticsRoutes(
   if (path.includes("/event-type-detail")) {
     return generateDemoEventTypeDetail(siteId, params);
   }
+  const eventComparisonTab =
+    /\/events-compare-(name|path|title|hostname)$/.exec(path)?.[1];
+  if (eventComparisonTab)
+    return generateDemoEventComparison(
+      siteId,
+      eventComparisonTab as "name" | "path" | "title" | "hostname",
+      params,
+    );
   if (path.includes("/events-summary")) {
     return generateDemoEventsSummary(siteId, params);
   }

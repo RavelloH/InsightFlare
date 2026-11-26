@@ -122,7 +122,13 @@ export async function startSiteAnalyticsStream(input: {
     : undefined;
   const allowedPaths = new Set(
     page === "events"
-      ? ["events-summary", "events-trend", "events-records"]
+      ? [
+          "events-summary",
+          "events-trend",
+          "events-records",
+          "events-compare-name",
+          "events-compare-path",
+        ]
       : page === "visitors"
         ? ["visitors"]
         : page === "sessions"

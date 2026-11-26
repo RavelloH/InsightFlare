@@ -1445,7 +1445,7 @@ describe("Dashboard Client Data Processing Utilities", () => {
             "&detail=click&eventId=private-record",
         );
         startEventsInitialReads("site-stream", mockWindow, search, transport);
-        expect(calls).toHaveLength(compare ? 5 : 3);
+        expect(calls).toHaveLength(compare ? 7 : 3);
         expect(calls.slice(0, 3).map((x) => x.path)).toEqual([
           "/api/private/events-summary",
           "/api/private/events-trend",
@@ -1479,10 +1479,27 @@ describe("Dashboard Client Data Processing Utilities", () => {
               x.params?.eventId === undefined,
           ),
         ).toBe(true);
-        if (compare)
+        if (compare) {
+          expect(calls.slice(3, 5).map((x) => x.path)).toEqual([
+            "/api/private/events-compare-name",
+            "/api/private/events-compare-path",
+          ]);
+          for (const call of calls.slice(3, 5))
+            expect(call.params).toMatchObject({
+              limit: 100,
+              sort: "views",
+              direction: "desc",
+              compare: "previous",
+              metric: "views",
+              sortBy: "current",
+              scope: "session",
+              "filter[page.path]": "/home",
+              "compareFilter[page.path]": "/docs",
+            });
           expect(
-            calls.slice(3).map((x) => x.params?.["filter[page.path]"]),
+            calls.slice(5).map((x) => x.params?.["filter[page.path]"]),
           ).toEqual(["/docs", "/docs"]);
+        }
       },
     );
     it.each([
