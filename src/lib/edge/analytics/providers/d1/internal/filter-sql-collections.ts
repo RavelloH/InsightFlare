@@ -893,12 +893,12 @@ class SqlCollectionCompiler {
     };
   }
   /**
-   * A root entity can qualify from one grouped set of identical Page/Event
-   * occurrences instead of enumerating combinations for every candidate.
-   * Only occurrence-local selector predicates are eligible. The universe
-   * still controls which entities can qualify (including negation).
+   * Global root qualification over canonical occurrences. Identical
+   * unconstrained steps reduce to cardinality; distinct Event pairs use
+   * strict predecessors, and repeated Event bounds use feasible extrema.
+   * The original universe still determines which entities may qualify.
    */
-  private globalRepeatedSequenceExists(
+  private globalSequenceExists(
     condition: FilterCondition,
     frame: SqlFrame,
   ): PredicateFragment | null {
@@ -910,81 +910,156 @@ class SqlCollectionCompiler {
       frame.currentAlias !== frame.anchorAlias ||
       frame.currentKind !== frame.anchorKind ||
       (frame.anchorKind !== "session" && frame.anchorKind !== "visitor") ||
-      (condition.operator !== "exists" && condition.operator !== "notExists") ||
-      target.kind !== "sequence" ||
-      target.steps.length < 2 ||
-      !target.steps.every(
-        (step) => JSON.stringify(step) === JSON.stringify(target.steps[0]),
-      )
+      (condition.operator !== "exists" && condition.operator !== "notExists")
     )
       return null;
-    const step = target.steps[0]!;
-    const root = step.kind === "selector" ? step.collection : step;
+    const sequence =
+      target.kind === "sequence"
+        ? target
+        : target.kind === "selector" && target.collection.kind === "sequence"
+          ? target.collection
+          : null;
+    if (!sequence || sequence.steps.length < 2) return null;
+    const steps = sequence.steps;
+    const count = steps.length;
+    const identical = steps.every(
+      (step) => JSON.stringify(step) === JSON.stringify(steps[0]),
+    );
+    if (!identical && count !== 2) return null;
+    const bound = target.kind === "selector" ? target.predicate : null;
     if (
-      root.kind !== "entity-root" ||
-      (root.entity !== "page" && root.entity !== "event")
+      bound &&
+      (bound.kind !== "condition" ||
+        bound.target.kind !== "context-intrinsic" ||
+        bound.target.context !== "sequence" ||
+        (bound.target.intrinsic !== "span" &&
+          !(
+            bound.target.intrinsic === "gap" &&
+            bound.target.from === 1 &&
+            bound.target.to === count
+          )) ||
+        !["lt", "lte", "gt", "gte"].includes(bound.operator))
     )
       return null;
-    const kind = root.entity;
-    // Dense unfiltered Page collections can make shared qualification
-    // more expensive. Only admit measured Page path equality selectors.
-    if (
-      kind === "page" &&
-      (step.kind !== "selector" ||
-        step.predicate.kind !== "condition" ||
-        step.predicate.operator !== "eq" ||
-        step.predicate.target.kind !== "member" ||
-        step.predicate.target.member !== "path" ||
-        step.predicate.target.object.kind !== "context-root" ||
-        step.predicate.target.object.context !== "current")
-    )
-      return null;
-    const localPredicate = (expression: FilterExpression): boolean => {
-      if (expression.kind === "not") return localPredicate(expression.child);
-      if (expression.kind !== "condition")
-        return expression.children.every(localPredicate);
-      const value = expression.target;
-      if (value.kind === "current-payload") return kind === "event";
-      return (
-        value.kind === "member" &&
-        value.object.kind === "context-root" &&
-        value.object.context === "current" &&
-        (value.member === "time" ||
-          (kind === "page" && value.member === "path") ||
-          (kind === "event" && value.member === "name"))
-      );
-    };
-    if (step.kind === "selector" && !localPredicate(step.predicate))
-      return null;
-    const item = this.alias();
-    const predicate =
-      step.kind === "selector"
-        ? onlyApplicable(
-            this.expression(step.predicate, {
-              ...frame,
-              currentAlias: item,
-              currentKind: kind,
-            }),
-          )
-        : { sql: "1", bindings: [], applicable: true };
-    const relation = this.source(kind, !this.clock?.filterRangeExplicit);
+    const upper =
+      bound?.kind === "condition" &&
+      (bound.operator === "lt" || bound.operator === "lte");
     const identity =
       frame.anchorKind === "session" ? "session_id" : "visitor_id";
+    const compileStep = (step: FilterTargetExpression) => {
+      const root = step.kind === "selector" ? step.collection : step;
+      if (
+        root.kind !== "entity-root" ||
+        (root.entity !== "page" && root.entity !== "event")
+      )
+        return null;
+      const kind = root.entity;
+      if (
+        kind === "page" &&
+        (!identical ||
+          bound ||
+          step.kind !== "selector" ||
+          step.predicate.kind !== "condition" ||
+          step.predicate.operator !== "eq" ||
+          step.predicate.target.kind !== "member" ||
+          step.predicate.target.member !== "path" ||
+          step.predicate.target.object.kind !== "context-root" ||
+          step.predicate.target.object.context !== "current")
+      )
+        return null;
+      const localPredicate = (expression: FilterExpression): boolean => {
+        if (expression.kind === "not") return localPredicate(expression.child);
+        if (expression.kind !== "condition")
+          return expression.children.every(localPredicate);
+        const value = expression.target;
+        if (value.kind === "current-payload") return kind === "event";
+        return (
+          value.kind === "member" &&
+          value.object.kind === "context-root" &&
+          value.object.context === "current" &&
+          (value.member === "time" ||
+            (kind === "page" && value.member === "path") ||
+            (kind === "event" && value.member === "name"))
+        );
+      };
+      if (step.kind === "selector" && !localPredicate(step.predicate))
+        return null;
+      const item = this.alias();
+      const predicate =
+        step.kind === "selector"
+          ? onlyApplicable(
+              this.expression(step.predicate, {
+                ...frame,
+                currentAlias: item,
+                currentKind: kind,
+              }),
+            )
+          : { sql: "1", bindings: [], applicable: true };
+      const relation = this.source(kind, !this.clock?.filterRangeExplicit);
+      return {
+        item,
+        kind,
+        bindings: predicate.bindings,
+        from: `FROM ${relation} ${item}
+          WHERE ${item}.site_pk IS NOT NULL
+            AND TRIM(COALESCE(${item}.${identity}, '')) != ''
+            AND (${predicate.sql})`,
+        key: `${item}.site_pk, ${item}.${identity} AS entity_id`,
+      };
+    };
+    const first = compileStep(steps[0]!);
+    if (!first) return null;
+    let sql: string;
+    const bindings = [...first.bindings];
+    const compared =
+      bound?.kind === "condition"
+        ? compareScalar(
+            { sql: "span_delta", bindings: [] },
+            bound.operator,
+            bound.value,
+            this.clock,
+          )
+        : null;
+    if (identical && !compared) {
+      sql = `SELECT ${first.key} ${first.from}
+        GROUP BY ${first.item}.site_pk, ${first.item}.${identity}
+        HAVING COUNT(*) >= ${count}`;
+    } else if (identical && compared) {
+      const time = `${first.item}.occurred_at`;
+      sql = upper
+        ? `SELECT DISTINCT site_pk, entity_id FROM (
+        SELECT ${first.key}, ${time} - LAG(${time}, ${count - 1})
+          OVER (PARTITION BY ${first.item}.site_pk, ${first.item}.${identity} ORDER BY ${time}) AS span_delta
+        ${first.from}
+      ) WHERE ${compared.sql}`
+        : `SELECT site_pk, entity_id FROM (
+        SELECT ${first.key}, MAX(${time}) - MIN(${time}) AS span_delta
+        ${first.from}
+        GROUP BY ${first.item}.site_pk, ${first.item}.${identity}
+        HAVING COUNT(*) >= ${count}
+      ) WHERE ${compared.sql}`;
+      bindings.push(...compared.bindings);
+    } else {
+      const last = compileStep(steps[1]!);
+      if (!last || first.kind !== "event" || last.kind !== "event") return null;
+      const projection = (step: typeof first, index: number) =>
+        `SELECT ${step.key}, ${step.item}.occurred_at AS activity_time,
+          ${step.item}.event_id COLLATE BINARY AS activity_id, ${index} AS step_index
+          ${step.from}`;
+      // Exclude the entire current occurrence peer group: a single Event
+      // may satisfy both selectors but cannot witness both sequence steps.
+      sql = `SELECT DISTINCT site_pk, entity_id FROM (
+        SELECT site_pk, entity_id, step_index, activity_time -
+          ${upper ? "MAX" : "MIN"}(CASE WHEN step_index = 0 THEN activity_time END)
+          OVER (PARTITION BY site_pk, entity_id ORDER BY activity_time, activity_id COLLATE BINARY
+            GROUPS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS span_delta
+        FROM (${projection(first, 0)} UNION ALL ${projection(last, 1)})
+      ) WHERE step_index = 1 AND ${compared?.sql ?? "span_delta IS NOT NULL"}`;
+      bindings.push(...last.bindings, ...(compared?.bindings ?? []));
+    }
     const name = `scope_global_sequence_${this.globalSequenceCtes.length}`;
     this.globalSequenceCtes.push(
-      boundCte(
-        name,
-        `${name} AS (
-      SELECT ${item}.site_pk, ${item}.${identity} AS entity_id
-      FROM ${relation} ${item}
-      WHERE ${item}.site_pk IS NOT NULL
-        AND TRIM(COALESCE(${item}.${identity}, '')) != ''
-        AND (${predicate.sql})
-      GROUP BY ${item}.site_pk, ${item}.${identity}
-      HAVING COUNT(*) >= ${target.steps.length}
-    )`,
-        predicate.bindings,
-      ),
+      boundCte(name, `${name} AS (${sql})`, bindings),
     );
     const found = `COALESCE((${frame.anchorAlias}.site_pk, ${frame.anchorAlias}.${identity})
       IN (SELECT site_pk, entity_id FROM ${name}), 0)`;
@@ -1247,7 +1322,7 @@ class SqlCollectionCompiler {
     condition: FilterCondition,
     frame: SqlFrame,
   ): PredicateFragment {
-    const globalSequence = this.globalRepeatedSequenceExists(condition, frame);
+    const globalSequence = this.globalSequenceExists(condition, frame);
     if (globalSequence) return globalSequence;
     const optimizedSame = this.localSameSequenceExists(condition, frame);
     if (optimizedSame) return optimizedSame;

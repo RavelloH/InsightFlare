@@ -455,6 +455,16 @@ describe("P4 complete timeline and relational SQL", () => {
       ] as const;
       const expressions = [
         "sequence([EVENT,EVENT]) exists",
+        'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
+        'sequence([EVENT { $.name eq "purchase" }, EVENT { $.name eq "signup" }]) notExists',
+        'sequence([EVENT, EVENT { $.name eq "signup" }]) exists',
+        'sequence([EVENT, EVENT { $.name eq "signup" }]) { $span lte 0ms } exists',
+        'sequence([EVENT, EVENT { $.name eq "signup" }]) { $span gte 0ms } notExists',
+        'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "missing" }]) { $gap(1,2) lt 10ms } notExists',
+        "sequence([EVENT,EVENT]) { $span lte 10ms } exists",
+        "sequence([EVENT,EVENT,EVENT]) { $span gt 5ms } exists",
+        "sequence([EVENT,EVENT,EVENT]) { $gap(1,3) gte 0ms } notExists",
+        "sequence([EVENT,EVENT,EVENT,EVENT]) { $span lte 0ms } exists",
         "sequence([EVENT,EVENT,EVENT]) notExists",
         "sequence([EVENT,EVENT,EVENT,EVENT]) exists",
         'sequence([EVENT { $.name eq "purchase" OR $.name eq "signup" }, EVENT { $.name eq "purchase" OR $.name eq "signup" }]) exists',
@@ -494,13 +504,14 @@ describe("P4 complete timeline and relational SQL", () => {
         }
       }
       for (const expression of [
-        'sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }]) exists',
+        "sequence([PAGE,EVENT]) exists",
         "sequence([PAGE,PAGE]) exists",
         "sequence([PAGE,PAGE]) notExists",
         "count(sequence([EVENT,EVENT])) eq 1",
         "adjacent(sequence([EVENT,EVENT])) exists",
         "without(sequence([EVENT,EVENT]), PAGE) exists",
-        "sequence([EVENT,EVENT]) { $span lte 10ms } exists",
+        "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) lte 10ms } exists",
+        "sequence([EVENT,EVENT]) { $span eq 10ms } exists",
       ]) {
         const sql = composeBoundCtes(
           compileCollectionSqlQualification(
