@@ -1,14 +1,21 @@
+import { infiniteQueryOptions } from "@tanstack/react-query";
+
 import {
   emptyVisitorDetail,
   emptyVisitors,
 } from "@/lib/dashboard/client/data/empty";
 import type {
+  PrivateReadTransport,
   SortDirection,
   VisitorListSortKey,
 } from "@/lib/dashboard/client/data/types";
 import { fetchPrivateJson } from "@/lib/dashboard/client/request";
 import { withFilters, withPagination } from "@/lib/dashboard/client/utils";
-import type { TimeWindow } from "@/lib/dashboard/query-state";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
+import {
+  parseFilterDocumentFromSearchParams,
+  type TimeWindow,
+} from "@/lib/dashboard/query-state";
 import type {
   JourneyEventsData,
   VisitorDetailData,
@@ -16,7 +23,10 @@ import type {
   VisitorSessionsData,
 } from "@/lib/dashboard-api/client/edge";
 import type { JourneyAnalysisContext } from "@/lib/edge/analytics/contract";
-import type { FilterDocument } from "@/lib/filter-contract";
+import {
+  attachFilterScopePreference,
+  type FilterDocument,
+} from "@/lib/filter-contract";
 function emptyVisitorsUnlessAborted(error: unknown): VisitorsData {
   if (error instanceof Error && error.name === "AbortError") throw error;
   return emptyVisitors();
@@ -33,6 +43,7 @@ export async function fetchVisitors(
     search?: string;
     analysisContext?: JourneyAnalysisContext;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
   },
 ): Promise<VisitorsData> {
   const params: Record<string, string | number> = {
@@ -64,11 +75,13 @@ export async function fetchVisitors(
     },
     filters,
   );
-  const request = options?.signal
-    ? fetchPrivateJson<VisitorsData>("/api/private/visitors", requestParams, {
-        signal: options.signal,
-      })
-    : fetchPrivateJson<VisitorsData>("/api/private/visitors", requestParams);
+  const request =
+    options?.signal || options?.transport
+      ? fetchPrivateJson<VisitorsData>("/api/private/visitors", requestParams, {
+          signal: options.signal,
+          ...(options.transport ? { transport: options.transport } : {}),
+        })
+      : fetchPrivateJson<VisitorsData>("/api/private/visitors", requestParams);
   return request.catch(emptyVisitorsUnlessAborted);
 }
 export async function fetchVisitorDetail(
@@ -151,4 +164,76 @@ export async function fetchVisitorSessions(
     ),
     { signal: options?.signal },
   );
+}
+
+export const VISITOR_PAGE_SIZE = 50;
+export const DEFAULT_VISITOR_SORT = {
+  key: "lastSeenAt",
+  direction: "desc",
+} as const;
+/** Shared normalized query identity for the route and the mounted list. */
+export function visitorsListQueryOptions(input: {
+  siteId: string;
+  window: TimeWindow;
+  filters: FilterDocument;
+  search?: string;
+  sort?: { key: VisitorListSortKey; direction: SortDirection };
+  transport?: PrivateReadTransport;
+  enabled?: boolean;
+}) {
+  const {
+    siteId,
+    window,
+    filters,
+    search = "",
+    sort = DEFAULT_VISITOR_SORT,
+    transport,
+  } = input;
+  return infiniteQueryOptions({
+    queryKey: [
+      "dashboard",
+      "visitors",
+      siteId,
+      window.from,
+      window.to,
+      window.timeZone,
+      filterQueryKey(filters),
+      search,
+      sort.key,
+      sort.direction,
+    ],
+    queryFn: ({ pageParam, signal }) =>
+      fetchVisitors(siteId, window, filters, {
+        cursor: pageParam,
+        limit: VISITOR_PAGE_SIZE,
+        sortBy: sort.key,
+        sortDir: sort.direction,
+        search,
+        signal,
+        transport,
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.data.pagination.hasMore
+        ? lastPage.data.pagination.nextCursor
+        : undefined,
+    enabled: input.enabled ?? true,
+  });
+}
+export function startVisitorsInitialReads(
+  siteId: string,
+  window: TimeWindow,
+  search: URLSearchParams,
+  transport: PrivateReadTransport,
+): void {
+  const document = parseFilterDocumentFromSearchParams(search);
+  const filters = document.root
+    ? document
+    : attachFilterScopePreference(document, "auto");
+  void fetchVisitors(siteId, window, filters, {
+    limit: VISITOR_PAGE_SIZE,
+    sortBy: DEFAULT_VISITOR_SORT.key,
+    sortDir: DEFAULT_VISITOR_SORT.direction,
+    transport,
+  }).catch(() => undefined);
 }

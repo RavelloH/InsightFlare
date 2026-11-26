@@ -18,12 +18,18 @@ import {
   parseDemoQueryLimit,
   withoutDemoGeoFilter,
 } from "@/lib/demo/realtime/filters";
-import { demoPage } from "@/lib/demo/realtime/pagination";
+import {
+  demoCursorFilterBinding,
+  demoPage,
+} from "@/lib/demo/realtime/pagination";
 import {
   buildDemoTrendBuckets,
   parseDemoTimeZone,
 } from "@/lib/demo/realtime/shared";
-import type { DemoDimensionRow } from "@/lib/demo/realtime/types";
+import type {
+  DemoDimensionRow,
+  DemoFilteredFacts,
+} from "@/lib/demo/realtime/types";
 import {
   DEMO_EMPTY_HASH_VALUE,
   DEMO_EMPTY_QUERY_VALUE,
@@ -68,7 +74,7 @@ export function generateDemoPages(
       siteId,
       from,
       to,
-      filters,
+      filters: demoCursorFilterBinding(filters),
       search: String(params.search ?? "")
         .trim()
         .toLowerCase(),
@@ -90,6 +96,38 @@ export function generateDemoPages(
   if (options.includeTabs !== false) result.tabs = pages.tabs;
   return result;
 }
+/** Group the already scoped candidate visits. A dimension row is not a
+ * second filter evaluation: session/visitor membership was expanded once. */
+function groupDemoPages(
+  filtered: DemoFilteredFacts,
+): Map<string, DemoFilteredFacts> {
+  const grouped = new Map<string, DemoFilteredFacts>();
+  for (const visit of filtered.visits) {
+    const label = visit.pathname.trim();
+    if (!label) continue;
+    const page = grouped.get(label) ?? {
+      visits: [],
+      sessions: new Set<string>(),
+      visitors: new Set<string>(),
+      visitsBySession: new Map<string, number>(),
+    };
+    page.visits.push(visit);
+    page.sessions.add(visit.sessionId);
+    page.visitors.add(visit.visitorId);
+    page.visitsBySession.set(
+      visit.sessionId,
+      (page.visitsBySession.get(visit.sessionId) ?? 0) + 1,
+    );
+    grouped.set(label, page);
+  }
+  return grouped;
+}
+const EMPTY_DEMO_PAGE: DemoFilteredFacts = {
+  visits: [],
+  sessions: new Set(),
+  visitors: new Set(),
+  visitsBySession: new Map(),
+};
 export function generateDemoPagesDashboard(
   siteId: string,
   params: Record<string, string | number>,
@@ -101,12 +139,7 @@ export function generateDemoPagesDashboard(
   const timeZone = parseDemoTimeZone(params);
   const dataset = buildDemoFactDataset(siteId, from, to);
   const filtered = applyDemoFilters(dataset, filters);
-  const allPathRows = aggregateDimensionRowsFromVisits(
-    dataset,
-    filtered.visits,
-    Math.max(1, filtered.visits.length),
-    (visit) => visit.pathname,
-  );
+  const currentPages = groupDemoPages(filtered);
   const comparison = resolveDemoComparison(params, filters);
   const referenceDataset = comparison
     ? buildDemoFactDataset(siteId, comparison.from, comparison.to)
@@ -122,20 +155,15 @@ export function generateDemoPagesDashboard(
     referenceDataset && referenceFilters
       ? applyDemoFilters(referenceDataset, referenceFilters)
       : null;
-  const referencePathRows = referenceFiltered
-    ? aggregateDimensionRowsFromVisits(
-        referenceDataset!,
-        referenceFiltered.visits,
-        Math.max(1, referenceFiltered.visits.length),
-        (visit) => visit.pathname,
-      )
-    : [];
-  const pathnames = Array.from(
-    new Set([
-      ...allPathRows.map((row) => row.label),
-      ...referencePathRows.map((row) => row.label),
-    ]),
-  );
+  const referencePages = referenceFiltered
+    ? groupDemoPages(referenceFiltered)
+    : new Map<string, DemoFilteredFacts>();
+  const previousPages = previousDataset
+    ? groupDemoPages(applyDemoFilters(previousDataset, filters))
+    : new Map<string, DemoFilteredFacts>();
+  const pathnames = [
+    ...new Set([...currentPages.keys(), ...referencePages.keys()]),
+  ];
 
   const percentDelta = (current: number, previous: number) =>
     previous <= 0 ? null : ((current - previous) / previous) * 100;
@@ -143,16 +171,13 @@ export function generateDemoPagesDashboard(
   const pageRows = pathnames.map((pathname) => {
     const currentMetrics = aggregateOverviewMetrics(
       dataset,
-      applyDemoFilters(dataset, { ...filters, path: pathname }),
+      currentPages.get(pathname) ?? EMPTY_DEMO_PAGE,
     );
     const referenceMetrics =
       referenceDataset && referenceFilters
         ? aggregateOverviewMetrics(
             referenceDataset,
-            applyDemoFilters(referenceDataset, {
-              ...referenceFilters,
-              path: pathname,
-            }),
+            referencePages.get(pathname) ?? EMPTY_DEMO_PAGE,
           )
         : null;
     const currentPagesPerSession =
@@ -185,7 +210,7 @@ export function generateDemoPagesDashboard(
       previousDataset && !comparison
         ? aggregateOverviewMetrics(
             previousDataset,
-            applyDemoFilters(previousDataset, { ...filters, path: pathname }),
+            previousPages.get(pathname) ?? EMPTY_DEMO_PAGE,
           )
         : null;
     const previousValues = previousMetrics
@@ -238,7 +263,7 @@ export function generateDemoPagesDashboard(
       to,
       interval,
       timeZone,
-      filters,
+      filters: demoCursorFilterBinding(filters),
       includeDetails: true,
       sort: String(params.sort ?? "views"),
       direction: String(params.direction ?? "desc"),
@@ -275,19 +300,12 @@ export function generateDemoPagesDashboard(
       },
     },
   );
-  const items = page.items.flatMap((pathname) => {
-    const row = pageRows.find(
-      (candidate) => candidate.label === pathname.label,
-    );
-    if (!row) return [];
-    const currentMetrics = aggregateOverviewMetrics(
-      dataset,
-      applyDemoFilters(dataset, { ...filters, path: row.label }),
-    );
+  const items = page.items.map((row) => {
+    const currentMetrics = row.metrics;
     const currentPagesPerSession = row.metrics.pagesPerSession;
     const titles = aggregateDimensionRowsFromVisits(
       dataset,
-      filtered.visits.filter((visit) => visit.pathname === row.label),
+      currentPages.get(row.label)?.visits ?? [],
       3,
       (visit) => visit.title,
     ).map((titleRow) => titleRow.label);
@@ -296,9 +314,10 @@ export function generateDemoPagesDashboard(
       from,
       to,
       interval,
-      { ...filters, path: row.label },
+      filters,
       timeZone,
       dataset,
+      currentPages.get(row.label) ?? EMPTY_DEMO_PAGE,
     ).map((point) => ({
       timestampMs: point.timestampMs,
       views: point.views,
@@ -311,59 +330,59 @@ export function generateDemoPagesDashboard(
             comparison.from,
             comparison.to,
             interval,
-            { ...referenceFilters, path: row.label },
+            referenceFilters,
             timeZone,
+            referenceDataset,
+            referencePages.get(row.label) ?? EMPTY_DEMO_PAGE,
           ).map((point) => ({
             timestampMs: point.timestampMs,
             views: point.views,
             visitors: point.visitors,
           }))
         : undefined;
-    return [
-      {
-        pathname: row.label,
-        titles,
-        trend,
-        ...(referenceTrend ? { referenceTrend } : {}),
-        metrics: {
-          views: currentMetrics.views,
-          visitors: currentMetrics.visitors,
-          sessions: currentMetrics.sessions,
-          bounceRate: currentMetrics.bounceRate,
-          pagesPerSession: currentPagesPerSession,
-          avgDurationMs: currentMetrics.avgDurationMs,
-        },
-        changeRates: row.change
-          ? Object.fromEntries(
+    return {
+      pathname: row.label,
+      titles,
+      trend,
+      ...(referenceTrend ? { referenceTrend } : {}),
+      metrics: {
+        views: currentMetrics.views,
+        visitors: currentMetrics.visitors,
+        sessions: currentMetrics.sessions,
+        bounceRate: currentMetrics.bounceRate,
+        pagesPerSession: currentPagesPerSession,
+        avgDurationMs: currentMetrics.avgDurationMs,
+      },
+      changeRates: row.change
+        ? Object.fromEntries(
+            Object.entries(row.change).map(([key, value]) => [
+              key,
+              value.relative,
+            ]),
+          )
+        : {
+            views: null,
+            visitors: null,
+            sessions: null,
+            bounceRate: null,
+            pagesPerSession: null,
+            avgDurationMs: null,
+          },
+      ...(row.reference && row.change
+        ? {
+            reference: row.reference,
+            change: Object.fromEntries(
               Object.entries(row.change).map(([key, value]) => [
                 key,
-                value.relative,
+                {
+                  absolute: value.absolute,
+                  relative: value.relative,
+                },
               ]),
-            )
-          : {
-              views: null,
-              visitors: null,
-              sessions: null,
-              bounceRate: null,
-              pagesPerSession: null,
-              avgDurationMs: null,
-            },
-        ...(row.reference && row.change
-          ? {
-              reference: row.reference,
-              change: Object.fromEntries(
-                Object.entries(row.change).map(([key, value]) => [
-                  key,
-                  {
-                    absolute: value.absolute,
-                    relative: value.relative,
-                  },
-                ]),
-              ),
-            }
-          : {}),
-      },
-    ];
+            ),
+          }
+        : {}),
+    };
   });
 
   return {
@@ -403,7 +422,7 @@ export function generateDemoReferrers(
       siteId,
       from,
       to,
-      filters,
+      filters: demoCursorFilterBinding(filters),
       includeFullUrl,
       search: String(params.search ?? "")
         .trim()
@@ -587,7 +606,7 @@ export function generateDemoDimension(
       dimensionType,
       from,
       to,
-      filters,
+      filters: demoCursorFilterBinding(filters),
       compare: params.compare ?? null,
       metric: params.metric ?? null,
       sortBy: params.sortBy ?? null,

@@ -153,6 +153,8 @@ export interface TabbedDataTableCardProps<
   TRow extends TabbedDataTableRowBase,
   TKey extends string = string,
 > {
+  /** Wait for the canonical dashboard time window before starting reads. */
+  queryEnabled?: boolean;
   tabs: NonEmptyArray<TabbedDataTableTab<TTab>>;
   columns:
     | readonly TabbedDataTableColumn<TRow, TKey, TTab>[]

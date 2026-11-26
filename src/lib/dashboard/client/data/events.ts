@@ -8,16 +8,24 @@ import {
   emptyJourneyEventDetail,
 } from "@/lib/dashboard/client/data/empty";
 import type {
+  DashboardListRequestOptions,
   EventRecordSortKey,
+  PrivateReadTransport,
   SortDirection,
 } from "@/lib/dashboard/client/data/types";
 import { fetchPrivateJson } from "@/lib/dashboard/client/request";
 import {
+  normalizeOverviewRows,
   normalizePaginatedCollection,
+  withComparison,
   withFilters,
   withPagination,
 } from "@/lib/dashboard/client/utils";
-import type { TimeWindow } from "@/lib/dashboard/query-state";
+import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
+import {
+  parseFilterDocumentFromSearchParams,
+  type TimeWindow,
+} from "@/lib/dashboard/query-state";
 import type {
   EventField,
   EventFieldValuesData,
@@ -32,6 +40,7 @@ import type {
   EventTypeFieldsData,
   JourneyEvent,
   JourneyEventDetailData,
+  OverviewTabData,
 } from "@/lib/dashboard-api/client/edge";
 import type { FilterDocument, FilterScope } from "@/lib/filter-contract";
 function fallbackUnlessAborted<T>(error: unknown, fallback: () => T): T {
@@ -49,7 +58,7 @@ export async function fetchEventsSummary(
   siteId: string,
   window: TimeWindow,
   filters?: FilterDocument,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; transport?: PrivateReadTransport },
 ): Promise<EventsSummaryData> {
   const requestParams = withFilters(
     {
@@ -60,16 +69,20 @@ export async function fetchEventsSummary(
     },
     filters,
   );
-  const request = options?.signal
-    ? fetchPrivateJson<EventsSummaryData>(
-        "/api/private/events-summary",
-        requestParams,
-        { signal: options.signal },
-      )
-    : fetchPrivateJson<EventsSummaryData>(
-        "/api/private/events-summary",
-        requestParams,
-      );
+  const request =
+    options?.signal || options?.transport
+      ? fetchPrivateJson<EventsSummaryData>(
+          "/api/private/events-summary",
+          requestParams,
+          {
+            signal: options.signal,
+            ...(options.transport ? { transport: options.transport } : {}),
+          },
+        )
+      : fetchPrivateJson<EventsSummaryData>(
+          "/api/private/events-summary",
+          requestParams,
+        );
   return request.catch((error) =>
     fallbackUnlessAborted(error, emptyEventsSummary),
   );
@@ -82,6 +95,7 @@ export async function fetchEventsTrend(
     limit?: number;
     eventName?: string;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
   },
 ): Promise<EventsTrendData> {
   const params: Record<string, string | number> = {
@@ -95,16 +109,20 @@ export async function fetchEventsTrend(
   const eventName = options?.eventName?.trim();
   if (eventName) params.eventName = eventName;
   const requestParams = withFilters(params, filters);
-  const request = options?.signal
-    ? fetchPrivateJson<EventsTrendResponseData>(
-        "/api/private/events-trend",
-        requestParams,
-        { signal: options.signal },
-      )
-    : fetchPrivateJson<EventsTrendResponseData>(
-        "/api/private/events-trend",
-        requestParams,
-      );
+  const request =
+    options?.signal || options?.transport
+      ? fetchPrivateJson<EventsTrendResponseData>(
+          "/api/private/events-trend",
+          requestParams,
+          {
+            signal: options.signal,
+            ...(options.transport ? { transport: options.transport } : {}),
+          },
+        )
+      : fetchPrivateJson<EventsTrendResponseData>(
+          "/api/private/events-trend",
+          requestParams,
+        );
   return request
     .then((value) => {
       const payload = value as EventsTrendResponseData;
@@ -146,6 +164,7 @@ export async function fetchEventsRecords(
     search?: string;
     eventName?: string;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
   },
 ): Promise<EventsRecordsData> {
   const limit = options?.limit ?? 80;
@@ -164,16 +183,20 @@ export async function fetchEventsRecords(
   const eventName = options?.eventName?.trim();
   if (eventName) params.eventName = eventName;
   const requestParams = withFilters(params, filters);
-  const request = options?.signal
-    ? fetchPrivateJson<EventsRecordsData>(
-        "/api/private/events-records",
-        requestParams,
-        { signal: options.signal },
-      )
-    : fetchPrivateJson<EventsRecordsData>(
-        "/api/private/events-records",
-        requestParams,
-      );
+  const request =
+    options?.signal || options?.transport
+      ? fetchPrivateJson<EventsRecordsData>(
+          "/api/private/events-records",
+          requestParams,
+          {
+            signal: options.signal,
+            ...(options.transport ? { transport: options.transport } : {}),
+          },
+        )
+      : fetchPrivateJson<EventsRecordsData>(
+          "/api/private/events-records",
+          requestParams,
+        );
   return request
     .then((value) => {
       const payload = value as EventsRecordsData;
@@ -421,4 +444,104 @@ export async function fetchJourneyEventDetail(
     : request.catch((error) =>
         fallbackUnlessAborted(error, emptyJourneyEventDetail),
       );
+}
+
+export type EventComparisonTab = "name" | "path" | "title" | "hostname";
+export async function fetchEventComparisonTab(
+  siteId: string,
+  window: TimeWindow,
+  tab: EventComparisonTab,
+  filters: FilterDocument,
+  options?: DashboardListRequestOptions & { resolvedScope?: FilterScope },
+): Promise<OverviewTabData["data"]> {
+  const payload = await fetchPrivateJson<OverviewTabData>(
+    `/api/private/events-compare-${tab}`,
+    withComparison(
+      withFilters(
+        withPagination(
+          {
+            siteId,
+            from: window.from,
+            to: window.to,
+            timeZone: window.timeZone,
+            ...(options?.search?.trim()
+              ? { search: options.search.trim() }
+              : {}),
+            ...(options?.sort ? { sort: options.sort } : {}),
+            ...(options?.direction ? { direction: options.direction } : {}),
+          },
+          options,
+          100,
+        ),
+        filters,
+        options?.resolvedScope,
+      ),
+      options?.comparison,
+      { metric: options?.comparisonMetric, sortBy: options?.comparisonSortBy },
+    ),
+    { signal: options?.signal, transport: options?.transport },
+  );
+  const data = normalizePaginatedCollection<
+    OverviewTabData["data"]["items"][number]
+  >(payload.data);
+  return { ...data, items: normalizeOverviewRows(data.items) };
+}
+
+export const EVENT_PAGE_SIZE = 50;
+export const DEFAULT_EVENT_RECORD_SORT = {
+  key: "occurredAt",
+  direction: "desc",
+} as const;
+export const EVENT_INITIAL_TREND_LIMIT = 18;
+export function startEventsInitialReads(
+  siteId: string,
+  window: TimeWindow,
+  search: URLSearchParams,
+  transport: PrivateReadTransport,
+): void {
+  const filters = parseFilterDocumentFromSearchParams(search);
+  const comparison = resolveDashboardComparisonQuery(search, window, filters);
+  const ignore = (p: Promise<unknown>) => {
+    void p.catch(() => undefined);
+  };
+  ignore(fetchEventsSummary(siteId, window, filters, { transport }));
+  ignore(
+    fetchEventsTrend(siteId, window, filters, {
+      limit: EVENT_INITIAL_TREND_LIMIT,
+      transport,
+    }),
+  );
+  ignore(
+    fetchEventsRecords(siteId, window, filters, {
+      limit: EVENT_PAGE_SIZE,
+      sortBy: DEFAULT_EVENT_RECORD_SORT.key,
+      sortDir: DEFAULT_EVENT_RECORD_SORT.direction,
+      transport,
+    }),
+  );
+  if (comparison) {
+    for (const tab of ["name", "path"] as const)
+      ignore(
+        fetchEventComparisonTab(siteId, window, tab, filters, {
+          limit: 100,
+          sort: "views",
+          direction: "desc",
+          comparison,
+          comparisonMetric: "views",
+          comparisonSortBy: "current",
+          transport,
+        }),
+      );
+    ignore(
+      fetchEventsSummary(siteId, comparison.window, comparison.filters, {
+        transport,
+      }),
+    );
+    ignore(
+      fetchEventsTrend(siteId, comparison.window, comparison.filters, {
+        limit: EVENT_INITIAL_TREND_LIMIT,
+        transport,
+      }),
+    );
+  }
 }

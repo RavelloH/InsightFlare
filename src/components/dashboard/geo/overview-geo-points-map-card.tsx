@@ -8,18 +8,15 @@ import {
   GeoPointsMapIsland,
   type GeoPointsMapPoint,
 } from "@/components/dashboard/geo/geo-points-map-island";
+import { overviewGeoPointsFilters } from "@/lib/dashboard/client/data/geo";
 import {
   emptyOverviewGeoPointsData,
   fetchOverviewGeoPoints,
 } from "@/lib/dashboard/client/data/index";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
-import {
-  attachFilterScopePreference,
-  type FilterDocument,
-  type FilterScope,
-  filterScopePreferenceFromDocument,
-} from "@/lib/filter-contract/index";
+import type { FilterDocument, FilterScope } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 interface OverviewGeoPointsMapCardProps {
@@ -29,6 +26,8 @@ interface OverviewGeoPointsMapCardProps {
   window: TimeWindow;
   filters: FilterDocument;
   resolvedScope?: FilterScope;
+  transport?: PrivateReadTransport;
+  queryEnabled?: boolean;
   selectedCountryCode?: string | null;
   onCountrySelect?: (countryCode: string | null) => void;
 }
@@ -39,23 +38,14 @@ export const OverviewGeoPointsMapCard = memo(function OverviewGeoPointsMapCard({
   window,
   filters,
   resolvedScope,
+  transport,
+  queryEnabled = true,
   selectedCountryCode,
   onCountrySelect,
 }: OverviewGeoPointsMapCardProps) {
   const emptyGeoPointsData = useMemo(() => emptyOverviewGeoPointsData(), []);
-  const requestFilters = useMemo<FilterDocument>(
-    () =>
-      attachFilterScopePreference(
-        {
-          ...filters,
-          country: undefined,
-          geo: undefined,
-          geoContinent: undefined,
-          geoTimezone: undefined,
-          geoOrganization: undefined,
-        } as FilterDocument,
-        filterScopePreferenceFromDocument(filters) ?? "auto",
-      ),
+  const requestFilters = useMemo(
+    () => overviewGeoPointsFilters(filters),
     [filters],
   );
   const requestFiltersKey = useMemo(
@@ -84,8 +74,9 @@ export const OverviewGeoPointsMapCard = memo(function OverviewGeoPointsMapCard({
         limit: 5000,
         signal,
         resolvedScope,
+        ...(transport ? { transport } : {}),
       }),
-    enabled: typeof window !== "undefined",
+    enabled: typeof window !== "undefined" && queryEnabled,
     placeholderData: keepPreviousData,
   });
 

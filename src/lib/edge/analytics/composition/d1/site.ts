@@ -13,6 +13,7 @@ import { EMPTY_FILTER_DOCUMENT } from "@/lib/edge/analytics/contract";
 import { queryChannelAggregate } from "@/lib/edge/analytics/providers/d1/internal/channels";
 import {
   decodeComparisonDimensionCursor,
+  eventComparisonExpression,
   queryComparisonDimensionPageFromD1,
   queryComparisonSessionPathPageFromD1,
 } from "@/lib/edge/analytics/providers/d1/internal/comparison-dimensions";
@@ -71,6 +72,8 @@ import {
   timeWindow,
 } from "./shared";
 function overviewTabExpression(tab: string): string | null {
+  const eventExpression = eventComparisonExpression(tab);
+  if (eventExpression) return eventExpression;
   if (tab === "page.path") return "TRIM(COALESCE(pathname, ''))";
   if (tab === "page.query") return "TRIM(COALESCE(query_string, ''))";
   if (tab === "page.title") return "TRIM(COALESCE(title, ''))";
@@ -263,6 +266,8 @@ export async function overviewTabData(
       };
     }
   }
+  if (eventComparisonExpression(tab))
+    throw new Error("event_dimension_requires_comparison");
   if (tab === "source.channel") {
     const selectExpr = buildTrafficChannelSqlExpression();
     const cursor = await decodeDimensionCursor(

@@ -31,6 +31,7 @@ import {
   type ReferrerSortKey,
   type ReferrerTab,
 } from "@/components/dashboard/referrers/referrer-utils";
+import { REFERRER_TABLE_LIMIT } from "@/lib/dashboard/client/data/referrers";
 import {
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
@@ -68,6 +69,7 @@ interface ReferrerBreakdownCardProps {
     metric: ComparisonTableMetric,
   ) => void;
   requestKey: string;
+  queryEnabled?: boolean;
   loader: TabbedDataTableLoader<
     ReferrerTab,
     ReferrerBreakdownRow,
@@ -85,6 +87,7 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
   comparisonMetricByGroup,
   onComparisonMetricChange,
   requestKey,
+  queryEnabled = true,
   loader,
   showSourceLinkTab = true,
 }: ReferrerBreakdownCardProps) {
@@ -320,6 +323,8 @@ export const ReferrerBreakdownCard = memo(function ReferrerBreakdownCard({
     <TabbedDataTableCard<ReferrerTab, ReferrerBreakdownRow, ReferrerSortKey>
       tabs={tabs}
       loader={loader}
+      limit={REFERRER_TABLE_LIMIT}
+      queryEnabled={queryEnabled}
       requestKey={`${requestKey}:${group}:${comparisonMetricByGroup[group]}`}
       defaultSort={
         comparisonQuery ? { key: "current", direction: "desc" } : undefined

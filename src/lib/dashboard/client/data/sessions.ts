@@ -1,21 +1,31 @@
+import { infiniteQueryOptions } from "@tanstack/react-query";
+
 import {
   emptySessionDetail,
   emptySessions,
 } from "@/lib/dashboard/client/data/empty";
 import type {
+  PrivateReadTransport,
   SessionListSortKey,
   SortDirection,
 } from "@/lib/dashboard/client/data/types";
 import { fetchPrivateJson } from "@/lib/dashboard/client/request";
 import { withFilters, withPagination } from "@/lib/dashboard/client/utils";
-import type { TimeWindow } from "@/lib/dashboard/query-state";
+import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
+import {
+  parseFilterDocumentFromSearchParams,
+  type TimeWindow,
+} from "@/lib/dashboard/query-state";
 import type {
   SessionDetailData,
   SessionEventsData,
   SessionsData,
 } from "@/lib/dashboard-api/client/edge";
 import type { JourneyAnalysisContext } from "@/lib/edge/analytics/contract";
-import type { FilterDocument } from "@/lib/filter-contract";
+import {
+  attachFilterScopePreference,
+  type FilterDocument,
+} from "@/lib/filter-contract";
 function emptySessionsUnlessAborted(error: unknown): SessionsData {
   if (error instanceof Error && error.name === "AbortError") throw error;
   return emptySessions();
@@ -32,6 +42,7 @@ export async function fetchSessions(
     search?: string;
     analysisContext?: JourneyAnalysisContext;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
   },
 ): Promise<SessionsData> {
   const params: Record<string, string | number> = {
@@ -63,11 +74,13 @@ export async function fetchSessions(
     },
     filters,
   );
-  const request = options?.signal
-    ? fetchPrivateJson<SessionsData>("/api/private/sessions", requestParams, {
-        signal: options.signal,
-      })
-    : fetchPrivateJson<SessionsData>("/api/private/sessions", requestParams);
+  const request =
+    options?.signal || options?.transport
+      ? fetchPrivateJson<SessionsData>("/api/private/sessions", requestParams, {
+          signal: options.signal,
+          ...(options.transport ? { transport: options.transport } : {}),
+        })
+      : fetchPrivateJson<SessionsData>("/api/private/sessions", requestParams);
   return request.catch(emptySessionsUnlessAborted);
 }
 export async function fetchSessionDetail(
@@ -115,4 +128,76 @@ export async function fetchSessionEvents(
     ),
     { signal: options?.signal },
   );
+}
+
+export const SESSION_PAGE_SIZE = 50;
+export const DEFAULT_SESSION_SORT = {
+  key: "startedAt",
+  direction: "desc",
+} as const;
+/** Shared normalized query identity for the route and the mounted list. */
+export function sessionsListQueryOptions(input: {
+  siteId: string;
+  window: TimeWindow;
+  filters: FilterDocument;
+  search?: string;
+  sort?: { key: SessionListSortKey; direction: SortDirection };
+  transport?: PrivateReadTransport;
+  enabled?: boolean;
+}) {
+  const {
+    siteId,
+    window,
+    filters,
+    search = "",
+    sort = DEFAULT_SESSION_SORT,
+    transport,
+  } = input;
+  return infiniteQueryOptions({
+    queryKey: [
+      "dashboard",
+      "sessions",
+      siteId,
+      window.from,
+      window.to,
+      window.timeZone,
+      filterQueryKey(filters),
+      search,
+      sort.key,
+      sort.direction,
+    ],
+    queryFn: ({ pageParam, signal }) =>
+      fetchSessions(siteId, window, filters, {
+        cursor: pageParam,
+        limit: SESSION_PAGE_SIZE,
+        sortBy: sort.key,
+        sortDir: sort.direction,
+        search,
+        signal,
+        transport,
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.data.pagination.hasMore
+        ? lastPage.data.pagination.nextCursor
+        : undefined,
+    enabled: input.enabled ?? true,
+  });
+}
+export function startSessionsInitialReads(
+  siteId: string,
+  window: TimeWindow,
+  search: URLSearchParams,
+  transport: PrivateReadTransport,
+): void {
+  const document = parseFilterDocumentFromSearchParams(search);
+  const filters = document.root
+    ? document
+    : attachFilterScopePreference(document, "auto");
+  void fetchSessions(siteId, window, filters, {
+    limit: SESSION_PAGE_SIZE,
+    sortBy: DEFAULT_SESSION_SORT.key,
+    sortDir: DEFAULT_SESSION_SORT.direction,
+    transport,
+  }).catch(() => undefined);
 }

@@ -13,14 +13,21 @@ import {
 } from "@insightflare/ui/card";
 import { PageHeading } from "@insightflare/ui/page-heading";
 import { RiSpeedUpLine } from "@remixicon/react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  queryOptions,
+  useQuery,
+} from "@tanstack/react-query";
 
 import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,
 } from "@/components/dashboard/comparison/use-dashboard-comparison-query";
+import { useDashboardDeferredReadTransport } from "@/components/dashboard/shell/dashboard-query-provider";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import { fetchPerformance } from "@/lib/dashboard/client/data/index";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
@@ -71,23 +78,27 @@ import {
   scoreStatus,
   scoreSummary,
 } from "./model";
-export function PerformanceClientPage({
-  locale,
-  messages,
-  siteId,
-}: PerformanceClientPageProps) {
-  const { filters, window: timeWindow } = useDashboardQuery() as {
-    filters: FilterDocument;
-    window: TimeWindow;
-  };
-  const [activePanel, setActivePanel] = useState<PerformancePanelKey>("score");
-  const comparisonQuery = useDashboardComparisonQuery(timeWindow, filters);
-  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
-  const comparisonFiltersKey = useMemo(
-    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : null),
-    [comparisonQuery],
-  );
-  const { data, isPending, isPlaceholderData } = useQuery({
+export function performanceQueryOptions(input: {
+  siteId: string;
+  window: TimeWindow;
+  filters: FilterDocument;
+  comparisonQuery: DashboardComparisonQuery | null;
+  transport?: PrivateReadTransport;
+  enabled?: boolean;
+}) {
+  const {
+    siteId,
+    window: timeWindow,
+    filters,
+    comparisonQuery,
+    transport,
+    enabled: queryReady = true,
+  } = input;
+  const filtersKey = filterQueryKey(filters);
+  const comparisonFiltersKey = comparisonQuery
+    ? filterQueryKey(comparisonQuery.filters)
+    : null;
+  return queryOptions({
     queryKey: [
       "dashboard",
       "performance",
@@ -107,13 +118,14 @@ export function PerformanceClientPage({
     queryFn: async ({ signal }) => {
       const currentPromise = fetchPerformance(siteId, timeWindow, filters, {
         signal,
+        ...(transport ? { transport } : {}),
       });
       const comparisonPromise = comparisonQuery
         ? fetchPerformance(
             siteId,
             comparisonQuery.window,
             comparisonQuery.filters,
-            { signal },
+            { signal, ...(transport ? { transport } : {}) },
           )
         : Promise.resolve(null);
       const [performanceData, comparisonData] = await Promise.all([
@@ -141,8 +153,37 @@ export function PerformanceClientPage({
       };
     },
     placeholderData: keepPreviousData,
-    enabled: typeof window !== "undefined",
+    enabled: queryReady,
   });
+}
+export function PerformanceClientPage({
+  locale,
+  messages,
+  siteId,
+  deferredReads,
+}: PerformanceClientPageProps) {
+  const {
+    filters,
+    window: timeWindow,
+    queryReady,
+  } = useDashboardQuery() as {
+    filters: FilterDocument;
+    queryReady: boolean;
+    window: TimeWindow;
+  };
+  const transport = useDashboardDeferredReadTransport(deferredReads);
+  const [activePanel, setActivePanel] = useState<PerformancePanelKey>("score");
+  const comparisonQuery = useDashboardComparisonQuery(timeWindow, filters);
+  const { data, isPending, isPlaceholderData } = useQuery(
+    performanceQueryOptions({
+      siteId,
+      window: timeWindow,
+      filters,
+      comparisonQuery,
+      transport,
+      enabled: queryReady,
+    }),
+  );
   const loading = isPending || isPlaceholderData;
   const performanceData =
     data?.performanceData ?? emptyPerformance(timeWindow.interval);

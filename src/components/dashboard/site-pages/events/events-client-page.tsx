@@ -1,9 +1,11 @@
+import type { ComponentProps } from "react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { EVENT_TREND_MAX_SERIES } from "@insightflare/product-ui/charts";
 import { DetailModal } from "@insightflare/product-ui/detail-drawer";
 import { MetricSummaryGrid } from "@insightflare/ui/metric-summary-grid";
-import { useQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 
+import { useDashboardDeferredReadTransport } from "@/components/dashboard/shell/dashboard-query-provider";
+import { useDashboardQueryReady } from "@/components/dashboard/shell/dashboard-query-provider";
 import { DETAIL_QUERY_PARAM } from "@/components/dashboard/site-pages/common/detail-query-param";
 import { useDashboardTimeWindow } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import { EventTypeDetailClientPage } from "@/components/dashboard/site-pages/events/event-type-detail-client-page";
@@ -17,14 +19,21 @@ import { parseOverviewCardFilters } from "@/components/dashboard/site-pages/over
 import { OverviewPagesSection } from "@/components/dashboard/site-pages/overview/pages-section";
 import { type OverviewPagesSectionCardData } from "@/components/dashboard/site-pages/overview/types";
 import {
+  EVENT_INITIAL_TREND_LIMIT,
+  fetchEventComparisonTab,
+} from "@/lib/dashboard/client/data/events";
+import {
   fetchEventsSummary,
   fetchEventsTrend,
 } from "@/lib/dashboard/client/data/index";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import {
   pushUrlWithoutNavigation,
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/dashboard/client/history";
+import { type DeferredPrivateReads } from "@/lib/dashboard/client/request";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
@@ -33,6 +42,7 @@ import type {
   EventsSummaryData,
   EventsTrendData,
 } from "@/lib/dashboard-api/client/edge";
+import type { FilterDocument } from "@/lib/filter-contract";
 import type { Locale } from "@/lib/i18n/config";
 import type { AppMessages } from "@/lib/i18n/messages";
 import {
@@ -45,6 +55,7 @@ interface EventsClientPageProps {
   siteId: string;
   siteDomain: string;
   pathname: string;
+  deferredReads?: DeferredPrivateReads | null;
 }
 function emptySummary(): EventsSummaryData {
   return {
@@ -71,6 +82,7 @@ function emptySummaryCards(): EventsSummaryData["cards"] {
     },
   };
 }
+const EMPTY_SUMMARY = emptySummary();
 function emptyOverviewPageSectionCards(): OverviewPagesSectionCardData {
   return {
     page: {
@@ -159,13 +171,108 @@ function comparisonLabelForEvents(
     ? messages.dashboardHeader.previousPeriod
     : messages.dashboardHeader.compareButton;
 }
+const EMPTY_EVENT_COMPARISON_CARDS = buildEventCardDataOverride([]);
+export function eventsAnalyticsQueryOptions(input: {
+  siteId: string;
+  window: TimeWindow;
+  filters: FilterDocument;
+  comparisonQuery: DashboardComparisonQuery | null;
+  transport?: PrivateReadTransport;
+  enabled?: boolean;
+}) {
+  const {
+    siteId,
+    window: timeWindow,
+    filters,
+    comparisonQuery,
+    transport,
+    enabled: queryReady = true,
+  } = input;
+  const filtersKey = filterQueryKey(filters);
+  const comparisonFiltersKey = comparisonQuery
+    ? filterQueryKey(comparisonQuery.filters)
+    : "none";
+  const baseKey = [
+    siteId,
+    timeWindow.from,
+    timeWindow.to,
+    timeWindow.interval,
+    timeWindow.timeZone,
+    filtersKey,
+    comparisonQuery?.mode ?? "none",
+    comparisonQuery?.window.from ?? "none",
+    comparisonQuery?.window.to ?? "none",
+    comparisonQuery?.window.interval ?? "none",
+    comparisonQuery?.window.timeZone ?? "none",
+    comparisonFiltersKey,
+  ];
+  const summary = queryOptions({
+    queryKey: ["dashboard", "events-summary", ...baseKey],
+    queryFn: async ({ signal }) => {
+      const observationGuard = capturePerceptionGuard(siteId);
+      const options = { signal, ...(transport ? { transport } : {}) };
+      const [summary, comparisonSummary] = await Promise.all([
+        fetchEventsSummary(siteId, timeWindow, filters, options).then(
+          (summary) => {
+            if (!signal.aborted)
+              observeLoadedDimension(
+                siteId,
+                "event.name",
+                summary.cards.event.name.map((row) => row.label),
+                observationGuard,
+              );
+            return summary;
+          },
+        ),
+        comparisonQuery
+          ? fetchEventsSummary(
+              siteId,
+              comparisonQuery.window,
+              comparisonQuery.filters,
+              options,
+            )
+          : Promise.resolve(undefined),
+      ]);
+      return { summary, comparisonSummary };
+    },
+    enabled: queryReady,
+  });
+  const trend = queryOptions({
+    queryKey: ["dashboard", "events-trend", ...baseKey],
+    queryFn: async ({ signal }) => {
+      const options = {
+        limit: EVENT_INITIAL_TREND_LIMIT,
+        signal,
+        ...(transport ? { transport } : {}),
+      };
+      const [trend, comparisonTrend] = await Promise.all([
+        fetchEventsTrend(siteId, timeWindow, filters, options),
+        comparisonQuery
+          ? fetchEventsTrend(
+              siteId,
+              comparisonQuery.window,
+              comparisonQuery.filters,
+              options,
+            )
+          : Promise.resolve(undefined),
+      ]);
+      return { trend, comparisonTrend };
+    },
+    enabled: queryReady,
+  });
+
+  return { summary, trend };
+}
 export function EventsClientPage({
   locale,
   messages,
   siteId,
   siteDomain,
   pathname,
+  deferredReads,
 }: EventsClientPageProps) {
+  const queryReady = useDashboardQueryReady();
+  const transport = useDashboardDeferredReadTransport(deferredReads);
   const labels = messages.events;
   const searchParams = useLiveSearchParams();
   const detailEventName = searchParams.get(DETAIL_QUERY_PARAM)?.trim() || "";
@@ -176,7 +283,6 @@ export function EventsClientPage({
     () => parseOverviewCardFilters(new URLSearchParams(searchParamsKey)),
     [searchParamsKey],
   );
-  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
   const comparisonQuery = useMemo(
     () =>
       resolveDashboardComparisonQuery(
@@ -193,10 +299,6 @@ export function EventsClientPage({
       timeWindow.to,
     ],
   );
-  const comparisonFiltersKey = useMemo(
-    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"),
-    [comparisonQuery],
-  );
 
   useEffect(() => {
     if (!detailEventName) {
@@ -204,81 +306,24 @@ export function EventsClientPage({
     }
   }, [detailEventName]);
 
-  const { data, isFetching, isPending } = useQuery({
-    queryKey: [
-      "dashboard",
-      "events-overview",
-      siteId,
-      timeWindow.from,
-      timeWindow.to,
-      timeWindow.interval,
-      timeWindow.timeZone,
-      filtersKey,
-      comparisonQuery?.mode ?? "none",
-      comparisonQuery?.window.from ?? "none",
-      comparisonQuery?.window.to ?? "none",
-      comparisonQuery?.window.interval ?? "none",
-      comparisonQuery?.window.timeZone ?? "none",
-      comparisonFiltersKey,
-    ],
-    queryFn: async ({ signal }) => {
-      const observationGuard = capturePerceptionGuard(siteId);
-      const currentRequest = Promise.all([
-        fetchEventsSummary(siteId, timeWindow, filters, { signal }).then(
-          (summary) => {
-            if (!signal.aborted) {
-              observeLoadedDimension(
-                siteId,
-                "event.name",
-                summary.cards.event.name.map((row) => row.label),
-                observationGuard,
-              );
-            }
-            return summary;
-          },
-        ),
-        fetchEventsTrend(siteId, timeWindow, filters, {
-          limit: EVENT_TREND_MAX_SERIES,
-          signal,
-        }),
-      ]);
-      if (!comparisonQuery) {
-        const [summary, trend] = await currentRequest;
-        return { summary, trend };
-      }
-
-      const comparisonRequest = Promise.all([
-        fetchEventsSummary(
-          siteId,
-          comparisonQuery.window,
-          comparisonQuery.filters,
-          { signal },
-        ),
-        fetchEventsTrend(
-          siteId,
-          comparisonQuery.window,
-          comparisonQuery.filters,
-          {
-            limit: EVENT_TREND_MAX_SERIES,
-            signal,
-          },
-        ),
-      ]);
-      const [[summary, trend], [comparisonSummary, comparisonTrend]] =
-        await Promise.all([currentRequest, comparisonRequest]);
-      return { summary, trend, comparisonSummary, comparisonTrend };
-    },
-    enabled: typeof window !== "undefined",
+  const options = eventsAnalyticsQueryOptions({
+    siteId,
+    window: timeWindow,
+    filters,
+    comparisonQuery,
+    transport,
+    enabled: queryReady,
   });
-  const loading = isPending || isFetching;
-  const summary = data?.summary ?? emptySummary();
-  const trend = data?.trend ?? emptyTrend(timeWindow.interval);
+  const summaryQuery = useQuery(options.summary);
+  const trendQuery = useQuery(options.trend);
+  const summary = summaryQuery.data?.summary ?? EMPTY_SUMMARY;
+  const trend = trendQuery.data?.trend ?? emptyTrend(timeWindow.interval);
   const comparisonLabel = comparisonLabelForEvents(
     messages,
     comparisonQuery?.mode,
     Boolean(comparisonQuery?.filters.root),
   );
-  const initialLoading = isPending && !data;
+  const initialLoading = summaryQuery.isPending && !summaryQuery.data;
 
   const openEventType = useCallback(
     (eventName: string) => {
@@ -317,6 +362,30 @@ export function EventsClientPage({
     [summary.cards.page],
   );
 
+  const comparisonFetchers = useMemo(() => {
+    type Fetcher = NonNullable<
+      NonNullable<
+        ComponentProps<typeof OverviewPagesSection>["pageCardFetchers"]
+      >["path"]
+    >;
+    const make =
+      (tab: Parameters<typeof fetchEventComparisonTab>[2]): Fetcher =>
+      (id, w, f, scope, options) =>
+        fetchEventComparisonTab(id, w, tab, f, {
+          ...options,
+          resolvedScope: scope,
+          transport,
+        });
+    return {
+      event: { path: make("name") },
+      context: {
+        path: make("path"),
+        title: make("title"),
+        hostname: make("hostname"),
+      },
+    };
+  }, [transport]);
+
   return (
     <div className="space-y-6">
       <EventPageHeader
@@ -330,9 +399,9 @@ export function EventsClientPage({
           locale,
           labels,
           summary: summary.summary,
-          comparisonSummary: data?.comparisonSummary?.summary,
+          comparisonSummary: summaryQuery.data?.comparisonSummary?.summary,
           comparisonLabel,
-          loading,
+          loading: summaryQuery.isPending || summaryQuery.isFetching,
         })}
       />
 
@@ -340,11 +409,11 @@ export function EventsClientPage({
         locale={locale}
         labels={labels}
         trend={trend}
-        comparisonTrend={data?.comparisonTrend}
+        comparisonTrend={trendQuery.data?.comparisonTrend}
         comparisonWindow={comparisonQuery?.window}
         window={timeWindow}
         title={labels.trendTitle}
-        loading={loading}
+        loading={trendQuery.isPending || trendQuery.isFetching}
         cumulativeLabel={messages.common.cumulativeEvents}
         currentPeriodLabel={messages.dashboardHeader.compareCurrentPeriod}
         comparisonLabel={comparisonLabel}
@@ -360,7 +429,16 @@ export function EventsClientPage({
           pathname={pathname}
           filters={filters}
           loading={initialLoading}
-          cardDataOverride={eventCardDataOverride}
+          queryEnabled={
+            queryReady && (Boolean(comparisonQuery) || !initialLoading)
+          }
+          cardDataOverride={
+            comparisonQuery
+              ? EMPTY_EVENT_COMPARISON_CARDS
+              : eventCardDataOverride
+          }
+          pageCardFetchers={comparisonFetchers.event}
+          pageCardRequestNamespace="event-name"
           visibleCards={["page"]}
           pageCardTabs={["path"]}
           pageCardTabMetaOverride={{
@@ -391,7 +469,16 @@ export function EventsClientPage({
           pathname={siteBasePath}
           filters={filters}
           loading={initialLoading}
-          cardDataOverride={contextCardDataOverride}
+          queryEnabled={
+            queryReady && (Boolean(comparisonQuery) || !initialLoading)
+          }
+          cardDataOverride={
+            comparisonQuery
+              ? EMPTY_EVENT_COMPARISON_CARDS
+              : contextCardDataOverride
+          }
+          pageCardFetchers={comparisonFetchers.context}
+          pageCardRequestNamespace="event-context"
           visibleCards={["page"]}
           pageCardTabs={["path", "title", "hostname"]}
           primaryMetricLabel={labels.totalEvents}
@@ -407,6 +494,7 @@ export function EventsClientPage({
         pathname={pathname}
         window={timeWindow}
         filters={filters}
+        transport={transport}
       />
 
       {detailEventName ? (

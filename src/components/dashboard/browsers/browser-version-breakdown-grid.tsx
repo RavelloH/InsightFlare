@@ -2,7 +2,9 @@ import { memo, useMemo } from "react";
 import { BrowserVersionBreakdownView } from "@insightflare/product-ui/technology";
 import { useQuery } from "@tanstack/react-query";
 
+import { useDashboardQueryReady } from "@/components/dashboard/shell/dashboard-query-provider";
 import { fetchBrowserVersionBreakdown } from "@/lib/dashboard/client/data/index";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -21,6 +23,7 @@ interface BrowserVersionBreakdownGridProps {
   siteId: string;
   window: TimeWindow;
   filters: FilterDocument;
+  transport?: PrivateReadTransport;
   comparisonQuery?: DashboardComparisonQuery | null;
   comparisonLabel?: string;
 }
@@ -72,9 +75,11 @@ export const BrowserVersionBreakdownGrid = memo(
     siteId,
     window,
     filters,
+    transport,
     comparisonQuery,
     comparisonLabel,
   }: BrowserVersionBreakdownGridProps) {
+    const queryReady = useDashboardQueryReady();
     const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
     const comparisonFiltersKey = useMemo(
       () =>
@@ -109,6 +114,7 @@ export const BrowserVersionBreakdownGrid = memo(
               browserLimit: 0,
               versionLimit: 5,
               signal,
+              ...(transport ? { transport } : {}),
             },
           ).catch(emptyBreakdownUnlessAborted);
 
@@ -120,7 +126,7 @@ export const BrowserVersionBreakdownGrid = memo(
         ]);
         return { current, comparison };
       },
-      enabled: !import.meta.env.SSR,
+      enabled: queryReady,
     });
     const breakdownData = useMemo(
       () => data?.current ?? emptyBrowserVersionBreakdown(),

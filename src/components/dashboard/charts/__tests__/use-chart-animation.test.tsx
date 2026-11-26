@@ -1,10 +1,19 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
+  SiteTrafficStackChart,
   useAnimationOnChartSwitch,
   useChartVisibility,
 } from "@insightflare/product-ui/charts";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+// Test the chart's own fade scheduling, not Motion's DOM animation engine
+// (which is not implemented faithfully by happy-dom).
+vi.mock("@insightflare/ui/auto-transition", () => ({
+  AutoTransition: ({ children }: { children: React.ReactNode }) => (
+    <>{children}</>
+  ),
+}));
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
@@ -250,5 +259,76 @@ describe("useAnimationOnChartSwitch", () => {
       />,
     );
     expect(isAnimationActive).toBe(false);
+  });
+});
+
+describe("streamed site traffic stack chart", () => {
+  it("retains the first real order and reveals the latest rows even when another result arrives during the fade", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn(() => ({
+          matches: false,
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        })),
+      );
+      const sites = [
+        { id: "a", name: "A site" },
+        { id: "b", name: "B site" },
+      ];
+      const from = Date.UTC(2026, 0, 1);
+      const base = {
+        sites,
+        from,
+        to: from,
+        locale: "en-US" as const,
+        timeZone: "UTC",
+        interval: "day" as const,
+        viewsLabel: "Views",
+        visitorsLabel: "Visitors",
+        messages: {
+          common: {
+            sitesFiltered: "{active}/{total}",
+            cumulativeTraffic: "Total traffic",
+          },
+        },
+      };
+      render(<SiteTrafficStackChart {...base} loading metricsPending />);
+      const data = (value: number) => [
+        {
+          timestampMs: from,
+          sites: [
+            { siteId: "a", views: 7, visitors: 2 },
+            { siteId: "b", views: value, visitors: 3 },
+          ],
+        },
+      ];
+      const realOrder = [sites[1]!, sites[0]!];
+      render(
+        <SiteTrafficStackChart {...base} sites={realOrder} data={data(17)} />,
+      );
+      render(
+        <SiteTrafficStackChart {...base} sites={realOrder} data={data(99)} />,
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      const legend = Array.from(container!.querySelectorAll("button")).map(
+        (button) => button.textContent,
+      );
+      expect(legend[0]).toContain("B site");
+      expect(legend[0]).toContain("99");
+      expect(legend[1]).toContain("A site");
+      expect(legend[1]).toContain("7");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

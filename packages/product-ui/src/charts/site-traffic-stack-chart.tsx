@@ -496,11 +496,12 @@ function useBarLayerTransition(
       // chart hidden if the browser has no rectangle layer to animate.
       revealPendingData();
     }, BAR_LAYER_FADE_FALLBACK_DELAY_MS);
-
-    return () => {
-      clearScheduledTransition();
-    };
   }, [chartData, clearScheduledTransition, revealPendingData, transitionKey]);
+
+  // Data can refresh while the loading-to-ready fade is still pending. Cleaning
+  // up on every chartData change would cancel the only reveal timer while the
+  // next effect sees the same key and returns, stranding the placeholder bars.
+  useLayoutEffect(() => clearScheduledTransition, [clearScheduledTransition]);
 
   return { displayedChartData, barsVisible, onBarLayerTransitionEnd };
 }
@@ -726,7 +727,10 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
   );
   const hoveredTimestampRef = useRef<number | null>(null);
 
-  if (!cachedSiteOrderRef.current && sites.length > 0) {
+  // Anonymous SSR inventory is sorted by name before traffic is available.
+  // The first real result establishes the same order as the original chart.
+  const hasTrafficData = data !== undefined;
+  if (!cachedSiteOrderRef.current && sites.length > 0 && hasTrafficData) {
     cachedSiteOrderRef.current = sites.map((site) => site.id);
   } else if (cachedSiteOrderRef.current && sites.length > 0) {
     const knownIds = new Set(cachedSiteOrderRef.current);
@@ -760,7 +764,7 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
     }
 
     return nextSites;
-  }, [sites]);
+  }, [sites, hasTrafficData]);
 
   const { series, config } = useMemo(() => {
     // Mirrors NeutralPress DimensionStats: start from a base color, invert to complementary,
@@ -772,11 +776,16 @@ export const SiteTrafficStackChart = memo(function SiteTrafficStackChart({
           views: "#2dd4bf",
           visitors: "#2dd4bf",
         };
+        const key =
+          "site_" +
+          Array.from(site.id, (char) => char.codePointAt(0)!.toString(16)).join(
+            "_",
+          );
         return {
           siteId: site.id,
           siteName: site.name,
-          visitorsKey: `site${index}Visitors`,
-          viewsKey: `site${index}Views`,
+          visitorsKey: key + "_Visitors",
+          viewsKey: key + "_Views",
           visitorsColor: colors.visitors,
           viewsColor: colors.views,
         };

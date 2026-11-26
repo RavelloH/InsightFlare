@@ -1,4 +1,4 @@
-import type { JSX } from "react";
+import { type JSX, useState } from "react";
 import {
   createFileRoute,
   Outlet,
@@ -61,6 +61,25 @@ function AppLayout(): JSX.Element {
   const { locale, messages, dashboardRoot, initialDashboardWindow } =
     Route.useRouteContext();
   const pathname = usePathname();
+  const resolvedPathname = useRouterState({
+    select: (state) => (state.resolvedLocation ?? state.location).pathname,
+  });
+  // Search-only changes (drawers, filters, comparison) must not slide the
+  // analytics window just because the authenticated bootstrap runs again.
+  const [windowBinding, setWindowBinding] = useState(() => ({
+    pathname: resolvedPathname,
+    window: initialDashboardWindow,
+  }));
+  if (windowBinding.pathname !== resolvedPathname) {
+    setWindowBinding({
+      pathname: resolvedPathname,
+      window: initialDashboardWindow,
+    });
+  }
+  const analyticsWindow =
+    windowBinding.pathname === resolvedPathname
+      ? windowBinding.window
+      : initialDashboardWindow;
   const teamRouteContext = useRouterState({
     select: ({ matches }) =>
       matches.find((match) => match.routeId === "/$locale/app/$teamSlug")
@@ -89,7 +108,8 @@ function AppLayout(): JSX.Element {
       authorizedActiveSite={authorizedActiveSite}
       sites={teamContext?.sites}
       unreadAttentionCount={shellContext.unreadAttentionCount}
-      initialQueryWindow={initialDashboardWindow}
+      initialQueryWindow={analyticsWindow}
+      navigationPending={pathname !== resolvedPathname}
       managementSections={
         shellContext.user.systemRole === "admin"
           ? buildManagementSections(locale, messages)

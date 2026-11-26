@@ -28,7 +28,9 @@ import {
 } from "@remixicon/react";
 import { useQuery } from "@tanstack/react-query";
 
+import { useDashboardQueryReady } from "@/components/dashboard/shell/dashboard-query-provider";
 import { fetchBrowserVersionBreakdown } from "@/lib/dashboard/client/data/index";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import { numberFormat, percentFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { BrowserVersionBreakdownData } from "@/lib/dashboard-api/client/edge";
@@ -161,6 +163,7 @@ interface CanIUseCompatCardProps {
   siteId: string;
   window: TimeWindow;
   filters: FilterDocument;
+  transport?: PrivateReadTransport;
 }
 export const CanIUseCompatCard = memo(function CanIUseCompatCard({
   locale,
@@ -168,7 +171,9 @@ export const CanIUseCompatCard = memo(function CanIUseCompatCard({
   siteId,
   window: tw,
   filters,
+  transport,
 }: CanIUseCompatCardProps) {
+  const queryReady = useDashboardQueryReady();
   const catalogQuery = useQuery({
     queryKey: ["dashboard", "caniuse-catalog"],
     queryFn: async ({ signal }) => {
@@ -211,13 +216,14 @@ export const CanIUseCompatCard = memo(function CanIUseCompatCard({
           browserLimit: 0,
           versionLimit: 0,
           signal,
+          ...(transport ? { transport } : {}),
         });
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") throw error;
         return emptyBreakdown();
       }
     },
-    enabled: !import.meta.env.SSR,
+    enabled: queryReady,
   });
   const browserData = browserDataQuery.data ?? emptyBreakdown();
   const browserLoading = browserDataQuery.isPending;

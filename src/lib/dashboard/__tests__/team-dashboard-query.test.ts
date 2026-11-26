@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  analyticsNavigationInput,
   readDashboardQueryPreferences,
   resolveDashboardInitialWindow,
 } from "@/lib/dashboard/query-preferences";
@@ -26,6 +27,42 @@ describe("team dashboard query helpers", () => {
     vi.unstubAllGlobals();
   });
 
+  it("plans only entered navigations with matching time preferences and preserves comparison scope", () => {
+    const cookie = encodeURIComponent(
+      JSON.stringify({ range: "30d", interval: "day", customRange: null }),
+    );
+    vi.stubGlobal("document", {
+      cookie: "insightflare-dashboard-query=" + cookie,
+    });
+    const input = {
+      preload: false,
+      cause: "enter",
+      window: { ...window, preset: "30d" as const },
+      accountTimeZone: "UTC",
+      siteId: "site-a",
+      search:
+        "scope=session&filter[page.path]=/home&compare=previous&compareFilter[page.path]=/docs",
+    };
+    const plan = analyticsNavigationInput(input);
+    expect(plan).not.toBeNull();
+    expect(plan?.siteId).toBe("site-a");
+    expect(plan?.window).toBe(input.window);
+    expect(plan?.comparisonQuery?.mode).toBe("previous");
+    expect(analyticsNavigationInput({ ...input, preload: true })).toBeNull();
+    expect(analyticsNavigationInput({ ...input, cause: "stay" })).toBeNull();
+    expect(
+      analyticsNavigationInput({
+        ...input,
+        window: { ...input.window, preset: "7d" },
+      }),
+    ).toBeNull();
+    expect(
+      analyticsNavigationInput({
+        ...input,
+        window: { ...input.window, timeZone: "Asia/Tokyo" },
+      }),
+    ).toBeNull();
+  });
   it("uses the full request window as the shared cache identity", () => {
     expect(teamDashboardQueryKey("team-1", window)).toEqual([
       "dashboard",

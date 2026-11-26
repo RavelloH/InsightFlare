@@ -14,7 +14,11 @@ import {
   CardTitle,
 } from "@insightflare/ui/card";
 import { RiLineChartLine } from "@remixicon/react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  queryOptions,
+  useQuery,
+} from "@tanstack/react-query";
 
 import {
   dashboardComparisonLabel,
@@ -25,6 +29,8 @@ import {
   addZonedInterval,
   startOfZonedInterval,
 } from "@/lib/analytics/time-zone";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type {
   DashboardInterval,
@@ -66,6 +72,7 @@ export type ShareTrendFetcher = (
   options?: {
     limit?: number;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
   },
 ) => Promise<BrowserTrendData>;
 interface ShareTrendCardProps {
@@ -77,6 +84,7 @@ interface ShareTrendCardProps {
   queryKey: readonly unknown[];
   title: string;
   fetchTrend: ShareTrendFetcher;
+  transport?: PrivateReadTransport;
   limit?: number;
   otherLabel?: string;
   headerBelow?: ReactNode;
@@ -541,6 +549,7 @@ function areShareTrendCardPropsEqual(
     previous.filters === next.filters &&
     previous.title === next.title &&
     previous.fetchTrend === next.fetchTrend &&
+    previous.transport === next.transport &&
     previous.limit === next.limit &&
     previous.otherLabel === next.otherLabel &&
     previous.headerBelow === next.headerBelow &&
@@ -550,54 +559,46 @@ function areShareTrendCardPropsEqual(
     previous.queryKey.every((value, index) => value === next.queryKey[index])
   );
 }
-export const ShareTrendCard = memo(function ShareTrendCard({
-  locale,
-  messages,
-  siteId,
-  window,
-  filters,
-  queryKey,
-  title,
-  fetchTrend,
-  limit = 5,
-  otherLabel = messages.browsers.otherLabel,
-  headerBelow,
-  formatSeriesLabel,
-  resolveSeriesIcon,
-}: ShareTrendCardProps) {
-  const queryReady = useDashboardQueryReady();
-  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
-  const comparisonQuery = useDashboardComparisonQuery(window, filters);
-  const comparisonFiltersKey = useMemo(
-    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"),
-    [comparisonQuery],
-  );
-  const currentDataWindow = useMemo(
-    () => ({
-      from: window.from,
-      to: window.to,
-      interval: window.interval,
-      timeZone: window.timeZone,
-    }),
-    [window.from, window.interval, window.timeZone, window.to],
-  );
-  const comparisonDataWindow = useMemo(
-    () =>
-      comparisonQuery
-        ? {
-            from: comparisonQuery.window.from,
-            to: comparisonQuery.window.to,
-            interval: comparisonQuery.window.interval,
-            timeZone: comparisonQuery.window.timeZone,
-          }
-        : null,
-    [comparisonQuery],
-  );
+/** Identical observers (overview and chart) share one cancellable query. */
+export function shareTrendQueryOptions(input: {
+  siteId: string;
+  window: TimeWindow;
+  filters: FilterDocument;
+  queryKey: readonly unknown[];
+  fetchTrend: ShareTrendFetcher;
+  comparisonQuery: DashboardComparisonQuery | null;
+  transport?: PrivateReadTransport;
+  limit?: number;
+}) {
   const {
-    data: trendQueryData,
-    isFetching,
-    isPending,
-  } = useQuery({
+    siteId,
+    window,
+    filters,
+    queryKey,
+    fetchTrend,
+    comparisonQuery,
+    transport,
+    limit = 5,
+  } = input;
+  const filtersKey = filterQueryKey(filters);
+  const comparisonFiltersKey = comparisonQuery
+    ? filterQueryKey(comparisonQuery.filters)
+    : "none";
+  const currentDataWindow = {
+    from: window.from,
+    to: window.to,
+    interval: window.interval,
+    timeZone: window.timeZone,
+  };
+  const comparisonDataWindow = comparisonQuery
+    ? {
+        from: comparisonQuery.window.from,
+        to: comparisonQuery.window.to,
+        interval: comparisonQuery.window.interval,
+        timeZone: comparisonQuery.window.timeZone,
+      }
+    : null;
+  return queryOptions({
     queryKey: [
       "dashboard",
       "share-trend",
@@ -624,6 +625,7 @@ export const ShareTrendCard = memo(function ShareTrendCard({
         fetchTrend(siteId, requestedWindow, requestedFilters, {
           limit,
           signal,
+          ...(transport ? { transport } : {}),
         }).catch((error) =>
           fallbackUnlessAborted(error, () =>
             emptyTrendData(requestedWindow.interval),
@@ -642,6 +644,63 @@ export const ShareTrendCard = memo(function ShareTrendCard({
         comparisonDataWindow,
       };
     },
+  });
+}
+
+export const ShareTrendCard = memo(function ShareTrendCard({
+  locale,
+  messages,
+  siteId,
+  window,
+  filters,
+  queryKey,
+  title,
+  fetchTrend,
+  transport,
+  limit = 5,
+  otherLabel = messages.browsers.otherLabel,
+  headerBelow,
+  formatSeriesLabel,
+  resolveSeriesIcon,
+}: ShareTrendCardProps) {
+  const queryReady = useDashboardQueryReady();
+  const comparisonQuery = useDashboardComparisonQuery(window, filters);
+  const currentDataWindow = useMemo(
+    () => ({
+      from: window.from,
+      to: window.to,
+      interval: window.interval,
+      timeZone: window.timeZone,
+    }),
+    [window.from, window.to, window.interval, window.timeZone],
+  );
+  const comparisonDataWindow = useMemo(
+    () =>
+      comparisonQuery
+        ? {
+            from: comparisonQuery.window.from,
+            to: comparisonQuery.window.to,
+            interval: comparisonQuery.window.interval,
+            timeZone: comparisonQuery.window.timeZone,
+          }
+        : null,
+    [comparisonQuery],
+  );
+  const {
+    data: trendQueryData,
+    isFetching,
+    isPending,
+  } = useQuery({
+    ...shareTrendQueryOptions({
+      siteId,
+      window,
+      filters,
+      queryKey,
+      fetchTrend,
+      comparisonQuery,
+      transport,
+      limit,
+    }),
     enabled: queryReady,
     placeholderData: keepPreviousData,
   });

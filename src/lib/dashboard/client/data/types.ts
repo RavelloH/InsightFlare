@@ -49,7 +49,13 @@ export type { JourneyAnalysisContext };
 export type EventRecordSortKey = "occurredAt" | "eventName" | "pathname";
 export type RetentionGranularity = TimeWindow["interval"];
 export type PrivateRequestParams = Record<string, string | number>;
+export type PrivateReadTransport = <T>(
+  path: string,
+  params?: PrivateRequestParams,
+  options?: FetchPrivateJsonOptions,
+) => Promise<T>;
 export type DashboardListRequestOptions = {
+  transport?: PrivateReadTransport;
   batchOverview?: boolean;
   limit?: number;
   cursor?: string | null;
@@ -73,6 +79,7 @@ export type PagesDashboardListRequestOptions = Omit<
   comparisonMetric?: PagesDashboardMetric;
 };
 export type FetchPrivateJsonOptions = {
+  transport?: PrivateReadTransport;
   batchOverview?: boolean;
   signal?: AbortSignal;
   dedupe?: boolean;

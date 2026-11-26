@@ -51,6 +51,10 @@ export const PUBLIC_QUERY_PATHS = [
 
 export const DASHBOARD_QUERY_PATHS = [
   ...PUBLIC_QUERY_PATHS,
+  "events-compare-name",
+  "events-compare-path",
+  "events-compare-title",
+  "events-compare-hostname",
   "events-summary",
   "events-trend",
   "events-records",

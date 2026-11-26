@@ -14,6 +14,8 @@ import {
   type ShareTrendFetcher,
 } from "@/components/dashboard/sharing/share-trend-card";
 import { fetchUtmTrend } from "@/lib/dashboard/client/data/index";
+import { CAMPAIGN_TREND_LIMIT } from "@/lib/dashboard/client/data/referrers";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { FilterDocument } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
@@ -24,6 +26,7 @@ interface CampaignShareTrendCardProps {
   siteId: string;
   window: TimeWindow;
   filters: FilterDocument;
+  transport?: PrivateReadTransport;
 }
 interface CampaignTrendPanelProps extends CampaignShareTrendCardProps {
   tab: CampaignTab;
@@ -114,6 +117,7 @@ function CampaignTrendPanel({
   siteId,
   window,
   filters,
+  transport,
   tab,
   title,
 }: CampaignTrendPanelProps) {
@@ -129,6 +133,8 @@ function CampaignTrendPanel({
       siteId={siteId}
       window={window}
       filters={filters}
+      transport={transport}
+      limit={CAMPAIGN_TREND_LIMIT}
       queryKey={["campaign", tab]}
       title={title}
       fetchTrend={fetchTrend}

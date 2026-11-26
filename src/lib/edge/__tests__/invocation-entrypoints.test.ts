@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type * as PrivateDashboardModule from "@/lib/edge/analytics/interfaces/dashboard/private";
 import type { InvocationMetricsPoint } from "@/lib/edge/analytics-engine/invocation-schema";
+import type * as SiteAccessModule from "@/lib/edge/auth/site-access";
 import type { Env } from "@/lib/edge/types";
 import type { AppEnv } from "@/lib/hono/types";
 
@@ -35,6 +37,22 @@ vi.mock("@/lib/edge/ingest/alarm-sweep", () => ({
   sweepIngestAlarms: vi.fn(async () => {}),
 }));
 
+vi.mock("@/lib/edge/auth/site-access", async (importOriginal) => ({
+  ...(await importOriginal<typeof SiteAccessModule>()),
+  resolvePrivateSite: vi.fn(),
+}));
+vi.mock(
+  "@/lib/edge/analytics/interfaces/dashboard/private",
+  async (importOriginal) => ({
+    ...(await importOriginal<typeof PrivateDashboardModule>()),
+    executePrivateQuery: vi.fn(),
+  }),
+);
+const { startSiteAnalyticsStream } =
+  await import("@/lib/dashboard/server/query");
+const { resolvePrivateSite } = await import("@/lib/edge/auth/site-access");
+const { executePrivateQuery } =
+  await import("@/lib/edge/analytics/interfaces/dashboard/private");
 const { default: server } = await import("@/server");
 const { default: startHandler } =
   await import("@tanstack/react-start/server-entry");
@@ -99,6 +117,346 @@ describe("actual Worker top-level invocation entrypoints", () => {
     expect(vi.mocked(apiApp.fetch)).not.toHaveBeenCalled();
     expect(vi.mocked(startHandler.fetch)).toHaveBeenCalledOnce();
   });
+
+  it("keeps one page invocation open for tracked deferred analytics after returning the response", async () => {
+    const f = setup();
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    f.env.DB = {
+      prepare: () => ({
+        all: async () => ({
+          success: true,
+          results: [],
+          meta: {
+            rows_read: 7,
+            rows_written: 0,
+            timings: { sql_duration_ms: 1 },
+            total_attempts: 1,
+          },
+        }),
+      }),
+    } as unknown as D1Database;
+    vi.mocked(resolvePrivateSite).mockResolvedValueOnce({
+      id: "site-a",
+      name: "A",
+      domain: "a.test",
+      canManage: true,
+    } as never);
+    vi.mocked(executePrivateQuery).mockImplementation(async (input) => {
+      if (input.pathname === "overview-geo-points") {
+        await gate;
+        await input.env.DB.prepare("SELECT 1").all();
+      }
+      if (input.pathname === "overview-source-domain")
+        return new Response("failure", { status: 500 });
+      return Response.json({
+        ok: true,
+        data: {
+          items: [],
+          pagination: {
+            limit: 100,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+      });
+    });
+    let reads: Awaited<ReturnType<typeof startSiteAnalyticsStream>> | undefined;
+    vi.mocked(startHandler.fetch).mockImplementationOnce(
+      async (request, options) => {
+        reads = await startSiteAnalyticsStream({
+          request,
+          env: options!.context!.env,
+          siteId: "site-a",
+          window: {
+            preset: "custom",
+            from: 100,
+            to: 300,
+            interval: "day",
+            timeZone: "UTC",
+          },
+          search: "",
+        });
+        return new Response("shell");
+      },
+    );
+    const response = await server.fetch(
+      new Request("https://app.test/en/app/team/site"),
+      f.env,
+      f.ctx,
+    );
+    expect(await response.text()).toBe("shell");
+    expect(Object.keys(reads!)).toHaveLength(6);
+    const source = Object.keys(reads!).find((key) =>
+      key.includes("overview-source-domain"),
+    )!;
+    const page = Object.keys(reads!).find((key) =>
+      key.includes("overview-page-path"),
+    )!;
+    await expect(reads![source]).resolves.toBeNull();
+    await expect(reads![page]).resolves.toHaveProperty("value");
+    expect(f.points).toHaveLength(0);
+    expect(f.work.length).toBeGreaterThan(0);
+    finish();
+    await f.finish();
+    expect(f.points).toHaveLength(1);
+    expect(f.points[0]!.doubles[3]).toBe(1);
+    expect(f.points[0]!.doubles[5]).toBe(7);
+    expect(f.points[0]!.doubles[19]).toBe(2);
+    expect(vi.mocked(executePrivateQuery)).toHaveBeenCalledTimes(6);
+    expect(vi.mocked(resolvePrivateSite)).toHaveBeenCalledTimes(1);
+  });
+  it("streams referrer cards independently and isolates a failed radar", async () => {
+    const f = setup();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(resolvePrivateSite).mockResolvedValueOnce({
+      id: "site-a",
+      name: "A",
+      domain: "a.test",
+      canManage: true,
+    } as never);
+    vi.mocked(executePrivateQuery).mockImplementation(async (input) => {
+      if (input.pathname === "referrer-radar") {
+        await gate;
+        return new Response("failure", { status: 500 });
+      }
+      return Response.json({
+        ok: true,
+        data: {
+          items: [],
+          pagination: {
+            limit: 100,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+      });
+    });
+    let reads: Awaited<ReturnType<typeof startSiteAnalyticsStream>> | undefined;
+    vi.mocked(startHandler.fetch).mockImplementationOnce(
+      async (request, options) => {
+        reads = await startSiteAnalyticsStream({
+          request,
+          env: options!.context!.env,
+          siteId: "site-a",
+          page: "referrers",
+          window: {
+            preset: "custom",
+            from: 100,
+            to: 300,
+            interval: "day",
+            timeZone: "UTC",
+          },
+          search: "",
+        });
+        return new Response("shell");
+      },
+    );
+    const response = await server.fetch(
+      new Request("https://app.test/en/app/team/site/referrers"),
+      f.env,
+      f.ctx,
+    );
+    expect(await response.text()).toBe("shell");
+    expect(Object.keys(reads!)).toHaveLength(5);
+    const radar = Object.keys(reads!).find((key) =>
+      key.includes("referrer-radar"),
+    )!;
+    for (const [key, promise] of Object.entries(reads!))
+      if (key !== radar) await expect(promise).resolves.toHaveProperty("value");
+    expect(f.points).toHaveLength(0);
+    release();
+    await expect(reads![radar]).resolves.toBeNull();
+    await f.finish();
+    expect(f.points).toHaveLength(1);
+    expect(executePrivateQuery).toHaveBeenCalledTimes(5);
+    expect(resolvePrivateSite).toHaveBeenCalledTimes(1);
+  });
+  it("streams geo dimension data while points remain pending and tracks late failure", async () => {
+    const f = setup();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(resolvePrivateSite).mockResolvedValueOnce({
+      id: "site-a",
+      name: "A",
+      domain: "a.test",
+      canManage: true,
+    } as never);
+    vi.mocked(executePrivateQuery).mockImplementation(async (input) => {
+      if (input.pathname === "overview-geo-points") {
+        await gate;
+        return new Response("failed", { status: 500 });
+      }
+      return Response.json({
+        ok: true,
+        data: {
+          items: [],
+          pagination: {
+            limit: 400,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+      });
+    });
+    let reads: Awaited<ReturnType<typeof startSiteAnalyticsStream>> | undefined;
+    vi.mocked(startHandler.fetch).mockImplementationOnce(
+      async (request, options) => {
+        reads = await startSiteAnalyticsStream({
+          request,
+          env: options!.context!.env,
+          siteId: "site-a",
+          page: "geo",
+          window: {
+            preset: "custom",
+            from: 100,
+            to: 300,
+            interval: "day",
+            timeZone: "UTC",
+          },
+          search: "location=JP",
+        });
+        return new Response("shell");
+      },
+    );
+    const response = await server.fetch(
+      new Request("https://app.test/en/app/team/site/geo?location=JP"),
+      f.env,
+      f.ctx,
+    );
+    expect(await response.text()).toBe("shell");
+    expect(Object.keys(reads!)).toHaveLength(2);
+    const stats = Object.keys(reads!).find((key) =>
+      key.includes("overview-geo-region"),
+    )!;
+    const points = Object.keys(reads!).find((key) =>
+      key.includes("overview-geo-points"),
+    )!;
+    await expect(reads![stats]).resolves.toHaveProperty("value");
+    expect(f.points).toHaveLength(0);
+    release();
+    await expect(reads![points]).resolves.toBeNull();
+    await f.finish();
+    expect(f.points).toHaveLength(1);
+    expect(executePrivateQuery).toHaveBeenCalledTimes(2);
+    expect(resolvePrivateSite).toHaveBeenCalledTimes(1);
+  });
+  it("streams event summary and records before a slow failed trend and tracks all work", async () => {
+    const f = setup();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(resolvePrivateSite).mockResolvedValueOnce({
+      id: "site-a",
+      name: "A",
+      domain: "a.test",
+      canManage: true,
+    } as never);
+    vi.mocked(executePrivateQuery).mockImplementation(async (input) => {
+      if (input.pathname === "events-trend") {
+        await gate;
+        return new Response("failed", { status: 500 });
+      }
+      return Response.json({
+        ok: true,
+        data: {
+          items: [],
+          pagination: {
+            limit: 50,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+      });
+    });
+    let reads: Awaited<ReturnType<typeof startSiteAnalyticsStream>> | undefined;
+    vi.mocked(startHandler.fetch).mockImplementationOnce(
+      async (request, options) => {
+        reads = await startSiteAnalyticsStream({
+          request,
+          env: options!.context!.env,
+          siteId: "site-a",
+          page: "events",
+          window: {
+            preset: "custom",
+            from: 100,
+            to: 300,
+            interval: "day",
+            timeZone: "UTC",
+          },
+          search: "detail=clicked",
+        });
+        return new Response("shell");
+      },
+    );
+    const response = await server.fetch(
+      new Request("https://app.test/en/app/team/site/events"),
+      f.env,
+      f.ctx,
+    );
+    expect(await response.text()).toBe("shell");
+    expect(Object.keys(reads!)).toHaveLength(3);
+    const trend = Object.keys(reads!).find((key) =>
+      key.includes("events-trend"),
+    )!;
+    for (const [key, promise] of Object.entries(reads!))
+      if (key !== trend) await expect(promise).resolves.toHaveProperty("value");
+    expect(f.points).toHaveLength(0);
+    release();
+    await expect(reads![trend]).resolves.toBeNull();
+    await f.finish();
+    expect(f.points).toHaveLength(1);
+    expect(executePrivateQuery).toHaveBeenCalledTimes(3);
+    expect(resolvePrivateSite).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    "overview",
+    "pages",
+    "referrers",
+    "campaigns",
+    "browsers",
+    "devices",
+    "geo",
+    "performance",
+    "events",
+    "visitors",
+    "sessions",
+  ] as const)(
+    "does not start any analytics for denied SSR site access on %s",
+    async (page) => {
+      vi.mocked(resolvePrivateSite).mockResolvedValueOnce(
+        new Response(null, { status: 404 }),
+      );
+      const reads = await startSiteAnalyticsStream({
+        request: new Request("https://app.test/en/app/team/site"),
+        env: setup().env,
+        siteId: "forbidden",
+        page,
+        window: {
+          preset: "custom",
+          from: 100,
+          to: 300,
+          interval: "day",
+          timeZone: "UTC",
+        },
+        search: "",
+      });
+      expect(reads).toEqual({});
+      expect(executePrivateQuery).not.toHaveBeenCalled();
+    },
+  );
 
   it("records an actual external /api request despite forged internal headers", async () => {
     const f = setup();

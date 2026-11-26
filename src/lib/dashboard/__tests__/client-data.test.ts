@@ -1,5 +1,9 @@
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { deviceCrossBreakdownQueryOptions } from "@/components/dashboard/devices/device-cross-breakdown-grid";
+import { shareTrendQueryOptions } from "@/components/dashboard/sharing/share-trend-card";
+import { pagesListQueryOptions } from "@/components/dashboard/site-pages/pages/pages-client-page";
 import {
   decodeHashLabel,
   decodeQueryLabel,
@@ -51,9 +55,32 @@ import {
   toQueryString,
   withFilters,
 } from "@/lib/dashboard/client/data";
-import { fetchPrivateJson } from "@/lib/dashboard/client/request";
+import { startTechnologyInitialReads } from "@/lib/dashboard/client/data/browser";
+import { startEventsInitialReads } from "@/lib/dashboard/client/data/events";
+import { startGeoInitialReads } from "@/lib/dashboard/client/data/geo";
+import { startOverviewInitialReads } from "@/lib/dashboard/client/data/overview";
+import { startPagesInitialReads } from "@/lib/dashboard/client/data/pages";
+import { startPerformanceInitialReads } from "@/lib/dashboard/client/data/performance";
+import {
+  startCampaignsInitialReads,
+  startReferrersInitialReads,
+} from "@/lib/dashboard/client/data/referrers";
+import { sessionsListQueryOptions } from "@/lib/dashboard/client/data/sessions";
+import { startSessionsInitialReads } from "@/lib/dashboard/client/data/sessions";
+import type {
+  PrivateReadTransport,
+  PrivateRequestParams,
+} from "@/lib/dashboard/client/data/types";
+import { visitorsListQueryOptions } from "@/lib/dashboard/client/data/visitors";
+import { startVisitorsInitialReads } from "@/lib/dashboard/client/data/visitors";
+import {
+  createDeferredPrivateReadTransport,
+  fetchPrivateJson,
+  privateReadIdentity,
+} from "@/lib/dashboard/client/request";
 import { withComparison } from "@/lib/dashboard/client/utils";
 import { dashboardFilterDocumentFromPresentation } from "@/lib/dashboard/filter-state";
+import { parseFilterDocumentFromSearchParams } from "@/lib/dashboard/query-state";
 import { isErrorEnvelope } from "@/lib/demo/realtime/envelope";
 import { handleDemoRequest } from "@/lib/demo/runtime";
 import {
@@ -665,6 +692,1039 @@ describe("Dashboard Client Data Processing Utilities", () => {
       globalThis.fetch = realFetch;
       process.off("unhandledRejection", suppressUnhandled);
     });
+
+    it("consumes the exact streamed request once, including concurrent readers, and preserves subsequent network refresh", async () => {
+      const params = {
+        siteId: "site-stream",
+        from: 100,
+        to: 200,
+        timeZone: "UTC",
+        limit: 100,
+        sort: "views",
+      };
+      const path = "/api/private/overview-page-path";
+      const key = privateReadIdentity(path, params);
+      let finish!: (value: { value: { ok: boolean } }) => void;
+      const deferred = new Promise<{ value: { ok: boolean } }>((resolve) => {
+        finish = resolve;
+      });
+      const transport = createDeferredPrivateReadTransport({ [key]: deferred });
+      const network = vi.fn(async () => freshJsonResponse({ ok: false }));
+      globalThis.fetch = network as typeof fetch;
+      const a = fetchPrivateJson(path, params, { transport });
+      const b = fetchPrivateJson(path, { ...params }, { transport });
+      expect(network).not.toHaveBeenCalled();
+      finish({ value: { ok: true } });
+      await expect(Promise.all([a, b])).resolves.toEqual([
+        { ok: true },
+        { ok: true },
+      ]);
+      expect(network).not.toHaveBeenCalled();
+      await expect(
+        fetchPrivateJson(path, params, { transport }),
+      ).resolves.toEqual({ ok: false });
+      expect(network).toHaveBeenCalledTimes(1);
+    });
+
+    it("never consumes a stale or cancelled streamed result; different filters and cursors fall through", async () => {
+      const path = "/api/private/overview-page-path";
+      const params = {
+        siteId: "site-stream",
+        from: 100,
+        to: 200,
+        scope: "session",
+        "filter[page.path]": "/home",
+      };
+      const key = privateReadIdentity(path, params);
+      let finish!: (value: { value: { ok: boolean } }) => void;
+      const deferred = new Promise<{ value: { ok: boolean } }>((resolve) => {
+        finish = resolve;
+      });
+      const transport = createDeferredPrivateReadTransport({ [key]: deferred });
+      const network = vi.fn(async () => freshJsonResponse({ ok: false }));
+      globalThis.fetch = network as typeof fetch;
+      const controller = new AbortController();
+      const aborted = fetchPrivateJson(path, params, {
+        transport,
+        signal: controller.signal,
+      });
+      controller.abort();
+      await expect(aborted).rejects.toMatchObject({ name: "AbortError" });
+      await expect(
+        fetchPrivateJson(
+          path,
+          { ...params, "filter[page.path]": "/other" },
+          { transport },
+        ),
+      ).resolves.toEqual({ ok: false });
+      await expect(
+        fetchPrivateJson(path, { ...params, cursor: "next" }, { transport }),
+      ).resolves.toEqual({ ok: false });
+      finish({ value: { ok: true } });
+      await expect(
+        fetchPrivateJson(path, params, { transport }),
+      ).resolves.toEqual({ ok: true });
+      expect(network).toHaveBeenCalledTimes(2);
+      const failed = createDeferredPrivateReadTransport({
+        [key]: Promise.resolve(null),
+      });
+      await expect(
+        fetchPrivateJson(path, params, { transport: failed }),
+      ).resolves.toEqual({ ok: false });
+      expect(network).toHaveBeenCalledTimes(3);
+    });
+
+    it("falls back to the network when a streamed promise rejects with or without an observer signal", async () => {
+      const path = "/api/private/overview-page-path";
+      const params = { siteId: "site-rejection", from: 100, to: 200 };
+      const key = privateReadIdentity(path, params);
+      const network = vi.fn(async () => freshJsonResponse({ ok: true }));
+      globalThis.fetch = network as typeof fetch;
+      for (const signal of [undefined, new AbortController().signal]) {
+        const transport = createDeferredPrivateReadTransport({
+          [key]: Promise.reject(new Error("stream disconnected")),
+        });
+        await expect(
+          fetchPrivateJson(path, params, { transport, signal }),
+        ).resolves.toEqual({ ok: true });
+      }
+      expect(network).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not leave unhandled rejections when an overview read or its batch fails", async () => {
+      const transport: PrivateReadTransport = async () => {
+        throw new Error("read unavailable");
+      };
+      const batch = vi.fn(async () => {
+        throw new Error("batch unavailable");
+      });
+      expect(() =>
+        startOverviewInitialReads(
+          "site-stream",
+          mockWindow,
+          new URLSearchParams(),
+          transport,
+          batch,
+        ),
+      ).not.toThrow();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(batch).toHaveBeenCalledTimes(1);
+    });
+
+    it("expires unused settled handoffs without resetting the deadline when recreated", async () => {
+      const path = "/api/private/overview-page-path";
+      const params = { siteId: "site-stream", from: 100, to: 200 };
+      const reads = {
+        [privateReadIdentity(path, params)]: Promise.resolve({
+          value: { ok: true },
+        }),
+      };
+      const clock = vi.spyOn(Date, "now").mockReturnValue(1000);
+      try {
+        createDeferredPrivateReadTransport(reads);
+        await Promise.resolve();
+        clock.mockReturnValue(16000);
+        const network = vi.fn(async () => freshJsonResponse({ ok: false }));
+        globalThis.fetch = network as typeof fetch;
+        const transport = createDeferredPrivateReadTransport(reads);
+        await expect(
+          fetchPrivateJson(path, params, { transport }),
+        ).resolves.toEqual({ ok: false });
+        expect(network).toHaveBeenCalledTimes(1);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+    it("joins a pending normalized page-list prefetch and retains fresh data without another HTTP read", async () => {
+      const client = new QueryClient({
+        defaultOptions: { queries: { staleTime: 15000, retry: false } },
+      });
+      const filters = parseFilterDocumentFromSearchParams(
+        new URLSearchParams("scope=session&filter[page.path]=/home"),
+      );
+      const input = {
+        siteId: "site-stream",
+        window: mockWindow,
+        filters,
+        comparisonQuery: null,
+      };
+      let finish!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const network = vi.fn(async () => {
+        await gate;
+        return freshJsonResponse({
+          ok: true,
+          data: {
+            items: [],
+            pagination: {
+              limit: 25,
+              returned: 0,
+              hasMore: false,
+              nextCursor: null,
+            },
+          },
+        });
+      });
+      globalThis.fetch = network as typeof fetch;
+      try {
+        const options = pagesListQueryOptions(input);
+        const prefetch = client.prefetchInfiniteQuery(options);
+        const mounted = client.fetchInfiniteQuery(
+          pagesListQueryOptions({
+            ...input,
+            search: "",
+            sort: { key: "views", direction: "desc" },
+          }),
+        );
+        expect(network).toHaveBeenCalledTimes(1);
+        finish();
+        await prefetch;
+        await expect(mounted).resolves.toMatchObject({ pages: [{ ok: true }] });
+        await client.prefetchInfiniteQuery(options);
+        expect(network).toHaveBeenCalledTimes(1);
+        expect(
+          pagesListQueryOptions({ ...input, search: "other" }).queryKey,
+        ).not.toEqual(options.queryKey);
+        expect(
+          pagesListQueryOptions({
+            ...input,
+            window: { ...mockWindow, timeZone: "Asia/Tokyo" },
+          }).queryKey,
+        ).not.toEqual(options.queryKey);
+      } finally {
+        finish();
+        client.clear();
+      }
+    });
+
+    it.each(["visitors", "sessions"] as const)(
+      "reuses the normalized %s list prefetch without prefetching more pages",
+      async (kind) => {
+        const client = new QueryClient({
+          defaultOptions: { queries: { staleTime: 15000, retry: false } },
+        });
+        const filters = parseFilterDocumentFromSearchParams(
+          new URLSearchParams("scope=visitor&filter[page.path]=/home"),
+        );
+        const input = { siteId: "site-stream", window: mockWindow, filters };
+        const network = vi.fn(async () =>
+          freshJsonResponse({
+            ok: true,
+            data: {
+              items: [],
+              pagination: {
+                limit: 50,
+                returned: 0,
+                hasMore: true,
+                nextCursor: "next",
+              },
+            },
+          }),
+        );
+        globalThis.fetch = network as typeof fetch;
+        try {
+          if (kind === "visitors") {
+            const options = visitorsListQueryOptions(input);
+            await client.prefetchInfiniteQuery(options);
+            await client.fetchInfiniteQuery(visitorsListQueryOptions(input));
+            expect(client.getQueryData(options.queryKey)?.pages).toHaveLength(
+              1,
+            );
+            expect(
+              visitorsListQueryOptions({ ...input, search: "other" }).queryKey,
+            ).not.toEqual(options.queryKey);
+          } else {
+            const options = sessionsListQueryOptions(input);
+            await client.prefetchInfiniteQuery(options);
+            await client.fetchInfiniteQuery(sessionsListQueryOptions(input));
+            expect(client.getQueryData(options.queryKey)?.pages).toHaveLength(
+              1,
+            );
+            expect(
+              sessionsListQueryOptions({ ...input, search: "other" }).queryKey,
+            ).not.toEqual(options.queryKey);
+          }
+          expect(network).toHaveBeenCalledTimes(1);
+        } finally {
+          client.clear();
+        }
+      },
+    );
+
+    it("plans only the visible overview reads and opens the existing batch scope for the three eligible dimensions", async () => {
+      const calls: {
+        path: string;
+        params?: PrivateRequestParams;
+        inBatch: boolean;
+      }[] = [];
+      let inBatch = false;
+      const transport: PrivateReadTransport = async <T>(
+        path: string,
+        params?: PrivateRequestParams,
+      ) => {
+        calls.push({ path, params, inBatch });
+        return {
+          ok: true,
+          data: {
+            items: [],
+            pagination: {
+              limit: 100,
+              returned: 0,
+              hasMore: false,
+              nextCursor: null,
+            },
+          },
+        } as T;
+      };
+      const batch = vi.fn(async (action: () => Promise<unknown>) => {
+        inBatch = true;
+        const result = action();
+        inBatch = false;
+        return result;
+      });
+      startOverviewInitialReads(
+        "site-stream",
+        mockWindow,
+        new URLSearchParams("scope=session&filter[page.path]=/home"),
+        transport,
+        batch,
+      );
+      expect(calls).toHaveLength(6);
+      expect(batch).toHaveBeenCalledOnce();
+      expect(
+        calls.filter((call) => call.inBatch).map((call) => call.path),
+      ).toEqual([
+        "/api/private/overview-page-path",
+        "/api/private/overview-client-browser",
+        "/api/private/overview-geo-country",
+      ]);
+      expect(
+        calls
+          .filter((call) => call.inBatch)
+          .every(
+            (call) =>
+              call.params?.limit === 100 &&
+              call.params?.sort === "views" &&
+              call.params?.direction === "desc",
+          ),
+      ).toBe(true);
+      expect(
+        calls.find((call) => call.path.endsWith("overview"))?.params,
+      ).toMatchObject({ includeChange: 1, includeDetail: 1 });
+      expect(
+        calls.find((call) => call.path.endsWith("overview-geo-points"))?.params
+          ?.limit,
+      ).toBe(5000);
+    });
+
+    it("plans the page list with its default previous comparison and the separate current-only share trend", () => {
+      const calls: Array<{ path: string; params?: PrivateRequestParams }> = [];
+      const transport: PrivateReadTransport = async <T>(
+        path: string,
+        params?: PrivateRequestParams,
+      ) => {
+        calls.push({ path, params });
+        return {} as T;
+      };
+      startPagesInitialReads(
+        "site-stream",
+        mockWindow,
+        new URLSearchParams("scope=session&filter[page.path]=/home"),
+        transport,
+      );
+      expect(calls).toHaveLength(3);
+      expect(calls[0]).toMatchObject({
+        path: "/api/private/pages-dashboard",
+        params: {
+          limit: 25,
+          sort: "views",
+          direction: "desc",
+          compare: "previous",
+          metric: "views",
+          sortBy: "current",
+          scope: "session",
+          "filter[page.path]": "/home",
+        },
+      });
+      expect(calls[1]).toMatchObject({
+        path: "/api/private/pages-dashboard",
+        params: { limit: 5, scope: "session", "filter[page.path]": "/home" },
+      });
+      expect(calls[1]?.params).not.toHaveProperty("compare");
+      expect(calls[2]).toMatchObject({
+        path: "/api/private/trend",
+        params: {
+          scope: "session",
+          "filter[page.path]": "/home",
+          interval: mockWindow.interval,
+        },
+      });
+      expect(
+        calls.every(
+          (call) =>
+            call.params?.siteId === "site-stream" &&
+            call.params?.timeZone === mockWindow.timeZone,
+        ),
+      ).toBe(true);
+    });
+
+    it("plans explicit comparison share reads with the reference window and filters", () => {
+      const calls: Array<{ path: string; params?: PrivateRequestParams }> = [];
+      const transport: PrivateReadTransport = async <T>(
+        path: string,
+        params?: PrivateRequestParams,
+      ) => {
+        calls.push({ path, params });
+        return {} as T;
+      };
+      startPagesInitialReads(
+        "site-stream",
+        mockWindow,
+        new URLSearchParams(
+          "compare=previous&filter[page.path]=/home&compareFilter[page.path]=/docs",
+        ),
+        transport,
+      );
+      expect(calls).toHaveLength(5);
+      expect(calls[0]?.params).toMatchObject({
+        limit: 25,
+        compare: "previous",
+        "compareFilter[page.path]": "/docs",
+      });
+      expect(calls[3]?.params).toMatchObject({
+        limit: 5,
+        to: mockWindow.from - 1,
+        "filter[page.path]": "/docs",
+      });
+      expect(calls[4]?.params).toMatchObject({
+        to: mockWindow.from - 1,
+        "filter[page.path]": "/docs",
+      });
+      expect(calls[3]?.params?.from).toBe(calls[4]?.params?.from);
+    });
+
+    it.each([false, true])(
+      "plans only default referrer reads, comparison=%s",
+      (compare) => {
+        const calls: Array<{ path: string; params?: PrivateRequestParams }> =
+          [];
+        const transport: PrivateReadTransport = async <T>(
+          path: string,
+          params?: PrivateRequestParams,
+        ) => {
+          calls.push({ path, params });
+          return {
+            ok: true,
+            data: {
+              items: [],
+              pagination: {
+                limit: 100,
+                returned: 0,
+                hasMore: false,
+                nextCursor: null,
+              },
+            },
+          } as T;
+        };
+        startReferrersInitialReads(
+          "site-stream",
+          mockWindow,
+          new URLSearchParams(
+            "scope=session&filter[page.path]=/home" +
+              (compare
+                ? "&compare=previous&compareFilter[page.path]=/docs"
+                : ""),
+          ),
+          transport,
+        );
+        expect(calls).toHaveLength(compare ? 8 : 5);
+        expect(calls.slice(0, 3).map((call) => call.path)).toEqual([
+          "/api/private/referrer-summary",
+          "/api/private/referrer-channel-dimension-trend",
+          "/api/private/referrer-radar",
+        ]);
+        expect(calls[0]?.params).toMatchObject({
+          topN: 5,
+          scope: "session",
+          "filter[page.path]": "/home",
+        });
+        expect(calls[1]?.params).toMatchObject({
+          limit: 5,
+          interval: mockWindow.interval,
+        });
+        expect(calls[2]?.params).toMatchObject({ limit: 24 });
+        if (compare) {
+          for (const call of calls.slice(3, 6))
+            expect(call.params).toMatchObject({
+              to: mockWindow.from - 1,
+              "filter[page.path]": "/docs",
+            });
+        }
+        const tables = calls.slice(-2);
+        expect(tables.map((call) => call.path)).toEqual([
+          "/api/private/overview-source-domain",
+          "/api/private/overview-source-channel",
+        ]);
+        for (const call of tables) {
+          expect(call.params).toMatchObject({
+            limit: 100,
+            sort: "views",
+            direction: "desc",
+            scope: "session",
+            "filter[page.path]": "/home",
+          });
+          if (compare)
+            expect(call.params).toMatchObject({
+              compare: "previous",
+              metric: "views",
+              sortBy: "current",
+              "compareFilter[page.path]": "/docs",
+            });
+          else expect(call.params).not.toHaveProperty("compare");
+        }
+        expect(
+          calls.every(
+            (call) =>
+              call.params?.siteId === "site-stream" &&
+              call.params?.timeZone === mockWindow.timeZone,
+          ),
+        ).toBe(true);
+      },
+    );
+
+    it.each([false, true])(
+      "plans only default campaign tables and five independent trends, comparison=%s",
+      (compare) => {
+        const calls: Array<{ path: string; params?: PrivateRequestParams }> =
+          [];
+        const transport: PrivateReadTransport = async <T>(
+          path: string,
+          params?: PrivateRequestParams,
+        ) => {
+          calls.push({ path, params });
+          return {
+            ok: true,
+            data: {
+              items: [],
+              pagination: {
+                limit: 100,
+                returned: 0,
+                hasMore: false,
+                nextCursor: null,
+              },
+            },
+          } as T;
+        };
+        startCampaignsInitialReads(
+          "site-stream",
+          mockWindow,
+          new URLSearchParams(
+            "scope=session&filter[page.path]=/home" +
+              (compare
+                ? "&compare=previous&compareFilter[page.path]=/docs"
+                : ""),
+          ),
+          transport,
+        );
+        expect(calls).toHaveLength(compare ? 12 : 7);
+        const trends = calls.filter(
+          (x) => x.path === "/api/private/utm-dimension-trend",
+        );
+        expect(
+          trends
+            .filter((x) => x.params?.from === mockWindow.from)
+            .map((x) => x.params?.dimension),
+        ).toEqual(["source", "medium", "campaign", "term", "content"]);
+        expect(
+          trends.every(
+            (x) =>
+              x.params?.limit === 5 &&
+              x.params?.interval === mockWindow.interval,
+          ),
+        ).toBe(true);
+        if (compare)
+          expect(
+            trends
+              .filter((x) => x.params?.to === mockWindow.from - 1)
+              .map((x) => x.params?.["filter[page.path]"]),
+          ).toEqual(Array(5).fill("/docs"));
+        const tables = calls.slice(-2);
+        expect(tables.map((x) => x.path)).toEqual([
+          "/api/private/utm-source",
+          "/api/private/utm-term",
+        ]);
+        for (const call of tables) {
+          expect(call.params).toMatchObject({
+            limit: 100,
+            sort: "views",
+            direction: "desc",
+            scope: "session",
+            "filter[page.path]": "/home",
+          });
+          if (compare)
+            expect(call.params).toMatchObject({
+              compare: "previous",
+              metric: "views",
+              sortBy: "current",
+              "compareFilter[page.path]": "/docs",
+            });
+          else expect(call.params).not.toHaveProperty("compare");
+        }
+        expect(
+          calls.every(
+            (x) =>
+              x.params?.siteId === "site-stream" &&
+              x.params?.timeZone === mockWindow.timeZone,
+          ),
+        ).toBe(true);
+      },
+    );
+
+    it.each(["browsers", "devices"] as const)(
+      "plans distinct technology reads for %s without duplicating overview trends",
+      (page) => {
+        const calls: Array<{ path: string; params?: PrivateRequestParams }> =
+          [];
+        const transport: PrivateReadTransport = async <T>(
+          path: string,
+          params?: PrivateRequestParams,
+        ) => {
+          calls.push({ path, params });
+          return { ok: true, data: [], series: [] } as T;
+        };
+        for (const compare of [false, true]) {
+          calls.length = 0;
+          startTechnologyInitialReads(
+            page,
+            "site-stream",
+            mockWindow,
+            new URLSearchParams(
+              "scope=session&filter[page.path]=/home" +
+                (compare
+                  ? "&compare=previous&compareFilter[page.path]=/docs"
+                  : ""),
+            ),
+            transport,
+          );
+          expect(calls).toHaveLength(
+            page === "browsers" ? (compare ? 11 : 6) : compare ? 10 : 5,
+          );
+          expect(
+            new Set(calls.map((x) => privateReadIdentity(x.path, x.params)))
+              .size,
+          ).toBe(calls.length);
+          expect(
+            calls.every(
+              (x) =>
+                x.params?.siteId === "site-stream" &&
+                x.params?.timeZone === mockWindow.timeZone,
+            ),
+          ).toBe(true);
+          if (compare)
+            expect(
+              calls.filter((x) => x.params?.to === mockWindow.from - 1),
+            ).toHaveLength(5);
+          if (page === "browsers") {
+            expect(
+              calls
+                .filter((x) => x.path.endsWith("browser-version-breakdown"))
+                .map((x) => x.params?.versionLimit),
+            ).toEqual(compare ? [5, 5, 0] : [5, 0]);
+          } else {
+            expect(
+              calls
+                .filter(
+                  (x) =>
+                    x.path.endsWith("client-dimension-trend") &&
+                    x.params?.from === mockWindow.from,
+                )
+                .map((x) => [x.params?.dimension, x.params?.limit]),
+            ).toEqual([
+              ["deviceType", 5],
+              ["operatingSystem", 5],
+              ["screenSize", 10],
+            ]);
+          }
+        }
+      },
+    );
+
+    it("shares the same cancellable trend query between overview and chart and isolates other identities", async () => {
+      const client = new QueryClient({
+        defaultOptions: { queries: { staleTime: 15000, retry: false } },
+      });
+      const document = parseFilterDocumentFromSearchParams(
+        new URLSearchParams("scope=session&filter[page.path]=/home"),
+      );
+      const result = {
+        ok: true as const,
+        interval: mockWindow.interval,
+        series: [],
+        data: [],
+      };
+      const fetchTrend = vi.fn(async () => result);
+      const input = {
+        siteId: "site-stream",
+        window: mockWindow,
+        filters: document,
+        queryKey: ["browser"],
+        fetchTrend,
+        comparisonQuery: null,
+      };
+      try {
+        const a = shareTrendQueryOptions(input);
+        const b = shareTrendQueryOptions({ ...input, queryKey: ["browser"] });
+        expect(a.queryKey).toEqual(b.queryKey);
+        await Promise.all([client.fetchQuery(a), client.fetchQuery(b)]);
+        await client.fetchQuery(b);
+        expect(fetchTrend).toHaveBeenCalledTimes(1);
+        await client.fetchQuery(
+          shareTrendQueryOptions({ ...input, queryKey: ["browser-engine"] }),
+        );
+        await client.fetchQuery(
+          shareTrendQueryOptions({
+            ...input,
+            window: { ...mockWindow, timeZone: "Asia/Shanghai" },
+          }),
+        );
+        expect(fetchTrend).toHaveBeenCalledTimes(3);
+      } finally {
+        client.clear();
+      }
+    });
+
+    it("retains a shared trend until its last observer leaves and then cancels it", async () => {
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      const filters = parseFilterDocumentFromSearchParams(
+        new URLSearchParams(),
+      );
+      let signalSeen: AbortSignal | undefined;
+      const fetchTrend = vi.fn(
+        async (
+          _siteId: string,
+          _window: Parameters<typeof fetchBrowserTrend>[1],
+          _filters?: typeof filters,
+          options?: { signal?: AbortSignal },
+        ) => {
+          signalSeen = options?.signal;
+          return new Promise<Awaited<ReturnType<typeof fetchBrowserTrend>>>(
+            (_resolve, reject) => {
+              signalSeen?.addEventListener(
+                "abort",
+                () => reject(new DOMException("Aborted", "AbortError")),
+                { once: true },
+              );
+            },
+          );
+        },
+      );
+      const opts = shareTrendQueryOptions({
+        siteId: "site-stream",
+        window: mockWindow,
+        filters,
+        queryKey: ["browser"],
+        fetchTrend,
+        comparisonQuery: null,
+      });
+      const a = new QueryObserver(client, opts);
+      const b = new QueryObserver(client, opts);
+      const unsubA = a.subscribe(() => {});
+      const unsubB = b.subscribe(() => {});
+      try {
+        await vi.waitFor(() => expect(signalSeen).toBeDefined());
+        expect(fetchTrend).toHaveBeenCalledTimes(1);
+        unsubA();
+        expect(signalSeen?.aborted).toBe(false);
+        unsubB();
+        expect(signalSeen?.aborted).toBe(true);
+      } finally {
+        unsubA();
+        unsubB();
+        client.clear();
+      }
+    });
+    it("allows the device browser cross card to finish while the OS card is still pending and fail independently", async () => {
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      let rejectOs!: (error: Error) => void;
+      const gate = new Promise<never>((_resolve, reject) => {
+        rejectOs = reject;
+      });
+      const transport: PrivateReadTransport = async <T>(
+        _path: string,
+        params?: PrivateRequestParams,
+      ) => {
+        if (params?.secondaryDimension === "operatingSystem") return gate;
+        return {
+          ok: true,
+          data: { columns: [], rows: [], totalVisitors: 42 },
+        } as T;
+      };
+      const input = {
+        siteId: "site-stream",
+        window: mockWindow,
+        filters: parseFilterDocumentFromSearchParams(new URLSearchParams()),
+        transport,
+        comparisonQuery: null,
+      };
+      try {
+        const browser = deviceCrossBreakdownQueryOptions(input, "browser");
+        const os = deviceCrossBreakdownQueryOptions(input, "operatingSystem");
+        const slow = client.fetchQuery(os);
+        await expect(client.fetchQuery(browser)).resolves.toMatchObject({
+          current: { totalVisitors: 42 },
+        });
+        expect(client.getQueryState(os.queryKey)?.fetchStatus).toBe("fetching");
+        rejectOs(new Error("failed OS query"));
+        await expect(slow).resolves.toMatchObject({
+          current: { totalVisitors: 0 },
+        });
+        expect(client.getQueryData(browser.queryKey)).toMatchObject({
+          current: { totalVisitors: 42 },
+        });
+      } finally {
+        client.clear();
+      }
+    });
+
+    it.each([
+      [null, "country", 400],
+      ["JP", "region", 400],
+      ["JP::13::Tokyo", "city", 600],
+      ["JP::13::Tokyo::Shinjuku", "city", 600],
+    ] as const)(
+      "preserves the geo page drill-down request %s",
+      (location, tab, limit) => {
+        const calls: Array<{ path: string; params?: PrivateRequestParams }> =
+          [];
+        const transport: PrivateReadTransport = async <T>(
+          path: string,
+          params?: PrivateRequestParams,
+        ) => {
+          calls.push({ path, params });
+          return {
+            ok: true,
+            data: {
+              items: [],
+              pagination: {
+                limit: 100,
+                returned: 0,
+                hasMore: false,
+                nextCursor: null,
+              },
+            },
+          } as T;
+        };
+        const search = new URLSearchParams(
+          "scope=session&filter[page.path]=/home&filter[geo.country]=de&compare=previous&compareFilter[page.path]=/docs&compareFilter[geo.country]=us",
+        );
+        if (location) search.set("location", location);
+        startGeoInitialReads("site-stream", mockWindow, search, transport);
+        expect(calls).toHaveLength(2);
+        expect(calls.map((x) => x.path)).toEqual([
+          "/api/private/overview-geo-points",
+          "/api/private/overview-geo-" + tab,
+        ]);
+        expect(calls[0]?.params).toMatchObject({
+          limit: 5000,
+          scope: "session",
+          "filter[page.path]": "/home",
+          "filter[geo.country]": location ? "jp" : "de",
+        });
+        expect(calls[1]?.params).toMatchObject({
+          limit,
+          scope: "session",
+          "filter[page.path]": "/home",
+          "filter[geo.country]": location ? "jp" : "de",
+          compare: "previous",
+          metric: "views",
+          sortBy: "current",
+          "compareFilter[geo.country]": location ? "jp" : "us",
+          "compareFilter[page.path]": "/docs",
+        });
+        if (location) expect(calls[0]?.params?.applyGeoFilter).toBe(1);
+        else expect(calls[0]?.params).not.toHaveProperty("applyGeoFilter");
+        expect(calls[0]?.params).not.toHaveProperty("compare");
+        expect(
+          calls.every(
+            (x) =>
+              x.params?.siteId === "site-stream" &&
+              x.params?.timeZone === mockWindow.timeZone,
+          ),
+        ).toBe(true);
+      },
+    );
+
+    it.each([false, true])(
+      "reads the composite RUM endpoint once per requested period, comparison=%s",
+      (compare) => {
+        const calls: Array<{ path: string; params?: PrivateRequestParams }> =
+          [];
+        const transport: PrivateReadTransport = async <T>(
+          path: string,
+          params?: PrivateRequestParams,
+        ) => {
+          calls.push({ path, params });
+          return { ok: true } as T;
+        };
+        startPerformanceInitialReads(
+          "site-stream",
+          mockWindow,
+          new URLSearchParams(
+            "scope=session&filter[page.path]=/home" +
+              (compare
+                ? "&compare=previous&compareFilter[page.path]=/docs"
+                : ""),
+          ),
+          transport,
+        );
+        expect(calls).toHaveLength(compare ? 2 : 1);
+        expect(
+          calls.every(
+            (x) =>
+              x.path === "/api/private/performance" &&
+              x.params?.siteId === "site-stream" &&
+              x.params?.timeZone === mockWindow.timeZone &&
+              x.params?.interval === mockWindow.interval,
+          ),
+        ).toBe(true);
+        expect(calls[0]?.params).toMatchObject({
+          from: mockWindow.from,
+          to: mockWindow.to,
+          scope: "session",
+          "filter[page.path]": "/home",
+        });
+        if (compare)
+          expect(calls[1]?.params).toMatchObject({
+            to: mockWindow.from - 1,
+            "filter[page.path]": "/docs",
+          });
+      },
+    );
+
+    it.each([false, true])(
+      "plans independent event summary, trend and only the first record page, compare=%s",
+      (compare) => {
+        const calls: Array<{ path: string; params?: PrivateRequestParams }> =
+          [];
+        const transport: PrivateReadTransport = async <T>(
+          path: string,
+          params?: PrivateRequestParams,
+        ) => {
+          calls.push({ path, params });
+          return { ok: true } as T;
+        };
+        const search = new URLSearchParams(
+          "scope=session&filter[page.path]=/home" +
+            (compare
+              ? "&compare=previous&compareFilter[page.path]=/docs"
+              : "") +
+            "&detail=click&eventId=private-record",
+        );
+        startEventsInitialReads("site-stream", mockWindow, search, transport);
+        expect(calls).toHaveLength(compare ? 7 : 3);
+        expect(calls.slice(0, 3).map((x) => x.path)).toEqual([
+          "/api/private/events-summary",
+          "/api/private/events-trend",
+          "/api/private/events-records",
+        ]);
+        expect(calls[1]?.params).toMatchObject({
+          limit: 18,
+          interval: mockWindow.interval,
+        });
+        expect(calls[2]?.params).toMatchObject({
+          limit: 50,
+          sortBy: "occurredAt",
+          sortDir: "desc",
+        });
+        expect(
+          calls
+            .slice(0, 3)
+            .every(
+              (x) =>
+                x.params?.scope === "session" &&
+                x.params?.["filter[page.path]"] === "/home",
+            ),
+        ).toBe(true);
+        expect(
+          calls.every(
+            (x) =>
+              x.params?.siteId === "site-stream" &&
+              x.params?.timeZone === mockWindow.timeZone &&
+              x.params?.cursor === undefined &&
+              x.params?.eventName === undefined &&
+              x.params?.eventId === undefined,
+          ),
+        ).toBe(true);
+        if (compare) {
+          expect(calls.slice(3, 5).map((x) => x.path)).toEqual([
+            "/api/private/events-compare-name",
+            "/api/private/events-compare-path",
+          ]);
+          for (const call of calls.slice(3, 5))
+            expect(call.params).toMatchObject({
+              limit: 100,
+              sort: "views",
+              direction: "desc",
+              compare: "previous",
+              metric: "views",
+              sortBy: "current",
+              scope: "session",
+              "filter[page.path]": "/home",
+              "compareFilter[page.path]": "/docs",
+            });
+          expect(
+            calls.slice(5).map((x) => x.params?.["filter[page.path]"]),
+          ).toEqual(["/docs", "/docs"]);
+        }
+      },
+    );
+    it.each([
+      ["visitors", startVisitorsInitialReads, "lastSeenAt"],
+      ["sessions", startSessionsInitialReads, "startedAt"],
+    ] as const)(
+      "plans only the first %s page with the existing sort",
+      (page, start, sortBy) => {
+        const calls: Array<{ path: string; params?: PrivateRequestParams }> =
+          [];
+        const transport: PrivateReadTransport = async <T>(
+          path: string,
+          params?: PrivateRequestParams,
+        ) => {
+          calls.push({ path, params });
+          return { ok: true } as T;
+        };
+        start(
+          "site-stream",
+          mockWindow,
+          new URLSearchParams(
+            "scope=visitor&filter[page.path]=/home&compare=previous&detail=private-id&cursor=untrusted&search=other&sortBy=views",
+          ),
+          transport,
+        );
+        expect(calls).toHaveLength(1);
+        expect(calls[0]).toEqual({
+          path: "/api/private/" + page,
+          params: {
+            siteId: "site-stream",
+            from: mockWindow.from,
+            to: mockWindow.to,
+            timeZone: mockWindow.timeZone,
+            limit: 50,
+            sortBy,
+            sortDir: "desc",
+            scope: "visitor",
+            "filter[page.path]": "/home",
+          },
+        });
+      },
+    );
 
     function freshJsonResponse(body: unknown, status = 200): Response {
       return new Response(JSON.stringify(body), {

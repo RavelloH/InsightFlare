@@ -24,6 +24,10 @@ import {
 } from "@/lib/edge/analytics/interfaces/dashboard/protocol/responses";
 import type { Env } from "@/lib/edge/types";
 export type OverviewTab =
+  | "event.name"
+  | "event.page.path"
+  | "event.page.title"
+  | "event.page.hostname"
   | "page.path"
   | "page.query"
   | "page.title"
@@ -136,6 +140,14 @@ export async function handleOverviewTabContract(
       };
     }
   }
+  if (
+    tab.startsWith("event.") &&
+    (!comparison || queryContext.policy.audience !== "private-dashboard")
+  )
+    return badRequest(
+      "Event dimension requires private comparison",
+      "invalid-input",
+    );
   const query: CanonicalDimensionQuery = {
     context: queryContext,
     time: queryWindowToTime(window),

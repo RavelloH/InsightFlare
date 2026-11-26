@@ -86,7 +86,6 @@ import {
   type DashboardInterval,
   normalizeCustomDateRange,
   parseFilterDocumentFromSearchParams,
-  parseFilterScopeFromSearchParams,
   type RangePreset,
   serializeFilterScopeToSearchParams,
 } from "@/lib/dashboard/query-state";
@@ -323,11 +322,6 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
       parseFilterDocumentFromSearchParams(new URLSearchParams(searchParamsKey)),
     [searchParamsKey],
   );
-  const urlScopePreference = useMemo(
-    () =>
-      parseFilterScopeFromSearchParams(new URLSearchParams(searchParamsKey)),
-    [searchParamsKey],
-  );
   const comparisonSearchState = useMemo(
     () =>
       parseDashboardComparisonSearchParams(
@@ -486,12 +480,6 @@ export const DashboardHeaderControls = memo(function DashboardHeaderControls({
     pendingNormalized,
     timeZone,
   ]);
-
-  useEffect(() => {
-    if (scopePreference !== urlScopePreference) {
-      setScopePreference(urlScopePreference);
-    }
-  }, [scopePreference, setScopePreference, urlScopePreference]);
 
   useEffect(() => {
     setComparisonSettings(

@@ -1,4 +1,7 @@
 import { resolveReportingTimeZone } from "@/lib/analytics/time-zone";
+import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
+import { parseFilterDocumentFromSearchParams } from "@/lib/dashboard/query-state";
+import { attachFilterScopePreference } from "@/lib/filter-contract";
 
 import {
   type CustomTimeRange,
@@ -9,7 +12,7 @@ import {
   resolveTimeWindow,
   type TimeWindow,
 } from "./query-state";
-import { REPORTING_TIME_ZONE_COOKIE } from "./time-zone";
+import { browserTimeZone, REPORTING_TIME_ZONE_COOKIE } from "./time-zone";
 export const DASHBOARD_QUERY_PREFERENCES_COOKIE =
   "insightflare-dashboard-query";
 const COOKIE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
@@ -110,4 +113,58 @@ export function writeDashboardQueryPreferences(
   });
   const secure = window.location.protocol === "https:" ? "; Secure" : "";
   document.cookie = `${DASHBOARD_QUERY_PREFERENCES_COOKIE}=${encodeURIComponent(payload)}; Path=/; Max-Age=${COOKIE_MAX_AGE_SECONDS}; SameSite=Lax${secure}`;
+}
+
+/** Only start analytical prefetch for a committed destination, not a hover.
+ * The bootstrap window must match the current browser preferences. */
+export function canPrefetchAnalyticsNavigation(input: {
+  preload: boolean;
+  cause: string;
+  window: TimeWindow;
+  accountTimeZone?: string | null;
+}): boolean {
+  if (
+    typeof document === "undefined" ||
+    input.preload ||
+    input.cause !== "enter"
+  )
+    return false;
+  const preferences = readDashboardQueryPreferences(document.cookie);
+  const window = input.window;
+  return (
+    window.timeZone ===
+      resolveReportingTimeZone(input.accountTimeZone, browserTimeZone()) &&
+    window.preset === preferences.range &&
+    (!preferences.interval || window.interval === preferences.interval) &&
+    (window.preset !== "custom" ||
+      (preferences.customRange?.from === window.from &&
+        preferences.customRange?.to === window.to))
+  );
+}
+
+export function analyticsNavigationInput(
+  input: Parameters<typeof canPrefetchAnalyticsNavigation>[0] & {
+    siteId: string;
+    search: string;
+    preserveEmptyScope?: boolean;
+  },
+) {
+  if (!canPrefetchAnalyticsNavigation(input)) return null;
+  const search = new URLSearchParams(input.search);
+  const document = parseFilterDocumentFromSearchParams(search);
+  const filters =
+    document.root || input.preserveEmptyScope
+      ? document
+      : attachFilterScopePreference(document, "auto");
+  return {
+    siteId: input.siteId,
+    window: input.window,
+    filters,
+    comparisonQuery: resolveDashboardComparisonQuery(
+      search,
+      input.window,
+      filters,
+    ),
+    search,
+  };
 }

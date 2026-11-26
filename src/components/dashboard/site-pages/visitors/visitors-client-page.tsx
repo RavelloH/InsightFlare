@@ -1,3 +1,8 @@
+import { useDashboardDeferredReadTransport } from "@/components/dashboard/shell/dashboard-query-provider";
+export {
+  DEFAULT_VISITOR_SORT,
+  VISITOR_PAGE_SIZE,
+} from "@/lib/dashboard/client/data/visitors";
 import {
   Fragment,
   memo,
@@ -46,13 +51,17 @@ import { DETAIL_QUERY_PARAM } from "@/components/dashboard/site-pages/common/det
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/sessions/session-detail-client-page";
 import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitors/visitor-detail-client-page";
-import { fetchVisitors } from "@/lib/dashboard/client/data/index";
+import {
+  DEFAULT_VISITOR_SORT,
+  VISITOR_PAGE_SIZE,
+  visitorsListQueryOptions,
+} from "@/lib/dashboard/client/data/visitors";
 import {
   pushUrlWithoutNavigation,
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/dashboard/client/history";
-import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
+import { type DeferredPrivateReads } from "@/lib/dashboard/client/request";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import { numberFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
@@ -67,9 +76,9 @@ interface VisitorsClientPageProps {
   messages: AppMessages;
   siteId: string;
   pathname: string;
+  deferredReads?: DeferredPrivateReads | null;
 }
 export type VisitorRow = VisitorsData["data"]["items"][number];
-export const VISITOR_PAGE_SIZE = 50;
 export const VISITOR_SKELETON_ROWS = VISITOR_PAGE_SIZE;
 export const VISITOR_TABLE_COLUMNS_STORAGE_KEY =
   "insightflare:analytics-table-columns:visitors";
@@ -94,10 +103,6 @@ export type VisitorTableColumnId =
   | "browser"
   | "device"
   | "screenSize";
-export const DEFAULT_VISITOR_SORT: VisitorSortState = {
-  key: "lastSeenAt",
-  direction: "desc",
-};
 export function createVisitorTableColumnDefinitions(
   labels: AppMessages["visitors"],
   visitorIdLabel: string,
@@ -734,6 +739,7 @@ export function VisitorsClientPage({
   messages,
   siteId,
   pathname,
+  deferredReads,
 }: VisitorsClientPageProps) {
   const labels = messages.visitors;
   const visitorColumnDefinitions = useMemo(
@@ -748,10 +754,16 @@ export function VisitorsClientPage({
     storageKey: VISITOR_TABLE_COLUMNS_STORAGE_KEY,
     columns: visitorColumnDefinitions,
   });
-  const { filters, window: timeWindow } = useDashboardQuery() as {
+  const {
+    filters,
+    window: timeWindow,
+    queryReady,
+  } = useDashboardQuery() as {
     filters: FilterDocument;
     window: TimeWindow;
+    queryReady: boolean;
   };
+  const transport = useDashboardDeferredReadTransport(deferredReads);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [sort, setSort] = useState<VisitorSortState>(DEFAULT_VISITOR_SORT);
@@ -760,7 +772,6 @@ export function VisitorsClientPage({
   const [nestedDetails, setNestedDetails] = useState<NestedJourneyDetail[]>([]);
   const nestedDetailKeyRef = useRef(0);
   const openedDetailFromListRef = useRef(false);
-  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
 
   useEffect(() => {
     if (!detailVisitorId) {
@@ -785,35 +796,17 @@ export function VisitorsClientPage({
     isFetching,
     isFetchingNextPage,
     isPending,
-  } = useInfiniteQuery({
-    queryKey: [
-      "dashboard",
-      "visitors",
+  } = useInfiniteQuery(
+    visitorsListQueryOptions({
       siteId,
-      timeWindow.from,
-      timeWindow.to,
-      timeWindow.timeZone,
-      filtersKey,
-      debouncedQuery,
-      sort.key,
-      sort.direction,
-    ],
-    queryFn: ({ pageParam, signal }) =>
-      fetchVisitors(siteId, timeWindow, filters, {
-        cursor: pageParam,
-        limit: VISITOR_PAGE_SIZE,
-        sortBy: sort.key,
-        sortDir: sort.direction,
-        search: debouncedQuery,
-        signal,
-      }),
-    initialPageParam: null as string | null,
-    getNextPageParam: (lastPage) =>
-      lastPage.data.pagination.hasMore
-        ? lastPage.data.pagination.nextCursor
-        : undefined,
-    enabled: typeof window !== "undefined",
-  });
+      window: timeWindow,
+      filters,
+      search: debouncedQuery,
+      sort,
+      transport,
+      enabled: queryReady,
+    }),
+  );
   const rows = useMemo(
     () =>
       data?.pages.reduce<VisitorRow[]>(

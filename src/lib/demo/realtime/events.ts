@@ -12,6 +12,10 @@ import "@/lib/demo/realtime/visit-helpers";
 import "@/lib/demo/realtime/visitor-pool";
 
 import {
+  buildDemoComparisonRows,
+  resolveDemoComparison,
+} from "@/lib/demo/realtime/comparison";
+import {
   collectDemoEventFields,
   collectDemoEventFieldValues,
   createDemoCustomEventFacts,
@@ -40,7 +44,11 @@ import {
   parseDemoLimit,
   parseDemoNumber,
 } from "@/lib/demo/realtime/filters";
-import { demoPage } from "@/lib/demo/realtime/pagination";
+import {
+  demoCursorFilterBinding,
+  demoCursorRequestBinding,
+  demoPage,
+} from "@/lib/demo/realtime/pagination";
 import {
   buildDemoTimeBuckets,
   createDemoShareTrendSeriesKey,
@@ -84,6 +92,58 @@ export function generateDemoEventsSummary(
       avgEventsPerSession: sessionCount > 0 ? events.length / sessionCount : 0,
     },
     cards: demoEventSummaryCards(dataset, events, 100),
+  };
+}
+export function generateDemoEventComparison(
+  siteId: string,
+  tab: "name" | "path" | "title" | "hostname",
+  params: Record<string, string | number>,
+): Record<string, unknown> {
+  const from = parseDemoNumber(params.from, 0),
+    to = parseDemoNumber(params.to, Date.now());
+  const filters = parseDemoFilters(params);
+  const comparison = resolveDemoComparison(params, filters);
+  if (!comparison) return { ok: false, error: "invalid-input" };
+  const collect = (
+    start: number,
+    end: number,
+    periodFilters: typeof filters,
+  ) => {
+    const dataset = buildDemoFactDataset(siteId, start, end);
+    const filtered = applyDemoFilters(dataset, periodFilters);
+    const events = filterDemoCustomEventsByPayload(
+      createDemoCustomEventFacts(filtered.visits),
+      periodFilters,
+      { allVisits: dataset.visits },
+    );
+    return demoEventDimensionRows(
+      dataset,
+      events,
+      Number.MAX_SAFE_INTEGER,
+      (event) =>
+        tab === "name"
+          ? event.eventName
+          : tab === "path"
+            ? event.visit.pathname
+            : tab === "title"
+              ? event.visit.title
+              : event.visit.hostname,
+    );
+  };
+  const rows = buildDemoComparisonRows(
+    collect(from, to, filters),
+    collect(comparison.from, comparison.to, comparison.filters),
+    params,
+  ).map((row) => ({ ...row, key: row.label, value: row.label }));
+  return {
+    ok: true,
+    data: demoPage(
+      rows,
+      params,
+      ["event-comparison", siteId, tab, demoCursorRequestBinding(params)],
+      100,
+      200,
+    ),
   };
 }
 export function generateDemoEventsTrend(
@@ -229,7 +289,7 @@ export function generateDemoEventsRecords(
       siteId,
       from,
       to,
-      filters,
+      filters: demoCursorFilterBinding(filters),
       eventName,
       search,
       sort: parseDemoEventRecordSort(params),
@@ -429,7 +489,7 @@ export function generateDemoEventFields(
     siteId,
     from,
     to,
-    filters,
+    filters: demoCursorFilterBinding(filters),
     eventName,
     sort: "events:desc,occurrences:desc,path:asc,valueType:asc",
   };
@@ -462,7 +522,7 @@ export function generateDemoEventTypeFieldValues(
     siteId,
     from,
     to,
-    filters,
+    filters: demoCursorFilterBinding(filters),
     eventName,
     fieldPath,
     fieldValueType,

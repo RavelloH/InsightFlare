@@ -43,6 +43,8 @@ export function OverviewMetricsSection({
   siteId,
   window,
   filters,
+  transport,
+  queryEnabled,
 }: OverviewDataSectionProps) {
   const comparisonQuery = useOverviewComparisonQuery(window, filters);
   const {
@@ -54,6 +56,8 @@ export function OverviewMetricsSection({
     window,
     filters,
     comparisonQuery,
+    transport,
+    queryEnabled,
   });
   const loading = isPending || isFetching;
   const overview = metricsData?.overview ?? emptyOverviewData();
@@ -214,6 +218,8 @@ export function OverviewTrendSection({
   siteId,
   window,
   filters,
+  transport,
+  queryEnabled,
 }: OverviewDataSectionProps) {
   const comparisonQuery = useOverviewComparisonQuery(window, filters);
   const currentDataWindow = useMemo(
@@ -227,6 +233,7 @@ export function OverviewTrendSection({
   );
   const {
     data: trendQueryData,
+    dataUpdatedAt,
     isFetching,
     isPending,
   } = useOverviewSummaryQuery({
@@ -234,6 +241,8 @@ export function OverviewTrendSection({
     window,
     filters,
     comparisonQuery,
+    transport,
+    queryEnabled,
   });
   const loading = isPending || isFetching;
   const trendData =
@@ -274,7 +283,11 @@ export function OverviewTrendSection({
         </CardTitle>
         <span className="text-xs text-muted-foreground">
           {messages.common.lastUpdated}:{" "}
-          {shortDateTime(locale, Date.now(), dataWindow.timeZone)}
+          {shortDateTime(
+            locale,
+            dataUpdatedAt || dataWindow.to,
+            dataWindow.timeZone,
+          )}
         </span>
       </CardHeader>
       <CardContent>

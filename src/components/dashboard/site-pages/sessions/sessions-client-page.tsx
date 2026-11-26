@@ -16,17 +16,22 @@ import {
   type SessionSortState,
   SessionsTableCard,
 } from "@/components/dashboard/sessions/sessions-table-card";
+import { useDashboardDeferredReadTransport } from "@/components/dashboard/shell/dashboard-query-provider";
 import { DETAIL_QUERY_PARAM } from "@/components/dashboard/site-pages/common/detail-query-param";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
 import { SessionDetailClientPage } from "@/components/dashboard/site-pages/sessions/session-detail-client-page";
 import { VisitorDetailClientPage } from "@/components/dashboard/site-pages/visitors/visitor-detail-client-page";
-import { fetchSessions } from "@/lib/dashboard/client/data/index";
+import {
+  DEFAULT_SESSION_SORT,
+  SESSION_PAGE_SIZE,
+  sessionsListQueryOptions,
+} from "@/lib/dashboard/client/data/sessions";
 import {
   pushUrlWithoutNavigation,
   replaceUrlWithoutNavigation,
   useLiveSearchParams,
 } from "@/lib/dashboard/client/history";
-import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
+import { type DeferredPrivateReads } from "@/lib/dashboard/client/request";
 import { serializeDashboardSearchParams } from "@/lib/dashboard/filter-state";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { JourneySession } from "@/lib/dashboard-api/client/edge";
@@ -38,13 +43,10 @@ interface SessionsClientPageProps {
   messages: AppMessages;
   siteId: string;
   pathname: string;
+  deferredReads?: DeferredPrivateReads | null;
 }
-const SESSION_PAGE_SIZE = 50;
+
 const SESSION_SKELETON_ROWS = SESSION_PAGE_SIZE;
-const DEFAULT_SESSION_SORT: SessionSortState = {
-  key: "startedAt",
-  direction: "desc",
-};
 type NestedJourneyDetail = {
   kind: "session" | "visitor";
   id: string;
@@ -76,6 +78,7 @@ export function SessionsClientPage({
   messages,
   siteId,
   pathname,
+  deferredReads,
 }: SessionsClientPageProps) {
   const labels = messages.sessions;
   const sessionColumnDefinitions = useMemo(
@@ -86,10 +89,16 @@ export function SessionsClientPage({
     storageKey: SESSION_TABLE_COLUMNS_STORAGE_KEY,
     columns: sessionColumnDefinitions,
   });
-  const { filters, window: timeWindow } = useDashboardQuery() as {
+  const {
+    filters,
+    window: timeWindow,
+    queryReady,
+  } = useDashboardQuery() as {
     filters: FilterDocument;
     window: TimeWindow;
+    queryReady: boolean;
   };
+  const transport = useDashboardDeferredReadTransport(deferredReads);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [sort, setSort] = useState<SessionSortState>(DEFAULT_SESSION_SORT);
@@ -98,7 +107,6 @@ export function SessionsClientPage({
   const [nestedDetails, setNestedDetails] = useState<NestedJourneyDetail[]>([]);
   const nestedDetailKeyRef = useRef(0);
   const openedDetailFromListRef = useRef(false);
-  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -123,35 +131,17 @@ export function SessionsClientPage({
     isFetching,
     isFetchingNextPage,
     isPending,
-  } = useInfiniteQuery({
-    queryKey: [
-      "dashboard",
-      "sessions",
+  } = useInfiniteQuery(
+    sessionsListQueryOptions({
       siteId,
-      timeWindow.from,
-      timeWindow.to,
-      timeWindow.timeZone,
-      filtersKey,
-      debouncedQuery,
-      sort.key,
-      sort.direction,
-    ],
-    queryFn: ({ pageParam, signal }) =>
-      fetchSessions(siteId, timeWindow, filters, {
-        cursor: pageParam,
-        limit: SESSION_PAGE_SIZE,
-        sortBy: sort.key,
-        sortDir: sort.direction,
-        search: debouncedQuery,
-        signal,
-      }),
-    initialPageParam: null as string | null,
-    getNextPageParam: (lastPage) =>
-      lastPage.data.pagination.hasMore
-        ? lastPage.data.pagination.nextCursor
-        : undefined,
-    enabled: typeof window !== "undefined",
-  });
+      window: timeWindow,
+      filters,
+      search: debouncedQuery,
+      sort,
+      transport,
+      enabled: queryReady,
+    }),
+  );
   const rows = useMemo(
     () =>
       data?.pages.reduce<JourneySession[]>(

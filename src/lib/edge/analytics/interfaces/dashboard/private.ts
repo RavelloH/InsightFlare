@@ -93,6 +93,10 @@ const TECHNOLOGY_HANDLERS: Readonly<Record<string, TechnologyHandlerName>> = {
   "client-cross-breakdown": "handleCrossBreakdownContract",
 };
 const OVERVIEW_TABS: Readonly<Record<string, OverviewTab>> = {
+  "events-compare-name": "event.name",
+  "events-compare-path": "event.page.path",
+  "events-compare-title": "event.page.title",
+  "events-compare-hostname": "event.page.hostname",
   "page-query": "page.query",
   "overview-page-path": "page.path",
   "overview-page-title": "page.title",

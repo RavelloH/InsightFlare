@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   DashboardQueryProvider,
+  useDashboardDeferredReadTransport,
   useDashboardQuery,
   useDashboardQueryControls,
   useDashboardQueryReady,
@@ -14,10 +15,12 @@ import {
   useDashboardTimeZone,
 } from "@/components/dashboard/shell/dashboard-query-provider";
 import { TimeZoneProvider } from "@/components/time-zone-provider";
+import { replaceUrlWithoutNavigation } from "@/lib/dashboard/client/history";
 import {
   resolveTimeWindow,
   type TimeWindow,
 } from "@/lib/dashboard/query-state";
+import { filterScopePreferenceFromDocument } from "@/lib/filter-contract";
 function Probe() {
   const { filters, scopePreference } = useDashboardQuery();
   return createElement(
@@ -76,6 +79,162 @@ describe("DashboardQueryProvider", () => {
     container.remove();
   });
 
+  it("retires an initial handoff after changing the global filter but not opening a detail drawer", async () => {
+    const reads = { read: Promise.resolve({ value: { ok: true } }) };
+    let transport: ReturnType<typeof useDashboardDeferredReadTransport>;
+    function ReadProbe() {
+      transport = useDashboardDeferredReadTransport(reads);
+      return null;
+    }
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <App>
+          <ReadProbe />
+        </App>,
+      );
+    });
+    const initial = transport!;
+    expect(initial).toBeTypeOf("function");
+    await act(async () =>
+      replaceUrlWithoutNavigation(
+        "/zh/app/team/site/pages?scope=visitor&filter%5Bpage.path%5D=%2Fdocs&detail=abc",
+      ),
+    );
+    expect(transport!).toBe(initial);
+    await act(async () =>
+      replaceUrlWithoutNavigation(
+        "/zh/app/team/site/pages?scope=visitor&filter%5Bpage.path%5D=%2Fother",
+      ),
+    );
+    expect(transport!).toBeUndefined();
+    await act(async () =>
+      replaceUrlWithoutNavigation(
+        "/zh/app/team/site/pages?scope=visitor&filter%5Bpage.path%5D=%2Fdocs",
+      ),
+    );
+    expect(transport!).toBeUndefined();
+  });
+  it("does not re-adopt cached SSR reads after leaving and returning to a page", async () => {
+    const reads = { read: Promise.resolve({ value: { ok: true } }) };
+    const freshReads = { read: Promise.resolve({ value: { ok: true } }) };
+    let transport: ReturnType<typeof useDashboardDeferredReadTransport>;
+    function ReadProbe({ data }: { data: typeof reads | null }) {
+      transport = useDashboardDeferredReadTransport(data);
+      return null;
+    }
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <App>
+          <ReadProbe data={reads} />
+        </App>,
+      );
+    });
+    expect(transport!).toBeTypeOf("function");
+    await act(async () => root.render(<App>{null}</App>));
+    await act(async () =>
+      root.render(
+        <App>
+          <ReadProbe data={reads} />
+        </App>,
+      ),
+    );
+    expect(transport!).toBeUndefined();
+    await act(async () =>
+      root.render(
+        <App>
+          <ReadProbe data={freshReads} />
+        </App>,
+      ),
+    );
+    expect(transport!).toBeTypeOf("function");
+    await act(async () =>
+      root.render(
+        <App>
+          <ReadProbe data={null} />
+        </App>,
+      ),
+    );
+    await act(async () =>
+      root.render(
+        <App>
+          <ReadProbe data={freshReads} />
+        </App>,
+      ),
+    );
+    expect(transport!).toBeUndefined();
+  });
+  it("never enables the old site's query with the destination filter during navigation", async () => {
+    const seen: Array<{ site: string; scope: string; filtered: boolean }> = [];
+    function ReadProbe({ site }: { site: string }) {
+      const { queryReady, filters, scopePreference } = useDashboardQuery();
+      useEffect(() => {
+        if (queryReady)
+          seen.push({ site, scope: scopePreference, filtered: !!filters.root });
+      }, [site, queryReady, filters, scopePreference]);
+      return null;
+    }
+    function NavigationApp({
+      site,
+      pending,
+    }: {
+      site: string;
+      pending: boolean;
+    }) {
+      return (
+        <TimeZoneProvider>
+          <DashboardQueryProvider scopeKey={site} navigationPending={pending}>
+            <ReadProbe site={site} />
+          </DashboardQueryProvider>
+        </TimeZoneProvider>
+      );
+    }
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<NavigationApp site="old" pending={false} />);
+    });
+    expect(seen.at(-1)).toEqual({
+      site: "old",
+      scope: "visitor",
+      filtered: true,
+    });
+    await act(async () => {
+      root.render(<NavigationApp site="old" pending />);
+      replaceUrlWithoutNavigation("/zh/app/team/new/pages");
+    });
+    expect(seen.every((row) => row.site !== "old" || row.filtered)).toBe(true);
+    await act(async () =>
+      root.render(<NavigationApp site="new" pending={false} />),
+    );
+    expect(seen.filter((row) => row.site === "new")).toEqual([
+      { site: "new", scope: "auto", filtered: false },
+    ]);
+  });
+  it("synchronizes URL filters before a newly mounted observer can read them", async () => {
+    const seen: Array<{ scope: string; filtered: boolean }> = [];
+    function ReadProbe() {
+      const { queryReady, filters, scopePreference } = useDashboardQuery();
+      useEffect(() => {
+        if (queryReady)
+          seen.push({ scope: scopePreference, filtered: !!filters.root });
+      }, [queryReady, filters, scopePreference]);
+      return null;
+    }
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <App>
+          <ReadProbe />
+        </App>,
+      );
+    });
+    expect(seen.at(-1)).toEqual({ scope: "visitor", filtered: true });
+    await act(async () =>
+      replaceUrlWithoutNavigation("/zh/app/team/site/pages"),
+    );
+    expect(seen.slice(1)).toEqual([{ scope: "auto", filtered: false }]);
+  });
   it("isolates editable DSL and filters from unrelated read-only subscribers", async () => {
     const counts = {
       query: 0,
@@ -223,6 +382,42 @@ describe("DashboardQueryProvider", () => {
     });
 
     expect(container.textContent).toBe("filtered:visitor");
+  });
+
+  it("keeps the non-enumerable request scope in sync when the URL changes only scope", async () => {
+    const seen: Array<{ scope: string; filterScope: string | undefined }> = [];
+    function ScopeProbe() {
+      const { filters, scopePreference, queryReady } = useDashboardQuery();
+      useEffect(() => {
+        if (queryReady)
+          seen.push({
+            scope: scopePreference,
+            filterScope: filterScopePreferenceFromDocument(filters),
+          });
+      }, [filters, scopePreference, queryReady]);
+      return <span>{scopePreference}</span>;
+    }
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <App>
+          <ScopeProbe />
+        </App>,
+      );
+    });
+    expect(seen.at(-1)).toEqual({ scope: "visitor", filterScope: "visitor" });
+    await act(async () =>
+      replaceUrlWithoutNavigation(
+        "/zh/app/team/site/pages?scope=session&filter%5Bpage.path%5D=%2Fdocs",
+      ),
+    );
+    expect(seen.at(-1)).toEqual({ scope: "session", filterScope: "session" });
+    await act(async () =>
+      replaceUrlWithoutNavigation(
+        "/zh/app/team/site/pages?filter%5Bpage.path%5D=%2Fdocs",
+      ),
+    );
+    expect(seen.at(-1)).toEqual({ scope: "auto", filterScope: "auto" });
   });
 
   it("clears a scope-only URL and falls back to Auto", async () => {

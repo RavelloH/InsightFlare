@@ -1,7 +1,11 @@
 import type { NotificationPreferencesData } from "@/lib/dashboard-api/client/edge";
 import { demoBadRequest, demoNotFound } from "@/lib/demo/realtime/envelope";
 import { normalizeDemoSearch } from "@/lib/demo/realtime/filters";
-import { demoPage, type DemoPagination } from "@/lib/demo/realtime/pagination";
+import {
+  demoCursorRequestBinding,
+  demoPage,
+  type DemoPagination,
+} from "@/lib/demo/realtime/pagination";
 
 export const demoNotFoundResponse = () => demoNotFound();
 
@@ -118,9 +122,7 @@ export function paginateDemoEnvelope(
       getRowLabel(left).localeCompare(getRowLabel(right))
     );
   };
-  const requestBinding = Object.fromEntries(
-    Object.entries(params).filter(([key]) => key !== "cursor"),
-  );
+  const requestBinding = demoCursorRequestBinding(params);
   const page = demoPage(
     record.data,
     params,

@@ -1,4 +1,5 @@
 import type * as ReactModule from "react";
+import type * as ReactQueryModule from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -12,10 +13,14 @@ vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof ReactModule>();
   return { ...actual, useMemo: (factory: () => unknown) => factory() };
 });
-vi.mock("@tanstack/react-query", () => ({
-  keepPreviousData: "keep-previous-data",
-  useQuery: mocks.useQuery,
-}));
+vi.mock("@tanstack/react-query", async (importOriginal) => {
+  const actual = await importOriginal<typeof ReactQueryModule>();
+  return {
+    ...actual,
+    keepPreviousData: "keep-previous-data",
+    useQuery: mocks.useQuery,
+  };
+});
 vi.mock("@/lib/dashboard/client/data/index", () => ({
   fetchOverview: mocks.fetchOverview,
   fetchTrend: mocks.fetchTrend,

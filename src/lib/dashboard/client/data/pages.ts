@@ -7,6 +7,7 @@ import type {
   DashboardListRequestOptions,
   PageCardTabsData,
   PagesDashboardListRequestOptions,
+  PrivateReadTransport,
   PrivateRequestParams,
 } from "@/lib/dashboard/client/data/types";
 import { fetchPrivateJson } from "@/lib/dashboard/client/request";
@@ -15,13 +16,20 @@ import {
   withFilters,
   withPagination,
 } from "@/lib/dashboard/client/utils";
-import type { TimeWindow } from "@/lib/dashboard/query-state";
+import { resolveDashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
+import {
+  parseFilterDocumentFromSearchParams,
+  type TimeWindow,
+} from "@/lib/dashboard/query-state";
 import type {
   BrowserTrendData,
   PagesDashboardData,
   PagesData,
 } from "@/lib/dashboard-api/client/edge";
-import type { FilterDocument } from "@/lib/filter-contract";
+import {
+  attachFilterScopePreference,
+  type FilterDocument,
+} from "@/lib/filter-contract";
 function fallbackUnlessAborted<T>(error: unknown, fallback: () => T): T {
   if (error instanceof Error && error.name === "AbortError") throw error;
   return fallback();
@@ -59,7 +67,10 @@ export async function fetchPagesDashboard(
   return fetchPrivateJson<PagesDashboardData>(
     "/api/private/pages-dashboard",
     params,
-    { signal: options?.signal },
+    {
+      signal: options?.signal,
+      ...(options?.transport ? { transport: options.transport } : {}),
+    },
   );
 }
 export async function fetchPagesShareTrend(
@@ -69,6 +80,7 @@ export async function fetchPagesShareTrend(
   options?: {
     limit?: number;
     signal?: AbortSignal;
+    transport?: PrivateReadTransport;
   },
 ): Promise<BrowserTrendData> {
   const limit = Math.max(1, Math.min(options?.limit ?? 5, 12));
@@ -76,6 +88,7 @@ export async function fetchPagesShareTrend(
     fetchPagesDashboard(siteId, window, filters, {
       limit,
       signal: options?.signal,
+      ...(options?.transport ? { transport: options.transport } : {}),
     }).catch((error) =>
       fallbackUnlessAborted(
         error,
@@ -95,9 +108,11 @@ export async function fetchPagesShareTrend(
           }) satisfies PagesDashboardData,
       ),
     ),
-    fetchTrend(siteId, window, filters, { signal: options?.signal }).catch(
-      (error) =>
-        fallbackUnlessAborted(error, () => emptyTrend(window.interval)),
+    fetchTrend(siteId, window, filters, {
+      signal: options?.signal,
+      ...(options?.transport ? { transport: options.transport } : {}),
+    }).catch((error) =>
+      fallbackUnlessAborted(error, () => emptyTrend(window.interval)),
     ),
   ]);
 
@@ -214,4 +229,69 @@ export async function fetchPageCardTabs(
     { signal: options?.signal },
   );
   return payload.tabs ?? emptyPageCardTabs();
+}
+
+export const PAGE_LIST_PAGE_SIZE = 25;
+export const PAGE_SHARE_TREND_LIMIT = 5;
+
+export function resolvePagesListComparisonQuery(
+  search: URLSearchParams,
+  window: TimeWindow,
+  filters: FilterDocument,
+) {
+  return (
+    resolveDashboardComparisonQuery(search, window, filters) ??
+    resolveDashboardComparisonQuery(
+      new URLSearchParams("compare=previous"),
+      window,
+      filters,
+    )
+  );
+}
+
+/** The table has an implicit previous-period comparison; the chart does not.
+ * Preserve both request identities and let the table and chart resolve independently. */
+export function startPagesInitialReads(
+  siteId: string,
+  window: TimeWindow,
+  search: URLSearchParams,
+  transport: PrivateReadTransport,
+): void {
+  const document = parseFilterDocumentFromSearchParams(search);
+  const filters = document.root
+    ? document
+    : attachFilterScopePreference(document, "auto");
+  const comparison = resolveDashboardComparisonQuery(search, window, filters);
+  const ignore = (promise: Promise<unknown>) => {
+    void promise.catch(() => undefined);
+  };
+  ignore(
+    fetchPagesDashboard(siteId, window, filters, {
+      limit: PAGE_LIST_PAGE_SIZE,
+      sort: "views",
+      direction: "desc",
+      comparison: resolvePagesListComparisonQuery(search, window, filters),
+      comparisonMetric: "views",
+      comparisonSortBy: "current",
+      transport,
+    }),
+  );
+  // Plan the raw reads, not the derived share-series transformation; the
+  // existing client queryFn computes the series once from these responses.
+  const startTrendReads = (
+    requestedWindow: TimeWindow,
+    requestedFilters: FilterDocument,
+  ) => {
+    ignore(
+      fetchPagesDashboard(siteId, requestedWindow, requestedFilters, {
+        limit: PAGE_SHARE_TREND_LIMIT,
+        transport,
+      }),
+    );
+    ignore(
+      fetchTrend(siteId, requestedWindow, requestedFilters, { transport }),
+    );
+  };
+  startTrendReads(window, filters);
+  if (comparison) startTrendReads(comparison.window, comparison.filters);
 }

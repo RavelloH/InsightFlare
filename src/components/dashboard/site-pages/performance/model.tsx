@@ -13,6 +13,7 @@ import {
   addZonedInterval,
   startOfZonedInterval,
 } from "@/lib/analytics/time-zone";
+import type { DeferredPrivateReads } from "@/lib/dashboard/client/request";
 import { intlLocale, numberFormat } from "@/lib/dashboard/format";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
@@ -31,6 +32,7 @@ export interface PerformanceClientPageProps {
   locale: Locale;
   messages: AppMessages;
   siteId: string;
+  deferredReads?: DeferredPrivateReads | null;
 }
 export type PerformancePanelKey = PerformanceMetricKey | "score";
 export type PerformanceStatus = "great" | "needs-improvement" | "poor" | "none";

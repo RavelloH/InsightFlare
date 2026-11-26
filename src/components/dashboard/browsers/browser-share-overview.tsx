@@ -2,12 +2,14 @@ import { memo, useMemo } from "react";
 import { TechnologyShareOverviewView } from "@insightflare/product-ui/technology";
 import { useQuery } from "@tanstack/react-query";
 
+import { shareTrendQueryOptions } from "@/components/dashboard/sharing/share-trend-card";
+import { useDashboardQueryReady } from "@/components/dashboard/shell/dashboard-query-provider";
 import {
   fetchBrowserEngineTrend,
   fetchBrowserTrend,
 } from "@/lib/dashboard/client/data/index";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
 import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
-import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { BrowserTrendData } from "@/lib/dashboard-api/client/edge";
 import type { FilterDocument } from "@/lib/filter-contract/index";
@@ -17,16 +19,14 @@ import { buildBrowserShareOverviewLabels } from "@/lib/product-ui-labels/technol
 function emptyTrend(): BrowserTrendData {
   return { ok: true, interval: "day", series: [], data: [] };
 }
-function emptyTrendUnlessAborted(error: unknown): BrowserTrendData {
-  if (error instanceof Error && error.name === "AbortError") throw error;
-  return emptyTrend();
-}
+
 interface BrowserShareOverviewProps {
   locale: Locale;
   messages: AppMessages;
   siteId: string;
   window: TimeWindow;
   filters: FilterDocument;
+  transport?: PrivateReadTransport;
   comparisonQuery?: DashboardComparisonQuery | null;
   comparisonLabel?: string;
 }
@@ -36,68 +36,47 @@ export const BrowserShareOverview = memo(function BrowserShareOverview({
   siteId,
   window: tw,
   filters,
+  transport,
   comparisonQuery,
   comparisonLabel,
 }: BrowserShareOverviewProps) {
-  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
-  const comparisonFiltersKey = useMemo(
-    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"),
-    [comparisonQuery],
-  );
-  const { data, isFetching, isPending } = useQuery({
-    queryKey: [
-      "dashboard",
-      "browser-share-overview",
+  const enabled = useDashboardQueryReady();
+  const primaryQuery = useQuery({
+    ...shareTrendQueryOptions({
       siteId,
-      tw.from,
-      tw.to,
-      tw.interval,
-      tw.timeZone,
-      filtersKey,
-      comparisonQuery?.mode ?? "none",
-      comparisonQuery?.window.from ?? "none",
-      comparisonQuery?.window.to ?? "none",
-      comparisonQuery?.window.interval ?? "none",
-      comparisonQuery?.window.timeZone ?? "none",
-      comparisonFiltersKey,
-    ],
-    queryFn: async ({ signal }) => {
-      const fetchShareData = async (
-        requestedWindow: TimeWindow,
-        requestedFilters: FilterDocument,
-      ) => {
-        const [browserTrend, engineTrend] = await Promise.all([
-          fetchBrowserTrend(siteId, requestedWindow, requestedFilters, {
-            limit: 5,
-            signal,
-          }).catch(emptyTrendUnlessAborted),
-          fetchBrowserEngineTrend(siteId, requestedWindow, requestedFilters, {
-            limit: 5,
-            signal,
-          }).catch(emptyTrendUnlessAborted),
-        ]);
-        return { browserTrend, engineTrend };
-      };
-      const [current, comparison] = await Promise.all([
-        fetchShareData(tw, filters),
-        comparisonQuery
-          ? fetchShareData(comparisonQuery.window, comparisonQuery.filters)
-          : Promise.resolve(null),
-      ]);
-      return { ...current, comparison };
-    },
-    enabled: !import.meta.env.SSR,
+      window: tw,
+      filters,
+      queryKey: ["browser"],
+      fetchTrend: fetchBrowserTrend,
+      comparisonQuery: comparisonQuery ?? null,
+      transport,
+    }),
+    enabled,
+  });
+  const secondaryQuery = useQuery({
+    ...shareTrendQueryOptions({
+      siteId,
+      window: tw,
+      filters,
+      queryKey: ["browser-engine"],
+      fetchTrend: fetchBrowserEngineTrend,
+      comparisonQuery: comparisonQuery ?? null,
+      transport,
+    }),
+    enabled,
   });
   const browserTrend = useMemo(
-    () => data?.browserTrend ?? emptyTrend(),
-    [data?.browserTrend],
+    () => primaryQuery.data?.trendData ?? emptyTrend(),
+    [primaryQuery.data?.trendData],
   );
   const engineTrend = useMemo(
-    () => data?.engineTrend ?? emptyTrend(),
-    [data?.engineTrend],
+    () => secondaryQuery.data?.trendData ?? emptyTrend(),
+    [secondaryQuery.data?.trendData],
   );
-  const comparisonBrowserTrend = data?.comparison?.browserTrend;
-  const comparisonEngineTrend = data?.comparison?.engineTrend;
+  const comparisonBrowserTrend =
+    primaryQuery.data?.comparisonTrendData ?? undefined;
+  const comparisonEngineTrend =
+    secondaryQuery.data?.comparisonTrendData ?? undefined;
   const browserItems = useMemo(
     () =>
       browserTrend.series.map((item) => ({
@@ -138,8 +117,10 @@ export const BrowserShareOverview = memo(function BrowserShareOverview({
       })),
     [comparisonEngineTrend?.series],
   );
-  const showOverlayLoading = isFetching && data !== undefined;
-  const showInitialLoading = isPending;
+  const showOverlayLoading =
+    (primaryQuery.isFetching || secondaryQuery.isFetching) &&
+    Boolean(primaryQuery.data && secondaryQuery.data);
+  const showInitialLoading = primaryQuery.isPending || secondaryQuery.isPending;
   const labels = useMemo(
     () => buildBrowserShareOverviewLabels(messages),
     [messages],

@@ -7,6 +7,7 @@ import type {
 import {
   readTeamDashboard,
   type ReadTeamDashboardInput,
+  resolveDashboardSession,
   resolveTeamDashboardScope,
 } from "@/lib/edge/analytics/providers/d1/operations/team-dashboard";
 
@@ -51,4 +52,4 @@ export type SsrTeamDashboardData = Awaited<
 export type SsrTeamDashboardResult = AnalyticsResult<SsrTeamDashboardData>;
 
 /** Composition-only access to the authenticated dashboard scope resolver. */
-export { resolveTeamDashboardScope };
+export { resolveDashboardSession, resolveTeamDashboardScope };

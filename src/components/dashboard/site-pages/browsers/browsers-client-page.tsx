@@ -11,7 +11,9 @@ import {
   dashboardComparisonLabel,
   useDashboardComparisonQuery,
 } from "@/components/dashboard/comparison/use-dashboard-comparison-query";
+import { useDashboardDeferredReadTransport } from "@/components/dashboard/shell/dashboard-query-provider";
 import { useDashboardQuery } from "@/components/dashboard/site-pages/common/use-dashboard-query";
+import { type DeferredPrivateReads } from "@/lib/dashboard/client/request";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { FilterDocument } from "@/lib/filter-contract/index";
 import type { Locale } from "@/lib/i18n/config";
@@ -21,16 +23,19 @@ interface BrowsersClientPageProps {
   messages: AppMessages;
   siteId: string;
   pathname: string;
+  deferredReads?: DeferredPrivateReads | null;
 }
 export function BrowsersClientPage({
   locale,
   messages,
   siteId,
+  deferredReads,
 }: BrowsersClientPageProps) {
   const { filters, window } = useDashboardQuery() as {
     filters: FilterDocument;
     window: TimeWindow;
   };
+  const transport = useDashboardDeferredReadTransport(deferredReads);
   const comparisonQuery = useDashboardComparisonQuery(window, filters);
 
   return (
@@ -46,6 +51,7 @@ export function BrowsersClientPage({
         siteId={siteId}
         window={window}
         filters={filters}
+        transport={transport}
         comparisonQuery={comparisonQuery}
         comparisonLabel={dashboardComparisonLabel(messages, comparisonQuery)}
       />
@@ -56,6 +62,7 @@ export function BrowsersClientPage({
         siteId={siteId}
         window={window}
         filters={filters}
+        transport={transport}
       />
 
       <BrowserEngineShareTrendCard
@@ -64,6 +71,7 @@ export function BrowsersClientPage({
         siteId={siteId}
         window={window}
         filters={filters}
+        transport={transport}
       />
 
       <BrowserPerformanceRadarCard
@@ -72,6 +80,7 @@ export function BrowsersClientPage({
         siteId={siteId}
         window={window}
         filters={filters}
+        transport={transport}
       />
 
       <BrowserVersionBreakdownGrid
@@ -80,6 +89,7 @@ export function BrowsersClientPage({
         siteId={siteId}
         window={window}
         filters={filters}
+        transport={transport}
         comparisonQuery={comparisonQuery}
         comparisonLabel={dashboardComparisonLabel(messages, comparisonQuery)}
       />
@@ -90,6 +100,7 @@ export function BrowsersClientPage({
         siteId={siteId}
         window={window}
         filters={filters}
+        transport={transport}
         comparisonQuery={comparisonQuery}
       />
 
@@ -99,6 +110,7 @@ export function BrowsersClientPage({
         siteId={siteId}
         window={window}
         filters={filters}
+        transport={transport}
       />
     </div>
   );

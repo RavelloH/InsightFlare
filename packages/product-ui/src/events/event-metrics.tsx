@@ -75,9 +75,9 @@ export function createEventMetricItems({
           summary.visitors,
           comparisonSummary.visitors,
         ),
-        average: eventMetricDelta(
-          summary.avgEventsPerSession,
-          comparisonSummary.avgEventsPerSession,
+        sessions: eventMetricDelta(
+          summary.sessions,
+          comparisonSummary.sessions,
         ),
       }
     : null;
@@ -126,9 +126,9 @@ export function createEventMetricItems({
       label: labels.sessions,
       value: formatNumber(summary.sessions),
       detail:
-        comparisonDetail(comparisonSummary?.avgEventsPerSession ?? 0) ??
+        comparisonDetail(comparisonSummary?.sessions ?? 0) ??
         `${labels.avgEventsPerSession}: ${average}`,
-      change: change(comparisonChanges?.average ?? null),
+      change: change(comparisonChanges?.sessions ?? null),
       loading,
     },
     {

@@ -2,7 +2,9 @@ import { useCallback, useMemo } from "react";
 import { PageHeading } from "@insightflare/ui/page-heading";
 
 import { OverviewGeoPointsMapCard } from "@/components/dashboard/geo/overview-geo-points-map-card";
+import { useDashboardDeferredReadTransport } from "@/components/dashboard/shell/dashboard-query-provider";
 import {
+  useDashboardQueryReady,
   useDashboardScopePreference,
   useDashboardTimeWindow,
 } from "@/components/dashboard/shell/dashboard-query-provider";
@@ -34,7 +36,10 @@ export function OverviewClientPage({
   siteDomain,
   pathname,
   showSourceLinkTab,
+  deferredReads,
 }: OverviewClientPageProps) {
+  const queryEnabled = useDashboardQueryReady();
+  const transport = useDashboardDeferredReadTransport(deferredReads);
   const searchParams = useLiveSearchParams();
   const livePathname = usePathname() || pathname;
   const window = useDashboardTimeWindow();
@@ -104,6 +109,8 @@ export function OverviewClientPage({
         siteId={siteId}
         window={window}
         filters={resolvedRequestFilters}
+        transport={transport}
+        queryEnabled={queryEnabled}
       />
       <OverviewTrendSection
         locale={locale}
@@ -111,6 +118,8 @@ export function OverviewClientPage({
         siteId={siteId}
         window={window}
         filters={resolvedRequestFilters}
+        transport={transport}
+        queryEnabled={queryEnabled}
       />
       <OverviewPagesSection
         locale={locale}
@@ -119,6 +128,8 @@ export function OverviewClientPage({
         siteDomain={siteDomain}
         pathname={pathname}
         filters={resolvedRequestFilters}
+        transport={transport}
+        queryEnabled={queryEnabled}
         resolvedScope={resolvedScope ?? undefined}
         showSourceLinkTab={showSourceLinkTab}
       />
@@ -128,6 +139,8 @@ export function OverviewClientPage({
         siteId={siteId}
         window={window}
         filters={resolvedRequestFilters}
+        transport={transport}
+        queryEnabled={queryEnabled}
         resolvedScope={resolvedScope ?? undefined}
         selectedCountryCode={selectedGeoCountry}
         onCountrySelect={handleMapCountrySelect}

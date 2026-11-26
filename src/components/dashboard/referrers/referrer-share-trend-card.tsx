@@ -1,5 +1,9 @@
 import { memo, useMemo } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  queryOptions,
+  useQuery,
+} from "@tanstack/react-query";
 
 import {
   dashboardComparisonLabel,
@@ -7,8 +11,12 @@ import {
 } from "@/components/dashboard/comparison/use-dashboard-comparison-query";
 import { DIRECT_REFERRER_FILTER_VALUE } from "@/components/dashboard/referrers/referrer-utils";
 import { ShareTrendChartCard } from "@/components/dashboard/sharing/share-trend-card";
+import { useDashboardQueryReady } from "@/components/dashboard/shell/dashboard-query-provider";
 import type { TrafficChannelId } from "@/lib/analytics/traffic-channel-rules";
 import { fetchReferrerAndChannelTrend } from "@/lib/dashboard/client/data/referrers";
+import { REFERRER_TREND_LIMIT } from "@/lib/dashboard/client/data/referrers";
+import type { PrivateReadTransport } from "@/lib/dashboard/client/data/types";
+import type { DashboardComparisonQuery } from "@/lib/dashboard/comparison-query";
 import { filterQueryKey } from "@/lib/dashboard/filter-query-key";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type {
@@ -24,6 +32,7 @@ interface ReferrerShareTrendCardProps {
   siteId: string;
   window: TimeWindow;
   filters: FilterDocument;
+  transport?: PrivateReadTransport;
 }
 function emptyTrendData(interval: TimeWindow["interval"]): BrowserTrendData {
   return {
@@ -55,19 +64,104 @@ function asBrowserTrendData(
     ...dimension,
   };
 }
+export function referrerTrendQueryOptions(input: {
+  siteId: string;
+  window: TimeWindow;
+  filters: FilterDocument;
+  comparisonQuery: DashboardComparisonQuery | null;
+  transport?: PrivateReadTransport;
+  enabled?: boolean;
+}) {
+  const {
+    siteId,
+    window,
+    filters,
+    comparisonQuery,
+    transport,
+    enabled: queryReady = true,
+  } = input;
+  const filtersKey = filterQueryKey(filters);
+  const comparisonFiltersKey = comparisonQuery
+    ? filterQueryKey(comparisonQuery.filters)
+    : "none";
+  const currentDataWindow = {
+    from: window.from,
+    to: window.to,
+    interval: window.interval,
+    timeZone: window.timeZone,
+  };
+  const comparisonDataWindow = comparisonQuery
+    ? {
+        from: comparisonQuery.window.from,
+        to: comparisonQuery.window.to,
+        interval: comparisonQuery.window.interval,
+        timeZone: comparisonQuery.window.timeZone,
+      }
+    : null;
+  return queryOptions({
+    queryKey: [
+      "dashboard",
+      "referrer-channel-trend",
+      siteId,
+      window.from,
+      window.to,
+      window.interval,
+      window.timeZone,
+      filtersKey,
+      comparisonQuery?.mode ?? "none",
+      comparisonQuery?.window.from ?? "none",
+      comparisonQuery?.window.to ?? "none",
+      comparisonQuery?.window.interval ?? "none",
+      comparisonQuery?.window.timeZone ?? "none",
+      comparisonFiltersKey,
+      REFERRER_TREND_LIMIT,
+    ],
+    queryFn: async ({ signal }) => {
+      const fetchTrendData = (
+        requestedWindow: TimeWindow,
+        requestedFilters: FilterDocument,
+      ) =>
+        fetchReferrerAndChannelTrend(
+          siteId,
+          requestedWindow,
+          requestedFilters,
+          {
+            limit: REFERRER_TREND_LIMIT,
+            signal,
+            ...(transport ? { transport } : {}),
+          },
+        ).catch((error) =>
+          fallbackUnlessAborted(error, () =>
+            emptyReferrerTrendData(requestedWindow.interval),
+          ),
+        );
+      const [trendData, comparisonTrendData] = await Promise.all([
+        fetchTrendData(window, filters),
+        comparisonQuery
+          ? fetchTrendData(comparisonQuery.window, comparisonQuery.filters)
+          : Promise.resolve(null),
+      ]);
+      return {
+        trendData,
+        comparisonTrendData,
+        dataWindow: currentDataWindow,
+        comparisonDataWindow,
+      };
+    },
+    enabled: queryReady,
+    placeholderData: keepPreviousData,
+  });
+}
 function ReferrerTrendPanel({
   locale,
   messages,
   siteId,
   window,
   filters,
+  transport,
 }: ReferrerShareTrendCardProps) {
-  const filtersKey = useMemo(() => filterQueryKey(filters), [filters]);
+  const queryReady = useDashboardQueryReady();
   const comparisonQuery = useDashboardComparisonQuery(window, filters);
-  const comparisonFiltersKey = useMemo(
-    () => (comparisonQuery ? filterQueryKey(comparisonQuery.filters) : "none"),
-    [comparisonQuery],
-  );
   const currentDataWindow = useMemo(
     () => ({
       from: window.from,
@@ -97,55 +191,16 @@ function ReferrerTrendPanel({
     data: trendQueryData,
     isFetching,
     isPending,
-  } = useQuery({
-    queryKey: [
-      "dashboard",
-      "referrer-channel-trend",
+  } = useQuery(
+    referrerTrendQueryOptions({
       siteId,
-      window.from,
-      window.to,
-      window.interval,
-      window.timeZone,
-      filtersKey,
-      comparisonQuery?.mode ?? "none",
-      comparisonQuery?.window.from ?? "none",
-      comparisonQuery?.window.to ?? "none",
-      comparisonQuery?.window.interval ?? "none",
-      comparisonQuery?.window.timeZone ?? "none",
-      comparisonFiltersKey,
-      5,
-    ],
-    queryFn: async ({ signal }) => {
-      const fetchTrendData = (
-        requestedWindow: TimeWindow,
-        requestedFilters: FilterDocument,
-      ) =>
-        fetchReferrerAndChannelTrend(
-          siteId,
-          requestedWindow,
-          requestedFilters,
-          { limit: 5, signal },
-        ).catch((error) =>
-          fallbackUnlessAborted(error, () =>
-            emptyReferrerTrendData(requestedWindow.interval),
-          ),
-        );
-      const [trendData, comparisonTrendData] = await Promise.all([
-        fetchTrendData(window, filters),
-        comparisonQuery
-          ? fetchTrendData(comparisonQuery.window, comparisonQuery.filters)
-          : Promise.resolve(null),
-      ]);
-      return {
-        trendData,
-        comparisonTrendData,
-        dataWindow: currentDataWindow,
-        comparisonDataWindow,
-      };
-    },
-    enabled: typeof window !== "undefined",
-    placeholderData: keepPreviousData,
-  });
+      window,
+      filters,
+      comparisonQuery,
+      transport,
+      enabled: queryReady,
+    }),
+  );
   const loading = isPending || isFetching;
   const trendData = trendQueryData?.trendData ?? fallbackTrendData;
   const dataWindow = trendQueryData?.dataWindow ?? currentDataWindow;

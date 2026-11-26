@@ -67,6 +67,7 @@ vi.mock("@/lib/dashboard/query-preferences", () => ({
 }));
 vi.mock("@/lib/dashboard/server/query", () => ({
   resolveTeamDashboardRequest: vi.fn(),
+  startSiteAnalyticsStream: vi.fn(),
 }));
 vi.mock("@/lib/edge/analytics/composition/ssr-query-runtime", () => ({
   createTeamDashboardQueryRuntime: vi.fn(() => ({
@@ -104,6 +105,7 @@ import {
   loadRetentionSnapshot,
   loadScheduledTasksInitialData,
   loadShareSite,
+  loadSiteAnalyticsStream,
   loadSiteConfigSnapshot,
   loadSiteSettingsInitialData,
   loadSiteSnippetSnapshot,
@@ -122,7 +124,10 @@ import {
   getDashboardTeamContext,
   readDashboardAdmin,
 } from "@/lib/dashboard/server";
-import { resolveTeamDashboardRequest } from "@/lib/dashboard/server/query";
+import {
+  resolveTeamDashboardRequest,
+  startSiteAnalyticsStream,
+} from "@/lib/dashboard/server/query";
 import {
   fetchPublicSite,
   normalizeNotificationPreferencesData,
@@ -421,7 +426,7 @@ describe("Dashboard route data loaders", () => {
         window: {
           startMs: 100,
           endExclusiveMs: 200,
-          nowMs: 200,
+          nowMs: expect.any(Number),
           timeZone: "Asia/Tokyo",
         },
         interval: "day",
@@ -520,7 +525,7 @@ describe("Dashboard route data loaders", () => {
       expect(teamDashboardExecute).toHaveBeenCalled();
     });
 
-    it("passes URL filters to the SSR team dashboard reader", async () => {
+    it("does not carry stale site URL filters into unfiltered team snapshots", async () => {
       vi.mocked(getRequest).mockReturnValue(
         headersOf(
           { host: "app.test" },
@@ -537,12 +542,7 @@ describe("Dashboard route data loaders", () => {
         expect.objectContaining({
           filters: {
             version: 1,
-            root: {
-              kind: "condition",
-              target: { kind: "field", field: "page.path" },
-              operator: "eq",
-              value: "/docs",
-            },
+            root: null,
           },
         }),
       );
@@ -869,6 +869,39 @@ describe("Dashboard route data loaders", () => {
         limit: 50,
       });
     });
+  });
+});
+
+describe("site overview stream setup", () => {
+  it("returns unresolved per-read promises without awaiting the slow read", async () => {
+    let resolve!: (value: { value: { ok: boolean } }) => void;
+    const deferred = new Promise<{ value: { ok: boolean } }>((done) => {
+      resolve = done;
+    });
+    vi.mocked(startSiteAnalyticsStream).mockResolvedValueOnce({
+      overview: deferred,
+    });
+    vi.mocked(getDashboardRuntime).mockResolvedValueOnce({
+      request: new Request("https://app.test/en/app/team/site"),
+      env: {} as never,
+      url: new URL("https://app.test/en/app/team/site"),
+    });
+    vi.mocked(getRequest).mockReturnValueOnce(
+      new Request("https://app.test/en/app/team/site"),
+    );
+    vi.mocked(resolveDashboardInitialWindow).mockReturnValueOnce({
+      preset: "custom",
+      from: 100,
+      to: 300,
+      timeZone: "UTC",
+      interval: "day",
+    });
+    const reads = await loadSiteAnalyticsStream({
+      data: { siteId: "site-a", search: "" },
+    });
+    expect(reads.overview).toBe(deferred);
+    resolve({ value: { ok: true } });
+    await expect(reads.overview).resolves.toEqual({ value: { ok: true } });
   });
 });
 
