@@ -841,7 +841,7 @@ export function createInvocationLogger(
       // Keys are supplied only by Hono's matched route template or fixed
       // entrypoint mappings. Reject dynamic paths, query strings, and IDs.
       if (
-        /^(?:api:\/[A-Za-z0-9_./:{}*-]{1,80}|api\.other|page\.(?:other|dashboard\.(?:workspace|team|other))|server_function\.(?:handler|dashboard\.bootstrap)|do\.(?:ingest|snapshot|active|diagnostic|reconcile|flush|ws|other|alarm|websocket)|scheduled\.tasks)$/.test(
+        /^(?:api:\/[A-Za-z0-9_./:{}*-]{1,80}|api\.other|page\.(?:other|dashboard\.(?:workspace|team|other|analytics\.(?:overview|pages|referrers|campaigns|browsers|devices|geo|performance|events|visitors|sessions)))|server_function\.(?:handler|dashboard\.bootstrap)|do\.(?:ingest|snapshot|active|diagnostic|reconcile|flush|ws|other|alarm|websocket)|scheduled\.tasks)$/.test(
           nextRouteKey,
         )
       )

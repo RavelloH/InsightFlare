@@ -197,7 +197,7 @@ function trustedRouteKey(snapshot: InvocationSnapshot): string {
   if (
     candidate &&
     encoder.encode(candidate).length <= 72 &&
-    /^(?:api:\/[A-Za-z0-9_./:{}*-]+|api\.other|page\.(?:other|dashboard\.(?:workspace|team|other))|server_function\.(?:handler|dashboard\.bootstrap)|do\.(?:ingest|snapshot|active|diagnostic|reconcile|flush|ws|other|alarm|websocket)|scheduled\.tasks)$/.test(
+    /^(?:api:\/[A-Za-z0-9_./:{}*-]+|api\.other|page\.(?:other|dashboard\.(?:workspace|team|other|analytics\.(?:overview|pages|referrers|campaigns|browsers|devices|geo|performance|events|visitors|sessions)))|server_function\.(?:handler|dashboard\.bootstrap)|do\.(?:ingest|snapshot|active|diagnostic|reconcile|flush|ws|other|alarm|websocket)|scheduled\.tasks)$/.test(
       candidate,
     )
   ) {

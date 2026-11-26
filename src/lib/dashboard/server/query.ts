@@ -25,13 +25,17 @@ import { toQueryString } from "@/lib/dashboard/client/utils";
 import type { ManagementJsonValue } from "@/lib/dashboard/management-data";
 import { readReportingTimeZoneFromCookie } from "@/lib/dashboard/query-preferences";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
+import type { TeamDashboardData } from "@/lib/dashboard/team-dashboard-query";
 import { runWithDimensionPageBatch } from "@/lib/edge/analytics/composition";
 import { withDashboardCache } from "@/lib/edge/analytics/composition/dashboard-cache";
 import {
   resolveDashboardSession,
   resolveTeamDashboardScope,
 } from "@/lib/edge/analytics/composition/ssr-query-runtime";
-import { executePrivateQuery } from "@/lib/edge/analytics/interfaces/dashboard/private";
+import {
+  executePrivateQuery,
+  executePrivateTeamDashboard,
+} from "@/lib/edge/analytics/interfaces/dashboard/private";
 import type { EdgeSessionClaims } from "@/lib/edge/auth/session-auth";
 import {
   resolvePrivateSite,
@@ -74,6 +78,65 @@ export async function resolveTeamDashboardRequest(input: {
   };
 }
 
+/** Share the exact authenticated HTTP cache and response contract for sidebar
+ * snapshots. No self-HTTP, no cross-user/site-ACL cache reuse. */
+export async function readCachedSidebarTeamDashboard(
+  resolved: ResolvedTeamDashboardRequest,
+  window: TimeWindow,
+): Promise<TeamDashboardData | null> {
+  const url = new URL("/api/private/team-dashboard", resolved.request.url);
+  url.search = new URLSearchParams({
+    teamId: resolved.teamId,
+    from: String(window.from),
+    to: String(window.to),
+    interval: window.interval,
+    timeZone: window.timeZone,
+  }).toString();
+  const request = new Request(url, {
+    headers: resolved.request.headers,
+    signal: resolved.request.signal,
+  });
+  const logger = currentInvocationLogger();
+  const context = logger
+    ? ({
+        waitUntil: (work: Promise<unknown>) => {
+          logger.track(work);
+        },
+      } as ExecutionContext)
+    : undefined;
+  const response = await withDashboardCache(
+    context,
+    url,
+    () =>
+      executePrivateTeamDashboard({
+        env: resolved.env,
+        teamId: resolved.teamId,
+        allowedSiteIds: resolved.allowedSiteIds,
+        url,
+      }),
+    {
+      identity: {
+        scope: "private-team",
+        tenantId: resolved.teamId,
+        route: "team-dashboard",
+        audienceId: resolved.session.userId,
+        allowedSiteIds: resolved.allowedSiteIds,
+      },
+      request,
+    },
+  );
+  if (!response.ok) return null;
+  const body = await readBoundedBody(response, 2 * 1024 * 1024);
+  if (!body.ok) return null;
+  const payload = JSON.parse(
+    new TextDecoder("utf-8", { fatal: true }).decode(body.bytes),
+  ) as {
+    ok: boolean;
+    data?: TeamDashboardData;
+  };
+  return payload.ok && payload.data ? payload.data : null;
+}
+
 /** Open one authenticated request-local execution scope. The returned map
  * contains independent promises; Start may stream each as soon as it settles.
  * Register reads (and cache writes) before the Worker returns its response,
@@ -112,6 +175,10 @@ export async function startSiteAnalyticsStream(input: {
   const reads: DeferredPrivateReads = {};
   const pending = new Map<string, Promise<ManagementJsonValue>>();
   const logger = currentInvocationLogger();
+  // A fixed page identifier separates complete SSR invocations from CSR APIs.
+  if (!authUrl.pathname.startsWith("/_serverFn/")) {
+    logger?.setRouteKey(`page.dashboard.analytics.${page}`);
+  }
   const capturedAtMs = appNow();
   const cacheContext = logger
     ? ({

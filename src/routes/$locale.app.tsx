@@ -12,6 +12,7 @@ import type {
   DashboardContext,
   DashboardTeamContext,
 } from "@/lib/dashboard/server";
+import type { DeferredSidebarTeamSnapshot } from "@/lib/dashboard/team-dashboard-query";
 import { buildManagementSections } from "@/lib/dashboard/team-sections";
 import { usePathname } from "@/lib/router";
 const handoff =
@@ -93,6 +94,15 @@ function AppLayout(): JSX.Element {
       )?.context as { siteContext?: DashboardContext } | undefined,
   });
   const authorizedActiveSite = siteRouteContext?.siteContext?.activeSite;
+  const sidebarSnapshot = useRouterState({
+    select: ({ matches }) =>
+      (
+        matches.find(
+          (match) => match.routeId === "/$locale/app/$teamSlug/$siteSlug",
+        )?.loaderData as
+          { sidebarSnapshot?: DeferredSidebarTeamSnapshot | null } | undefined
+      )?.sidebarSnapshot,
+  });
 
   const shellContext = dashboardRoot ?? teamContext;
   if (!shellContext) return <Outlet />;
@@ -109,6 +119,7 @@ function AppLayout(): JSX.Element {
       sites={teamContext?.sites}
       unreadAttentionCount={shellContext.unreadAttentionCount}
       initialQueryWindow={analyticsWindow}
+      deferredSidebarSnapshot={sidebarSnapshot}
       navigationPending={pathname !== resolvedPathname}
       managementSections={
         shellContext.user.systemRole === "admin"
