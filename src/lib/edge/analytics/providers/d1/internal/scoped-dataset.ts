@@ -1242,6 +1242,7 @@ function buildFilterSqlDomains(
   input: ScopedDatasetCompilerInput,
   time: QueryTime,
   target?: ScopedDatasetTarget,
+  preserveSessionTimeline = false,
 ): FilterSqlDomains {
   const queryStart = input.window.startMs;
   const queryEnd = input.window.endExclusiveMs;
@@ -1365,6 +1366,47 @@ function buildFilterSqlDomains(
       ),
     );
   }
+  // Sessionless visits use visit_id as their timeline key. Preserve only
+  // the possible collision and its events in R, not in F or U or Q.
+  const collisionTimeline =
+    target?.type === "session" && preserveSessionTimeline;
+  const timelineVisits = collisionTimeline
+    ? "scope_filter_timeline_visits"
+    : readVisits;
+  const timelineEvents = collisionTimeline
+    ? "scope_filter_timeline_events"
+    : readEvents;
+  if (collisionTimeline) {
+    definitions.push(
+      boundCte(
+        timelineVisits,
+        `${timelineVisits} AS (
+          SELECT site_pk, session_id, visitor_id, visit_id, started_at FROM ${readVisits}
+          UNION ALL
+          SELECT site_pk, session_id, visitor_id, visit_id, started_at FROM visits
+          WHERE site_pk IN ${siteIdsSql(input.siteIds)} AND visit_id = ?
+            AND (session_id IS NULL OR session_id = '')
+            AND started_at >= ? AND started_at < ?
+        )`,
+        [...input.siteIds, target.value, readStart, readEnd],
+      ),
+      boundCte(
+        timelineEvents,
+        `${timelineEvents} AS (
+          SELECT site_pk, session_id, visitor_id, visit_id, event_pk, event_id, occurred_at FROM ${readEvents}
+          UNION ALL
+          SELECT ce.site_pk, v.session_id, v.visitor_id, ce.visit_id, ce.event_pk, ce.event_id, ce.occurred_at
+          FROM visits v
+          INNER JOIN custom_events ce ON ce.site_pk = v.site_pk AND ce.visit_id = v.visit_id
+          INNER JOIN custom_event_names cen ON cen.id = ce.event_name_id
+          WHERE v.site_pk IN ${siteIdsSql(input.siteIds)} AND v.visit_id = ?
+            AND (v.session_id IS NULL OR v.session_id = '')
+            AND ce.occurred_at >= ? AND ce.occurred_at < ?
+        )`,
+        [...input.siteIds, target.value, readStart, readEnd],
+      ),
+    );
+  }
   const hasExplicitQualificationRange = Boolean(
     requestedFilter || time.filterRangeEmpty,
   );
@@ -1383,6 +1425,7 @@ function buildFilterSqlDomains(
       filterEvents,
       readVisits,
       readEvents,
+      ...(collisionTimeline ? { timelineVisits, timelineEvents } : {}),
     },
     clock,
   };
@@ -1571,72 +1614,72 @@ function targetMembershipEvidence(
  * Preserve the full authorized time domains even when narrowing identity.
  */
 type LocalOccurrenceKind = "page" | "event";
-type LocalRelationGrain = "session" | "visitor";
+interface LocalRelationProof {
+  needsAdjacency: boolean;
+}
 function localOccurrenceCollection(
   target: FilterTargetExpression,
-  grain: LocalRelationGrain,
+  proof: LocalRelationProof,
 ): LocalOccurrenceKind | null {
   if (target.kind === "entity-root")
     return target.entity === "page" || target.entity === "event"
       ? target.entity
       : null;
   if (target.kind === "selector") {
-    const kind = localOccurrenceCollection(target.collection, grain);
-    return kind && localRelationExpression(target.predicate, grain, kind)
+    const kind = localOccurrenceCollection(target.collection, proof);
+    return kind && localRelationExpression(target.predicate, proof, kind)
       ? kind
       : null;
   }
   if (target.kind === "window") {
-    const kind = localOccurrenceCollection(target.collection, grain);
+    const kind = localOccurrenceCollection(target.collection, proof);
     const anchor = target.anchor;
     const localAnchor =
       anchor.kind === "time-anchor" ||
       (anchor.kind === "reducer" &&
         ["first", "last", "nth"].includes(anchor.reducer) &&
-        localOccurrenceCollection(anchor.input, grain) !== null) ||
+        localOccurrenceCollection(anchor.input, proof) !== null) ||
       (anchor.kind === "occurrence-time" &&
-        localRelationTarget(anchor, null, grain));
+        localRelationTarget(anchor, null, proof));
     return kind && localAnchor ? kind : null;
   }
   return null;
 }
 function localSequenceCollection(
   target: FilterTargetExpression,
-  grain: LocalRelationGrain,
+  proof: LocalRelationProof,
 ): boolean {
   if (target.kind === "sequence")
     return target.steps.every(
-      (step) => localOccurrenceCollection(step, grain) !== null,
+      (step) => localOccurrenceCollection(step, proof) !== null,
     );
   if (target.kind === "without")
     return (
-      localSequenceCollection(target.sequence, grain) &&
-      localOccurrenceCollection(target.excluded, grain) !== null
+      localSequenceCollection(target.sequence, proof) &&
+      localOccurrenceCollection(target.excluded, proof) !== null
     );
-  // Session timeline keys also include sessionless Visit IDs. Removing
-  // those rows could compress positions and change adjacency on collision.
-  if (target.kind === "adjacent")
-    return (
-      grain === "visitor" && localSequenceCollection(target.sequence, grain)
-    );
+  if (target.kind === "adjacent") {
+    proof.needsAdjacency = true;
+    return localSequenceCollection(target.sequence, proof);
+  }
   return false;
 }
 function localRelationTarget(
   target: FilterTargetExpression,
   current: LocalOccurrenceKind | null,
-  grain: LocalRelationGrain,
+  proof: LocalRelationProof,
 ): boolean {
   switch (target.kind) {
     case "entity-root":
     case "selector":
     case "window":
-      return localOccurrenceCollection(target, grain) !== null;
+      return localOccurrenceCollection(target, proof) !== null;
     case "sequence":
     case "without":
     case "adjacent":
-      return localSequenceCollection(target, grain);
+      return localSequenceCollection(target, proof);
     case "periods":
-      return localOccurrenceCollection(target.collection, grain) !== null;
+      return localOccurrenceCollection(target.collection, proof) !== null;
     case "event-payload":
     case "current-payload":
       return current === "event";
@@ -1653,10 +1696,10 @@ function localRelationTarget(
     case "reducer":
       return (
         target.reducer === "count" &&
-        (localOccurrenceCollection(target.input, grain) !== null ||
-          localSequenceCollection(target.input, grain) ||
+        (localOccurrenceCollection(target.input, proof) !== null ||
+          localSequenceCollection(target.input, proof) ||
           (target.input.kind === "periods" &&
-            localOccurrenceCollection(target.input.collection, grain) !== null))
+            localOccurrenceCollection(target.input.collection, proof) !== null))
       );
     case "member": {
       const root = target.object;
@@ -1665,7 +1708,7 @@ function localRelationTarget(
           ? current
           : root.kind === "reducer" &&
               ["first", "last", "nth"].includes(root.reducer)
-            ? localOccurrenceCollection(root.input, grain)
+            ? localOccurrenceCollection(root.input, proof)
             : null;
       return (
         kind !== null &&
@@ -1678,12 +1721,12 @@ function localRelationTarget(
       return (
         target.input.kind === "reducer" &&
         ["first", "last", "nth"].includes(target.input.reducer) &&
-        localOccurrenceCollection(target.input.input, grain) !== null
+        localOccurrenceCollection(target.input.input, proof) !== null
       );
     case "arithmetic":
       return (
-        localRelationTarget(target.left, current, grain) &&
-        localRelationTarget(target.right, current, grain)
+        localRelationTarget(target.left, current, proof) &&
+        localRelationTarget(target.right, current, proof)
       );
     case "time-anchor":
     case "duration":
@@ -1694,16 +1737,16 @@ function localRelationTarget(
 }
 function localRelationExpression(
   expression: FilterExpression,
-  grain: LocalRelationGrain,
+  proof: LocalRelationProof,
   current: LocalOccurrenceKind | null = null,
 ): boolean {
   if (expression.kind === "not")
-    return localRelationExpression(expression.child, grain, current);
+    return localRelationExpression(expression.child, proof, current);
   if (expression.kind !== "condition")
     return expression.children.every((child) =>
-      localRelationExpression(child, grain, current),
+      localRelationExpression(child, proof, current),
     );
-  return localRelationTarget(expression.target, current, grain);
+  return localRelationTarget(expression.target, current, proof);
 }
 /**
  * Compile the one relation bundle consumed by historical D1 providers.
@@ -1733,6 +1776,7 @@ export function compileScopedDatasetSql(
     input.target && input.filters.root && !advanced
       ? targetMembershipEvidence(input.filters.root, input.target.type)
       : null;
+  const relationProof: LocalRelationProof = { needsAdjacency: false };
   const target =
     input.target &&
     input.siteIds.length === 1 &&
@@ -1743,7 +1787,7 @@ export function compileScopedDatasetSql(
     input.filters.root !== null &&
     (advanced
       ? !input.compatibilityEventSource &&
-        localRelationExpression(input.filters.root, input.target.type)
+        localRelationExpression(input.filters.root, relationProof)
       : targetEvidence?.local &&
         targetEvidence.broad &&
         !compilePositiveEventCountMembership(
@@ -1753,7 +1797,12 @@ export function compileScopedDatasetSql(
       ? input.target
       : undefined;
   const domains = advanced
-    ? buildFilterSqlDomains(input, metadata!.time, target)
+    ? buildFilterSqlDomains(
+        input,
+        metadata!.time,
+        target,
+        relationProof.needsAdjacency,
+      )
     : undefined;
   // Both observation predicates read the same linked Visit columns. An
   // Event matching such a predicate cannot qualify a nonmatching in-window

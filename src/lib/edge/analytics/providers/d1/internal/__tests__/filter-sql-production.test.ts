@@ -3081,7 +3081,7 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       db.close();
     }
   });
-  it("keeps Session adjacency on the full timeline when a sessionless Visit key collides", async () => {
+  it("preserves Session adjacency when a sessionless Visit key collides", async () => {
     const { db, env } = runFixture();
     try {
       db.exec(
@@ -3108,8 +3108,10 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         const target = { type: kind, value: kind === "session" ? "s1" : "u1" };
         const original = compileScopedDatasetSql(input);
         const restricted = compileScopedDatasetSql({ ...input, target });
-        if (kind === "session") expect(restricted).toEqual(original);
-        else expect(restricted.ctes).toContain("AND visitor_id = ?");
+        if (kind === "session") {
+          expect(restricted.ctes).toContain("scope_filter_timeline_visits AS");
+          expect(restricted.ctes).toContain("AND session_id = ?");
+        } else expect(restricted.ctes).toContain("AND visitor_id = ?");
         const column = kind + "_id";
         const read = (dataset: ReturnType<typeof compileScopedDatasetSql>) =>
           db
@@ -3127,6 +3129,61 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           100,
         );
         expect(result.items.length > 0).toBe(kind === "visitor");
+      }
+    } finally {
+      db.close();
+    }
+  });
+  it("keeps collision events position-only even when their linked visit is outside R", async () => {
+    const { db, env } = runFixture();
+    try {
+      db.exec(
+        "INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms) VALUES(1,'site-a','s1',NULL,'other','/outside',20,1),(2,'site-b','s1','','other','/other-site',140,1); INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at) VALUES(105,1,'site-a','collision-event','s1',3,145)",
+      );
+      const doc = parseFilterDsl(
+        'adjacent(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }])) exists',
+        analyticsFilterRegistry,
+      );
+      const plan = createScopedFilterPlan("session-events", doc, "session")!;
+      const target = { type: "session", value: "s1" } as const;
+      const filters = attachScopedFilterMetadata(doc, {
+        requestedScope: "session",
+        resolvedScope: plan.scope,
+        plan,
+        time: createQueryTime(100, 300, "UTC", 400),
+        siteIds: ["site-a"],
+      });
+      const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
+      const read = (dataset: ReturnType<typeof compileScopedDatasetSql>) =>
+        db
+          .prepare(
+            `WITH ${dataset.ctes} SELECT * FROM ${dataset.eventRelation} WHERE session_id = ? ORDER BY event_id`,
+          )
+          .all(...dataset.bindings.map((b) => b.value), target.value);
+      for (const [eventTime, expected] of [
+        [145, false],
+        [160, false],
+        [300, true],
+      ] as const) {
+        db.prepare(
+          "UPDATE custom_events SET occurred_at=? WHERE event_pk=105",
+        ).run(eventTime);
+        const original = compileScopedDatasetSql(input);
+        const restricted = compileScopedDatasetSql({ ...input, target });
+        expect(read(restricted)).toEqual(read(original));
+        const page = await queryJourneyEventsPageFromD1(
+          env,
+          "site-a",
+          WINDOW,
+          filters,
+          target,
+          100,
+        );
+        // At an equal timestamp, collision-event sorts before e-purchase.
+        expect(page.items.length > 0).toBe(expected);
+        expect(page.items.some((item) => item.id === "collision-event")).toBe(
+          false,
+        );
       }
     } finally {
       db.close();

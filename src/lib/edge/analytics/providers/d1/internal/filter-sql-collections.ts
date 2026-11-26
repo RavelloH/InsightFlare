@@ -59,6 +59,9 @@ export interface SqlQualificationSources {
   /** Complete authorized read range R, used by Window and full timeline. */
   readonly readVisits?: string;
   readonly readEvents?: string;
+  /** Optional complete local timeline, including position-only evidence. */
+  readonly timelineVisits?: string;
+  readonly timelineEvents?: string;
 }
 
 interface SqlFragment {
@@ -1057,7 +1060,10 @@ export function compileCollectionSqlQualification(
   );
   const ctes: BoundCteDefinition[] = [
     ...factCtes(filterVisits, filterEvents),
-    timelineCte(readVisits, readEvents),
+    timelineCte(
+      safeQualificationIdentifier(sources.timelineVisits ?? readVisits),
+      safeQualificationIdentifier(sources.timelineEvents ?? readEvents),
+    ),
     boundCte(
       "scope_filter_sessions",
       `scope_filter_sessions AS (
