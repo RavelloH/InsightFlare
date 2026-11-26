@@ -742,11 +742,11 @@ class SqlCollectionCompiler {
   }
 
   /**
-   * Existential two-step equality needs only the earliest first and latest
-   * second position for each typed value, not all combinations. Keep the
+   * Identical steps need only a sufficient number of occurrences sharing
+   * one typed value; distinct pairs need only their ordering extrema. Keep the
    * ordinary enumerator for counts, mixed predicates and unproven sources.
    */
-  private localSamePairExists(
+  private localSameSequenceExists(
     condition: FilterCondition,
     frame: SqlFrame,
   ): PredicateFragment | null {
@@ -757,7 +757,7 @@ class SqlCollectionCompiler {
       (condition.operator !== "exists" && condition.operator !== "notExists") ||
       target.kind !== "selector" ||
       target.collection.kind !== "sequence" ||
-      target.collection.steps.length !== 2 ||
+      target.collection.steps.length < 2 ||
       target.predicate.kind !== "condition"
     )
       return null;
@@ -771,13 +771,18 @@ class SqlCollectionCompiler {
       predicate.value !== true
     )
       return null;
-    const steps = target.collection.steps.map((step) =>
+    const count = target.collection.steps.length;
+    const identical = target.collection.steps.every(
+      (step) =>
+        JSON.stringify(step) === JSON.stringify(target.collection.steps[0]),
+    );
+    if (!identical && count !== 2) return null;
+    const steps = (
+      identical ? target.collection.steps.slice(0, 1) : target.collection.steps
+    ).map((step) =>
       this.collection(step, frame, !this.clock?.filterRangeExplicit),
     );
     const input = same.input;
-    const identical =
-      JSON.stringify(target.collection.steps[0]) ===
-      JSON.stringify(target.collection.steps[1]);
     const payload = input.kind === "current-payload";
     const member =
       input.kind === "member" &&
@@ -819,7 +824,7 @@ class SqlCollectionCompiler {
       // collation rather than re-encoding the same scalar as typed JSON.
       const found = `EXISTS (SELECT 1 FROM (${step.sql}) ${item}
         WHERE ${scalar} IS NOT NULL
-        GROUP BY ${scalar} COLLATE BINARY HAVING COUNT(*) >= 2)`;
+        GROUP BY ${scalar} COLLATE BINARY HAVING COUNT(*) >= ${count})`;
       return {
         sql: condition.operator === "notExists" ? `NOT ${found}` : found,
         bindings: step.bindings,
@@ -827,8 +832,8 @@ class SqlCollectionCompiler {
       };
     }
     if (identical) {
-      // Identical steps admit every pair of distinct matching occurrences in
-      // strict timeline order. Each canonical occurrence appears once.
+      // Identical steps admit any selection of distinct matching
+      // occurrences in strict timeline order. Each occurs once.
       const step = steps[0]!;
       const item = this.alias();
       const candidates = this.alias();
@@ -840,7 +845,7 @@ class SqlCollectionCompiler {
       )
       SELECT 1 FROM ${candidates}
       WHERE json_extract(typed_value, '$.t') IN (1, 2, 3)
-      GROUP BY site_pk, anchor_id, typed_value HAVING COUNT(*) >= 2)`;
+      GROUP BY site_pk, anchor_id, typed_value HAVING COUNT(*) >= ${count})`;
       return {
         sql: condition.operator === "notExists" ? `NOT ${found}` : found,
         bindings: [...payload.bindings, ...step.bindings],
@@ -963,10 +968,10 @@ class SqlCollectionCompiler {
   }
 
   /**
-   * For two identical step collections the smallest possible span is
-   * attained by adjacent occurrences within the filtered collection;
-   * the largest is attained by its time extrema. This does not imply
-   * Adjacent on the unfiltered timeline.
+   * For N identical steps the smallest possible span is attained by
+   * N consecutive occurrences within the filtered collection. Given at
+   * least N occurrences, the largest span is attained by its time extrema.
+   * This does not imply Adjacent on the unfiltered timeline.
    */
   private localSequenceSpanExists(
     condition: FilterCondition,
@@ -979,12 +984,15 @@ class SqlCollectionCompiler {
       (condition.operator !== "exists" && condition.operator !== "notExists") ||
       target.kind !== "selector" ||
       target.collection.kind !== "sequence" ||
-      target.collection.steps.length !== 2 ||
+      target.collection.steps.length < 2 ||
       target.predicate.kind !== "condition" ||
-      JSON.stringify(target.collection.steps[0]) !==
-        JSON.stringify(target.collection.steps[1])
+      !target.collection.steps.every(
+        (step) =>
+          JSON.stringify(step) === JSON.stringify(target.collection.steps[0]),
+      )
     )
       return null;
+    const count = target.collection.steps.length;
     const predicate = target.predicate;
     const intrinsic = predicate.target;
     if (
@@ -994,7 +1002,7 @@ class SqlCollectionCompiler {
         !(
           intrinsic.intrinsic === "gap" &&
           intrinsic.from === 1 &&
-          intrinsic.to === 2
+          intrinsic.to === count
         )) ||
       !["lt", "lte", "gt", "gte"].includes(predicate.operator)
     )
@@ -1019,11 +1027,11 @@ class SqlCollectionCompiler {
     );
     const found = upper
       ? `EXISTS (SELECT 1 FROM (
-          SELECT ${time} - LAG(${time}) OVER (ORDER BY ${time}) AS span_delta
+          SELECT ${time} - LAG(${time}, ${count - 1}) OVER (ORDER BY ${time}) AS span_delta
           FROM (${step.sql}) ${item}
         ) WHERE ${compared.sql})`
       : `EXISTS (SELECT COUNT(*) FROM (${step.sql}) ${item}
-        HAVING COUNT(*) >= 2 AND ${compared.sql})`;
+        HAVING COUNT(*) >= ${count} AND ${compared.sql})`;
     return {
       sql: condition.operator === "notExists" ? `NOT ${found}` : found,
       bindings: [...step.bindings, ...compared.bindings],
@@ -1035,8 +1043,8 @@ class SqlCollectionCompiler {
     condition: FilterCondition,
     frame: SqlFrame,
   ): PredicateFragment {
-    const optimizedPair = this.localSamePairExists(condition, frame);
-    if (optimizedPair) return optimizedPair;
+    const optimizedSame = this.localSameSequenceExists(condition, frame);
+    if (optimizedSame) return optimizedSame;
     const optimizedSpan = this.localSequenceSpanExists(condition, frame);
     if (optimizedSpan) return optimizedSpan;
     const optimizedSequence = this.localSequenceExists(condition, frame);
