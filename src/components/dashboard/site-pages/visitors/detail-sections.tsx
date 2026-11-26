@@ -464,6 +464,7 @@ const VisitDetailsCard = memo(function VisitDetailsCard({
   onOpenSession,
   onOpenEvent,
   loading = false,
+  error = false,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -477,6 +478,7 @@ const VisitDetailsCard = memo(function VisitDetailsCard({
   onOpenSession?: (sessionId: string) => void;
   onOpenEvent: (event: JourneyEvent) => void;
   loading?: boolean;
+  error?: boolean;
 }) {
   const chronologicalEvents = useMemo(
     () =>
@@ -489,7 +491,7 @@ const VisitDetailsCard = memo(function VisitDetailsCard({
       }),
     [events],
   );
-  const eventContentKey = loading ? "loading" : "content";
+  const eventContentKey = loading ? "loading" : error ? "error" : "content";
   const loadMoreInFlightRef = useRef(false);
 
   useEffect(() => {
@@ -535,6 +537,8 @@ const VisitDetailsCard = memo(function VisitDetailsCard({
                   <VisitorEventSkeletonCard key={`event-skeleton-${index}`} />
                 ))}
               </div>
+            ) : error ? (
+              <EmptyState key="error">{labels.loadError}</EmptyState>
             ) : chronologicalEvents.length === 0 && !hasMore ? (
               <EmptyState key="empty">{labels.emptyEvents}</EmptyState>
             ) : (
@@ -608,6 +612,8 @@ const ActivityAndSessionsSection = memo(function ActivityAndSessionsSection({
   loadingMoreSessions = false,
   onLoadMoreSessions,
   loading = false,
+  sessionsPending = false,
+  sessionsError = false,
 }: {
   locale: Locale;
   labels: Labels;
@@ -620,6 +626,8 @@ const ActivityAndSessionsSection = memo(function ActivityAndSessionsSection({
   loadingMoreSessions?: boolean;
   onLoadMoreSessions?: () => void;
   loading?: boolean;
+  sessionsPending?: boolean;
+  sessionsError?: boolean;
 }) {
   const [sessionSort, setSessionSort] =
     useState<SessionSortState>(VISITOR_SESSION_SORT);
@@ -735,7 +743,8 @@ const ActivityAndSessionsSection = memo(function ActivityAndSessionsSection({
           hasMore={hasMoreSessions}
           loadingMore={loadingMoreSessions}
           onLoadMore={onLoadMoreSessions}
-          loadingRows={loading}
+          loadingRows={loading || sessionsPending}
+          error={sessionsError}
           skeletonRows={5}
           visibleColumnIds={sessionColumns.visibleIds}
         />
@@ -1014,6 +1023,10 @@ export function DetailContent({
   loadingMoreEvents = false,
   onLoadMoreEvents,
   loading = false,
+  sessionsPending = false,
+  sessionsError = false,
+  eventsPending = false,
+  eventsError = false,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -1031,6 +1044,10 @@ export function DetailContent({
   loadingMoreEvents?: boolean;
   onLoadMoreEvents?: () => void;
   loading?: boolean;
+  sessionsPending?: boolean;
+  sessionsError?: boolean;
+  eventsPending?: boolean;
+  eventsError?: boolean;
 }) {
   const modalClose = useDetailDrawerClose();
   const visitorListPath = pathname.replace(/\/detail$/, "");
@@ -1095,7 +1112,7 @@ export function DetailContent({
         sessions={detail.sessions}
         backHref={visitorListPath}
         onBack={modalClose ?? undefined}
-        loading={loading}
+        loading={loading || sessionsPending}
       />
 
       <div className="mx-auto mt-6 w-full max-w-[1400px] space-y-6 px-4 md:px-6">
@@ -1105,7 +1122,7 @@ export function DetailContent({
           labels={labels}
           detail={detail}
           timeZone={timeZone}
-          loading={loading}
+          loading={loading || sessionsPending}
         />
 
         <ActivityAndSessionsSection
@@ -1119,6 +1136,8 @@ export function DetailContent({
           hasMoreSessions={hasMoreSessions}
           loadingMoreSessions={loadingMoreSessions}
           onLoadMoreSessions={onLoadMoreSessions}
+          sessionsPending={sessionsPending}
+          sessionsError={sessionsError}
           loading={loading}
         />
 
@@ -1134,7 +1153,8 @@ export function DetailContent({
           timeZone={timeZone}
           onOpenSession={onOpenSession}
           onOpenEvent={setSelectedEvent}
-          loading={loading}
+          loading={loading || eventsPending}
+          error={eventsError}
         />
 
         <VisitorDetailBottomCards
@@ -1145,7 +1165,7 @@ export function DetailContent({
           siteId={siteId}
           siteBasePath={siteBasePath}
           siteDomain={visitorSiteDomain}
-          loading={loading}
+          loading={loading || sessionsPending || eventsPending}
         />
 
         <JourneyGeoLocationCard
@@ -1153,7 +1173,7 @@ export function DetailContent({
           messages={messages}
           title={labels.geoLocationTitle}
           locations={geoLocations}
-          loading={loading}
+          loading={loading || sessionsPending}
         />
 
         <VisitorPerformancePanel

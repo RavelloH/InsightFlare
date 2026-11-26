@@ -1,4 +1,8 @@
-import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import {
+  InfiniteQueryObserver,
+  QueryClient,
+  QueryObserver,
+} from "@tanstack/react-query";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { deviceCrossBreakdownQueryOptions } from "@/components/dashboard/devices/device-cross-breakdown-grid";
@@ -65,13 +69,19 @@ import {
   startCampaignsInitialReads,
   startReferrersInitialReads,
 } from "@/lib/dashboard/client/data/referrers";
-import { sessionsListQueryOptions } from "@/lib/dashboard/client/data/sessions";
+import {
+  sessionDetailQueryOptions,
+  sessionsListQueryOptions,
+} from "@/lib/dashboard/client/data/sessions";
 import { startSessionsInitialReads } from "@/lib/dashboard/client/data/sessions";
 import type {
   PrivateReadTransport,
   PrivateRequestParams,
 } from "@/lib/dashboard/client/data/types";
-import { visitorsListQueryOptions } from "@/lib/dashboard/client/data/visitors";
+import {
+  visitorDetailQueryOptions,
+  visitorsListQueryOptions,
+} from "@/lib/dashboard/client/data/visitors";
 import { startVisitorsInitialReads } from "@/lib/dashboard/client/data/visitors";
 import {
   createDeferredPrivateReadTransport,
@@ -1732,6 +1742,137 @@ describe("Dashboard Client Data Processing Utilities", () => {
         headers: { "content-type": "application/json" },
       });
     }
+
+    it("starts independent visitor and session detail collections before their summaries resolve", async () => {
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        .mockImplementation(async (input) => {
+          const url = new URL(String(input), "https://test.invalid");
+          if (url.pathname.endsWith("-detail")) {
+            await gate;
+            return freshJsonResponse({ ok: true, data: {} });
+          }
+          const next = url.searchParams.has("cursor") ? null : "next-cursor";
+          return freshJsonResponse({
+            ok: true,
+            data: {
+              items: [],
+              pagination: {
+                limit: 100,
+                returned: 0,
+                hasMore: next !== null,
+                nextCursor: next,
+              },
+            },
+          });
+        });
+      globalThis.fetch = fetchMock;
+      const visitorInput = {
+        siteId: "journey-site",
+        visitorId: " visitor-a ",
+        window: mockWindow,
+        queryReady: true,
+      };
+      const sessionInput = {
+        siteId: "journey-site",
+        sessionId: " session-a ",
+        window: mockWindow,
+        queryReady: true,
+      };
+      const visitor = visitorDetailQueryOptions(visitorInput);
+      const session = sessionDetailQueryOptions(sessionInput);
+      for (const disabled of [
+        visitorDetailQueryOptions({ ...visitorInput, queryReady: false }),
+        visitorDetailQueryOptions({ ...visitorInput, visitorId: " " }),
+        sessionDetailQueryOptions({ ...sessionInput, queryReady: false }),
+        sessionDetailQueryOptions({ ...sessionInput, siteId: "" }),
+      ]) {
+        expect(disabled.detail.enabled).toBe(false);
+        expect(disabled.events.enabled).toBe(false);
+        if ("sessions" in disabled)
+          expect(disabled.sessions.enabled).toBe(false);
+      }
+      const vd = new QueryObserver(client, visitor.detail);
+      const vs = new InfiniteQueryObserver(client, visitor.sessions);
+      const ve = new InfiniteQueryObserver(client, visitor.events);
+      const sd = new QueryObserver(client, session.detail);
+      const se = new InfiniteQueryObserver(client, session.events);
+      const unsub = [
+        vd.subscribe(() => {}),
+        vs.subscribe(() => {}),
+        ve.subscribe(() => {}),
+        sd.subscribe(() => {}),
+        se.subscribe(() => {}),
+      ];
+      try {
+        await vi.waitFor(
+          () => {
+            expect(vs.getCurrentResult().isSuccess).toBe(true);
+            expect(ve.getCurrentResult().isSuccess).toBe(true);
+            expect(se.getCurrentResult().isSuccess).toBe(true);
+          },
+          { timeout: 5000 },
+        );
+        expect(vd.getCurrentResult().isPending).toBe(true);
+        expect(sd.getCurrentResult().isPending).toBe(true);
+        expect(fetchMock).toHaveBeenCalledTimes(5);
+        const endpoints = fetchMock.mock.calls.map(
+          ([url]) => new URL(String(url), "https://test.invalid"),
+        );
+        expect(
+          endpoints.map((url) => url.pathname.split("/").pop()).sort(),
+        ).toEqual([
+          "session-detail",
+          "session-events",
+          "visitor-detail",
+          "visitor-events",
+          "visitor-sessions",
+        ]);
+        for (const url of endpoints) {
+          expect(url.searchParams.get("siteId")).toBe("journey-site");
+          expect(url.searchParams.get("from")).toBe(String(mockWindow.from));
+          expect(url.searchParams.get("to")).toBe(String(mockWindow.to));
+          expect(url.searchParams.get("timeZone")).toBe(mockWindow.timeZone);
+          if (url.pathname.includes("visitor-"))
+            expect(url.searchParams.get("visitorId")).toBe("visitor-a");
+          else expect(url.searchParams.get("sessionId")).toBe("session-a");
+        }
+        await Promise.all([
+          vs.fetchNextPage(),
+          ve.fetchNextPage(),
+          se.fetchNextPage(),
+        ]);
+        expect(fetchMock).toHaveBeenCalledTimes(8);
+        for (const [url] of fetchMock.mock.calls.slice(5))
+          expect(
+            new URL(String(url), "https://test.invalid").searchParams.get(
+              "cursor",
+            ),
+          ).toBe("next-cursor");
+        expect(vs.getCurrentResult().hasNextPage).toBe(false);
+        expect(ve.getCurrentResult().hasNextPage).toBe(false);
+        expect(se.getCurrentResult().hasNextPage).toBe(false);
+        release();
+        await vi.waitFor(
+          () => {
+            expect(vd.getCurrentResult().isSuccess).toBe(true);
+            expect(sd.getCurrentResult().isSuccess).toBe(true);
+          },
+          { timeout: 5000 },
+        );
+      } finally {
+        release();
+        unsub.forEach((unsubscribe) => unsubscribe());
+        client.clear();
+      }
+    });
 
     function geoTabResponse(items: unknown[]): Response {
       return freshJsonResponse({

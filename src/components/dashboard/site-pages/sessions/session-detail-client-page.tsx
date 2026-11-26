@@ -5,18 +5,14 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { JourneyDetailStateSwitch } from "@/components/dashboard/journeys/journey-detail-state";
 import { JourneyGeoLocationCard } from "@/components/dashboard/journeys/journey-geo-location-card";
-import {
-  useDashboardTimeWindow,
-  useDashboardTimeZone,
-} from "@/components/dashboard/shell/dashboard-query-provider";
+import { useDashboardTimeQuery } from "@/components/dashboard/shell/dashboard-query-provider";
 import { EventDetailDrawer } from "@/components/dashboard/site-pages/events/event-detail-drawer";
 import { PageDetailDrawer } from "@/components/dashboard/site-pages/pages/page-detail-drawer";
 import {
   fetchEventRecordDetail,
   fetchJourneyEventDetail,
-  fetchSessionDetail,
-  fetchSessionEvents,
 } from "@/lib/dashboard/client/data/index";
+import { sessionDetailQueryOptions } from "@/lib/dashboard/client/data/sessions";
 import { normalizePagePath } from "@/lib/dashboard/page-detail";
 import type { TimeWindow } from "@/lib/dashboard/query-state";
 import type { JourneyEvent } from "@/lib/dashboard-api/client/edge";
@@ -44,6 +40,8 @@ function DetailContent({
   loadingMoreEvents = false,
   onLoadMoreEvents,
   loading = false,
+  eventsPending = false,
+  eventsError = false,
 }: {
   locale: Locale;
   messages: AppMessages;
@@ -58,6 +56,8 @@ function DetailContent({
   loadingMoreEvents?: boolean;
   onLoadMoreEvents?: () => void;
   loading?: boolean;
+  eventsPending?: boolean;
+  eventsError?: boolean;
 }) {
   const modalClose = useDetailDrawerClose();
   const session = detail.session;
@@ -155,7 +155,8 @@ function DetailContent({
             onLoadMore={onLoadMoreEvents}
             timeZone={timeZone}
             onOpenEvent={setSelectedEvent}
-            loading={loading}
+            loading={loading || eventsPending}
+            error={eventsError}
           />
         </section>
 
@@ -167,7 +168,7 @@ function DetailContent({
           siteId={siteId}
           siteBasePath={siteBasePath}
           siteDomain={sessionSiteDomain}
-          loading={loading}
+          loading={loading || eventsPending}
         />
 
         <JourneyGeoLocationCard
@@ -243,46 +244,33 @@ export const SessionDetailClientPage = memo(function SessionDetailClientPage({
   onOpenVisitor,
 }: SessionDetailClientPageProps) {
   const labels = messages.sessionDetail;
-  const timeZone = useDashboardTimeZone();
-  const window = useDashboardTimeWindow();
-  const requestKey = useMemo(
-    () => [siteId, sessionId, timeZone, window.from, window.to].join(":"),
-    [sessionId, siteId, timeZone, window.from, window.to],
-  );
-
-  const detailQuery = useQuery({
-    queryKey: ["dashboard", "session-detail", requestKey],
-    queryFn: ({ signal }) =>
-      fetchSessionDetail(siteId, sessionId, timeZone, window, { signal }),
-    enabled: typeof window !== "undefined" && Boolean(sessionId),
+  const { window, queryReady } = useDashboardTimeQuery();
+  const timeZone = window.timeZone;
+  const options = sessionDetailQueryOptions({
+    siteId,
+    sessionId,
+    window,
+    queryReady,
   });
+  const detailQuery = useQuery(options.detail);
+  const eventsQuery = useInfiniteQuery(options.events);
   const summary = detailQuery.data?.data ?? null;
-  const eventsQuery = useInfiniteQuery({
-    queryKey: [
-      "dashboard",
-      "session-detail-events",
-      siteId,
-      sessionId,
-      timeZone,
-      window.from,
-      window.to,
-    ],
-    queryFn: ({ pageParam, signal }) =>
-      fetchSessionEvents(siteId, sessionId, window, {
-        cursor: pageParam,
-        signal,
-      }),
-    initialPageParam: null as string | null,
-    getNextPageParam: (lastPage) =>
-      lastPage.data?.pagination?.hasMore
-        ? lastPage.data.pagination.nextCursor
-        : undefined,
-    enabled: Boolean(summary && sessionId),
-  });
-  const loadedEvents = eventsQuery.data
-    ? eventsQuery.data.pages.flatMap((page) => page.data.items)
-    : (summary?.events ?? []);
-  const detail = summary ? { ...summary, events: loadedEvents } : null;
+  const detail = useMemo(
+    () =>
+      summary
+        ? {
+            ...summary,
+            events:
+              eventsQuery.data?.pages.flatMap((page) => page.data.items) ??
+              summary.events ??
+              [],
+          }
+        : null,
+    [summary, eventsQuery.data],
+  );
+  const eventsPending = eventsQuery.isPending && !summary?.events?.length;
+  const eventsError =
+    eventsQuery.isError && !eventsQuery.data && !summary?.events?.length;
   const loading = detailQuery.isPending && !summary;
   const error = detailQuery.isError;
 
@@ -333,6 +321,8 @@ export const SessionDetailClientPage = memo(function SessionDetailClientPage({
       timeZone={timeZone}
       timeWindow={window}
       onOpenVisitor={onOpenVisitor}
+      eventsPending={eventsPending}
+      eventsError={eventsError}
       hasMoreEvents={Boolean(eventsQuery.hasNextPage)}
       loadingMoreEvents={eventsQuery.isFetchingNextPage}
       onLoadMoreEvents={() => {

@@ -3,15 +3,8 @@ import { Card, CardContent } from "@insightflare/ui/card";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { JourneyDetailStateSwitch } from "@/components/dashboard/journeys/journey-detail-state";
-import {
-  useDashboardTimeWindow,
-  useDashboardTimeZone,
-} from "@/components/dashboard/shell/dashboard-query-provider";
-import {
-  fetchVisitorDetail,
-  fetchVisitorEvents,
-  fetchVisitorSessions,
-} from "@/lib/dashboard/client/data/index";
+import { useDashboardTimeQuery } from "@/components/dashboard/shell/dashboard-query-provider";
+import { visitorDetailQueryOptions } from "@/lib/dashboard/client/data/visitors";
 
 import { DetailContent } from "./detail-sections";
 import {
@@ -27,77 +20,41 @@ export const VisitorDetailClientPage = memo(function VisitorDetailClientPage({
   onOpenSession,
 }: VisitorDetailClientPageProps) {
   const labels = messages.visitorDetail;
-  const timeZone = useDashboardTimeZone();
-  const window = useDashboardTimeWindow();
-  const requestKey = useMemo(
-    () => [siteId, visitorId, timeZone, window.from, window.to].join(":"),
-    [siteId, timeZone, visitorId, window.from, window.to],
-  );
-
-  const detailQuery = useQuery({
-    queryKey: ["dashboard", "visitor-detail", requestKey],
-    queryFn: ({ signal }) =>
-      fetchVisitorDetail(siteId, visitorId, timeZone, window, { signal }),
-    enabled: typeof window !== "undefined" && Boolean(visitorId),
+  const { window, queryReady } = useDashboardTimeQuery();
+  const timeZone = window.timeZone;
+  const options = visitorDetailQueryOptions({
+    siteId,
+    visitorId,
+    window,
+    queryReady,
   });
+  const detailQuery = useQuery(options.detail);
+  const sessionsQuery = useInfiniteQuery(options.sessions);
+  const eventsQuery = useInfiniteQuery(options.events);
   const summary = detailQuery.data?.data ?? null;
-  const sessionsQuery = useInfiniteQuery({
-    queryKey: [
-      "dashboard",
-      "visitor-detail-sessions",
-      siteId,
-      visitorId,
-      timeZone,
-      window.from,
-      window.to,
-    ],
-    queryFn: ({ pageParam, signal }) =>
-      fetchVisitorSessions(siteId, visitorId, window, {
-        cursor: pageParam,
-        signal,
-      }),
-    initialPageParam: null as string | null,
-    getNextPageParam: (lastPage) =>
-      lastPage.data?.pagination?.hasMore
-        ? lastPage.data.pagination.nextCursor
-        : undefined,
-    enabled: Boolean(summary && visitorId),
-  });
-  const eventsQuery = useInfiniteQuery({
-    queryKey: [
-      "dashboard",
-      "visitor-detail-events",
-      siteId,
-      visitorId,
-      timeZone,
-      window.from,
-      window.to,
-    ],
-    queryFn: ({ pageParam, signal }) =>
-      fetchVisitorEvents(siteId, visitorId, window, {
-        cursor: pageParam,
-        signal,
-      }),
-    initialPageParam: null as string | null,
-    getNextPageParam: (lastPage) =>
-      lastPage.data?.pagination?.hasMore
-        ? lastPage.data.pagination.nextCursor
-        : undefined,
-    enabled: Boolean(summary && visitorId),
-  });
-  const loadedSessions = sessionsQuery.data
-    ? sessionsQuery.data.pages.flatMap((page) => page.data.items)
-    : (summary?.sessions ?? []);
-  const loadedEvents = eventsQuery.data
-    ? eventsQuery.data.pages.flatMap((page) => page.data.items)
-    : (summary?.events ?? []);
-  const detail = summary
-    ? {
-        ...summary,
-        sessions: loadedSessions,
-        events: loadedEvents,
-      }
-    : null;
+  const detail = useMemo(
+    () =>
+      summary
+        ? {
+            ...summary,
+            sessions:
+              sessionsQuery.data?.pages.flatMap((page) => page.data.items) ??
+              summary.sessions ??
+              [],
+            events:
+              eventsQuery.data?.pages.flatMap((page) => page.data.items) ??
+              summary.events ??
+              [],
+          }
+        : null,
+    [summary, sessionsQuery.data, eventsQuery.data],
+  );
+  const sessionsPending = sessionsQuery.isPending && !summary?.sessions?.length;
+  const eventsPending = eventsQuery.isPending && !summary?.events?.length;
+  const sessionsError =
+    sessionsQuery.isError && !sessionsQuery.data && !summary?.sessions?.length;
+  const eventsError =
+    eventsQuery.isError && !eventsQuery.data && !summary?.events?.length;
   const loading = detailQuery.isPending && !summary;
   const error = detailQuery.isError;
 
@@ -148,6 +105,8 @@ export const VisitorDetailClientPage = memo(function VisitorDetailClientPage({
       timeZone={timeZone}
       timeWindow={window}
       onOpenSession={onOpenSession}
+      sessionsPending={sessionsPending}
+      sessionsError={sessionsError}
       hasMoreSessions={Boolean(sessionsQuery.hasNextPage)}
       loadingMoreSessions={sessionsQuery.isFetchingNextPage}
       onLoadMoreSessions={() => {
@@ -155,6 +114,8 @@ export const VisitorDetailClientPage = memo(function VisitorDetailClientPage({
           void sessionsQuery.fetchNextPage();
         }
       }}
+      eventsPending={eventsPending}
+      eventsError={eventsError}
       hasMoreEvents={Boolean(eventsQuery.hasNextPage)}
       loadingMoreEvents={eventsQuery.isFetchingNextPage}
       onLoadMoreEvents={() => {
