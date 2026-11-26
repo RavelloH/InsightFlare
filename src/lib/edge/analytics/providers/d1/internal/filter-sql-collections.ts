@@ -838,12 +838,92 @@ class SqlCollectionCompiler {
       applicable: true,
     };
   }
+  /**
+   * Identical unconstrained steps need only N distinct occurrences; a
+   * two-step sequence can use its first minimum and last maximum.
+   * Keep Page-only distinct pairs and other shapes on the full enumerator.
+   */
+  private localSequenceExists(
+    condition: FilterCondition,
+    frame: SqlFrame,
+  ): PredicateFragment | null {
+    const target = condition.target;
+    if (
+      !this.sources.uniqueLocalOccurrences ||
+      (frame.anchorKind !== "session" && frame.anchorKind !== "visitor") ||
+      (condition.operator !== "exists" && condition.operator !== "notExists") ||
+      target.kind !== "sequence" ||
+      target.steps.length < 2
+    )
+      return null;
+    const steps = target.steps.map((step) =>
+      this.collection(step, frame, !this.clock?.filterRangeExplicit),
+    );
+    if (
+      steps.some(
+        (step) => step.entityKind !== "page" && step.entityKind !== "event",
+      )
+    )
+      return null;
+    const identical = target.steps.every(
+      (step) => JSON.stringify(step) === JSON.stringify(target.steps[0]),
+    );
+    if (identical) {
+      // The same unique occurrence collection can satisfy N identical
+      // steps iff it contains at least N distinct occurrences.
+      const step = steps[0]!;
+      const found = `EXISTS (SELECT 1 FROM (${step.sql}) ${this.alias()}
+        LIMIT 1 OFFSET ${steps.length - 1})`;
+      return {
+        sql: condition.operator === "notExists" ? `NOT ${found}` : found,
+        bindings: step.bindings,
+        applicable: true,
+      };
+    }
+    if (steps.length === 2 && steps[0]!.entityKind !== steps[1]!.entityKind) {
+      // At equal timestamps every Page precedes every Event. For a
+      // heterogeneous pair no occurrence ID comparison is needed.
+      const first = steps[0]!;
+      const last = steps[1]!;
+      const time = (step: SqlCollectionRef) =>
+        step.entityKind === "event" ? "occurred_at" : "started_at";
+      const earliest = `(SELECT MIN(${time(first)}) FROM (${first.sql}) ${this.alias()})`;
+      const latest = `(SELECT MAX(${time(last)}) FROM (${last.sql}) ${this.alias()})`;
+      const found = `EXISTS (SELECT 1 WHERE ${earliest}
+        ${first.entityKind === "page" ? "<=" : "<"} ${latest})`;
+      return {
+        sql: condition.operator === "notExists" ? `NOT ${found}` : found,
+        bindings: [...first.bindings, ...last.bindings],
+        applicable: true,
+      };
+    }
+    if (steps.length !== 2 || steps[0]!.entityKind !== "event") return null;
+    // Distinct Event steps use independent extrema with strict binary
+    // ordering. Distinct Page pairs keep the established lookup path.
+    const first = steps[0]!;
+    const last = steps[1]!;
+    const time = "occurred_at";
+    const id = "event_id COLLATE BINARY";
+    const extreme = (step: SqlCollectionRef, direction: "ASC" | "DESC") =>
+      `(SELECT ${time}, ${id} FROM (${step.sql}) ${this.alias()}
+        ORDER BY ${time} ${direction}, ${id} ${direction} LIMIT 1)`;
+    const found = `EXISTS (SELECT 1 WHERE ${extreme(first, "ASC")}
+      < ${extreme(last, "DESC")})`;
+    return {
+      sql: condition.operator === "notExists" ? `NOT ${found}` : found,
+      bindings: [...first.bindings, ...last.bindings],
+      applicable: true,
+    };
+  }
+
   private condition(
     condition: FilterCondition,
     frame: SqlFrame,
   ): PredicateFragment {
     const optimizedPair = this.localPayloadPairExists(condition, frame);
     if (optimizedPair) return optimizedPair;
+    const optimizedSequence = this.localSequenceExists(condition, frame);
+    if (optimizedSequence) return optimizedSequence;
     const target = condition.target;
     if (target.kind === "context-intrinsic" && target.context === "sequence") {
       if (!frame.sequenceAlias)
