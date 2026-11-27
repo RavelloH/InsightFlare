@@ -240,7 +240,7 @@ export function buildEventFilteredSourceCte(
   window: QueryWindow,
   filters: FilterDocument,
   eventName?: string,
-  options?: { materialize?: boolean },
+  options?: { materialize?: boolean; summaryProjection?: boolean },
 ): {
   cte: string;
   bindings: Array<string | number | null>;
@@ -261,7 +261,7 @@ export function buildEventFilteredSourceCte(
 WITH
 ${dataset.ctes},
 filtered_events ${options?.materialize ? "AS MATERIALIZED" : "AS"} (
-  SELECT *
+  SELECT ${options?.summaryProjection ? "event_name, pathname, title, hostname, session_id, visitor_id" : "*"}
   FROM ${dataset.eventRelation} es
   ${eventNameClause}
 )`,
@@ -286,7 +286,7 @@ filtered_events ${options?.materialize ? "AS MATERIALIZED" : "AS"} (
 WITH
 ${sourceCtes},
 filtered_events ${options?.materialize ? "AS MATERIALIZED" : "AS"} (
-  SELECT *
+  SELECT ${options?.summaryProjection ? "event_name, pathname, title, hostname, session_id, visitor_id" : "*"}
   FROM event_source es
   ${filter.clause}
 )`,

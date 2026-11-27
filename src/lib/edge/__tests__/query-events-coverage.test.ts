@@ -154,9 +154,13 @@ describe("edge query events summary coverage", () => {
     });
 
     expect(queryD1AllMock).toHaveBeenCalledOnce();
-    expect(queryD1AllMock.mock.calls[0][1]).toContain(
-      "filtered_events AS MATERIALIZED",
+    const sql = queryD1AllMock.mock.calls[0][1] as string;
+    expect(sql).toContain("event_facts AS MATERIALIZED");
+    expect(sql).toContain(
+      "GROUP BY event_name, pathname, title, hostname, session_id, visitor_id",
     );
+    expect(sql).not.toContain("filtered_events AS MATERIALIZED");
+    expect(sql.match(/LIMIT 100/g)).toHaveLength(4);
     expect(queryD1AllMock.mock.calls[0][2]).toEqual(
       expect.arrayContaining([siteId, window.startMs, window.endExclusiveMs]),
     );

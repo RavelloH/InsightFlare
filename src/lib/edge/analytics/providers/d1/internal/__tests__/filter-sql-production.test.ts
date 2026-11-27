@@ -3083,6 +3083,189 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
+  it("aggregates duplicate event facts while preserving all distinct counts and each card's top 100", async () => {
+    const db = sqlitePayloadFixture();
+    try {
+      db.exec(
+        "DELETE FROM custom_events; DELETE FROM custom_event_names; DELETE FROM visits",
+      );
+      const nameStmt = db.prepare(
+        "INSERT INTO custom_event_names(id,site_pk,name) VALUES(?,?,?)",
+      );
+      const visitStmt = db.prepare(
+        "INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,title,hostname,started_at,duration_ms) VALUES(?,?,?,?,?,?,?,?,?,?)",
+      );
+      const eventStmt = db.prepare(
+        "INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at) VALUES(?,?,?,?,?,?,?)",
+      );
+      const records: {
+        name: string | null;
+        path: string | null;
+        title: string | null;
+        host: string | null;
+        session: string | null;
+        visitor: string | null;
+      }[] = [];
+      let pk = 10000;
+      for (let i = 0; i < 115; i++) {
+        const key = String(i).padStart(3, "0");
+        const name =
+          i === 0 ? "" : i === 1 ? null : i === 2 ? " " : "name-" + key;
+        const path =
+          i === 0 ? null : i === 1 ? "" : i === 2 ? " " : "/path-" + key;
+        const title = i === 0 ? "" : i === 1 ? null : "title-" + key;
+        const host = i === 0 ? null : i === 1 ? "" : "host-" + key;
+        nameStmt.run(i + 1, 1, name);
+        for (let j = 0; j < 3; j++) {
+          const session = j === 0 ? "" : j === 1 ? "session-" + (i % 5) : null;
+          const visitor = j === 0 ? null : j === 1 ? "visitor-" + (i % 7) : " ";
+          const visit = "visit-" + key + "-" + j;
+          visitStmt.run(
+            1,
+            "site-a",
+            visit,
+            session,
+            visitor,
+            path,
+            title,
+            host,
+            120,
+            10,
+          );
+          for (let k = 0; k < (i % 4 === 0 ? 3 : 1); k++) {
+            eventStmt.run(pk, 1, "site-a", "event-" + pk, visit, i + 1, 150);
+            pk++;
+            records.push({ name, path, title, host, session, visitor });
+          }
+        }
+      }
+      // Multiple events on a different page with an already counted identity.
+      const visit = "shared-visit";
+      visitStmt.run(
+        1,
+        "site-a",
+        visit,
+        "session-3",
+        "visitor-3",
+        "/path-003",
+        "title-003",
+        "host-003",
+        120,
+        10,
+      );
+      eventStmt.run(pk, 1, "site-a", "shared-event", visit, 4, 151);
+      records.push({
+        name: "name-003",
+        path: "/path-003",
+        title: "title-003",
+        host: "host-003",
+        session: "session-3",
+        visitor: "visitor-3",
+      });
+      nameStmt.run(999, 2, "foreign");
+      visitStmt.run(
+        2,
+        "site-b",
+        "other-site",
+        "session-3",
+        "visitor-3",
+        "/foreign",
+        "foreign",
+        "foreign",
+        120,
+        10,
+      );
+      eventStmt.run(
+        pk + 1,
+        2,
+        "site-b",
+        "foreign-event",
+        "other-site",
+        999,
+        150,
+      );
+      eventStmt.run(pk + 2, 1, "site-a", "outside-window", visit, 4, 300);
+      const distinct = (values: (string | null)[]) =>
+        new Set(values.filter((v) => v !== null && v !== "")).size;
+      const expected = (rows: typeof records) => {
+        const card = (key: "name" | "path" | "title" | "host") => {
+          const groups = new Map<string, typeof records>();
+          for (const row of rows) {
+            const value = row[key];
+            if (value === null || value.trim() === "") continue;
+            const group = groups.get(value) ?? [];
+            group.push(row);
+            groups.set(value, group);
+          }
+          return [...groups]
+            .map(([value, group]) => ({
+              value,
+              views: group.length,
+              sessions: distinct(group.map((r) => r.session)),
+              visitors: distinct(group.map((r) => r.visitor)),
+            }))
+            .sort(
+              (a, b) =>
+                b.views - a.views ||
+                b.sessions - a.sessions ||
+                b.visitors - a.visitors ||
+                (a.value < b.value ? -1 : a.value > b.value ? 1 : 0),
+            )
+            .slice(0, 100);
+        };
+        return {
+          summary: {
+            events: rows.length,
+            eventTypes: new Set(
+              rows.map((r) => r.name).filter((v) => v !== null),
+            ).size,
+            sessions: distinct(rows.map((r) => r.session)),
+            visitors: distinct(rows.map((r) => r.visitor)),
+          },
+          cards: {
+            event: { name: card("name") },
+            page: {
+              path: card("path"),
+              title: card("title"),
+              hostname: card("host"),
+            },
+          },
+        };
+      };
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const env = { DB: createSqliteD1Database(db, trace) } as never;
+      // Both the legacy/unprepared and canonical source projections must
+      // preserve NULL, empty, whitespace, and the exact ordering of ties.
+      const prepared = ready("event-summary", 'page.path contains "/"');
+      expect(
+        await queryEventsSummaryFromD1(
+          env,
+          "site-a",
+          WINDOW,
+          EMPTY_FILTER_DOCUMENT,
+        ),
+      ).toEqual(expected(records));
+      expect(
+        await queryEventsSummaryFromD1(env, "site-a", WINDOW, prepared),
+      ).toEqual(expected(records.filter((row) => row.path?.includes("/"))));
+      expect(
+        await queryEventsSummaryFromD1(
+          env,
+          "site-a",
+          WINDOW,
+          ready("event-summary", 'event.name eq "missing"'),
+        ),
+      ).toEqual(expected([]));
+      expect(trace.preparedSql).toHaveLength(3);
+      for (const sql of trace.preparedSql) {
+        expect(sql).toContain("event_facts AS MATERIALIZED");
+        expect(sql).not.toContain("ranked_cards");
+      }
+    } finally {
+      db.close();
+    }
+  });
+
   it("shares prepared entity event trends without changing top order or Other distinct identities", async () => {
     const { db } = runFixture();
     try {

@@ -489,7 +489,7 @@ function commonQueryMatches(): SqlMatch[] {
     ),
     allMatch(["dimension_rollup AS"], dimensionRows),
     allMatch(
-      ["card_rows AS", "ranked_cards AS", "__summary__"],
+      ["card_rows AS", "event_facts AS MATERIALIZED", "__summary__"],
       [
         {
           cardType: "__summary__",
