@@ -3,10 +3,21 @@ import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 
 import {
+  observeScrollbarResize,
   OverlayScrollbar,
   SCROLLBAR_UPDATED_EVENT,
 } from "../src/components/ui/overlay-scrollbar";
 import { VerticalScrollMask } from "../src/components/ui/vertical-scroll-mask";
+
+function resizeEntry(target: Element): ResizeObserverEntry {
+  return {
+    target,
+    borderBoxSize: [],
+    contentBoxSize: [],
+    devicePixelContentBoxSize: [],
+    contentRect: target.getBoundingClientRect(),
+  };
+}
 
 const mocks = vi.hoisted(() => {
   const instance = {
@@ -65,6 +76,7 @@ it.each(["success", "invalid", "throws", "native"] as const)(
           resize.push(fn);
         }
         observe() {}
+        unobserve() {}
         disconnect() {
           disconnect();
         }
@@ -143,7 +155,7 @@ it.each(["horizontal", "vertical", "native"] as const)(
     const frames = new Map<number, FrameRequestCallback>();
     let frameId = 0;
     const tasks: Array<() => void> = [];
-    const resize: Array<() => void> = [];
+    const resize: Array<(entries: ResizeObserverEntry[]) => void> = [];
     vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) => {
       frames.set(++frameId, fn);
       return frameId;
@@ -160,10 +172,11 @@ it.each(["horizontal", "vertical", "native"] as const)(
     vi.stubGlobal(
       "ResizeObserver",
       class {
-        constructor(fn: () => void) {
+        constructor(fn: (entries: ResizeObserverEntry[]) => void) {
           resize.push(fn);
         }
         observe() {}
+        unobserve() {}
         disconnect() {}
       },
     );
@@ -215,7 +228,7 @@ it.each(["horizontal", "vertical", "native"] as const)(
         viewport.scrollTop = 200;
         viewport.dispatchEvent(new Event("scroll"));
         viewport.dispatchEvent(new Event(SCROLLBAR_UPDATED_EVENT));
-        resize.forEach((fn) => fn());
+        resize.forEach((fn) => fn([resizeEntry(viewport)]));
         viewport.dispatchEvent(new Event("scroll"));
       });
       expect(frames.size).toBe(1);
@@ -241,3 +254,55 @@ it.each(["horizontal", "vertical", "native"] as const)(
     }
   },
 );
+
+it("shares viewport/content observation while preserving independent subscribers and cleanup", () => {
+  const viewport = document.createElement("div");
+  const content = document.createElement("div");
+  const other = document.createElement("div");
+  const observe = vi.fn();
+  const unobserve = vi.fn();
+  const disconnect = vi.fn();
+  let deliver!: (entries: ResizeObserverEntry[]) => void;
+  const create = vi.fn();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(fn: typeof deliver) {
+        create();
+        deliver = fn;
+      }
+      observe = observe;
+      unobserve = unobserve;
+      disconnect = disconnect;
+    },
+  );
+  const init = vi.fn();
+  const mask = vi.fn();
+  const next = vi.fn();
+  const stopInit = observeScrollbarResize(viewport, content, init);
+  const stopMask = observeScrollbarResize(viewport, content, mask);
+  const stopNext = observeScrollbarResize(other, null, next);
+  try {
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(observe.mock.calls).toEqual([[viewport], [content], [other]]);
+    deliver([viewport, content, other].map((target) => resizeEntry(target)));
+    expect(init).toHaveBeenCalledTimes(1);
+    expect(mask).toHaveBeenCalledTimes(1);
+    expect(next).toHaveBeenCalledTimes(1);
+    stopInit();
+    expect(unobserve).not.toHaveBeenCalled();
+    deliver([viewport, content].map((target) => resizeEntry(target)));
+    expect(init).toHaveBeenCalledTimes(1);
+    expect(mask).toHaveBeenCalledTimes(2);
+    stopMask();
+    expect(unobserve.mock.calls).toEqual([[viewport], [content]]);
+    expect(disconnect).not.toHaveBeenCalled();
+  } finally {
+    stopInit();
+    stopMask();
+    stopNext();
+    vi.unstubAllGlobals();
+  }
+  expect(unobserve.mock.calls).toEqual([[viewport], [content], [other]]);
+  expect(disconnect).toHaveBeenCalledTimes(1);
+});
