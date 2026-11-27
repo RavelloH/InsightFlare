@@ -3717,10 +3717,12 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     },
   );
 
-  it("seeks historical Event witnesses only for small report universes and preserves dense fallback", () => {
-    const db = sqliteFixture();
-    try {
-      db.exec(`
+  it.each(["session", "visitor"] as const)(
+    "seeks historical Event witnesses only for small report universes and preserves dense fallback (%s)",
+    (scope) => {
+      const db = sqliteFixture();
+      try {
+        db.exec(`
         CREATE UNIQUE INDEX test_visit_key ON visits(site_pk,visit_id);
         CREATE INDEX test_visit_session ON visits(site_pk,session_id,started_at);
         CREATE INDEX test_visit_visitor ON visits(site_pk,visitor_id,started_at);
@@ -3741,96 +3743,113 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
               (111,2,'site-b','e-one','v-report',4,200),
               (112,1,'site-a','e-blank','v-blank',1,220);
       `);
-      const base = createQueryTime(100, 300, "UTC", 400);
-      const history = { ...base, readRange: createTimeRange(-10000, 400) };
-      const read = (
-        scope: "session" | "visitor",
-        expression: string,
-        time: QueryTime = history,
-        forceSet = false,
-      ) => {
-        const data = dataset(expression, scope, time);
-        const sql = forceSet
-          ? data.ctes.replaceAll("LIMIT 1 OFFSET 64", "LIMIT 1 OFFSET 0")
-          : data.ctes;
-        const rows = (relation: string, column: string) =>
-          select(
-            db,
-            `WITH ${sql} SELECT site_pk,${column} FROM ${relation} ORDER BY site_pk,${column}`,
-            data.bindings.map((b) => b.value),
-          );
-        return {
-          sql: data.ctes,
-          visits: rows(data.visitRelation, "visit_id"),
-          events: rows(data.eventRelation, "event_pk"),
+        const base = createQueryTime(100, 300, "UTC", 400);
+        const history = { ...base, readRange: createTimeRange(-10000, 400) };
+        const read = (
+          scope: "session" | "visitor",
+          expression: string,
+          time: QueryTime = history,
+          forceSet = false,
+        ) => {
+          const data = dataset(expression, scope, time);
+          const sql = forceSet
+            ? data.ctes.replaceAll("LIMIT 1 OFFSET 64", "LIMIT 1 OFFSET 0")
+            : data.ctes;
+          const rows = (relation: string, column: string) =>
+            select(
+              db,
+              `WITH ${sql} SELECT site_pk,${column} FROM ${relation} ORDER BY site_pk,${column}`,
+              data.bindings.map((b) => b.value),
+            );
+          return {
+            sql: data.ctes,
+            visits: rows(data.visitRelation, "visit_id"),
+            events: rows(data.eventRelation, "event_pk"),
+          };
         };
-      };
-      const namedPair =
-        'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) exists';
-      const forward =
-        'sequence([EVENT { $.name eq "signup" },EVENT { $.name eq "purchase" }]) exists';
-      const reverse =
-        'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "signup" }]) exists';
-      const overlap =
-        'sequence([EVENT { $.name eq "purchase" },EVENT { $.name exists }]) exists';
-      const lowerExpressions = [
-        "sequence([EVENT,EVENT,EVENT]) { $span gte 130ms } exists",
-        "sequence([EVENT,EVENT,EVENT]) { $span gt 130ms } exists",
-        "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) gte 100ms } exists",
-        "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) gt 100ms } exists",
-        "sequence([EVENT,EVENT,EVENT]) { $gap(2,3) gte 30ms } exists",
-        "sequence([EVENT,EVENT,EVENT]) { $gap(2,3) gt 30ms } exists",
-        "sequence([EVENT,EVENT,EVENT,EVENT]) { $gap(2,3) gte 0ms } notExists",
-        'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) { $span gte 0ms } exists',
-        'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) { $span gt 0ms } exists',
-        "sequence([EVENT { $.name exists },EVENT { $.name exists },EVENT { $.name exists }]) { $gap(2,3) gte 0ms } notExists",
-      ];
-      const upperGapExpressions = Array.from(
-        { length: 4 },
-        (_, index) => index + 2,
-      ).flatMap((count) => {
-        const steps = Array(count).fill("EVENT").join(",");
-        return Array.from(
-          { length: count - 1 },
-          (_, index) => index + 1,
-        ).flatMap((from) =>
-          Array.from(
-            { length: count - from },
-            (_, index) => from + index + 1,
-          ).flatMap((to) => [
-            `sequence([${steps}]) { $gap(${from},${to}) lte 100ms } exists`,
-            `sequence([${steps}]) { $gap(${from},${to}) lt 0ms } notExists`,
-          ]),
-        );
-      });
-      const expressions = [
-        "sequence([EVENT,EVENT]) exists",
-        "sequence([EVENT,EVENT]) notExists",
-        "sequence([EVENT,EVENT,EVENT]) exists",
-        namedPair,
-        namedPair.replace(" exists", " notExists"),
-        'sequence([EVENT { $.name eq "missing" },EVENT { $.name eq "missing" }]) notExists',
-        "sequence([EVENT { $.name exists },EVENT { $.name exists },EVENT { $.name exists }]) exists",
-        'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) exists',
-        forward,
-        reverse,
-        overlap,
-        forward.replace("]) exists", "]) notExists"),
-        overlap.replace("]) exists", "]) notExists"),
-        'sequence([EVENT { $.name exists },EVENT { $.name eq "missing" }]) notExists',
-        'sequence([EVENT { $.name eq "missing" },EVENT { $.name exists }]) exists',
-        "sequence([EVENT,EVENT,EVENT]) { $span lte 130ms } exists",
-        "sequence([EVENT,EVENT,EVENT]) { $span lt 130ms } notExists",
-        "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) lte 100ms } exists",
-        "sequence([EVENT,EVENT,EVENT,EVENT]) { $gap(2,3) lt 30ms } notExists",
-        "sequence([EVENT,EVENT,EVENT,EVENT,EVENT]) { $gap(2,3) lte 100ms } exists",
-        "sequence([EVENT,EVENT,EVENT,EVENT,EVENT]) { $gap(3,4) lt 0ms } notExists",
-        'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) { $span lte 0ms } exists',
-        "sequence([EVENT { $.name exists },EVENT { $.name exists },EVENT { $.name exists }]) { $gap(2,3) lte 0ms } exists",
-        ...upperGapExpressions,
-        ...lowerExpressions,
-      ];
-      for (const scope of ["session", "visitor"] as const) {
+        const namedPair =
+          'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) exists';
+        const forward =
+          'sequence([EVENT { $.name eq "signup" },EVENT { $.name eq "purchase" }]) exists';
+        const reverse =
+          'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "signup" }]) exists';
+        const overlap =
+          'sequence([EVENT { $.name eq "purchase" },EVENT { $.name exists }]) exists';
+        const forwardUpper =
+          'sequence([EVENT { $.name eq "signup" },EVENT { $.name eq "purchase" }]) { $span lte 100ms } exists';
+        const reverseUpper =
+          'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "signup" }]) { $span lt 0ms } notExists';
+        const overlapUpper =
+          'sequence([EVENT { $.name eq "purchase" },EVENT { $.name exists }]) { $span lte 0ms } exists';
+        const missingUpper =
+          'sequence([EVENT { $.name eq "missing" },EVENT { $.name exists }]) { $span lte 100ms } notExists';
+        const lowerExpressions = [
+          "sequence([EVENT,EVENT,EVENT]) { $span gte 130ms } exists",
+          "sequence([EVENT,EVENT,EVENT]) { $span gt 130ms } exists",
+          "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) gte 100ms } exists",
+          "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) gt 100ms } exists",
+          "sequence([EVENT,EVENT,EVENT]) { $gap(2,3) gte 30ms } exists",
+          "sequence([EVENT,EVENT,EVENT]) { $gap(2,3) gt 30ms } exists",
+          "sequence([EVENT,EVENT,EVENT,EVENT]) { $gap(2,3) gte 0ms } notExists",
+          'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) { $span gte 0ms } exists',
+          'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) { $span gt 0ms } exists',
+          "sequence([EVENT { $.name exists },EVENT { $.name exists },EVENT { $.name exists }]) { $gap(2,3) gte 0ms } notExists",
+        ];
+        const upperGapExpressions = Array.from(
+          { length: 4 },
+          (_, index) => index + 2,
+        ).flatMap((count) => {
+          const steps = Array(count).fill("EVENT").join(",");
+          return Array.from(
+            { length: count - 1 },
+            (_, index) => index + 1,
+          ).flatMap((from) =>
+            Array.from(
+              { length: count - from },
+              (_, index) => from + index + 1,
+            ).flatMap((to) => [
+              `sequence([${steps}]) { $gap(${from},${to}) lte 100ms } exists`,
+              `sequence([${steps}]) { $gap(${from},${to}) lt 0ms } notExists`,
+            ]),
+          );
+        });
+        const expressions = [
+          "sequence([EVENT,EVENT]) exists",
+          "sequence([EVENT,EVENT]) notExists",
+          "sequence([EVENT,EVENT,EVENT]) exists",
+          namedPair,
+          namedPair.replace(" exists", " notExists"),
+          'sequence([EVENT { $.name eq "missing" },EVENT { $.name eq "missing" }]) notExists',
+          "sequence([EVENT { $.name exists },EVENT { $.name exists },EVENT { $.name exists }]) exists",
+          'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) exists',
+          forward,
+          reverse,
+          overlap,
+          forwardUpper,
+          reverseUpper,
+          overlapUpper,
+          missingUpper,
+          forwardUpper.replace("100ms", "0ms"),
+          forwardUpper
+            .replace("lte 100ms", "lt 100ms")
+            .replace(" exists", " notExists"),
+          'sequence([EVENT { $.name exists },EVENT { $.name eq "purchase" }]) { $gap(1,2) lte 0ms } exists',
+          'sequence([EVENT { $.name exists },EVENT { $.name eq "missing" }]) { $gap(1,2) lt 100ms } notExists',
+          forward.replace("]) exists", "]) notExists"),
+          overlap.replace("]) exists", "]) notExists"),
+          'sequence([EVENT { $.name exists },EVENT { $.name eq "missing" }]) notExists',
+          'sequence([EVENT { $.name eq "missing" },EVENT { $.name exists }]) exists',
+          "sequence([EVENT,EVENT,EVENT]) { $span lte 130ms } exists",
+          "sequence([EVENT,EVENT,EVENT]) { $span lt 130ms } notExists",
+          "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) lte 100ms } exists",
+          "sequence([EVENT,EVENT,EVENT,EVENT]) { $gap(2,3) lt 30ms } notExists",
+          "sequence([EVENT,EVENT,EVENT,EVENT,EVENT]) { $gap(2,3) lte 100ms } exists",
+          "sequence([EVENT,EVENT,EVENT,EVENT,EVENT]) { $gap(3,4) lt 0ms } notExists",
+          'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) { $span lte 0ms } exists',
+          "sequence([EVENT { $.name exists },EVENT { $.name exists },EVENT { $.name exists }]) { $gap(2,3) lte 0ms } exists",
+          ...upperGapExpressions,
+          ...lowerExpressions,
+        ];
         for (const expression of expressions) {
           const actual = read(scope, expression);
           expect(actual.sql).toContain("history_visit");
@@ -3882,7 +3901,16 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
             filterRange: createTimeRange(100, 300),
           }).sql,
         ).not.toContain("history_visit");
+        expect(
+          read(scope, forwardUpper, {
+            ...history,
+            filterRange: createTimeRange(100, 300),
+          }).sql,
+        ).not.toContain("history_visit");
         expect(read(scope, upperSpan, base).sql).not.toContain("history_visit");
+        expect(read(scope, forwardUpper, base).sql).not.toContain(
+          "history_visit",
+        );
         const triple = read(scope, expressions[2]!);
         expect(triple.visits).toEqual([{ site_pk: 1, visit_id: "v-new" }]);
         expect(
@@ -3934,10 +3962,8 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
             'sequence([EVENT { $.name contains "signup" },EVENT { $.name eq "purchase" }]) exists',
           ).sql,
         ).not.toContain("history_visit");
-      }
-      // Both paths reuse the same normalized event.name comparison.
-      db.exec("UPDATE custom_event_names SET name=' purchase ' WHERE id=1");
-      for (const scope of ["session", "visitor"] as const) {
+        // Both paths reuse the same normalized event.name comparison.
+        db.exec("UPDATE custom_event_names SET name=' purchase ' WHERE id=1");
         expect(read(scope, namedPair)).toEqual(
           read(scope, namedPair, history, true),
         );
@@ -3945,13 +3971,11 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           { site_pk: 1, visit_id: "v-new" },
           { site_pk: 1, visit_id: "v-report" },
         ]);
-      }
-      // Equal timestamps are ordered by binary event ID, not by name or insertion order.
-      // The right-boundary purchase does not qualify the reverse order.
-      db.exec(
-        "INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at) VALUES(113,1,'site-a','e-z','v-before',2,-10000)",
-      );
-      for (const scope of ["session", "visitor"] as const) {
+        // Equal timestamps are ordered by binary event ID, not by name or insertion order.
+        // The right-boundary purchase does not qualify the reverse order.
+        db.exec(
+          "INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at) VALUES(113,1,'site-a','e-z','v-before',2,-10000)",
+        );
         expect(read(scope, forward).visits).toEqual([
           { site_pk: 1, visit_id: "v-new" },
         ]);
@@ -3962,21 +3986,34 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         expect(read(scope, reverse)).toEqual(
           read(scope, reverse, history, true),
         );
-      }
-      const insert = db.prepare(
-        "INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms) VALUES(1,'site-a',?,?,?,'/dense',200,1)",
-      );
-      for (let i = 0; i < 70; i++)
-        insert.run("dense-" + i, "dense-session-" + i, "dense-visitor-" + i);
-      for (const scope of ["session", "visitor"] as const)
+        const reverseZero = reverseUpper
+          .replace("lt 0ms", "lte 0ms")
+          .replace("notExists", "exists");
+        expect(read(scope, reverseZero)).toEqual(
+          read(scope, reverseZero, history, true),
+        );
+        expect(read(scope, reverseZero).visits).toContainEqual({
+          site_pk: 1,
+          visit_id: "v-report",
+        });
+        expect(read(scope, forwardUpper.replace("100ms", "0ms"))).toEqual(
+          read(scope, forwardUpper.replace("100ms", "0ms"), history, true),
+        );
+
+        const insert = db.prepare(
+          "INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms) VALUES(1,'site-a',?,?,?,'/dense',200,1)",
+        );
+        for (let i = 0; i < 70; i++)
+          insert.run("dense-" + i, "dense-session-" + i, "dense-visitor-" + i);
         for (const expression of expressions)
           expect(read(scope, expression)).toEqual(
             read(scope, expression, history, true),
           );
-    } finally {
-      db.close();
-    }
-  });
+      } finally {
+        db.close();
+      }
+    },
+  );
 
   it("uses authorized indexed Page blockers without changing global Adjacent read domains", () => {
     const db = sqliteFixture();
