@@ -259,6 +259,10 @@ export async function startSiteAnalyticsStream(input: {
       headers: request.headers,
       signal: request.signal,
     });
+    // Large map responses are already JSON. Preserve the bounded UTF-8 body
+    // instead of parsing thousands of rows and walking them again in Seroval.
+    // Both geo planners start the raw request without consuming its value.
+    const rawJson = pathname === "overview-geo-points";
     const execute = async (): Promise<ManagementJsonValue> => {
       const response = await withDashboardCache(
         cacheContext,
@@ -275,15 +279,17 @@ export async function startSiteAnalyticsStream(input: {
           }),
         {
           identity: { scope: "private", tenantId: site.id, route: pathname },
-          request: child,
+          // Map normalization discards requestId/timestamp. On a cache hit
+          // the sanitized JSON is sufficient; don't parse and re-stringify
+          // the entire map just to reconstruct those two envelope fields.
+          request: rawJson ? undefined : child,
         },
       );
       if (!response.ok) throw new Error("ssr_query_failed_" + response.status);
       const body = await readBoundedBody(response, 2 * 1024 * 1024);
       if (!body.ok) throw new Error("ssr_query_response_limit");
-      return JSON.parse(
-        new TextDecoder("utf-8", { fatal: true }).decode(body.bytes),
-      ) as ManagementJsonValue;
+      const text = new TextDecoder("utf-8", { fatal: true }).decode(body.bytes);
+      return rawJson ? text : (JSON.parse(text) as ManagementJsonValue);
     };
     const promise = logger
       ? logger.measure("dashboard.ssr.analytics", execute, {
@@ -292,7 +298,8 @@ export async function startSiteAnalyticsStream(input: {
       : execute();
     pending.set(key, promise);
     const deferred = promise.then(
-      (value) => ({ value }),
+      (value) =>
+        rawJson && typeof value === "string" ? { json: value } : { value },
       () => null,
     );
     reads[key] = logger ? logger.track(deferred) : deferred;

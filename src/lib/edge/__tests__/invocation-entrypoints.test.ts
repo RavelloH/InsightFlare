@@ -274,6 +274,23 @@ describe("actual Worker top-level invocation entrypoints", () => {
     expect(f.points).toHaveLength(0);
     expect(f.work.length).toBeGreaterThan(0);
     finish();
+    const geo = Object.keys(reads!).find((key) =>
+      key.includes("overview-geo-points"),
+    )!;
+    await expect(reads![geo]).resolves.toEqual({
+      json: JSON.stringify({
+        ok: true,
+        data: {
+          items: [],
+          pagination: {
+            limit: 100,
+            returned: 0,
+            hasMore: false,
+            nextCursor: null,
+          },
+        },
+      }),
+    });
     await f.finish();
     expect(f.points).toHaveLength(1);
     expect(f.points[0]!.blobs[3]).toBe("page.dashboard.analytics.overview");
@@ -283,6 +300,109 @@ describe("actual Worker top-level invocation entrypoints", () => {
     expect(vi.mocked(executePrivateQuery)).toHaveBeenCalledTimes(6);
     expect(vi.mocked(resolvePrivateSite)).toHaveBeenCalledTimes(1);
   });
+  it("reuses cached geo JSON without rematerializing envelope fields, while HTTP keeps its contract", async () => {
+    const f = setup();
+    const { withDashboardCache } =
+      await import("@/lib/edge/analytics/composition/dashboard-cache");
+    const entries = new Map<string, Response>();
+    vi.stubGlobal("caches", {
+      open: async () => ({
+        match: async (request: Request) => entries.get(request.url)?.clone(),
+        put: async (request: Request, response: Response) => {
+          entries.set(request.url, response.clone());
+        },
+      }),
+    });
+    const data = {
+      ok: true,
+      data: [
+        { latitude: 35.12, longitude: 139.56, country: "JP", city: "東京" },
+      ],
+      countryCounts: [],
+      regionCounts: [],
+      cityCounts: [],
+    };
+    const body = { ...data, requestId: "old", timestamp: "old" };
+    const window = {
+      preset: "custom" as const,
+      from: 100,
+      to: 300,
+      interval: "day" as const,
+      timeZone: "UTC",
+    };
+    const request = new Request("https://app.test/en/app/team/site/geo");
+    const url = new URL(
+      "https://app.test/api/private/overview-geo-points?siteId=site-a&from=100&to=300&timeZone=UTC&limit=5000",
+    );
+    const identity = {
+      scope: "private" as const,
+      tenantId: "site-a",
+      route: "overview-geo-points",
+    };
+    try {
+      await withDashboardCache(f.ctx, url, async () => Response.json(body), {
+        identity,
+        request,
+      });
+      await f.finish();
+      vi.mocked(resolvePrivateSite).mockResolvedValueOnce({
+        id: "site-a",
+        name: "A",
+        domain: "a.test",
+        canManage: true,
+      } as never);
+      vi.mocked(executePrivateQuery).mockImplementation(async (input) => {
+        if (input.pathname === "overview-geo-points")
+          throw new Error("geo cache miss");
+        return Response.json({
+          ok: true,
+          data: {
+            items: [],
+            pagination: {
+              limit: 400,
+              returned: 0,
+              hasMore: false,
+              nextCursor: null,
+            },
+          },
+        });
+      });
+      const reads = await startSiteAnalyticsStream({
+        request,
+        env: f.env,
+        siteId: "site-a",
+        page: "geo",
+        window,
+        search: "",
+      });
+      const geo = Object.keys(reads).find((key) =>
+        key.includes("overview-geo-points"),
+      )!;
+      await expect(reads[geo]).resolves.toEqual({ json: JSON.stringify(data) });
+      expect(
+        vi
+          .mocked(executePrivateQuery)
+          .mock.calls.some(
+            ([input]) => input.pathname === "overview-geo-points",
+          ),
+      ).toBe(false);
+      const generate = vi.fn(async () => Response.json(body));
+      const http = await withDashboardCache(f.ctx, url, generate, {
+        identity,
+        request: new Request(url, { headers: { "x-request-id": "new" } }),
+      });
+      expect(http.headers.get("x-insightflare-cache")).toBe("HIT");
+      expect(await http.json()).toEqual({
+        ...data,
+        requestId: "new",
+        timestamp: expect.any(String),
+      });
+      expect(generate).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("streams referrer cards independently and isolates a failed radar", async () => {
     const f = setup();
     let release!: () => void;
