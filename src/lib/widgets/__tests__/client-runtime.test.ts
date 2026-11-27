@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { WIDGET_EMBED_LOADER } from "@/lib/widgets/client/embed-loader";
 import {
   WIDGET_SCRIPT_VARIANTS,
   widgetClientScript,
@@ -12,6 +11,9 @@ import {
 } from "@/lib/widgets/contract";
 import { renderWidgetDocument } from "@/lib/widgets/embed";
 import { WIDGET_EMBED_MESSAGES } from "@/lib/widgets/embed-messages";
+
+// The host-page loader ships as a static file at a stable URL.
+import WIDGET_EMBED_LOADER from "../../../../public/widgets/embed.js?raw";
 
 const uuid = "11111111-1111-4111-8111-111111111111";
 const base = {
@@ -209,6 +211,61 @@ describe("composed widget client scripts", () => {
       .split(" ")
       .map((point) => Number(point.split(",")[1]));
     expect(Math.min(...y)).toBeLessThan(60);
+  });
+
+  it("formats numbers and changes like the dashboard", () => {
+    const metric = (value: number, change: number) => {
+      renderPreview(config({}), {
+        ...base,
+        type: "metric",
+        metric: "visitors",
+        value,
+        change,
+      });
+      return [
+        content().querySelector(".widget__value")?.textContent,
+        content().querySelector(".widget__change")?.textContent,
+      ];
+    };
+    expect(metric(18753, 0.085)).toEqual(["18,753", "↑ +8.5%"]);
+    expect(metric(2_400_000, -0.013)).toEqual(["2.4M", "↓ -1.3%"]);
+    expect(metric(5, 0)).toEqual(["5", "0%"]);
+  });
+
+  it("draws ranking rows with a share background relative to the top row", () => {
+    renderPreview(config({ type: "ranking" }), {
+      ...base,
+      type: "ranking",
+      metric: "visitors",
+      rows: [
+        { label: "/a", value: 4000 },
+        { label: "/b", value: 1000 },
+      ],
+    });
+    const rows = Array.from(
+      content().querySelectorAll<HTMLElement>(".widget__row"),
+    );
+    expect(
+      rows.map((row) => row.style.getPropertyValue("--widget-share")),
+    ).toEqual(["100%", "25%"]);
+    expect(rows[0]!.querySelector(".widget__count")?.textContent).toBe("4,000");
+    expect(content().querySelector(".widget__rank")).toBeNull();
+  });
+
+  it("places the realtime map counter above the map instead of over it", () => {
+    renderPreview(config({ type: "realtime", realtimeLayout: "map" }), {
+      ...base,
+      type: "realtime",
+      metric: "visitors",
+      activeNow: 12,
+      bars: [],
+      points: [{ country: "US", lat: 39.5, lon: -97.5, value: 4 }],
+      rows: [],
+    });
+    const [counter, map] = Array.from(content().children);
+    expect(counter?.className).toBe("widget__realtime-map-counter");
+    expect(map?.className).toBe("widget__geo-map");
+    expect(map?.querySelector(".widget__realtime-map-counter")).toBeNull();
   });
 
   it("renders ranking rows", () => {

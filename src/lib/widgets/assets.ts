@@ -1,4 +1,3 @@
-import { WIDGET_EMBED_LOADER } from "@/lib/widgets/client/embed-loader";
 import {
   WIDGET_SCRIPT_VARIANTS,
   widgetClientScript,
@@ -16,7 +15,6 @@ import { widgetStylesheet } from "@/lib/widgets/embed-style";
  * with the native WebCrypto digest; nothing is hashed at module load.
  */
 export const WIDGET_ASSET_PREFIX = "/api/public/widgets/assets/";
-export const WIDGET_EMBED_LOADER_PATH = "/api/public/widgets/embed.js";
 
 interface WidgetAsset {
   file: string;
@@ -135,18 +133,6 @@ export async function widgetAssetResponse(
       "cache-control": exact
         ? "public, max-age=31536000, immutable"
         : "no-store",
-    },
-  });
-}
-
-export function widgetEmbedLoaderResponse(): Response {
-  return new Response(WIDGET_EMBED_LOADER, {
-    headers: {
-      "x-content-type-options": "nosniff",
-      "content-type": "text/javascript; charset=utf-8",
-      // Stable URL embedded in third-party pages: keep it revalidating.
-      "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
-      "access-control-allow-origin": "*",
     },
   });
 }

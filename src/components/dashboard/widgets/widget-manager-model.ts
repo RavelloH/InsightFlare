@@ -137,22 +137,34 @@ export function htmlAttribute(value: string): string {
     .replaceAll(">", "&gt;");
 }
 
-/**
- * iframe snippet plus the optional host-page loader that resizes the iframe
- * to its content. Without the script, the suggested height applies.
- */
-export function widgetEmbedSnippet(input: {
+interface WidgetEmbedInput {
   origin: string;
   path: string;
   config: WidgetConfig;
   title: string;
-}): string {
+}
+
+/**
+ * The two parts of an embed: the iframe that renders the widget (required,
+ * works on its own at the suggested height) and the optional host-page
+ * loader that resizes marked iframes to their content.
+ */
+export function widgetEmbedParts(input: WidgetEmbedInput): {
+  iframe: string;
+  script: string;
+} {
   const src = `${input.origin}${input.path}`;
-  const loader = `${input.origin}/api/public/widgets/embed.js`;
-  return [
-    `<iframe src="${htmlAttribute(src)}" title="${htmlAttribute(input.title)}" width="100%" height="${suggestedWidgetHeight(input.config)}" loading="lazy" style="border:0" data-insightflare-widget></iframe>`,
-    `<script src="${htmlAttribute(loader)}" async></script>`,
-  ].join("\n");
+  // Static asset (public/widgets/embed.js) at a stable, unversioned URL.
+  const loader = `${input.origin}/widgets/embed.js`;
+  return {
+    iframe: `<iframe src="${htmlAttribute(src)}" title="${htmlAttribute(input.title)}" width="100%" height="${suggestedWidgetHeight(input.config)}" loading="lazy" style="border:0" data-insightflare-widget></iframe>`,
+    script: `<script src="${htmlAttribute(loader)}" async></script>`,
+  };
+}
+
+export function widgetEmbedSnippet(input: WidgetEmbedInput): string {
+  const parts = widgetEmbedParts(input);
+  return `${parts.iframe}\n${parts.script}`;
 }
 
 export function displayType(

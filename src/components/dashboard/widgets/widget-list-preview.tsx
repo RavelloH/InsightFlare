@@ -45,6 +45,30 @@ export function MasonryItem({ children }: { children: ReactNode }) {
   );
 }
 
+// Filter switches remount cards. Reuse recent preview data so a remount does
+// not re-run its analytics query; edits change updatedAt/revision and miss.
+const PREVIEW_CACHE_TTL_MS = 60_000;
+const PREVIEW_CACHE_LIMIT = 200;
+const previewCache = new Map<string, { data: WidgetData; expiresAt: number }>();
+
+function previewCacheKey(record: WidgetRecord): string {
+  return `${record.uuid}:${record.updatedAt}:${record.revision}`;
+}
+
+function cachedPreview(key: string): WidgetData | null {
+  const hit = previewCache.get(key);
+  return hit && hit.expiresAt > Date.now() ? hit.data : null;
+}
+
+function rememberPreview(key: string, data: WidgetData): void {
+  previewCache.delete(key);
+  if (previewCache.size >= PREVIEW_CACHE_LIMIT) {
+    const oldest = previewCache.keys().next().value;
+    if (oldest !== undefined) previewCache.delete(oldest);
+  }
+  previewCache.set(key, { data, expiresAt: Date.now() + PREVIEW_CACHE_TTL_MS });
+}
+
 export function WidgetListPreview({
   record,
   basePath,
@@ -60,7 +84,10 @@ export function WidgetListPreview({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
-  const [data, setData] = useState<WidgetData | null>(null);
+  const cacheKey = previewCacheKey(record);
+  const [data, setData] = useState<WidgetData | null>(() =>
+    cachedPreview(cacheKey),
+  );
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const config = record.published ?? record.draft;
@@ -90,6 +117,11 @@ export function WidgetListPreview({
 
   useEffect(() => {
     if (!visible) return;
+    const cached = attempt === 0 ? cachedPreview(cacheKey) : null;
+    if (cached) {
+      setData(cached);
+      return;
+    }
     let active = true;
     setData(null);
     setFailed(false);
@@ -98,6 +130,7 @@ export function WidgetListPreview({
       config,
     })
       .then((result) => {
+        rememberPreview(cacheKey, result.data);
         if (active) setData(result.data);
       })
       .catch(() => {
@@ -106,7 +139,7 @@ export function WidgetListPreview({
     return () => {
       active = false;
     };
-  }, [basePath, config, record.siteId, visible, attempt]);
+  }, [basePath, cacheKey, config, record.siteId, visible, attempt]);
 
   return (
     <div ref={containerRef} className="min-w-0 w-full">

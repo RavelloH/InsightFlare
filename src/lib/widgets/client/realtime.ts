@@ -102,9 +102,10 @@ export const REALTIME_CLIENT_FRAGMENT = String.raw`
       renderGeo({ points: data.points, unmapped: data.activeNow });
       var geo = content.querySelector(".widget__geo-map");
       if (geo) {
+        // Above the map rather than over it, so no region is hidden.
         var bubble = makeRealtimeCounter("widget__realtime-map-counter");
         setRealtimeNumber(bubble.querySelector(".widget__realtime-number"), data.activeNow);
-        geo.appendChild(bubble);
+        content.insertBefore(bubble, geo);
       }
       return;
     }

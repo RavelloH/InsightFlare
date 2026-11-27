@@ -9,6 +9,10 @@ const STATIC_HEADERS = [
   "  Cache-Control: public, max-age=31536000, immutable",
   "/images/flagpack/*",
   "  Cache-Control: public, max-age=31536000, immutable",
+  "# Widget embed loader: a stable URL pasted into third-party pages.",
+  "/widgets/embed.js",
+  "  Cache-Control: public, max-age=3600, stale-while-revalidate=86400",
+  "  X-Content-Type-Options: nosniff",
   "",
 ].join("\n");
 

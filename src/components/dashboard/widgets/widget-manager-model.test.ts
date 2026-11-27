@@ -14,6 +14,7 @@ import {
   htmlAttribute,
   metricLabel,
   statusLabel,
+  widgetEmbedParts,
   widgetEmbedSnippet,
   widgetParameters,
   widgetRequest,
@@ -123,9 +124,25 @@ describe("widget embed snippet", () => {
       '<iframe src="https://insight.example/en/widget/abc" title="Visitors &quot;&lt;live&gt;&quot; &amp; more" width="100%" height="160" loading="lazy" style="border:0" data-insightflare-widget></iframe>',
     );
     expect(script).toBe(
-      '<script src="https://insight.example/api/public/widgets/embed.js" async></script>',
+      '<script src="https://insight.example/widgets/embed.js" async></script>',
     );
     expect(htmlAttribute(`a&"<>`)).toBe("a&amp;&quot;&lt;&gt;");
+  });
+
+  it("exposes the required iframe and optional loader as separate parts", () => {
+    const input = {
+      origin: "https://insight.example",
+      path: "/widget/abc",
+      config: config(),
+      title: "Visitors",
+    };
+    const parts = widgetEmbedParts(input);
+    expect(parts.iframe).toContain("data-insightflare-widget");
+    expect(parts.iframe).not.toContain("<script");
+    expect(parts.script).toBe(
+      '<script src="https://insight.example/widgets/embed.js" async></script>',
+    );
+    expect(widgetEmbedSnippet(input)).toBe(`${parts.iframe}\n${parts.script}`);
   });
 });
 

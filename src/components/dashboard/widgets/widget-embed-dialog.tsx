@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Badge } from "@insightflare/ui/badge";
 import { Button } from "@insightflare/ui/button";
 import { Field, FieldLabel } from "@insightflare/ui/field";
 import { OverlayScrollbar } from "@insightflare/ui/overlay-scrollbar";
@@ -32,7 +33,11 @@ import type { WidgetRecord } from "@/lib/widgets/contract";
 import { suggestedWidgetHeight } from "@/lib/widgets/contract";
 
 import type { widgetLabels } from "./labels";
-import { displayType, widgetEmbedSnippet } from "./widget-manager-model";
+import {
+  displayType,
+  widgetEmbedParts,
+  widgetEmbedSnippet,
+} from "./widget-manager-model";
 
 export function WidgetEmbedDialog({
   copy,
@@ -56,24 +61,26 @@ export function WidgetEmbedDialog({
     return `${prefix}/widget/${encodeURIComponent(record.uuid)}`;
   }
 
-  function embedCode(record: WidgetRecord): string {
+  function embedInput(record: WidgetRecord) {
     const config = record.published ?? record.draft;
-    return widgetEmbedSnippet({
+    return {
       origin: window.location.origin,
       path: embedPath(record),
       config,
       title: config.title || displayType(config.type, copy),
-    });
+    };
   }
 
-  async function copyEmbed(record: WidgetRecord) {
+  async function copyText(text: string) {
     try {
-      await navigator.clipboard.writeText(embedCode(record));
+      await navigator.clipboard.writeText(text);
       toast.success(copy.copied);
     } catch {
       toast.error(copy.requestError);
     }
   }
+
+  const parts = embedRecord ? widgetEmbedParts(embedInput(embedRecord)) : null;
 
   return (
     <ResponsiveDialog
@@ -141,22 +148,29 @@ export function WidgetEmbedDialog({
                   />
                 </a>
               </div>
-              <div className="min-w-0 space-y-1.5">
-                <p className="text-xs font-medium">{copy.embedCode}</p>
-                <div className="min-w-0 border bg-muted/25 p-3">
-                  <OverlayScrollbar
-                    axis="horizontal"
-                    showEdgeMasks
-                    className="min-w-0 w-full text-xs leading-relaxed text-foreground"
-                    contentClassName="w-max min-w-full"
-                  >
-                    <HighlightedCode
-                      source={embedCode(embedRecord)}
-                      className="font-mono whitespace-pre"
-                    />
-                  </OverlayScrollbar>
+              {parts ? (
+                <div className="min-w-0 space-y-4">
+                  <EmbedPart
+                    step={1}
+                    title={copy.embedFrameTitle}
+                    badge={copy.embedRequired}
+                    hint={copy.embedFrameHint}
+                    source={parts.iframe}
+                    copyLabel={copy.copyPart}
+                    onCopy={() => void copyText(parts.iframe)}
+                  />
+                  <EmbedPart
+                    step={2}
+                    title={copy.embedLoaderTitle}
+                    badge={copy.embedOptional}
+                    optional
+                    hint={copy.embedLoaderHint}
+                    source={parts.script}
+                    copyLabel={copy.copyPart}
+                    onCopy={() => void copyText(parts.script)}
+                  />
                 </div>
-              </div>
+              ) : null}
               <div className="space-y-2">
                 <h3 className="text-xs font-semibold">{copy.embedDetails}</h3>
                 <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-5 gap-y-2 text-xs">
@@ -222,7 +236,8 @@ export function WidgetEmbedDialog({
           <Button
             disabled={!embedRecord}
             onClick={() => {
-              if (embedRecord) void copyEmbed(embedRecord);
+              if (embedRecord)
+                void copyText(widgetEmbedSnippet(embedInput(embedRecord)));
             }}
           >
             <RiFileCopyLine className="size-4" aria-hidden="true" />
@@ -231,5 +246,65 @@ export function WidgetEmbedDialog({
         </ResponsiveDialogFooter>
       </ResponsiveDialogContent>
     </ResponsiveDialog>
+  );
+}
+
+function EmbedPart({
+  step,
+  title,
+  badge,
+  optional = false,
+  hint,
+  source,
+  copyLabel,
+  onCopy,
+}: {
+  step: number;
+  title: string;
+  badge: string;
+  optional?: boolean;
+  hint: string;
+  source: string;
+  copyLabel: string;
+  onCopy: () => void;
+}) {
+  return (
+    <section className="min-w-0 space-y-1.5">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="flex size-5 shrink-0 items-center justify-center border font-mono text-[10px] text-muted-foreground">
+          {step}
+        </span>
+        <h3 className="min-w-0 truncate text-xs font-medium">{title}</h3>
+        <Badge
+          variant={optional ? "outline" : "secondary"}
+          className="shrink-0 rounded-none px-1.5 py-0 text-[10px] font-normal"
+        >
+          {badge}
+        </Badge>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="ml-auto h-7 shrink-0 px-2 text-xs"
+          onClick={onCopy}
+        >
+          <RiFileCopyLine className="size-3.5" aria-hidden="true" />
+          {copyLabel}
+        </Button>
+      </div>
+      <p className="text-xs leading-relaxed text-muted-foreground">{hint}</p>
+      <div className="min-w-0 border bg-muted/25 p-3">
+        <OverlayScrollbar
+          axis="horizontal"
+          showEdgeMasks
+          className="min-w-0 w-full text-xs leading-relaxed text-foreground"
+          contentClassName="w-max min-w-full"
+        >
+          <HighlightedCode
+            source={source}
+            className="font-mono whitespace-pre"
+          />
+        </OverlayScrollbar>
+      </div>
+    </section>
   );
 }

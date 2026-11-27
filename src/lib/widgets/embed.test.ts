@@ -53,8 +53,8 @@ describe("widget preview auto-height", () => {
       config,
     });
     expect(html).toContain("border-radius: 0;");
-    expect(html).toMatch(/\.widget__rank\s*\{[^}]*border-radius:\s*0;/);
-    expect(html).toContain(".widget__rank {");
+    expect(html).toMatch(/\.widget__realtime-badge\s*\{[^}]*border-radius: 0;/);
+    expect(html).toContain(".widget__row::before");
     expect(html).not.toContain("widget__footer");
     expect(html).not.toContain("widget-footer");
   });

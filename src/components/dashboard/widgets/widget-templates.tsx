@@ -313,11 +313,11 @@ function TemplateDrawing({ type }: { type: WidgetTemplateId }) {
         className="flex h-[76px] flex-col justify-center gap-2 px-3.5"
       >
         <div className="font-mono text-[24px] font-semibold leading-none tracking-tight text-foreground">
-          12.8k
+          12,846
         </div>
         <div className="flex items-center gap-2">
-          <span className="border border-primary/25 bg-primary/10 px-1 py-0.5 font-mono text-[10px] leading-none text-primary">
-            +8.4%
+          <span className="font-mono text-[10px] leading-none text-primary">
+            ↑ +8.4%
           </span>
           <span className="h-1 w-12 bg-muted-foreground/20" />
         </div>
@@ -400,18 +400,22 @@ function TemplateDrawing({ type }: { type: WidgetTemplateId }) {
     return (
       <div
         aria-hidden="true"
-        className="flex h-[76px] flex-col justify-center gap-2 px-3.5"
+        className="flex h-[76px] flex-col justify-center px-3.5"
       >
         {[0, 1, 2].map((index) => (
-          <div className="flex items-center gap-2" key={index}>
-            <span className="flex size-4 shrink-0 items-center justify-center bg-muted font-mono text-[9px] text-foreground/70">
-              {index + 1}
-            </span>
+          <div
+            className="relative flex h-5 items-center gap-2 border-b px-1.5 first:border-t"
+            key={index}
+          >
             <span
-              className="h-1.5 bg-muted-foreground/25"
-              style={{ width: `${90 - index * 16}px` }}
+              className="absolute inset-y-0 left-0 bg-muted"
+              style={{ width: `${100 - index * 28}%` }}
             />
-            <span className="ml-auto h-1.5 w-7 bg-muted-foreground/15" />
+            <span
+              className="relative h-1.5 bg-muted-foreground/25"
+              style={{ width: `${72 - index * 12}px` }}
+            />
+            <span className="relative ml-auto h-1.5 w-7 bg-muted-foreground/30" />
           </div>
         ))}
       </div>

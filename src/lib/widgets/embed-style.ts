@@ -107,9 +107,8 @@ button {
   margin: 0;
   overflow-wrap: anywhere;
   font-size: 0.8125rem;
-  font-weight: 620;
+  font-weight: 500;
   line-height: 1.45;
-  letter-spacing: -0.01em;
 }
 .widget__period {
   flex: none;
@@ -133,11 +132,11 @@ button {
   gap: 0.5rem 0.75rem;
 }
 .widget__value {
-  font-size: clamp(2rem, 11vw, 2.5rem);
+  font-size: clamp(1.75rem, 10vw, 2.25rem);
   font-variant-numeric: tabular-nums;
-  font-weight: 650;
-  letter-spacing: -0.055em;
-  line-height: 1.08;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
 }
 .widget__unit {
   color: var(--muted-foreground);
@@ -146,12 +145,10 @@ button {
 .widget__change {
   display: inline-flex;
   align-items: center;
-  padding: 0.125rem 0.375rem;
-  border: 1px solid var(--border);
-  background: var(--muted);
   color: var(--muted-foreground);
   font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .widget__change[data-direction="up"] {
   color: var(--primary);
@@ -205,35 +202,35 @@ button {
 }
 .widget__list {
   display: grid;
-  gap: 0.5rem;
   margin: 0;
   padding: 0;
+  border-top: 1px solid var(--border);
   list-style: none;
 }
 .widget__row {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 1rem;
   min-width: 0;
+  padding: 0.4375rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.widget__row::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--widget-share, 0%);
+  background: var(--muted);
+  content: "";
+}
+.widget__row > * {
+  position: relative;
 }
 .widget__ranked-label {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 0.625rem;
-}
-.widget__rank {
-  display: grid;
-  width: 1.25rem;
-  height: 1.25rem;
-  flex: none;
-  place-items: center;
-  border-radius: 0;
-  background: var(--muted);
-  color: var(--muted-foreground);
-  font-size: 0.625rem;
-  font-variant-numeric: tabular-nums;
 }
 .widget__label.widget__path-link { color:var(--primary);text-decoration:none;text-underline-offset:3px; }
 .widget__path-link:hover { text-decoration:underline; }
@@ -246,7 +243,7 @@ button {
   white-space: nowrap;
 }
 .widget__count {
-  color: var(--muted-foreground);
+  color: var(--foreground);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
@@ -255,10 +252,12 @@ button {
 .widget__bar-track { width:100%;height:.375rem;background:var(--muted); }
 .widget__bar-fill { height:100%;background:var(--primary);transition:width .22s ease; }
 .widget__bar-number { flex:none;color:var(--muted-foreground);font-size:.6875rem;font-variant-numeric:tabular-nums; }
-.widget__legend { display:flex;flex-wrap:wrap;gap:.5rem .85rem;margin:.5rem 0 .625rem; }
+.widget__legend { display:flex;flex-wrap:wrap;gap:.375rem .85rem;margin:0 0 .5rem; }
 .widget__legend-item { display:flex;align-items:center;gap:.375rem;color:var(--muted-foreground);font-size:.6875rem; }
 .widget__legend-swatch { width:.875rem;height:.1875rem;background:var(--primary); }
 .widget__secondary { margin:.5rem 0 0;color:var(--muted-foreground);font-size:.6875rem; }
+.widget__value-line + .widget__secondary { margin-top:.25rem; }
+.widget__value-line ~ .widget__trend-grid { margin-top:.875rem; }
 
 .widget__donut-wrap { display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1rem;min-width:0; }
 .widget__donut-ring { display:block;flex:none;width:112px;height:112px;overflow:visible; }
@@ -276,7 +275,7 @@ button {
 .widget__ratio-layout .widget__breakdown-legend { grid-template-columns:repeat(auto-fit,minmax(min(100%,125px),1fr));gap:.55rem 1rem; }
 @media (prefers-reduced-motion:reduce) { .widget__ratio-segment { transition:none; } }
 
-.widget__geo-map { position:relative;width:100%;height:182px;min-width:0;overflow:hidden; }
+.widget__geo-map { position:relative;width:100%;height:auto;aspect-ratio:360/150;max-height:260px;min-width:0;overflow:hidden; }
 .widget[data-geo-projection="globe"] .widget__geo-map { height:208px; }
 .widget__geo-canvas { display:block;width:100%;height:100%;touch-action:pan-y; }
 .widget__geo-tooltip { position:absolute;z-index:2;pointer-events:none;transform:translate(-50%,-100%);max-width:85%;padding:.35rem .5rem;border:1px solid var(--border);background:var(--card);color:var(--foreground);font-size:.6875rem;white-space:nowrap; }
@@ -322,11 +321,10 @@ button {
 .widget__realtime-bar { flex: 1 1 0; min-width: 0; background: var(--primary); opacity: .86; transition: height .3s ease-out; }
 .widget__realtime-axis { display: flex; align-items: center; justify-content: space-between; color: var(--muted-foreground); font-size: .625rem; }
 .widget__realtime-map-counter {
-  position: absolute; top: .25rem; left: .25rem; z-index: 1;
-  display: flex; align-items: center; gap: .4rem; padding: .3rem .5rem;
-  border: 1px solid var(--border); background: var(--card);
+  display: flex; align-items: center; gap: .4rem; margin: 0 0 .5rem;
   font-size: .6875rem;
 }
+.widget__realtime-map-counter .widget__realtime-label { color: var(--muted-foreground); }
 .widget__realtime-map-counter .widget__realtime-number { font-weight: 650; }
 .widget__realtime-empty { margin: 0; padding: 1rem 0; text-align: center; color: var(--muted-foreground); font-size: .75rem; }
 @media (prefers-reduced-motion: reduce) { .widget__realtime-bar { transition: none; } }
