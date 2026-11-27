@@ -36,6 +36,57 @@ import {
   sampleActiveVisitors,
 } from "@/lib/demo/realtime/visitor-pool";
 export const DEMO_FACT_DATASET_CACHE = new Map<string, DemoFactDataset>();
+// A count of windows alone is not a memory budget: a single window can
+// contain 12k visits plus session and visitor objects. Reserve space before
+// allocating the next dataset, and retain recently used windows first.
+const MAX_CACHED_FACT_ROWS = 60_000;
+const MAX_CACHED_WINDOWS = 140;
+function reserveFactCacheRows(incomingRows: number) {
+  let retainedRows = 0;
+  for (const dataset of DEMO_FACT_DATASET_CACHE.values()) {
+    retainedRows +=
+      dataset.visits.length + dataset.sessions.size + dataset.visitors.size;
+  }
+  for (const [key, dataset] of DEMO_FACT_DATASET_CACHE) {
+    if (
+      retainedRows + incomingRows <= MAX_CACHED_FACT_ROWS &&
+      DEMO_FACT_DATASET_CACHE.size < MAX_CACHED_WINDOWS
+    )
+      break;
+    retainedRows -=
+      dataset.visits.length + dataset.sessions.size + dataset.visitors.size;
+    DEMO_FACT_DATASET_CACHE.delete(key);
+  }
+}
+const EU_COUNTRIES = new Set([
+  "AT",
+  "BE",
+  "BG",
+  "HR",
+  "CY",
+  "CZ",
+  "DE",
+  "DK",
+  "EE",
+  "ES",
+  "FI",
+  "FR",
+  "GR",
+  "HU",
+  "IE",
+  "IT",
+  "LT",
+  "LU",
+  "LV",
+  "MT",
+  "NL",
+  "PL",
+  "PT",
+  "RO",
+  "SE",
+  "SI",
+  "SK",
+]);
 const DEMO_DAY_MS = 86_400_000;
 /** Earliest timestamp for which the synthetic Mock source claims coverage. */
 export const DEMO_FILTER_HISTORY_START_MS = Date.UTC(2020, 0, 1);
@@ -194,12 +245,17 @@ export function buildDemoFactDataset(
   const bucket = windowBucket(from, to);
   const cacheKey = `${day}:${siteId}:${bucket}`;
   const cached = DEMO_FACT_DATASET_CACHE.get(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    DEMO_FACT_DATASET_CACHE.delete(cacheKey);
+    DEMO_FACT_DATASET_CACHE.set(cacheKey, cached);
+    return cached;
+  }
 
   const profile = findSiteProfile(siteId);
   const metrics = computeMetrics(siteId, from, to);
   if (metrics.views <= 0) {
     const empty = emptyDemoFactDataset(from, to);
+    reserveFactCacheRows(0);
     DEMO_FACT_DATASET_CACHE.set(cacheKey, empty);
     return empty;
   }
@@ -226,6 +282,7 @@ export function buildDemoFactDataset(
     Math.min(sampledSessions, sampledVisitorsRaw),
   );
 
+  reserveFactCacheRows(sampledViews + sampledSessions + sampledVisitors);
   const viewWeight = metrics.views / sampledViews;
   const sessionWeight = metrics.sessions / sampledSessions;
   const visitorWeight = metrics.visitors / sampledVisitors;
@@ -276,6 +333,7 @@ export function buildDemoFactDataset(
   // Keep the fact universe bounded so the dashboard only exposes the paths
   // and referrers described by the selected demo site.
   const referrerPool = profileReferrers(profile);
+  const referrerWeights = referrerPool.map((entry) => entry.weight);
   const expandedPaths = profilePaths(profile);
   const pathWeights = expandedPaths.map((_, index) => 1 / (1 + index * 0.85));
   const pathTitleMap = buildDemoPathTitleMap(profile, expandedPaths);
@@ -283,6 +341,7 @@ export function buildDemoFactDataset(
   // 或由 profile.pathFlow 显式定义。会话内的连续 pageview 服从该图。
   const pathGraph = buildPathTransitionGraph(profile, expandedPaths);
   const eventPool = ["pageview", ...profile.eventNames];
+  const customEventPool = eventPool.slice(1);
   const fallbackAvgDuration = Math.max(
     4_000,
     Math.round(siteRatios(siteId).avgDurationMs),
@@ -331,16 +390,17 @@ export function buildDemoFactDataset(
     const osVersion = fingerprint.osVersion;
     const language = fingerprint.language;
     const screenSize = fingerprint.screenSize;
+    const screenMatch = /^(\d+)x(\d+)$/.exec(screenSize.trim());
+    const screenWidth = screenMatch ? Number(screenMatch[1]) : null;
+    const screenHeight = screenMatch ? Number(screenMatch[2]) : null;
+    const isEU = EU_COUNTRIES.has(country.trim().toUpperCase());
+    const identityMode = sessionIndex % 5;
 
     // Keep the selected referrer within the site's profile so overview source
     // dimensions do not acquire unrelated country/global long-tail labels.
     const selectedReferrer =
-      referrerPool[
-        weightedPickIndex(
-          rng,
-          referrerPool.map((entry) => entry.weight),
-        )
-      ]?.label ?? "(direct)";
+      referrerPool[weightedPickIndex(rng, referrerWeights)]?.label ??
+      "(direct)";
     const isDirect = selectedReferrer === "(direct)";
     const referrerHost = isDirect ? "" : selectedReferrer.toLowerCase();
     const keyword = encodeURIComponent(
@@ -386,14 +446,11 @@ export function buildDemoFactDataset(
       const eventType =
         visitIndex === 0 || rng() < 0.7
           ? eventPool[0]
-          : pickFromList(rng, eventPool.slice(1), eventPool[0]);
+          : pickFromList(rng, customEventPool, eventPool[0]);
       const durationMs = Math.max(
         0,
         Math.round((sessionDuration / viewCount) * (0.74 + rng() * 0.62)),
       );
-      const screenMatch = /^(\d+)x(\d+)$/.exec(screenSize.trim());
-      const screenWidth = screenMatch ? Number(screenMatch[1]) : null;
-      const screenHeight = screenMatch ? Number(screenMatch[2]) : null;
       const hasPerformance = (sessionIndex + visitIndex) % 3 !== 0;
       const perfTtfbMs = hasPerformance
         ? Math.max(1, Math.round(durationMs * 0.04))
@@ -410,7 +467,6 @@ export function buildDemoFactDataset(
       const perfInpMs = hasPerformance
         ? Math.max(1, Math.round(durationMs * 0.06))
         : null;
-      const identityMode = sessionIndex % 5;
 
       visits.push({
         visitId: `${sessionId}-v-${visitIndex.toString(36).padStart(3, "0")}`,
@@ -446,35 +502,7 @@ export function buildDemoFactDataset(
         durationMs,
         screenWidth,
         screenHeight,
-        isEU: new Set([
-          "AT",
-          "BE",
-          "BG",
-          "HR",
-          "CY",
-          "CZ",
-          "DE",
-          "DK",
-          "EE",
-          "ES",
-          "FI",
-          "FR",
-          "GR",
-          "HU",
-          "IE",
-          "IT",
-          "LT",
-          "LU",
-          "LV",
-          "MT",
-          "NL",
-          "PL",
-          "PT",
-          "RO",
-          "SE",
-          "SI",
-          "SK",
-        ]).has(country.trim().toUpperCase()),
+        isEU,
         perfTtfbMs,
         perfFcpMs,
         perfLcpMs,
@@ -520,57 +548,27 @@ export function buildDemoFactDataset(
   // Refresh the shared fact maps after the duration scaling above. These
   // values are consumed by the canonical mock filter evaluator as well as
   // the historical presentation-filter paths.
-  const sessionStats = new Map<
-    string,
-    { durationMs: number; views: number; events: number }
-  >();
   for (const visit of visits) {
-    const current = sessionStats.get(visit.sessionId) ?? {
-      durationMs: 0,
-      views: 0,
-      events: 0,
-    };
-    current.durationMs += visit.durationMs;
-    current.views += 1;
-    if (visit.eventType.trim().toLowerCase() !== "pageview")
-      current.events += 1;
-    sessionStats.set(visit.sessionId, current);
+    const session = sessions.get(visit.sessionId);
+    if (!session) continue;
+    session.durationMs = (session.durationMs ?? 0) + visit.durationMs;
+    session.views = (session.views ?? 0) + 1;
+    session.events =
+      (session.events ?? 0) +
+      (visit.eventType.trim().toLowerCase() === "pageview" ? 0 : 1);
   }
-  for (const [sessionId, session] of sessions) {
-    const stats = sessionStats.get(sessionId);
-    if (!stats) continue;
-    sessions.set(sessionId, {
-      ...session,
-      durationMs: stats.durationMs,
-      views: stats.views,
-      events: stats.events,
-      bounce: stats.views === 1,
-    });
+  for (const visitor of visitors.values()) {
+    visitor.sessions = 0;
+    visitor.views = 0;
+    visitor.events = 0;
   }
-  const visitorStats = new Map<
-    string,
-    { sessions: Set<string>; views: number; events: number }
-  >();
-  for (const visit of visits) {
-    const current = visitorStats.get(visit.visitorId) ?? {
-      sessions: new Set<string>(),
-      views: 0,
-      events: 0,
-    };
-    current.sessions.add(visit.sessionId);
-    current.views += 1;
-    if (visit.eventType.trim().toLowerCase() !== "pageview")
-      current.events += 1;
-    visitorStats.set(visit.visitorId, current);
-  }
-  for (const [visitorId, visitor] of visitors) {
-    const stats = visitorStats.get(visitorId);
-    visitors.set(visitorId, {
-      ...visitor,
-      sessions: stats?.sessions.size ?? 0,
-      views: stats?.views ?? 0,
-      events: stats?.events ?? 0,
-    });
+  for (const session of sessions.values()) {
+    session.bounce = session.views === 1;
+    const visitor = visitors.get(session.visitorId);
+    if (!visitor) continue;
+    visitor.sessions = (visitor.sessions ?? 0) + 1;
+    visitor.views = (visitor.views ?? 0) + (session.views ?? 0);
+    visitor.events = (visitor.events ?? 0) + (session.events ?? 0);
   }
 
   const dataset: DemoFactDataset = {
@@ -582,12 +580,5 @@ export function buildDemoFactDataset(
     visitors,
   };
   DEMO_FACT_DATASET_CACHE.set(cacheKey, dataset);
-  // Keep hot windows available when navigating between pages/sites. Clearing
-  // the whole cache here makes the next route rebuild every window at once.
-  while (DEMO_FACT_DATASET_CACHE.size > 140) {
-    const oldestKey = DEMO_FACT_DATASET_CACHE.keys().next().value;
-    if (oldestKey === undefined) break;
-    DEMO_FACT_DATASET_CACHE.delete(oldestKey);
-  }
   return dataset;
 }

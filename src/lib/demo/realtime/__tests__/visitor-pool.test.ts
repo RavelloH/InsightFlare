@@ -87,6 +87,16 @@ describe("mock/visitor-pool", () => {
       expect(Number.isFinite(a.longitude)).toBe(true);
     });
 
+    it("recreates identical fingerprints after bounded cache eviction", () => {
+      const first = getVisitorFingerprint(SITE_ID, "v-eviction-first");
+      for (let i = 0; i < 8192; i++) {
+        getVisitorFingerprint(SITE_ID, "v-eviction-" + i);
+      }
+      const next = getVisitorFingerprint(SITE_ID, "v-eviction-first");
+      expect(next).not.toBe(first);
+      expect(next).toEqual(first);
+    });
+
     it("returns different fingerprints for different visitor IDs (most of the time)", () => {
       const fingerprints = new Set<string>();
       for (let i = 0; i < 20; i += 1) {
