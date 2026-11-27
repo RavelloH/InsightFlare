@@ -3656,6 +3656,18 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "signup" }]) exists';
       const overlap =
         'sequence([EVENT { $.name eq "purchase" },EVENT { $.name exists }]) exists';
+      const lowerExpressions = [
+        "sequence([EVENT,EVENT,EVENT]) { $span gte 130ms } exists",
+        "sequence([EVENT,EVENT,EVENT]) { $span gt 130ms } exists",
+        "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) gte 100ms } exists",
+        "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) gt 100ms } exists",
+        "sequence([EVENT,EVENT,EVENT]) { $gap(2,3) gte 30ms } exists",
+        "sequence([EVENT,EVENT,EVENT]) { $gap(2,3) gt 30ms } exists",
+        "sequence([EVENT,EVENT,EVENT,EVENT]) { $gap(2,3) gte 0ms } notExists",
+        'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) { $span gte 0ms } exists',
+        'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) { $span gt 0ms } exists',
+        "sequence([EVENT { $.name exists },EVENT { $.name exists },EVENT { $.name exists }]) { $gap(2,3) gte 0ms } notExists",
+      ];
       const expressions = [
         "sequence([EVENT,EVENT]) exists",
         "sequence([EVENT,EVENT]) notExists",
@@ -3672,6 +3684,7 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         overlap.replace("]) exists", "]) notExists"),
         'sequence([EVENT { $.name exists },EVENT { $.name eq "missing" }]) notExists',
         'sequence([EVENT { $.name eq "missing" },EVENT { $.name exists }]) exists',
+        ...lowerExpressions,
       ];
       for (const scope of ["session", "visitor"] as const) {
         for (const expression of expressions) {
@@ -3690,6 +3703,33 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           { site_pk: 1, event_pk: 103 },
           { site_pk: 1, event_pk: 108 },
         ]);
+        for (const i of [0, 2, 4]) {
+          expect(read(scope, lowerExpressions[i]!).visits).toEqual([
+            { site_pk: 1, visit_id: "v-new" },
+          ]);
+        }
+        for (const i of [1, 3, 5]) {
+          expect(read(scope, lowerExpressions[i]!).visits).toEqual([]);
+        }
+        expect(read(scope, lowerExpressions[7]!).visits).toEqual(pair.visits);
+        expect(read(scope, lowerExpressions[8]!).visits).toEqual([
+          { site_pk: 1, visit_id: "v-new" },
+        ]);
+        expect(read(scope, lowerExpressions[8]!).events).toEqual([
+          { site_pk: 1, event_pk: 102 },
+          { site_pk: 1, event_pk: 103 },
+          { site_pk: 1, event_pk: 108 },
+        ]);
+        expect(
+          read(scope, "sequence([EVENT,EVENT]) { $span lte 1000ms } exists")
+            .sql,
+        ).not.toContain("history_visit");
+        expect(
+          read(scope, lowerExpressions[0]!, {
+            ...history,
+            filterRange: createTimeRange(100, 300),
+          }).sql,
+        ).not.toContain("history_visit");
         const triple = read(scope, expressions[2]!);
         expect(triple.visits).toEqual([{ site_pk: 1, visit_id: "v-new" }]);
         expect(
