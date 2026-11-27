@@ -14,7 +14,6 @@ import { isValidLocale, type Locale } from "@/lib/i18n/config";
 import {
   widgetAssetResponse,
   widgetDocumentAssets,
-  widgetEmbedLoaderResponse,
 } from "@/lib/widgets/assets";
 import {
   normalizeWidgetOrigin,
@@ -205,7 +204,6 @@ widgetPageRoutes.get("/:uuid", async (c) => {
 widgetPageRoutes.get("*", () => placeholderHtml("not-found", 404));
 
 // Registered before "/:uuid/data" so asset names never reach the widget lookup.
-publicWidgetDataRoutes.get("/embed.js", () => widgetEmbedLoaderResponse());
 publicWidgetDataRoutes.get("/assets/:file", async (c) => {
   const response = await widgetAssetResponse(c.req.param("file"));
   return (

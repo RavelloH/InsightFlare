@@ -500,17 +500,6 @@ describe("widget static assets", () => {
     }
   });
 
-  it("serves the host-page auto-height loader at a stable URL", async () => {
-    const response = await request("/api/public/widgets/embed.js");
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe(
-      "text/javascript; charset=utf-8",
-    );
-    expect(response.headers.get("cache-control")).toContain("max-age=3600");
-    expect(await response.text()).toContain("iframe[data-insightflare-widget]");
-    expect(readWidget).not.toHaveBeenCalled();
-  });
-
   it("styles placeholders through the same-origin stylesheet", async () => {
     vi.mocked(readWidget).mockResolvedValue(null);
     const response = await request(documentPath);

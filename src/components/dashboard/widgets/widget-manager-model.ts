@@ -154,7 +154,8 @@ export function widgetEmbedParts(input: WidgetEmbedInput): {
   script: string;
 } {
   const src = `${input.origin}${input.path}`;
-  const loader = `${input.origin}/api/public/widgets/embed.js`;
+  // Static asset (public/widgets/embed.js) at a stable, unversioned URL.
+  const loader = `${input.origin}/widgets/embed.js`;
   return {
     iframe: `<iframe src="${htmlAttribute(src)}" title="${htmlAttribute(input.title)}" width="100%" height="${suggestedWidgetHeight(input.config)}" loading="lazy" style="border:0" data-insightflare-widget></iframe>`,
     script: `<script src="${htmlAttribute(loader)}" async></script>`,

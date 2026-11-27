@@ -56,6 +56,7 @@ const exact = new Set([
   "public/favicon-16x16.png",
   "public/favicon-32x32.png",
   "public/icon-1024.png",
+  "public/widgets/embed.js",
 ]);
 const allowed = [
   /^\.github\/readme\/README\.(?:en|ja|zh|zh-tw)\.md$/,

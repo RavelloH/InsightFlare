@@ -100,6 +100,7 @@ describe("public repository file policy", { timeout: 20000 }, () => {
     "output/report.json",
     ".playwright-cli/snapshot.ts",
     "public/images/report.pdf",
+    "public/widgets/other.js",
     "docs/新增 document.md",
   ])("rejects unapproved staged paths: %s", (file) => {
     stage(file);
@@ -127,6 +128,7 @@ describe("public repository file policy", { timeout: 20000 }, () => {
       "docs/openapi.json",
       "migrations/0001_initial.sql",
       "public/images/browser/chrome.svg",
+      "public/widgets/embed.js",
       ".github/screenshot/001.webp",
       ".github/workflows/ci.yml",
       ".husky/pre-commit",

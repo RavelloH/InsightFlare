@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { WIDGET_EMBED_LOADER } from "@/lib/widgets/client/embed-loader";
 import {
   WIDGET_SCRIPT_VARIANTS,
   widgetClientScript,
@@ -12,6 +11,9 @@ import {
 } from "@/lib/widgets/contract";
 import { renderWidgetDocument } from "@/lib/widgets/embed";
 import { WIDGET_EMBED_MESSAGES } from "@/lib/widgets/embed-messages";
+
+// The host-page loader ships as a static file at a stable URL.
+import WIDGET_EMBED_LOADER from "../../../../public/widgets/embed.js?raw";
 
 const uuid = "11111111-1111-4111-8111-111111111111";
 const base = {

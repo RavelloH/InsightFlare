@@ -17,8 +17,13 @@ it("only caches versioned static assets and preserves custom configuration", asy
     expect(content.split("\n").filter((line) => line.startsWith("/"))).toEqual([
       "/assets/*",
       "/images/flagpack/*",
+      "/widgets/embed.js",
     ]);
     expect(content.match(/max-age=31536000, immutable/g)).toHaveLength(2);
+    // The unversioned widget loader revalidates instead of being immutable.
+    expect(content).toContain(
+      "/widgets/embed.js\n  Cache-Control: public, max-age=3600, stale-while-revalidate=86400",
+    );
     await generateStaticHeaders(directory);
     expect(await readFile(target, "utf8")).toBe(content);
     await writeFile(target, "/custom\n  X-Test: yes\n");
