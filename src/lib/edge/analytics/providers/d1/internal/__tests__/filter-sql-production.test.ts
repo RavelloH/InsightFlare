@@ -1590,7 +1590,9 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           });
           expect(standalone.status).toBe(200);
           const baseline = (await standalone.json()) as { data: unknown };
-          expect(value?.value).toMatchObject({ ok: true, data: baseline.data });
+          expect(value).toMatchObject({
+            value: { ok: true, data: baseline.data },
+          });
           return value;
         }),
       );
@@ -1627,9 +1629,11 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           dashboardMode: true,
         });
         expect(standalone.status).toBe(200);
-        expect(result?.value).toMatchObject({
-          ok: true,
-          data: ((await standalone.json()) as { data: unknown }).data,
+        expect(result).toMatchObject({
+          value: {
+            ok: true,
+            data: ((await standalone.json()) as { data: unknown }).data,
+          },
         });
       }
       await Promise.all(Object.values(geo));
