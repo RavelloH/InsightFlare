@@ -12,6 +12,7 @@ import {
   nf,
   normalizeErrorMessage,
   readJsonResponse,
+  takeDeferredJsonResponsePayload,
   toErrorCode,
   una,
 } from "@/lib/response";
@@ -105,6 +106,22 @@ describe("response helpers", () => {
       requestId: "internal-1",
       rows: [{ value: 1 }],
     });
+  });
+
+  it("takes a deferred response payload once without consuming ordinary HTTP bodies", async () => {
+    const deferred = jsonResponseWith(
+      { requestId: "internal", deferJsonSerialization: true },
+      { ok: true },
+    );
+    expect(takeDeferredJsonResponsePayload(deferred)).toMatchObject({
+      ok: true,
+      requestId: "internal",
+    });
+    expect(takeDeferredJsonResponsePayload(deferred)).toBeUndefined();
+    const ordinary = j({ ok: true });
+    expect(takeDeferredJsonResponsePayload(ordinary)).toBeUndefined();
+    await expect(ordinary.json()).resolves.toEqual({ ok: true });
+    expect(takeDeferredJsonResponsePayload(new Response(null))).toBeUndefined();
   });
 
   it("normalizes error codes and common error response shortcuts", async () => {

@@ -1529,6 +1529,87 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
+  it("streams nonempty D1 map points with canonical metadata on cold cache and cache hit", async () => {
+    const { db, env } = runFixture();
+    const acl = vi.spyOn(siteAccess, "resolvePrivateSite").mockResolvedValue({
+      id: "site-a",
+      name: "A",
+      domain: "a.test",
+      canManage: true,
+    } as never);
+    const entries = new Map<string, Response>();
+    vi.stubGlobal("caches", {
+      open: async () => ({
+        match: async (request: Request) => entries.get(request.url)?.clone(),
+        put: async (request: Request, response: Response) => {
+          entries.set(request.url, response.clone());
+        },
+      }),
+    });
+    try {
+      const request = new Request("https://app.test/en/app/team/site/geo");
+      const window = {
+        preset: "custom" as const,
+        from: 100,
+        to: 300,
+        interval: "day" as const,
+        timeZone: "UTC",
+      };
+      const start = () =>
+        startSiteAnalyticsStream({
+          request,
+          env,
+          siteId: "site-a",
+          page: "geo",
+          window,
+          search: "",
+        });
+      const read = async () => {
+        const reads = await start();
+        const key = Object.keys(reads).find((key) =>
+          key.includes("overview-geo-points"),
+        )!;
+        const result = await reads[key];
+        await Promise.all(Object.values(reads));
+        if (!result || !("json" in result))
+          throw new Error("missing geo JSON handoff");
+        return {
+          key,
+          value: JSON.parse(result.json) as Record<string, unknown>,
+        };
+      };
+      const cold = await read();
+      expect(cold.value).toMatchObject({
+        ok: true,
+        data: expect.arrayContaining([
+          expect.objectContaining({ latitude: 34.05, longitude: -118.25 }),
+        ]),
+      });
+      expect(cold.value).not.toHaveProperty("requestId");
+      expect(cold.value).not.toHaveProperty("timestamp");
+      const url = new URL(cold.key, request.url);
+      const standalone = await executePrivateQuery({
+        env,
+        siteId: "site-a",
+        pathname: "overview-geo-points",
+        url,
+        request: new Request(url),
+        dashboardMode: true,
+      });
+      expect(standalone.status).toBe(200);
+      expect(await standalone.json()).toEqual({
+        ...cold.value,
+        requestId: expect.any(String),
+        timestamp: expect.any(String),
+      });
+      expect(await read()).toEqual(cold);
+    } finally {
+      vi.unstubAllGlobals();
+      acl.mockRestore();
+      db.close();
+    }
+  });
+
   it("uses the existing dimension batch from the SSR overview planner, including geography isolation", async () => {
     const db = sqlitePayloadFixture();
     const logger = createInvocationLogger({
