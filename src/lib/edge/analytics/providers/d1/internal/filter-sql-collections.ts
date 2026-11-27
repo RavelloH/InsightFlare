@@ -934,6 +934,74 @@ class SqlCollectionCompiler {
       (step) => JSON.stringify(step) === JSON.stringify(steps[0]),
     );
     const bound = target.kind === "selector" ? target.predicate : null;
+    // Narrow report universes can seek only their own historical Event
+    // witnesses instead of grouping every entity in the retained history.
+    // The time ratio, step count and probe cap are cost guards, not
+    // restrictions on the authorized historical range.
+    const start = this.clock?.readStartMs;
+    const end = this.clock?.readEndExclusiveMs;
+    const qStart = this.clock?.rangeStartMs;
+    const qEnd = this.clock?.rangeEndExclusiveMs;
+    if (
+      this.sources.indexedGlobalTimelineVisits &&
+      target.kind === "sequence" &&
+      identical &&
+      count <= 5 &&
+      steps[0]?.kind === "entity-root" &&
+      steps[0].entity === "event" &&
+      !this.clock?.filterRangeExplicit &&
+      start !== undefined &&
+      end !== undefined &&
+      qStart !== undefined &&
+      qEnd !== undefined &&
+      qEnd > qStart &&
+      qEnd - qStart <= 3600000 &&
+      end - start >= 24 * (qEnd - qStart)
+    ) {
+      const identity =
+        frame.anchorKind === "session" ? "session_id" : "visitor_id";
+      const name = `scope_global_sequence_${this.globalSequenceCtes.length}`;
+      const universe =
+        frame.anchorKind === "session"
+          ? "scope_filter_sessions"
+          : "scope_filter_visitors";
+      const anchor = frame.anchorAlias;
+      const found = `EXISTS (
+        SELECT 1 FROM visits history_visit
+        CROSS JOIN custom_events history_event
+        INNER JOIN custom_event_names history_name ON history_name.id=history_event.event_name_id
+        WHERE history_visit.site_pk=${anchor}.site_pk AND history_visit.${identity}=${anchor}.${identity}
+          AND history_event.site_pk=history_visit.site_pk AND history_event.visit_id=history_visit.visit_id
+          AND history_event.occurred_at>=? AND history_event.occurred_at<?
+        LIMIT 1 OFFSET ${count - 1})`;
+      const item = this.alias();
+      // Bound the number of independent history probes. CASE is lazy in
+      // SQLite: a dense report universe retains the set-based scan, and a
+      // small universe never evaluates that historical aggregate.
+      this.globalSequenceCtes.push(
+        boundCte(
+          name,
+          `${name} AS (
+          SELECT ${item}.site_pk, ${item}.${identity} AS entity_id
+          FROM ${this.source("event", true)} ${item}
+          WHERE ${item}.site_pk IS NOT NULL AND TRIM(COALESCE(${item}.${identity},''))!=''
+          GROUP BY ${item}.site_pk,${item}.${identity}
+          HAVING COUNT(*) >= ${count})`,
+        ),
+      );
+      const membership = `CASE WHEN EXISTS (SELECT 1 FROM ${universe} LIMIT 1 OFFSET 64)
+        THEN COALESCE((${anchor}.site_pk,${anchor}.${identity}) IN (SELECT site_pk,entity_id FROM ${name}),0)
+        ELSE ${found} END`;
+      return {
+        sql:
+          condition.operator === "notExists"
+            ? `NOT (${membership})`
+            : membership,
+        bindings: [start, end],
+        applicable: true,
+      };
+    }
+
     if (
       adjacent &&
       (count > 5 ||
