@@ -398,12 +398,23 @@ function buildFunnelCteParts(
   // With identical stages, the greedy next witness is simply the next
   // ordered occurrence. Rank once; retain the first witness identities and
   // conversion-window anchor rather than counting the later witness's session.
-  // Membership plans retain their existing reached-relation construction.
+  // For mixed funnels, amortize ranking only over a long visitor prefix
+  // followed by one different conversion step. Keep other mixed funnels
+  // and membership plans on the selective stage-by-stage path.
+  let repeatedPrefix = 0;
+  while (
+    repeatedPrefix < config.steps.length &&
+    config.steps[repeatedPrefix]!.filterDsl === config.steps[0]!.filterDsl
+  )
+    repeatedPrefix++;
   if (
     options.analysis &&
     dataset.uniqueObservationIds === true &&
-    config.steps.length >= 3 &&
-    config.steps.every((step) => step.filterDsl === config.steps[0]!.filterDsl)
+    repeatedPrefix >= 3 &&
+    (repeatedPrefix === config.steps.length ||
+      (visitorWindow &&
+        repeatedPrefix >= 4 &&
+        repeatedPrefix === config.steps.length - 1))
   ) {
     const filter = executeObservationFilterOnScopedDataset(
       dataset,
@@ -424,10 +435,10 @@ function buildFunnelCteParts(
       FROM funnel_step_0_witnesses
       WINDOW w AS (${order})
     ), repeat_reached AS MATERIALIZED (
-      SELECT * FROM repeat_ranked WHERE reached_rank <= ${config.steps.length}
+      SELECT * FROM repeat_ranked WHERE reached_rank <= ${repeatedPrefix}
       ${visitorWindow ? "AND last_observed_at <= first_observed_at + (SELECT conversion_window_ms FROM funnel_params)" : ""}
     )`);
-    config.steps.forEach((step, index) => {
+    config.steps.slice(0, repeatedPrefix).forEach((step, index) => {
       funnelCtes.push(
         `reached_${index} AS (SELECT * FROM repeat_reached WHERE reached_rank=${index + 1})`,
       );
@@ -437,16 +448,13 @@ function buildFunnelCteParts(
         reachedRelation: `reached_${index}`,
       });
     });
-    return {
-      funnelCtes,
-      filterBindings,
-      steps: layers,
-      identity,
-      firstFilter: filter,
-    };
+    firstFilter = filter;
+  } else {
+    repeatedPrefix = 0;
   }
 
-  config.steps.forEach((step, stepIndex) => {
+  config.steps.slice(repeatedPrefix).forEach((step, offset) => {
+    const stepIndex = offset + repeatedPrefix;
     const filter = executeObservationFilterOnScopedDataset(
       dataset,
       parseFunnelStepFilter(step),

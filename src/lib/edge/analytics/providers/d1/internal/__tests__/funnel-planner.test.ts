@@ -456,6 +456,93 @@ scope_final_events(event_pk,event_id,site_pk,session_id,visitor_id,occurred_at,s
         }
       }
     }
+    const page = 'page.path eq "/landing"';
+    const event = 'event.name eq "signup"';
+    const missing = 'event.name eq "missing"';
+    for (const scope of ["session", "visitor"] as const) {
+      for (const prefixLength of [3, 4, 5, 9, 11]) {
+        for (const [prefix, tail] of [
+          [page, event],
+          [event, page],
+          [event, missing],
+        ] as const) {
+          for (const window of scope === "visitor"
+            ? [1, 30, 31, 1000]
+            : [null]) {
+            const definition = config(
+              [
+                ...Array.from({ length: prefixLength }, (_, i) =>
+                  step("prefix-" + i, prefix),
+                ),
+                step("tail", tail),
+              ],
+              scope,
+              window,
+            );
+            const options = { allowHistoricalOverLimit: prefixLength >= 10 };
+            const optimized = buildFunnelSqlPlan(definition, unique, options);
+            const original = buildFunnelSqlPlan(definition, source, options);
+            expect(
+              optimized.sql.includes("repeat_reached AS MATERIALIZED"),
+            ).toBe(scope === "visitor" && prefixLength >= 4);
+            expect(runPlan(optimized)).toEqual(runPlan(original));
+          }
+        }
+      }
+    }
+    const longMixed = config(
+      [
+        step("a", page),
+        step("b", page),
+        step("c", page),
+        step("d", page),
+        step("e", event),
+        step("f", page),
+      ],
+      "visitor",
+      1000,
+    );
+    expect(buildFunnelSqlPlan(longMixed, unique).sql).not.toContain(
+      "repeat_reached",
+    );
+    const prefixThenTail = config(
+      [
+        step("a", event),
+        step("b", event),
+        step("c", event),
+        step("d", event),
+        step("e", page),
+      ],
+      "visitor",
+      31,
+    );
+    const membership = buildFunnelMembershipSqlPlan(prefixThenTail, unique, 4);
+    expect(membership.ctes).not.toContain("repeat_reached");
+    // The fourth event is at 131, after the first at 100. There is no
+    // subsequent Page for visitor-a, even though another visitor shares
+    // the first session. Neither may complete the funnel.
+    expect(runPlan(buildFunnelSqlPlan(prefixThenTail, unique)).at(-1)).toEqual({
+      stepIndex: 4,
+      stepId: "e",
+      sessions: 0,
+      visitors: 0,
+    });
+
+    const withConversion = {
+      ...unique,
+      ctes: unique.ctes.replace(
+        "(1, 's-null-visitor', NULL, 120, 'visit-e', '/landing')",
+        "(1, 's-null-visitor', NULL, 120, 'visit-e', '/landing'), (1, 's-conversion', 'visitor-a', 132, 'visit-final', '/landing')",
+      ),
+    };
+    const conversion = config(prefixThenTail.steps, "visitor", 32);
+    expect(
+      runPlan(buildFunnelSqlPlan(conversion, withConversion)).at(-1),
+    ).toEqual({ stepIndex: 4, stepId: "e", sessions: 1, visitors: 1 });
+    expect(
+      runPlan(buildFunnelSqlPlan(prefixThenTail, withConversion)).at(-1),
+    ).toEqual({ stepIndex: 4, stepId: "e", sessions: 0, visitors: 0 });
+
     const mixed = config([
       step("a", 'page.path eq "/landing"'),
       step("b", 'event.name eq "signup"'),
