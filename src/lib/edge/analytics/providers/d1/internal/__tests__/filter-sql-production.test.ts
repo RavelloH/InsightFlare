@@ -3648,10 +3648,17 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           events: rows(data.eventRelation, "event_pk"),
         };
       };
+      const namedPair =
+        'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) exists';
       const expressions = [
         "sequence([EVENT,EVENT]) exists",
         "sequence([EVENT,EVENT]) notExists",
         "sequence([EVENT,EVENT,EVENT]) exists",
+        namedPair,
+        namedPair.replace(" exists", " notExists"),
+        'sequence([EVENT { $.name eq "missing" },EVENT { $.name eq "missing" }]) notExists',
+        "sequence([EVENT { $.name exists },EVENT { $.name exists },EVENT { $.name exists }]) exists",
+        'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) exists',
       ];
       for (const scope of ["session", "visitor"] as const) {
         for (const expression of expressions) {
@@ -3685,12 +3692,39 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
             filterRange: createTimeRange(100, 300),
           }).sql,
         ).not.toContain("history_visit");
+        expect(read(scope, namedPair).visits).toEqual(pair.visits);
+        expect(read(scope, namedPair).events).toEqual(pair.events);
+        expect(read(scope, expressions[7]!).visits).toEqual([]);
+        expect(read(scope, expressions[7]!).events).toEqual([]);
+        expect(
+          read(scope, namedPair, {
+            ...history,
+            filterRange: createTimeRange(100, 300),
+          }).sql,
+        ).not.toContain("history_visit");
         expect(
           read(
             scope,
-            'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) exists',
+            'sequence([EVENT { $.name contains "purchase" },EVENT { $.name contains "purchase" }]) exists',
           ).sql,
         ).not.toContain("history_visit");
+        expect(
+          read(
+            scope,
+            'sequence([EVENT { $.name eq "signup" },EVENT { $.name eq "purchase" }]) exists',
+          ).sql,
+        ).not.toContain("history_visit");
+      }
+      // Both paths reuse the same normalized event.name comparison.
+      db.exec("UPDATE custom_event_names SET name=' purchase ' WHERE id=1");
+      for (const scope of ["session", "visitor"] as const) {
+        expect(read(scope, namedPair)).toEqual(
+          read(scope, namedPair, history, true),
+        );
+        expect(read(scope, namedPair).visits).toEqual([
+          { site_pk: 1, visit_id: "v-new" },
+          { site_pk: 1, visit_id: "v-report" },
+        ]);
       }
       const insert = db.prepare(
         "INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms) VALUES(1,'site-a',?,?,?,'/dense',200,1)",
