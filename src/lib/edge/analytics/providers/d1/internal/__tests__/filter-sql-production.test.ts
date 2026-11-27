@@ -3601,6 +3601,135 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
   it.each(["session", "visitor"] as const)(
+    "seeks historical Without witnesses in report entities (%s)",
+    (scope) => {
+      const db = sqliteFixture();
+      try {
+        db.exec(`
+        CREATE UNIQUE INDEX test_visit_key ON visits(site_pk,visit_id);
+        CREATE INDEX test_visit_session ON visits(site_pk,session_id,started_at);
+        CREATE INDEX test_visit_visitor ON visits(site_pk,visitor_id,started_at);
+        CREATE INDEX test_event_visit ON custom_events(site_pk,visit_id,occurred_at);
+        INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms)
+        VALUES(1,'site-a','v-without-before','s-without','u-without','/old',-10001,1),
+              (1,'site-a','v-without-now','s-without','u-without','/now',200,1),
+              (1,'site-a','v-without-one','s-without-one','u-without-one','/now',200,1),
+              (1,'site-a','v-without-only','s-without-only','u-without-only','/old',-10001,1),
+              (2,'site-b','v-without-before','s-without','u-without','/old',-10001,1);
+        INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at)
+        VALUES(11201,1,'site-a','without-a','v-without-before',2,-10000),
+              (11202,1,'site-a','without-b','v-without-before',1,-10000),
+              (11203,1,'site-a','without-c','v-without-before',2,-10000),
+              (11204,1,'site-a','without-d','v-without-before',1,-10000),
+              (11205,1,'site-a','without-e','v-without-before',2,-10000),
+              (11206,1,'site-a','without-f','v-without-before',1,400),
+              (11207,1,'site-a','without-one','v-without-one',1,210),
+              (11208,2,'site-b','without-a','v-without-before',4,-10000),
+              (11209,1,'site-a','without-only-a','v-without-only',2,0),
+              (11210,1,'site-a','without-only-b','v-without-only',1,150);
+      `);
+        const base = createQueryTime(100, 300, "UTC", 400);
+        const history = { ...base, readRange: createTimeRange(-10000, 400) };
+        const a = 'EVENT { $.name eq "signup" }';
+        const b = 'EVENT { $.name eq "purchase" }';
+        const any = "EVENT { $.name exists }";
+        const missing = 'EVENT { $.name eq "missing" }';
+        const sequences = [
+          { steps: [a, b], excluded: a, expected: true },
+          { steps: [a, b, a], excluded: a, expected: true },
+          { steps: [a, b, a, b, a], excluded: a, expected: false },
+          { steps: [a, b, a, b, a], excluded: missing, expected: true },
+          { steps: [b, b], excluded: a, expected: false },
+          { steps: [a, a], excluded: a, expected: true },
+          { steps: [a, b, a, b], excluded: missing, expected: true },
+          { steps: [a, missing, b], excluded: a, expected: false },
+          { steps: [any, b, any], excluded: missing, expected: true },
+          { steps: ["EVENT", b, "EVENT"], excluded: a, expected: true },
+          { steps: ["EVENT", "EVENT"], excluded: "EVENT", expected: true },
+        ];
+        const read = (
+          expression: string,
+          time: QueryTime = history,
+          forceSet = false,
+        ) => {
+          const data = dataset(expression, scope, time);
+          const sql = forceSet
+            ? data.ctes.replaceAll("LIMIT 1 OFFSET 64", "LIMIT 1 OFFSET 0")
+            : data.ctes;
+          const rows = (relation: string, column: string) =>
+            select(
+              db,
+              `WITH ${sql} SELECT site_pk,${column} FROM ${relation} ORDER BY site_pk,${column}`,
+              data.bindings.map((b) => b.value),
+            );
+          return {
+            sql: data.ctes,
+            visits: rows(data.visitRelation, "visit_id"),
+            events: rows(data.eventRelation, "event_pk"),
+          };
+        };
+        const expressions = sequences.flatMap(({ steps, excluded }) =>
+          ["exists", "notExists"].map(
+            (op) => `without(sequence([${steps.join(",")}]),${excluded}) ${op}`,
+          ),
+        );
+        const compare = () => {
+          for (const expression of expressions) {
+            const actual = read(expression);
+            expect(actual.sql).toContain("history_visit");
+            expect(actual).toEqual(read(expression, history, true));
+          }
+        };
+        compare();
+        for (const [index, shape] of sequences.entries()) {
+          const positive = read(expressions[index * 2]!).visits;
+          const negative = read(expressions[index * 2 + 1]!).visits;
+          const entity = { site_pk: 1, visit_id: "v-without-now" };
+          if (shape.expected) {
+            expect(positive).toContainEqual(entity);
+            expect(negative).not.toContainEqual(entity);
+          } else {
+            expect(positive).not.toContainEqual(entity);
+            expect(negative).toContainEqual(entity);
+          }
+          expect(positive).not.toContainEqual({
+            site_pk: 1,
+            visit_id: "v-without-one",
+          });
+        }
+        expect(read(expressions[0]!).events).toContainEqual({
+          site_pk: 1,
+          event_pk: 11210,
+        });
+        expect(read(expressions[0]!, base).sql).not.toContain("history_visit");
+        expect(
+          read(expressions[0]!, {
+            ...history,
+            filterRange: createTimeRange(100, 300),
+          }).sql,
+        ).not.toContain("history_visit");
+        expect(
+          read(
+            `without(sequence([${a},${b}]),EVENT { $.name contains "signup" }) exists`,
+          ).sql,
+        ).not.toContain("history_visit");
+        const insert = db.prepare(
+          "INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms) VALUES(1,'site-a',?,?,?,'/dense',200,1)",
+        );
+        for (let i = 0; i < 70; i++)
+          insert.run(
+            "without-dense-" + i,
+            "without-session-" + i,
+            "without-visitor-" + i,
+          );
+        compare();
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  it.each(["session", "visitor"] as const)(
     "seeks ordered historical multi-stage Event witnesses (%s)",
     (scope) => {
       const db = sqliteFixture();
