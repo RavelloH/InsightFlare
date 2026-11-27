@@ -1627,6 +1627,68 @@ class SqlCollectionCompiler {
 
     if (
       this.sources.indexedGlobalTimelineVisits &&
+      target.kind === "selector" &&
+      !identical &&
+      count === 2 &&
+      firstName &&
+      lastName &&
+      compared &&
+      upper &&
+      historyRoot.kind === "entity-root" &&
+      historyRoot.entity === "event" &&
+      !this.clock?.filterRangeExplicit &&
+      start !== undefined &&
+      end !== undefined &&
+      qStart !== undefined &&
+      qEnd !== undefined &&
+      qEnd > qStart &&
+      qEnd - qStart <= 3600000 &&
+      end - start >= 24 * (qEnd - qStart)
+    ) {
+      const universe =
+        frame.anchorKind === "session"
+          ? "scope_filter_sessions"
+          : "scope_filter_visitors";
+      const anchor = frame.anchorAlias;
+      const flags = [firstName, lastName].map((selector, index) => {
+        const predicate = onlyApplicable(
+          this.expression(selector, {
+            ...frame,
+            currentAlias: "history_name",
+            currentKind: "event",
+          }),
+        );
+        seekBindings.push(...predicate.bindings);
+        return `CASE WHEN (${predicate.sql}) THEN 1 ELSE 0 END AS match_${index}`;
+      });
+      seekBindings.push(start, end);
+      // Physical Event occurrences are unique. The latest strictly earlier
+      // first-stage witness minimizes the gap for each second-stage witness.
+      // One source with two flags avoids visiting the same history twice.
+      const ranked = `SELECT match_1, activity_time -
+        MAX(CASE WHEN match_0=1 THEN activity_time END) OVER (
+          ORDER BY activity_time,activity_id COLLATE BINARY
+          ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS span_delta
+        FROM (SELECT history_event.occurred_at AS activity_time,
+          history_event.event_id AS activity_id,${flags.join(", ")}
+          FROM visits history_visit
+          CROSS JOIN custom_events history_event
+          INNER JOIN (SELECT id,name AS event_name FROM custom_event_names) history_name
+            ON history_name.id=history_event.event_name_id
+          WHERE history_visit.site_pk=${anchor}.site_pk
+            AND history_visit.${identity}=${anchor}.${identity}
+            AND history_event.site_pk=history_visit.site_pk
+            AND history_event.visit_id=history_visit.visit_id
+            AND history_event.occurred_at>=? AND history_event.occurred_at<?)`;
+      const local = `EXISTS(SELECT 1 FROM (${ranked})
+        WHERE match_1=1 AND ${compared.sql})`;
+      seekBindings.push(...compared.bindings);
+      found = `CASE WHEN EXISTS(SELECT 1 FROM ${universe} LIMIT 1 OFFSET 64)
+        THEN ${found} ELSE ${local} END`;
+    }
+
+    if (
+      this.sources.indexedGlobalTimelineVisits &&
       identical &&
       count <= 5 &&
       compared &&
