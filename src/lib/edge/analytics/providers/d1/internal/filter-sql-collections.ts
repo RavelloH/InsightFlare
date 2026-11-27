@@ -1169,6 +1169,7 @@ class SqlCollectionCompiler {
     const first = compileStep(steps[0]!);
     if (!first) return null;
     let sql: string;
+    let withoutSqlForSource: ((source: string) => string) | undefined;
     const bindings = [...first.bindings];
     const compared =
       bound?.kind === "condition" && !same
@@ -1202,15 +1203,15 @@ class SqlCollectionCompiler {
       // A start may itself be excluded, but every interior witness must
       // be non-excluded. An end may be excluded too. A reachable prefix
       // remains usable until the next strictly intervening exclusion.
-      const ctes = [
-        `ranked AS (
+      const ranked = (source: string) => `ranked AS (
         SELECT *, ROW_NUMBER() OVER (${partition} ORDER BY activity_time, activity_id COLLATE BINARY) AS position
         FROM (SELECT ${first.key}, ${item}.occurred_at AS activity_time,
           ${item}.event_id AS activity_id, ${flags.join(", ")}
-          FROM ${this.source("event", true)} ${item}
+          FROM ${source} ${item}
           WHERE ${item}.site_pk IS NOT NULL AND TRIM(COALESCE(${item}.${identity}, '')) != '')
         WHERE excluded = 1 OR ${stages.map((_, i) => `match_${i} = 1`).join(" OR ")}
-      )`,
+      )`;
+      const ctes = [
         `prefix_0 AS (
         SELECT *, MAX(CASE WHEN excluded = 1 THEN position END) OVER (${previous}) AS last_excluded,
           match_0 AS reachable
@@ -1235,7 +1236,9 @@ class SqlCollectionCompiler {
         )`);
         prefix = next;
       }
-      sql = `WITH ${ctes.join(", ")} SELECT DISTINCT site_pk, entity_id FROM ${prefix} WHERE reachable = 1`;
+      withoutSqlForSource = (source) =>
+        `WITH ${[ranked(source), ...ctes].join(", ")} SELECT DISTINCT site_pk, entity_id FROM ${prefix} WHERE reachable = 1`;
+      sql = withoutSqlForSource(this.source("event", true));
     } else if (without) {
       const last = compileStep(steps[1]!, first.item);
       const excluded = compileStep(target.excluded, first.item);
@@ -1252,11 +1255,11 @@ class SqlCollectionCompiler {
         bindings.push(...step.bindings);
         return `CASE WHEN (${step.predicate}) THEN 1 ELSE 0 END AS match_${index}`;
       });
-      const events = `SELECT ${first.key},
+      const events = (source: string) => `SELECT ${first.key},
           ${item}.occurred_at AS activity_time, 1 AS kind_rank,
           ${item}.event_id AS activity_id,
           ${flags.join(", ")}
-          FROM ${this.source("event", true)} ${item}
+          FROM ${source} ${item}
           WHERE ${item}.site_pk IS NOT NULL
             AND TRIM(COALESCE(${item}.${identity}, '')) != ''`;
       // Only matching endpoints and exclusions affect existence. Other
@@ -1267,9 +1270,9 @@ class SqlCollectionCompiler {
       const order =
         "ORDER BY activity_time, kind_rank, activity_id COLLATE BINARY";
       const previous = `${partition} ORDER BY position ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING`;
-      sql = `WITH ranked AS (
+      withoutSqlForSource = (source) => `WITH ranked AS (
         SELECT *, ROW_NUMBER() OVER (${partition} ${order}) AS position
-        FROM (${events})
+        FROM (${events(source)})
         WHERE match_0 = 1 OR match_1 = 1 OR match_2 = 1
       ), predecessors AS (
         SELECT site_pk, entity_id, match_1,
@@ -1279,6 +1282,7 @@ class SqlCollectionCompiler {
       )
       SELECT DISTINCT site_pk, entity_id FROM predecessors
       WHERE match_1 = 1 AND last_start >= COALESCE(last_excluded, 0)`;
+      sql = withoutSqlForSource(this.source("event", true));
     } else if (adjacent) {
       const matched = identical
         ? [first]
@@ -1577,6 +1581,47 @@ class SqlCollectionCompiler {
     const firstName = getNameSelector(steps[0]!);
     const lastName = getNameSelector(steps[1]!);
     const seekBindings: (string | number | null)[] = [];
+    const simpleEventStep = (step: FilterTargetExpression) =>
+      (step.kind === "entity-root" && step.entity === "event") ||
+      getNameSelector(step) !== null;
+    if (
+      withoutSqlForSource &&
+      without &&
+      target.kind === "without" &&
+      this.sources.indexedGlobalTimelineVisits &&
+      steps.every(simpleEventStep) &&
+      simpleEventStep(target.excluded) &&
+      !this.clock?.filterRangeExplicit &&
+      start !== undefined &&
+      end !== undefined &&
+      qStart !== undefined &&
+      qEnd !== undefined &&
+      qEnd > qStart &&
+      qEnd - qStart <= 3600000 &&
+      end - start >= 24 * (qEnd - qStart)
+    ) {
+      const universe =
+        frame.anchorKind === "session"
+          ? "scope_filter_sessions"
+          : "scope_filter_visitors";
+      // The original window logic already preserves strict exclusion boundaries.
+      // Restrict only its input to the current report entity, not the history.
+      const physical = `(SELECT history_event.site_pk, history_visit.${identity},
+          history_event.occurred_at, history_event.event_id, history_name.name AS event_name
+        FROM visits history_visit
+        CROSS JOIN custom_events history_event
+        INNER JOIN custom_event_names history_name ON history_name.id=history_event.event_name_id
+        WHERE history_visit.site_pk=${frame.anchorAlias}.site_pk
+          AND history_visit.${identity}=${frame.anchorAlias}.${identity}
+          AND history_event.site_pk=history_visit.site_pk
+          AND history_event.visit_id=history_visit.visit_id
+          AND history_event.occurred_at>=? AND history_event.occurred_at<?)`;
+      const localSql = withoutSqlForSource(physical);
+      seekBindings.push(...bindings, start, end);
+      found = `CASE WHEN EXISTS (SELECT 1 FROM ${universe} LIMIT 1 OFFSET 64)
+        THEN ${found} ELSE EXISTS(SELECT 1 FROM (${localSql})) END`;
+    }
+
     if (
       this.sources.indexedGlobalTimelineVisits &&
       target.kind === "sequence" &&
