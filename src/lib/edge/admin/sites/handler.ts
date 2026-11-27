@@ -25,6 +25,7 @@ import {
   toSlug,
 } from "@/lib/edge/admin/access";
 import { requireActor } from "@/lib/edge/admin/auth";
+import { siteTransferMutations } from "@/lib/edge/admin/owned-resources";
 import {
   bad,
   bool,
@@ -270,22 +271,29 @@ export async function handleSitesAdmin(
       const available = await ensurePublicSlugAvailable(env, pubSlug, siteId);
       if (!available) return bad("Public slug already exists", undefined, req);
     }
-    await database(env).run(
-      compileD1Mutation(
-        update(schema.sites, (columns) => ({
-          set: {
-            team_id: nextTeamId,
-            name,
-            domain,
-            public_enabled: pub ? 1 : 0,
-            public_slug: pub ? pubSlug : null,
-            updated_at: unixepoch(),
-          },
-          where: eq(columns.id, param(siteId)),
-        })),
-        { tag: "admin.sites.update" },
-      ),
+    const siteUpdate = compileD1Mutation(
+      update(schema.sites, (columns) => ({
+        set: {
+          team_id: nextTeamId,
+          name,
+          domain,
+          public_enabled: pub ? 1 : 0,
+          public_slug: pub ? pubSlug : null,
+          updated_at: unixepoch(),
+        },
+        where: eq(columns.id, param(siteId)),
+      })),
+      { tag: "admin.sites.update" },
     );
+    if (nextTeamId === e.teamId) {
+      await database(env).run(siteUpdate);
+    } else {
+      // Moving teams: owners outside the new team are treated as departed.
+      await database(env).batch([
+        siteUpdate,
+        ...siteTransferMutations(siteId, nextTeamId),
+      ]);
+    }
     await upsertSiteScriptSettings(env, siteId, {
       siteDomain: domain,
     });

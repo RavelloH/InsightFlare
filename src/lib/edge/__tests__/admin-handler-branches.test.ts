@@ -412,6 +412,50 @@ describe("admin handler low branches", () => {
     });
   });
 
+  it("reports a retryable conflict when resources change during account deletion", async () => {
+    byIdMock.mockResolvedValueOnce({
+      ...actor.user,
+      id: "target-1",
+      username: "target",
+      email: "target@example.test",
+    });
+    const deleteEnv = createEnv([
+      statement({ first: { count: 0 } }),
+      statement(),
+      statement(),
+      statement(),
+    ]);
+    deleteEnv.batch.mockRejectedValueOnce(
+      new Error("D1_ERROR: FOREIGN KEY constraint failed: SQLITE_CONSTRAINT"),
+    );
+    const response = await handleUsersAdmin(
+      request(
+        "/admin/users",
+        jsonInit({ userId: "target-1", intent: "delete" }, "PATCH"),
+      ),
+      deleteEnv.env,
+    );
+    expect(response.status).toBe(409);
+
+    byIdMock.mockResolvedValueOnce({ ...actor.user, id: "target-2" });
+    const failingEnv = createEnv([
+      statement({ first: { count: 0 } }),
+      statement(),
+      statement(),
+      statement(),
+    ]);
+    failingEnv.batch.mockRejectedValueOnce(new Error("D1 unavailable"));
+    await expect(
+      handleUsersAdmin(
+        request(
+          "/admin/users",
+          jsonInit({ userId: "target-2", intent: "delete" }, "PATCH"),
+        ),
+        failingEnv.env,
+      ),
+    ).rejects.toThrow("D1 unavailable");
+  });
+
   it("rejects short replacement passwords when admins update users", async () => {
     byIdMock.mockResolvedValueOnce(actor.user);
     const usernameConflict = statement({ first: null });

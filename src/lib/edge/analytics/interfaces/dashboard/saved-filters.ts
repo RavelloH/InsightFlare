@@ -468,6 +468,12 @@ export async function handleSavedFilters(
   if (request.method === "PUT") {
     const parsed = savedFilterInput(await parseJson(request));
     if (parsed instanceof Response) return parsed;
+    // Only a changed expression can create a duplicate. Ownership transfers
+    // may legitimately leave identical filters with one owner; renaming or
+    // describing such a filter must still work.
+    const expressionChanged =
+      parsed.filterDsl !== existing.filterDsl ||
+      parsed.scopePreference !== (existing.scopePreference ?? "auto");
     const savedFilters = scan(schema.saved_filters);
     const duplicateMatches = filter(
       savedFilters,
@@ -486,11 +492,13 @@ export async function handleSavedFilters(
     const duplicateQuery = project(duplicateLimit, {
       id: duplicateLimit.columns.id,
     });
-    const duplicate = await createD1DatabaseClient(env.DB).first(
-      compileD1Query(duplicateQuery, {
-        tag: "analytics.saved_filters.first",
-      }),
-    );
+    const duplicate = expressionChanged
+      ? await createD1DatabaseClient(env.DB).first(
+          compileD1Query(duplicateQuery, {
+            tag: "analytics.saved_filters.first",
+          }),
+        )
+      : null;
     if (duplicate) {
       return bad(
         "An identical saved filter already exists",

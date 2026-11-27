@@ -13,6 +13,7 @@ import {
   inSubquery,
   join,
   limit,
+  not,
   param,
   project,
   scalar,
@@ -33,10 +34,18 @@ import type { Env } from "@/lib/edge/types";
  *   user in the same D1 batch. `saved_filters.owner_user_id` stays
  *   ON DELETE RESTRICT, so a row created concurrently rolls the batch back
  *   instead of leaving an orphan;
+ * - moving a site to another team treats owners who are not members of the
+ *   new team as having left it;
  * - site access changes are reversible and intentionally do nothing here.
  * The new owner always comes from `teams.owner_user_id` inside the
  * statement, never from the client.
  */
+
+function teamMemberIds(teamId: string) {
+  const members = scan(schema.team_members);
+  const matching = filter(members, eq(members.columns.team_id, param(teamId)));
+  return project(matching, { userId: matching.columns.user_id });
+}
 
 function teamSiteIds(teamId: string) {
   const sites = scan(schema.sites);
@@ -101,6 +110,45 @@ export function memberDepartureMutations(
           eq(columns.owner_user_id, param(userId)),
           eq(columns.visibility, param("team")),
           inSubquery(columns.site_id, teamSiteIds(teamId)),
+        ),
+      })),
+      { tag: "admin.owned_resources.saved_filters.transfer_shared" },
+    ),
+  ];
+}
+
+/**
+ * A site moving to `nextTeamId`: resources owned by users outside that team
+ * follow the departure rule. Owners who belong to both teams keep theirs.
+ */
+export function siteTransferMutations(
+  siteId: string,
+  nextTeamId: string,
+): CompiledMutation[] {
+  return [
+    compileD1Mutation(
+      deleteFrom(schema.saved_filters, (columns) =>
+        and(
+          eq(columns.site_id, param(siteId)),
+          eq(columns.visibility, param("private")),
+          not(inSubquery(columns.owner_user_id, teamMemberIds(nextTeamId))),
+        ),
+      ),
+      { tag: "admin.owned_resources.saved_filters.delete_private" },
+    ),
+    compileD1Mutation(
+      update(schema.saved_filters, (columns) => ({
+        set: {
+          owner_user_id: coalesce(
+            teamOwnerOf(nextTeamId),
+            columns.owner_user_id,
+          ),
+          updated_at: unixepoch(),
+        },
+        where: and(
+          eq(columns.site_id, param(siteId)),
+          eq(columns.visibility, param("team")),
+          not(inSubquery(columns.owner_user_id, teamMemberIds(nextTeamId))),
         ),
       })),
       { tag: "admin.owned_resources.saved_filters.transfer_shared" },

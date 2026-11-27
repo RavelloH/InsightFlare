@@ -367,6 +367,68 @@ describe("saved filters", () => {
     ).toEqual({ id: "team-shared" });
   });
 
+  it("allows renaming a filter that duplicates another after a transfer", async () => {
+    const { env, d1 } = context();
+    d1.database
+      .prepare(
+        "INSERT INTO saved_filters (id, site_id, owner_user_id, visibility, name, filter_dsl) VALUES (?,?,?,?,?,?)",
+      )
+      .run(
+        "transferred",
+        "site-1",
+        "user-1",
+        "team",
+        "Copy",
+        'page.path eq "/docs"',
+      );
+    const rename = await handleSavedFilters(
+      request("PUT", {
+        name: "Renamed",
+        description: "",
+        visibility: "team",
+        filterDsl: 'page.path eq "/docs"',
+      }),
+      env,
+      { siteId: "site-1", session, filterId: "transferred" },
+    );
+    const intoDuplicate = await handleSavedFilters(
+      request("PUT", {
+        name: "Renamed",
+        description: "",
+        visibility: "team",
+        filterDsl: 'page.path eq "/docs"',
+      }),
+      env,
+      { siteId: "site-1", session, filterId: "own-private" },
+    );
+    expect(rename.status).toBe(200);
+    // Unchanged expression on a pre-existing duplicate is also allowed;
+    // changing an expression into a duplicate is still rejected below.
+    expect(intoDuplicate.status).toBe(200);
+    const changed = await handleSavedFilters(
+      request("PUT", {
+        name: "Changed",
+        description: "",
+        visibility: "team",
+        filterDsl: 'geo.country eq "cn"',
+      }),
+      env,
+      { siteId: "site-1", session, filterId: "transferred" },
+    );
+    expect(changed.status).toBe(200);
+    const collide = await handleSavedFilters(
+      request("PUT", {
+        name: "Collide",
+        description: "",
+        visibility: "team",
+        filterDsl: 'page.path eq "/docs"',
+      }),
+      env,
+      { siteId: "site-1", session, filterId: "transferred" },
+    );
+    expect(collide.status).toBe(400);
+  });
+
   it("updates and deletes filters owned by the current user", async () => {
     const { env, d1 } = context();
     const update = await handleSavedFilters(

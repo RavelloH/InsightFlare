@@ -10,12 +10,14 @@ import {
   eq,
   param,
   schema,
+  update,
 } from "@/lib/db";
 import { createSqliteD1Database } from "@/lib/db/__tests__/sqlite-d1";
 import {
   accountDeletionMutations,
   memberDepartureImpact,
   memberDepartureMutations,
+  siteTransferMutations,
 } from "@/lib/edge/admin/owned-resources";
 import type { Env } from "@/lib/edge/types";
 
@@ -112,6 +114,28 @@ describe("owned resource lifecycle", () => {
     expect(
       database.prepare("SELECT id FROM users WHERE id = 'member'").get(),
     ).toBeUndefined();
+  });
+
+  it("moves only outsiders' resources when a site changes team", async () => {
+    const { database, env, rows } = fixture();
+    database
+      .prepare("DELETE FROM team_members WHERE team_id = ? AND user_id = ?")
+      .run("team-b", "member");
+    await createD1DatabaseClient(env.DB).batch([
+      compileD1Mutation(
+        update(schema.sites, (columns) => ({
+          set: { team_id: "team-b" },
+          where: eq(columns.id, param("site-a1")),
+        })),
+      ),
+      ...siteTransferMutations("site-a1", "team-b"),
+    ]);
+    expect(rows()).toEqual([
+      { id: "a1-other", owner: "owner-b", updatedAt: 500 },
+      { id: "a2-shared", owner: "member", updatedAt: 1 },
+      { id: "b1-private", owner: "member", updatedAt: 1 },
+      { id: "b1-shared", owner: "member", updatedAt: 1 },
+    ]);
   });
 
   it("keeps the restrict guard: without cleanup the account delete fails", () => {
