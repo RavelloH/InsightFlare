@@ -1111,6 +1111,47 @@ describe("Teams and Sites admin Typed DAL differential checks", () => {
     databases.delete(legacy.database);
   });
 
+  it("reports and applies member departure cleanup in one batch", async () => {
+    const { database, env } = createFixture();
+    const insertFilter = database.prepare(
+      "INSERT INTO saved_filters (id,site_id,owner_user_id,visibility,name,filter_dsl) VALUES (?,?,?,?,?,?)",
+    );
+    insertFilter.run("private", "site-1", "member-1", "private", "p", "x");
+    insertFilter.run("shared", "site-1", "member-1", "team", "s", "x");
+
+    const impact = await handleMembersAdmin(
+      request(
+        "/admin/members?teamId=team-1&userId=member-1&view=departure-impact",
+      ),
+      env,
+      new URL(
+        "https://app.test/admin/members?teamId=team-1&userId=member-1&view=departure-impact",
+      ),
+    );
+    expect(await responseData(impact)).toEqual({ deleted: 1, transferred: 1 });
+
+    const removal = await handleMembersAdmin(
+      request("/admin/members", "PATCH", {
+        teamId: "team-1",
+        userId: "member-1",
+        intent: "remove",
+      }),
+      env,
+      new URL("https://app.test/admin/members"),
+    );
+    expect(removal.status).toBe(200);
+    expect(
+      database
+        .prepare("SELECT id, owner_user_id AS owner FROM saved_filters")
+        .all(),
+    ).toEqual([{ id: "shared", owner: "owner-1" }]);
+    expect(
+      database
+        .prepare("SELECT 1 FROM team_members WHERE team_id=? AND user_id=?")
+        .get("team-1", "member-1"),
+    ).toBeUndefined();
+  });
+
   it("matches slug checks, site listing and site/domain lookup", async () => {
     const { database, env } = createFixture();
     expect(

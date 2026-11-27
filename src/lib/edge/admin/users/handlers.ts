@@ -38,8 +38,10 @@ import {
   toPublicUser,
   verifyPassword,
 } from "@/lib/edge/admin/auth";
+import { accountDeletionMutations } from "@/lib/edge/admin/owned-resources";
 import {
   bad,
+  conflict,
   forb,
   jsonResponseFor,
   na,
@@ -306,12 +308,27 @@ export async function handleUsersAdmin(
         return bad("Cannot delete user that owns teams", undefined, req);
       }
 
-      await database(env).run(
-        compileD1Mutation(
-          deleteFrom(schema.users, (columns) => eq(columns.id, param(id))),
-          { tag: "admin.users.delete" },
-        ),
-      );
+      // Private resources are deleted and shared ones handed to their team
+      // owner in the same batch. saved_filters keeps ON DELETE RESTRICT, so a
+      // resource created concurrently aborts the whole batch instead of
+      // leaving an orphan.
+      try {
+        await database(env).batch([
+          ...accountDeletionMutations(id),
+          compileD1Mutation(
+            deleteFrom(schema.users, (columns) => eq(columns.id, param(id))),
+            { tag: "admin.users.delete" },
+          ),
+        ]);
+      } catch (error) {
+        if (error instanceof Error && /FOREIGN KEY/i.test(error.message))
+          return conflict(
+            "User resources changed during deletion; please retry",
+            "user_resources_changed",
+            req,
+          );
+        throw error;
+      }
       return jsonResponseFor(req, {
         ok: true,
         data: { userId: id, removed: true },

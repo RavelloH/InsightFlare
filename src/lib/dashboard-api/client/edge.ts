@@ -361,6 +361,26 @@ export async function fetchAdminMembers(
   });
   return res.data;
 }
+/** What removing a member would delete or hand to the team owner. */
+export interface MemberDepartureImpact {
+  deleted: number;
+  transferred: number;
+}
+export async function fetchMemberDepartureImpact(
+  teamId: string,
+  userId: string,
+  options?: { signal?: AbortSignal },
+): Promise<MemberDepartureImpact> {
+  const res = await fetchEdgeJson<{
+    ok: boolean;
+    data: MemberDepartureImpact;
+  }>({
+    path: adminServicePath("members"),
+    params: { teamId, userId, view: "departure-impact" },
+    signal: options?.signal,
+  });
+  return res.data;
+}
 export async function addAdminMember(input: {
   teamId: string;
   identifier: string;

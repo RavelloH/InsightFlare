@@ -154,11 +154,27 @@ function parseListLimit(url: URL): number {
     ? Math.max(1, Math.min(100, Math.trunc(value)))
     : 100;
 }
-function asSavedFilter(row: SavedFilterRow, actorUserId: string): SavedFilter {
+/** Team owners/admins may delete (never edit) team-visible filters. */
+function canDeleteSavedFilter(
+  row: SavedFilterRow,
+  actorUserId: string,
+  canManageSite: boolean,
+): boolean {
+  return (
+    row.ownerUserId === actorUserId ||
+    (canManageSite && row.visibility === "team")
+  );
+}
+function asSavedFilter(
+  row: SavedFilterRow,
+  actorUserId: string,
+  canManageSite: boolean,
+): SavedFilter {
   return {
     ...row,
     scopePreference: row.scopePreference ?? "auto",
     isOwner: row.ownerUserId === actorUserId,
+    canDelete: canDeleteSavedFilter(row, actorUserId, canManageSite),
   };
 }
 function text(value: unknown, maxLength: number): string | null {
@@ -254,9 +270,12 @@ export async function handleSavedFilters(
     readonly siteId: string;
     readonly session: EdgeSessionClaims;
     readonly filterId?: string;
+    /** Actor is a team owner/admin (or system admin) for this site. */
+    readonly canManageSite?: boolean;
   },
 ): Promise<Response> {
   const { siteId, session } = input;
+  const canManageSite = input.canManageSite === true;
   const id = filterId(input.filterId);
 
   if (request.method === "GET" && !input.filterId) {
@@ -318,7 +337,7 @@ export async function handleSavedFilters(
     const hasMore = rows.results.length > limit;
     const pageRows = hasMore ? rows.results.slice(0, limit) : rows.results;
     const items = pageRows.map((row) =>
-      asSavedFilter(savedFilterRow(row), session.userId),
+      asSavedFilter(savedFilterRow(row), session.userId, canManageSite),
     );
     const last = pageRows[pageRows.length - 1];
     return jsonResponseFor(request, {
@@ -393,7 +412,7 @@ export async function handleSavedFilters(
     if (!created) throw new Error("saved filter was not created");
     return jsonResponseFor(
       request,
-      { filter: asSavedFilter(created, session.userId) },
+      { filter: asSavedFilter(created, session.userId, canManageSite) },
       201,
     );
   }
@@ -412,8 +431,34 @@ export async function handleSavedFilters(
   if (request.method === "GET") {
     if (!canRead) return nf("Saved filter not found", undefined, request);
     return jsonResponseFor(request, {
-      filter: asSavedFilter(existing, session.userId),
+      filter: asSavedFilter(existing, session.userId, canManageSite),
     });
+  }
+
+  if (request.method === "DELETE") {
+    if (!canDeleteSavedFilter(existing, session.userId, canManageSite)) {
+      return forb("Only the filter owner can modify it", undefined, request);
+    }
+    // Re-check ownership in the statement so a concurrent visibility change
+    // cannot let a manager delete a filter that just became private.
+    await createD1DatabaseClient(env.DB).run(
+      compileD1Mutation(
+        deleteFrom(schema.saved_filters, (columns) =>
+          and(
+            eq(columns.id, param(id)),
+            eq(columns.site_id, param(siteId)),
+            canManageSite
+              ? or(
+                  eq(columns.owner_user_id, param(session.userId)),
+                  eq(columns.visibility, param("team")),
+                )
+              : eq(columns.owner_user_id, param(session.userId)),
+          ),
+        ),
+        { tag: "analytics.saved_filters.delete" },
+      ),
+    );
+    return jsonResponseFor(request, { deletedId: id });
   }
 
   if (existing.ownerUserId !== session.userId) {
@@ -477,24 +522,8 @@ export async function handleSavedFilters(
     const updated = await savedFilterById(env, siteId, id);
     if (!updated) throw new Error("saved filter was not updated");
     return jsonResponseFor(request, {
-      filter: asSavedFilter(updated, session.userId),
+      filter: asSavedFilter(updated, session.userId, canManageSite),
     });
-  }
-
-  if (request.method === "DELETE") {
-    await createD1DatabaseClient(env.DB).run(
-      compileD1Mutation(
-        deleteFrom(schema.saved_filters, (columns) =>
-          and(
-            eq(columns.id, param(id)),
-            eq(columns.site_id, param(siteId)),
-            eq(columns.owner_user_id, param(session.userId)),
-          ),
-        ),
-        { tag: "analytics.saved_filters.delete" },
-      ),
-    );
-    return jsonResponseFor(request, { deletedId: id });
   }
 
   return na(request);

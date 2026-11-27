@@ -380,16 +380,32 @@ describe("admin handler low branches", () => {
     };
     byIdMock.mockResolvedValueOnce(targetUser);
     const ownedTeams = statement({ first: { count: null } });
+    const deletePrivateFilters = statement();
+    const transferSharedFilters = statement();
     const deleteUser = statement();
+    const deleteEnv = createEnv([
+      ownedTeams,
+      deletePrivateFilters,
+      transferSharedFilters,
+      deleteUser,
+    ]);
     const removed = await handleUsersAdmin(
       request(
         "/admin/users",
         jsonInit({ userId: "target-1", intent: "delete" }, "PATCH"),
       ),
-      createEnv([ownedTeams, deleteUser]).env,
+      deleteEnv.env,
     );
     expect(removed.status).toBe(200);
     expect(ownedTeams.bind).toHaveBeenCalledWith("target-1");
+    // Resource cleanup and the user delete run as one atomic batch.
+    expect(deleteEnv.batch).toHaveBeenCalledWith([
+      deletePrivateFilters,
+      transferSharedFilters,
+      deleteUser,
+    ]);
+    expect(deletePrivateFilters.sql).toContain('DELETE FROM "saved_filters"');
+    expect(transferSharedFilters.sql).toContain('UPDATE "saved_filters"');
     expect(deleteUser.bind).toHaveBeenCalledWith("target-1");
     await expect(jsonOf(removed)).resolves.toMatchObject({
       data: { userId: "target-1", removed: true },

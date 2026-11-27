@@ -34,6 +34,7 @@ async function savedFiltersRoute(c: Context<AppEnv>) {
     siteId: site.id,
     session,
     filterId: c.req.param("filterId") || undefined,
+    canManageSite: site.canManage === true,
   });
 }
 

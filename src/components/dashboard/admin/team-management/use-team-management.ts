@@ -20,10 +20,11 @@ import {
   type TeamDashboardSite,
   type TeamDashboardSnapshot,
 } from "@/lib/dashboard/team-dashboard-query";
-import type {
-  MemberData,
-  SiteData,
-  TeamData,
+import {
+  fetchMemberDepartureImpact,
+  type MemberData,
+  type SiteData,
+  type TeamData,
 } from "@/lib/dashboard-api/client/edge";
 import { navigateWithTransition } from "@/lib/page-transition";
 import { useRouter } from "@/lib/router";
@@ -168,6 +169,25 @@ export function useTeamManagement({
 
   const [removeMemberTarget, setRemoveMemberTarget] =
     useState<MemberData | null>(null);
+  const removeMemberImpactQuery = useQuery({
+    queryKey: [
+      "team-member-departure-impact",
+      activeTeam.id,
+      removeMemberTarget?.userId ?? null,
+    ],
+    queryFn: ({ signal }) =>
+      fetchMemberDepartureImpact(
+        activeTeam.id,
+        removeMemberTarget?.userId ?? "",
+        { signal },
+      ),
+    enabled: Boolean(removeMemberTarget),
+    staleTime: 0,
+    gcTime: 0,
+  });
+  const removeMemberImpact = removeMemberTarget
+    ? (removeMemberImpactQuery.data ?? null)
+    : null;
 
   const [changingRoleId, setChangingRoleId] = useState<string | null>(null);
 
@@ -765,6 +785,7 @@ export function useTeamManagement({
     panelSubtitle,
     panelTitle,
     removingMemberId,
+    removeMemberImpact,
     removeMemberTarget,
     revokingInviteId,
     revokeInviteTarget,
