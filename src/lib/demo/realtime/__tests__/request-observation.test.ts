@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { generateDemoRequestObservationData } from "@/lib/demo/realtime/request-observation";
+import {
+  aggregateDemoRequestObservationData,
+  generateDemoRequestObservationData,
+  generateDemoRequestObservationEvents,
+} from "@/lib/demo/realtime/request-observation";
 
 function weightedCount(events: Array<{ sampleWeight: number }>) {
   return events.reduce((sum, event) => sum + event.sampleWeight, 0);
@@ -38,6 +42,52 @@ describe("mock/request-observation", () => {
     expect(
       full.blockedEvents.some((event) => event.metadataJson.length > 0),
     ).toBe(true);
+  });
+
+  it("generates only matching metadata and preserves the event-only and overview contracts", () => {
+    const now = Date.UTC(2026, 10, 27);
+    const original = generateDemoRequestObservationData(60, now);
+    const blocked = original.blockedEvents[0]!;
+    const normal = original.normalEvents[0]!;
+    const events = generateDemoRequestObservationEvents(60, now, {
+      metadataMatch: { traceId: blocked.traceId, rayId: normal.rayId },
+    });
+    expect(events).not.toHaveProperty("summary");
+    expect(events).not.toHaveProperty("trend");
+    expect(
+      events.allEvents
+        .filter((event) => event.metadataJson)
+        .map((event) => event.traceId)
+        .sort(),
+    ).toEqual([blocked.traceId, normal.traceId].sort());
+    expect(
+      events.blockedEvents.find((event) => event.traceId === blocked.traceId),
+    ).toEqual(blocked);
+    expect(
+      events.normalEvents.find((event) => event.rayId === normal.rayId),
+    ).toEqual(normal);
+    const {
+      blockedEvents: _blocked,
+      includedEvents: _included,
+      events: _events,
+      normalEvents: _normal,
+      blocked: originalBlocked,
+      included: originalIncluded,
+      ...originalStats
+    } = original;
+    const aggregated = aggregateDemoRequestObservationData(events);
+    const {
+      blockedEvents: _b,
+      includedEvents: _i,
+      events: _e,
+      normalEvents: _n,
+      blocked: actualBlocked,
+      included: actualIncluded,
+      ...actualStats
+    } = aggregated;
+    expect(actualStats).toEqual(originalStats);
+    expect(actualBlocked.summary).toEqual(originalBlocked.summary);
+    expect(actualIncluded.summary).toEqual(originalIncluded.summary);
   });
 
   it("generates weighted blocked and included request observation data", () => {

@@ -1,5 +1,8 @@
 import { demoPage } from "@/lib/demo/realtime/pagination";
-import { generateDemoRequestObservationData } from "@/lib/demo/realtime/request-observation";
+import {
+  aggregateDemoRequestObservationData,
+  generateDemoRequestObservationEvents,
+} from "@/lib/demo/realtime/request-observation";
 
 export function demoRequestObservationResponse(
   params: Record<string, string | number>,
@@ -18,10 +21,15 @@ export function demoRequestObservationResponse(
         : requestedMinutes <= 10080
           ? 10080
           : 43200;
-  const data = generateDemoRequestObservationData(
+  const detailRequested = params.detail === "1";
+  const traceId = String(params.traceId || "");
+  const rayId = String(params.rayId || "");
+  const data = generateDemoRequestObservationEvents(
     minutes,
     Number.isFinite(to) && to > 0 ? to : undefined,
-    { includeMetadataJson: params.detail === "1" },
+    detailRequested
+      ? { metadataMatch: { traceId, rayId } }
+      : { includeMetadataJson: false },
   );
   const serializeDetailEvent = (event: Record<string, unknown>) => {
     const { sampleWeight: _sampleWeight, ...serialized } = event;
@@ -73,12 +81,10 @@ export function demoRequestObservationResponse(
     Record<string, unknown>
   >;
 
-  if (params.detail === "1") {
-    const traceId = String(params.traceId || "");
-    const rayId = String(params.rayId || "");
-    const detail = [...blockedEvents, ...includedEvents].find(
-      (event) => event.traceId === traceId || event.rayId === rayId,
-    );
+  if (detailRequested) {
+    const matches = (event: Record<string, unknown>) =>
+      event.traceId === traceId || event.rayId === rayId;
+    const detail = blockedEvents.find(matches) ?? includedEvents.find(matches);
     return {
       ok: true,
       configured: data.configured,
@@ -220,8 +226,9 @@ export function demoRequestObservationResponse(
     serializeListEvent(event, "included"),
   );
 
+  const overviewData = aggregateDemoRequestObservationData(data);
   return {
-    ...data,
+    ...overviewData,
     events: serializedBlockedEvents,
     normalEvents: serializedIncludedEvents.filter(
       (event) => event.category === "normal",
@@ -229,12 +236,12 @@ export function demoRequestObservationResponse(
     blockedEvents: serializedBlockedEvents,
     includedEvents: serializedIncludedEvents,
     blocked: {
-      ...data.blocked,
+      ...overviewData.blocked,
       events: serializedBlockedEvents,
       pagination: blockedPage.pagination,
     },
     included: {
-      ...data.included,
+      ...overviewData.included,
       events: serializedIncludedEvents,
       pagination: includedPage.pagination,
     },

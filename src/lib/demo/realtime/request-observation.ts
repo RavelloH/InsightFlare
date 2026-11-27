@@ -744,12 +744,20 @@ function aggregateEvents(
     includedMapPoints: [...includedMapPoints.values()],
   };
 }
-export function generateDemoRequestObservationData(
+interface DemoRequestObservationOptions {
+  includeMetadataJson?: boolean;
+  metadataMatch?: { traceId: string; rayId: string };
+}
+export function generateDemoRequestObservationEvents(
   minutes: WindowMinutes,
   generatedAt = Date.now(),
-  options: { includeMetadataJson?: boolean } = {},
-): DemoRequestObservationData {
-  const includeMetadataJson = options.includeMetadataJson !== false;
+  options: DemoRequestObservationOptions = {},
+) {
+  const includeMetadata = (traceId: string, rayId: string) =>
+    options.includeMetadataJson !== false &&
+    (!options.metadataMatch ||
+      options.metadataMatch.traceId === traceId ||
+      options.metadataMatch.rayId === rayId);
   const from = generatedAt - minutes * 60 * 1000;
   const rng = createDemoRng(
     "global",
@@ -837,7 +845,7 @@ export function generateDemoRequestObservationData(
       traceId,
       requestMethod: "POST",
       httpProtocol: "h2",
-      metadataJson: includeMetadataJson
+      metadataJson: includeMetadata(traceId, rayId)
         ? JSON.stringify({
             rayId,
             requestUrl: `https://${site.domain}${pathname}`,
@@ -908,6 +916,10 @@ export function generateDemoRequestObservationData(
       Math.round((18 + rng() * 44 + (isCustomEvent ? 8 : 0)) * 10) / 10;
     const sampleWeight = index % 19 === 0 ? 3 : index % 7 === 0 ? 2 : 1;
 
+    const colo = sPick(rng, COLOS);
+    const rayId = `${sInt(rng, 100000, 999999).toString(16)}${index.toString(16)}ok`;
+    const traceId = `demo-normal-${index.toString(36).padStart(5, "0")}`;
+
     normalEvents.push({
       timestamp: new Date(receivedAt).toISOString(),
       receivedAt,
@@ -931,14 +943,14 @@ export function generateDemoRequestObservationData(
       region: geo.regionName || geo.region,
       city: geo.cityName || geo.city,
       continent: geo.continent,
-      colo: sPick(rng, COLOS),
+      colo,
       asn: asn.asn,
       asOrganization: asn.organization,
-      rayId: `${sInt(rng, 100000, 999999).toString(16)}${index.toString(16)}ok`,
-      traceId: `demo-normal-${index.toString(36).padStart(5, "0")}`,
+      rayId,
+      traceId,
       requestMethod: "POST",
       httpProtocol: "h2",
-      metadataJson: includeMetadataJson
+      metadataJson: includeMetadata(traceId, rayId)
         ? JSON.stringify({
             eventId: `demo-event-${index.toString(36).padStart(5, "0")}`,
             visitId: `demo-visit-${(index % 24).toString(36).padStart(3, "0")}`,
@@ -972,24 +984,59 @@ export function generateDemoRequestObservationData(
       right.receivedAt - left.receivedAt ||
       left.traceId.localeCompare(right.traceId),
   );
-  // Reuse the existing normal-event array; allEvents already contains the same stable order.
+  // Preserve the existing global order and derive all partitions in one pass.
   normalEvents.length = 0;
+  const blockedEvents: DemoRequestEvent[] = [];
+  const includedEvents: DemoRequestEvent[] = [];
+  let observedSampled = false;
   for (const event of allEvents) {
     if (event.category === "normal") normalEvents.push(event);
+    if (event.disposition === "blocked") blockedEvents.push(event);
+    else includedEvents.push(event);
+    if (event.sampleWeight > 1) observedSampled = true;
   }
-  const blockedEvents = allEvents.filter(
-    (event) => event.disposition === "blocked",
+  return {
+    configured: true,
+    generatedAt,
+    window: { minutes, from, to: generatedAt },
+    sampling: {
+      provider: "cloudflare_analytics_engine" as const,
+      mode: "automatic" as const,
+      observedSampled,
+      aggregatesWeighted: true,
+      detailsAreSampled: true,
+      distinctAreApproximate: true,
+    },
+    allEvents,
+    normalEvents,
+    blockedEvents,
+    includedEvents,
+  };
+}
+export function generateDemoRequestObservationData(
+  minutes: WindowMinutes,
+  generatedAt = Date.now(),
+  options: DemoRequestObservationOptions = {},
+): DemoRequestObservationData {
+  return aggregateDemoRequestObservationData(
+    generateDemoRequestObservationEvents(minutes, generatedAt, options),
   );
-  const includedEvents = allEvents.filter(
-    (event) => event.disposition === "included",
-  );
-  const aggregates = aggregateEvents(allEvents, minutes, generatedAt);
-
-  let observedSampled = false;
+}
+export function aggregateDemoRequestObservationData(
+  data: ReturnType<typeof generateDemoRequestObservationEvents>,
+): DemoRequestObservationData {
+  const {
+    allEvents,
+    blockedEvents,
+    includedEvents,
+    normalEvents,
+    generatedAt,
+    window,
+  } = data;
+  const aggregates = aggregateEvents(allEvents, window.minutes, generatedAt);
   const summarizeEvents = (
     source: DemoRequestEvent[],
     includeLatency = false,
-    detectSampled = false,
   ) => {
     let total = 0;
     let normalRequests = 0;
@@ -1010,7 +1057,6 @@ export function generateDemoRequestObservationData(
     for (const event of source) {
       const weight = event.sampleWeight;
       total += weight;
-      if (detectSampled && weight > 1) observedSampled = true;
       if (event.category === "normal") normalRequests += weight;
       else if (event.category === "suspected_bot")
         suspectedBotRequests += weight;
@@ -1064,7 +1110,7 @@ export function generateDemoRequestObservationData(
       p99LatencyMs,
     };
   };
-  const summaryStats = summarizeEvents(allEvents, false, true);
+  const summaryStats = summarizeEvents(allEvents);
   const blockedSummary = summarizeEvents(blockedEvents);
   const includedSummary = summarizeEvents(includedEvents, true);
   const totalRequests = summaryStats.total;
@@ -1089,17 +1135,10 @@ export function generateDemoRequestObservationData(
 
   return {
     ok: true,
-    configured: true,
+    configured: data.configured,
     generatedAt,
-    window: { minutes, from, to: generatedAt },
-    sampling: {
-      provider: "cloudflare_analytics_engine" as const,
-      mode: "automatic" as const,
-      observedSampled,
-      aggregatesWeighted: true,
-      detailsAreSampled: true,
-      distinctAreApproximate: true,
-    },
+    window,
+    sampling: data.sampling,
     summary,
     events: blockedEvents,
     normalEvents,
