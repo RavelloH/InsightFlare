@@ -4144,6 +4144,143 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     },
   );
 
+  it.each(["session", "visitor"] as const)(
+    "seeks complete historical Adjacent timelines for report entities (%s)",
+    (scope) => {
+      const db = sqliteFixture();
+      try {
+        db.exec(`
+        CREATE UNIQUE INDEX test_visit_key ON visits(site_pk,visit_id);
+        CREATE INDEX test_visit_session ON visits(site_pk,session_id,started_at);
+        CREATE INDEX test_visit_visitor ON visits(site_pk,visitor_id,started_at);
+        CREATE INDEX test_event_visit ON custom_events(site_pk,visit_id,occurred_at);
+        INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms)
+        VALUES(1,'site-a','v-adj-history','s-adj','u-adj','/old',-10001,1),
+              (1,'site-a','v-adj-between','s-adj','u-adj','/between',90,1),
+              (1,'site-a','v-adj-now','s-adj','u-adj','/now',200,1),
+              (2,'site-b','v-adj-between','s-adj','u-adj','/other',90,1),
+              (1,'site-a','v-adj-one','s-adj-one','u-adj-one','/now',200,1);
+        INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at)
+        VALUES(12201,1,'site-a','adj-a','v-adj-history',2,70),
+              (12202,1,'site-a','adj-b','v-adj-history',1,110),
+              (12203,1,'site-a','adj-c','v-adj-history',2,110),
+              (12204,1,'site-a','adj-d','v-adj-history',1,110),
+              (12205,1,'site-a','adj-e','v-adj-history',2,110),
+              (12206,1,'site-a','adj-right','v-adj-history',1,400),
+              (12207,1,'site-a','adj-one','v-adj-one',1,210);
+      `);
+        const base = createQueryTime(100, 300, "UTC", 400);
+        const history = { ...base, readRange: createTimeRange(-10000, 400) };
+        const a = 'EVENT { $.name eq "signup" }';
+        const b = 'EVENT { $.name eq "purchase" }';
+        const any = "EVENT { $.name exists }";
+        const page = 'PAGE { $.path eq "/between" }';
+        const shapes = [
+          [a, b],
+          [page, b],
+          [a, page],
+          [b, a, b, a],
+          [b, any, b, any],
+          ["EVENT", "EVENT", "EVENT", "EVENT", "EVENT"],
+          [a, b, 'EVENT { $.name eq "missing" }'],
+        ];
+        const expressions = shapes.flatMap((steps) =>
+          ["exists", "notExists"].map(
+            (op) => `adjacent(sequence([${steps.join(",")}])) ${op}`,
+          ),
+        );
+        const read = (
+          expression: string,
+          time: QueryTime = history,
+          forceSet = false,
+        ) => {
+          const data = dataset(expression, scope, time);
+          const sql = forceSet
+            ? data.ctes.replaceAll("LIMIT 1 OFFSET 64", "LIMIT 1 OFFSET 0")
+            : data.ctes;
+          const rows = (relation: string, column: string) =>
+            select(
+              db,
+              `WITH ${sql} SELECT site_pk,${column} FROM ${relation} ORDER BY site_pk,${column}`,
+              data.bindings.map((b) => b.value),
+            );
+          return {
+            sql: data.ctes,
+            visits: rows(data.visitRelation, "visit_id"),
+            events: rows(data.eventRelation, "event_pk"),
+          };
+        };
+        const compare = () => {
+          for (const expression of expressions) {
+            const actual = read(expression);
+            expect(actual.sql).toContain("history_visit");
+            expect(actual).toEqual(read(expression, history, true));
+          }
+        };
+        const entity = { site_pk: 1, visit_id: "v-adj-now" };
+        const hit = (index: number) =>
+          read(expressions[index * 2]!).visits.some(
+            (row) =>
+              row.site_pk === entity.site_pk &&
+              row.visit_id === entity.visit_id,
+          );
+        compare();
+        expect([0, 1, 2, 3, 4, 5, 6].map(hit)).toEqual([
+          true,
+          true,
+          true,
+          true,
+          true,
+          false,
+          false,
+        ]);
+        // An unrelated Page must still interrupt the four consecutive Event witnesses.
+        db.exec(
+          "INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms) VALUES(1,'site-a','v-adj-noise','s-adj','u-adj','/noise',110,1)",
+        );
+        compare();
+        expect(hit(1)).toBe(false);
+        db.exec(
+          "DELETE FROM visits WHERE site_pk=1 AND visit_id='v-adj-noise'",
+        );
+        // A sessionless Page can occupy the real Session timeline, but never match its stage.
+        db.exec(
+          "UPDATE visits SET visit_id='s-adj',session_id=NULL WHERE site_pk=1 AND visit_id='v-adj-between'",
+        );
+        compare();
+        expect(hit(1)).toBe(scope === "visitor");
+        expect(hit(2)).toBe(scope === "visitor");
+        // Move its Page outside R; the linked Event in R still blocks the Session.
+        db.exec(
+          "UPDATE visits SET started_at=-10001,visitor_id='other' WHERE site_pk=1 AND visit_id='s-adj'; INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at) VALUES(12208,1,'site-a','adj-bb','s-adj',1,110)",
+        );
+        compare();
+        expect(hit(3)).toBe(scope === "visitor");
+        expect(hit(4)).toBe(scope === "visitor");
+        expect(read(expressions[0]!, base).sql).not.toContain("history_visit");
+        expect(
+          read(expressions[0]!, {
+            ...history,
+            filterRange: createTimeRange(100, 300),
+          }).sql,
+        ).not.toContain("history_visit");
+        expect(
+          read(
+            'adjacent(sequence([EVENT { $.name contains "signup" },EVENT])) exists',
+          ).sql,
+        ).not.toContain("history_visit");
+        const insert = db.prepare(
+          "INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms) VALUES(1,'site-a',?,?,?,'/dense',200,1)",
+        );
+        for (let i = 0; i < 70; i++)
+          insert.run("adj-dense-" + i, "adj-session-" + i, "adj-visitor-" + i);
+        compare();
+      } finally {
+        db.close();
+      }
+    },
+  );
+
   it("uses authorized indexed Page blockers without changing global Adjacent read domains", () => {
     const db = sqliteFixture();
     try {
