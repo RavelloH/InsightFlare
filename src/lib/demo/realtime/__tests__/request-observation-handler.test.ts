@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { generateData } = vi.hoisted(() => ({
+const { generateData, aggregateData } = vi.hoisted(() => ({
   generateData: vi.fn(),
+  aggregateData: vi.fn(),
 }));
 
 vi.mock("@/lib/demo/realtime/request-observation", () => ({
-  generateDemoRequestObservationData: generateData,
+  generateDemoRequestObservationEvents: generateData,
+  aggregateDemoRequestObservationData: aggregateData,
 }));
 
 import { demoRequestObservationResponse } from "@/lib/demo/realtime/request-observation-handler";
@@ -120,7 +122,10 @@ const demoData = {
 };
 
 beforeEach(() => {
+  generateData.mockClear();
+  aggregateData.mockClear();
   generateData.mockReturnValue(demoData);
+  aggregateData.mockReturnValue(demoData);
 });
 
 describe("demo request observation response handler", () => {
@@ -132,6 +137,8 @@ describe("demo request observation response handler", () => {
     expect(generateData).toHaveBeenLastCalledWith(60, undefined, {
       includeMetadataJson: false,
     });
+    expect(aggregateData).toHaveBeenCalledTimes(1);
+    expect(aggregateData).toHaveBeenCalledWith(demoData);
     expect(invalidWindow.events[0]).not.toHaveProperty("sampleWeight");
     expect(invalidWindow.blocked.events).toHaveLength(6);
     expect(invalidWindow.included.events).toHaveLength(1);
@@ -159,7 +166,7 @@ describe("demo request observation response handler", () => {
       traceId: "missing",
     }) as Record<string, any>;
     expect(generateData).toHaveBeenLastCalledWith(60, undefined, {
-      includeMetadataJson: true,
+      metadataMatch: { traceId: "missing", rayId: "" },
     });
     expect(missing.detail).toBeNull();
     const detail = demoRequestObservationResponse({
@@ -173,6 +180,15 @@ describe("demo request observation response handler", () => {
       rayId: "ray-included",
     }) as Record<string, any>;
     expect(detailByRay.detail.disposition).toBe("included");
+    expect(generateData).toHaveBeenLastCalledWith(60, undefined, {
+      metadataMatch: { traceId: "", rayId: "ray-included" },
+    });
+    const conflicting = demoRequestObservationResponse({
+      detail: "1",
+      traceId: "trace-included",
+      rayId: "ray-1",
+    }) as Record<string, any>;
+    expect(conflicting.detail.traceId).toBe("trace-1");
 
     const blocked = demoRequestObservationResponse({
       source: "abnormal",
@@ -190,6 +206,7 @@ describe("demo request observation response handler", () => {
     expect(included.data.pagination.limit).toBe(100);
     expect(included.data.items[0]).toHaveProperty("hostname");
     expect(included.data.items[0]).not.toHaveProperty("ip");
+    expect(aggregateData).toHaveBeenCalledTimes(4);
   });
 
   it("groups supported dimensions with source aliases, weighted counts, and unknown fallbacks", () => {
@@ -247,5 +264,6 @@ describe("demo request observation response handler", () => {
       dimensionSource: "unexpected",
     }) as Record<string, any>;
     expect(unknownSource.dimension.source).toBe("blocked");
+    expect(aggregateData).not.toHaveBeenCalled();
   });
 });
