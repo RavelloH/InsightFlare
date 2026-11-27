@@ -47,27 +47,33 @@ export function useInfiniteTableSentinel({
     ) {
       return;
     }
+    // IntersectionObserver delivers an initial layout snapshot even when a
+    // row is clipped by a nested scroll container. Reuse that snapshot for
+    // the initial prefetch margin instead of forcing synchronous layout on
+    // every skeleton row in an animation frame.
+    const initialNodes = new Set(connectedSentinelNodes);
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) onReachEnd();
+        const viewportHeight = window.innerHeight;
+        let shouldLoad = false;
+        for (const entry of entries) {
+          const initial = initialNodes.delete(entry.target as HTMLElement);
+          const rect = entry.boundingClientRect;
+          if (
+            entry.isIntersecting ||
+            (initial &&
+              rect.top <= viewportHeight + triggerDistance &&
+              rect.bottom >= -triggerDistance)
+          ) {
+            shouldLoad = true;
+          }
+        }
+        if (shouldLoad) onReachEnd();
       },
       { root: null, rootMargin, threshold: 0.01 },
     );
     connectedSentinelNodes.forEach((node) => observer.observe(node));
-    const frameId = window.requestAnimationFrame(() => {
-      const isInTriggerRange = connectedSentinelNodes.some((node) => {
-        const rect = node.getBoundingClientRect();
-        return (
-          rect.top <= window.innerHeight + triggerDistance &&
-          rect.bottom >= -triggerDistance
-        );
-      });
-      if (isInTriggerRange) {
-        onReachEnd();
-      }
-    });
     return () => {
-      window.cancelAnimationFrame(frameId);
       observer.disconnect();
     };
   }, [enabled, onReachEnd, rootMargin, sentinelNodes, triggerDistance]);

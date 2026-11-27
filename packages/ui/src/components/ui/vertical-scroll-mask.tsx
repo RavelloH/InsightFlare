@@ -55,23 +55,24 @@ export function VerticalScrollMask({
     (viewport = viewportRef.current) => {
       if (!viewport) return;
 
-      const { scrollTop, scrollHeight, clientHeight } = viewport;
-      const canScroll = scrollHeight > clientHeight + 1;
-      const showTop = enabled && canScroll && scrollTop > 10;
-      const showBottom =
-        enabled && canScroll && scrollTop < scrollHeight - clientHeight - 10;
+      const maxScrollTop = enabled
+        ? (scrollbarRef.current?.state().overflowAmount.y ??
+          viewport.scrollHeight - viewport.clientHeight)
+        : 0;
+      const canScroll = maxScrollTop > 1;
+      const scrollTop = canScroll ? viewport.scrollTop : 0;
+      const showTop = canScroll && scrollTop > 10;
+      const showBottom = canScroll && scrollTop < maxScrollTop - 10;
       topMaskRef.current?.classList.toggle("opacity-100", showTop);
       topMaskRef.current?.classList.toggle("opacity-0", !showTop);
       bottomMaskRef.current?.classList.toggle("opacity-100", showBottom);
       bottomMaskRef.current?.classList.toggle("opacity-0", !showBottom);
     },
-    [enabled],
+    [enabled, scrollbarRef],
   );
 
   const scheduleMaskSync = useCallback(() => {
-    if (frameRef.current !== null) {
-      cancelAnimationFrame(frameRef.current);
-    }
+    if (frameRef.current !== null) return;
     frameRef.current = requestAnimationFrame(() => {
       frameRef.current = null;
       syncMasks();
@@ -87,13 +88,12 @@ export function VerticalScrollMask({
     const resizeObserver = new ResizeObserver(sync);
     resizeObserver.observe(viewport);
     if (contentRef.current) resizeObserver.observe(contentRef.current);
-    const animationFrame = requestAnimationFrame(sync);
+    scheduleMaskSync();
 
     return () => {
       viewport.removeEventListener("scroll", sync);
       viewport.removeEventListener(SCROLLBAR_UPDATED_EVENT, sync);
       resizeObserver.disconnect();
-      cancelAnimationFrame(animationFrame);
       if (frameRef.current !== null) {
         cancelAnimationFrame(frameRef.current);
         frameRef.current = null;
@@ -102,8 +102,12 @@ export function VerticalScrollMask({
   }, [enabled, scheduleMaskSync, scrollbarRef]);
 
   useEffect(() => {
-    scrollbarRef.current?.update();
     scheduleMaskSync();
+    if (!scrollbarRef.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      scrollbarRef.current?.update();
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [scheduleMaskSync, scrollbarRef, syncKey]);
 
   return (

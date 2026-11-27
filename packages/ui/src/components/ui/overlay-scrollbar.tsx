@@ -319,19 +319,28 @@ export function OverlayScrollbar({
     if (!viewport) return;
     const tracksHorizontal = axis === "horizontal" || axis === "both";
     const tracksVertical = axis === "vertical" || axis === "both";
+    let frameId: number | null = null;
     const sync = () => {
-      const {
-        clientHeight,
-        clientWidth,
-        scrollHeight,
-        scrollLeft,
-        scrollTop,
-        scrollWidth,
-      } = viewport;
-      const maxScrollLeft = Math.max(0, scrollWidth - clientWidth);
-      const maxScrollTop = Math.max(0, scrollHeight - clientHeight);
-      const canScrollHorizontally = tracksHorizontal && maxScrollLeft > 1;
-      const canScrollVertically = tracksVertical && maxScrollTop > 1;
+      frameId = null;
+      // The enhanced scrollbar already owns these layout measurements.
+      // Until it initializes (or on native/fallback), read only the tracked axis.
+      const overflow = scrollbarRef.current?.state().overflowAmount;
+      const maxScrollLeft = tracksHorizontal
+        ? Math.max(
+            0,
+            overflow?.x ?? viewport.scrollWidth - viewport.clientWidth,
+          )
+        : 0;
+      const maxScrollTop = tracksVertical
+        ? Math.max(
+            0,
+            overflow?.y ?? viewport.scrollHeight - viewport.clientHeight,
+          )
+        : 0;
+      const canScrollHorizontally = maxScrollLeft > 1;
+      const canScrollVertically = maxScrollTop > 1;
+      const scrollLeft = canScrollHorizontally ? viewport.scrollLeft : 0;
+      const scrollTop = canScrollVertically ? viewport.scrollTop : 0;
       const next = {
         left: canScrollHorizontally && scrollLeft > 10,
         right: canScrollHorizontally && scrollLeft < maxScrollLeft - 10,
@@ -348,24 +357,30 @@ export function OverlayScrollbar({
       );
     };
 
-    viewport.addEventListener("scroll", sync, { passive: true });
-    viewport.addEventListener(SCROLLBAR_UPDATED_EVENT, sync);
-    const resizeObserver = new ResizeObserver(sync);
+    const scheduleSync = () => {
+      if (frameId === null) frameId = window.requestAnimationFrame(sync);
+    };
+    viewport.addEventListener("scroll", scheduleSync, { passive: true });
+    viewport.addEventListener(SCROLLBAR_UPDATED_EVENT, scheduleSync);
+    const resizeObserver = new ResizeObserver(scheduleSync);
     resizeObserver.observe(viewport);
     if (contentRef.current) resizeObserver.observe(contentRef.current);
-    sync();
-    const frameId = window.requestAnimationFrame(sync);
+    scheduleSync();
 
     return () => {
-      viewport.removeEventListener("scroll", sync);
-      viewport.removeEventListener(SCROLLBAR_UPDATED_EVENT, sync);
+      viewport.removeEventListener("scroll", scheduleSync);
+      viewport.removeEventListener(SCROLLBAR_UPDATED_EVENT, scheduleSync);
       resizeObserver.disconnect();
-      window.cancelAnimationFrame(frameId);
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
     };
   }, [axis, scrollbarRef, showEdgeMasks]);
 
   useEffect(() => {
-    scrollbarRef.current?.update();
+    if (!scrollbarRef.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      scrollbarRef.current?.update();
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [scrollbarRef, syncKey]);
 
   return (
