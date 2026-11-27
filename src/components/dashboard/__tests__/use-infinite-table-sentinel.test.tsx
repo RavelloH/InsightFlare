@@ -111,7 +111,7 @@ describe("useInfiniteTableSentinel", () => {
     }
     try {
       act(() => root.render(createElement(Probe)));
-      const [first, second] = container.querySelectorAll("tr");
+      const [first, second] = Array.from(container.querySelectorAll("tr"));
       const entry = (target: Element, top: number, isIntersecting = false) =>
         ({
           target,
