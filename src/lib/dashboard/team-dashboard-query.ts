@@ -60,8 +60,29 @@ export interface DeferredSidebarTeamSnapshot {
   promise: Promise<TeamDashboardSnapshot | null>;
 }
 const consumedSidebarSnapshots = new WeakSet<object>();
-/** Route loader data can outlive the page. Only an exact, fresh team/window
- * may join the streamed snapshot, and a consumed promise cannot be replayed. */
+const SIDEBAR_HANDOFF_FRESH_MS = 15_000;
+const sidebarHandoffExpiry = new WeakMap<object, number>();
+
+/** Observe the stream when the client shell receives it, even if the sidebar
+ * is collapsed. A pending stream can finish independently; a resolved,
+ * unclaimed stream is not a second cache. Never compare server and browser
+ * wall clocks or renew a previous handoff on a rerender. */
+export function trackSidebarTeamSnapshot(
+  deferred: DeferredSidebarTeamSnapshot | null | undefined,
+): void {
+  if (!deferred || sidebarHandoffExpiry.has(deferred.promise)) return;
+  sidebarHandoffExpiry.set(deferred.promise, Infinity);
+  const settle = () => {
+    sidebarHandoffExpiry.set(
+      deferred.promise,
+      performance.now() + SIDEBAR_HANDOFF_FRESH_MS,
+    );
+  };
+  void deferred.promise.then(settle, settle);
+}
+
+/** Only an exact, still available team/window may claim a streamed snapshot.
+ * fetchedAt remains the server's data timestamp, not a handoff deadline. */
 export function takeSidebarTeamSnapshot(
   deferred: DeferredSidebarTeamSnapshot | null | undefined,
   teamId: string,
@@ -71,13 +92,12 @@ export function takeSidebarTeamSnapshot(
     !deferred ||
     deferred.teamId !== teamId ||
     !sameTeamDashboardWindow(deferred.window, window) ||
-    consumedSidebarSnapshots.has(deferred.promise)
+    consumedSidebarSnapshots.has(deferred.promise) ||
+    performance.now() >= (sidebarHandoffExpiry.get(deferred.promise) ?? 0)
   )
     return undefined;
   consumedSidebarSnapshots.add(deferred.promise);
-  return deferred.promise.then((snapshot) =>
-    snapshot && Date.now() - snapshot.fetchedAt <= 15_000 ? snapshot : null,
-  );
+  return deferred.promise;
 }
 export interface TeamTrafficPoint {
   timestampMs: number;
