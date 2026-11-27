@@ -3668,6 +3668,24 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) { $span gt 0ms } exists',
         "sequence([EVENT { $.name exists },EVENT { $.name exists },EVENT { $.name exists }]) { $gap(2,3) gte 0ms } notExists",
       ];
+      const upperGapExpressions = Array.from(
+        { length: 4 },
+        (_, index) => index + 2,
+      ).flatMap((count) => {
+        const steps = Array(count).fill("EVENT").join(",");
+        return Array.from(
+          { length: count - 1 },
+          (_, index) => index + 1,
+        ).flatMap((from) =>
+          Array.from(
+            { length: count - from },
+            (_, index) => from + index + 1,
+          ).flatMap((to) => [
+            `sequence([${steps}]) { $gap(${from},${to}) lte 100ms } exists`,
+            `sequence([${steps}]) { $gap(${from},${to}) lt 0ms } notExists`,
+          ]),
+        );
+      });
       const expressions = [
         "sequence([EVENT,EVENT]) exists",
         "sequence([EVENT,EVENT]) notExists",
@@ -3684,6 +3702,15 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         overlap.replace("]) exists", "]) notExists"),
         'sequence([EVENT { $.name exists },EVENT { $.name eq "missing" }]) notExists',
         'sequence([EVENT { $.name eq "missing" },EVENT { $.name exists }]) exists',
+        "sequence([EVENT,EVENT,EVENT]) { $span lte 130ms } exists",
+        "sequence([EVENT,EVENT,EVENT]) { $span lt 130ms } notExists",
+        "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) lte 100ms } exists",
+        "sequence([EVENT,EVENT,EVENT,EVENT]) { $gap(2,3) lt 30ms } notExists",
+        "sequence([EVENT,EVENT,EVENT,EVENT,EVENT]) { $gap(2,3) lte 100ms } exists",
+        "sequence([EVENT,EVENT,EVENT,EVENT,EVENT]) { $gap(3,4) lt 0ms } notExists",
+        'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) { $span lte 0ms } exists',
+        "sequence([EVENT { $.name exists },EVENT { $.name exists },EVENT { $.name exists }]) { $gap(2,3) lte 0ms } exists",
+        ...upperGapExpressions,
         ...lowerExpressions,
       ];
       for (const scope of ["session", "visitor"] as const) {
@@ -3723,13 +3750,22 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         expect(
           read(scope, "sequence([EVENT,EVENT]) { $span lte 1000ms } exists")
             .sql,
-        ).not.toContain("history_visit");
+        ).toContain("history_visit");
         expect(
           read(scope, lowerExpressions[0]!, {
             ...history,
             filterRange: createTimeRange(100, 300),
           }).sql,
         ).not.toContain("history_visit");
+        const upperSpan =
+          "sequence([EVENT,EVENT,EVENT]) { $span lte 130ms } exists";
+        expect(
+          read(scope, upperSpan, {
+            ...history,
+            filterRange: createTimeRange(100, 300),
+          }).sql,
+        ).not.toContain("history_visit");
+        expect(read(scope, upperSpan, base).sql).not.toContain("history_visit");
         const triple = read(scope, expressions[2]!);
         expect(triple.visits).toEqual([{ site_pk: 1, visit_id: "v-new" }]);
         expect(
