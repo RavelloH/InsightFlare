@@ -945,14 +945,16 @@ class SqlCollectionCompiler {
     const firstStep = steps[0]!;
     const historyRoot =
       firstStep.kind === "selector" ? firstStep.collection : firstStep;
-    const nameSelector =
-      firstStep.kind === "selector" &&
-      firstStep.predicate.kind === "condition" &&
-      this.currentMember(firstStep.predicate.target, "event") ===
-        "event.name" &&
-      ["eq", "exists"].includes(firstStep.predicate.operator)
-        ? firstStep.predicate
+    const getNameSelector = (step: FilterTargetExpression) =>
+      step.kind === "selector" &&
+      step.collection.kind === "entity-root" &&
+      step.collection.entity === "event" &&
+      step.predicate.kind === "condition" &&
+      this.currentMember(step.predicate.target, "event") === "event.name" &&
+      ["eq", "exists"].includes(step.predicate.operator)
+        ? step.predicate
         : null;
+    const nameSelector = getNameSelector(firstStep);
     if (
       this.sources.indexedGlobalTimelineVisits &&
       target.kind === "sequence" &&
@@ -1570,11 +1572,62 @@ class SqlCollectionCompiler {
     this.globalSequenceCtes.push(
       boundCte(name, `${name} AS (${sql})`, bindings),
     );
-    const found = `COALESCE((${frame.anchorAlias}.site_pk, ${frame.anchorAlias}.${identity})
+    let found = `COALESCE((${frame.anchorAlias}.site_pk, ${frame.anchorAlias}.${identity})
       IN (SELECT site_pk, entity_id FROM ${name}), 0)`;
+    const firstName = getNameSelector(steps[0]!);
+    const lastName = getNameSelector(steps[1]!);
+    const seekBindings: (string | number | null)[] = [];
+    if (
+      this.sources.indexedGlobalTimelineVisits &&
+      target.kind === "sequence" &&
+      !identical &&
+      count === 2 &&
+      firstName &&
+      lastName &&
+      !this.clock?.filterRangeExplicit &&
+      start !== undefined &&
+      end !== undefined &&
+      qStart !== undefined &&
+      qEnd !== undefined &&
+      qEnd > qStart &&
+      qEnd - qStart <= 3600000 &&
+      end - start >= 24 * (qEnd - qStart)
+    ) {
+      const universe =
+        frame.anchorKind === "session"
+          ? "scope_filter_sessions"
+          : "scope_filter_visitors";
+      const extreme = (
+        selector: FilterCondition,
+        direction: "ASC" | "DESC",
+      ) => {
+        const predicate = onlyApplicable(
+          this.expression(selector, {
+            ...frame,
+            currentAlias: "history_name",
+            currentKind: "event",
+          }),
+        );
+        seekBindings.push(start, end, ...predicate.bindings);
+        return `(SELECT history_event.occurred_at, history_event.event_id COLLATE BINARY
+          FROM visits history_visit
+          CROSS JOIN custom_events history_event
+          INNER JOIN (SELECT id,name AS event_name FROM custom_event_names) history_name ON history_name.id=history_event.event_name_id
+          WHERE history_visit.site_pk=${frame.anchorAlias}.site_pk AND history_visit.${identity}=${frame.anchorAlias}.${identity}
+          AND history_event.site_pk=history_visit.site_pk AND history_event.visit_id=history_visit.visit_id
+          AND history_event.occurred_at>=? AND history_event.occurred_at<?
+          AND (${predicate.sql})
+          ORDER BY history_event.occurred_at ${direction}, history_event.event_id COLLATE BINARY ${direction} LIMIT 1)`;
+      };
+      const earliest = extreme(firstName, "ASC");
+      const latest = extreme(lastName, "DESC");
+      found = `CASE WHEN EXISTS(SELECT 1 FROM ${universe} LIMIT 1 OFFSET 64)
+        THEN ${found} ELSE COALESCE(${earliest} < ${latest},0) END`;
+    }
+
     return {
       sql: condition.operator === "notExists" ? `NOT (${found})` : found,
-      bindings: [],
+      bindings: seekBindings,
       applicable: true,
     };
   }
