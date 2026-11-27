@@ -5,6 +5,7 @@ import type { InvocationMetricsPoint } from "@/lib/edge/analytics-engine/invocat
 import type * as SiteAccessModule from "@/lib/edge/auth/site-access";
 import type { Env } from "@/lib/edge/types";
 import type { AppEnv } from "@/lib/hono/types";
+import { jsonResponseWith } from "@/lib/response";
 
 vi.mock("@tanstack/react-start/server-entry", () => ({
   default: {
@@ -221,6 +222,25 @@ describe("actual Worker top-level invocation entrypoints", () => {
       if (input.pathname === "overview-geo-points") {
         await gate;
         await input.env.DB.prepare("SELECT 1").all();
+        expect(input.deferJsonSerialization).toBe(true);
+        return jsonResponseWith(
+          {
+            requestId: "internal",
+            deferJsonSerialization: input.deferJsonSerialization,
+          },
+          {
+            ok: true,
+            data: {
+              items: [],
+              pagination: {
+                limit: 100,
+                returned: 0,
+                hasMore: false,
+                nextCursor: null,
+              },
+            },
+          },
+        );
       }
       if (input.pathname === "overview-source-domain")
         return new Response("failure", { status: 500 });

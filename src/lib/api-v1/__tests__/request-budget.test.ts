@@ -48,6 +48,31 @@ describe("API v1 request budgets", () => {
     });
   });
 
+  it("reuses an exact single chunk and copies sliced or multi-chunk buffers", async () => {
+    const read = (chunks: Uint8Array[]) =>
+      readBoundedBody(
+        {
+          headers: new Headers(),
+          body: new ReadableStream<Uint8Array>({
+            start(controller) {
+              for (const chunk of chunks) controller.enqueue(chunk);
+              controller.close();
+            },
+          }),
+        },
+        8,
+      );
+    const whole = new Uint8Array([1, 2, 3]);
+    const one = await read([whole]);
+    expect(one.ok && one.bytes).toBe(whole);
+    const slice = whole.subarray(1);
+    const partial = await read([slice]);
+    expect(partial).toEqual({ ok: true, bytes: new Uint8Array([2, 3]) });
+    expect(partial.ok && partial.bytes.buffer).not.toBe(whole.buffer);
+    const many = await read([whole, new Uint8Array([4, 5])]);
+    expect(many).toEqual({ ok: true, bytes: new Uint8Array([1, 2, 3, 4, 5]) });
+  });
+
   it("uses a declared length as an early upper-bound and handles empty bodies", async () => {
     const declared = {
       headers: new Headers({ "content-length": "100" }),
