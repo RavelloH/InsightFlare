@@ -299,13 +299,16 @@ export async function queryEventsSummaryFromD1(
   summary: EventSummaryRow;
   cards: EventSummaryCards;
 }> {
+  // All five aggregates share only these six dimensions. Collapse identical
+  // combinations once, retaining their multiplicities for event counts.
+  // Each card can apply its own exact top-N ordering before the final union.
   const source = buildEventFilteredSourceCte(
     siteId,
     window,
     filters,
     undefined,
     {
-      materialize: true,
+      summaryProjection: true,
     },
   );
   const rows =
@@ -319,62 +322,64 @@ export async function queryEventsSummaryFromD1(
     }>(
       env,
       `${source.cte},
+event_facts AS MATERIALIZED (
+ SELECT event_name, pathname, title, hostname, session_id, visitor_id, count(*) AS event_count
+ FROM filtered_events
+ GROUP BY event_name, pathname, title, hostname, session_id, visitor_id
+),
 card_rows AS (
   SELECT
     '__summary__' AS cardType,
     NULL AS value,
-    count(*) AS views,
+    COALESCE(sum(event_count),0) AS views,
     count(DISTINCT event_name) AS eventTypes,
     count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
     count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
-  FROM filtered_events
+  FROM event_facts
   UNION ALL
-  SELECT 'event', event_name, count(*), 0,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END),
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END)
-  FROM filtered_events
+  SELECT * FROM (
+  SELECT 'event' AS cardType, event_name AS value, COALESCE(sum(event_count),0) AS views, 0 AS eventTypes,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+  FROM event_facts
   WHERE TRIM(COALESCE(event_name, '')) != ''
   GROUP BY event_name
+  ORDER BY views DESC, sessions DESC, visitors DESC, value ASC LIMIT 100
+  )
   UNION ALL
-  SELECT 'path', pathname, count(*), 0,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END),
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END)
-  FROM filtered_events
+  SELECT * FROM (
+  SELECT 'path' AS cardType, pathname AS value, COALESCE(sum(event_count),0) AS views, 0 AS eventTypes,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+  FROM event_facts
   WHERE TRIM(COALESCE(pathname, '')) != ''
   GROUP BY pathname
+  ORDER BY views DESC, sessions DESC, visitors DESC, value ASC LIMIT 100
+  )
   UNION ALL
-  SELECT 'title', title, count(*), 0,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END),
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END)
-  FROM filtered_events
+  SELECT * FROM (
+  SELECT 'title' AS cardType, title AS value, COALESCE(sum(event_count),0) AS views, 0 AS eventTypes,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+  FROM event_facts
   WHERE TRIM(COALESCE(title, '')) != ''
   GROUP BY title
+  ORDER BY views DESC, sessions DESC, visitors DESC, value ASC LIMIT 100
+  )
   UNION ALL
-  SELECT 'hostname', hostname, count(*), 0,
-    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END),
-    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END)
-  FROM filtered_events
+  SELECT * FROM (
+  SELECT 'hostname' AS cardType, hostname AS value, COALESCE(sum(event_count),0) AS views, 0 AS eventTypes,
+    count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
+    count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors
+  FROM event_facts
   WHERE TRIM(COALESCE(hostname, '')) != ''
   GROUP BY hostname
-),
-ranked_cards AS (
-  SELECT
-    cardType,
-    value,
-    views,
-    eventTypes,
-    sessions,
-    visitors,
-    ROW_NUMBER() OVER (
-      PARTITION BY cardType
-      ORDER BY views DESC, sessions DESC, visitors DESC, value ASC
-    ) AS card_rank
-  FROM card_rows
+  ORDER BY views DESC, sessions DESC, visitors DESC, value ASC LIMIT 100
+  )
 )
 SELECT cardType, value, views, eventTypes, sessions, visitors
-FROM ranked_cards
-WHERE cardType = '__summary__' OR card_rank <= 100
-ORDER BY cardType ASC, card_rank ASC
+FROM card_rows
+ORDER BY cardType ASC, views DESC, sessions DESC, visitors DESC, value ASC
 `,
       source.bindings,
     )) ?? [];
