@@ -457,6 +457,8 @@ describe("P4 complete timeline and relational SQL", () => {
         "sequence([EVENT,EVENT]) exists",
         'without(sequence([EVENT { $.name eq "signup" },EVENT { $.name eq "purchase" }]),EVENT { $.name eq "noise" }) notExists',
         "without(sequence([EVENT,EVENT]), EVENT) exists",
+        "without(sequence([EVENT,EVENT,EVENT]), EVENT) exists",
+        'without(sequence([EVENT,EVENT { $.name eq "purchase" },EVENT]), EVENT { $.name eq "noise" }) notExists',
         "adjacent(sequence([EVENT,EVENT])) exists",
         "adjacent(sequence([PAGE,EVENT])) notExists",
         'adjacent(sequence([EVENT { $.name eq "signup" },EVENT { $.name eq "purchase" }])) exists',
@@ -544,6 +546,7 @@ describe("P4 complete timeline and relational SQL", () => {
         "adjacent(sequence([EVENT,EVENT,EVENT,EVENT,EVENT,EVENT])) exists",
         "without(sequence([EVENT,EVENT]), PAGE) exists",
         "without(sequence([EVENT,EVENT,EVENT]), PAGE) exists",
+        "without(sequence([EVENT,EVENT,EVENT,EVENT,EVENT,EVENT]), EVENT) exists",
         "without(sequence([PAGE,EVENT]), EVENT) exists",
         "count(without(sequence([EVENT,EVENT]), PAGE)) eq 1",
         "sequence([PAGE,PAGE,PAGE]) { $gap(1,2) lte 10ms } exists",
@@ -1217,6 +1220,99 @@ describe("P4 complete timeline and relational SQL", () => {
                 const c = composeBoundCtes(plan.ctes);
                 if (uniqueGlobalOccurrences && !excluded.startsWith("PAGE"))
                   expect(c.ctes).toContain("last_excluded");
+                else expect(c.ctes).not.toContain("scope_global_sequence_0 AS");
+                return db
+                  .prepare(
+                    `WITH ${variant}, ${c.ctes} SELECT site_pk,entity_id FROM ${plan.qualifiedEntityRelation} ORDER BY site_pk,entity_id`,
+                  )
+                  .all(...c.bindings.map((x) => x.value));
+              };
+              for (const variant of variants)
+                expect(read(variant, true)).toEqual(read(variant, false));
+            }
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  it.each([
+    ["session", 3, 0],
+    ["session", 3, 1],
+    ["visitor", 3, 0],
+    ["visitor", 3, 1],
+    ["session", 4, 0],
+    ["session", 4, 1],
+    ["visitor", 4, 0],
+    ["visitor", 4, 1],
+    ["session", 5, 0],
+    ["session", 5, 1],
+    ["visitor", 5, 0],
+    ["visitor", 5, 1],
+  ] as const)(
+    "propagates valid global Without prefixes (%s, %i stages, group %i)",
+    (scope, count, group) => {
+      const db = fixture();
+      try {
+        const dense = source.replace(
+          "(1,'a',105,'e5'",
+          "(1,'a',107,'e7','v2','s1','u1','/pricing','signup',27),(1,'a',108,'e8','v2','s1','u1','/pricing','noise',30),(1,'a',110,'e10','v2','s1','u1','/pricing','purchase',31),(1,'a',111,'e11','v2','s1','u1','/pricing','purchase',32),(1,'a',112,'e12','v2','s1','u1','/pricing','purchase',33),(1,'a',113,'e13','v2','s1','u1','/pricing','signup',34),(1,'a',105,'e5'",
+        );
+        const variants = [
+          source,
+          dense,
+          dense.replace("'signup',27)", "'signup',30)"),
+          dense.replace("'e7','v2','s1','u1'", "'e7','v2','s3','u1'"),
+          dense
+            .replace(
+              "(1,'a','v3','s2'",
+              "(1,'a','s1','','u1','/landing',1,28),(1,'a','v3','s2'",
+            )
+            .replace(
+              "(1,'a',105,'e5'",
+              "(1,'a',109,'e9','s1','','u1','/landing','noise',29),(1,'a',105,'e5'",
+            ),
+        ];
+        const signup = 'EVENT { $.name eq "signup" }';
+        const purchase = 'EVENT { $.name eq "purchase" }';
+        const noise = 'EVENT { $.name eq "noise" }';
+        const payload = 'EVENT { $.payload("/sku") eq "alpha" }';
+        const pairs = [
+          Array(count).fill("EVENT").join(","),
+          [signup, ...Array(count - 2).fill("EVENT"), purchase].join(","),
+          [purchase, ...Array(count - 2).fill(purchase), signup].join(","),
+          [payload, ...Array(count - 2).fill(purchase), purchase].join(","),
+          [noise, ...Array(count - 2).fill(signup), noise].join(","),
+          [
+            signup,
+            ...Array(count - 2).fill('EVENT { $.name eq "missing" }'),
+            purchase,
+          ].join(","),
+        ];
+        const exclusions = [
+          "EVENT",
+          'EVENT { $.name eq "noise" }',
+          'EVENT { $.name eq "signup" }',
+          'EVENT { $.name eq "purchase" }',
+          'EVENT { $.payload("/sku") eq "alpha" }',
+        ];
+        for (const pair of pairs.slice(group * 3, group * 3 + 3))
+          for (const excluded of exclusions)
+            for (const operator of ["exists", "notExists"]) {
+              const expression = `without(sequence([${pair}]),${excluded}) ${operator}`;
+              const read = (
+                variant: string,
+                uniqueGlobalOccurrences: boolean,
+              ) => {
+                const plan = compileCollectionSqlQualification(
+                  parseFilterDsl(expression, analyticsFilterRegistry),
+                  scope,
+                  { uniqueGlobalOccurrences },
+                );
+                if (plan.kind !== "entity") throw Error("expected entity");
+                const c = composeBoundCtes(plan.ctes);
+                if (uniqueGlobalOccurrences)
+                  expect(c.ctes).toContain("prefix_" + (count - 1));
                 else expect(c.ctes).not.toContain("scope_global_sequence_0 AS");
                 return db
                   .prepare(
