@@ -3600,7 +3600,7 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       }
     }
   });
-  it("seeks repeated historical Events only for small report universes and preserves dense fallback", () => {
+  it("seeks historical Event witnesses only for small report universes and preserves dense fallback", () => {
     const db = sqliteFixture();
     try {
       db.exec(`
@@ -3650,6 +3650,12 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       };
       const namedPair =
         'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) exists';
+      const forward =
+        'sequence([EVENT { $.name eq "signup" },EVENT { $.name eq "purchase" }]) exists';
+      const reverse =
+        'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "signup" }]) exists';
+      const overlap =
+        'sequence([EVENT { $.name eq "purchase" },EVENT { $.name exists }]) exists';
       const expressions = [
         "sequence([EVENT,EVENT]) exists",
         "sequence([EVENT,EVENT]) notExists",
@@ -3659,6 +3665,13 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         'sequence([EVENT { $.name eq "missing" },EVENT { $.name eq "missing" }]) notExists',
         "sequence([EVENT { $.name exists },EVENT { $.name exists },EVENT { $.name exists }]) exists",
         'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) exists',
+        forward,
+        reverse,
+        overlap,
+        forward.replace("]) exists", "]) notExists"),
+        overlap.replace("]) exists", "]) notExists"),
+        'sequence([EVENT { $.name exists },EVENT { $.name eq "missing" }]) notExists',
+        'sequence([EVENT { $.name eq "missing" },EVENT { $.name exists }]) exists',
       ];
       for (const scope of ["session", "visitor"] as const) {
         for (const expression of expressions) {
@@ -3708,10 +3721,24 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
             'sequence([EVENT { $.name contains "purchase" },EVENT { $.name contains "purchase" }]) exists',
           ).sql,
         ).not.toContain("history_visit");
+        expect(read(scope, forward).visits).toEqual([
+          { site_pk: 1, visit_id: "v-new" },
+        ]);
+        expect(read(scope, reverse).visits).toEqual([
+          { site_pk: 1, visit_id: "v-new" },
+        ]);
+        expect(read(scope, overlap).visits).toEqual(pair.visits);
+        expect(read(scope, overlap).events).toEqual(pair.events);
+        expect(
+          read(scope, forward, {
+            ...history,
+            filterRange: createTimeRange(100, 300),
+          }).sql,
+        ).not.toContain("history_visit");
         expect(
           read(
             scope,
-            'sequence([EVENT { $.name eq "signup" },EVENT { $.name eq "purchase" }]) exists',
+            'sequence([EVENT { $.name contains "signup" },EVENT { $.name eq "purchase" }]) exists',
           ).sql,
         ).not.toContain("history_visit");
       }
@@ -3725,6 +3752,23 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           { site_pk: 1, visit_id: "v-new" },
           { site_pk: 1, visit_id: "v-report" },
         ]);
+      }
+      // Equal timestamps are ordered by binary event ID, not by name or insertion order.
+      // The right-boundary purchase does not qualify the reverse order.
+      db.exec(
+        "INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at) VALUES(113,1,'site-a','e-z','v-before',2,-10000)",
+      );
+      for (const scope of ["session", "visitor"] as const) {
+        expect(read(scope, forward).visits).toEqual([
+          { site_pk: 1, visit_id: "v-new" },
+        ]);
+        expect(read(scope, reverse).visits).toEqual([
+          { site_pk: 1, visit_id: "v-new" },
+          { site_pk: 1, visit_id: "v-report" },
+        ]);
+        expect(read(scope, reverse)).toEqual(
+          read(scope, reverse, history, true),
+        );
       }
       const insert = db.prepare(
         "INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms) VALUES(1,'site-a',?,?,?,'/dense',200,1)",
