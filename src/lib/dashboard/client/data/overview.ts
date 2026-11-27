@@ -1,7 +1,7 @@
 import {
   fetchOverviewGeoDimensionTabPage,
-  fetchOverviewGeoPoints,
   overviewGeoPointsFilters,
+  requestOverviewGeoPoints,
 } from "@/lib/dashboard/client/data/geo";
 import {
   fetchOverviewClientDimensionTab,
@@ -155,11 +155,16 @@ export function startOverviewInitialReads(
     fetchOverviewSourceCardTab(siteId, window, "domain", filters, options),
   );
   ignore(
-    fetchOverviewGeoPoints(siteId, window, overviewGeoPointsFilters(filters), {
-      transport,
-      limit: 5000,
-      resolvedScope: scope,
-    }),
+    requestOverviewGeoPoints<unknown>(
+      siteId,
+      window,
+      overviewGeoPointsFilters(filters),
+      {
+        transport,
+        limit: 5000,
+        resolvedScope: scope,
+      },
+    ),
   );
   const dimensions = () =>
     Promise.allSettled([
