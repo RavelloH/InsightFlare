@@ -21,6 +21,7 @@ export function demoRequestObservationResponse(
   const data = generateDemoRequestObservationData(
     minutes,
     Number.isFinite(to) && to > 0 ? to : undefined,
+    { includeMetadataJson: params.detail === "1" },
   );
   const serializeDetailEvent = (event: Record<string, unknown>) => {
     const { sampleWeight: _sampleWeight, ...serialized } = event;

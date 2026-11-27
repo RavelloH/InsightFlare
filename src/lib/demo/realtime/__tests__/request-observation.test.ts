@@ -7,6 +7,39 @@ function weightedCount(events: Array<{ sampleWeight: number }>) {
 }
 
 describe("mock/request-observation", () => {
+  it("omits detail-only metadata without changing deterministic event data", () => {
+    const generatedAt = Date.UTC(2026, 10, 27);
+    const full = generateDemoRequestObservationData(60, generatedAt);
+    const lean = generateDemoRequestObservationData(60, generatedAt, {
+      includeMetadataJson: false,
+    });
+    const stripMetadata = (events: typeof full.events) =>
+      events.map(({ metadataJson: _metadataJson, ...event }) => event);
+
+    expect(stripMetadata(lean.blockedEvents)).toEqual(
+      stripMetadata(full.blockedEvents),
+    );
+    expect(stripMetadata(lean.includedEvents)).toEqual(
+      stripMetadata(full.includedEvents),
+    );
+    expect(stripMetadata(lean.normalEvents)).toEqual(
+      stripMetadata(full.normalEvents),
+    );
+    expect(lean.summary).toEqual(full.summary);
+    expect(lean.trend).toEqual(full.trend);
+    expect(lean.blocked.summary).toEqual(full.blocked.summary);
+    expect(lean.blocked.mapPoints).toEqual(full.blocked.mapPoints);
+    expect(lean.blockedEvents.every((event) => event.metadataJson === "")).toBe(
+      true,
+    );
+    expect(
+      lean.includedEvents.every((event) => event.metadataJson === ""),
+    ).toBe(true);
+    expect(
+      full.blockedEvents.some((event) => event.metadataJson.length > 0),
+    ).toBe(true);
+  });
+
   it("generates weighted blocked and included request observation data", () => {
     const data = generateDemoRequestObservationData(1440);
     const allEvents = [...data.blockedEvents, ...data.includedEvents];

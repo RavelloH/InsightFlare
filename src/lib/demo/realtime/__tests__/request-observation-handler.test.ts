@@ -129,7 +129,9 @@ describe("demo request observation response handler", () => {
       from: "bad",
       to: "0",
     }) as Record<string, any>;
-    expect(generateData).toHaveBeenLastCalledWith(60, undefined);
+    expect(generateData).toHaveBeenLastCalledWith(60, undefined, {
+      includeMetadataJson: false,
+    });
     expect(invalidWindow.events[0]).not.toHaveProperty("sampleWeight");
     expect(invalidWindow.blocked.events).toHaveLength(6);
     expect(invalidWindow.included.events).toHaveLength(1);
@@ -138,16 +140,27 @@ describe("demo request observation response handler", () => {
     ).toEqual(["normal"]);
 
     demoRequestObservationResponse({ from: 0, to: 61 * 60_000 });
-    expect(generateData).toHaveBeenLastCalledWith(1440, 61 * 60_000);
+    expect(generateData).toHaveBeenLastCalledWith(1440, 61 * 60_000, {
+      includeMetadataJson: false,
+    });
     demoRequestObservationResponse({ from: 0, to: 7 * 24 * 60 * 60_000 });
-    expect(generateData).toHaveBeenLastCalledWith(10080, 7 * 24 * 60 * 60_000);
+    expect(generateData).toHaveBeenLastCalledWith(10080, 7 * 24 * 60 * 60_000, {
+      includeMetadataJson: false,
+    });
     demoRequestObservationResponse({ from: 0, to: 31 * 24 * 60 * 60_000 });
-    expect(generateData).toHaveBeenLastCalledWith(43200, 31 * 24 * 60 * 60_000);
+    expect(generateData).toHaveBeenLastCalledWith(
+      43200,
+      31 * 24 * 60 * 60_000,
+      { includeMetadataJson: false },
+    );
 
     const missing = demoRequestObservationResponse({
       detail: "1",
       traceId: "missing",
     }) as Record<string, any>;
+    expect(generateData).toHaveBeenLastCalledWith(60, undefined, {
+      includeMetadataJson: true,
+    });
     expect(missing.detail).toBeNull();
     const detail = demoRequestObservationResponse({
       detail: "1",
