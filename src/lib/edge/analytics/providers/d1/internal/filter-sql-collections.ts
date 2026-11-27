@@ -942,13 +942,25 @@ class SqlCollectionCompiler {
     const end = this.clock?.readEndExclusiveMs;
     const qStart = this.clock?.rangeStartMs;
     const qEnd = this.clock?.rangeEndExclusiveMs;
+    const firstStep = steps[0]!;
+    const historyRoot =
+      firstStep.kind === "selector" ? firstStep.collection : firstStep;
+    const nameSelector =
+      firstStep.kind === "selector" &&
+      firstStep.predicate.kind === "condition" &&
+      this.currentMember(firstStep.predicate.target, "event") ===
+        "event.name" &&
+      ["eq", "exists"].includes(firstStep.predicate.operator)
+        ? firstStep.predicate
+        : null;
     if (
       this.sources.indexedGlobalTimelineVisits &&
       target.kind === "sequence" &&
       identical &&
       count <= 5 &&
-      steps[0]?.kind === "entity-root" &&
-      steps[0].entity === "event" &&
+      historyRoot.kind === "entity-root" &&
+      historyRoot.entity === "event" &&
+      (firstStep.kind === "entity-root" || nameSelector !== null) &&
       !this.clock?.filterRangeExplicit &&
       start !== undefined &&
       end !== undefined &&
@@ -966,15 +978,28 @@ class SqlCollectionCompiler {
           ? "scope_filter_sessions"
           : "scope_filter_visitors";
       const anchor = frame.anchorAlias;
+      const namePredicate = (alias: string) =>
+        nameSelector
+          ? onlyApplicable(
+              this.expression(nameSelector, {
+                ...frame,
+                currentAlias: alias,
+                currentKind: "event",
+              }),
+            )
+          : { sql: "1", bindings: [], applicable: true };
+      const seekPredicate = namePredicate("history_name");
       const found = `EXISTS (
         SELECT 1 FROM visits history_visit
         CROSS JOIN custom_events history_event
-        INNER JOIN custom_event_names history_name ON history_name.id=history_event.event_name_id
+        INNER JOIN ${nameSelector ? "(SELECT id,name AS event_name FROM custom_event_names)" : "custom_event_names"} history_name ON history_name.id=history_event.event_name_id
         WHERE history_visit.site_pk=${anchor}.site_pk AND history_visit.${identity}=${anchor}.${identity}
           AND history_event.site_pk=history_visit.site_pk AND history_event.visit_id=history_visit.visit_id
           AND history_event.occurred_at>=? AND history_event.occurred_at<?
+          ${nameSelector ? `AND (${seekPredicate.sql})` : ""}
         LIMIT 1 OFFSET ${count - 1})`;
       const item = this.alias();
+      const setPredicate = namePredicate(item);
       // Bound the number of independent history probes. CASE is lazy in
       // SQLite: a dense report universe retains the set-based scan, and a
       // small universe never evaluates that historical aggregate.
@@ -985,8 +1010,10 @@ class SqlCollectionCompiler {
           SELECT ${item}.site_pk, ${item}.${identity} AS entity_id
           FROM ${this.source("event", true)} ${item}
           WHERE ${item}.site_pk IS NOT NULL AND TRIM(COALESCE(${item}.${identity},''))!=''
+            ${nameSelector ? `AND (${setPredicate.sql})` : ""}
           GROUP BY ${item}.site_pk,${item}.${identity}
           HAVING COUNT(*) >= ${count})`,
+          setPredicate.bindings,
         ),
       );
       const membership = `CASE WHEN EXISTS (SELECT 1 FROM ${universe} LIMIT 1 OFFSET 64)
@@ -997,7 +1024,7 @@ class SqlCollectionCompiler {
           condition.operator === "notExists"
             ? `NOT (${membership})`
             : membership,
-        bindings: [start, end],
+        bindings: [start, end, ...seekPredicate.bindings],
         applicable: true,
       };
     }
