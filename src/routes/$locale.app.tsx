@@ -12,7 +12,10 @@ import type {
   DashboardContext,
   DashboardTeamContext,
 } from "@/lib/dashboard/server";
-import type { DeferredSidebarTeamSnapshot } from "@/lib/dashboard/team-dashboard-query";
+import {
+  type DeferredSidebarTeamSnapshot,
+  trackSidebarTeamSnapshot,
+} from "@/lib/dashboard/team-dashboard-query";
 import { buildManagementSections } from "@/lib/dashboard/team-sections";
 import { usePathname } from "@/lib/router";
 const handoff =
@@ -103,6 +106,10 @@ function AppLayout(): JSX.Element {
           { sidebarSnapshot?: DeferredSidebarTeamSnapshot | null } | undefined
       )?.sidebarSnapshot,
   });
+
+  if (typeof document !== "undefined") {
+    trackSidebarTeamSnapshot(sidebarSnapshot);
+  }
 
   const shellContext = dashboardRoot ?? teamContext;
   if (!shellContext) return <Outlet />;
