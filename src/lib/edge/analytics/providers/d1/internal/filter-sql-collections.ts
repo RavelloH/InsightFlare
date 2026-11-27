@@ -1204,7 +1204,15 @@ class SqlCollectionCompiler {
       // window. A sessionless row may share a real session's timeline key
       // but must never provide a matching stage to that session.
       const eligible = `TRIM(COALESCE(${item}.${identity}, '')) != ''`;
+      // Only entities with a matching Event can qualify. Retain the
+      // complete timeline for each candidate, including sessionless rows
+      // whose visit IDs collide with candidate session IDs.
+      const eventStage = stages.find((step) => step.kind === "event")!;
+      const candidateSql = `SELECT ${eventStage.key} ${eventStage.from}
+        GROUP BY ${eventStage.item}.site_pk, ${eventStage.item}.${identity}
+        ${identical ? `HAVING COUNT(*) >= ${count}` : ""}`;
       bindings.length = 0;
+      bindings.push(...eventStage.bindings);
       const branches = (["page", "event"] as const).map((kind) => {
         const flags = stages.map((step, index) => {
           if (step.kind !== kind) return `0 AS match_${index}`;
@@ -1217,7 +1225,8 @@ class SqlCollectionCompiler {
           ${item}.${kind === "page" ? "visit_id" : "event_id"} AS activity_id,
           ${flags.join(", ")}
           FROM ${this.source(kind, true)} ${item}
-          WHERE ${item}.site_pk IS NOT NULL`;
+          WHERE ${item}.site_pk IS NOT NULL
+            AND (${item}.site_pk, ${partitionKey}) IN (SELECT site_pk, entity_id FROM candidate_entities)`;
       });
       const order =
         "PARTITION BY site_pk, entity_id ORDER BY activity_time, kind_rank, activity_id COLLATE BINARY";
@@ -1233,7 +1242,7 @@ class SqlCollectionCompiler {
               )
               .join(" AND ")} AS qualifies`,
           ];
-      sql = `SELECT DISTINCT site_pk,entity_id FROM (
+      sql = `WITH candidate_entities AS MATERIALIZED (${candidateSql}) SELECT DISTINCT site_pk,entity_id FROM (
         SELECT site_pk,entity_id,${checks.join(", ")}
         FROM (${branches.join(" UNION ALL ")})
       ) WHERE qualifies = 1`;
