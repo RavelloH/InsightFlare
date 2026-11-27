@@ -1118,6 +1118,9 @@ describe("P4 complete timeline and relational SQL", () => {
       ];
       const sequences = [
         "EVENT,EVENT",
+        'EVENT { $.name eq "missing" },EVENT',
+        'PAGE,EVENT { $.payload("/sku") eq "beta" }',
+        'EVENT { $.name eq "signup" },EVENT { $.name eq "signup" }',
         "PAGE,PAGE",
         "EVENT,EVENT,EVENT",
         "PAGE,EVENT",
@@ -1147,7 +1150,7 @@ describe("P4 complete timeline and relational SQL", () => {
                 sequence.includes("EVENT") &&
                 (sequence.split(",").length === 2 || !sequence.includes("PAGE"))
               )
-                expect(c.ctes).toContain("scope_global_sequence_0 AS");
+                expect(c.ctes).toContain("candidate_entities AS MATERIALIZED");
               else expect(c.ctes).not.toContain("scope_global_sequence_0 AS");
               return db
                 .prepare(
@@ -1158,6 +1161,53 @@ describe("P4 complete timeline and relational SQL", () => {
             for (const variant of variants)
               expect(read(variant, true)).toEqual(read(variant, false));
           }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps sessionless collision blockers and does not borrow candidate keys across sites", () => {
+    const db = fixture();
+    try {
+      const expression =
+        'adjacent(sequence([EVENT { $.name eq "signup" },EVENT { $.name eq "purchase" }])) exists';
+      const blocked = source.replace(
+        "(1,'a','v3','s2','u2','/landing',1,10),",
+        "(1,'a','v3','s2','u2','/landing',1,10),(1,'a','s2','','u9','/landing',1,16),",
+      );
+      const read = (
+        variant: string,
+        scope: "session" | "visitor",
+        uniqueGlobalOccurrences: boolean,
+      ) => {
+        const plan = compileCollectionSqlQualification(
+          parseFilterDsl(expression, analyticsFilterRegistry),
+          scope,
+          { uniqueGlobalOccurrences },
+        );
+        if (plan.kind !== "entity") throw Error("expected entity");
+        const c = composeBoundCtes(plan.ctes);
+        if (uniqueGlobalOccurrences)
+          expect(c.ctes).toContain("candidate_entities AS MATERIALIZED");
+        return db
+          .prepare(
+            `WITH ${variant}, ${c.ctes} SELECT site_pk,entity_id FROM ${plan.qualifiedEntityRelation} ORDER BY site_pk,entity_id`,
+          )
+          .all(...c.bindings.map((x) => x.value));
+      };
+      expect(read(source, "session", true)).toEqual([
+        { site_pk: 1, entity_id: "s2" },
+        { site_pk: 2, entity_id: "s1" },
+      ]);
+      expect(read(blocked, "session", true)).toEqual([
+        { site_pk: 2, entity_id: "s1" },
+      ]);
+      expect(read(blocked, "visitor", true)).toEqual([
+        { site_pk: 1, entity_id: "u2" },
+        { site_pk: 2, entity_id: "u1" },
+      ]);
+      for (const scope of ["session", "visitor"] as const)
+        expect(read(blocked, scope, true)).toEqual(read(blocked, scope, false));
     } finally {
       db.close();
     }
