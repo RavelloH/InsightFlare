@@ -10,6 +10,7 @@ import {
   filterFingerprint,
   parseFilterParams,
 } from "@/lib/edge/analytics/contract";
+import { takeDeferredJsonResponsePayload } from "@/lib/response";
 const DASHBOARD_CACHE_NAME = "insightflare-dashboard-query";
 const DEFAULT_TTL_SECONDS = 60;
 const PUBLIC_QUERY_CACHE_NAME = "insightflare-public-query";
@@ -176,6 +177,9 @@ export interface DashboardCacheOptions {
   clientCacheScope?: "private" | "public";
   identity?: DashboardCacheIdentity;
   request?: Request;
+  /** Internal SSR-only consumer: materialize a deferred JSON object directly
+   * as canonical JSON. Never use when an HTTP response needs request metadata. */
+  canonicalDeferredJson?: boolean;
 }
 function cacheCreatedAt(response: Response): number | null {
   const value = Number(response.headers.get("x-insightflare-cache-created-at"));
@@ -263,8 +267,11 @@ async function addDynamicResponseFields(
 async function cacheStorageResponse(
   response: Response,
   ttlSeconds: number,
+  canonical?: { hadDynamicFields: boolean },
 ): Promise<Response> {
-  const sanitized = await removeDynamicResponseFields(response);
+  const sanitized = canonical
+    ? { response, ...canonical }
+    : await removeDynamicResponseFields(response);
   const headers = new Headers(sanitized.response.headers);
   headers.set("x-insightflare-cache-created-at", String(Date.now()));
   if (sanitized.hadDynamicFields) {
@@ -300,9 +307,38 @@ export async function withDashboardCache(
     Math.floor(options.ttlSeconds ?? DEFAULT_TTL_SECONDS),
   );
   const clientCacheScope = options.clientCacheScope ?? "private";
+  // Only the explicitly opted-in internal consumer may request a bodyless
+  // response from its producer. Materialize once, before returning or caching.
+  const generateFresh = async () => {
+    const response = await generate();
+    if (!options.canonicalDeferredJson || options.request || !response.ok)
+      return { fresh: response };
+    const payload = takeDeferredJsonResponsePayload(response);
+    if (!payload || typeof payload !== "object" || Array.isArray(payload))
+      return { fresh: response };
+    const source = payload as Record<string, unknown>;
+    const hadDynamicFields = [...DYNAMIC_RESPONSE_FIELDS].some((key) =>
+      Object.hasOwn(source, key),
+    );
+    const sanitized = Object.fromEntries(
+      Object.entries(source).filter(
+        ([key]) => !DYNAMIC_RESPONSE_FIELDS.has(key),
+      ),
+    );
+    const headers = new Headers(response.headers);
+    headers.delete("content-length");
+    return {
+      fresh: new Response(JSON.stringify(sanitized), {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      }),
+      canonical: { hadDynamicFields },
+    };
+  };
   const cache = await openEdgeCache(options.cacheName ?? DASHBOARD_CACHE_NAME);
   if (!cache) {
-    const fresh = await generate();
+    const { fresh } = await generateFresh();
     if (options.applyCacheHeadersOnBypass && fresh.ok) {
       return withCacheControlHeaders(
         fresh,
@@ -334,12 +370,16 @@ export async function withDashboardCache(
     // Fall through to fresh generation on cache read failure.
   }
 
-  const fresh = await generate();
+  const { fresh, canonical } = await generateFresh();
   if (!fresh.ok) {
     return fresh;
   }
 
-  const cacheable = await cacheStorageResponse(fresh.clone(), ttlSeconds);
+  const cacheable = await cacheStorageResponse(
+    fresh.clone(),
+    ttlSeconds,
+    canonical,
+  );
   const putPromise = cache.put(cacheKey, cacheable).catch(() => undefined);
   if (ctx && typeof ctx.waitUntil === "function") {
     ctx.waitUntil(putPromise);

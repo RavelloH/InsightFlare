@@ -36,6 +36,15 @@ function createJsonResponse(
   return response;
 }
 
+/** Consume a bodyless JSON response created by an explicitly deferred internal
+ * handler. External responses cannot supply a structured payload. */
+export function takeDeferredJsonResponsePayload(response: Response): unknown {
+  if (response.body !== null) return undefined;
+  const payload = jsonResponsePayloads.get(response);
+  jsonResponsePayloads.delete(response);
+  return payload;
+}
+
 export async function readJsonResponse<T = unknown>(
   response: Response,
 ): Promise<T> {

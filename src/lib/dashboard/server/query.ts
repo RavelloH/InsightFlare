@@ -275,6 +275,7 @@ export async function startSiteAnalyticsStream(input: {
             url,
             request: child,
             dashboardMode: true,
+            deferJsonSerialization: rawJson,
             batchExecution: { capturedAtMs, signal: request.signal },
           }),
         {
@@ -283,6 +284,7 @@ export async function startSiteAnalyticsStream(input: {
           // the sanitized JSON is sufficient; don't parse and re-stringify
           // the entire map just to reconstruct those two envelope fields.
           request: rawJson ? undefined : child,
+          canonicalDeferredJson: rawJson,
         },
       );
       if (!response.ok) throw new Error("ssr_query_failed_" + response.status);
