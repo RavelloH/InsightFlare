@@ -1170,6 +1170,7 @@ class SqlCollectionCompiler {
     if (!first) return null;
     let sql: string;
     let withoutSqlForSource: ((source: string) => string) | undefined;
+    let adjacentLocal: SqlFragment | undefined;
     const bindings = [...first.bindings];
     const compared =
       bound?.kind === "condition" && !same
@@ -1406,6 +1407,72 @@ class SqlCollectionCompiler {
         SELECT site_pk,entity_id,${checks.join(", ")}
         FROM (${branches.join(" UNION ALL ")})
       ) WHERE qualifies = 1`;
+      const simpleStep = (step: FilterTargetExpression) =>
+        step.kind === "entity-root" ||
+        getNameSelector(step) !== null ||
+        (step.kind === "selector" &&
+          step.collection.kind === "entity-root" &&
+          step.collection.entity === "page" &&
+          step.predicate.kind === "condition" &&
+          this.currentMember(step.predicate.target, "page") === "page.path" &&
+          ["eq", "exists", "contains"].includes(step.predicate.operator));
+      if (
+        indexedPages &&
+        !this.clock?.filterRangeExplicit &&
+        steps.every(simpleStep) &&
+        start !== undefined &&
+        end !== undefined &&
+        qStart !== undefined &&
+        qEnd !== undefined &&
+        qEnd > qStart &&
+        qEnd - qStart <= 3600000 &&
+        end - start >= 24 * (qEnd - qStart)
+      ) {
+        const anchor = frame.anchorAlias;
+        const localBindings: (string | number | null)[] = [];
+        const localBranches: string[] = [];
+        for (const kind of ["page", "event"] as const) {
+          const flags = stages.map((stage, index) => {
+            if (stage.kind !== kind) return `0 AS match_${index}`;
+            localBindings.push(...stage.bindings);
+            return `CASE WHEN ${eligible} AND (${stage.predicate}) THEN 1 ELSE 0 END AS match_${index}`;
+          });
+          const project = (columns: readonly string[], collision: boolean) => {
+            const key = collision
+              ? `history_visit.visit_id=${anchor}.${identity} AND (history_visit.session_id IS NULL OR history_visit.session_id='')`
+              : `history_visit.${identity}=${anchor}.${identity}`;
+            const physical =
+              kind === "page"
+                ? `SELECT history_visit.* FROM visits history_visit WHERE history_visit.site_pk=${anchor}.site_pk AND ${key} AND history_visit.started_at>=? AND history_visit.started_at<?`
+                : `SELECT history_event.site_pk,history_visit.session_id,history_visit.visitor_id,history_visit.visit_id,history_event.occurred_at,history_event.event_id,history_name.name AS event_name
+                FROM visits history_visit CROSS JOIN custom_events history_event
+                INNER JOIN custom_event_names history_name ON history_name.id=history_event.event_name_id
+                WHERE history_visit.site_pk=${anchor}.site_pk AND ${key}
+                AND history_event.site_pk=history_visit.site_pk AND history_event.visit_id=history_visit.visit_id
+                AND history_event.occurred_at>=? AND history_event.occurred_at<?`;
+            localBindings.push(start, end);
+            return `SELECT ${item}.site_pk,${anchor}.${identity} AS entity_id,
+              ${item}.${kind === "page" ? "started_at" : "occurred_at"} AS activity_time,
+              ${kind === "page" ? 0 : 1} AS kind_rank,
+              ${item}.${kind === "page" ? "visit_id" : "event_id"} AS activity_id,
+              ${columns.join(", ")} FROM (${physical}) ${item}`;
+          };
+          localBranches.push(project(flags, false));
+          if (frame.anchorKind === "session")
+            localBranches.push(
+              project(
+                stages.map((_, i) => `0 AS match_${i}`),
+                true,
+              ),
+            );
+        }
+        adjacentLocal = {
+          sql: `EXISTS(SELECT 1 FROM (
+          SELECT ${checks.join(", ")} FROM (${localBranches.join(" UNION ALL ")})
+        ) WHERE qualifies=1)`,
+          bindings: localBindings,
+        };
+      }
     } else if (multiStage) {
       if (first.kind !== "event") return null;
       const matched = steps
@@ -1581,6 +1648,15 @@ class SqlCollectionCompiler {
     const firstName = getNameSelector(steps[0]!);
     const lastName = getNameSelector(steps[1]!);
     const seekBindings: (string | number | null)[] = [];
+    if (adjacentLocal) {
+      const universe =
+        frame.anchorKind === "session"
+          ? "scope_filter_sessions"
+          : "scope_filter_visitors";
+      found = `CASE WHEN EXISTS(SELECT 1 FROM ${universe} LIMIT 1 OFFSET 64)
+        THEN ${found} ELSE ${adjacentLocal.sql} END`;
+      seekBindings.push(...adjacentLocal.bindings);
+    }
     const simpleEventStep = (step: FilterTargetExpression) =>
       (step.kind === "entity-root" && step.entity === "event") ||
       getNameSelector(step) !== null;
