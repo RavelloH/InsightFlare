@@ -3600,6 +3600,123 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       }
     }
   });
+  it.each(["session", "visitor"] as const)(
+    "seeks ordered historical multi-stage Event witnesses (%s)",
+    (scope) => {
+      const db = sqliteFixture();
+      try {
+        db.exec(`
+        CREATE UNIQUE INDEX test_visit_key ON visits(site_pk,visit_id);
+        CREATE INDEX test_visit_session ON visits(site_pk,session_id,started_at);
+        CREATE INDEX test_visit_visitor ON visits(site_pk,visitor_id,started_at);
+        CREATE INDEX test_event_visit ON custom_events(site_pk,visit_id,occurred_at);
+        INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms)
+        VALUES(1,'site-a','v-multi-before','s-multi','u-multi','/old',-10001,1),
+              (1,'site-a','v-multi-now','s-multi','u-multi','/now',200,1),
+              (1,'site-a','v-multi-one','s-one','u-one','/now',200,1),
+              (2,'site-b','v-multi-before','s-multi','u-multi','/old',-10001,1);
+        INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at)
+        VALUES(10201,1,'site-a','multi-a','v-multi-before',2,-10000),
+              (10202,1,'site-a','multi-b','v-multi-before',1,-10000),
+              (10203,1,'site-a','multi-c','v-multi-before',2,-10000),
+              (10204,1,'site-a','multi-d','v-multi-before',1,-10000),
+              (10205,1,'site-a','multi-e','v-multi-before',2,-10000),
+              (10206,1,'site-a','multi-f','v-multi-before',1,400),
+              (10207,1,'site-a','one','v-multi-one',1,210),
+              (10208,2,'site-b','multi-a','v-multi-before',4,-10000);
+      `);
+        const base = createQueryTime(100, 300, "UTC", 400);
+        const history = { ...base, readRange: createTimeRange(-10000, 400) };
+        const a = 'EVENT { $.name eq "signup" }';
+        const b = 'EVENT { $.name eq "purchase" }';
+        const any = "EVENT { $.name exists }";
+        const missing = 'EVENT { $.name eq "missing" }';
+        const sequences = [
+          [a, b, a],
+          [a, b, a, b],
+          [a, b, a, b, a],
+          [any, b, any],
+          [b, any, b, any],
+          [b, b, b, a],
+          [a, missing, b, a],
+          [any, b, any, b, any],
+        ];
+        const read = (
+          expression: string,
+          time: QueryTime = history,
+          forceSet = false,
+        ) => {
+          const data = dataset(expression, scope, time);
+          const sql = forceSet
+            ? data.ctes.replaceAll("LIMIT 1 OFFSET 64", "LIMIT 1 OFFSET 0")
+            : data.ctes;
+          const rows = (relation: string, column: string) =>
+            select(
+              db,
+              `WITH ${sql} SELECT site_pk,${column} FROM ${relation} ORDER BY site_pk,${column}`,
+              data.bindings.map((b) => b.value),
+            );
+          return {
+            sql: data.ctes,
+            visits: rows(data.visitRelation, "visit_id"),
+            events: rows(data.eventRelation, "event_pk"),
+          };
+        };
+        const expressions = sequences.flatMap((steps) =>
+          ["exists", "notExists"].map(
+            (op) => `sequence([${steps.join(",")}]) ${op}`,
+          ),
+        );
+        const compare = () => {
+          for (const expression of expressions) {
+            const actual = read(expression);
+            expect(actual.sql).toContain("history_ranked");
+            expect(actual).toEqual(read(expression, history, true));
+          }
+        };
+        compare();
+        for (const index of [0, 1, 2, 3, 4, 7]) {
+          const rows = read(expressions[index * 2]!).visits;
+          expect(rows).toContainEqual({ site_pk: 1, visit_id: "v-multi-now" });
+          expect(rows).not.toContainEqual({
+            site_pk: 1,
+            visit_id: "v-multi-one",
+          });
+        }
+        for (const index of [5, 6]) {
+          expect(read(expressions[index * 2]!).visits).not.toContainEqual({
+            site_pk: 1,
+            visit_id: "v-multi-now",
+          });
+        }
+        expect(read(expressions[0]!, base).sql).not.toContain("history_ranked");
+        expect(
+          read(expressions[0]!, {
+            ...history,
+            filterRange: createTimeRange(100, 300),
+          }).sql,
+        ).not.toContain("history_ranked");
+        expect(
+          read(
+            `sequence([${a},${b},EVENT { $.name contains "signup" }]) exists`,
+          ).sql,
+        ).not.toContain("history_ranked");
+        const insert = db.prepare(
+          "INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms) VALUES(1,'site-a',?,?,?,'/dense',200,1)",
+        );
+        for (let i = 0; i < 70; i++)
+          insert.run(
+            "multi-dense-" + i,
+            "multi-session-" + i,
+            "multi-visitor-" + i,
+          );
+        compare();
+      } finally {
+        db.close();
+      }
+    },
+  );
+
   it("seeks historical Event witnesses only for small report universes and preserves dense fallback", () => {
     const db = sqliteFixture();
     try {

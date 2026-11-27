@@ -1722,6 +1722,63 @@ class SqlCollectionCompiler {
       found = `CASE WHEN EXISTS(SELECT 1 FROM ${universe} LIMIT 1 OFFSET 64) THEN ${found} ELSE (${local}) END`;
     }
 
+    if (
+      this.sources.indexedGlobalTimelineVisits &&
+      multiStage &&
+      target.kind === "sequence" &&
+      steps.every((step) => getNameSelector(step) !== null) &&
+      !this.clock?.filterRangeExplicit &&
+      start !== undefined &&
+      end !== undefined &&
+      qStart !== undefined &&
+      qEnd !== undefined &&
+      qEnd > qStart &&
+      qEnd - qStart <= 3600000 &&
+      end - start >= 24 * (qEnd - qStart)
+    ) {
+      const universe =
+        frame.anchorKind === "session"
+          ? "scope_filter_sessions"
+          : "scope_filter_visitors";
+      const flags = steps.map((step, index) => {
+        const predicate = onlyApplicable(
+          this.expression(getNameSelector(step)!, {
+            ...frame,
+            currentAlias: "history_name",
+            currentKind: "event",
+          }),
+        );
+        seekBindings.push(...predicate.bindings);
+        return `CASE WHEN (${predicate.sql}) THEN 1 ELSE 0 END AS match_${index}`;
+      });
+      seekBindings.push(start, end);
+      // One ordered source per entity; the earliest reachable prefix
+      // dominates every later witness for an unconstrained sequence.
+      // Reusing strict positions also prevents overlapping selectors from
+      // matching the same occurrence twice.
+      const ranked = `history_ranked AS (
+        SELECT ROW_NUMBER() OVER (ORDER BY history_event.occurred_at,history_event.event_id COLLATE BINARY) AS position,
+          ${flags.join(", ")}
+        FROM visits history_visit
+        CROSS JOIN custom_events history_event
+        INNER JOIN (SELECT id,name AS event_name FROM custom_event_names) history_name ON history_name.id=history_event.event_name_id
+        WHERE history_visit.site_pk=${frame.anchorAlias}.site_pk AND history_visit.${identity}=${frame.anchorAlias}.${identity}
+          AND history_event.site_pk=history_visit.site_pk AND history_event.visit_id=history_visit.visit_id
+          AND history_event.occurred_at>=? AND history_event.occurred_at<?)`;
+      const ctes = [ranked];
+      let previous = "history_ranked";
+      for (let index = 0; index < count - 1; index++) {
+        const next = `history_reachable_${index}`;
+        ctes.push(`${next} AS (
+          SELECT *, MIN(CASE WHEN match_${index}=1 THEN position END) OVER () AS reached_${index}
+          FROM ${previous} ${index === 0 ? "" : `WHERE position > reached_${index - 1}`})`);
+        previous = next;
+      }
+      const local = `EXISTS(WITH ${ctes.join(", ")}
+        SELECT 1 FROM ${previous} WHERE match_${count - 1}=1 AND position > reached_${count - 2})`;
+      found = `CASE WHEN EXISTS(SELECT 1 FROM ${universe} LIMIT 1 OFFSET 64) THEN ${found} ELSE ${local} END`;
+    }
+
     return {
       sql: condition.operator === "notExists" ? `NOT (${found})` : found,
       bindings: seekBindings,
