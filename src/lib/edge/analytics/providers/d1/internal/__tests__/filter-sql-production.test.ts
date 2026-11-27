@@ -3600,6 +3600,113 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       }
     }
   });
+  it("seeks repeated historical Events only for small report universes and preserves dense fallback", () => {
+    const db = sqliteFixture();
+    try {
+      db.exec(`
+        CREATE UNIQUE INDEX test_visit_key ON visits(site_pk,visit_id);
+        CREATE INDEX test_visit_session ON visits(site_pk,session_id,started_at);
+        CREATE INDEX test_visit_visitor ON visits(site_pk,visitor_id,started_at);
+        CREATE INDEX test_event_visit ON custom_events(site_pk,visit_id,occurred_at);
+        INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms)
+        VALUES(1,'site-a','v-before','s3','u3','/before',-10001,1),
+              (1,'site-a','v-report','s3','u3','/report',200,1),
+              (1,'site-a','v-only','s4','u4','/before',-10001,1),
+              (1,'site-a','v-blank','','','/report',210,1),
+              (2,'site-b','v-report','s3','u3','/report',200,1);
+        INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at)
+        VALUES(105,1,'site-a','e-left','v-before',1,-10000),
+              (106,1,'site-a','e-same-time','v-before',1,-10000),
+              (107,1,'site-a','e-right','v-before',1,400),
+              (108,1,'site-a','e-only','v-only',1,150),
+              (109,1,'site-a','e-only-before','v-only',1,30),
+              (110,1,'site-a','e-orphan-name','v-report',999,200),
+              (111,2,'site-b','e-one','v-report',4,200),
+              (112,1,'site-a','e-blank','v-blank',1,220);
+      `);
+      const base = createQueryTime(100, 300, "UTC", 400);
+      const history = { ...base, readRange: createTimeRange(-10000, 400) };
+      const read = (
+        scope: "session" | "visitor",
+        expression: string,
+        time: QueryTime = history,
+        forceSet = false,
+      ) => {
+        const data = dataset(expression, scope, time);
+        const sql = forceSet
+          ? data.ctes.replaceAll("LIMIT 1 OFFSET 64", "LIMIT 1 OFFSET 0")
+          : data.ctes;
+        const rows = (relation: string, column: string) =>
+          select(
+            db,
+            `WITH ${sql} SELECT site_pk,${column} FROM ${relation} ORDER BY site_pk,${column}`,
+            data.bindings.map((b) => b.value),
+          );
+        return {
+          sql: data.ctes,
+          visits: rows(data.visitRelation, "visit_id"),
+          events: rows(data.eventRelation, "event_pk"),
+        };
+      };
+      const expressions = [
+        "sequence([EVENT,EVENT]) exists",
+        "sequence([EVENT,EVENT]) notExists",
+        "sequence([EVENT,EVENT,EVENT]) exists",
+      ];
+      for (const scope of ["session", "visitor"] as const) {
+        for (const expression of expressions) {
+          const actual = read(scope, expression);
+          expect(actual.sql).toContain("history_visit");
+          expect(actual.sql).toContain("LIMIT 1 OFFSET 64");
+          expect(actual).toEqual(read(scope, expression, history, true));
+        }
+        const pair = read(scope, expressions[0]!);
+        expect(pair.visits).toEqual([
+          { site_pk: 1, visit_id: "v-new" },
+          { site_pk: 1, visit_id: "v-report" },
+        ]);
+        expect(pair.events).toEqual([
+          { site_pk: 1, event_pk: 102 },
+          { site_pk: 1, event_pk: 103 },
+          { site_pk: 1, event_pk: 108 },
+        ]);
+        const triple = read(scope, expressions[2]!);
+        expect(triple.visits).toEqual([{ site_pk: 1, visit_id: "v-new" }]);
+        expect(
+          read(scope, "sequence([EVENT,EVENT,EVENT,EVENT,EVENT,EVENT]) exists")
+            .sql,
+        ).not.toContain("history_visit");
+        expect(read(scope, expressions[0]!, base).sql).not.toContain(
+          "history_visit",
+        );
+        expect(
+          read(scope, expressions[0]!, {
+            ...history,
+            filterRange: createTimeRange(100, 300),
+          }).sql,
+        ).not.toContain("history_visit");
+        expect(
+          read(
+            scope,
+            'sequence([EVENT { $.name eq "purchase" },EVENT { $.name eq "purchase" }]) exists',
+          ).sql,
+        ).not.toContain("history_visit");
+      }
+      const insert = db.prepare(
+        "INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms) VALUES(1,'site-a',?,?,?,'/dense',200,1)",
+      );
+      for (let i = 0; i < 70; i++)
+        insert.run("dense-" + i, "dense-session-" + i, "dense-visitor-" + i);
+      for (const scope of ["session", "visitor"] as const)
+        for (const expression of expressions)
+          expect(read(scope, expression)).toEqual(
+            read(scope, expression, history, true),
+          );
+    } finally {
+      db.close();
+    }
+  });
+
   it("uses authorized indexed Page blockers without changing global Adjacent read domains", () => {
     const db = sqliteFixture();
     try {
