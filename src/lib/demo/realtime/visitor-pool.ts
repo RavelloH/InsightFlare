@@ -53,6 +53,7 @@ export interface VisitorFingerprint {
   screenSize: string;
 }
 const FINGERPRINT_CACHE = new Map<string, VisitorFingerprint>();
+const MAX_CACHED_FINGERPRINTS = 8_192;
 const UNIVERSE_SIZE_CACHE = new Map<string, number>();
 const MIN_UNIVERSE = 800;
 const MAX_UNIVERSE = 50_000;
@@ -105,7 +106,7 @@ export function visitorIndexFromId(id: string): number {
 }
 /**
  * Derive a visitor's stable fingerprint. Properties are computed once and
- * cached, then reused across every query in this process.
+ * cached within a bounded recent working set. Evicted values are deterministic.
  */
 export function getVisitorFingerprint(
   siteId: string,
@@ -113,7 +114,11 @@ export function getVisitorFingerprint(
 ): VisitorFingerprint {
   const cacheKey = `${siteId}:${visitorId}`;
   const cached = FINGERPRINT_CACHE.get(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    FINGERPRINT_CACHE.delete(cacheKey);
+    FINGERPRINT_CACHE.set(cacheKey, cached);
+    return cached;
+  }
 
   const profile = findSiteProfile(siteId);
   const rng = mulberry32(fnv1a(`fp:${siteId}:${visitorId}`));
@@ -147,6 +152,10 @@ export function getVisitorFingerprint(
     language,
     screenSize,
   };
+  if (FINGERPRINT_CACHE.size >= MAX_CACHED_FINGERPRINTS) {
+    const oldest = FINGERPRINT_CACHE.keys().next().value;
+    if (oldest !== undefined) FINGERPRINT_CACHE.delete(oldest);
+  }
   FINGERPRINT_CACHE.set(cacheKey, fingerprint);
   return fingerprint;
 }

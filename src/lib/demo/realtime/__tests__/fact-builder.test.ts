@@ -262,6 +262,59 @@ describe("mock/fact-builder", () => {
       expect(DEMO_FACT_DATASET_CACHE.has("stale:0")).toBe(false);
     });
 
+    it("bounds retained fact rows and keeps recently used comparison windows", () => {
+      DEMO_FACT_DATASET_CACHE.clear();
+      const end = Date.UTC(2026, 10, 27);
+      const from = end - 29 * DAY_MS;
+      const first = buildDemoFactDataset(SITE_ID, from, end);
+      const second = buildDemoFactDataset(SITE_ID, from - DAY_MS, end - DAY_MS);
+      expect(first.visits.length).toBe(12_000);
+      expect(second.visits.length).toBe(12_000);
+      expect(buildDemoFactDataset(SITE_ID, from, end)).toBe(first);
+      const third = buildDemoFactDataset(
+        SITE_ID,
+        from - 2 * DAY_MS,
+        end - 2 * DAY_MS,
+      );
+      const retained = [...DEMO_FACT_DATASET_CACHE.values()];
+      expect(retained).toContain(first);
+      expect(retained).toContain(third);
+      expect(retained).not.toContain(second);
+      expect(
+        retained.reduce(
+          (sum, dataset) =>
+            sum +
+            dataset.visits.length +
+            dataset.sessions.size +
+            dataset.visitors.size,
+          0,
+        ),
+      ).toBeLessThanOrEqual(60_000);
+      const regenerated = buildDemoFactDataset(
+        SITE_ID,
+        from - DAY_MS,
+        end - DAY_MS,
+      );
+      expect(regenerated).not.toBe(second);
+      expect(regenerated).toEqual(second);
+      DEMO_FACT_DATASET_CACHE.clear();
+    });
+
+    it("bounds even zero-view windows", () => {
+      DEMO_FACT_DATASET_CACHE.clear();
+      for (let i = 0; i < 140; i++) {
+        DEMO_FACT_DATASET_CACHE.set(
+          "empty:" + i,
+          emptyDemoFactDataset(i, i + 1),
+        );
+      }
+      const empty = buildDemoFactDataset(SITE_ID, 0, 1);
+      expect(empty.visits).toEqual([]);
+      expect(DEMO_FACT_DATASET_CACHE.size).toBe(140);
+      expect(DEMO_FACT_DATASET_CACHE.has("empty:0")).toBe(false);
+      DEMO_FACT_DATASET_CACHE.clear();
+    });
+
     it("handles non-finite endpoints by returning an empty dataset", () => {
       DEMO_FACT_DATASET_CACHE.clear();
       const d = buildDemoFactDataset(SITE_ID, Number.NaN, 100);
