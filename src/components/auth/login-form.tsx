@@ -23,6 +23,8 @@ import type { Locale } from "@/lib/i18n/config";
 import { navigateWithTransition } from "@/lib/page-transition";
 import { useRouter } from "@/lib/router";
 
+import { verifyTurnstile } from "./turnstile-client";
+
 interface LoginFormProps {
   locale: Locale;
   nextPath: string;
@@ -52,7 +54,7 @@ type LoginTurnstileClientConfig =
   { enabled: false } | { enabled: true; siteKey: string; mode: "invisible" };
 
 type TurnstileStatus =
-  "checking" | "disabled" | "loading" | "running" | "verified" | "error";
+  "checking" | "disabled" | "running" | "verified" | "error";
 
 interface TurnstilePublicResponse {
   ok?: boolean;
@@ -65,31 +67,7 @@ interface TurnstilePublicResponse {
   };
 }
 
-interface TurnstileApi {
-  render: (
-    container: HTMLElement,
-    options: {
-      sitekey: string;
-      size: "invisible";
-      callback: (token: string) => void;
-      "error-callback": () => void;
-      "expired-callback": () => void;
-    },
-  ) => string;
-  execute: (widgetId: string) => void;
-  reset: (widgetId: string) => void;
-  remove?: (widgetId: string) => void;
-}
-
-declare global {
-  interface Window {
-    turnstile?: TurnstileApi;
-  }
-}
-
-const TURNSTILE_SCRIPT_ID = "cloudflare-turnstile-script";
 const TURNSTILE_TOKEN_TTL_MS = 240_000;
-let turnstileScriptPromise: Promise<void> | null = null;
 
 function apiErrorCode(payload: LoginResponse): string {
   if (typeof payload.error === "string") return payload.error;
@@ -104,52 +82,27 @@ function apiErrorCode(payload: LoginResponse): string {
   return "";
 }
 
-async function fetchLoginTurnstileConfig(): Promise<LoginTurnstileClientConfig> {
+async function fetchLoginTurnstileConfig(
+  signal: AbortSignal,
+): Promise<LoginTurnstileClientConfig> {
   const response = await fetch("/api/public/login-security", {
     method: "GET",
     credentials: "include",
     cache: "no-store",
+    signal,
   });
   const payload = (await response.json()) as TurnstilePublicResponse;
   const turnstile = payload.data?.turnstile;
-  if (!response.ok || payload.ok !== true || !turnstile?.enabled) {
-    return { enabled: false };
+  if (
+    !response.ok ||
+    payload.ok !== true ||
+    typeof turnstile?.enabled !== "boolean"
+  ) {
+    throw new Error("turnstile_config_unavailable");
   }
-  return turnstile.siteKey
-    ? { enabled: true, siteKey: turnstile.siteKey, mode: "invisible" }
-    : { enabled: false };
-}
-
-function loadTurnstileScript(): Promise<void> {
-  if (window.turnstile) return Promise.resolve();
-  if (turnstileScriptPromise) return turnstileScriptPromise;
-
-  turnstileScriptPromise = new Promise((resolve, reject) => {
-    const existing = document.getElementById(
-      TURNSTILE_SCRIPT_ID,
-    ) as HTMLScriptElement | null;
-    if (existing) {
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error("load")), {
-        once: true,
-      });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = TURNSTILE_SCRIPT_ID;
-    script.src =
-      "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-    script.async = true;
-    script.defer = true;
-    script.addEventListener("load", () => resolve(), { once: true });
-    script.addEventListener("error", () => reject(new Error("load")), {
-      once: true,
-    });
-    document.head.appendChild(script);
-  });
-
-  return turnstileScriptPromise;
+  if (!turnstile.enabled) return { enabled: false };
+  if (!turnstile.siteKey) throw new Error("turnstile_config_unavailable");
+  return { enabled: true, siteKey: turnstile.siteKey, mode: "invisible" };
 }
 
 export function LoginForm({
@@ -169,143 +122,103 @@ export function LoginForm({
 }: LoginFormProps) {
   const router = useRouter();
   const turnstileRef = useRef<HTMLDivElement | null>(null);
-  const widgetIdRef = useRef<string | null>(null);
-  const verificationPromiseRef = useRef<Promise<string> | null>(null);
+  const verificationRef = useRef<AbortController | null>(null);
+  const refreshTimerRef = useRef<number | undefined>(undefined);
   const tokenRef = useRef<{ token: string; issuedAt: number } | null>(null);
-  const configRef = useRef<LoginTurnstileClientConfig>({ enabled: false });
+  const configRef = useRef<LoginTurnstileClientConfig | null>(null);
+  const mountedRef = useRef(false);
+  const submittingRef = useRef(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
-  const [turnstileConfig, setTurnstileConfig] =
-    useState<LoginTurnstileClientConfig>({ enabled: false });
   const [turnstileStatus, setTurnstileStatus] =
     useState<TurnstileStatus>("checking");
   const [securityDialogOpen, setSecurityDialogOpen] = useState(false);
 
-  useEffect(() => {
-    configRef.current = turnstileConfig;
-  }, [turnstileConfig]);
-
   const clearToken = useCallback(() => {
     tokenRef.current = null;
+    window.clearTimeout(refreshTimerRef.current);
   }, []);
 
-  const resetTurnstile = useCallback(() => {
-    clearToken();
-    const widgetId = widgetIdRef.current;
-    if (widgetId && window.turnstile) {
-      window.turnstile.reset(widgetId);
-    }
-  }, [clearToken]);
-
-  const runTurnstile = useCallback(async (): Promise<string> => {
-    const currentConfig = configRef.current;
-    if (!currentConfig.enabled) return "";
-
-    const existing = tokenRef.current;
-    if (existing && Date.now() - existing.issuedAt < TURNSTILE_TOKEN_TTL_MS) {
-      return existing.token;
-    }
-    if (verificationPromiseRef.current) return verificationPromiseRef.current;
-
-    setTurnstileStatus((status) =>
-      status === "loading" ? "loading" : "running",
-    );
-
-    const promise = new Promise<string>((resolve, reject) => {
-      const container = turnstileRef.current;
-      const turnstile = window.turnstile;
-      if (!container || !turnstile) {
-        reject(new Error("turnstile_unavailable"));
-        return;
-      }
-
-      const callbacks = {
-        callback: (token: string) => {
-          tokenRef.current = { token, issuedAt: Date.now() };
-          setTurnstileStatus("verified");
-          verificationPromiseRef.current = null;
-          resolve(token);
-        },
-        "error-callback": () => {
-          clearToken();
-          setTurnstileStatus("error");
-          setSecurityDialogOpen(true);
-          verificationPromiseRef.current = null;
-          reject(new Error("turnstile_error"));
-        },
-        "expired-callback": () => {
-          clearToken();
-          setTurnstileStatus("error");
-          verificationPromiseRef.current = null;
-        },
-      };
-
-      if (!widgetIdRef.current) {
-        widgetIdRef.current = turnstile.render(container, {
-          sitekey: currentConfig.siteKey,
-          size: "invisible",
-          ...callbacks,
-        });
-      }
-      turnstile.execute(widgetIdRef.current);
-    });
-
-    verificationPromiseRef.current = promise;
-    return promise;
-  }, [clearToken]);
-
-  const initializeTurnstile = useCallback(async () => {
-    try {
-      const config = await fetchLoginTurnstileConfig();
-      setTurnstileConfig(config);
-      configRef.current = config;
-      if (!config.enabled) {
-        setTurnstileStatus("disabled");
-        return;
-      }
-      setTurnstileStatus("loading");
-      await loadTurnstileScript();
-      await runTurnstile();
-    } catch {
+  const prepareSecurity = useCallback(
+    async function prepare(): Promise<void> {
+      verificationRef.current?.abort();
       clearToken();
-      setTurnstileStatus("error");
-      setSecurityDialogOpen(true);
-    }
-  }, [clearToken, runTurnstile]);
+      const controller = new AbortController();
+      verificationRef.current = controller;
+      const { signal } = controller;
+      try {
+        let config = configRef.current;
+        if (!config) {
+          setTurnstileStatus("checking");
+          config = await fetchLoginTurnstileConfig(signal);
+          signal.throwIfAborted();
+          configRef.current = config;
+        }
+        if (!config.enabled) {
+          setTurnstileStatus("disabled");
+          return;
+        }
+        setTurnstileStatus("running");
+        const container = turnstileRef.current;
+        if (!container) throw new Error("turnstile_unavailable");
+        const token = await verifyTurnstile(container, config.siteKey, signal);
+        signal.throwIfAborted();
+        tokenRef.current = { token, issuedAt: Date.now() };
+        setTurnstileStatus("verified");
+        refreshTimerRef.current = window.setTimeout(() => {
+          if (!submittingRef.current) void prepare();
+        }, TURNSTILE_TOKEN_TTL_MS);
+      } catch {
+        if (signal.aborted) return;
+        clearToken();
+        setTurnstileStatus("error");
+        setSecurityDialogOpen(true);
+      }
+    },
+    [clearToken],
+  );
 
   useEffect(() => {
-    void initializeTurnstile();
+    mountedRef.current = true;
+    void prepareSecurity();
     return () => {
-      const widgetId = widgetIdRef.current;
-      if (widgetId && window.turnstile?.remove) {
-        window.turnstile.remove(widgetId);
-      }
-      widgetIdRef.current = null;
-      verificationPromiseRef.current = null;
+      mountedRef.current = false;
+      verificationRef.current?.abort();
+      clearToken();
     };
-  }, [initializeTurnstile]);
+  }, [clearToken, prepareSecurity]);
 
-  async function retrySecurityVerification() {
+  function retrySecurityVerification() {
     setSecurityDialogOpen(false);
-    resetTurnstile();
-    setTurnstileStatus("running");
-    try {
-      await runTurnstile();
-    } catch {
-      setTurnstileStatus("error");
-      setSecurityDialogOpen(true);
-    }
+    void prepareSecurity();
   }
 
   async function handleLogin() {
-    if (pending || redirecting) return;
+    if (
+      submittingRef.current ||
+      redirecting ||
+      !configRef.current ||
+      (turnstileStatus !== "verified" && turnstileStatus !== "disabled")
+    )
+      return;
+    const currentConfig = configRef.current;
+    const token = tokenRef.current;
+    if (
+      currentConfig.enabled &&
+      (!token || Date.now() - token.issuedAt >= TURNSTILE_TOKEN_TTL_MS)
+    ) {
+      void prepareSecurity();
+      return;
+    }
+    submittingRef.current = true;
+    clearToken();
     setPending(true);
     let loginSucceeded = false;
+    let securityFailed = false;
     try {
-      const currentConfig = configRef.current;
-      const turnstileToken = currentConfig.enabled ? await runTurnstile() : "";
+      const turnstileToken = token?.token ?? "";
       const response = await fetch("/api/public/session", {
         method: "POST",
         credentials: "include",
@@ -319,12 +232,20 @@ export function LoginForm({
           ...(currentConfig.enabled ? { turnstileToken } : {}),
         }),
       });
-      if (currentConfig.enabled) clearToken();
       const payload = (await response.json()) as LoginResponse;
+      if (!mountedRef.current) return;
       if (!response.ok || !payload.ok || !payload.data) {
         const code = apiErrorCode(payload);
-        if (code === "turnstile_failed" || code === "turnstile_required") {
-          resetTurnstile();
+        if (
+          [
+            "turnstile_failed",
+            "turnstile_required",
+            "turnstile_not_configured",
+            "turnstile_verification_error",
+          ].includes(code)
+        ) {
+          securityFailed = true;
+          configRef.current = null;
           setTurnstileStatus("error");
           setSecurityDialogOpen(true);
           throw new Error(securityVerificationFailedLabel);
@@ -341,26 +262,31 @@ export function LoginForm({
       navigateWithTransition(router, payload.data.next || `/${locale}/app`);
     } catch (error) {
       const message = error instanceof Error ? error.message : failedLabel;
-      toast.error(message || failedLabel);
+      if (mountedRef.current) toast.error(message || failedLabel);
     } finally {
-      if (!loginSucceeded) setPending(false);
+      if (!loginSucceeded) {
+        submittingRef.current = false;
+        if (mountedRef.current) {
+          setPending(false);
+          if (currentConfig.enabled && !securityFailed) void prepareSecurity();
+        }
+      }
     }
   }
 
+  const securityError = turnstileStatus === "error";
   const securityBlocking =
-    turnstileConfig.enabled &&
-    (turnstileStatus === "checking" ||
-      turnstileStatus === "loading" ||
-      turnstileStatus === "running" ||
-      turnstileStatus === "error");
+    turnstileStatus === "checking" || turnstileStatus === "running";
   const buttonDisabled = pending || redirecting || securityBlocking;
   const buttonLabel = redirecting
     ? redirectingLabel
-    : securityBlocking
-      ? verifyingSecurityLabel
-      : pending
-        ? signingInLabel
-        : signInLabel;
+    : securityError
+      ? retrySecurityLabel
+      : securityBlocking
+        ? verifyingSecurityLabel
+        : pending
+          ? signingInLabel
+          : signInLabel;
   const showButtonSpinner = pending || redirecting || securityBlocking;
 
   return (
@@ -371,7 +297,8 @@ export function LoginForm({
         action="/api/public/session"
         onSubmit={(event) => {
           event.preventDefault();
-          void handleLogin();
+          if (securityError) retrySecurityVerification();
+          else void handleLogin();
         }}
       >
         <input type="hidden" name="next" value={nextPath} />
@@ -399,7 +326,12 @@ export function LoginForm({
             required
           />
         </div>
-        <Button type="submit" className="w-full" disabled={buttonDisabled}>
+        <Button
+          type={securityError ? "button" : "submit"}
+          onClick={securityError ? retrySecurityVerification : undefined}
+          className="w-full"
+          disabled={buttonDisabled}
+        >
           <AutoTransition className="inline-flex items-center gap-[var(--button-content-gap)]">
             {showButtonSpinner ? (
               <span
@@ -411,18 +343,20 @@ export function LoginForm({
               </span>
             ) : (
               <span
-                key="idle"
+                key={securityError ? "retry" : "idle"}
                 className="inline-flex items-center gap-[var(--button-content-gap)]"
               >
-                <RiLoginBoxLine data-icon="inline-start" />
+                {securityError ? (
+                  <RiRefreshLine data-icon="inline-start" />
+                ) : (
+                  <RiLoginBoxLine data-icon="inline-start" />
+                )}
                 {buttonLabel}
               </span>
             )}
           </AutoTransition>
         </Button>
-        {turnstileConfig.enabled ? (
-          <div ref={turnstileRef} className="hidden" aria-hidden="true" />
-        ) : null}
+        <div ref={turnstileRef} className="hidden" aria-hidden="true" />
       </form>
 
       <Dialog open={securityDialogOpen} onOpenChange={setSecurityDialogOpen}>
@@ -442,7 +376,7 @@ export function LoginForm({
             <Button
               type="button"
               onClick={() => {
-                void retrySecurityVerification();
+                retrySecurityVerification();
               }}
             >
               <RiRefreshLine data-icon="inline-start" />

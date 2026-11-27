@@ -41,6 +41,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import { verifyTurnstile } from "@/components/auth/turnstile-client";
 import {
   managementQueryOptions,
   type SystemSettingsInitialData,
@@ -67,28 +68,6 @@ interface PublicLoginTurnstileAdminConfig {
   updatedAt: number;
 }
 type FormState = Pick<PublicLoginTurnstileAdminConfig, "enabled" | "siteKey">;
-interface TurnstileApi {
-  render: (
-    container: HTMLElement,
-    options: {
-      sitekey: string;
-      size: "invisible";
-      callback: (token: string) => void;
-      "error-callback": () => void;
-      "expired-callback": () => void;
-    },
-  ) => string;
-  execute: (widgetId: string) => void;
-  reset: (widgetId: string) => void;
-  remove?: (widgetId: string) => void;
-}
-declare global {
-  interface Window {
-    turnstile?: TurnstileApi;
-  }
-}
-const TURNSTILE_SCRIPT_ID = "cloudflare-turnstile-script";
-let turnstileScriptPromise: Promise<void> | null = null;
 function defaultConfig(): PublicLoginTurnstileAdminConfig {
   return {
     enabled: false,
@@ -137,37 +116,6 @@ async function testConfig(body: {
     body,
   });
 }
-function loadTurnstileScript(): Promise<void> {
-  if (window.turnstile) return Promise.resolve();
-  if (turnstileScriptPromise) return turnstileScriptPromise;
-
-  turnstileScriptPromise = new Promise((resolve, reject) => {
-    const existing = document.getElementById(
-      TURNSTILE_SCRIPT_ID,
-    ) as HTMLScriptElement | null;
-    if (existing) {
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error("load")), {
-        once: true,
-      });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = TURNSTILE_SCRIPT_ID;
-    script.src =
-      "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-    script.async = true;
-    script.defer = true;
-    script.addEventListener("load", () => resolve(), { once: true });
-    script.addEventListener("error", () => reject(new Error("load")), {
-      once: true,
-    });
-    document.head.appendChild(script);
-  });
-
-  return turnstileScriptPromise;
-}
 export function turnstileSettingsQueryOptions(
   userId: string,
   deferred?: Promise<Pick<
@@ -194,7 +142,7 @@ export function LoginTurnstileSettingsClient({
 }: LoginTurnstileSettingsClientProps) {
   const copy = messages.systemSettings;
   const turnstileRef = useRef<HTMLDivElement | null>(null);
-  const widgetIdRef = useRef<string | null>(null);
+  const verificationRef = useRef<AbortController | null>(null);
   const [config, setConfig] = useState<PublicLoginTurnstileAdminConfig>(
     initialData?.loginTurnstile ?? defaultConfig(),
   );
@@ -262,63 +210,44 @@ export function LoginTurnstileSettingsClient({
     copy.loginTurnstileLoadFailed,
   ]);
 
-  useEffect(() => {
-    return () => {
-      const widgetId = widgetIdRef.current;
-      if (widgetId && window.turnstile?.remove) {
-        window.turnstile.remove(widgetId);
-      }
-    };
-  }, []);
+  useEffect(() => () => verificationRef.current?.abort(), []);
 
   function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
     setTestedFingerprint("");
   }
 
-  async function executeTestTurnstile(siteKey: string): Promise<string> {
-    await loadTurnstileScript();
-    return new Promise((resolve, reject) => {
-      const container = turnstileRef.current;
-      const turnstile = window.turnstile;
-      if (!container || !turnstile) {
-        reject(new Error("turnstile_unavailable"));
-        return;
-      }
-      if (widgetIdRef.current) {
-        turnstile.remove?.(widgetIdRef.current);
-        widgetIdRef.current = null;
-      }
-      widgetIdRef.current = turnstile.render(container, {
-        sitekey: siteKey,
-        size: "invisible",
-        callback: (token) => resolve(token),
-        "error-callback": () => reject(new Error("turnstile_error")),
-        "expired-callback": () => reject(new Error("turnstile_expired")),
-      });
-      turnstile.execute(widgetIdRef.current);
-    });
-  }
-
   async function handleTest() {
-    if (lockedUntilReady) return;
+    if (lockedUntilReady || verificationRef.current) return;
     const siteKey = form.siteKey.trim();
     const nextSecretKey = secretKey.trim();
     if (!siteKey || !nextSecretKey) {
       toast.error(copy.loginTurnstileTestMissing);
       return;
     }
+    const controller = new AbortController();
+    verificationRef.current = controller;
     setTesting(true);
     try {
-      const turnstileToken = await executeTestTurnstile(siteKey);
+      const container = turnstileRef.current;
+      if (!container) throw new Error("turnstile_unavailable");
+      const turnstileToken = await verifyTurnstile(
+        container,
+        siteKey,
+        controller.signal,
+      );
+      controller.signal.throwIfAborted();
       await testConfig({ siteKey, secretKey: nextSecretKey, turnstileToken });
+      if (controller.signal.aborted) return;
       setTestedFingerprint(`${siteKey}::${nextSecretKey}`);
       toast.success(copy.loginTurnstileTestPassed);
     } catch {
+      if (controller.signal.aborted) return;
       setTestedFingerprint("");
       toast.error(copy.loginTurnstileTestFailed);
     } finally {
-      setTesting(false);
+      verificationRef.current = null;
+      if (!controller.signal.aborted) setTesting(false);
     }
   }
 
