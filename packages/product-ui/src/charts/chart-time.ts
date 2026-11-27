@@ -3,6 +3,28 @@ import type { ChartLocale, DashboardInterval } from "./types";
 
 export type ChartAxisDateFormat = "compact" | "regular" | "time";
 
+// Chart instances and tooltip renders share the same small set of formats.
+// Keep retention bounded across locales and reporting time zones in SSR
+// isolates as well as long-lived browser sessions.
+const MAX_DATE_FORMATTERS = 64;
+const dateFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function cachedDateFormatter(
+  locale: string,
+  options: Intl.DateTimeFormatOptions,
+): Intl.DateTimeFormat {
+  const key = JSON.stringify([locale, options]);
+  const cached = dateFormatters.get(key);
+  if (cached) return cached;
+  const created = new Intl.DateTimeFormat(locale, options);
+  if (dateFormatters.size >= MAX_DATE_FORMATTERS) {
+    const oldest = dateFormatters.keys().next().value;
+    if (oldest !== undefined) dateFormatters.delete(oldest);
+  }
+  dateFormatters.set(key, created);
+  return created;
+}
+
 export function createChartAxisDateFormatter(
   locale: ChartLocale,
   interval: DashboardInterval,
@@ -11,7 +33,7 @@ export function createChartAxisDateFormatter(
 ): Intl.DateTimeFormat {
   const resolvedLocale = intlLocale(locale);
   if (format === "time") {
-    return new Intl.DateTimeFormat(resolvedLocale, {
+    return cachedDateFormatter(resolvedLocale, {
       timeZone,
       hour: "2-digit",
       minute: "2-digit",
@@ -20,7 +42,7 @@ export function createChartAxisDateFormatter(
 
   if (format === "regular") {
     if (interval === "minute" || interval === "hour") {
-      return new Intl.DateTimeFormat(resolvedLocale, {
+      return cachedDateFormatter(resolvedLocale, {
         timeZone,
         month: "short",
         day: "numeric",
@@ -29,13 +51,13 @@ export function createChartAxisDateFormatter(
       });
     }
     if (interval === "month") {
-      return new Intl.DateTimeFormat(resolvedLocale, {
+      return cachedDateFormatter(resolvedLocale, {
         timeZone,
         year: "numeric",
         month: "short",
       });
     }
-    return new Intl.DateTimeFormat(resolvedLocale, {
+    return cachedDateFormatter(resolvedLocale, {
       timeZone,
       month: "short",
       day: "numeric",
@@ -43,7 +65,7 @@ export function createChartAxisDateFormatter(
   }
 
   if (interval === "minute" || interval === "hour") {
-    return new Intl.DateTimeFormat(resolvedLocale, {
+    return cachedDateFormatter(resolvedLocale, {
       timeZone,
       month: "numeric",
       day: "numeric",
@@ -52,13 +74,13 @@ export function createChartAxisDateFormatter(
     });
   }
   if (interval === "day") {
-    return new Intl.DateTimeFormat(resolvedLocale, {
+    return cachedDateFormatter(resolvedLocale, {
       timeZone,
       month: "numeric",
       day: "numeric",
     });
   }
-  return new Intl.DateTimeFormat(resolvedLocale, {
+  return cachedDateFormatter(resolvedLocale, {
     timeZone,
     year: "2-digit",
     month: "short",
@@ -81,5 +103,5 @@ export function createChartTooltipDateFormatter(
     dateOptions.hour = "2-digit";
     dateOptions.minute = "2-digit";
   }
-  return new Intl.DateTimeFormat(intlLocale(locale), dateOptions);
+  return cachedDateFormatter(intlLocale(locale), dateOptions);
 }
