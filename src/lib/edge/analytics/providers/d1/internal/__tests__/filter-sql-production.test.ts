@@ -2454,7 +2454,7 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
-  it("shares entity membership evidence without narrowing cross-observation AND or losing Event-only entities", () => {
+  it("shares entity membership evidence without narrowing cross-observation AND or losing Event-only entities", async () => {
     const db = sqlitePayloadFixture();
     try {
       db.exec(`
@@ -2552,6 +2552,63 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
               `SELECT event_pk FROM ${compiled.eventRelation} ORDER BY event_pk`,
             ),
           ).toEqual(item.events.map((event_pk) => ({ event_pk })));
+          const doc = parseFilterDsl(item.expression, analyticsFilterRegistry);
+          const plan = createScopedFilterPlan("overview", doc, scope)!;
+          const filters = attachScopedFilterMetadata(doc, {
+            requestedScope: scope,
+            resolvedScope: plan.scope,
+            plan,
+            time: createQueryTime(100, 300, "UTC", 400),
+            siteIds: ["site-a"],
+          });
+          const input = { filters, plan, siteIds: ["site-a"], window: WINDOW };
+          const baseline = compileScopedDatasetSql(input);
+          const optimized = compileScopedDatasetSql({
+            ...input,
+            inlineVisitEvidence: true,
+          });
+          expect(baseline.ctes).toContain("scope_raw_visits AS MATERIALIZED");
+          expect(
+            optimized.ctes.includes("scope_raw_visits AS NOT MATERIALIZED"),
+          ).toBe(item.evidence);
+          expect(optimized.ctes).toContain("scope_raw_events AS MATERIALIZED");
+          expect(optimized.bindings).toEqual(baseline.bindings);
+          for (const relation of [
+            "visitRelation",
+            "eventRelation",
+            "sessionRelation",
+            "visitorRelation",
+          ] as const) {
+            const read = (data: typeof baseline) =>
+              select(
+                db,
+                `WITH ${data.ctes} SELECT * FROM ${data[relation]} ORDER BY 1,2`,
+                data.bindings.map((b) => b.value),
+              );
+            expect(read(optimized)).toEqual(read(baseline));
+          }
+          const expected = select(
+            db,
+            `WITH ${baseline.ctes} SELECT COUNT(*) AS views,
+            (SELECT COUNT(*) FROM ${baseline.sessionRelation}) AS sessions,
+            (SELECT COUNT(*) FROM ${baseline.visitorRelation}) AS visitors,
+            (SELECT COUNT(*) FROM (SELECT session_id FROM ${baseline.visitRelation}
+              WHERE session_id != '' GROUP BY session_id HAVING COUNT(*)=1)) AS bounces,
+            COALESCE(SUM(CASE WHEN duration_ms>=0 THEN duration_ms ELSE 0 END),0) AS totalDuration,
+            COALESCE(SUM(CASE WHEN duration_ms>=0 THEN 1 ELSE 0 END),0) AS durationViews
+            FROM ${baseline.visitRelation}`,
+            baseline.bindings.map((b) => b.value),
+          )[0];
+          const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+          const env = { DB: createSqliteD1Database(db, trace) } as never;
+          expect(
+            await queryOverviewFromD1(env, "site-a", WINDOW, filters),
+          ).toEqual(expected);
+          expect(
+            trace.preparedSql[0]!.includes(
+              "scope_raw_visits AS NOT MATERIALIZED",
+            ),
+          ).toBe(item.evidence);
         }
       }
     } finally {

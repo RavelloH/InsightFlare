@@ -83,6 +83,8 @@ export interface ScopedDatasetCompilerInput {
    * callers keep the full structured projection.
    */
   readonly compatibilityEventSource?: boolean;
+  /** Reader-proven hint; do not inline for other consumers of the shared dataset. */
+  readonly inlineVisitEvidence?: boolean;
 }
 
 export function scopedDatasetFor(
@@ -90,6 +92,7 @@ export function scopedDatasetFor(
   window: QueryWindow,
   filters: FilterDocument,
   target?: ScopedDatasetTarget,
+  options?: { readonly inlineVisitEvidence?: boolean },
 ): ScopedDatasetSql | null {
   const metadata = scopedFilterMetadata(filters);
   return metadata
@@ -99,6 +102,7 @@ export function scopedDatasetFor(
         siteIds: [siteId],
         window,
         target,
+        inlineVisitEvidence: options?.inlineVisitEvidence,
       })
     : null;
 }
@@ -1948,15 +1952,33 @@ scope_final_events AS (
     ON matching_events.site_pk = re.site_pk
    AND matching_events.event_id = re.event_id
 )`;
+  // Only a measured reader may request this plan. Shared negated
+  // Visit-context evidence reads Visit rows again for final reporting;
+  // let SQLite seek the qualified identity without materializing them.
+  // Keep Event materialization: rereading its linked Visit/name join
+  // regresses event-dense sites, and other readers have different scans.
+  const inlineVisitEvidence =
+    input.inlineVisitEvidence === true &&
+    !input.compatibilityEventSource &&
+    target === undefined &&
+    input.siteIds.length === 1 &&
+    !domains &&
+    qualification.kind === "entity" &&
+    qualification.ctes.some((cte) => cte.name === "scope_membership_evidence");
   const definitions: BoundCteDefinition[] = [
     boundCte(
       "scope_raw_visits",
-      allowSourceInlining
+      inlineVisitEvidence
         ? visitSource(input.siteIds, target).replace(
             "scope_raw_visits AS MATERIALIZED (",
-            "scope_raw_visits AS (",
+            "scope_raw_visits AS NOT MATERIALIZED (",
           )
-        : visitSource(input.siteIds, target),
+        : allowSourceInlining
+          ? visitSource(input.siteIds, target).replace(
+              "scope_raw_visits AS MATERIALIZED (",
+              "scope_raw_visits AS (",
+            )
+          : visitSource(input.siteIds, target),
       [
         ...input.siteIds,
         input.window.startMs,

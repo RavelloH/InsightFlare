@@ -44,7 +44,9 @@ export async function queryOverviewFromD1(
   diagnostics?: D1ReadDiagnostics,
 ): Promise<OverviewAggregateRow> {
   const scopedDataset =
-    scopedDatasetFor(siteId, window, filters) ??
+    scopedDatasetFor(siteId, window, filters, undefined, {
+      inlineVisitEvidence: true,
+    }) ??
     scopedDatasetForUnpreparedReader(
       "overview",
       siteId,
