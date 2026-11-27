@@ -3462,6 +3462,73 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       }
     }
   });
+  it("uses authorized indexed Page blockers without changing global Adjacent read domains", () => {
+    const db = sqliteFixture();
+    try {
+      db.exec(`
+        CREATE UNIQUE INDEX test_visit_key ON visits(site_pk,visit_id);
+        CREATE INDEX test_visit_session ON visits(site_pk,session_id,started_at);
+        CREATE INDEX test_visit_visitor ON visits(site_pk,visitor_id,started_at);
+        INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms)
+        VALUES (1,'site-a','v-history','s3','u3','/old',-20,1),
+               (1,'site-a','v-blocker','s3','u3','/between',90,1),
+               (1,'site-a','v-report','s3','u3','/report',200,1),
+               (2,'site-b','v-blocker','s3','u3','/other-site',90,1);
+        INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at)
+        VALUES (105,1,'site-a','e-history-start','v-history',2,70),
+               (106,1,'site-a','e-history-end','v-history',1,110);
+      `);
+      const expression =
+        'adjacent(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }])) exists';
+      const base = createQueryTime(100, 300, "UTC", 400);
+      const history = { ...base, readRange: createTimeRange(0, 300) };
+      const read = (
+        scope: "session" | "visitor",
+        time: QueryTime,
+        expr = expression,
+      ) => {
+        const compiled = dataset(expr, scope, time);
+        return {
+          sql: compiled.ctes,
+          rows: select(
+            db,
+            `WITH ${compiled.ctes} SELECT site_pk,event_id FROM ${compiled.eventRelation} WHERE event_id='e-history-end' ORDER BY site_pk,event_id`,
+            compiled.bindings.map((b) => b.value),
+          ),
+        };
+      };
+      const hit = [{ site_pk: 1, event_id: "e-history-end" }];
+      for (const scope of ["session", "visitor"] as const) {
+        expect(read(scope, history).sql).toContain("CROSS JOIN visits");
+        expect(read(scope, history).rows).toEqual([]);
+        expect(read(scope, base).rows).toEqual([]);
+      }
+      db.exec(
+        "UPDATE visits SET started_at=-1 WHERE site_pk=1 AND visit_id='v-blocker'",
+      );
+      for (const scope of ["session", "visitor"] as const) {
+        expect(read(scope, history).rows).toEqual(hit);
+        const explicit = { ...history, filterRange: createTimeRange(100, 300) };
+        expect(read(scope, explicit).sql).not.toContain("CROSS JOIN visits");
+        expect(read(scope, explicit).rows).toEqual([]);
+      }
+      db.exec(
+        "UPDATE visits SET visit_id='s3',session_id=NULL,visitor_id='other',started_at=90 WHERE site_pk=1 AND visit_id='v-blocker'",
+      );
+      expect(read("session", history).rows).toEqual([]);
+      expect(read("visitor", history).rows).toEqual(hit);
+      db.exec(
+        "UPDATE visits SET started_at=300 WHERE site_pk=1 AND visit_id='s3'",
+      );
+      expect(read("session", history).rows).toEqual(hit);
+      expect(
+        read("session", history, "adjacent(sequence([PAGE,EVENT])) exists").sql,
+      ).not.toContain("CROSS JOIN visits");
+    } finally {
+      db.close();
+    }
+  });
+
   it("preserves Session adjacency when a sessionless Visit key collides", async () => {
     const { db, env } = runFixture();
     try {
