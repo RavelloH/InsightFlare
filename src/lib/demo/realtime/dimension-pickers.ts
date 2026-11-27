@@ -56,15 +56,15 @@ export function weightedPickIndex(
   weights: number[],
 ): number {
   if (weights.length === 0) return 0;
-  const safeWeights = weights.map((weight) => Math.max(0, Number(weight) || 0));
-  const totalWeight = safeWeights.reduce((sum, weight) => sum + weight, 0);
+  let totalWeight = 0;
+  for (const weight of weights) totalWeight += Math.max(0, Number(weight) || 0);
   if (totalWeight <= 0) return 0;
   let hit = rng() * totalWeight;
-  for (let index = 0; index < safeWeights.length; index += 1) {
-    hit -= safeWeights[index] ?? 0;
+  for (let index = 0; index < weights.length; index += 1) {
+    hit -= Math.max(0, Number(weights[index]) || 0);
     if (hit <= 0) return index;
   }
-  return safeWeights.length - 1;
+  return weights.length - 1;
 }
 export function randomGaussian(rng: () => number): number {
   const u = Math.max(rng(), Number.EPSILON);
@@ -269,23 +269,50 @@ export function pickDemoDeviceType(
   );
   return entries[index]?.label ?? "Desktop";
 }
-export function pickDemoBrowser(rng: () => number, deviceType: string): string {
-  const adjusted = BROWSER_MARKET_WEIGHTS.map((entry) => {
-    let weight = entry.weight;
-    const mobileBrowser = isMobileBrowserLabel(entry.label);
-    if (deviceType === "Mobile") {
-      weight *= mobileBrowser ? 2.1 : 0.56;
-    } else if (deviceType === "Tablet") {
-      weight *= mobileBrowser ? 1.35 : 0.82;
-    } else {
-      weight *= mobileBrowser ? 0.38 : 1.15;
-    }
+// The market fixture is static. Prepare only three device-specific pools
+// once, retaining the original subtraction order and RNG consumption.
+function prepareBrowserPicker(deviceType: string) {
+  const entries = BROWSER_MARKET_WEIGHTS.map((entry) => {
+    const mobile = isMobileBrowserLabel(entry.label);
+    const factor =
+      deviceType === "Mobile"
+        ? mobile
+          ? 2.1
+          : 0.56
+        : deviceType === "Tablet"
+          ? mobile
+            ? 1.35
+            : 0.82
+          : mobile
+            ? 0.38
+            : 1.15;
     return {
-      label: entry.label,
-      weight,
+      label: String(entry.label || "").trim(),
+      weight: Math.max(0, Number(entry.weight * factor) || 0),
     };
-  });
-  return weightedPickLabel(rng, adjusted, "Chrome");
+  }).filter((entry) => entry.label.length > 0 && entry.weight > 0);
+  const total = entries.reduce((sum, entry) => sum + entry.weight, 0);
+  return (rng: () => number): string => {
+    if (total <= 0) return "Chrome";
+    let hit = rng() * total;
+    for (const entry of entries) {
+      hit -= entry.weight;
+      if (hit <= 0) return entry.label;
+    }
+    return entries.at(-1)?.label || "Chrome";
+  };
+}
+const pickMobileBrowser = prepareBrowserPicker("Mobile");
+const pickTabletBrowser = prepareBrowserPicker("Tablet");
+const pickDesktopBrowser = prepareBrowserPicker("Desktop");
+export function pickDemoBrowser(rng: () => number, deviceType: string): string {
+  return (
+    deviceType === "Mobile"
+      ? pickMobileBrowser
+      : deviceType === "Tablet"
+        ? pickTabletBrowser
+        : pickDesktopBrowser
+  )(rng);
 }
 export function pickDemoBrowserVersion(
   rng: () => number,

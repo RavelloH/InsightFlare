@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { findSiteProfile } from "@/lib/demo/data/site-profiles";
-import { mulberry32 } from "@/lib/demo/generators/utils";
+import { mulberry32, weightedPickLabel } from "@/lib/demo/generators/utils";
 import type * as DimensionPickersModule from "@/lib/demo/realtime/dimension-pickers";
 import {
   buildCountryPool,
@@ -33,6 +33,7 @@ import {
   weightedPickIndex,
 } from "@/lib/demo/realtime/dimension-pickers";
 import type * as DimensionPoolsModule from "@/lib/demo/realtime/dimension-pools";
+import { BROWSER_MARKET_WEIGHTS } from "@/lib/demo/realtime/dimension-pools";
 const rng = (seed: number) => mulberry32(seed);
 async function withMockedDimensionPools<T>(
   overrides: Record<string, unknown>,
@@ -377,6 +378,37 @@ describe("mock/dimension-pickers", () => {
   });
 
   describe("pickDemoBrowser", () => {
+    it("preserves the original weighted choice and RNG stream for all device types", () => {
+      for (const device of ["Mobile", "Tablet", "Desktop", "Other"]) {
+        const entries = BROWSER_MARKET_WEIGHTS.map((entry) => {
+          const mobile = isMobileBrowserLabel(entry.label);
+          return {
+            label: entry.label,
+            weight:
+              entry.weight *
+              (device === "Mobile"
+                ? mobile
+                  ? 2.1
+                  : 0.56
+                : device === "Tablet"
+                  ? mobile
+                    ? 1.35
+                    : 0.82
+                  : mobile
+                    ? 0.38
+                    : 1.15),
+          };
+        });
+        const before = rng(42);
+        const after = rng(42);
+        for (let i = 0; i < 1000; i++) {
+          expect(pickDemoBrowser(after, device)).toBe(
+            weightedPickLabel(before, entries, "Chrome"),
+          );
+        }
+        expect(after()).toBe(before());
+      }
+    });
     it("picks a browser for each device type", () => {
       const r = rng(2);
       expect(typeof pickDemoBrowser(r, "Desktop")).toBe("string");
