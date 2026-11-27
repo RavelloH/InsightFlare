@@ -1166,6 +1166,73 @@ describe("P4 complete timeline and relational SQL", () => {
     }
   });
 
+  it("prunes absent Adjacent stages without treating overlapping witnesses as a match", () => {
+    const db = fixture();
+    try {
+      const one = source.replace(
+        ",\n           (1,'a',106,'e6','v3','s2','u2','/landing','purchase',18)",
+        "",
+      );
+      const sequences = [
+        'EVENT,EVENT { $.name eq "missing" }',
+        'EVENT { $.name eq "signup" },EVENT { $.name exists }',
+        'EVENT { $.name eq "signup" },EVENT { $.payload("/sku") eq "beta" }',
+        'EVENT,EVENT { $.name eq "purchase" },EVENT',
+        'EVENT,EVENT { $.name exists },EVENT { $.payload("/sku") eq "beta" },EVENT',
+        'EVENT,EVENT { $.name exists },EVENT { $.name eq "purchase" },EVENT,EVENT',
+      ];
+      const read = (
+        variant: string,
+        scope: "session" | "visitor",
+        sequence: string,
+        operator: string,
+        uniqueGlobalOccurrences: boolean,
+      ) => {
+        const plan = compileCollectionSqlQualification(
+          parseFilterDsl(
+            `adjacent(sequence([${sequence}])) ${operator}`,
+            analyticsFilterRegistry,
+          ),
+          scope,
+          { uniqueGlobalOccurrences },
+        );
+        if (plan.kind !== "entity") throw Error("expected entity");
+        const c = composeBoundCtes(plan.ctes);
+        if (uniqueGlobalOccurrences) {
+          expect(c.ctes).toContain("candidate_entities AS MATERIALIZED");
+          if (sequence.includes("$.payload")) {
+            expect(c.ctes).not.toContain("HAVING COUNT(*) >=");
+          } else {
+            expect(c.ctes).toContain("HAVING COUNT(*) >=");
+            expect(c.ctes).toContain("MAX(CASE WHEN");
+          }
+        }
+        return db
+          .prepare(
+            `WITH ${variant}, ${c.ctes} SELECT site_pk,entity_id FROM ${plan.qualifiedEntityRelation} ORDER BY site_pk,entity_id`,
+          )
+          .all(...c.bindings.map((x) => x.value));
+      };
+      expect(one).not.toBe(source);
+      for (const scope of ["session", "visitor"] as const) {
+        for (const seq of sequences)
+          for (const operator of ["exists", "notExists"])
+            for (const variant of [
+              source,
+              one,
+              source.replace("'purchase',18)", "'purchase',15)"),
+            ])
+              expect(read(variant, scope, seq, operator, true)).toEqual(
+                read(variant, scope, seq, operator, false),
+              );
+        expect(read(source, scope, sequences[0]!, "exists", true)).toEqual([]);
+        expect(read(one, scope, sequences[2]!, "exists", true)).toEqual([]);
+      }
+    } finally {
+      db.close();
+    }
+  });
+
   it("keeps sessionless collision blockers and does not borrow candidate keys across sites", () => {
     const db = fixture();
     try {
