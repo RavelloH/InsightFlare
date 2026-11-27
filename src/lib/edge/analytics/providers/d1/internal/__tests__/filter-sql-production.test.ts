@@ -2609,6 +2609,89 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
               "scope_raw_visits AS NOT MATERIALIZED",
             ),
           ).toBe(item.evidence);
+          const dimensionPlan = createScopedFilterPlan(
+            "dimension",
+            doc,
+            scope,
+          )!;
+          const dimensionFilters = attachScopedFilterMetadata(doc, {
+            requestedScope: scope,
+            resolvedScope: dimensionPlan.scope,
+            plan: dimensionPlan,
+            time: createQueryTime(100, 300, "UTC", 400),
+            siteIds: ["site-a"],
+          });
+          const dimensionBaseline = compileScopedDatasetSql({
+            filters: dimensionFilters,
+            plan: dimensionPlan,
+            siteIds: ["site-a"],
+            window: WINDOW,
+          });
+          const dims = ["pathname", "country", "browser"];
+          const readBaseline = (dim: string) =>
+            select(
+              db,
+              `WITH ${dimensionBaseline.ctes} SELECT COALESCE(${dim}, '') AS value,
+              COUNT(*) AS views,
+              COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS sessions,
+              COUNT(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id END) AS visitors
+              FROM ${dimensionBaseline.visitRelation}
+              GROUP BY value ORDER BY views DESC, sessions DESC, value ASC LIMIT 10`,
+              dimensionBaseline.bindings.map((b) => b.value),
+            );
+          const dimensionEnv = {
+            DB: createSqliteD1Database(db, trace),
+            DAILY_SALT_SECRET: "test-secret",
+          } as never;
+          const readPage = (dim: string) =>
+            queryDimensionPageFromD1(
+              dimensionEnv,
+              "site-a",
+              WINDOW,
+              dimensionFilters,
+              10,
+              dim,
+              undefined,
+              null,
+              undefined,
+              "private-dashboard",
+              {},
+            );
+          for (const dim of dims) {
+            trace.preparedSql.length = 0;
+            expect(
+              await queryDimensionFromD1(
+                dimensionEnv,
+                "site-a",
+                WINDOW,
+                dimensionFilters,
+                10,
+                dim,
+              ),
+            ).toEqual(readBaseline(dim));
+            expect((await readPage(dim)).items).toEqual(readBaseline(dim));
+            expect(trace.preparedSql).toHaveLength(2);
+            for (const sql of trace.preparedSql) {
+              expect(sql.includes("scope_raw_visits AS NOT MATERIALIZED")).toBe(
+                item.evidence,
+              );
+              expect(sql).toContain("scope_raw_events AS MATERIALIZED");
+            }
+          }
+          trace.preparedSql.length = 0;
+          const merged = await runWithDimensionPageBatch(
+            () => Promise.all(dims.map(readPage)),
+            "private-dashboard",
+          );
+          expect(merged.map((page) => page.items)).toEqual(
+            dims.map(readBaseline),
+          );
+          expect(trace.preparedSql).toHaveLength(1);
+          expect(
+            trace.preparedSql[0]!.includes(
+              "scope_raw_visits AS NOT MATERIALIZED",
+            ),
+          ).toBe(item.evidence);
         }
       }
     } finally {

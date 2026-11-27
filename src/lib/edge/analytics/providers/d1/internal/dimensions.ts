@@ -173,7 +173,9 @@ export async function queryDimensionFromD1(
   },
   diagnostics?: D1ReadDiagnostics,
 ): Promise<DimensionRow[]> {
-  const scopedDataset = scopedVisitDataset(siteId, window, filters);
+  const scopedDataset = scopedDatasetFor(siteId, window, filters, undefined, {
+    inlineVisitEvidence: true,
+  });
   const filter = scopedDataset
     ? null
     : buildVisitFilterSql(filters, "visit_source", { window });
@@ -271,7 +273,9 @@ function dimensionPagePlan(
   options?: DimensionPageOptions,
   cursor?: DimensionAggregateCursor | null,
 ): { plan: DimensionPagePlan; dataset: ScopedDatasetSql | null } {
-  const dataset = scopedVisitDataset(siteId, window, filters);
+  const dataset = scopedDatasetFor(siteId, window, filters, undefined, {
+    inlineVisitEvidence: true,
+  });
   const filter = dataset
     ? null
     : buildVisitFilterSql(filters, "visit_source", { window });
