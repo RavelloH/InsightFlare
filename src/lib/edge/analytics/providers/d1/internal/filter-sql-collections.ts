@@ -66,6 +66,8 @@ export interface SqlQualificationSources {
   readonly uniqueLocalOccurrences?: boolean;
   /** Canonical global sources have unique occurrences within the read range. */
   readonly uniqueGlobalOccurrences?: boolean;
+  /** Canonical physical visits in the authorized R domain. */
+  readonly indexedGlobalTimelineVisits?: boolean;
 }
 
 interface SqlFragment {
@@ -1213,7 +1215,30 @@ class SqlCollectionCompiler {
         ${identical ? `HAVING COUNT(*) >= ${count}` : ""}`;
       bindings.length = 0;
       bindings.push(...eventStage.bindings);
+      const readStart = this.clock?.readStartMs;
+      const readEnd = this.clock?.readEndExclusiveMs;
+      const indexedPages =
+        this.sources.indexedGlobalTimelineVisits &&
+        stages.every((step) => step.kind === "event") &&
+        readStart !== undefined &&
+        readEnd !== undefined;
       const branches = (["page", "event"] as const).map((kind) => {
+        if (kind === "page" && indexedPages) {
+          const project = `SELECT ${item}.site_pk, candidate.entity_id,
+            ${item}.started_at AS activity_time, 0 AS kind_rank,
+            ${item}.visit_id AS activity_id, ${stages.map((_, i) => `0 AS match_${i}`).join(", ")}
+            FROM candidate_entities candidate CROSS JOIN visits ${item}
+            WHERE ${item}.site_pk = candidate.site_pk AND ${item}.started_at >= ? AND ${item}.started_at < ?`;
+          bindings.push(readStart, readEnd);
+          const direct = `${project} AND ${item}.${identity} = candidate.entity_id`;
+          if (frame.anchorKind !== "session") return direct;
+          // The disjoint sessionless branch keeps position-only collision
+          // blockers while allowing both physical keys to use their indexes.
+          bindings.push(readStart, readEnd);
+          return `${direct} UNION ALL ${project}
+            AND ${item}.visit_id = candidate.entity_id
+            AND (${item}.session_id IS NULL OR ${item}.session_id = '')`;
+        }
         const flags = stages.map((step, index) => {
           if (step.kind !== kind) return `0 AS match_${index}`;
           bindings.push(...step.bindings);
@@ -2006,6 +2031,7 @@ export function compileCollectionSqlQualification(
       timelineEvents: sources.timelineEvents,
       uniqueLocalOccurrences: sources.uniqueLocalOccurrences,
       uniqueGlobalOccurrences: sources.uniqueGlobalOccurrences,
+      indexedGlobalTimelineVisits: sources.indexedGlobalTimelineVisits,
     },
     clock,
   );

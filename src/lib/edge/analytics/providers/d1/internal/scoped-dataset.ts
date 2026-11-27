@@ -1430,6 +1430,8 @@ function buildFilterSqlDomains(
         target !== undefined && !input.compatibilityEventSource,
       uniqueGlobalOccurrences:
         target === undefined && !input.compatibilityEventSource,
+      indexedGlobalTimelineVisits:
+        target === undefined && !input.compatibilityEventSource,
     },
     clock,
   };
