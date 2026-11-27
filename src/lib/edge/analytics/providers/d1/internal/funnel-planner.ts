@@ -395,6 +395,57 @@ function buildFunnelCteParts(
     funnelCtes.push("funnel_params AS (SELECT ? AS conversion_window_ms)");
   }
 
+  // With identical stages, the greedy next witness is simply the next
+  // ordered occurrence. Rank once; retain the first witness identities and
+  // conversion-window anchor rather than counting the later witness's session.
+  // Membership plans retain their existing reached-relation construction.
+  if (
+    options.analysis &&
+    dataset.uniqueObservationIds === true &&
+    config.steps.length >= 3 &&
+    config.steps.every((step) => step.filterDsl === config.steps[0]!.filterDsl)
+  ) {
+    const filter = executeObservationFilterOnScopedDataset(
+      dataset,
+      parseFunnelStepFilter(config.steps[0]!),
+      "funnel_step_0",
+    );
+    funnelCtes.push(filter.ctes.trim(), witnessCte(0, filter, identity, true));
+    filterBindings.push(...filter.bindings);
+    const order = `PARTITION BY site_pk, ${identity} ORDER BY observed_at, observation_rank, sequence, source_id`;
+    funnelCtes.push(`repeat_ranked AS (
+      SELECT site_pk,
+        FIRST_VALUE(session_id) OVER w AS session_id,
+        FIRST_VALUE(visitor_id) OVER w AS visitor_id,
+        FIRST_VALUE(observed_at) OVER w AS first_observed_at,
+        observed_at AS last_observed_at, observation_rank AS last_observation_rank,
+        sequence AS last_sequence, source_id AS last_source_id,
+        ROW_NUMBER() OVER w AS reached_rank
+      FROM funnel_step_0_witnesses
+      WINDOW w AS (${order})
+    ), repeat_reached AS MATERIALIZED (
+      SELECT * FROM repeat_ranked WHERE reached_rank <= ${config.steps.length}
+      ${visitorWindow ? "AND last_observed_at <= first_observed_at + (SELECT conversion_window_ms FROM funnel_params)" : ""}
+    )`);
+    config.steps.forEach((step, index) => {
+      funnelCtes.push(
+        `reached_${index} AS (SELECT * FROM repeat_reached WHERE reached_rank=${index + 1})`,
+      );
+      layers.push({
+        stepId: step.id,
+        stepIndex: index,
+        reachedRelation: `reached_${index}`,
+      });
+    });
+    return {
+      funnelCtes,
+      filterBindings,
+      steps: layers,
+      identity,
+      firstFilter: filter,
+    };
+  }
+
   config.steps.forEach((step, stepIndex) => {
     const filter = executeObservationFilterOnScopedDataset(
       dataset,
