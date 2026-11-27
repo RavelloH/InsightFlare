@@ -10,6 +10,7 @@ import type { PartialOptions } from "overlayscrollbars";
 
 import { cn } from "../../lib/utils";
 import {
+  observeScrollbarResize,
   SCROLLBAR_UPDATED_EVENT,
   useReactOverlayScrollbar,
   VERTICAL_SCROLLBAR_OPTIONS,
@@ -85,15 +86,17 @@ export function VerticalScrollMask({
     const sync = () => scheduleMaskSync();
     viewport.addEventListener("scroll", sync, { passive: true });
     viewport.addEventListener(SCROLLBAR_UPDATED_EVENT, sync);
-    const resizeObserver = new ResizeObserver(sync);
-    resizeObserver.observe(viewport);
-    if (contentRef.current) resizeObserver.observe(contentRef.current);
+    const stopObserving = observeScrollbarResize(
+      viewport,
+      contentRef.current,
+      sync,
+    );
     scheduleMaskSync();
 
     return () => {
       viewport.removeEventListener("scroll", sync);
       viewport.removeEventListener(SCROLLBAR_UPDATED_EVENT, sync);
-      resizeObserver.disconnect();
+      stopObserving();
       if (frameRef.current !== null) {
         cancelAnimationFrame(frameRef.current);
         frameRef.current = null;
