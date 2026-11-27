@@ -78,6 +78,67 @@ describe("useInfiniteTableSentinel", () => {
     expect(onReachEnd).toHaveBeenCalled();
   });
 
+  it("uses initial observer geometry for prefetch without forcing row layout", () => {
+    let callback: IntersectionObserverCallback | undefined;
+    const observe = vi.fn();
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(next: IntersectionObserverCallback) {
+          callback = next;
+        }
+        observe = observe;
+        disconnect = vi.fn();
+      },
+    );
+    const onReachEnd = vi.fn();
+    const measure = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+    function Probe() {
+      const sentinelRef = useInfiniteTableSentinel({
+        enabled: true,
+        onReachEnd,
+      });
+      return createElement(
+        "table",
+        null,
+        createElement(
+          "tbody",
+          null,
+          createElement("tr", { ref: sentinelRef }),
+          createElement("tr", { ref: sentinelRef }),
+        ),
+      );
+    }
+    try {
+      act(() => root.render(createElement(Probe)));
+      const [first, second] = Array.from(container.querySelectorAll("tr"));
+      const entry = (target: Element, top: number, isIntersecting = false) =>
+        ({
+          target,
+          boundingClientRect: { top, bottom: top + 40 },
+          isIntersecting,
+        }) as IntersectionObserverEntry;
+      const deliver = (...entries: IntersectionObserverEntry[]) =>
+        act(() => callback?.(entries, {} as IntersectionObserver));
+      expect(measure).not.toHaveBeenCalled();
+      deliver(
+        entry(first!, window.innerHeight + 481),
+        entry(second!, window.innerHeight + 300),
+      );
+      expect(onReachEnd).toHaveBeenCalledTimes(1);
+      deliver(
+        entry(first!, window.innerHeight + 300),
+        entry(second!, window.innerHeight + 300),
+      );
+      expect(onReachEnd).toHaveBeenCalledTimes(1);
+      deliver(entry(first!, 50, true));
+      expect(onReachEnd).toHaveBeenCalledTimes(2);
+      expect(measure).not.toHaveBeenCalled();
+    } finally {
+      measure.mockRestore();
+    }
+  });
+
   it("does not observe when disabled or unsupported", () => {
     vi.stubGlobal("IntersectionObserver", undefined);
     const onReachEnd = vi.fn();

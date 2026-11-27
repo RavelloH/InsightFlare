@@ -6,6 +6,7 @@ import {
   OverlayScrollbar,
   SCROLLBAR_UPDATED_EVENT,
 } from "../src/components/ui/overlay-scrollbar";
+import { VerticalScrollMask } from "../src/components/ui/vertical-scroll-mask";
 
 const mocks = vi.hoisted(() => {
   const instance = {
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => {
     off: vi.fn(),
     destroy: vi.fn(),
     update: vi.fn(),
+    state: vi.fn(() => ({ overflowAmount: { x: 200, y: 200 } })),
   };
   return { instance, initialize: vi.fn(), getInstance: vi.fn(() => instance) };
 });
@@ -127,5 +129,115 @@ it.each(["success", "invalid", "throws", "native"] as const)(
     expect(mocks.instance.destroy).toHaveBeenCalledTimes(
       scenario === "success" ? 1 : 0,
     );
+  },
+);
+
+it.each(["horizontal", "vertical", "native"] as const)(
+  "coalesces mask measurements and preserves edge visibility (%s)",
+  (scenario) => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    document.documentElement.dataset.scrollbarMode =
+      scenario === "native" ? "native" : "overlay";
+    const frames = new Map<number, FrameRequestCallback>();
+    let frameId = 0;
+    const tasks: Array<() => void> = [];
+    const resize: Array<() => void> = [];
+    vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) => {
+      frames.set(++frameId, fn);
+      return frameId;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+    const nativeSetTimeout = window.setTimeout.bind(window);
+    vi.spyOn(window, "setTimeout").mockImplementation((fn, delay, ...args) => {
+      if (delay === 0 && typeof fn === "function") {
+        tasks.push(() => fn(...args));
+        return 1;
+      }
+      return nativeSetTimeout(fn, delay, ...args);
+    });
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(fn: () => void) {
+          resize.push(fn);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const flush = () =>
+      act(() => {
+        const current = [...frames.values()];
+        frames.clear();
+        current.forEach((fn) => fn(0));
+        tasks.splice(0).forEach((fn) => fn());
+      });
+    try {
+      mocks.instance.state.mockClear();
+      act(() =>
+        root.render(
+          scenario === "vertical" ? (
+            <VerticalScrollMask>Content</VerticalScrollMask>
+          ) : (
+            <OverlayScrollbar axis="horizontal" showEdgeMasks>
+              Content
+            </OverlayScrollbar>
+          ),
+        ),
+      );
+      const viewport = container.querySelector<HTMLDivElement>(
+        ".os-scrollbar-viewport",
+      )!;
+      const width = vi.fn(() => 300);
+      const height = vi.fn(() => 300);
+      Object.defineProperties(viewport, {
+        clientWidth: { configurable: true, value: 100 },
+        clientHeight: { configurable: true, value: 100 },
+        scrollWidth: { configurable: true, get: width },
+        scrollHeight: { configurable: true, get: height },
+      });
+      flush();
+      flush();
+      flush();
+      const masks = [
+        ...container.querySelectorAll('[aria-hidden="true"]'),
+      ].filter((e) => e.classList.contains("pointer-events-none"));
+      expect(masks).toHaveLength(2);
+      expect(masks[0]?.classList.contains("opacity-0")).toBe(true);
+      expect(masks[1]?.classList.contains("opacity-100")).toBe(true);
+      width.mockClear();
+      height.mockClear();
+      mocks.instance.state.mockClear();
+      act(() => {
+        viewport.scrollLeft = 200;
+        viewport.scrollTop = 200;
+        viewport.dispatchEvent(new Event("scroll"));
+        viewport.dispatchEvent(new Event(SCROLLBAR_UPDATED_EVENT));
+        resize.forEach((fn) => fn());
+        viewport.dispatchEvent(new Event("scroll"));
+      });
+      expect(frames.size).toBe(1);
+      flush();
+      expect(masks[0]?.classList.contains("opacity-100")).toBe(true);
+      expect(masks[1]?.classList.contains("opacity-0")).toBe(true);
+      expect(viewport.scrollLeft).toBe(200);
+      expect(viewport.scrollTop).toBe(200);
+      expect(height).not.toHaveBeenCalled();
+      if (scenario === "native") {
+        expect(width).toHaveBeenCalledTimes(1);
+        expect(mocks.instance.state).not.toHaveBeenCalled();
+      } else {
+        expect(width).not.toHaveBeenCalled();
+        expect(mocks.instance.state).toHaveBeenCalledTimes(1);
+      }
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+      delete document.documentElement.dataset.scrollbarMode;
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    }
   },
 );
