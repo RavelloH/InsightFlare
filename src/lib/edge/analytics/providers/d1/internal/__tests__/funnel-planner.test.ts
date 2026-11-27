@@ -405,6 +405,75 @@ scope_final_events(event_pk, event_id, site_pk, session_id, visitor_id, occurred
       }
     }
   });
+  it("ranks identical analysis stages once without changing first-witness identities or time windows", () => {
+    const source: ScopedDatasetSql = {
+      ...dataset,
+      ctes: `
+scope_final_visits(site_pk, session_id, visitor_id, started_at, visit_id, pathname) AS (
+  VALUES
+    (1, 's-first', 'visitor-a', 100, 'visit-a', '/landing'),
+    (1, 's-later', 'visitor-a', 130, 'visit-b', '/landing'),
+    (1, 's-first', 'visitor-other', 140, 'visit-c', '/landing'),
+    (1, '', 'visitor-b', 100, 'visit-d', '/landing'),
+    (2, 's-first', 'visitor-a', 100, 'visit-a', '/landing'),
+    (1, 's-null-visitor', NULL, 120, 'visit-e', '/landing')
+),
+scope_final_events(event_pk,event_id,site_pk,session_id,visitor_id,occurred_at,sequence,event_name,pathname) AS (
+  VALUES
+    (1,'event-a',1,'s-first','visitor-a',100,0,'signup','/landing'),
+    (2,'event-b',1,'s-first','visitor-a',100,1,'signup','/landing'),
+    (3,'event-c',1,'s-later','visitor-a',130,0,'signup','/landing'),
+    (4,'event-d',1,'s-first','visitor-other',140,0,'signup','/landing'),
+    (5,'event-e',1,'','visitor-b',105,0,'signup','/landing'),
+    (6,'event-f',2,'s-first','visitor-a',110,0,'signup','/landing'),
+    (7,'event-g',1,'s-null-visitor',NULL,120,1,'signup','/landing'),
+    (8,'event-h',1,'s-null-visitor',NULL,125,2,'signup','/landing'),
+    (9,'event-i',1,'s-later','visitor-a',131,0,'signup','/landing')
+)`,
+    };
+    const unique = { ...source, uniqueObservationIds: true };
+    for (const scope of ["session", "visitor"] as const) {
+      for (const n of [3, 4, 6, 10, 12]) {
+        for (const expr of [
+          'page.path eq "/landing"',
+          'event.name eq "signup"',
+        ]) {
+          for (const conversionWindow of scope === "visitor"
+            ? [1, 30, 31, 1000]
+            : [null]) {
+            const definition = config(
+              Array.from({ length: n }, (_, i) => step("repeat-" + i, expr)),
+              scope,
+              conversionWindow,
+            );
+            const options = { allowHistoricalOverLimit: n > 10 };
+            const original = buildFunnelSqlPlan(definition, source, options);
+            const optimized = buildFunnelSqlPlan(definition, unique, options);
+            expect(optimized.sql).toContain("repeat_reached AS MATERIALIZED");
+            expect(optimized.sql).not.toContain("funnel_step_1_witnesses");
+            expect(runPlan(optimized)).toEqual(runPlan(original));
+          }
+        }
+      }
+    }
+    const mixed = config([
+      step("a", 'page.path eq "/landing"'),
+      step("b", 'event.name eq "signup"'),
+      step("c", 'page.path eq "/landing"'),
+    ]);
+    expect(buildFunnelSqlPlan(mixed, unique).sql).not.toContain(
+      "repeat_reached",
+    );
+    const repeated = config(
+      Array.from({ length: 3 }, (_, i) =>
+        step("s" + i, 'page.path eq "/landing"'),
+      ),
+    );
+    expect(
+      buildFunnelMembershipSqlPlan(repeated, unique, 2).ctes,
+    ).not.toContain("repeat_reached");
+  });
+
   it("deduplicates amplified witnesses by source id in SQL", () => {
     const duplicateSourceDataset: ScopedDatasetSql = {
       ...dataset,
