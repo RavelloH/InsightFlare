@@ -1630,7 +1630,6 @@ class SqlCollectionCompiler {
       identical &&
       count <= 5 &&
       compared &&
-      !upper &&
       historyRoot.kind === "entity-root" &&
       historyRoot.entity === "event" &&
       (firstStep.kind === "entity-root" || nameSelector !== null) &&
@@ -1676,7 +1675,35 @@ class SqlCollectionCompiler {
           ? intrinsic.to
           : count;
       let local: string;
-      if (from === 1 && to === count) {
+      if (upper) {
+        // An upper bound is satisfied by the tightest feasible N-occurrence
+        // window. Use the same (time, binary event ID) ordering as sequence
+        // evaluation, then compare the time delta between the requested steps.
+        const distance = to - from;
+        const suffix = count - to;
+        const order =
+          "ORDER BY history_event.occurred_at, history_event.event_id COLLATE BINARY";
+        const prefixGuard =
+          from > 1
+            ? `, LAG(history_event.event_id, ${to - 1}) OVER (${order}) IS NOT NULL AS has_prefix`
+            : "";
+        const suffixGuard =
+          suffix > 0
+            ? `, LEAD(history_event.event_id, ${suffix}) OVER (${order}) IS NOT NULL AS has_suffix`
+            : "";
+        const guards = [
+          ...(from > 1 ? ["has_prefix"] : []),
+          ...(suffix > 0 ? ["has_suffix"] : []),
+        ];
+        const ranked = `SELECT
+            history_event.occurred_at -
+              LAG(history_event.occurred_at, ${distance}) OVER (${order}) AS span_delta
+            ${prefixGuard}${suffixGuard}
+          ${physical()}`;
+        local = `EXISTS(SELECT 1 FROM (${ranked})
+          WHERE ${compared.sql}${guards.map((guard) => ` AND ${guard}`).join("")})`;
+        seekBindings.push(...compared.bindings);
+      } else if (from === 1 && to === count) {
         local = `EXISTS(SELECT 1 FROM (SELECT MAX(history_event.occurred_at)-MIN(history_event.occurred_at) AS span_delta
           ${physical()} HAVING COUNT(*)>=${count}) WHERE ${compared.sql})`;
         seekBindings.push(...compared.bindings);
