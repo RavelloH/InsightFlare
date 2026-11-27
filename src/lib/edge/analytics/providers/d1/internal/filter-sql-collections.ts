@@ -946,7 +946,7 @@ class SqlCollectionCompiler {
       return null;
     if (
       without &&
-      (count !== 2 ||
+      (count > 5 ||
         (this.clock?.filterRangeExplicit &&
           (this.source("page") !== this.source("page", true) ||
             this.source("event") !== this.source("event", true))) ||
@@ -1080,7 +1080,64 @@ class SqlCollectionCompiler {
             this.clock,
           )
         : null;
-    if (without) {
+    if (without && count > 2) {
+      const matched = [
+        first,
+        ...steps.slice(1).map((step) => compileStep(step, first.item)),
+      ];
+      const excluded = compileStep(target.excluded, first.item);
+      if (
+        matched.some((step) => step?.kind !== "event") ||
+        excluded?.kind !== "event"
+      )
+        return null;
+      const stages = matched as (typeof first)[];
+      const item = first.item;
+      bindings.length = 0;
+      const flags = [...stages, excluded].map((step, index) => {
+        bindings.push(...step.bindings);
+        return `CASE WHEN (${step.predicate}) THEN 1 ELSE 0 END AS ${index === count ? "excluded" : "match_" + index}`;
+      });
+      const partition = "PARTITION BY site_pk, entity_id";
+      const previous = `${partition} ORDER BY position ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING`;
+      // A start may itself be excluded, but every interior witness must
+      // be non-excluded. An end may be excluded too. A reachable prefix
+      // remains usable until the next strictly intervening exclusion.
+      const ctes = [
+        `ranked AS (
+        SELECT *, ROW_NUMBER() OVER (${partition} ORDER BY activity_time, activity_id COLLATE BINARY) AS position
+        FROM (SELECT ${first.key}, ${item}.occurred_at AS activity_time,
+          ${item}.event_id AS activity_id, ${flags.join(", ")}
+          FROM ${this.source("event", true)} ${item}
+          WHERE ${item}.site_pk IS NOT NULL AND TRIM(COALESCE(${item}.${identity}, '')) != '')
+        WHERE excluded = 1 OR ${stages.map((_, i) => `match_${i} = 1`).join(" OR ")}
+      )`,
+        `prefix_0 AS (
+        SELECT *, MAX(CASE WHEN excluded = 1 THEN position END) OVER (${previous}) AS last_excluded,
+          match_0 AS reachable
+        FROM ranked
+      )`,
+      ];
+      let prefix = "prefix_0";
+      for (let index = 1; index < count; index++) {
+        const next = `prefix_${index}`;
+        // The latest reachable predecessor suffices: if it lies before
+        // the last exclusion, all earlier predecessors are invalid too.
+        const remaining = stages
+          .slice(index + 1)
+          .map((_, i) => `match_${index + i + 1}`);
+        ctes.push(`${next} AS (
+          SELECT site_pk, entity_id, position, excluded, last_excluded,
+            ${remaining.length ? remaining.join(", ") + "," : ""}
+            CASE WHEN match_${index} = 1 ${index < count - 1 ? "AND excluded = 0" : ""}
+              AND last_reachable >= COALESCE(last_excluded, 0)
+              THEN 1 ELSE 0 END AS reachable
+          FROM (SELECT *, MAX(CASE WHEN reachable = 1 THEN position END) OVER (${previous}) AS last_reachable FROM ${prefix})
+        )`);
+        prefix = next;
+      }
+      sql = `WITH ${ctes.join(", ")} SELECT DISTINCT site_pk, entity_id FROM ${prefix} WHERE reachable = 1`;
+    } else if (without) {
       const last = compileStep(steps[1]!, first.item);
       const excluded = compileStep(target.excluded, first.item);
       if (
