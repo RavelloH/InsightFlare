@@ -3604,7 +3604,86 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       expect(read("session", history).rows).toEqual(hit);
       expect(
         read("session", history, "adjacent(sequence([PAGE,EVENT])) exists").sql,
-      ).not.toContain("CROSS JOIN visits");
+      ).toContain("CROSS JOIN visits");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves mixed indexed Adjacent witnesses, collision blockers and predicate bindings", () => {
+    const db = sqliteFixture();
+    try {
+      db.exec(`
+        CREATE UNIQUE INDEX test_visit_key ON visits(site_pk,visit_id);
+        CREATE INDEX test_visit_session ON visits(site_pk,session_id,started_at);
+        CREATE INDEX test_visit_visitor ON visits(site_pk,visitor_id,started_at);
+        INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms)
+        VALUES (1,'site-a','v-history','s3','u3','/old',-20,1),
+               (1,'site-a','v-between','s3','u3','/between',90,1),
+               (1,'site-a','v-report','s3','u3','/report',200,1),
+               (2,'site-b','v-between','s3','u3','/between',90,1);
+        INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at)
+        VALUES (105,1,'site-a','e-history-start','v-history',2,70),
+               (106,1,'site-a','e-history-end','v-history',1,110);
+      `);
+      const base = createQueryTime(100, 300, "UTC", 400);
+      const history = { ...base, readRange: createTimeRange(0, 300) };
+      const forward =
+        'adjacent(sequence([PAGE { $.path eq "/between" },EVENT { $.name eq "purchase" }]))';
+      const reverse =
+        'adjacent(sequence([EVENT { $.name eq "signup" },PAGE { $.path contains "/between" }]))';
+      const read = (
+        scope: "session" | "visitor",
+        expression: string,
+        time: QueryTime = history,
+      ) => {
+        const compiled = dataset(expression, scope, time);
+        return {
+          sql: compiled.ctes,
+          rows: select(
+            db,
+            `WITH ${compiled.ctes} SELECT site_pk,event_id FROM ${compiled.eventRelation} WHERE event_id='e-history-end' ORDER BY site_pk,event_id`,
+            compiled.bindings.map((b) => b.value),
+          ),
+        };
+      };
+      const hit = [{ site_pk: 1, event_id: "e-history-end" }];
+      for (const scope of ["session", "visitor"] as const) {
+        for (const expr of [forward, reverse]) {
+          expect(read(scope, expr + " exists").sql).toContain(
+            "CROSS JOIN visits",
+          );
+          expect(read(scope, expr + " exists").rows).toEqual(hit);
+          expect(read(scope, expr + " notExists").rows).toEqual([]);
+          expect(read(scope, expr + " exists", base).rows).toEqual([]);
+        }
+        expect(
+          read(scope, forward + " exists", {
+            ...history,
+            filterRange: createTimeRange(100, 300),
+          }).sql,
+        ).not.toContain("CROSS JOIN visits");
+      }
+      db.exec(
+        "UPDATE visits SET visit_id='s3',session_id=NULL WHERE site_pk=1 AND visit_id='v-between'",
+      );
+      // The same Page remains a real visitor witness, but cannot witness a Session.
+      for (const expr of [forward, reverse]) {
+        expect(read("session", expr + " exists").rows).toEqual([]);
+        expect(read("session", expr + " notExists").rows).toEqual(hit);
+        expect(read("visitor", expr + " exists").rows).toEqual(hit);
+      }
+      db.exec(
+        "UPDATE visits SET session_id='s3',started_at=110 WHERE site_pk=1 AND visit_id='s3'",
+      );
+      // Page precedes Event at equal timestamps.
+      expect(read("session", forward + " exists").rows).toEqual(hit);
+      expect(read("session", reverse + " exists").rows).toEqual(hit);
+      db.exec(
+        "INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms) VALUES(1,'site-a','v-noise','s3','u3','/noise',100,1)",
+      );
+      expect(read("session", reverse + " exists").rows).toEqual([]);
+      expect(read("session", forward + " exists").rows).toEqual(hit);
     } finally {
       db.close();
     }
