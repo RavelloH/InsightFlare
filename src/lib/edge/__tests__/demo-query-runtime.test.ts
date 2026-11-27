@@ -9,6 +9,7 @@ import type * as DemoMockModule from "@/lib/demo/runtime";
 import { handleDemoRequest } from "@/lib/demo/runtime";
 import { createQueryTime } from "@/lib/edge/analytics/contract";
 import {
+  createDemoQueryResponse,
   executeDemoQuery,
   executeDemoQueryPayload,
 } from "@/lib/edge/analytics/providers/mock/demo-query";
@@ -183,6 +184,102 @@ describe("server demo query runtime", () => {
     ).resolves.toMatchObject({
       status: 200,
       payload: expect.objectContaining({ data: { views: 12 } }),
+    });
+  });
+
+  it("does not materialize internal fixture JSON until the actual HTTP response", async () => {
+    const toJSON = vi.fn(() => ({
+      views: 12,
+      absent: undefined,
+      nonFinite: NaN,
+    }));
+    const data = { toJSON };
+    handleDemoRequestMock.mockReturnValue({ ok: true, data });
+    const input = {
+      request: request("/api/private/overview"),
+      url: new URL("https://app.test/api/private/overview"),
+      siteId: "demo-site-001",
+      context: { requestId: "deferred", deferJsonSerialization: true },
+    };
+    const result = await executeDemoQueryPayload(input);
+    expect(result.status).toBe(200);
+    expect((result.payload as { data: unknown }).data).toBe(data);
+    expect(toJSON).not.toHaveBeenCalled();
+    const wire = createDemoQueryResponse(
+      result.payload,
+      result.status,
+      false,
+      input.context,
+    );
+    expect(wire.body).not.toBeNull();
+    const serialized = await wire.json();
+    expect(serialized).toMatchObject({
+      ok: true,
+      requestId: "deferred",
+      data: { views: 12, nonFinite: null },
+    });
+    expect(toJSON).toHaveBeenCalledTimes(1);
+    const direct = await executeDemoQuery(input);
+    expect(direct.body).not.toBeNull();
+    expect(await direct.json()).toMatchObject({
+      ok: true,
+      requestId: "deferred",
+      data: { views: 12, nonFinite: null },
+    });
+    expect(toJSON).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves the deferred provider error envelope and HTTP cache policy", async () => {
+    handleDemoRequestMock.mockReturnValue(demoNotFound("Missing"));
+    const input = {
+      request: request("/api/private/overview"),
+      url: new URL("https://app.test/api/private/overview"),
+      siteId: "demo-site-001",
+      context: { requestId: "missing" },
+    };
+    const result = await executeDemoQueryPayload(input);
+    expect(result.status).toBe(404);
+    const response = createDemoQueryResponse(
+      result.payload,
+      result.status,
+      true,
+      input.context,
+    );
+    expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await response.json()).toMatchObject({
+      ok: false,
+      requestId: "missing",
+      error: { code: "not_found" },
+    });
+  });
+
+  it("maps fixture serialization failures to a standard error at the HTTP boundary", async () => {
+    const data: Record<string, unknown> = {};
+    data.circular = data;
+    handleDemoRequestMock.mockReturnValue({ ok: true, data });
+    const input = {
+      request: request("/api/private/overview"),
+      url: new URL("https://app.test/api/private/overview"),
+      siteId: "demo-site-001",
+      context: { requestId: "circular" },
+    };
+    const result = await executeDemoQueryPayload(input);
+    const wire = createDemoQueryResponse(
+      result.payload,
+      result.status,
+      true,
+      input.context,
+    );
+    const direct = await executeDemoQuery(input);
+    expect(wire.status).toBe(500);
+    expect(direct.status).toBe(500);
+    expect(wire.headers.get("cache-control")).toBe("private, no-store");
+    expect(await wire.json()).toMatchObject({
+      ok: false,
+      requestId: "circular",
+      error: { code: "internal_error" },
     });
   });
 

@@ -17,6 +17,7 @@ import {
   getRequestId,
   jsonResponseWith,
   type ResponseContext,
+  takeDeferredJsonResponsePayload,
 } from "@/lib/response";
 const PRIVATE_CACHE_HEADERS = {
   "cache-control": "private, no-store",
@@ -61,12 +62,43 @@ export function createDemoQueryResponse(
   publicQuery: boolean,
   context: ResponseContext,
 ): Response {
+  try {
+    return createDemoQueryResponseInternal(
+      payload,
+      status,
+      publicQuery,
+      context,
+      false,
+    );
+  } catch (error) {
+    // Internal provider payloads are not serialized until this boundary.
+    // Keep malformed fixture output in the standard JSON error envelope.
+    return createDemoQueryResponseInternal(
+      demoErr(
+        "internal_error",
+        error instanceof Error ? error.message : "demo_query_error",
+      ),
+      500,
+      publicQuery,
+      context,
+      false,
+    );
+  }
+}
+
+function createDemoQueryResponseInternal(
+  payload: unknown,
+  status: number,
+  publicQuery: boolean,
+  context: ResponseContext,
+  deferJsonSerialization: boolean,
+): Response {
   const body =
     payload && typeof payload === "object" && !Array.isArray(payload)
       ? (payload as Record<string, unknown>)
       : { data: payload };
   return jsonResponseWith(
-    { ...context, deferJsonSerialization: false },
+    { ...context, deferJsonSerialization },
     body,
     status,
     responseHeaders(publicQuery, status < 400),
@@ -127,26 +159,31 @@ async function requestBody(
 export async function executeDemoQuery(
   input: DemoQueryRuntimeInput,
 ): Promise<Response> {
+  return executeDemoQueryInternal(input, false);
+}
+
+async function executeDemoQueryInternal(
+  input: DemoQueryRuntimeInput,
+  deferJsonSerialization: boolean,
+): Promise<Response> {
   const { request, url, siteId, publicQuery = false } = input;
   const context: ResponseContext = input.context ?? {
     requestId: getRequestId(request),
   };
-  if (unsupportedSavedFilterMethod(request, url)) {
-    return createDemoQueryResponse(
-      demoErr("method_not_allowed", "Method Not Allowed"),
-      405,
+  const respond = (payload: unknown, status: number) =>
+    createDemoQueryResponseInternal(
+      payload,
+      status,
       publicQuery,
       context,
+      deferJsonSerialization,
     );
+  if (unsupportedSavedFilterMethod(request, url)) {
+    return respond(demoErr("method_not_allowed", "Method Not Allowed"), 405);
   }
   const parsedBody = await requestBody(request);
   if (!parsedBody.valid && requiresJsonBodyValidation(request, url)) {
-    return createDemoQueryResponse(
-      demoBadRequest("Invalid JSON body"),
-      400,
-      publicQuery,
-      context,
-    );
+    return respond(demoBadRequest("Invalid JSON body"), 400);
   }
   const params = Object.fromEntries(url.searchParams) as Record<
     string,
@@ -169,11 +206,9 @@ export async function executeDemoQuery(
     const side = canonical.current ?? canonical;
     const { time, filters, scopePreference } = side;
     if (!time)
-      return createDemoQueryResponse(
+      return respond(
         demoBadRequest("Canonical query is missing its time range"),
         400,
-        publicQuery,
-        context,
       );
     params.from = time.range.startMs;
     params.to = time.range.endExclusiveMs;
@@ -222,7 +257,7 @@ export async function executeDemoQuery(
           ? 405
           : 400
       : successStatus(request, url);
-    return createDemoQueryResponse(result, status, publicQuery, context);
+    return respond(result, status);
   } catch (error) {
     const message = error instanceof Error ? error.message : "demo_query_error";
     if (
@@ -231,19 +266,9 @@ export async function executeDemoQuery(
       message === "filter_sequence_match_limit_exceeded" ||
       message === "filter_sequence_work_limit_exceeded"
     ) {
-      return createDemoQueryResponse(
-        demoBadRequest(message),
-        400,
-        publicQuery,
-        context,
-      );
+      return respond(demoBadRequest(message), 400);
     }
-    return createDemoQueryResponse(
-      demoErr("internal_error", message),
-      500,
-      publicQuery,
-      context,
-    );
+    return respond(demoErr("internal_error", message), 500);
   }
 }
 /**
@@ -253,6 +278,12 @@ export async function executeDemoQuery(
 export async function executeDemoQueryPayload(
   input: DemoQueryRuntimeInput,
 ): Promise<DemoQueryPayloadResult> {
-  const result = await executeDemoQuery(input);
-  return { payload: await result.json(), status: result.status };
+  // The canonical provider hands this payload to the HTTP adapter, which
+  // serializes it once at the actual transport boundary. Never defer a
+  // response that can be returned directly to a client.
+  const result = await executeDemoQueryInternal(input, true);
+  return {
+    payload: takeDeferredJsonResponsePayload(result),
+    status: result.status,
+  };
 }
