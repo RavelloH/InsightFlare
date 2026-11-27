@@ -4,6 +4,8 @@ import {
   type Key,
   memo,
   type ReactNode,
+  type RefCallback,
+  useMemo,
   useRef,
 } from "react";
 import { AutoTransition } from "@insightflare/ui/auto-transition";
@@ -67,7 +69,7 @@ interface AnalyticsDataTableBodyProps<TRow> {
   appendError: boolean;
   appendErrorContent?: ReactNode;
   hasMore: boolean;
-  sentinelRef: (node: HTMLElement | null) => void;
+  sentinelRef: RefCallback<HTMLElement>;
   tableBodyClassName?: string;
 }
 interface AnalyticsDataTableAnimatedRowProps<TRow> {
@@ -181,6 +183,30 @@ const AnalyticsDataTableBody = memo(function AnalyticsDataTableBody<TRow>({
   tableBodyClassName,
 }: AnalyticsDataTableBodyProps<TRow>) {
   const isEmpty = !loading && !error && rows.length === 0 && !hasMore;
+  // Loading-next-page state and appended real rows do not change the
+  // placeholders. Keep their elements stable, including the existing refs.
+  const skeletonMode = loading
+    ? "initial"
+    : !error && !appendError && hasMore
+      ? "append"
+      : null;
+  const skeletonElements = useMemo(() => {
+    if (!skeletonMode) return [];
+    return Array.from({ length: skeletonRows }, (_, index) => (
+      <tr
+        key={
+          (skeletonMode === "initial" ? "skeleton-" : "skeleton-more-") + index
+        }
+        ref={skeletonMode === "append" ? sentinelRef : undefined}
+        aria-hidden="true"
+        data-slot="table-row"
+        data-skeleton-motion={index === 0 ? "active" : "static"}
+        className={TABLE_ROW_CLASS_NAME}
+      >
+        {renderSkeletonRow(index)}
+      </tr>
+    ));
+  }, [skeletonMode, skeletonRows, sentinelRef, renderSkeletonRow]);
   const tableBodyTransitionKey = loading
     ? "loading"
     : error
@@ -202,17 +228,7 @@ const AnalyticsDataTableBody = memo(function AnalyticsDataTableBody<TRow>({
       className={cn("[&_tr:last-child]:border-0", tableBodyClassName)}
     >
       {loading
-        ? Array.from({ length: skeletonRows }, (_, index) => (
-            <tr
-              key={`skeleton-${index}`}
-              aria-hidden="true"
-              data-slot="table-row"
-              data-skeleton-motion={index === 0 ? "active" : "static"}
-              className={TABLE_ROW_CLASS_NAME}
-            >
-              {renderSkeletonRow(index)}
-            </tr>
-          ))
+        ? skeletonElements
         : error
           ? renderStateRow("error", errorContent, columnCount)
           : isEmpty
@@ -241,20 +257,7 @@ const AnalyticsDataTableBody = memo(function AnalyticsDataTableBody<TRow>({
                           ),
                     ]
                   : hasMore
-                    ? Array.from({ length: skeletonRows }, (_, index) => (
-                        <tr
-                          key={`skeleton-more-${index}`}
-                          ref={sentinelRef}
-                          aria-hidden="true"
-                          data-slot="table-row"
-                          data-skeleton-motion={
-                            index === 0 ? "active" : "static"
-                          }
-                          className={TABLE_ROW_CLASS_NAME}
-                        >
-                          {renderSkeletonRow(index)}
-                        </tr>
-                      ))
+                    ? skeletonElements
                     : []),
               ]}
     </AutoTransition>
