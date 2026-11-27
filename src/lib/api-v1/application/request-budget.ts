@@ -117,6 +117,17 @@ export async function readBoundedBody(
     reader.releaseLock();
   }
   if (total === 0) return { ok: false, reason: "empty" };
+  // Most internally generated responses arrive as one contiguous chunk.
+  // Reuse it only when it owns an exactly sized buffer; do not retain an
+  // oversized backing allocation or expose unrelated bytes.
+  const single = chunks[0];
+  if (
+    chunks.length === 1 &&
+    single &&
+    single.byteOffset === 0 &&
+    single.buffer.byteLength === total
+  )
+    return { ok: true, bytes: single };
   const bytes = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) {

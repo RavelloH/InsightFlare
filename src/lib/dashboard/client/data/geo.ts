@@ -73,16 +73,19 @@ export function overviewGeoPointsFilters(
     filterScopePreferenceFromDocument(filters) ?? "auto",
   );
 }
-export async function fetchOverviewGeoPoints(
+type OverviewGeoPointsOptions = DashboardListRequestOptions & {
+  applyGeoFilter?: boolean;
+  resolvedScope?: FilterScope;
+};
+
+/** SSR planners only need to start the exact request, not normalize its rows. */
+export function requestOverviewGeoPoints<T>(
   siteId: string,
   window: TimeWindow,
   filters?: FilterDocument,
-  options?: DashboardListRequestOptions & {
-    applyGeoFilter?: boolean;
-    resolvedScope?: FilterScope;
-  },
-): Promise<OverviewGeoPointsData> {
-  return fetchPrivateJson<OverviewGeoPointsData>(
+  options?: OverviewGeoPointsOptions,
+): Promise<T> {
+  return fetchPrivateJson<T>(
     "/api/private/overview-geo-points",
     withComparison(
       withFilters(
@@ -104,6 +107,19 @@ export async function fetchOverviewGeoPoints(
       },
     ),
     { signal: options?.signal, transport: options?.transport },
+  );
+}
+export async function fetchOverviewGeoPoints(
+  siteId: string,
+  window: TimeWindow,
+  filters?: FilterDocument,
+  options?: OverviewGeoPointsOptions,
+): Promise<OverviewGeoPointsData> {
+  return requestOverviewGeoPoints<OverviewGeoPointsData>(
+    siteId,
+    window,
+    filters,
+    options,
   )
     .then((payload) => ({
       ok: payload.ok,
@@ -282,7 +298,7 @@ export function startGeoInitialReads(
     resolveDashboardComparisonQuery(search, window, filters),
     search.get("location"),
   );
-  void fetchOverviewGeoPoints(siteId, window, request.filters, {
+  void requestOverviewGeoPoints<unknown>(siteId, window, request.filters, {
     limit: GEO_PAGE_POINT_LIMIT,
     applyGeoFilter: Boolean(request.location),
     transport,

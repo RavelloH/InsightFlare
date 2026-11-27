@@ -103,6 +103,55 @@ export function shouldUseNativeScrollbars(): boolean {
 
 export const SCROLLBAR_UPDATED_EVENT = "insightflare:scrollbar-updated";
 
+// Initialization and edge masks observe the same React-owned nodes. Share
+// only our size notifications, not OverlayScrollbars' internal observers or
+// initialization lifecycle. One callback per subscriber per delivery.
+const resizeSubscribers = new Map<Element, Set<() => void>>();
+let scrollbarResizeObserver: ResizeObserver | null = null;
+
+export function observeScrollbarResize(
+  viewport: Element,
+  content: Element | null,
+  notify: () => void,
+): () => void {
+  if (typeof ResizeObserver === "undefined") return () => undefined;
+  if (!scrollbarResizeObserver) {
+    scrollbarResizeObserver = new ResizeObserver((entries) => {
+      const callbacks = new Set<() => void>();
+      for (const entry of entries)
+        for (const callback of resizeSubscribers.get(entry.target) ?? [])
+          callbacks.add(callback);
+      for (const callback of callbacks) callback();
+    });
+  }
+  const observer = scrollbarResizeObserver;
+  const nodes =
+    content && content !== viewport ? [viewport, content] : [viewport];
+  for (const node of nodes) {
+    const subscribers = resizeSubscribers.get(node);
+    if (subscribers) {
+      subscribers.add(notify);
+    } else {
+      resizeSubscribers.set(node, new Set([notify]));
+      observer.observe(node);
+    }
+  }
+  return () => {
+    for (const node of nodes) {
+      const subscribers = resizeSubscribers.get(node);
+      if (!subscribers?.delete(notify)) continue;
+      if (subscribers.size === 0) {
+        resizeSubscribers.delete(node);
+        observer.unobserve(node);
+      }
+    }
+    if (resizeSubscribers.size === 0 && scrollbarResizeObserver === observer) {
+      observer.disconnect();
+      scrollbarResizeObserver = null;
+    }
+  };
+}
+
 /**
  * Enhancement is visual only: native overflow works before it starts. Run
  * at most one costly initialization per frame, outside React's layout commit.
@@ -192,7 +241,7 @@ export function useReactOverlayScrollbar({
     let failed = false;
     let instance: OverlayScrollbars | null = null;
     let cancelQueued: (() => void) | null = null;
-    let observer: ResizeObserver | null = null;
+    let stopObserving: (() => void) | null = null;
     const notify = () =>
       viewport.dispatchEvent(new Event(SCROLLBAR_UPDATED_EVENT));
     const enhance = () => {
@@ -211,12 +260,14 @@ export function useReactOverlayScrollbar({
       }
       instanceRef.current = instance;
       if (instance) {
-        observer?.disconnect();
+        stopObserving?.();
+        stopObserving = null;
         viewport.removeEventListener("scroll", queue);
         instance.on("updated", notify);
       } else {
         failed = true;
-        observer?.disconnect();
+        stopObserving?.();
+        stopObserving = null;
         viewport.removeEventListener("scroll", queue);
         viewport.setAttribute("data-scrollbar-fallback", "");
       }
@@ -226,11 +277,7 @@ export function useReactOverlayScrollbar({
       if (!cancelled && !failed && !instance && !cancelQueued)
         cancelQueued = enqueueEnhancement(enhance);
     };
-    if (typeof ResizeObserver !== "undefined") {
-      observer = new ResizeObserver(queue);
-      observer.observe(viewport);
-      observer.observe(content);
-    }
+    stopObserving = observeScrollbarResize(viewport, content, queue);
     viewport.addEventListener("scroll", queue, { passive: true });
     queue();
 
@@ -238,7 +285,7 @@ export function useReactOverlayScrollbar({
       cancelled = true;
       cancelQueued?.();
       viewport.removeEventListener("scroll", queue);
-      observer?.disconnect();
+      stopObserving?.();
       if (instance && OverlayScrollbars.valid(instance)) {
         instance.off("updated", notify);
         instance.destroy();
@@ -311,7 +358,11 @@ export function OverlayScrollbar({
 
   useEffect(() => {
     if (!showEdgeMasks) {
-      setEdgeMasks({ left: false, right: false, top: false, bottom: false });
+      setEdgeMasks((current) =>
+        current.left || current.right || current.top || current.bottom
+          ? { left: false, right: false, top: false, bottom: false }
+          : current,
+      );
       return;
     }
 
@@ -362,15 +413,17 @@ export function OverlayScrollbar({
     };
     viewport.addEventListener("scroll", scheduleSync, { passive: true });
     viewport.addEventListener(SCROLLBAR_UPDATED_EVENT, scheduleSync);
-    const resizeObserver = new ResizeObserver(scheduleSync);
-    resizeObserver.observe(viewport);
-    if (contentRef.current) resizeObserver.observe(contentRef.current);
+    const stopObserving = observeScrollbarResize(
+      viewport,
+      contentRef.current,
+      scheduleSync,
+    );
     scheduleSync();
 
     return () => {
       viewport.removeEventListener("scroll", scheduleSync);
       viewport.removeEventListener(SCROLLBAR_UPDATED_EVENT, scheduleSync);
-      resizeObserver.disconnect();
+      stopObserving();
       if (frameId !== null) window.cancelAnimationFrame(frameId);
     };
   }, [axis, scrollbarRef, showEdgeMasks]);

@@ -14,6 +14,7 @@ import {
   takeSidebarTeamSnapshot,
   teamDashboardQueryKey,
   teamDashboardQueryOptions,
+  trackSidebarTeamSnapshot,
 } from "@/lib/dashboard/team-dashboard-query";
 
 const window = {
@@ -26,6 +27,7 @@ const window = {
 describe("team dashboard query helpers", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("plans only entered navigations with matching time preferences and preserves comparison scope", () => {
@@ -286,21 +288,24 @@ describe("team dashboard query helpers", () => {
     });
   });
 
-  it("consumes only fresh, exact team/window sidebar handoffs once", async () => {
+  it("consumes only tracked, exact team/window sidebar handoffs once", async () => {
     const snapshot = {
       data: { sites: [], trend: [] },
       window,
       range: "7d" as const,
-      fetchedAt: Date.now(),
+      fetchedAt: Date.now() - 60_000,
     };
     const deferred = {
       teamId: "team-1",
       window,
       promise: Promise.resolve(snapshot),
     };
+    trackSidebarTeamSnapshot(undefined);
     expect(
       takeSidebarTeamSnapshot(undefined, "team-1", window),
     ).toBeUndefined();
+    expect(takeSidebarTeamSnapshot(deferred, "team-1", window)).toBeUndefined();
+    trackSidebarTeamSnapshot(deferred);
     expect(takeSidebarTeamSnapshot(deferred, "team-2", window)).toBeUndefined();
     expect(
       takeSidebarTeamSnapshot(deferred, "team-1", {
@@ -312,29 +317,51 @@ describe("team dashboard query helpers", () => {
       takeSidebarTeamSnapshot(deferred, "team-1", window),
     ).resolves.toBe(snapshot);
     expect(takeSidebarTeamSnapshot(deferred, "team-1", window)).toBeUndefined();
-    await expect(
-      takeSidebarTeamSnapshot(
-        {
-          ...deferred,
-          promise: Promise.resolve({
-            ...snapshot,
-            fetchedAt: Date.now() - 16_000,
-          }),
-        },
-        "team-1",
+  });
+
+  it("expires unused received handoffs without renewing them on rerender", async () => {
+    vi.useFakeTimers();
+    const deferred = {
+      teamId: "team-1",
+      window,
+      promise: Promise.resolve({
+        data: { sites: [], trend: [] },
         window,
-      ),
-    ).resolves.toBeNull();
+        range: "7d" as const,
+        fetchedAt: Date.now(),
+      }),
+    };
+    trackSidebarTeamSnapshot(deferred);
+    await deferred.promise;
+    vi.advanceTimersByTime(16_000);
+    trackSidebarTeamSnapshot(deferred);
+    expect(takeSidebarTeamSnapshot(deferred, "team-1", window)).toBeUndefined();
+  });
+
+  it("does not expire pending handoffs and preserves a null or rejected result", async () => {
+    vi.useFakeTimers();
+    let finish!: (value: null) => void;
+    const deferred = {
+      teamId: "team-1",
+      window,
+      promise: new Promise<null>((resolve) => {
+        finish = resolve;
+      }),
+    };
+    trackSidebarTeamSnapshot(deferred);
+    vi.advanceTimersByTime(30_000);
+    const result = takeSidebarTeamSnapshot(deferred, "team-1", window);
+    expect(result).toBe(deferred.promise);
+    finish(null);
+    await expect(result).resolves.toBeNull();
+    const rejected = {
+      ...deferred,
+      promise: Promise.reject(new Error("stream")),
+    };
+    trackSidebarTeamSnapshot(rejected);
     await expect(
-      takeSidebarTeamSnapshot(
-        {
-          ...deferred,
-          promise: Promise.resolve(null),
-        },
-        "team-1",
-        window,
-      ),
-    ).resolves.toBeNull();
+      takeSidebarTeamSnapshot(rejected, "team-1", window),
+    ).rejects.toThrow("stream");
   });
 
   it("joins a matching streamed snapshot without duplicating the private API request", async () => {

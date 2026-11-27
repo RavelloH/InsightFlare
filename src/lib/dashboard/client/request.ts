@@ -252,9 +252,11 @@ export function privateReadIdentity(
   query.sort();
   return path + "?" + query.toString();
 }
+export type DeferredPrivateReadResult =
+  { value: ManagementJsonValue } | { json: string };
 export type DeferredPrivateReads = Record<
   string,
-  Promise<{ value: ManagementJsonValue } | null>
+  Promise<DeferredPrivateReadResult | null>
 >;
 const consumedPrivateReads = new WeakSet<object>();
 // Match the normalized React Query freshness window. Pending reads can
@@ -306,7 +308,17 @@ export function createDeferredPrivateReadTransport(
           : deferred.catch(() => null));
         if (signal?.aborted) throwAbortError();
         consumedPrivateReads.add(deferred);
-        if (result) return result.value as T;
+        if (result) {
+          if ("value" in result) return result.value as T;
+          try {
+            const value: unknown = JSON.parse(result.json);
+            if (value && typeof value === "object" && !Array.isArray(value))
+              return value as T;
+          } catch {
+            // A malformed streamed body must take the same network fallback
+            // as a failed server read, rather than becoming an empty chart.
+          }
+        }
       } finally {
         if (abort) signal?.removeEventListener("abort", abort);
       }

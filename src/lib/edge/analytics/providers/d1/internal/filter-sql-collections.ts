@@ -66,6 +66,8 @@ export interface SqlQualificationSources {
   readonly uniqueLocalOccurrences?: boolean;
   /** Canonical global sources have unique occurrences within the read range. */
   readonly uniqueGlobalOccurrences?: boolean;
+  /** Canonical physical visits in the authorized R domain. */
+  readonly indexedGlobalTimelineVisits?: boolean;
 }
 
 interface SqlFragment {
@@ -1208,12 +1210,69 @@ class SqlCollectionCompiler {
       // complete timeline for each candidate, including sessionless rows
       // whose visit IDs collide with candidate session IDs.
       const eventStage = stages.find((step) => step.kind === "event")!;
-      const candidateSql = `SELECT ${eventStage.key} ${eventStage.from}
-        GROUP BY ${eventStage.item}.site_pk, ${eventStage.item}.${identity}
-        ${identical ? `HAVING COUNT(*) >= ${count}` : ""}`;
+      const eventStages = stages.filter((step) => step.kind === "event");
+      // Each distinct Event stage needs a witness and the entity must
+      // contain enough occurrences. Overlapping predicates may still
+      // share a witness here: the complete timeline checks strict order.
+      const hasPayload = (expression: FilterExpression): boolean => {
+        if (expression.kind === "not") return hasPayload(expression.child);
+        if (expression.kind === "condition")
+          return expression.target.kind === "current-payload";
+        return expression.children.some(hasPayload);
+      };
+      // Payload traversal can be expensive on unrelated events. Keep the
+      // original candidate path for those selectors until separately measured.
+      const stronger =
+        !identical &&
+        eventStages.length > 1 &&
+        steps.every(
+          (step) => step.kind !== "selector" || !hasPayload(step.predicate),
+        );
+      const candidateSql = stronger
+        ? `SELECT ${eventStage.key} FROM ${eventStage.relation} ${item}
+          WHERE ${item}.site_pk IS NOT NULL AND ${eligible}
+          GROUP BY ${item}.site_pk, ${item}.${identity}
+          HAVING COUNT(*) >= ${eventStages.length}
+            AND ${eventStages.map((step) => `MAX(CASE WHEN (${step.predicate}) THEN 1 ELSE 0 END) = 1`).join(" AND ")}`
+        : `SELECT ${eventStage.key} ${eventStage.from}
+          GROUP BY ${eventStage.item}.site_pk, ${eventStage.item}.${identity}
+          ${identical ? `HAVING COUNT(*) >= ${count}` : ""}`;
       bindings.length = 0;
-      bindings.push(...eventStage.bindings);
+      bindings.push(
+        ...(stronger
+          ? eventStages.flatMap((step) => step.bindings)
+          : eventStage.bindings),
+      );
+      const readStart = this.clock?.readStartMs;
+      const readEnd = this.clock?.readEndExclusiveMs;
+      const indexedPages =
+        this.sources.indexedGlobalTimelineVisits &&
+        readStart !== undefined &&
+        readEnd !== undefined;
       const branches = (["page", "event"] as const).map((kind) => {
+        if (kind === "page" && indexedPages) {
+          const flags = stages.map((step, index) => {
+            if (step.kind !== "page") return `0 AS match_${index}`;
+            bindings.push(...step.bindings);
+            return `CASE WHEN ${eligible} AND (${step.predicate}) THEN 1 ELSE 0 END AS match_${index}`;
+          });
+          const project = (
+            flags: readonly string[],
+          ) => `SELECT ${item}.site_pk, candidate.entity_id,
+            ${item}.started_at AS activity_time, 0 AS kind_rank,
+            ${item}.visit_id AS activity_id, ${flags.join(", ")}
+            FROM candidate_entities candidate CROSS JOIN visits ${item}
+            WHERE ${item}.site_pk = candidate.site_pk AND ${item}.started_at >= ? AND ${item}.started_at < ?`;
+          bindings.push(readStart, readEnd);
+          const direct = `${project(flags)} AND ${item}.${identity} = candidate.entity_id`;
+          if (frame.anchorKind !== "session") return direct;
+          // The disjoint sessionless branch keeps position-only collision
+          // blockers while allowing both physical keys to use their indexes.
+          bindings.push(readStart, readEnd);
+          return `${direct} UNION ALL ${project(stages.map((_, i) => `0 AS match_${i}`))}
+            AND ${item}.visit_id = candidate.entity_id
+            AND (${item}.session_id IS NULL OR ${item}.session_id = '')`;
+        }
         const flags = stages.map((step, index) => {
           if (step.kind !== kind) return `0 AS match_${index}`;
           bindings.push(...step.bindings);
@@ -2006,6 +2065,7 @@ export function compileCollectionSqlQualification(
       timelineEvents: sources.timelineEvents,
       uniqueLocalOccurrences: sources.uniqueLocalOccurrences,
       uniqueGlobalOccurrences: sources.uniqueGlobalOccurrences,
+      indexedGlobalTimelineVisits: sources.indexedGlobalTimelineVisits,
     },
     clock,
   );

@@ -1529,6 +1529,87 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
+  it("streams nonempty D1 map points with canonical metadata on cold cache and cache hit", async () => {
+    const { db, env } = runFixture();
+    const acl = vi.spyOn(siteAccess, "resolvePrivateSite").mockResolvedValue({
+      id: "site-a",
+      name: "A",
+      domain: "a.test",
+      canManage: true,
+    } as never);
+    const entries = new Map<string, Response>();
+    vi.stubGlobal("caches", {
+      open: async () => ({
+        match: async (request: Request) => entries.get(request.url)?.clone(),
+        put: async (request: Request, response: Response) => {
+          entries.set(request.url, response.clone());
+        },
+      }),
+    });
+    try {
+      const request = new Request("https://app.test/en/app/team/site/geo");
+      const window = {
+        preset: "custom" as const,
+        from: 100,
+        to: 300,
+        interval: "day" as const,
+        timeZone: "UTC",
+      };
+      const start = () =>
+        startSiteAnalyticsStream({
+          request,
+          env,
+          siteId: "site-a",
+          page: "geo",
+          window,
+          search: "",
+        });
+      const read = async () => {
+        const reads = await start();
+        const key = Object.keys(reads).find((key) =>
+          key.includes("overview-geo-points"),
+        )!;
+        const result = await reads[key];
+        await Promise.all(Object.values(reads));
+        if (!result || !("json" in result))
+          throw new Error("missing geo JSON handoff");
+        return {
+          key,
+          value: JSON.parse(result.json) as Record<string, unknown>,
+        };
+      };
+      const cold = await read();
+      expect(cold.value).toMatchObject({
+        ok: true,
+        data: expect.arrayContaining([
+          expect.objectContaining({ latitude: 34.05, longitude: -118.25 }),
+        ]),
+      });
+      expect(cold.value).not.toHaveProperty("requestId");
+      expect(cold.value).not.toHaveProperty("timestamp");
+      const url = new URL(cold.key, request.url);
+      const standalone = await executePrivateQuery({
+        env,
+        siteId: "site-a",
+        pathname: "overview-geo-points",
+        url,
+        request: new Request(url),
+        dashboardMode: true,
+      });
+      expect(standalone.status).toBe(200);
+      expect(await standalone.json()).toEqual({
+        ...cold.value,
+        requestId: expect.any(String),
+        timestamp: expect.any(String),
+      });
+      expect(await read()).toEqual(cold);
+    } finally {
+      vi.unstubAllGlobals();
+      acl.mockRestore();
+      db.close();
+    }
+  });
+
   it("uses the existing dimension batch from the SSR overview planner, including geography isolation", async () => {
     const db = sqlitePayloadFixture();
     const logger = createInvocationLogger({
@@ -1590,7 +1671,9 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           });
           expect(standalone.status).toBe(200);
           const baseline = (await standalone.json()) as { data: unknown };
-          expect(value?.value).toMatchObject({ ok: true, data: baseline.data });
+          expect(value).toMatchObject({
+            value: { ok: true, data: baseline.data },
+          });
           return value;
         }),
       );
@@ -1627,9 +1710,11 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
           dashboardMode: true,
         });
         expect(standalone.status).toBe(200);
-        expect(result?.value).toMatchObject({
-          ok: true,
-          data: ((await standalone.json()) as { data: unknown }).data,
+        expect(result).toMatchObject({
+          value: {
+            ok: true,
+            data: ((await standalone.json()) as { data: unknown }).data,
+          },
         });
       }
       await Promise.all(Object.values(geo));
@@ -3458,6 +3543,152 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
       }
     }
   });
+  it("uses authorized indexed Page blockers without changing global Adjacent read domains", () => {
+    const db = sqliteFixture();
+    try {
+      db.exec(`
+        CREATE UNIQUE INDEX test_visit_key ON visits(site_pk,visit_id);
+        CREATE INDEX test_visit_session ON visits(site_pk,session_id,started_at);
+        CREATE INDEX test_visit_visitor ON visits(site_pk,visitor_id,started_at);
+        INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms)
+        VALUES (1,'site-a','v-history','s3','u3','/old',-20,1),
+               (1,'site-a','v-blocker','s3','u3','/between',90,1),
+               (1,'site-a','v-report','s3','u3','/report',200,1),
+               (2,'site-b','v-blocker','s3','u3','/other-site',90,1);
+        INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at)
+        VALUES (105,1,'site-a','e-history-start','v-history',2,70),
+               (106,1,'site-a','e-history-end','v-history',1,110);
+      `);
+      const expression =
+        'adjacent(sequence([EVENT { $.name eq "signup" }, EVENT { $.name eq "purchase" }])) exists';
+      const base = createQueryTime(100, 300, "UTC", 400);
+      const history = { ...base, readRange: createTimeRange(0, 300) };
+      const read = (
+        scope: "session" | "visitor",
+        time: QueryTime,
+        expr = expression,
+      ) => {
+        const compiled = dataset(expr, scope, time);
+        return {
+          sql: compiled.ctes,
+          rows: select(
+            db,
+            `WITH ${compiled.ctes} SELECT site_pk,event_id FROM ${compiled.eventRelation} WHERE event_id='e-history-end' ORDER BY site_pk,event_id`,
+            compiled.bindings.map((b) => b.value),
+          ),
+        };
+      };
+      const hit = [{ site_pk: 1, event_id: "e-history-end" }];
+      for (const scope of ["session", "visitor"] as const) {
+        expect(read(scope, history).sql).toContain("CROSS JOIN visits");
+        expect(read(scope, history).rows).toEqual([]);
+        expect(read(scope, base).rows).toEqual([]);
+      }
+      db.exec(
+        "UPDATE visits SET started_at=-1 WHERE site_pk=1 AND visit_id='v-blocker'",
+      );
+      for (const scope of ["session", "visitor"] as const) {
+        expect(read(scope, history).rows).toEqual(hit);
+        const explicit = { ...history, filterRange: createTimeRange(100, 300) };
+        expect(read(scope, explicit).sql).not.toContain("CROSS JOIN visits");
+        expect(read(scope, explicit).rows).toEqual([]);
+      }
+      db.exec(
+        "UPDATE visits SET visit_id='s3',session_id=NULL,visitor_id='other',started_at=90 WHERE site_pk=1 AND visit_id='v-blocker'",
+      );
+      expect(read("session", history).rows).toEqual([]);
+      expect(read("visitor", history).rows).toEqual(hit);
+      db.exec(
+        "UPDATE visits SET started_at=300 WHERE site_pk=1 AND visit_id='s3'",
+      );
+      expect(read("session", history).rows).toEqual(hit);
+      expect(
+        read("session", history, "adjacent(sequence([PAGE,EVENT])) exists").sql,
+      ).toContain("CROSS JOIN visits");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves mixed indexed Adjacent witnesses, collision blockers and predicate bindings", () => {
+    const db = sqliteFixture();
+    try {
+      db.exec(`
+        CREATE UNIQUE INDEX test_visit_key ON visits(site_pk,visit_id);
+        CREATE INDEX test_visit_session ON visits(site_pk,session_id,started_at);
+        CREATE INDEX test_visit_visitor ON visits(site_pk,visitor_id,started_at);
+        INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms)
+        VALUES (1,'site-a','v-history','s3','u3','/old',-20,1),
+               (1,'site-a','v-between','s3','u3','/between',90,1),
+               (1,'site-a','v-report','s3','u3','/report',200,1),
+               (2,'site-b','v-between','s3','u3','/between',90,1);
+        INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at)
+        VALUES (105,1,'site-a','e-history-start','v-history',2,70),
+               (106,1,'site-a','e-history-end','v-history',1,110);
+      `);
+      const base = createQueryTime(100, 300, "UTC", 400);
+      const history = { ...base, readRange: createTimeRange(0, 300) };
+      const forward =
+        'adjacent(sequence([PAGE { $.path eq "/between" },EVENT { $.name eq "purchase" }]))';
+      const reverse =
+        'adjacent(sequence([EVENT { $.name eq "signup" },PAGE { $.path contains "/between" }]))';
+      const read = (
+        scope: "session" | "visitor",
+        expression: string,
+        time: QueryTime = history,
+      ) => {
+        const compiled = dataset(expression, scope, time);
+        return {
+          sql: compiled.ctes,
+          rows: select(
+            db,
+            `WITH ${compiled.ctes} SELECT site_pk,event_id FROM ${compiled.eventRelation} WHERE event_id='e-history-end' ORDER BY site_pk,event_id`,
+            compiled.bindings.map((b) => b.value),
+          ),
+        };
+      };
+      const hit = [{ site_pk: 1, event_id: "e-history-end" }];
+      for (const scope of ["session", "visitor"] as const) {
+        for (const expr of [forward, reverse]) {
+          expect(read(scope, expr + " exists").sql).toContain(
+            "CROSS JOIN visits",
+          );
+          expect(read(scope, expr + " exists").rows).toEqual(hit);
+          expect(read(scope, expr + " notExists").rows).toEqual([]);
+          expect(read(scope, expr + " exists", base).rows).toEqual([]);
+        }
+        expect(
+          read(scope, forward + " exists", {
+            ...history,
+            filterRange: createTimeRange(100, 300),
+          }).sql,
+        ).not.toContain("CROSS JOIN visits");
+      }
+      db.exec(
+        "UPDATE visits SET visit_id='s3',session_id=NULL WHERE site_pk=1 AND visit_id='v-between'",
+      );
+      // The same Page remains a real visitor witness, but cannot witness a Session.
+      for (const expr of [forward, reverse]) {
+        expect(read("session", expr + " exists").rows).toEqual([]);
+        expect(read("session", expr + " notExists").rows).toEqual(hit);
+        expect(read("visitor", expr + " exists").rows).toEqual(hit);
+      }
+      db.exec(
+        "UPDATE visits SET session_id='s3',started_at=110 WHERE site_pk=1 AND visit_id='s3'",
+      );
+      // Page precedes Event at equal timestamps.
+      expect(read("session", forward + " exists").rows).toEqual(hit);
+      expect(read("session", reverse + " exists").rows).toEqual(hit);
+      db.exec(
+        "INSERT INTO visits(site_pk,site_id,visit_id,session_id,visitor_id,pathname,started_at,duration_ms) VALUES(1,'site-a','v-noise','s3','u3','/noise',100,1)",
+      );
+      expect(read("session", reverse + " exists").rows).toEqual([]);
+      expect(read("session", forward + " exists").rows).toEqual(hit);
+    } finally {
+      db.close();
+    }
+  });
+
   it("preserves Session adjacency when a sessionless Visit key collides", async () => {
     const { db, env } = runFixture();
     try {

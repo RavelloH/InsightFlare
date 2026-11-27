@@ -736,6 +736,50 @@ describe("Dashboard Client Data Processing Utilities", () => {
       expect(network).toHaveBeenCalledTimes(1);
     });
 
+    it("decodes an opaque JSON handoff without changing map values, and falls back on malformed bodies", async () => {
+      const path = "/api/private/overview-geo-points";
+      const params = { siteId: "site-stream", from: 100, to: 200 };
+      const key = privateReadIdentity(path, params);
+      const original = {
+        ok: true,
+        data: [
+          {
+            latitude: 35.123456789,
+            longitude: -139.987654321,
+            timestampMs: 123.456,
+            country: "JP",
+            city: "</script>東京",
+            pointCount: 7,
+            unknownField: null,
+          },
+        ],
+        countryCounts: [],
+        regionCounts: [],
+        cityCounts: [],
+      };
+      const network = vi.fn(async () => freshJsonResponse({ ok: false }));
+      globalThis.fetch = network as typeof fetch;
+      const transport = createDeferredPrivateReadTransport({
+        [key]: Promise.resolve({ json: JSON.stringify(original) }),
+      });
+      await expect(
+        fetchPrivateJson(path, params, { transport }),
+      ).resolves.toEqual(original);
+      expect(network).not.toHaveBeenCalled();
+      await expect(
+        fetchPrivateJson(path, params, { transport }),
+      ).resolves.toEqual({ ok: false });
+      for (const json of ["{bad", "null", "[]", "123"]) {
+        const invalid = createDeferredPrivateReadTransport({
+          [key]: Promise.resolve({ json }),
+        });
+        await expect(
+          fetchPrivateJson(path, params, { transport: invalid }),
+        ).resolves.toEqual({ ok: false });
+      }
+      expect(network).toHaveBeenCalledTimes(5);
+    });
+
     it("never consumes a stale or cancelled streamed result; different filters and cursors fall through", async () => {
       const path = "/api/private/overview-page-path";
       const params = {

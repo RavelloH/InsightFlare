@@ -4,6 +4,7 @@ import {
   PUBLIC_QUERY_CACHE_OPTIONS,
   withDashboardCache,
 } from "@/lib/edge/analytics/composition/dashboard-cache";
+import { jsonResponseWith } from "@/lib/response";
 describe("edge dashboard cache wrapper", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
@@ -275,6 +276,82 @@ describe("edge dashboard cache wrapper", () => {
     expect(cached.headers.get("x-insightflare-cache-had-dynamic-fields")).toBe(
       "1",
     );
+  });
+
+  it("materializes deferred internal JSON once, shares the canonical cache, and restores HTTP metadata", async () => {
+    const entries = new Map<string, Response>();
+    vi.stubGlobal("caches", {
+      open: async () => ({
+        match: async (request: Request) => entries.get(request.url)?.clone(),
+        put: async (request: Request, response: Response) => {
+          entries.set(request.url, response.clone());
+        },
+      }),
+    });
+    const url = new URL("https://example.test/api/private/overview-geo-points");
+    const payload = {
+      ok: true,
+      data: [{ city: "東京</script>", latitude: 35.12345 }],
+      timestampMs: 123,
+    };
+    const generate = vi.fn(async () =>
+      jsonResponseWith(
+        { requestId: "internal", deferJsonSerialization: true },
+        payload,
+        200,
+        { "x-insightflare-d1-rows-read": "42" },
+      ),
+    );
+    const fresh = await withDashboardCache(undefined, url, generate, {
+      canonicalDeferredJson: true,
+    });
+    expect(fresh.headers.get("x-edge-cache")).toBe("MISS");
+    expect(
+      fresh.headers.get("x-insightflare-cache-had-dynamic-fields"),
+    ).toBeNull();
+    expect(await fresh.json()).toEqual(payload);
+    const cached = [...entries.values()][0]!;
+    expect(cached.headers.get("x-insightflare-cache-had-dynamic-fields")).toBe(
+      "1",
+    );
+    expect(await cached.clone().json()).toEqual(payload);
+    const internal = await withDashboardCache(undefined, url, generate, {
+      canonicalDeferredJson: true,
+    });
+    expect(await internal.json()).toEqual(payload);
+    expect(internal.headers.get("x-insightflare-d1-rows-read")).toBe("0");
+    const http = await withDashboardCache(undefined, url, generate, {
+      request: new Request(url, { headers: { "x-request-id": "http" } }),
+    });
+    expect(await http.json()).toEqual({
+      ...payload,
+      requestId: "http",
+      timestamp: expect.any(String),
+    });
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
+  it("materializes internal deferred JSON even without Cache API, and preserves normal response fallback", async () => {
+    vi.stubGlobal("caches", null);
+    const url = new URL("https://example.test/api");
+    const result = await withDashboardCache(
+      undefined,
+      url,
+      async () =>
+        jsonResponseWith(
+          { requestId: "internal", deferJsonSerialization: true },
+          { ok: true, data: [] },
+        ),
+      { canonicalDeferredJson: true },
+    );
+    expect(await result.json()).toEqual({ ok: true, data: [] });
+    const ordinary = await withDashboardCache(
+      undefined,
+      url,
+      async () => Response.json({ ok: true, requestId: "ordinary" }),
+      { canonicalDeferredJson: true },
+    );
+    expect(await ordinary.json()).toEqual({ ok: true, requestId: "ordinary" });
   });
 
   it("does not cache non-OK responses and tolerates cache failures", async () => {
