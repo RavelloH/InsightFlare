@@ -33,7 +33,10 @@ import {
   weightedPickIndex,
 } from "@/lib/demo/realtime/dimension-pickers";
 import type * as DimensionPoolsModule from "@/lib/demo/realtime/dimension-pools";
-import { BROWSER_MARKET_WEIGHTS } from "@/lib/demo/realtime/dimension-pools";
+import {
+  BROWSER_MARKET_WEIGHTS,
+  COUNTRY_GEO_CLUSTERS,
+} from "@/lib/demo/realtime/dimension-pools";
 const rng = (seed: number) => mulberry32(seed);
 async function withMockedDimensionPools<T>(
   overrides: Record<string, unknown>,
@@ -129,6 +132,20 @@ describe("mock/dimension-pickers", () => {
       const cluster = pickCountryGeoCluster(rng(1), "US");
       expect(cluster.weight).toBeGreaterThan(0);
       expect(cluster.spreadKm).toBeGreaterThan(0);
+    });
+    it("preserves the weighted selection sequence without per-pick weight allocation", () => {
+      const actualRng = rng(42);
+      const expectedRng = rng(42);
+      const clusters = COUNTRY_GEO_CLUSTERS.US ?? [];
+      for (let index = 0; index < 100; index += 1) {
+        const expectedIndex = weightedPickIndex(
+          expectedRng,
+          clusters.map((cluster) => cluster.weight),
+        );
+        expect(pickCountryGeoCluster(actualRng, "US")).toBe(
+          clusters[expectedIndex],
+        );
+      }
     });
   });
 
@@ -559,6 +576,14 @@ describe("mock/dimension-pickers", () => {
       const parsed = parseDemoCityLabel("US::CA::California::Los Angeles");
       expect(parsed?.city).toBe("US::CA::California::Los Angeles");
       expect(parsed?.cityName).toBe("Los Angeles");
+    });
+    it("returns an independent object when a parsed label is cached", () => {
+      const first = parseDemoCityLabel("US::CA::California::Los Angeles");
+      if (!first) throw new Error("expected a parsed city");
+      first.cityName = "mutated";
+      expect(
+        parseDemoCityLabel("US::CA::California::Los Angeles")?.cityName,
+      ).toBe("Los Angeles");
     });
 
     it("joins multi-segment city names", () => {

@@ -71,6 +71,12 @@ export function randomGaussian(rng: () => number): number {
   const v = Math.max(rng(), Number.EPSILON);
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
+interface PreparedGeoClusterPicker {
+  clusters: GeoCluster[];
+  weights: number[];
+  totalWeight: number;
+}
+const GEO_CLUSTER_PICKERS = new Map<string, PreparedGeoClusterPicker>();
 export function pickCountryGeoCluster(
   rng: () => number,
   countryCode: string,
@@ -88,11 +94,25 @@ export function pickCountryGeoCluster(
       spreadKm: 170,
     };
   }
-  const index = weightedPickIndex(
-    rng,
-    clusters.map((cluster) => cluster.weight),
-  );
-  return clusters[index] ?? clusters[0];
+  let prepared = GEO_CLUSTER_PICKERS.get(countryCode);
+  if (!prepared || prepared.clusters !== clusters) {
+    const weights = new Array<number>(clusters.length);
+    let totalWeight = 0;
+    for (let index = 0; index < clusters.length; index += 1) {
+      const weight = Math.max(0, Number(clusters[index]?.weight) || 0);
+      weights[index] = weight;
+      totalWeight += weight;
+    }
+    prepared = { clusters, weights, totalWeight };
+    GEO_CLUSTER_PICKERS.set(countryCode, prepared);
+  }
+  if (prepared.totalWeight <= 0) return clusters[0];
+  let hit = rng() * prepared.totalWeight;
+  for (let index = 0; index < prepared.weights.length; index += 1) {
+    hit -= prepared.weights[index] ?? 0;
+    if (hit <= 0) return clusters[index] ?? clusters[0];
+  }
+  return clusters[clusters.length - 1] ?? clusters[0];
 }
 export function sampleGeoPointByCountry(
   rng: () => number,
@@ -396,7 +416,7 @@ export function pickDemoOrganization(
     (offset + sInt(rng, 0, Math.min(4, ALL_ORGS.length - 1))) % ALL_ORGS.length;
   return ALL_ORGS[index];
 }
-export function parseDemoRegionLabel(label: string): {
+function parseDemoRegionLabelUncached(label: string): {
   country: string;
   regionCode: string;
   regionName: string;
@@ -417,7 +437,7 @@ export function parseDemoRegionLabel(label: string): {
     region: `${country}${DEMO_GEO_SEGMENT_SEPARATOR}${regionToken}${DEMO_GEO_SEGMENT_SEPARATOR}${regionName || regionToken}`,
   };
 }
-export function parseDemoCityLabel(label: string): {
+function parseDemoCityLabelUncached(label: string): {
   country: string;
   regionCode: string;
   regionName: string;
@@ -444,6 +464,52 @@ export function parseDemoCityLabel(label: string): {
     cityName,
     city: `${region}${DEMO_GEO_SEGMENT_SEPARATOR}${cityName}`,
   };
+}
+const GEO_LABEL_CACHE_LIMIT = 8_192;
+const REGION_LABEL_CACHE = new Map<
+  string,
+  ReturnType<typeof parseDemoRegionLabelUncached>
+>();
+const CITY_LABEL_CACHE = new Map<
+  string,
+  ReturnType<typeof parseDemoCityLabelUncached>
+>();
+function getCachedGeoLabel<T>(
+  cache: Map<string, T>,
+  label: string,
+  create: () => T,
+): T {
+  const cached = cache.get(label);
+  if (cached !== undefined || cache.has(label)) {
+    cache.delete(label);
+    cache.set(label, cached as T);
+    return cached as T;
+  }
+  const value = create();
+  if (cache.size >= GEO_LABEL_CACHE_LIMIT) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.set(label, value);
+  return value;
+}
+export function parseDemoRegionLabel(
+  label: string,
+): ReturnType<typeof parseDemoRegionLabelUncached> {
+  const normalizedLabel = String(label);
+  const parsed = getCachedGeoLabel(REGION_LABEL_CACHE, normalizedLabel, () =>
+    parseDemoRegionLabelUncached(normalizedLabel),
+  );
+  return parsed ? { ...parsed } : null;
+}
+export function parseDemoCityLabel(
+  label: string,
+): ReturnType<typeof parseDemoCityLabelUncached> {
+  const normalizedLabel = String(label);
+  const parsed = getCachedGeoLabel(CITY_LABEL_CACHE, normalizedLabel, () =>
+    parseDemoCityLabelUncached(normalizedLabel),
+  );
+  return parsed ? { ...parsed } : null;
 }
 // Per-country boost map for referrers — favored search engines / portals
 // keyed by country code. Used by pickReferrerByCountry to bias the site's
