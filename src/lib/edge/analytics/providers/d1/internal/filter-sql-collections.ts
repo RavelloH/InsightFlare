@@ -915,13 +915,16 @@ class SqlCollectionCompiler {
       return null;
     const adjacent =
       target.kind === "adjacent" && target.sequence.kind === "sequence";
-    const sequence = adjacent
-      ? target.sequence
-      : target.kind === "sequence"
-        ? target
-        : target.kind === "selector" && target.collection.kind === "sequence"
-          ? target.collection
-          : null;
+    const without =
+      target.kind === "without" && target.sequence.kind === "sequence";
+    const sequence =
+      adjacent || without
+        ? target.sequence
+        : target.kind === "sequence"
+          ? target
+          : target.kind === "selector" && target.collection.kind === "sequence"
+            ? target.collection
+            : null;
     if (!sequence || sequence.steps.length < 2) return null;
     const steps = sequence.steps;
     const count = steps.length;
@@ -941,7 +944,19 @@ class SqlCollectionCompiler {
           this.sources.timelineEvents !== this.source("event", true)))
     )
       return null;
-    const multiStage = !adjacent && !identical && count > 2;
+    if (
+      without &&
+      (count !== 2 ||
+        (this.clock?.filterRangeExplicit &&
+          (this.source("page") !== this.source("page", true) ||
+            this.source("event") !== this.source("event", true))) ||
+        (this.sources.timelineVisits &&
+          this.sources.timelineVisits !== this.source("page", true)) ||
+        (this.sources.timelineEvents &&
+          this.sources.timelineEvents !== this.source("event", true)))
+    )
+      return null;
+    const multiStage = !adjacent && !without && !identical && count > 2;
     if (multiStage && (bound || count > 5)) return null;
     const same =
       bound?.kind === "condition" &&
@@ -998,6 +1013,7 @@ class SqlCollectionCompiler {
       if (
         kind === "page" &&
         !adjacent &&
+        !without &&
         (!identical ||
           bound ||
           step.kind !== "selector" ||
@@ -1064,7 +1080,50 @@ class SqlCollectionCompiler {
             this.clock,
           )
         : null;
-    if (adjacent) {
+    if (without) {
+      const last = compileStep(steps[1]!, first.item);
+      const excluded = compileStep(target.excluded, first.item);
+      if (
+        first.kind !== "event" ||
+        last?.kind !== "event" ||
+        excluded?.kind !== "event"
+      )
+        return null;
+      const stages = [first, last, excluded];
+      const item = first.item;
+      bindings.length = 0;
+      const flags = stages.map((step, index) => {
+        bindings.push(...step.bindings);
+        return `CASE WHEN (${step.predicate}) THEN 1 ELSE 0 END AS match_${index}`;
+      });
+      const events = `SELECT ${first.key},
+          ${item}.occurred_at AS activity_time, 1 AS kind_rank,
+          ${item}.event_id AS activity_id,
+          ${flags.join(", ")}
+          FROM ${this.source("event", true)} ${item}
+          WHERE ${item}.site_pk IS NOT NULL
+            AND TRIM(COALESCE(${item}.${identity}, '')) != ''`;
+      // Only matching endpoints and exclusions affect existence. Other
+      // activities (including sessionless collisions) cannot be witnesses
+      // or excluded items for this entity. An exclusion at either endpoint
+      // is allowed; use strictly preceding rows and inclusive >=.
+      const partition = "PARTITION BY site_pk, entity_id";
+      const order =
+        "ORDER BY activity_time, kind_rank, activity_id COLLATE BINARY";
+      const previous = `${partition} ORDER BY position ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING`;
+      sql = `WITH ranked AS (
+        SELECT *, ROW_NUMBER() OVER (${partition} ${order}) AS position
+        FROM (${events})
+        WHERE match_0 = 1 OR match_1 = 1 OR match_2 = 1
+      ), predecessors AS (
+        SELECT site_pk, entity_id, match_1,
+          MAX(CASE WHEN match_0 = 1 THEN position END) OVER (${previous}) AS last_start,
+          MAX(CASE WHEN match_2 = 1 THEN position END) OVER (${previous}) AS last_excluded
+        FROM ranked
+      )
+      SELECT DISTINCT site_pk, entity_id FROM predecessors
+      WHERE match_1 = 1 AND last_start >= COALESCE(last_excluded, 0)`;
+    } else if (adjacent) {
       const matched = identical
         ? [first]
         : [
