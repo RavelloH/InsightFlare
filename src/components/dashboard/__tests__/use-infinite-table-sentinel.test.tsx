@@ -1,4 +1,4 @@
-import { act, createElement } from "react";
+import { act, createElement, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { useInfiniteTableSentinel } from "@insightflare/product-ui/tables";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -137,6 +137,62 @@ describe("useInfiniteTableSentinel", () => {
     } finally {
       measure.mockRestore();
     }
+  });
+
+  it("tracks precise row detachment and reattachment in StrictMode and when re-enabled", () => {
+    const observers: {
+      targets: Set<Element>;
+      disconnect: ReturnType<typeof vi.fn>;
+    }[] = [];
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        targets = new Set<Element>();
+        disconnect = vi.fn(() => this.targets.clear());
+        constructor() {
+          observers.push(this);
+        }
+        observe(node: Element) {
+          this.targets.add(node);
+        }
+      },
+    );
+    const onReachEnd = vi.fn();
+    function Probe({ keys, enabled }: { keys: string[]; enabled: boolean }) {
+      const ref = useInfiniteTableSentinel({ enabled, onReachEnd });
+      return (
+        <table>
+          <tbody>
+            {keys.map((key) => (
+              <tr key={key} ref={ref} data-key={key} />
+            ))}
+          </tbody>
+        </table>
+      );
+    }
+    const render = (keys: string[], enabled = true) =>
+      act(() =>
+        root.render(
+          <StrictMode>
+            <Probe keys={keys} enabled={enabled} />
+          </StrictMode>,
+        ),
+      );
+    const latest = () =>
+      [...(observers.at(-1)?.targets ?? [])].map((node) =>
+        node.getAttribute("data-key"),
+      );
+    render(["a", "b", "c"]);
+    expect(latest()).toEqual(["a", "b", "c"]);
+    render(["a", "c"]);
+    expect(latest()).toEqual(["a", "c"]);
+    render(["a", "c"], false);
+    expect(latest()).toEqual([]);
+    render(["d"], false);
+    render(["d"]);
+    expect(latest()).toEqual(["d"]);
+    render([]);
+    expect(latest()).toEqual([]);
   });
 
   it("does not observe when disabled or unsupported", () => {

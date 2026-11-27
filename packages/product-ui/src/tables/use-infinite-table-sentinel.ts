@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface UseInfiniteTableSentinelOptions {
   enabled: boolean;
@@ -13,30 +13,25 @@ export function useInfiniteTableSentinel({
   rootMargin = "360px 0px",
   triggerDistance = 480,
 }: UseInfiniteTableSentinelOptions) {
-  const [sentinelNodes, setSentinelNodes] = useState<HTMLElement[]>([]);
+  // React 19 callback-ref cleanup identifies the precise detached node.
+  // Register in O(1) per row rather than rebuilding a growing array/Set
+  // for each of the many skeleton refs in the same commit.
+  const sentinelNodes = useRef(new Set<HTMLElement>());
+  const [nodeVersion, setNodeVersion] = useState(0);
 
   const setSentinelNode = useCallback((node: HTMLElement | null) => {
-    setSentinelNodes((currentNodes) => {
-      const nextNodes = new Set(
-        currentNodes.filter((currentNode) => currentNode.isConnected),
-      );
-      if (node) nextNodes.add(node);
-
-      const nextNodeList = [...nextNodes];
-      if (
-        nextNodeList.length === currentNodes.length &&
-        nextNodeList.every(
-          (currentNode, index) => currentNode === currentNodes[index],
-        )
-      ) {
-        return currentNodes;
-      }
-      return nextNodeList;
-    });
+    if (!node) return;
+    const nodes = sentinelNodes.current;
+    nodes.add(node);
+    setNodeVersion((version) => version + 1);
+    return () => {
+      if (nodes.delete(node)) setNodeVersion((version) => version + 1);
+    };
   }, []);
 
   useEffect(() => {
-    const connectedSentinelNodes = sentinelNodes.filter(
+    if (nodeVersion === 0) return;
+    const connectedSentinelNodes = [...sentinelNodes.current].filter(
       (node) => node.isConnected,
     );
 
@@ -76,7 +71,7 @@ export function useInfiniteTableSentinel({
     return () => {
       observer.disconnect();
     };
-  }, [enabled, onReachEnd, rootMargin, sentinelNodes, triggerDistance]);
+  }, [enabled, onReachEnd, rootMargin, nodeVersion, triggerDistance]);
 
   return setSentinelNode;
 }
