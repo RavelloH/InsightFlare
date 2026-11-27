@@ -1627,10 +1627,71 @@ class SqlCollectionCompiler {
 
     if (
       this.sources.indexedGlobalTimelineVisits &&
+      target.kind === "selector" &&
+      !identical &&
+      count === 2 &&
+      firstName &&
+      lastName &&
+      compared &&
+      upper &&
+      historyRoot.kind === "entity-root" &&
+      historyRoot.entity === "event" &&
+      !this.clock?.filterRangeExplicit &&
+      start !== undefined &&
+      end !== undefined &&
+      qStart !== undefined &&
+      qEnd !== undefined &&
+      qEnd > qStart &&
+      qEnd - qStart <= 3600000 &&
+      end - start >= 24 * (qEnd - qStart)
+    ) {
+      const universe =
+        frame.anchorKind === "session"
+          ? "scope_filter_sessions"
+          : "scope_filter_visitors";
+      const anchor = frame.anchorAlias;
+      const flags = [firstName, lastName].map((selector, index) => {
+        const predicate = onlyApplicable(
+          this.expression(selector, {
+            ...frame,
+            currentAlias: "history_name",
+            currentKind: "event",
+          }),
+        );
+        seekBindings.push(...predicate.bindings);
+        return `CASE WHEN (${predicate.sql}) THEN 1 ELSE 0 END AS match_${index}`;
+      });
+      seekBindings.push(start, end);
+      // Physical Event occurrences are unique. The latest strictly earlier
+      // first-stage witness minimizes the gap for each second-stage witness.
+      // One source with two flags avoids visiting the same history twice.
+      const ranked = `SELECT match_1, activity_time -
+        MAX(CASE WHEN match_0=1 THEN activity_time END) OVER (
+          ORDER BY activity_time,activity_id COLLATE BINARY
+          ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS span_delta
+        FROM (SELECT history_event.occurred_at AS activity_time,
+          history_event.event_id AS activity_id,${flags.join(", ")}
+          FROM visits history_visit
+          CROSS JOIN custom_events history_event
+          INNER JOIN (SELECT id,name AS event_name FROM custom_event_names) history_name
+            ON history_name.id=history_event.event_name_id
+          WHERE history_visit.site_pk=${anchor}.site_pk
+            AND history_visit.${identity}=${anchor}.${identity}
+            AND history_event.site_pk=history_visit.site_pk
+            AND history_event.visit_id=history_visit.visit_id
+            AND history_event.occurred_at>=? AND history_event.occurred_at<?)`;
+      const local = `EXISTS(SELECT 1 FROM (${ranked})
+        WHERE match_1=1 AND ${compared.sql})`;
+      seekBindings.push(...compared.bindings);
+      found = `CASE WHEN EXISTS(SELECT 1 FROM ${universe} LIMIT 1 OFFSET 64)
+        THEN ${found} ELSE ${local} END`;
+    }
+
+    if (
+      this.sources.indexedGlobalTimelineVisits &&
       identical &&
       count <= 5 &&
       compared &&
-      !upper &&
       historyRoot.kind === "entity-root" &&
       historyRoot.entity === "event" &&
       (firstStep.kind === "entity-root" || nameSelector !== null) &&
@@ -1676,7 +1737,35 @@ class SqlCollectionCompiler {
           ? intrinsic.to
           : count;
       let local: string;
-      if (from === 1 && to === count) {
+      if (upper) {
+        // An upper bound is satisfied by the tightest feasible N-occurrence
+        // window. Use the same (time, binary event ID) ordering as sequence
+        // evaluation, then compare the time delta between the requested steps.
+        const distance = to - from;
+        const suffix = count - to;
+        const order =
+          "ORDER BY history_event.occurred_at, history_event.event_id COLLATE BINARY";
+        const prefixGuard =
+          from > 1
+            ? `, LAG(history_event.event_id, ${to - 1}) OVER (${order}) IS NOT NULL AS has_prefix`
+            : "";
+        const suffixGuard =
+          suffix > 0
+            ? `, LEAD(history_event.event_id, ${suffix}) OVER (${order}) IS NOT NULL AS has_suffix`
+            : "";
+        const guards = [
+          ...(from > 1 ? ["has_prefix"] : []),
+          ...(suffix > 0 ? ["has_suffix"] : []),
+        ];
+        const ranked = `SELECT
+            history_event.occurred_at -
+              LAG(history_event.occurred_at, ${distance}) OVER (${order}) AS span_delta
+            ${prefixGuard}${suffixGuard}
+          ${physical()}`;
+        local = `EXISTS(SELECT 1 FROM (${ranked})
+          WHERE ${compared.sql}${guards.map((guard) => ` AND ${guard}`).join("")})`;
+        seekBindings.push(...compared.bindings);
+      } else if (from === 1 && to === count) {
         local = `EXISTS(SELECT 1 FROM (SELECT MAX(history_event.occurred_at)-MIN(history_event.occurred_at) AS span_delta
           ${physical()} HAVING COUNT(*)>=${count}) WHERE ${compared.sql})`;
         seekBindings.push(...compared.bindings);
@@ -1693,6 +1782,63 @@ class SqlCollectionCompiler {
         seekBindings.push(...compared.bindings);
       }
       found = `CASE WHEN EXISTS(SELECT 1 FROM ${universe} LIMIT 1 OFFSET 64) THEN ${found} ELSE (${local}) END`;
+    }
+
+    if (
+      this.sources.indexedGlobalTimelineVisits &&
+      multiStage &&
+      target.kind === "sequence" &&
+      steps.every((step) => getNameSelector(step) !== null) &&
+      !this.clock?.filterRangeExplicit &&
+      start !== undefined &&
+      end !== undefined &&
+      qStart !== undefined &&
+      qEnd !== undefined &&
+      qEnd > qStart &&
+      qEnd - qStart <= 3600000 &&
+      end - start >= 24 * (qEnd - qStart)
+    ) {
+      const universe =
+        frame.anchorKind === "session"
+          ? "scope_filter_sessions"
+          : "scope_filter_visitors";
+      const flags = steps.map((step, index) => {
+        const predicate = onlyApplicable(
+          this.expression(getNameSelector(step)!, {
+            ...frame,
+            currentAlias: "history_name",
+            currentKind: "event",
+          }),
+        );
+        seekBindings.push(...predicate.bindings);
+        return `CASE WHEN (${predicate.sql}) THEN 1 ELSE 0 END AS match_${index}`;
+      });
+      seekBindings.push(start, end);
+      // One ordered source per entity; the earliest reachable prefix
+      // dominates every later witness for an unconstrained sequence.
+      // Reusing strict positions also prevents overlapping selectors from
+      // matching the same occurrence twice.
+      const ranked = `history_ranked AS (
+        SELECT ROW_NUMBER() OVER (ORDER BY history_event.occurred_at,history_event.event_id COLLATE BINARY) AS position,
+          ${flags.join(", ")}
+        FROM visits history_visit
+        CROSS JOIN custom_events history_event
+        INNER JOIN (SELECT id,name AS event_name FROM custom_event_names) history_name ON history_name.id=history_event.event_name_id
+        WHERE history_visit.site_pk=${frame.anchorAlias}.site_pk AND history_visit.${identity}=${frame.anchorAlias}.${identity}
+          AND history_event.site_pk=history_visit.site_pk AND history_event.visit_id=history_visit.visit_id
+          AND history_event.occurred_at>=? AND history_event.occurred_at<?)`;
+      const ctes = [ranked];
+      let previous = "history_ranked";
+      for (let index = 0; index < count - 1; index++) {
+        const next = `history_reachable_${index}`;
+        ctes.push(`${next} AS (
+          SELECT *, MIN(CASE WHEN match_${index}=1 THEN position END) OVER () AS reached_${index}
+          FROM ${previous} ${index === 0 ? "" : `WHERE position > reached_${index - 1}`})`);
+        previous = next;
+      }
+      const local = `EXISTS(WITH ${ctes.join(", ")}
+        SELECT 1 FROM ${previous} WHERE match_${count - 1}=1 AND position > reached_${count - 2})`;
+      found = `CASE WHEN EXISTS(SELECT 1 FROM ${universe} LIMIT 1 OFFSET 64) THEN ${found} ELSE ${local} END`;
     }
 
     return {
