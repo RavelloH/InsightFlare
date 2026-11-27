@@ -1077,7 +1077,7 @@ filterBuilder:
       description: "Select visitors matching: Visitors with multiple recorded countries."
   savedFiltersPersonal: Personal filters
   savedFiltersTeam: Team filters
-  savedFiltersAuthor: "Author: {name}"
+  savedFiltersAuthor: "Owner: {name}"
   savedFiltersPrivate: Personal
   savedFiltersTeamShared: Shared with team
   saveThisFilter: Save this filter
@@ -1096,12 +1096,14 @@ filterBuilder:
   savedFilterVisibility: Visibility
   savedFilterVisibilityPrivate: Only me
   savedFilterVisibilityTeam: Share with team
+  savedFilterVisibilityTeamHint: The name, description and conditions will be visible to team members, and later changes are shared with them too.
   savedFilterCreateDescription: Save the current filter expression to apply it again later.
   savedFilterManageDescription: Update this filter's details or start editing its conditions.
   editSavedFilter: Edit this filter
   deleteSavedFilter: Delete this filter
   deleteSavedFilterTitle: Delete this filter?
   deleteSavedFilterDescription: This cannot be undone, and team members will no longer be able to use it.
+  deleteSharedSavedFilterDescription: This filter was shared with the team by "{name}". This cannot be undone, and team members will no longer be able to use it.
   savedFilterCancel: Cancel
   savedFilterSave: Save
   savedFilterSaving: Saving...
@@ -2891,6 +2893,7 @@ teamManagement:
     remove: Remove member
     removeMemberAction: Remove member "{target}"
     removeMemberConfirm: Remove "{target}" from this team? They will lose access immediately.
+    removeMemberImpact: "{deleted} private filters in this team will be deleted and {transferred} shared filters will be transferred to the team owner."
     noMembers: No members found for this team.
     invitesTitle: Create invite link
     invitesSubtitle: Users join this team only after accepting an invite.
@@ -3082,7 +3085,7 @@ adminUsers:
   creating: Creating...
   delete: Delete
   deleting: Deleting...
-  deleteConfirm: Delete this user account?
+  deleteConfirm: Delete this user account? Their private filters will be deleted and shared filters transferred to each team owner.
   deleteSuccess: User deleted.
   deleteFailed: Failed to delete user.
   generateResetLink: Generate password reset link

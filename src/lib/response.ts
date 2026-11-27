@@ -166,6 +166,14 @@ export function nf(msg = "Not Found", code?: string, req?: Request): Response {
   return errorResponse(req ?? null, 404, code ?? toErrorCode(msg), msg);
 }
 
+export function conflict(
+  msg = "Conflict",
+  code?: string,
+  req?: Request,
+): Response {
+  return errorResponse(req ?? null, 409, code ?? toErrorCode(msg), msg);
+}
+
 export function na(req?: Request): Response {
   return errorResponse(
     req ?? null,

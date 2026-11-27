@@ -62,6 +62,7 @@ describe("Hono private saved-filter routes", () => {
       siteId: "site-1",
       session,
       filterId: undefined,
+      canManageSite: false,
     });
   });
 
@@ -80,7 +81,31 @@ describe("Hono private saved-filter routes", () => {
       siteId: "site-1",
       session,
       filterId: "filter-1",
+      canManageSite: false,
     });
+  });
+
+  it("tells the handler when the actor manages the site's team", async () => {
+    vi.mocked(resolvePrivateSiteForSession).mockResolvedValue({
+      id: "site-1",
+      name: "Site",
+      domain: "app.test",
+      canManage: true,
+    });
+    await createApp().fetch(
+      new Request(
+        "https://app.test/api/private/saved-filters/filter-1?siteId=site-1",
+        { method: "DELETE" },
+      ),
+      env as never,
+      ctx,
+    );
+
+    expect(handleSavedFilters).toHaveBeenCalledWith(
+      expect.any(Request),
+      env,
+      expect.objectContaining({ canManageSite: true }),
+    );
   });
 
   it("returns private-site access failures without dispatching the handler", async () => {

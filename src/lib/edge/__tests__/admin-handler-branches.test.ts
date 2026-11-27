@@ -380,20 +380,80 @@ describe("admin handler low branches", () => {
     };
     byIdMock.mockResolvedValueOnce(targetUser);
     const ownedTeams = statement({ first: { count: null } });
+    const deletePrivateFilters = statement();
+    const transferSharedFilters = statement();
     const deleteUser = statement();
+    const deleteEnv = createEnv([
+      ownedTeams,
+      deletePrivateFilters,
+      transferSharedFilters,
+      deleteUser,
+    ]);
     const removed = await handleUsersAdmin(
       request(
         "/admin/users",
         jsonInit({ userId: "target-1", intent: "delete" }, "PATCH"),
       ),
-      createEnv([ownedTeams, deleteUser]).env,
+      deleteEnv.env,
     );
     expect(removed.status).toBe(200);
     expect(ownedTeams.bind).toHaveBeenCalledWith("target-1");
+    // Resource cleanup and the user delete run as one atomic batch.
+    expect(deleteEnv.batch).toHaveBeenCalledWith([
+      deletePrivateFilters,
+      transferSharedFilters,
+      deleteUser,
+    ]);
+    expect(deletePrivateFilters.sql).toContain('DELETE FROM "saved_filters"');
+    expect(transferSharedFilters.sql).toContain('UPDATE "saved_filters"');
     expect(deleteUser.bind).toHaveBeenCalledWith("target-1");
     await expect(jsonOf(removed)).resolves.toMatchObject({
       data: { userId: "target-1", removed: true },
     });
+  });
+
+  it("reports a retryable conflict when resources change during account deletion", async () => {
+    byIdMock.mockResolvedValueOnce({
+      ...actor.user,
+      id: "target-1",
+      username: "target",
+      email: "target@example.test",
+    });
+    const deleteEnv = createEnv([
+      statement({ first: { count: 0 } }),
+      statement(),
+      statement(),
+      statement(),
+    ]);
+    deleteEnv.batch.mockRejectedValueOnce(
+      new Error("D1_ERROR: FOREIGN KEY constraint failed: SQLITE_CONSTRAINT"),
+    );
+    const response = await handleUsersAdmin(
+      request(
+        "/admin/users",
+        jsonInit({ userId: "target-1", intent: "delete" }, "PATCH"),
+      ),
+      deleteEnv.env,
+    );
+    expect(response.status).toBe(409);
+
+    byIdMock.mockResolvedValueOnce({ ...actor.user, id: "target-2" });
+    const failingEnv = createEnv([
+      statement({ first: { count: 0 } }),
+      statement(),
+      statement(),
+      statement(),
+    ]);
+    failingEnv.batch.mockRejectedValueOnce(new Error("D1 unavailable"));
+    await expect(
+      handleUsersAdmin(
+        request(
+          "/admin/users",
+          jsonInit({ userId: "target-2", intent: "delete" }, "PATCH"),
+        ),
+        failingEnv.env,
+      ),
+    ).rejects.toThrow("D1 unavailable");
   });
 
   it("rejects short replacement passwords when admins update users", async () => {

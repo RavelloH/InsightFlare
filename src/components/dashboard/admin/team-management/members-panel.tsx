@@ -9,6 +9,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@insightflare/ui/alert-dialog";
+import { AutoResizer } from "@insightflare/ui/auto-resizer";
+import { AutoTransition } from "@insightflare/ui/auto-transition";
 import { Button } from "@insightflare/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@insightflare/ui/field";
 import {
@@ -50,6 +52,7 @@ export function TeamManagementMemberDialogs() {
     inviteSiteAccessDialogOpen,
     inviteSiteIds,
     messages,
+    removeMemberImpact,
     removeMemberTarget,
     removingMemberId,
     revokeInviteTarget,
@@ -256,6 +259,30 @@ export function TeamManagementMemberDialogs() {
                 })
               : null}
           </AlertDialogDescription>
+          <AutoResizer initial={false} duration={0.18}>
+            <AutoTransition
+              transitionKey={
+                removeMemberImpact &&
+                removeMemberImpact.deleted + removeMemberImpact.transferred > 0
+                  ? "impact"
+                  : "none"
+              }
+              type="fade"
+              duration={0.18}
+              initial={false}
+            >
+              {removeMemberImpact &&
+              removeMemberImpact.deleted + removeMemberImpact.transferred >
+                0 ? (
+                <p className="text-sm text-muted-foreground">
+                  {formatI18nTemplate(copy.members.removeMemberImpact, {
+                    deleted: String(removeMemberImpact.deleted),
+                    transferred: String(removeMemberImpact.transferred),
+                  })}
+                </p>
+              ) : null}
+            </AutoTransition>
+          </AutoResizer>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={Boolean(removingMemberId)}>

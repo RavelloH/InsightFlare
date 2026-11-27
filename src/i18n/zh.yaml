@@ -1073,7 +1073,7 @@ filterBuilder:
       description: "筛选符合「记录中出现多个国家值」条件的访客。"
   savedFiltersPersonal: 个人筛选
   savedFiltersTeam: 团队筛选
-  savedFiltersAuthor: "作者：{name}"
+  savedFiltersAuthor: "所有者：{name}"
   savedFiltersPrivate: 个人
   savedFiltersTeamShared: 已共享给团队
   saveThisFilter: 保存此筛选
@@ -1092,12 +1092,14 @@ filterBuilder:
   savedFilterVisibility: 可见性
   savedFilterVisibilityPrivate: 仅自己可见
   savedFilterVisibilityTeam: 与团队共享
+  savedFilterVisibilityTeamHint: 名称、备注与筛选条件将对团队成员可见，之后的修改也会同步给他们。
   savedFilterCreateDescription: 保存当前的筛选表达式，以便之后再次套用。
   savedFilterManageDescription: 更新此筛选的基本信息，或开始编辑筛选条件。
   editSavedFilter: 修改此筛选
   deleteSavedFilter: 删除此筛选
   deleteSavedFilterTitle: 删除此筛选？
   deleteSavedFilterDescription: 删除后无法恢复，团队成员也将无法再使用它。
+  deleteSharedSavedFilterDescription: 这是「{name}」共享给团队的筛选。删除后无法恢复，团队成员也将无法再使用它。
   savedFilterCancel: 取消
   savedFilterSave: 保存
   savedFilterSaving: 正在保存...
@@ -2797,6 +2799,7 @@ teamManagement:
     remove: 移除成员
     removeMemberAction: 移除成员「{target}」
     removeMemberConfirm: 确认将「{target}」从该团队移除吗？移除后将立即失去访问权限。
+    removeMemberImpact: 其在本团队的 {deleted} 个私有筛选将被删除，{transferred} 个共享筛选将转交给团队所有者。
     noMembers: 当前团队暂无成员。
     invitesTitle: 创建邀请链接
     invitesSubtitle: 用户接受邀请后才会加入此团队。
@@ -2979,7 +2982,7 @@ adminUsers:
   creating: 创建中...
   delete: 删除
   deleting: 删除中...
-  deleteConfirm: 确认删除该用户账号吗？
+  deleteConfirm: 确认删除该用户账号吗？其私有筛选将被删除，共享筛选将转交给对应团队的所有者。
   deleteSuccess: 用户已删除。
   deleteFailed: 删除用户失败。
   generateResetLink: 生成重置密码链接

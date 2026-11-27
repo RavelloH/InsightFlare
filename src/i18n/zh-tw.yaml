@@ -1075,7 +1075,7 @@ filterBuilder:
       description: "篩選符合「記錄中出現多個國家值」條件的訪客。"
   savedFiltersPersonal: 個人篩選
   savedFiltersTeam: 團隊篩選
-  savedFiltersAuthor: "作者：{name}"
+  savedFiltersAuthor: "擁有者：{name}"
   savedFiltersPrivate: 個人
   savedFiltersTeamShared: 已共享給團隊
   saveThisFilter: 儲存此篩選
@@ -1094,12 +1094,14 @@ filterBuilder:
   savedFilterVisibility: 可見性
   savedFilterVisibilityPrivate: 僅自己可見
   savedFilterVisibilityTeam: 與團隊共享
+  savedFilterVisibilityTeamHint: 名稱、備註與篩選條件將對團隊成員可見，之後的修改也會同步給他們。
   savedFilterCreateDescription: 儲存目前的篩選表示式，以便之後再次套用。
   savedFilterManageDescription: 更新此篩選的基本資訊，或開始編輯篩選條件。
   editSavedFilter: 修改此篩選
   deleteSavedFilter: 刪除此篩選
   deleteSavedFilterTitle: 刪除此篩選？
   deleteSavedFilterDescription: 刪除後無法恢復，團隊成員也將無法再使用它。
+  deleteSharedSavedFilterDescription: 這是「{name}」共享給團隊的篩選。刪除後無法恢復，團隊成員也將無法再使用它。
   savedFilterCancel: 取消
   savedFilterSave: 儲存
   savedFilterSaving: 正在儲存...
@@ -2799,6 +2801,7 @@ teamManagement:
     remove: 移除成員
     removeMemberAction: 移除成員「{target}」
     removeMemberConfirm: 確認將「{target}」從該團隊移除嗎？移除後將立即失去存取權限。
+    removeMemberImpact: 其在本團隊的 {deleted} 個私人篩選將被刪除，{transferred} 個共享篩選將轉交給團隊擁有者。
     noMembers: 目前團隊暫無成員。
     invitesTitle: 建立邀請連結
     invitesSubtitle: 使用者接受邀請後才會加入此團隊。
@@ -2981,7 +2984,7 @@ adminUsers:
   creating: 建立中...
   delete: 刪除
   deleting: 刪除中...
-  deleteConfirm: 確認刪除該使用者帳號嗎？
+  deleteConfirm: 確認刪除該使用者帳號嗎？其私人篩選將被刪除，共享篩選將轉交給對應團隊的擁有者。
   deleteSuccess: 使用者已刪除。
   deleteFailed: 刪除使用者失敗。
   generateResetLink: 產生重設密碼連結

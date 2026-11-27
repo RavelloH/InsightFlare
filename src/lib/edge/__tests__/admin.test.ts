@@ -1461,6 +1461,9 @@ describe("private admin edge handler", () => {
         statement({ first: userRow() }),
         statement({ first: userRow({ id: "target-1" }) }),
         statement({ first: { count: 0 } }),
+        // Owned-resource cleanup runs in the same batch as the delete.
+        statement(),
+        statement(),
         deleteStmt,
       ]).env;
       const success = await dispatch(
@@ -2540,6 +2543,9 @@ describe("private admin edge handler", () => {
         statement({ first: { id: "team-1", ownerUserId: "user-1" } }),
         statement({ first: { id: "team-2", ownerUserId: "user-1" } }),
         update,
+        // Moving teams also applies the departure rule to filter owners.
+        statement(),
+        statement(),
       ]);
 
       const response = await dispatch(
@@ -3215,6 +3221,9 @@ describe("private admin edge handler", () => {
         statement({ first: { id: "team-1", ownerUserId: "user-1" } }),
         statement({ first: { id: "team-1", ownerUserId: "user-1" } }),
         statement({ first: { role: "member" } }),
+        // Departure cleanup precedes the membership delete in one batch.
+        statement(),
+        statement(),
         remove,
       ]).env;
       const removed = await dispatch(

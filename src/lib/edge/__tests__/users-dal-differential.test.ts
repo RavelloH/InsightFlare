@@ -330,6 +330,32 @@ describe("admin users Typed DAL differential checks", () => {
     );
   });
 
+  it("cleans up saved filters atomically when deleting an account", async () => {
+    const { database, env } = createFixture();
+    database
+      .prepare("INSERT INTO sites (id,team_id,name,domain) VALUES (?,?,?,?)")
+      .run("site-1", "admin-team", "Site", "site.test");
+    const insertFilter = database.prepare(
+      "INSERT INTO saved_filters (id,site_id,owner_user_id,visibility,name,filter_dsl) VALUES (?,?,?,?,?,?)",
+    );
+    insertFilter.run("private", "site-1", TARGET_ID, "private", "p", "x");
+    insertFilter.run("shared", "site-1", TARGET_ID, "team", "s", "x");
+
+    const response = await handleUsersAdmin(
+      request("PATCH", { intent: "delete", userId: TARGET_ID }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(
+      sqlRows(
+        database,
+        "SELECT id, owner_user_id AS owner FROM saved_filters ORDER BY id",
+      ),
+    ).toEqual([{ id: "shared", owner: ADMIN_ID }]);
+    expect(legacyUser(database, TARGET_ID)).toBeNull();
+  });
+
   it("matches the owned-team guard and user delete query sequence", async () => {
     const typed = createFixture();
     const legacy = createFixture();
@@ -344,7 +370,8 @@ describe("admin users Typed DAL differential checks", () => {
       ok: true,
       data: { userId: TARGET_ID, removed: true },
     });
-    expect(typed.trace.preparedSql).toHaveLength(4);
+    // Owned-team guard, two saved-filter lifecycle statements, user delete.
+    expect(typed.trace.preparedSql).toHaveLength(6);
     expect(publicState(typed.database)).toEqual(publicState(legacy.database));
     expect(
       sqlRows(

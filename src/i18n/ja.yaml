@@ -1074,7 +1074,7 @@ filterBuilder:
       description: "複数の国が記録された訪問者に該当する訪問者を抽出します。"
   savedFiltersPersonal: 個人用フィルター
   savedFiltersTeam: チームのフィルター
-  savedFiltersAuthor: "作成者: {name}"
+  savedFiltersAuthor: "所有者: {name}"
   savedFiltersPrivate: 個人用
   savedFiltersTeamShared: チームと共有済み
   saveThisFilter: このフィルターを保存
@@ -1093,12 +1093,14 @@ filterBuilder:
   savedFilterVisibility: 公開範囲
   savedFilterVisibilityPrivate: 自分のみ
   savedFilterVisibilityTeam: チームと共有
+  savedFilterVisibilityTeamHint: 名前・説明・条件がチームメンバーに表示され、以降の変更も共有されます。
   savedFilterCreateDescription: 現在のフィルター式を保存して、あとで再び適用できます。
   savedFilterManageDescription: このフィルターの基本情報を更新するか、条件の編集を開始します。
   editSavedFilter: このフィルターを編集
   deleteSavedFilter: このフィルターを削除
   deleteSavedFilterTitle: このフィルターを削除しますか？
   deleteSavedFilterDescription: この操作は取り消せません。チームメンバーも使用できなくなります。
+  deleteSharedSavedFilterDescription: "{name} がチームと共有したフィルターです。この操作は取り消せません。チームメンバーも使用できなくなります。"
   savedFilterCancel: キャンセル
   savedFilterSave: 保存
   savedFilterSaving: 保存中...
@@ -2808,6 +2810,7 @@ teamManagement:
     remove: メンバーを削除
     removeMemberAction: '"{target}" をメンバーから削除'
     removeMemberConfirm: '"{target}" をこのチームから削除しますか？直ちにアクセスできなくなります。'
+    removeMemberImpact: このチームの非公開フィルター {deleted} 件は削除され、共有フィルター {transferred} 件はチームオーナーに移管されます。
     noMembers: このチームにはメンバーがいません。
     invitesTitle: 招待リンクを作成
     invitesSubtitle: ユーザーは招待を承認した後にのみこのチームへ参加します。
@@ -2990,7 +2993,7 @@ adminUsers:
   creating: 作成中...
   delete: 削除
   deleting: 削除中...
-  deleteConfirm: このユーザーアカウントを削除しますか？
+  deleteConfirm: このユーザーアカウントを削除しますか？非公開フィルターは削除され、共有フィルターは各チームのオーナーに移管されます。
   deleteSuccess: ユーザーを削除しました。
   deleteFailed: ユーザーを削除できません。
   generateResetLink: パスワードリセットリンクを生成

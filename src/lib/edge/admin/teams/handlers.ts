@@ -39,6 +39,10 @@ import {
   teamsFor,
 } from "@/lib/edge/admin/auth";
 import {
+  memberDepartureImpact,
+  memberDepartureMutations,
+} from "@/lib/edge/admin/owned-resources";
+import {
   bad,
   forb,
   jsonResponseFor,
@@ -374,6 +378,16 @@ export async function handleMembersAdmin(
     if (!teamId) return bad("Missing teamId", undefined, req);
     if (!(await canReadTeam(env, a, teamId)))
       return forb("Team access denied", undefined, req);
+    if (url.searchParams.get("view") === "departure-impact") {
+      const userId = clampString(url.searchParams.get("userId") || "", 120);
+      if (!userId) return bad("Missing userId", undefined, req);
+      if (!(await canManageTeam(env, a, teamId)))
+        return forb("Only team owner can manage members", undefined, req);
+      return jsonResponseFor(req, {
+        ok: true,
+        data: await memberDepartureImpact(env, teamId, userId),
+      });
+    }
     const members = scan(schema.team_members);
     const users = scan(schema.users);
     const joined = join(
@@ -620,7 +634,10 @@ export async function handleMembersAdmin(
 
     if (userId === team.ownerUserId || existingRole === "owner")
       return bad("Cannot remove team owner", undefined, req);
-    await database(env).run(
+    // Clean up the member's resources in this team and drop the membership
+    // atomically, so a departed member never keeps orphaned resources.
+    await database(env).batch([
+      ...memberDepartureMutations(teamId, userId),
       compileD1Mutation(
         deleteFrom(schema.team_members, (columns) =>
           and(
@@ -630,7 +647,7 @@ export async function handleMembersAdmin(
         ),
         { tag: "admin.team_members.delete" },
       ),
-    );
+    ]);
     return jsonResponseFor(req, {
       ok: true,
       data: { teamId, userId, removed: true },

@@ -1111,6 +1111,112 @@ describe("Teams and Sites admin Typed DAL differential checks", () => {
     databases.delete(legacy.database);
   });
 
+  it("reports and applies member departure cleanup in one batch", async () => {
+    const { database, env } = createFixture();
+    const insertFilter = database.prepare(
+      "INSERT INTO saved_filters (id,site_id,owner_user_id,visibility,name,filter_dsl) VALUES (?,?,?,?,?,?)",
+    );
+    insertFilter.run("private", "site-1", "member-1", "private", "p", "x");
+    insertFilter.run("shared", "site-1", "member-1", "team", "s", "x");
+
+    const impact = await handleMembersAdmin(
+      request(
+        "/admin/members?teamId=team-1&userId=member-1&view=departure-impact",
+      ),
+      env,
+      new URL(
+        "https://app.test/admin/members?teamId=team-1&userId=member-1&view=departure-impact",
+      ),
+    );
+    expect(await responseData(impact)).toEqual({ deleted: 1, transferred: 1 });
+
+    const removal = await handleMembersAdmin(
+      request("/admin/members", "PATCH", {
+        teamId: "team-1",
+        userId: "member-1",
+        intent: "remove",
+      }),
+      env,
+      new URL("https://app.test/admin/members"),
+    );
+    expect(removal.status).toBe(200);
+    expect(
+      database
+        .prepare("SELECT id, owner_user_id AS owner FROM saved_filters")
+        .all(),
+    ).toEqual([{ id: "shared", owner: "owner-1" }]);
+    expect(
+      database
+        .prepare("SELECT 1 FROM team_members WHERE team_id=? AND user_id=?")
+        .get("team-1", "member-1"),
+    ).toBeUndefined();
+  });
+
+  it("only lets team managers read departure impact", async () => {
+    const { env } = createFixture();
+    mocks.canManageTeam.mockResolvedValue(false);
+    const url =
+      "https://app.test/admin/members?teamId=team-1&userId=member-1&view=departure-impact";
+    const response = await handleMembersAdmin(
+      request(url.replace("https://app.test", "")),
+      env,
+      new URL(url),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it("applies the departure rule to owners outside a site's new team", async () => {
+    const { database, env } = createFixture();
+    database
+      .prepare(
+        "INSERT INTO teams (id,name,slug,owner_user_id,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+      )
+      .run("team-2", "Team Two", "team-two", "member-1", 110, 110);
+    database
+      .prepare("INSERT INTO team_members (team_id,user_id,role) VALUES (?,?,?)")
+      .run("team-2", "member-1", "owner");
+    const insertFilter = database.prepare(
+      "INSERT INTO saved_filters (id,site_id,owner_user_id,visibility,name,filter_dsl) VALUES (?,?,?,?,?,?)",
+    );
+    insertFilter.run(
+      "outsider-private",
+      "site-1",
+      "owner-1",
+      "private",
+      "a",
+      "x",
+    );
+    insertFilter.run("outsider-shared", "site-1", "owner-1", "team", "b", "x");
+    insertFilter.run(
+      "member-private",
+      "site-1",
+      "member-1",
+      "private",
+      "c",
+      "x",
+    );
+    insertFilter.run("other-site", "site-2", "owner-1", "private", "d", "x");
+
+    const response = await handleSitesAdmin(
+      request("/admin/sites", "PATCH", { siteId: "site-1", teamId: "team-2" }),
+      env,
+      new URL("https://app.test/admin/sites"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(
+      database
+        .prepare(
+          "SELECT id, owner_user_id AS owner FROM saved_filters ORDER BY id",
+        )
+        .all(),
+    ).toEqual([
+      { id: "member-private", owner: "member-1" },
+      { id: "other-site", owner: "owner-1" },
+      { id: "outsider-shared", owner: "member-1" },
+    ]);
+  });
+
   it("matches slug checks, site listing and site/domain lookup", async () => {
     const { database, env } = createFixture();
     expect(

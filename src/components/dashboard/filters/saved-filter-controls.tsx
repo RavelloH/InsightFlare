@@ -863,6 +863,20 @@ export function SavedFilterFormFields({
             </SelectItem>
           </SelectContent>
         </Select>
+        <AutoResizer initial={false} duration={0.18}>
+          <AutoTransition
+            transitionKey={form.visibility}
+            type="fade"
+            duration={0.18}
+            initial={false}
+          >
+            {form.visibility === "team" ? (
+              <p className="text-xs text-muted-foreground">
+                {messages.filterBuilder.savedFilterVisibilityTeamHint}
+              </p>
+            ) : null}
+          </AutoTransition>
+        </AutoResizer>
       </div>
     </div>
   );

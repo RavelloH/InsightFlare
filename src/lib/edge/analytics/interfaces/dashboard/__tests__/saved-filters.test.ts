@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { handleSavedFilters } from "@/lib/edge/analytics/interfaces/dashboard/saved-filters";
 import type { Env } from "@/lib/edge/types";
+import type { SavedFilter } from "@/lib/saved-filters";
 
 type Binding = string | number | null;
 type D1Row = Record<string, unknown>;
@@ -306,6 +307,126 @@ describe("saved filters", () => {
     expect(hidden.status).toBe(404);
     expect(update.status).toBe(403);
     expect(deletion.status).toBe(403);
+  });
+
+  it("lets team managers delete, but never edit, filters shared by others", async () => {
+    const { env, d1 } = context();
+    const manager = { siteId: "site-1", session, canManageSite: true };
+    const list = await handleSavedFilters(request("GET"), env, manager);
+    const items = ((await list.json()) as { items: SavedFilter[] }).items;
+    expect(
+      Object.fromEntries(items.map((item) => [item.id, item.canDelete])),
+    ).toEqual({ "own-private": true, "team-shared": true });
+
+    const update = await handleSavedFilters(
+      request("PUT", {
+        name: "Nope",
+        description: "",
+        visibility: "team",
+        filterDsl: 'page.path eq "/docs"',
+      }),
+      env,
+      { ...manager, filterId: "team-shared" },
+    );
+    const otherPrivate = await handleSavedFilters(request("DELETE"), env, {
+      ...manager,
+      filterId: "other-private",
+    });
+    const shared = await handleSavedFilters(request("DELETE"), env, {
+      ...manager,
+      filterId: "team-shared",
+    });
+
+    expect(update.status).toBe(403);
+    expect(otherPrivate.status).toBe(403);
+    expect(shared.status).toBe(200);
+    expect(
+      d1.database
+        .prepare("SELECT id FROM saved_filters ORDER BY id")
+        .all()
+        .map((row) => row.id),
+    ).toEqual(["other-private", "own-private"]);
+  });
+
+  it("refuses manager deletes once a shared filter becomes private", async () => {
+    const { env, d1 } = context();
+    d1.database
+      .prepare("UPDATE saved_filters SET visibility = 'private' WHERE id = ?")
+      .run("team-shared");
+    const deletion = await handleSavedFilters(request("DELETE"), env, {
+      siteId: "site-1",
+      session,
+      canManageSite: true,
+      filterId: "team-shared",
+    });
+    expect(deletion.status).toBe(403);
+    expect(
+      d1.database
+        .prepare("SELECT id FROM saved_filters WHERE id = ?")
+        .get("team-shared"),
+    ).toEqual({ id: "team-shared" });
+  });
+
+  it("allows renaming a filter that duplicates another after a transfer", async () => {
+    const { env, d1 } = context();
+    d1.database
+      .prepare(
+        "INSERT INTO saved_filters (id, site_id, owner_user_id, visibility, name, filter_dsl) VALUES (?,?,?,?,?,?)",
+      )
+      .run(
+        "transferred",
+        "site-1",
+        "user-1",
+        "team",
+        "Copy",
+        'page.path eq "/docs"',
+      );
+    const rename = await handleSavedFilters(
+      request("PUT", {
+        name: "Renamed",
+        description: "",
+        visibility: "team",
+        filterDsl: 'page.path eq "/docs"',
+      }),
+      env,
+      { siteId: "site-1", session, filterId: "transferred" },
+    );
+    const intoDuplicate = await handleSavedFilters(
+      request("PUT", {
+        name: "Renamed",
+        description: "",
+        visibility: "team",
+        filterDsl: 'page.path eq "/docs"',
+      }),
+      env,
+      { siteId: "site-1", session, filterId: "own-private" },
+    );
+    expect(rename.status).toBe(200);
+    // Unchanged expression on a pre-existing duplicate is also allowed;
+    // changing an expression into a duplicate is still rejected below.
+    expect(intoDuplicate.status).toBe(200);
+    const changed = await handleSavedFilters(
+      request("PUT", {
+        name: "Changed",
+        description: "",
+        visibility: "team",
+        filterDsl: 'geo.country eq "cn"',
+      }),
+      env,
+      { siteId: "site-1", session, filterId: "transferred" },
+    );
+    expect(changed.status).toBe(200);
+    const collide = await handleSavedFilters(
+      request("PUT", {
+        name: "Collide",
+        description: "",
+        visibility: "team",
+        filterDsl: 'page.path eq "/docs"',
+      }),
+      env,
+      { siteId: "site-1", session, filterId: "transferred" },
+    );
+    expect(collide.status).toBe(400);
   });
 
   it("updates and deletes filters owned by the current user", async () => {

@@ -22,6 +22,8 @@ export interface SavedFilter {
   readonly ownerUserId: string;
   readonly authorName: string;
   readonly isOwner: boolean;
+  /** Owner, or a team owner/admin for a team-visible filter (delete only). */
+  readonly canDelete: boolean;
   readonly visibility: SavedFilterVisibility;
   readonly scopePreference: SavedFilterScopePreference;
   readonly name: string;

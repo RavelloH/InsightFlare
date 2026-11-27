@@ -50,6 +50,7 @@ import {
   type FilterScopePreference,
   parseFilterDsl,
 } from "@/lib/filter-contract/index";
+import { formatI18nTemplate } from "@/lib/i18n/template";
 import type { SavedFilter } from "@/lib/saved-filters";
 
 import { allowedFields } from "./filter-editor/field-catalog";
@@ -110,6 +111,9 @@ export function FilterPanel({
   const [manageSavedFilterOpen, setManageSavedFilterOpen] = useState(false);
   const [confirmSavedFilterDeleteOpen, setConfirmSavedFilterDeleteOpen] =
     useState(false);
+  const [pendingDeleteSavedFilterId, setPendingDeleteSavedFilterId] = useState<
+    string | undefined
+  >();
   const [managedSavedFilterId, setManagedSavedFilterId] = useState<
     string | undefined
   >();
@@ -206,6 +210,7 @@ export function FilterPanel({
     },
     onSuccess: () => {
       setConfirmSavedFilterDeleteOpen(false);
+      setPendingDeleteSavedFilterId(undefined);
       setManageSavedFilterOpen(false);
       setManagedSavedFilterId(undefined);
       setEditingSavedFilterId(undefined);
@@ -282,6 +287,16 @@ export function FilterPanel({
   const editingSavedFilter = savedFilters.find(
     (filter) => filter.id === editingSavedFilterId && filter.isOwner,
   );
+  // Owners delete from the manage dialog; team owners/admins can also delete
+  // filters shared by others (but never edit them).
+  const pendingDeleteSavedFilter = savedFilters.find(
+    (filter) => filter.id === pendingDeleteSavedFilterId && filter.canDelete,
+  );
+  const requestSavedFilterDelete = (filter: SavedFilter) => {
+    setSavedFilterOperationError(null);
+    setPendingDeleteSavedFilterId(filter.id);
+    setConfirmSavedFilterDeleteOpen(true);
+  };
   const hasEffectiveFilter =
     !expressionError &&
     root.children.length > 0 &&
@@ -585,6 +600,17 @@ export function FilterPanel({
                 <span>{messages.filterBuilder.saveAsThisFilter}</span>
               </Button>
             ) : null}
+            {savedFilterPrimaryAction === "save-as" &&
+            matchedSavedFilter?.canDelete ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => requestSavedFilterDelete(matchedSavedFilter)}
+              >
+                <RiDeleteBinLine data-icon="inline-start" />
+                <span>{messages.filterBuilder.deleteSavedFilter}</span>
+              </Button>
+            ) : null}
             {savedFilterPrimaryAction === "manage" && matchedSavedFilter ? (
               <Button
                 type="button"
@@ -716,8 +742,8 @@ export function FilterPanel({
                 !managedSavedFilter || updateSavedFilterMutation.isPending
               }
               onClick={() => {
-                setSavedFilterOperationError(null);
-                setConfirmSavedFilterDeleteOpen(true);
+                if (managedSavedFilter)
+                  requestSavedFilterDelete(managedSavedFilter);
               }}
             >
               <RiDeleteBinLine data-icon="inline-start" />
@@ -783,7 +809,10 @@ export function FilterPanel({
       </ResponsiveDialog>
       <AlertDialog
         open={confirmSavedFilterDeleteOpen}
-        onOpenChange={setConfirmSavedFilterDeleteOpen}
+        onOpenChange={(nextOpen) => {
+          setConfirmSavedFilterDeleteOpen(nextOpen);
+          if (!nextOpen) setPendingDeleteSavedFilterId(undefined);
+        }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -794,7 +823,12 @@ export function FilterPanel({
               {messages.filterBuilder.deleteSavedFilterTitle}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {messages.filterBuilder.deleteSavedFilterDescription}
+              {pendingDeleteSavedFilter && !pendingDeleteSavedFilter.isOwner
+                ? formatI18nTemplate(
+                    messages.filterBuilder.deleteSharedSavedFilterDescription,
+                    { name: pendingDeleteSavedFilter.authorName },
+                  )
+                : messages.filterBuilder.deleteSavedFilterDescription}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -804,13 +838,13 @@ export function FilterPanel({
             <AlertDialogAction
               variant="destructive"
               disabled={
-                !managedSavedFilter || deleteSavedFilterMutation.isPending
+                !pendingDeleteSavedFilter || deleteSavedFilterMutation.isPending
               }
               onClick={(event) => {
                 event.preventDefault();
-                if (!managedSavedFilter) return;
+                if (!pendingDeleteSavedFilter) return;
                 setSavedFilterOperationError(null);
-                deleteSavedFilterMutation.mutate(managedSavedFilter.id);
+                deleteSavedFilterMutation.mutate(pendingDeleteSavedFilter.id);
               }}
             >
               {deleteSavedFilterMutation.isPending ? (
