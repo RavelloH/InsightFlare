@@ -455,6 +455,8 @@ describe("P4 complete timeline and relational SQL", () => {
       ] as const;
       const expressions = [
         "sequence([EVENT,EVENT]) exists",
+        'without(sequence([EVENT { $.name eq "signup" },EVENT { $.name eq "purchase" }]),EVENT { $.name eq "noise" }) notExists',
+        "without(sequence([EVENT,EVENT]), EVENT) exists",
         "adjacent(sequence([EVENT,EVENT])) exists",
         "adjacent(sequence([PAGE,EVENT])) notExists",
         'adjacent(sequence([EVENT { $.name eq "signup" },EVENT { $.name eq "purchase" }])) exists',
@@ -508,7 +510,8 @@ describe("P4 complete timeline and relational SQL", () => {
               if (
                 unique &&
                 !(
-                  expression.startsWith("adjacent(") &&
+                  (expression.startsWith("adjacent(") ||
+                    expression.startsWith("without(")) &&
                   variant.clock?.filterRangeExplicit
                 )
               )
@@ -540,6 +543,9 @@ describe("P4 complete timeline and relational SQL", () => {
         "count(adjacent(sequence([EVENT,EVENT]))) eq 1",
         "adjacent(sequence([EVENT,EVENT,EVENT,EVENT,EVENT,EVENT])) exists",
         "without(sequence([EVENT,EVENT]), PAGE) exists",
+        "without(sequence([EVENT,EVENT,EVENT]), PAGE) exists",
+        "without(sequence([PAGE,EVENT]), EVENT) exists",
+        "count(without(sequence([EVENT,EVENT]), PAGE)) eq 1",
         "sequence([PAGE,PAGE,PAGE]) { $gap(1,2) lte 10ms } exists",
         "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) eq 10ms } exists",
         "sequence([EVENT,EVENT,EVENT]) { $gap(1,2) lte 10ms AND $span gte 0ms } exists",
@@ -1153,6 +1159,79 @@ describe("P4 complete timeline and relational SQL", () => {
       db.close();
     }
   });
+
+  it.each(["session", "visitor"] as const)(
+    "compares the latest strictly preceding start and exclusion for global Without (%s)",
+    (scope) => {
+      const db = fixture();
+      try {
+        const dense = source.replace(
+          "(1,'a',105,'e5'",
+          "(1,'a',107,'e7','v2','s1','u1','/pricing','signup',27),(1,'a',108,'e8','v2','s1','u1','/pricing','noise',30),(1,'a',105,'e5'",
+        );
+        const variants = [
+          source,
+          dense,
+          dense.replace("'signup',27)", "'signup',30)"),
+          dense.replace("'e7','v2','s1','u1'", "'e7','v2','s3','u1'"),
+          dense
+            .replace(
+              "(1,'a','v3','s2'",
+              "(1,'a','s1','','u1','/landing',1,28),(1,'a','v3','s2'",
+            )
+            .replace(
+              "(1,'a',105,'e5'",
+              "(1,'a',109,'e9','s1','','u1','/landing','noise',29),(1,'a',105,'e5'",
+            ),
+        ];
+        const pairs = [
+          "EVENT,EVENT",
+          'EVENT { $.name eq "signup" },EVENT { $.name eq "purchase" }',
+          'EVENT { $.name eq "purchase" },EVENT { $.name eq "signup" }',
+          'EVENT { $.payload("/sku") eq "alpha" },EVENT { $.name exists }',
+          'EVENT { $.name eq "missing" },EVENT',
+        ];
+        const exclusions = [
+          "EVENT",
+          "PAGE",
+          'EVENT { $.name eq "noise" }',
+          'EVENT { $.name eq "signup" }',
+          'EVENT { $.name eq "purchase" }',
+          'EVENT { $.payload("/sku") eq "alpha" }',
+          'PAGE { $.path eq "/pricing" }',
+        ];
+        for (const pair of pairs)
+          for (const excluded of exclusions)
+            for (const operator of ["exists", "notExists"]) {
+              const expression = `without(sequence([${pair}]),${excluded}) ${operator}`;
+              const read = (
+                variant: string,
+                uniqueGlobalOccurrences: boolean,
+              ) => {
+                const plan = compileCollectionSqlQualification(
+                  parseFilterDsl(expression, analyticsFilterRegistry),
+                  scope,
+                  { uniqueGlobalOccurrences },
+                );
+                if (plan.kind !== "entity") throw Error("expected entity");
+                const c = composeBoundCtes(plan.ctes);
+                if (uniqueGlobalOccurrences && !excluded.startsWith("PAGE"))
+                  expect(c.ctes).toContain("last_excluded");
+                else expect(c.ctes).not.toContain("scope_global_sequence_0 AS");
+                return db
+                  .prepare(
+                    `WITH ${variant}, ${c.ctes} SELECT site_pk,entity_id FROM ${plan.qualifiedEntityRelation} ORDER BY site_pk,entity_id`,
+                  )
+                  .all(...c.bindings.map((x) => x.value));
+              };
+              for (const variant of variants)
+                expect(read(variant, true)).toEqual(read(variant, false));
+            }
+      } finally {
+        db.close();
+      }
+    },
+  );
 
   it("evaluates $span, $gap and $same in a bound Sequence item", () => {
     const db = fixture();
