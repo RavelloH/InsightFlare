@@ -2702,6 +2702,61 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
               "scope_raw_visits AS NOT MATERIALIZED",
             ),
           ).toBe(item.evidence);
+          const trendPlan = createScopedFilterPlan("event-trend", doc, scope)!;
+          const trendFilters = attachScopedFilterMetadata(doc, {
+            requestedScope: scope,
+            resolvedScope: trendPlan.scope,
+            plan: trendPlan,
+            time: createQueryTime(100, 300, "UTC", 400),
+            siteIds: ["site-a"],
+          });
+          const baselineDb = createSqliteD1Database(db);
+          const baselineEnv = {
+            DB: {
+              prepare: (sql: string) =>
+                baselineDb.prepare(
+                  sql.replace(
+                    "scope_raw_visits AS NOT MATERIALIZED",
+                    "scope_raw_visits AS MATERIALIZED",
+                  ),
+                ),
+            },
+          } as never;
+          for (const [limit, eventName] of [
+            [1, undefined],
+            [10, "purchase"],
+            [0, undefined],
+            [10, ""],
+          ] as const) {
+            trace.preparedSql.length = 0;
+            const expectedTrend = await queryEventsTrendFromD1(
+              baselineEnv,
+              "site-a",
+              WINDOW,
+              "minute",
+              trendFilters,
+              limit,
+              eventName,
+            );
+            const actualTrend = await queryEventsTrendFromD1(
+              env,
+              "site-a",
+              WINDOW,
+              "minute",
+              trendFilters,
+              limit,
+              eventName,
+            );
+            expect(actualTrend).toEqual(expectedTrend);
+            const eligible = limit > 0 && eventName !== "";
+            if (eligible) expect(trace.preparedSql).toHaveLength(1);
+            for (const sql of trace.preparedSql) {
+              expect(sql.includes("scope_raw_visits AS NOT MATERIALIZED")).toBe(
+                eligible && item.evidence,
+              );
+              expect(sql).toContain("scope_raw_events AS MATERIALIZED");
+            }
+          }
         }
       }
     } finally {

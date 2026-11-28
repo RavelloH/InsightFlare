@@ -240,7 +240,11 @@ export function buildEventFilteredSourceCte(
   window: QueryWindow,
   filters: FilterDocument,
   eventName?: string,
-  options?: { materialize?: boolean; summaryProjection?: boolean },
+  options?: {
+    materialize?: boolean;
+    summaryProjection?: boolean;
+    inlineVisitEvidence?: boolean;
+  },
 ): {
   cte: string;
   bindings: Array<string | number | null>;
@@ -252,6 +256,7 @@ export function buildEventFilteredSourceCte(
       plan: scopedMetadata.plan,
       siteIds: [siteId],
       window,
+      inlineVisitEvidence: options?.inlineVisitEvidence,
     });
     const eventNameClause = eventName
       ? "WHERE TRIM(COALESCE(es.event_name, '')) = ?"
