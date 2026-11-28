@@ -747,7 +747,7 @@ describe("edge journey retention coverage", () => {
       ],
     });
     expect(calls[0].sql).toContain(
-      "MIN(bucket) OVER (PARTITION BY visitor_id) AS cohort_bucket",
+      "json_group_array(DISTINCT bucket) AS periods",
     );
     expect(calls[0].sql).toContain("FROM scope_final_visits");
     expect(calls[0].bindings).toEqual([
@@ -833,6 +833,23 @@ describe("edge journey retention coverage", () => {
         window.endExclusiveMs,
       );
 
+      insert.run(
+        "duplicate-same-bucket",
+        siteId,
+        "visitor-a",
+        "session-dup",
+        baseMs + 2,
+        baseMs + 2,
+      );
+      insert.run(
+        "empty-identity",
+        siteId,
+        "",
+        "session-empty",
+        baseMs + 3,
+        baseMs + 3,
+      );
+
       const response = await handleRetention(
         env,
         siteId,
@@ -863,7 +880,8 @@ describe("edge journey retention coverage", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]?.sql).toContain("visitor_buckets AS (");
+      expect(calls[0]?.sql).toContain("visitor_periods AS (");
+      expect(calls[0]?.sql).toContain("json_group_array(DISTINCT bucket)");
       expect(calls[0]?.sql).not.toContain("all_visits AS MATERIALIZED");
       const plan = database
         .prepare(`EXPLAIN QUERY PLAN ${calls[0]?.sql ?? "SELECT 1"}`)
@@ -876,6 +894,87 @@ describe("edge journey retention coverage", () => {
           row.detail.includes("idx_visits_site_pk_started_at"),
         ),
       ).toBe(true);
+      // Exercise the exact threshold and the original window fallback with
+      // identical included observations. A return in bucket 63 must not
+      // duplicate the cohort denominator or any earlier active bucket.
+      const hour = 60 * 60 * 1000;
+      insert.run(
+        "last-bounded-bucket",
+        siteId,
+        "visitor-a",
+        "session-late",
+        baseMs + 63 * hour,
+        baseMs + 63 * hour,
+      );
+      insert.run(
+        "outside-both-windows",
+        siteId,
+        "visitor-a",
+        "session-outside",
+        baseMs + 65 * hour,
+        baseMs + 65 * hour,
+      );
+      const results = [];
+      for (const count of [64, 65]) {
+        const result = await handleRetention(
+          env,
+          siteId,
+          url("/retention", {
+            from: baseMs,
+            to: baseMs + count * hour,
+            granularity: "hour",
+          }),
+        );
+        results.push(await result.json());
+        expect(
+          calls.at(-1)?.sql.includes("json_group_array(DISTINCT bucket)"),
+        ).toBe(count === 64);
+        expect(
+          calls
+            .at(-1)
+            ?.sql.includes("MIN(bucket) OVER (PARTITION BY visitor_id)"),
+        ).toBe(count === 65);
+      }
+      expect(results[0]).toEqual(results[1]);
+      expect(results[0]).toMatchObject({
+        ok: true,
+        granularity: "hour",
+        cohorts: [
+          {
+            bucket: baseMs,
+            size: 1,
+            periods: [
+              { index: 0, visitors: 1, rate: 1 },
+              { index: 1, visitors: 1, rate: 1 },
+              { index: 63, visitors: 1, rate: 1 },
+            ],
+          },
+          {
+            bucket: baseMs + hour,
+            size: 1,
+            periods: [{ index: 0, visitors: 1, rate: 1 }],
+          },
+          {
+            bucket: baseMs + 2 * hour,
+            size: 1,
+            periods: [{ index: 0, visitors: 1, rate: 1 }],
+          },
+        ],
+      });
+      const empty = await handleRetention(
+        env,
+        siteId,
+        url("/retention", {
+          from: baseMs + 66 * hour,
+          to: baseMs + 67 * hour,
+          granularity: "hour",
+        }),
+      );
+      expect(await empty.json()).toMatchObject({
+        ok: true,
+        granularity: "hour",
+        cohorts: [],
+      });
     } finally {
       database.close();
     }

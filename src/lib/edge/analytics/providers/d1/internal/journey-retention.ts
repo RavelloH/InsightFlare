@@ -47,8 +47,31 @@ export async function queryRetentionFromD1(
   // observations. Deduplicate narrow visitor/bucket pairs once, then use
   // the earliest bucket per visitor. Legacy filters still select the
   // cohort separately and count all later visits outside the predicate.
-  const cohortSql = !filter?.clause
-    ? `
+  // Bound the per-visitor array independently of the number of visits.
+  // Both algorithms count each visitor once per active bucket; the minimum
+  // active bucket is the cohort. Legacy predicate-only cohorts are separate.
+  const cohortSql =
+    !filter?.clause && buckets.length <= 64
+      ? `
+visit_buckets AS (
+  SELECT visitor_id, ${bucket.sql} AS bucket
+  FROM ${visitRelation}
+  WHERE visitor_id != ''
+),
+visitor_periods AS (
+  SELECT visitor_id, MIN(bucket) AS cohort_bucket,
+    json_group_array(DISTINCT bucket) AS periods
+  FROM visit_buckets
+  WHERE bucket IS NOT NULL
+  GROUP BY visitor_id
+)
+SELECT cohort_bucket AS cohortBucket, j.value AS visitBucket, COUNT(*) AS visitors
+FROM visitor_periods CROSS JOIN json_each(periods) j
+GROUP BY cohort_bucket, j.value
+ORDER BY cohort_bucket ASC, j.value ASC
+`
+      : !filter?.clause
+        ? `
 visit_buckets AS (
   SELECT visitor_id, ${bucket.sql} AS bucket
   FROM ${visitRelation}
@@ -69,7 +92,7 @@ FROM cohort_buckets
 GROUP BY cohort_bucket, bucket
 ORDER BY cohort_bucket ASC, bucket ASC
 `
-    : `
+        : `
 all_visits AS MATERIALIZED (
   SELECT
     *,
