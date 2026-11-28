@@ -75,13 +75,24 @@ export async function queryOverviewFromD1(
     : `
   count(DISTINCT CASE WHEN session_id != '' THEN session_id ELSE NULL END) AS sessions,
   count(DISTINCT CASE WHEN visitor_id != '' THEN visitor_id ELSE NULL END) AS visitors,`;
+  const metadata = scopedFilterMetadata(filters);
+  // Empty observation scopes can seek Visits directly for the bounce rollup.
+  // Filtered scopes reuse the qualified observation relation to avoid
+  // repeating entity qualification. Events contribute only distinct identities.
+  const directBounce =
+    scopedDataset !== null &&
+    filters.root === null &&
+    metadata?.plan.scope === "event" &&
+    metadata.plan.mode === "observation" &&
+    !metadata.time.filterRange &&
+    !metadata.time.filterRangeEmpty;
   const sourceSql = scopedDataset
     ? `${scopedDataset.ctes},
-report_observations AS MATERIALIZED (
+report_observations AS ${directBounce ? "" : "MATERIALIZED "}(
   SELECT session_id, visitor_id, duration_ms, 1 AS is_visit
   FROM ${scopedDataset.visitRelation}
   UNION ALL
-  SELECT session_id, visitor_id, NULL AS duration_ms, 0 AS is_visit
+  SELECT DISTINCT session_id, visitor_id, NULL AS duration_ms, 0 AS is_visit
   FROM ${scopedDataset.eventRelation}
 ),`
     : `${visitSource},
@@ -97,8 +108,8 @@ WITH
 ${sourceSql}
 session_rollup AS (
   SELECT vs.session_id, count(*) AS visit_count
-  FROM ${reportSource} vs
-  WHERE ${visitOnly}vs.session_id != ''
+  FROM ${directBounce ? scopedDataset!.visitRelation : reportSource} vs
+  WHERE ${directBounce ? "" : visitOnly}vs.session_id != ''
   GROUP BY vs.session_id
 )
 SELECT

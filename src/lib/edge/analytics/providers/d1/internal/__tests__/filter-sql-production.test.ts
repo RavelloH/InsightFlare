@@ -2446,7 +2446,17 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
         ).toEqual(expected);
         expect(trace.preparedSql).toHaveLength(1);
         expect(trace.preparedSql[0]).toContain(
-          "report_observations AS MATERIALIZED",
+          scope === "event"
+            ? "report_observations AS ("
+            : "report_observations AS MATERIALIZED",
+        );
+        expect(trace.preparedSql[0]).toContain(
+          "SELECT DISTINCT session_id, visitor_id, NULL AS duration_ms",
+        );
+        expect(trace.preparedSql[0]).toContain(
+          scope === "event"
+            ? `FROM ${compiled.visitRelation} vs`
+            : "FROM report_observations vs",
         );
       }
     } finally {
