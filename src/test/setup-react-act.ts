@@ -9,3 +9,20 @@ await Promise.all(SUPPORTED_LOCALES.map(loadRuntimeMessages));
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
+
+// Happy DOM rejects the native finished promise on cancel(), but unlike
+// the Web Animations spec it does not mark that rejection as handled.
+// Keep the original promise rejected for callers that explicitly await it.
+if (typeof Animation !== "undefined") {
+  const cancel = Animation.prototype.cancel;
+  Animation.prototype.cancel = function (this: Animation) {
+    if (this.playState !== "idle") {
+      void this.finished.catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          throw error;
+        }
+      });
+    }
+    cancel.call(this);
+  };
+}
