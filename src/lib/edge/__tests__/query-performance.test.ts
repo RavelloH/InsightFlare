@@ -1204,6 +1204,63 @@ describe("edge query performance D1 helpers", () => {
     expect(prepare).not.toHaveBeenCalled();
   });
 
+  it("uses compact uniform buckets for long all-metric trends without changing independent statistics", async () => {
+    const { env, d1 } = createSqlitePerformanceEnv();
+    const longWindow = {
+      ...window,
+      endExclusiveMs: window.startMs + 48 * 3600000,
+    };
+    try {
+      const insert = d1.database.prepare(
+        "INSERT INTO visits(visit_id,site_id,started_at,pathname,country,perf_ttfb_ms,perf_fcp_ms,perf_lcp_ms,perf_cls,perf_inp_ms) VALUES(?,?,?,'/','US',?,?,?,?,?)",
+      );
+      for (let i = 0; i < 100; i++) {
+        insert.run(
+          "compact-" + i,
+          siteId,
+          longWindow.startMs + i * 1700000,
+          i % 7,
+          i % 13,
+          i % 3 === 0 ? null : i % 11,
+          (i % 9) / 1000,
+          i % 4 === 0 ? null : i % 17,
+        );
+      }
+      insert.run(
+        "outside",
+        siteId,
+        longWindow.endExclusiveMs,
+        999,
+        999,
+        999,
+        999,
+        999,
+      );
+      const result = await queryAllPerformanceTrendsFromD1(
+        env,
+        siteId,
+        longWindow,
+        "hour",
+        EMPTY_FILTER_DOCUMENT,
+      );
+      expect(d1.calls[0]?.sql).toContain("CAST(started_at AS INTEGER)");
+      for (const metric of ["ttfb", "fcp", "lcp", "cls", "inp"] as const) {
+        expect(result[metric]).toEqual(
+          await queryPerformanceTrendFromD1(
+            env,
+            siteId,
+            longWindow,
+            "hour",
+            EMPTY_FILTER_DOCUMENT,
+            metric,
+          ),
+        );
+      }
+    } finally {
+      d1.close();
+    }
+  });
+
   it("matches exact nearest ranks at percentile boundaries, ties and sparse samples", async () => {
     const { env, d1 } = createSqlitePerformanceEnv();
     try {

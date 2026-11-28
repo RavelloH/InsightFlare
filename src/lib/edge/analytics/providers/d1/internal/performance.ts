@@ -354,7 +354,9 @@ export async function queryAllPerformanceTrendsFromD1(
 ): Promise<Record<PerformanceMetricKey, PerformanceTrendPointRow[]>> {
   const source = performanceVisitSource(siteId, window, filters);
   const buckets = buildTimeBuckets(window, interval);
-  const bucket = timeBucketCase(buckets, "started_at");
+  const bucket = timeBucketCase(buckets, "started_at", {
+    compactUniform: true,
+  });
   // Neither query counts page views. Prune observations without any
   // metrics before materialization, without changing the scoped eligibility.
   const filteredClause = appendSqlConditions(source.filterClause, [

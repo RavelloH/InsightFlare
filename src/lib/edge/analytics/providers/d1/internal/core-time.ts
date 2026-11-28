@@ -76,7 +76,37 @@ export function buildTimeBuckets(
 export function timeBucketCase(
   buckets: TimeBucket[],
   columnExpression: string,
+  options?: { compactUniform?: boolean },
 ): TimeBucketCase {
+  // The calendar plan remains authoritative. Only compact a sufficiently long,
+  // contiguous, zero-indexed, equal-width plan with safe nonnegative boundaries.
+  // Integer arithmetic on the nonnegative timestamp preserves the half-open
+  // boundaries (including fractional millisecond values).
+  if (options?.compactUniform && buckets.length >= 16) {
+    const start = buckets[0]!.startMs;
+    const end = buckets.at(-1)!.endExclusiveMs;
+    const width = buckets[0]!.endExclusiveMs - start;
+    if (
+      Number.isSafeInteger(start) &&
+      start >= 0 &&
+      Number.isSafeInteger(end) &&
+      Number.isSafeInteger(width) &&
+      width > 0 &&
+      buckets.every(
+        (bucket, index) =>
+          bucket.index === index &&
+          Number.isSafeInteger(bucket.startMs) &&
+          Number.isSafeInteger(bucket.endExclusiveMs) &&
+          bucket.startMs === start + index * width &&
+          bucket.endExclusiveMs - bucket.startMs === width,
+      )
+    ) {
+      return {
+        sql: `CASE WHEN ${columnExpression} >= ${start} AND ${columnExpression} < ${end} THEN (CAST(${columnExpression} AS INTEGER) - ${start}) / ${width} ELSE NULL END`,
+        bindings: [],
+      };
+    }
+  }
   const clauses = buckets.map((bucket) => {
     return `WHEN ${columnExpression} >= ${sqlIntegerLiteral(bucket.startMs)} AND ${columnExpression} < ${sqlIntegerLiteral(bucket.endExclusiveMs)} THEN ${bucket.index}`;
   });
