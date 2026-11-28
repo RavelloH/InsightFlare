@@ -5,10 +5,13 @@ import {
   useRef,
   useState,
 } from "react";
-import { OverlayScrollbars, type PartialOptions } from "overlayscrollbars";
-import { useOverlayScrollbars } from "overlayscrollbars-react";
 
 import { cn } from "../../lib/utils";
+
+export interface ScrollbarOptions {
+  overflow: { x: "scroll" | "hidden"; y: "scroll" | "hidden" };
+  scrollbars: { autoHide: "move" | "never"; autoHideDelay?: number };
+}
 
 export const HORIZONTAL_SCROLLBAR_OPTIONS = {
   overflow: {
@@ -16,12 +19,10 @@ export const HORIZONTAL_SCROLLBAR_OPTIONS = {
     y: "hidden",
   },
   scrollbars: {
-    theme: "os-theme-insightflare",
     autoHide: "move",
     autoHideDelay: 420,
-    autoHideSuspend: false,
   },
-} satisfies PartialOptions;
+} satisfies ScrollbarOptions;
 
 export const VERTICAL_SCROLLBAR_OPTIONS = {
   overflow: {
@@ -29,12 +30,10 @@ export const VERTICAL_SCROLLBAR_OPTIONS = {
     y: "scroll",
   },
   scrollbars: {
-    theme: "os-theme-insightflare",
     autoHide: "move",
     autoHideDelay: 420,
-    autoHideSuspend: false,
   },
-} satisfies PartialOptions;
+} satisfies ScrollbarOptions;
 
 export const BOTH_SCROLLBAR_OPTIONS = {
   overflow: {
@@ -42,12 +41,10 @@ export const BOTH_SCROLLBAR_OPTIONS = {
     y: "scroll",
   },
   scrollbars: {
-    theme: "os-theme-insightflare",
     autoHide: "move",
     autoHideDelay: 420,
-    autoHideSuspend: false,
   },
-} satisfies PartialOptions;
+} satisfies ScrollbarOptions;
 
 export const PERSISTENT_VERTICAL_SCROLLBAR_OPTIONS = {
   ...VERTICAL_SCROLLBAR_OPTIONS,
@@ -55,7 +52,7 @@ export const PERSISTENT_VERTICAL_SCROLLBAR_OPTIONS = {
     ...VERTICAL_SCROLLBAR_OPTIONS.scrollbars,
     autoHide: "never",
   },
-} satisfies PartialOptions;
+} satisfies ScrollbarOptions;
 
 function isSafariFamily(
   userAgent: string,
@@ -103,9 +100,7 @@ export function shouldUseNativeScrollbars(): boolean {
 
 export const SCROLLBAR_UPDATED_EVENT = "insightflare:scrollbar-updated";
 
-// Initialization and edge masks observe the same React-owned nodes. Share
-// only our size notifications, not OverlayScrollbars' internal observers or
-// initialization lifecycle. One callback per subscriber per delivery.
+// Share size observations across all scrollbars and edge masks. One callback per subscriber per delivery.
 const resizeSubscribers = new Map<Element, Set<() => void>>();
 let scrollbarResizeObserver: ResizeObserver | null = null;
 
@@ -152,66 +147,371 @@ export function observeScrollbarResize(
   };
 }
 
-/**
- * Enhancement is visual only: native overflow works before it starts. Run
- * at most one costly initialization per frame, outside React's layout commit.
- */
-const enhancements = new Set<() => void>();
-let enhancementScheduled = false;
-
-function scheduleNextEnhancement() {
-  if (enhancementScheduled || enhancements.size === 0) return;
-  enhancementScheduled = true;
-  window.requestAnimationFrame(() => {
-    // An idle deadline is not guaranteed on a busy page. Yield the frame
-    // before initializing one host, but never wait for an idle budget.
-    window.setTimeout(() => {
-      enhancementScheduled = false;
-      const next = enhancements.values().next().value;
-      if (next) {
-        enhancements.delete(next);
-        next();
-      }
-      scheduleNextEnhancement();
-    }, 0);
+// Batch all geometry reads before writes; scroll-only updates reuse cached sizes.
+type ScrollbarFrame = () => (() => void) | undefined;
+const pendingFrames = new Set<ScrollbarFrame>();
+let pendingFrameId: number | null = null;
+function scheduleScrollbarFrame(read: ScrollbarFrame) {
+  pendingFrames.add(read);
+  if (pendingFrameId !== null) return;
+  pendingFrameId = requestAnimationFrame(() => {
+    pendingFrameId = null;
+    const reads = [...pendingFrames];
+    pendingFrames.clear();
+    const writes = reads.map((job) => job());
+    for (const write of writes) write?.();
   });
 }
-
-function enqueueEnhancement(job: () => void) {
-  enhancements.add(job);
-  scheduleNextEnhancement();
-  return () => enhancements.delete(job);
+function cancelScrollbarFrame(read: ScrollbarFrame) {
+  pendingFrames.delete(read);
+  if (!pendingFrames.size && pendingFrameId !== null) {
+    cancelAnimationFrame(pendingFrameId);
+    pendingFrameId = null;
+  }
 }
 
-function hasScrollableOverflow(
+type ScrollAxis = "x" | "y";
+type ScrollbarGeometry = { max: number; length: number; thumb: number };
+
+export function calculateScrollbarGeometry(
+  client: number,
+  scroll: number,
+  track: number,
+): ScrollbarGeometry {
+  const max = Math.max(0, scroll - client);
+  const length = Math.max(0, track);
+  const thumb =
+    max > 1 && scroll > 0
+      ? Math.min(length, Math.max(18, (length * client) / scroll))
+      : length;
+  return { max, length, thumb };
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+interface ScrollbarState {
+  overflowAmount: { x: number; y: number };
+  rtl: boolean;
+}
+interface ScrollbarInstance {
+  state: () => ScrollbarState;
+  update: () => void;
+}
+interface ScrollbarTrack {
+  axis: ScrollAxis;
+  element: HTMLDivElement;
+  handle: HTMLDivElement;
+  geometry: ScrollbarGeometry;
+  position: number;
+  dispose: () => void;
+}
+
+function createScrollbar(
+  host: HTMLDivElement,
   viewport: HTMLDivElement,
-  options: PartialOptions,
-) {
-  const x = options.overflow?.x;
-  const y = options.overflow?.y;
-  return (
-    (x !== "hidden" &&
-      x !== "visible" &&
-      viewport.scrollWidth > viewport.clientWidth + 1) ||
-    (y !== "hidden" &&
-      y !== "visible" &&
-      viewport.scrollHeight > viewport.clientHeight + 1)
-  );
+  content: HTMLDivElement,
+  options: ScrollbarOptions,
+): ScrollbarInstance & { destroy: () => void } {
+  const tracks: ScrollbarTrack[] = [];
+  const state: ScrollbarState = { overflowAmount: { x: 0, y: 0 }, rtl: false };
+  let disposed = false;
+  let dirty = true;
+  let measured = false;
+  let hideTimer: ReturnType<typeof setTimeout> | undefined;
+  let activeDrag = false;
+  let activeHover = false;
+  const persistent = options.scrollbars.autoHide === "never";
+  const delay = options.scrollbars.autoHideDelay ?? 420;
+  const position = (axis: ScrollAxis, max: number) =>
+    clamp(
+      axis === "x"
+        ? viewport.scrollLeft + (state.rtl ? max : 0)
+        : viewport.scrollTop,
+      0,
+      max,
+    );
+  function setPosition(axis: ScrollAxis, next: number, max: number) {
+    const value = clamp(next, 0, max);
+    if (axis === "x") viewport.scrollLeft = value - (state.rtl ? max : 0);
+    else viewport.scrollTop = value;
+  }
+  function hide() {
+    clearTimeout(hideTimer);
+    if (persistent || activeDrag || activeHover) return;
+    hideTimer = setTimeout(() => {
+      for (const track of tracks)
+        track.element.classList.add("os-scrollbar-auto-hide-hidden");
+    }, delay);
+  }
+  function show() {
+    if (persistent) return;
+    for (const track of tracks)
+      if (track.element.classList.contains("os-scrollbar-auto-hide-hidden"))
+        track.element.classList.remove("os-scrollbar-auto-hide-hidden");
+    hide();
+  }
+  function makeTrack(axis: ScrollAxis) {
+    const element = document.createElement("div");
+    element.className =
+      "os-scrollbar os-theme-insightflare os-scrollbar-" +
+      (axis === "x" ? "horizontal" : "vertical") +
+      (persistent
+        ? ""
+        : " os-scrollbar-auto-hide os-scrollbar-auto-hide-hidden");
+    element.setAttribute("aria-hidden", "true");
+    const rail = document.createElement("div");
+    rail.className = "os-scrollbar-track";
+    const handle = document.createElement("div");
+    handle.className = "os-scrollbar-handle";
+    rail.append(handle);
+    element.append(rail);
+    host.append(element);
+    const track: ScrollbarTrack = {
+      axis,
+      element,
+      handle,
+      geometry: { max: 0, length: 0, thumb: 0 },
+      position: 0,
+      dispose: () => undefined,
+    };
+    let drag: {
+      id: number;
+      start: number;
+      scroll: number;
+      ratio: number;
+    } | null = null;
+    const coordinate = (event: PointerEvent) =>
+      axis === "x" ? event.clientX : event.clientY;
+    const down = (event: PointerEvent) => {
+      if (event.button !== 0 || !event.isPrimary || track.geometry.max <= 1)
+        return;
+      const travel = track.geometry.length - track.geometry.thumb;
+      if (travel <= 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        handle.setPointerCapture(event.pointerId);
+      } catch {
+        return;
+      }
+      drag = {
+        id: event.pointerId,
+        start: coordinate(event),
+        scroll: position(axis, track.geometry.max),
+        ratio: track.geometry.max / travel,
+      };
+      activeDrag = true;
+      element.classList.add("os-scrollbar-dragging");
+      show();
+    };
+    const move = (event: PointerEvent) => {
+      if (!drag || drag.id !== event.pointerId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setPosition(
+        axis,
+        drag.scroll + (coordinate(event) - drag.start) * drag.ratio,
+        track.geometry.max,
+      );
+    };
+    const finish = (event: PointerEvent) => {
+      if (!drag || drag.id !== event.pointerId) return;
+      drag = null;
+      activeDrag = false;
+      element.classList.remove("os-scrollbar-dragging");
+      if (handle.hasPointerCapture(event.pointerId))
+        handle.releasePointerCapture(event.pointerId);
+      hide();
+    };
+    const enter = () => {
+      activeHover = true;
+      show();
+    };
+    const leave = () => {
+      activeHover = false;
+      hide();
+    };
+    const wheel = (event: WheelEvent) => {
+      if (event.ctrlKey) return;
+      const delta = axis === "x" ? event.deltaX || event.deltaY : event.deltaY;
+      const unit =
+        event.deltaMode === 1
+          ? 16
+          : event.deltaMode === 2
+            ? axis === "x"
+              ? viewport.clientWidth
+              : viewport.clientHeight
+            : 1;
+      const current = position(axis, track.geometry.max);
+      const next = clamp(current + delta * unit, 0, track.geometry.max);
+      if (next === current) return;
+      event.preventDefault();
+      setPosition(axis, next, track.geometry.max);
+    };
+    handle.addEventListener("pointerdown", down);
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", finish);
+    handle.addEventListener("pointercancel", finish);
+    handle.addEventListener("lostpointercapture", finish);
+    element.addEventListener("pointerenter", enter);
+    element.addEventListener("pointerleave", leave);
+    element.addEventListener("wheel", wheel, { passive: false });
+    track.dispose = () => {
+      if (drag && handle.hasPointerCapture(drag.id))
+        handle.releasePointerCapture(drag.id);
+      drag = null;
+      handle.removeEventListener("pointerdown", down);
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", finish);
+      handle.removeEventListener("pointercancel", finish);
+      handle.removeEventListener("lostpointercapture", finish);
+      element.removeEventListener("pointerenter", enter);
+      element.removeEventListener("pointerleave", leave);
+      element.removeEventListener("wheel", wheel);
+      element.remove();
+    };
+    tracks.push(track);
+  }
+  if (options.overflow.x === "scroll") makeTrack("x");
+  if (options.overflow.y === "scroll") makeTrack("y");
+  for (const track of tracks)
+    track.element.classList.toggle("os-scrollbar-both", tracks.length === 2);
+
+  const read: ScrollbarFrame = () => {
+    if (disposed) return;
+    const needsMeasure = dirty;
+    dirty = false;
+    const previous = state.overflowAmount;
+    const previousRtl = state.rtl;
+    if (needsMeasure) {
+      state.rtl = getComputedStyle(viewport).direction === "rtl";
+      const overflowAmount = { x: 0, y: 0 };
+      for (const track of tracks) {
+        const x = track.axis === "x";
+        track.geometry = calculateScrollbarGeometry(
+          x ? viewport.clientWidth : viewport.clientHeight,
+          x ? viewport.scrollWidth : viewport.scrollHeight,
+          x ? track.element.clientWidth : track.element.clientHeight,
+        );
+        overflowAmount[track.axis] = track.geometry.max;
+      }
+      state.overflowAmount = overflowAmount;
+    }
+    for (const track of tracks)
+      track.position = position(track.axis, track.geometry.max);
+    const notify =
+      !measured ||
+      previous.x !== state.overflowAmount.x ||
+      previous.y !== state.overflowAmount.y ||
+      previousRtl !== state.rtl;
+    measured = true;
+    return () => {
+      if (disposed) return;
+      for (const track of tracks) {
+        const { max, length, thumb } = track.geometry;
+        const visible = max > 1 && length > 0;
+        track.element.classList.toggle("os-scrollbar-visible", visible);
+        if (needsMeasure)
+          track.element.classList.toggle("os-scrollbar-rtl", state.rtl);
+        if (!visible) continue;
+        const offset = max > 0 ? (track.position / max) * (length - thumb) : 0;
+        const x = track.axis === "x";
+        if (needsMeasure) {
+          const size = thumb + "px";
+          if (x) track.handle.style.width = size;
+          else track.handle.style.height = size;
+        }
+        const transform = x
+          ? "translate3d(" + offset + "px,0,0)"
+          : "translate3d(0," + offset + "px,0)";
+        if (track.handle.style.transform !== transform)
+          track.handle.style.transform = transform;
+      }
+      if (notify) viewport.dispatchEvent(new Event(SCROLLBAR_UPDATED_EVENT));
+    };
+  };
+  const update = () => {
+    if (disposed) return;
+    dirty = true;
+    scheduleScrollbarFrame(read);
+  };
+  const onScroll = () => {
+    if (
+      !measured ||
+      tracks.some(
+        (track) =>
+          track.geometry.max <= 1 &&
+          Math.abs(
+            track.axis === "x" ? viewport.scrollLeft : viewport.scrollTop,
+          ) > 1,
+      )
+    )
+      update();
+    else scheduleScrollbarFrame(read);
+    show();
+  };
+  // A table may change intrinsic width without resizing its block wrapper.
+  // Observe only immediate children, never each row or attribute mutation.
+  const stopResize = observeScrollbarResize(viewport, content, update);
+  const childObservers = new Map<Element, () => void>();
+  const observeChildren = () => {
+    if (options.overflow.x !== "scroll") return;
+    const children = new Set(Array.from(content.children));
+    for (const [child, stop] of childObservers)
+      if (!children.has(child)) {
+        stop();
+        childObservers.delete(child);
+      }
+    for (const child of children)
+      if (!childObservers.has(child))
+        childObservers.set(child, observeScrollbarResize(child, null, update));
+  };
+  observeChildren();
+  const childObserver =
+    options.overflow.x === "scroll" && typeof MutationObserver !== "undefined"
+      ? new MutationObserver(() => {
+          observeChildren();
+          update();
+        })
+      : null;
+  childObserver?.observe(content, { childList: true });
+  viewport.addEventListener("scroll", onScroll, { passive: true });
+  content.addEventListener("load", update, true);
+  host.addEventListener("pointermove", show, { passive: true });
+  host.addEventListener("pointerleave", hide);
+  viewport.setAttribute("data-scrollbar-enhanced", "");
+  update();
+  return {
+    state: () => state,
+    update,
+    destroy() {
+      disposed = true;
+      clearTimeout(hideTimer);
+      cancelScrollbarFrame(read);
+      stopResize();
+      childObserver?.disconnect();
+      for (const stop of childObservers.values()) stop();
+      childObservers.clear();
+      viewport.removeEventListener("scroll", onScroll);
+      content.removeEventListener("load", update, true);
+      host.removeEventListener("pointermove", show);
+      host.removeEventListener("pointerleave", hide);
+      for (const track of tracks) track.dispose();
+      clearTimeout(hideTimer);
+      viewport.removeAttribute("data-scrollbar-enhanced");
+    },
+  };
 }
 
 interface OverlayScrollbarNodes {
   hostRef: { current: HTMLDivElement | null };
   viewportRef: { current: HTMLDivElement | null };
   contentRef: { current: HTMLDivElement | null };
-  options: PartialOptions;
+  options: ScrollbarOptions;
   enabled?: boolean;
 }
 
-/**
- * Initializes OverlayScrollbars against a React-owned viewport/content pair.
- * Providing both nodes keeps OverlayScrollbars from moving React children while
- * it builds its scrollbar UI around the host.
- */
 export function useReactOverlayScrollbar({
   hostRef,
   viewportRef,
@@ -219,82 +519,34 @@ export function useReactOverlayScrollbar({
   options,
   enabled = true,
 }: OverlayScrollbarNodes) {
-  const [initialize, getInstance] = useOverlayScrollbars({ options });
-  const instanceRef = useRef<OverlayScrollbars | null>(null);
-
-  const optionsRef = useRef(options);
-  optionsRef.current = options;
-
+  const instanceRef = useRef<ScrollbarInstance | null>(null);
+  const { x, y } = options.overflow;
+  const { autoHide, autoHideDelay } = options.scrollbars;
   useEffect(() => {
     if (shouldUseNativeScrollbars()) return;
-
     const host = hostRef.current;
     const viewport = viewportRef.current;
     const content = contentRef.current;
-    if (!host || !viewport || !content) return;
-    if (!enabled) {
-      viewport.setAttribute("data-scrollbar-fallback", "");
-      return () => viewport.removeAttribute("data-scrollbar-fallback");
-    }
-
-    let cancelled = false;
-    let failed = false;
-    let instance: OverlayScrollbars | null = null;
-    let cancelQueued: (() => void) | null = null;
-    let stopObserving: (() => void) | null = null;
-    const notify = () =>
-      viewport.dispatchEvent(new Event(SCROLLBAR_UPDATED_EVENT));
-    const enhance = () => {
-      cancelQueued = null;
-      if (cancelled || failed || instance || !host.isConnected) return;
-      // The outer shell often has no overflow; don't build a scrollbar until
-      // the viewport actually needs one.
-      if (!hasScrollableOverflow(viewport, optionsRef.current)) return;
-      try {
-        initialize({ target: host, elements: { viewport, content } });
-        const candidate = getInstance();
-        instance =
-          candidate && OverlayScrollbars.valid(candidate) ? candidate : null;
-      } catch {
-        // Keep the original viewport scrollable if enhancement fails.
-      }
-      instanceRef.current = instance;
-      if (instance) {
-        stopObserving?.();
-        stopObserving = null;
-        viewport.removeEventListener("scroll", queue);
-        instance.on("updated", notify);
-      } else {
-        failed = true;
-        stopObserving?.();
-        stopObserving = null;
-        viewport.removeEventListener("scroll", queue);
-        viewport.setAttribute("data-scrollbar-fallback", "");
-      }
-      notify();
-    };
-    const queue = () => {
-      if (!cancelled && !failed && !instance && !cancelQueued)
-        cancelQueued = enqueueEnhancement(enhance);
-    };
-    stopObserving = observeScrollbarResize(viewport, content, queue);
-    viewport.addEventListener("scroll", queue, { passive: true });
-    queue();
-
+    if (!host || !viewport || !content || !enabled) return;
+    const instance = createScrollbar(host, viewport, content, {
+      overflow: { x, y },
+      scrollbars: { autoHide, autoHideDelay },
+    });
+    instanceRef.current = instance;
     return () => {
-      cancelled = true;
-      cancelQueued?.();
-      viewport.removeEventListener("scroll", queue);
-      stopObserving?.();
-      if (instance && OverlayScrollbars.valid(instance)) {
-        instance.off("updated", notify);
-        instance.destroy();
-      }
-      viewport.removeAttribute("data-scrollbar-fallback");
+      instance.destroy();
       instanceRef.current = null;
     };
-  }, [enabled, getInstance, hostRef, initialize, viewportRef, contentRef]);
-
+  }, [
+    enabled,
+    hostRef,
+    viewportRef,
+    contentRef,
+    x,
+    y,
+    autoHide,
+    autoHideDelay,
+  ]);
   return instanceRef;
 }
 
@@ -313,7 +565,7 @@ export interface OverlayScrollbarProps extends ComponentPropsWithoutRef<"div"> {
   axis?: "both" | "horizontal" | "vertical";
   contentClassName?: string;
   maskClassName?: string;
-  options?: PartialOptions;
+  options?: ScrollbarOptions;
   scrollElementRef?: Ref<HTMLDivElement>;
   showEdgeMasks?: boolean;
   syncKey?: string | number | boolean | null;
@@ -390,7 +642,13 @@ export function OverlayScrollbar({
         : 0;
       const canScrollHorizontally = maxScrollLeft > 1;
       const canScrollVertically = maxScrollTop > 1;
-      const scrollLeft = canScrollHorizontally ? viewport.scrollLeft : 0;
+      const rtl =
+        canScrollHorizontally &&
+        (scrollbarRef.current?.state().rtl ??
+          getComputedStyle(viewport).direction === "rtl");
+      const scrollLeft = canScrollHorizontally
+        ? viewport.scrollLeft + (rtl ? maxScrollLeft : 0)
+        : 0;
       const scrollTop = canScrollVertically ? viewport.scrollTop : 0;
       const next = {
         left: canScrollHorizontally && scrollLeft > 10,
@@ -434,7 +692,7 @@ export function OverlayScrollbar({
       scrollbarRef.current?.update();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [scrollbarRef, syncKey]);
+  }, [scrollbarRef, syncKey, props.dir]);
 
   return (
     <div
