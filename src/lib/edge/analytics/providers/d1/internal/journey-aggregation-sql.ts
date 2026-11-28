@@ -369,18 +369,42 @@ export function buildSessionAggregationSql(
   options: SessionAggregationOptions,
 ): string {
   const browserVersion = options.browserVersionExpression ?? "browser_version";
+  const validCoordinates =
+    "latitude IS NOT NULL AND longitude IS NOT NULL AND ABS(latitude)<=90 AND ABS(longitude)<=180";
+  // A paged list can compute both ends from the ascending rank and fold
+  // its first valid coordinate pair into the same aggregate. Keep the
+  // established detail/unpaged path as an independent ordering oracle.
+  const latestWitness = options.pageFirst
+    ? "first_rank = last_rank"
+    : "latest_rank = 1";
   return `
 ${buildPageEntityCtes(options, "session")}ranked_visits AS (
   SELECT
-    fv.*,
+    fv.*,${
+      options.pageFirst
+        ? `
+    ROW_NUMBER() OVER (
+      PARTITION BY fv.session_id
+      ORDER BY CASE WHEN ${validCoordinates} THEN 0 ELSE 1 END, started_at ASC, visit_id ASC
+    ) AS geo_rank,`
+        : ""
+    }
     ROW_NUMBER() OVER (
       PARTITION BY fv.session_id
       ORDER BY fv.started_at ASC, fv.visit_id ASC
     ) AS first_rank,
-    ROW_NUMBER() OVER (
+    ${
+      options.pageFirst
+        ? `COUNT(*) OVER (
+      PARTITION BY fv.session_id
+      ORDER BY fv.started_at ASC, fv.visit_id ASC
+      ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    ) AS last_rank`
+        : `ROW_NUMBER() OVER (
       PARTITION BY fv.session_id
       ORDER BY fv.started_at DESC, fv.visit_id DESC
-    ) AS latest_rank,
+    ) AS latest_rank`
+    },
     ROW_NUMBER() OVER (
       PARTITION BY fv.session_id
       ORDER BY
@@ -393,7 +417,10 @@ ${buildPageEntityCtes(options, "session")}ranked_visits AS (
   ${options.searchWhere ?? ""}
   ${options.pageFirst ? "AND fv.session_id IN (SELECT sessionId FROM page_entities)" : ""}
 ),
-geo_ranked AS (
+${
+  options.pageFirst
+    ? ""
+    : `geo_ranked AS (
   SELECT
     session_id,
     latitude,
@@ -408,10 +435,17 @@ geo_ranked AS (
     AND ABS(latitude) <= 90
     AND ABS(longitude) <= 180
 ),
-session_metrics AS (
+`
+}session_metrics AS (
   SELECT
     session_id,
-    MAX(CASE WHEN first_rank = 1 THEN visitor_id END) AS visitorId,
+    MAX(CASE WHEN first_rank = 1 THEN visitor_id END) AS visitorId,${
+      options.pageFirst
+        ? `
+    MAX(CASE WHEN geo_rank = 1 AND ${validCoordinates} THEN latitude END) AS latitude,
+    MAX(CASE WHEN geo_rank = 1 AND ${validCoordinates} THEN longitude END) AS longitude,`
+        : ""
+    }
     MAX(CASE WHEN identity_rank = 1 THEN user_id END) AS userId,
     MAX(CASE WHEN identity_rank = 1 THEN user_name END) AS userName,
     MIN(started_at) AS startedAt,
@@ -421,7 +455,7 @@ session_metrics AS (
     COUNT(CASE WHEN is_visit_observation = 1 THEN 1 END) AS views,
     CASE WHEN COUNT(CASE WHEN is_visit_observation = 1 THEN 1 END) = 1 THEN 1 ELSE 0 END AS bounce,
     MAX(CASE WHEN first_rank = 1 THEN pathname END) AS entryPath,
-    MAX(CASE WHEN latest_rank = 1 THEN pathname END) AS exitPath,
+    MAX(CASE WHEN ${latestWitness} THEN pathname END) AS exitPath,
     MAX(CASE WHEN first_rank = 1 THEN referrer_host END) AS referrerHost,
     MAX(CASE WHEN first_rank = 1 THEN referrer_url END) AS referrerUrl,
     MAX(CASE WHEN first_rank = 1 THEN country END) AS country,
@@ -443,12 +477,16 @@ event_counts AS (
   FROM event_source
   WHERE ${options.pageFirst ? "session_id IN (SELECT sessionId FROM page_entities)" : "session_id != ''"}
   GROUP BY session_id
-),
+)${
+    options.pageFirst
+      ? ""
+      : `,
 geo_first AS (
   SELECT session_id, latitude, longitude
   FROM geo_ranked
   WHERE geo_rank = 1
-)
+)`
+  }
 SELECT
   sm.session_id AS sessionId,
   COALESCE(sm.visitorId, '') AS visitorId,
@@ -469,8 +507,8 @@ SELECT
   COALESCE(sm.region, '') AS region,
   COALESCE(sm.regionCode, '') AS regionCode,
   COALESCE(sm.city, '') AS city,
-  gf.latitude,
-  gf.longitude,
+  ${options.pageFirst ? "sm" : "gf"}.latitude,
+  ${options.pageFirst ? "sm" : "gf"}.longitude,
   COALESCE(sm.browser, '') AS browser,
   COALESCE(sm.browserVersion, '') AS browserVersion,
   COALESCE(sm.os, '') AS os,
@@ -480,7 +518,7 @@ SELECT
   sm.screenHeight
 FROM session_metrics sm
 LEFT JOIN event_counts ec ON ec.session_id = sm.session_id
-LEFT JOIN geo_first gf ON gf.session_id = sm.session_id
+${options.pageFirst ? "" : "LEFT JOIN geo_first gf ON gf.session_id = sm.session_id"}
 WHERE 1 = 1
 ${options.pageFirst ? "" : (options.cursorWhere ?? "")}
 ORDER BY ${options.orderBy}

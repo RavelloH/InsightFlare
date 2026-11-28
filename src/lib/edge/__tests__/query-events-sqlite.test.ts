@@ -1673,6 +1673,31 @@ describe("event detail D1 SQL", () => {
           .run(visitId, siteId, visitorId, sessionId, startedAt, "/pricing");
       }
 
+      // The first valid coordinate pair must be taken from one witness,
+      // not from independent min/max values. Include ties, invalid and
+      // partially missing pairs, and a session with no valid pair.
+      d1.database.exec(`
+        UPDATE visits SET latitude=91, longitude=10 WHERE visit_id='visit-2';
+        UPDATE visits SET latitude=0, longitude=180 WHERE visit_id='visit-3';
+        UPDATE visits SET latitude=10, longitude=NULL WHERE visit_id='visit-4';
+      `);
+      d1.database
+        .prepare(
+          "INSERT INTO visits(visit_id,site_id,visitor_id,session_id,started_at,pathname,latitude,longitude,user_id,user_name) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        )
+        .run(
+          "visit-3-tie",
+          siteId,
+          "visitor-2",
+          "session-2",
+          eventTime + 2,
+          "/tie",
+          45,
+          -90,
+          "known",
+          "Named user",
+        );
+
       for (const sort of [
         { key: "firstSeenAt", direction: "asc" },
         { key: "firstSeenAt", direction: "desc" },
@@ -1792,6 +1817,24 @@ describe("event detail D1 SQL", () => {
           cursor = page.nextCursor;
         } while (cursor);
         expect(received).toEqual(expected);
+        expect(captured.sql).toContain("AS last_rank");
+        expect(captured.sql).not.toContain("geo_ranked AS");
+        expect(captured.sql).not.toContain("geo_first AS");
+        expect(
+          received.find((row) => row.sessionId === "session-2"),
+        ).toMatchObject({
+          latitude: 0,
+          longitude: 180,
+          exitPath: "/tie",
+          userId: "known",
+          userName: "Named user",
+        });
+        expect(
+          received.find((row) => row.sessionId === "session-3"),
+        ).toMatchObject({
+          latitude: null,
+          longitude: null,
+        });
       }
 
       const cursorQuery = d1.calls.at(-1);
