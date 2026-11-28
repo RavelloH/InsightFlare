@@ -1,3 +1,5 @@
+import { DatabaseSync } from "node:sqlite";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -447,6 +449,72 @@ describe("edge query core time helpers", () => {
         `AND started_at < ${Date.UTC(2026, 0, 2, 3)} THEN 1 ELSE NULL END`,
       bindings: [],
     });
+  });
+
+  it("compacts only contiguous equal-width calendar buckets and preserves exact SQL boundaries", () => {
+    const from = Date.UTC(2026, 2, 1, 1, 30);
+    const to = from + 30 * 86400000;
+    const queryWindow: QueryWindow = {
+      startMs: from,
+      endExclusiveMs: to,
+      nowMs: to,
+      timeZone: "UTC",
+    };
+    const buckets = buildTimeBuckets(queryWindow, "hour");
+    const old = timeBucketCase(buckets, "ts");
+    const compact = timeBucketCase(buckets, "ts", { compactUniform: true });
+    expect(compact.sql.length).toBeLessThan(200);
+    expect(compact.bindings).toEqual([]);
+    const db = new DatabaseSync(":memory:");
+    try {
+      db.exec("CREATE TABLE observations(ts INTEGER)");
+      const insert = db.prepare("INSERT INTO observations VALUES (?)");
+      insert.run(null);
+      for (const bucket of buckets) {
+        for (const value of [
+          bucket.startMs - 1,
+          bucket.startMs - 0.25,
+          bucket.startMs,
+          bucket.startMs + 0.25,
+          bucket.endExclusiveMs - 1,
+          bucket.endExclusiveMs - 0.25,
+          bucket.endExclusiveMs,
+        ]) {
+          insert.run(value);
+        }
+      }
+      expect(
+        db.prepare(`SELECT ts, ${old.sql} AS bucket FROM observations`).all(),
+      ).toEqual(
+        db
+          .prepare(`SELECT ts, ${compact.sql} AS bucket FROM observations`)
+          .all(),
+      );
+    } finally {
+      db.close();
+    }
+    for (const irregular of [
+      buckets.slice(0, 15),
+      buckets.filter((_, i) => i !== 10),
+      buckets.map((b, i) => (i === 1 ? { ...b, index: 2 } : b)),
+      buckets.map((b, i) =>
+        i === 1 ? { ...b, endExclusiveMs: b.endExclusiveMs - 1 } : b,
+      ),
+      buckets.map((b) => ({
+        ...b,
+        startMs: b.startMs - from - 7200000,
+        endExclusiveMs: b.endExclusiveMs - from - 7200000,
+      })),
+      buildTimeBuckets({ ...queryWindow, timeZone: "America/New_York" }, "day"),
+      buildTimeBuckets(
+        { ...queryWindow, endExclusiveMs: from + 730 * 86400000 },
+        "month",
+      ),
+    ]) {
+      expect(timeBucketCase(irregular, "ts", { compactUniform: true })).toEqual(
+        timeBucketCase(irregular, "ts"),
+      );
+    }
   });
 
   it("keeps calendar-day boundaries across daylight saving changes", () => {
