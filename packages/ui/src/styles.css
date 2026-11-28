@@ -32,11 +32,21 @@
   }
 }
 
+/* Keep inherited size limits as defaults, not overrides of caller utilities.
+   The viewport must also shrink inside a max-height-only flex drawer. */
+@layer components {
+  .os-scrollbar-host,
+  .os-scrollbar-viewport {
+    max-width: inherit;
+    max-height: inherit;
+  }
+}
+
 .os-scrollbar-host {
   position: relative;
   overflow: hidden;
-  max-width: inherit;
-  max-height: inherit;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
 }
@@ -44,8 +54,7 @@
   position: relative;
   box-sizing: inherit;
   width: 100%;
-  max-width: inherit;
-  max-height: inherit;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
 }
