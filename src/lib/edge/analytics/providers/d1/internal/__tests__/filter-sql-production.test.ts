@@ -3446,6 +3446,132 @@ describe("P5 final: visit-derived real production Readers over typed Event paylo
     }
   });
 
+  it("shares named entity event trends with exact trimmed-name and Other semantics", async () => {
+    const { db } = runFixture();
+    try {
+      const trace: SqliteD1Trace = { preparedSql: [], bindings: [] };
+      const env = { DB: createSqliteD1Database(db, trace) } as never;
+      db.exec(`
+        INSERT INTO custom_event_names VALUES(5,1,' purchase ');
+        INSERT INTO custom_events(event_pk,site_pk,site_id,event_id,visit_id,event_name_id,occurred_at)
+        VALUES(106,1,'site-a','e-named-old','v-old',5,180),
+              (107,1,'site-a','e-named-new','v-new',5,190),
+              (108,1,'site-a','e-named-right','v-new',5,300);
+      `);
+      for (const scope of ["session", "visitor"] as const) {
+        for (const expression of [
+          'page.path eq "/home"',
+          'page.path eq "/not-present"',
+        ]) {
+          const doc = parseFilterDsl(expression, analyticsFilterRegistry);
+          const plan = createScopedFilterPlan("event-trend", doc, scope)!;
+          const filters = attachScopedFilterMetadata(doc, {
+            requestedScope: scope,
+            resolvedScope: plan.scope,
+            plan,
+            time: createQueryTime(100, 300, "UTC", 400),
+            siteIds: ["site-a"],
+          });
+          for (const limit of [1, 10]) {
+            trace.preparedSql.length = 0;
+            const result = await queryEventsTrendFromD1(
+              env,
+              "site-a",
+              WINDOW,
+              "minute",
+              filters,
+              limit,
+              "purchase",
+            );
+            expect(trace.preparedSql).toHaveLength(1);
+            expect(trace.preparedSql[0]).toContain(
+              "trend_observations AS MATERIALIZED",
+            );
+            const matches = expression.includes("/home");
+            expect(
+              result.data.reduce((sum, point) => sum + point.totalEvents, 0),
+            ).toBe(matches ? 3 : 0);
+            if (!matches) {
+              expect(result.series).toEqual([]);
+            } else {
+              expect(result.series).toEqual([
+                expect.objectContaining({
+                  eventName: " purchase ",
+                  events: 2,
+                  sessions: 1,
+                  visitors: 1,
+                }),
+                limit === 1
+                  ? expect.objectContaining({
+                      isOther: true,
+                      events: 1,
+                      sessions: 1,
+                      visitors: 1,
+                    })
+                  : expect.objectContaining({
+                      eventName: "purchase",
+                      events: 1,
+                      sessions: 1,
+                      visitors: 1,
+                    }),
+              ]);
+            }
+            trace.preparedSql.length = 0;
+            const missing = await queryEventsTrendFromD1(
+              env,
+              "site-a",
+              WINDOW,
+              "minute",
+              filters,
+              limit,
+              "missing",
+            );
+            expect(missing.series).toEqual([]);
+            expect(missing.data.every((point) => point.totalEvents === 0)).toBe(
+              true,
+            );
+            expect(trace.preparedSql).toHaveLength(1);
+          }
+          trace.preparedSql.length = 0;
+          const zero = await queryEventsTrendFromD1(
+            env,
+            "site-a",
+            WINDOW,
+            "minute",
+            filters,
+            0,
+            "purchase",
+          );
+          expect(
+            zero.data.reduce((sum, point) => sum + point.totalEvents, 0),
+          ).toBe(expression.includes("/home") ? 3 : 0);
+          expect(
+            trace.preparedSql.every(
+              (sql) => !sql.includes("trend_observations AS MATERIALIZED"),
+            ),
+          ).toBe(true);
+          trace.preparedSql.length = 0;
+          await queryEventsTrendFromD1(
+            env,
+            "site-a",
+            WINDOW,
+            "minute",
+            filters,
+            10,
+            "",
+          );
+          expect(
+            trace.preparedSql.every(
+              (sql) => !sql.includes("trend_observations AS MATERIALIZED"),
+            ),
+          ).toBe(true);
+        }
+      }
+    } finally {
+      db.close();
+    }
+  });
+
   it("EventFields, FieldValues and Context calculate typed JSON and source cards from actual matches", async () => {
     const { db, env } = runFixture();
     try {

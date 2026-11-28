@@ -143,11 +143,13 @@ export async function queryEventsTrendFromD1(
   const bucket = timeBucketCase(buckets, "occurred_at");
   const scope = scopedFilterMetadata(filters)?.plan.scope;
   // Nonempty entity scopes repeat costly membership qualification. For
-  // empty/observation scopes and named-event reads, retain the cheap path.
+  // empty/observation scopes, retain the cheap path. An explicit nonempty
+  // event name still requires the same entity qualification for both aggregates.
+  // Preserve the legacy empty-string and zero-limit paths.
   const shared =
     filters.root !== null &&
     (scope === "session" || scope === "visitor") &&
-    eventName === undefined &&
+    eventName !== "" &&
     limit > 0
       ? await querySharedEventTrendRows(env, source, bucket, limit)
       : null;
