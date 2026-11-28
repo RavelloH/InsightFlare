@@ -104,9 +104,6 @@ importers:
       opencc-js:
         specifier: 1.4.2
         version: 1.4.2
-      overlayscrollbars:
-        specifier: ^2.17.0
-        version: 2.17.0
       radix-ui:
         specifier: ^1.8.1
         version: 1.8.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -279,9 +276,6 @@ importers:
       motion:
         specifier: ^12.43.0
         version: 12.43.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      overlayscrollbars:
-        specifier: ^2.17.0
-        version: 2.17.0
       react:
         specifier: ^19.0.0
         version: 19.3.1
@@ -331,12 +325,6 @@ importers:
       motion:
         specifier: ^12.43.0
         version: 12.43.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      overlayscrollbars:
-        specifier: ^2.17.0
-        version: 2.17.0
-      overlayscrollbars-react:
-        specifier: 0.5.7
-        version: 0.5.7(overlayscrollbars@2.17.0)(react@19.3.1)
       radix-ui:
         specifier: ^1.8.1
         version: 1.8.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -4383,15 +4371,6 @@ packages:
 
   outvariant@1.4.3:
     resolution: {integrity: sha512-+Sl2UErvtsoajRDKCE5/dBz4DIvHXQQnAxtQTF04OJxY0+DyZXSo5P5Bb7XYWOh81syohlYL24hbDwxedPUJCA==}
-
-  overlayscrollbars-react@0.5.7:
-    resolution: {integrity: sha512-pjWnZNmVkv4J0k/YzdazWJpBuu1mTTKR6K0pzjqK9BfHkB53hREqBGV8LONH23G5ulGXeXBLgD91HjcQuvq2WA==}
-    peerDependencies:
-      overlayscrollbars: ^2.0.0
-      react: '>=16.8.0'
-
-  overlayscrollbars@2.17.0:
-    resolution: {integrity: sha512-tyFSxFVJ2FcTTiEkwMthAb+Ogs8vgpW31Sy5z2TL1Q6Kw7579zrcd4xDm38lmdD934LjiTHyrzR90KMDrbCXoA==}
 
   own-keys@1.0.1:
     resolution: {integrity: sha512-qFOyK5PjiWZd+QQIh+1jhdb9LpxTF0qs7Pm8o5QHYZ0M3vKqSqzsZaEB6oWlxZ+q2sJBMI/Ktgd2N5ZwQoRHfg==}
@@ -9725,13 +9704,6 @@ snapshots:
 
   outvariant@1.4.3:
     optional: true
-
-  overlayscrollbars-react@0.5.7(overlayscrollbars@2.17.0)(react@19.3.1):
-    dependencies:
-      overlayscrollbars: 2.17.0
-      react: 19.3.1
-
-  overlayscrollbars@2.17.0: {}
 
   own-keys@1.0.1:
     dependencies:

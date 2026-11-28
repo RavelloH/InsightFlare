@@ -6,12 +6,12 @@ import {
   useEffect,
   useRef,
 } from "react";
-import type { PartialOptions } from "overlayscrollbars";
 
 import { cn } from "../../lib/utils";
 import {
   observeScrollbarResize,
   SCROLLBAR_UPDATED_EVENT,
+  type ScrollbarOptions,
   useReactOverlayScrollbar,
   VERTICAL_SCROLLBAR_OPTIONS,
 } from "./overlay-scrollbar";
@@ -22,7 +22,7 @@ export interface VerticalScrollMaskProps extends ComponentPropsWithoutRef<"div">
   enabled?: boolean;
   hostRef?: Ref<HTMLDivElement>;
   maskClassName?: string;
-  scrollbarOptions?: PartialOptions;
+  scrollbarOptions?: ScrollbarOptions;
   syncKey?: string | number | boolean | null;
 }
 
@@ -111,7 +111,7 @@ export function VerticalScrollMask({
       scrollbarRef.current?.update();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [scheduleMaskSync, scrollbarRef, syncKey]);
+  }, [scheduleMaskSync, scrollbarRef, syncKey, props.dir]);
 
   return (
     <div className={cn("relative flex min-h-0 flex-col", className)} {...props}>

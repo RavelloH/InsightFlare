@@ -3,7 +3,6 @@
 @import "shadcn/tailwind.css";
 @source "./components/ui";
 @import "../styles/index.css";
-@import "overlayscrollbars/styles/overlayscrollbars.css";
 
 /* Charts render their tooltip inside the chart DOM (Recharts 2 and custom
    chart tooltips). Only while a tooltip is open, let it escape card and
@@ -33,155 +32,206 @@
   }
 }
 
-.os-scrollbar-host[data-scrollbar-axis="vertical"] {
-  overflow: hidden;
+/* Keep inherited size limits as defaults, not overrides of caller utilities.
+   The viewport must also shrink inside a max-height-only flex drawer. */
+@layer components {
+  .os-scrollbar-host,
+  .os-scrollbar-viewport {
+    max-width: inherit;
+    max-height: inherit;
+  }
 }
 
-.os-scrollbar-host[data-scrollbar-axis="horizontal"] {
+.os-scrollbar-host {
+  position: relative;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
-
-.os-scrollbar-viewport[data-scrollbar-axis="vertical"]:not(
-    [data-overlayscrollbars-viewport]
-  ) {
+.os-scrollbar-viewport {
+  position: relative;
+  box-sizing: inherit;
+  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.os-scrollbar-content {
+  box-sizing: inherit;
+}
+.os-scrollbar-viewport[data-scrollbar-axis="vertical"] {
   overflow-x: hidden;
   overflow-y: auto;
 }
-
-.os-scrollbar-viewport[data-scrollbar-axis="horizontal"]:not(
-    [data-overlayscrollbars-viewport]
-  ) {
+.os-scrollbar-viewport[data-scrollbar-axis="horizontal"] {
   overflow-x: auto;
   overflow-y: hidden;
 }
-
-.os-scrollbar-viewport[data-scrollbar-axis="both"]:not(
-    [data-overlayscrollbars-viewport]
-  ) {
+.os-scrollbar-viewport[data-scrollbar-axis="both"] {
   overflow: auto;
 }
-
-/* Hide the native track from the first paint in overlay mode, without
-   disabling native wheel/touch/keyboard scrolling before enhancement. */
 html[data-scrollbar-mode="overlay"]
-  .os-scrollbar-viewport:not([data-overlayscrollbars-viewport]):not(
-    [data-scrollbar-fallback]
-  ) {
+  .os-scrollbar-viewport:not([data-scrollbar-fallback]) {
   scrollbar-width: none;
 }
-
 html[data-scrollbar-mode="overlay"]
-  .os-scrollbar-viewport:not([data-overlayscrollbars-viewport]):not(
-    [data-scrollbar-fallback]
-  )::-webkit-scrollbar {
+  .os-scrollbar-viewport:not([data-scrollbar-fallback])::-webkit-scrollbar {
   display: none;
   width: 0;
   height: 0;
 }
 
+/* Only explicit controller opt-out uses the native track. */
 html[data-scrollbar-mode="overlay"]
   .os-scrollbar-viewport[data-scrollbar-fallback] {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
-
 html[data-scrollbar-mode="overlay"]
   .os-scrollbar-viewport[data-scrollbar-fallback]::-webkit-scrollbar {
   display: block;
   width: 8px;
   height: 8px;
 }
-
 html[data-scrollbar-mode="overlay"]
   .os-scrollbar-viewport[data-scrollbar-fallback]::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
   border-radius: 999px;
 }
 
-.os-scrollbar-host {
-  max-width: inherit;
-  max-height: inherit;
-  min-width: 0;
-  min-height: 0;
-}
-
-.os-scrollbar-viewport {
-  max-width: inherit;
-  max-height: inherit;
-  min-width: 0;
-  min-height: 0;
-}
-
 .if-select-content-scroll-area {
   max-height: min(var(--radix-popover-content-available-height, 100vh), 20rem);
 }
 
-.os-theme-insightflare {
-  --os-size: 8px;
-  --os-padding-perpendicular: 1px;
-  --os-padding-axis: 1px;
-  --os-track-border-radius: 999px;
-  --os-handle-border-radius: 999px;
-  --os-handle-bg: color-mix(in oklch, var(--scrollbar-thumb) 68%, transparent);
-  --os-handle-bg-hover: var(--scrollbar-thumb-hover);
-  --os-handle-bg-active: var(--scrollbar-thumb-hover);
-  --os-handle-perpendicular-size: 0.2rem;
-  --os-handle-perpendicular-size-hover: 0.45rem;
-  --os-handle-perpendicular-size-active: 0.45rem;
-  --os-handle-interactive-area-offset: 4px;
-  --os-track-bg: transparent;
-}
-
+/* Absolutely positioned siblings of the native viewport, never layout children. */
 .os-theme-insightflare.os-scrollbar {
+  position: absolute;
+  z-index: 30;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  --if-thumb-color: color-mix(
+    in oklch,
+    var(--scrollbar-thumb) 68%,
+    transparent
+  );
   transition:
     opacity 220ms cubic-bezier(0.22, 1, 0.36, 1),
     visibility 220ms linear,
-    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
-    top 150ms,
-    right 150ms,
-    bottom 150ms,
-    left 150ms;
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-
-.os-theme-insightflare.os-scrollbar-horizontal {
+.os-scrollbar-horizontal {
+  height: 8px;
+  left: 1px;
+  right: 1px;
+  bottom: 1px;
   transform-origin: center bottom;
-  transform: translateY(0) scaleY(1);
 }
-
-.os-theme-insightflare.os-scrollbar-vertical {
+.os-scrollbar-vertical {
+  width: 8px;
+  top: 1px;
+  bottom: 1px;
+  right: 1px;
   transform-origin: right center;
-  transform: translateX(0) scaleX(1);
 }
-
-.os-theme-insightflare.os-scrollbar-rtl.os-scrollbar-vertical {
+.os-scrollbar-vertical.os-scrollbar-rtl {
+  right: auto;
+  left: 1px;
   transform-origin: left center;
 }
-
-.os-theme-insightflare.os-scrollbar-horizontal.os-scrollbar-auto-hide.os-scrollbar-auto-hide-hidden {
+.os-scrollbar-horizontal.os-scrollbar-both {
+  right: 9px;
+}
+.os-scrollbar-horizontal.os-scrollbar-both.os-scrollbar-rtl {
+  right: 1px;
+  left: 9px;
+}
+.os-scrollbar-vertical.os-scrollbar-both {
+  bottom: 9px;
+}
+.os-theme-insightflare.os-scrollbar-visible {
+  visibility: visible;
+  opacity: 1;
+}
+.os-theme-insightflare.os-scrollbar-auto-hide-hidden {
+  visibility: hidden;
+  opacity: 0;
+}
+.os-scrollbar-horizontal.os-scrollbar-auto-hide-hidden {
   transform: translateY(5px) scaleY(0.72);
 }
-
-.os-theme-insightflare.os-scrollbar-vertical.os-scrollbar-auto-hide.os-scrollbar-auto-hide-hidden {
+.os-scrollbar-vertical.os-scrollbar-auto-hide-hidden {
   transform: translateX(5px) scaleX(0.72);
 }
-
-.os-theme-insightflare.os-scrollbar-rtl.os-scrollbar-vertical.os-scrollbar-auto-hide.os-scrollbar-auto-hide-hidden {
+.os-scrollbar-vertical.os-scrollbar-auto-hide-hidden.os-scrollbar-rtl {
   transform: translateX(-5px) scaleX(0.72);
 }
-
-.os-theme-insightflare.os-scrollbar-horizontal .os-scrollbar-handle,
-.os-theme-insightflare.os-scrollbar-vertical .os-scrollbar-handle {
+.os-scrollbar-track {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.os-scrollbar-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  touch-action: none;
+  user-select: none;
+  pointer-events: none;
+}
+.os-scrollbar-visible:not(.os-scrollbar-auto-hide-hidden) .os-scrollbar-handle {
+  pointer-events: auto;
+}
+.os-scrollbar-horizontal .os-scrollbar-handle {
+  height: 100%;
+}
+.os-scrollbar-vertical .os-scrollbar-handle {
+  width: 100%;
+}
+.os-scrollbar-handle::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  background: var(--if-thumb-color);
   transition:
-    opacity 220ms cubic-bezier(0.22, 1, 0.36, 1),
     background-color 180ms ease,
-    border-color 180ms ease,
     width 220ms cubic-bezier(0.22, 1, 0.36, 1),
     height 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-
+.os-scrollbar-horizontal .os-scrollbar-handle::after {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0.2rem;
+}
+.os-scrollbar-vertical .os-scrollbar-handle::after {
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 0.2rem;
+}
+.os-scrollbar-vertical.os-scrollbar-rtl .os-scrollbar-handle::after {
+  right: auto;
+  left: 0;
+}
+.os-scrollbar-horizontal .os-scrollbar-handle:hover::after,
+.os-scrollbar-horizontal.os-scrollbar-dragging .os-scrollbar-handle::after {
+  height: 0.45rem;
+}
+.os-scrollbar-vertical .os-scrollbar-handle:hover::after,
+.os-scrollbar-vertical.os-scrollbar-dragging .os-scrollbar-handle::after {
+  width: 0.45rem;
+}
+.os-scrollbar-handle:hover::after,
+.os-scrollbar-dragging .os-scrollbar-handle::after {
+  background: var(--scrollbar-thumb-hover);
+}
 @media (prefers-reduced-motion: reduce) {
   .os-theme-insightflare.os-scrollbar,
-  .os-theme-insightflare .os-scrollbar-handle {
+  .os-scrollbar-handle::after {
     transition: none !important;
   }
 }

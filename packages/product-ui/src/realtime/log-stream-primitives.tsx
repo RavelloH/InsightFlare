@@ -5,13 +5,13 @@ import {
   useRef,
   useState,
 } from "react";
+import type { ScrollbarOptions } from "@insightflare/ui/overlay-scrollbar";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@insightflare/ui/tooltip";
 import { VerticalScrollMask } from "@insightflare/ui/vertical-scroll-mask";
-import type { PartialOptions } from "overlayscrollbars";
 
 import { cn } from "../utils/cn";
 
@@ -32,22 +32,15 @@ export const VISITOR_AVATAR_COLORS = [
 ];
 
 const PANEL_SCROLLBAR_OPTIONS = {
-  update: {
-    // Realtime list/detail content updates already call instance.update via syncKey.
-    // Avoid scanning every mutation for image load listeners on each refresh.
-    elementEvents: null,
-  },
   overflow: {
     x: "hidden",
     y: "scroll",
   },
   scrollbars: {
-    theme: "os-theme-insightflare",
     autoHide: "move",
     autoHideDelay: 420,
-    autoHideSuspend: false,
   },
-} satisfies PartialOptions;
+} satisfies ScrollbarOptions;
 
 function sanitizeHostname(value: string): string {
   return value

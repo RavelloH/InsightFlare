@@ -14,8 +14,8 @@ import {
   useOverlayStackState,
 } from "@insightflare/ui/layer-manager";
 import { LayerPortal } from "@insightflare/ui/layer-portal";
+import type { ScrollbarOptions } from "@insightflare/ui/overlay-scrollbar";
 import { VerticalScrollMask } from "@insightflare/ui/vertical-scroll-mask";
-import type { PartialOptions } from "overlayscrollbars";
 
 import { cn } from "../utils/cn";
 const CLOSE_TRANSLATE_Y_VH = 1.12;
@@ -38,11 +38,9 @@ const DETAIL_DRAWER_SCROLLBAR_OPTIONS = {
     y: "scroll",
   },
   scrollbars: {
-    theme: "os-theme-insightflare",
     autoHide: "never",
-    autoHideSuspend: false,
   },
-} satisfies PartialOptions;
+} satisfies ScrollbarOptions;
 const DetailDrawerCloseContext = createContext<(() => void) | null>(null);
 const DetailDrawerReadyContext = createContext(true);
 interface DetailDrawerProps {
