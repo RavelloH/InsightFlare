@@ -560,3 +560,20 @@ describe("Goal dashboard components", () => {
     container.remove();
   });
 });
+
+it("handles native animation cancellation without swallowing explicit rejections", async () => {
+  const element = document.createElement("div");
+  document.body.appendChild(element);
+  try {
+    const observed = element.animate([{ opacity: 0 }, { opacity: 1 }], 1000);
+    const finished = observed.finished;
+    observed.cancel();
+    await expect(finished).rejects.toMatchObject({ name: "AbortError" });
+
+    const unobserved = element.animate([{ opacity: 0 }, { opacity: 1 }], 1000);
+    unobserved.cancel();
+    expect(unobserved.playState).toBe("idle");
+  } finally {
+    element.remove();
+  }
+});
