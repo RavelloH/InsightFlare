@@ -135,13 +135,13 @@
     "tailwindcss": "^4.0.0"
   },
   "dependencies": {
-    "@iconify/react": "^6.0.3",
+    "@iconify/react": "^6.0.4",
     "@remixicon/react": "^4.9.0",
     "boring-avatars": "^2.0.4",
     "clsx": "^2.1.1",
     "motion": "^12.43.0",
     "recharts": "^2.15.4",
-    "tailwind-merge": "^3.7.0"
+    "tailwind-merge": "^3.7.1"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
