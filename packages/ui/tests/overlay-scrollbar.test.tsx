@@ -1,4 +1,4 @@
-import { act } from "react";
+import { act, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 
@@ -8,6 +8,7 @@ import {
   OverlayScrollbar,
   PERSISTENT_VERTICAL_SCROLLBAR_OPTIONS,
   SCROLLBAR_UPDATED_EVENT,
+  useReactOverlayScrollbar,
 } from "../src/components/ui/overlay-scrollbar";
 import { VerticalScrollMask } from "../src/components/ui/vertical-scroll-mask";
 
@@ -271,6 +272,80 @@ it("maps captured pointer movement to the native scroll offset and releases capt
     expect(release).toHaveBeenCalledWith(1);
     pointer("pointermove", 45);
     expect(viewport.scrollTop).toBe(100);
+  } finally {
+    f.cleanup();
+  }
+});
+
+it("preserves explicit controller opt-out and restores enhancement when enabled again", () => {
+  const f = fixture();
+  function Example({ enabled }: { enabled: boolean }) {
+    const hostRef = useRef<HTMLDivElement>(null);
+    const viewportRef = useRef<HTMLDivElement>(null);
+    const contentRef = useRef<HTMLDivElement>(null);
+    useReactOverlayScrollbar({
+      hostRef,
+      viewportRef,
+      contentRef,
+      enabled,
+      options: PERSISTENT_VERTICAL_SCROLLBAR_OPTIONS,
+    });
+    return (
+      <div ref={hostRef}>
+        <div ref={viewportRef} className="os-scrollbar-viewport">
+          <div ref={contentRef}>Content</div>
+        </div>
+      </div>
+    );
+  }
+  try {
+    act(() => f.root.render(<Example enabled={false} />));
+    const viewport = f.container.querySelector(".os-scrollbar-viewport")!;
+    expect(viewport.hasAttribute("data-scrollbar-fallback")).toBe(true);
+    expect(f.container.querySelector(".os-scrollbar")).toBeNull();
+    act(() => f.root.render(<Example enabled />));
+    f.flush();
+    expect(viewport.hasAttribute("data-scrollbar-fallback")).toBe(false);
+    expect(viewport.hasAttribute("data-scrollbar-enhanced")).toBe(true);
+    expect(f.container.querySelector(".os-scrollbar")).not.toBeNull();
+    act(() => f.root.render(<Example enabled={false} />));
+    expect(viewport.hasAttribute("data-scrollbar-fallback")).toBe(true);
+    expect(viewport.hasAttribute("data-scrollbar-enhanced")).toBe(false);
+    expect(f.container.querySelector(".os-scrollbar")).toBeNull();
+  } finally {
+    f.cleanup();
+  }
+});
+
+it("does not propagate thumb clicks to an overlay outside-click handler", () => {
+  const f = fixture();
+  const outsideClick = vi.fn();
+  try {
+    act(() =>
+      f.root.render(
+        <VerticalScrollMask
+          onClick={outsideClick}
+          scrollbarOptions={PERSISTENT_VERTICAL_SCROLLBAR_OPTIONS}
+        >
+          <button type="button">Content</button>
+        </VerticalScrollMask>,
+      ),
+    );
+    const thumb = f.container.querySelector<HTMLElement>(
+      ".os-scrollbar-handle",
+    )!;
+    act(() => thumb.click());
+    expect(outsideClick).not.toHaveBeenCalled();
+    act(() => f.container.querySelector("button")!.click());
+    expect(outsideClick).toHaveBeenCalledTimes(1);
+    outsideClick.mockClear();
+    const track = thumb.parentElement!.parentElement!;
+    act(() => f.root.unmount());
+    const listener = vi.fn();
+    track.addEventListener("click", listener);
+    const click = new MouseEvent("click", { bubbles: true });
+    thumb.dispatchEvent(click);
+    expect(listener).toHaveBeenCalledTimes(1);
   } finally {
     f.cleanup();
   }

@@ -349,6 +349,9 @@ function createScrollbar(
       event.preventDefault();
       setPosition(axis, next, track.geometry.max);
     };
+    // A thumb click is scrollbar chrome, not an outside click on an overlay.
+    const click = (event: MouseEvent) => event.stopPropagation();
+    element.addEventListener("click", click);
     handle.addEventListener("pointerdown", down);
     handle.addEventListener("pointermove", move);
     handle.addEventListener("pointerup", finish);
@@ -361,6 +364,7 @@ function createScrollbar(
       if (drag && handle.hasPointerCapture(drag.id))
         handle.releasePointerCapture(drag.id);
       drag = null;
+      element.removeEventListener("click", click);
       handle.removeEventListener("pointerdown", down);
       handle.removeEventListener("pointermove", move);
       handle.removeEventListener("pointerup", finish);
@@ -527,7 +531,12 @@ export function useReactOverlayScrollbar({
     const host = hostRef.current;
     const viewport = viewportRef.current;
     const content = contentRef.current;
-    if (!host || !viewport || !content || !enabled) return;
+    if (!host || !viewport || !content) return;
+    // Preserve explicit opt-out; ordinary product callers always enhance.
+    if (!enabled) {
+      viewport.setAttribute("data-scrollbar-fallback", "");
+      return () => viewport.removeAttribute("data-scrollbar-fallback");
+    }
     const instance = createScrollbar(host, viewport, content, {
       overflow: { x, y },
       scrollbars: { autoHide, autoHideDelay },
