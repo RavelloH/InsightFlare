@@ -133,31 +133,35 @@ export async function queryEventsTrendFromD1(
   limit: number,
   eventName?: string,
 ) {
+  const buckets = buildTimeBuckets(window, interval);
+  const bucket = timeBucketCase(buckets, "occurred_at");
+  const scope = scopedFilterMetadata(filters)?.plan.scope;
+  // Nonempty entity scopes repeat costly membership qualification.
+  // Reuse the measured Visit-evidence guard only on the shared statement.
+  // Preserve the legacy empty-string, zero-limit and budget fallback paths.
+  const shareEligible =
+    filters.root !== null &&
+    (scope === "session" || scope === "visitor") &&
+    eventName !== "" &&
+    limit > 0;
   const source = buildEventFilteredSourceCte(
     siteId,
     window,
     filters,
     eventName,
+    shareEligible ? { inlineVisitEvidence: true } : undefined,
   );
-  const buckets = buildTimeBuckets(window, interval);
-  const bucket = timeBucketCase(buckets, "occurred_at");
-  const scope = scopedFilterMetadata(filters)?.plan.scope;
-  // Nonempty entity scopes repeat costly membership qualification. For
-  // empty/observation scopes, retain the cheap path. An explicit nonempty
-  // event name still requires the same entity qualification for both aggregates.
-  // Preserve the legacy empty-string and zero-limit paths.
-  const shared =
-    filters.root !== null &&
-    (scope === "session" || scope === "visitor") &&
-    eventName !== "" &&
-    limit > 0
-      ? await querySharedEventTrendRows(env, source, bucket, limit)
-      : null;
+  const shared = shareEligible
+    ? await querySharedEventTrendRows(env, source, bucket, limit)
+    : null;
   let result: EventTrendRows;
   if (shared) {
     result = shared;
   } else {
-    const baseCte = source.cte;
+    const fallbackSource = shareEligible
+      ? buildEventFilteredSourceCte(siteId, window, filters, eventName)
+      : source;
+    const baseCte = fallbackSource.cte;
     const seriesRows = await queryD1All<EventTrendSeriesRow>(
       env,
       `${baseCte}
@@ -171,7 +175,7 @@ GROUP BY event_name
 ORDER BY events DESC, sessions DESC, eventName ASC
 LIMIT ?
 `,
-      [...source.bindings, limit],
+      [...fallbackSource.bindings, limit],
     );
     const seriesNames = seriesRows.map((row) => row.eventName);
     const namesClause =
@@ -197,7 +201,7 @@ FROM bucketed
 WHERE bucket IS NOT NULL
 ORDER BY bucket ASC
 `,
-      [...source.bindings, ...seriesNames, SHARE_TREND_OTHER_TOKEN],
+      [...fallbackSource.bindings, ...seriesNames, SHARE_TREND_OTHER_TOKEN],
     );
     const hasOther = trendRows.some(
       (row) => String(row.seriesKey) === SHARE_TREND_OTHER_TOKEN,
@@ -214,7 +218,7 @@ SELECT
 FROM filtered_events
 ${seriesNames.length > 0 ? `WHERE event_name NOT IN (${seriesNames.map(() => "?").join(", ")})` : ""}
   `,
-          [...source.bindings, SHARE_TREND_OTHER_LABEL, ...seriesNames],
+          [...fallbackSource.bindings, SHARE_TREND_OTHER_LABEL, ...seriesNames],
         )
       : [];
 
